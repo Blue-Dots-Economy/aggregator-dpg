@@ -25,7 +25,7 @@ milestone: "Phase 0 — Foundations"
 
 ## Dependencies
 - **Platform:** P-01, P-02, P-03, P-13
-- **Service dep:** P-16 SPS
+- **External:** Signal Processing Service (owned outside this repo; see P-16 stub for contract + fake)
 
 ## Labels / milestone
 - Labels: `type:epic`, `phase:0`, `area:backend`, `priority:p0`

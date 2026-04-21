@@ -27,7 +27,8 @@ The signal-heavy surface: aggregate summary cards (AG-0b), paginated participant
 - Toggling a status rule in SPS updates the UI with no web deploy
 
 ## Dependencies
-- **Platform:** P-08, P-09, P-11, P-13, P-16, P-17, P-20
+- **Platform:** P-08, P-09, P-11, P-13, P-17, P-20
+- **External:** Signal Processing Service (out of scope — consumed via P-08; see P-16 stub)
 
 ## Labels / milestone
 - Labels: `type:epic`, `phase:3`, `area:backend`, `area:frontend`, `priority:p0`, `jtbd:AG-0b`, `jtbd:AG-2`, `jtbd:AG-6`

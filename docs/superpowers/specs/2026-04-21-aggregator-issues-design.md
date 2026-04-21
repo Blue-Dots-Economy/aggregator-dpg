@@ -151,7 +151,10 @@ Each service package owns the shape of its own config: it ships a Zod schema (`c
 
 ## 6. Epic taxonomy
 
-### 6.1 Platform epics (P-01 … P-20, `type:epic`, `phase:0` default)
+### 6.1 Platform epics (P-01 … P-20, `type:epic`, `phase:0` default unless noted)
+
+> **Note on P-16:** Per README §5.2, the Signal Processing Service is out of scope for this repo. P-16 is retained as a **contract stub** — it documents the read-API the Aggregator DPG consumes, ships a local fake (under `signal-processing-client/testing`), and tracks open questions for whoever owns SPS. All consumer features depend on P-08 (`signal-processing-client`), not on P-16. If SPS is ever built here, a new epic supersedes this stub.
+
 
 | ID | Epic |
 |---|---|
@@ -170,7 +173,7 @@ Each service package owns the shape of its own config: it ships a Zod schema (`c
 | P-13 | Observability |
 | P-14 | SchemaService |
 | P-15 | Security Baseline |
-| P-16 | Signal Processing Service (standalone) |
+| P-16 | Signal Processing Service — contract stub only (external/deferred; see §6.4) |
 | P-17 | Frontend Foundation |
 | P-18 | QA Foundation |
 | P-19 | DevEx & CI |
@@ -335,8 +338,9 @@ F-14.1 Schema versioning · F-14.2 Form descriptor emitter · F-14.3 Completion-
 ### P-15 Security Baseline
 F-15.1 TLS/HSTS · F-15.2 CSRF · F-15.3 CSP · F-15.4 CSV virus scan + limits · F-15.5 Signed URL TTLs · F-15.6 Secrets management
 
-### P-16 Signal Processing Service
-F-16.1 Scaffolding + Dockerfile · F-16.2 Ingestion jobs · F-16.3 Materialisation store · F-16.4 Seeker status rules · F-16.5 Provider status rules · F-16.6 Completion-% mat · F-16.7 Mode-wise reg counts · F-16.8 Aggregator summary · F-16.9 Read API · F-16.10 Refresh scheduler · F-16.11 Consumer-agnostic contract tests
+### P-16 Signal Processing Service — contract stub only (external)
+Out of scope per README §5.2. Tracked here for traceability. Contract-side items only:
+S-16.1 Document SPS read-API contract consumed by P-08 · S-16.2 Local fake (`signal-processing-client/testing`) with fixtures matching contract · S-16.3 Contract tests in Aggregator repo that validate any SPS impl
 
 ### P-17 Frontend Foundation
 F-17.1 Next.js scaffold · F-17.2 UI library + design tokens · F-17.3 TanStack Query + typed client · F-17.4 Auth context + protected routes · F-17.5 Schema-driven form renderer · F-17.6 Table/list primitive · F-17.7 i18n (next-intl) · F-17.8 A11y primitives + lint

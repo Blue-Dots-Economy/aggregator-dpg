@@ -32,8 +32,8 @@ AG-1 (onboard via links/QR/bulk), AG-1a (per-mode conversion), AG-1b (act on fla
 - 1,000-row bulk upload completes in < 60 s per README §7.5
 
 ## Dependencies
-- **Platform:** P-03, P-04, P-06, P-08, P-09, P-11, P-13, P-15, P-16, P-17
-- **Upstream:** Signals Stack source-mode attribution (PRD open item 3)
+- **Platform:** P-03, P-04, P-06, P-08, P-09, P-11, P-13, P-15, P-17
+- **External:** Signals Stack source-mode attribution (PRD open item 3); Signal Processing Service (out of scope — consumed via P-08; see P-16 stub)
 
 ## Labels / milestone
 - Labels: `type:epic`, `phase:2`, `area:backend`, `area:frontend`, `priority:p0`, `jtbd:AG-1`, `jtbd:AG-1a`, `jtbd:AG-1b`, `jtbd:AG-1c`

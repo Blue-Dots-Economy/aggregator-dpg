@@ -19,7 +19,7 @@ Status legend: **[drafted]** · **[TODO]**
 - [P-13 observability package](./platform/P-13-observability.md) **[drafted]**
 - [P-14 schema-service package](./platform/P-14-schema-service.md) **[drafted]**
 - [P-15 Security baseline](./platform/P-15-security-baseline.md) **[drafted]**
-- [P-16 Signal Processing Service (standalone)](./platform/P-16-signal-processing-service.md) **[drafted]**
+- [P-16 Signal Processing Service — contract stub (external/deferred)](./platform/P-16-signal-processing-service.md) **[stub — out of scope]**
 - [P-17 Frontend Foundation](./platform/P-17-frontend-foundation.md) **[drafted]**
 - [P-18 QA Foundation](./platform/P-18-qa-foundation.md) **[drafted]**
 - [P-19 DevEx & CI](./platform/P-19-devex-ci.md) **[drafted]**
