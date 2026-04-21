@@ -17,6 +17,7 @@ gh issue view <issue-number>   # feature issue: body, labels, milestone
 ```
 
 Also read the feature section in the doc:
+
 - Platform features: `docs/issues/platform/P-NN-features.md` → find `## F-NN.N`
 - Product features: `docs/issues/product/PH-N-features.md` → find `## F-...`
 
@@ -25,6 +26,7 @@ Extract: Story, AC items, Tests, and every `T-XX.X.X` task line.
 ## Step 2 — Create sub-issues per task
 
 Get current GitHub user first:
+
 ```bash
 GH_USER=$(gh api user --jq .login)
 ```
@@ -54,6 +56,7 @@ Record each `T-XX.X.X → #NNN` mapping — needed for commits.
 ## Step 3 — Ask questions before coding
 
 In ONE message, surface:
+
 - Ambiguous AC items
 - Dependencies on packages not yet scaffolded
 - Unresolved open questions from the epic doc (`P-NN-*.md`, same number, no `-features` suffix)
@@ -73,26 +76,35 @@ Slug = lowercase-hyphenated from the feature title.
 ## Step 5 — Implement task by task
 
 For each task in order:
+
 1. Implement
 2. Stage relevant files only (no `git add .`)
-3. Commit:
+3. Commit using **standard conventional commit format** (commitlint-compatible):
 
 ```
-#<sub-issue-number> feat(T-XX.X.X): <imperative description>
+feat(T-XX.X.X): <imperative description>
+
+Refs #<sub-issue-number>
 
 Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 ```
 
 Examples:
+
 ```
-#312 feat(T-01.1.1): init pnpm and pnpm-workspace.yaml
-#313 feat(T-01.1.2): install turbo and define base pipeline
+feat(T-01.1.1): init pnpm and pnpm-workspace.yaml
+
+Refs #312
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 ```
 
 Rules:
+
 - One task = one or more commits, all referencing the **same** sub-issue `#NNN`
 - Never mix two T-references in one commit
 - Use `fix`/`chore`/`test`/`docs` instead of `feat` when more accurate
+- Sub-issue reference goes in commit **body** (`Refs #NNN`), never in the header — commitlint rejects `#NNN` in the header
 
 ## Step 6 — Create PR (only after ALL tasks done)
 
@@ -132,16 +144,17 @@ Keep it concise — 3 short paragraphs max. No bullet dumps.
 
 ## Quick reference
 
-| Thing | Convention |
-|-------|-----------|
-| Branch | `feat/F-XX.X-<slug>` |
-| Commit prefix | `#<sub-issue> feat(T-XX.X.X):` |
-| Assignee | `$(gh api user --jq .login)` — current GH user |
-| PR base branch | `develop` always |
-| PR timing | After **all** tasks committed |
-| Feature doc path (platform) | `docs/issues/platform/P-NN-features.md` |
-| Feature doc path (product) | `docs/issues/product/PH-N-features.md` |
-| Epic context | `docs/issues/platform/P-NN-<name>.md` (same NN, no `-features`) |
+| Thing                       | Convention                                                      |
+| --------------------------- | --------------------------------------------------------------- |
+| Branch                      | `feat/F-XX.X-<slug>`                                            |
+| Commit header               | `feat(T-XX.X.X): <description>`                                 |
+| Sub-issue ref               | `Refs #<sub-issue>` in commit body                              |
+| Assignee                    | `$(gh api user --jq .login)` — current GH user                  |
+| PR base branch              | `develop` always                                                |
+| PR timing                   | After **all** tasks committed                                   |
+| Feature doc path (platform) | `docs/issues/platform/P-NN-features.md`                         |
+| Feature doc path (product)  | `docs/issues/product/PH-N-features.md`                          |
+| Epic context                | `docs/issues/platform/P-NN-<name>.md` (same NN, no `-features`) |
 
 ## Common mistakes
 
