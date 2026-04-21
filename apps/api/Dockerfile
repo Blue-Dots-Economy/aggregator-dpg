@@ -1,0 +1,33 @@
+# syntax=docker/dockerfile:1
+
+FROM node:20-alpine AS base
+ENV PNPM_HOME="/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
+RUN corepack enable
+
+# ── installer: resolve and cache workspace deps ───────────────────────────────
+FROM base AS installer
+WORKDIR /app
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps/api/package.json                            apps/api/
+COPY packages/tsconfig/package.json                   packages/tsconfig/
+RUN pnpm install --frozen-lockfile
+
+# ── builder: compile TypeScript ───────────────────────────────────────────────
+FROM installer AS builder
+COPY . .
+RUN pnpm --filter @aggregator-dpg/api build
+
+# ── deployer: prune to production deps only ───────────────────────────────────
+FROM installer AS deployer
+COPY --from=builder /app/apps/api/dist ./apps/api/dist
+RUN pnpm deploy --filter @aggregator-dpg/api --prod /standalone
+
+# ── runner: minimal runtime image ─────────────────────────────────────────────
+FROM node:20-alpine AS runner
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+WORKDIR /app
+COPY --from=deployer --chown=appuser:appgroup /standalone .
+USER appuser
+EXPOSE 3000
+CMD ["node", "dist/index.js"]

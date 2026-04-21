@@ -1,0 +1,13 @@
+node_modules/
+.turbo/
+dist/
+.next/
+*.tsbuildinfo
+.git/
+.changeset/
+.husky/
+docs/
+.env
+.env.local
+*.env.local
+.claude/
