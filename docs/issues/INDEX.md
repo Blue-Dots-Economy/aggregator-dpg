@@ -63,10 +63,23 @@ One file per epic; each H2 section becomes a GitHub issue.
 
 **Totals for Phase 0:** ~112 features + 3 SPS stubs, ~250 inline tasks.
 
-## Product feature files (Pass 3 — complete)
+## Product feature files
 
 - [Φ1 Phase 1 features](./product/PH-1-features.md) — 8 features, ~36 tasks
 - [Φ2 Phase 2 features](./product/PH-2-features.md) — 11 features, ~46 tasks
+- [Φ3 Phase 3 features](./product/PH-3-features.md) — 6 features, ~24 tasks
+- [Φ4 Phase 4 features](./product/PH-4-features.md) — 6 features, ~18 tasks
 
-## Pass 4 (next)
-Phase-3 + Phase-4 product features + tasks under Φ3 and Φ4, plus Post-MVP stubs under X-01.
+## Post-MVP stubs
+
+- [X-01 stub features](./post-mvp/X-01-stubs.md) — 14 stubs (AG-0a, AG-3/4/5/7/8, FS-1…FS-8)
+
+## Totals
+
+- Epics: 25 (20 platform + 4 product + 1 post-MVP tracking)
+- Features: ~143 (MVP) + 14 (post-MVP stubs) = **~157**
+- Inline tasks: **~380**
+
+## Next
+
+**Pass 5:** `gh` CLI push — create labels, milestones, Project, issues; wire parent/sub-issue relations; assign Project field values.
