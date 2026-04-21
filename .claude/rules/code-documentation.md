@@ -1,27 +1,23 @@
 # Rule: Code Documentation
 
-Every public class, method, and function must have a docstring. Private helpers (`_` prefix) should have one if the logic is non-obvious.
+Every public class, method, and function must have a TSDoc comment. Private helpers (`_` prefix or unexported) should have one if the logic is non-obvious.
 
-**Format:** Use Google-style docstrings.
+**Format:** Use TSDoc.
 
-```python
-def assemble_prompt(self, request: PromptRequest) -> PromptResponse:
-    """Assemble the full LLM prompt from NLU results and session history.
-
-    Args:
-        request: Contains intent, entities, session history, and raw input.
-
-    Returns:
-        PromptResponse with the assembled system prompt and user message.
-
-    Raises:
-        ValueError: If request.intent is None or empty.
-        KnowledgeEngineError: If RAG retrieval fails after retries.
-    """
+```typescript
+/**
+ * Assembles the full API prompt from NLU results and session history.
+ *
+ * @param request - Contains intent, entities, session history, and raw input.
+ * @returns PromptResponse with the assembled system prompt and user message.
+ * @throws {ValueError} If request.intent is null or empty.
+ * @throws {KnowledgeEngineError} If RAG retrieval fails after retries.
+ */
+assemblePrompt(request: PromptRequest): Promise<PromptResponse> {
 ```
 
 **Rules:**
 - The first line is a single-sentence summary ending with a period.
-- Document all parameters, return values, and raised exceptions.
+- Document all parameters (`@param`), return values (`@returns`), and thrown exceptions (`@throws`).
 - Do not restate the function name or describe *how* it works — describe *what* it does and *why* the caller needs it.
-- Module-level docstrings must state the module's role within the DPG framework and which block it belongs to.
+- Module-level file comments must state the module's role within the DPG framework and which package it belongs to.

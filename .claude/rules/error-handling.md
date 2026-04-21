@@ -1,23 +1,31 @@
 # Rule: Error Handling
 
-All calls to external systems (LLM API, vector DB, connectors, mock servers) must include:
+All calls to external systems (Signals Stack, Jobs Stack, Signal Processing Service, storage, email) must include:
 
 - **Timeout** — explicit timeout on every external call; never rely on the default.
 - **Retry** — retry transient failures (rate limits, timeouts) at least once with exponential backoff.
-- **Structured errors** — return a typed exception or dict the caller can handle programmatically; never return raw exception strings.
-- **No silent swallowing** — never use bare `except: pass`; always log and re-raise or return a structured failure.
+- **Structured errors** — throw a typed error class the caller can handle programmatically; never surface raw error strings to callers.
+- **No silent swallowing** — never use empty `catch` blocks; always log and re-throw or return a structured failure.
 
-```python
-# Wrong
-try:
-    result = call_external_api()
-except Exception:
-    pass
+```typescript
+// Wrong
+try {
+  result = await callExternalApi();
+} catch {
+  // swallowed
+}
 
-# Correct
-try:
-    result = call_external_api()
-except TimeoutError as e:
-    logger.error("API timeout", extra={"error": str(e)})
-    raise ExternalCallError("API timed out") from e
+// Correct
+try {
+  result = await callExternalApi();
+} catch (err) {
+  if (err instanceof TimeoutError) {
+    logger.error('signals_stack_timeout', { operation: 'fetchMembers', error: String(err) });
+    throw new UpstreamError('Signals Stack timed out', { cause: err });
+  }
+  throw err;
+}
 ```
+
+Use the typed error hierarchy from `@aggregator-dpg/shared-primitives`:
+`BaseError` → `UpstreamError`, `ConfigError`, `AuthError`, `ValidationError`, `DomainError`.
