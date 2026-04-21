@@ -31,87 +31,123 @@ The issues are drafted as markdown files first (`docs/issues/`), reviewed, then 
 | Q8 | Every task carries acceptance criteria + tests (unit mandatory, integration/e2e per feature) |
 | + | GitHub Projects v2 tracking alongside issues, using Approach 3 (hybrid matrix: Platform epics + Product epics + Post-MVP tracking epic) |
 
-## 3. Repository & monorepo layout
+## 3. Repository & monorepo layout (hybrid per-service)
+
+Every service package is self-contained — interface, implementations, config schema, and defaults all live together. Subpath exports separate the interface surface from the implementation surface so consumers can depend on types only, and alternate impls (e.g., a fake for tests) slot in without a new package. A small `shared-primitives` package holds the irreducible cross-service types (error base classes, branded IDs, `Result`, common DTOs).
 
 ```
 aggregator-dpg/
 ├── apps/
-│   ├── web/                    # Next.js (App Router) — Aggregator web app
-│   └── api/                    # Node.js BFF API (Express or Fastify)
+│   ├── web/                        # Next.js (App Router) — Aggregator web app
+│   └── api/
+│       ├── src/composition.ts      # DI wiring: binds each interface to a concrete impl
+│       └── ...
 ├── services/
-│   └── signal-processing/      # Standalone SPS (materialised signals)
+│   └── signal-processing/          # Standalone SPS (materialised signals)
 ├── packages/
-│   ├── core-interfaces/        # All service interfaces, DTOs, error taxonomy, Zod config schemas
-│   ├── db-postgres/            # DBService Postgres adapter + migrations
-│   ├── auth-otp/               # AuthService + OtpProvider impls
-│   ├── signal-stack-client/    # SignalStackClient adapter (UBI backend)
-│   ├── jobs-stack-client/      # JobsStackClient adapter
-│   ├── signal-processing-client/ # SPS read-API binding
-│   ├── storage-s3/             # StorageService impl
-│   ├── email-provider/         # EmailService impl
-│   ├── queue-bullmq/           # QueueService impl
-│   ├── cache-redis/            # CacheService impl
-│   ├── observability/          # Logger/Metrics/Tracer impls (pino + OTel + Prom)
-│   ├── config/                 # ConfigService (loader + Zod validation)
-│   └── schema-service/         # SchemaService (profile schema versioning + completion-%)
-├── config/                     # All runtime YAML configs (env-var interpolation supported)
-│   ├── profiles.yaml
-│   ├── entities.yaml
-│   ├── signal-stack.yaml
-│   ├── jobs-stack.yaml
-│   ├── signal-processing.yaml
-│   ├── onboarding.yaml
-│   ├── features.yaml
-│   └── auth.yaml
+│   ├── shared-primitives/          # Errors, branded IDs, Result, base DTOs (only truly shared types)
+│   ├── db/
+│   │   ├── src/interface.ts        # DBService, Repository<T>, UnitOfWork
+│   │   ├── src/postgres/           # Postgres impl + migrations
+│   │   ├── src/testing/            # In-memory fake for tests
+│   │   ├── src/config.schema.ts    # Zod for this service
+│   │   ├── config.defaults.yaml
+│   │   └── package.json            # subpath exports: ./interface, ./postgres, ./testing
+│   ├── auth/
+│   │   ├── src/interface.ts        # AuthService, OtpProvider
+│   │   ├── src/otp/                # OTP impl + JWT logic
+│   │   ├── src/testing/
+│   │   ├── src/config.schema.ts
+│   │   ├── config.defaults.yaml
+│   │   └── package.json
+│   ├── signal-stack/               # SignalStackClient interface + REST adapter + config
+│   ├── jobs-stack/                 # JobsStackClient interface + REST adapter + config
+│   ├── signal-processing-client/   # SPC interface + HTTP adapter + config
+│   ├── storage/                    # StorageService interface + S3 impl + local-dev impl
+│   ├── email/                      # EmailService interface + provider impl
+│   ├── queue/                      # QueueService interface + BullMQ impl
+│   ├── cache/                      # CacheService interface + Redis impl
+│   ├── observability/              # Logger/Metrics/Tracer interfaces + pino/Prom/OTel impls
+│   ├── config-loader/              # ConfigService: discovers per-package schemas, composes, validates
+│   └── schema-service/             # SchemaService interface + impl + config (profile schemas)
+├── config/
+│   └── env/
+│       ├── dev.yaml                # Aggregated env overrides (ops-owned)
+│       ├── staging.yaml
+│       └── prod.yaml
 ├── docs/
-│   ├── superpowers/specs/      # Design docs
-│   └── issues/                 # Draft issue markdowns (mirrors GitHub hierarchy)
+│   ├── superpowers/specs/
+│   └── issues/
 └── .github/
-    ├── ISSUE_TEMPLATE/
-    │   ├── epic.md
-    │   ├── feature.md
-    │   └── task.md
+    ├── ISSUE_TEMPLATE/{epic.md,feature.md,task.md}
     └── workflows/
 ```
 
+**Per-package conventions (enforced by lint rules + CI):**
+
+- Each service package exports at minimum:
+  - `./interface` — only types, abstract classes, and Zod schemas. Zero runtime deps besides `shared-primitives` and `zod`.
+  - `./impl-name` (e.g., `./postgres`, `./redis`) — concrete implementations. May have heavy deps.
+  - `./testing` — in-memory/fake impls for tests.
+- Service-to-service references use `./interface` only. A service may not import another service's impl.
+- Config: each package ships `config.schema.ts` (Zod) + `config.defaults.yaml`. The `config-loader` package discovers both at boot, merges with `config/env/<env>.yaml` overrides, validates, and hands typed slices to each service.
+- `composition.ts` at `apps/api` (and at each deployable in `services/`) is the **only** place that binds interfaces to concrete impls. No consumer code references an impl package directly.
+
 ## 4. Service interfaces
 
-Every service exposes a TypeScript interface in `packages/core-interfaces`. Consumers depend only on the interface. Implementations live in their own packages and are wired via dependency injection at composition root (`apps/api/src/composition.ts`).
+Every service package exposes its interface via `./interface` (types + abstract class + Zod schemas, no runtime weight) and one or more implementation subpath exports. Consumers (the API composition root and other services) import from `./interface`; concrete bindings happen only at the composition root.
 
-| # | Interface | Purpose | Initial impl package |
-|---|-----------|---------|----------------------|
-| 1 | `DBService` / `Repository<T>` / `UnitOfWork` | Persistence abstraction; converts domain ops to SQL at the boundary | `db-postgres` |
-| 2 | `AuthService` | Session + OTP orchestration | `auth-otp` |
-| 3 | `OtpProvider` | Sub-interface: email / SMS delivery | `auth-otp` (email); SMS TBD |
-| 4 | `SignalStackClient` | Signals Stack (UBI backend) reads + bulk-creates | `signal-stack-client` |
-| 5 | `JobsStackClient` | Jobs Stack reads | `jobs-stack-client` |
-| 6 | `SignalProcessingClient` | SPS read API consumer | `signal-processing-client` |
-| 7 | `StorageService` | Object storage for exports | `storage-s3` |
-| 8 | `EmailService` | Transactional mail | `email-provider` |
-| 9 | `QueueService` | Async jobs (bulk upload, exports) | `queue-bullmq` |
-| 10 | `CacheService` | KV caching | `cache-redis` |
-| 11 | `Logger` / `Metrics` / `Tracer` | Observability primitives | `observability` |
-| 12 | `ConfigService` | Typed config access | `config` |
-| 13 | `SchemaService` | Profile schema versioning + completion-% | `schema-service` |
+| # | Package | Interface exported (`./interface`) | Initial impl subpaths |
+|---|---------|-------------------------------------|------------------------|
+| 1 | `db` | `DBService`, `Repository<T>`, `UnitOfWork` | `./postgres`, `./testing` |
+| 2 | `auth` | `AuthService`, `Session`, `OtpProvider` | `./otp` (email-OTP + JWT), `./testing` |
+| 3 | `signal-stack` | `SignalStackClient` | `./rest`, `./testing` |
+| 4 | `jobs-stack` | `JobsStackClient` | `./rest`, `./testing` |
+| 5 | `signal-processing-client` | `SignalProcessingClient` | `./http`, `./testing` |
+| 6 | `storage` | `StorageService` | `./s3`, `./local`, `./testing` |
+| 7 | `email` | `EmailService` | `./smtp` (or provider), `./testing` |
+| 8 | `queue` | `QueueService` | `./bullmq`, `./testing` |
+| 9 | `cache` | `CacheService` | `./redis`, `./memory` |
+| 10 | `observability` | `Logger`, `Metrics`, `Tracer` | `./pino-otel-prom`, `./testing` |
+| 11 | `config-loader` | `ConfigService` | `./fs` (file-system loader), `./testing` |
+| 12 | `schema-service` | `SchemaService` | `./default`, `./testing` |
 
-Error taxonomy: typed error classes in `core-interfaces` (e.g., `UpstreamError`, `ConfigError`, `AuthError`, `ValidationError`) — no stringly-typed errors.
+Shared primitives (`shared-primitives`): typed error hierarchy (`UpstreamError`, `ConfigError`, `AuthError`, `ValidationError`, `DomainError`), branded IDs (`AggregatorId`, `UserId`, `OrgId`), `Result<T,E>`, common DTO bases. No business logic lives here — it is the irreducible shared surface only.
+
+**Rule:** a service package's `./interface` subpath may import only from `shared-primitives` and `zod`. This is enforced by a dependency-cruiser rule in CI.
 
 ## 5. Configuration surface
 
-All configurable surfaces land under `config/*.yaml`, loaded at boot, validated against Zod schemas in `core-interfaces`. Env-var interpolation (`${VAR}`) supported. Dev may hot-reload; prod is boot-only.
+Each service package owns the shape of its own config: it ships a Zod schema (`config.schema.ts`) and a `config.defaults.yaml`. The `config-loader` package discovers these at boot across the workspace, merges with environment-specific overrides under `config/env/<env>.yaml`, validates the composite against the union schema, and exposes typed slices to each service.
+
+**Per-package config (owned by the service):**
+
+| Package | Controls |
+|---|---|
+| `db` | Connection URL, pool size, statement timeout, migration table |
+| `auth` | OTP TTL, session/refresh TTLs, rate limits, JWT signing key ref, OTP provider selection |
+| `signal-stack` | Base URL, auth header, per-endpoint paths, retry/timeout/CB |
+| `jobs-stack` | Base URL + endpoints, retry/timeout |
+| `signal-processing-client` | SPS base URL + endpoints, cache TTLs |
+| `storage` | Bucket, region, signed-URL TTL, retention days |
+| `email` | Provider, sender, templates dir |
+| `queue` | Redis URL, queue names, concurrency, DLQ policy |
+| `cache` | Redis URL, key prefix, default TTL |
+| `observability` | Log level, OTel endpoint, Prom scrape config |
+| `schema-service` | Active profile schema version, completion-% threshold (default 75%) |
+
+**Domain config (owned by `apps/api` + `schema-service`):**
 
 | File | Controls |
 |---|---|
-| `profiles.yaml` | Profile schema (Who I Am / What I Have / What I Want), required flags, types, options. Source for dynamic form + completion-% |
-| `entities.yaml` | Entity types (seeker, provider, future types) and their field bindings |
-| `signal-stack.yaml` | Signals Stack base URL, auth, per-endpoint paths, retry/timeout |
-| `jobs-stack.yaml` | Jobs Stack base URL + endpoints |
-| `signal-processing.yaml` | SPS base URL + endpoints |
-| `onboarding.yaml` | `modes.bulk.enabled`, `modes.qr.enabled`, `modes.link.enabled`, CSV template refs, completion-% threshold |
-| `features.yaml` | Feature flags (beta gates, post-MVP staging) |
-| `auth.yaml` | OTP provider selection, session/refresh TTLs, rate limits |
+| `profiles.yaml` (consumed by `schema-service`) | Profile schema (Who I Am / What I Have / What I Want), required flags, types, options. Source for dynamic form + completion-% |
+| `entities.yaml` (consumed by `apps/api`) | Entity types (seeker, provider, future types) and their field bindings |
+| `onboarding.yaml` (consumed by `apps/api`) | `modes.bulk.enabled`, `modes.qr.enabled`, `modes.link.enabled`, CSV template refs |
+| `features.yaml` (consumed by `apps/api` + `apps/web`) | Feature flags (beta gates, post-MVP staging) |
 
-Config precedence: env vars override file values for secrets; file values are otherwise authoritative.
+**Env overrides (ops-owned):** `config/env/{dev,staging,prod}.yaml` — a single merge point that can override any key from any package's defaults. Secrets come from env vars via `${VAR}` interpolation.
+
+**Precedence (lowest → highest):** package defaults → domain YAML → `config/env/<env>.yaml` → env vars.
 
 ## 6. Epic taxonomy
 
@@ -120,17 +156,17 @@ Config precedence: env vars override file values for secrets; file values are ot
 | ID | Epic |
 |---|---|
 | P-01 | Monorepo & Build System |
-| P-02 | Core Interfaces & Contracts |
-| P-03 | ConfigService |
-| P-04 | DBService (Postgres impl) |
-| P-05 | AuthService |
-| P-06 | SignalStackClient |
-| P-07 | JobsStackClient |
-| P-08 | SignalProcessingClient |
-| P-09 | StorageService |
-| P-10 | EmailService |
-| P-11 | QueueService |
-| P-12 | CacheService |
+| P-02 | Shared Primitives & Interface Conventions |
+| P-03 | `config-loader` package (ConfigService) |
+| P-04 | `db` package (DBService + Postgres impl) |
+| P-05 | `auth` package (AuthService + OTP impl) |
+| P-06 | `signal-stack` package (SignalStackClient + REST impl) |
+| P-07 | `jobs-stack` package (JobsStackClient + REST impl) |
+| P-08 | `signal-processing-client` package |
+| P-09 | `storage` package (StorageService + S3/local impls) |
+| P-10 | `email` package (EmailService + provider impl) |
+| P-11 | `queue` package (QueueService + BullMQ impl) |
+| P-12 | `cache` package (CacheService + Redis impl) |
 | P-13 | Observability |
 | P-14 | SchemaService |
 | P-15 | Security Baseline |
@@ -244,14 +280,24 @@ The complete feature list per epic is captured verbatim in §D of the brainstorm
 
 _(Full per-feature detail moves to `docs/issues/` markdowns; list here for traceability.)_
 
+**Uniform per-package features** (implicit in each of P-04 … P-14; not re-listed below):
+- `./interface` subpath: abstract class + DTOs + Zod schemas
+- `./testing` subpath: in-memory fake for tests
+- `config.schema.ts` + `config.defaults.yaml` for the package
+- `package.json` subpath exports set up per convention (P-02.2)
+
 ### P-01 Monorepo & Build System
 F-01.1 pnpm workspaces + turbo · F-01.2 TS strict + shared tsconfig · F-01.3 ESLint/Prettier + husky · F-01.4 CI (lint/typecheck/test/build) · F-01.5 Conventional commits + release tooling · F-01.6 Dockerfiles per deployable
 
-### P-02 Core Interfaces & Contracts
-F-02.1 DB/Repository/UoW interfaces · F-02.2 Auth/Session/OtpProvider · F-02.3 Signal/Jobs/SPS client interfaces · F-02.4 Storage/Email/Queue/Cache · F-02.5 Logger/Metrics/Tracer · F-02.6 Config/Schema · F-02.7 DTOs + error taxonomy · F-02.8 Zod schemas for configs
+### P-02 Shared Primitives & Interface Conventions
+F-02.1 `shared-primitives` package: error hierarchy, branded IDs, `Result`, base DTOs · F-02.2 Per-service package template (folder layout, subpath exports, `package.json` conventions) · F-02.3 Dependency-cruiser rule: `./interface` may import only `shared-primitives` + `zod` · F-02.4 Dependency-cruiser rule: no service may import another service's impl subpath · F-02.5 Interface authoring conventions (abstract class + Zod + DTO naming) · F-02.6 Testing-subpath conventions (fakes vs mocks)
 
-### P-03 ConfigService
-F-03.1 YAML loader + env interp · F-03.2 Zod validation + typed accessors · F-03.3 profiles.yaml schema · F-03.4 entities.yaml · F-03.5 signal-stack.yaml · F-03.6 jobs-stack.yaml · F-03.7 signal-processing.yaml · F-03.8 onboarding.yaml · F-03.9 features.yaml · F-03.10 auth.yaml · F-03.11 Hot-reload/boot-only strategy · F-03.12 Precedence docs
+Note: each service's interfaces are authored in that service's own package under P-04 … P-14. This epic covers only cross-cutting primitives and conventions that all services follow.
+
+### P-03 `config-loader` package
+F-03.1 `ConfigService` interface + FS loader impl · F-03.2 Per-package schema discovery mechanism · F-03.3 Env-YAML merge (`config/env/<env>.yaml`) · F-03.4 Env-var `${VAR}` interpolation · F-03.5 Composite Zod validation + typed slice accessors · F-03.6 Domain YAMLs: `profiles.yaml` · F-03.7 `entities.yaml` · F-03.8 `onboarding.yaml` · F-03.9 `features.yaml` · F-03.10 Hot-reload (dev) vs boot-only (prod) · F-03.11 Precedence + overrides docs
+
+Note: each service package owns its own `config.schema.ts` and `config.defaults.yaml`; those features are listed under each service's epic (P-04 … P-14), not here.
 
 ### P-04 DBService (Postgres)
 F-04.1 Postgres adapter · F-04.2 Migration runner · F-04.3 Schema (all README §5.3 tables) · F-04.4 Repositories per entity · F-04.5 UoW/transactions · F-04.6 Pool + health · F-04.7 Indexes · F-04.8 Seed scripts
