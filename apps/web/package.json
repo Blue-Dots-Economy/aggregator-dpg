@@ -1,0 +1,16 @@
+{
+  "name": "@aggregator-dpg/web",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "build": "mkdir -p dist && touch dist/index.js",
+    "dev": "echo 'dev: web (stub)'",
+    "lint": "eslint --no-warn-ignored .",
+    "typecheck": "tsc --noEmit",
+    "test": "echo 'test: web (stub)'"
+  },
+  "devDependencies": {
+    "@aggregator-dpg/tsconfig": "workspace:*",
+    "typescript": "^6.0.3"
+  }
+}

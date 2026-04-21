@@ -1,6 +1,8 @@
 # Rule: Logging and Observability
 
-Every significant operation must emit a structured log entry. Never use bare `print()` in module code.
+Every significant operation must emit a structured log entry. Never use bare `console.log()` in module code.
+
+Use the logger from `@aggregator-dpg/observability`. It wraps **pino** and emits structured JSON.
 
 Required fields per log entry:
 
@@ -9,26 +11,37 @@ Required fields per log entry:
 | `operation` | Name of the function or step |
 | `status` | `success`, `failure`, or `skipped` |
 | `error` | Error message and type (failure only) |
-| `latency_ms` | Elapsed ms (external calls and LLM calls) |
-| `timestamp` | Epoch timestamp in millis when the log was captured |
+| `latency_ms` | Elapsed ms (external calls) |
+| `timestamp` | Epoch timestamp in millis (added automatically by pino) |
 
-logs must differentiate between debug, info, error levels and raise all.
-The script must choose log level from env var before executing
+Log level is read from the `LOG_LEVEL` environment variable at startup (`debug` / `info` / `warn` / `error`). Default: `info`.
 
-```python
-import logging, time
-logger = logging.getLogger(__name__)
+```typescript
+import { logger } from '@aggregator-dpg/observability';
 
-start = time.time()
-# ... operation ...
-logger.info("llm_call", extra={
-    "operation": "llm_wrapper.call",
-    "status": "success",
-    "latency_ms": int((time.time() - start) * 1000),
-    "model": model_used,
-    "input_tokens": input_tokens,
-    "output_tokens": output_tokens,
-})
+const start = Date.now();
+// ... operation ...
+logger.info({
+  operation: 'signalStackClient.fetchMembers',
+  status: 'success',
+  latency_ms: Date.now() - start,
+  aggregator_id: aggregatorId,
+});
+
+// On failure:
+logger.error({
+  operation: 'signalStackClient.fetchMembers',
+  status: 'failure',
+  error: err.message,
+  error_type: err.constructor.name,
+  latency_ms: Date.now() - start,
+});
 ```
 
-Never log PII, phone numbers, or message content outside the designated audit log path managed by the Observability Layer.
+Differentiate levels:
+- `logger.debug` — verbose internals, only visible at `LOG_LEVEL=debug`
+- `logger.info` — normal operation milestones
+- `logger.warn` — recoverable anomalies
+- `logger.error` — failures requiring attention
+
+Never log PII, phone numbers, or message content outside the designated audit log path managed by the Observability package.

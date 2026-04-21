@@ -1,0 +1,13 @@
+{
+  "name": "@aggregator-dpg/tsconfig",
+  "version": "0.0.0",
+  "private": true,
+  "exports": {
+    "./base.json": "./base.json",
+    "./node.json": "./node.json",
+    "./next.json": "./next.json"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3"
+  }
+}

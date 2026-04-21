@@ -1,0 +1,66 @@
+# ── Version control ───────────────────────────────────────────────────────────
+.git/
+.gitignore
+
+# ── Dependencies (reinstalled fresh inside image) ─────────────────────────────
+node_modules/
+.pnpm-store/
+
+# ── Build outputs (rebuilt inside image) ──────────────────────────────────────
+dist/
+build/
+out/
+.next/
+.nuxt/
+.svelte-kit/
+
+# ── TypeScript ────────────────────────────────────────────────────────────────
+*.tsbuildinfo
+*.d.ts.map
+
+# ── Cache ─────────────────────────────────────────────────────────────────────
+.turbo/
+.cache/
+.eslintcache
+.prettiercache
+.parcel-cache/
+
+# ── Test & coverage ───────────────────────────────────────────────────────────
+coverage/
+*.lcov
+.nyc_output/
+**/__tests__/
+**/*.test.ts
+**/*.test.tsx
+**/*.spec.ts
+**/*.spec.tsx
+
+# ── Environment ───────────────────────────────────────────────────────────────
+.env
+.env.*
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+logs/
+*.log
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+._*
+Thumbs.db
+
+# ── Dev tooling (not needed at runtime) ───────────────────────────────────────
+.husky/
+.changeset/
+.claude/
+.github/
+.vscode/
+.idea/
+
+# ── Docs & config files ───────────────────────────────────────────────────────
+docs/
+*.md
+!**/README.md
+.eslintrc*
+eslint.config.*
+prettier.config.*
+commitlint.config.*

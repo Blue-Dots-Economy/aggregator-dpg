@@ -1,0 +1,16 @@
+{
+  "name": "@aggregator-dpg/api",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc",
+    "dev": "echo 'dev: api (stub)'",
+    "lint": "eslint --no-warn-ignored .",
+    "typecheck": "tsc --noEmit",
+    "test": "echo 'test: api (stub)'"
+  },
+  "devDependencies": {
+    "@aggregator-dpg/tsconfig": "workspace:*",
+    "typescript": "^6.0.3"
+  }
+}
