@@ -16,6 +16,8 @@ importers:
 
   apps/web: {}
 
+  packages/tsconfig: {}
+
 packages:
 
   '@turbo/darwin-64@2.9.6':
