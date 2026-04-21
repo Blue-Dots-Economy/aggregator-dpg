@@ -70,7 +70,7 @@ async function addSingleSelect(name, options) {
     console.log(`  field exists: ${name}`);
     return;
   }
-  const optsArg = options.map((o) => `--single-select-option "${o}"`).join(" ");
+  const optsArg = `--single-select-options "${options.join(",")}"`;
   gh(
     `project field-create ${projectNumber} --owner ${OWNER} --name "${name}" --data-type SINGLE_SELECT ${optsArg}`
   );
