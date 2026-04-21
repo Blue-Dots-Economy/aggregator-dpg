@@ -6,7 +6,11 @@
     "build": "echo 'build: web (stub)'",
     "dev": "echo 'dev: web (stub)'",
     "lint": "echo 'lint: web (stub)'",
-    "typecheck": "echo 'typecheck: web (stub)'",
+    "typecheck": "tsc --noEmit",
     "test": "echo 'test: web (stub)'"
+  },
+  "devDependencies": {
+    "@aggregator-dpg/tsconfig": "workspace:*",
+    "typescript": "^6.0.3"
   }
 }

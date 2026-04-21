@@ -1,0 +1,16 @@
+{
+  "name": "@aggregator-dpg/tsconfig",
+  "version": "0.0.0",
+  "private": true,
+  "exports": {
+    "./base.json": "./base.json",
+    "./node.json": "./node.json",
+    "./next.json": "./next.json"
+  },
+  "scripts": {
+    "typecheck:canary": "node -e \"const {execSync}=require('child_process');try{execSync('tsc --noEmit -p __canary__/tsconfig.json',{stdio:'pipe'});process.exit(1)}catch{console.log('canary: strict flags confirmed active');process.exit(0)}\""
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3"
+  }
+}

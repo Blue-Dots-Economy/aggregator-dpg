@@ -6,7 +6,11 @@
     "build": "echo 'build: api (stub)'",
     "dev": "echo 'dev: api (stub)'",
     "lint": "echo 'lint: api (stub)'",
-    "typecheck": "echo 'typecheck: api (stub)'",
+    "typecheck": "tsc --noEmit",
     "test": "echo 'test: api (stub)'"
+  },
+  "devDependencies": {
+    "@aggregator-dpg/tsconfig": "workspace:*",
+    "typescript": "^6.0.3"
   }
 }
