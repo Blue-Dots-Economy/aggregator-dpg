@@ -36,8 +36,35 @@ Status legend: **[drafted]** · **[TODO]**
 
 - [X-01 Post-MVP Backlog](./post-mvp/X-01-post-mvp-backlog.md) **[drafted]**
 
-## Features & tasks
+## Phase-0 feature files (Pass 2 — complete)
 
-**Pass 2 (next):** All Phase-0 features + tasks under P-01 … P-20.
-**Pass 3:** Phase-1 + Phase-2 features + tasks.
-**Pass 4:** Phase-3 + Phase-4 features + tasks + Post-MVP stubs.
+One file per epic; each H2 section becomes a GitHub issue.
+
+- [P-01 features](./platform/P-01-features.md) — 6 features, ~15 tasks
+- [P-02 features](./platform/P-02-features.md) — 6 features, ~14 tasks
+- [P-03 features](./platform/P-03-features.md) — 11 features, ~24 tasks
+- [P-04 features](./platform/P-04-features.md) — 10 features, ~28 tasks
+- [P-05 features](./platform/P-05-features.md) — 7 features, ~16 tasks
+- [P-06 features](./platform/P-06-features.md) — 9 features, ~19 tasks
+- [P-07 features](./platform/P-07-features.md) — 7 features, ~9 tasks
+- [P-08 features](./platform/P-08-features.md) — 4 features, ~7 tasks
+- [P-09 features](./platform/P-09-features.md) — 4 features, ~10 tasks
+- [P-10 features](./platform/P-10-features.md) — 4 features, ~9 tasks
+- [P-11 features](./platform/P-11-features.md) — 4 features, ~10 tasks
+- [P-12 features](./platform/P-12-features.md) — 3 features, ~5 tasks
+- [P-13 features](./platform/P-13-features.md) — 6 features, ~16 tasks
+- [P-14 features](./platform/P-14-features.md) — 4 features, ~8 tasks
+- [P-15 features](./platform/P-15-features.md) — 6 features, ~14 tasks
+- [P-16 features](./platform/P-16-features.md) — 3 stub items (external SPS)
+- [P-17 features](./platform/P-17-features.md) — 8 features, ~20 tasks
+- [P-18 features](./platform/P-18-features.md) — 6 features, ~13 tasks
+- [P-19 features](./platform/P-19-features.md) — 5 features, ~6 tasks
+- [P-20 features](./platform/P-20-features.md) — 5 features, ~12 tasks
+
+**Totals for Phase 0:** ~112 features + 3 SPS stubs, ~250 inline tasks.
+
+## Pass 3 (next)
+Phase-1 + Phase-2 product features + tasks under Φ1 and Φ2.
+
+## Pass 4
+Phase-3 + Phase-4 product features + tasks under Φ3 and Φ4, plus Post-MVP stubs under X-01.
