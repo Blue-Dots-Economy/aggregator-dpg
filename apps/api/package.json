@@ -5,7 +5,7 @@
   "scripts": {
     "build": "echo 'build: api (stub)'",
     "dev": "echo 'dev: api (stub)'",
-    "lint": "echo 'lint: api (stub)'",
+    "lint": "eslint --no-warn-ignored .",
     "typecheck": "tsc --noEmit",
     "test": "echo 'test: api (stub)'"
   },
