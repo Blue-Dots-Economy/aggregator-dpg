@@ -15,14 +15,14 @@ This installs all workspace dependencies across `apps/*`, `services/*`, and `pac
 
 ## Common commands
 
-| Command | What it does |
-|---------|-------------|
-| `pnpm -w build` | Build all packages (topological order, cached) |
-| `pnpm -w test` | Run all tests |
-| `pnpm -w lint` | Lint all packages |
-| `pnpm -w typecheck` | Type-check all packages |
-| `pnpm -w dev` | Start all packages in dev/watch mode |
-| `pnpm --filter <name> <cmd>` | Run a command in one package only |
+| Command                      | What it does                                   |
+| ---------------------------- | ---------------------------------------------- |
+| `pnpm -w build`              | Build all packages (topological order, cached) |
+| `pnpm -w test`               | Run all tests                                  |
+| `pnpm -w lint`               | Lint all packages                              |
+| `pnpm -w typecheck`          | Type-check all packages                        |
+| `pnpm -w dev`                | Start all packages in dev/watch mode           |
+| `pnpm --filter <name> <cmd>` | Run a command in one package only              |
 
 ## Workspace layout
 
@@ -58,3 +58,22 @@ Task commits must include the sub-issue number:
 ```
 
 Do **not** bypass pre-commit hooks with `--no-verify`.
+
+## Pre-commit hooks
+
+Every commit runs `lint-staged` automatically via husky:
+
+| Staged files                         | Action                                |
+| ------------------------------------ | ------------------------------------- |
+| `*.{ts,tsx,js,mjs,cjs,json,yaml,md}` | `prettier --write` (auto-format)      |
+| `*.{ts,tsx}`                         | `eslint --fix` (auto-fix lint errors) |
+
+Hooks run on staged files only — they are fast and non-blocking for unrelated changes.
+
+**Never use `--no-verify` to skip hooks.** If the hook fails:
+
+1. Read the error — it tells you exactly what is wrong.
+2. Fix the issue (`eslint` errors that cannot be auto-fixed require manual correction).
+3. Re-stage the fixed file and commit again.
+
+Skipping hooks lets broken or unformatted code into the history and breaks the shared style baseline for the entire team.
