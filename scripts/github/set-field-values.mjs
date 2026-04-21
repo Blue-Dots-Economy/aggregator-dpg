@@ -219,7 +219,7 @@ for (const item of items) {
 
     // Epic: epic issues set to their own key; features set to their parent epic key
     const epicKey = epicByNumber[issueNum] ?? featureToEpic[issueNum];
-    if (epicKey) updateText(item.id, "Epic", epicKey);
+    if (epicKey) updateSingleSelect(item.id, "Epic", epicKey);
   } catch (e) {
     errors++;
     console.warn(`  #${issueNum}: ${e.message?.slice(0, 200) ?? e}`);
