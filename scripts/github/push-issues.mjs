@@ -109,7 +109,8 @@ function createIssue({ title, body, labels = [], milestone }) {
   writeFileSync(tmp, body);
   const labelArgs = labels.map((l) => `--label "${l}"`).join(" ");
   const milestoneArg = milestone ? `--milestone "${milestone}"` : "";
-  const titleEsc = title.replace(/"/g, '\\"');
+  // Escape for double-quoted shell: backslash, backtick, dollar, double-quote
+  const titleEsc = title.replace(/\\/g, "\\\\").replace(/`/g, "\\`").replace(/\$/g, "\\$").replace(/"/g, '\\"');
   const url = gh(
     `issue create --repo ${REPO} --title "${titleEsc}" --body-file "${tmp}" ${labelArgs} ${milestoneArg}`
   );
