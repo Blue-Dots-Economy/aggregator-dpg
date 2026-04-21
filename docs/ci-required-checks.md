@@ -12,7 +12,7 @@ Add each check name exactly as listed below (copy-paste — GitHub matches by ex
 
 | Check name | What it gates                              |
 | ---------- | ------------------------------------------ |
-| `CI`       | Lint + typecheck + test + build on Node 22 |
+| `CI`       | Lint + typecheck + test + build on Node 24 |
 
 > The check name comes from the `name:` field of the `ci` job in `ci.yml`.
 > If the job name ever changes, update this doc and re-pin the checks.

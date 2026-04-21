@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM node:20-alpine AS base
+FROM node:24-alpine AS base
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
 RUN corepack enable
@@ -24,7 +24,7 @@ COPY --from=builder /app/apps/api/dist ./apps/api/dist
 RUN pnpm deploy --filter @aggregator-dpg/api --prod /standalone
 
 # ── runner: minimal runtime image ─────────────────────────────────────────────
-FROM node:20-alpine AS runner
+FROM node:24-alpine AS runner
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 WORKDIR /app
 COPY --from=deployer --chown=appuser:appgroup /standalone .
