@@ -1,0 +1,12 @@
+{
+  "name": "@aggregator-dpg/api",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "build": "echo 'build: api (stub)'",
+    "dev": "echo 'dev: api (stub)'",
+    "lint": "echo 'lint: api (stub)'",
+    "typecheck": "echo 'typecheck: api (stub)'",
+    "test": "echo 'test: api (stub)'"
+  }
+}

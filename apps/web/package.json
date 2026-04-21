@@ -1,0 +1,12 @@
+{
+  "name": "@aggregator-dpg/web",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "build": "echo 'build: web (stub)'",
+    "dev": "echo 'dev: web (stub)'",
+    "lint": "echo 'lint: web (stub)'",
+    "typecheck": "echo 'typecheck: web (stub)'",
+    "test": "echo 'test: web (stub)'"
+  }
+}
