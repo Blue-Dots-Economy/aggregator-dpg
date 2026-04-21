@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "build": "echo 'build: web (stub)'",
+    "build": "mkdir -p dist && touch dist/index.js",
     "dev": "echo 'dev: web (stub)'",
     "lint": "eslint --no-warn-ignored .",
     "typecheck": "tsc --noEmit",

@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "build": "echo 'build: api (stub)'",
+    "build": "tsc",
     "dev": "echo 'dev: api (stub)'",
     "lint": "eslint --no-warn-ignored .",
     "typecheck": "tsc --noEmit",
