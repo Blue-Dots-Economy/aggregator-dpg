@@ -10,15 +10,11 @@ Add each check name exactly as listed below (copy-paste — GitHub matches by ex
 
 ## Required checks
 
-These map to the job matrix in `.github/workflows/ci.yml`:
+| Check name | What it gates                              |
+| ---------- | ------------------------------------------ |
+| `CI`       | Lint + typecheck + test + build on Node 22 |
 
-| Check name     | What it gates                              |
-| -------------- | ------------------------------------------ |
-| `CI / Node 20` | Lint + typecheck + test + build on Node 20 |
-| `CI / Node 22` | Lint + typecheck + test + build on Node 22 |
-
-> The check names come from the `name:` field of the job in `ci.yml`:
-> `CI / Node ${{ matrix.node }}` → resolves to `CI / Node 20` and `CI / Node 22`.
+> The check name comes from the `name:` field of the `ci` job in `ci.yml`.
 > If the job name ever changes, update this doc and re-pin the checks.
 
 ## Recommended additional settings
