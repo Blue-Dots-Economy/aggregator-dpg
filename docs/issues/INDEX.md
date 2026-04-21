@@ -63,8 +63,10 @@ One file per epic; each H2 section becomes a GitHub issue.
 
 **Totals for Phase 0:** ~112 features + 3 SPS stubs, ~250 inline tasks.
 
-## Pass 3 (next)
-Phase-1 + Phase-2 product features + tasks under Φ1 and Φ2.
+## Product feature files (Pass 3 — complete)
 
-## Pass 4
+- [Φ1 Phase 1 features](./product/PH-1-features.md) — 8 features, ~36 tasks
+- [Φ2 Phase 2 features](./product/PH-2-features.md) — 11 features, ~46 tasks
+
+## Pass 4 (next)
 Phase-3 + Phase-4 product features + tasks under Φ3 and Φ4, plus Post-MVP stubs under X-01.
