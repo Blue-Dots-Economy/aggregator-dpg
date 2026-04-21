@@ -194,7 +194,7 @@ Every listing endpoint accepts `aggregator_id` implicitly from the session and a
 
 ### 5.2 Signal Processing Service
 
-Separate service per PRD. Responsibilities:
+Separate service per PRD out of scope in current implementation. Responsibilities:
 
 - Ingests raw events from Signals Stack and Jobs Stack (timestamps, application events, profile fields, registration mode).
 - Computes all derived signals listed in § 3.2.
