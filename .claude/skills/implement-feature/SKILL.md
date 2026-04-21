@@ -7,7 +7,7 @@ description: Use when user provides a GitHub feature issue number and feature ID
 
 ## Overview
 
-Read spec → create task sub-issues → ask questions → implement → commit per task → PR at end.
+Read spec → create task sub-issues → ask questions → implement → commit per task → PR to `develop` → explain.
 Never write code before questions are answered. Never create PR before all tasks are committed.
 
 ## Step 1 — Read (parallel)
@@ -96,8 +96,11 @@ Rules:
 
 ## Step 6 — Create PR (only after ALL tasks done)
 
+Always target the `develop` branch:
+
 ```bash
 gh pr create \
+  --base develop \
   --title "feat(F-XX.X): <feature title>" \
   --body "$(cat <<'EOF'
 ## Summary
@@ -117,6 +120,16 @@ EOF
 )"
 ```
 
+## Step 7 — Explain the feature
+
+After the PR URL is printed, write a plain-language summary covering:
+
+1. **What was built** — list every file/package created or modified and its purpose in one sentence each.
+2. **Why it matters** — explain the problem this feature solves and what breaks without it.
+3. **How it connects** — which future features or packages depend on this landing first.
+
+Keep it concise — 3 short paragraphs max. No bullet dumps.
+
 ## Quick reference
 
 | Thing | Convention |
@@ -124,6 +137,7 @@ EOF
 | Branch | `feat/F-XX.X-<slug>` |
 | Commit prefix | `#<sub-issue> feat(T-XX.X.X):` |
 | Assignee | `$(gh api user --jq .login)` — current GH user |
+| PR base branch | `develop` always |
 | PR timing | After **all** tasks committed |
 | Feature doc path (platform) | `docs/issues/platform/P-NN-features.md` |
 | Feature doc path (product) | `docs/issues/product/PH-N-features.md` |
