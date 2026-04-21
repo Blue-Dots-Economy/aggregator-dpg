@@ -5,7 +5,7 @@
   "scripts": {
     "build": "echo 'build: web (stub)'",
     "dev": "echo 'dev: web (stub)'",
-    "lint": "echo 'lint: web (stub)'",
+    "lint": "eslint --no-warn-ignored .",
     "typecheck": "tsc --noEmit",
     "test": "echo 'test: web (stub)'"
   },
