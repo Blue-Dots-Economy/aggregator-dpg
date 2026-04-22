@@ -1,0 +1,24 @@
+# Feature flags and locale configuration.
+#
+# flags: boolean gates for beta or post-MVP features.
+#   Set to false to disable a feature without a code change.
+#   Add new flags here — no source change required.
+#
+# locale: default UI language and the set of supported locales.
+
+flags:
+  # Onboarding mode gates — mirror onboarding.yaml toggles at the feature level.
+  bulkOnboarding: true
+  qrOnboarding: true
+  linkOnboarding: true
+  # Post-MVP: profile completeness indicator shown to participants.
+  betaProfileCompletion: false
+
+locale:
+  default: en
+  available:
+    - en
+    - hi
+    - kn
+    - te
+    - ta

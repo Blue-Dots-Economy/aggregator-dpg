@@ -15,6 +15,10 @@
     "./onboarding": {
       "import": "./dist/onboarding.schema.js",
       "types": "./dist/onboarding.schema.d.ts"
+    },
+    "./features": {
+      "import": "./dist/features.schema.js",
+      "types": "./dist/features.schema.d.ts"
     }
   },
   "scripts": {
