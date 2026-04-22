@@ -85,6 +85,24 @@ export abstract class ConfigServiceBase {
   abstract require<T = unknown>(path: string): T;
 
   /**
+   * Returns the validated, typed config slice for the given package configKey.
+   *
+   * The slice is the top-level object nested under `key` in the merged tree,
+   * already validated and Zod-coerced by `load()`. The caller provides the
+   * TypeScript type — no re-validation occurs.
+   *
+   * @param key - The package's configKey (e.g. "signalStack", "db").
+   * @typeParam T - The package's Config type (e.g. `SignalStackConfig`).
+   * @returns The typed config slice.
+   * @throws {ConfigError} With code CONFIG_KEY_MISSING if the key is absent.
+   *
+   * @example
+   * const ss = config.slice<SignalStackConfig>('signalStack');
+   * console.log(ss.baseUrl); // fully typed
+   */
+  abstract slice<T>(key: string): T;
+
+  /**
    * Reloads config from disk without restarting the process.
    *
    * Validates the new config before replacing the current one.
