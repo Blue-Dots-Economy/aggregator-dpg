@@ -1,0 +1,81 @@
+# Aggregator profile schema — defines the fields shown to aggregators during onboarding.
+#
+# Each field entry:
+#   name     — camelCase identifier used in API payloads
+#   label    — human-readable display label
+#   type     — input type: text | email | phone | select | multiselect | textarea | number | boolean
+#   required — whether the field counts toward completeness
+#   group    — section: whoIAm | whatIWant | whatIHave
+#   options  — (select / multiselect only) allowed values
+
+completeness:
+  # Fraction of required fields that must be filled to consider a profile complete.
+  # Range: 0.0–1.0. Default: 0.75 (75%).
+  threshold: 0.75
+
+fields:
+  # ── WHO I AM ──────────────────────────────────────────────────────────────
+
+  - name: representativeName
+    label: Name of accountable representative
+    type: text
+    required: true
+    group: whoIAm
+
+  - name: mobileNumber
+    label: Mobile number for follow-up
+    type: phone
+    required: true
+    group: whoIAm
+
+  - name: email
+    label: Email for follow-up
+    type: email
+    required: true
+    group: whoIAm
+
+  - name: trustAnchorType
+    label: Trust anchor / identity of the aggregator
+    type: select
+    required: true
+    group: whoIAm
+    options:
+      - ngo
+      - government
+      - private
+      - individual
+
+  - name: organisationName
+    label: Organisation name (for institutional aggregators)
+    type: text
+    required: false
+    group: whoIAm
+
+  # ── WHAT I WANT ───────────────────────────────────────────────────────────
+
+  - name: contactPreference
+    label: How should the ecosystem contact your participants?
+    type: select
+    required: true
+    group: whatIWant
+    options:
+      - direct
+      - viaAggregator
+      - either
+
+  # ── WHAT I HAVE ───────────────────────────────────────────────────────────
+
+  - name: beneficiaryGroups
+    label: Beneficiary groups this aggregator currently serves
+    type: multiselect
+    required: true
+    group: whatIHave
+    options:
+      - students
+      - personsWithDisabilities
+      - women
+      - workers
+      - seniorCitizens
+      - jobProviders
+      - serviceProviders
+      - other
