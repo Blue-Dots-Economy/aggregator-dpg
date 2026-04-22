@@ -16,7 +16,7 @@
     "dev": "turbo run dev",
     "prepare": "husky",
     "new-service": "tsx scripts/new-service.ts",
-    "dep-check": "depcruise packages --exclude '__depcruise-canary__' --config .dependency-cruiser.cjs"
+    "dep-check": "depcruise packages --config .dependency-cruiser.cjs"
   },
   "lint-staged": {
     "*.{ts,tsx,js,mjs,cjs,json,yaml,md}": [
