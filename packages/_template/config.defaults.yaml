@@ -3,8 +3,8 @@
 # Loaded at startup via @aggregator-dpg/config-loader (wired in a future feature).
 # Per-environment overrides live in config/env/{dev,staging,prod}.yaml.
 #
-# Replace the example keys below with real config for your service.
-
-_template:
-  # exampleTimeoutMs: 5000
-  # exampleBaseUrl: "https://example.internal"
+# Add this package's defaults here, nested under the package configKey.
+#
+# template:
+#   exampleTimeoutMs: 5000
+#   exampleBaseUrl: "https://example.internal"

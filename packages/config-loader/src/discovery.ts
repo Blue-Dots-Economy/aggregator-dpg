@@ -28,6 +28,8 @@ export interface ConfigSchemaModule {
 export interface RegisteredPackage {
   /** Package name from package.json (e.g. "@aggregator-dpg/signal-stack"). */
   packageName: string;
+  /** Absolute path to the package directory. */
+  packageDir: string;
   /** Top-level key in the merged config tree (e.g. "signalStack"). */
   configKey: string;
   /** Zod schema validating this package's config slice. */
@@ -151,6 +153,7 @@ export async function discoverPackages(
 
     registry.set(mod.configKey, {
       packageName,
+      packageDir,
       configKey: mod.configKey,
       configSchema: mod.configSchema as z.ZodTypeAny,
       ...(configDefaults !== undefined && { configDefaults }),

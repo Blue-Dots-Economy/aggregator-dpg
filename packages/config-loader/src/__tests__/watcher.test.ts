@@ -76,6 +76,22 @@ describe('startWatcher', () => {
     expect(onReload).toHaveBeenCalledTimes(1);
   });
 
+  it('logs reload failures without surfacing an unhandled rejection', async () => {
+    const { trigger } = mockWatch();
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const onReload = vi.fn().mockRejectedValue(new Error('bad config'));
+    startWatcher('/config', 300, onReload);
+
+    trigger();
+    await vi.runAllTimersAsync();
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Config reload failed'),
+      expect.any(Error),
+    );
+    errorSpy.mockRestore();
+  });
+
   it('unsubscribe closes the watcher', () => {
     const { close } = mockWatch();
     const onReload = vi.fn().mockResolvedValue(undefined);

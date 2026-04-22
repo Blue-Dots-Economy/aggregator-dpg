@@ -97,11 +97,31 @@ export class FsConfigService extends ConfigServiceBase {
     this.registry = await discoverPackages(packagesDir);
 
     // Seed store with per-package defaults (each nested under its configKey).
+    // TypeScript defaults provide typed baselines; config.defaults.yaml lets
+    // deployable package defaults change without editing source.
     const merged: Record<string, unknown> = {};
     for (const [key, pkg] of this.registry) {
+      const defaults: Record<string, unknown> = {};
       if (pkg.configDefaults !== undefined) {
-        merged[key] = { ...pkg.configDefaults };
+        deepMerge(defaults, pkg.configDefaults);
       }
+
+      const defaultsFilePath = join(pkg.packageDir, 'config.defaults.yaml');
+      const yamlDefaults = loadYaml(defaultsFilePath);
+      const yamlSlice = Object.hasOwn(yamlDefaults, key) ? yamlDefaults[key] : yamlDefaults;
+      if (yamlSlice !== undefined) {
+        if (yamlSlice === null || typeof yamlSlice !== 'object' || Array.isArray(yamlSlice)) {
+          throw new ConfigError(
+            `Default config for "${key}" must be a YAML mapping: ${defaultsFilePath}`,
+            {
+              code: 'CONFIG_PARSE_ERROR',
+              details: { configKey: key, filePath: defaultsFilePath },
+            },
+          );
+        }
+        deepMerge(defaults, yamlSlice as Record<string, unknown>);
+      }
+      merged[key] = defaults;
     }
 
     // Env YAML deep-merges on top, overriding any defaults.

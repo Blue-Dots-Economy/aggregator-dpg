@@ -10,7 +10,12 @@ function makeRegistry(
   return new Map(
     entries.map(({ key, schema }) => [
       key,
-      { packageName: `@test/${key}`, configKey: key, configSchema: schema },
+      {
+        packageName: `@test/${key}`,
+        packageDir: `/tmp/${key}`,
+        configKey: key,
+        configSchema: schema,
+      },
     ]),
   );
 }

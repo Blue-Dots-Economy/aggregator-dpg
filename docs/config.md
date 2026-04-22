@@ -9,6 +9,8 @@ How the aggregator-dpg config system works, how to add a new key, and what is fo
 ```
 per-package configDefaults  (TypeScript, in packages/<name>/src/config.schema.ts)
         ↓  deep-merged by
+packages/<name>/config.defaults.yaml
+        ↓  deep-merged by
 config/env/<env>.yaml        (YAML file, checked into repo, no secrets)
         ↓  interpolated by
 ${ENV_VAR} / ${ENV_VAR:-default}  (process.env at boot)
@@ -17,6 +19,8 @@ Zod composite schema         (built from each package's configSchema)
 ```
 
 Later layers override earlier ones. Objects are deep-merged; arrays are replaced wholesale.
+Package `config.defaults.yaml` files may either contain the slice directly or nest it
+under the package `configKey`.
 
 ---
 

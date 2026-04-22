@@ -16,6 +16,7 @@ function makeRepo(
       name: string;
       configKey: string;
       configDefaults?: Record<string, unknown>;
+      defaultsYaml?: string;
     }>;
   } = {},
 ): void {
@@ -54,6 +55,10 @@ function makeRepo(
       ].join('\n'),
       'utf8',
     );
+
+    if (pkg.defaultsYaml !== undefined) {
+      writeFileSync(join(pkgDir, 'config.defaults.yaml'), pkg.defaultsYaml, 'utf8');
+    }
   }
 }
 
@@ -93,6 +98,42 @@ describe('FsConfigService', () => {
     // Env YAML overrides url but default timeout survives
     expect(svc.get('pkgA.url')).toBe('http://override');
     expect(svc.get('pkgA.timeout')).toBe(5000);
+  });
+
+  it('loads package config.defaults.yaml before env YAML', async () => {
+    makeRepo(tmpDir, {
+      packages: [
+        {
+          name: 'pkg-a',
+          configKey: 'pkgA',
+          defaultsYaml: 'pkgA:\n  timeout: 5000\n  url: http://default\n',
+        },
+      ],
+      envYaml: 'pkgA:\n  url: http://override\n',
+      env: 'test',
+    });
+    const svc = new FsConfigService(tmpDir);
+    await svc.load('test');
+    expect(svc.get('pkgA.timeout')).toBe(5000);
+    expect(svc.get('pkgA.url')).toBe('http://override');
+  });
+
+  it('merges config.defaults.yaml over exported configDefaults', async () => {
+    makeRepo(tmpDir, {
+      packages: [
+        {
+          name: 'pkg-a',
+          configKey: 'pkgA',
+          configDefaults: { timeout: 1000, nested: { retries: 1, enabled: true } },
+          defaultsYaml: 'pkgA:\n  timeout: 5000\n  nested:\n    retries: 3\n',
+        },
+      ],
+    });
+    const svc = new FsConfigService(tmpDir);
+    await svc.load('test');
+    expect(svc.get('pkgA.timeout')).toBe(5000);
+    expect(svc.get('pkgA.nested.retries')).toBe(3);
+    expect(svc.get('pkgA.nested.enabled')).toBe(true);
   });
 
   it('uses only defaults when no env YAML exists', async () => {

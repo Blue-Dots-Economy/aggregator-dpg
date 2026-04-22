@@ -29,7 +29,9 @@ export function startWatcher(
   const watcher = watch(configDir, { recursive: true }, () => {
     if (timer !== undefined) clearTimeout(timer);
     timer = setTimeout(() => {
-      void onReload();
+      void onReload().catch((err: unknown) => {
+        console.error('[config-loader] Config reload failed; keeping previous config', err);
+      });
     }, debounceMs);
   });
 

@@ -13,11 +13,10 @@ module.exports = {
       name: 'no-cross-service-impl-imports',
       severity: 'error',
       comment:
-        'Only src/testing/ may import from impl paths (e.g. src/in-memory/). ' +
-        'All other callers — including files in other packages — must go through ' +
+        'Packages may use their own internals, but cross-package callers must go through ' +
         'the ./interface or ./testing declared subpath exports.',
       from: {
-        path: '(^|/)packages/[^/]+/src/',
+        path: '(^|/)packages/([^/]+)/src/',
         pathNot: [
           '(^|/)src/testing/', // testing/ wraps impl — allowed consumer
           '(^|/)src/__tests__/', // unit tests import impl directly to test it
@@ -26,6 +25,7 @@ module.exports = {
       to: {
         path: '(^|/)packages/[^/]+/src/',
         pathNot: [
+          '$1', // same package internals are allowed; $1 comes from from.path capture
           '(^|/)src/interface\\.ts$', // ./interface subpath allowed
           '(^|/)src/testing/', // ./testing subpath allowed
         ],

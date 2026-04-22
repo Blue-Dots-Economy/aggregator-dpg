@@ -34,7 +34,7 @@ config.require<string>('signalStack.baseUrl'); // 'http://localhost'
 
 ## Config file conventions
 
-- `packages/<name>/config.defaults.yaml` — default values, checked into repo
+- `packages/<name>/config.defaults.yaml` — default values, checked into repo; loaded after exported `configDefaults`
 - `packages/<name>/src/config.schema.ts` — Zod schema validating the slice
 - `config/env/{development,staging,production}.yaml` — per-env overrides (root of repo)
 
