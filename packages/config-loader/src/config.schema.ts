@@ -22,3 +22,9 @@ export const configSchema = z.object({
 });
 
 export type Config = z.infer<typeof configSchema>;
+
+/**
+ * Baseline config values merged into the tree before env YAML overrides.
+ * Keys must match fields declared in configSchema above.
+ */
+export const configDefaults: Config = {};

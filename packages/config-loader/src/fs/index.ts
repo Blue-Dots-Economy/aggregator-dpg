@@ -17,33 +17,8 @@ import { ConfigError } from '@aggregator-dpg/shared-primitives/errors';
 import type { ConfigChangeCallback, Env, Unsubscribe } from '../interface.js';
 import { ConfigServiceBase } from '../interface.js';
 import { discoverPackages, type RegisteredPackage } from '../discovery.js';
-
-/**
- * Recursively merges source into target. Arrays are replaced, not concatenated.
- * Mutates and returns target.
- */
-function deepMerge(
-  target: Record<string, unknown>,
-  source: Record<string, unknown>,
-): Record<string, unknown> {
-  for (const key of Object.keys(source)) {
-    const src = source[key];
-    const tgt = target[key];
-    if (
-      src !== null &&
-      typeof src === 'object' &&
-      !Array.isArray(src) &&
-      tgt !== null &&
-      typeof tgt === 'object' &&
-      !Array.isArray(tgt)
-    ) {
-      deepMerge(tgt as Record<string, unknown>, src as Record<string, unknown>);
-    } else {
-      target[key] = src;
-    }
-  }
-  return target;
-}
+import { deepMerge } from '../merge.js';
+export { resolveEnv } from '../env.js';
 
 /**
  * Resolves a dotted path into a nested object.
@@ -118,7 +93,15 @@ export class FsConfigService extends ConfigServiceBase {
     const packagesDir = join(this.repoRoot, 'packages');
     this.registry = await discoverPackages(packagesDir);
 
+    // Seed store with per-package defaults (each nested under its configKey).
     const merged: Record<string, unknown> = {};
+    for (const [key, pkg] of this.registry) {
+      if (pkg.configDefaults !== undefined) {
+        merged[key] = { ...pkg.configDefaults };
+      }
+    }
+
+    // Env YAML deep-merges on top, overriding any defaults.
     const envFilePath = join(this.repoRoot, 'config', 'env', `${env}.yaml`);
     deepMerge(merged, loadYaml(envFilePath));
     this.store = merged;

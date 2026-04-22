@@ -20,6 +20,8 @@ import { ConfigError } from '@aggregator-dpg/shared-primitives/errors';
 export interface ConfigSchemaModule {
   configKey: unknown;
   configSchema: unknown;
+  /** Optional baseline values merged into the config tree before env overrides. */
+  configDefaults?: unknown;
 }
 
 /** One registered package entry after discovery. */
@@ -30,6 +32,11 @@ export interface RegisteredPackage {
   configKey: string;
   /** Zod schema validating this package's config slice. */
   configSchema: z.ZodTypeAny;
+  /**
+   * Baseline config values for this package's slice.
+   * Merged into the tree before env YAML overrides are applied.
+   */
+  configDefaults?: Record<string, unknown>;
 }
 
 /**
@@ -134,10 +141,19 @@ export async function discoverPackages(
       );
     }
 
+    const configDefaults =
+      mod.configDefaults !== undefined &&
+      mod.configDefaults !== null &&
+      typeof mod.configDefaults === 'object' &&
+      !Array.isArray(mod.configDefaults)
+        ? (mod.configDefaults as Record<string, unknown>)
+        : undefined;
+
     registry.set(mod.configKey, {
       packageName,
       configKey: mod.configKey,
       configSchema: mod.configSchema as z.ZodTypeAny,
+      ...(configDefaults !== undefined && { configDefaults }),
     });
   }
 
