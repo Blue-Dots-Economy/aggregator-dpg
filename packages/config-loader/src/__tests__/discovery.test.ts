@@ -12,7 +12,12 @@ import { ConfigError } from '@aggregator-dpg/shared-primitives/errors';
 function makePackage(
   root: string,
   dirName: string,
-  opts: { configKey?: string; omitConfigKey?: boolean; omitSchema?: boolean },
+  opts: {
+    configKey?: string;
+    omitConfigKey?: boolean;
+    omitSchema?: boolean;
+    configDefaults?: Record<string, unknown>;
+  },
 ): void {
   const pkgDir = join(root, dirName);
   const distDir = join(pkgDir, 'dist');
@@ -25,8 +30,16 @@ function makePackage(
     ? ''
     : `export const configKey = ${JSON.stringify(opts.configKey ?? dirName)};`;
   const schemaLine = opts.omitSchema ? '' : `export const configSchema = { parse: () => ({}) };`;
+  const defaultsLine =
+    opts.configDefaults !== undefined
+      ? `export const configDefaults = ${JSON.stringify(opts.configDefaults)};`
+      : '';
 
-  writeFileSync(join(distDir, 'config.schema.js'), `${keyLine}\n${schemaLine}\n`, 'utf8');
+  writeFileSync(
+    join(distDir, 'config.schema.js'),
+    `${keyLine}\n${schemaLine}\n${defaultsLine}\n`,
+    'utf8',
+  );
 }
 
 describe('discoverPackages', () => {
@@ -94,5 +107,33 @@ describe('discoverPackages', () => {
     makePackage(tmpDir, 'valid-pkg', { configKey: 'valid' });
     const result = await discoverPackages(tmpDir);
     expect(result.size).toBe(1);
+  });
+
+  it('collects configDefaults when exported', async () => {
+    makePackage(tmpDir, 'pkg-a', {
+      configKey: 'pkgA',
+      configDefaults: { timeout: 5000, nested: { retries: 3 } },
+    });
+    const result = await discoverPackages(tmpDir);
+    expect(result.get('pkgA')?.configDefaults).toEqual({ timeout: 5000, nested: { retries: 3 } });
+  });
+
+  it('stores undefined configDefaults when export is absent', async () => {
+    makePackage(tmpDir, 'pkg-a', { configKey: 'pkgA' });
+    const result = await discoverPackages(tmpDir);
+    expect(result.get('pkgA')?.configDefaults).toBeUndefined();
+  });
+
+  it('ignores non-object configDefaults (array)', async () => {
+    makePackage(tmpDir, 'pkg-a', { configKey: 'pkgA' });
+    // Manually write an array as configDefaults
+    const distPath = join(tmpDir, 'pkg-a', 'dist', 'config.schema.js');
+    writeFileSync(
+      distPath,
+      `export const configKey = 'pkgA';\nexport const configSchema = { parse: () => ({}) };\nexport const configDefaults = [1, 2, 3];\n`,
+      'utf8',
+    );
+    const result = await discoverPackages(tmpDir);
+    expect(result.get('pkgA')?.configDefaults).toBeUndefined();
   });
 });
