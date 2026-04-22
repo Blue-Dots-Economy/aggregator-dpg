@@ -86,4 +86,22 @@ describe('ConfigServiceFake', () => {
       expect(typeof unsub).toBe('function');
     });
   });
+
+  describe('slice', () => {
+    it('returns the typed top-level slice', () => {
+      const cfg = new ConfigServiceFake({ db: { host: 'localhost', port: 5432 } });
+      const db = cfg.slice<{ host: string; port: number }>('db');
+      expect(db).toEqual({ host: 'localhost', port: 5432 });
+    });
+
+    it('throws ConfigError with CONFIG_KEY_MISSING when key absent', () => {
+      const cfg = new ConfigServiceFake({});
+      expect(() => cfg.slice('missing')).toThrow(ConfigError);
+      try {
+        cfg.slice('missing');
+      } catch (err) {
+        expect((err as ConfigError).code).toBe('CONFIG_KEY_MISSING');
+      }
+    });
+  });
 });

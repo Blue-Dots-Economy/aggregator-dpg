@@ -12,6 +12,7 @@
 import { ConfigError } from '@aggregator-dpg/shared-primitives/errors';
 import type { ConfigChangeCallback, Env, Unsubscribe } from '../interface.js';
 import { ConfigServiceBase } from '../interface.js';
+export type { ConfigSlice } from '../interface.js';
 
 /**
  * Resolves a dotted path into a nested object.
@@ -53,6 +54,23 @@ export class ConfigServiceFake extends ConfigServiceBase {
    */
   async load(_env: Env): Promise<void> {
     // no-op: store set at construction or via seed()
+  }
+
+  /**
+   * Returns the typed config slice for the given configKey.
+   *
+   * @param key - The package's configKey.
+   * @throws {ConfigError} With code CONFIG_KEY_MISSING if the key is absent.
+   */
+  slice<T>(key: string): T {
+    const value = this.store[key];
+    if (value === undefined) {
+      throw new ConfigError(`Config slice not found: "${key}"`, {
+        code: 'CONFIG_KEY_MISSING',
+        details: { key },
+      });
+    }
+    return value as T;
   }
 
   /**
