@@ -18,6 +18,7 @@ import type { ConfigChangeCallback, Env, Unsubscribe } from '../interface.js';
 import { ConfigServiceBase } from '../interface.js';
 import { discoverPackages, type RegisteredPackage } from '../discovery.js';
 import { deepMerge } from '../merge.js';
+import { interpolateConfig } from '../interpolate.js';
 export { resolveEnv } from '../env.js';
 
 /**
@@ -104,7 +105,9 @@ export class FsConfigService extends ConfigServiceBase {
     // Env YAML deep-merges on top, overriding any defaults.
     const envFilePath = join(this.repoRoot, 'config', 'env', `${env}.yaml`);
     deepMerge(merged, loadYaml(envFilePath));
-    this.store = merged;
+
+    // Interpolate ${VAR} / ${VAR:-default} placeholders before Zod validation.
+    this.store = interpolateConfig(merged);
     this.currentEnv = env;
   }
 
