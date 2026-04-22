@@ -16,6 +16,7 @@ import { load as parseYaml } from 'js-yaml';
 import { ConfigError } from '@aggregator-dpg/shared-primitives/errors';
 import type { ConfigChangeCallback, Env, Unsubscribe } from '../interface.js';
 import { ConfigServiceBase } from '../interface.js';
+import { discoverPackages, type RegisteredPackage } from '../discovery.js';
 
 /**
  * Recursively merges source into target. Arrays are replaced, not concatenated.
@@ -93,6 +94,8 @@ export class FsConfigService extends ConfigServiceBase {
   private currentEnv: Env | undefined;
   private readonly listeners = new Set<ConfigChangeCallback>();
   private readonly repoRoot: string;
+  /** Populated after load() — keyed by configKey. */
+  private registry = new Map<string, RegisteredPackage>();
 
   /**
    * @param repoRoot - Absolute path to the monorepo root. Defaults to process.cwd().
@@ -105,18 +108,29 @@ export class FsConfigService extends ConfigServiceBase {
   /**
    * Loads config for the given environment.
    *
-   * Reads config/env/<env>.yaml and stores the merged result.
-   * Per-package defaults discovery is added in F-03.2.
+   * Discovers per-package configSchema + configKey, then merges
+   * config/env/<env>.yaml overrides into the store.
    *
    * @param env - The deployment environment.
-   * @throws {ConfigError} If any YAML file fails to parse.
+   * @throws {ConfigError} If schema discovery fails or any YAML file cannot be parsed.
    */
   async load(env: Env): Promise<void> {
+    const packagesDir = join(this.repoRoot, 'packages');
+    this.registry = await discoverPackages(packagesDir);
+
     const merged: Record<string, unknown> = {};
     const envFilePath = join(this.repoRoot, 'config', 'env', `${env}.yaml`);
     deepMerge(merged, loadYaml(envFilePath));
     this.store = merged;
     this.currentEnv = env;
+  }
+
+  /**
+   * Returns the discovered package registry.
+   * Available after load() has been called.
+   */
+  getRegistry(): ReadonlyMap<string, RegisteredPackage> {
+    return this.registry;
   }
 
   /**
