@@ -14,7 +14,9 @@
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "dev": "turbo run dev",
-    "prepare": "husky"
+    "prepare": "husky",
+    "new-service": "tsx scripts/new-service.ts",
+    "dep-check": "depcruise packages --config .dependency-cruiser.cjs --output-type err-long"
   },
   "lint-staged": {
     "*.{ts,tsx,js,mjs,cjs,json,yaml,md}": [
@@ -28,6 +30,7 @@
     "@changesets/cli": "^2.31.0",
     "@commitlint/cli": "^20.5.0",
     "@commitlint/config-conventional": "^20.5.0",
+    "dependency-cruiser": "^17.3.10",
     "eslint": "^10.2.1",
     "eslint-plugin-import-x": "^4.16.2",
     "eslint-plugin-jsx-a11y": "^6.10.2",
@@ -35,6 +38,7 @@
     "husky": "^9.1.7",
     "lint-staged": "^16.4.0",
     "prettier": "^3.8.3",
+    "tsx": "^4.19.4",
     "turbo": "^2.5.3",
     "typescript-eslint": "^8.59.0"
   }

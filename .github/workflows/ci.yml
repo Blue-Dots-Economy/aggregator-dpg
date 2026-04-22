@@ -48,6 +48,9 @@ jobs:
       - name: Build
         run: pnpm -w build
 
+      - name: Dep-cruiser — check interface boundaries
+        run: pnpm dep-check
+
   docker:
     name: Docker / ${{ matrix.app }}
     runs-on: ubuntu-latest

@@ -1,0 +1,39 @@
+{
+  "name": "@aggregator-dpg/shared-primitives",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./errors": {
+      "import": "./dist/errors/index.js",
+      "types": "./dist/errors/index.d.ts"
+    },
+    "./ids": {
+      "import": "./dist/ids/index.js",
+      "types": "./dist/ids/index.d.ts"
+    },
+    "./result": {
+      "import": "./dist/result/index.js",
+      "types": "./dist/result/index.d.ts"
+    },
+    "./dto": {
+      "import": "./dist/dto/index.js",
+      "types": "./dist/dto/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@aggregator-dpg/tsconfig": "workspace:*",
+    "@vitest/coverage-v8": "^3.2.0",
+    "typescript": "^6.0.3",
+    "vitest": "^3.2.0"
+  }
+}

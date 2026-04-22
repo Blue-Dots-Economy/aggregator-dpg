@@ -122,8 +122,9 @@ gh pr create \
 - [ ] <copy AC items from feature doc; tick completed ones>
 
 ## Sub-issues resolved
-- #NNN T-XX.X.X <description>
-- #NNN T-XX.X.X <description>
+
+Closes #NNN T-XX.X.X <description>
+Closes #NNN T-XX.X.X <description>
 
 Closes #<feature-issue-number>
 
