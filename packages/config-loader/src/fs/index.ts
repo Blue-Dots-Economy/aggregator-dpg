@@ -18,6 +18,7 @@ import type { ConfigChangeCallback, Env, Unsubscribe } from '../interface.js';
 import { ConfigServiceBase } from '../interface.js';
 import { discoverPackages, type RegisteredPackage } from '../discovery.js';
 import { deepMerge } from '../merge.js';
+export { resolveEnv } from '../env.js';
 
 /**
  * Resolves a dotted path into a nested object.
