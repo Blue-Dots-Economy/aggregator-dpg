@@ -7,6 +7,10 @@
     "./config": {
       "import": "./dist/config.schema.js",
       "types": "./dist/config.schema.d.ts"
+    },
+    "./entities": {
+      "import": "./dist/entities.schema.js",
+      "types": "./dist/entities.schema.d.ts"
     }
   },
   "scripts": {
