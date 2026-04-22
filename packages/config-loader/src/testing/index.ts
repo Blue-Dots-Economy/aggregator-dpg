@@ -122,6 +122,16 @@ export class ConfigServiceFake extends ConfigServiceBase {
   }
 
   /**
+   * No-op watch — in-memory fake has no files to watch.
+   * Present to satisfy the abstract contract.
+   *
+   * @returns No-op unsubscribe function.
+   */
+  watch(): Unsubscribe {
+    return () => {};
+  }
+
+  /**
    * Replaces the in-memory store with the given config tree.
    *
    * Use in test setup to change config between test cases.
