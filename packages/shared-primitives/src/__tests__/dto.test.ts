@@ -3,7 +3,11 @@ import {
   TimestampsSchema,
   CursorSchema,
   paginatedSchema,
+  PagingSchema,
+  SortSchema,
+  FilterConditionSchema,
   FilterSchema,
+  FilterOperatorSchema,
   SortDirectionSchema,
 } from '../dto/index.js';
 import { z } from 'zod';
@@ -83,12 +87,63 @@ describe('FilterSchema', () => {
     expect(f.sortDirection).toBe('desc');
   });
 
+  it('parses structured conditions and field sorting', () => {
+    const f = FilterSchema.parse({
+      conditions: [{ field: 'status', op: 'eq', value: 'active' }],
+      sort: [{ field: 'createdAt', direction: 'desc' }],
+    });
+    expect(f.conditions?.[0]?.field).toBe('status');
+    expect(f.conditions?.[0]?.op).toBe('eq');
+    expect(f.sort?.[0]?.field).toBe('createdAt');
+  });
+
   it('rejects limit of zero', () => {
     expect(() => FilterSchema.parse({ limit: 0 })).toThrow();
   });
 
   it('rejects limit over 1000', () => {
     expect(() => FilterSchema.parse({ limit: 1001 })).toThrow();
+  });
+});
+
+describe('PagingSchema', () => {
+  it('parses cursor paging', () => {
+    const paging = PagingSchema.parse({ limit: 50, cursor: 'next' });
+    expect(paging.limit).toBe(50);
+    expect(paging.cursor).toBe('next');
+  });
+
+  it('rejects negative limits', () => {
+    expect(() => PagingSchema.parse({ limit: -1 })).toThrow();
+  });
+});
+
+describe('SortSchema', () => {
+  it('parses a field sort', () => {
+    const sort = SortSchema.parse({ field: 'createdAt', direction: 'asc' });
+    expect(sort.field).toBe('createdAt');
+  });
+
+  it('rejects empty sort field', () => {
+    expect(() => SortSchema.parse({ field: '', direction: 'asc' })).toThrow();
+  });
+});
+
+describe('FilterConditionSchema', () => {
+  it('parses a filter condition', () => {
+    const condition = FilterConditionSchema.parse({ field: 'age', op: 'gte', value: 18 });
+    expect(condition.op).toBe('gte');
+  });
+
+  it('rejects unknown operators', () => {
+    expect(() => FilterConditionSchema.parse({ field: 'age', op: 'sql', value: 18 })).toThrow();
+  });
+});
+
+describe('FilterOperatorSchema', () => {
+  it('accepts supported operators', () => {
+    expect(FilterOperatorSchema.parse('eq')).toBe('eq');
+    expect(FilterOperatorSchema.parse('contains')).toBe('contains');
   });
 });
 
