@@ -1,0 +1,184 @@
+/**
+ * Filesystem implementation of ConfigServiceBase.
+ *
+ * Reads config/env/<env>.yaml override files and exposes typed get/require
+ * accessors. Per-package schema discovery and defaults merging are added in
+ * F-03.2 and F-03.3. Throws ConfigError on any load failure.
+ *
+ * Import via the ./fs subpath — never import from src/fs directly.
+ *
+ * @module @aggregator-dpg/config-loader/fs
+ */
+
+import { readFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { load as parseYaml } from 'js-yaml';
+import { ConfigError } from '@aggregator-dpg/shared-primitives/errors';
+import type { ConfigChangeCallback, Env, Unsubscribe } from '../interface.js';
+import { ConfigServiceBase } from '../interface.js';
+
+/**
+ * Recursively merges source into target. Arrays are replaced, not concatenated.
+ * Mutates and returns target.
+ */
+function deepMerge(
+  target: Record<string, unknown>,
+  source: Record<string, unknown>,
+): Record<string, unknown> {
+  for (const key of Object.keys(source)) {
+    const src = source[key];
+    const tgt = target[key];
+    if (
+      src !== null &&
+      typeof src === 'object' &&
+      !Array.isArray(src) &&
+      tgt !== null &&
+      typeof tgt === 'object' &&
+      !Array.isArray(tgt)
+    ) {
+      deepMerge(tgt as Record<string, unknown>, src as Record<string, unknown>);
+    } else {
+      target[key] = src;
+    }
+  }
+  return target;
+}
+
+/**
+ * Resolves a dotted path into a nested object.
+ * Returns undefined if any segment along the path is missing.
+ */
+function resolvePath(obj: Record<string, unknown>, path: string): unknown {
+  return path.split('.').reduce<unknown>((current, key) => {
+    if (current === undefined || current === null || typeof current !== 'object') return undefined;
+    return (current as Record<string, unknown>)[key];
+  }, obj);
+}
+
+/**
+ * Loads YAML from disk. Returns an empty object if the file does not exist.
+ *
+ * @throws {ConfigError} If the file exists but cannot be parsed.
+ */
+function loadYaml(filePath: string): Record<string, unknown> {
+  if (!existsSync(filePath)) return {};
+  try {
+    const raw = readFileSync(filePath, 'utf8');
+    const parsed = parseYaml(raw);
+    if (parsed === null || parsed === undefined) return {};
+    if (typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new ConfigError(
+        `Config file must be a YAML mapping, got ${typeof parsed}: ${filePath}`,
+        { code: 'CONFIG_PARSE_ERROR' },
+      );
+    }
+    return parsed as Record<string, unknown>;
+  } catch (err) {
+    if (err instanceof ConfigError) throw err;
+    throw new ConfigError(`Failed to parse config file: ${filePath}`, {
+      code: 'CONFIG_PARSE_ERROR',
+      details: { cause: String(err) },
+    });
+  }
+}
+
+/**
+ * Filesystem-backed ConfigService implementation.
+ *
+ * Reads config/env/<env>.yaml and exposes typed get/require accessors.
+ * Call load() once at application boot before accessing any config values.
+ */
+export class FsConfigService extends ConfigServiceBase {
+  private store: Record<string, unknown> = {};
+  private currentEnv: Env | undefined;
+  private readonly listeners = new Set<ConfigChangeCallback>();
+  private readonly repoRoot: string;
+
+  /**
+   * @param repoRoot - Absolute path to the monorepo root. Defaults to process.cwd().
+   */
+  constructor(repoRoot: string = process.cwd()) {
+    super();
+    this.repoRoot = repoRoot;
+  }
+
+  /**
+   * Loads config for the given environment.
+   *
+   * Reads config/env/<env>.yaml and stores the merged result.
+   * Per-package defaults discovery is added in F-03.2.
+   *
+   * @param env - The deployment environment.
+   * @throws {ConfigError} If any YAML file fails to parse.
+   */
+  async load(env: Env): Promise<void> {
+    const merged: Record<string, unknown> = {};
+    const envFilePath = join(this.repoRoot, 'config', 'env', `${env}.yaml`);
+    deepMerge(merged, loadYaml(envFilePath));
+    this.store = merged;
+    this.currentEnv = env;
+  }
+
+  /**
+   * Returns the value at the given dotted path, or undefined if absent.
+   *
+   * @param path - Dotted key path, e.g. "signalStack.baseUrl".
+   */
+  get<T = unknown>(path: string): T | undefined {
+    return resolvePath(this.store, path) as T | undefined;
+  }
+
+  /**
+   * Returns the value at the given dotted path, throwing if absent.
+   *
+   * @param path - Dotted key path.
+   * @throws {ConfigError} If the path does not exist or the value is undefined.
+   */
+  require<T = unknown>(path: string): T {
+    const value = resolvePath(this.store, path);
+    if (value === undefined) {
+      throw new ConfigError(`Required config key not found: "${path}"`, {
+        code: 'CONFIG_KEY_MISSING',
+        details: { path },
+      });
+    }
+    return value as T;
+  }
+
+  /**
+   * Reloads config from disk and notifies all onChange listeners on success.
+   * Previous config remains active if reload fails.
+   *
+   * @throws {ConfigError} If the reload fails.
+   */
+  async reload(): Promise<void> {
+    if (this.currentEnv === undefined) {
+      throw new ConfigError('Cannot reload before initial load() call', {
+        code: 'CONFIG_NOT_LOADED',
+      });
+    }
+    const previous = this.store;
+    try {
+      await this.load(this.currentEnv);
+    } catch (err) {
+      this.store = previous;
+      throw err;
+    }
+    for (const cb of this.listeners) {
+      cb();
+    }
+  }
+
+  /**
+   * Registers a callback invoked after each successful reload.
+   *
+   * @param cb - Called after config is refreshed.
+   * @returns Unsubscribe function to remove the listener.
+   */
+  onChange(cb: ConfigChangeCallback): Unsubscribe {
+    this.listeners.add(cb);
+    return () => {
+      this.listeners.delete(cb);
+    };
+  }
+}
