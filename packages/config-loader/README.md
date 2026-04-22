@@ -39,3 +39,7 @@ config.require<string>('signalStack.baseUrl'); // 'http://localhost'
 - `config/env/{development,staging,production}.yaml` — per-env overrides (root of repo)
 
 Per-package schema discovery and env-var interpolation (`${VAR}`) are implemented in F-03.2–F-03.4.
+
+## Further reading
+
+See [docs/config.md](../../docs/config.md) for the full precedence guide, secrets rules, hot-reload, and how to add a new config key.
