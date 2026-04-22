@@ -1,0 +1,23 @@
+# Onboarding mode configuration — controls which onboarding paths are active.
+#
+# Disabling a mode hides the corresponding UI path and disables its API endpoint.
+# All toggles default to enabled; set to false to deactivate a mode.
+
+modes:
+  # Bulk CSV upload — operator uploads a CSV file to onboard many participants at once.
+  bulk:
+    enabled: true
+    # Path (relative to repo root) to the CSV template participants should use.
+    csvTemplate: config/templates/bulk-onboard.csv
+
+  # QR code — participant scans a QR code displayed by the operator.
+  qr:
+    enabled: true
+    # Rendered QR image size in pixels (width = height).
+    size: 256
+
+  # Shareable link — operator sends a one-time link to the participant.
+  link:
+    enabled: true
+    # How long (in seconds) a generated link remains valid before expiring.
+    ttlSeconds: 86400

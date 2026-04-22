@@ -11,6 +11,10 @@
     "./entities": {
       "import": "./dist/entities.schema.js",
       "types": "./dist/entities.schema.d.ts"
+    },
+    "./onboarding": {
+      "import": "./dist/onboarding.schema.js",
+      "types": "./dist/onboarding.schema.d.ts"
     }
   },
   "scripts": {
