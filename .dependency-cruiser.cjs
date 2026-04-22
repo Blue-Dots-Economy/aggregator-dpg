@@ -10,6 +10,28 @@
 module.exports = {
   forbidden: [
     {
+      name: 'no-cross-service-impl-imports',
+      severity: 'error',
+      comment:
+        'Only src/testing/ may import from impl paths (e.g. src/in-memory/). ' +
+        'All other callers — including files in other packages — must go through ' +
+        'the ./interface or ./testing declared subpath exports.',
+      from: {
+        path: '(^|/)packages/[^/]+/src/',
+        pathNot: [
+          '(^|/)src/testing/', // testing/ wraps impl — allowed consumer
+          '(^|/)src/__tests__/', // unit tests import impl directly to test it
+        ],
+      },
+      to: {
+        path: '(^|/)packages/[^/]+/src/',
+        pathNot: [
+          '(^|/)src/interface\\.ts$', // ./interface subpath allowed
+          '(^|/)src/testing/', // ./testing subpath allowed
+        ],
+      },
+    },
+    {
       name: 'no-heavy-deps-in-interface',
       severity: 'error',
       comment:
