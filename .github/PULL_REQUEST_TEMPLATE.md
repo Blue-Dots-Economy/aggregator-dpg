@@ -16,7 +16,7 @@
 - [ ] `pnpm -w test` passes
 - [ ] `pnpm dep-check` passes (no import boundary violations)
 
-### If this PR adds or modifies `src/interface.ts` — [interface conventions](../docs/conventions/interfaces.md)
+### If this PR adds or modifies `src/interface.ts` — [interface conventions](../.claude/rules/interfaces.md)
 
 - [ ] Abstract class used (not TS `interface` or `type`)
 - [ ] Every method is `abstract` — no default implementations
@@ -26,7 +26,7 @@
 - [ ] Only `shared-primitives`, `zod`, `node:*` imported into interface file
 - [ ] In-memory fake and testing fake updated to match any signature changes
 
-### If this PR adds or modifies `src/testing/` — [testing conventions](../docs/conventions/testing.md)
+### If this PR adds or modifies `src/testing/` — [testing conventions](../.claude/rules/testing.md)
 
 - [ ] `ServiceFake` extends the in-memory implementation
 - [ ] `seed()` helper covers all entity types the fake manages
