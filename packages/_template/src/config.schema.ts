@@ -10,6 +10,12 @@
 
 import { z } from 'zod';
 
+/**
+ * Top-level key under which this package's config lives in the merged config tree.
+ * Must be unique across all packages. Replace with your service name (camelCase).
+ */
+export const configKey = 'template';
+
 // Replace with real config fields for your service.
 export const configSchema = z.object({
   // exampleTimeoutMs: z.number().int().positive().default(5000),
