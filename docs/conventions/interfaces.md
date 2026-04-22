@@ -57,6 +57,18 @@ export type TMember = { ... };
 
 Only Zod schemas live in `src/interface.ts`. Do not import validation libraries other than `zod` into interface files — dep-cruiser enforces this.
 
+**Exception — generic schema factories:** When a schema must be generic (e.g., `Paginated<T>`), a factory function is acceptable because Zod does not support generic schema constants. Use a lowercase function name ending with `schema` (not `Schema`):
+
+```typescript
+// ✅ Acceptable — factory required for generic T
+export function paginatedSchema<T>(itemSchema: z.ZodType<T>) {
+  return z.object({ items: z.array(itemSchema), total: z.number().int().nonnegative() });
+}
+
+// ❌ Wrong — lowercase factory used where a plain constant would suffice
+export function memberSchema() { return z.object({ ... }); }
+```
+
 ---
 
 ## 3. DTO naming

@@ -1,13 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { ServiceFake } from '../testing/index.js';
-import type { TemplateItem } from '../interface.js';
-
-const makeItem = (overrides: Partial<TemplateItem> = {}): TemplateItem => ({
-  id: 'item-1',
-  name: 'Test Item',
-  createdAt: new Date('2024-01-01'),
-  ...overrides,
-});
+import { ServiceFake, buildTemplateItem } from '../testing/index.js';
 
 describe('ServiceFake', () => {
   let svc: ServiceFake;
@@ -18,10 +10,10 @@ describe('ServiceFake', () => {
 
   describe('findById', () => {
     it('returns Ok with item when it exists', async () => {
-      svc.seed([makeItem()]);
-      const result = await svc.findById('item-1');
+      svc.seed([buildTemplateItem()]);
+      const result = await svc.findById('item-default');
       expect(result.success).toBe(true);
-      if (result.success) expect(result.value.name).toBe('Test Item');
+      if (result.success) expect(result.value.name).toBe('Default Item');
     });
 
     it('returns Err when item does not exist', async () => {
@@ -48,19 +40,19 @@ describe('ServiceFake', () => {
     });
 
     it('overwrites existing item on same id', async () => {
-      svc.seed([makeItem({ name: 'Old' })]);
-      await svc.save({ id: 'item-1', name: 'Updated' });
-      const result = await svc.findById('item-1');
+      svc.seed([buildTemplateItem({ name: 'Old' })]);
+      await svc.save({ id: 'item-default', name: 'Updated' });
+      const result = await svc.findById('item-default');
       expect(result.success && result.value.name).toBe('Updated');
     });
   });
 
   describe('delete', () => {
     it('returns Ok and removes item', async () => {
-      svc.seed([makeItem()]);
-      const result = await svc.delete('item-1');
+      svc.seed([buildTemplateItem()]);
+      const result = await svc.delete('item-default');
       expect(result.success).toBe(true);
-      const find = await svc.findById('item-1');
+      const find = await svc.findById('item-default');
       expect(find.success).toBe(false);
     });
 
@@ -73,7 +65,7 @@ describe('ServiceFake', () => {
 
   describe('seed', () => {
     it('seeds multiple items', async () => {
-      svc.seed([makeItem({ id: 'a' }), makeItem({ id: 'b' })]);
+      svc.seed([buildTemplateItem({ id: 'a' }), buildTemplateItem({ id: 'b' })]);
       expect((await svc.findById('a')).success).toBe(true);
       expect((await svc.findById('b')).success).toBe(true);
     });

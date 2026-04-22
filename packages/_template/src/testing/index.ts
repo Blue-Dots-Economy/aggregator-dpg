@@ -41,6 +41,3 @@ export function buildTemplateItem(overrides: Partial<TemplateItem> = {}): Templa
     ...overrides,
   };
 }
-
-export type { TemplateItem } from '../interface.js';
-export { ServiceBase } from '../interface.js';
