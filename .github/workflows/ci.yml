@@ -48,6 +48,15 @@ jobs:
       - name: Build
         run: pnpm -w build
 
+      - name: Dep-cruiser — check interface boundaries
+        run: |
+          pnpm dep-check
+          # Canary: rule must catch the pg import — fail CI if no violation found
+          if pnpm depcruise packages/__depcruise-canary__ --config .dependency-cruiser.cjs; then
+            echo "ERROR: canary passed but should have violated no-heavy-deps-in-interface"
+            exit 1
+          fi
+
   docker:
     name: Docker / ${{ matrix.app }}
     runs-on: ubuntu-latest
