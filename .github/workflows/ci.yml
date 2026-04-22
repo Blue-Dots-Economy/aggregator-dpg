@@ -50,7 +50,7 @@ jobs:
 
       - name: Dep-cruiser — check interface boundaries
         run: |
-          pnpm dep-check
+          pnpm dep-check   # real packages — must exit 0
           # Canary: rule must catch the pg import — fail CI if no violation found
           if pnpm depcruise packages/__depcruise-canary__ --config .dependency-cruiser.cjs; then
             echo "ERROR: canary passed but should have violated no-heavy-deps-in-interface"
