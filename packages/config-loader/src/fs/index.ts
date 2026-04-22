@@ -19,6 +19,7 @@ import { ConfigServiceBase } from '../interface.js';
 import { discoverPackages, type RegisteredPackage } from '../discovery.js';
 import { deepMerge } from '../merge.js';
 import { interpolateConfig } from '../interpolate.js';
+import { validateConfig } from '../validate.js';
 export { resolveEnv } from '../env.js';
 
 /**
@@ -107,7 +108,10 @@ export class FsConfigService extends ConfigServiceBase {
     deepMerge(merged, loadYaml(envFilePath));
 
     // Interpolate ${VAR} / ${VAR:-default} placeholders before Zod validation.
-    this.store = interpolateConfig(merged);
+    const interpolated = interpolateConfig(merged);
+
+    // Validate against composite schema; store receives Zod-coerced output.
+    this.store = validateConfig(interpolated, this.registry);
     this.currentEnv = env;
   }
 
@@ -117,6 +121,23 @@ export class FsConfigService extends ConfigServiceBase {
    */
   getRegistry(): ReadonlyMap<string, RegisteredPackage> {
     return this.registry;
+  }
+
+  /**
+   * Returns the validated, typed config slice for the given package configKey.
+   *
+   * @param key - The package's configKey (e.g. "signalStack").
+   * @throws {ConfigError} With code CONFIG_KEY_MISSING if the key is absent.
+   */
+  slice<T>(key: string): T {
+    const value = this.store[key];
+    if (value === undefined) {
+      throw new ConfigError(`Config slice not found: "${key}"`, {
+        code: 'CONFIG_KEY_MISSING',
+        details: { key },
+      });
+    }
+    return value as T;
   }
 
   /**
