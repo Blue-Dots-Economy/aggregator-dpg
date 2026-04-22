@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -172,5 +172,52 @@ describe('FsConfigService', () => {
     const svc = new FsConfigService(tmpDir);
     await svc.load('test');
     expect(svc.getRegistry().has('pkgA')).toBe(true);
+  });
+
+  describe('watch()', () => {
+    let originalConfigWatch: string | undefined;
+
+    beforeEach(() => {
+      originalConfigWatch = process.env['CONFIG_WATCH'];
+      delete process.env['CONFIG_WATCH'];
+    });
+
+    afterEach(() => {
+      if (originalConfigWatch !== undefined) {
+        process.env['CONFIG_WATCH'] = originalConfigWatch;
+      } else {
+        delete process.env['CONFIG_WATCH'];
+      }
+    });
+
+    it('returns a no-op when CONFIG_WATCH is not set', async () => {
+      makeRepo(tmpDir);
+      const svc = new FsConfigService(tmpDir);
+      await svc.load('test');
+      const unsubscribe = svc.watch();
+      expect(typeof unsubscribe).toBe('function');
+      expect(() => unsubscribe()).not.toThrow();
+    });
+
+    it('returns a no-op when CONFIG_WATCH is not "1"', async () => {
+      process.env['CONFIG_WATCH'] = '0';
+      makeRepo(tmpDir);
+      const svc = new FsConfigService(tmpDir);
+      await svc.load('test');
+      const unsubscribe = svc.watch();
+      expect(() => unsubscribe()).not.toThrow();
+    });
+
+    it('returns a no-op and warns when env is production, even with CONFIG_WATCH=1', async () => {
+      process.env['CONFIG_WATCH'] = '1';
+      makeRepo(tmpDir);
+      const svc = new FsConfigService(tmpDir);
+      await svc.load('production');
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const unsubscribe = svc.watch();
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('production'));
+      expect(() => unsubscribe()).not.toThrow();
+      warnSpy.mockRestore();
+    });
   });
 });

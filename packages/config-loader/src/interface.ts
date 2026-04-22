@@ -119,4 +119,17 @@ export abstract class ConfigServiceBase {
    * @returns An unsubscribe function — call it to remove the listener.
    */
   abstract onChange(cb: ConfigChangeCallback): Unsubscribe;
+
+  /**
+   * Starts watching config files for changes and reloading on modification.
+   *
+   * Only active when `CONFIG_WATCH=1` is set and the environment is not
+   * production. Returns a no-op unsubscribe in all other cases.
+   *
+   * Call after `load()`. The returned function stops the watcher — call it
+   * on process shutdown to avoid open file-descriptor leaks.
+   *
+   * @returns Unsubscribe function that stops watching.
+   */
+  abstract watch(): Unsubscribe;
 }

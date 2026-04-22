@@ -20,6 +20,7 @@ import { discoverPackages, type RegisteredPackage } from '../discovery.js';
 import { deepMerge } from '../merge.js';
 import { interpolateConfig } from '../interpolate.js';
 import { validateConfig } from '../validate.js';
+import { startWatcher } from './watcher.js';
 export { resolveEnv } from '../env.js';
 
 /**
@@ -201,5 +202,32 @@ export class FsConfigService extends ConfigServiceBase {
     return () => {
       this.listeners.delete(cb);
     };
+  }
+
+  /**
+   * Starts watching `config/` for file changes, reloading after a 300 ms debounce.
+   *
+   * Skipped (returns no-op) when:
+   * - The current environment is `production` — a warning is logged.
+   * - `CONFIG_WATCH` env var is not exactly `"1"`.
+   *
+   * Call after `load()`. Stop the watcher by calling the returned unsubscribe
+   * function before process shutdown.
+   *
+   * @returns Unsubscribe function that stops watching.
+   */
+  watch(): Unsubscribe {
+    if (this.currentEnv === 'production') {
+      console.warn(
+        '[config-loader] CONFIG_WATCH is ignored in production — restart the process to apply config changes',
+      );
+      return () => {};
+    }
+    if (process.env['CONFIG_WATCH'] !== '1') {
+      return () => {};
+    }
+    const configDir = join(this.repoRoot, 'config');
+    console.info(`[config-loader] Watching ${configDir} for changes (debounce 300 ms)`);
+    return startWatcher(configDir, 300, () => this.reload());
   }
 }
