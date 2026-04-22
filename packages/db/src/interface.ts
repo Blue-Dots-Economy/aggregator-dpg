@@ -10,6 +10,7 @@
  */
 
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
+import type { Filter, Paginated, Paging } from '@aggregator-dpg/shared-primitives/dto';
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
 
 /**
@@ -46,7 +47,12 @@ export interface UnitOfWork {
  * @typeParam TFilter - Query filter DTO accepted by this repository.
  * @typeParam TPaging - Paging DTO accepted by this repository.
  */
-export abstract class Repository<TEntity, TId, TFilter = unknown, TPaging = unknown> {
+export abstract class Repository<
+  TEntity,
+  TId,
+  TFilter extends Filter = Filter,
+  TPaging extends Paging = Paging,
+> {
   abstract getById(id: TId): Promise<Result<TEntity | null, BaseError>>;
 
   abstract findOne(filter: TFilter): Promise<Result<TEntity | null, BaseError>>;
@@ -54,7 +60,7 @@ export abstract class Repository<TEntity, TId, TFilter = unknown, TPaging = unkn
   abstract findMany(
     filter: TFilter,
     paging?: TPaging,
-  ): Promise<Result<readonly TEntity[], BaseError>>;
+  ): Promise<Result<Paginated<TEntity>, BaseError>>;
 
   abstract create(input: CreateInput<TEntity>): Promise<Result<TEntity, BaseError>>;
 

@@ -64,22 +64,83 @@ export type SortDirection = 'asc' | 'desc';
 /** SortDirection Zod schema. */
 export const SortDirectionSchema = z.enum(['asc', 'desc']);
 
+/** Cursor-based paging options for repository and list queries. */
+export interface Paging {
+  /** Maximum number of items to return. */
+  limit?: number;
+  /** Opaque cursor value from a previous response. */
+  cursor?: string;
+}
+
+/** Zod schema for Paging. */
+export const PagingSchema = z.object({
+  limit: z.number().int().positive().max(1000).optional(),
+  cursor: z.string().optional(),
+});
+
+/** Sort expression for a named field. */
+export interface Sort<TField extends string = string> {
+  field: TField;
+  direction: SortDirection;
+}
+
+/** Zod schema for Sort. */
+export const SortSchema = z.object({
+  field: z.string().min(1),
+  direction: SortDirectionSchema,
+});
+
+/** Supported repository filter operators. */
+export type FilterOperator = 'eq' | 'neq' | 'in' | 'lt' | 'lte' | 'gt' | 'gte' | 'contains';
+
+/** Zod schema for FilterOperator. */
+export const FilterOperatorSchema = z.enum([
+  'eq',
+  'neq',
+  'in',
+  'lt',
+  'lte',
+  'gt',
+  'gte',
+  'contains',
+]);
+
+/**
+ * SQL-free filter condition over a named field.
+ *
+ * Repositories translate these conditions to their backing store. Callers do
+ * not pass SQL fragments, column expressions, or driver-specific values.
+ */
+export interface FilterCondition<TField extends string = string> {
+  field: TField;
+  op: FilterOperator;
+  value: unknown;
+}
+
+/** Zod schema for FilterCondition. */
+export const FilterConditionSchema = z.object({
+  field: z.string().min(1),
+  op: FilterOperatorSchema,
+  value: z.unknown(),
+});
+
 /**
  * Common filter parameters for list endpoints.
  *
  * Services extend this with domain-specific fields.
  */
-export interface Filter {
-  /** Maximum number of items to return. */
-  limit?: number;
-  /** Opaque cursor value from a previous response. */
-  cursor?: string;
+export interface Filter<TField extends string = string> extends Paging {
+  /** Structured conditions combined by the repository implementation. */
+  conditions?: Array<FilterCondition<TField>>;
+  /** Field-level sort expressions. */
+  sort?: Array<Sort<TField>>;
+  /** Legacy single-direction sort hint for simple list endpoints. */
   sortDirection?: SortDirection;
 }
 
 /** Zod schema for Filter. */
-export const FilterSchema = z.object({
-  limit: z.number().int().positive().max(1000).optional(),
-  cursor: z.string().optional(),
+export const FilterSchema = PagingSchema.extend({
+  conditions: z.array(FilterConditionSchema).optional(),
+  sort: z.array(SortSchema).optional(),
   sortDirection: SortDirectionSchema.optional(),
 });
