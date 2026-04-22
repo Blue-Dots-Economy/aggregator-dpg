@@ -11,10 +11,6 @@
     "./testing": {
       "import": "./dist/testing/index.js",
       "types": "./dist/testing/index.d.ts"
-    },
-    "./config": {
-      "import": "./dist/config.schema.js",
-      "types": "./dist/config.schema.d.ts"
     }
   },
   "scripts": {

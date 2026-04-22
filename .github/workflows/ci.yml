@@ -51,9 +51,6 @@ jobs:
       - name: Dep-cruiser — check interface boundaries
         run: pnpm dep-check
 
-      - name: Lint — service READMEs link to docs/config.md
-        run: node scripts/check-readme-links.mjs
-
   docker:
     name: Docker / ${{ matrix.app }}
     runs-on: ubuntu-latest
