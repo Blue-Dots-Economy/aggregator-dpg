@@ -21,7 +21,7 @@ RUN pnpm --filter @aggregator-dpg/api build
 # ── deployer: prune to production deps only ───────────────────────────────────
 FROM installer AS deployer
 COPY --from=builder /app/apps/api/dist ./apps/api/dist
-RUN pnpm deploy --filter @aggregator-dpg/api --prod /standalone
+RUN pnpm deploy --filter @aggregator-dpg/api --prod --legacy /standalone
 
 # ── runner: minimal runtime image ─────────────────────────────────────────────
 FROM node:24-alpine AS runner
