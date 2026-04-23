@@ -1,0 +1,93 @@
+name: Schema Diff
+
+on:
+  pull_request:
+    paths:
+      - 'packages/db/src/schema/**'
+
+permissions:
+  pull-requests: write
+
+jobs:
+  schema-diff:
+    name: Schema diff comment
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate migration SQL (dry-run)
+        id: generate
+        working-directory: packages/db
+        # drizzle-kit generate does not need DATABASE_URL — compares schema against
+        # the last migration snapshot and emits SQL to ./migrations.
+        # We capture stdout; the generated file is read back for the PR comment.
+        run: |
+          pnpm migrate:generate --name schema_diff_preview 2>&1 | tee /tmp/drizzle-output.txt
+          # Find the latest generated migration file
+          LATEST=$(ls -t migrations/*.sql 2>/dev/null | head -1)
+          if [ -n "$LATEST" ]; then
+            echo "migration_file=$LATEST" >> "$GITHUB_OUTPUT"
+            echo "has_migration=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_migration=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Post schema diff comment
+        if: steps.generate.outputs.has_migration == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const file = '${{ steps.generate.outputs.migration_file }}';
+            const sql = fs.readFileSync(`packages/db/${file}`, 'utf8');
+
+            const body = [
+              '## 🗃️ Schema change detected',
+              '',
+              'The following SQL will be applied when this PR is deployed.',
+              'Review carefully before approving.',
+              '',
+              '```sql',
+              sql.trim(),
+              '```',
+              '',
+              `_Generated from \`${file}\` by drizzle-kit — informational only, not blocking._`,
+            ].join('\n');
+
+            // Delete previous schema-diff bot comment if it exists
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            for (const comment of comments.data) {
+              if (comment.body.startsWith('## 🗃️ Schema change detected')) {
+                await github.rest.issues.deleteComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: comment.id,
+                });
+              }
+            }
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
+
+      - name: No schema change
+        if: steps.generate.outputs.has_migration == 'false'
+        run: echo "No migration SQL generated — schema unchanged or first run."
