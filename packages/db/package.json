@@ -21,7 +21,10 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "migrate:generate": "drizzle-kit generate",
+    "migrate:up": "drizzle-kit migrate",
+    "migrate:status": "drizzle-kit status"
   },
   "dependencies": {
     "@aggregator-dpg/shared-primitives": "workspace:*",
