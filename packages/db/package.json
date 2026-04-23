@@ -25,6 +25,7 @@
   },
   "dependencies": {
     "@aggregator-dpg/shared-primitives": "workspace:*",
+    "drizzle-orm": "^0.45.2",
     "pg": "^8.20.0",
     "zod": "^3.24.0"
   },
@@ -32,6 +33,7 @@
     "@aggregator-dpg/tsconfig": "workspace:*",
     "@types/pg": "^8.20.0",
     "@vitest/coverage-v8": "^3.2.0",
+    "drizzle-kit": "^0.31.10",
     "typescript": "^6.0.3",
     "vitest": "^3.2.0"
   }
