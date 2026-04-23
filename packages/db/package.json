@@ -7,6 +7,14 @@
     "./interface": {
       "import": "./dist/interface.js",
       "types": "./dist/interface.d.ts"
+    },
+    "./postgres": {
+      "import": "./dist/postgres/index.js",
+      "types": "./dist/postgres/index.d.ts"
+    },
+    "./config": {
+      "import": "./dist/config.schema.js",
+      "types": "./dist/config.schema.d.ts"
     }
   },
   "scripts": {
@@ -17,10 +25,12 @@
   },
   "dependencies": {
     "@aggregator-dpg/shared-primitives": "workspace:*",
+    "pg": "^8.20.0",
     "zod": "^3.24.0"
   },
   "devDependencies": {
     "@aggregator-dpg/tsconfig": "workspace:*",
+    "@types/pg": "^8.20.0",
     "@vitest/coverage-v8": "^3.2.0",
     "typescript": "^6.0.3",
     "vitest": "^3.2.0"
