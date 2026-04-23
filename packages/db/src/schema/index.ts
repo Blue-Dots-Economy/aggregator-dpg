@@ -10,3 +10,4 @@
 
 export * from './aggregator.js';
 export * from './onboarding.js';
+export * from './bulk-upload.js';
