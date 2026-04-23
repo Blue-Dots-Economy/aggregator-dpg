@@ -11,3 +11,6 @@
 export * from './aggregator.js';
 export * from './onboarding.js';
 export * from './bulk-upload.js';
+export * from './registration.js';
+export * from './export.js';
+export * from './audit.js';
