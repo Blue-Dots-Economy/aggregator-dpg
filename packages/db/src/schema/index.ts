@@ -9,3 +9,4 @@
  */
 
 export * from './aggregator.js';
+export * from './onboarding.js';
