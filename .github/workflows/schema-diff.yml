@@ -6,6 +6,7 @@ on:
       - 'packages/db/src/schema/**'
 
 permissions:
+  contents: read
   pull-requests: write
 
 jobs:
