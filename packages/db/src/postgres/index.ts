@@ -7,7 +7,6 @@
  * @module @aggregator-dpg/db/postgres
  */
 
-import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
 import { ok, err } from '@aggregator-dpg/shared-primitives/result';
@@ -18,8 +17,13 @@ import { DBService } from '../interface.js';
 import type { DbConfig } from '../config.schema.js';
 import { createPool } from './pool.js';
 import type { PoolMetrics } from './pool.js';
+import { createDrizzle } from './drizzle.js';
+import type { DrizzleDB } from './drizzle.js';
+import { withTransaction } from './transaction.js';
+import type { DrizzleUoW } from './uow.js';
 
 export type { PoolMetrics } from './pool.js';
+export type { DrizzleUoW } from './uow.js';
 
 /**
  * Postgres-backed database service.
@@ -31,6 +35,7 @@ export type { PoolMetrics } from './pool.js';
  */
 export class PostgresDBService extends DBService {
   private readonly pool: Pool;
+  private readonly db: DrizzleDB;
   private readonly healthcheckTimeoutMs: number;
 
   /**
@@ -40,6 +45,7 @@ export class PostgresDBService extends DBService {
     super();
     this.healthcheckTimeoutMs = config.healthcheckTimeoutMs;
     this.pool = createPool(config);
+    this.db = createDrizzle(this.pool);
   }
 
   /**
@@ -89,24 +95,14 @@ export class PostgresDBService extends DBService {
   /**
    * Runs work inside a single Postgres transaction.
    *
-   * Commits on success; rolls back and re-throws on any error.
+   * Commits on success; rolls back and re-throws on any error. Nested calls
+   * automatically use SAVEPOINTs — the outer transaction is not affected by
+   * an inner rollback that is caught by the caller.
    *
-   * @param fn - Callback receiving a UnitOfWork with a unique transactionId.
+   * @param fn - Callback receiving a DrizzleUoW with per-entity repo handles.
    */
   async transaction<T>(fn: (uow: UnitOfWork) => Promise<T>): Promise<T> {
-    const client = await this.pool.connect();
-    const transactionId = randomUUID();
-    try {
-      await client.query('BEGIN');
-      const result = await fn({ transactionId });
-      await client.query('COMMIT');
-      return result;
-    } catch (e) {
-      await client.query('ROLLBACK');
-      throw e;
-    } finally {
-      client.release();
-    }
+    return withTransaction(this.db, fn as (uow: DrizzleUoW) => Promise<T>);
   }
 
   /**
