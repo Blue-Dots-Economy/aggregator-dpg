@@ -1,9 +1,20 @@
+/**
+ * Unit tests for PostgresDBService.transaction().
+ *
+ * Tests verify the public contract: return value propagation, error re-throw,
+ * and UoW shape. BEGIN/COMMIT/ROLLBACK mechanics are drizzle internals covered
+ * by integration tests in transaction.integration.test.ts.
+ *
+ * @module @aggregator-dpg/db/__tests__
+ */
+
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('pg');
 
 import { Pool } from 'pg';
 import { PostgresDBService } from '../postgres/index.js';
+import type { DrizzleUoW } from '../postgres/uow.js';
 import type { DbConfig } from '../config.schema.js';
 
 const BASE_CONFIG: DbConfig = {
@@ -15,14 +26,14 @@ const BASE_CONFIG: DbConfig = {
 
 function makeMockPool() {
   const mockClient = {
-    query: vi.fn().mockResolvedValue({ rows: [] }),
+    query: vi.fn().mockResolvedValue({ rows: [], rowCount: 0 }),
     release: vi.fn(),
   };
 
   const mockPool = {
     connect: vi.fn().mockResolvedValue(mockClient),
     end: vi.fn().mockResolvedValue(undefined),
-    query: vi.fn().mockResolvedValue({ rows: [] }),
+    query: vi.fn().mockResolvedValue({ rows: [], rowCount: 0 }),
     totalCount: 5,
     idleCount: 3,
     waitingCount: 1,
@@ -37,45 +48,59 @@ describe('PostgresDBService — transaction', () => {
     vi.resetAllMocks();
   });
 
-  it('runs BEGIN, callback, COMMIT on success', async () => {
-    const { mockClient } = makeMockPool();
+  it('returns the callback return value on success', async () => {
+    makeMockPool();
     const db = new PostgresDBService(BASE_CONFIG);
-    const result = await db.transaction(async (uow) => {
-      expect(uow.transactionId).toBeTruthy();
-      return 'done';
-    });
+    const result = await db.transaction(async () => 'done');
     expect(result).toBe('done');
-    expect(mockClient.query).toHaveBeenCalledWith('BEGIN');
-    expect(mockClient.query).toHaveBeenCalledWith('COMMIT');
   });
 
-  it('runs ROLLBACK and re-throws on callback error', async () => {
-    const { mockClient } = makeMockPool();
+  it('re-throws errors from the callback', async () => {
+    makeMockPool();
     const db = new PostgresDBService(BASE_CONFIG);
     await expect(
       db.transaction(async () => {
         throw new Error('business error');
       }),
     ).rejects.toThrow('business error');
-    expect(mockClient.query).toHaveBeenCalledWith('ROLLBACK');
   });
 
-  it('releases client after commit', async () => {
-    const { mockClient } = makeMockPool();
+  it('uow carries a non-empty transactionId', async () => {
+    makeMockPool();
     const db = new PostgresDBService(BASE_CONFIG);
-    await db.transaction(async () => 'ok');
-    expect(mockClient.release).toHaveBeenCalledOnce();
+    await db.transaction(async (uow) => {
+      expect(typeof uow.transactionId).toBe('string');
+      expect(uow.transactionId.length).toBeGreaterThan(0);
+    });
   });
 
-  it('releases client after rollback', async () => {
-    const { mockClient } = makeMockPool();
+  it('uow exposes typed repo handles (DrizzleUoW)', async () => {
+    makeMockPool();
     const db = new PostgresDBService(BASE_CONFIG);
-    await db
-      .transaction(async () => {
-        throw new Error('fail');
-      })
-      .catch(() => {});
-    expect(mockClient.release).toHaveBeenCalledOnce();
+    await db.transaction(async (uow) => {
+      const typed = uow as DrizzleUoW;
+      expect(typed.auditLog).toBeDefined();
+      expect(typed.aggregatorProfile).toBeDefined();
+      expect(typed.aggregatorProfileSchema).toBeDefined();
+      expect(typed.onboardingLink).toBeDefined();
+      expect(typed.bulkUploadBatch).toBeDefined();
+      expect(typed.bulkUploadRow).toBeDefined();
+      expect(typed.registrationRequest).toBeDefined();
+      expect(typed.exportJob).toBeDefined();
+    });
+  });
+
+  it('each transaction gets a unique transactionId', async () => {
+    makeMockPool();
+    const db = new PostgresDBService(BASE_CONFIG);
+    const ids: string[] = [];
+    await db.transaction(async (uow) => {
+      ids.push(uow.transactionId);
+    });
+    await db.transaction(async (uow) => {
+      ids.push(uow.transactionId);
+    });
+    expect(ids[0]).not.toBe(ids[1]);
   });
 });
 

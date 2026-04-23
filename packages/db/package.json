@@ -26,6 +26,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "migrate:generate": "drizzle-kit generate",
     "migrate:up": "drizzle-kit migrate",
     "migrate:status": "drizzle-kit status"
