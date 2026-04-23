@@ -15,6 +15,10 @@
     "./config": {
       "import": "./dist/config.schema.js",
       "types": "./dist/config.schema.d.ts"
+    },
+    "./repositories": {
+      "import": "./dist/repositories/index.js",
+      "types": "./dist/repositories/index.d.ts"
     }
   },
   "scripts": {
