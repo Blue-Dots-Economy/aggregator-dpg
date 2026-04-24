@@ -33,7 +33,8 @@
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "migrate:generate": "drizzle-kit generate",
     "migrate:up": "drizzle-kit migrate",
-    "migrate:status": "drizzle-kit status"
+    "migrate:status": "drizzle-kit status",
+    "seed": "tsx scripts/seed.ts"
   },
   "dependencies": {
     "@aggregator-dpg/shared-primitives": "workspace:*",
