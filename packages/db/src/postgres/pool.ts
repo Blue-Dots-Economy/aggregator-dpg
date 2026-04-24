@@ -30,8 +30,9 @@ export type PoolMetrics = {
  */
 export function createPool(config: DbConfig): Pool {
   return new Pool({
-    connectionString: config.connectionUrl,
+    connectionString: config.url,
     max: config.poolSize,
     statement_timeout: config.statementTimeoutMs,
+    ssl: config.ssl,
   });
 }

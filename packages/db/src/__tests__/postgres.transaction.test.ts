@@ -18,10 +18,12 @@ import type { DrizzleUoW } from '../postgres/uow.js';
 import type { DbConfig } from '../config.schema.js';
 
 const BASE_CONFIG: DbConfig = {
-  connectionUrl: 'postgres://user:pass@localhost:5432/test',
+  url: 'postgres://user:pass@localhost:5432/test',
   poolSize: 5,
   statementTimeoutMs: 10_000,
   healthcheckTimeoutMs: 3_000,
+  migrationsTable: '__drizzle_migrations',
+  ssl: false,
 };
 
 function makeMockPool() {

@@ -23,10 +23,12 @@ suite('PostgresDBService.transaction (integration)', () => {
 
   beforeAll(() => {
     svc = new PostgresDBService({
-      connectionUrl: dbUrl!,
+      url: dbUrl!,
       poolSize: 2,
       statementTimeoutMs: 5_000,
       healthcheckTimeoutMs: 3_000,
+      migrationsTable: '__drizzle_migrations',
+      ssl: false,
     });
   });
 
