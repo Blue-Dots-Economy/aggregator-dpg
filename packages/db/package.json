@@ -19,6 +19,10 @@
     "./repositories": {
       "import": "./dist/repositories/index.js",
       "types": "./dist/repositories/index.d.ts"
+    },
+    "./testing": {
+      "import": "./dist/testing/index.js",
+      "types": "./dist/testing/index.d.ts"
     }
   },
   "scripts": {
