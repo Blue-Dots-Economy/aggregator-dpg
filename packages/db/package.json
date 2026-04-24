@@ -43,9 +43,11 @@
   },
   "devDependencies": {
     "@aggregator-dpg/tsconfig": "workspace:*",
+    "@types/js-yaml": "^4.0.9",
     "@types/pg": "^8.20.0",
     "@vitest/coverage-v8": "^3.2.0",
     "drizzle-kit": "^0.31.10",
+    "js-yaml": "^4.1.0",
     "typescript": "^6.0.3",
     "vitest": "^3.2.0"
   }

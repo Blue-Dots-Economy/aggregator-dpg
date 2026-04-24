@@ -14,16 +14,24 @@ import { z } from 'zod';
  */
 export const DbConfigSchema = z.object({
   /**
-   * Full Postgres connection URL. Must be supplied via DATABASE_URL env var.
+   * Full Postgres connection URL. Must be supplied via DATABASE_URL env var
+   * in production; config-loader interpolates `${DATABASE_URL}` before Zod runs.
    * Example: postgres://user:pass@localhost:5432/aggregator
    */
-  connectionUrl: z.string().url(),
+  url: z.string().url(),
   /** Maximum number of clients in the pool. */
   poolSize: z.number().int().positive(),
   /** Milliseconds before a query is cancelled by the server. */
   statementTimeoutMs: z.number().int().positive(),
   /** Milliseconds before a healthcheck SELECT 1 is considered failed. */
   healthcheckTimeoutMs: z.number().int().positive(),
+  /** Table used by drizzle-kit to track applied migrations. */
+  migrationsTable: z.string().min(1),
+  /**
+   * Enable TLS for the connection. Default `false` for local dev.
+   * Production / managed Postgres: set to `true` via env-specific override.
+   */
+  ssl: z.boolean(),
 });
 
 export type DbConfig = z.infer<typeof DbConfigSchema>;
@@ -40,14 +48,19 @@ export const configKey = 'db';
 export const configSchema = DbConfigSchema;
 
 /**
- * Baseline db config. connectionUrl is resolved from DATABASE_URL env var at
- * boot — the interpolation pipeline replaces the placeholder before Zod runs.
+ * Baseline db config. `url` is resolved from DATABASE_URL env var at boot —
+ * the interpolation pipeline replaces the placeholder before Zod runs.
+ *
+ * Local-dev defaults: small pool, lenient timeouts, TLS off. Per-environment
+ * overrides live in config/env/{dev,staging,prod}.yaml.
  */
 export const configDefaults: DbConfig = {
-  connectionUrl: '${DATABASE_URL}',
+  url: '${DATABASE_URL}',
   poolSize: 10,
   statementTimeoutMs: 30_000,
   healthcheckTimeoutMs: 5_000,
+  migrationsTable: '__drizzle_migrations',
+  ssl: false,
 };
 
 export type Config = DbConfig;

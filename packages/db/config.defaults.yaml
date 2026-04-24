@@ -1,0 +1,16 @@
+# Baseline defaults for the db config slice.
+#
+# Consumed by @aggregator-dpg/config-loader at boot. Values here are
+# local-dev-friendly. Per-environment overrides live in
+# config/env/{dev,staging,prod}.yaml and take precedence.
+#
+# `${DATABASE_URL}` is interpolated from the env var before Zod validation —
+# the placeholder itself never reaches the running service.
+
+db:
+  url: '${DATABASE_URL}'
+  poolSize: 10
+  statementTimeoutMs: 30000
+  healthcheckTimeoutMs: 5000
+  migrationsTable: '__drizzle_migrations'
+  ssl: false
