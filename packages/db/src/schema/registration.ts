@@ -9,7 +9,7 @@
  * @module @aggregator-dpg/db/schema
  */
 
-import { pgEnum, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { index, pgEnum, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
 /** Lifecycle state of a registration request. */
@@ -25,20 +25,29 @@ export const registrationStatusEnum = pgEnum('registration_status', [
  * No FK to aggregator_profile — the profile is created only after approval.
  * consent_at records when the applicant accepted the platform terms.
  */
-export const registrationRequest = pgTable('registration_request', {
-  id: uuid('id')
-    .primaryKey()
-    .default(sql`gen_random_uuid()`),
-  orgName: text('org_name').notNull(),
-  /** Type of aggregator (e.g. "employer", "skilling-partner"). */
-  aggregatorType: text('aggregator_type').notNull(),
-  adminName: text('admin_name').notNull(),
-  email: text('email').notNull(),
-  phone: text('phone').notNull(),
-  /** Timestamp when the applicant accepted the platform terms of service. */
-  consentAt: timestamp('consent_at', { withTimezone: true }).notNull(),
-  status: registrationStatusEnum('status').notNull().default('pending'),
-  createdAt: timestamp('created_at', { withTimezone: true })
-    .notNull()
-    .default(sql`now()`),
-});
+export const registrationRequest = pgTable(
+  'registration_request',
+  {
+    id: uuid('id')
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    orgName: text('org_name').notNull(),
+    /** Type of aggregator (e.g. "employer", "skilling-partner"). */
+    aggregatorType: text('aggregator_type').notNull(),
+    adminName: text('admin_name').notNull(),
+    email: text('email').notNull(),
+    phone: text('phone').notNull(),
+    /** Timestamp when the applicant accepted the platform terms of service. */
+    consentAt: timestamp('consent_at', { withTimezone: true }).notNull(),
+    status: registrationStatusEnum('status').notNull().default('pending'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .default(sql`now()`),
+  },
+  (t) => ({
+    /** Partial index supporting the admin review queue — only pending rows. */
+    pendingIdx: index('idx_registration_request_pending')
+      .on(t.createdAt.desc())
+      .where(sql`${t.status} = 'pending'`),
+  }),
+);
