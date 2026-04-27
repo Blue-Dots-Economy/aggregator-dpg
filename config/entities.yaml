@@ -1,0 +1,22 @@
+# Entity type definitions — declares which entity types exist and which profile
+# sections each entity uses during onboarding.
+#
+# Adding a new entity type requires only a new entry here; no code changes needed.
+#
+# Each entry:
+#   type     — identifier used in API payloads (string, not an enum)
+#   label    — human-readable display name
+#   sections — profile groups (from profiles.yaml) that apply to this entity type
+
+entities:
+  - type: seeker
+    label: Job Seeker
+    sections:
+      - whoIAm
+      - whatIWant
+
+  - type: provider
+    label: Job Provider / Employer
+    sections:
+      - whoIAm
+      - whatIHave

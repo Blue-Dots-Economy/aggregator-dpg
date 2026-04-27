@@ -1,0 +1,42 @@
+{
+  "name": "@aggregator-dpg/schema-service",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./config": {
+      "import": "./dist/config.schema.js",
+      "types": "./dist/config.schema.d.ts"
+    },
+    "./entities": {
+      "import": "./dist/entities.schema.js",
+      "types": "./dist/entities.schema.d.ts"
+    },
+    "./onboarding": {
+      "import": "./dist/onboarding.schema.js",
+      "types": "./dist/onboarding.schema.d.ts"
+    },
+    "./features": {
+      "import": "./dist/features.schema.js",
+      "types": "./dist/features.schema.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@aggregator-dpg/shared-primitives": "workspace:*",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@aggregator-dpg/tsconfig": "workspace:*",
+    "@types/js-yaml": "^4.0.9",
+    "@vitest/coverage-v8": "^3.2.0",
+    "js-yaml": "^4.1.0",
+    "typescript": "^6.0.3",
+    "vitest": "^3.2.0"
+  }
+}
