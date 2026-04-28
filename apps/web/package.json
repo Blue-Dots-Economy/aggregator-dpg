@@ -3,14 +3,40 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "build": "mkdir -p dist && touch dist/index.js",
-    "dev": "echo 'dev: web (stub)'",
-    "lint": "eslint --no-warn-ignored .",
+    "dev": "next dev --turbo",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint --no-warn-ignored --ignore-pattern coverage --ignore-pattern .next --ignore-pattern next-env.d.ts .",
     "typecheck": "tsc --noEmit",
-    "test": "echo 'test: web (stub)'"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@rjsf/core": "^5.24.0",
+    "@rjsf/utils": "^5.24.0",
+    "@rjsf/validator-ajv8": "^5.24.0",
+    "@tanstack/react-query": "^5.62.7",
+    "clsx": "^2.1.1",
+    "next": "^15.1.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
     "@aggregator-dpg/tsconfig": "workspace:*",
-    "typescript": "^6.0.3"
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.1.0",
+    "@testing-library/user-event": "^14.5.2",
+    "@types/node": "^22.10.5",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "@vitest/coverage-v8": "^2.1.8",
+    "autoprefixer": "^10.4.20",
+    "jsdom": "^25.0.1",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^6.0.3",
+    "vitest": "^2.1.8"
   }
 }
