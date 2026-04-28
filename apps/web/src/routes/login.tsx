@@ -110,8 +110,14 @@ export function LoginRoute() {
 
           <div className="mt-8 text-[12px] text-ink-400">
             By continuing you agree to the{' '}
-            <a className="text-primary-600 hover:underline">Privacy Policy</a> and{' '}
-            <a className="text-primary-600 hover:underline">Terms</a>.
+            <button type="button" className="text-primary-600 hover:underline">
+              Privacy Policy
+            </button>{' '}
+            and{' '}
+            <button type="button" className="text-primary-600 hover:underline">
+              Terms
+            </button>
+            .
           </div>
 
           {/* support row — fills lower whitespace, signals invite-only nature */}
@@ -120,7 +126,9 @@ export function LoginRoute() {
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
               Invite-only · Blue Dots SSO
             </div>
-            <a className="text-primary-600 font-semibold hover:underline">Need help?</a>
+            <button type="button" className="text-primary-600 font-semibold hover:underline">
+              Need help?
+            </button>
           </div>
         </div>
 
@@ -490,9 +498,12 @@ function LoginForm({ org, setOrg, pw, setPw, onBack, onSubmit }: LoginFormProps)
 
       <div className="mt-6 flex flex-col gap-4">
         <div>
-          <label className="bd-label">Organisation</label>
+          <label className="bd-label" htmlFor="login-org">
+            Organisation
+          </label>
           <div className="relative">
             <select
+              id="login-org"
               className="bd-input appearance-none pr-10"
               value={org}
               onChange={(e: ChangeEvent<HTMLSelectElement>) => setOrg(e.target.value)}
@@ -513,8 +524,11 @@ function LoginForm({ org, setOrg, pw, setPw, onBack, onSubmit }: LoginFormProps)
         </div>
 
         <div>
-          <label className="bd-label">Password</label>
+          <label className="bd-label" htmlFor="login-pw">
+            Password
+          </label>
           <input
+            id="login-pw"
             type="password"
             className="bd-input"
             value={pw}
@@ -712,10 +726,17 @@ function RegField({
   hint,
   colSpan = 1,
 }: RegFieldProps) {
+  const id = `reg-${label
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)/g, '')}`;
   return (
     <div className={colSpan === 2 ? 'sm:col-span-2' : ''}>
-      <label className="bd-label">{label}</label>
+      <label className="bd-label" htmlFor={id}>
+        {label}
+      </label>
       <input
+        id={id}
         type={type}
         placeholder={placeholder}
         value={value}

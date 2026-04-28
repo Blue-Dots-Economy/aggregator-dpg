@@ -7,7 +7,7 @@
 
 ## 1. Goal
 
-Port the Blue Dots Aggregator Portal mockup (HTML + Babel-compiled JSX) into a production React + TypeScript application that lives inside the `aggregator-dpg` monorepo at `apps/portal`. The output replaces the static prototype with a maintainable, type-safe, test-covered codebase whose data layer is abstracted behind a service interface so the UI can later be wired to the real `apps/api` backend without touching screens.
+Port the Blue Dots Aggregator Portal mockup (HTML + Babel-compiled JSX) into a production React + TypeScript application that lives inside the `aggregator-dpg` monorepo at `apps/web`. The output replaces the static prototype with a maintainable, type-safe, test-covered codebase whose data layer is abstracted behind a service interface so the UI can later be wired to the real `apps/api` backend without touching screens.
 
 ## 2. Non-goals
 
@@ -15,8 +15,11 @@ Port the Blue Dots Aggregator Portal mockup (HTML + Babel-compiled JSX) into a p
 - Real authentication (boolean session flag mirrors source behaviour).
 - The Tweaks panel (`tweaks-panel.jsx`) — dev-time customizer, not production.
 - Visual redesign — this is a 1:1 port of the existing aesthetic.
-- i18n / accessibility audit beyond what the source already provides.
-- Replacement of the existing `apps/web` stub.
+- i18n / accessibility audit beyond what the source already provides (jsx-a11y rule
+  fixes applied where strict CI rules forced them — `htmlFor`/`id` pairing,
+  `<a>` → `<button>` for non-navigating links, `role="checkbox"` on consent
+  toggles).
+- Replaces the prior `apps/web` stub; the portal lives at `apps/web`.
 
 ## 3. Stack
 
@@ -37,9 +40,9 @@ CDN scripts in the source HTML (React, Babel, Tailwind CDN) are dropped — Vite
 
 ## 4. Workspace integration
 
-- New package: `apps/portal/` named `@aggregator-dpg/portal` (`private: true`).
+- New package: `apps/web/` named `@aggregator-dpg/web` (`private: true`).
 - `pnpm-workspace.yaml` already globs `apps/*`; no edits needed.
-- Scripts in `apps/portal/package.json`:
+- Scripts in `apps/web/package.json`:
   - `dev` → `vite`
   - `build` → `tsc -b && vite build`
   - `preview` → `vite preview`
@@ -55,7 +58,7 @@ CDN scripts in the source HTML (React, Babel, Tailwind CDN) are dropped — Vite
 ## 5. Folder structure
 
 ```
-apps/portal/
+apps/web/
 ├── index.html
 ├── package.json
 ├── vite.config.ts
@@ -335,17 +338,17 @@ No real network, no real timers, no real DOM portals.
 ## 13. Build, lint, CI
 
 - Repo CI already runs `pnpm -w lint`, `pnpm -w typecheck`, `pnpm -w test`. The new package is picked up automatically.
-- `apps/portal/Dockerfile` is **not** part of this iteration — left as a follow-up once a backend wire-up needs an image.
-- `vite build` outputs to `apps/portal/dist/`. `dist/` is added to `.gitignore`.
+- `apps/web/Dockerfile` is **not** part of this iteration — left as a follow-up once a backend wire-up needs an image.
+- `vite build` outputs to `apps/web/dist/`. `dist/` is added to `.gitignore`.
 
 ## 14. Acceptance criteria
 
 1. `pnpm install` at repo root completes cleanly.
-2. `pnpm --filter @aggregator-dpg/portal dev` starts on a free port (default `5173`); the four screens render and are reachable via sidebar links.
-3. `pnpm --filter @aggregator-dpg/portal build` completes with no TypeScript errors.
-4. `pnpm --filter @aggregator-dpg/portal lint` passes.
-5. `pnpm --filter @aggregator-dpg/portal typecheck` passes.
-6. `pnpm --filter @aggregator-dpg/portal test --coverage` passes with ≥ 70% line coverage.
+2. `pnpm --filter @aggregator-dpg/web dev` starts on a free port (default `5173`); the four screens render and are reachable via sidebar links.
+3. `pnpm --filter @aggregator-dpg/web build` completes with no TypeScript errors.
+4. `pnpm --filter @aggregator-dpg/web lint` passes.
+5. `pnpm --filter @aggregator-dpg/web typecheck` passes.
+6. `pnpm --filter @aggregator-dpg/web test --coverage` passes with ≥ 70% line coverage.
 7. Visual fidelity to `Blue Dots Portal.html` is ≥ 95% on the four screens at 1440 px width (manual side-by-side check).
 8. Sidebar active-link state, login → dashboard navigation, and sign-out flow work end-to-end.
 9. Swapping a service implementation requires changing only the exported binding line in the corresponding `services/*.service.ts` file (no UI edits).

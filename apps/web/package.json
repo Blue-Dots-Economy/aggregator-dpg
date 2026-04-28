@@ -2,15 +2,41 @@
   "name": "@aggregator-dpg/web",
   "version": "0.0.0",
   "private": true,
+  "type": "module",
   "scripts": {
-    "build": "mkdir -p dist && touch dist/index.js",
-    "dev": "echo 'dev: web (stub)'",
-    "lint": "eslint --no-warn-ignored .",
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "start": "serve -s dist -l 8080 --no-clipboard --no-port-switching",
+    "lint": "eslint --no-warn-ignored --ignore-pattern coverage .",
     "typecheck": "tsc --noEmit",
-    "test": "echo 'test: web (stub)'"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.62.7",
+    "clsx": "^2.1.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.28.0",
+    "serve": "^14.2.4"
   },
   "devDependencies": {
     "@aggregator-dpg/tsconfig": "workspace:*",
-    "typescript": "^6.0.3"
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.1.0",
+    "@testing-library/user-event": "^14.5.2",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "@vitest/coverage-v8": "^2.1.8",
+    "autoprefixer": "^10.4.20",
+    "jsdom": "^25.0.1",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^6.0.3",
+    "vite": "^5.4.11",
+    "vitest": "^2.1.8"
   }
 }

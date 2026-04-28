@@ -164,8 +164,11 @@ function RegistrationLinkForm() {
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px]">
         <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-x-5 gap-y-4">
           <div className="md:col-span-2">
-            <label className="bd-label">Organisation Name</label>
+            <label className="bd-label" htmlFor="rl-org">
+              Organisation Name
+            </label>
             <input
+              id="rl-org"
               className="bd-input"
               value={form.org}
               onChange={(e) => set('org', e.target.value)}
@@ -173,18 +176,22 @@ function RegistrationLinkForm() {
           </div>
 
           <div>
-            <label className="bd-label">
+            <label className="bd-label" htmlFor="rl-state">
               Instance (State Name) <span className="text-rose-500">*</span>
             </label>
             <input
+              id="rl-state"
               className="bd-input"
               value={form.state}
               onChange={(e) => set('state', e.target.value)}
             />
           </div>
           <div>
-            <label className="bd-label">Lever / Event</label>
+            <label className="bd-label" htmlFor="rl-lever">
+              Lever / Event
+            </label>
             <input
+              id="rl-lever"
               className="bd-input"
               value={form.lever}
               onChange={(e) => set('lever', e.target.value)}
@@ -192,9 +199,12 @@ function RegistrationLinkForm() {
           </div>
 
           <div>
-            <label className="bd-label">Event Date</label>
+            <label className="bd-label" htmlFor="rl-date">
+              Event Date
+            </label>
             <div className="relative">
               <input
+                id="rl-date"
                 type="date"
                 className="bd-input pr-10"
                 value={form.date}
@@ -207,8 +217,11 @@ function RegistrationLinkForm() {
             </div>
           </div>
           <div>
-            <label className="bd-label">Event Location</label>
+            <label className="bd-label" htmlFor="rl-location">
+              Event Location
+            </label>
             <input
+              id="rl-location"
               className="bd-input"
               placeholder="e.g. Hubli"
               value={form.location}
@@ -217,20 +230,22 @@ function RegistrationLinkForm() {
           </div>
 
           <div>
-            <label className="bd-label">
+            <label className="bd-label" htmlFor="rl-district">
               District <span className="text-rose-500">*</span>
             </label>
             <input
+              id="rl-district"
               className="bd-input"
               value={form.district}
               onChange={(e) => set('district', e.target.value)}
             />
           </div>
           <div>
-            <label className="bd-label">
+            <label className="bd-label" htmlFor="rl-domain">
               Domain <span className="text-rose-500">*</span>
             </label>
             <select
+              id="rl-domain"
               className="bd-input appearance-none"
               value={form.domain}
               onChange={(e) => set('domain', e.target.value)}
@@ -242,8 +257,11 @@ function RegistrationLinkForm() {
           </div>
 
           <div>
-            <label className="bd-label">Signal Source</label>
+            <label className="bd-label" htmlFor="rl-signal">
+              Signal Source
+            </label>
             <select
+              id="rl-signal"
               className="bd-input appearance-none"
               value={form.signal}
               onChange={(e) => set('signal', e.target.value)}
@@ -255,8 +273,11 @@ function RegistrationLinkForm() {
             </select>
           </div>
           <div>
-            <label className="bd-label">Signal Sub-Source</label>
+            <label className="bd-label" htmlFor="rl-sub">
+              Signal Sub-Source
+            </label>
             <select
+              id="rl-sub"
               className="bd-input appearance-none"
               value={form.sub}
               onChange={(e) => set('sub', e.target.value)}
@@ -268,16 +289,22 @@ function RegistrationLinkForm() {
           </div>
 
           <div>
-            <label className="bd-label">Source Full Name</label>
+            <label className="bd-label" htmlFor="rl-full">
+              Source Full Name
+            </label>
             <input
+              id="rl-full"
               className="bd-input"
               value={form.full}
               onChange={(e) => set('full', e.target.value)}
             />
           </div>
           <div>
-            <label className="bd-label">Source Type</label>
+            <label className="bd-label" htmlFor="rl-type">
+              Source Type
+            </label>
             <select
+              id="rl-type"
               className="bd-input appearance-none"
               value={form.type}
               onChange={(e) => set('type', e.target.value)}
@@ -290,12 +317,17 @@ function RegistrationLinkForm() {
           </div>
 
           <div className="md:col-span-2">
-            <label className="bd-label">Generated URL</label>
+            <label className="bd-label" htmlFor="rl-url">
+              Generated URL
+            </label>
             <div className="flex items-center gap-2 bg-[var(--bd-primary-50)] border border-[var(--bd-primary-100)] rounded-[10px] px-3 py-2.5">
               <I.link size={14} className="text-primary-600" />
-              <span className="font-mono text-[12.5px] text-primary-600 truncate flex-1">
-                {url}
-              </span>
+              <input
+                id="rl-url"
+                readOnly
+                value={url}
+                className="font-mono text-[12.5px] text-primary-600 truncate flex-1 bg-transparent border-0 outline-none"
+              />
               <button
                 type="button"
                 className="text-[12px] font-semibold text-primary-600 inline-flex items-center gap-1 hover:underline"

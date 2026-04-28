@@ -310,8 +310,11 @@ interface ConsentCheckProps {
 function ConsentCheck({ defaultChecked = true, required, children }: ConsentCheckProps) {
   const [on, setOn] = useState<boolean>(defaultChecked);
   return (
-    <label className="flex items-start gap-3 py-2 cursor-pointer">
-      <span
+    <div className="flex items-start gap-3 py-2">
+      <button
+        type="button"
+        role="checkbox"
+        aria-checked={on}
         onClick={() => setOn(!on)}
         className={`w-[18px] h-[18px] rounded-[5px] border-2 flex items-center justify-center mt-0.5 shrink-0 transition-all
               ${
@@ -321,11 +324,11 @@ function ConsentCheck({ defaultChecked = true, required, children }: ConsentChec
               }`}
       >
         {on && <I.check size={11} className="text-white" stroke={3} />}
-      </span>
+      </button>
       <span className="text-[13.5px] text-ink-700 leading-relaxed">
         {children} {required && <span className="text-rose-500">*</span>}
       </span>
-    </label>
+    </div>
   );
 }
 
