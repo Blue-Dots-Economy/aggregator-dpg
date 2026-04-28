@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite';
+import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import path from 'node:path';
 
@@ -8,9 +8,6 @@ export default defineConfig({
     alias: {
       '@': path.resolve(__dirname, './src'),
     },
-  },
-  server: {
-    port: 5173,
   },
   test: {
     globals: true,
@@ -26,7 +23,16 @@ export default defineConfig({
         branches: 60,
         statements: 70,
       },
-      exclude: ['node_modules/', 'dist/', '**/*.config.*', '**/__tests__/**', 'src/main.tsx'],
+      exclude: [
+        'node_modules/',
+        '.next/',
+        'dist/',
+        '**/*.config.*',
+        '**/__tests__/**',
+        'src/app/layout.tsx',
+        'src/app/page.tsx',
+        'next-env.d.ts',
+      ],
     },
   },
 });

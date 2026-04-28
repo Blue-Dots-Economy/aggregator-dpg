@@ -359,3 +359,80 @@ No real network, no real timers, no real DOM portals.
 - Add Storybook for component review.
 - Add Playwright E2E once the portal has more than one critical user journey.
 - Decide whether to retire `apps/web` after this lands.
+
+---
+
+## 16. v2 — Next.js 15 + RJSF (supersedes v1)
+
+**Date:** 2026-04-28
+**Status:** Active. Replaces the Vite implementation captured in sections 1–15.
+
+The v1 Vite + React Router build (preserved on branch
+`feat/aggregator-portal-ui`) is superseded by a Next.js 15 App Router
+implementation. The driver for the change is reuse of `react-jsonschema-form`
+(RJSF) for the two large form-heavy screens (Onboarding registration link form,
+Profile registration form) so future schema additions live in JSON instead of
+hand-rolled JSX, and so server-rendered routes / SSR primitives are available
+when the backend wires in.
+
+### 16.1 Stack delta
+
+| Concern         | v1 Vite                      | v2 Next.js                                                                               |
+| --------------- | ---------------------------- | ---------------------------------------------------------------------------------------- |
+| Build / runtime | Vite 5 + `serve`             | Next.js 15 App Router + Turbopack (`next dev --turbo`); standalone output for production |
+| Routing         | React Router v6              | App Router file-system routing (`app/`)                                                  |
+| Forms           | Hand-rolled controlled forms | RJSF v5 (`@rjsf/core`, `@rjsf/utils`, `@rjsf/validator-ajv8`) for Onboarding + Profile   |
+| Auth guard      | `<ProtectedRoute>` element   | `app/(portal)/layout.tsx` redirects unauthenticated users from a client effect           |
+| Test runner     | Vitest                       | Vitest (unchanged)                                                                       |
+
+Other packages unchanged: TS strict, Tailwind v3, TanStack Query v5, custom
+`AuthContext`, `clsx`, `@testing-library/*`, repo `tsconfig` and ESLint.
+
+### 16.2 RJSF integration
+
+- One shared themed wrapper: `components/forms/RjsfThemed.tsx` exporting
+  `RjsfThemedForm`. Provides custom `TextWidget`, `TextareaWidget`,
+  `SelectWidget`, `DateWidget`, `CheckboxWidget` rendering `bd-input` and
+  `bd-label` classes, plus `FieldTemplate` and `ObjectFieldTemplate` that
+  honour custom `ui:colSpan: 1 | 2` and `ui:layout: 'grid' | 'stack'`.
+- Schemas live in `src/schemas/*.ts` and export both `RJSFSchema` +
+  `UiSchema` + a typed `*FormData` interface + `*Defaults` constant.
+- Used by:
+  - `app/(portal)/onboarding/page.tsx` — registration link form
+    (`registration-link.schema`).
+  - `app/(portal)/profile/page.tsx` — aggregator profile registration form
+    (`aggregator-profile.schema`).
+- Login + BlueDots stay handcoded — RJSF would harm UX and visual fidelity
+  for the split-screen brand panel and the table-heavy participant view.
+
+### 16.3 Auth flow (v2)
+
+- `AuthProvider` ('use client') stores user in React state and mirrors to
+  `localStorage` under key `bd-portal-user`. Hydrates on mount and exposes
+  `isHydrated` so guards can avoid flash-of-unauthenticated-content.
+- `app/page.tsx` (root) is a tiny client component that, after hydration,
+  redirects to `/blue-dots` (authed) or `/login` (anonymous).
+- `app/(portal)/layout.tsx` (auth-guarded group) redirects to `/login` if
+  not authenticated and renders nothing during hydration to avoid flicker.
+
+### 16.4 Production runtime
+
+- `next.config.ts` sets `output: 'standalone'`.
+- `apps/web/Dockerfile` is multi-stage: `installer` filtered to
+  `@aggregator-dpg/web...`, `builder` runs `next build`, `runner` copies
+  `.next/standalone`, `.next/static`, and `public/` into a fresh
+  `node:24-alpine` and runs `node apps/web/server.js` as non-root `appuser`
+  on port 3000. No second runtime, no nginx.
+
+### 16.5 Acceptance criteria (v2)
+
+1. `pnpm install` clean at repo root.
+2. `pnpm --filter @aggregator-dpg/web dev` boots Next dev on `:3000`; all
+   four screens render via sidebar navigation.
+3. `pnpm --filter @aggregator-dpg/web typecheck` passes.
+4. `pnpm --filter @aggregator-dpg/web lint` passes (jsx-a11y rules included).
+5. `pnpm --filter @aggregator-dpg/web build` produces `.next/standalone`.
+6. `pnpm --filter @aggregator-dpg/web test` passes; coverage ≥ 70 % lines.
+7. Visual fidelity to the source HTML ≥ 95 % at 1440 px width.
+8. Adding a field to either RJSF form requires only a schema edit, no UI
+   code change.

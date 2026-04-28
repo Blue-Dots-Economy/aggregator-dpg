@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import { afterEach, vi } from 'vitest';
 import { cleanup } from '@testing-library/react';
+import type * as NextNavigationModule from 'next/navigation';
 
 afterEach(() => {
   cleanup();
@@ -50,3 +51,20 @@ if (typeof HTMLCanvasElement !== 'undefined') {
     lineWidth: 0,
   }));
 }
+
+vi.mock('next/navigation', async () => {
+  const actual = await vi.importActual<typeof NextNavigationModule>('next/navigation');
+  return {
+    ...actual,
+    useRouter: () => ({
+      push: vi.fn(),
+      replace: vi.fn(),
+      refresh: vi.fn(),
+      back: vi.fn(),
+      forward: vi.fn(),
+      prefetch: vi.fn(),
+    }),
+    usePathname: () => '/',
+    useSearchParams: () => new URLSearchParams(),
+  };
+});

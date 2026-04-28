@@ -1,3 +1,5 @@
+'use client';
+
 import { useQuery } from '@tanstack/react-query';
 import { blueDotsService } from '../services/blue-dots.service';
 import type { ParticipantFilter } from '../types';

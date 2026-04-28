@@ -1,15 +1,15 @@
 # syntax=docker/dockerfile:1.7
 #
-# Blue Dots Aggregator Portal — production image (apps/web).
+# Blue Dots Aggregator Portal — Next.js 15 production image (apps/web).
 #
-# Multi-stage build aligned with repo template (services/Dockerfile.template):
+# Multi-stage build aligned with repo template. Uses Next.js standalone output
+# (`output: 'standalone'` in next.config.ts) so the runtime image only carries
+# the compiled server, .next/static, and public/ assets — no pnpm, no source.
+#
 #   1. base       — node:24-alpine + corepack
 #   2. installer  — workspace deps (filtered to web)
-#   3. builder    — Vite production build
-#   4. deployer   — pnpm deploy → self-contained /standalone
-#   5. runner     — minimal runtime, runs as non-root appuser on :8080
-#
-# Static assets are served by `serve` (pinned dep). No nginx, no second runtime.
+#   3. builder    — `next build` produces .next/standalone
+#   4. runner     — minimal runtime, runs as non-root nextjs user on :3000
 
 FROM node:24-alpine AS base
 ENV PNPM_HOME="/pnpm" \
@@ -28,14 +28,9 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
 
 # ── builder ───────────────────────────────────────────────────────────────────
 FROM installer AS builder
+ENV NEXT_TELEMETRY_DISABLED=1
 COPY . .
 RUN pnpm --filter @aggregator-dpg/web build
-
-# ── deployer ──────────────────────────────────────────────────────────────────
-FROM installer AS deployer
-COPY --from=builder /app/apps/web/dist        /app/apps/web/dist
-COPY --from=builder /app/apps/web/serve.json  /app/apps/web/serve.json
-RUN pnpm deploy --filter @aggregator-dpg/web --prod --legacy /standalone
 
 # ── runner ────────────────────────────────────────────────────────────────────
 FROM node:24-alpine AS runner
@@ -45,7 +40,7 @@ ARG BUILD_DATE=unknown
 ARG VERSION=0.0.0
 
 LABEL org.opencontainers.image.title="aggregator-dpg-web" \
-      org.opencontainers.image.description="Blue Dots Aggregator Portal SPA" \
+      org.opencontainers.image.description="Blue Dots Aggregator Portal (Next.js)" \
       org.opencontainers.image.source="https://github.com/sanketika-labs/aggregator-dpg" \
       org.opencontainers.image.revision="${VCS_REF}" \
       org.opencontainers.image.created="${BUILD_DATE}" \
@@ -53,13 +48,20 @@ LABEL org.opencontainers.image.title="aggregator-dpg-web" \
       org.opencontainers.image.licenses="UNLICENSED"
 
 ENV NODE_ENV=production \
-    PORT=8080
+    NEXT_TELEMETRY_DISABLED=1 \
+    PORT=3000 \
+    HOSTNAME=0.0.0.0
 
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 WORKDIR /app
-COPY --from=deployer --chown=appuser:appgroup /standalone ./
+
+# Next.js standalone output already prunes node_modules to the bare minimum.
+# Copy in standalone server, static assets, and public/ — chown to non-root.
+COPY --from=builder --chown=appuser:appgroup /app/apps/web/.next/standalone ./
+COPY --from=builder --chown=appuser:appgroup /app/apps/web/.next/static     ./apps/web/.next/static
+COPY --from=builder --chown=appuser:appgroup /app/apps/web/public           ./apps/web/public
 
 USER appuser
-EXPOSE 8080
+EXPOSE 3000
 
-CMD ["node", "node_modules/serve/build/main.js", "-s", "dist", "-l", "8080", "--no-clipboard", "--no-port-switching"]
+CMD ["node", "apps/web/server.js"]

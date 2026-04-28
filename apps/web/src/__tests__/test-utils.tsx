@@ -1,11 +1,9 @@
 import type { ReactElement, ReactNode } from 'react';
 import { render, type RenderOptions, type RenderResult } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter } from 'react-router-dom';
 import { AuthProvider } from '../lib/auth-context';
 
 interface ProviderOptions {
-  initialEntries?: string[];
   queryClient?: QueryClient;
 }
 
@@ -20,20 +18,15 @@ export function makeQueryClient(): QueryClient {
 
 export function AllProviders({
   children,
-  initialEntries,
   queryClient,
 }: {
   children: ReactNode;
-  initialEntries?: string[];
   queryClient?: QueryClient;
 }) {
   const client = queryClient ?? makeQueryClient();
-  const entries = initialEntries ?? ['/'];
   return (
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={entries}>
-        <AuthProvider>{children}</AuthProvider>
-      </MemoryRouter>
+      <AuthProvider>{children}</AuthProvider>
     </QueryClientProvider>
   );
 }
@@ -42,15 +35,10 @@ export function renderWithProviders(
   ui: ReactElement,
   options?: ProviderOptions & RenderOptions,
 ): RenderResult {
-  const { initialEntries, queryClient, ...rest } = options ?? {};
+  const { queryClient, ...rest } = options ?? {};
   return render(ui, {
     wrapper: ({ children }) => (
-      <AllProviders
-        {...(initialEntries ? { initialEntries } : {})}
-        {...(queryClient ? { queryClient } : {})}
-      >
-        {children}
-      </AllProviders>
+      <AllProviders {...(queryClient ? { queryClient } : {})}>{children}</AllProviders>
     ),
     ...rest,
   });

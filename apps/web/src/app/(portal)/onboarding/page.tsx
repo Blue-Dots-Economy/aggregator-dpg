@@ -1,14 +1,24 @@
-import { useState, type FormEvent } from 'react';
-import { Button } from '../components/ui/Button';
-import { Topbar } from '../components/shell/Topbar';
-import { Dropzone } from '../components/ui/Dropzone';
-import { QrCode } from '../components/ui/QrCode';
-import { I } from '../icons';
-import { useRegistrationLinks } from '../hooks/useOnboarding';
-import type { RegistrationLink } from '../types';
+'use client';
+
+import { useState } from 'react';
+import type { IChangeEvent } from '@rjsf/core';
+import { RjsfThemedForm } from '../../../components/forms/RjsfThemed';
+import {
+  registrationLinkSchema,
+  registrationLinkUiSchema,
+  registrationLinkDefaults,
+  type RegistrationLinkFormData,
+} from '../../../schemas/registration-link.schema';
+import { Button } from '../../../components/ui/Button';
+import { Topbar } from '../../../components/shell/Topbar';
+import { Dropzone } from '../../../components/ui/Dropzone';
+import { QrCode } from '../../../components/ui/QrCode';
+import { I } from '../../../icons';
+import { useRegistrationLinks } from '../../../hooks/useOnboarding';
+import type { RegistrationLink } from '../../../types';
 
 interface StatItem {
-  icon: keyof typeof I;
+  icon: 'users' | 'shield' | 'alert';
   label: string;
   count: number;
   tone: string;
@@ -16,28 +26,29 @@ interface StatItem {
   cta?: boolean;
 }
 
+const STAT_ITEMS: StatItem[] = [
+  {
+    icon: 'users',
+    label: 'Total registered via your links',
+    count: 77,
+    tone: '#6366F1',
+    bg: '#EEF2FF',
+  },
+  { icon: 'shield', label: 'Verified & discoverable', count: 77, tone: '#10B981', bg: '#ECFDF5' },
+  {
+    icon: 'alert',
+    label: 'Unverified seekers',
+    count: 0,
+    tone: '#EF4444',
+    bg: '#FEF2F2',
+    cta: true,
+  },
+];
+
 function StatStrip() {
-  const items: StatItem[] = [
-    {
-      icon: 'users',
-      label: 'Total registered via your links',
-      count: 77,
-      tone: '#6366F1',
-      bg: '#EEF2FF',
-    },
-    { icon: 'shield', label: 'Verified & discoverable', count: 77, tone: '#10B981', bg: '#ECFDF5' },
-    {
-      icon: 'alert',
-      label: 'Unverified seekers',
-      count: 0,
-      tone: '#EF4444',
-      bg: '#FEF2F2',
-      cta: true,
-    },
-  ];
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-      {items.map((it, i) => {
+      {STAT_ITEMS.map((it, i) => {
         const Ic = I[it.icon];
         return (
           <div key={i} className="bd-card bd-shadow p-5 flex items-center gap-4">
@@ -110,46 +121,26 @@ function CSVUpload() {
   );
 }
 
-interface FormState {
-  org: string;
-  state: string;
-  lever: string;
-  date: string;
-  location: string;
-  district: string;
-  domain: string;
-  signal: string;
-  sub: string;
-  full: string;
-  type: string;
+interface RegistrationLinkSectionProps {
+  formData: RegistrationLinkFormData;
+  onChange: (next: RegistrationLinkFormData) => void;
 }
 
-function RegistrationLinkForm() {
-  const [form, setForm] = useState<FormState>({
-    org: 'TRRAIN',
-    state: 'Karnataka',
-    lever: 'Bluedotathon',
-    date: '',
-    location: '',
-    district: 'Dharwad',
-    domain: 'Seeker',
-    signal: 'Event',
-    sub: 'On-ground',
-    full: 'TRRAIN-Hubli-2026',
-    type: 'Walk-in',
-  });
-  const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setForm({ ...form, [k]: v });
+function RegistrationLinkSection({ formData, onChange }: RegistrationLinkSectionProps) {
+  const url =
+    `https://bluedots.app/r/${(formData.org || 'TRRAIN').toLowerCase()}-${(formData.state || 'KA').slice(0, 3).toLowerCase()}-${(formData.lever || 'event').toLowerCase()}`.replace(
+      /\s+/g,
+      '-',
+    );
 
-  const url = `https://bluedots.app/r/${(form.org || 'TRRAIN').toLowerCase()}-${(form.state || 'KA')
-    .slice(0, 3)
-    .toLowerCase()}-${(form.lever || 'event').toLowerCase()}`.replace(/\s+/g, '-');
-
-  const onSubmit = (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
+  const handleChange = (e: IChangeEvent<RegistrationLinkFormData>) => {
+    if (e.formData) {
+      onChange(e.formData);
+    }
   };
 
   return (
-    <form onSubmit={onSubmit} className="bd-card bd-shadow overflow-hidden">
+    <div className="bd-card bd-shadow overflow-hidden">
       <div className="px-6 py-5 flex items-center gap-3 border-b border-[var(--bd-border)]">
         <I.link size={16} className="text-ink-500" />
         <div className="font-display font-bold text-[16px] text-ink-900">
@@ -162,172 +153,28 @@ function RegistrationLinkForm() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px]">
-        <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-x-5 gap-y-4">
-          <div className="md:col-span-2">
-            <label className="bd-label" htmlFor="rl-org">
-              Organisation Name
-            </label>
-            <input
-              id="rl-org"
-              className="bd-input"
-              value={form.org}
-              onChange={(e) => set('org', e.target.value)}
-            />
-          </div>
+        <div className="p-6">
+          <RjsfThemedForm<RegistrationLinkFormData>
+            schema={registrationLinkSchema}
+            uiSchema={registrationLinkUiSchema}
+            formData={formData}
+            onChange={handleChange}
+          >
+            <></>
+          </RjsfThemedForm>
 
-          <div>
-            <label className="bd-label" htmlFor="rl-state">
-              Instance (State Name) <span className="text-rose-500">*</span>
-            </label>
-            <input
-              id="rl-state"
-              className="bd-input"
-              value={form.state}
-              onChange={(e) => set('state', e.target.value)}
-            />
-          </div>
-          <div>
-            <label className="bd-label" htmlFor="rl-lever">
-              Lever / Event
-            </label>
-            <input
-              id="rl-lever"
-              className="bd-input"
-              value={form.lever}
-              onChange={(e) => set('lever', e.target.value)}
-            />
-          </div>
-
-          <div>
-            <label className="bd-label" htmlFor="rl-date">
-              Event Date
-            </label>
-            <div className="relative">
-              <input
-                id="rl-date"
-                type="date"
-                className="bd-input pr-10"
-                value={form.date}
-                onChange={(e) => set('date', e.target.value)}
-              />
-              <I.calendar
-                size={14}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-300 pointer-events-none"
-              />
-            </div>
-          </div>
-          <div>
-            <label className="bd-label" htmlFor="rl-location">
-              Event Location
-            </label>
-            <input
-              id="rl-location"
-              className="bd-input"
-              placeholder="e.g. Hubli"
-              value={form.location}
-              onChange={(e) => set('location', e.target.value)}
-            />
-          </div>
-
-          <div>
-            <label className="bd-label" htmlFor="rl-district">
-              District <span className="text-rose-500">*</span>
-            </label>
-            <input
-              id="rl-district"
-              className="bd-input"
-              value={form.district}
-              onChange={(e) => set('district', e.target.value)}
-            />
-          </div>
-          <div>
-            <label className="bd-label" htmlFor="rl-domain">
-              Domain <span className="text-rose-500">*</span>
-            </label>
-            <select
-              id="rl-domain"
-              className="bd-input appearance-none"
-              value={form.domain}
-              onChange={(e) => set('domain', e.target.value)}
-            >
-              <option>Seeker</option>
-              <option>Provider</option>
-              <option>Both</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="bd-label" htmlFor="rl-signal">
-              Signal Source
-            </label>
-            <select
-              id="rl-signal"
-              className="bd-input appearance-none"
-              value={form.signal}
-              onChange={(e) => set('signal', e.target.value)}
-            >
-              <option>Event</option>
-              <option>Outreach</option>
-              <option>Partner</option>
-              <option>Walk-in</option>
-            </select>
-          </div>
-          <div>
-            <label className="bd-label" htmlFor="rl-sub">
-              Signal Sub-Source
-            </label>
-            <select
-              id="rl-sub"
-              className="bd-input appearance-none"
-              value={form.sub}
-              onChange={(e) => set('sub', e.target.value)}
-            >
-              <option>On-ground</option>
-              <option>Online</option>
-              <option>Referral</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="bd-label" htmlFor="rl-full">
-              Source Full Name
-            </label>
-            <input
-              id="rl-full"
-              className="bd-input"
-              value={form.full}
-              onChange={(e) => set('full', e.target.value)}
-            />
-          </div>
-          <div>
-            <label className="bd-label" htmlFor="rl-type">
-              Source Type
-            </label>
-            <select
-              id="rl-type"
-              className="bd-input appearance-none"
-              value={form.type}
-              onChange={(e) => set('type', e.target.value)}
-            >
-              <option>Walk-in</option>
-              <option>Campaign</option>
-              <option>Referral</option>
-              <option>Direct</option>
-            </select>
-          </div>
-
-          <div className="md:col-span-2">
-            <label className="bd-label" htmlFor="rl-url">
+          <div className="mt-4">
+            <label className="bd-label" htmlFor="registration-generated-url">
               Generated URL
             </label>
-            <div className="flex items-center gap-2 bg-[var(--bd-primary-50)] border border-[var(--bd-primary-100)] rounded-[10px] px-3 py-2.5">
+            <div
+              id="registration-generated-url"
+              className="flex items-center gap-2 bg-[var(--bd-primary-50)] border border-[var(--bd-primary-100)] rounded-[10px] px-3 py-2.5"
+            >
               <I.link size={14} className="text-primary-600" />
-              <input
-                id="rl-url"
-                readOnly
-                value={url}
-                className="font-mono text-[12.5px] text-primary-600 truncate flex-1 bg-transparent border-0 outline-none"
-              />
+              <span className="font-mono text-[12.5px] text-primary-600 truncate flex-1">
+                {url}
+              </span>
               <button
                 type="button"
                 className="text-[12px] font-semibold text-primary-600 inline-flex items-center gap-1 hover:underline"
@@ -366,16 +213,16 @@ function RegistrationLinkForm() {
               Live preview
             </div>
             <div className="text-[12.5px] text-ink-500">
-              <span className="font-semibold text-ink-700">{form.org}</span> · {form.state}
+              <span className="font-semibold text-ink-700">{formData.org}</span> · {formData.state}
               <br />
-              {form.lever} · {form.district}
+              {formData.lever} · {formData.district}
               <br />
-              <span className="text-ink-400">{form.full}</span>
+              <span className="text-ink-400">{formData.full}</span>
             </div>
           </div>
         </div>
       </div>
-    </form>
+    </div>
   );
 }
 
@@ -410,7 +257,11 @@ function LinkCard({ link }: LinkCardProps) {
             <div className="inline-flex items-center gap-2 bg-ink-50 border border-[var(--bd-border)] rounded-[10px] px-3 py-1.5 text-[12.5px]">
               <span className="text-ink-400">{url.split('/').slice(0, -1).join('/')}/</span>
               <span className="font-mono text-rose-500">{link.slug}</span>
-              <button type="button" className="ml-1 text-ink-300 hover:text-ink-700">
+              <button
+                type="button"
+                className="ml-1 text-ink-300 hover:text-ink-700"
+                aria-label="Copy slug"
+              >
                 <I.copy size={12} />
               </button>
             </div>
@@ -418,6 +269,7 @@ function LinkCard({ link }: LinkCardProps) {
               type="button"
               className="w-8 h-8 rounded-[10px] border border-[var(--bd-border)] bg-white hover:bg-ink-50 flex items-center justify-center text-ink-500"
               title="QR code"
+              aria-label="QR code"
             >
               <I.qr size={14} />
             </button>
@@ -425,6 +277,7 @@ function LinkCard({ link }: LinkCardProps) {
               type="button"
               className="w-8 h-8 rounded-[10px] border border-[var(--bd-border)] bg-white hover:bg-ink-50 flex items-center justify-center text-ink-500"
               title="Open"
+              aria-label="Open link"
             >
               <I.link size={14} />
             </button>
@@ -461,6 +314,7 @@ function LinkCard({ link }: LinkCardProps) {
             type="button"
             className="w-8 h-8 rounded-[10px] border border-rose-200 text-rose-500 hover:bg-rose-50 flex items-center justify-center"
             title="Delete link"
+            aria-label="Delete link"
           >
             <I.x size={14} />
           </button>
@@ -472,9 +326,9 @@ function LinkCard({ link }: LinkCardProps) {
 
 function YourLinks() {
   const [tab, setTab] = useState<'seeker' | 'provider'>('seeker');
-  const { data: links } = useRegistrationLinks(tab);
-  const list: RegistrationLink[] = links ?? [];
-  const activeCount = list.filter((l) => l.active).length;
+  const { data } = useRegistrationLinks(tab);
+  const links: RegistrationLink[] = data ?? [];
+  const activeCount = links.filter((l) => l.active).length;
 
   return (
     <div className="bd-card bd-shadow overflow-hidden">
@@ -507,14 +361,12 @@ function YourLinks() {
         </div>
       </div>
       <div className="p-5 flex flex-col gap-3">
-        {!links ? (
-          <div className="text-center py-10 text-ink-400 text-[13px]" />
-        ) : list.length === 0 ? (
+        {links.length === 0 ? (
           <div className="text-center py-10 text-ink-400 text-[13px]">
             No {tab} links yet. Create one above.
           </div>
         ) : (
-          list.map((l) => <LinkCard key={l.id} link={l} />)
+          links.map((l) => <LinkCard key={l.id} link={l} />)
         )}
       </div>
     </div>
@@ -522,14 +374,13 @@ function YourLinks() {
 }
 
 function FlaggedProfiles() {
-  const flaggedCount = 0;
   return (
     <div className="bd-card bd-shadow overflow-hidden">
       <div className="px-5 py-4 border-b border-[var(--bd-border)] flex items-center justify-between">
         <div className="flex items-center gap-3">
           <h2 className="font-display font-bold text-[15px] text-ink-900">Flagged profiles</h2>
           <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 text-[11.5px] font-semibold">
-            <I.alert size={11} /> {flaggedCount}
+            <I.alert size={11} /> 0
           </span>
         </div>
         <button
@@ -574,7 +425,9 @@ function FlaggedProfiles() {
   );
 }
 
-export function OnboardingRoute() {
+export default function OnboardingPage() {
+  const [formData, setFormData] = useState<RegistrationLinkFormData>(registrationLinkDefaults);
+
   return (
     <div className="fade-up flex flex-col gap-5">
       <Topbar
@@ -591,7 +444,7 @@ export function OnboardingRoute() {
       />
       <StatStrip />
       <CSVUpload />
-      <RegistrationLinkForm />
+      <RegistrationLinkSection formData={formData} onChange={setFormData} />
       <YourLinks />
       <FlaggedProfiles />
     </div>

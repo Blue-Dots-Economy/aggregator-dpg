@@ -1,5 +1,8 @@
 node_modules
+.next
+out
 dist
 *.tsbuildinfo
 coverage
-.vite
+.turbo
+next-env.d.ts

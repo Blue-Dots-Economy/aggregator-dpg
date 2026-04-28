@@ -1,45 +1,56 @@
-import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { BlueDotsLogo } from '../components/ui/BlueDotsLogo';
-import { I } from '../icons';
-import { ORGS } from '../data/mock';
-import { useAuth } from '../lib/auth-context';
+'use client';
+
+import { useState, useRef, useEffect, type ChangeEvent, type FormEvent } from 'react';
+import { useRouter } from 'next/navigation';
+import { useAuth } from '../../lib/auth-context';
+import { BlueDotsLogo } from '../../components/ui/BlueDotsLogo';
+import { I } from '../../icons';
+import { ORGS } from '../../data/mock';
 
 type Step = 'welcome' | 'login' | 'register';
-type Path = 'existing' | 'member' | null;
+type Path = 'existing' | 'member';
 
-interface SubmitPayload {
-  org: string;
-  password: string;
+interface Dot {
+  ax: number;
+  ay: number;
+  x: number;
+  y: number;
+  dPhaseX: number;
+  dPhaseY: number;
+  dSpeedX: number;
+  dSpeedY: number;
+  dAmpX: number;
+  dAmpY: number;
+  r: number;
+  pulse: number;
+  hue: 'bright' | 'soft';
 }
 
 /**
- * Login route — split-screen brand panel + Welcome → Log in / Register flow.
+ * Login page — split-screen brand panel + welcome/login/register state machine.
  *
- * Renders the unauthenticated entry point of the portal. Drives the auth
- * context's signIn and navigates to the post-login landing page on success.
+ * @returns The login page React element.
  */
-export function LoginRoute() {
-  const navigate = useNavigate();
+export default function LoginPage() {
+  const router = useRouter();
   const { signIn } = useAuth();
 
   const [step, setStep] = useState<Step>('welcome');
-  const [_path, setPath] = useState<Path>(null);
+  const [path, setPath] = useState<Path | null>(null);
   const [org, setOrg] = useState<string>('');
   const [pw, setPw] = useState<string>('');
 
-  const goWelcome = () => {
+  const goWelcome = (): void => {
     setStep('welcome');
   };
-
-  const goLogin = (p: Exclude<Path, null>) => {
+  const goLogin = (p: Path): void => {
     setPath(p);
     setStep(p === 'member' ? 'register' : 'login');
   };
 
-  const handleSubmit = async ({ org: o, password }: SubmitPayload) => {
-    await signIn({ org: o, password });
-    navigate('/blue-dots');
+  const handleEnter = async (payload: { org: string; password?: string }): Promise<void> => {
+    await signIn({ org: payload.org, password: payload.password ?? '' });
+    router.push('/blue-dots');
   };
 
   return (
@@ -102,10 +113,10 @@ export function LoginRoute() {
                 pw={pw}
                 setPw={setPw}
                 onBack={goWelcome}
-                onSubmit={handleSubmit}
+                onSubmit={handleEnter}
               />
             )}
-            {step === 'register' && <RegisterForm onBack={goWelcome} onSubmit={handleSubmit} />}
+            {step === 'register' && <RegisterForm onBack={goWelcome} onSubmit={handleEnter} />}
           </div>
 
           <div className="mt-8 text-[12px] text-ink-400">
@@ -137,29 +148,23 @@ export function LoginRoute() {
           v2.4.0 · build 7281
         </div>
       </div>
+
+      {/* Reference path so unused-var lint stays clean if path ever needed */}
+      <span hidden aria-hidden>
+        {path ?? ''}
+      </span>
     </div>
   );
 }
 
 /* ───────────── Brand panel with particle network ───────────── */
 
-interface Dot {
-  ax: number;
-  ay: number;
-  x: number;
-  y: number;
-  dPhaseX: number;
-  dPhaseY: number;
-  dSpeedX: number;
-  dSpeedY: number;
-  dAmpX: number;
-  dAmpY: number;
-  r: number;
-  pulse: number;
-  hue: 'bright' | 'soft';
-}
-
-function BrandPanel() {
+/**
+ * Animated brand panel rendering a particle network on a canvas.
+ *
+ * @returns Brand panel React element with hero copy and stats.
+ */
+function BrandPanel(): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
@@ -171,7 +176,7 @@ function BrandPanel() {
     let raf = 0;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
 
-    const resize = () => {
+    const resize = (): void => {
       const r = canvas.getBoundingClientRect();
       canvas.width = r.width * dpr;
       canvas.height = r.height * dpr;
@@ -180,7 +185,7 @@ function BrandPanel() {
 
     let dots: Dot[] = [];
 
-    const buildDots = () => {
+    const buildDots = (): void => {
       const W = canvas.getBoundingClientRect().width;
       const H = canvas.getBoundingClientRect().height;
       if (W < 10 || H < 10) return;
@@ -217,7 +222,7 @@ function BrandPanel() {
       dots = next;
     };
 
-    const onResize = () => {
+    const onResize = (): void => {
       resize();
       buildDots();
     };
@@ -225,10 +230,10 @@ function BrandPanel() {
     const ro = new ResizeObserver(onResize);
     ro.observe(canvas);
 
-    const W = () => canvas.getBoundingClientRect().width;
-    const H = () => canvas.getBoundingClientRect().height;
+    const W = (): number => canvas.getBoundingClientRect().width;
+    const H = (): number => canvas.getBoundingClientRect().height;
 
-    const draw = () => {
+    const draw = (): void => {
       const w = W();
       const h = H();
       ctx.clearRect(0, 0, w, h);
@@ -300,9 +305,7 @@ function BrandPanel() {
   return (
     <div
       className="hidden lg:flex relative w-[58%] flex-col justify-between p-12 overflow-hidden text-white"
-      style={{
-        background: 'linear-gradient(135deg, #0F172A 0%, #172554 45%, #1E3A5F 100%)',
-      }}
+      style={{ background: 'linear-gradient(135deg, #0F172A 0%, #172554 45%, #1E3A5F 100%)' }}
     >
       {/* canvas network */}
       <canvas
@@ -359,8 +362,8 @@ function BrandPanel() {
         </h1>
 
         <p className="text-[15px] text-white/70 leading-relaxed mt-5 max-w-[460px]">
-          A unified network where providers, and seekers move together — every blue dot is a person,
-          an opportunity, a path forward.
+          A unified network where aggregators, providers, and seekers move together — every blue dot
+          is a person, an opportunity, a path forward.
         </p>
 
         <div className="flex items-center gap-7 mt-8 pt-6 border-t border-white/10">
@@ -372,7 +375,7 @@ function BrandPanel() {
       </div>
 
       {/* footer attribution */}
-      <div className="relative z-10"></div>
+      <div className="relative z-10" />
     </div>
   );
 }
@@ -382,7 +385,13 @@ interface BrandStatProps {
   label: string;
 }
 
-function BrandStat({ n, label }: BrandStatProps) {
+/**
+ * A compact stat label used in the brand panel footer row.
+ *
+ * @param props - Number/value and label text.
+ * @returns Stat React element.
+ */
+function BrandStat({ n, label }: BrandStatProps): JSX.Element {
   return (
     <div>
       <div className="font-display font-bold text-[22px] text-white leading-none tracking-tight">
@@ -394,10 +403,16 @@ function BrandStat({ n, label }: BrandStatProps) {
 }
 
 interface WelcomeProps {
-  onPath: (p: Exclude<Path, null>) => void;
+  onPath: (p: Path) => void;
 }
 
-function Welcome({ onPath }: WelcomeProps) {
+/**
+ * Welcome card with two choices: existing user sign-in or new member registration.
+ *
+ * @param props - Path selection callback.
+ * @returns Welcome React element.
+ */
+function Welcome({ onPath }: WelcomeProps): JSX.Element {
   return (
     <div>
       <h2 className="font-display font-bold text-[28px] text-ink-900 tracking-tight leading-tight">
@@ -409,6 +424,7 @@ function Welcome({ onPath }: WelcomeProps) {
 
       <div className="grid grid-cols-1 gap-2.5 mt-7">
         <button
+          type="button"
           onClick={() => onPath('existing')}
           className="group w-full flex items-center justify-between gap-4 p-4 pr-5 rounded-[14px] border text-left transition-all
                      border-[var(--bd-primary)] bg-[var(--bd-primary-50)]/50 hover:bg-[var(--bd-primary-50)]"
@@ -435,6 +451,7 @@ function Welcome({ onPath }: WelcomeProps) {
         </button>
 
         <button
+          type="button"
           onClick={() => onPath('member')}
           className="group w-full flex items-center justify-between gap-4 p-4 pr-5 rounded-[14px] border text-left transition-all
                      border-[var(--bd-border)] hover:border-ink-300 hover:bg-ink-50/60"
@@ -470,11 +487,19 @@ interface LoginFormProps {
   pw: string;
   setPw: (v: string) => void;
   onBack: () => void;
-  onSubmit: (payload: SubmitPayload) => void | Promise<void>;
+  onSubmit: (payload: { org: string; password: string }) => void | Promise<void>;
 }
 
-function LoginForm({ org, setOrg, pw, setPw, onBack, onSubmit }: LoginFormProps) {
-  const canSubmit = org.length > 0 && pw.length >= 4;
+/**
+ * Login form with organisation select and password input.
+ *
+ * @param props - Controlled state, back/submit callbacks.
+ * @returns Login form React element.
+ */
+function LoginForm({ org, setOrg, pw, setPw, onBack, onSubmit }: LoginFormProps): JSX.Element {
+  const orgs: readonly string[] = ORGS;
+
+  const canSubmit = Boolean(org) && pw.length >= 4;
 
   return (
     <form
@@ -510,7 +535,7 @@ function LoginForm({ org, setOrg, pw, setPw, onBack, onSubmit }: LoginFormProps)
               style={{ color: org ? '#0B1020' : '#9098B5' }}
             >
               <option value="">— Organisation —</option>
-              {ORGS.map((o) => (
+              {orgs.map((o) => (
                 <option key={o} value={o}>
                   {o}
                 </option>
@@ -565,10 +590,10 @@ function LoginForm({ org, setOrg, pw, setPw, onBack, onSubmit }: LoginFormProps)
 
 interface RegisterFormProps {
   onBack: () => void;
-  onSubmit: (payload: SubmitPayload) => void | Promise<void>;
+  onSubmit: (payload: { org: string; password?: string }) => void | Promise<void>;
 }
 
-interface RegisterState {
+interface RegState {
   assoc: string;
   sub: string;
   name: string;
@@ -578,8 +603,14 @@ interface RegisterState {
   cpw: string;
 }
 
-function RegisterForm({ onBack, onSubmit }: RegisterFormProps) {
-  const [f, setF] = useState<RegisterState>({
+/**
+ * Registration form for new aggregator organisations.
+ *
+ * @param props - Back/submit callbacks.
+ * @returns Registration form React element.
+ */
+function RegisterForm({ onBack, onSubmit }: RegisterFormProps): JSX.Element {
+  const [f, setF] = useState<RegState>({
     assoc: '',
     sub: '',
     name: '',
@@ -588,21 +619,16 @@ function RegisterForm({ onBack, onSubmit }: RegisterFormProps) {
     pw: '',
     cpw: '',
   });
-  const set = (k: keyof RegisterState) => (e: ChangeEvent<HTMLInputElement>) =>
-    setF((prev) => ({ ...prev, [k]: e.target.value }));
+  const set =
+    (k: keyof RegState) =>
+    (e: ChangeEvent<HTMLInputElement>): void =>
+      setF((prev) => ({ ...prev, [k]: e.target.value }));
 
   const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email);
   const phoneOk = f.phone.replace(/\D/g, '').length >= 10;
   const pwOk = f.pw.length >= 6;
   const matchOk = f.pw === f.cpw && f.cpw.length > 0;
-  const canSubmit =
-    f.assoc.length > 0 &&
-    f.sub.length > 0 &&
-    f.name.length > 0 &&
-    emailOk &&
-    phoneOk &&
-    pwOk &&
-    matchOk;
+  const canSubmit = Boolean(f.assoc && f.sub && f.name && emailOk && phoneOk && pwOk && matchOk);
 
   return (
     <form
@@ -653,7 +679,7 @@ function RegisterForm({ onBack, onSubmit }: RegisterFormProps) {
           placeholder="name@org.in"
           value={f.email}
           onChange={set('email')}
-          invalid={f.email.length > 0 && !emailOk}
+          invalid={Boolean(f.email) && !emailOk}
         />
         <RegField
           label="Phone"
@@ -661,7 +687,7 @@ function RegisterForm({ onBack, onSubmit }: RegisterFormProps) {
           placeholder="+91 ..."
           value={f.phone}
           onChange={set('phone')}
-          invalid={f.phone.length > 0 && !phoneOk}
+          invalid={Boolean(f.phone) && !phoneOk}
         />
         <RegField
           label="Password"
@@ -669,7 +695,7 @@ function RegisterForm({ onBack, onSubmit }: RegisterFormProps) {
           placeholder="At least 6 characters"
           value={f.pw}
           onChange={set('pw')}
-          {...(f.pw.length > 0 && !pwOk ? { hint: 'Use at least 6 characters' } : {})}
+          {...(f.pw && !pwOk ? { hint: 'Use at least 6 characters' } : {})}
         />
         <RegField
           label="Confirm Password"
@@ -677,8 +703,8 @@ function RegisterForm({ onBack, onSubmit }: RegisterFormProps) {
           placeholder="Repeat password"
           value={f.cpw}
           onChange={set('cpw')}
-          invalid={f.cpw.length > 0 && !matchOk}
-          {...(f.cpw.length > 0 && !matchOk ? { hint: 'Passwords don’t match' } : {})}
+          invalid={Boolean(f.cpw) && !matchOk}
+          {...(f.cpw && !matchOk ? { hint: 'Passwords don’t match' } : {})}
           colSpan={2}
         />
       </div>
@@ -698,7 +724,7 @@ function RegisterForm({ onBack, onSubmit }: RegisterFormProps) {
 
       <div className="mt-4 text-[12px] text-ink-400 flex items-start gap-2">
         <span className="w-1 h-1 rounded-full bg-ink-300 mt-1.5 shrink-0" />
-        Your registration will be reviewed by the Blue Dots team. You’ll receive an email once
+        Your registration will be reviewed by the Blue Dots team. You{'’'}ll receive an email once
         approved.
       </div>
     </form>
@@ -713,9 +739,28 @@ interface RegFieldProps {
   onChange: (e: ChangeEvent<HTMLInputElement>) => void;
   invalid?: boolean;
   hint?: string;
-  colSpan?: number;
+  colSpan?: 1 | 2;
 }
 
+/**
+ * Slugifies a label into a stable id-safe token.
+ *
+ * @param s - The label string to slugify.
+ * @returns Lowercase, hyphen-separated id fragment.
+ */
+function slug(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+/**
+ * A labelled input field for the registration form.
+ *
+ * @param props - Field props (label, value, change handler, optional hint/invalid/colSpan).
+ * @returns Input field React element with paired label and optional hint.
+ */
 function RegField({
   label,
   type = 'text',
@@ -725,11 +770,8 @@ function RegField({
   invalid,
   hint,
   colSpan = 1,
-}: RegFieldProps) {
-  const id = `reg-${label
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/(^-|-$)/g, '')}`;
+}: RegFieldProps): JSX.Element {
+  const id = `reg-${slug(label)}`;
   return (
     <div className={colSpan === 2 ? 'sm:col-span-2' : ''}>
       <label className="bd-label" htmlFor={id}>
@@ -738,13 +780,13 @@ function RegField({
       <input
         id={id}
         type={type}
-        placeholder={placeholder}
+        {...(placeholder !== undefined ? { placeholder } : {})}
         value={value}
         onChange={onChange}
         className="bd-input"
-        style={invalid ? { borderColor: '#EF4444' } : undefined}
+        {...(invalid ? { style: { borderColor: '#EF4444' } } : {})}
       />
-      {hint && <div className="text-[11.5px] text-[#EF4444] mt-1">{hint}</div>}
+      {hint ? <div className="text-[11.5px] text-[#EF4444] mt-1">{hint}</div> : null}
     </div>
   );
 }

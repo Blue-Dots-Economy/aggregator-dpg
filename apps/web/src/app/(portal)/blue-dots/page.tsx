@@ -1,36 +1,57 @@
-/**
- * My Blue Dots route — tracks every participant in the network across
- * Seekers, Providers, and Opportunity Providers tabs.
- */
+'use client';
 
 import { useState, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { Button } from '../components/ui/Button';
-import { StatusPill } from '../components/ui/StatusPill';
-import { Avatar } from '../components/ui/Avatar';
-import { SegmentedTabs, type SegmentedTab } from '../components/ui/SegmentedTabs';
-import { Topbar } from '../components/shell/Topbar';
-import { I, type IconName } from '../icons';
-import { useSeekers, useProviders, useOppProviders } from '../hooks/useBlueDots';
-import type { ParticipantBase, Provider } from '../types';
+import { Button } from '../../../components/ui/Button';
+import { StatusPill } from '../../../components/ui/StatusPill';
+import { Avatar } from '../../../components/ui/Avatar';
+import { SegmentedTabs, type SegmentedTab } from '../../../components/ui/SegmentedTabs';
+import { Topbar } from '../../../components/shell/Topbar';
+import { I, type IconName } from '../../../icons';
+import { useSeekers, useProviders, useOppProviders } from '../../../hooks/useBlueDots';
+import type { ParticipantBase, Provider } from '../../../types';
 
 type Tab = 'seekers' | 'providers' | 'opp';
 
 type StatTone = 'active' | 'risk' | 'inactive' | 'satisfied';
-type DeltaTone = 'up' | 'down' | 'flat';
-type ChipTone = 'soft' | 'warm' | 'cool' | 'mute';
-type TableKind = 'seeker' | 'provider' | 'opp';
 
-interface ToneStyle {
+interface ToneConfig {
   ring: string;
   bg: string;
   icon: string;
   num: string;
 }
 
+const STAT_TONES: Record<StatTone, ToneConfig> = {
+  active: {
+    ring: '#A7F3D0',
+    bg: 'linear-gradient(180deg,#ECFDF5 0%,#FFFFFF 70%)',
+    icon: '#10B981',
+    num: '#047857',
+  },
+  risk: {
+    ring: '#FCD34D',
+    bg: 'linear-gradient(180deg,#FFFBEB 0%,#FFFFFF 70%)',
+    icon: '#F59E0B',
+    num: '#B45309',
+  },
+  inactive: {
+    ring: '#FCA5A5',
+    bg: 'linear-gradient(180deg,#FEF2F2 0%,#FFFFFF 70%)',
+    icon: '#EF4444',
+    num: '#B91C1C',
+  },
+  satisfied: {
+    ring: '#C7D2FE',
+    bg: 'linear-gradient(180deg,#EEF2FF 0%,#FFFFFF 70%)',
+    icon: '#6366F1',
+    num: '#4338CA',
+  },
+};
+
 interface StatCardProps {
   tone: StatTone;
-  count: string | number;
+  count: string;
   label: string;
   icon: IconName;
   hint?: string;
@@ -38,33 +59,7 @@ interface StatCardProps {
 }
 
 function StatCard({ tone, count, label, icon, hint, action }: StatCardProps) {
-  const tones: Record<StatTone, ToneStyle> = {
-    active: {
-      ring: '#A7F3D0',
-      bg: 'linear-gradient(180deg,#ECFDF5 0%,#FFFFFF 70%)',
-      icon: '#10B981',
-      num: '#047857',
-    },
-    risk: {
-      ring: '#FCD34D',
-      bg: 'linear-gradient(180deg,#FFFBEB 0%,#FFFFFF 70%)',
-      icon: '#F59E0B',
-      num: '#B45309',
-    },
-    inactive: {
-      ring: '#FCA5A5',
-      bg: 'linear-gradient(180deg,#FEF2F2 0%,#FFFFFF 70%)',
-      icon: '#EF4444',
-      num: '#B91C1C',
-    },
-    satisfied: {
-      ring: '#C7D2FE',
-      bg: 'linear-gradient(180deg,#EEF2FF 0%,#FFFFFF 70%)',
-      icon: '#6366F1',
-      num: '#4338CA',
-    },
-  };
-  const t = tones[tone];
+  const t = STAT_TONES[tone] ?? STAT_TONES.inactive;
   const Ic = I[icon];
   return (
     <div
@@ -94,19 +89,22 @@ function StatCard({ tone, count, label, icon, hint, action }: StatCardProps) {
   );
 }
 
+type DeltaTone = 'up' | 'down' | 'flat';
+
 interface MiniStatProps {
   label: string;
-  value: string | number;
+  value: string;
   delta?: string;
   deltaTone?: DeltaTone;
 }
 
+const DELTA_TONES: Record<DeltaTone, string> = {
+  up: 'text-emerald-600 bg-emerald-50',
+  down: 'text-rose-600 bg-rose-50',
+  flat: 'text-ink-500 bg-ink-100',
+};
+
 function MiniStat({ label, value, delta, deltaTone = 'flat' }: MiniStatProps) {
-  const tones: Record<DeltaTone, string> = {
-    up: 'text-emerald-600 bg-emerald-50',
-    down: 'text-rose-600 bg-rose-50',
-    flat: 'text-ink-500 bg-ink-100',
-  };
   return (
     <div className="bd-card p-4 flex flex-col gap-1.5">
       <div className="text-[12px] text-ink-400 font-medium">{label}</div>
@@ -116,7 +114,7 @@ function MiniStat({ label, value, delta, deltaTone = 'flat' }: MiniStatProps) {
         </div>
         {delta && (
           <span
-            className={`text-[11px] font-semibold px-1.5 py-0.5 rounded-md ${tones[deltaTone]}`}
+            className={`text-[11px] font-semibold px-1.5 py-0.5 rounded-md ${DELTA_TONES[deltaTone]}`}
           >
             {delta}
           </span>
@@ -126,63 +124,30 @@ function MiniStat({ label, value, delta, deltaTone = 'flat' }: MiniStatProps) {
   );
 }
 
+type ChipTone = 'soft' | 'warm' | 'cool' | 'mute';
+
 interface ActionChipProps {
   label: string;
   tone?: ChipTone;
   icon?: ReactNode;
 }
 
+const CHIP_TONES: Record<ChipTone, string> = {
+  soft: 'bg-[var(--bd-primary-50)] text-primary-600 hover:bg-[var(--bd-primary-100)]',
+  warm: 'bg-amber-50 text-amber-800 hover:bg-amber-100',
+  cool: 'bg-sky-50 text-sky-800 hover:bg-sky-100',
+  mute: 'bg-ink-100 text-ink-600 hover:bg-ink-200',
+};
+
 function ActionChip({ label, tone = 'soft', icon }: ActionChipProps) {
-  const tones: Record<ChipTone, string> = {
-    soft: 'bg-[var(--bd-primary-50)] text-primary-600 hover:bg-[var(--bd-primary-100)]',
-    warm: 'bg-amber-50 text-amber-800 hover:bg-amber-100',
-    cool: 'bg-sky-50 text-sky-800 hover:bg-sky-100',
-    mute: 'bg-ink-100 text-ink-600 hover:bg-ink-200',
-  };
   return (
     <button
       type="button"
-      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11.5px] font-semibold transition-colors ${tones[tone]}`}
+      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11.5px] font-semibold transition-colors ${CHIP_TONES[tone]}`}
     >
       {icon}
       {label}
     </button>
-  );
-}
-
-interface NumPart {
-  v: number;
-  label: string;
-  short: string;
-  bg: string;
-  fg: string;
-}
-
-interface NumCellProps {
-  total: number;
-  parts: NumPart[];
-}
-
-// Kept inline per spec — currently unreferenced by the table layout but
-// retained as a sibling of FunnelCell for future column variants.
-function _NumCell({ total, parts }: NumCellProps) {
-  return (
-    <div className="flex items-center gap-3">
-      <div className="font-display font-bold text-[16px] text-ink-900 tabular-nums">{total}</div>
-      <div className="flex items-center gap-1.5">
-        {parts.map((p, i) => (
-          <div key={i} className="flex flex-col items-center" title={p.label}>
-            <div className="text-[10px] text-ink-400 leading-none mb-1">{p.short}</div>
-            <div
-              className="text-[11px] font-semibold tabular-nums px-1.5 py-0.5 rounded-md"
-              style={{ background: p.bg, color: p.fg }}
-            >
-              {p.v}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
   );
 }
 
@@ -198,18 +163,13 @@ interface FunnelCellProps {
   parts: FunnelPart[];
 }
 
-interface PortalPos {
-  x: number;
-  y: number;
-}
-
 function FunnelCell({ total, parts }: FunnelCellProps) {
   const sum = parts.reduce((a, b) => a + b.v, 0) || 1;
-  const [hover, setHover] = useState<boolean>(false);
-  const [pos, setPos] = useState<PortalPos>({ x: 0, y: 0 });
+  const [hover, setHover] = useState(false);
+  const [pos, setPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const ref = useRef<HTMLDivElement | null>(null);
 
-  const onEnter = (): void => {
+  const onEnter = () => {
     const r = ref.current?.getBoundingClientRect();
     if (!r) return;
     setPos({ x: r.left + window.scrollX, y: r.bottom + window.scrollY + 8 });
@@ -235,6 +195,7 @@ function FunnelCell({ total, parts }: FunnelCellProps) {
       </div>
 
       {hover &&
+        typeof document !== 'undefined' &&
         createPortal(
           <div
             style={{ position: 'absolute', left: pos.x, top: pos.y, zIndex: 9999 }}
@@ -272,13 +233,15 @@ function ProgressTiny({ pct }: { pct: number }) {
   );
 }
 
+type RowKind = 'seeker' | 'provider' | 'opp';
+
 interface RecommendedAction {
   label: string;
   tone: ChipTone;
   icon: ReactNode;
 }
 
-function recommendedActions(row: ParticipantBase, kind: TableKind): RecommendedAction[] {
+function recommendedActions(row: ParticipantBase, kind: RowKind): RecommendedAction[] {
   const out: RecommendedAction[] = [];
   if (row.status === 'at-risk')
     out.push({ label: 'Re-engage', tone: 'warm', icon: <I.send size={12} /> });
@@ -297,29 +260,36 @@ function recommendedActions(row: ParticipantBase, kind: TableKind): RecommendedA
   return out.slice(0, 2);
 }
 
-interface ParticipantTableProps {
-  kind: TableKind;
-  rows: ParticipantBase[];
+interface ParticipantTableProps<R extends ParticipantBase> {
+  kind: RowKind;
+  rows: R[];
 }
 
-function ParticipantTable({ kind, rows }: ParticipantTableProps) {
-  const headerLabel =
-    kind === 'seeker' ? 'Participants' : kind === 'opp' ? 'Opportunity Providers' : 'Providers';
-  const stickyCol = kind === 'seeker' ? 'Participant' : 'Provider';
-  const minWidth = kind === 'provider' ? 1180 : 1080;
-
+function ParticipantTable<R extends ParticipantBase>({ kind, rows }: ParticipantTableProps<R>) {
+  const searchId = `bd-search-${kind}`;
   return (
     <div className="bd-card bd-shadow overflow-hidden">
       <div className="px-5 py-4 flex items-center gap-3 border-b border-[var(--bd-border)]">
-        <div className="font-display font-bold text-[15px] text-ink-900">{headerLabel}</div>
+        <div className="font-display font-bold text-[15px] text-ink-900">
+          {kind === 'seeker'
+            ? 'Participants'
+            : kind === 'opp'
+              ? 'Opportunity Providers'
+              : 'Providers'}
+        </div>
         <span className="text-[12px] text-ink-400">
           {rows.length} of {rows.length}
         </span>
 
         <div className="ml-auto flex items-center gap-2">
           <div className="relative">
+            <label htmlFor={searchId} className="sr-only">
+              Search participants
+            </label>
             <I.search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-300" />
             <input
+              id={searchId}
+              aria-label="Search participants"
               className="bd-input pl-9 w-[260px] text-[13px] py-1.5"
               placeholder={
                 kind === 'seeker' ? 'Search by name, ID, profile…' : 'Search by org, role, ID…'
@@ -336,7 +306,7 @@ function ParticipantTable({ kind, rows }: ParticipantTableProps) {
       </div>
 
       <div className="overflow-auto scroll-x" style={{ maxHeight: 520 }}>
-        <table className="bd-table" style={{ minWidth }}>
+        <table className="bd-table" style={{ minWidth: kind === 'provider' ? 1180 : 1080 }}>
           <thead style={{ position: 'sticky', top: 0, zIndex: 4, background: '#FAFBFE' }}>
             <tr>
               <th
@@ -348,7 +318,7 @@ function ParticipantTable({ kind, rows }: ParticipantTableProps) {
                   minWidth: 240,
                 }}
               >
-                {stickyCol}
+                {kind === 'seeker' ? 'Participant' : 'Provider'}
               </th>
               <th>Joined</th>
               {kind === 'provider' && <th>Job Role</th>}
@@ -361,7 +331,8 @@ function ParticipantTable({ kind, rows }: ParticipantTableProps) {
           </thead>
           <tbody>
             {rows.map((r) => {
-              const roleParts = kind === 'provider' ? (r as Provider).role.split(' · ') : [];
+              const roleParts =
+                kind === 'provider' ? (r as unknown as Provider).role.split(' · ') : [];
               return (
                 <tr key={r.id} className="fade-up">
                   <td
@@ -469,6 +440,7 @@ function ParticipantTable({ kind, rows }: ParticipantTableProps) {
                       <button
                         type="button"
                         className="w-7 h-7 rounded-md hover:bg-ink-100 flex items-center justify-center text-ink-400"
+                        aria-label="More actions"
                       >
                         <I.more size={16} />
                       </button>
@@ -486,7 +458,11 @@ function ParticipantTable({ kind, rows }: ParticipantTableProps) {
           Showing 1–{rows.length} of {rows.length}
         </div>
         <div className="flex items-center gap-1">
-          <button type="button" className="px-2.5 py-1.5 rounded-md hover:bg-ink-100 text-ink-400">
+          <button
+            type="button"
+            aria-label="Previous page"
+            className="px-2.5 py-1.5 rounded-md hover:bg-ink-100 text-ink-400"
+          >
             <I.chevL size={14} />
           </button>
           <button
@@ -501,7 +477,11 @@ function ParticipantTable({ kind, rows }: ParticipantTableProps) {
           <button type="button" className="px-3 py-1 rounded-md hover:bg-ink-100">
             3
           </button>
-          <button type="button" className="px-2.5 py-1.5 rounded-md hover:bg-ink-100 text-ink-400">
+          <button
+            type="button"
+            aria-label="Next page"
+            className="px-2.5 py-1.5 rounded-md hover:bg-ink-100 text-ink-400"
+          >
             <I.chevR size={14} />
           </button>
         </div>
@@ -512,34 +492,22 @@ function ParticipantTable({ kind, rows }: ParticipantTableProps) {
 
 function LoadingCard() {
   return (
-    <div
-      className="bd-card bd-shadow p-5"
-      style={{ minHeight: 200, opacity: 0.5 }}
-      aria-busy="true"
-    />
+    <div className="bd-card bd-shadow p-8 text-[13px] text-ink-400" style={{ opacity: 0.6 }}>
+      Loading…
+    </div>
   );
 }
 
-function ErrorCard({ message }: { message: string }) {
+function ErrorCard() {
   return (
-    <div className="bd-card bd-shadow p-5 flex items-center gap-3">
-      <div className="w-9 h-9 rounded-[10px] flex items-center justify-center bg-rose-50 text-rose-600">
-        <I.alert size={18} />
-      </div>
-      <div>
-        <div className="font-display font-bold text-[14px] text-ink-900">Unable to load data</div>
-        <div className="text-[12.5px] text-ink-500 mt-0.5">{message}</div>
-      </div>
+    <div className="bd-card bd-shadow p-8 text-[13px] text-rose-600">
+      Failed to load. Please try again.
     </div>
   );
 }
 
 function SeekersTab() {
   const { data, isLoading, isError } = useSeekers();
-  if (isLoading) return <LoadingCard />;
-  if (isError) return <ErrorCard message="Could not load seekers." />;
-  const rows = data ?? [];
-
   return (
     <div className="flex flex-col gap-5">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -572,17 +540,20 @@ function SeekersTab() {
         <MiniStat label="New Participants" value="9" delta="this week" deltaTone="flat" />
       </div>
 
-      <ParticipantTable kind="seeker" rows={rows} />
+      {isLoading ? (
+        <LoadingCard />
+      ) : isError ? (
+        <ErrorCard />
+      ) : (
+        <ParticipantTable kind="seeker" rows={data ?? []} />
+      )}
     </div>
   );
 }
 
 function ProvidersTab() {
   const { data, isLoading, isError } = useProviders();
-  if (isLoading) return <LoadingCard />;
-  if (isError) return <ErrorCard message="Could not load providers." />;
   const rows: Provider[] = data ?? [];
-
   return (
     <div className="flex flex-col gap-5">
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -617,17 +588,19 @@ function ProvidersTab() {
         <MiniStat label="Hires this Month" value="34" delta="↑ 22%" deltaTone="up" />
       </div>
 
-      <ParticipantTable kind="provider" rows={rows} />
+      {isLoading ? (
+        <LoadingCard />
+      ) : isError ? (
+        <ErrorCard />
+      ) : (
+        <ParticipantTable<Provider> kind="provider" rows={rows} />
+      )}
     </div>
   );
 }
 
 function OppProvidersTab() {
   const { data, isLoading, isError } = useOppProviders();
-  if (isLoading) return <LoadingCard />;
-  if (isError) return <ErrorCard message="Could not load opportunity providers." />;
-  const rows = data ?? [];
-
   return (
     <div className="flex flex-col gap-5">
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -656,44 +629,46 @@ function OppProvidersTab() {
         <MiniStat label="Placement Rate" value="46%" delta="↑ 4%" deltaTone="up" />
       </div>
 
-      <ParticipantTable kind="opp" rows={rows} />
+      {isLoading ? (
+        <LoadingCard />
+      ) : isError ? (
+        <ErrorCard />
+      ) : (
+        <ParticipantTable kind="opp" rows={data ?? []} />
+      )}
     </div>
   );
 }
 
-/**
- * Top-level My Blue Dots route component. Renders the topbar, the tab switcher,
- * and the active tab's content (seekers, providers, or opportunity providers).
- */
-export function BlueDotsRoute() {
-  const [tab, setTab] = useState<Tab>('seekers');
+const TAB_ITEMS: SegmentedTab<Tab>[] = [
+  {
+    id: 'seekers',
+    label: (
+      <span className="inline-flex items-center gap-2">
+        <I.users size={14} /> Seekers <span className="text-ink-300">·</span> 77
+      </span>
+    ),
+  },
+  {
+    id: 'providers',
+    label: (
+      <span className="inline-flex items-center gap-2">
+        <I.briefcase size={14} /> Providers <span className="text-ink-300">·</span> 24
+      </span>
+    ),
+  },
+  {
+    id: 'opp',
+    label: (
+      <span className="inline-flex items-center gap-2">
+        <I.spark size={14} /> Opportunity Providers <span className="text-ink-300">·</span> 18
+      </span>
+    ),
+  },
+];
 
-  const items: SegmentedTab<Tab>[] = [
-    {
-      id: 'seekers',
-      label: (
-        <span className="inline-flex items-center gap-2">
-          <I.users size={14} /> Seekers <span className="text-ink-300">·</span> 77
-        </span>
-      ),
-    },
-    {
-      id: 'providers',
-      label: (
-        <span className="inline-flex items-center gap-2">
-          <I.briefcase size={14} /> Providers <span className="text-ink-300">·</span> 24
-        </span>
-      ),
-    },
-    {
-      id: 'opp',
-      label: (
-        <span className="inline-flex items-center gap-2">
-          <I.spark size={14} /> Opportunity Providers <span className="text-ink-300">·</span> 18
-        </span>
-      ),
-    },
-  ];
+export default function BlueDotsPage() {
+  const [tab, setTab] = useState<Tab>('seekers');
 
   return (
     <div className="fade-up">
@@ -710,7 +685,7 @@ export function BlueDotsRoute() {
         }
       />
 
-      <SegmentedTabs<Tab> value={tab} onChange={setTab} items={items} className="mb-6" />
+      <SegmentedTabs<Tab> value={tab} onChange={setTab} items={TAB_ITEMS} className="mb-6" />
 
       {tab === 'seekers' && <SeekersTab />}
       {tab === 'providers' && <ProvidersTab />}
@@ -718,7 +693,3 @@ export function BlueDotsRoute() {
     </div>
   );
 }
-
-// Reference _NumCell so strict unused-locals checks don't flag it; the helper
-// is retained inline per the porting spec for future column variants.
-void _NumCell;

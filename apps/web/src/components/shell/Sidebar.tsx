@@ -1,4 +1,7 @@
-import { NavLink } from 'react-router-dom';
+'use client';
+
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { I, type IconName } from '../../icons';
 import { BlueDotsLogo } from '../ui/BlueDotsLogo';
 import { useAuth } from '../../lib/auth-context';
@@ -97,6 +100,7 @@ function ActivityRow({ who, what, when, tone, type }: ActivityItem) {
 }
 
 export function Sidebar() {
+  const pathname = usePathname();
   const { user, signOut } = useAuth();
   const orgInitials = (user?.org ?? 'TR').slice(0, 2).toUpperCase();
 
@@ -121,34 +125,29 @@ export function Sidebar() {
         <nav className="flex flex-col gap-0.5">
           {NAV.map((n) => {
             const Ic = I[n.icon];
+            const isActive = pathname === n.to || pathname?.startsWith(`${n.to}/`);
             return (
-              <NavLink
+              <Link
                 key={n.to}
-                to={n.to}
-                className={({ isActive }) =>
-                  cn(
-                    'group flex items-center gap-3 px-3 py-2.5 rounded-[10px] text-[14px] font-medium transition-all',
-                    isActive ? 'nav-active' : 'text-ink-500 hover:bg-ink-50 hover:text-ink-900',
-                  )
-                }
-              >
-                {({ isActive }) => (
-                  <>
-                    <Ic size={18} stroke={isActive ? 2 : 1.7} />
-                    <span>{n.label}</span>
-                    {n.badge !== undefined && (
-                      <span
-                        className={cn(
-                          'ml-auto text-[11px] font-semibold px-1.5 py-0.5 rounded-md',
-                          isActive ? 'bg-white text-primary-600' : 'bg-ink-100 text-ink-500',
-                        )}
-                      >
-                        {n.badge}
-                      </span>
-                    )}
-                  </>
+                href={n.to}
+                className={cn(
+                  'group flex items-center gap-3 px-3 py-2.5 rounded-[10px] text-[14px] font-medium transition-all',
+                  isActive ? 'nav-active' : 'text-ink-500 hover:bg-ink-50 hover:text-ink-900',
                 )}
-              </NavLink>
+              >
+                <Ic size={18} stroke={isActive ? 2 : 1.7} />
+                <span>{n.label}</span>
+                {n.badge !== undefined && (
+                  <span
+                    className={cn(
+                      'ml-auto text-[11px] font-semibold px-1.5 py-0.5 rounded-md',
+                      isActive ? 'bg-white text-primary-600' : 'bg-ink-100 text-ink-500',
+                    )}
+                  >
+                    {n.badge}
+                  </span>
+                )}
+              </Link>
             );
           })}
         </nav>
