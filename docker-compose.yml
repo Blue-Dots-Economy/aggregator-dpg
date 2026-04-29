@@ -1,0 +1,248 @@
+name: aggregator-dpg
+
+# Local-dev stack for the Blue Dots Aggregator Portal.
+#
+# Foundations: Postgres, Redis, MinIO, Keycloak, MailHog.
+# Apps:        web (Next.js).  api + worker placeholders are commented in once
+#              those services exist (see apps/api stub).
+#
+# Quick start:
+#   cp .env.example .env
+#   docker compose up -d
+#   docker compose logs -f web
+#
+# URLs (after `up`):
+#   Web app           : http://localhost:3000
+#   API (later)       : http://localhost:4000
+#   Keycloak          : http://localhost:8080      admin / ${KC_BOOTSTRAP_ADMIN_PASSWORD}
+#   MinIO console     : http://localhost:9001      ${MINIO_ROOT_USER} / ${MINIO_ROOT_PASSWORD}
+#   MinIO S3 API      : http://localhost:9000
+#   MailHog UI        : http://localhost:8025      (captures every outbound email)
+#   Postgres          : localhost:5432             aggregator / ${POSTGRES_PASSWORD}
+#   Redis             : localhost:6379
+#
+# Email delivery is intentionally not part of the local stack. Configure SMTP
+# externally (Keycloak realm SMTP settings, API SMTP env vars) when needed.
+
+services:
+  # ─────────────────────────────────────────────────────────────────────────
+  # Foundations
+  # ─────────────────────────────────────────────────────────────────────────
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: aggregator-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-aggregator}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aggregator-dev}
+      POSTGRES_DB: ${POSTGRES_DB:-aggregator}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aggregator} -d ${POSTGRES_DB:-aggregator}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: aggregator-redis
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:RELEASE.2024-12-13T22-19-12Z
+    container_name: aggregator-minio
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Web console
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.5.5
+    container_name: aggregator-keycloak
+    restart: unless-stopped
+    # build: re-bake plugin into the official image so providers/ is on classpath
+    # AND `kc.sh build` has already indexed our SPIs. start-dev uses --import-realm
+    # to load realm JSON on first boot.
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD:-admin}
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: ${POSTGRES_USER:-aggregator}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:-aggregator-dev}
+      KC_HOSTNAME: localhost
+      KC_HOSTNAME_STRICT: "false"
+      KC_HTTP_ENABLED: "true"
+      KC_HEALTH_ENABLED: "true"
+      # SMS provider — use 'log' for local dev (writes OTP to keycloak logs).
+      # Switch to 'twilio' or 'sns' in .env once creds are configured.
+      KC_SPI_SMS_PROVIDER: ${KC_SPI_SMS_PROVIDER:-log}
+      # Twilio (only used when KC_SPI_SMS_PROVIDER=twilio)
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
+      TWILIO_FROM_NUMBER: ${TWILIO_FROM_NUMBER:-}
+      # AWS SNS (only used when KC_SPI_SMS_PROVIDER=sns)
+      AWS_REGION: ${AWS_REGION:-ap-south-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      # SMTP for email OTP — populate in .env to enable email channel.
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_FROM: ${SMTP_FROM:-no-reply@example.com}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./infra/keycloak/realms:/opt/keycloak/data/import:ro
+      - ./infra/keycloak/providers:/opt/keycloak/providers:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/9000 && echo -e 'GET /health/ready HTTP/1.1\\r\\nhost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && head -1 <&3 | grep -q '200'"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Apps
+  # ─────────────────────────────────────────────────────────────────────────
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    image: aggregator-dpg/web:dev
+    container_name: aggregator-web
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      NEXT_TELEMETRY_DISABLED: "1"
+      PORT: "3000"
+      HOSTNAME: "0.0.0.0"
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:4000}
+      API_BASE_URL: ${API_BASE_URL:-http://api:4000}
+      # ─── OIDC (Authorization Code + PKCE) ────────────────────────────
+      # OIDC_ISSUER MUST be reachable from BOTH the browser and the web
+      # container. In compose, `keycloak:8080` works inside the network
+      # but not from the browser. Two viable setups:
+      #   (a) Real DNS in staging/prod (e.g. https://auth.example.com)
+      #       — both browser and container resolve identically. Default.
+      #   (b) Local dev w/ docker only: add to /etc/hosts on the host
+      #       `127.0.0.1 keycloak` and set OIDC_ISSUER=http://keycloak:8080/...
+      #       so both sides agree.
+      # For pure dev iteration, run web with `pnpm --filter @aggregator-dpg/web dev`
+      # so OIDC_ISSUER=http://localhost:8080/... works for both.
+      OIDC_ISSUER: ${OIDC_ISSUER:-http://localhost:8080/realms/aggregator}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-aggregator-portal}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-http://localhost:3100/api/auth/callback}
+      OIDC_POST_LOGOUT_REDIRECT_URI: ${OIDC_POST_LOGOUT_REDIRECT_URI:-http://localhost:3100/}
+      OIDC_SCOPE: ${OIDC_SCOPE:-openid profile email}
+      # ─── Session ──────────────────────────────────────────────────────
+      SESSION_COOKIE_NAME: ${SESSION_COOKIE_NAME:-sid}
+      SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-43200}
+      # SESSION_KEY signs the short-lived OIDC handshake cookie. Generate
+      # with `openssl rand -hex 32` and store in .env. Must be ≥32 chars.
+      SESSION_KEY: ${SESSION_KEY:?SESSION_KEY must be set in .env}
+      # ─── Redis (BFF session store) ────────────────────────────────────
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "3100:3000"   # host 3100 → container 3000 (avoids clashes with `pnpm dev` on 3000)
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+
+  # Uncomment once apps/api has a real NestJS service:
+  #
+  # api:
+  #   build:
+  #     context: .
+  #     dockerfile: apps/api/Dockerfile
+  #   image: aggregator-dpg/api:dev
+  #   container_name: aggregator-api
+  #   restart: unless-stopped
+  #   environment:
+  #     NODE_ENV: production
+  #     PORT: "4000"
+  #     DATABASE_URL: postgres://${POSTGRES_USER:-aggregator}:${POSTGRES_PASSWORD:-aggregator-dev}@postgres:5432/${POSTGRES_DB:-aggregator}
+  #     REDIS_URL: redis://redis:6379
+  #     KEYCLOAK_URL: http://keycloak:8080
+  #     KEYCLOAK_REALM: signal-stack
+  #     KEYCLOAK_CLIENT_ID: aggregator-api
+  #     KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:-change-me}
+  #     S3_ENDPOINT: http://minio:9000
+  #     S3_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+  #     S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+  #     SMTP_HOST: ${SMTP_HOST:-localhost}
+  #     SMTP_PORT: ${SMTP_PORT:-1025}
+  #     LOG_LEVEL: ${LOG_LEVEL:-info}
+  #   ports:
+  #     - "4000:4000"
+  #   depends_on:
+  #     postgres:        { condition: service_healthy }
+  #     redis:           { condition: service_healthy }
+  #     keycloak:        { condition: service_healthy }
+  #     minio:           { condition: service_healthy }
+
+  # Uncomment once the bulk-upload worker is built:
+  #
+  # worker:
+  #   build:
+  #     context: .
+  #     dockerfile: apps/api/Dockerfile        # same codebase, different entry
+  #   image: aggregator-dpg/worker:dev
+  #   container_name: aggregator-worker
+  #   restart: unless-stopped
+  #   command: ["node", "dist/worker.js"]
+  #   environment:
+  #     NODE_ENV: production
+  #     DATABASE_URL: postgres://${POSTGRES_USER:-aggregator}:${POSTGRES_PASSWORD:-aggregator-dev}@postgres:5432/${POSTGRES_DB:-aggregator}
+  #     REDIS_URL: redis://redis:6379
+  #     S3_ENDPOINT: http://minio:9000
+  #     S3_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+  #     S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+  #     LOG_LEVEL: ${LOG_LEVEL:-info}
+  #   depends_on:
+  #     postgres:        { condition: service_healthy }
+  #     redis:           { condition: service_healthy }
+  #     minio:           { condition: service_healthy }
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:
