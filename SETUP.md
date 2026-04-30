@@ -61,7 +61,7 @@ docker compose up -d
 docker compose ps   # wait until aggregator-keycloak is "healthy"
 ```
 
-The Keycloak realm is auto-imported from `infra/keycloak/realms/aggregator-realm.json` on container start.
+The Keycloak realm is auto-imported from `infra/keycloak/realms/aggregator-realm.json` on container start. The custom OTP authenticator SPI is bundled at `infra/keycloak/providers/keycloak-otp-1.0.0-SNAPSHOT.jar` and mounted into `/opt/keycloak/providers/` by Compose, so login-by-OTP works out of the box. The JAR is committed to the repo to keep first-time setup zero-friction; rebuild it from <https://github.com/sanketika-labs/keycloak-otp-authenticator> when you bump the version.
 
 ---
 
