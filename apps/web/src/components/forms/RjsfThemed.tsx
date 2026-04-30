@@ -181,12 +181,21 @@ function TitleField(_props: TitleFieldProps) {
   return null;
 }
 
+// RJSF picks specialised widgets for `format: "email" | "uri" | "tel"` etc.
+// The defaults render unstyled <input>s — alias them to TextWidget so the
+// shared `.bd-input` styling applies everywhere.
 const widgets: RegistryWidgetsType = {
   TextWidget,
   TextareaWidget,
   SelectWidget,
   DateWidget,
   CheckboxWidget,
+  EmailWidget: TextWidget,
+  URLWidget: TextWidget,
+  UpDownWidget: TextWidget,
+  RangeWidget: TextWidget,
+  PasswordWidget: TextWidget,
+  ColorWidget: TextWidget,
 };
 
 export interface RjsfThemedFormProps<T extends GenericObjectType = GenericObjectType> extends Omit<
@@ -198,18 +207,22 @@ export interface RjsfThemedFormProps<T extends GenericObjectType = GenericObject
 
 export function RjsfThemedForm<T extends GenericObjectType = GenericObjectType>({
   className,
+  showErrorList = false,
+  liveValidate = false,
+  noHtml5Validate = true,
   ...props
 }: RjsfThemedFormProps<T>) {
   const validator = validatorAjv8 as unknown as ValidatorType<T, RJSFSchema, GenericObjectType>;
   return (
     <div className={className}>
       <Form<T>
+        showErrorList={showErrorList}
+        liveValidate={liveValidate}
+        noHtml5Validate={noHtml5Validate}
         {...props}
         validator={validator}
         widgets={widgets}
         templates={{ FieldTemplate, ObjectFieldTemplate, TitleFieldTemplate: TitleField }}
-        showErrorList={false}
-        liveValidate={false}
       />
     </div>
   );

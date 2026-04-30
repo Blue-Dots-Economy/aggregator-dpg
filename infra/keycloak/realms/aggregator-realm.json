@@ -99,6 +99,22 @@
         "post.logout.redirect.uris": "http://localhost:3000/##http://localhost:3000/login##http://localhost:3100/##http://localhost:3100/login",
         "pkce.code.challenge.method": "S256"
       }
+    },
+    {
+      "clientId": "aggregator-api",
+      "name": "Aggregator API (service account)",
+      "description": "Confidential client used by apps/api for Keycloak admin operations (create user on registration approval, etc.). Service account holds only realm-management:manage-users.",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "aggregator-api-dev-secret-change-me",
+      "directAccessGrantsEnabled": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": true,
+      "authorizationServicesEnabled": false,
+      "attributes": {
+        "use.refresh.tokens": "false"
+      }
     }
   ],
   "users": [

@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.bluedots.org/aggregator/registration.v1.json",
+  "title": "Aggregator Registration",
+  "description": "Pre-approval payload submitted when an organisation requests an Aggregator account. Only the minimum identity needed to email an admin and create a disabled Keycloak user. Personal name is captured during first login via the Keycloak Update Profile required action; full profile is collected post-login.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["aggregator_type", "association", "email", "phone"],
+  "properties": {
+    "aggregator_type": {
+      "type": "string",
+      "title": "Aggregator Type",
+      "description": "Whether this aggregator represents opportunity seekers (job seekers, students) or opportunity providers (employers, training partners).",
+      "enum": ["seeker", "provider"],
+      "default": "seeker"
+    },
+    "association": {
+      "type": "string",
+      "title": "Organisation",
+      "description": "Parent organisation or association the aggregator represents.",
+      "minLength": 2,
+      "maxLength": 200,
+      "examples": ["TRRAIN", "Pankh Foundation"]
+    },
+    "email": {
+      "type": "string",
+      "title": "Email",
+      "format": "email",
+      "description": "Email used for verification, admin approval correspondence, and login.",
+      "maxLength": 320
+    },
+    "phone": {
+      "type": "string",
+      "title": "Phone",
+      "description": "Mobile number in international E.164 format. Indian numbers may omit the +91 prefix.",
+      "pattern": "^(\\+?\\d{10,15}|\\d{10})$",
+      "examples": ["+919876543210", "9876543210"]
+    }
+  }
+}
