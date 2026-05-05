@@ -30,6 +30,9 @@ WORKDIR /app
 COPY --from=deployer --chown=appuser:appgroup /standalone .
 # Schemas are loaded from config/ at runtime by registration-validator.
 COPY --from=builder --chown=appuser:appgroup /app/config ./config
+# Drizzle migrations are read at runtime by db/migrate.ts (resolved via
+# `../../drizzle/migrations` relative to dist/db/, i.e. /app/drizzle/migrations).
+COPY --from=builder --chown=appuser:appgroup /app/apps/api/drizzle ./drizzle
 USER appuser
 EXPOSE 4000
 CMD ["node", "dist/server.js"]
