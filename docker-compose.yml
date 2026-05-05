@@ -183,6 +183,8 @@ services:
       OIDC_SCOPE: ${OIDC_SCOPE:-openid profile email}
       # ─── Session ──────────────────────────────────────────────────────
       SESSION_COOKIE_NAME: ${SESSION_COOKIE_NAME:-sid}
+      COOKIE_SECURE: ${COOKIE_SECURE:-}
+      PUBLIC_PORTAL_URL: ${PUBLIC_PORTAL_URL:-http://localhost:3100}
       SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-43200}
       # SESSION_KEY signs the short-lived OIDC handshake cookie. Generate
       # with `openssl rand -hex 32` and store in .env. Must be ≥32 chars.
@@ -218,7 +220,7 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-aggregator}:${POSTGRES_PASSWORD:-aggregator-dev}@postgres:5432/${POSTGRES_DB:-aggregator}
       RUN_MIGRATIONS_ON_BOOT: "true"
       # Keycloak admin (service account)
-      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_URL: ${KEYCLOAK_URL:-http://keycloak:8080}
       KEYCLOAK_REALM: ${KEYCLOAK_REALM:-aggregator}
       KEYCLOAK_ADMIN_CLIENT_ID: ${KEYCLOAK_ADMIN_CLIENT_ID:-aggregator-api}
       KEYCLOAK_ADMIN_CLIENT_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET:-aggregator-api-dev-secret-change-me}

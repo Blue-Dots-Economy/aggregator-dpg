@@ -16,6 +16,13 @@ export const OIDC_FLOW_COOKIE = 'oidc_flow';
 
 const FIVE_MIN = 60 * 5;
 
+function cookieSecure(): boolean {
+  const v = process.env.COOKIE_SECURE;
+  if (v === 'false') return false;
+  if (v === 'true') return true;
+  return process.env.NODE_ENV === 'production';
+}
+
 /**
  * Returns cookie attributes for the long-lived session cookie.
  */
@@ -28,7 +35,7 @@ export function sessionCookieOptions(): {
 } {
   return {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: cookieSecure(),
     sameSite: 'lax',
     path: '/',
     maxAge: Number(process.env.SESSION_TTL_SECONDS ?? 60 * 60 * 12),
@@ -47,7 +54,7 @@ export function oidcFlowCookieOptions(): {
 } {
   return {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: cookieSecure(),
     sameSite: 'lax',
     path: '/',
     maxAge: FIVE_MIN,
@@ -66,7 +73,7 @@ export function clearCookieOptions(): {
 } {
   return {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: cookieSecure(),
     sameSite: 'lax',
     path: '/',
     maxAge: 0,
