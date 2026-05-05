@@ -30,7 +30,7 @@ dev: up ## Alias for `up`. Brings the full local stack up.
 
 up: ## Start all foundations + apps in the background.
 	@test -f .env || (echo ".env missing — run 'make setup' first" && exit 1)
-	docker compose up -d --build
+	docker compose -f docker-compose-ebs.yml up -d --build
 
 down: ## Stop and remove all containers (data volumes preserved).
 	docker compose down
