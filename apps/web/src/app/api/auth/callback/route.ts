@@ -95,7 +95,8 @@ function failure(req: NextRequest, reason: string): NextResponse {
 }
 
 function absoluteUrl(req: NextRequest, path: string): string {
-  return new URL(path, req.nextUrl.origin).toString();
+  const base = process.env.PUBLIC_PORTAL_URL ?? req.nextUrl.origin;
+  return new URL(path, base).toString();
 }
 
 function mustEnv(name: string): string {

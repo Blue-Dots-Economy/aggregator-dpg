@@ -110,7 +110,7 @@ services:
       KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
       KC_DB_USERNAME: ${POSTGRES_USER:-aggregator}
       KC_DB_PASSWORD: ${POSTGRES_PASSWORD:-aggregator-dev}
-      KC_HOSTNAME: ${KC_HOSTNAME:-keycloak}
+      KC_HOSTNAME: ${PUBLIC_HOST:-keycloak}
       KC_HOSTNAME_STRICT: "false"
       KC_HTTP_ENABLED: "true"
       KC_HEALTH_ENABLED: "true"
@@ -162,7 +162,7 @@ services:
       NEXT_TELEMETRY_DISABLED: "1"
       PORT: "3000"
       HOSTNAME: "0.0.0.0"
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:4000}
+      NEXT_PUBLIC_API_URL: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}:${API_PORT:-4000}"
       API_BASE_URL: ${API_BASE_URL:-http://api:4000}
       # ─── OIDC (Authorization Code + PKCE) ────────────────────────────
       # OIDC_ISSUER MUST be reachable from BOTH the browser and the web
@@ -175,14 +175,16 @@ services:
       #       so both sides agree.
       # For pure dev iteration, run web with `pnpm --filter @aggregator-dpg/web dev`
       # so OIDC_ISSUER=http://localhost:8080/... works for both.
-      OIDC_ISSUER: ${OIDC_ISSUER:-http://localhost:8080/realms/aggregator}
+      OIDC_ISSUER: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}:${KC_PORT:-8080}/realms/${KEYCLOAK_REALM:-aggregator}"
       OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-aggregator-portal}
       OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
-      OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-http://localhost:3100/api/auth/callback}
-      OIDC_POST_LOGOUT_REDIRECT_URI: ${OIDC_POST_LOGOUT_REDIRECT_URI:-http://localhost:3100/}
+      OIDC_REDIRECT_URI: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}:${PORTAL_PORT:-3100}/api/auth/callback"
+      OIDC_POST_LOGOUT_REDIRECT_URI: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}:${PORTAL_PORT:-3100}/"
       OIDC_SCOPE: ${OIDC_SCOPE:-openid profile email}
       # ─── Session ──────────────────────────────────────────────────────
       SESSION_COOKIE_NAME: ${SESSION_COOKIE_NAME:-sid}
+      COOKIE_SECURE: ${COOKIE_SECURE:-}
+      PUBLIC_PORTAL_URL: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}:${PORTAL_PORT:-3100}"
       SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-43200}
       # SESSION_KEY signs the short-lived OIDC handshake cookie. Generate
       # with `openssl rand -hex 32` and store in .env. Must be ≥32 chars.
@@ -214,11 +216,11 @@ services:
       PORT: "4000"
       HOST: "0.0.0.0"
       LOG_LEVEL: ${LOG_LEVEL:-info}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:3100}
+      CORS_ORIGINS: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}:${PORTAL_PORT:-3100}"
       DATABASE_URL: postgres://${POSTGRES_USER:-aggregator}:${POSTGRES_PASSWORD:-aggregator-dev}@postgres:5432/${POSTGRES_DB:-aggregator}
       RUN_MIGRATIONS_ON_BOOT: "true"
       # Keycloak admin (service account)
-      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_URL: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}:${KC_PORT:-8080}"
       KEYCLOAK_REALM: ${KEYCLOAK_REALM:-aggregator}
       KEYCLOAK_ADMIN_CLIENT_ID: ${KEYCLOAK_ADMIN_CLIENT_ID:-aggregator-api}
       KEYCLOAK_ADMIN_CLIENT_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET:-aggregator-api-dev-secret-change-me}
@@ -236,8 +238,8 @@ services:
       # Approval flow
       APPROVAL_TOKEN_SECRET: ${APPROVAL_TOKEN_SECRET:?APPROVAL_TOKEN_SECRET must be set in .env (≥32 chars)}
       ADMIN_EMAILS: ${ADMIN_EMAILS:-admin@bluedots.local}
-      PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:4000}
-      PUBLIC_PORTAL_URL: ${PUBLIC_PORTAL_URL:-http://localhost:3000}
+      PUBLIC_API_URL: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}:${API_PORT:-4000}"
+      PUBLIC_PORTAL_URL: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}:${PORTAL_PORT:-3100}"
     ports:
       - "4000:4000"
     healthcheck:
