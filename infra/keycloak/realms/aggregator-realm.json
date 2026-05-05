@@ -24,12 +24,12 @@
   "smtpServer": {
     "host": "smtp.gmail.com",
     "port": "587",
-    "from": "srivatsa.k@sahamati.org.in",
+    "from": "example@example.com",
     "fromDisplayName": "Blue Dots Aggregator",
     "ssl": "false",
     "starttls": "true",
     "auth": "true",
-    "user": "srivatsa.k@sahamati.org.in"
+    "user": "example"
   },
   "authenticationFlows": [
     {
