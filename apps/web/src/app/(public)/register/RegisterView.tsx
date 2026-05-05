@@ -18,12 +18,40 @@ type SubmitState =
   | { status: 'idle' }
   | { status: 'submitting' }
   | { status: 'done'; aggregatorId: string }
-  | { status: 'error'; message: string };
+  | { status: 'error'; title: string; detail: string; code: string; requestId: string };
 
 interface RegistrationResponse {
   aggregator_id: string;
   org_slug?: string;
   message?: string;
+}
+
+interface ApiErrorEnvelope {
+  error?: {
+    code?: string;
+    title?: string;
+    detail?: string;
+    requestId?: string;
+  };
+}
+
+function parseError(
+  body: unknown,
+  fallbackStatus: number,
+  fallbackReqId: string,
+): {
+  title: string;
+  detail: string;
+  code: string;
+  requestId: string;
+} {
+  const env = body as ApiErrorEnvelope;
+  return {
+    title: env?.error?.title ?? 'Submission failed',
+    detail: env?.error?.detail ?? `The server returned HTTP ${fallbackStatus}.`,
+    code: env?.error?.code ?? 'UNKNOWN',
+    requestId: env?.error?.requestId ?? fallbackReqId,
+  };
 }
 
 /**
@@ -59,12 +87,10 @@ export function RegisterView({ schema, uiSchema }: RegisterViewProps): JSX.Eleme
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(e.formData ?? {}),
       });
+      const reqId = res.headers.get('x-request-id') ?? '';
       if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { message?: string };
-        setState({
-          status: 'error',
-          message: body.message ?? `Submission failed (HTTP ${res.status})`,
-        });
+        const body = await res.json().catch(() => ({}));
+        setState({ status: 'error', ...parseError(body, res.status, reqId) });
         return;
       }
       const body = (await res.json()) as RegistrationResponse;
@@ -72,7 +98,10 @@ export function RegisterView({ schema, uiSchema }: RegisterViewProps): JSX.Eleme
     } catch (err) {
       setState({
         status: 'error',
-        message: err instanceof Error ? err.message : 'Network error',
+        title: 'Network error',
+        detail: err instanceof Error ? err.message : 'Could not reach the server.',
+        code: 'NETWORK_ERROR',
+        requestId: '',
       });
     }
   };
@@ -148,7 +177,15 @@ export function RegisterView({ schema, uiSchema }: RegisterViewProps): JSX.Eleme
                   role="alert"
                   className="mb-5 rounded-[10px] border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-700"
                 >
-                  {state.message}
+                  <div className="font-semibold">{state.title}</div>
+                  <div className="mt-1 text-red-600">{state.detail}</div>
+                  {state.requestId || state.code !== 'UNKNOWN' ? (
+                    <div className="mt-2 text-[11px] text-red-500/80 font-mono">
+                      {state.code !== 'UNKNOWN' ? <span>Code: {state.code}</span> : null}
+                      {state.code !== 'UNKNOWN' && state.requestId ? <span> · </span> : null}
+                      {state.requestId ? <span>Ref: {state.requestId}</span> : null}
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
 

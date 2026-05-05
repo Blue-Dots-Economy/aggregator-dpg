@@ -21,7 +21,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { config } from '../config.js';
-import { logger } from '../logger.js';
 import { verifyApprovalToken } from '../services/approval-token.js';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
 import { getIdpAdmin } from '../services/idp-admin/index.js';
@@ -119,6 +118,10 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
     '/admin/v1/aggregator-registrations/decision/:id',
     async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
       const aggregatorId = req.params.id;
+      const log = req.log.child({
+        operation: 'aggregator-approval.decide',
+        aggregator_id: aggregatorId,
+      });
       const parsed = DecisionBodySchema.safeParse(req.body);
       if (!parsed.success) {
         return sendHtml(
@@ -173,13 +176,15 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
       if (parsed.data.decision === 'approve') {
         const enable = await idp.enableUser(lookup.kcUser.id);
         if (!enable.ok) {
-          logger.error({
-            operation: 'aggregator-approval.decide',
-            status: 'failure',
-            step: 'idp.enableUser',
-            error: enable.error.message,
-            aggregator_id: aggregatorId,
-          });
+          log.error(
+            {
+              status: 'failure',
+              sub_operation: 'idp.enableUser',
+              code: enable.error.code,
+              cause: enable.error.message,
+            },
+            'failed to enable KC user during approval',
+          );
           return sendHtml(
             reply,
             503,
@@ -196,12 +201,15 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
           [KC_ATTR.REJECTION_REASON]: null,
         });
         if (!stamp.ok) {
-          logger.warn({
-            operation: 'aggregator-approval.decide',
-            status: 'failure',
-            step: 'idp.setAttributes.approved',
-            error: stamp.error.message,
-          });
+          log.warn(
+            {
+              status: 'failure',
+              sub_operation: 'idp.setAttributes.approved',
+              code: stamp.error.code,
+              cause: stamp.error.message,
+            },
+            'failed to stamp decision attributes (approved)',
+          );
         }
         const approvedMail = renderApplicantApproved({
           contactName: applicantNameOf(lookup.kcUser),
@@ -216,19 +224,17 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
           text: approvedMail.text,
         });
         if (!sendResult.ok) {
-          logger.error({
-            operation: 'aggregator-approval.decide',
-            status: 'failure',
-            step: 'mailer.send.approved',
-            error: sendResult.error.message,
-          });
+          log.error(
+            {
+              status: 'failure',
+              sub_operation: 'mailer.send.approved',
+              code: sendResult.error.code,
+              cause: sendResult.error.message,
+            },
+            'approved-email delivery failed',
+          );
         }
-        logger.info({
-          operation: 'aggregator-approval.decide',
-          status: 'success',
-          decision: 'approve',
-          aggregator_id: aggregatorId,
-        });
+        log.info({ status: 'success', decision: 'approve' }, 'aggregator approved');
         return sendHtml(
           reply,
           200,
@@ -248,12 +254,15 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
         ...(parsed.data.reason ? { [KC_ATTR.REJECTION_REASON]: parsed.data.reason } : {}),
       });
       if (!stamp.ok) {
-        logger.warn({
-          operation: 'aggregator-approval.decide',
-          status: 'failure',
-          step: 'idp.setAttributes.rejected',
-          error: stamp.error.message,
-        });
+        log.warn(
+          {
+            status: 'failure',
+            sub_operation: 'idp.setAttributes.rejected',
+            code: stamp.error.code,
+            cause: stamp.error.message,
+          },
+          'failed to stamp decision attributes (rejected)',
+        );
       }
       const rejectedMail = renderApplicantRejected({
         contactName: applicantNameOf(lookup.kcUser),
@@ -267,19 +276,17 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
         text: rejectedMail.text,
       });
       if (!sendResult.ok) {
-        logger.error({
-          operation: 'aggregator-approval.decide',
-          status: 'failure',
-          step: 'mailer.send.rejected',
-          error: sendResult.error.message,
-        });
+        log.error(
+          {
+            status: 'failure',
+            sub_operation: 'mailer.send.rejected',
+            code: sendResult.error.code,
+            cause: sendResult.error.message,
+          },
+          'rejected-email delivery failed',
+        );
       }
-      logger.info({
-        operation: 'aggregator-approval.decide',
-        status: 'success',
-        decision: 'reject',
-        aggregator_id: aggregatorId,
-      });
+      log.info({ status: 'success', decision: 'reject' }, 'aggregator rejected');
       return sendHtml(
         reply,
         200,

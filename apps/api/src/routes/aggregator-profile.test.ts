@@ -119,8 +119,10 @@ describe('aggregator profile routes', () => {
       payload: { data: { who_i_am: { display_name: 'X' } }, consent: {} },
     });
     expect(res.statusCode).toBe(400);
-    const body = res.json() as { error: string };
-    expect(body.error).toBe('ValidationError');
+    const body = res.json() as { error: { code: string; title: string; requestId: string } };
+    expect(body.error.code).toBe('SCHEMA_VALIDATION');
+    expect(body.error.title).toBeTruthy();
+    expect(body.error.requestId).toMatch(/^req-/);
   });
 
   it('PUT updates the profile and reports is_complete=true on full payload', async () => {

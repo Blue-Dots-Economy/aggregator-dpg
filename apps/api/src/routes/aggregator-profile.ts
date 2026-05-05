@@ -11,52 +11,52 @@
  *
  * Authorisation: Bearer access token from Keycloak, with a custom
  * `aggregator_id` claim mapped from the user attribute.
+ *
+ * Failures are surfaced by throwing `httpError(<CODE>)`; the global error
+ * handler renders the canonical envelope.
  */
 
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { FastifyBaseLogger, FastifyInstance, FastifyRequest } from 'fastify';
 import { authenticate, type AuthContext } from '../services/auth/access-token.js';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
 import { getAggregatorProfileStore } from '../services/aggregator-profile-store/index.js';
 import { getIdpAdmin, KC_ATTR } from '../services/idp-admin/index.js';
 import type { IdpUser } from '../services/idp-admin/index.js';
 import { getProfileValidator } from '../services/profile-validator.js';
-import { logger } from '../logger.js';
+import { httpError } from '../errors/http-error.js';
 
 export async function registerAggregatorProfileRoutes(app: FastifyInstance): Promise<void> {
   app.get('/v1/aggregators/profile/me', async (req, reply) => {
-    const auth = await requireAuth(req, reply);
-    if (!auth) return reply;
+    const auth = await requireAuth(req);
+    const log = req.log.child({ operation: 'aggregator-profile.read', actor: auth.userId });
+    const start = Date.now();
 
     const profileStore = getAggregatorProfileStore();
     const aggregatorStore = getAggregatorStore();
 
     const aggregator = await aggregatorStore.findById(auth.aggregatorId);
-    if (!aggregator.ok || !aggregator.value) {
-      return reply.status(404).send({
-        error: 'NotFound',
-        message: 'aggregator not found',
-      });
+    if (!aggregator.ok) {
+      throw httpError('DB_UNAVAILABLE', { cause: aggregator.error });
+    }
+    if (!aggregator.value) {
+      throw httpError('NOT_FOUND', { detail: 'Aggregator record not found.' });
     }
 
     const profile = await profileStore.findByAggregatorId(auth.aggregatorId);
     if (!profile.ok) {
-      return reply.status(503).send({
-        error: 'ServiceUnavailable',
-        message: profile.error.message,
-      });
+      throw httpError('DB_UNAVAILABLE', { cause: profile.error });
     }
     if (!profile.value) {
-      // Should not happen — submit flow always inserts an empty profile.
-      return reply.status(404).send({
-        error: 'NotFound',
-        message: 'profile not found',
-      });
+      // Submit flow always inserts an empty profile — this should never fire.
+      throw httpError('NOT_FOUND', { detail: 'Profile record missing.' });
     }
 
-    // Pull KC attributes (association, phone) the access token may not
-    // surface as claims by default. The BFF holds the access token; the
-    // browser never sees this call.
-    const kcUser = await fetchKcUserSafe(auth);
+    const kcUser = await fetchKcUserSafe(auth, log);
+
+    log.info(
+      { status: 'success', latency_ms: Date.now() - start, aggregator_id: auth.aggregatorId },
+      'profile read',
+    );
 
     return reply.send({
       aggregator_id: auth.aggregatorId,
@@ -83,8 +83,9 @@ export async function registerAggregatorProfileRoutes(app: FastifyInstance): Pro
   });
 
   app.put('/v1/aggregators/profile/me', async (req, reply) => {
-    const auth = await requireAuth(req, reply);
-    if (!auth) return reply;
+    const auth = await requireAuth(req);
+    const log = req.log.child({ operation: 'aggregator-profile.update', actor: auth.userId });
+    const start = Date.now();
 
     const body = (req.body ?? {}) as Record<string, unknown>;
     const data = (body.data ?? {}) as Record<string, unknown>;
@@ -92,10 +93,9 @@ export async function registerAggregatorProfileRoutes(app: FastifyInstance): Pro
 
     const validate = getProfileValidator();
     if (!validate(data)) {
-      return reply.status(400).send({
-        error: 'ValidationError',
-        message: 'profile data failed schema validation',
-        details: validate.errors,
+      throw httpError('SCHEMA_VALIDATION', {
+        detail: 'Profile data failed schema validation.',
+        fields: { issues: validate.errors ?? [] },
       });
     }
 
@@ -106,20 +106,20 @@ export async function registerAggregatorProfileRoutes(app: FastifyInstance): Pro
       updatedBy: auth.userId,
     });
     if (!updated.ok) {
-      const status = updated.error.code === 'NOT_FOUND' ? 404 : 503;
-      return reply.status(status).send({
-        error: status === 404 ? 'NotFound' : 'ServiceUnavailable',
-        code: updated.error.code,
-        message: updated.error.message,
-      });
+      if (updated.error.code === 'NOT_FOUND') {
+        throw httpError('NOT_FOUND', { detail: 'Profile record missing.', cause: updated.error });
+      }
+      throw httpError('DB_UNAVAILABLE', { cause: updated.error });
     }
 
-    logger.info({
-      operation: 'aggregator-profile.update',
-      status: 'success',
-      aggregator_id: auth.aggregatorId,
-      user_id: auth.userId,
-    });
+    log.info(
+      {
+        status: 'success',
+        latency_ms: Date.now() - start,
+        aggregator_id: auth.aggregatorId,
+      },
+      'profile updated',
+    );
 
     return reply.send({
       aggregator_id: auth.aggregatorId,
@@ -132,23 +132,23 @@ export async function registerAggregatorProfileRoutes(app: FastifyInstance): Pro
   });
 }
 
-async function fetchKcUserSafe(auth: AuthContext): Promise<IdpUser | null> {
+async function fetchKcUserSafe(auth: AuthContext, log: FastifyBaseLogger): Promise<IdpUser | null> {
   try {
     const result = await getIdpAdmin().findById(auth.userId);
     if (result.ok) return result.value ?? null;
-    logger.warn({
-      operation: 'aggregator-profile.fetchKcUser',
-      status: 'failure',
-      error: result.error.message,
-      error_code: result.error.code,
-    });
+    log.warn(
+      { sub_operation: 'fetchKcUser', code: result.error.code, hint: result.error.message },
+      'failed to load KC user — falling back to JWT claims',
+    );
     return null;
   } catch (err) {
-    logger.warn({
-      operation: 'aggregator-profile.fetchKcUser',
-      status: 'failure',
-      error: (err as Error).message,
-    });
+    log.warn(
+      {
+        sub_operation: 'fetchKcUser',
+        cause: err instanceof Error ? err.message : String(err),
+      },
+      'failed to load KC user (threw)',
+    );
     return null;
   }
 }
@@ -159,23 +159,16 @@ function pickAttribute(user: IdpUser | null, name: string): string | undefined {
   return undefined;
 }
 
-async function requireAuth(req: FastifyRequest, reply: FastifyReply): Promise<AuthContext | null> {
+async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
   const result = await authenticate(req);
   if (result.ok) return result.context;
-  const status = result.error.code === 'MISSING_AGGREGATOR_ID' ? 403 : 401;
-  await reply.status(status).send({
-    error: status === 403 ? 'Forbidden' : 'Unauthorized',
-    code: result.error.code,
-    message: result.error.message,
+  const code = result.error.code === 'MISSING_AGGREGATOR_ID' ? 'FORBIDDEN' : 'UNAUTHORIZED';
+  throw httpError(code, {
+    detail: result.error.message,
+    fields: { reason: result.error.code },
   });
-  return null;
 }
 
-/**
- * A profile is "complete" once the three required top-level sections of
- * `profile.v1.json` are present. Consent is intentionally excluded — the
- * applicant can update consent independently.
- */
 function isProfileComplete(data: Record<string, unknown>): boolean {
   const who = data.who_i_am as Record<string, unknown> | undefined;
   const want = data.what_i_want as Record<string, unknown> | undefined;
