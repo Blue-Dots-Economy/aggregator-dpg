@@ -34,6 +34,15 @@ This installs every workspace under `apps/*` and `packages/*` in one shot.
 
 ## 3. Bootstrap the local stack
 
+There are two supported run modes:
+
+| Mode                             | Use when                                                     | Sections to follow |
+| -------------------------------- | ------------------------------------------------------------ | ------------------ |
+| **Hybrid (dev)**                 | Active development with hot-reload of API/web outside docker | §3 → §9            |
+| **Docker-only (prod-like / VM)** | Running everything (api + web + foundations) in containers   | §3 → §3a → §6 → §8 |
+
+For docker-only deploys (single VM, staging, prod), see **§3a** below. For local dev with hot-reload, continue with §3.
+
 A single Docker Compose file brings up every backing service. The first run pulls images (~1.5 GB) and starts:
 
 | Service  | Host port                  | Purpose                                                          |
@@ -62,6 +71,63 @@ docker compose ps   # wait until aggregator-keycloak is "healthy"
 ```
 
 The Keycloak realm is auto-imported from `infra/keycloak/realms/aggregator-realm.json` on container start. The custom OTP authenticator SPI is bundled at `infra/keycloak/providers/keycloak-otp-1.0.0-SNAPSHOT.jar` and mounted into `/opt/keycloak/providers/` by Compose, so login-by-OTP works out of the box. The JAR is committed to the repo to keep first-time setup zero-friction; rebuild it from <https://github.com/sanketika-labs/keycloak-otp-authenticator> when you bump the version.
+
+---
+
+## 3a. Docker-only run (web + api in containers)
+
+Use this when deploying to a VM, staging, or any host where you want everything in containers (no `pnpm dev`). All env values live in a **single root `.env`** sectioned per service.
+
+### One-shot setup
+
+```bash
+make setup        # copies infra/env.template → .env (mode 600) AND adds `127.0.0.1 keycloak` to /etc/hosts
+# edit .env — fill every change-me-* and generate secrets:
+#   SESSION_KEY=$(openssl rand -hex 32)
+#   APPROVAL_TOKEN_SECRET=$(openssl rand -hex 32)
+make up           # docker compose up -d --build
+```
+
+### Why `/etc/hosts` needs `127.0.0.1 keycloak`
+
+When the web container is inside docker, browser and web container must resolve the OIDC issuer URL to the SAME Keycloak. With `OIDC_ISSUER=http://keycloak:8080/...`:
+
+- Browser: `keycloak` → `127.0.0.1` (via /etc/hosts) → docker port `8080` → keycloak container ✓
+- Web container: `keycloak` → docker DNS → keycloak container ✓
+
+Both sides agree, JWT issuer claim validates. Without the hosts entry, browser cannot resolve `keycloak` and OIDC redirect fails.
+
+`make hosts` is idempotent — safe to re-run.
+
+### `.env` structure
+
+The template at `infra/env.template` is sectioned per service with config + secrets subsections:
+
+```
+# ════════════ postgres ════════════
+# --- config ---
+POSTGRES_USER=...
+# --- secrets ---
+POSTGRES_PASSWORD=...
+
+# ════════════ api ════════════
+# --- config ---
+LOG_LEVEL=info
+# --- secrets ---
+APPROVAL_TOKEN_SECRET=...
+```
+
+Same structure ports cleanly to Kubernetes later (config block → ConfigMap, secrets block → Secret).
+
+### VM deploy
+
+When moving from localhost to a VM, replace `localhost` and `keycloak` everywhere in `.env` with the VM hostname/IP, then:
+
+```bash
+docker compose up -d --build   # --build is REQUIRED — NEXT_PUBLIC_API_URL is baked at compile time
+```
+
+Also update Keycloak realm client `aggregator-portal` → **Valid Redirect URIs** + **Web Origins** to match the new portal URL.
 
 ---
 

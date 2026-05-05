@@ -1,12 +1,35 @@
-.PHONY: help dev up down logs ps reset psql redis-cli mc kc rebuild-web rebuild-keycloak kc-plugin kc-logs
+.PHONY: help setup hosts env dev up down logs ps reset psql redis-cli mc kc rebuild-web rebuild-keycloak kc-plugin kc-logs
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
 
+setup: env hosts ## One-shot: bootstrap .env + add `127.0.0.1 keycloak` to /etc/hosts.
+	@echo ""
+	@echo "Setup complete. Edit .env (fill change-me-* + secrets), then run 'make up'."
+
+env: ## Copy infra/env.template → .env if missing, chmod 600.
+	@if [ -f .env ]; then \
+		echo ".env already exists — leaving untouched."; \
+	else \
+		cp infra/env.template .env; \
+		chmod 600 .env; \
+		echo "Created .env from infra/env.template (mode 600)."; \
+		echo "Generate secrets:  openssl rand -hex 32"; \
+	fi
+
+hosts: ## Add `127.0.0.1 keycloak` to /etc/hosts (needed when running web in docker).
+	@if grep -q "^127\.0\.0\.1[[:space:]]\+keycloak\b" /etc/hosts; then \
+		echo "/etc/hosts already maps keycloak → 127.0.0.1 — skipping."; \
+	else \
+		echo "Adding '127.0.0.1 keycloak' to /etc/hosts (sudo required)..."; \
+		echo "127.0.0.1 keycloak" | sudo tee -a /etc/hosts > /dev/null; \
+		echo "Done."; \
+	fi
+
 dev: up ## Alias for `up`. Brings the full local stack up.
 
 up: ## Start all foundations + apps in the background.
-	@test -f .env || (echo "Creating .env from .env.example"; cp .env.example .env)
+	@test -f .env || (echo ".env missing — run 'make setup' first" && exit 1)
 	docker compose up -d --build
 
 down: ## Stop and remove all containers (data volumes preserved).
