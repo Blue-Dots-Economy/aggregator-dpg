@@ -28,6 +28,8 @@ FROM node:24-alpine AS runner
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 WORKDIR /app
 COPY --from=deployer --chown=appuser:appgroup /standalone .
+# Schemas are loaded from config/ at runtime by registration-validator.
+COPY --from=builder --chown=appuser:appgroup /app/config ./config
 USER appuser
-EXPOSE 3000
-CMD ["node", "dist/index.js"]
+EXPOSE 4000
+CMD ["node", "dist/server.js"]

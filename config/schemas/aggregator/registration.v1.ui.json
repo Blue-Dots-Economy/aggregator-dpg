@@ -1,0 +1,20 @@
+{
+  "ui:order": ["aggregator_type", "association", "email", "phone"],
+  "aggregator_type": {
+    "ui:widget": "select",
+    "ui:placeholder": "Select aggregator type",
+    "ui:enumNames": ["Seeker", "Provider"]
+  },
+  "association": {
+    "ui:placeholder": "e.g. TRRAIN, Pankh Foundation",
+    "ui:autofocus": true
+  },
+  "email": {
+    "ui:placeholder": "name@org.in",
+    "ui:options": { "inputType": "email" }
+  },
+  "phone": {
+    "ui:placeholder": "+91 98765 43210",
+    "ui:options": { "inputType": "tel" }
+  }
+}
