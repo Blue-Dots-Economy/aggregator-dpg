@@ -40,7 +40,7 @@ services:
     ports:
       - "5433:5432"   # host 5433 → container 5432 (avoids clashes with a system Postgres on 5432)
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - /data/postgres:/var/lib/postgresql/data
       - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aggregator} -d ${POSTGRES_DB:-aggregator}"]
@@ -280,6 +280,5 @@ services:
   #     minio:           { condition: service_healthy }
 
 volumes:
-  postgres-data:
   redis-data:
   minio-data:
