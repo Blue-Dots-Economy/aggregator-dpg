@@ -11,15 +11,15 @@ name: aggregator-dpg
 #   docker compose up -d
 #   docker compose logs -f web
 #
-# URLs (after `up`):
-#   Web app           : http://localhost:3000
-#   API (later)       : http://localhost:4000
-#   Keycloak          : http://localhost:8080      admin / ${KC_BOOTSTRAP_ADMIN_PASSWORD}
-#   MinIO console     : http://localhost:9001      ${MINIO_ROOT_USER} / ${MINIO_ROOT_PASSWORD}
-#   MinIO S3 API      : http://localhost:9000
-#   MailHog UI        : http://localhost:8025      (captures every outbound email)
-#   Postgres          : localhost:5432             aggregator / ${POSTGRES_PASSWORD}
-#   Redis             : localhost:6379
+# URLs (after `up`) — all browser-facing services proxied through nginx:80:
+#   Web app           : http://localhost/
+#   API               : http://localhost/backend/
+#   Keycloak          : http://localhost/auth/     admin / ${KC_BOOTSTRAP_ADMIN_PASSWORD}
+#   MinIO console     : http://localhost/minio/    ${MINIO_ROOT_USER} / ${MINIO_ROOT_PASSWORD}
+#   MinIO S3 API      : http://localhost/s3/
+#   MailHog UI        : http://localhost/mail/     (captures every outbound email)
+#   Postgres          : localhost:5433             aggregator / ${POSTGRES_PASSWORD}  (direct, dev-only)
+#   Redis             : localhost:6379                                                (direct, dev-only)
 #
 # Email delivery is intentionally not part of the local stack. Configure SMTP
 # externally (Keycloak realm SMTP settings, API SMTP env vars) when needed.
@@ -67,9 +67,7 @@ services:
     image: mailhog/mailhog:v1.0.1
     container_name: aggregator-mailhog
     restart: unless-stopped
-    ports:
-      - "1025:1025"   # SMTP
-      - "8025:8025"   # Web UI
+    # SMTP (1025) reached over docker network by api/keycloak; UI (8025) proxied via nginx /mail/.
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8025/api/v2/messages"]
       interval: 10s
@@ -84,9 +82,10 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
-    ports:
-      - "9000:9000"   # S3 API
-      - "9001:9001"   # Web console
+      # Tells the console its public origin so login/SSO redirects come back via nginx /minio/.
+      MINIO_BROWSER_REDIRECT_URL: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}/minio"
+      # Optional public S3 base — set if SDK clients hit nginx instead of :9000 directly.
+      MINIO_SERVER_URL: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}/s3"
     volumes:
       - minio-data:/data
     healthcheck:
@@ -114,6 +113,9 @@ services:
       KC_HOSTNAME_STRICT: "false"
       KC_HTTP_ENABLED: "true"
       KC_HEALTH_ENABLED: "true"
+      # Behind nginx: serve under /auth/ subpath and trust X-Forwarded-* from the proxy.
+      KC_HTTP_RELATIVE_PATH: /auth
+      KC_PROXY_HEADERS: xforwarded
       # SMS provider — use 'log' for local dev (writes OTP to keycloak logs).
       # Switch to 'twilio' or 'sns' in .env once creds are configured.
       KC_SPI_SMS_PROVIDER: ${KC_SPI_SMS_PROVIDER:-log}
@@ -131,8 +133,7 @@ services:
       SMTP_FROM: ${SMTP_FROM:-no-reply@example.com}
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
-    ports:
-      - "8080:8080"
+    # No host port mapping — exposed only via nginx at /auth/.
     volumes:
       - ./infra/keycloak/realms:/opt/keycloak/data/import:ro
       - ./infra/keycloak/providers:/opt/keycloak/providers:ro
@@ -192,8 +193,7 @@ services:
       # ─── Redis (BFF session store) ────────────────────────────────────
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       LOG_LEVEL: ${LOG_LEVEL:-info}
-    ports:
-      - "3100:3000"   # host 3100 → container 3000 (avoids clashes with `pnpm dev` on 3000)
+    # No host port mapping — exposed only via nginx at /.
     depends_on:
       postgres:
         condition: service_healthy
@@ -240,8 +240,7 @@ services:
       ADMIN_EMAILS: ${ADMIN_EMAILS:-admin@bluedots.local}
       PUBLIC_API_URL: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}:${API_PORT:-4000}"
       PUBLIC_PORTAL_URL: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}:${PORTAL_PORT:-3100}"
-    ports:
-      - "4000:4000"
+    # No host port mapping — exposed only via nginx at /backend/.
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:4000/health/ready || exit 1"]
       interval: 10s
@@ -278,6 +277,31 @@ services:
   #     postgres:        { condition: service_healthy }
   #     redis:           { condition: service_healthy }
   #     minio:           { condition: service_healthy }
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Edge: nginx reverse proxy — single ingress on host port 80.
+  # Routes by URL path prefix to internal services on the docker network.
+  # ─────────────────────────────────────────────────────────────────────────
+
+  nginx:
+    image: nginx:alpine
+    container_name: aggregator-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      web:
+        condition: service_started
+      api:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      mailhog:
+        condition: service_healthy
 
 volumes:
   redis-data:
