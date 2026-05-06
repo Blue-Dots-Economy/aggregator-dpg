@@ -346,16 +346,17 @@ docker-compose.yml         All backing services
 
 ## 11. Troubleshooting
 
-| Symptom                                                         | Likely cause                                                                                                                                        |
-| --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `EADDRINUSE 0.0.0.0:4000`                                       | Old API still running. `lsof -ti:4000 \| xargs kill -9`                                                                                             |
-| `KEYCLOAK_URL ... must be set`                                  | API started without picking up `apps/api/.env` — run `pnpm --filter @aggregator-dpg/api dev` from the repo root, not from `apps/api/`               |
-| BFF: `service-token HTTP 401: invalid client credentials`       | `BFF_SERVICE_CLIENT_SECRET` mismatch with `aggregator-api` client secret in KC                                                                      |
-| `403 MISSING_AGGREGATOR_ID` from `/v1/aggregators/profile/me`   | KC protocol mapper for `aggregator_id` not configured (see §5)                                                                                      |
-| `409 PHONE_EXISTS` on registration                              | Phone already used by another KC user (unique check is intentional — same phone can't OTP-route to two accounts)                                    |
-| Approval link page shows "Already approved" on first click      | Test data left over — KC user has `decision_made=approved` attribute. Delete the user in KC admin or pick a different aggregator id                 |
-| Login complains "user does not exist" with the registered email | KC user's email field is empty. Either (a) re-register so the new createUser path populates email + emailVerified, or (b) edit the user in KC admin |
-| Submit returns 201 but no email arrives                         | `apps/api/.env` still points at MailHog. Check <http://localhost:8025> for captured mail or switch `MAIL_PROVIDER=smtp` to a real provider          |
+| Symptom                                                         | Likely cause                                                                                                                                                                                                             |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `EADDRINUSE 0.0.0.0:4000`                                       | Old API still running. `lsof -ti:4000 \| xargs kill -9`                                                                                                                                                                  |
+| `KEYCLOAK_URL ... must be set`                                  | API started without picking up `apps/api/.env` — run `pnpm --filter @aggregator-dpg/api dev` from the repo root, not from `apps/api/`                                                                                    |
+| BFF: `service-token HTTP 401: invalid client credentials`       | `BFF_SERVICE_CLIENT_SECRET` mismatch with `aggregator-api` client secret in KC                                                                                                                                           |
+| `403 MISSING_AGGREGATOR_ID` from `/v1/aggregators/profile/me`   | KC protocol mapper for `aggregator_id` not configured (see §5)                                                                                                                                                           |
+| `409 PHONE_EXISTS` on registration                              | Phone already used by another KC user (unique check is intentional — same phone can't OTP-route to two accounts)                                                                                                         |
+| Approval link page shows "Already approved" on first click      | Test data left over — KC user has `decision_made=approved` attribute. Delete the user in KC admin or pick a different aggregator id                                                                                      |
+| Login complains "user does not exist" with the registered email | KC user's email field is empty. Either (a) re-register so the new createUser path populates email + emailVerified, or (b) edit the user in KC admin                                                                      |
+| Submit returns 201 but no email arrives                         | `apps/api/.env` still points at MailHog. Check <http://localhost:8025> for captured mail or switch `MAIL_PROVIDER=smtp` to a real provider                                                                               |
+| Login redirects to `/login?error=invalid_flow_cookie`           | `COOKIE_SECURE` is `true` (or unset, defaulting to `true` under `NODE_ENV=production`) but the portal is served over plain HTTP. Set `COOKIE_SECURE=false` in `.env` and run `docker compose up -d --force-recreate web` |
 
 ---
 
