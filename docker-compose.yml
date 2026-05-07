@@ -102,8 +102,10 @@ services:
     container_name: aggregator-keycloak
     restart: unless-stopped
     # build: re-bake plugin into the official image so providers/ is on classpath
-    # AND `kc.sh build` has already indexed our SPIs. start-dev uses --import-realm
-    # to load realm JSON on first boot.
+    # AND `kc.sh build` has already indexed our SPIs. render-realm.sh substitutes
+    # __PUBLIC_BASE_URL__ in the realm JSON before exec'ing kc.sh start-dev
+    # --import-realm.
+    entrypoint: ["/opt/keycloak/render-realm.sh"]
     command: ["start-dev", "--import-realm"]
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}
@@ -113,6 +115,10 @@ services:
       KC_DB_USERNAME: ${POSTGRES_USER:-aggregator}
       KC_DB_PASSWORD: ${POSTGRES_PASSWORD:-aggregator-dev}
       KC_HOSTNAME: ${PUBLIC_HOST:-keycloak}
+      # Substituted into realm JSON at boot (clients[].redirectUris,
+      # webOrigins, post.logout.redirect.uris). Must be the browser-facing
+      # base URL — same value the web/api services use to derive OIDC_ISSUER.
+      PUBLIC_BASE_URL: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}"
       KC_HOSTNAME_STRICT: "false"
       KC_HTTP_ENABLED: "true"
       KC_HEALTH_ENABLED: "true"
@@ -138,8 +144,13 @@ services:
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
     # No host port mapping — exposed only via nginx at /auth/.
     volumes:
-      - ./infra/keycloak/realms:/opt/keycloak/data/import:ro
+      - ./infra/keycloak/realms:/opt/keycloak/data/import-template:ro
       - ./infra/keycloak/providers:/opt/keycloak/providers:ro
+      - ./infra/keycloak/render-realm.sh:/opt/keycloak/render-realm.sh:ro
+    # render-realm.sh writes substituted realm JSON here on each boot. tmpfs
+    # keeps the host tree clean and ensures stale renders never persist.
+    tmpfs:
+      - /opt/keycloak/data/import:uid=1000,gid=0,mode=0775
     depends_on:
       postgres:
         condition: service_healthy

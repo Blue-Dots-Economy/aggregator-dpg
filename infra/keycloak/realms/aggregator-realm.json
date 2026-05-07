@@ -104,18 +104,16 @@
         "http://localhost:3000/api/auth/callback",
         "http://localhost:3100/api/auth/callback",
         "http://localhost/api/auth/callback",
-        "http://3.110.95.98:3100/api/auth/callback",
-        "http://13.206.236.118/api/auth/callback"
+        "__PUBLIC_BASE_URL__/api/auth/callback"
       ],
       "webOrigins": [
         "http://localhost:3000",
         "http://localhost:3100",
         "http://localhost",
-        "http://3.110.95.98:3100",
-        "http://13.206.236.118"
+        "__PUBLIC_BASE_URL__"
       ],
       "attributes": {
-        "post.logout.redirect.uris": "http://localhost:3000/##http://localhost:3000/login##http://localhost:3100/##http://localhost:3100/login##http://localhost/##http://localhost/login##http://3.110.95.98:3100/##http://3.110.95.98:3100/login##http://13.206.236.118/##http://13.206.236.118/login",
+        "post.logout.redirect.uris": "http://localhost:3000/##http://localhost:3000/login##http://localhost:3100/##http://localhost:3100/login##http://localhost/##http://localhost/login##__PUBLIC_BASE_URL__/##__PUBLIC_BASE_URL__/login",
         "pkce.code.challenge.method": "S256"
       },
       "protocolMappers": [
