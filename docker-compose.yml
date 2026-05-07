@@ -310,18 +310,47 @@ services:
   #     minio:           { condition: service_healthy }
 
   # ─────────────────────────────────────────────────────────────────────────
-  # Edge: nginx reverse proxy — single ingress on host port 80.
-  # Routes by URL path prefix to internal services on the docker network.
+  # Edge: nginx reverse proxy + Let's Encrypt — single ingress on 80/443.
+  #
+  # jonasal/nginx-certbot bundles nginx + certbot + auto-renewal. On first
+  # boot it generates a self-signed dummy cert so nginx can start, then
+  # certbot performs an HTTP-01 challenge (port 80 must be reachable from
+  # the public internet) and replaces the dummy with a real LE cert.
+  #
+  # Two config layers, both included by jonasal's main nginx.conf inside
+  # the http {} block:
+  #   1. ./infra/nginx/user_conf.d/*.conf      → mounted as-is
+  #      (shared http-scope: maps, upstreams, proxy/buffer settings)
+  #   2. ./infra/nginx/templates/*.template    → rendered via envsubst at
+  #      boot, output to /etc/nginx/conf.d/*.conf (server blocks with
+  #      ${PUBLIC_HOST} substituted in server_name + ssl_certificate paths)
   # ─────────────────────────────────────────────────────────────────────────
 
   nginx:
-    image: nginx:alpine
+    image: jonasal/nginx-certbot:5.4.1
     container_name: aggregator-nginx
     restart: unless-stopped
+    environment:
+      # Required by certbot for cert expiry / abuse notifications.
+      CERTBOT_EMAIL: ${CERTBOT_EMAIL:?CERTBOT_EMAIL must be set in .env}
+      # USE_LOCAL_CA=1 issues self-signed certs via pebble — useful for
+      # smoke-testing the ingress without burning Let's Encrypt rate limits.
+      # Set to 0 (or unset) for production.
+      USE_LOCAL_CA: ${USE_LOCAL_CA:-0}
+      # Substituted into the .template file at boot. Both the SSL listener's
+      # server_name and the ssl_certificate paths reference this — keep one
+      # source of truth so cert request and TLS listener always agree.
+      PUBLIC_HOST: ${PUBLIC_HOST:?PUBLIC_HOST must be set in .env}
+      # Restrict envsubst to PUBLIC_HOST only — leaves all $-prefixed nginx
+      # variables ($host, $scheme, $remote_addr, etc.) untouched.
+      NGINX_ENVSUBST_FILTER: '^PUBLIC_HOST$$'
     ports:
       - "80:80"
+      - "443:443"
     volumes:
-      - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./infra/nginx/user_conf.d:/etc/nginx/user_conf.d:ro
+      - ./infra/nginx/templates:/etc/nginx/templates:ro
+      - nginx-letsencrypt:/etc/letsencrypt
     depends_on:
       web:
         condition: service_started
@@ -337,3 +366,7 @@ services:
 volumes:
   redis-data:
   minio-data:
+  # Persists Let's Encrypt account keys + issued certs across container
+  # restarts. Wiping this volume forces a fresh ACME registration — be
+  # mindful of LE rate limits (5 duplicate certs per week per domain).
+  nginx-letsencrypt:
