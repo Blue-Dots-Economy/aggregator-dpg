@@ -26,6 +26,8 @@ export const QueueName = {
   BulkFinalise: 'bulk-finalise',
   /** Periodic rollup of link_submission rows into onboarding. */
   LinkMetricsRollup: 'link-metrics-rollup',
+  /** Hourly watchdog + retention sweep. */
+  CronWatchdog: 'cron-watchdog',
 } as const;
 
 export type QueueName = (typeof QueueName)[keyof typeof QueueName];
@@ -57,6 +59,10 @@ export interface BulkFinaliseJob {
 
 export interface LinkMetricsRollupJob {
   /** Tick timestamp (epoch ms) used as part of the jobId for dedupe. */
+  tick: number;
+}
+
+export interface CronWatchdogJob {
   tick: number;
 }
 

@@ -170,6 +170,8 @@ export async function finaliseBulk(job: BulkFinaliseJob): Promise<FinaliseOutcom
 
   log.info({
     status: 'success',
+    event_type: 'audit',
+    audit: 'bulkUpload.run_completed',
     latency_ms: Date.now() - start,
     total,
     passed,

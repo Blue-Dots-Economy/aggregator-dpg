@@ -26,6 +26,8 @@ import { normalisePhone } from '../services/phone.js';
 import { getDb } from '../db/client.js';
 import { participants, linkSubmissions } from '../db/schema.js';
 import { httpError } from '../errors/http-error.js';
+import { consume } from '../services/rate-limiter/index.js';
+import { config } from '../config.js';
 
 interface SlugParams {
   slug?: string;
@@ -66,6 +68,24 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
     }
     const log = req.log.child({ operation: 'public.registrationSubmit', slug });
     const start = Date.now();
+
+    // Rate limit by (slug, ip). CAPTCHA enforcement is handled at the BFF
+    // layer (Cloudflare Turnstile) — the API layer keeps a coarse fallback
+    // so a misconfigured BFF can't expose unbounded write traffic.
+    const ip = (req.ip ?? '0.0.0.0').toString();
+    const rate = await consume({
+      namespace: 'link-submit',
+      key: `${slug}:${ip}`,
+      windowSeconds: config.PUBLIC_SUBMIT_RATE_WINDOW_SECONDS,
+      max: config.PUBLIC_SUBMIT_RATE_MAX_PER_WINDOW,
+    });
+    if (!rate.allowed) {
+      void reply.header('Retry-After', String(rate.retryAfterSeconds));
+      log.warn({ status: 'rate_limited', count: rate.count, ip });
+      throw httpError('RATE_LIMITED', {
+        detail: `Retry in ${rate.retryAfterSeconds}s.`,
+      });
+    }
 
     const link = await loadLiveLinkBySlug(slug, log);
 
@@ -164,6 +184,8 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
 
     log.info({
       status: 'success',
+      event_type: 'audit',
+      audit: 'link.submission_recorded',
       latency_ms: Date.now() - start,
       link_id: link.id,
       outcome,

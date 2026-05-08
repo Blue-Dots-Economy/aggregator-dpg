@@ -212,6 +212,8 @@ export async function processBulkFile(job: BulkFileProcessJob): Promise<ProcessO
 
   log.info({
     status: 'success',
+    event_type: 'audit',
+    audit: 'bulkUpload.run_started',
     latency_ms: Date.now() - start,
     total_rows: rows.length,
     enqueued: rows.length,

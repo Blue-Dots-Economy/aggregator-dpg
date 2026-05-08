@@ -43,6 +43,22 @@ const ConfigSchema = z.object({
   // across the worker process. BullMQ jobId dedupe (`${uploadId}:finalise`)
   // already guarantees one finaliser per upload.
   BULK_FINALISE_CONCURRENCY: z.coerce.number().int().positive().default(2),
+
+  // ─── Link metrics aggregator ────────────────────────────────────────────
+  /** Cron interval (ms) for the link-metrics rollup tick. Default 5 min. */
+  LINK_METRICS_ROLLUP_INTERVAL_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(5 * 60 * 1000),
+
+  // ─── Watchdog cron ──────────────────────────────────────────────────────
+  /** Cron interval (ms) for the stuck-job watchdog tick. Default 1 hour. */
+  WATCHDOG_INTERVAL_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(60 * 60 * 1000),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

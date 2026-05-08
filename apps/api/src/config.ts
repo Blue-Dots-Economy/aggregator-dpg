@@ -79,6 +79,10 @@ const ConfigSchema = z.object({
   // ─── Schema loader ──────────────────────────────────────────────────────
   /** Absolute or relative path to `config/schemas/`. Used by link-submit Ajv. */
   SCHEMA_ROOT_DIR: z.string().default('./config/schemas'),
+
+  // ─── Rate limit (public link submit) ────────────────────────────────────
+  PUBLIC_SUBMIT_RATE_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
+  PUBLIC_SUBMIT_RATE_MAX_PER_WINDOW: z.coerce.number().int().positive().default(20),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

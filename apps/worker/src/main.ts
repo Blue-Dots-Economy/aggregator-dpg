@@ -7,12 +7,15 @@
  * alongside.
  */
 
-import { Worker } from 'bullmq';
+import { Queue, Worker } from 'bullmq';
 import {
   QueueName,
+  DEFAULT_JOB_OPTS,
   type BulkFileProcessJob,
   type BulkFinaliseJob,
   type BulkRowProcessJob,
+  type CronWatchdogJob,
+  type LinkMetricsRollupJob,
 } from '@aggregator-dpg/queue';
 import { config } from './config.js';
 import { logger } from './logger.js';
@@ -20,6 +23,8 @@ import { closeDb } from './db.js';
 import { processBulkFile } from './jobs/bulk-file-process.js';
 import { processBulkRow } from './jobs/bulk-row-process.js';
 import { finaliseBulk } from './jobs/bulk-finalise.js';
+import { rollupLinkMetrics } from './jobs/link-metrics-rollup.js';
+import { runWatchdog } from './jobs/cron-watchdog.js';
 import { getRedis, closeRedis } from './services/redis.js';
 import { closeQueues } from './services/bulk-queue.js';
 
@@ -53,10 +58,58 @@ async function main(): Promise<void> {
     },
   );
 
+  const linkMetricsWorker = new Worker<LinkMetricsRollupJob>(
+    QueueName.LinkMetricsRollup,
+    async (job) => rollupLinkMetrics(job.data),
+    {
+      connection,
+      concurrency: 1,
+    },
+  );
+
+  const watchdogWorker = new Worker<CronWatchdogJob>(
+    QueueName.CronWatchdog,
+    async () => runWatchdog(),
+    {
+      connection,
+      concurrency: 1,
+    },
+  );
+
+  // Repeatable cron ticks. Threshold-triggered fan-in for metrics rollup
+  // can be added later — cron-only is sufficient for MVP.
+  const linkMetricsQueue = new Queue<LinkMetricsRollupJob>(QueueName.LinkMetricsRollup, {
+    connection,
+    defaultJobOptions: DEFAULT_JOB_OPTS,
+  });
+  await linkMetricsQueue.add(
+    'tick',
+    { tick: Date.now() },
+    {
+      repeat: { every: config.LINK_METRICS_ROLLUP_INTERVAL_MS },
+      jobId: 'link-metrics-rollup-tick',
+    },
+  );
+
+  const watchdogQueue = new Queue<CronWatchdogJob>(QueueName.CronWatchdog, {
+    connection,
+    defaultJobOptions: DEFAULT_JOB_OPTS,
+  });
+  await watchdogQueue.add(
+    'tick',
+    { tick: Date.now() },
+    {
+      repeat: { every: config.WATCHDOG_INTERVAL_MS },
+      jobId: 'cron-watchdog-tick',
+    },
+  );
+
   for (const [name, w] of [
     ['bulkFileProcess', fileWorker],
     ['bulkRowProcess', rowWorker],
     ['bulkFinalise', finaliseWorker],
+    ['linkMetricsRollup', linkMetricsWorker],
+    ['cronWatchdog', watchdogWorker],
   ] as const) {
     w.on('completed', (job, result) => {
       logger.debug({
@@ -77,12 +130,25 @@ async function main(): Promise<void> {
   logger.info({
     operation: 'worker.boot',
     status: 'ready',
-    queues: [QueueName.BulkFileProcess, QueueName.BulkRowProcess, QueueName.BulkFinalise],
+    queues: [
+      QueueName.BulkFileProcess,
+      QueueName.BulkRowProcess,
+      QueueName.BulkFinalise,
+      QueueName.LinkMetricsRollup,
+      QueueName.CronWatchdog,
+    ],
   });
 
   const shutdown = async (signal: string): Promise<void> => {
     logger.info({ operation: 'worker.shutdown', signal });
-    await Promise.all([fileWorker.close(), rowWorker.close(), finaliseWorker.close()]);
+    await Promise.all([
+      fileWorker.close(),
+      rowWorker.close(),
+      finaliseWorker.close(),
+      linkMetricsWorker.close(),
+      watchdogWorker.close(),
+    ]);
+    await Promise.all([linkMetricsQueue.close(), watchdogQueue.close()]);
     await closeQueues();
     await closeRedis();
     await closeDb();

@@ -185,6 +185,13 @@ export const ERR = {
     detail: 'This participant has already registered with this aggregator.',
     hint: 'participants UNIQUE (aggregator_id, participant_id) — ON CONFLICT path.',
   },
+  RATE_LIMITED: {
+    code: 'RATE_LIMITED',
+    status: 429,
+    title: 'Too many requests',
+    detail: 'You have made too many requests. Please slow down and retry shortly.',
+    hint: 'Per-slug+ip rate limiter on public submit; window/max in config.',
+  },
 } as const satisfies Record<string, ErrorCatalogueEntry>;
 
 export type ErrorCode = keyof typeof ERR;
