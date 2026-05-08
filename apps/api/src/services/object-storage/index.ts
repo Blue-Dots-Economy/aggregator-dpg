@@ -114,6 +114,21 @@ export async function headObject(key: string): Promise<ObjectHead | null> {
   }
 }
 
+/**
+ * Uploads an artefact to S3. Used for QR PNGs at link-create time and for
+ * any other API-side object writes.
+ */
+export async function putObject(key: string, body: Buffer, contentType: string): Promise<void> {
+  await getClient().send(
+    new PutObjectCommand({
+      Bucket: config.S3_BUCKET,
+      Key: key,
+      Body: body,
+      ContentType: contentType,
+    }),
+  );
+}
+
 export interface SignedDownloadUrl {
   url: string;
   key: string;
@@ -138,6 +153,23 @@ export async function signErrorsCsvDownloadUrl(key: string): Promise<SignedDownl
     expiresIn: config.BULK_UPLOAD_URL_TTL_SECONDS,
   });
   const expiresAt = new Date(Date.now() + config.BULK_UPLOAD_URL_TTL_SECONDS * 1000).toISOString();
+  return { url, key, expiresAt };
+}
+
+/**
+ * Issues a pre-signed GET URL for a QR PNG. Browsers can render the URL
+ * directly in an <img> tag.
+ */
+export async function signQrDownloadUrl(key: string): Promise<SignedDownloadUrl> {
+  const command = new GetObjectCommand({
+    Bucket: config.S3_BUCKET,
+    Key: key,
+    ResponseContentType: 'image/png',
+  });
+  const url = await getSignedUrl(getClient(), command, {
+    expiresIn: config.QR_DOWNLOAD_URL_TTL_SECONDS,
+  });
+  const expiresAt = new Date(Date.now() + config.QR_DOWNLOAD_URL_TTL_SECONDS * 1000).toISOString();
   return { url, key, expiresAt };
 }
 

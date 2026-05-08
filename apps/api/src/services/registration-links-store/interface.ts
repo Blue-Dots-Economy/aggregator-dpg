@@ -1,0 +1,62 @@
+/**
+ * Registration links store contract.
+ *
+ * Persistence port for the `registration_links` table. Owns slug uniqueness,
+ * status lifecycle (draft → live → retired), and qr_object_key updates.
+ */
+
+export type RegistrationLinkStatus = 'draft' | 'live' | 'retired';
+
+export interface RegistrationLink {
+  id: string;
+  aggregatorId: string;
+  slug: string;
+  domain: 'seeker' | 'provider';
+  context: Record<string, unknown>;
+  qrObjectKey: string | null;
+  status: RegistrationLinkStatus;
+  expiresAt: Date | null;
+  createdBy: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface CreateRegistrationLinkInput {
+  aggregatorId: string;
+  slug: string;
+  domain: 'seeker' | 'provider';
+  context: Record<string, unknown>;
+  status?: RegistrationLinkStatus;
+  expiresAt?: Date | null;
+  createdBy: string;
+}
+
+export type StoreError =
+  | { code: 'NOT_FOUND'; message: string }
+  | { code: 'SLUG_COLLISION'; message: string }
+  | { code: 'DB_UNAVAILABLE'; message: string };
+
+export type StoreResult<T> = { ok: true; value: T } | { ok: false; error: StoreError };
+
+export abstract class RegistrationLinksStoreBase {
+  /**
+   * Create a new registration link. Returns SLUG_COLLISION on slug uniqueness
+   * violation so the caller can retry with a fresh suffix.
+   */
+  abstract create(input: CreateRegistrationLinkInput): Promise<StoreResult<RegistrationLink>>;
+  /**
+   * Find a link by id, scoped to the calling aggregator. Cross-aggregator
+   * access is enforced at the store boundary so route-layer mistakes can't
+   * leak rows.
+   */
+  abstract findById(
+    id: string,
+    aggregatorId: string,
+  ): Promise<StoreResult<RegistrationLink | null>>;
+  /** Set the qr_object_key after the QR PNG has been uploaded to S3. */
+  abstract updateQrKey(
+    id: string,
+    aggregatorId: string,
+    qrObjectKey: string,
+  ): Promise<StoreResult<RegistrationLink>>;
+}

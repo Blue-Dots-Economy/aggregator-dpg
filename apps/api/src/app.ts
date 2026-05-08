@@ -19,6 +19,7 @@ import { registerAggregatorRegistrationRoutes } from './routes/aggregator-regist
 import { registerAggregatorApprovalRoutes } from './routes/aggregator-approvals.js';
 import { registerAggregatorProfileRoutes } from './routes/aggregator-profile.js';
 import { registerBulkUploadsRoutes } from './routes/bulk-uploads.js';
+import { registerRegistrationLinksRoutes } from './routes/registration-links.js';
 import { ERR } from './errors/codes.js';
 import { HttpError } from './errors/http-error.js';
 import { coerceToHttpError, toEnvelope, toLogPayload } from './errors/serialize.js';
@@ -101,6 +102,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await registerAggregatorApprovalRoutes(app);
   await registerAggregatorProfileRoutes(app);
   await registerBulkUploadsRoutes(app);
+  await registerRegistrationLinksRoutes(app);
 
   app.setErrorHandler((rawErr, req, reply) => {
     // Fastify schema validation error — promote to a typed HttpError so the

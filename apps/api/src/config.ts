@@ -65,6 +65,16 @@ const ConfigSchema = z.object({
     .int()
     .positive()
     .default(10 * 1024 * 1024),
+
+  // ─── Registration links ─────────────────────────────────────────────────
+  /**
+   * Base URL of the public landing page that resolves a registration link
+   * slug. Encoded into the QR PNG; clients hit `${PUBLIC_LINK_BASE_URL}/${slug}`.
+   * Example: https://aggregator.example.com/r
+   */
+  PUBLIC_LINK_BASE_URL: z.string().default('http://localhost:3000/r'),
+  /** Pre-signed GET URL TTL for QR PNG downloads (seconds). */
+  QR_DOWNLOAD_URL_TTL_SECONDS: z.coerce.number().int().positive().default(900),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

@@ -39,6 +39,7 @@
     "pg": "^8.13.1",
     "pino": "^9.5.0",
     "pino-pretty": "^11.3.0",
+    "qrcode": "^1.5.4",
     "zod": "^3.24.1"
   },
   "devDependencies": {
@@ -46,6 +47,7 @@
     "@types/node": "^22.10.5",
     "@types/nodemailer": "^6.4.17",
     "@types/pg": "^8.11.10",
+    "@types/qrcode": "^1.5.5",
     "@vitest/coverage-v8": "^2.1.8",
     "drizzle-kit": "^0.28.1",
     "tsx": "^4.19.2",
