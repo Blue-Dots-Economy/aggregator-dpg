@@ -104,6 +104,33 @@ describe('FileSchemaLoader', () => {
       expect(result.error.code).toBe('SCHEMA_COMPILE_ERROR');
     }
   });
+
+  it('rejects ref ids containing path-traversal characters', async () => {
+    const loader = new FileSchemaLoader({ rootDir });
+    const traversal = await loader.getSchema({ id: '../etc/passwd', version: 'v1' });
+    expect(traversal.success).toBe(false);
+    if (!traversal.success) {
+      expect(traversal.error.code).toBe('SCHEMA_NOT_FOUND');
+    }
+
+    const slashed = await loader.getSchema({ id: 'aggregator/../foo', version: 'v1' });
+    expect(slashed.success).toBe(false);
+
+    const badVersion = await loader.getSchema({ id: 'aggregator', version: '../v1' });
+    expect(badVersion.success).toBe(false);
+  });
+
+  it('rejects ref ids with disallowed characters', async () => {
+    const loader = new FileSchemaLoader({ rootDir });
+    for (const id of ['Aggregator', 'agg.profile', 'agg space', '']) {
+      const r = await loader.getSchema({ id, version: 'v1' });
+      expect(r.success).toBe(false);
+    }
+    for (const version of ['1', 'V1', 'v1.0', '']) {
+      const r = await loader.getSchema({ id: 'aggregator', version });
+      expect(r.success).toBe(false);
+    }
+  });
 });
 
 describe('SchemaLoaderFake', () => {

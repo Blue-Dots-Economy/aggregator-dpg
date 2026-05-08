@@ -182,15 +182,17 @@ async function commit(
   outcome: RowOutcome,
   log: typeof logger,
 ): Promise<RowOutcome> {
+  // Only `failed` outcomes get a payload — `skipped` (e.g. duplicate
+  // participant) is dedup, not an error, and must not appear in errors.csv.
   const errorPayload =
-    outcome.outcome === 'passed'
-      ? ''
-      : JSON.stringify({
+    outcome.outcome === 'failed'
+      ? JSON.stringify({
           row_index: job.rowIndex,
           raw_row: job.rawRow,
           reasons: outcome.reasons,
           error_category: outcome.category,
-        });
+        })
+      : '';
 
   const result = await runBulkRowCommit(
     getRedis(),

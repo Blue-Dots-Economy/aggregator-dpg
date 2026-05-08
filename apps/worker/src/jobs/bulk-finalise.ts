@@ -99,8 +99,12 @@ export async function finaliseBulk(job: BulkFinaliseJob): Promise<FinaliseOutcom
   const headerCols = await readHeaderCols(redis, `${ns}:meta`);
   const csvHeader = [...headerCols, 'error_category', 'error_reason'];
   const csvRows: string[][] = errors.map((e) => {
-    const cells = parseRawRow(e.raw_row, headerCols.length);
-    return [...cells, e.error_category ?? '', (e.reasons ?? []).join('; ')];
+    const cells = parseRawRow(e.raw_row, headerCols.length).map(sanitiseCsvCell);
+    return [
+      ...cells,
+      sanitiseCsvCell(e.error_category ?? ''),
+      sanitiseCsvCell((e.reasons ?? []).join('; ')),
+    ];
   });
   const csvBody = Papa.unparse({ fields: csvHeader, data: csvRows });
   const errorsKey = `bulk-uploads/${job.uploadId}/errors.csv`;
@@ -240,4 +244,26 @@ function parseRawRow(rawRow: string, expectedCols: number): string[] {
     return [...cells, ...Array(expectedCols - cells.length).fill('')];
   }
   return cells;
+}
+
+/**
+ * Defuses spreadsheet formula injection. Cells starting with `=`, `+`, `-`,
+ * `@`, tab, or CR are interpreted as formulas by Excel/LibreOffice when the
+ * downloaded errors.csv is opened. Prefixing with a single quote keeps the
+ * value visible but inert.
+ */
+function sanitiseCsvCell(value: string): string {
+  if (!value) return value;
+  const first = value.charAt(0);
+  if (
+    first === '=' ||
+    first === '+' ||
+    first === '-' ||
+    first === '@' ||
+    first === '\t' ||
+    first === '\r'
+  ) {
+    return `'${value}`;
+  }
+  return value;
 }

@@ -327,6 +327,18 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
       log.error({ status: 'failure', reason: 'errors_csv_key_missing' });
       throw httpError('NOT_FOUND', { detail: 'Errors report not available for this upload.' });
     }
+    // Hardened: only sign keys that match the canonical errors.csv layout.
+    // Even though the worker writes a deterministic key, this guards against
+    // any future path (or DB tamper) signing a GET URL for an arbitrary object.
+    const expectedKey = `bulk-uploads/${upload.id}/errors.csv`;
+    if (upload.errorsCsvS3Key !== expectedKey) {
+      log.error({
+        status: 'failure',
+        reason: 'errors_csv_key_invalid',
+        s3_key: upload.errorsCsvS3Key,
+      });
+      throw httpError('NOT_FOUND', { detail: 'Errors report not available for this upload.' });
+    }
 
     const signed = await signErrorsCsvDownloadUrl(upload.errorsCsvS3Key);
 

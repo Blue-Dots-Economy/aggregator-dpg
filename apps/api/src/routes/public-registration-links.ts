@@ -129,58 +129,66 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
     const emailRaw = typeof body['email'] === 'string' ? (body['email'] as string) : '';
     const emailNormalised = emailRaw ? emailRaw.trim().toLowerCase() : null;
 
-    // 3. INSERT participant ON CONFLICT DO NOTHING — single transaction with
-    //    the link_submission insert below to keep submission + outcome in sync.
-    const inserted = await getDb()
-      .insert(participants)
-      .values({
-        aggregatorId: link.aggregatorId,
-        type: link.domain,
-        participantId,
-        data: body,
-        phone: phoneNormalised,
-        email: emailNormalised,
-        sourceLinkId: link.id,
-      })
-      .onConflictDoNothing({
-        target: [participants.aggregatorId, participants.participantId],
-      })
-      .returning({ id: participants.id });
+    // 3 + 4. participant INSERT (ON CONFLICT DO NOTHING) and link_submission
+    // INSERT must commit atomically — otherwise a crash between them leaves a
+    // participant without a corresponding submission row, and the metrics
+    // rollup never credits the registration.
+    const txResult = await getDb().transaction(async (tx) => {
+      const inserted = await tx
+        .insert(participants)
+        .values({
+          aggregatorId: link.aggregatorId,
+          type: link.domain,
+          participantId,
+          data: body,
+          phone: phoneNormalised,
+          email: emailNormalised,
+          sourceLinkId: link.id,
+        })
+        .onConflictDoNothing({
+          target: [participants.aggregatorId, participants.participantId],
+        })
+        .returning({ id: participants.id });
 
-    let outcome: 'passed' | 'skipped';
-    let participantRowId: string | null = null;
-    if (inserted.length > 0 && inserted[0]) {
-      outcome = 'passed';
-      participantRowId = inserted[0].id;
-    } else {
-      // Conflict — look up existing participant id for the submission row.
-      const existing = await getDb()
-        .select({ id: participants.id })
-        .from(participants)
-        .where(
-          and(
-            eq(participants.aggregatorId, link.aggregatorId),
-            eq(participants.participantId, participantId),
-          ),
-        )
-        .limit(1);
-      participantRowId = existing[0]?.id ?? null;
-      outcome = 'skipped';
-    }
+      let outcome: 'passed' | 'skipped';
+      let participantRowId: string | null = null;
+      if (inserted.length > 0 && inserted[0]) {
+        outcome = 'passed';
+        participantRowId = inserted[0].id;
+      } else {
+        const existing = await tx
+          .select({ id: participants.id })
+          .from(participants)
+          .where(
+            and(
+              eq(participants.aggregatorId, link.aggregatorId),
+              eq(participants.participantId, participantId),
+            ),
+          )
+          .limit(1);
+        participantRowId = existing[0]?.id ?? null;
+        outcome = 'skipped';
+      }
 
-    // 4. INSERT link_submission with the outcome.
-    const submission = await getDb()
-      .insert(linkSubmissions)
-      .values({
-        linkId: link.id,
-        aggregatorId: link.aggregatorId,
-        participantId: participantRowId,
-        metadataSnapshot: link.context,
-        submittedData: body,
+      const submission = await tx
+        .insert(linkSubmissions)
+        .values({
+          linkId: link.id,
+          aggregatorId: link.aggregatorId,
+          participantId: participantRowId,
+          metadataSnapshot: link.context,
+          submittedData: body,
+          outcome,
+        })
+        .returning({ id: linkSubmissions.id });
+
+      return {
         outcome,
-      })
-      .returning({ id: linkSubmissions.id });
-    const submissionId = submission[0]?.id;
+        participantRowId,
+        submissionId: submission[0]?.id,
+      };
+    });
+    const { outcome, participantRowId, submissionId } = txResult;
 
     log.info({
       status: 'success',

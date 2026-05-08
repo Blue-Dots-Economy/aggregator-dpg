@@ -63,11 +63,17 @@ export class FileSchemaLoader extends SchemaLoaderBase {
   }
 
   async getSchema(ref: SchemaRef): Promise<Result<JsonSchema, BaseError>> {
+    if (!isSafeRef(ref)) {
+      return err(new SchemaNotFoundError(ref));
+    }
     const cacheKey = `${ref.id}:${ref.version}`;
     const cached = this.schemaCache.get(cacheKey);
     if (cached) return ok(cached);
 
     const filePath = this.resolvePath(ref);
+    if (!isInsideRoot(filePath, this.rootDir)) {
+      return err(new SchemaNotFoundError(ref));
+    }
     let raw: string;
     try {
       raw = await readFile(filePath, 'utf8');
@@ -115,4 +121,25 @@ export class FileSchemaLoader extends SchemaLoaderBase {
     this.schemaCache.clear();
     this.validatorCache.clear();
   }
+}
+
+// Allowed identifier shapes for schema id segments + version.
+//   id        e.g. participant-seeker, aggregator-registration
+//   version   e.g. v1, v2, v10
+const SAFE_ID_RE = /^[a-z][a-z0-9-]{0,63}$/;
+const SAFE_VERSION_RE = /^v\d{1,4}$/;
+
+function isSafeRef(ref: SchemaRef): boolean {
+  return SAFE_ID_RE.test(ref.id) && SAFE_VERSION_RE.test(ref.version);
+}
+
+/**
+ * Ensures the resolved schema path stays inside the configured root —
+ * defence in depth on top of `isSafeRef`. Belt + braces against any future
+ * regex bypass or rootDir relative-path quirk.
+ */
+function isInsideRoot(filePath: string, rootDir: string): boolean {
+  const resolvedRoot = path.resolve(rootDir);
+  const resolvedTarget = path.resolve(filePath);
+  return resolvedTarget === resolvedRoot || resolvedTarget.startsWith(resolvedRoot + path.sep);
 }
