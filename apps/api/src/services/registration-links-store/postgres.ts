@@ -68,6 +68,25 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
     }
   }
 
+  async findBySlug(slug: string): Promise<StoreResult<RegistrationLink | null>> {
+    try {
+      const rows = await getDb()
+        .select()
+        .from(registrationLinks)
+        .where(eq(registrationLinks.slug, slug))
+        .limit(1);
+      const row = rows[0];
+      return { ok: true, value: row ? toDomain(row) : null };
+    } catch (err: unknown) {
+      logger.error({
+        operation: 'registrationLinksStore.findBySlug',
+        status: 'failure',
+        error: (err as Error).message,
+      });
+      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: (err as Error).message } };
+    }
+  }
+
   async findById(id: string, aggregatorId: string): Promise<StoreResult<RegistrationLink | null>> {
     try {
       const rows = await getDb()

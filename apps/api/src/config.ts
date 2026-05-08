@@ -75,6 +75,10 @@ const ConfigSchema = z.object({
   PUBLIC_LINK_BASE_URL: z.string().default('http://localhost:3000/r'),
   /** Pre-signed GET URL TTL for QR PNG downloads (seconds). */
   QR_DOWNLOAD_URL_TTL_SECONDS: z.coerce.number().int().positive().default(900),
+
+  // ─── Schema loader ──────────────────────────────────────────────────────
+  /** Absolute or relative path to `config/schemas/`. Used by link-submit Ajv. */
+  SCHEMA_ROOT_DIR: z.string().default('./config/schemas'),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

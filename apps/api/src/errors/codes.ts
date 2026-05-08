@@ -169,6 +169,22 @@ export const ERR = {
     detail: 'The errors report is only available after the upload finishes processing.',
     hint: 'GET /errors.csv called before bulk_uploads.status reached completed.',
   },
+
+  // ── Registration links (public path) ────────────────────────────────────
+  LINK_NOT_LIVE: {
+    code: 'LINK_NOT_LIVE',
+    status: 410,
+    title: 'Registration link no longer active',
+    detail: 'This registration link is not accepting submissions.',
+    hint: 'registration_link.status is retired or expired.',
+  },
+  LINK_DUPLICATE: {
+    code: 'LINK_DUPLICATE',
+    status: 409,
+    title: 'Already registered',
+    detail: 'This participant has already registered with this aggregator.',
+    hint: 'participants UNIQUE (aggregator_id, participant_id) — ON CONFLICT path.',
+  },
 } as const satisfies Record<string, ErrorCatalogueEntry>;
 
 export type ErrorCode = keyof typeof ERR;

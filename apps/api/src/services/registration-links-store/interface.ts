@@ -64,6 +64,11 @@ export abstract class RegistrationLinksStoreBase {
     id: string,
     aggregatorId: string,
   ): Promise<StoreResult<RegistrationLink | null>>;
+  /**
+   * Find a link by its public slug. Used by the public resolve and submit
+   * endpoints — no aggregator scoping; the slug is the access token.
+   */
+  abstract findBySlug(slug: string): Promise<StoreResult<RegistrationLink | null>>;
   /** Set the qr_object_key after the QR PNG has been uploaded to S3. */
   abstract updateQrKey(
     id: string,

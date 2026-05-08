@@ -59,6 +59,9 @@ importers:
       '@aggregator-dpg/queue':
         specifier: workspace:*
         version: link:../../packages/queue
+      '@aggregator-dpg/schema-loader':
+        specifier: workspace:*
+        version: link:../../packages/schema-loader
       '@aws-sdk/client-s3':
         specifier: ^3.1045.0
         version: 3.1045.0
