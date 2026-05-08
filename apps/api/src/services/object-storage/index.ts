@@ -10,7 +10,12 @@
  * latter requires `S3_ENDPOINT` + path-style addressing.
  */
 
-import { HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import {
+  GetObjectCommand,
+  HeadObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { config } from '../../config.js';
 
@@ -107,6 +112,33 @@ export async function headObject(key: string): Promise<ObjectHead | null> {
     if (code === 'NotFound' || code === 'NoSuchKey') return null;
     throw err;
   }
+}
+
+export interface SignedDownloadUrl {
+  url: string;
+  key: string;
+  /** ISO 8601 expiry timestamp. */
+  expiresAt: string;
+}
+
+/**
+ * Issues a pre-signed GET URL for a bulk-upload errors.csv artefact.
+ *
+ * Reuses BULK_UPLOAD_URL_TTL_SECONDS for download TTL — short enough that a
+ * leaked URL has limited utility, long enough for a normal browser download.
+ */
+export async function signErrorsCsvDownloadUrl(key: string): Promise<SignedDownloadUrl> {
+  const command = new GetObjectCommand({
+    Bucket: config.S3_BUCKET,
+    Key: key,
+    ResponseContentDisposition: 'attachment; filename="errors.csv"',
+    ResponseContentType: 'text/csv',
+  });
+  const url = await getSignedUrl(getClient(), command, {
+    expiresIn: config.BULK_UPLOAD_URL_TTL_SECONDS,
+  });
+  const expiresAt = new Date(Date.now() + config.BULK_UPLOAD_URL_TTL_SECONDS * 1000).toISOString();
+  return { url, key, expiresAt };
 }
 
 /** Test-only — clears the cached client so a fresh instance is built next call. */

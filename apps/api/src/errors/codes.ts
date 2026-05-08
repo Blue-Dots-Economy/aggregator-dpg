@@ -160,6 +160,15 @@ export const ERR = {
     detail: 'The requested resource does not exist.',
     hint: 'Store returned null for the given id.',
   },
+
+  // ── Bulk uploads ────────────────────────────────────────────────────────
+  BULK_UPLOAD_NOT_READY: {
+    code: 'BULK_UPLOAD_NOT_READY',
+    status: 410,
+    title: 'Errors report not ready',
+    detail: 'The errors report is only available after the upload finishes processing.',
+    hint: 'GET /errors.csv called before bulk_uploads.status reached completed.',
+  },
 } as const satisfies Record<string, ErrorCatalogueEntry>;
 
 export type ErrorCode = keyof typeof ERR;

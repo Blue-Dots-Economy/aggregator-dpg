@@ -23,7 +23,11 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { authenticate, type AuthContext } from '../services/auth/access-token.js';
 import { getBulkUploadsStore } from '../services/bulk-uploads-store/index.js';
 import { enqueueBulkFileProcess } from '../services/bulk-queue/index.js';
-import { headObject, signBulkUploadUrl } from '../services/object-storage/index.js';
+import {
+  headObject,
+  signBulkUploadUrl,
+  signErrorsCsvDownloadUrl,
+} from '../services/object-storage/index.js';
 import { httpError } from '../errors/http-error.js';
 
 interface CreateBody {
@@ -223,6 +227,72 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
     }
 
     return reply.send(toResponse(found.value));
+  });
+
+  app.get('/v1/bulk-uploads/:id/errors.csv', async (req, reply) => {
+    const auth = await requireAuth(req);
+    const params = req.params as { id?: string };
+    const uploadId = params.id;
+    if (!uploadId) {
+      throw httpError('SCHEMA_VALIDATION', { detail: 'upload_id is required.' });
+    }
+    const log = req.log.child({
+      operation: 'bulkUploads.errorsCsv',
+      actor: auth.userId,
+      upload_id: uploadId,
+    });
+    const start = Date.now();
+
+    const store = getBulkUploadsStore();
+    const found = await store.findById(uploadId, auth.aggregatorId);
+    if (!found.ok) {
+      throw httpError('DB_UNAVAILABLE', { cause: new Error(found.error.message) });
+    }
+    if (!found.value) {
+      // 403 to prevent cross-aggregator enumeration.
+      throw httpError('FORBIDDEN', { detail: 'Upload not accessible.' });
+    }
+    const upload = found.value;
+
+    if (upload.status !== 'completed') {
+      log.info({
+        status: 'skipped',
+        reason: 'not_completed',
+        current_status: upload.status,
+        latency_ms: Date.now() - start,
+      });
+      throw httpError('BULK_UPLOAD_NOT_READY', {
+        detail: `Upload is in status '${upload.status}'. The errors report is generated only after finalisation.`,
+      });
+    }
+    if (!upload.errorsCsvS3Key) {
+      // Defensive: should always be set when status='completed', but
+      // surface it cleanly if a future code path leaves it null.
+      log.error({ status: 'failure', reason: 'errors_csv_key_missing' });
+      throw httpError('NOT_FOUND', { detail: 'Errors report not available for this upload.' });
+    }
+
+    const signed = await signErrorsCsvDownloadUrl(upload.errorsCsvS3Key);
+
+    log.info({
+      status: 'success',
+      latency_ms: Date.now() - start,
+      s3_key: upload.errorsCsvS3Key,
+    });
+
+    return reply.send({
+      upload_id: upload.id,
+      url: signed.url,
+      s3_key: signed.key,
+      expires_at: signed.expiresAt,
+      content_type: 'text/csv',
+      counts: {
+        total_rows: upload.totalRows,
+        passed: upload.passed,
+        failed: upload.failed,
+        skipped: upload.skipped,
+      },
+    });
   });
 }
 
