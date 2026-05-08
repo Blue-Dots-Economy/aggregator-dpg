@@ -12,12 +12,14 @@
  *      with approve / reject deep links.
  *   7. On any post-DB failure, roll back the aggregator row (cascade clears
  *      the profile via FK).
+ *
+ * Failures throw `httpError(<CODE>)`; the global error handler emits the
+ * canonical envelope and structured log line.
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { config } from '../config.js';
-import { logger } from '../logger.js';
 import { getRegistrationValidator } from '../services/registration-validator.js';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
 import { getAggregatorProfileStore } from '../services/aggregator-profile-store/index.js';
@@ -30,6 +32,7 @@ import { slugWithSuffix } from '../services/slug.js';
 import { authenticateAny } from '../services/auth/access-token.js';
 import { KC_ATTR } from '../services/idp-admin/index.js';
 import type { AggregatorType } from '../db/schema-types.js';
+import { httpError } from '../errors/http-error.js';
 
 const SubmitBodySchema = z.object({
   aggregator_type: z.enum(['seeker', 'provider']),
@@ -44,6 +47,9 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
   app.post(
     '/v1/aggregator-registrations/create',
     async (req: FastifyRequest, reply: FastifyReply) => {
+      const log = req.log.child({ operation: 'aggregator-registration.create' });
+      const start = Date.now();
+
       // Every backend API requires a Bearer token. Registration is reached
       // anonymously by the user, so the BFF attaches a Keycloak service-
       // account token (client_credentials grant on the `aggregator-bff`
@@ -52,19 +58,17 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
       // claim because the caller is a service principal, not a user.
       const auth = await authenticateAny(req);
       if (!auth.ok) {
-        return reply.status(401).send({
-          error: 'Unauthorized',
-          code: auth.error.code,
-          message: auth.error.message,
+        throw httpError('UNAUTHORIZED', {
+          detail: auth.error.message,
+          fields: { reason: auth.error.code },
         });
       }
 
       const parseResult = SubmitBodySchema.safeParse(req.body);
       if (!parseResult.success) {
-        return reply.status(400).send({
-          error: 'BadRequest',
-          message: 'invalid request body',
-          details: parseResult.error.issues,
+        throw httpError('SCHEMA_VALIDATION', {
+          detail: 'Request body failed shape validation.',
+          fields: { issues: parseResult.error.issues },
         });
       }
 
@@ -72,20 +76,18 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
       // `config/` rather than code.
       const validate = getRegistrationValidator();
       if (!validate(parseResult.data)) {
-        return reply.status(400).send({
-          error: 'ValidationError',
-          message: 'payload failed schema validation',
-          details: validate.errors,
+        throw httpError('SCHEMA_VALIDATION', {
+          detail: 'Payload failed schema validation.',
+          fields: { issues: validate.errors ?? [] },
         });
       }
 
       const body = parseResult.data;
       const phoneResult = normalisePhone(body.phone);
       if (!phoneResult.ok) {
-        return reply.status(400).send({
-          error: 'BadRequest',
-          code: 'INVALID_PHONE',
-          message: phoneResult.error.message,
+        throw httpError('INVALID_PHONE', {
+          detail: phoneResult.error.message,
+          fields: { input: body.phone },
         });
       }
 
@@ -99,25 +101,13 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
       // aggregator row for a duplicate submission.
       const existing = await idp.findByEmail(body.email);
       if (!existing.ok) {
-        logger.error({
-          operation: 'aggregator-registration.create',
-          status: 'failure',
-          step: 'idp.findByEmail',
-          error: existing.error.message,
-          error_code: existing.error.code,
-        });
-        return reply.status(503).send({
-          error: 'ServiceUnavailable',
-          code: existing.error.code,
-          message: 'identity service unavailable',
+        throw httpError('IDP_UNAVAILABLE', {
+          cause: existing.error,
+          fields: { sub_operation: 'idp.findByEmail' },
         });
       }
       if (existing.value !== null) {
-        return reply.status(409).send({
-          error: 'Conflict',
-          code: 'USER_EXISTS',
-          message: 'a user with this email is already registered',
-        });
+        throw httpError('USER_EXISTS', { fields: { email: body.email } });
       }
 
       // Phone is the OTP-login identity for the portal — Keycloak's OTP
@@ -128,25 +118,13 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
       // disabled". Enforce phone uniqueness here so that never happens.
       const phoneOwner = await idp.findByAttribute(KC_ATTR.PHONE_NUMBER, phoneResult.value);
       if (!phoneOwner.ok) {
-        logger.error({
-          operation: 'aggregator-registration.create',
-          status: 'failure',
-          step: 'idp.findByAttribute.phoneNumber',
-          error: phoneOwner.error.message,
-          error_code: phoneOwner.error.code,
-        });
-        return reply.status(503).send({
-          error: 'ServiceUnavailable',
-          code: phoneOwner.error.code,
-          message: 'identity service unavailable',
+        throw httpError('IDP_UNAVAILABLE', {
+          cause: phoneOwner.error,
+          fields: { sub_operation: 'idp.findByAttribute.phoneNumber' },
         });
       }
       if (phoneOwner.value !== null) {
-        return reply.status(409).send({
-          error: 'Conflict',
-          code: 'PHONE_EXISTS',
-          message: 'a user with this mobile number is already registered',
-        });
+        throw httpError('PHONE_EXISTS', { fields: { phone: phoneResult.value } });
       }
 
       const aggregator = await createAggregatorWithSlug(
@@ -155,11 +133,9 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
         aggregatorType,
       );
       if (!aggregator.ok) {
-        return reply.status(503).send({
-          error: 'ServiceUnavailable',
-          code: aggregator.error.code,
-          message: aggregator.error.message,
-        });
+        const code =
+          aggregator.error.code === 'DUPLICATE_SLUG' ? 'DUPLICATE_SLUG' : 'DB_UNAVAILABLE';
+        throw httpError(code, { cause: aggregator.error });
       }
       const { id: aggregatorId, orgSlug } = aggregator.value;
 
@@ -173,16 +149,9 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
       });
       if (!profile.ok) {
         await aggregatorStore.deleteById(aggregatorId);
-        logger.error({
-          operation: 'aggregator-registration.create',
-          status: 'failure',
-          step: 'profileStore.create',
-          error: profile.error.message,
-        });
-        return reply.status(503).send({
-          error: 'ServiceUnavailable',
-          code: profile.error.code,
-          message: profile.error.message,
+        throw httpError('DB_UNAVAILABLE', {
+          cause: profile.error,
+          fields: { sub_operation: 'profileStore.create', rolled_back: true },
         });
       }
 
@@ -207,18 +176,15 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
       });
       if (!kcResult.ok) {
         await aggregatorStore.deleteById(aggregatorId);
-        logger.error({
-          operation: 'aggregator-registration.create',
-          status: 'failure',
-          step: 'idp.createUser',
-          error: kcResult.error.message,
-          error_code: kcResult.error.code,
-        });
-        const status = kcResult.error.code === 'USER_EXISTS' ? 409 : 503;
-        return reply.status(status).send({
-          error: status === 409 ? 'Conflict' : 'ServiceUnavailable',
-          code: kcResult.error.code,
-          message: kcResult.error.message,
+        if (kcResult.error.code === 'USER_EXISTS') {
+          throw httpError('USER_EXISTS', {
+            cause: kcResult.error,
+            fields: { email: body.email, rolled_back: true },
+          });
+        }
+        throw httpError('IDP_UNAVAILABLE', {
+          cause: kcResult.error,
+          fields: { sub_operation: 'idp.createUser', rolled_back: true },
         });
       }
 
@@ -230,19 +196,9 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
         approveToken = (await mintApprovalToken({ aggregatorId, intent: 'approve' })).token;
         rejectToken = (await mintApprovalToken({ aggregatorId, intent: 'reject' })).token;
       } catch (err) {
-        logger.error({
-          operation: 'aggregator-registration.create',
-          status: 'failure',
-          step: 'mintApprovalToken',
-          error: (err as Error).message,
-        });
         // KC user remains disabled + orphaned-but-known. Don't roll back —
         // the admin can still trigger an action manually.
-        return reply.status(500).send({
-          error: 'InternalServerError',
-          code: 'TOKEN_MINT_FAILED',
-          message: 'could not mint approval tokens',
-        });
+        throw httpError('TOKEN_MINT_FAILED', { cause: err });
       }
 
       const recipients = parseAdminEmails();
@@ -267,22 +223,26 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
       if (!mailResult.ok) {
         // Email failure is logged but not surfaced as a 5xx — the row is
         // still authoritative and admins can resend.
-        logger.error({
-          operation: 'aggregator-registration.create',
-          status: 'failure',
-          step: 'mailer.send',
-          error: mailResult.error.message,
-          error_code: mailResult.error.code,
-        });
+        log.warn(
+          {
+            sub_operation: 'mailer.send',
+            code: mailResult.error.code,
+            cause: mailResult.error.message,
+          },
+          'admin review email delivery failed — registration still recorded',
+        );
       }
 
-      logger.info({
-        operation: 'aggregator-registration.create',
-        status: 'success',
-        aggregator_id: aggregatorId,
-        org_slug: orgSlug,
-        keycloak_user_id: kcResult.value.id,
-      });
+      log.info(
+        {
+          status: 'success',
+          latency_ms: Date.now() - start,
+          aggregator_id: aggregatorId,
+          org_slug: orgSlug,
+          keycloak_user_id: kcResult.value.id,
+        },
+        'aggregator registration submitted',
+      );
 
       return reply.status(201).send({
         aggregator_id: aggregatorId,

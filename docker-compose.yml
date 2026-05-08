@@ -178,6 +178,11 @@ services:
       OIDC_ISSUER: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}:${KC_PORT:-8080}/realms/${KEYCLOAK_REALM:-aggregator}"
       OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-aggregator-portal}
       OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      # ─── BFF service-account (client_credentials) ─────────────────────
+      # Used by anonymous BFF routes (e.g. POST /api/aggregator/register)
+      # to obtain a service-account token for upstream API calls.
+      BFF_SERVICE_CLIENT_ID: ${BFF_SERVICE_CLIENT_ID:-aggregator-api}
+      BFF_SERVICE_CLIENT_SECRET: ${BFF_SERVICE_CLIENT_SECRET:-}
       OIDC_REDIRECT_URI: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}:${PORTAL_PORT:-3100}/api/auth/callback"
       OIDC_POST_LOGOUT_REDIRECT_URI: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}:${PORTAL_PORT:-3100}/"
       OIDC_SCOPE: ${OIDC_SCOPE:-openid profile email}
@@ -223,7 +228,7 @@ services:
       KEYCLOAK_URL: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}:${KC_PORT:-8080}"
       KEYCLOAK_REALM: ${KEYCLOAK_REALM:-aggregator}
       KEYCLOAK_ADMIN_CLIENT_ID: ${KEYCLOAK_ADMIN_CLIENT_ID:-aggregator-api}
-      KEYCLOAK_ADMIN_CLIENT_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET:-aggregator-api-dev-secret-change-me}
+      KEYCLOAK_ADMIN_CLIENT_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET:-}
       # Mailer — `smtp` (default, points at MailHog in compose) or `ses`
       MAIL_PROVIDER: ${MAIL_PROVIDER:-smtp}
       SMTP_HOST: ${SMTP_HOST:-mailhog}
@@ -243,7 +248,7 @@ services:
     ports:
       - "4000:4000"
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:4000/health/ready || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:4000/health/ready || exit 1"]
       interval: 10s
       timeout: 3s
       retries: 10
