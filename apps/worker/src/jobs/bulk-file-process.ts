@@ -185,7 +185,15 @@ export async function processBulkFile(job: BulkFileProcessJob): Promise<ProcessO
   // prematurely.
   const redis = getRedis();
   const ns = `bu:${job.uploadId}`;
-  await redis.hset(`${ns}:meta`, 'started_at', String(Date.now()));
+  // Stash header columns for the Finaliser — it needs them to write
+  // errors.csv with matching original-column ordering.
+  await redis.hset(
+    `${ns}:meta`,
+    'started_at',
+    String(Date.now()),
+    'headers',
+    JSON.stringify(headers),
+  );
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];

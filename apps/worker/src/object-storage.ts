@@ -1,8 +1,9 @@
 /**
- * S3 client for the worker. Downloads CSV files for the File Processor.
+ * S3 client for the worker. Downloads CSV files for the File Processor and
+ * uploads errors.csv artefacts for the Finaliser.
  */
 
-import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { config } from './config.js';
 
 let cachedClient: S3Client | null = null;
@@ -45,4 +46,20 @@ export async function downloadCsvAsString(s3Key: string): Promise<string> {
     chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
   }
   return Buffer.concat(chunks).toString('utf8');
+}
+
+/**
+ * Uploads an artefact to S3. Used by the Finaliser to write
+ * `bulk-uploads/{upload_id}/errors.csv` at a deterministic key — replays of
+ * the Finaliser overwrite identical bytes.
+ */
+export async function putObject(key: string, body: Buffer, contentType: string): Promise<void> {
+  await getClient().send(
+    new PutObjectCommand({
+      Bucket: config.S3_BUCKET,
+      Key: key,
+      Body: body,
+      ContentType: contentType,
+    }),
+  );
 }

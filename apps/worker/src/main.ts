@@ -8,12 +8,18 @@
  */
 
 import { Worker } from 'bullmq';
-import { QueueName, type BulkFileProcessJob, type BulkRowProcessJob } from '@aggregator-dpg/queue';
+import {
+  QueueName,
+  type BulkFileProcessJob,
+  type BulkFinaliseJob,
+  type BulkRowProcessJob,
+} from '@aggregator-dpg/queue';
 import { config } from './config.js';
 import { logger } from './logger.js';
 import { closeDb } from './db.js';
 import { processBulkFile } from './jobs/bulk-file-process.js';
 import { processBulkRow } from './jobs/bulk-row-process.js';
+import { finaliseBulk } from './jobs/bulk-finalise.js';
 import { getRedis, closeRedis } from './services/redis.js';
 import { closeQueues } from './services/bulk-queue.js';
 
@@ -38,9 +44,19 @@ async function main(): Promise<void> {
     },
   );
 
+  const finaliseWorker = new Worker<BulkFinaliseJob>(
+    QueueName.BulkFinalise,
+    async (job) => finaliseBulk(job.data),
+    {
+      connection,
+      concurrency: config.BULK_FINALISE_CONCURRENCY,
+    },
+  );
+
   for (const [name, w] of [
     ['bulkFileProcess', fileWorker],
     ['bulkRowProcess', rowWorker],
+    ['bulkFinalise', finaliseWorker],
   ] as const) {
     w.on('completed', (job, result) => {
       logger.debug({
@@ -61,12 +77,12 @@ async function main(): Promise<void> {
   logger.info({
     operation: 'worker.boot',
     status: 'ready',
-    queues: [QueueName.BulkFileProcess, QueueName.BulkRowProcess],
+    queues: [QueueName.BulkFileProcess, QueueName.BulkRowProcess, QueueName.BulkFinalise],
   });
 
   const shutdown = async (signal: string): Promise<void> => {
     logger.info({ operation: 'worker.shutdown', signal });
-    await Promise.all([fileWorker.close(), rowWorker.close()]);
+    await Promise.all([fileWorker.close(), rowWorker.close(), finaliseWorker.close()]);
     await closeQueues();
     await closeRedis();
     await closeDb();

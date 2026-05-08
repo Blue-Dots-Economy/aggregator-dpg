@@ -39,6 +39,10 @@ const ConfigSchema = z.object({
   // ─── Worker concurrency ─────────────────────────────────────────────────
   BULK_FILE_PROCESS_CONCURRENCY: z.coerce.number().int().positive().default(2),
   BULK_ROW_PROCESS_CONCURRENCY: z.coerce.number().int().positive().default(10),
+  // Concurrency caps how many DIFFERENT uploads can finalise in parallel
+  // across the worker process. BullMQ jobId dedupe (`${uploadId}:finalise`)
+  // already guarantees one finaliser per upload.
+  BULK_FINALISE_CONCURRENCY: z.coerce.number().int().positive().default(2),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
