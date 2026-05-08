@@ -24,6 +24,8 @@ const SUCCESS_BG = '#dcfce7';
 const INFO = '#1e40af';
 const INFO_BG = '#dbeafe';
 
+const BRAND_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect x="0.6" y="0.6" width="46.8" height="46.8" rx="13" fill="#EFF4FF" stroke="rgba(37,99,235,0.15)"/><g stroke="rgba(37,99,235,0.35)" stroke-width="0.9" stroke-linecap="round"><line x1="24" y1="24" x2="8" y2="12"/><line x1="24" y1="24" x2="40" y2="10"/><line x1="24" y1="24" x2="42" y2="26"/><line x1="24" y1="24" x2="34" y2="40"/><line x1="24" y1="24" x2="14" y2="38"/><line x1="24" y1="24" x2="6" y2="26"/></g><circle cx="8" cy="12" r="2.6" fill="#2563EB"/><circle cx="40" cy="10" r="2" fill="#2563EB"/><circle cx="42" cy="26" r="3.2" fill="#2563EB"/><circle cx="34" cy="40" r="2.4" fill="#2563EB"/><circle cx="14" cy="38" r="2.8" fill="#2563EB"/><circle cx="6" cy="26" r="2" fill="#2563EB"/><circle cx="24" cy="24" r="9.4" fill="rgba(37,99,235,0.35)"/><circle cx="24" cy="24" r="5.4" fill="#1D4ED8"/></svg>`;
+
 interface ShellOptions {
   title: string;
 }
@@ -34,6 +36,7 @@ function shell(opts: ShellOptions, body: string): string {
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>${escape(opts.title)} · Blue Dots</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,${encodeURIComponent(BRAND_FAVICON_SVG)}" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
