@@ -29,6 +29,8 @@ import {
   signErrorsCsvDownloadUrl,
 } from '../services/object-storage/index.js';
 import { httpError } from '../errors/http-error.js';
+import { getSchemaLoader } from '../services/schema-loader/index.js';
+import { buildCsvTemplate } from '../services/csv-template/index.js';
 
 interface CreateBody {
   participant_type?: unknown;
@@ -37,6 +39,35 @@ interface CreateBody {
 const VALID_TYPES = new Set(['seeker', 'provider']);
 
 export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<void> {
+  app.get('/v1/bulk-uploads/template', async (req, reply) => {
+    const auth = await requireAuth(req);
+    const query = req.query as { participant_type?: string };
+    const participantType = query.participant_type;
+    if (!participantType || !VALID_TYPES.has(participantType)) {
+      throw httpError('SCHEMA_VALIDATION', {
+        detail: 'participant_type must be "seeker" or "provider".',
+        fields: { participant_type: 'invalid' },
+      });
+    }
+
+    const schemaResult = await getSchemaLoader().getSchema({
+      id: `participant-${participantType}`,
+      version: 'v1',
+    });
+    if (!schemaResult.success) {
+      throw httpError('INTERNAL', {
+        detail: 'Participant schema unavailable.',
+        cause: new Error(schemaResult.error.message),
+      });
+    }
+    const csv = buildCsvTemplate(schemaResult.value);
+    void auth; // authenticated for audit; csv content is schema-derived only
+    return reply
+      .header('Content-Type', 'text/csv; charset=utf-8')
+      .header('Content-Disposition', `attachment; filename="${participantType}-template.csv"`)
+      .send(csv);
+  });
+
   app.post('/v1/bulk-uploads', async (req, reply) => {
     const auth = await requireAuth(req);
     const log = req.log.child({ operation: 'bulkUploads.create', actor: auth.userId });
@@ -168,11 +199,17 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
     const marked = await store.markUploaded(uploadId, auth.aggregatorId, head.etag);
     if (!marked.ok) {
       if (marked.error.code === 'DUPLICATE_ETAG') {
-        // Re-upload of identical CSV under same aggregator. Surface the existing
-        // upload row so the client can poll it.
+        // Re-upload of identical CSV under same aggregator. Drop the orphan
+        // pending row we just created and surface the existing one so the
+        // client can poll it.
+        await store.deletePending(uploadId, auth.aggregatorId);
         const existing = await store.findByAggregatorAndEtag(auth.aggregatorId, head.etag);
         if (existing.ok && existing.value) {
-          return reply.send(toResponse(existing.value));
+          return reply.send({
+            ...toResponse(existing.value),
+            duplicate: true,
+            message: 'This CSV was already uploaded earlier — showing the existing run.',
+          });
         }
       }
       throw httpError('DB_UNAVAILABLE', { cause: new Error(marked.error.message) });
@@ -207,6 +244,25 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
     });
 
     return reply.send(toResponse(marked.value));
+  });
+
+  app.get('/v1/bulk-uploads', async (req, reply) => {
+    const auth = await requireAuth(req);
+    const query = req.query as { limit?: string; offset?: string };
+    const limit = Math.max(1, Math.min(100, Number.parseInt(query.limit ?? '20', 10) || 20));
+    const offset = Math.max(0, Number.parseInt(query.offset ?? '0', 10) || 0);
+
+    const store = getBulkUploadsStore();
+    const result = await store.list(auth.aggregatorId, { limit, offset });
+    if (!result.ok) {
+      throw httpError('DB_UNAVAILABLE', { cause: new Error(result.error.message) });
+    }
+    return reply.send({
+      items: result.value.rows.map(toResponse),
+      total: result.value.total,
+      limit,
+      offset,
+    });
   });
 
   app.get('/v1/bulk-uploads/:id', async (req, reply) => {

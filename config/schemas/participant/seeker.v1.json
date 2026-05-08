@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.bluedots.org/participant/seeker.v1.json",
+  "title": "Participant — Seeker",
+  "description": "Opportunity seeker (e.g. ITI student, jobseeker). Used by both bulk CSV upload and link-driven sync submission. participant_id is supplied by the data source and forms the dedup key with aggregator_id.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["participant_id", "full_name", "phone"],
+  "properties": {
+    "participant_id": {
+      "type": "string",
+      "title": "Participant ID",
+      "description": "External unique id (roll number, employee id, etc.). Stable per source.",
+      "minLength": 1,
+      "maxLength": 64,
+      "examples": ["BLR-2026-001"]
+    },
+    "full_name": {
+      "type": "string",
+      "title": "Full Name",
+      "minLength": 2,
+      "maxLength": 200
+    },
+    "phone": {
+      "type": "string",
+      "title": "Phone",
+      "description": "10-digit Indian mobile or E.164 international format.",
+      "pattern": "^(\\+?\\d{10,15}|\\d{10})$"
+    },
+    "email": {
+      "type": "string",
+      "title": "Email",
+      "format": "email",
+      "maxLength": 320
+    },
+    "gender": {
+      "type": "string",
+      "title": "Gender",
+      "enum": ["male", "female", "other", "prefer_not_say"]
+    },
+    "date_of_birth": {
+      "type": "string",
+      "title": "Date of Birth",
+      "format": "date",
+      "description": "ISO date (YYYY-MM-DD)."
+    },
+    "state": {
+      "type": "string",
+      "title": "State",
+      "maxLength": 100
+    },
+    "district": {
+      "type": "string",
+      "title": "District",
+      "maxLength": 100
+    },
+    "qualification": {
+      "type": "string",
+      "title": "Qualification",
+      "maxLength": 200
+    },
+    "skills": {
+      "type": "string",
+      "title": "Skills",
+      "description": "Comma-separated list of skills.",
+      "maxLength": 500
+    }
+  }
+}

@@ -55,6 +55,16 @@ export type StoreError =
 
 export type StoreResult<T> = { ok: true; value: T } | { ok: false; error: StoreError };
 
+export interface ListBulkUploadsOptions {
+  limit: number;
+  offset: number;
+}
+
+export interface ListBulkUploadsResult {
+  rows: BulkUpload[];
+  total: number;
+}
+
 export abstract class BulkUploadsStoreBase {
   /** Create a new upload row in `pending` status. */
   abstract create(input: CreateBulkUploadInput): Promise<StoreResult<BulkUpload>>;
@@ -65,6 +75,13 @@ export abstract class BulkUploadsStoreBase {
     aggregatorId: string,
     s3Etag: string,
   ): Promise<StoreResult<BulkUpload | null>>;
+  /**
+   * Paginated list scoped to one aggregator. Most-recent first.
+   */
+  abstract list(
+    aggregatorId: string,
+    options: ListBulkUploadsOptions,
+  ): Promise<StoreResult<ListBulkUploadsResult>>;
   /**
    * Transition `pending` → `uploaded` and record the S3 ETag captured by
    * the API after the browser confirms the PUT completed.
@@ -78,4 +95,12 @@ export abstract class BulkUploadsStoreBase {
     aggregatorId: string,
     s3Etag: string,
   ): Promise<StoreResult<BulkUpload>>;
+  /**
+   * Delete a row that is still `pending`. Used to clean up orphan rows
+   * created when a re-upload of identical CSV bytes hits the
+   * (aggregator_id, s3_etag) UNIQUE conflict — we keep the original row
+   * (which already holds the etag) and drop the pending duplicate so the
+   * user does not see a stale entry in their list.
+   */
+  abstract deletePending(id: string, aggregatorId: string): Promise<StoreResult<void>>;
 }

@@ -25,6 +25,8 @@ export type {
   BulkUpload,
   BulkUploadStatus,
   CreateBulkUploadInput,
+  ListBulkUploadsOptions,
+  ListBulkUploadsResult,
   StoreError,
   StoreResult,
 } from './interface.js';

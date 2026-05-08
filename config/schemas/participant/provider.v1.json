@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.bluedots.org/participant/provider.v1.json",
+  "title": "Participant — Provider",
+  "description": "Opportunity provider (employer contact, training partner). Used by both bulk CSV upload and link-driven sync submission. participant_id is supplied by the data source and forms the dedup key with aggregator_id.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["participant_id", "organisation_name", "contact_name", "phone"],
+  "properties": {
+    "participant_id": {
+      "type": "string",
+      "title": "Participant ID",
+      "description": "External unique id (employer code, partner id). Stable per source.",
+      "minLength": 1,
+      "maxLength": 64,
+      "examples": ["EMP-2026-001"]
+    },
+    "organisation_name": {
+      "type": "string",
+      "title": "Organisation Name",
+      "minLength": 2,
+      "maxLength": 200
+    },
+    "contact_name": {
+      "type": "string",
+      "title": "Contact Name",
+      "minLength": 2,
+      "maxLength": 200
+    },
+    "phone": {
+      "type": "string",
+      "title": "Phone",
+      "pattern": "^(\\+?\\d{10,15}|\\d{10})$"
+    },
+    "email": {
+      "type": "string",
+      "title": "Email",
+      "format": "email",
+      "maxLength": 320
+    },
+    "industry": {
+      "type": "string",
+      "title": "Industry",
+      "maxLength": 100
+    },
+    "state": {
+      "type": "string",
+      "title": "State",
+      "maxLength": 100
+    },
+    "district": {
+      "type": "string",
+      "title": "District",
+      "maxLength": 100
+    },
+    "open_roles": {
+      "type": "string",
+      "title": "Open Roles",
+      "description": "Comma-separated role titles currently hiring.",
+      "maxLength": 500
+    }
+  }
+}

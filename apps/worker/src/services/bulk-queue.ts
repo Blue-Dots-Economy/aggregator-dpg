@@ -36,21 +36,24 @@ function getFinaliseQueue(): Queue<BulkFinaliseJob> {
   return finaliseQueue;
 }
 
-/** Enqueue a per-row job. jobId encodes (uploadId:rowIndex) for replay safety. */
+/**
+ * Enqueue a per-row job. jobId encodes (uploadId, rowIndex) for replay
+ * safety. BullMQ rejects ':' in custom jobIds — use '__' as the separator.
+ */
 export async function enqueueRowProcess(payload: BulkRowProcessJob): Promise<void> {
   await getRowQueue().add(QueueName.BulkRowProcess, payload, {
-    jobId: `${payload.uploadId}:${payload.rowIndex}`,
+    jobId: `${payload.uploadId}__${payload.rowIndex}`,
   });
 }
 
 /**
- * Enqueue the Finaliser. jobId = `${uploadId}:finalise` so BullMQ
+ * Enqueue the Finaliser. jobId = `${uploadId}__finalise` so BullMQ
  * deduplicates if multiple Row Processors hit the equality condition
  * concurrently — only one finaliser ever runs.
  */
 export async function enqueueFinalise(payload: BulkFinaliseJob): Promise<void> {
   await getFinaliseQueue().add(QueueName.BulkFinalise, payload, {
-    jobId: `${payload.uploadId}:finalise`,
+    jobId: `${payload.uploadId}__finalise`,
   });
   logger.info({
     operation: 'bulkQueue.enqueueFinalise',

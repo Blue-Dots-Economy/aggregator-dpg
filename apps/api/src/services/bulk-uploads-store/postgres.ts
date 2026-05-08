@@ -5,7 +5,7 @@
  * abstract `StoreError` codes — no driver-specific errors leak.
  */
 
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { logger } from '../../logger.js';
 import { bulkUploads, type BulkUploadRow } from '../../db/schema.js';
 import { getDb } from '../../db/client.js';
@@ -13,6 +13,8 @@ import {
   BulkUploadsStoreBase,
   type BulkUpload,
   type CreateBulkUploadInput,
+  type ListBulkUploadsOptions,
+  type ListBulkUploadsResult,
   type StoreResult,
 } from './interface.js';
 
@@ -92,6 +94,59 @@ export class PostgresBulkUploadsStore extends BulkUploadsStoreBase {
     } catch (err: unknown) {
       logger.error({
         operation: 'bulkUploadsStore.findByAggregatorAndEtag',
+        status: 'failure',
+        error: (err as Error).message,
+      });
+      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: (err as Error).message } };
+    }
+  }
+
+  async list(
+    aggregatorId: string,
+    options: ListBulkUploadsOptions,
+  ): Promise<StoreResult<ListBulkUploadsResult>> {
+    try {
+      const where = eq(bulkUploads.aggregatorId, aggregatorId);
+      const [rows, totalRows] = await Promise.all([
+        getDb()
+          .select()
+          .from(bulkUploads)
+          .where(where)
+          .orderBy(desc(bulkUploads.createdAt))
+          .limit(options.limit)
+          .offset(options.offset),
+        getDb()
+          .select({ count: sql<number>`count(*)::int` })
+          .from(bulkUploads)
+          .where(where),
+      ]);
+      const total = totalRows[0]?.count ?? 0;
+      return { ok: true, value: { rows: rows.map(toDomain), total } };
+    } catch (err: unknown) {
+      logger.error({
+        operation: 'bulkUploadsStore.list',
+        status: 'failure',
+        error: (err as Error).message,
+      });
+      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: (err as Error).message } };
+    }
+  }
+
+  async deletePending(id: string, aggregatorId: string): Promise<StoreResult<void>> {
+    try {
+      await getDb()
+        .delete(bulkUploads)
+        .where(
+          and(
+            eq(bulkUploads.id, id),
+            eq(bulkUploads.aggregatorId, aggregatorId),
+            eq(bulkUploads.status, 'pending'),
+          ),
+        );
+      return { ok: true, value: undefined };
+    } catch (err: unknown) {
+      logger.error({
+        operation: 'bulkUploadsStore.deletePending',
         status: 'failure',
         error: (err as Error).message,
       });

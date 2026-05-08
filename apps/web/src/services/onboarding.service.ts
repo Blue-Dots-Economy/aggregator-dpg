@@ -1,34 +1,224 @@
-import type { RegistrationLink } from '../types';
-import { SEEKER_LINKS, PROVIDER_LINKS } from '../data/mock';
+/**
+ * Onboarding service — calls the BFF proxies for the link + bulk-upload
+ * pipelines. Lives in the browser, so it never sees API tokens directly;
+ * the BFF attaches the bearer header.
+ */
 
-export interface OnboardingService {
-  links(kind: 'seeker' | 'provider'): Promise<RegistrationLink[]>;
-  uploadCsv(file: File): Promise<{ accepted: number; rejected: number }>;
-  generateLink(input: { org: string; state: string; lever: string }): Promise<{ url: string }>;
+export interface ApiRegistrationLink {
+  link_id: string;
+  slug: string;
+  domain: 'seeker' | 'provider';
+  status: 'draft' | 'live' | 'retired';
+  context: Record<string, unknown>;
+  expires_at: string | null;
+  public_url: string;
+  qr_url: string | null;
+  qr_expires_at: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
-class MockOnboardingService implements OnboardingService {
-  async links(kind: 'seeker' | 'provider'): Promise<RegistrationLink[]> {
-    return kind === 'seeker' ? SEEKER_LINKS : PROVIDER_LINKS;
-  }
+export interface ListLinksResponse {
+  items: ApiRegistrationLink[];
+  total: number;
+  limit: number;
+  offset: number;
+}
 
-  async uploadCsv(file: File): Promise<{ accepted: number; rejected: number }> {
-    if (!file.name.toLowerCase().endsWith('.csv')) {
-      throw new Error('Only .csv files are accepted');
+export interface CreateLinkInput {
+  domain: 'seeker' | 'provider';
+  context?: Record<string, unknown>;
+  status?: 'draft' | 'live';
+  expires_at?: string | null;
+}
+
+export interface OnboardingSummary {
+  aggregator_id: string;
+  from: string | null;
+  to: string | null;
+  total: number;
+  passed: number;
+  failed: number;
+  skipped: number;
+}
+
+export interface BulkUploadCreateResponse {
+  upload_id: string;
+  upload_url: string;
+  s3_key: string;
+  expires_at: string;
+  content_type: string;
+  max_bytes: number;
+  schema_id: string;
+  schema_version: string;
+  status: string;
+}
+
+export interface BulkUploadStatus {
+  upload_id: string;
+  status: string;
+  status_reason: string | null;
+  participant_type: 'seeker' | 'provider';
+  total_rows: number | null;
+  passed: number;
+  failed: number;
+  skipped: number;
+  errors_csv_s3_key: string | null;
+  schema_id: string;
+  schema_version: string;
+  created_at: string;
+  completed_at: string | null;
+}
+
+export interface BulkUploadErrorsResponse {
+  upload_id: string;
+  url: string;
+  s3_key: string;
+  expires_at: string;
+  content_type: string;
+  counts: {
+    total_rows: number | null;
+    passed: number;
+    failed: number;
+    skipped: number;
+  };
+}
+
+async function jsonFetch<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
+  const res = await fetch(input, {
+    ...init,
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+      ...(init?.headers ?? {}),
+    },
+    credentials: 'include',
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`request failed (${res.status}): ${text || res.statusText}`);
+  }
+  return (await res.json()) as T;
+}
+
+export const onboardingService = {
+  async listLinks(
+    opts: {
+      domain?: 'seeker' | 'provider';
+      status?: 'draft' | 'live' | 'retired';
+      limit?: number;
+      offset?: number;
+    } = {},
+  ): Promise<ListLinksResponse> {
+    const params = new URLSearchParams();
+    if (opts.status) params.set('status', opts.status);
+    if (opts.limit) params.set('limit', String(opts.limit));
+    if (opts.offset) params.set('offset', String(opts.offset));
+    const qs = params.toString();
+    const data = await jsonFetch<ListLinksResponse>(`/api/links${qs ? `?${qs}` : ''}`);
+    if (opts.domain) {
+      return { ...data, items: data.items.filter((it) => it.domain === opts.domain) };
     }
-    return { accepted: 0, rejected: 0 };
-  }
+    return data;
+  },
 
-  async generateLink(input: {
-    org: string;
-    state: string;
-    lever: string;
-  }): Promise<{ url: string }> {
-    const slug = `${input.org}-${input.state.slice(0, 3)}-${input.lever}`
-      .toLowerCase()
-      .replace(/\s+/g, '-');
-    return { url: `https://bluedots.app/r/${slug}` };
-  }
-}
+  async createLink(input: CreateLinkInput): Promise<ApiRegistrationLink> {
+    return jsonFetch<ApiRegistrationLink>('/api/links', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
 
-export const onboardingService: OnboardingService = new MockOnboardingService();
+  async deactivateLink(id: string): Promise<ApiRegistrationLink> {
+    return jsonFetch<ApiRegistrationLink>(`/api/links/${encodeURIComponent(id)}/deactivate`, {
+      method: 'POST',
+    });
+  },
+
+  async summary(opts: { from?: string; to?: string } = {}): Promise<OnboardingSummary> {
+    const params = new URLSearchParams();
+    if (opts.from) params.set('from', opts.from);
+    if (opts.to) params.set('to', opts.to);
+    const qs = params.toString();
+    return jsonFetch<OnboardingSummary>(`/api/onboarding/summary${qs ? `?${qs}` : ''}`);
+  },
+
+  async createBulkUpload(
+    participantType: 'seeker' | 'provider',
+  ): Promise<BulkUploadCreateResponse> {
+    return jsonFetch<BulkUploadCreateResponse>('/api/bulk-uploads', {
+      method: 'POST',
+      body: JSON.stringify({ participant_type: participantType }),
+    });
+  },
+
+  async startBulkUpload(uploadId: string): Promise<BulkUploadStatus> {
+    return jsonFetch<BulkUploadStatus>(`/api/bulk-uploads/${encodeURIComponent(uploadId)}/start`, {
+      method: 'POST',
+    });
+  },
+
+  async readBulkUpload(uploadId: string): Promise<BulkUploadStatus> {
+    return jsonFetch<BulkUploadStatus>(`/api/bulk-uploads/${encodeURIComponent(uploadId)}`);
+  },
+
+  async listBulkUploads(opts: { limit?: number; offset?: number } = {}): Promise<{
+    items: BulkUploadStatus[];
+    total: number;
+    limit: number;
+    offset: number;
+  }> {
+    const params = new URLSearchParams();
+    if (opts.limit) params.set('limit', String(opts.limit));
+    if (opts.offset) params.set('offset', String(opts.offset));
+    const qs = params.toString();
+    return jsonFetch(`/api/bulk-uploads/list${qs ? `?${qs}` : ''}`);
+  },
+
+  async errorsCsvUrl(uploadId: string): Promise<BulkUploadErrorsResponse> {
+    return jsonFetch<BulkUploadErrorsResponse>(
+      `/api/bulk-uploads/${encodeURIComponent(uploadId)}/errors`,
+    );
+  },
+
+  /**
+   * Full bulk upload flow: presign → PUT to S3 → start → poll status.
+   * `duplicate=true` when the CSV bytes match a prior upload — backend
+   * surfaces the existing run instead of creating a fresh one.
+   */
+  async uploadCsv(
+    file: File,
+    participantType: 'seeker' | 'provider',
+  ): Promise<{
+    uploadId: string;
+    status: BulkUploadStatus;
+    duplicate?: boolean;
+    message?: string;
+  }> {
+    const presigned = await this.createBulkUpload(participantType);
+    const put = await fetch(presigned.upload_url, {
+      method: 'PUT',
+      body: file,
+      headers: { 'Content-Type': presigned.content_type },
+    });
+    if (!put.ok) {
+      throw new Error(`S3 PUT failed (${put.status}): ${await put.text().catch(() => '')}`);
+    }
+    const status = (await this.startBulkUpload(presigned.upload_id)) as BulkUploadStatus & {
+      duplicate?: boolean;
+      message?: string;
+    };
+    const out: {
+      uploadId: string;
+      status: BulkUploadStatus;
+      duplicate?: boolean;
+      message?: string;
+    } = {
+      uploadId: status.upload_id,
+      status,
+    };
+    if (status.duplicate) out.duplicate = true;
+    if (status.message) out.message = status.message;
+    return out;
+  },
+};
