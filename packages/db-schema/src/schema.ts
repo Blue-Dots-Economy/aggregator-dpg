@@ -187,10 +187,11 @@ export const participants = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
-    aggregatorParticipantUnique: uniqueIndex('participants_aggregator_participant_unique').on(
-      table.aggregatorId,
-      table.participantId,
-    ),
+    // Dedup key includes `type` so a seeker and a provider can share the same
+    // external participant_id under one aggregator without colliding.
+    aggregatorTypeParticipantUnique: uniqueIndex(
+      'participants_aggregator_type_participant_unique',
+    ).on(table.aggregatorId, table.type, table.participantId),
     aggregatorPhoneIdx: index('participants_aggregator_phone_idx').on(
       table.aggregatorId,
       table.phone,

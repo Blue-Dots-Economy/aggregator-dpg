@@ -31,6 +31,7 @@ import {
 import { httpError } from '../errors/http-error.js';
 import { getSchemaLoader } from '../services/schema-loader/index.js';
 import { buildCsvTemplate } from '../services/csv-template/index.js';
+import { config } from '../config.js';
 
 interface CreateBody {
   participant_type?: unknown;
@@ -194,6 +195,21 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
     }
     if (head.contentLength === 0) {
       throw httpError('SCHEMA_VALIDATION', { detail: 'Uploaded CSV is empty.' });
+    }
+    if (head.contentLength > config.BULK_UPLOAD_MAX_BYTES) {
+      // Belt + braces alongside the signed PUT — S3 PUT signing alone does not
+      // bind a max size on the GetObject side, and the worker downloads the
+      // whole object into memory. Reject before enqueueing.
+      log.warn({
+        status: 'failure',
+        reason: 'object_too_large',
+        s3_key: upload.s3Key,
+        content_length: head.contentLength,
+        max_bytes: config.BULK_UPLOAD_MAX_BYTES,
+      });
+      throw httpError('SCHEMA_VALIDATION', {
+        detail: `Uploaded CSV is too large (${head.contentLength} bytes; max ${config.BULK_UPLOAD_MAX_BYTES}).`,
+      });
     }
 
     const marked = await store.markUploaded(uploadId, auth.aggregatorId, head.etag);

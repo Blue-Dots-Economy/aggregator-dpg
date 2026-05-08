@@ -123,45 +123,51 @@ export async function finaliseBulk(job: BulkFinaliseJob): Promise<FinaliseOutcom
   const skipped = parseInt(counters['skipped'] ?? '0', 10) || 0;
   const total = passed + failed + skipped;
 
-  // 6. UPDATE bulk_uploads → completed.
+  // 6 + 7. Mark `bulk_uploads` completed AND insert the onboarding rollup
+  // row atomically. If we update first and the onboarding INSERT then fails,
+  // BullMQ retries hit the `already_completed` short-circuit (line above)
+  // and the rollup is permanently lost. Single transaction prevents that.
   const completedAt = new Date();
-  await getDb()
-    .update(schema.bulkUploads)
-    .set({
-      status: 'completed',
-      passed,
-      failed,
-      skipped,
-      errorsCsvS3Key: errorsKey,
-      completedAt,
-      lastProgressAt: completedAt,
-      updatedAt: completedAt,
-    })
-    .where(eq(schema.bulkUploads.id, job.uploadId));
+  await getDb().transaction(async (tx) => {
+    await tx
+      .update(schema.bulkUploads)
+      .set({
+        status: 'completed',
+        passed,
+        failed,
+        skipped,
+        errorsCsvS3Key: errorsKey,
+        completedAt,
+        lastProgressAt: completedAt,
+        updatedAt: completedAt,
+      })
+      .where(eq(schema.bulkUploads.id, job.uploadId));
 
-  // 7. INSERT onboarding (source='bulk') — pre-check for idempotency on
-  // replay, since the partial UNIQUE on batch_id WHERE source='bulk'
-  // can't be addressed by a Drizzle ON CONFLICT target directly.
-  const existing = await getDb()
-    .select({ id: schema.onboarding.id })
-    .from(schema.onboarding)
-    .where(and(eq(schema.onboarding.source, 'bulk'), eq(schema.onboarding.batchId, job.uploadId)))
-    .limit(1);
-  if (existing.length === 0) {
-    await getDb().insert(schema.onboarding).values({
-      aggregatorId: upload.aggregatorId,
-      orgSlug,
-      source: 'bulk',
-      batchId: job.uploadId,
-      linkId: null,
-      periodStart: upload.createdAt,
-      periodEnd: completedAt,
-      total,
-      passed,
-      failed,
-      skipped,
-    });
-  }
+    // Pre-check for idempotency on replay — the partial UNIQUE on
+    // (batch_id WHERE source='bulk') can't be a Drizzle ON CONFLICT target
+    // directly. Inside the same transaction so a parallel finaliser can't
+    // sneak between the SELECT and INSERT.
+    const existing = await tx
+      .select({ id: schema.onboarding.id })
+      .from(schema.onboarding)
+      .where(and(eq(schema.onboarding.source, 'bulk'), eq(schema.onboarding.batchId, job.uploadId)))
+      .limit(1);
+    if (existing.length === 0) {
+      await tx.insert(schema.onboarding).values({
+        aggregatorId: upload.aggregatorId,
+        orgSlug,
+        source: 'bulk',
+        batchId: job.uploadId,
+        linkId: null,
+        periodStart: upload.createdAt,
+        periodEnd: completedAt,
+        total,
+        passed,
+        failed,
+        skipped,
+      });
+    }
+  });
 
   // 8. Cleanup Redis keys — only after all persistence succeeded.
   await redis.del(

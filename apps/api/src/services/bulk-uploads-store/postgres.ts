@@ -5,7 +5,7 @@
  * abstract `StoreError` codes — no driver-specific errors leak.
  */
 
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { logger } from '../../logger.js';
 import { bulkUploads, type BulkUploadRow } from '../../db/schema.js';
 import { getDb } from '../../db/client.js';
@@ -183,14 +183,32 @@ export class PostgresBulkUploadsStore extends BulkUploadsStoreBase {
       return { ok: true, value: current };
     }
     try {
+      // SQL guard the transition — without `status IN ('pending','uploaded')`
+      // a concurrent caller racing past row_processing/completed could
+      // clobber the row back to `uploaded`.
       const rows = await getDb()
         .update(bulkUploads)
         .set({ status: 'uploaded', s3Etag, updatedAt: new Date() })
-        .where(and(eq(bulkUploads.id, id), eq(bulkUploads.aggregatorId, aggregatorId)))
+        .where(
+          and(
+            eq(bulkUploads.id, id),
+            eq(bulkUploads.aggregatorId, aggregatorId),
+            inArray(bulkUploads.status, ['pending', 'uploaded']),
+          ),
+        )
         .returning();
       const row = rows[0];
       if (!row) {
-        return { ok: false, error: { code: 'DB_UNAVAILABLE', message: 'no row returned' } };
+        // Row exists (we read it above) but status moved past pending/uploaded
+        // between the read and the write. Treat as a stale-replay invalid
+        // transition rather than DB unavailability.
+        return {
+          ok: false,
+          error: {
+            code: 'INVALID_TRANSITION',
+            message: `markUploaded raced — row no longer in pending/uploaded`,
+          },
+        };
       }
       logger.info({
         operation: 'bulkUploadsStore.markUploaded',

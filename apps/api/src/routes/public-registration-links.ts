@@ -146,7 +146,7 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
           sourceLinkId: link.id,
         })
         .onConflictDoNothing({
-          target: [participants.aggregatorId, participants.participantId],
+          target: [participants.aggregatorId, participants.type, participants.participantId],
         })
         .returning({ id: participants.id });
 
@@ -162,6 +162,7 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
           .where(
             and(
               eq(participants.aggregatorId, link.aggregatorId),
+              eq(participants.type, link.domain),
               eq(participants.participantId, participantId),
             ),
           )

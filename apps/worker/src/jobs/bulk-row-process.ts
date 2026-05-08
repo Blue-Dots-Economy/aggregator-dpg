@@ -148,7 +148,11 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
         sourceRowIndex: job.rowIndex,
       })
       .onConflictDoNothing({
-        target: [schema.participants.aggregatorId, schema.participants.participantId],
+        target: [
+          schema.participants.aggregatorId,
+          schema.participants.type,
+          schema.participants.participantId,
+        ],
       })
       .returning({ id: schema.participants.id });
     if (inserted.length > 0) {
