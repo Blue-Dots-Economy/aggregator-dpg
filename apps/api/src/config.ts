@@ -34,6 +34,35 @@ const ConfigSchema = z.object({
   PUBLIC_PORTAL_URL: z.string().default('http://localhost:3000'),
   /** Comma-separated list of admin recipient email addresses. */
   ADMIN_EMAILS: z.string().default(''),
+
+  // ─── Object storage (bulk uploads + errors.csv) ──────────────────────────
+  /**
+   * S3-compatible endpoint URL. For MinIO in dev, set to
+   * `http://minio:9000` (in-container) or `http://localhost:9000` (host).
+   * For real S3, leave blank — the SDK uses AWS endpoints by region.
+   */
+  S3_ENDPOINT: z.string().optional(),
+  S3_REGION: z.string().default('us-east-1'),
+  /** Bucket holding uploaded CSVs and generated error reports. */
+  S3_BUCKET: z.string().default('aggregator-bulk-uploads'),
+  S3_ACCESS_KEY_ID: z.string().optional(),
+  S3_SECRET_ACCESS_KEY: z.string().optional(),
+  /**
+   * Force path-style addressing (bucket.endpoint.com vs endpoint.com/bucket).
+   * Required for MinIO; auto-detected for AWS.
+   */
+  S3_FORCE_PATH_STYLE: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
+  /** Pre-signed PUT URL TTL for bulk uploads (seconds). */
+  BULK_UPLOAD_URL_TTL_SECONDS: z.coerce.number().int().positive().default(900),
+  /** Maximum CSV file size for the pre-signed PUT (bytes). */
+  BULK_UPLOAD_MAX_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(10 * 1024 * 1024),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

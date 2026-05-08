@@ -93,7 +93,9 @@ export const bulkUploads = pgTable(
       .references(() => aggregators.id, { onDelete: 'cascade' }),
     participantType: participantTypeEnum('participant_type').notNull(),
     s3Key: text('s3_key').notNull(),
-    s3Etag: text('s3_etag').notNull(),
+    // ETag captured by HEAD when the browser confirms upload (POST /:id/start).
+    // NULL while status='pending'.
+    s3Etag: text('s3_etag'),
     status: bulkUploadStatusEnum('status').notNull().default('pending'),
     statusReason: text('status_reason'),
     totalRows: integer('total_rows'),
