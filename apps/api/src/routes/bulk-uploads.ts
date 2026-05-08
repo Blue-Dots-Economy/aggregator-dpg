@@ -22,6 +22,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { authenticate, type AuthContext } from '../services/auth/access-token.js';
 import { getBulkUploadsStore } from '../services/bulk-uploads-store/index.js';
+import { enqueueBulkFileProcess } from '../services/bulk-queue/index.js';
 import { headObject, signBulkUploadUrl } from '../services/object-storage/index.js';
 import { httpError } from '../errors/http-error.js';
 
@@ -173,7 +174,26 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
       throw httpError('DB_UNAVAILABLE', { cause: new Error(marked.error.message) });
     }
 
-    // TODO(slice 9): enqueue 'bulk-file-process' BullMQ job here.
+    try {
+      await enqueueBulkFileProcess({
+        uploadId: marked.value.id,
+        aggregatorId: auth.aggregatorId,
+        s3Key: marked.value.s3Key,
+        participantType: marked.value.participantType,
+        schemaId: marked.value.schemaId,
+        schemaVersion: marked.value.schemaVersion,
+      });
+    } catch (err) {
+      // Enqueue failed but the row is already in 'uploaded' status. The
+      // stuck-job watchdog will surface this if no worker picks it up.
+      log.error({
+        status: 'failure',
+        sub_operation: 'enqueue.bulk-file-process',
+        error: (err as Error).message,
+      });
+      throw httpError('INTERNAL', { cause: err });
+    }
+
     log.info({
       status: 'success',
       latency_ms: Date.now() - start,

@@ -1,0 +1,25 @@
+{
+  "name": "@aggregator-dpg/queue",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "bullmq": "^5.76.6",
+    "ioredis": "^5.10.1"
+  },
+  "devDependencies": {
+    "@aggregator-dpg/tsconfig": "workspace:*",
+    "@types/node": "^22.0.0",
+    "typescript": "^6.0.3"
+  }
+}

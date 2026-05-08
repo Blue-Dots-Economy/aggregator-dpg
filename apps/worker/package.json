@@ -1,0 +1,36 @@
+{
+  "name": "@aggregator-dpg/worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/main.ts",
+    "start": "node dist/main.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@aggregator-dpg/db-schema": "workspace:*",
+    "@aggregator-dpg/queue": "workspace:*",
+    "@aggregator-dpg/schema-loader": "workspace:*",
+    "@aggregator-dpg/shared-primitives": "workspace:*",
+    "@aws-sdk/client-s3": "^3.1045.0",
+    "bullmq": "^5.76.6",
+    "drizzle-orm": "^0.36.4",
+    "ioredis": "^5.10.1",
+    "papaparse": "^5.4.1",
+    "pg": "^8.13.1",
+    "pino": "^9.5.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@aggregator-dpg/tsconfig": "workspace:*",
+    "@types/node": "^22.10.5",
+    "@types/papaparse": "^5.3.15",
+    "@types/pg": "^8.11.10",
+    "tsx": "^4.19.2",
+    "typescript": "^6.0.3",
+    "vitest": "^3.2.0"
+  }
+}
