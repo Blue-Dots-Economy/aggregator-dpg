@@ -287,13 +287,17 @@ function ParticipantTable<R extends ParticipantBase>({ kind, rows }: Participant
             <label htmlFor={searchId} className="sr-only">
               Search participants
             </label>
-            <I.search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-300" />
+            <I.search
+              size={15}
+              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-400"
+            />
             <input
               id={searchId}
               aria-label="Search participants"
-              className="bd-input pl-9 w-[260px] text-[13px] py-1.5"
+              className="bd-input w-[320px] text-[13px] py-1.5"
+              style={{ paddingLeft: 36 }}
               placeholder={
-                kind === 'seeker' ? 'Search by name, ID, profile…' : 'Search by org, role, ID…'
+                kind === 'seeker' ? 'Search name, ID, profile…' : 'Search org, role, ID…'
               }
             />
           </div>
