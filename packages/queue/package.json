@@ -10,7 +10,7 @@
     }
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && cp -r src/lua dist/lua",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

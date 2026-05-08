@@ -20,13 +20,13 @@
 import Papa from 'papaparse';
 import { eq } from 'drizzle-orm';
 import type { BulkFileProcessJob } from '@aggregator-dpg/queue';
-import { FileSchemaLoader } from '@aggregator-dpg/schema-loader/file';
 import { schema, getDb } from '../db.js';
 import { downloadCsvAsString } from '../object-storage.js';
 import { config } from '../config.js';
 import { logger } from '../logger.js';
-
-const schemaLoader = new FileSchemaLoader({ rootDir: config.SCHEMA_ROOT_DIR });
+import { getSchemaLoader } from '../services/schema-loader.js';
+import { getRedis } from '../services/redis.js';
+import { enqueueRowProcess } from '../services/bulk-queue.js';
 
 const BOM = '﻿';
 
@@ -101,7 +101,8 @@ export async function processBulkFile(job: BulkFileProcessJob): Promise<ProcessO
   }
 
   // 3. Schema fetch.
-  const validatorResult = await schemaLoader.getValidator({
+  const loader = getSchemaLoader();
+  const validatorResult = await loader.getValidator({
     id: job.schemaId,
     version: job.schemaVersion,
   });
@@ -110,7 +111,7 @@ export async function processBulkFile(job: BulkFileProcessJob): Promise<ProcessO
     await markStatus(job.uploadId, 'file_failed', 'schema_unavailable');
     return { status: 'failed', reason: 'schema_unavailable' };
   }
-  const schemaResult = await schemaLoader.getSchema({
+  const schemaResult = await loader.getSchema({
     id: job.schemaId,
     version: job.schemaVersion,
   });
@@ -178,16 +179,53 @@ export async function processBulkFile(job: BulkFileProcessJob): Promise<ProcessO
     })
     .where(eq(schema.bulkUploads.id, job.uploadId));
 
-  // 6. TODO(slice 11): enqueue per-row jobs into bulk-row-process here.
-  // For now the row jobs aren't wired; the upload will sit in row_processing
-  // until slice 11. This is intentional — slice 9 covers file-level only.
+  // 6. Enqueue per-row jobs FIRST, then set total + reader_done in Redis.
+  // Order matters: setting total before all jobs are enqueued risks the Row
+  // Processor seeing `processed == total` early and triggering Finaliser
+  // prematurely.
+  const redis = getRedis();
+  const ns = `bu:${job.uploadId}`;
+  await redis.hset(`${ns}:meta`, 'started_at', String(Date.now()));
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    if (!row) continue;
+    await enqueueRowProcess({
+      uploadId: job.uploadId,
+      aggregatorId: job.aggregatorId,
+      rowIndex: i,
+      rawRow: linesForRowIndex(lines, i),
+      payload: row,
+    });
+  }
+
+  // Now safe to publish total_rows + reader_done.
+  await redis.hset(`${ns}:meta`, 'total_rows', String(rows.length), 'reader_done', '1');
 
   log.info({
     status: 'success',
     latency_ms: Date.now() - start,
     total_rows: rows.length,
+    enqueued: rows.length,
   });
   return { status: 'enqueued', totalRows: rows.length };
+}
+
+/**
+ * Returns the original CSV line for a given parsed row index. Header is
+ * lines[0]; data rows start at lines[1]. Empty lines (skipped by Papaparse)
+ * may shift the mapping — for MVP, we use a simple linear walk that maps
+ * non-empty data lines to row indices.
+ */
+function linesForRowIndex(lines: string[], rowIndex: number): string {
+  let dataIdx = -1;
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i] ?? '';
+    if (line.trim() === '') continue;
+    dataIdx++;
+    if (dataIdx === rowIndex) return line;
+  }
+  return '';
 }
 
 async function markStatus(

@@ -1,0 +1,66 @@
+/**
+ * Worker-side enqueue surfaces.
+ *
+ * Reader → enqueue per-row jobs (File Processor uses this).
+ * Row Processor → enqueue Finaliser job on the last row.
+ */
+
+import { Queue } from 'bullmq';
+import {
+  QueueName,
+  DEFAULT_JOB_OPTS,
+  type BulkRowProcessJob,
+  type BulkFinaliseJob,
+} from '@aggregator-dpg/queue';
+import { getRedis } from './redis.js';
+import { logger } from '../logger.js';
+
+let rowQueue: Queue<BulkRowProcessJob> | null = null;
+let finaliseQueue: Queue<BulkFinaliseJob> | null = null;
+
+function getRowQueue(): Queue<BulkRowProcessJob> {
+  if (rowQueue) return rowQueue;
+  rowQueue = new Queue<BulkRowProcessJob>(QueueName.BulkRowProcess, {
+    connection: getRedis(),
+    defaultJobOptions: DEFAULT_JOB_OPTS,
+  });
+  return rowQueue;
+}
+
+function getFinaliseQueue(): Queue<BulkFinaliseJob> {
+  if (finaliseQueue) return finaliseQueue;
+  finaliseQueue = new Queue<BulkFinaliseJob>(QueueName.BulkFinalise, {
+    connection: getRedis(),
+    defaultJobOptions: DEFAULT_JOB_OPTS,
+  });
+  return finaliseQueue;
+}
+
+/** Enqueue a per-row job. jobId encodes (uploadId:rowIndex) for replay safety. */
+export async function enqueueRowProcess(payload: BulkRowProcessJob): Promise<void> {
+  await getRowQueue().add(QueueName.BulkRowProcess, payload, {
+    jobId: `${payload.uploadId}:${payload.rowIndex}`,
+  });
+}
+
+/**
+ * Enqueue the Finaliser. jobId = `${uploadId}:finalise` so BullMQ
+ * deduplicates if multiple Row Processors hit the equality condition
+ * concurrently — only one finaliser ever runs.
+ */
+export async function enqueueFinalise(payload: BulkFinaliseJob): Promise<void> {
+  await getFinaliseQueue().add(QueueName.BulkFinalise, payload, {
+    jobId: `${payload.uploadId}:finalise`,
+  });
+  logger.info({
+    operation: 'bulkQueue.enqueueFinalise',
+    upload_id: payload.uploadId,
+  });
+}
+
+export async function closeQueues(): Promise<void> {
+  await rowQueue?.close();
+  await finaliseQueue?.close();
+  rowQueue = null;
+  finaliseQueue = null;
+}

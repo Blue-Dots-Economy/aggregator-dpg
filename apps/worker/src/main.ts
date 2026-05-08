@@ -8,14 +8,17 @@
  */
 
 import { Worker } from 'bullmq';
-import { QueueName, createRedisConnection, type BulkFileProcessJob } from '@aggregator-dpg/queue';
+import { QueueName, type BulkFileProcessJob, type BulkRowProcessJob } from '@aggregator-dpg/queue';
 import { config } from './config.js';
 import { logger } from './logger.js';
 import { closeDb } from './db.js';
 import { processBulkFile } from './jobs/bulk-file-process.js';
+import { processBulkRow } from './jobs/bulk-row-process.js';
+import { getRedis, closeRedis } from './services/redis.js';
+import { closeQueues } from './services/bulk-queue.js';
 
 async function main(): Promise<void> {
-  const connection = createRedisConnection({ url: config.REDIS_URL });
+  const connection = getRedis();
 
   const fileWorker = new Worker<BulkFileProcessJob>(
     QueueName.BulkFileProcess,
@@ -26,32 +29,46 @@ async function main(): Promise<void> {
     },
   );
 
-  fileWorker.on('completed', (job, result) => {
-    logger.info({
-      operation: 'worker.bulkFileProcess.completed',
-      job_id: job.id,
-      result,
-    });
-  });
+  const rowWorker = new Worker<BulkRowProcessJob>(
+    QueueName.BulkRowProcess,
+    async (job) => processBulkRow(job.data),
+    {
+      connection,
+      concurrency: config.BULK_ROW_PROCESS_CONCURRENCY,
+    },
+  );
 
-  fileWorker.on('failed', (job, err) => {
-    logger.error({
-      operation: 'worker.bulkFileProcess.failed',
-      job_id: job?.id,
-      error: err.message,
+  for (const [name, w] of [
+    ['bulkFileProcess', fileWorker],
+    ['bulkRowProcess', rowWorker],
+  ] as const) {
+    w.on('completed', (job, result) => {
+      logger.debug({
+        operation: `worker.${name}.completed`,
+        job_id: job.id,
+        result,
+      });
     });
-  });
+    w.on('failed', (job, err) => {
+      logger.error({
+        operation: `worker.${name}.failed`,
+        job_id: job?.id,
+        error: err.message,
+      });
+    });
+  }
 
   logger.info({
     operation: 'worker.boot',
     status: 'ready',
-    queues: [QueueName.BulkFileProcess],
+    queues: [QueueName.BulkFileProcess, QueueName.BulkRowProcess],
   });
 
   const shutdown = async (signal: string): Promise<void> => {
     logger.info({ operation: 'worker.shutdown', signal });
-    await fileWorker.close();
-    await connection.quit().catch(() => undefined);
+    await Promise.all([fileWorker.close(), rowWorker.close()]);
+    await closeQueues();
+    await closeRedis();
     await closeDb();
     process.exit(0);
   };

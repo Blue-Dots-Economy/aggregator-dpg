@@ -38,6 +38,7 @@ const ConfigSchema = z.object({
 
   // ─── Worker concurrency ─────────────────────────────────────────────────
   BULK_FILE_PROCESS_CONCURRENCY: z.coerce.number().int().positive().default(2),
+  BULK_ROW_PROCESS_CONCURRENCY: z.coerce.number().int().positive().default(10),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

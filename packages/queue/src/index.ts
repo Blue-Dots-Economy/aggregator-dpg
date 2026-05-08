@@ -89,3 +89,12 @@ export const DEFAULT_JOB_OPTS = {
   removeOnComplete: { age: 3600 },
   removeOnFail: { age: 604800 },
 } as const;
+
+// ─── Lua scripts ─────────────────────────────────────────────────────────────
+
+export {
+  runBulkRowCommit,
+  bulkRowCommitScript,
+  type BulkRowCommitResult,
+  type BulkRowOutcome,
+} from './lua-loader.js';
