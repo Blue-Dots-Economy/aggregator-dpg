@@ -1,5 +1,27 @@
 -- Replaces the (aggregator_id, participant_id) UNIQUE with one that also
 -- includes `type`, so a seeker and a provider can share the same external
 -- participant_id under one aggregator without colliding on dedup.
+--
+-- IMPORTANT — production runbook:
+--   The drizzle migrator wraps this file in a transaction, which means the
+--   plain `CREATE UNIQUE INDEX` below holds ACCESS EXCLUSIVE on `participants`
+--   for the duration of the build. For tables with > ~100k rows or live
+--   write traffic, run this migration MANUALLY (bypassing the migrator) with
+--   the CONCURRENTLY pair instead:
+--
+--     -- step 1, outside any transaction
+--     CREATE UNIQUE INDEX CONCURRENTLY
+--       participants_aggregator_type_participant_unique
+--       ON participants (aggregator_id, type, participant_id);
+--     -- step 2, outside any transaction
+--     DROP INDEX CONCURRENTLY participants_aggregator_participant_unique;
+--     -- step 3, mark this migration as applied in drizzle's __drizzle_migrations
+--     INSERT INTO drizzle.__drizzle_migrations (hash, created_at)
+--       VALUES ('<hash>', extract(epoch from now())*1000);
+--
+-- For dev / staging where the table is small, the synchronous form below is
+-- fine. If duplicate `(aggregator_id, type, participant_id)` rows already
+-- exist, the CREATE will fail with a duplicate-key error pointing at the
+-- offending rows — resolve manually before retrying.
 DROP INDEX IF EXISTS "participants_aggregator_participant_unique";--> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS "participants_aggregator_type_participant_unique" ON "participants" USING btree ("aggregator_id","type","participant_id");

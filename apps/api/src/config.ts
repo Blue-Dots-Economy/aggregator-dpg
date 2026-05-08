@@ -42,6 +42,14 @@ const ConfigSchema = z.object({
    * For real S3, leave blank — the SDK uses AWS endpoints by region.
    */
   S3_ENDPOINT: z.string().optional(),
+  /**
+   * Browser-reachable endpoint used to mint pre-signed URLs. Falls back to
+   * S3_ENDPOINT when unset (single-host dev). In production this is the
+   * public hostname (e.g. https://s3.amazonaws.com or
+   * https://files.example.com) while S3_ENDPOINT remains the in-cluster /
+   * VPC-internal hostname for HEAD/PUT/GET ops.
+   */
+  S3_PUBLIC_ENDPOINT: z.string().optional(),
   S3_REGION: z.string().default('us-east-1'),
   /** Bucket holding uploaded CSVs and generated error reports. */
   S3_BUCKET: z.string().default('aggregator-bulk-uploads'),

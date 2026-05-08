@@ -19,13 +19,22 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { config } from '../../config.js';
 
-let cachedClient: S3Client | null = null;
+// Two S3 clients are kept on this module:
+//   - `getInternalClient()` uses S3_ENDPOINT (e.g. http://minio:9000 inside
+//     docker, or the AWS regional endpoint in prod). All server-side calls
+//     (HEAD, PUT for QR + errors.csv, GET for the worker's CSV download)
+//     route through here.
+//   - `getPresignerClient()` uses S3_PUBLIC_ENDPOINT — the host the BROWSER
+//     can reach. Pre-signed URLs encode the endpoint, so they MUST be minted
+//     against the public hostname or browsers see DNS errors. Defaults to
+//     S3_ENDPOINT when S3_PUBLIC_ENDPOINT is unset (single-host dev).
+let cachedInternalClient: S3Client | null = null;
+let cachedPresignerClient: S3Client | null = null;
 
-function getClient(): S3Client {
-  if (cachedClient) return cachedClient;
-  cachedClient = new S3Client({
+function buildClient(endpoint: string | undefined): S3Client {
+  return new S3Client({
     region: config.S3_REGION,
-    ...(config.S3_ENDPOINT ? { endpoint: config.S3_ENDPOINT } : {}),
+    ...(endpoint ? { endpoint } : {}),
     forcePathStyle: config.S3_FORCE_PATH_STYLE,
     ...(config.S3_ACCESS_KEY_ID && config.S3_SECRET_ACCESS_KEY
       ? {
@@ -36,7 +45,19 @@ function getClient(): S3Client {
         }
       : {}),
   });
-  return cachedClient;
+}
+
+function getInternalClient(): S3Client {
+  if (cachedInternalClient) return cachedInternalClient;
+  cachedInternalClient = buildClient(config.S3_ENDPOINT);
+  return cachedInternalClient;
+}
+
+function getPresignerClient(): S3Client {
+  if (cachedPresignerClient) return cachedPresignerClient;
+  const publicEndpoint = config.S3_PUBLIC_ENDPOINT || config.S3_ENDPOINT;
+  cachedPresignerClient = buildClient(publicEndpoint);
+  return cachedPresignerClient;
 }
 
 export interface SignedUploadUrl {
@@ -72,7 +93,7 @@ export async function signBulkUploadUrl(opts: {
     Key: key,
     ContentType: 'text/csv',
   });
-  const url = await getSignedUrl(getClient(), command, {
+  const url = await getSignedUrl(getPresignerClient(), command, {
     expiresIn: config.BULK_UPLOAD_URL_TTL_SECONDS,
   });
   const expiresAt = new Date(Date.now() + config.BULK_UPLOAD_URL_TTL_SECONDS * 1000).toISOString();
@@ -98,7 +119,7 @@ export interface ObjectHead {
  */
 export async function headObject(key: string): Promise<ObjectHead | null> {
   try {
-    const result = await getClient().send(
+    const result = await getInternalClient().send(
       new HeadObjectCommand({ Bucket: config.S3_BUCKET, Key: key }),
     );
     if (!result.ETag) return null;
@@ -119,7 +140,7 @@ export async function headObject(key: string): Promise<ObjectHead | null> {
  * any other API-side object writes.
  */
 export async function putObject(key: string, body: Buffer, contentType: string): Promise<void> {
-  await getClient().send(
+  await getInternalClient().send(
     new PutObjectCommand({
       Bucket: config.S3_BUCKET,
       Key: key,
@@ -149,7 +170,7 @@ export async function signErrorsCsvDownloadUrl(key: string): Promise<SignedDownl
     ResponseContentDisposition: 'attachment; filename="errors.csv"',
     ResponseContentType: 'text/csv',
   });
-  const url = await getSignedUrl(getClient(), command, {
+  const url = await getSignedUrl(getPresignerClient(), command, {
     expiresIn: config.BULK_UPLOAD_URL_TTL_SECONDS,
   });
   const expiresAt = new Date(Date.now() + config.BULK_UPLOAD_URL_TTL_SECONDS * 1000).toISOString();
@@ -166,14 +187,15 @@ export async function signQrDownloadUrl(key: string): Promise<SignedDownloadUrl>
     Key: key,
     ResponseContentType: 'image/png',
   });
-  const url = await getSignedUrl(getClient(), command, {
+  const url = await getSignedUrl(getPresignerClient(), command, {
     expiresIn: config.QR_DOWNLOAD_URL_TTL_SECONDS,
   });
   const expiresAt = new Date(Date.now() + config.QR_DOWNLOAD_URL_TTL_SECONDS * 1000).toISOString();
   return { url, key, expiresAt };
 }
 
-/** Test-only — clears the cached client so a fresh instance is built next call. */
+/** Test-only — clears the cached clients so fresh instances are built next call. */
 export function _resetObjectStorageClient(): void {
-  cachedClient = null;
+  cachedInternalClient = null;
+  cachedPresignerClient = null;
 }
