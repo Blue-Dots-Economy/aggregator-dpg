@@ -25,6 +25,8 @@ export type {
   RegistrationLink,
   RegistrationLinkStatus,
   CreateRegistrationLinkInput,
+  ListRegistrationLinksOptions,
+  ListRegistrationLinksResult,
   StoreError,
   StoreResult,
 } from './interface.js';

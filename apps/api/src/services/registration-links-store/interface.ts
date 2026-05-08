@@ -38,6 +38,17 @@ export type StoreError =
 
 export type StoreResult<T> = { ok: true; value: T } | { ok: false; error: StoreError };
 
+export interface ListRegistrationLinksOptions {
+  status?: RegistrationLinkStatus;
+  limit: number;
+  offset: number;
+}
+
+export interface ListRegistrationLinksResult {
+  rows: RegistrationLink[];
+  total: number;
+}
+
 export abstract class RegistrationLinksStoreBase {
   /**
    * Create a new registration link. Returns SLUG_COLLISION on slug uniqueness
@@ -58,5 +69,22 @@ export abstract class RegistrationLinksStoreBase {
     id: string,
     aggregatorId: string,
     qrObjectKey: string,
+  ): Promise<StoreResult<RegistrationLink>>;
+  /**
+   * Paginated list scoped to one aggregator. Most-recent first. Optional
+   * status filter narrows to draft/live/retired.
+   */
+  abstract list(
+    aggregatorId: string,
+    options: ListRegistrationLinksOptions,
+  ): Promise<StoreResult<ListRegistrationLinksResult>>;
+  /**
+   * Flip a link's status. Idempotent — calling with the current status
+   * returns the row unchanged.
+   */
+  abstract updateStatus(
+    id: string,
+    aggregatorId: string,
+    nextStatus: RegistrationLinkStatus,
   ): Promise<StoreResult<RegistrationLink>>;
 }

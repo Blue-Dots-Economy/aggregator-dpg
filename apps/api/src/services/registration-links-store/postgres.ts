@@ -5,14 +5,17 @@
  * are mapped to abstract `StoreError` codes — callers reason in domain terms.
  */
 
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { logger } from '../../logger.js';
 import { registrationLinks, type RegistrationLinkRow } from '../../db/schema.js';
 import { getDb } from '../../db/client.js';
 import {
   RegistrationLinksStoreBase,
   type CreateRegistrationLinkInput,
+  type ListRegistrationLinksOptions,
+  type ListRegistrationLinksResult,
   type RegistrationLink,
+  type RegistrationLinkStatus,
   type StoreResult,
 } from './interface.js';
 
@@ -103,6 +106,71 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
     } catch (err: unknown) {
       logger.error({
         operation: 'registrationLinksStore.updateQrKey',
+        status: 'failure',
+        error: (err as Error).message,
+      });
+      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: (err as Error).message } };
+    }
+  }
+
+  async list(
+    aggregatorId: string,
+    options: ListRegistrationLinksOptions,
+  ): Promise<StoreResult<ListRegistrationLinksResult>> {
+    try {
+      const where = options.status
+        ? and(
+            eq(registrationLinks.aggregatorId, aggregatorId),
+            eq(registrationLinks.status, options.status),
+          )
+        : eq(registrationLinks.aggregatorId, aggregatorId);
+      const [rows, totalRows] = await Promise.all([
+        getDb()
+          .select()
+          .from(registrationLinks)
+          .where(where)
+          .orderBy(desc(registrationLinks.createdAt))
+          .limit(options.limit)
+          .offset(options.offset),
+        getDb()
+          .select({ count: sql<number>`count(*)::int` })
+          .from(registrationLinks)
+          .where(where),
+      ]);
+      const total = totalRows[0]?.count ?? 0;
+      return {
+        ok: true,
+        value: { rows: rows.map(toDomain), total },
+      };
+    } catch (err: unknown) {
+      logger.error({
+        operation: 'registrationLinksStore.list',
+        status: 'failure',
+        error: (err as Error).message,
+      });
+      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: (err as Error).message } };
+    }
+  }
+
+  async updateStatus(
+    id: string,
+    aggregatorId: string,
+    nextStatus: RegistrationLinkStatus,
+  ): Promise<StoreResult<RegistrationLink>> {
+    try {
+      const rows = await getDb()
+        .update(registrationLinks)
+        .set({ status: nextStatus, updatedAt: new Date() })
+        .where(and(eq(registrationLinks.id, id), eq(registrationLinks.aggregatorId, aggregatorId)))
+        .returning();
+      const row = rows[0];
+      if (!row) {
+        return { ok: false, error: { code: 'NOT_FOUND', message: `link not found: ${id}` } };
+      }
+      return { ok: true, value: toDomain(row) };
+    } catch (err: unknown) {
+      logger.error({
+        operation: 'registrationLinksStore.updateStatus',
         status: 'failure',
         error: (err as Error).message,
       });
