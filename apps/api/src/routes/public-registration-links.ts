@@ -1,23 +1,23 @@
 /**
  * Public registration link endpoints.
  *
- *   GET  /public/v1/links/resolve/:slug
+ *   GET  /public/v1/aggregators/:orgSlug/links/:slug
  *     Anonymous resolve. Returns the public-safe shape of a live link so a
  *     BFF can render the registration form. 404 for missing or draft slugs;
  *     410 for retired or expired ones.
  *
- *   POST /public/v1/registrations/create/:slug
+ *   POST /public/v1/aggregators/:orgSlug/registrations/:slug
  *     Anonymous synchronous submit. Validates the body against the active
  *     participant schema for the link's domain, normalises phone+email,
  *     creates the participant + a link_submission row, and returns the
- *     submission id. Implemented in slice 17 alongside slice 16 because
- *     they share the slug resolution + status guards.
+ *     submission id.
  *
- * Security model: slug is the access token. No JWT required. Aggregator
- * scoping is implicit via the link row.
+ * Security model: (org_slug, slug) pair is the access token. No JWT
+ * required. Aggregator scoping is implicit via the link row.
  */
 
 import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 import { getRegistrationLinksStore } from '../services/registration-links-store/index.js';
 import type { RegistrationLink } from '../services/registration-links-store/index.js';
@@ -29,20 +29,21 @@ import { httpError } from '../errors/http-error.js';
 import { consume } from '../services/rate-limiter/index.js';
 import { config } from '../config.js';
 
-interface SlugParams {
+interface OrgSlugParams {
+  orgSlug?: string;
   slug?: string;
 }
 
 export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance): Promise<void> {
-  app.get('/public/v1/links/resolve/:slug', async (req, reply) => {
-    const slug = (req.params as SlugParams).slug;
-    if (!slug) {
-      throw httpError('SCHEMA_VALIDATION', { detail: 'slug is required.' });
+  app.get('/public/v1/aggregators/:orgSlug/links/:slug', async (req, reply) => {
+    const { orgSlug, slug } = req.params as OrgSlugParams;
+    if (!orgSlug || !slug) {
+      throw httpError('SCHEMA_VALIDATION', { detail: 'orgSlug and slug are required.' });
     }
-    const log = req.log.child({ operation: 'public.linkResolve', slug });
+    const log = req.log.child({ operation: 'public.linkResolve', org_slug: orgSlug, slug });
     const start = Date.now();
 
-    const link = await loadLiveLinkBySlug(slug, log);
+    const link = await loadLiveLinkByOrgAndSlug(orgSlug, slug, log);
 
     log.info({
       status: 'success',
@@ -61,21 +62,25 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
     });
   });
 
-  app.post('/public/v1/registrations/create/:slug', async (req, reply) => {
-    const slug = (req.params as SlugParams).slug;
-    if (!slug) {
-      throw httpError('SCHEMA_VALIDATION', { detail: 'slug is required.' });
+  app.post('/public/v1/aggregators/:orgSlug/registrations/:slug', async (req, reply) => {
+    const { orgSlug, slug } = req.params as OrgSlugParams;
+    if (!orgSlug || !slug) {
+      throw httpError('SCHEMA_VALIDATION', { detail: 'orgSlug and slug are required.' });
     }
-    const log = req.log.child({ operation: 'public.registrationSubmit', slug });
+    const log = req.log.child({
+      operation: 'public.registrationSubmit',
+      org_slug: orgSlug,
+      slug,
+    });
     const start = Date.now();
 
-    // Rate limit by (slug, ip). CAPTCHA enforcement is handled at the BFF
-    // layer (Cloudflare Turnstile) — the API layer keeps a coarse fallback
-    // so a misconfigured BFF can't expose unbounded write traffic.
+    // Rate limit by (orgSlug, slug, ip). CAPTCHA enforcement is handled at
+    // the BFF layer (Cloudflare Turnstile) — the API layer keeps a coarse
+    // fallback so a misconfigured BFF can't expose unbounded write traffic.
     const ip = (req.ip ?? '0.0.0.0').toString();
     const rate = await consume({
       namespace: 'link-submit',
-      key: `${slug}:${ip}`,
+      key: `${orgSlug}:${slug}:${ip}`,
       windowSeconds: config.PUBLIC_SUBMIT_RATE_WINDOW_SECONDS,
       max: config.PUBLIC_SUBMIT_RATE_MAX_PER_WINDOW,
     });
@@ -87,7 +92,7 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       });
     }
 
-    const link = await loadLiveLinkBySlug(slug, log);
+    const link = await loadLiveLinkByOrgAndSlug(orgSlug, slug, log);
 
     const body = (req.body ?? {}) as Record<string, unknown>;
 
@@ -109,14 +114,13 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       });
     }
 
-    // 2. Normalisation.
-    const participantId = String(body['participant_id'] ?? '').trim();
-    if (!participantId) {
-      throw httpError('SCHEMA_VALIDATION', {
-        detail: 'participant_id is required.',
-        fields: { participant_id: 'required' },
-      });
-    }
+    // 2. Normalisation. `participant_id` is only required when the link's
+    // schema includes it. Otherwise we auto-allocate a UUID so the
+    // `(aggregator_id, type, participant_id)` unique index can still anchor
+    // the row. Dedup via this key is a no-op for schemas without their own
+    // stable id — by design.
+    const rawParticipantId = String(body['participant_id'] ?? '').trim();
+    const participantId = rawParticipantId.length > 0 ? rawParticipantId : randomUUID();
     const phoneRaw = typeof body['phone'] === 'string' ? (body['phone'] as string) : '';
     let phoneNormalised: string | null = null;
     if (phoneRaw) {
@@ -221,15 +225,17 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
 }
 
 /**
- * Loads a registration link by slug and asserts it is currently `live`.
- * Translates store/null/expiry into the canonical 404 / 410 status codes.
+ * Loads a registration link by (org_slug, slug) and asserts it is currently
+ * `live`. Translates store/null/expiry into the canonical 404 / 410 status
+ * codes.
  */
-async function loadLiveLinkBySlug(
+async function loadLiveLinkByOrgAndSlug(
+  orgSlug: string,
   slug: string,
   log: FastifyRequest['log'],
 ): Promise<RegistrationLink> {
   const store = getRegistrationLinksStore();
-  const found = await store.findBySlug(slug);
+  const found = await store.findByOrgAndSlug(orgSlug, slug);
   if (!found.ok) {
     throw httpError('DB_UNAVAILABLE', { cause: new Error(found.error.message) });
   }

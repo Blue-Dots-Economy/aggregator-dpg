@@ -67,8 +67,21 @@ export abstract class RegistrationLinksStoreBase {
   /**
    * Find a link by its public slug. Used by the public resolve and submit
    * endpoints — no aggregator scoping; the slug is the access token.
+   *
+   * @deprecated Slug is now unique per-aggregator (migration 0008). Use
+   *   {@link findByOrgAndSlug} for the new `/<org_slug>/<slug>` public URL.
    */
   abstract findBySlug(slug: string): Promise<StoreResult<RegistrationLink | null>>;
+
+  /**
+   * Public-URL lookup keyed by (aggregator's `org_slug`, registration link
+   * slug). JOINs `aggregators` on `org_slug` so the route layer doesn't need
+   * a separate aggregator-resolve step.
+   */
+  abstract findByOrgAndSlug(
+    orgSlug: string,
+    slug: string,
+  ): Promise<StoreResult<RegistrationLink | null>>;
   /** Set the qr_object_key after the QR PNG has been uploaded to S3. */
   abstract updateQrKey(
     id: string,

@@ -14,15 +14,80 @@ import { randomBytes } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import QRCode from 'qrcode';
 import { z } from 'zod';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { authenticate, type AuthContext } from '../services/auth/access-token.js';
+import { getAggregatorStore } from '../services/aggregator-store/index.js';
 import { getRegistrationLinksStore } from '../services/registration-links-store/index.js';
 import type { RegistrationLink } from '../services/registration-links-store/index.js';
 import { putObject, signQrDownloadUrl } from '../services/object-storage/index.js';
 import { httpError } from '../errors/http-error.js';
 import { config } from '../config.js';
+import { getDb } from '../db/client.js';
+import { onboarding } from '../db/schema.js';
+
+interface LinkMetrics {
+  total: number;
+  passed: number;
+  failed: number;
+  skipped: number;
+}
+
+const ZERO_METRICS: LinkMetrics = { total: 0, passed: 0, failed: 0, skipped: 0 };
+
+/**
+ * Sums the rolled-up `onboarding` rows (source='link') for one or more link
+ * IDs scoped to a single aggregator. Returns a Map keyed by link_id; missing
+ * keys mean the link has no rolled-up submissions yet.
+ */
+async function fetchLinkMetrics(
+  aggregatorId: string,
+  linkIds: string[],
+): Promise<Map<string, LinkMetrics>> {
+  const out = new Map<string, LinkMetrics>();
+  if (linkIds.length === 0) return out;
+  const rows = await getDb()
+    .select({
+      linkId: onboarding.linkId,
+      total: sql<number>`coalesce(sum(${onboarding.total}), 0)::int`,
+      passed: sql<number>`coalesce(sum(${onboarding.passed}), 0)::int`,
+      failed: sql<number>`coalesce(sum(${onboarding.failed}), 0)::int`,
+      skipped: sql<number>`coalesce(sum(${onboarding.skipped}), 0)::int`,
+    })
+    .from(onboarding)
+    .where(
+      and(
+        eq(onboarding.aggregatorId, aggregatorId),
+        eq(onboarding.source, 'link'),
+        inArray(onboarding.linkId, linkIds),
+      ),
+    )
+    .groupBy(onboarding.linkId);
+  for (const r of rows) {
+    if (!r.linkId) continue;
+    out.set(r.linkId, {
+      total: r.total ?? 0,
+      passed: r.passed ?? 0,
+      failed: r.failed ?? 0,
+      skipped: r.skipped ?? 0,
+    });
+  }
+  return out;
+}
 
 const CreateLinkBodySchema = z.object({
   domain: z.enum(['seeker', 'provider']),
+  /**
+   * Optional client-supplied slug. URL-safe lowercase, hyphen-separated,
+   * 3-60 chars. The route appends a short random suffix on collision so the
+   * caller doesn't have to retry — the returned `public_url` carries the
+   * final allocated slug.
+   */
+  slug: z
+    .string()
+    .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'slug must be lowercase + hyphens (a-z, 0-9)')
+    .min(3)
+    .max(60)
+    .optional(),
   context: z.record(z.unknown()).default({}),
   status: z.enum(['draft', 'live']).default('draft'),
   expires_at: z
@@ -61,12 +126,18 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
 
     const store = getRegistrationLinksStore();
 
-    // Slug allocation with bounded retry. Slug is not user-facing input, so a
-    // pure-random base62 stem keeps URLs short and dodges most collisions.
+    // Slug allocation. If the caller supplied a slug, try it first; collisions
+    // are resolved by appending a short random suffix (`-XXXX`) so the user
+    // keeps the readable part of their slug. Without a caller-supplied slug,
+    // a pure-random base62 stem is used.
     let created;
     let slug = '';
     for (let attempt = 0; attempt < SLUG_RETRIES; attempt++) {
-      slug = generateSlug();
+      if (body.slug) {
+        slug = attempt === 0 ? body.slug : `${body.slug}-${randomSuffix()}`;
+      } else {
+        slug = generateSlug();
+      }
       const result = await store.create({
         aggregatorId: auth.aggregatorId,
         slug,
@@ -102,9 +173,23 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
       });
     }
 
+    // Aggregator org_slug for the URL namespace. Cached per-create only —
+    // worst-case one extra row read per link, which is negligible vs the
+    // alternative of denormalising org_slug onto every registration_links row.
+    const aggregatorStore = getAggregatorStore();
+    const aggLookup = await aggregatorStore.findById(auth.aggregatorId);
+    if (!aggLookup.ok || !aggLookup.value) {
+      throw httpError('DB_UNAVAILABLE', {
+        cause: new Error(
+          aggLookup.ok ? 'aggregator row missing for caller' : aggLookup.error.message,
+        ),
+      });
+    }
+    const callerOrgSlug = aggLookup.value.orgSlug;
+
     // QR generation + S3 upload. Keyed deterministically so a re-run after a
     // partial failure overwrites identical bytes.
-    const publicUrl = buildPublicUrl(slug);
+    const publicUrl = buildPublicUrl(callerOrgSlug, slug);
     const qrKey = `qr/${auth.aggregatorId}/${created.id}.png`;
     let qrPng: Buffer;
     try {
@@ -147,7 +232,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
     });
 
     return reply.code(201).send(
-      await buildResponse(updated.value, {
+      await buildResponse(updated.value, callerOrgSlug, {
         publicUrl,
         qrSigned: { url: qrSigned.url, expiresAt: qrSigned.expiresAt },
       }),
@@ -172,6 +257,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
     }
     const { status, limit, offset } = parsed.data;
 
+    const orgSlug = await resolveOrgSlug(auth.aggregatorId);
     const result = await getRegistrationLinksStore().list(auth.aggregatorId, {
       ...(status ? { status } : {}),
       limit,
@@ -181,7 +267,17 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
       throw httpError('DB_UNAVAILABLE', { cause: new Error(result.error.message) });
     }
 
-    const items = await Promise.all(result.value.rows.map((row) => buildResponse(row)));
+    // Single grouped SQL for all link metrics; per-row fallback in
+    // buildResponse would N+1 the list endpoint.
+    const metricsById = await fetchLinkMetrics(
+      auth.aggregatorId,
+      result.value.rows.map((r) => r.id),
+    );
+    const items = await Promise.all(
+      result.value.rows.map((row) =>
+        buildResponse(row, orgSlug, { metrics: metricsById.get(row.id) ?? ZERO_METRICS }),
+      ),
+    );
 
     log.info({
       status: 'success',
@@ -214,8 +310,8 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
       // 403 to prevent cross-aggregator enumeration.
       throw httpError('FORBIDDEN', { detail: 'Link not accessible.' });
     }
-
-    return reply.send(await buildResponse(result.value));
+    const orgSlug = await resolveOrgSlug(auth.aggregatorId);
+    return reply.send(await buildResponse(result.value, orgSlug));
   });
 
   app.post('/v1/links/:id/deactivate', async (req, reply) => {
@@ -241,9 +337,10 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
       throw httpError('FORBIDDEN', { detail: 'Link not accessible.' });
     }
 
+    const orgSlug = await resolveOrgSlug(auth.aggregatorId);
     if (found.value.status === 'retired') {
       log.info({ status: 'skipped', reason: 'already_retired', latency_ms: Date.now() - start });
-      return reply.send(await buildResponse(found.value));
+      return reply.send(await buildResponse(found.value, orgSlug));
     }
 
     const updated = await store.updateStatus(linkId, auth.aggregatorId, 'retired');
@@ -257,25 +354,46 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
       previous_status: found.value.status,
     });
 
-    return reply.send(await buildResponse(updated.value));
+    return reply.send(await buildResponse(updated.value, orgSlug));
   });
+}
+
+/**
+ * Resolves the caller's aggregator org_slug. Used by the public-URL builder
+ * which needs the slug as a path segment. Wrapped in a helper so handlers
+ * don't repeat the lookup-or-throw boilerplate.
+ */
+async function resolveOrgSlug(aggregatorId: string): Promise<string> {
+  const result = await getAggregatorStore().findById(aggregatorId);
+  if (!result.ok || !result.value) {
+    throw httpError('DB_UNAVAILABLE', {
+      cause: new Error(result.ok ? 'aggregator row missing for caller' : result.error.message),
+    });
+  }
+  return result.value.orgSlug;
 }
 
 interface ResponseOverrides {
   publicUrl?: string;
   qrSigned?: { url: string; expiresAt: string };
+  metrics?: LinkMetrics;
 }
 
 /**
  * Renders a registration link as the canonical API response shape. Lazily
  * presigns the QR URL when the row has a stored qr_object_key — keeps list
  * responses fresh without persisting short-lived URLs.
+ *
+ * @param orgSlug - The owning aggregator's `org_slug`. The public URL is
+ *   namespaced under it (`<base>/<org_slug>/<link_slug>`), so we need it to
+ *   re-mint the URL each request rather than persisting a stale snapshot.
  */
 async function buildResponse(
   row: RegistrationLink,
+  orgSlug: string,
   overrides: ResponseOverrides = {},
 ): Promise<Record<string, unknown>> {
-  const publicUrl = overrides.publicUrl ?? buildPublicUrl(row.slug);
+  const publicUrl = overrides.publicUrl ?? buildPublicUrl(orgSlug, row.slug);
   let qrUrl: string | null = null;
   let qrExpiresAt: string | null = null;
   if (overrides.qrSigned) {
@@ -286,6 +404,13 @@ async function buildResponse(
     qrUrl = signed.url;
     qrExpiresAt = signed.expiresAt;
   }
+  // `metrics` may be supplied by the caller when responding to a list (one
+  // grouped SQL aggregation per request); otherwise fall back to a per-link
+  // lookup so single-link reads still surface counters.
+  const metrics =
+    overrides.metrics ??
+    (await fetchLinkMetrics(row.aggregatorId, [row.id])).get(row.id) ??
+    ZERO_METRICS;
   return {
     link_id: row.id,
     slug: row.slug,
@@ -296,6 +421,7 @@ async function buildResponse(
     public_url: publicUrl,
     qr_url: qrUrl,
     qr_expires_at: qrExpiresAt,
+    metrics,
     created_at: row.createdAt.toISOString(),
     updated_at: row.updatedAt.toISOString(),
   };
@@ -306,13 +432,22 @@ async function buildResponse(
  * across a single aggregator are vanishingly unlikely but the route still
  * retries on the unique-violation error from the store as defence in depth.
  */
+function randomSuffix(bytes = 2): string {
+  return randomBytes(bytes).toString('hex');
+}
+
 function generateSlug(): string {
   return randomBytes(8).toString('hex');
 }
 
-function buildPublicUrl(slug: string): string {
+/**
+ * Build the public URL for a registration link. The URL is namespaced under
+ * the aggregator's `org_slug` so two aggregators can use the same per-link
+ * slug without collision: `${base}/<org_slug>/<slug>`.
+ */
+function buildPublicUrl(orgSlug: string, slug: string): string {
   const base = config.PUBLIC_LINK_BASE_URL.replace(/\/+$/, '');
-  return `${base}/${slug}`;
+  return `${base}/${orgSlug}/${slug}`;
 }
 
 async function requireAuth(req: FastifyRequest): Promise<AuthContext> {

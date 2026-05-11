@@ -7,7 +7,7 @@
 
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { logger } from '../../logger.js';
-import { registrationLinks, type RegistrationLinkRow } from '../../db/schema.js';
+import { aggregators, registrationLinks, type RegistrationLinkRow } from '../../db/schema.js';
 import { getDb } from '../../db/client.js';
 import {
   RegistrationLinksStoreBase,
@@ -80,6 +80,29 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
     } catch (err: unknown) {
       logger.error({
         operation: 'registrationLinksStore.findBySlug',
+        status: 'failure',
+        error: (err as Error).message,
+      });
+      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: (err as Error).message } };
+    }
+  }
+
+  async findByOrgAndSlug(
+    orgSlug: string,
+    slug: string,
+  ): Promise<StoreResult<RegistrationLink | null>> {
+    try {
+      const rows = await getDb()
+        .select({ link: registrationLinks })
+        .from(registrationLinks)
+        .innerJoin(aggregators, eq(registrationLinks.aggregatorId, aggregators.id))
+        .where(and(eq(aggregators.orgSlug, orgSlug), eq(registrationLinks.slug, slug)))
+        .limit(1);
+      const row = rows[0]?.link;
+      return { ok: true, value: row ? toDomain(row) : null };
+    } catch (err: unknown) {
+      logger.error({
+        operation: 'registrationLinksStore.findByOrgAndSlug',
         status: 'failure',
         error: (err as Error).message,
       });

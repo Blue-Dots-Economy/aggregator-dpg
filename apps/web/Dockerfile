@@ -60,6 +60,10 @@ WORKDIR /app
 COPY --from=builder --chown=appuser:appgroup /app/apps/web/.next/standalone ./
 COPY --from=builder --chown=appuser:appgroup /app/apps/web/.next/static     ./apps/web/.next/static
 COPY --from=builder --chown=appuser:appgroup /app/apps/web/public           ./apps/web/public
+# Participant JSON Schemas are loaded at runtime by the public /r/[slug]
+# page. Next's output-file tracer doesn't pick them up because they're
+# read via dynamic `path.resolve(...)`, so copy them explicitly.
+COPY --from=builder --chown=appuser:appgroup /app/config/schemas            ./config/schemas
 
 USER appuser
 EXPOSE 3000
