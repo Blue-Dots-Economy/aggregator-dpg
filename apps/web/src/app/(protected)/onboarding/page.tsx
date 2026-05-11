@@ -15,6 +15,7 @@ import {
 } from '../../../hooks/useOnboarding';
 import type { ApiRegistrationLink, BulkUploadStatus } from '../../../services/onboarding.service';
 import { onboardingService } from '../../../services/onboarding.service';
+import { useProfile } from '../../../hooks/useProfile';
 
 interface StatItem {
   icon: 'users' | 'shield' | 'alert' | 'refresh';
@@ -34,7 +35,7 @@ function StatStrip() {
     return [
       {
         icon: 'users',
-        label: 'Total registered via your links',
+        label: 'Total registered',
         count: total,
         tone: '#6366F1',
         bg: '#EEF2FF',
@@ -98,6 +99,9 @@ function CSVUpload() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const upload = useBulkUpload();
   const recent = useRecentBulkUploads(10);
+  // Summary lives in a sibling component (StatStrip) but the manual-refresh
+  // affordance should refetch both — the top counters lag behind otherwise.
+  const summary = useOnboardingSummary();
 
   const onPick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -184,24 +188,50 @@ function CSVUpload() {
           className="hidden"
           id="csv-file-input"
         />
-        <label htmlFor="csv-file-input" className="cursor-pointer block text-center">
-          <div className="w-12 h-12 mx-auto rounded-full bg-white border border-[var(--bd-border)] flex items-center justify-center text-primary-600 mb-3 bd-shadow">
-            <I.upload size={20} />
+        {pickedFile ? (
+          // Selected-file chip with explicit × dismissal. Cleared state +
+          // resets the file input so the same filename can be re-picked.
+          <div className="flex items-center justify-center gap-2">
+            <div className="inline-flex items-center gap-2 max-w-full px-3 py-2 rounded-[10px] bg-[var(--bd-primary-50)] border border-[var(--bd-primary-100)]">
+              <I.upload size={14} className="text-primary-600 shrink-0" />
+              <span className="text-[13.5px] font-semibold text-primary-700 truncate">
+                {pickedFile.name}
+              </span>
+              <span className="text-[11.5px] text-ink-400 shrink-0">
+                {(pickedFile.size / 1024).toFixed(1)} KB
+              </span>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setPickedFile(null);
+                  setUploadError(null);
+                  setUploadNotice(null);
+                  if (fileInputRef.current) fileInputRef.current.value = '';
+                }}
+                title="Remove file"
+                aria-label="Remove file"
+                className="inline-flex items-center justify-center w-6 h-6 rounded-full text-ink-500 hover:text-rose-600 hover:bg-rose-50 transition-colors shrink-0"
+              >
+                <I.x size={13} />
+              </button>
+            </div>
           </div>
-          <div className="text-[14px] font-semibold text-ink-700">
-            {pickedFile ? (
-              <span className="text-primary-600">{pickedFile.name}</span>
-            ) : (
-              <>
-                Drag your CSV here or{' '}
-                <span className="text-primary-600 underline-offset-2">click to browse</span>
-              </>
-            )}
-          </div>
-          <div className="text-[12px] text-ink-400 mt-1">
-            .csv only · UTF-8 encoded · uploaded as {participantType}s
-          </div>
-        </label>
+        ) : (
+          <label htmlFor="csv-file-input" className="cursor-pointer block text-center">
+            <div className="w-12 h-12 mx-auto rounded-full bg-white border border-[var(--bd-border)] flex items-center justify-center text-primary-600 mb-3 bd-shadow">
+              <I.upload size={20} />
+            </div>
+            <div className="text-[14px] font-semibold text-ink-700">
+              Drag your CSV here or{' '}
+              <span className="text-primary-600 underline-offset-2">click to browse</span>
+            </div>
+            <div className="text-[12px] text-ink-400 mt-1">
+              .csv only · UTF-8 encoded · uploaded as {participantType}s
+            </div>
+          </label>
+        )}
       </Dropzone>
 
       <div className="flex items-center justify-between mt-4">
@@ -228,7 +258,12 @@ function CSVUpload() {
       <RecentUploadsTable
         items={recent.data?.items ?? []}
         loading={recent.isLoading}
+        fetching={recent.isFetching || summary.isFetching}
         error={recent.error as Error | null}
+        onRefresh={() => {
+          void recent.refetch();
+          void summary.refetch();
+        }}
       />
     </div>
   );
@@ -238,18 +273,29 @@ function RecentUploadsTable({
   items,
   loading,
   error,
+  fetching,
+  onRefresh,
 }: {
   items: BulkUploadStatus[];
   loading: boolean;
+  fetching: boolean;
   error: Error | null;
+  onRefresh: () => void;
 }) {
   return (
     <div className="mt-5 border-t border-[var(--bd-border)] pt-4">
       <div className="flex items-center justify-between mb-2">
         <div className="font-display font-bold text-[14px] text-ink-700">Recent uploads</div>
-        <div className="text-[11.5px] text-ink-400">
-          {loading ? 'Loading…' : 'Refreshes while jobs are in-flight'}
-        </div>
+        <button
+          type="button"
+          onClick={onRefresh}
+          disabled={fetching}
+          title="Refresh for latest status"
+          aria-label="Refresh"
+          className="inline-flex items-center justify-center w-7 h-7 rounded-full text-ink-500 hover:text-primary-600 hover:bg-[var(--bd-primary-50)] disabled:opacity-40 transition-colors"
+        >
+          <I.refresh size={14} className={fetching ? 'animate-spin' : ''} />
+        </button>
       </div>
       <div className="overflow-x-auto scroll-x">
         <table className="bd-table" style={{ minWidth: 800 }}>
@@ -262,7 +308,7 @@ function RecentUploadsTable({
               <th style={{ textAlign: 'center' }}>Passed</th>
               <th style={{ textAlign: 'center' }}>Failed</th>
               <th style={{ textAlign: 'center' }}>Skipped</th>
-              <th>Reason / errors</th>
+              <th style={{ minWidth: 240 }}>Reason / errors</th>
             </tr>
           </thead>
           <tbody>
@@ -339,7 +385,7 @@ function UploadRow({ upload }: { upload: BulkUploadStatus }) {
         {upload.skipped}
       </td>
       <td className="text-[12px]">
-        {upload.status === 'completed' ? (
+        {upload.status === 'completed' && upload.failed > 0 && upload.errors_csv_s3_key ? (
           <button
             type="button"
             onClick={onDownloadErrors}
@@ -349,12 +395,14 @@ function UploadRow({ upload }: { upload: BulkUploadStatus }) {
             <I.download size={12} />
             {downloading ? 'Signing…' : 'errors.csv'}
           </button>
+        ) : upload.status === 'completed' ? (
+          <span className="text-emerald-600">All rows passed</span>
         ) : upload.status_reason ? (
           <span
             title={upload.status_reason}
-            className="text-rose-600 truncate inline-block max-w-[220px] align-middle"
+            className="text-rose-600 block whitespace-pre-line break-words max-w-[240px] align-middle leading-snug"
           >
-            {upload.status_reason}
+            {upload.status_reason.replace(/,\s*/g, ',\n')}
           </span>
         ) : (
           <span className="text-ink-300">—</span>
@@ -375,19 +423,61 @@ function formatRelative(iso: string): string {
 
 interface CreateLinkFormState {
   domain: 'seeker' | 'provider';
+  /** Instance (state of operation). Drives slug + display title. */
   state: string;
+  /** District — required, drives slug + display title. */
   district: string;
-  signal_source: string;
-  campaign: string;
+  /** Free-form lever / event label (e.g. "Field Drive", "Bluedotathon"). */
+  lever_event: string;
+  /** ISO date string (yyyy-mm-dd) for the event. */
+  event_date: string;
+  /** Optional event venue / city. */
+  event_location: string;
 }
 
 const EMPTY_FORM: CreateLinkFormState = {
   domain: 'seeker',
   state: '',
   district: '',
-  signal_source: '',
-  campaign: '',
+  lever_event: '',
+  event_date: '',
+  event_location: '',
 };
+
+function slugifyForLink(input: string): string {
+  return input
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40);
+}
+
+function buildLinkSlug(f: CreateLinkFormState): string | undefined {
+  const district = slugifyForLink(f.district);
+  const lever = slugifyForLink(f.lever_event);
+  if (!district || !lever) return undefined;
+  let dateSuffix = '';
+  if (f.event_date) {
+    const d = new Date(f.event_date);
+    if (!Number.isNaN(d.getTime())) {
+      const mon = d.toLocaleString('en-US', { month: 'short' }).toLowerCase();
+      const yy = String(d.getFullYear()).slice(-2);
+      dateSuffix = `-${mon}${yy}`;
+    }
+  }
+  return `${district}-${lever}${dateSuffix}`;
+}
+
+function buildLinkTitle(f: CreateLinkFormState): string {
+  const parts = [f.district, f.lever_event].filter(Boolean).join(' ');
+  if (!f.event_date) return parts || 'Untitled link';
+  const d = new Date(f.event_date);
+  if (Number.isNaN(d.getTime())) return parts;
+  const monYear = d.toLocaleString('en-US', { month: 'short', year: 'numeric' });
+  return parts ? `${parts} — ${monYear}` : monYear;
+}
 
 function CreateLinkSection() {
   const [form, setForm] = useState<CreateLinkFormState>(EMPTY_FORM);
@@ -395,18 +485,31 @@ function CreateLinkSection() {
   const [createError, setCreateError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const create = useCreateLink();
+  const profile = useProfile();
+  const orgName = profile.data?.org ?? '';
 
   const onCreate = async () => {
     setCreateError(null);
+    if (!form.state || !form.district || !form.lever_event) {
+      setCreateError('State, District, and Lever / Event are required.');
+      return;
+    }
     try {
+      const title = buildLinkTitle(form);
+      const slug = buildLinkSlug(form);
       const link = await create.mutateAsync({
         domain: form.domain,
         status: 'live',
+        ...(slug ? { slug } : {}),
+        title,
         context: {
+          org_name: orgName || undefined,
+          title,
           state: form.state || undefined,
           district: form.district || undefined,
-          signal_source: form.signal_source || undefined,
-          campaign: form.campaign || undefined,
+          lever_event: form.lever_event || undefined,
+          event_date: form.event_date || undefined,
+          event_location: form.event_location || undefined,
         },
       });
       setCreated(link);
@@ -429,14 +532,68 @@ function CreateLinkSection() {
         <div className="font-display font-bold text-[16px] text-ink-900">
           Share a registration link
         </div>
+        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[11.5px] font-semibold">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+          Live
+        </span>
         <div className="ml-auto text-[12px] text-ink-400">
-          Generated by API · QR rendered server-side
+          Slug derived from inputs · QR rendered server-side
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px]">
         <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-3">
-          <Field label="Domain">
+          <div className="md:col-span-2">
+            <Field label="Enter your Organisation Name">
+              <input
+                className="bd-input bg-ink-50 cursor-not-allowed"
+                value={orgName}
+                readOnly
+                placeholder="—"
+              />
+            </Field>
+          </div>
+          <Field label="Instance (State Name) *">
+            <input
+              className="bd-input"
+              value={form.state}
+              onChange={(e) => setForm((f) => ({ ...f, state: e.target.value }))}
+              placeholder="Karnataka"
+            />
+          </Field>
+          <Field label="Lever / Event">
+            <input
+              className="bd-input"
+              value={form.lever_event}
+              onChange={(e) => setForm((f) => ({ ...f, lever_event: e.target.value }))}
+              placeholder="Bluedotathon"
+            />
+          </Field>
+          <Field label="Event Date">
+            <input
+              type="date"
+              className="bd-input"
+              value={form.event_date}
+              onChange={(e) => setForm((f) => ({ ...f, event_date: e.target.value }))}
+            />
+          </Field>
+          <Field label="Event Location">
+            <input
+              className="bd-input"
+              value={form.event_location}
+              onChange={(e) => setForm((f) => ({ ...f, event_location: e.target.value }))}
+              placeholder="e.g. Hubli"
+            />
+          </Field>
+          <Field label="District *">
+            <input
+              className="bd-input"
+              value={form.district}
+              onChange={(e) => setForm((f) => ({ ...f, district: e.target.value }))}
+              placeholder="Dharwad"
+            />
+          </Field>
+          <Field label="Domain *">
             <select
               className="bd-input"
               value={form.domain}
@@ -448,42 +605,28 @@ function CreateLinkSection() {
               <option value="provider">Provider</option>
             </select>
           </Field>
-          <Field label="State">
-            <input
-              className="bd-input"
-              value={form.state}
-              onChange={(e) => setForm((f) => ({ ...f, state: e.target.value }))}
-              placeholder="Karnataka"
-            />
-          </Field>
-          <Field label="District">
-            <input
-              className="bd-input"
-              value={form.district}
-              onChange={(e) => setForm((f) => ({ ...f, district: e.target.value }))}
-              placeholder="Bangalore"
-            />
-          </Field>
-          <Field label="Signal source">
-            <input
-              className="bd-input"
-              value={form.signal_source}
-              onChange={(e) => setForm((f) => ({ ...f, signal_source: e.target.value }))}
-              placeholder="event"
-            />
-          </Field>
-          <Field label="Campaign">
-            <input
-              className="bd-input"
-              value={form.campaign}
-              onChange={(e) => setForm((f) => ({ ...f, campaign: e.target.value }))}
-              placeholder="march-camp"
-            />
-          </Field>
-          <div className="md:col-span-2 flex items-center justify-end mt-2">
-            <Button onClick={onCreate} disabled={create.isPending}>
-              {create.isPending ? 'Creating…' : 'Create link'}
-            </Button>
+          <div className="md:col-span-2 flex items-center justify-end gap-2 mt-2">
+            {created ? (
+              <>
+                <Button
+                  kind="ghost"
+                  onClick={() => {
+                    setForm(EMPTY_FORM);
+                    setCreated(null);
+                    setCreateError(null);
+                  }}
+                >
+                  + Create another link
+                </Button>
+                <span className="text-[12px] text-emerald-700 font-semibold">
+                  ✓ Added to your list below
+                </span>
+              </>
+            ) : (
+              <Button onClick={onCreate} disabled={create.isPending}>
+                {create.isPending ? 'Creating…' : 'Create link'}
+              </Button>
+            )}
           </div>
           {createError && (
             <div className="md:col-span-2 text-[12.5px] text-rose-700 bg-rose-50 border border-rose-200 rounded-[10px] px-3 py-2">
@@ -558,6 +701,25 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
   const [copied, setCopied] = useState(false);
   const deactivate = useDeactivateLink();
   const isLive = link.status === 'live';
+  const ctx = (link.context ?? {}) as Record<string, unknown>;
+  const title =
+    (typeof ctx['title'] === 'string' && ctx['title']) ||
+    [ctx['district'], ctx['lever_event']].filter(Boolean).join(' ') ||
+    link.slug;
+  const subtitle =
+    [ctx['org_name'], ctx['event_location']].filter(Boolean).join(' · ') ||
+    `Created ${new Date(link.created_at).toLocaleDateString()}`;
+  // Render `<host>/r/<slug>` as `host/register/org/<slug>` so the slug
+  // segment is visually emphasised (the screenshot's design choice).
+  let urlHost = link.public_url;
+  let urlPath = '';
+  try {
+    const u = new URL(link.public_url);
+    urlHost = u.host;
+    urlPath = u.pathname.replace(/^\//, '');
+  } catch {
+    /* keep raw */
+  }
   const onCopy = async () => {
     if (!navigator.clipboard) return;
     await navigator.clipboard.writeText(link.public_url);
@@ -565,12 +727,12 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
     setTimeout(() => setCopied(false), 1500);
   };
   return (
-    <div className="bd-card p-5 hover:border-[var(--bd-primary-100)] transition-colors group">
+    <div className="bd-card p-5 hover:border-[var(--bd-primary-100)] transition-colors">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
-            <h3 className="font-display font-bold text-[15.5px] text-ink-900 leading-tight">
-              {link.slug}
+            <h3 className="font-display font-bold text-[16px] text-ink-900 leading-tight">
+              {title}
             </h3>
             <span
               className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold ${
@@ -590,39 +752,71 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
                       : 'bg-amber-500'
                 }`}
               />
-              {link.status}
+              {isLive ? 'Active' : link.status}
             </span>
           </div>
-          <p className="text-[12.5px] text-ink-400 mt-1.5">
-            {summariseContext(link.context) || 'No context fields set.'}
-          </p>
 
+          <p className="text-[12.5px] text-ink-400 mt-1.5">{subtitle}</p>
+
+          {/* URL row */}
           <div className="flex items-center gap-2 mt-3 flex-wrap">
-            <div className="inline-flex items-center gap-2 bg-ink-50 border border-[var(--bd-border)] rounded-[10px] px-3 py-1.5 text-[12.5px]">
-              <span className="font-mono text-rose-500">{link.public_url}</span>
+            <div className="inline-flex items-center gap-1 bg-ink-50 border border-[var(--bd-border)] rounded-[10px] px-3 py-1.5 text-[12.5px] font-mono">
+              <span className="text-ink-500">{urlHost}/</span>
+              <span className="text-amber-700 font-semibold">{urlPath}</span>
+              <button
+                type="button"
+                onClick={onCopy}
+                title="Copy link"
+                className="ml-1 text-ink-400 hover:text-primary-600"
+              >
+                <I.copy size={12} />
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={onCopy}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] bg-[var(--bd-primary-50)] text-primary-600 text-[12.5px] font-semibold hover:bg-[var(--bd-primary-100)] transition-colors"
-            >
-              <I.copy size={12} /> {copied ? 'Copied!' : 'Copy link'}
-            </button>
             {link.qr_url && (
               <a
                 href={link.qr_url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] border border-[var(--bd-border)] text-ink-600 text-[12.5px] font-semibold hover:bg-ink-50"
+                title="View QR"
+                className="inline-flex items-center justify-center w-8 h-8 rounded-[10px] border border-[var(--bd-border)] text-ink-500 hover:text-primary-600 hover:border-[var(--bd-primary-100)]"
               >
-                <I.qr size={12} /> QR
+                <I.qr size={14} />
               </a>
             )}
+            <a
+              href={link.public_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Open link"
+              className="inline-flex items-center justify-center w-8 h-8 rounded-[10px] border border-[var(--bd-border)] text-ink-500 hover:text-primary-600 hover:border-[var(--bd-primary-100)]"
+            >
+              <I.link size={14} />
+            </a>
+            <button
+              type="button"
+              onClick={onCopy}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] border border-[var(--bd-border)] text-ink-600 text-[12.5px] font-semibold hover:bg-ink-50"
+            >
+              {copied ? 'Copied!' : 'Copy link'}
+            </button>
           </div>
 
+          {/* Metadata row */}
           <div className="flex items-center gap-4 mt-3.5 text-[12.5px] flex-wrap">
-            <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 font-semibold text-[11.5px]">
+            <span
+              className={`inline-flex items-center px-2 py-0.5 rounded-full font-semibold text-[11.5px] ${
+                link.domain === 'seeker' ? 'bg-amber-50 text-amber-700' : 'bg-sky-50 text-sky-700'
+              }`}
+            >
               {link.domain}
+            </span>
+            <span className="text-ink-700">
+              <strong className="font-bold">{link.metrics?.total ?? 0}</strong>{' '}
+              <span className="text-ink-400">registrations</span>
+            </span>
+            <span className="text-ink-700">
+              <strong className="font-bold">{link.metrics?.passed ?? 0}</strong>{' '}
+              <span className="text-ink-400">verified</span>
             </span>
             <span className="text-ink-400">
               Created {new Date(link.created_at).toLocaleDateString()}
@@ -637,25 +831,30 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
 
         <div className="flex items-center gap-2 shrink-0">
           {isLive && (
-            <Button
-              kind="ghost"
-              onClick={() => deactivate.mutate(link.link_id)}
-              disabled={deactivate.isPending}
-            >
-              {deactivate.isPending ? 'Retiring…' : 'Deactivate'}
-            </Button>
+            <>
+              <Button
+                kind="ghost"
+                onClick={() => deactivate.mutate(link.link_id)}
+                disabled={deactivate.isPending}
+              >
+                {deactivate.isPending ? 'Retiring…' : 'Deactivate'}
+              </Button>
+              <button
+                type="button"
+                onClick={() => deactivate.mutate(link.link_id)}
+                disabled={deactivate.isPending}
+                title="Retire link"
+                aria-label="Retire link"
+                className="inline-flex items-center justify-center w-8 h-8 rounded-[10px] border border-rose-200 text-rose-500 hover:bg-rose-50 disabled:opacity-50"
+              >
+                <I.x size={14} />
+              </button>
+            </>
           )}
         </div>
       </div>
     </div>
   );
-}
-
-function summariseContext(context: Record<string, unknown>): string {
-  return Object.entries(context)
-    .filter(([, v]) => Boolean(v))
-    .map(([k, v]) => `${k}: ${String(v)}`)
-    .join(' · ');
 }
 
 function YourLinks() {
@@ -672,7 +871,7 @@ function YourLinks() {
             Your Registration Links
           </h2>
           <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[11.5px] font-semibold">
-            {activeCount} live
+            {activeCount} active
           </span>
         </div>
         <div className="flex items-center bg-ink-50 border border-[var(--bd-border)] rounded-[10px] p-0.5">

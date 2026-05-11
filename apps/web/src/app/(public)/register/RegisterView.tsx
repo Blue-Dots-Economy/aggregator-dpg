@@ -35,6 +35,93 @@ interface ApiErrorEnvelope {
   };
 }
 
+interface AjvLikeError {
+  name?: string;
+  property?: string;
+  message?: string;
+  params?: Record<string, unknown>;
+  schemaPath?: string;
+}
+
+function titleCase(s: string): string {
+  return s
+    .replace(/[_-]+/g, ' ')
+    .replace(/\.([a-z])/gi, ' $1')
+    .replace(/([A-Z])/g, ' $1')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ')
+    .map((w) => (w ? w[0]!.toUpperCase() + w.slice(1) : ''))
+    .join(' ');
+}
+
+/**
+ * Walk a JSON Schema along a dotted path and return the leaf node's `title`
+ * if it has one. Falls back to undefined so the caller can pick a sensible
+ * substitute (e.g. last path segment, missingProperty).
+ */
+function lookupTitle(schema: RJSFSchema, dottedPath: string): string | undefined {
+  if (!dottedPath) return undefined;
+  const segs = dottedPath.split('.').filter(Boolean);
+  let cur: unknown = schema;
+  for (const seg of segs) {
+    if (cur && typeof cur === 'object' && 'properties' in cur) {
+      const props = (cur as { properties?: Record<string, unknown> }).properties;
+      const next = props?.[seg];
+      if (!next) return undefined;
+      cur = next;
+    } else {
+      return undefined;
+    }
+  }
+  if (cur && typeof cur === 'object' && 'title' in cur) {
+    return (cur as { title?: string }).title;
+  }
+  return undefined;
+}
+
+/**
+ * Convert Ajv-shaped validation errors into user-facing sentences like
+ * "Aggregator Type is required" — keyed off the schema `title` for each
+ * field. Falls back to a title-cased version of the field key.
+ */
+function humaniseValidationErrors(errs: AjvLikeError[], schema: RJSFSchema): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const e of errs) {
+    const propPath = (e.property ?? '').replace(/^\./, '');
+    const missing = (e.params?.['missingProperty'] as string | undefined) ?? undefined;
+    const fullPath = missing ? [propPath, missing].filter(Boolean).join('.') : propPath;
+    const titleFromSchema = lookupTitle(schema, fullPath);
+    const fallbackKey = missing || fullPath.split('.').pop() || '';
+    const resolvedLabel =
+      (titleFromSchema && titleFromSchema.trim()) || (fallbackKey && titleCase(fallbackKey)) || '';
+    const isRequired = e.name === 'required' || /required/i.test(e.message ?? '');
+    const rawMessage = (e.message ?? '').trim();
+    // When Ajv can't pin a single property (e.g. anyOf / oneOf branches all
+    // failed), fall back to the schemaPath so the user sees at least *which*
+    // constraint blew up — beats a vacuous "Form: is invalid".
+    let line: string;
+    if (resolvedLabel) {
+      line = isRequired
+        ? `${resolvedLabel} is required`
+        : `${resolvedLabel}: ${rawMessage || 'is invalid'}`;
+    } else if (rawMessage) {
+      // No path but we have a message — show the message standalone.
+      line = rawMessage;
+    } else {
+      // Last resort: surface the schemaPath so we have *some* signal.
+      const where = (e.schemaPath ?? '').replace(/^#?\/?/, '');
+      line = where ? `Validation failed at ${where}` : 'One or more fields failed validation.';
+    }
+    if (!seen.has(line)) {
+      seen.add(line);
+      out.push(line);
+    }
+  }
+  return out.length > 0 ? out : ['One or more fields failed validation.'];
+}
+
 function parseError(
   body: unknown,
   fallbackStatus: number,
@@ -60,7 +147,27 @@ function parseError(
  * the BFF, which proxies to the API.
  */
 export function RegisterView({ schema, uiSchema }: RegisterViewProps): JSX.Element {
-  const [formData, setFormData] = useState<Record<string, unknown>>({});
+  // Controlled form data. The initial value seeds the location card +
+  // consent timestamps; onChange keeps our state in sync with RJSF so that
+  // a re-render triggered by `state` updates (e.g. showing an error alert)
+  // doesn't wipe what the user already typed.
+  const [formData, setFormData] = useState<Record<string, unknown>>(() => {
+    const now = new Date();
+    const oneYear = new Date(now);
+    oneYear.setFullYear(oneYear.getFullYear() + 1);
+    return {
+      locations: [
+        {
+          geo: { type: 'Point', coordinates: [0, 0] },
+          address: { addressCountry: 'IN' },
+        },
+      ],
+      consent: {
+        given_at: now.toISOString(),
+        valid_till: oneYear.toISOString(),
+      },
+    };
+  });
   const [state, setState] = useState<SubmitState>({ status: 'idle' });
 
   // Page header uses the schema title plus a short user-facing tagline. The
@@ -81,11 +188,24 @@ export function RegisterView({ schema, uiSchema }: RegisterViewProps): JSX.Eleme
     _event: FormEvent<HTMLFormElement>,
   ): Promise<void> => {
     setState({ status: 'submitting' });
+    // Refresh consent timestamps at submit so they reflect the actual moment
+    // the user clicked, not page-load time.
+    const now = new Date();
+    const oneYear = new Date(now);
+    oneYear.setFullYear(oneYear.getFullYear() + 1);
+    const payload = {
+      ...(e.formData ?? {}),
+      consent: {
+        ...((e.formData as Record<string, unknown> | undefined)?.consent ?? {}),
+        given_at: now.toISOString(),
+        valid_till: oneYear.toISOString(),
+      },
+    };
     try {
       const res = await fetch('/api/aggregator/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(e.formData ?? {}),
+        body: JSON.stringify(payload),
       });
       const reqId = res.headers.get('x-request-id') ?? '';
       if (!res.ok) {
@@ -178,13 +298,23 @@ export function RegisterView({ schema, uiSchema }: RegisterViewProps): JSX.Eleme
                   className="mb-5 rounded-[10px] border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-700"
                 >
                   <div className="font-semibold">{state.title}</div>
-                  <div className="mt-1 text-red-600">{state.detail}</div>
-                  {state.requestId || state.code !== 'UNKNOWN' ? (
-                    <div className="mt-2 text-[11px] text-red-500/80 font-mono">
-                      {state.code !== 'UNKNOWN' ? <span>Code: {state.code}</span> : null}
-                      {state.code !== 'UNKNOWN' && state.requestId ? <span> · </span> : null}
-                      {state.requestId ? <span>Ref: {state.requestId}</span> : null}
-                    </div>
+                  {state.detail ? (
+                    <ul className="mt-1.5 text-red-600 list-disc list-inside space-y-0.5">
+                      {state.detail
+                        .split('\n')
+                        .filter(Boolean)
+                        .map((line, i) => (
+                          <li key={i}>{line}</li>
+                        ))}
+                    </ul>
+                  ) : null}
+                  {state.code === 'CLIENT_VALIDATION' && state.requestId ? (
+                    <details className="mt-2 text-[11px] text-red-500/80">
+                      <summary className="cursor-pointer">Show raw validation errors</summary>
+                      <pre className="mt-1 whitespace-pre-wrap font-mono text-[11px] bg-red-100/40 rounded p-2 max-h-[200px] overflow-auto">
+                        {state.requestId}
+                      </pre>
+                    </details>
                   ) : null}
                 </div>
               ) : null}
@@ -195,11 +325,33 @@ export function RegisterView({ schema, uiSchema }: RegisterViewProps): JSX.Eleme
                 formData={formData}
                 onChange={(e) => setFormData(e.formData as Record<string, unknown>)}
                 onSubmit={handleSubmit}
+                onError={(errs) => {
+                  // Convert raw Ajv errors into human-readable lines using
+                  // schema titles. Drop dotted paths like ".contact.phone" in
+                  // favour of "Phone is required".
+                  const lines = humaniseValidationErrors(errs, formSchema);
+                  // Stash a JSON dump of the raw Ajv errors into the detail
+                  // payload so when humanise can't resolve a label, the user
+                  // can copy-paste the underlying object from the alert
+                  // without opening DevTools.
+                  const rawDump = JSON.stringify(errs, null, 2);
+                  setState({
+                    status: 'error',
+                    title: 'Please fix the highlighted fields',
+                    detail: lines.join('\n'),
+                    code: 'CLIENT_VALIDATION',
+                    requestId: rawDump,
+                  });
+                  if (typeof window !== 'undefined') {
+                     
+                    console.error('[register] validation errors', errs);
+                  }
+                }}
                 showErrorList={false}
-                liveValidate
+                focusOnFirstError
                 noHtml5Validate
               >
-                <div className="mt-6 flex flex-col gap-3">
+                <div className="mt-4 flex flex-col gap-3">
                   <button
                     type="submit"
                     disabled={state.status === 'submitting'}

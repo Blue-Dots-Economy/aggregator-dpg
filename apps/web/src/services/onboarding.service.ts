@@ -14,6 +14,16 @@ export interface ApiRegistrationLink {
   public_url: string;
   qr_url: string | null;
   qr_expires_at: string | null;
+  /**
+   * Optional rollup counters surfaced by the listing endpoint. Defaults
+   * to zeros when the link has no submissions yet.
+   */
+  metrics?: {
+    total: number;
+    passed: number;
+    failed: number;
+    skipped: number;
+  };
   created_at: string;
   updated_at: string;
 }
@@ -27,6 +37,13 @@ export interface ListLinksResponse {
 
 export interface CreateLinkInput {
   domain: 'seeker' | 'provider';
+  /** Optional human-readable slug. Server falls back to random when omitted. */
+  slug?: string;
+  /**
+   * Free-form display label rendered as the card title (e.g.
+   * "Dharwad Field Drive — Apr 2026"). Stored on `context.title`.
+   */
+  title?: string;
   context?: Record<string, unknown>;
   status?: 'draft' | 'live';
   expires_at?: string | null;
