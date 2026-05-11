@@ -114,13 +114,14 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       });
     }
 
-    // 2. Normalisation. `participant_id` is only required when the link's
-    // schema includes it. Otherwise we auto-allocate a UUID so the
-    // `(aggregator_id, type, participant_id)` unique index can still anchor
-    // the row. Dedup via this key is a no-op for schemas without their own
-    // stable id — by design.
-    const rawParticipantId = String(body['participant_id'] ?? '').trim();
-    const participantId = rawParticipantId.length > 0 ? rawParticipantId : randomUUID();
+    // 2. Normalisation. On the public path the server ALWAYS mints the
+    // `participant_id` — accepting a client-supplied value would let an
+    // anonymous caller probe whether arbitrary aggregator-side IDs exist
+    // (the `ON CONFLICT DO NOTHING` branch is observable via the 409
+    // outcome). Authenticated bulk uploads still honour caller-supplied IDs
+    // for dedup; that path runs behind requireApproved.
+    delete (body as Record<string, unknown>)['participant_id'];
+    const participantId = randomUUID();
     const phoneRaw = typeof body['phone'] === 'string' ? (body['phone'] as string) : '';
     let phoneNormalised: string | null = null;
     if (phoneRaw) {
@@ -208,10 +209,12 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
 
     if (outcome === 'skipped') {
       // Surface dedup in the response status to match the design (409).
+      // `participant_id` is intentionally omitted on the public path so we
+      // do not leak the DB row UUID of an existing participant to an
+      // anonymous caller.
       return reply.code(409).send({
         outcome,
         submission_id: submissionId,
-        participant_id: participantRowId,
         message: 'Already registered with this aggregator.',
       });
     }
@@ -219,7 +222,6 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
     return reply.code(201).send({
       outcome,
       submission_id: submissionId,
-      participant_id: participantRowId,
     });
   });
 }

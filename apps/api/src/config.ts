@@ -93,6 +93,19 @@ const ConfigSchema = z.object({
   // ─── Rate limit (public link submit) ────────────────────────────────────
   PUBLIC_SUBMIT_RATE_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
   PUBLIC_SUBMIT_RATE_MAX_PER_WINDOW: z.coerce.number().int().positive().default(20),
+
+  /**
+   * Trust-proxy configuration for Fastify. Controls which upstream addresses
+   * are allowed to supply `X-Forwarded-For` (and therefore decide what
+   * `req.ip` evaluates to — used by the public rate limiter).
+   *
+   * Accepts a comma-separated list of IPs, CIDR ranges, or Fastify named
+   * groups (`loopback`, `linklocal`, `uniquelocal`). Production deployments
+   * MUST set this to the BFF subnet so callers cannot spoof their source IP.
+   * The default `loopback,linklocal,uniquelocal` trusts only RFC1918 private
+   * ranges, which is safe behind a single-host Docker compose dev stack.
+   */
+  TRUST_PROXY: z.string().default('loopback,linklocal,uniquelocal'),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

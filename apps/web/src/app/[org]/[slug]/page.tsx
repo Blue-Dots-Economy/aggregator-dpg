@@ -62,6 +62,13 @@ export default async function PublicRegistrationPage({ params }: PageProps) {
   }
 
   // 2. Load participant schema + ui schema from disk (config-driven).
+  // Defence in depth: validate the `domain` value before composing the
+  // file path. The API is trusted but typing alone does not enforce a
+  // runtime allowlist, and any future API contract drift could otherwise
+  // turn this into a path-traversal vector.
+  if (resolved.domain !== 'seeker' && resolved.domain !== 'provider') {
+    notFound();
+  }
   const schemaFile = `${resolved.domain}.v1.json`;
   const uiFile = `${resolved.domain}.v1.ui.json`;
   let schema: RJSFSchema;

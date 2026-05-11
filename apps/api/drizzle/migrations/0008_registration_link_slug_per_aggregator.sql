@@ -1,4 +1,4 @@
--- Migration 0007 — make `registration_links.slug` unique per aggregator
+-- Migration 0008 — make `registration_links.slug` unique per aggregator
 -- instead of globally unique.
 --
 -- Public registration URLs are moving from `/r/<slug>` to

@@ -62,6 +62,14 @@ export const ERR = {
     detail: 'You do not have permission to perform this action.',
     hint: 'JWT aggregator_id claim does not match path id, or role missing.',
   },
+  NOT_APPROVED: {
+    code: 'NOT_APPROVED',
+    status: 403,
+    title: 'Approval pending',
+    detail:
+      'Your aggregator account has not been approved yet. An admin must approve the registration before this action is available.',
+    hint: 'JWT `decision_made` claim is missing, "pending", or "rejected". See requireApproved().',
+  },
 
   // ── Registration ────────────────────────────────────────────────────────
   USER_EXISTS: {

@@ -20,7 +20,7 @@
  */
 
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { authenticate, type AuthContext } from '../services/auth/access-token.js';
+import { requireApproved, type AuthContext } from '../services/auth/access-token.js';
 import { getBulkUploadsStore } from '../services/bulk-uploads-store/index.js';
 import { enqueueBulkFileProcess } from '../services/bulk-queue/index.js';
 import {
@@ -440,8 +440,11 @@ function toResponse(upload: {
 }
 
 async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
-  const result = await authenticate(req);
+  const result = await requireApproved(req);
   if (!result.ok) {
+    if (result.error.code === 'NOT_APPROVED') {
+      throw httpError('NOT_APPROVED', { detail: result.error.message });
+    }
     throw httpError('UNAUTHORIZED', { detail: result.error.message });
   }
   if (!result.context.aggregatorId) {

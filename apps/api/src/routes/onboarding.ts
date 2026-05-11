@@ -12,7 +12,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { and, eq, gte, lte, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { authenticate, type AuthContext } from '../services/auth/access-token.js';
+import { requireApproved, type AuthContext } from '../services/auth/access-token.js';
 import { getDb } from '../db/client.js';
 import { onboarding } from '../db/schema.js';
 import { httpError } from '../errors/http-error.js';
@@ -92,8 +92,11 @@ function parseRange(req: FastifyRequest): { from?: Date; to?: Date } {
 }
 
 async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
-  const result = await authenticate(req);
+  const result = await requireApproved(req);
   if (!result.ok) {
+    if (result.error.code === 'NOT_APPROVED') {
+      throw httpError('NOT_APPROVED', { detail: result.error.message });
+    }
     throw httpError('UNAUTHORIZED', { detail: result.error.message });
   }
   if (!result.context.aggregatorId) {

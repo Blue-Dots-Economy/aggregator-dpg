@@ -58,7 +58,11 @@ export async function buildApp(): Promise<FastifyInstance> {
           }
         : {}),
     },
-    trustProxy: true,
+    // Trust only the upstream proxies named in `TRUST_PROXY`. Blanket
+    // `true` would let any caller forge `X-Forwarded-For` and bypass the
+    // public rate limiter, which is keyed off `req.ip`. The default trusts
+    // RFC1918 only — production must point this at the BFF subnet.
+    trustProxy: parseTrustProxy(config.TRUST_PROXY),
     requestIdHeader: REQUEST_ID_HEADER,
     requestIdLogLabel: 'reqId',
     genReqId: (req) => {
@@ -143,4 +147,21 @@ export async function buildApp(): Promise<FastifyInstance> {
   });
 
   return app;
+}
+
+/**
+ * Parse `TRUST_PROXY` env into the shape Fastify expects.
+ *
+ *   "loopback,linklocal,uniquelocal" → "loopback, linklocal, uniquelocal"
+ *   "10.0.0.0/8,127.0.0.1"          → "10.0.0.0/8, 127.0.0.1"
+ *   "true" / "false"                 → boolean (compat with legacy configs)
+ *
+ * @param raw - Comma-separated value from {@link config.TRUST_PROXY}.
+ * @returns A value accepted by Fastify's `trustProxy` option.
+ */
+function parseTrustProxy(raw: string): string | boolean {
+  const trimmed = raw.trim();
+  if (trimmed === 'true') return true;
+  if (trimmed === 'false') return false;
+  return trimmed;
 }

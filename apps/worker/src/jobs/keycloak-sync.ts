@@ -29,6 +29,9 @@ import { schema, getDb } from '../db.js';
 import { logger } from '../logger.js';
 import { config } from '../config.js';
 
+const KC_HTTP_TIMEOUT_MS = 10_000;
+const KC_HTTP_RETRY_DELAY_MS = 500;
+
 interface KcUserSummary {
   id: string;
   email?: string;
@@ -49,7 +52,7 @@ export async function runKeycloakSync(): Promise<KeycloakSyncOutcome> {
   const start = Date.now();
 
   const token = await fetchAdminToken();
-  if (!token.ok || !token.value) {
+  if (!token.ok) {
     log.error(
       { status: 'failure', sub: 'token', error: token.error },
       'unable to obtain KC admin token',
@@ -64,7 +67,7 @@ export async function runKeycloakSync(): Promise<KeycloakSyncOutcome> {
 
   for (let first = 0; ; first += PAGE_SIZE) {
     const page = await listUsers(adminToken, first, PAGE_SIZE);
-    if (!page.ok || !page.value) {
+    if (!page.ok) {
       log.error(
         { status: 'failure', sub: 'list', error: page.error, first },
         'KC user listing failed',
@@ -79,7 +82,7 @@ export async function runKeycloakSync(): Promise<KeycloakSyncOutcome> {
       const aggregatorId = u.attributes?.['aggregator_id']?.[0];
       if (!aggregatorId) continue;
 
-      const result = await reconcile(aggregatorId, u, log);
+      const result = await reconcile(aggregatorId, u, adminToken, log);
       if (result === 'repaired') repaired += 1;
       else if (result === 'failed') failed += 1;
     }
@@ -103,6 +106,7 @@ export async function runKeycloakSync(): Promise<KeycloakSyncOutcome> {
 async function reconcile(
   aggregatorId: string,
   kc: KcUserSummary,
+  adminToken: string,
   log: typeof logger,
 ): Promise<'noop' | 'repaired' | 'failed'> {
   const rows = await getDb()
@@ -131,56 +135,110 @@ async function reconcile(
   const dbPhone = row.contact.phone;
   const dbEmail = row.contact.email.toLowerCase();
   const dbDecision = statusToDecision(row.status);
+  const dbIsTerminal =
+    row.status === 'active' || row.status === 'inactive' || row.status === 'retired';
 
   const phoneDrift = kcPhone !== null && kcPhone !== dbPhone;
   const emailDrift = kcEmail !== null && kcEmail !== dbEmail;
-  const decisionDrift = kcDecision !== undefined && kcDecision !== dbDecision;
 
-  if (!phoneDrift && !emailDrift && !decisionDrift) return 'noop';
+  // Decision drift handling is asymmetric: the approval route writes DB
+  // first and KC second, so a partial failure leaves DB=non-pending while
+  // KC still says `pending` (or omits the attribute). In that case the DB
+  // is authoritative — push it back to KC. Only let KC overwrite the DB
+  // status when the DB is still `pending` and KC carries a definitive
+  // value, which is the legitimate "admin edited KC directly" path.
+  const kcSaysPending = kcDecision === undefined || kcDecision === 'pending';
+  const pushDbToKc = dbIsTerminal && kcSaysPending;
+  const kcOverwritesDb = !dbIsTerminal && kcDecision !== undefined && kcDecision !== dbDecision;
 
-  const patch: Partial<typeof row> & { updatedAt: Date } = { updatedAt: new Date() };
-  if (phoneDrift || emailDrift) {
-    patch.contact = {
-      ...row.contact,
-      ...(phoneDrift && kcPhone ? { phone: kcPhone } : {}),
-      ...(emailDrift && kcEmail ? { email: kcEmail } : {}),
-    };
+  if (!phoneDrift && !emailDrift && !pushDbToKc && !kcOverwritesDb) return 'noop';
+
+  let repaired = false;
+
+  // 1. DB-side patch: phone / email always follow KC; decision_made only
+  // follows KC when the DB is still pending.
+  if (phoneDrift || emailDrift || kcOverwritesDb) {
+    const patch: Partial<typeof row> & { updatedAt: Date } = { updatedAt: new Date() };
+    if (phoneDrift || emailDrift) {
+      patch.contact = {
+        ...row.contact,
+        ...(phoneDrift && kcPhone ? { phone: kcPhone } : {}),
+        ...(emailDrift && kcEmail ? { email: kcEmail } : {}),
+      };
+    }
+    if (kcOverwritesDb && kcDecision) {
+      patch.status = decisionToStatus(kcDecision);
+    }
+    patch.updatedBy = 'keycloak-sync';
+
+    try {
+      await getDb()
+        .update(schema.aggregators)
+        .set(patch)
+        .where(eq(schema.aggregators.id, aggregatorId));
+      log.warn(
+        {
+          event: 'drift_repair',
+          sub: 'kc_to_db',
+          aggregator_id: aggregatorId,
+          kc_user_id: kc.id,
+          phone_drift: phoneDrift,
+          email_drift: emailDrift,
+          decision_drift: kcOverwritesDb,
+        },
+        'DB row updated to match Keycloak',
+      );
+      repaired = true;
+    } catch (err) {
+      log.error(
+        {
+          event: 'drift_repair',
+          sub: 'kc_to_db',
+          status: 'failure',
+          aggregator_id: aggregatorId,
+          kc_user_id: kc.id,
+          error: (err as Error).message,
+        },
+        'failed to apply KC→DB drift repair',
+      );
+      return 'failed';
+    }
   }
-  if (decisionDrift && kcDecision) {
-    patch.status = decisionToStatus(kcDecision);
-  }
-  patch.updatedBy = 'keycloak-sync';
 
-  try {
-    await getDb()
-      .update(schema.aggregators)
-      .set(patch)
-      .where(eq(schema.aggregators.id, aggregatorId));
+  // 2. KC-side push: the DB has a definitive decision but KC has not been
+  // updated yet (or was reset). Mirror the DB value back so JWT-issue-time
+  // gates and the next sync tick agree.
+  if (pushDbToKc) {
+    const pushed = await pushDecisionToKc(kc.id, dbDecision, adminToken, kc.attributes);
+    if (!pushed.ok) {
+      log.error(
+        {
+          event: 'drift_repair',
+          sub: 'db_to_kc',
+          status: 'failure',
+          aggregator_id: aggregatorId,
+          kc_user_id: kc.id,
+          decision: dbDecision,
+          error: pushed.error,
+        },
+        'failed to push DB decision back to Keycloak',
+      );
+      return 'failed';
+    }
     log.warn(
       {
         event: 'drift_repair',
+        sub: 'db_to_kc',
         aggregator_id: aggregatorId,
         kc_user_id: kc.id,
-        phone_drift: phoneDrift,
-        email_drift: emailDrift,
-        decision_drift: decisionDrift,
+        decision: dbDecision,
       },
-      'DB row updated to match Keycloak',
+      'KC attributes updated to match DB',
     );
-    return 'repaired';
-  } catch (err) {
-    log.error(
-      {
-        event: 'drift_repair',
-        status: 'failure',
-        aggregator_id: aggregatorId,
-        kc_user_id: kc.id,
-        error: (err as Error).message,
-      },
-      'failed to apply drift repair',
-    );
-    return 'failed';
+    repaired = true;
   }
+
+  return repaired ? 'repaired' : 'noop';
 }
 
 function statusToDecision(status: string): 'pending' | 'approved' | 'rejected' {
@@ -208,11 +266,7 @@ function decisionToStatus(decision: string): 'pending' | 'active' | 'inactive' {
 
 // ─── Minimal KC admin client (HTTP only) ────────────────────────────────────
 
-interface OkErr<T> {
-  ok: boolean;
-  value?: T;
-  error?: string;
-}
+type OkErr<T> = { ok: true; value: T } | { ok: false; error: string };
 
 async function fetchAdminToken(): Promise<OkErr<string>> {
   const base = config.KEYCLOAK_URL?.replace(/\/+$/, '');
@@ -227,13 +281,14 @@ async function fetchAdminToken(): Promise<OkErr<string>> {
     client_id: clientId,
     client_secret: clientSecret,
   });
-  const res = await fetch(`${base}/realms/${realm}/protocol/openid-connect/token`, {
+  const res = await fetchWithRetry(`${base}/realms/${realm}/protocol/openid-connect/token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body,
   });
-  if (!res.ok) return { ok: false, error: `token HTTP ${res.status}` };
-  const json = (await res.json()) as { access_token?: string };
+  if (!res.ok) return { ok: false, error: res.error };
+  if (!res.value.ok) return { ok: false, error: `token HTTP ${res.value.status}` };
+  const json = (await res.value.json()) as { access_token?: string };
   if (!json.access_token) return { ok: false, error: 'no access_token in response' };
   return { ok: true, value: json.access_token };
 }
@@ -247,11 +302,76 @@ async function listUsers(
   const realm = config.KEYCLOAK_REALM;
   if (!base || !realm) return { ok: false, error: 'KEYCLOAK_* env vars not configured' };
   const url = `${base}/admin/realms/${realm}/users?first=${first}&max=${max}`;
-  const res = await fetch(url, {
+  const res = await fetchWithRetry(url, {
     method: 'GET',
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (!res.ok) return { ok: false, error: `list HTTP ${res.status}` };
-  const json = (await res.json()) as KcUserSummary[];
+  if (!res.ok) return { ok: false, error: res.error };
+  if (!res.value.ok) return { ok: false, error: `list HTTP ${res.value.status}` };
+  const json = (await res.value.json()) as KcUserSummary[];
   return { ok: true, value: json };
+}
+
+/**
+ * Push the authoritative DB decision back to Keycloak. Used when the DB row
+ * is already non-pending but KC still says `pending` (or omits the
+ * attribute entirely) — the inverse of the default KC → DB sync direction.
+ *
+ * @param userId - Keycloak user id.
+ * @param decision - `pending` / `approved` / `rejected`.
+ * @param token - Admin token from {@link fetchAdminToken}.
+ */
+async function pushDecisionToKc(
+  userId: string,
+  decision: 'pending' | 'approved' | 'rejected',
+  token: string,
+  existing: Record<string, string[]> | undefined,
+): Promise<OkErr<void>> {
+  const base = config.KEYCLOAK_URL?.replace(/\/+$/, '');
+  const realm = config.KEYCLOAK_REALM;
+  if (!base || !realm) return { ok: false, error: 'KEYCLOAK_* env vars not configured' };
+  const url = `${base}/admin/realms/${realm}/users/${encodeURIComponent(userId)}`;
+  // Merge over the existing attributes so we never accidentally drop other
+  // mapper-driven fields (phoneNumber, aggregator_id, ...).
+  const attributes: Record<string, string[]> = { ...(existing ?? {}), decision_made: [decision] };
+  const res = await fetchWithRetry(url, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ attributes }),
+  });
+  if (!res.ok) return { ok: false, error: res.error };
+  if (!res.value.ok) return { ok: false, error: `push HTTP ${res.value.status}` };
+  return { ok: true, value: undefined };
+}
+
+/**
+ * `fetch` with explicit timeout + a single retry on network errors / 5xx.
+ * 4xx responses are returned without retry so callers can decide how to
+ * surface them.
+ */
+async function fetchWithRetry(url: string, init: RequestInit): Promise<OkErr<Response>> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const res = await fetch(url, {
+        ...init,
+        signal: AbortSignal.timeout(KC_HTTP_TIMEOUT_MS),
+      });
+      if (res.status >= 500 && attempt === 0) {
+        await sleep(KC_HTTP_RETRY_DELAY_MS);
+        continue;
+      }
+      return { ok: true, value: res };
+    } catch (err) {
+      if (attempt === 0) {
+        await sleep(KC_HTTP_RETRY_DELAY_MS);
+        continue;
+      }
+      return { ok: false, error: (err as Error).message };
+    }
+  }
+  return { ok: false, error: 'unreachable' };
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
 }

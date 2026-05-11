@@ -163,12 +163,18 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
         throw httpError('PHONE_EXISTS', { fields: { phone: phoneE164 } });
       }
 
+      // Server-stamp the consent timestamp so the recorded value reflects
+      // when the API actually accepted the registration, not whatever the
+      // client clock reported. `valid_till` stays caller-supplied but is
+      // clamped to a hard ceiling so a misbehaving form can not store a
+      // 1000-year consent window.
+      const serverConsent = stampConsent(body.consent);
       const aggregator = await createAggregatorWithSlug(aggregatorStore, body.name, {
         type: body.type,
         url: body.url ?? null,
         contact,
         locations: body.locations,
-        consent: body.consent,
+        consent: serverConsent,
       });
       if (!aggregator.ok) {
         const code = mapStoreCreateError(aggregator.error.code);
@@ -331,6 +337,39 @@ async function createAggregatorWithSlug(
       error: { code: 'DB_UNAVAILABLE', message: 'slug retries exhausted' },
     }
   );
+}
+
+/**
+ * Maximum consent validity window. Hard ceiling so a buggy or hostile
+ * client cannot persist a consent record that is effectively permanent.
+ * Five years lines up with typical regulatory retention envelopes; tune
+ * via config if a deployment needs something different.
+ */
+const MAX_CONSENT_VALIDITY_MS = 5 * 365 * 24 * 60 * 60 * 1000;
+
+/**
+ * Server-stamp `given_at` to the current instant and clamp `valid_till` to
+ * at most {@link MAX_CONSENT_VALIDITY_MS} after that instant. The client is
+ * allowed to ask for a shorter window but never a longer one.
+ *
+ * @param incoming - Consent block as it arrived from the registration form.
+ * @returns Consent record with server-authoritative timestamps.
+ */
+function stampConsent(
+  incoming: ReturnType<typeof RegistrationPayloadSchema.parse>['consent'],
+): ReturnType<typeof RegistrationPayloadSchema.parse>['consent'] {
+  const now = new Date();
+  const maxValidTill = new Date(now.getTime() + MAX_CONSENT_VALIDITY_MS);
+  const requestedValidTill = new Date(incoming.valid_till);
+  const validTill =
+    Number.isFinite(requestedValidTill.getTime()) && requestedValidTill < maxValidTill
+      ? requestedValidTill
+      : maxValidTill;
+  return {
+    ...incoming,
+    given_at: now.toISOString(),
+    valid_till: validTill.toISOString(),
+  };
 }
 
 function mapStoreCreateError(

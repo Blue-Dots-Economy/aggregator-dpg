@@ -25,7 +25,12 @@ type SubmitState =
 interface SubmitResponse {
   outcome: 'passed' | 'skipped';
   submission_id: string;
-  participant_id: string | null;
+  /**
+   * Server omits this on the public path to avoid leaking the DB row UUID
+   * of an existing participant. Kept optional so older builds that did
+   * include it still type-check.
+   */
+  participant_id?: string | null;
   message?: string;
 }
 

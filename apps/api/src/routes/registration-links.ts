@@ -15,7 +15,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import QRCode from 'qrcode';
 import { z } from 'zod';
 import { and, eq, inArray, sql } from 'drizzle-orm';
-import { authenticate, type AuthContext } from '../services/auth/access-token.js';
+import { requireApproved, type AuthContext } from '../services/auth/access-token.js';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
 import { getRegistrationLinksStore } from '../services/registration-links-store/index.js';
 import type { RegistrationLink } from '../services/registration-links-store/index.js';
@@ -451,8 +451,11 @@ function buildPublicUrl(orgSlug: string, slug: string): string {
 }
 
 async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
-  const result = await authenticate(req);
+  const result = await requireApproved(req);
   if (!result.ok) {
+    if (result.error.code === 'NOT_APPROVED') {
+      throw httpError('NOT_APPROVED', { detail: result.error.message });
+    }
     throw httpError('UNAUTHORIZED', { detail: result.error.message });
   }
   if (!result.context.aggregatorId) {

@@ -48,11 +48,18 @@ export async function consume(options: RateLimitOptions): Promise<RateLimitResul
   const windowStart = Math.floor(now / 1000 / options.windowSeconds) * options.windowSeconds;
   const fullKey = `rl:${options.namespace}:${options.key}:${windowStart}`;
   try {
-    const count = await redis.incr(fullKey);
-    if (count === 1) {
-      // First hit in window — set TTL to expire shortly after window closes.
-      await redis.expire(fullKey, options.windowSeconds + 1);
-    }
+    // INCR + EXPIRE issued atomically. Pipelining via `multi()` avoids the
+    // INCR-without-EXPIRE window that exists if the process dies between
+    // calls — without TTL the bucket would never reset. Re-applying
+    // EXPIRE on every hit is a no-op cost-wise (single Redis op) and
+    // keeps the key alive while traffic is active in-window.
+    const pipelineRes = await redis
+      .multi()
+      .incr(fullKey)
+      .expire(fullKey, options.windowSeconds + 1)
+      .exec();
+    const incrEntry = pipelineRes?.[0];
+    const count = Array.isArray(incrEntry) && typeof incrEntry[1] === 'number' ? incrEntry[1] : 0;
     if (count > options.max) {
       const retryAfterSeconds = Math.max(
         1,
