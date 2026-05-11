@@ -18,6 +18,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@aggregator-dpg/shared-primitives": "workspace:*",
     "drizzle-orm": "^0.36.4"
   },
   "devDependencies": {

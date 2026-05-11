@@ -16,7 +16,11 @@ import {
 } from '../interface.js';
 
 const require = createRequire(import.meta.url);
-type AjvOptions = { allErrors?: boolean; strict?: boolean | 'log' };
+type AjvOptions = {
+  allErrors?: boolean;
+  strict?: boolean | 'log';
+  coerceTypes?: boolean | 'array';
+};
 type AjvLike = {
   compile(schema: unknown): ValidateFunction;
 };
@@ -32,7 +36,7 @@ export class SchemaLoaderFake extends SchemaLoaderBase {
 
   constructor() {
     super();
-    this.ajv = new AjvCtor({ allErrors: true, strict: false });
+    this.ajv = new AjvCtor({ allErrors: true, strict: false, coerceTypes: 'array' });
     addFormats(this.ajv);
   }
 

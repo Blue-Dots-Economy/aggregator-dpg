@@ -2,15 +2,30 @@
  * Postgres schema definitions for the Aggregator API.
  *
  * Tables:
- *   - `aggregators`: org-level data only (id, slug, type, timestamps).
- *   - `aggregator_profiles`: per-aggregator profile JSON, populated post-login.
+ *   - `aggregators`: registration-essential identity. Captured during signup
+ *     so that the user can authenticate immediately after submitting. Holds
+ *     id, slug, actor_type, name/type, url, Beckn `contact` (+ generated
+ *     `contact_phone` / `contact_email` for indexed login lookups), Beckn
+ *     `locations`, `consent` (T&C snapshot — accepted before account create),
+ *     lifecycle `status`, and audit fields. `org_slug` is derived from `name`
+ *     at INSERT and is immutable (trigger lives in the migration).
+ *   - `aggregator_profile`: secondary, 1:1 with `aggregators`. Filled out
+ *     post-login via the profile-completion flow. Holds `contact_name`,
+ *     `personas`, `services`, `verified_certificate`, and a
+ *     `profile_completed_at` checkpoint. A stub row is inserted alongside the
+ *     parent in the same transaction so the 1:1 invariant always holds.
  *   - `bulk_uploads`: parent record per CSV upload. Tracks lifecycle
  *     (pending → uploaded → file_validating → row_processing → completed/failed)
  *     plus counters (passed/failed/skipped). Per-row state lives transiently
  *     in Redis during the run and `errors.csv` on S3 after.
  *
- * No PII is stored in `aggregators` or `aggregator_profiles`. Email, phone,
- * and contact name live in Keycloak.
+ * Keycloak remains the authoritative store for `phoneNumber`, `email`, and
+ * `decision_made` (approval state); those values are mirrored into the
+ * `aggregators.contact` jsonb for query / Beckn-shape passthrough.
+ *
+ * CHECK constraints (shape guards on jsonb, conditional integrity on
+ * actor_type ↔ type) and the immutability trigger on `org_slug` are declared
+ * in the migration, not here.
  */
 
 import { sql } from 'drizzle-orm';
@@ -25,10 +40,33 @@ import {
   uniqueIndex,
   index,
 } from 'drizzle-orm/pg-core';
+import type {
+  BecknContact,
+  BecknLocation,
+  ConsentRecord,
+  PersonaRef,
+  PublicKeyEntry,
+  ServiceRef,
+} from '@aggregator-dpg/shared-primitives/aggregator';
+
+export type { BecknContact, BecknLocation, ConsentRecord, PersonaRef, PublicKeyEntry, ServiceRef };
 
 // ─── Enums ───────────────────────────────────────────────────────────────────
 
-export const aggregatorTypeEnum = pgEnum('aggregator_type', ['seeker', 'provider']);
+export const aggregatorActorTypeEnum = pgEnum('aggregator_actor_type', [
+  'aggregator',
+  'seeker',
+  'provider',
+]);
+
+export const aggregatorTypeEnum = pgEnum('aggregator_type', ['seeker', 'provider', 'both']);
+
+export const aggregatorStatusEnum = pgEnum('aggregator_status', [
+  'pending',
+  'active',
+  'inactive',
+  'retired',
+]);
 
 export const participantTypeEnum = pgEnum('participant_type', ['seeker', 'provider']);
 
@@ -59,28 +97,98 @@ export const onboardingSourceEnum = pgEnum('onboarding_source', ['bulk', 'link']
 
 // ─── aggregators ─────────────────────────────────────────────────────────────
 
-export const aggregators = pgTable('aggregators', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  orgSlug: text('org_slug').notNull().unique(),
-  type: aggregatorTypeEnum('type').notNull(),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-});
+export const aggregators = pgTable(
+  'aggregators',
+  {
+    // Identity
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgSlug: text('org_slug').notNull().unique(),
+    actorType: aggregatorActorTypeEnum('actor_type').notNull(),
+    name: text('name').notNull(),
+    // `type` is NULL when actor_type='aggregator' (enforced by CHECK).
+    type: aggregatorTypeEnum('type'),
+    url: text('url'),
 
-// ─── aggregator_profiles ─────────────────────────────────────────────────────
+    // Beckn Contact (mirrored from Keycloak — KC is authoritative for
+    // phone/email; this jsonb is the Beckn-shape projection for catalog reads).
+    contact: jsonb('contact').$type<BecknContact>().notNull(),
+    contactPhone: text('contact_phone')
+      .notNull()
+      .generatedAlwaysAs(sql`(contact->>'phone')`),
+    contactEmail: text('contact_email')
+      .notNull()
+      .generatedAlwaysAs(sql`(lower(contact->>'email'))`),
 
-export const aggregatorProfiles = pgTable('aggregator_profiles', {
-  aggregatorId: uuid('aggregator_id')
-    .primaryKey()
-    .references(() => aggregators.id, { onDelete: 'cascade' }),
-  schemaVersion: integer('schema_version').notNull().default(1),
-  data: jsonb('data').$type<Record<string, unknown>>().notNull().default({}),
-  consent: jsonb('consent').$type<Record<string, unknown>>().notNull().default({}),
-  createdBy: text('created_by').notNull(),
-  updatedBy: text('updated_by').notNull(),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-});
+    // Beckn Location[] — optional list of geographic locations.
+    locations: jsonb('locations')
+      .$type<BecknLocation[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+
+    // Onboarding consent (snapshot at signup; aggregator must accept T&C
+    // before the row is created). Refreshable via PATCH.
+    consent: jsonb('consent').$type<ConsentRecord>().notNull(),
+
+    // Lifecycle
+    status: aggregatorStatusEnum('status').notNull().default('pending'),
+    createdBy: text('created_by').notNull(),
+    updatedBy: text('updated_by').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    // Auth-path lookups: phone/email are the credential identifiers a user
+    // types in at login. Uniqueness prevents duplicate registration.
+    contactPhoneUnique: uniqueIndex('aggregators_contact_phone_unique').on(table.contactPhone),
+    contactEmailUnique: uniqueIndex('aggregators_contact_email_unique').on(table.contactEmail),
+    // Approval queue + tenant-classification filters.
+    statusIdx: index('aggregators_status_idx').on(table.status),
+    actorTypeIdx: index('aggregators_actor_type_idx').on(table.actorType),
+  }),
+);
+
+// ─── aggregator_profile ──────────────────────────────────────────────────────
+
+export const aggregatorProfile = pgTable(
+  'aggregator_profile',
+  {
+    aggregatorId: uuid('aggregator_id')
+      .primaryKey()
+      .references(() => aggregators.id, { onDelete: 'cascade' }),
+    // Display label for the primary human contact at the aggregator org.
+    // Distinct from `aggregators.contact.name` (which is the Beckn contact
+    // object's `name` field on the structured contact payload).
+    contactName: text('contact_name'),
+    // Schema-registry references — IDs validated at app layer against the
+    // active schema registry (config/schema-registry.yaml).
+    personas: jsonb('personas')
+      .$type<PersonaRef[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    services: jsonb('services')
+      .$type<ServiceRef[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    verifiedCertificate: jsonb('verified_certificate')
+      .$type<PublicKeyEntry[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    // NULL until profile_completed_at is stamped (when all required profile
+    // fields are present). Powers the "complete your profile" UI banner and
+    // Beckn-catalog visibility filter.
+    profileCompletedAt: timestamp('profile_completed_at', { withTimezone: true }),
+    createdBy: text('created_by').notNull(),
+    updatedBy: text('updated_by').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    // Beckn catalog discovery: "all aggregators supporting persona X / service Y".
+    personasGin: index('aggregator_profile_personas_gin').using('gin', table.personas),
+    servicesGin: index('aggregator_profile_services_gin').using('gin', table.services),
+    profileCompletedIdx: index('aggregator_profile_completed_at_idx').on(table.profileCompletedAt),
+  }),
+);
 
 // ─── bulk_uploads ────────────────────────────────────────────────────────────
 
@@ -112,11 +220,14 @@ export const bulkUploads = pgTable(
     completedAt: timestamp('completed_at', { withTimezone: true }),
   },
   (table) => ({
-    // Re-upload of identical CSV under the same aggregator is idempotent.
-    aggregatorEtagUnique: uniqueIndex('bulk_uploads_aggregator_etag_unique').on(
-      table.aggregatorId,
-      table.s3Etag,
-    ),
+    // Re-upload of identical CSV under the same aggregator is idempotent for
+    // ACTIVE runs (pending / uploaded / processing / completed). Terminal
+    // failure rows (`file_failed`, `failed`) are EXCLUDED from this unique so
+    // the aggregator can fix a bad CSV and re-upload the same bytes. Failed
+    // rows stay in the table for audit history.
+    aggregatorEtagUnique: uniqueIndex('bulk_uploads_aggregator_etag_unique')
+      .on(table.aggregatorId, table.s3Etag)
+      .where(sql`status NOT IN ('file_failed', 'failed')`),
     // Watchdog scan: status + last_progress_at to detect stalled jobs.
     statusProgressIdx: index('bulk_uploads_status_progress_idx').on(
       table.status,
@@ -150,7 +261,12 @@ export const registrationLinks = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
-    slugUnique: uniqueIndex('registration_links_slug_unique').on(table.slug),
+    // Per-aggregator slug uniqueness — two aggregators may pick the same
+    // human-readable slug since the public URL is `/<org_slug>/<slug>`.
+    aggregatorSlugUnique: uniqueIndex('registration_links_aggregator_slug_unique').on(
+      table.aggregatorId,
+      table.slug,
+    ),
     aggregatorStatusIdx: index('registration_links_aggregator_status_idx').on(
       table.aggregatorId,
       table.status,
@@ -286,8 +402,8 @@ export const onboarding = pgTable(
 
 export type AggregatorRow = typeof aggregators.$inferSelect;
 export type NewAggregatorRow = typeof aggregators.$inferInsert;
-export type AggregatorProfileRow = typeof aggregatorProfiles.$inferSelect;
-export type NewAggregatorProfileRow = typeof aggregatorProfiles.$inferInsert;
+export type AggregatorProfileRow = typeof aggregatorProfile.$inferSelect;
+export type NewAggregatorProfileRow = typeof aggregatorProfile.$inferInsert;
 export type BulkUploadRow = typeof bulkUploads.$inferSelect;
 export type NewBulkUploadRow = typeof bulkUploads.$inferInsert;
 export type ParticipantRow = typeof participants.$inferSelect;

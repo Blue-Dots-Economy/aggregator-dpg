@@ -30,7 +30,11 @@ import {
 } from './interface.js';
 
 const require = createRequire(import.meta.url);
-type AjvOptions = { allErrors?: boolean; strict?: boolean | 'log' };
+type AjvOptions = {
+  allErrors?: boolean;
+  strict?: boolean | 'log';
+  coerceTypes?: boolean | 'array';
+};
 type AjvLike = {
   compile(schema: unknown): ValidateFunction;
 };
@@ -58,7 +62,11 @@ export class FileSchemaLoader extends SchemaLoaderBase {
   constructor(opts: FileSchemaLoaderOptions) {
     super();
     this.rootDir = opts.rootDir;
-    this.ajv = new AjvCtor({ allErrors: true, strict: false });
+    // coerceTypes: 'array' is the CSV-friendly mode — "5" → 5, "true" → true,
+    // and a single string is wrapped into a one-element array. Worker-side
+    // preprocess still has to split comma-joined cells into multi-element
+    // arrays before validate runs.
+    this.ajv = new AjvCtor({ allErrors: true, strict: false, coerceTypes: 'array' });
     addFormats(this.ajv);
   }
 

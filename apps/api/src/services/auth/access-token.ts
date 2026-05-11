@@ -19,6 +19,12 @@ export interface AuthContext {
   userId: string;
   /** Custom claim mapped from the `aggregator_id` user attribute. */
   aggregatorId: string;
+  /**
+   * Approval state read from the `decision_made` user-attribute claim.
+   * `'pending'` when the admin has not yet decided. Auth-gated routes call
+   * {@link requireApproved} to reject anything other than `'approved'`.
+   */
+  decisionMade?: 'pending' | 'approved' | 'rejected';
   email?: string;
   emailVerified?: boolean;
   preferredUsername?: string;
@@ -31,7 +37,8 @@ export interface AuthContext {
 export type AuthError =
   | { code: 'MISSING_TOKEN'; message: string }
   | { code: 'INVALID_TOKEN'; message: string }
-  | { code: 'MISSING_AGGREGATOR_ID'; message: string };
+  | { code: 'MISSING_AGGREGATOR_ID'; message: string }
+  | { code: 'NOT_APPROVED'; message: string };
 
 export type AuthResult = { ok: true; context: AuthContext } | { ok: false; error: AuthError };
 
@@ -119,7 +126,33 @@ export async function authenticate(req: FastifyRequest): Promise<AuthResult> {
   const phoneVerified = claims.phone_number_verified ?? claims.phoneNumberVerified;
   if (typeof phoneVerified === 'boolean') ctx.phoneNumberVerified = phoneVerified;
   else if (typeof phoneVerified === 'string') ctx.phoneNumberVerified = phoneVerified === 'true';
+  const decision = readStringOrFirst(claims.decision_made);
+  if (decision === 'pending' || decision === 'approved' || decision === 'rejected') {
+    ctx.decisionMade = decision;
+  }
   return { ok: true, context: ctx };
+}
+
+/**
+ * Wrap {@link authenticate} with the approval gate. Rejects with
+ * `NOT_APPROVED` when `decision_made` is missing or != `'approved'`. Use on
+ * protected business endpoints (everything except `/auth/*` and the
+ * profile-self-read which legitimately needs to surface "pending" status to
+ * the applicant's own dashboard).
+ */
+export async function requireApproved(req: FastifyRequest): Promise<AuthResult> {
+  const result = await authenticate(req);
+  if (!result.ok) return result;
+  if (result.context.decisionMade !== 'approved') {
+    return {
+      ok: false,
+      error: {
+        code: 'NOT_APPROVED',
+        message: `aggregator approval pending (decision_made=${result.context.decisionMade ?? 'absent'})`,
+      },
+    };
+  }
+  return result;
 }
 
 /**

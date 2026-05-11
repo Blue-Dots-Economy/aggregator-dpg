@@ -17,6 +17,7 @@ import {
   type IdpResult,
   type IdpUser,
 } from './interface.js';
+import { KC_ATTR } from './attributes.js';
 
 const HTTP_TIMEOUT_MS = 10_000;
 const TOKEN_REFRESH_LEAD_MS = 30_000;
@@ -279,6 +280,13 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
       };
     }
     return { ok: true, value: undefined };
+  }
+
+  async setUserDecision(
+    userId: string,
+    decision: 'pending' | 'approved' | 'rejected',
+  ): Promise<IdpResult<void>> {
+    return this.setAttributes(userId, { [KC_ATTR.DECISION_MADE]: decision });
   }
 
   // ─── private ───────────────────────────────────────────────────────────────

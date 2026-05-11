@@ -4,4 +4,11 @@
  * Drizzle schema module.
  */
 
-export type AggregatorType = 'seeker' | 'provider';
+export type AggregatorActorType = 'aggregator' | 'seeker' | 'provider';
+
+export type AggregatorRoleType = 'seeker' | 'provider' | 'both';
+
+export type AggregatorStatus = 'pending' | 'active' | 'inactive' | 'retired';
+
+/** @deprecated Use {@link AggregatorRoleType}. Kept temporarily until callers migrate. */
+export type AggregatorType = AggregatorRoleType;

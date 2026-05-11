@@ -28,6 +28,8 @@ export const QueueName = {
   LinkMetricsRollup: 'link-metrics-rollup',
   /** Hourly watchdog + retention sweep. */
   CronWatchdog: 'cron-watchdog',
+  /** Periodic Keycloak ↔ DB drift reconciliation. */
+  KeycloakSync: 'keycloak-sync',
 } as const;
 
 export type QueueName = (typeof QueueName)[keyof typeof QueueName];
@@ -47,8 +49,12 @@ export interface BulkRowProcessJob {
   uploadId: string;
   aggregatorId: string;
   rowIndex: number;
-  /** Original CSV line as captured by the File Processor. */
-  rawRow: string;
+  /** Pinned schema id, propagated from File Processor so Row Processor avoids a per-row DB read. */
+  schemaId: string;
+  /** Pinned schema version, propagated from File Processor. */
+  schemaVersion: string;
+  /** Pinned participant type, propagated from File Processor. */
+  participantType: 'seeker' | 'provider';
   /** Parsed payload after CSV → object conversion. */
   payload: Record<string, unknown>;
 }
@@ -63,6 +69,10 @@ export interface LinkMetricsRollupJob {
 }
 
 export interface CronWatchdogJob {
+  tick: number;
+}
+
+export interface KeycloakSyncJob {
   tick: number;
 }
 
