@@ -1,63 +1,51 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.bluedots.org/participant/provider.v1.json",
-  "title": "Participant — Provider",
-  "description": "Opportunity provider (employer contact, training partner). Used by both bulk CSV upload and link-driven sync submission. participant_id is supplied by the data source and forms the dedup key with aggregator_id.",
+  "title": "Job Posting 1.0",
+  "description": "Employers and recruiters posting jobs.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["participant_id", "organisation_name", "contact_name", "phone"],
+  "required": ["company_name", "role", "city", "employment_type"],
   "properties": {
     "participant_id": {
       "type": "string",
       "title": "Participant ID",
-      "description": "External unique id (employer code, partner id). Stable per source.",
+      "description": "Stable aggregator-supplied identifier. Re-uploading a row with the same participant_id is treated as a duplicate (skipped). If omitted, the worker mints a UUID and dedup across uploads is not possible.",
       "minLength": 1,
       "maxLength": 64,
-      "examples": ["EMP-2026-001"]
+      "pattern": "^[A-Za-z0-9_.:-]+$"
     },
-    "organisation_name": {
+    "company_name": {
       "type": "string",
-      "title": "Organisation Name",
-      "minLength": 2,
-      "maxLength": 200
+      "title": "Company Name",
+      "minLength": 1
     },
-    "contact_name": {
+    "role": {
       "type": "string",
-      "title": "Contact Name",
-      "minLength": 2,
-      "maxLength": 200
+      "title": "Role",
+      "minLength": 1
     },
-    "phone": {
+    "city": {
       "type": "string",
-      "title": "Phone",
-      "pattern": "^(\\+?\\d{10,15}|\\d{10})$"
+      "title": "City"
     },
-    "email": {
+    "employment_type": {
       "type": "string",
-      "title": "Email",
-      "format": "email",
-      "maxLength": 320
+      "title": "Employment Type",
+      "enum": ["full_time", "part_time", "contract", "internship"]
     },
-    "industry": {
+    "salary_range": {
       "type": "string",
-      "title": "Industry",
-      "maxLength": 100
+      "title": "Salary Range",
+      "description": "e.g. 5-8 LPA",
+      "minLength": 1,
+      "maxLength": 100,
+      "examples": ["5-8 LPA", "₹40,000–60,000/month"]
     },
-    "state": {
-      "type": "string",
-      "title": "State",
-      "maxLength": 100
-    },
-    "district": {
-      "type": "string",
-      "title": "District",
-      "maxLength": 100
-    },
-    "open_roles": {
-      "type": "string",
-      "title": "Open Roles",
-      "description": "Comma-separated role titles currently hiring.",
-      "maxLength": 500
+    "required_skills": {
+      "type": "array",
+      "title": "Required Skills",
+      "items": { "type": "string" }
     }
   }
 }

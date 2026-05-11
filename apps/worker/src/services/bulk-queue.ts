@@ -47,6 +47,23 @@ export async function enqueueRowProcess(payload: BulkRowProcessJob): Promise<voi
 }
 
 /**
+ * Batch-enqueue per-row jobs. Single `LPUSH+EVALSHA` BullMQ pipeline instead
+ * of one round-trip per row — order is preserved and dedup `jobId` semantics
+ * match `enqueueRowProcess`.
+ */
+export async function enqueueRowProcessBulk(payloads: BulkRowProcessJob[]): Promise<void> {
+  if (payloads.length === 0) return;
+  const queue = getRowQueue();
+  await queue.addBulk(
+    payloads.map((p) => ({
+      name: QueueName.BulkRowProcess,
+      data: p,
+      opts: { jobId: `${p.uploadId}__${p.rowIndex}` },
+    })),
+  );
+}
+
+/**
  * Enqueue the Finaliser. jobId = `${uploadId}__finalise` so BullMQ
  * deduplicates if multiple Row Processors hit the equality condition
  * concurrently — only one finaliser ever runs.

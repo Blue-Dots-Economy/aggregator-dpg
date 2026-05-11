@@ -27,7 +27,6 @@ import { logger } from '../logger.js';
 
 interface ErrorRecord {
   row_index: number;
-  raw_row: string;
   reasons: string[];
   error_category: string;
 }
@@ -93,35 +92,43 @@ export async function finaliseBulk(job: BulkFinaliseJob): Promise<FinaliseOutcom
   const errors = await readErrors(redis, `${ns}:errors`);
   errors.sort((a, b) => a.row_index - b.row_index);
 
-  // 4. Build errors.csv. Header = original columns + error_category +
-  // error_reason. Always write the artefact, even on zero errors, so the
-  // download endpoint has a stable response.
-  const headerCols = await readHeaderCols(redis, `${ns}:meta`);
-  const csvHeader = [...headerCols, 'error_category', 'error_reason'];
-  const csvRows: string[][] = errors.map((e) => {
-    const cells = parseRawRow(e.raw_row, headerCols.length).map(sanitiseCsvCell);
-    return [
-      ...cells,
-      sanitiseCsvCell(e.error_category ?? ''),
-      sanitiseCsvCell((e.reasons ?? []).join('; ')),
-    ];
-  });
-  const csvBody = Papa.unparse({ fields: csvHeader, data: csvRows });
-  const errorsKey = `bulk-uploads/${job.uploadId}/errors.csv`;
-  try {
-    await putObject(errorsKey, Buffer.from(csvBody, 'utf8'), 'text/csv');
-  } catch (err) {
-    log.error({ status: 'failure', sub: 's3.put', error: (err as Error).message });
-    throw err;
-  }
-
-  // 5. Authoritative counters from Redis. Don't trust periodic flush — pick
-  // the live values written by the Lua commit script.
+  // 4. Authoritative counters first — drives the "do we need errors.csv?"
+  // decision. Pulled directly from Redis (the Lua commit script is the
+  // source of truth; periodic DB flushes lag).
   const counters = await redis.hgetall(`${ns}:counters`);
   const passed = parseInt(counters['passed'] ?? '0', 10) || 0;
   const failed = parseInt(counters['failed'] ?? '0', 10) || 0;
   const skipped = parseInt(counters['skipped'] ?? '0', 10) || 0;
   const total = passed + failed + skipped;
+
+  // 5. Build + upload errors.csv only when there's at least one failure.
+  // Empty CSV on a clean run wasted S3 storage and surfaced a misleading
+  // "Download errors" button in the UI for runs that had nothing to report.
+  let errorsKey: string | null = null;
+  if (failed > 0) {
+    const headerCols = await readHeaderCols(redis, `${ns}:meta`);
+    const csvHeader = [...headerCols, 'error_category', 'error_reason'];
+    // Fetch raw CSV lines for only the failed row indices in one round-trip.
+    const indices = errors.map((e) => String(e.row_index));
+    const rawRows =
+      indices.length > 0 ? await redis.hmget(`${ns}:lines`, ...indices) : ([] as (string | null)[]);
+    const csvRows: string[][] = errors.map((e, i) => {
+      const cells = parseRawRow(rawRows[i] ?? '', headerCols.length).map(sanitiseCsvCell);
+      return [
+        ...cells,
+        sanitiseCsvCell(e.error_category ?? ''),
+        sanitiseCsvCell((e.reasons ?? []).join('; ')),
+      ];
+    });
+    const csvBody = Papa.unparse({ fields: csvHeader, data: csvRows });
+    errorsKey = `bulk-uploads/${job.uploadId}/errors.csv`;
+    try {
+      await putObject(errorsKey, Buffer.from(csvBody, 'utf8'), 'text/csv');
+    } catch (err) {
+      log.error({ status: 'failure', sub: 's3.put', error: (err as Error).message });
+      throw err;
+    }
+  }
 
   // 6 + 7. Mark `bulk_uploads` completed AND insert the onboarding rollup
   // row atomically. If we update first and the onboarding INSERT then fails,
@@ -176,6 +183,7 @@ export async function finaliseBulk(job: BulkFinaliseJob): Promise<FinaliseOutcom
     `${ns}:errors`,
     `${ns}:error_rows`,
     `${ns}:meta`,
+    `${ns}:lines`,
   );
 
   log.info({

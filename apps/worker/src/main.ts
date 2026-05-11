@@ -15,6 +15,7 @@ import {
   type BulkFinaliseJob,
   type BulkRowProcessJob,
   type CronWatchdogJob,
+  type KeycloakSyncJob,
   type LinkMetricsRollupJob,
 } from '@aggregator-dpg/queue';
 import { config } from './config.js';
@@ -25,6 +26,7 @@ import { processBulkRow } from './jobs/bulk-row-process.js';
 import { finaliseBulk } from './jobs/bulk-finalise.js';
 import { rollupLinkMetrics } from './jobs/link-metrics-rollup.js';
 import { runWatchdog } from './jobs/cron-watchdog.js';
+import { runKeycloakSync } from './jobs/keycloak-sync.js';
 import { getRedis, closeRedis } from './services/redis.js';
 import { closeQueues } from './services/bulk-queue.js';
 
@@ -76,6 +78,15 @@ async function main(): Promise<void> {
     },
   );
 
+  const keycloakSyncWorker = new Worker<KeycloakSyncJob>(
+    QueueName.KeycloakSync,
+    async () => runKeycloakSync(),
+    {
+      connection,
+      concurrency: 1,
+    },
+  );
+
   // Repeatable cron ticks. Threshold-triggered fan-in for metrics rollup
   // can be added later — cron-only is sufficient for MVP.
   const linkMetricsQueue = new Queue<LinkMetricsRollupJob>(QueueName.LinkMetricsRollup, {
@@ -104,12 +115,26 @@ async function main(): Promise<void> {
     },
   );
 
+  const keycloakSyncQueue = new Queue<KeycloakSyncJob>(QueueName.KeycloakSync, {
+    connection,
+    defaultJobOptions: DEFAULT_JOB_OPTS,
+  });
+  await keycloakSyncQueue.add(
+    'tick',
+    { tick: Date.now() },
+    {
+      repeat: { every: config.KEYCLOAK_SYNC_INTERVAL_MS },
+      jobId: 'keycloak-sync-tick',
+    },
+  );
+
   for (const [name, w] of [
     ['bulkFileProcess', fileWorker],
     ['bulkRowProcess', rowWorker],
     ['bulkFinalise', finaliseWorker],
     ['linkMetricsRollup', linkMetricsWorker],
     ['cronWatchdog', watchdogWorker],
+    ['keycloakSync', keycloakSyncWorker],
   ] as const) {
     w.on('completed', (job, result) => {
       logger.debug({
@@ -136,6 +161,7 @@ async function main(): Promise<void> {
       QueueName.BulkFinalise,
       QueueName.LinkMetricsRollup,
       QueueName.CronWatchdog,
+      QueueName.KeycloakSync,
     ],
   });
 
@@ -147,8 +173,9 @@ async function main(): Promise<void> {
       finaliseWorker.close(),
       linkMetricsWorker.close(),
       watchdogWorker.close(),
+      keycloakSyncWorker.close(),
     ]);
-    await Promise.all([linkMetricsQueue.close(), watchdogQueue.close()]);
+    await Promise.all([linkMetricsQueue.close(), watchdogQueue.close(), keycloakSyncQueue.close()]);
     await closeQueues();
     await closeRedis();
     await closeDb();

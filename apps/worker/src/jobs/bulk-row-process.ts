@@ -15,6 +15,7 @@
  *   failed   = validation | normalisation | system_error
  */
 
+import { randomUUID } from 'node:crypto';
 import { eq, sql } from 'drizzle-orm';
 import {
   runBulkRowCommit,
@@ -27,6 +28,8 @@ import { getRedis } from '../services/redis.js';
 import { enqueueFinalise } from '../services/bulk-queue.js';
 import { normalisePhone, normaliseEmail } from '../services/phone.js';
 import { logger } from '../logger.js';
+
+const VALID_PARTICIPANT_TYPES = new Set(['seeker', 'provider']);
 
 type ErrorCategory = 'validation' | 'normalisation' | 'duplicate' | 'system_error';
 
@@ -45,32 +48,35 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
     row_index: job.rowIndex,
   });
 
-  // Read pinned schema_id + version off the upload row.
-  const uploadRows = await getDb()
-    .select()
-    .from(schema.bulkUploads)
-    .where(eq(schema.bulkUploads.id, job.uploadId))
-    .limit(1);
-  const upload = uploadRows[0];
-  if (!upload) {
-    log.warn({ status: 'skipped', reason: 'upload_missing' });
-    return { outcome: 'failed', category: 'system_error', reasons: ['upload_missing'] };
-  }
-  if (upload.status !== 'row_processing') {
-    // Job arrived after the run was killed/finalised. Skip silently.
-    log.info({ status: 'skipped', reason: 'wrong_status', current_status: upload.status });
-    return { outcome: 'skipped', category: null, reasons: [] };
+  // Job payload carries the schema ref + participant type pinned by the File
+  // Processor — no per-row SELECT on bulk_uploads needed. Status guards live
+  // in the Finaliser and the File Processor entry guard; stale row jobs are a
+  // non-issue here because the Lua commit script + jobId dedup absorb replays.
+  if (!VALID_PARTICIPANT_TYPES.has(job.participantType)) {
+    return await commit(
+      job,
+      {
+        outcome: 'failed',
+        category: 'system_error',
+        reasons: [`invalid participant_type: ${job.participantType}`],
+      },
+      log,
+    );
   }
 
-  // 1. Schema validation.
-  const validatorResult = await getSchemaLoader().getValidator({
-    id: upload.schemaId,
-    version: upload.schemaVersion,
-  });
+  // 1. Schema validation. Load schema + validator together (both cached
+  // by the loader) so we can pre-split comma-joined array cells before Ajv
+  // runs. Ajv's `coerceTypes: 'array'` wraps a single string into a
+  // one-element array but does NOT split on `,` — that's our job.
+  const ref = { id: job.schemaId, version: job.schemaVersion };
+  const loader = getSchemaLoader();
+  const [validatorResult, schemaResult] = await Promise.all([
+    loader.getValidator(ref),
+    loader.getSchema(ref),
+  ]);
   if (!validatorResult.success) {
     return await commit(
       job,
-      upload.aggregatorId,
       {
         outcome: 'failed',
         category: 'system_error',
@@ -79,6 +85,9 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
       log,
     );
   }
+  if (schemaResult.success) {
+    preprocessArrayCells(job.payload, schemaResult.value);
+  }
   const validate = validatorResult.value;
   if (!validate(job.payload)) {
     const reasons = (validate.errors ?? []).map(
@@ -86,7 +95,6 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
     );
     return await commit(
       job,
-      upload.aggregatorId,
       {
         outcome: 'failed',
         category: 'validation',
@@ -96,20 +104,12 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
     );
   }
 
-  // 2. Normalisation.
-  const participantId = String(job.payload['participant_id'] ?? '').trim();
-  if (!participantId) {
-    return await commit(
-      job,
-      upload.aggregatorId,
-      {
-        outcome: 'failed',
-        category: 'validation',
-        reasons: ['participant_id: required'],
-      },
-      log,
-    );
-  }
+  // 2. Normalisation. Auto-allocate a UUID when the row carries no explicit
+  // `participant_id` — keeps the `(aggregator, type, participant_id)` unique
+  // index satisfied while letting the participant schema decide whether the
+  // field is a meaningful business id or not.
+  const rawParticipantId = String(job.payload['participant_id'] ?? '').trim();
+  const participantId = rawParticipantId.length > 0 ? rawParticipantId : randomUUID();
   const phoneRaw = typeof job.payload['phone'] === 'string' ? (job.payload['phone'] as string) : '';
   let phoneNormalised: string | null = null;
   if (phoneRaw) {
@@ -117,7 +117,6 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
     if (!phone.ok) {
       return await commit(
         job,
-        upload.aggregatorId,
         {
           outcome: 'failed',
           category: 'normalisation',
@@ -138,13 +137,13 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
     const inserted = await getDb()
       .insert(schema.participants)
       .values({
-        aggregatorId: upload.aggregatorId,
-        type: upload.participantType,
+        aggregatorId: job.aggregatorId,
+        type: job.participantType,
         participantId,
         data: job.payload,
         phone: phoneNormalised,
         email: emailNormalised,
-        sourceBulkUploadId: upload.id,
+        sourceBulkUploadId: job.uploadId,
         sourceRowIndex: job.rowIndex,
       })
       .onConflictDoNothing({
@@ -173,7 +172,7 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
     };
   }
 
-  return await commit(job, upload.aggregatorId, outcome, log);
+  return await commit(job, outcome, log);
 }
 
 /**
@@ -182,17 +181,17 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
  */
 async function commit(
   job: BulkRowProcessJob,
-  _aggregatorId: string,
   outcome: RowOutcome,
   log: typeof logger,
 ): Promise<RowOutcome> {
   // Only `failed` outcomes get a payload — `skipped` (e.g. duplicate
   // participant) is dedup, not an error, and must not appear in errors.csv.
+  // raw_row is reconstructed by the Finaliser from `bu:{id}:lines` keyed on
+  // row_index, so it does NOT travel in the per-row job payload anymore.
   const errorPayload =
     outcome.outcome === 'failed'
       ? JSON.stringify({
           row_index: job.rowIndex,
-          raw_row: job.rawRow,
           reasons: outcome.reasons,
           error_category: outcome.category,
         })
@@ -239,14 +238,42 @@ async function commit(
  * Flush Redis counters (passed/failed/skipped) into bulk_uploads. Powers
  * DB-only API status reads. Idempotent — overwrites with the latest counts.
  */
+/**
+ * Mutates `payload` in place: for every schema property declared with
+ * `type: 'array'`, if the cell arrived as a string (CSV form), split it on
+ * commas into a trimmed array. Empty cells become empty arrays. Non-string
+ * values are left untouched. Worker complement to Ajv `coerceTypes: 'array'`
+ * which wraps a string into a one-element array but never splits on commas.
+ */
+function preprocessArrayCells(
+  payload: Record<string, unknown>,
+  jsonSchema: Record<string, unknown>,
+): void {
+  const props = jsonSchema['properties'];
+  if (!props || typeof props !== 'object') return;
+  for (const [field, def] of Object.entries(props as Record<string, Record<string, unknown>>)) {
+    if (def?.['type'] !== 'array') continue;
+    const cell = payload[field];
+    if (typeof cell !== 'string') continue;
+    payload[field] = cell
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+  }
+}
+
 async function flushCounters(uploadId: string): Promise<void> {
   const redis = getRedis();
   const ns = `bu:${uploadId}`;
-  const [passed, failed, skipped] = await Promise.all([
-    redis.hget(`${ns}:counters`, 'passed').then((v) => parseInt(v ?? '0', 10) || 0),
-    redis.hget(`${ns}:counters`, 'failed').then((v) => parseInt(v ?? '0', 10) || 0),
-    redis.hget(`${ns}:counters`, 'skipped').then((v) => parseInt(v ?? '0', 10) || 0),
-  ]);
+  const [passedRaw, failedRaw, skippedRaw] = await redis.hmget(
+    `${ns}:counters`,
+    'passed',
+    'failed',
+    'skipped',
+  );
+  const passed = parseInt(passedRaw ?? '0', 10) || 0;
+  const failed = parseInt(failedRaw ?? '0', 10) || 0;
+  const skipped = parseInt(skippedRaw ?? '0', 10) || 0;
   await getDb()
     .update(schema.bulkUploads)
     .set({

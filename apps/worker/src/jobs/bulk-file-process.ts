@@ -26,7 +26,7 @@ import { config } from '../config.js';
 import { logger } from '../logger.js';
 import { getSchemaLoader } from '../services/schema-loader.js';
 import { getRedis } from '../services/redis.js';
-import { enqueueRowProcess } from '../services/bulk-queue.js';
+import { enqueueRowProcessBulk } from '../services/bulk-queue.js';
 
 const BOM = '﻿';
 
@@ -100,21 +100,18 @@ export async function processBulkFile(job: BulkFileProcessJob): Promise<ProcessO
     return { status: 'failed', reason: 'encoding_unsupported' };
   }
 
-  // 3. Schema fetch.
+  // 3. Schema fetch — validator + schema in one round-trip (loader caches both).
   const loader = getSchemaLoader();
-  const validatorResult = await loader.getValidator({
-    id: job.schemaId,
-    version: job.schemaVersion,
-  });
+  const ref = { id: job.schemaId, version: job.schemaVersion };
+  const [validatorResult, schemaResult] = await Promise.all([
+    loader.getValidator(ref),
+    loader.getSchema(ref),
+  ]);
   if (!validatorResult.success) {
     log.error({ status: 'failure', sub: 'schema.load', error: validatorResult.error.code });
     await markStatus(job.uploadId, 'file_failed', 'schema_unavailable');
     return { status: 'failed', reason: 'schema_unavailable' };
   }
-  const schemaResult = await loader.getSchema({
-    id: job.schemaId,
-    version: job.schemaVersion,
-  });
   if (!schemaResult.success) {
     log.error({ status: 'failure', sub: 'schema.load', error: schemaResult.error.code });
     await markStatus(job.uploadId, 'file_failed', 'schema_unavailable');
@@ -195,16 +192,38 @@ export async function processBulkFile(job: BulkFileProcessJob): Promise<ProcessO
     JSON.stringify(headers),
   );
 
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i];
-    if (!row) continue;
-    await enqueueRowProcess({
+  // Precompute data lines (one walk over `lines`) so we don't re-scan per row.
+  const dataLines: string[] = [];
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i] ?? '';
+    if (line.trim() === '') continue;
+    dataLines.push(line);
+  }
+
+  const ENQUEUE_CHUNK = 1000;
+  for (let off = 0; off < rows.length; off += ENQUEUE_CHUNK) {
+    const slice = rows.slice(off, off + ENQUEUE_CHUNK);
+    const payloads = slice.map((row, j) => ({
       uploadId: job.uploadId,
       aggregatorId: job.aggregatorId,
-      rowIndex: i,
-      rawRow: linesForRowIndex(lines, i),
+      rowIndex: off + j,
+      schemaId: job.schemaId,
+      schemaVersion: job.schemaVersion,
+      participantType: job.participantType,
       payload: row,
-    });
+    }));
+
+    // Persist raw CSV lines under bu:{id}:lines so the Finaliser can
+    // reconstruct errors.csv without the row payload carrying rawRow.
+    const linesArgs: string[] = [];
+    for (const p of payloads) {
+      linesArgs.push(String(p.rowIndex), dataLines[p.rowIndex] ?? '');
+    }
+    if (linesArgs.length > 0) {
+      await redis.hset(`${ns}:lines`, ...linesArgs);
+    }
+
+    await enqueueRowProcessBulk(payloads);
   }
 
   // Now safe to publish total_rows + reader_done.
@@ -219,23 +238,6 @@ export async function processBulkFile(job: BulkFileProcessJob): Promise<ProcessO
     enqueued: rows.length,
   });
   return { status: 'enqueued', totalRows: rows.length };
-}
-
-/**
- * Returns the original CSV line for a given parsed row index. Header is
- * lines[0]; data rows start at lines[1]. Empty lines (skipped by Papaparse)
- * may shift the mapping — for MVP, we use a simple linear walk that maps
- * non-empty data lines to row indices.
- */
-function linesForRowIndex(lines: string[], rowIndex: number): string {
-  let dataIdx = -1;
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i] ?? '';
-    if (line.trim() === '') continue;
-    dataIdx++;
-    if (dataIdx === rowIndex) return line;
-  }
-  return '';
 }
 
 async function markStatus(

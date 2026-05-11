@@ -45,12 +45,17 @@ const ConfigSchema = z.object({
   BULK_FINALISE_CONCURRENCY: z.coerce.number().int().positive().default(2),
 
   // ─── Link metrics aggregator ────────────────────────────────────────────
-  /** Cron interval (ms) for the link-metrics rollup tick. Default 5 min. */
+  /**
+   * Cron interval (ms) for the link-metrics rollup tick. Default 1 min so
+   * public-form submissions surface on the aggregator dashboard quickly.
+   * Override via env for higher-throughput deployments where 1 min creates
+   * too much DB churn.
+   */
   LINK_METRICS_ROLLUP_INTERVAL_MS: z.coerce
     .number()
     .int()
     .positive()
-    .default(5 * 60 * 1000),
+    .default(60 * 1000),
 
   // ─── Watchdog cron ──────────────────────────────────────────────────────
   /** Cron interval (ms) for the stuck-job watchdog tick. Default 1 hour. */
@@ -59,6 +64,18 @@ const ConfigSchema = z.object({
     .int()
     .positive()
     .default(60 * 60 * 1000),
+
+  // ─── Keycloak drift sync ────────────────────────────────────────────────
+  /** Cron interval (ms) for the Keycloak ↔ DB drift sync. Default 15 min. */
+  KEYCLOAK_SYNC_INTERVAL_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(15 * 60 * 1000),
+  KEYCLOAK_URL: z.string().optional(),
+  KEYCLOAK_REALM: z.string().optional(),
+  KEYCLOAK_CLIENT_ID: z.string().optional(),
+  KEYCLOAK_CLIENT_SECRET: z.string().optional(),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

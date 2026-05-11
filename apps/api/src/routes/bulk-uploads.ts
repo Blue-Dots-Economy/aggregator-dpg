@@ -215,9 +215,11 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
     const marked = await store.markUploaded(uploadId, auth.aggregatorId, head.etag);
     if (!marked.ok) {
       if (marked.error.code === 'DUPLICATE_ETAG') {
-        // Re-upload of identical CSV under same aggregator. Drop the orphan
-        // pending row we just created and surface the existing one so the
-        // client can poll it.
+        // Same CSV bytes are already attached to a non-failed run for this
+        // aggregator (the (aggregator_id, s3_etag) UNIQUE is partial — failed
+        // and file_failed rows are excluded so they never block a retry).
+        // Drop the orphan pending row we just created and surface the
+        // existing run.
         await store.deletePending(uploadId, auth.aggregatorId);
         const existing = await store.findByAggregatorAndEtag(auth.aggregatorId, head.etag);
         if (existing.ok && existing.value) {
@@ -338,10 +340,19 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
       });
     }
     if (!upload.errorsCsvS3Key) {
-      // Defensive: should always be set when status='completed', but
-      // surface it cleanly if a future code path leaves it null.
-      log.error({ status: 'failure', reason: 'errors_csv_key_missing' });
-      throw httpError('NOT_FOUND', { detail: 'Errors report not available for this upload.' });
+      // The Finaliser only writes errors.csv when `failed > 0`. A null key
+      // on a completed run = clean upload (every row passed). Communicate
+      // that to the UI so it can hide the "Download errors" button instead
+      // of rendering it as a broken link.
+      log.info({
+        status: 'skipped',
+        reason: 'no_errors_to_report',
+        passed: upload.passed,
+        failed: upload.failed,
+      });
+      throw httpError('NOT_FOUND', {
+        detail: 'No errors to download — all rows in this upload passed.',
+      });
     }
     // Hardened: only sign keys that match the canonical errors.csv layout.
     // Even though the worker writes a deterministic key, this guards against
