@@ -7,14 +7,18 @@ setup: env hosts ## One-shot: bootstrap .env + add `127.0.0.1 keycloak` to /etc/
 	@echo ""
 	@echo "Setup complete. Edit .env (fill change-me-* + secrets), then run 'make up'."
 
-env: ## Copy infra/env.template → .env if missing, chmod 600.
+env: ## Copy infra/env.local (preferred) or infra/env.template → .env if missing, chmod 600.
 	@if [ -f .env ]; then \
 		echo ".env already exists — leaving untouched."; \
+	elif [ -f infra/env.local ]; then \
+		cp infra/env.local .env; \
+		chmod 600 .env; \
+		echo "Created .env from infra/env.local (mode 600). Ready to run 'make up'."; \
 	else \
 		cp infra/env.template .env; \
 		chmod 600 .env; \
 		echo "Created .env from infra/env.template (mode 600)."; \
-		echo "Generate secrets:  openssl rand -hex 32"; \
+		echo "Fill change-me-* placeholders. Generate secrets:  openssl rand -hex 32"; \
 	fi
 
 hosts: ## Add `127.0.0.1 keycloak` to /etc/hosts (needed when running web in docker).
@@ -37,7 +41,7 @@ dev: up ## Alias for `up`. Brings the full local stack up.
 
 up: ## Start all foundations + apps in the background.
 	@test -f .env || (echo ".env missing — run 'make setup' first" && exit 1)
-	docker compose -f docker-compose-ebs.yml up -d --build
+	docker compose up -d --build
 
 down: ## Stop and remove all containers (data volumes preserved).
 	docker compose down

@@ -64,14 +64,17 @@ services:
       retries: 10
 
   mailhog:
-    image: mailhog/mailhog:v1.0.1
+    image: axllent/mailpit:v1.20
     container_name: aggregator-mailhog
     restart: unless-stopped
     ports:
       - "1025:1025"   # SMTP
       - "8025:8025"   # Web UI
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: "true"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "true"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8025/api/v2/messages"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:8025/api/v1/messages"]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -149,6 +152,30 @@ services:
       timeout: 5s
       retries: 30
       start_period: 30s
+
+  keycloak-init:
+    image: alpine:3.20
+    container_name: aggregator-keycloak-init
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    environment:
+      KC_URL: http://keycloak:8080
+      KC_REALM: ${KEYCLOAK_REALM:-aggregator}
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD}
+      UNMANAGED_POLICY: ENABLED
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_FROM: ${SMTP_FROM:-no-reply@example.com}
+      SMTP_FROM_DISPLAY: ${SMTP_FROM_DISPLAY:-Aggregator}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+    volumes:
+      - ./infra/keycloak/init:/init:ro
+    entrypoint: ["sh", "-c", "apk add --no-cache curl jq > /dev/null && sh /init/apply-user-profile.sh"]
+    restart: "no"
 
   # ─────────────────────────────────────────────────────────────────────────
   # Apps
