@@ -35,7 +35,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-aggregator}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aggregator-dev}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
       POSTGRES_DB: ${POSTGRES_DB:-aggregator}
     ports:
       - "5433:5432"   # host 5433 → container 5432 (avoids clashes with a system Postgres on 5432)
@@ -83,7 +83,7 @@ services:
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD must be set in .env}
     ports:
       - "9000:9000"   # S3 API
       - "9001:9001"   # Web console
@@ -105,12 +105,16 @@ services:
     command: ["start-dev", "--import-realm"]
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}
-      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD:?KC_BOOTSTRAP_ADMIN_PASSWORD must be set in .env}
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
       KC_DB_USERNAME: ${POSTGRES_USER:-aggregator}
       KC_DB_PASSWORD: ${POSTGRES_PASSWORD:-aggregator-dev}
-      KC_HOSTNAME: ${PUBLIC_HOST:-keycloak}
+      # KC_HOSTNAME drives the iss claim; must match the OIDC_ISSUER set
+      # for the web container so token validation succeeds. The host's
+      # /etc/hosts maps `keycloak` → 127.0.0.1 so browsers can reach the
+      # auth_endpoint URL too. Override in .env for staging/prod.
+      KC_HOSTNAME: ${KC_HOSTNAME:-keycloak}
       KC_HOSTNAME_STRICT: "false"
       KC_HTTP_ENABLED: "true"
       KC_HEALTH_ENABLED: "true"
@@ -175,7 +179,7 @@ services:
       #       so both sides agree.
       # For pure dev iteration, run web with `pnpm --filter @aggregator-dpg/web dev`
       # so OIDC_ISSUER=http://localhost:8080/... works for both.
-      OIDC_ISSUER: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}:${KC_PORT:-8080}/realms/${KEYCLOAK_REALM:-aggregator}"
+      OIDC_ISSUER: ${OIDC_ISSUER:-http://keycloak:${KC_PORT:-8080}/realms/${KEYCLOAK_REALM:-aggregator}}
       OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-aggregator-portal}
       OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
       # ─── BFF service-account (client_credentials) ─────────────────────
@@ -225,7 +229,9 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-aggregator}:${POSTGRES_PASSWORD:-aggregator-dev}@postgres:5432/${POSTGRES_DB:-aggregator}
       RUN_MIGRATIONS_ON_BOOT: "true"
       # Keycloak admin (service account)
-      KEYCLOAK_URL: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}:${KC_PORT:-8080}"
+      # Must match the issuer claim on tokens minted by KC. Keep aligned
+      # with KC_HOSTNAME so JWT validation in the API succeeds.
+      KEYCLOAK_URL: ${KEYCLOAK_URL:-http://keycloak:${KC_PORT:-8080}}
       KEYCLOAK_REALM: ${KEYCLOAK_REALM:-aggregator}
       KEYCLOAK_ADMIN_CLIENT_ID: ${KEYCLOAK_ADMIN_CLIENT_ID:-aggregator-api}
       KEYCLOAK_ADMIN_CLIENT_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET:-}
@@ -245,6 +251,27 @@ services:
       ADMIN_EMAILS: ${ADMIN_EMAILS:-admin@bluedots.local}
       PUBLIC_API_URL: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}:${API_PORT:-4000}"
       PUBLIC_PORTAL_URL: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}:${PORTAL_PORT:-3100}"
+      # ─── Object storage (bulk uploads + QR PNGs + errors.csv) ────────
+      # The pre-signed PUT URL is generated server-side and used by the
+      # browser; the host of the signed URL must be reachable from the
+      # browser. S3_PUBLIC_ENDPOINT lets the API mint URLs against
+      # localhost:9000 while internal calls (HEAD, GetObject) go via
+      # the docker DNS name `minio:9000`.
+      S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
+      # Browser-reachable URL (host /etc/hosts maps `minio` → 127.0.0.1) so
+      # presigned PUT URLs work when issued from inside docker.
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://minio:9000}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_BUCKET: ${S3_BUCKET:-aggregator-bulk-uploads}
+      S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD must be set in .env}
+      S3_FORCE_PATH_STYLE: "true"
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      BULK_UPLOAD_URL_TTL_SECONDS: ${BULK_UPLOAD_URL_TTL_SECONDS:-900}
+      BULK_UPLOAD_MAX_BYTES: ${BULK_UPLOAD_MAX_BYTES:-10485760}
+      QR_DOWNLOAD_URL_TTL_SECONDS: ${QR_DOWNLOAD_URL_TTL_SECONDS:-900}
+      PUBLIC_LINK_BASE_URL: ${PUBLIC_LINK_BASE_URL:-http://localhost:3100}
+      SCHEMA_ROOT_DIR: /app/config/schemas
     ports:
       - "4000:4000"
     healthcheck:
@@ -261,28 +288,44 @@ services:
       mailhog:
         condition: service_healthy
 
-  # Uncomment once the bulk-upload worker is built:
-  #
-  # worker:
-  #   build:
-  #     context: .
-  #     dockerfile: apps/api/Dockerfile        # same codebase, different entry
-  #   image: aggregator-dpg/worker:dev
-  #   container_name: aggregator-worker
-  #   restart: unless-stopped
-  #   command: ["node", "dist/worker.js"]
-  #   environment:
-  #     NODE_ENV: production
-  #     DATABASE_URL: postgres://${POSTGRES_USER:-aggregator}:${POSTGRES_PASSWORD:-aggregator-dev}@postgres:5432/${POSTGRES_DB:-aggregator}
-  #     REDIS_URL: redis://redis:6379
-  #     S3_ENDPOINT: http://minio:9000
-  #     S3_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
-  #     S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
-  #     LOG_LEVEL: ${LOG_LEVEL:-info}
-  #   depends_on:
-  #     postgres:        { condition: service_healthy }
-  #     redis:           { condition: service_healthy }
-  #     minio:           { condition: service_healthy }
+  # ── Bulk-upload + cron worker ────────────────────────────────────────────
+  # BullMQ consumer for: bulk-file-process, bulk-row-process, bulk-finalise,
+  # link-metrics-rollup, cron-watchdog. Mirrors the API's
+  # config wiring (DB / Redis / S3) since the same code paths run.
+  worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    image: aggregator-dpg/worker:dev
+    container_name: aggregator-worker
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: postgres://${POSTGRES_USER:-aggregator}:${POSTGRES_PASSWORD:-aggregator-dev}@postgres:5432/${POSTGRES_DB:-aggregator}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      # ─── Object storage (raw CSV download + errors.csv write) ──────
+      S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_BUCKET: ${S3_BUCKET:-aggregator-bulk-uploads}
+      S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD must be set in .env}
+      S3_FORCE_PATH_STYLE: "true"
+      # ─── Schemas (participant validators) ──────────────────────────
+      SCHEMA_ROOT_DIR: /app/config/schemas
+      # ─── File processor row caps ───────────────────────────────────
+      BULK_MAX_ROWS: ${BULK_MAX_ROWS:-10000}
+      BULK_MAX_ROW_BYTES: ${BULK_MAX_ROW_BYTES:-65536}
+      # ─── Cron intervals (ms) ───────────────────────────────────────
+      LINK_METRICS_ROLLUP_INTERVAL_MS: ${LINK_METRICS_ROLLUP_INTERVAL_MS:-300000}
+      WATCHDOG_INTERVAL_MS: ${WATCHDOG_INTERVAL_MS:-3600000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
 
 volumes:
   postgres-data:

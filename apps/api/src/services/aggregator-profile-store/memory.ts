@@ -26,9 +26,11 @@ export class InMemoryAggregatorProfileStore extends AggregatorProfileStoreBase {
     const now = new Date();
     const row: AggregatorProfile = {
       aggregatorId: input.aggregatorId,
-      schemaVersion: input.schemaVersion ?? 1,
-      data: input.data ?? {},
-      consent: input.consent ?? {},
+      contactName: input.contactName ?? null,
+      personas: input.personas ?? [],
+      services: input.services ?? [],
+      verifiedCertificate: input.verifiedCertificate ?? [],
+      profileCompletedAt: null,
       createdBy: input.createdBy,
       updatedBy: input.updatedBy,
       createdAt: now,
@@ -54,13 +56,33 @@ export class InMemoryAggregatorProfileStore extends AggregatorProfileStoreBase {
     }
     const next: AggregatorProfile = {
       ...existing,
-      schemaVersion: input.schemaVersion ?? existing.schemaVersion,
-      data: input.data ?? existing.data,
-      consent: input.consent ?? existing.consent,
+      contactName: input.contactName !== undefined ? input.contactName : existing.contactName,
+      personas: input.personas ?? existing.personas,
+      services: input.services ?? existing.services,
+      verifiedCertificate: input.verifiedCertificate ?? existing.verifiedCertificate,
+      profileCompletedAt:
+        input.profileCompletedAt !== undefined
+          ? input.profileCompletedAt
+          : existing.profileCompletedAt,
       updatedBy: input.updatedBy,
       updatedAt: new Date(),
     };
     this.byAggregatorId.set(aggregatorId, next);
     return { ok: true, value: next };
+  }
+
+  async markCompleted(
+    aggregatorId: string,
+    updatedBy: string,
+  ): Promise<ProfileStoreResult<AggregatorProfile>> {
+    return this.update(aggregatorId, { profileCompletedAt: new Date(), updatedBy });
+  }
+
+  async deleteByAggregatorId(aggregatorId: string): Promise<ProfileStoreResult<void>> {
+    if (!this.byAggregatorId.has(aggregatorId)) {
+      return { ok: false, error: { code: 'NOT_FOUND', message: aggregatorId } };
+    }
+    this.byAggregatorId.delete(aggregatorId);
+    return { ok: true, value: undefined };
   }
 }

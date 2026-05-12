@@ -1,20 +1,88 @@
 {
-  "ui:order": ["aggregator_type", "association", "email", "phone"],
-  "aggregator_type": {
-    "ui:widget": "select",
-    "ui:placeholder": "Select aggregator type",
-    "ui:enumNames": ["Seeker", "Provider"]
+  "ui:layout": "stack",
+  "ui:order": ["name", "type", "url", "contact", "locations", "consent"],
+  "locations": {
+    "ui:options": {
+      "addable": true,
+      "removable": true,
+      "orderable": false,
+      "itemLabel": "Location"
+    },
+    "items": {
+      "ui:title": "",
+      "ui:layout": "stack",
+      "ui:order": ["address", "geo"],
+      "geo": {
+        "ui:widget": "hidden",
+        "ui:title": "",
+        "type": { "ui:widget": "hidden" },
+        "coordinates": { "ui:widget": "hidden" },
+        "geometries": { "ui:widget": "hidden" },
+        "bbox": { "ui:widget": "hidden" }
+      },
+      "address": {
+        "ui:title": "",
+        "ui:layout": "grid",
+        "ui:order": [
+          "streetAddress",
+          "addressLocality",
+          "addressRegion",
+          "postalCode",
+          "addressCountry"
+        ],
+        "streetAddress": { "ui:placeholder": "Street" },
+        "addressLocality": { "ui:placeholder": "City" },
+        "addressRegion": { "ui:placeholder": "State" },
+        "postalCode": { "ui:placeholder": "PIN" },
+        "addressCountry": { "ui:placeholder": "IN" }
+      }
+    }
   },
-  "association": {
-    "ui:placeholder": "e.g. TRRAIN, Pankh Foundation",
+  "name": {
+    "ui:placeholder": "e.g. SkillBridge Network",
     "ui:autofocus": true
   },
-  "email": {
-    "ui:placeholder": "name@org.in",
-    "ui:options": { "inputType": "email" }
+  "type": {
+    "ui:widget": "select",
+    "ui:placeholder": "Select aggregator type",
+    "ui:enumNames": ["Seeker", "Provider", "Both"]
   },
-  "phone": {
-    "ui:placeholder": "+91 98765 43210",
-    "ui:options": { "inputType": "tel" }
+  "url": {
+    "ui:placeholder": "https://yourorg.in",
+    "ui:options": { "inputType": "url" }
+  },
+  "contact": {
+    "ui:layout": "grid",
+    "ui:order": ["name", "phone", "email", "alternatePhone"],
+    "name": {
+      "ui:placeholder": "Full name of the primary contact"
+    },
+    "phone": {
+      "ui:placeholder": "+91 98765 43210",
+      "ui:options": { "inputType": "tel" }
+    },
+    "email": {
+      "ui:placeholder": "admin@yourorg.in",
+      "ui:options": { "inputType": "email" }
+    },
+    "alternatePhone": {
+      "ui:placeholder": "Optional",
+      "ui:options": { "inputType": "tel" }
+    }
+  },
+  "consent": {
+    "ui:layout": "stack",
+    "ui:order": ["value", "given_at", "valid_till"],
+    "value": {
+      "ui:widget": "checkbox"
+    },
+    "given_at": {
+      "ui:widget": "hidden",
+      "ui:options": { "label": false }
+    },
+    "valid_till": {
+      "ui:widget": "hidden",
+      "ui:options": { "label": false }
+    }
   }
 }

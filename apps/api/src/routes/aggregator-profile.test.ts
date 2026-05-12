@@ -111,49 +111,59 @@ describe('aggregator profile routes', () => {
     expect(id.active).toBe(true);
   });
 
-  it('PUT validates the body against profile.v1.json', async () => {
+  it('PATCH rejects body that includes neither `aggregator` nor `profile`', async () => {
     const res = await app.inject({
-      method: 'PUT',
+      method: 'PATCH',
       url: '/v1/aggregators/profile/me',
       headers: { authorization: 'Bearer good-token' },
-      payload: { data: { who_i_am: { display_name: 'X' } }, consent: {} },
+      payload: {},
     });
     expect(res.statusCode).toBe(400);
-    const body = res.json() as { error: { code: string; title: string; requestId: string } };
+    const body = res.json() as { error: { code: string } };
     expect(body.error.code).toBe('SCHEMA_VALIDATION');
-    expect(body.error.title).toBeTruthy();
-    expect(body.error.requestId).toMatch(/^req-/);
   });
 
-  it('PUT updates the profile and reports is_complete=true on full payload', async () => {
-    const data = {
-      who_i_am: {
-        display_name: 'TRRAIN',
-        address: '2nd Floor, Trade Centre, Mumbai 400051',
-      },
-      what_i_want: {
-        beneficiary_groups: ['Women in retail'],
-        geographies: ['Maharashtra'],
-      },
-      what_i_have: { network_size: 500 },
-    };
+  it('PATCH profile stamps profile_completed_at when contact_name + persona + service are all present', async () => {
     const res = await app.inject({
-      method: 'PUT',
+      method: 'PATCH',
       url: '/v1/aggregators/profile/me',
       headers: { authorization: 'Bearer good-token' },
-      payload: { data, consent: { profile_creation: true } },
+      payload: {
+        profile: {
+          contact_name: 'Asha Rao',
+          personas: [{ id: 'persona-iti-seeker', name: 'ITI Seeker' }],
+          services: [{ id: 'service-bluedots-job', name: 'BlueDots Job' }],
+        },
+      },
     });
     expect(res.statusCode).toBe(200);
     const body = res.json() as Record<string, unknown>;
     expect(body.is_complete).toBe(true);
-    expect((body.data as { who_i_am: { display_name: string } }).who_i_am.display_name).toBe(
-      'TRRAIN',
-    );
+    expect(body.profile_completed_at).toBeTruthy();
 
     const stored = await profileStore.findByAggregatorId(aggregatorId);
     if (stored.ok && stored.value) {
-      expect(stored.value.updatedBy.length).toBeGreaterThan(0);
-      expect(stored.value.consent).toEqual({ profile_creation: true });
+      expect(stored.value.contactName).toBe('Asha Rao');
+      expect(stored.value.profileCompletedAt).not.toBeNull();
     }
+  });
+
+  it('PATCH profile rejects unknown persona/service IDs against the schema registry', async () => {
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/v1/aggregators/profile/me',
+      headers: { authorization: 'Bearer good-token' },
+      payload: {
+        profile: {
+          contact_name: 'Asha',
+          personas: [{ id: 'persona-bogus', name: 'Bogus' }],
+          services: [{ id: 'service-bluedots-job', name: 'BlueDots' }],
+        },
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    const body = res.json() as { error: { code: string; fields?: Record<string, string[]> } };
+    expect(body.error.code).toBe('SCHEMA_VALIDATION');
+    expect(body.error.fields?.unknown_personas).toContain('persona-bogus');
   });
 });

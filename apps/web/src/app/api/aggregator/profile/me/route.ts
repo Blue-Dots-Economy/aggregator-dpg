@@ -1,8 +1,11 @@
 /**
  * BFF proxy for aggregator profile read + update.
  *
- *   GET  /api/aggregator/profile/me
- *   PUT  /api/aggregator/profile/me
+ *   GET   /api/aggregator/profile/me
+ *   PATCH /api/aggregator/profile/me  — partial update; body is split by the
+ *                                       API into aggregator + profile writes
+ *   PUT   /api/aggregator/profile/me  — legacy / full-replace alias kept for
+ *                                       callers that haven't migrated yet
  *
  * Requires an active session — `callApi` attaches the access token and
  * refreshes it transparently. The body and response are forwarded verbatim;
@@ -29,7 +32,7 @@ export async function GET(): Promise<NextResponse> {
   }
 }
 
-export async function PUT(req: NextRequest): Promise<NextResponse> {
+export async function PATCH(req: NextRequest): Promise<NextResponse> {
   let body: unknown;
   try {
     body = await req.json();
@@ -38,7 +41,7 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
   }
   try {
     const upstream = await callApi('/v1/aggregators/profile/me', {
-      method: 'PUT',
+      method: 'PATCH',
       body,
     });
     return await passthrough(upstream);
@@ -51,6 +54,11 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
       { status: 503 },
     );
   }
+}
+
+// Legacy PUT alias — forwards to the API PATCH so older callers don't break.
+export async function PUT(req: NextRequest): Promise<NextResponse> {
+  return PATCH(req);
 }
 
 async function passthrough(upstream: Response): Promise<NextResponse> {

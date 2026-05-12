@@ -18,6 +18,10 @@ import { registerHealthRoutes } from './routes/health.js';
 import { registerAggregatorRegistrationRoutes } from './routes/aggregator-registrations.js';
 import { registerAggregatorApprovalRoutes } from './routes/aggregator-approvals.js';
 import { registerAggregatorProfileRoutes } from './routes/aggregator-profile.js';
+import { registerBulkUploadsRoutes } from './routes/bulk-uploads.js';
+import { registerRegistrationLinksRoutes } from './routes/registration-links.js';
+import { registerPublicRegistrationLinkRoutes } from './routes/public-registration-links.js';
+import { registerOnboardingRoutes } from './routes/onboarding.js';
 import { ERR } from './errors/codes.js';
 import { HttpError } from './errors/http-error.js';
 import { coerceToHttpError, toEnvelope, toLogPayload } from './errors/serialize.js';
@@ -54,7 +58,11 @@ export async function buildApp(): Promise<FastifyInstance> {
           }
         : {}),
     },
-    trustProxy: true,
+    // Trust only the upstream proxies named in `TRUST_PROXY`. Blanket
+    // `true` would let any caller forge `X-Forwarded-For` and bypass the
+    // public rate limiter, which is keyed off `req.ip`. The default trusts
+    // RFC1918 only — production must point this at the BFF subnet.
+    trustProxy: parseTrustProxy(config.TRUST_PROXY),
     requestIdHeader: REQUEST_ID_HEADER,
     requestIdLogLabel: 'reqId',
     genReqId: (req) => {
@@ -99,6 +107,10 @@ export async function buildApp(): Promise<FastifyInstance> {
   await registerAggregatorRegistrationRoutes(app);
   await registerAggregatorApprovalRoutes(app);
   await registerAggregatorProfileRoutes(app);
+  await registerBulkUploadsRoutes(app);
+  await registerRegistrationLinksRoutes(app);
+  await registerPublicRegistrationLinkRoutes(app);
+  await registerOnboardingRoutes(app);
 
   app.setErrorHandler((rawErr, req, reply) => {
     // Fastify schema validation error — promote to a typed HttpError so the
@@ -135,4 +147,21 @@ export async function buildApp(): Promise<FastifyInstance> {
   });
 
   return app;
+}
+
+/**
+ * Parse `TRUST_PROXY` env into the shape Fastify expects.
+ *
+ *   "loopback,linklocal,uniquelocal" → "loopback, linklocal, uniquelocal"
+ *   "10.0.0.0/8,127.0.0.1"          → "10.0.0.0/8, 127.0.0.1"
+ *   "true" / "false"                 → boolean (compat with legacy configs)
+ *
+ * @param raw - Comma-separated value from {@link config.TRUST_PROXY}.
+ * @returns A value accepted by Fastify's `trustProxy` option.
+ */
+function parseTrustProxy(raw: string): string | boolean {
+  const trimmed = raw.trim();
+  if (trimmed === 'true') return true;
+  if (trimmed === 'false') return false;
+  return trimmed;
 }

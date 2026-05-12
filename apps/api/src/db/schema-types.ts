@@ -1,7 +1,3 @@
-/**
- * String-literal types mirroring the DB enums in `schema.ts`.
- * Re-exported for downstream services that don't want to pull in the full
- * Drizzle schema module.
- */
+/** Re-exports schema string-literal types from `@aggregator-dpg/db-schema/types`. */
 
-export type AggregatorType = 'seeker' | 'provider';
+export * from '@aggregator-dpg/db-schema/types';

@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.bluedots.org/participant/provider.v1.json",
+  "title": "Job Posting 1.0",
+  "description": "Employers and recruiters posting jobs.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["company_name", "role", "city", "employment_type"],
+  "properties": {
+    "participant_id": {
+      "type": "string",
+      "title": "Participant ID",
+      "description": "Stable aggregator-supplied identifier. Re-uploading a row with the same participant_id is treated as a duplicate (skipped). If omitted, the worker mints a UUID and dedup across uploads is not possible.",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9_.:-]+$"
+    },
+    "company_name": {
+      "type": "string",
+      "title": "Company Name",
+      "minLength": 1
+    },
+    "role": {
+      "type": "string",
+      "title": "Role",
+      "minLength": 1
+    },
+    "city": {
+      "type": "string",
+      "title": "City"
+    },
+    "employment_type": {
+      "type": "string",
+      "title": "Employment Type",
+      "enum": ["full_time", "part_time", "contract", "internship"]
+    },
+    "salary_range": {
+      "type": "string",
+      "title": "Salary Range",
+      "description": "e.g. 5-8 LPA",
+      "minLength": 1,
+      "maxLength": 100,
+      "examples": ["5-8 LPA", "₹40,000–60,000/month"]
+    },
+    "required_skills": {
+      "type": "array",
+      "title": "Required Skills",
+      "items": { "type": "string" }
+    }
+  }
+}

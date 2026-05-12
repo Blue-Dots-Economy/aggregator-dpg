@@ -11,16 +11,26 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/api/package.json                            apps/api/
 COPY packages/tsconfig/package.json                   packages/tsconfig/
+COPY packages/db-schema/package.json                  packages/db-schema/
+COPY packages/queue/package.json                      packages/queue/
+COPY packages/schema-loader/package.json              packages/schema-loader/
+COPY packages/shared-primitives/package.json          packages/shared-primitives/
 RUN pnpm install --frozen-lockfile
 
 # ── builder: compile TypeScript ───────────────────────────────────────────────
 FROM installer AS builder
 COPY . .
-RUN pnpm --filter @aggregator-dpg/api build
+# Build workspace deps first so the api can import their dist outputs.
+RUN pnpm --filter @aggregator-dpg/shared-primitives build \
+ && pnpm --filter @aggregator-dpg/db-schema build \
+ && pnpm --filter @aggregator-dpg/queue build \
+ && pnpm --filter @aggregator-dpg/schema-loader build \
+ && pnpm --filter @aggregator-dpg/api build
 
 # ── deployer: prune to production deps only ───────────────────────────────────
-FROM installer AS deployer
-COPY --from=builder /app/apps/api/dist ./apps/api/dist
+# Inherit FROM builder so workspace deps' dist/ is present when pnpm deploy
+# resolves their files.
+FROM builder AS deployer
 RUN pnpm deploy --filter @aggregator-dpg/api --prod --legacy /standalone
 
 # ── runner: minimal runtime image ─────────────────────────────────────────────

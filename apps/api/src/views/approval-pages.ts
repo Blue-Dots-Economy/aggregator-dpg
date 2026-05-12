@@ -249,8 +249,8 @@ export function renderConfirmPage(v: ConfirmPageVars): string {
             <div class="meta-value">${escape(v.applicantEmail)}</div>
           </div>
           <div class="meta-row">
-            <div class="meta-label">Slug</div>
-            <div class="meta-value mono">${escape(v.association)}</div>
+            <div class="meta-label">Name</div>
+            <div class="meta-value">${escape(v.association)}</div>
           </div>
           <div class="meta-row">
             <div class="meta-label">Type</div>

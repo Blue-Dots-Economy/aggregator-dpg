@@ -2,28 +2,84 @@
  * Aggregator profile endpoints (post-login).
  *
  *   GET /v1/aggregators/profile/me
- *     Returns the authenticated aggregator's profile JSON + a derived
- *     `is_complete` flag.
+ *     Returns the merged read shape: aggregator (registration-essential
+ *     fields) + 1:1 `aggregator_profile` (post-login fields) + identity
+ *     fragment derived from JWT / Keycloak.
  *
- *   PUT /v1/aggregators/profile/me
- *     Validates the body against `profile.v1.json` and replaces the
- *     profile's `data` + `consent` JSONB blobs.
+ *   PATCH /v1/aggregators/profile/me
+ *     Single endpoint that splits writes by destination:
  *
- * Authorisation: Bearer access token from Keycloak, with a custom
+ *       body.aggregator.contact    → Keycloak FIRST (mirror is authoritative
+ *                                    for phone+email), then DB
+ *       body.aggregator.*          → DB only (name / url / locations / consent)
+ *       body.profile.*             → `aggregator_profile` only
+ *
+ *     `org_slug` is rejected (immutable; DB trigger enforces too). On a
+ *     profile-only PATCH the route stamps `profile_completed_at` once all
+ *     required profile fields (`contact_name`, ≥1 persona, ≥1 service) are
+ *     present.
+ *
+ * Authorisation: Bearer access token from Keycloak with the custom
  * `aggregator_id` claim mapped from the user attribute.
- *
- * Failures are surfaced by throwing `httpError(<CODE>)`; the global error
- * handler renders the canonical envelope.
  */
 
 import type { FastifyBaseLogger, FastifyInstance, FastifyRequest } from 'fastify';
+import { z } from 'zod';
+import {
+  ConsentRecordSchema,
+  PersonaRefSchema,
+  PublicKeyEntrySchema,
+  ServiceRefSchema,
+} from '@aggregator-dpg/shared-primitives/aggregator';
+import type {
+  BecknContact,
+  PersonaRef,
+  PublicKeyEntry,
+  ServiceRef,
+} from '@aggregator-dpg/shared-primitives/aggregator';
+import { BecknContactSchema, BecknLocationSchema } from '@aggregator-dpg/shared-primitives/beckn';
 import { authenticate, type AuthContext } from '../services/auth/access-token.js';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
-import { getAggregatorProfileStore } from '../services/aggregator-profile-store/index.js';
+import {
+  getAggregatorProfileStore,
+  type AggregatorProfile,
+} from '../services/aggregator-profile-store/index.js';
 import { getIdpAdmin, KC_ATTR } from '../services/idp-admin/index.js';
 import type { IdpUser } from '../services/idp-admin/index.js';
-import { getProfileValidator } from '../services/profile-validator.js';
+import { normalisePhone } from '../services/phone.js';
+import { getSchemaRegistry } from '../services/schema-registry/index.js';
 import { httpError } from '../errors/http-error.js';
+
+// ─── Body schemas ───────────────────────────────────────────────────────────
+
+const AggregatorPatchSchema = z
+  .object({
+    name: z.string().min(2).max(200).optional(),
+    url: z.string().url().max(2048).nullable().optional(),
+    contact: BecknContactSchema.optional(),
+    locations: z.array(BecknLocationSchema).optional(),
+    consent: ConsentRecordSchema.optional(),
+  })
+  .strict();
+
+const ProfilePatchSchema = z
+  .object({
+    contact_name: z.string().min(1).max(200).nullable().optional(),
+    personas: z.array(PersonaRefSchema).optional(),
+    services: z.array(ServiceRefSchema).optional(),
+    verified_certificate: z.array(PublicKeyEntrySchema).optional(),
+  })
+  .strict();
+
+const ProfileUpdateBodySchema = z
+  .object({
+    aggregator: AggregatorPatchSchema.optional(),
+    profile: ProfilePatchSchema.optional(),
+  })
+  .strict()
+  .refine((b) => b.aggregator !== undefined || b.profile !== undefined, {
+    message: 'body must include at least one of `aggregator` or `profile`',
+  });
 
 export async function registerAggregatorProfileRoutes(app: FastifyInstance): Promise<void> {
   app.get('/v1/aggregators/profile/me', async (req, reply) => {
@@ -31,12 +87,12 @@ export async function registerAggregatorProfileRoutes(app: FastifyInstance): Pro
     const log = req.log.child({ operation: 'aggregator-profile.read', actor: auth.userId });
     const start = Date.now();
 
-    const profileStore = getAggregatorProfileStore();
     const aggregatorStore = getAggregatorStore();
+    const profileStore = getAggregatorProfileStore();
 
     const aggregator = await aggregatorStore.findById(auth.aggregatorId);
     if (!aggregator.ok) {
-      throw httpError('DB_UNAVAILABLE', { cause: aggregator.error });
+      throw httpError('DB_UNAVAILABLE', { cause: new Error(aggregator.error.message) });
     }
     if (!aggregator.value) {
       throw httpError('NOT_FOUND', { detail: 'Aggregator record not found.' });
@@ -44,10 +100,10 @@ export async function registerAggregatorProfileRoutes(app: FastifyInstance): Pro
 
     const profile = await profileStore.findByAggregatorId(auth.aggregatorId);
     if (!profile.ok) {
-      throw httpError('DB_UNAVAILABLE', { cause: profile.error });
+      throw httpError('DB_UNAVAILABLE', { cause: new Error(profile.error.message) });
     }
     if (!profile.value) {
-      // Submit flow always inserts an empty profile — this should never fire.
+      // Registration always inserts a stub profile — should never fire.
       throw httpError('NOT_FOUND', { detail: 'Profile record missing.' });
     }
 
@@ -61,55 +117,183 @@ export async function registerAggregatorProfileRoutes(app: FastifyInstance): Pro
     return reply.send({
       aggregator_id: auth.aggregatorId,
       org_slug: aggregator.value.orgSlug,
-      org_name: pickAttribute(kcUser, KC_ATTR.ASSOCIATION) ?? aggregator.value.orgSlug,
+      // aggregator.name is now authoritative for display. Fall back to slug
+      // only on the (impossible) empty-string edge case.
+      org_name: aggregator.value.name || aggregator.value.orgSlug,
+      actor_type: aggregator.value.actorType,
       type: aggregator.value.type,
+      url: aggregator.value.url,
+      contact: aggregator.value.contact,
+      locations: aggregator.value.locations,
+      consent: aggregator.value.consent,
+      status: aggregator.value.status,
+      // Profile (1:1)
+      contact_name: profile.value.contactName,
+      personas: profile.value.personas,
+      services: profile.value.services,
+      verified_certificate: profile.value.verifiedCertificate,
+      profile_completed_at: profile.value.profileCompletedAt?.toISOString() ?? null,
+      // Identity (from JWT claim / KC fallback)
       identity: {
         first_name: auth.firstName ?? kcUser?.firstName ?? null,
         last_name: auth.lastName ?? kcUser?.lastName ?? null,
-        email: auth.email ?? kcUser?.email ?? null,
+        email: auth.email ?? kcUser?.email ?? aggregator.value.contact.email,
         email_verified: auth.emailVerified ?? false,
-        phone: auth.phoneNumber ?? pickAttribute(kcUser, KC_ATTR.PHONE_NUMBER) ?? null,
+        phone:
+          auth.phoneNumber ??
+          pickAttribute(kcUser, KC_ATTR.PHONE_NUMBER) ??
+          aggregator.value.contact.phone,
         phone_verified:
           auth.phoneNumberVerified ?? pickAttribute(kcUser, 'phoneNumberVerified') === 'true',
-        active: kcUser?.enabled ?? true,
+        active: kcUser?.enabled ?? aggregator.value.status === 'active',
       },
-      schema_version: profile.value.schemaVersion,
-      data: profile.value.data,
-      consent: profile.value.consent,
-      is_complete: isProfileComplete(profile.value.data),
+      is_complete: profile.value.profileCompletedAt !== null,
       created_at: aggregator.value.createdAt.toISOString(),
-      updated_at: profile.value.updatedAt.toISOString(),
+      updated_at:
+        profile.value.updatedAt.getTime() > aggregator.value.updatedAt.getTime()
+          ? profile.value.updatedAt.toISOString()
+          : aggregator.value.updatedAt.toISOString(),
     });
   });
 
-  app.put('/v1/aggregators/profile/me', async (req, reply) => {
+  app.patch('/v1/aggregators/profile/me', async (req, reply) => {
     const auth = await requireAuth(req);
     const log = req.log.child({ operation: 'aggregator-profile.update', actor: auth.userId });
     const start = Date.now();
 
-    const body = (req.body ?? {}) as Record<string, unknown>;
-    const data = (body.data ?? {}) as Record<string, unknown>;
-    const consent = (body.consent ?? {}) as Record<string, unknown>;
-
-    const validate = getProfileValidator();
-    if (!validate(data)) {
+    const parsed = ProfileUpdateBodySchema.safeParse(req.body);
+    if (!parsed.success) {
       throw httpError('SCHEMA_VALIDATION', {
-        detail: 'Profile data failed schema validation.',
-        fields: { issues: validate.errors ?? [] },
+        detail: 'Request body failed shape validation.',
+        fields: { issues: parsed.error.issues },
       });
     }
+    const body = parsed.data;
 
+    const aggregatorStore = getAggregatorStore();
     const profileStore = getAggregatorProfileStore();
-    const updated = await profileStore.update(auth.aggregatorId, {
-      data,
-      consent,
-      updatedBy: auth.userId,
-    });
-    if (!updated.ok) {
-      if (updated.error.code === 'NOT_FOUND') {
-        throw httpError('NOT_FOUND', { detail: 'Profile record missing.', cause: updated.error });
+
+    // ─── 1. Mirror phone/email to Keycloak FIRST (authoritative). ──────────
+    // If KC fails, abort before touching the DB so we never have the DB
+    // ahead of Keycloak.
+    let normalisedContact: BecknContact | undefined;
+    if (body.aggregator?.contact) {
+      const raw = body.aggregator.contact;
+      const phoneR = normalisePhone(raw.phone);
+      if (!phoneR.ok) {
+        throw httpError('INVALID_PHONE', {
+          detail: phoneR.error.message,
+          fields: { input: raw.phone },
+        });
       }
-      throw httpError('DB_UNAVAILABLE', { cause: updated.error });
+      normalisedContact = { ...raw, phone: phoneR.value };
+
+      const idp = getIdpAdmin();
+      const kcWrite = await idp.setAttributes(auth.userId, {
+        [KC_ATTR.PHONE_NUMBER]: phoneR.value,
+      });
+      if (!kcWrite.ok) {
+        log.error(
+          {
+            status: 'failure',
+            sub_operation: 'idp.setAttributes.contact',
+            code: kcWrite.error.code,
+            cause: kcWrite.error.message,
+          },
+          'failed to mirror phone to Keycloak — aborting before DB write',
+        );
+        throw httpError('IDP_UNAVAILABLE', { cause: kcWrite.error });
+      }
+    }
+
+    // ─── 2. Aggregator-table updates ──────────────────────────────────────
+    let aggregatorUpdated = false;
+    if (body.aggregator !== undefined) {
+      const patch: Parameters<typeof aggregatorStore.update>[1] = {
+        updatedBy: auth.userId,
+      };
+      if (body.aggregator.name !== undefined) patch.name = body.aggregator.name;
+      if (body.aggregator.url !== undefined) patch.url = body.aggregator.url;
+      if (normalisedContact !== undefined) patch.contact = normalisedContact;
+      if (body.aggregator.locations !== undefined) patch.locations = body.aggregator.locations;
+      if (body.aggregator.consent !== undefined) patch.consent = body.aggregator.consent;
+
+      const result = await aggregatorStore.update(auth.aggregatorId, patch);
+      if (!result.ok) {
+        throw httpError(mapAggregatorUpdateError(result.error.code), {
+          cause: new Error(result.error.message),
+        });
+      }
+      aggregatorUpdated = true;
+    }
+
+    // ─── 3. Profile-table updates + completion check ──────────────────────
+    let profileUpdated = false;
+    if (body.profile !== undefined) {
+      // Validate persona / service IDs against the schema registry. Unknown
+      // IDs are rejected as SCHEMA_VALIDATION — Beckn catalogs require
+      // canonical schema refs, not free-form strings.
+      const registry = getSchemaRegistry();
+      const unknownPersonas = (body.profile.personas ?? []).filter(
+        (p) => !registry.hasPersona(p.id),
+      );
+      const unknownServices = (body.profile.services ?? []).filter(
+        (s) => !registry.hasService(s.id),
+      );
+      if (unknownPersonas.length > 0 || unknownServices.length > 0) {
+        throw httpError('SCHEMA_VALIDATION', {
+          detail: 'One or more persona/service IDs are not in the schema registry.',
+          fields: {
+            unknown_personas: unknownPersonas.map((p) => p.id),
+            unknown_services: unknownServices.map((s) => s.id),
+          },
+        });
+      }
+
+      const patch: Parameters<typeof profileStore.update>[1] = {
+        updatedBy: auth.userId,
+      };
+      if (body.profile.contact_name !== undefined) patch.contactName = body.profile.contact_name;
+      if (body.profile.personas !== undefined) patch.personas = body.profile.personas;
+      if (body.profile.services !== undefined) patch.services = body.profile.services;
+      if (body.profile.verified_certificate !== undefined) {
+        patch.verifiedCertificate = body.profile.verified_certificate;
+      }
+
+      const existing = await profileStore.findByAggregatorId(auth.aggregatorId);
+      if (!existing.ok || !existing.value) {
+        throw httpError('NOT_FOUND', { detail: 'Profile record missing.' });
+      }
+      // Compute the post-write profile state to decide whether to stamp
+      // `profile_completed_at` (or clear it if a previously-complete profile
+      // is now incomplete).
+      const next: AggregatorProfile = {
+        ...existing.value,
+        contactName:
+          patch.contactName !== undefined ? patch.contactName : existing.value.contactName,
+        personas: patch.personas ?? existing.value.personas,
+        services: patch.services ?? existing.value.services,
+        verifiedCertificate: patch.verifiedCertificate ?? existing.value.verifiedCertificate,
+      };
+      const complete = isProfileComplete(next);
+      const wasComplete = existing.value.profileCompletedAt !== null;
+      if (complete && !wasComplete) {
+        patch.profileCompletedAt = new Date();
+      } else if (!complete && wasComplete) {
+        patch.profileCompletedAt = null;
+      }
+
+      const result = await profileStore.update(auth.aggregatorId, patch);
+      if (!result.ok) {
+        if (result.error.code === 'NOT_FOUND') {
+          throw httpError('NOT_FOUND', {
+            detail: 'Profile record missing.',
+            cause: new Error(result.error.message),
+          });
+        }
+        throw httpError('DB_UNAVAILABLE', { cause: new Error(result.error.message) });
+      }
+      profileUpdated = true;
     }
 
     log.info(
@@ -117,17 +301,40 @@ export async function registerAggregatorProfileRoutes(app: FastifyInstance): Pro
         status: 'success',
         latency_ms: Date.now() - start,
         aggregator_id: auth.aggregatorId,
+        aggregator_updated: aggregatorUpdated,
+        profile_updated: profileUpdated,
       },
       'profile updated',
     );
 
+    // Echo the merged view so the client doesn't need an extra GET.
+    const aggregator = await aggregatorStore.findById(auth.aggregatorId);
+    const profile = await profileStore.findByAggregatorId(auth.aggregatorId);
+    if (!aggregator.ok || !aggregator.value || !profile.ok || !profile.value) {
+      throw httpError('INTERNAL', { detail: 'Post-write read failed.' });
+    }
+
     return reply.send({
       aggregator_id: auth.aggregatorId,
-      schema_version: updated.value.schemaVersion,
-      data: updated.value.data,
-      consent: updated.value.consent,
-      is_complete: isProfileComplete(updated.value.data),
-      updated_at: updated.value.updatedAt.toISOString(),
+      org_slug: aggregator.value.orgSlug,
+      name: aggregator.value.name,
+      actor_type: aggregator.value.actorType,
+      type: aggregator.value.type,
+      url: aggregator.value.url,
+      contact: aggregator.value.contact,
+      locations: aggregator.value.locations,
+      consent: aggregator.value.consent,
+      status: aggregator.value.status,
+      contact_name: profile.value.contactName,
+      personas: profile.value.personas,
+      services: profile.value.services,
+      verified_certificate: profile.value.verifiedCertificate,
+      profile_completed_at: profile.value.profileCompletedAt?.toISOString() ?? null,
+      is_complete: profile.value.profileCompletedAt !== null,
+      updated_at:
+        profile.value.updatedAt.getTime() > aggregator.value.updatedAt.getTime()
+          ? profile.value.updatedAt.toISOString()
+          : aggregator.value.updatedAt.toISOString(),
     });
   });
 }
@@ -169,14 +376,44 @@ async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
   });
 }
 
-function isProfileComplete(data: Record<string, unknown>): boolean {
-  const who = data.who_i_am as Record<string, unknown> | undefined;
-  const want = data.what_i_want as Record<string, unknown> | undefined;
-  const have = data.what_i_have as Record<string, unknown> | undefined;
-  if (!who || typeof who.display_name !== 'string' || !who.display_name) return false;
-  if (!want || !Array.isArray(want.beneficiary_groups) || want.beneficiary_groups.length === 0) {
-    return false;
-  }
-  if (!have || typeof have.network_size !== 'number') return false;
+/**
+ * "Profile complete" rule: at minimum the contact-name display label is
+ * present, plus at least one persona and at least one service so the
+ * aggregator is discoverable in Beckn catalog queries.
+ */
+function isProfileComplete(p: {
+  contactName: string | null;
+  personas: PersonaRef[];
+  services: ServiceRef[];
+  verifiedCertificate: PublicKeyEntry[];
+}): boolean {
+  if (!p.contactName || p.contactName.trim() === '') return false;
+  if (p.personas.length === 0) return false;
+  if (p.services.length === 0) return false;
   return true;
+}
+
+function mapAggregatorUpdateError(
+  code:
+    | 'NOT_FOUND'
+    | 'DUPLICATE_SLUG'
+    | 'DUPLICATE_PHONE'
+    | 'DUPLICATE_EMAIL'
+    | 'CHECK_VIOLATION'
+    | 'DB_UNAVAILABLE',
+): Parameters<typeof httpError>[0] {
+  switch (code) {
+    case 'NOT_FOUND':
+      return 'NOT_FOUND';
+    case 'DUPLICATE_PHONE':
+      return 'PHONE_EXISTS';
+    case 'DUPLICATE_EMAIL':
+      return 'USER_EXISTS';
+    case 'CHECK_VIOLATION':
+      return 'SCHEMA_VALIDATION';
+    case 'DUPLICATE_SLUG':
+      return 'DUPLICATE_SLUG';
+    default:
+      return 'DB_UNAVAILABLE';
+  }
 }

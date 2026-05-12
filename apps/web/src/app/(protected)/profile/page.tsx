@@ -1,22 +1,15 @@
 'use client';
 
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { Topbar } from '../../../components/shell/Topbar';
 import { Button } from '../../../components/ui/Button';
 import { StatusPill } from '../../../components/ui/StatusPill';
-import { SegmentedTabs } from '../../../components/ui/SegmentedTabs';
-import { RjsfThemedForm } from '../../../components/forms/RjsfThemed';
-import {
-  aggregatorProfileSchema,
-  aggregatorProfileUiSchema,
-  aggregatorProfileDefaults,
-  type AggregatorProfileFormData,
-} from '../../../schemas/aggregator-profile.schema';
 import { useProfile } from '../../../hooks/useProfile';
 import type { AggregatorProfile } from '../../../types';
 import { I } from '../../../icons';
+import { ProfileEditView } from './ProfileEditView';
 
-type ProfileTab = 'active' | 'form';
 type DeltaTone = 'up' | 'down' | 'flat';
 
 interface MiniStatProps {
@@ -105,9 +98,10 @@ interface ActiveProfileProps {
   data: AggregatorProfile | undefined;
   isLoading: boolean;
   isError: boolean;
+  onEdit: () => void;
 }
 
-function ActiveProfile({ data, isLoading, isError }: ActiveProfileProps) {
+function ActiveProfile({ data, isLoading, isError, onEdit }: ActiveProfileProps) {
   if (isError) {
     return (
       <div className="bd-card bd-shadow overflow-hidden border border-rose-200 bg-rose-50 px-7 py-6">
@@ -185,7 +179,7 @@ function ActiveProfile({ data, isLoading, isError }: ActiveProfileProps) {
             </div>
           </div>
         </div>
-        <Button kind="ghost" icon={<I.edit size={14} />}>
+        <Button kind="ghost" icon={<I.edit size={14} />} onClick={onEdit}>
           Edit
         </Button>
       </div>
@@ -206,10 +200,46 @@ function ActiveProfile({ data, isLoading, isError }: ActiveProfileProps) {
 
       <Section title="Aggregator Details">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-5">
-          <KV label="Beneficiary Groups" value={beneficiaries} />
           <KV label="Organisation Address" value={address} />
           <KV label="Geographies Served" value={geographies} />
-          <KV label="Sectors" value={sectors} />
+        </div>
+      </Section>
+
+      <Section title="Personas Supported">
+        <div className="text-[14px] text-ink-900">
+          {beneficiaries ? (
+            <div className="flex flex-wrap gap-2">
+              {beneficiaries.split(' · ').map((p, i) => (
+                <span
+                  key={i}
+                  className="inline-flex items-center px-2.5 py-1 rounded-full bg-[var(--bd-primary-50)] text-primary-600 text-[12.5px] font-semibold"
+                >
+                  {p}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <span className="text-ink-300">—</span>
+          )}
+        </div>
+      </Section>
+
+      <Section title="Services Supported">
+        <div className="text-[14px] text-ink-900">
+          {sectors ? (
+            <div className="flex flex-wrap gap-2">
+              {sectors.split(' · ').map((s, i) => (
+                <span
+                  key={i}
+                  className="inline-flex items-center px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 text-[12.5px] font-semibold"
+                >
+                  {s}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <span className="text-ink-300">—</span>
+          )}
         </div>
       </Section>
 
@@ -269,78 +299,54 @@ function ActiveProfile({ data, isLoading, isError }: ActiveProfileProps) {
   );
 }
 
-function RegistrationFormCard() {
-  const [formData, setFormData] = useState<AggregatorProfileFormData>(aggregatorProfileDefaults);
-
-  return (
-    <div className="bd-card bd-shadow overflow-hidden">
-      <div className="px-7 py-5 bg-gradient-to-r from-[var(--bd-primary-50)] to-white border-b border-[var(--bd-border)] flex items-center justify-between">
-        <div>
-          <h2 className="font-display font-bold text-[17px] text-ink-900">Registration Form</h2>
-          <p className="text-[12.5px] text-ink-400 mt-0.5">
-            Complete or update the source-of-truth profile for your aggregator.
-          </p>
-        </div>
-        <div className="flex items-center gap-2 text-[12px] text-ink-400">
-          <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-amber-50 text-amber-700 font-semibold">
-            <I.alert size={12} /> Draft saved 4m ago
-          </span>
-        </div>
-      </div>
-
-      <div className="px-7 py-7">
-        <RjsfThemedForm<AggregatorProfileFormData>
-          schema={aggregatorProfileSchema}
-          uiSchema={aggregatorProfileUiSchema}
-          formData={formData}
-          onChange={(e) => setFormData(e.formData as AggregatorProfileFormData)}
-        >
-          <></>
-        </RjsfThemedForm>
-      </div>
-
-      <div className="px-7 py-5 border-t border-[var(--bd-border)] bg-[var(--bd-bg)] flex items-center justify-between">
-        <div className="text-[12.5px] text-ink-400">
-          All changes are auto-saved. Submit to publish updates to the ecosystem.
-        </div>
-        <div className="flex items-center gap-2">
-          <Button kind="ghost" disabled>
-            Discard
-          </Button>
-          <Button kind="ghost" disabled>
-            Save draft
-          </Button>
-          <Button icon={<I.check size={14} />} disabled>
-            Submit for review
-          </Button>
-        </div>
-      </div>
-    </div>
+function SavedToast({ onDone }: { onDone: () => void }) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  useEffect(() => {
+    const t = setTimeout(onDone, 2400);
+    return () => clearTimeout(t);
+  }, [onDone]);
+  if (!mounted) return null;
+  // Portal to <body> so the toast is not contained by any ancestor with a
+  // CSS `transform` (e.g. the `fade-up` animation wrapper), which would turn
+  // `position: fixed` into "fixed-to-ancestor" instead of "fixed-to-viewport".
+  return createPortal(
+    <div
+      role="status"
+      aria-live="polite"
+      className="fixed top-4 right-4 z-[100] rounded-[10px] border border-emerald-200 bg-emerald-50 px-4 py-3 text-[13px] text-emerald-700 shadow-lg inline-flex items-center gap-2"
+    >
+      <I.check size={14} /> Profile saved
+    </div>,
+    document.body,
   );
 }
 
 export default function ProfilePage() {
-  const [tab, setTab] = useState<ProfileTab>('active');
+  const [isEditing, setIsEditing] = useState(false);
+  const [showToast, setShowToast] = useState(false);
   const { data, isLoading, isError } = useProfile();
 
   return (
     <div className="fade-up">
       <Topbar title="Aggregator Profile" subtitle="Manage your aggregator identity and settings." />
-      <div className="mb-6">
-        <SegmentedTabs<ProfileTab>
-          value={tab}
-          onChange={setTab}
-          items={[
-            { id: 'active', label: 'Active Profile' },
-            { id: 'form', label: 'Registration Form' },
-          ]}
+      {isEditing ? (
+        <ProfileEditView
+          onDone={() => setIsEditing(false)}
+          onSaved={() => {
+            setIsEditing(false);
+            setShowToast(true);
+          }}
         />
-      </div>
-      {tab === 'active' ? (
-        <ActiveProfile data={data} isLoading={isLoading} isError={isError} />
       ) : (
-        <RegistrationFormCard />
+        <ActiveProfile
+          data={data}
+          isLoading={isLoading}
+          isError={isError}
+          onEdit={() => setIsEditing(true)}
+        />
       )}
+      {showToast && <SavedToast onDone={() => setShowToast(false)} />}
     </div>
   );
 }

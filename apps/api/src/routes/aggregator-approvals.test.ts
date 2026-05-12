@@ -31,7 +31,19 @@ describe('admin approval routes', () => {
 
     aggregatorStore = new AggregatorStoreFake();
     aggregatorStore.seed([
-      buildAggregator({ id: aggregatorId, orgSlug: 'trrain-abcd', type: 'seeker' }),
+      buildAggregator({
+        id: aggregatorId,
+        orgSlug: 'trrain-abcd',
+        actorType: 'aggregator',
+        type: null,
+        name: 'TRRAIN',
+        contact: {
+          name: 'Asha Rao',
+          phone: '+919876543210',
+          email: 'asha@trrain.org',
+        },
+        status: 'pending',
+      }),
     ]);
     _setAggregatorStore(aggregatorStore);
     _setAggregatorProfileStore(new AggregatorProfileStoreFake());
@@ -42,7 +54,7 @@ describe('admin approval routes', () => {
       firstName: 'Asha',
       lastName: 'Rao',
       enabled: false,
-      attributes: { aggregator_id: aggregatorId, org_slug: 'trrain-abcd' },
+      attributes: { aggregator_id: aggregatorId, decision_made: 'pending' },
     });
     if (!created.ok) throw new Error('seed failed');
     kcUserId = created.value.id;
@@ -75,8 +87,8 @@ describe('admin approval routes', () => {
     expect(res.body).toContain(`/admin/v1/aggregator-registrations/decision/${aggregatorId}`);
   });
 
-  it('GET /read/:id shows already-approved when decision_made=approved', async () => {
-    await idp.setAttributes(kcUserId, { decision_made: 'approved' });
+  it('GET /read/:id shows already-approved when aggregator.status=active', async () => {
+    await aggregatorStore.updateStatus(aggregatorId, 'active', 'admin');
     const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
     const res = await app.inject({
       method: 'GET',
@@ -86,8 +98,8 @@ describe('admin approval routes', () => {
     expect(res.body).toContain('Already approved');
   });
 
-  it('GET /read/:id shows already-rejected when decision_made=rejected', async () => {
-    await idp.setAttributes(kcUserId, { decision_made: 'rejected' });
+  it('GET /read/:id shows already-rejected when aggregator.status=inactive', async () => {
+    await aggregatorStore.updateStatus(aggregatorId, 'inactive', 'admin');
     const { token } = await mintApprovalToken({ aggregatorId, intent: 'reject' });
     const res = await app.inject({
       method: 'GET',
@@ -118,7 +130,7 @@ describe('admin approval routes', () => {
     expect(res.statusCode).toBe(400);
   });
 
-  it('POST /decision/:id approve enables KC user, stamps decision_made, emails applicant', async () => {
+  it('POST /decision/:id approve flips DB status, enables KC user, stamps decision_made, emails applicant', async () => {
     const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
     const res = await app.inject({
       method: 'POST',
@@ -128,11 +140,17 @@ describe('admin approval routes', () => {
     expect(res.statusCode).toBe(200);
     expect(res.body).toContain('Application approved');
 
+    const dbAfter = await aggregatorStore.findById(aggregatorId);
+    if (dbAfter.ok && dbAfter.value) {
+      expect(dbAfter.value.status).toBe('active');
+    }
+
     const after = await idp.findById(kcUserId);
     if (after.ok && after.value) {
       expect(after.value.enabled).toBe(true);
       expect(after.value.attributes?.decision_made?.[0]).toBe('approved');
-      expect(after.value.attributes?.decided_at?.[0]).toMatch(/^\d{4}-/);
+      // decided_at / rejection_reason attributes are no longer written to KC.
+      expect(after.value.attributes?.decided_at).toBeUndefined();
     }
 
     expect(mailer.outbox).toHaveLength(1);
@@ -142,7 +160,7 @@ describe('admin approval routes', () => {
     expect(m.subject).toContain('approved');
   });
 
-  it('POST /decision/:id reject keeps user disabled, stamps reason, emails applicant', async () => {
+  it('POST /decision/:id reject flips DB status to inactive, keeps user disabled, emails applicant with reason', async () => {
     const { token } = await mintApprovalToken({ aggregatorId, intent: 'reject' });
     const res = await app.inject({
       method: 'POST',
@@ -152,11 +170,17 @@ describe('admin approval routes', () => {
     expect(res.statusCode).toBe(200);
     expect(res.body).toContain('Application rejected');
 
+    const dbAfter = await aggregatorStore.findById(aggregatorId);
+    if (dbAfter.ok && dbAfter.value) {
+      expect(dbAfter.value.status).toBe('inactive');
+    }
+
     const after = await idp.findById(kcUserId);
     if (after.ok && after.value) {
       expect(after.value.enabled).toBe(false);
       expect(after.value.attributes?.decision_made?.[0]).toBe('rejected');
-      expect(after.value.attributes?.rejection_reason?.[0]).toBe('incomplete documentation');
+      // rejection_reason is no longer persisted on KC (audit-log only).
+      expect(after.value.attributes?.rejection_reason).toBeUndefined();
     }
 
     expect(mailer.outbox).toHaveLength(1);

@@ -62,6 +62,14 @@ export const ERR = {
     detail: 'You do not have permission to perform this action.',
     hint: 'JWT aggregator_id claim does not match path id, or role missing.',
   },
+  NOT_APPROVED: {
+    code: 'NOT_APPROVED',
+    status: 403,
+    title: 'Approval pending',
+    detail:
+      'Your aggregator account has not been approved yet. An admin must approve the registration before this action is available.',
+    hint: 'JWT `decision_made` claim is missing, "pending", or "rejected". See requireApproved().',
+  },
 
   // ── Registration ────────────────────────────────────────────────────────
   USER_EXISTS: {
@@ -159,6 +167,45 @@ export const ERR = {
     title: 'Not found',
     detail: 'The requested resource does not exist.',
     hint: 'Store returned null for the given id.',
+  },
+  CONFLICT: {
+    code: 'CONFLICT',
+    status: 409,
+    title: 'Action not allowed',
+    detail: 'The requested action conflicts with the current resource state.',
+    hint: 'State-machine transition disallowed (e.g. retired → live).',
+  },
+
+  // ── Bulk uploads ────────────────────────────────────────────────────────
+  BULK_UPLOAD_NOT_READY: {
+    code: 'BULK_UPLOAD_NOT_READY',
+    status: 410,
+    title: 'Errors report not ready',
+    detail: 'The errors report is only available after the upload finishes processing.',
+    hint: 'GET /errors.csv called before bulk_uploads.status reached completed.',
+  },
+
+  // ── Registration links (public path) ────────────────────────────────────
+  LINK_NOT_LIVE: {
+    code: 'LINK_NOT_LIVE',
+    status: 410,
+    title: 'Registration link no longer active',
+    detail: 'This registration link is not accepting submissions.',
+    hint: 'registration_link.status is retired or expired.',
+  },
+  LINK_DUPLICATE: {
+    code: 'LINK_DUPLICATE',
+    status: 409,
+    title: 'Already registered',
+    detail: 'This participant has already registered with this aggregator.',
+    hint: 'participants UNIQUE (aggregator_id, participant_id) — ON CONFLICT path.',
+  },
+  RATE_LIMITED: {
+    code: 'RATE_LIMITED',
+    status: 429,
+    title: 'Too many requests',
+    detail: 'You have made too many requests. Please slow down and retry shortly.',
+    hint: 'Per-slug+ip rate limiter on public submit; window/max in config.',
   },
 } as const satisfies Record<string, ErrorCatalogueEntry>;
 

@@ -5,7 +5,33 @@ const apiResponse = {
   aggregator_id: 'agg-1',
   org_slug: 'trrain-abcd',
   org_name: 'TRRAIN',
-  type: 'seeker',
+  actor_type: 'aggregator',
+  type: null,
+  url: null,
+  contact: {
+    name: 'Asha Rao',
+    phone: '+919876543210',
+    email: 'asha@trrain.org',
+  },
+  locations: [
+    {
+      geo: { type: 'Point', coordinates: [72.8777, 19.076] },
+      address: {
+        streetAddress: '2nd Floor, Trade Centre',
+        addressLocality: 'Mumbai',
+        addressRegion: 'Maharashtra',
+        postalCode: '400051',
+        addressCountry: 'IN',
+      },
+    },
+  ],
+  consent: { value: true, given_at: '2026-01-01T00:00:00Z', valid_till: '2027-01-01T00:00:00Z' },
+  status: 'active',
+  contact_name: 'Asha Rao',
+  personas: [{ id: 'persona-iti-seeker', name: 'Women in retail' }],
+  services: [{ id: 'service-bluedots-job', name: 'BlueDots Job' }],
+  verified_certificate: [],
+  profile_completed_at: '2026-04-30T00:00:00Z',
   identity: {
     first_name: 'Asha',
     last_name: 'Rao',
@@ -15,13 +41,7 @@ const apiResponse = {
     phone_verified: false,
     active: true,
   },
-  schema_version: 1,
-  data: {
-    who_i_am: { address: 'Mumbai 400051' },
-    what_i_want: { beneficiary_groups: ['Women in retail'], geographies: ['Maharashtra'] },
-  },
-  consent: { profile_creation: true },
-  is_complete: false,
+  is_complete: true,
   created_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-04-30T00:00:00Z',
 };
@@ -53,13 +73,21 @@ describe('profileService', () => {
     expect(profile.consent.profileCreation).toBe(true);
   });
 
-  it('renders empty aggregator-details when JSONB data is empty', async () => {
+  it('renders empty aggregator-details when personas/services/locations are empty', async () => {
     globalThis.fetch = vi.fn(
       async () =>
-        new Response(JSON.stringify({ ...apiResponse, data: {}, consent: {} }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        }),
+        new Response(
+          JSON.stringify({
+            ...apiResponse,
+            personas: [],
+            services: [],
+            locations: [],
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
     ) as unknown as typeof fetch;
     const profile = await profileService.get();
     expect(profile.beneficiaries).toBe('');

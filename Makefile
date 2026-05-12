@@ -25,6 +25,13 @@ hosts: ## Add `127.0.0.1 keycloak` to /etc/hosts (needed when running web in doc
 		echo "127.0.0.1 keycloak" | sudo tee -a /etc/hosts > /dev/null; \
 		echo "Done."; \
 	fi
+	@if grep -q "^127\.0\.0\.1[[:space:]]\+minio\b" /etc/hosts; then \
+		echo "/etc/hosts already maps minio → 127.0.0.1 — skipping."; \
+	else \
+		echo "Adding '127.0.0.1 minio' to /etc/hosts (sudo required)..."; \
+		echo "127.0.0.1 minio" | sudo tee -a /etc/hosts > /dev/null; \
+		echo "Done."; \
+	fi
 
 dev: up ## Alias for `up`. Brings the full local stack up.
 
