@@ -1,11 +1,12 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '../../../components/ui/Button';
 import { Topbar } from '../../../components/shell/Topbar';
 import { Dropzone } from '../../../components/ui/Dropzone';
 import { I } from '../../../icons';
 import {
+  useActivateLink,
   useBulkUpload,
   useCreateLink,
   useDeactivateLink,
@@ -15,7 +16,7 @@ import {
 } from '../../../hooks/useOnboarding';
 import type { ApiRegistrationLink, BulkUploadStatus } from '../../../services/onboarding.service';
 import { onboardingService } from '../../../services/onboarding.service';
-import { useProfile } from '../../../hooks/useProfile';
+import { useProfile, useProfileRaw } from '../../../hooks/useProfile';
 
 interface StatItem {
   icon: 'users' | 'shield' | 'alert' | 'refresh';
@@ -31,7 +32,6 @@ function StatStrip() {
     const total = summary.data?.total ?? 0;
     const passed = summary.data?.passed ?? 0;
     const failed = summary.data?.failed ?? 0;
-    const skipped = summary.data?.skipped ?? 0;
     return [
       {
         icon: 'users',
@@ -54,17 +54,10 @@ function StatStrip() {
         tone: '#EF4444',
         bg: '#FEF2F2',
       },
-      {
-        icon: 'refresh',
-        label: 'Skipped (already registered)',
-        count: skipped,
-        tone: '#B45309',
-        bg: '#FEF3C7',
-      },
     ];
   }, [summary.data]);
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
       {items.map((it, i) => {
         const Ic = I[it.icon];
         return (
@@ -485,8 +478,36 @@ function CreateLinkSection() {
   const [createError, setCreateError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const create = useCreateLink();
+  const activate = useActivateLink();
   const profile = useProfile();
+  const rawProfile = useProfileRaw();
   const orgName = profile.data?.org ?? '';
+
+  // Prefill state / district / event location from the aggregator's first
+  // postal address. User can still override. Only fills on first load —
+  // subsequent edits stay sticky.
+  useEffect(() => {
+    const firstLoc = rawProfile.data?.locations?.[0]?.address;
+    if (!firstLoc) return;
+    setForm((f) => ({
+      ...f,
+      state: f.state || firstLoc.addressRegion || '',
+      district: f.district || firstLoc.addressLocality || '',
+      event_location: f.event_location || firstLoc.addressLocality || '',
+    }));
+  }, [rawProfile.data]);
+
+  const resetSection = () => {
+    const firstLoc = rawProfile.data?.locations?.[0]?.address;
+    setForm({
+      ...EMPTY_FORM,
+      state: firstLoc?.addressRegion ?? '',
+      district: firstLoc?.addressLocality ?? '',
+      event_location: firstLoc?.addressLocality ?? '',
+    });
+    setCreated(null);
+    setCreateError(null);
+  };
 
   const onCreate = async () => {
     setCreateError(null);
@@ -499,7 +520,7 @@ function CreateLinkSection() {
       const slug = buildLinkSlug(form);
       const link = await create.mutateAsync({
         domain: form.domain,
-        status: 'live',
+        status: 'draft',
         ...(slug ? { slug } : {}),
         title,
         context: {
@@ -513,6 +534,17 @@ function CreateLinkSection() {
         },
       });
       setCreated(link);
+    } catch (err) {
+      setCreateError((err as Error).message);
+    }
+  };
+
+  const onMakeLive = async () => {
+    if (!created) return;
+    setCreateError(null);
+    try {
+      await activate.mutateAsync(created.link_id);
+      resetSection();
     } catch (err) {
       setCreateError((err as Error).message);
     }
@@ -532,13 +564,16 @@ function CreateLinkSection() {
         <div className="font-display font-bold text-[16px] text-ink-900">
           Share a registration link
         </div>
-        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[11.5px] font-semibold">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-          Live
-        </span>
-        <div className="ml-auto text-[12px] text-ink-400">
-          Slug derived from inputs · QR rendered server-side
-        </div>
+        {created ? (
+          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 text-[11.5px] font-semibold">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+            Draft
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-ink-50 text-ink-500 text-[11.5px] font-semibold">
+            New
+          </span>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px]">
@@ -608,19 +643,15 @@ function CreateLinkSection() {
           <div className="md:col-span-2 flex items-center justify-end gap-2 mt-2">
             {created ? (
               <>
-                <Button
-                  kind="ghost"
-                  onClick={() => {
-                    setForm(EMPTY_FORM);
-                    setCreated(null);
-                    setCreateError(null);
-                  }}
-                >
-                  + Create another link
-                </Button>
-                <span className="text-[12px] text-emerald-700 font-semibold">
-                  ✓ Added to your list below
+                <span className="mr-auto text-[12px] text-amber-700 font-semibold">
+                  Saved as draft — choose to make it live or keep it for later.
                 </span>
+                <Button kind="ghost" onClick={resetSection} disabled={activate.isPending}>
+                  Stay Draft
+                </Button>
+                <Button onClick={onMakeLive} disabled={activate.isPending}>
+                  {activate.isPending ? 'Going live…' : 'Make Live'}
+                </Button>
               </>
             ) : (
               <Button onClick={onCreate} disabled={create.isPending}>
@@ -699,8 +730,10 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function LinkCard({ link }: { link: ApiRegistrationLink }) {
   const [copied, setCopied] = useState(false);
+  const activate = useActivateLink();
   const deactivate = useDeactivateLink();
   const isLive = link.status === 'live';
+  const isDraft = link.status === 'draft';
   const ctx = (link.context ?? {}) as Record<string, unknown>;
   const title =
     (typeof ctx['title'] === 'string' && ctx['title']) ||
@@ -830,26 +863,19 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
+          {isDraft && (
+            <Button onClick={() => activate.mutate(link.link_id)} disabled={activate.isPending}>
+              {activate.isPending ? 'Going live…' : 'Make Live'}
+            </Button>
+          )}
           {isLive && (
-            <>
-              <Button
-                kind="ghost"
-                onClick={() => deactivate.mutate(link.link_id)}
-                disabled={deactivate.isPending}
-              >
-                {deactivate.isPending ? 'Retiring…' : 'Deactivate'}
-              </Button>
-              <button
-                type="button"
-                onClick={() => deactivate.mutate(link.link_id)}
-                disabled={deactivate.isPending}
-                title="Retire link"
-                aria-label="Retire link"
-                className="inline-flex items-center justify-center w-8 h-8 rounded-[10px] border border-rose-200 text-rose-500 hover:bg-rose-50 disabled:opacity-50"
-              >
-                <I.x size={14} />
-              </button>
-            </>
+            <Button
+              kind="ghost"
+              onClick={() => deactivate.mutate(link.link_id)}
+              disabled={deactivate.isPending}
+            >
+              {deactivate.isPending ? 'Retiring…' : 'Deactivate'}
+            </Button>
           )}
         </div>
       </div>

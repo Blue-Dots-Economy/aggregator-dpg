@@ -4,6 +4,7 @@
  *   POST /v1/links/create              create a link + QR
  *   GET  /v1/links                     list links scoped to aggregator
  *   GET  /v1/links/:id                 read a single link with QR URL
+ *   POST /v1/links/:id/activate        flip a draft link to live (idempotent)
  *   POST /v1/links/:id/deactivate      retire a link (idempotent)
  *
  * All endpoints require an authenticated aggregator JWT and scope writes by
@@ -312,6 +313,52 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
     }
     const orgSlug = await resolveOrgSlug(auth.aggregatorId);
     return reply.send(await buildResponse(result.value, orgSlug));
+  });
+
+  app.post('/v1/links/:id/activate', async (req, reply) => {
+    const auth = await requireAuth(req);
+    const params = req.params as { id?: string };
+    const linkId = params.id;
+    if (!linkId) {
+      throw httpError('SCHEMA_VALIDATION', { detail: 'link_id is required.' });
+    }
+    const log = req.log.child({
+      operation: 'registrationLinks.activate',
+      actor: auth.userId,
+      link_id: linkId,
+    });
+    const start = Date.now();
+
+    const store = getRegistrationLinksStore();
+    const found = await store.findById(linkId, auth.aggregatorId);
+    if (!found.ok) {
+      throw httpError('DB_UNAVAILABLE', { cause: new Error(found.error.message) });
+    }
+    if (!found.value) {
+      throw httpError('FORBIDDEN', { detail: 'Link not accessible.' });
+    }
+
+    const orgSlug = await resolveOrgSlug(auth.aggregatorId);
+    if (found.value.status === 'live') {
+      log.info({ status: 'skipped', reason: 'already_live', latency_ms: Date.now() - start });
+      return reply.send(await buildResponse(found.value, orgSlug));
+    }
+    if (found.value.status === 'retired') {
+      throw httpError('CONFLICT', { detail: 'Retired links cannot be reactivated.' });
+    }
+
+    const updated = await store.updateStatus(linkId, auth.aggregatorId, 'live');
+    if (!updated.ok) {
+      throw httpError('DB_UNAVAILABLE', { cause: new Error(updated.error.message) });
+    }
+
+    log.info({
+      status: 'success',
+      latency_ms: Date.now() - start,
+      previous_status: found.value.status,
+    });
+
+    return reply.send(await buildResponse(updated.value, orgSlug));
   });
 
   app.post('/v1/links/:id/deactivate', async (req, reply) => {

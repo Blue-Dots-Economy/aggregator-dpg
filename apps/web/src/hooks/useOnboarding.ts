@@ -30,6 +30,16 @@ export function useCreateLink() {
   });
 }
 
+export function useActivateLink() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => onboardingService.activateLink(id),
+    onSuccess: (link) => {
+      qc.invalidateQueries({ queryKey: ['onboarding', 'links', link.domain] });
+    },
+  });
+}
+
 export function useDeactivateLink() {
   const qc = useQueryClient();
   return useMutation({

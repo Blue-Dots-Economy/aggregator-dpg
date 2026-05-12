@@ -168,6 +168,13 @@ export const ERR = {
     detail: 'The requested resource does not exist.',
     hint: 'Store returned null for the given id.',
   },
+  CONFLICT: {
+    code: 'CONFLICT',
+    status: 409,
+    title: 'Action not allowed',
+    detail: 'The requested action conflicts with the current resource state.',
+    hint: 'State-machine transition disallowed (e.g. retired → live).',
+  },
 
   // ── Bulk uploads ────────────────────────────────────────────────────────
   BULK_UPLOAD_NOT_READY: {

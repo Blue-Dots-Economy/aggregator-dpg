@@ -146,6 +146,12 @@ export const onboardingService = {
     });
   },
 
+  async activateLink(id: string): Promise<ApiRegistrationLink> {
+    return jsonFetch<ApiRegistrationLink>(`/api/links/${encodeURIComponent(id)}/activate`, {
+      method: 'POST',
+    });
+  },
+
   async deactivateLink(id: string): Promise<ApiRegistrationLink> {
     return jsonFetch<ApiRegistrationLink>(`/api/links/${encodeURIComponent(id)}/deactivate`, {
       method: 'POST',
