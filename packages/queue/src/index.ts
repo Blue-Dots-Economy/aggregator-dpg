@@ -28,8 +28,6 @@ export const QueueName = {
   LinkMetricsRollup: 'link-metrics-rollup',
   /** Hourly watchdog + retention sweep. */
   CronWatchdog: 'cron-watchdog',
-  /** Periodic Keycloak ↔ DB drift reconciliation. */
-  KeycloakSync: 'keycloak-sync',
 } as const;
 
 export type QueueName = (typeof QueueName)[keyof typeof QueueName];
@@ -69,10 +67,6 @@ export interface LinkMetricsRollupJob {
 }
 
 export interface CronWatchdogJob {
-  tick: number;
-}
-
-export interface KeycloakSyncJob {
   tick: number;
 }
 

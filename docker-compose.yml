@@ -290,8 +290,8 @@ services:
 
   # ── Bulk-upload + cron worker ────────────────────────────────────────────
   # BullMQ consumer for: bulk-file-process, bulk-row-process, bulk-finalise,
-  # link-metrics-rollup, cron-watchdog, keycloak-sync. Mirrors the API's
-  # config wiring (DB / Redis / S3 / Keycloak) since the same code paths run.
+  # link-metrics-rollup, cron-watchdog. Mirrors the API's
+  # config wiring (DB / Redis / S3) since the same code paths run.
   worker:
     build:
       context: .
@@ -319,12 +319,6 @@ services:
       # ─── Cron intervals (ms) ───────────────────────────────────────
       LINK_METRICS_ROLLUP_INTERVAL_MS: ${LINK_METRICS_ROLLUP_INTERVAL_MS:-300000}
       WATCHDOG_INTERVAL_MS: ${WATCHDOG_INTERVAL_MS:-3600000}
-      KEYCLOAK_SYNC_INTERVAL_MS: ${KEYCLOAK_SYNC_INTERVAL_MS:-900000}
-      # ─── Keycloak (drift-sync admin REST) ──────────────────────────
-      KEYCLOAK_URL: ${KEYCLOAK_URL:-http://keycloak:${KC_PORT:-8080}}
-      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-aggregator}
-      KEYCLOAK_CLIENT_ID: ${KEYCLOAK_ADMIN_CLIENT_ID:-aggregator-api}
-      KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET:-}
     depends_on:
       postgres:
         condition: service_healthy

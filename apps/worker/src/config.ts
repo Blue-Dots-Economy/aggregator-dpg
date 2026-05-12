@@ -64,18 +64,6 @@ const ConfigSchema = z.object({
     .int()
     .positive()
     .default(60 * 60 * 1000),
-
-  // ─── Keycloak drift sync ────────────────────────────────────────────────
-  /** Cron interval (ms) for the Keycloak ↔ DB drift sync. Default 15 min. */
-  KEYCLOAK_SYNC_INTERVAL_MS: z.coerce
-    .number()
-    .int()
-    .positive()
-    .default(15 * 60 * 1000),
-  KEYCLOAK_URL: z.string().optional(),
-  KEYCLOAK_REALM: z.string().optional(),
-  KEYCLOAK_CLIENT_ID: z.string().optional(),
-  KEYCLOAK_CLIENT_SECRET: z.string().optional(),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
