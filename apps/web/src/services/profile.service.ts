@@ -1,8 +1,41 @@
 import type { AggregatorProfile } from '../types';
 
+/**
+ * Server-side patch shape mirrored from the API's
+ * `ProfileUpdateBodySchema`. The API splits writes by destination:
+ *   - `aggregator.*` → `aggregators` row (Beckn contact / locations live here)
+ *   - `profile.*`    → `aggregator_profile` row (post-login extras)
+ */
+export interface ProfileEditPayload {
+  aggregator?: {
+    name?: string;
+    url?: string | null;
+    contact?: {
+      name: string;
+      phone: string;
+      email: string;
+      alternatePhone?: string;
+      company?: string;
+      gstNumber?: string;
+    };
+    locations?: Array<{
+      geo: { type: string; coordinates?: unknown };
+      address?: Record<string, string | undefined>;
+    }>;
+  };
+  profile?: {
+    contact_name?: string | null;
+    personas?: Array<{ id: string; name: string }>;
+    services?: Array<{ id: string; name: string }>;
+  };
+}
+
 export interface ProfileService {
   get(): Promise<AggregatorProfile>;
   update(patch: Partial<AggregatorProfile>): Promise<AggregatorProfile>;
+  edit(payload: ProfileEditPayload): Promise<AggregatorProfile>;
+  /** Raw read of the merged API response (pre-mapping) for edit pre-fill. */
+  getRaw(): Promise<ProfileApiResponse>;
 }
 
 interface BecknContact {
@@ -34,7 +67,7 @@ interface ServiceRef {
  * refactor. `aggregator.*` fields are flattened into the top level alongside
  * the post-login `aggregator_profile` fields.
  */
-interface ProfileApiResponse {
+export interface ProfileApiResponse {
   aggregator_id: string;
   org_slug: string;
   org_name: string;
@@ -51,7 +84,7 @@ interface ProfileApiResponse {
   services: ServiceRef[];
   verified_certificate: unknown[];
   profile_completed_at: string | null;
-  identity: {
+  identity?: {
     first_name: string | null;
     last_name: string | null;
     email: string | null;
@@ -67,20 +100,42 @@ interface ProfileApiResponse {
 
 class ApiProfileService implements ProfileService {
   async get(): Promise<AggregatorProfile> {
+    const body = await this.getRaw();
+    return mapToAggregatorProfile(body);
+  }
+
+  async getRaw(): Promise<ProfileApiResponse> {
     const res = await fetch('/api/aggregator/profile/me', { credentials: 'include' });
     if (!res.ok) {
       throw new Error(`profile fetch failed: ${res.status}`);
     }
-    const body = (await res.json()) as ProfileApiResponse;
-    return mapToAggregatorProfile(body);
+    return (await res.json()) as ProfileApiResponse;
   }
 
   async update(patch: Partial<AggregatorProfile>): Promise<AggregatorProfile> {
-    // Profile completion form PUTs `data` + `consent` JSONB shapes directly
-    // to /api/aggregator/profile/me. Patch-based updates are not yet wired —
-    // return a fresh fetch so callers stay consistent.
+    // Legacy display-shape patch (kept for callers that haven't migrated to
+    // `edit()`). Returns the freshly fetched profile so React Query stays
+    // consistent.
     void patch;
     return this.get();
+  }
+
+  async edit(payload: ProfileEditPayload): Promise<AggregatorProfile> {
+    const res = await fetch('/api/aggregator/profile/me', {
+      method: 'PATCH',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as {
+        error?: { title?: string; detail?: string };
+      };
+      const detail = body.error?.detail ?? body.error?.title ?? `HTTP ${res.status}`;
+      throw new Error(detail);
+    }
+    const data = (await res.json()) as ProfileApiResponse;
+    return mapToAggregatorProfile(data);
   }
 }
 
@@ -88,7 +143,7 @@ function mapToAggregatorProfile(api: ProfileApiResponse): AggregatorProfile {
   // Display the Beckn contact.name as the coordinator. Fall back to KC
   // identity (firstName + lastName) when the contact has not been set, then
   // to the profile's separate contact_name label.
-  const identityFull = [api.identity.first_name, api.identity.last_name]
+  const identityFull = [api.identity?.first_name, api.identity?.last_name]
     .filter((p): p is string => Boolean(p && p.length > 0))
     .join(' ');
   const coordinator = api.contact?.name || api.contact_name || identityFull;
@@ -116,19 +171,22 @@ function mapToAggregatorProfile(api: ProfileApiResponse): AggregatorProfile {
     .join(' · ');
   const sectors = api.services.map((s) => s.name).join(' · ');
 
+  const fmtDate = (iso: string | null | undefined): string => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime())
+      ? ''
+      : d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+  };
   return {
     id: api.aggregator_id,
-    org: api.org_name || api.org_slug,
-    registered: new Date(api.created_at).toLocaleDateString('en-IN', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-    }),
+    org: api.org_name || '',
+    registered: fmtDate(api.created_at),
     coordinator,
     contact: {
       name: coordinator,
-      mobile: api.contact?.phone ?? api.identity.phone ?? '',
-      email: api.contact?.email ?? api.identity.email ?? '',
+      mobile: api.contact?.phone ?? api.identity?.phone ?? '',
+      email: api.contact?.email ?? api.identity?.email ?? '',
     },
     beneficiaries,
     address,
@@ -147,11 +205,7 @@ function mapToAggregatorProfile(api: ProfileApiResponse): AggregatorProfile {
       analytics: false,
       marketing: false,
       retention: false,
-      lastReviewed: new Date(api.updated_at).toLocaleDateString('en-IN', {
-        day: '2-digit',
-        month: 'short',
-        year: 'numeric',
-      }),
+      lastReviewed: fmtDate(api.updated_at),
     },
   };
 }
