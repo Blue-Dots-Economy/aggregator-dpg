@@ -94,9 +94,11 @@
     {
       "clientId": "aggregator-portal",
       "name": "Aggregator Portal (BFF)",
-      "description": "Public OIDC client for the Blue Dots Aggregator portal — Authorization Code + PKCE; tokens held server-side by Next.js BFF.",
+      "description": "Confidential OIDC client for the Blue Dots Aggregator portal — Authorization Code + PKCE with client secret; tokens held server-side by Next.js BFF.",
       "enabled": true,
-      "publicClient": true,
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "aggregator-portal-dev-secret-change-me",
       "directAccessGrantsEnabled": false,
       "standardFlowEnabled": true,
       "implicitFlowEnabled": false,
@@ -130,6 +132,38 @@
             "id.token.claim": "false",
             "access.token.claim": "true",
             "userinfo.token.claim": "false",
+            "multivalued": "false",
+            "aggregate.attrs": "false"
+          }
+        },
+        {
+          "name": "decision_made",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "decision_made",
+            "claim.name": "decision_made",
+            "jsonType.label": "String",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "false",
+            "multivalued": "false",
+            "aggregate.attrs": "false"
+          }
+        },
+        {
+          "name": "phone_number",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "phoneNumber",
+            "claim.name": "phone_number",
+            "jsonType.label": "String",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
             "multivalued": "false",
             "aggregate.attrs": "false"
           }

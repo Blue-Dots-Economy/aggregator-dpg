@@ -4,12 +4,13 @@
 
 import { eq } from 'drizzle-orm';
 import { logger } from '../../logger.js';
-import { aggregatorProfiles } from '../../db/schema.js';
+import { aggregatorProfile } from '../../db/schema.js';
 import { getDb } from '../../db/client.js';
 import {
   AggregatorProfileStoreBase,
   type AggregatorProfile,
   type CreateAggregatorProfileInput,
+  type ProfileStoreError,
   type ProfileStoreResult,
   type UpdateAggregatorProfileInput,
 } from './interface.js';
@@ -24,12 +25,13 @@ export class PostgresAggregatorProfileStore extends AggregatorProfileStoreBase {
     const start = Date.now();
     try {
       const rows = await getDb()
-        .insert(aggregatorProfiles)
+        .insert(aggregatorProfile)
         .values({
           aggregatorId: input.aggregatorId,
-          schemaVersion: input.schemaVersion ?? 1,
-          data: input.data ?? {},
-          consent: input.consent ?? {},
+          contactName: input.contactName ?? null,
+          personas: input.personas ?? [],
+          services: input.services ?? [],
+          verifiedCertificate: input.verifiedCertificate ?? [],
           createdBy: input.createdBy,
           updatedBy: input.updatedBy,
         })
@@ -46,27 +48,7 @@ export class PostgresAggregatorProfileStore extends AggregatorProfileStoreBase {
       });
       return { ok: true, value: toDomain(row) };
     } catch (err: unknown) {
-      const code = (err as { code?: string }).code;
-      if (code === PG_UNIQUE_VIOLATION) {
-        return {
-          ok: false,
-          error: { code: 'DUPLICATE', message: `profile exists for ${input.aggregatorId}` },
-        };
-      }
-      if (code === PG_FK_VIOLATION) {
-        return {
-          ok: false,
-          error: { code: 'NOT_FOUND', message: `aggregator ${input.aggregatorId} not found` },
-        };
-      }
-      logger.error({
-        operation: 'aggregatorProfileStore.create',
-        status: 'failure',
-        error: (err as Error).message,
-        error_type: (err as Error).constructor.name,
-        latency_ms: Date.now() - start,
-      });
-      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: (err as Error).message } };
+      return this.mapWriteError('aggregatorProfileStore.create', err, input.aggregatorId, start);
     }
   }
 
@@ -76,8 +58,8 @@ export class PostgresAggregatorProfileStore extends AggregatorProfileStoreBase {
     try {
       const [row] = await getDb()
         .select()
-        .from(aggregatorProfiles)
-        .where(eq(aggregatorProfiles.aggregatorId, aggregatorId))
+        .from(aggregatorProfile)
+        .where(eq(aggregatorProfile.aggregatorId, aggregatorId))
         .limit(1);
       return { ok: true, value: row ? toDomain(row) : null };
     } catch (err: unknown) {
@@ -100,14 +82,18 @@ export class PostgresAggregatorProfileStore extends AggregatorProfileStoreBase {
         updatedBy: input.updatedBy,
         updatedAt: new Date(),
       };
-      if (input.schemaVersion !== undefined) updateValues.schemaVersion = input.schemaVersion;
-      if (input.data !== undefined) updateValues.data = input.data;
-      if (input.consent !== undefined) updateValues.consent = input.consent;
+      if (input.contactName !== undefined) updateValues['contactName'] = input.contactName;
+      if (input.personas !== undefined) updateValues['personas'] = input.personas;
+      if (input.services !== undefined) updateValues['services'] = input.services;
+      if (input.verifiedCertificate !== undefined)
+        updateValues['verifiedCertificate'] = input.verifiedCertificate;
+      if (input.profileCompletedAt !== undefined)
+        updateValues['profileCompletedAt'] = input.profileCompletedAt;
 
       const rows = await getDb()
-        .update(aggregatorProfiles)
+        .update(aggregatorProfile)
         .set(updateValues)
-        .where(eq(aggregatorProfiles.aggregatorId, aggregatorId))
+        .where(eq(aggregatorProfile.aggregatorId, aggregatorId))
         .returning();
 
       const updated = rows[0];
@@ -122,23 +108,91 @@ export class PostgresAggregatorProfileStore extends AggregatorProfileStoreBase {
       });
       return { ok: true, value: toDomain(updated) };
     } catch (err: unknown) {
+      return this.mapWriteError('aggregatorProfileStore.update', err, aggregatorId, start);
+    }
+  }
+
+  async markCompleted(
+    aggregatorId: string,
+    updatedBy: string,
+  ): Promise<ProfileStoreResult<AggregatorProfile>> {
+    return this.update(aggregatorId, { profileCompletedAt: new Date(), updatedBy });
+  }
+
+  async deleteByAggregatorId(aggregatorId: string): Promise<ProfileStoreResult<void>> {
+    try {
+      const rows = await getDb()
+        .delete(aggregatorProfile)
+        .where(eq(aggregatorProfile.aggregatorId, aggregatorId))
+        .returning();
+      if (rows.length === 0) {
+        return { ok: false, error: { code: 'NOT_FOUND', message: aggregatorId } };
+      }
+      return { ok: true, value: undefined };
+    } catch (err: unknown) {
       logger.error({
-        operation: 'aggregatorProfileStore.update',
+        operation: 'aggregatorProfileStore.deleteByAggregatorId',
         status: 'failure',
         error: (err as Error).message,
-        latency_ms: Date.now() - start,
       });
       return { ok: false, error: { code: 'DB_UNAVAILABLE', message: (err as Error).message } };
     }
   }
+
+  private mapWriteError(
+    op: string,
+    err: unknown,
+    contextId: string,
+    start: number,
+  ): ProfileStoreResult<never> {
+    const code = (err as { code?: string }).code;
+    const message = (err as Error).message ?? 'unknown';
+    if (code === PG_UNIQUE_VIOLATION) {
+      logger.warn({
+        operation: op,
+        status: 'failure',
+        error: 'DUPLICATE',
+        latency_ms: Date.now() - start,
+      });
+      return {
+        ok: false,
+        error: { code: 'DUPLICATE', message: `profile exists for ${contextId}` },
+      };
+    }
+    if (code === PG_FK_VIOLATION) {
+      logger.warn({
+        operation: op,
+        status: 'failure',
+        error: 'FOREIGN_KEY_VIOLATION',
+        latency_ms: Date.now() - start,
+      });
+      return {
+        ok: false,
+        error: {
+          code: 'FOREIGN_KEY_VIOLATION',
+          message: `aggregator ${contextId} not found`,
+        } satisfies ProfileStoreError,
+      };
+    }
+    logger.error({
+      operation: op,
+      status: 'failure',
+      error: message,
+      error_type: (err as Error).constructor?.name,
+      latency_ms: Date.now() - start,
+    });
+    return { ok: false, error: { code: 'DB_UNAVAILABLE', message } };
+  }
 }
 
-function toDomain(row: typeof aggregatorProfiles.$inferSelect): AggregatorProfile {
+function toDomain(row: typeof aggregatorProfile.$inferSelect): AggregatorProfile {
   return {
     aggregatorId: row.aggregatorId,
-    schemaVersion: row.schemaVersion,
-    data: row.data,
-    consent: row.consent,
+    contactName: row.contactName,
+    personas: row.personas,
+    services: row.services,
+    verifiedCertificate: row.verifiedCertificate,
+    profileCompletedAt: row.profileCompletedAt,
     createdBy: row.createdBy,
     updatedBy: row.updatedBy,
     createdAt: row.createdAt,

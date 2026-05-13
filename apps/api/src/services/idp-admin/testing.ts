@@ -10,6 +10,7 @@ import {
   type IdpResult,
   type IdpUser,
 } from './interface.js';
+import { KC_ATTR } from './attributes.js';
 
 export class IdpAdminFake extends IdpAdminAdapter {
   private users = new Map<string, IdpUser & { attributes: Record<string, string[]> }>();
@@ -135,6 +136,13 @@ export class IdpAdminFake extends IdpAdminAdapter {
     }
     u.attributes = merged;
     return { ok: true, value: undefined };
+  }
+
+  async setUserDecision(
+    userId: string,
+    decision: 'pending' | 'approved' | 'rejected',
+  ): Promise<IdpResult<void>> {
+    return this.setAttributes(userId, { [KC_ATTR.DECISION_MADE]: decision });
   }
 
   private setEnabled(userId: string, enabled: boolean): IdpResult<void> {

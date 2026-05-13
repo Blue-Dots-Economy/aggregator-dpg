@@ -3,8 +3,11 @@
  *
  * `slugify` produces a URL-safe, lower-case, hyphen-separated rendering of
  * arbitrary input. `randomSuffix` appends a short hex suffix so multiple
- * applications from the same association don't collide on the unique
- * `org_slug` column.
+ * registrations from the same display `name` don't collide on the unique
+ * `org_slug` column. The slug is generated **once** at INSERT time from
+ * `aggregator.name` and is then immutable — the DB trigger
+ * `aggregators_lock_slug` rejects any UPDATE that mutates the column,
+ * even if `name` is later edited.
  */
 
 import { randomBytes } from 'node:crypto';
@@ -17,7 +20,7 @@ const MAX_SLUG_LEN = 60;
  * Falls back to "org" when input contains no slug-friendly characters
  * (e.g. only emoji or punctuation) so callers always get a non-empty stem.
  *
- * @param input - Raw input (association name, etc.).
+ * @param input - Raw input (aggregator display name).
  * @returns Lower-case slug, max 60 chars.
  */
 export function slugify(input: string): string {
@@ -42,8 +45,23 @@ export function randomSuffix(bytes = 2): string {
 }
 
 /**
- * Composes a slug stem with a random suffix: `<stem>-<hex>`.
+ * Composes a slug from the aggregator's display name + a random suffix:
+ * `slugify(name)-<hex>`. Call this once at INSERT — the slug is immutable
+ * afterwards (DB trigger `aggregators_lock_slug` enforces it).
+ *
+ * @param name - Aggregator display name from the registration payload.
+ * @param bytes - Random suffix length in bytes (default 2 → 4 hex chars).
+ */
+export function slugFromName(name: string, bytes = 2): string {
+  return `${slugify(name)}-${randomSuffix(bytes)}`;
+}
+
+/**
+ * Legacy alias for {@link slugFromName}. Kept so callers that still pass an
+ * association string don't break until Phase 6 swaps them to `name`.
+ *
+ * @deprecated Use {@link slugFromName} once the registration route is on the new payload.
  */
 export function slugWithSuffix(stem: string, bytes = 2): string {
-  return `${slugify(stem)}-${randomSuffix(bytes)}`;
+  return slugFromName(stem, bytes);
 }

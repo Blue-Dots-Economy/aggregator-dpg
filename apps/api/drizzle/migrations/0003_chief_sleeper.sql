@@ -1,0 +1,1 @@
+ALTER TABLE "bulk_uploads" ALTER COLUMN "s3_etag" DROP NOT NULL;

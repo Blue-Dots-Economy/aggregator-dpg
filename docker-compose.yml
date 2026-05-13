@@ -1,28 +1,31 @@
 name: aggregator-dpg
 
-# Local-dev stack for the Blue Dots Aggregator Portal.
+# Local-dev + VM-deployable stack for the Blue Dots Aggregator Portal.
 #
-# Foundations: Postgres, Redis, MinIO, Keycloak, MailHog.
-# Apps:        web (Next.js).  api + worker placeholders are commented in once
-#              those services exist (see apps/api stub).
+# Foundations: Postgres, Redis, Keycloak (+ keycloak-init sidecar), Mailpit.
+# Apps:        web (Next.js BFF), api (Fastify), worker (BullMQ consumer).
+# Edge:        jonasal/nginx-certbot terminates TLS on :443 and proxies all
+#              browser-facing traffic — no service exposes its own host port.
 #
-# Quick start:
-#   cp .env.example .env
+# Quick start (VM, real domain, Let's Encrypt cert):
+#   cp infra/env.template .env
+#   # set PUBLIC_HOST, CERTBOT_EMAIL, all change-me-* secrets
+#   # set S3_REGION + S3_BUCKET; ensure VM IAM role has s3:* on the bucket
+#   chmod 600 .env
 #   docker compose up -d
-#   docker compose logs -f web
+#   docker compose logs -f nginx api worker
 #
-# URLs (after `up`) — all browser-facing services proxied through nginx:80:
-#   Web app           : http://localhost/
-#   API               : http://localhost/backend/
-#   Keycloak          : http://localhost/auth/     admin / ${KC_BOOTSTRAP_ADMIN_PASSWORD}
-#   MinIO console     : http://localhost/minio/    ${MINIO_ROOT_USER} / ${MINIO_ROOT_PASSWORD}
-#   MinIO S3 API      : http://localhost/s3/
-#   MailHog UI        : http://localhost/mail/     (captures every outbound email)
+# URLs (after `up`) — all browser-facing services proxied through nginx:443:
+#   Web app           : ${PUBLIC_PROTOCOL}://${PUBLIC_HOST}/
+#   API               : ${PUBLIC_PROTOCOL}://${PUBLIC_HOST}/backend/
+#   Keycloak          : ${PUBLIC_PROTOCOL}://${PUBLIC_HOST}/auth/   admin / ${KC_BOOTSTRAP_ADMIN_PASSWORD}
+#   Mailpit UI        : ${PUBLIC_PROTOCOL}://${PUBLIC_HOST}/mail/   (captures every outbound email)
 #   Postgres          : localhost:5433             aggregator / ${POSTGRES_PASSWORD}  (direct, dev-only)
 #   Redis             : localhost:6379                                                (direct, dev-only)
 #
-# Email delivery is intentionally not part of the local stack. Configure SMTP
-# externally (Keycloak realm SMTP settings, API SMTP env vars) when needed.
+# Object storage is AWS S3 (regional endpoint, IAM-role credentials). The
+# VM's EC2 instance profile must grant s3:GetObject, s3:PutObject,
+# s3:HeadObject, s3:DeleteObject on the bucket. No keys live in .env.
 
 services:
   # ─────────────────────────────────────────────────────────────────────────
@@ -35,7 +38,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-aggregator}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aggregator-dev}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
       POSTGRES_DB: ${POSTGRES_DB:-aggregator}
     ports:
       - "5433:5432"   # host 5433 → container 5432 (avoids clashes with a system Postgres on 5432)
@@ -64,38 +67,18 @@ services:
       retries: 10
 
   mailhog:
-    image: mailhog/mailhog:v1.0.1
+    image: axllent/mailpit:v1.20
     container_name: aggregator-mailhog
     restart: unless-stopped
     # SMTP (1025) reached over docker network by api/keycloak; UI (8025) proxied via nginx /mail/.
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: "true"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "true"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8025/api/v2/messages"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:8025/api/v1/messages"]
       interval: 10s
       timeout: 3s
       retries: 5
-
-  minio:
-    image: minio/minio:RELEASE.2024-12-13T22-19-12Z
-    container_name: aggregator-minio
-    restart: unless-stopped
-    command: ["server", "/data", "--console-address", ":9001"]
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
-      # MINIO_SERVER_URL / MINIO_BROWSER_REDIRECT_URL deliberately unset.
-      # MinIO 2024+ rejects path components in those URLs, and SigV4 signing
-      # is incompatible with nginx prefix-stripping at /s3/. Until we have a
-      # dedicated subdomain (e.g. minio.example.com), MinIO stays
-      # internal-only — reachable from other services via docker DNS at
-      # minio:9000 (S3) and minio:9001 (console). See infra/nginx/nginx.conf
-      # for the /minio/ and /s3/ blocks (kept for future subdomain wiring).
-    volumes:
-      - minio-data:/data
-    healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
-      interval: 10s
-      timeout: 3s
-      retries: 10
 
   keycloak:
     image: quay.io/keycloak/keycloak:26.5.5
@@ -103,13 +86,15 @@ services:
     restart: unless-stopped
     # build: re-bake plugin into the official image so providers/ is on classpath
     # AND `kc.sh build` has already indexed our SPIs. render-realm.sh substitutes
-    # __PUBLIC_BASE_URL__ in the realm JSON before exec'ing kc.sh start-dev
-    # --import-realm.
+    # __PUBLIC_BASE_URL__ + __SMTP_*__ in the realm JSON before exec'ing kc.sh
+    # start-dev --import-realm. The keycloak-init sidecar then re-applies SMTP +
+    # unmanagedAttributePolicy via REST so they take effect even when the realm
+    # already existed in postgres from a previous boot.
     entrypoint: ["/opt/keycloak/render-realm.sh"]
     command: ["start-dev", "--import-realm"]
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}
-      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD:?KC_BOOTSTRAP_ADMIN_PASSWORD must be set in .env}
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
       KC_DB_USERNAME: ${POSTGRES_USER:-aggregator}
@@ -138,7 +123,7 @@ services:
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
       # SMTP for email OTP. Substituted into the realm's smtpServer block by
       # render-realm.sh — the realm JSON itself only has __SMTP_*__ placeholders.
-      # Defaults target the in-stack MailHog so first-boot login works with no
+      # Defaults target the in-stack Mailpit so first-boot login works with no
       # .env edits; override these per environment to point at real SMTP.
       SMTP_HOST: ${SMTP_HOST:-mailhog}
       SMTP_PORT: ${SMTP_PORT:-1025}
@@ -170,6 +155,36 @@ services:
       retries: 30
       start_period: 30s
 
+  # Post-import init: applies SMTP + unmanagedAttributePolicy via Keycloak
+  # admin REST. Idempotent — safe to re-run on every `docker compose up`.
+  # Complements render-realm.sh: the latter only takes effect on first
+  # realm import; this sidecar re-applies config when the realm already
+  # exists in postgres.
+  keycloak-init:
+    image: alpine:3.20
+    container_name: aggregator-keycloak-init
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    environment:
+      # Internal URL — must include /auth because KC_HTTP_RELATIVE_PATH=/auth.
+      KC_URL: http://keycloak:8080/auth
+      KC_REALM: ${KEYCLOAK_REALM:-aggregator}
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD}
+      UNMANAGED_POLICY: ENABLED
+      SMTP_HOST: ${SMTP_HOST:-mailhog}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_FROM: ${SMTP_FROM:-no-reply@bluedots.local}
+      SMTP_FROM_DISPLAY: ${SMTP_FROM_DISPLAY:-Blue Dots Aggregator}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+    volumes:
+      - ./infra/keycloak/init:/init:ro
+    entrypoint: ["sh", "-c", "apk add --no-cache curl jq > /dev/null && sh /init/apply-user-profile.sh"]
+    restart: "no"
+
   # ─────────────────────────────────────────────────────────────────────────
   # Apps
   # ─────────────────────────────────────────────────────────────────────────
@@ -186,15 +201,15 @@ services:
       NEXT_TELEMETRY_DISABLED: "1"
       PORT: "3000"
       HOSTNAME: "0.0.0.0"
-      # All browser-visible URLs go through nginx on :80 — no service port suffixes.
+      # All browser-visible URLs go through nginx on :443 — no service port suffixes.
       NEXT_PUBLIC_API_URL: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}/backend"
       API_BASE_URL: ${API_BASE_URL:-http://api:4000}
       # ─── OIDC (Authorization Code + PKCE) ────────────────────────────
       # OIDC_ISSUER must resolve identically from the browser AND the web
       # container. With nginx as the sole ingress, both reach Keycloak via
-      # http://${PUBLIC_HOST}/auth/realms/${realm}. The web container's
-      # back-channel call is short-circuited to the docker host gateway via
-      # the `extra_hosts` mapping below.
+      # ${PUBLIC_PROTOCOL}://${PUBLIC_HOST}/auth/realms/${realm}. The web
+      # container's back-channel call is short-circuited to the docker host
+      # gateway via the `extra_hosts` mapping below.
       OIDC_ISSUER: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}/auth/realms/${KEYCLOAK_REALM:-aggregator}"
       OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-aggregator-portal}
       OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
@@ -206,8 +221,8 @@ services:
       # `aggregator-api` client to authorise upstream calls made on behalf of
       # an unauthenticated browser. Reuses the same client/secret the api
       # service already has so .env carries one pair, not two.
-      BFF_SERVICE_CLIENT_ID: ${KEYCLOAK_ADMIN_CLIENT_ID:-aggregator-api}
-      BFF_SERVICE_CLIENT_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET:-aggregator-api-dev-secret-change-me}
+      BFF_SERVICE_CLIENT_ID: ${BFF_SERVICE_CLIENT_ID:-${KEYCLOAK_ADMIN_CLIENT_ID:-aggregator-api}}
+      BFF_SERVICE_CLIENT_SECRET: ${BFF_SERVICE_CLIENT_SECRET:-${KEYCLOAK_ADMIN_CLIENT_SECRET:-}}
       # ─── Session ──────────────────────────────────────────────────────
       SESSION_COOKIE_NAME: ${SESSION_COOKIE_NAME:-sid}
       COOKIE_SECURE: ${COOKIE_SECURE:-}
@@ -252,12 +267,12 @@ services:
       RUN_MIGRATIONS_ON_BOOT: "true"
       # Keycloak admin (service account). Must equal the public issuer prefix
       # so the JWT `iss` claim matches what `expectedIssuer()` derives from
-      # KEYCLOAK_URL (apps/api/src/services/auth/access-token.ts:209).
+      # KEYCLOAK_URL (apps/api/src/services/auth/access-token.ts).
       KEYCLOAK_URL: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}/auth"
       KEYCLOAK_REALM: ${KEYCLOAK_REALM:-aggregator}
       KEYCLOAK_ADMIN_CLIENT_ID: ${KEYCLOAK_ADMIN_CLIENT_ID:-aggregator-api}
-      KEYCLOAK_ADMIN_CLIENT_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET:-aggregator-api-dev-secret-change-me}
-      # Mailer — `smtp` (default, points at MailHog in compose) or `ses`
+      KEYCLOAK_ADMIN_CLIENT_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET:-}
+      # Mailer — `smtp` (default, points at Mailpit in compose) or `ses`
       MAIL_PROVIDER: ${MAIL_PROVIDER:-smtp}
       SMTP_HOST: ${SMTP_HOST:-mailhog}
       SMTP_PORT: ${SMTP_PORT:-1025}
@@ -273,6 +288,20 @@ services:
       ADMIN_EMAILS: ${ADMIN_EMAILS:-admin@bluedots.local}
       PUBLIC_API_URL: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}/backend"
       PUBLIC_PORTAL_URL: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}"
+      # ─── Object storage (bulk uploads + QR PNGs + errors.csv) ────────
+      # AWS S3 via IAM role on the VM. S3_ENDPOINT/S3_PUBLIC_ENDPOINT are
+      # intentionally unset — the SDK uses the regional AWS endpoint.
+      # S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY are unset so the default
+      # credential chain picks up the EC2 instance role.
+      S3_REGION: ${S3_REGION:-ap-south-1}
+      S3_BUCKET: ${S3_BUCKET:-aggregator-bulk-uploads}
+      S3_FORCE_PATH_STYLE: "false"
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      BULK_UPLOAD_URL_TTL_SECONDS: ${BULK_UPLOAD_URL_TTL_SECONDS:-900}
+      BULK_UPLOAD_MAX_BYTES: ${BULK_UPLOAD_MAX_BYTES:-10485760}
+      QR_DOWNLOAD_URL_TTL_SECONDS: ${QR_DOWNLOAD_URL_TTL_SECONDS:-900}
+      PUBLIC_LINK_BASE_URL: ${PUBLIC_LINK_BASE_URL:-${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}}
+      SCHEMA_ROOT_DIR: /app/config/schemas
     # No host port mapping — exposed only via nginx at /backend/.
     # See `extra_hosts` rationale on the web service: api hits Keycloak via
     # the public URL for both admin REST + JWKS, so we short-circuit DNS to
@@ -293,28 +322,40 @@ services:
       mailhog:
         condition: service_healthy
 
-  # Uncomment once the bulk-upload worker is built:
-  #
-  # worker:
-  #   build:
-  #     context: .
-  #     dockerfile: apps/api/Dockerfile        # same codebase, different entry
-  #   image: aggregator-dpg/worker:dev
-  #   container_name: aggregator-worker
-  #   restart: unless-stopped
-  #   command: ["node", "dist/worker.js"]
-  #   environment:
-  #     NODE_ENV: production
-  #     DATABASE_URL: postgres://${POSTGRES_USER:-aggregator}:${POSTGRES_PASSWORD:-aggregator-dev}@postgres:5432/${POSTGRES_DB:-aggregator}
-  #     REDIS_URL: redis://redis:6379
-  #     S3_ENDPOINT: http://minio:9000
-  #     S3_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
-  #     S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
-  #     LOG_LEVEL: ${LOG_LEVEL:-info}
-  #   depends_on:
-  #     postgres:        { condition: service_healthy }
-  #     redis:           { condition: service_healthy }
-  #     minio:           { condition: service_healthy }
+  # ── Bulk-upload + cron worker ────────────────────────────────────────────
+  # BullMQ consumer for: bulk-file-process, bulk-row-process, bulk-finalise,
+  # link-metrics-rollup, cron-watchdog. Mirrors the API's config wiring
+  # (DB / Redis / S3) since the same code paths run.
+  worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    image: aggregator-dpg/worker:dev
+    container_name: aggregator-worker
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: postgres://${POSTGRES_USER:-aggregator}:${POSTGRES_PASSWORD:-aggregator-dev}@postgres:5432/${POSTGRES_DB:-aggregator}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      # ─── Object storage (raw CSV download + errors.csv write) ──────
+      # AWS S3 via IAM role on the VM — see notes on the api service.
+      S3_REGION: ${S3_REGION:-ap-south-1}
+      S3_BUCKET: ${S3_BUCKET:-aggregator-bulk-uploads}
+      S3_FORCE_PATH_STYLE: "false"
+      # ─── Schemas (participant validators) ──────────────────────────
+      SCHEMA_ROOT_DIR: /app/config/schemas
+      # ─── File processor row caps ───────────────────────────────────
+      BULK_MAX_ROWS: ${BULK_MAX_ROWS:-10000}
+      BULK_MAX_ROW_BYTES: ${BULK_MAX_ROW_BYTES:-65536}
+      # ─── Cron intervals (ms) ───────────────────────────────────────
+      LINK_METRICS_ROLLUP_INTERVAL_MS: ${LINK_METRICS_ROLLUP_INTERVAL_MS:-300000}
+      WATCHDOG_INTERVAL_MS: ${WATCHDOG_INTERVAL_MS:-3600000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   # ─────────────────────────────────────────────────────────────────────────
   # Edge: nginx reverse proxy + Let's Encrypt — single ingress on 80/443.
@@ -365,14 +406,11 @@ services:
         condition: service_healthy
       keycloak:
         condition: service_healthy
-      minio:
-        condition: service_healthy
       mailhog:
         condition: service_healthy
 
 volumes:
   redis-data:
-  minio-data:
   # Persists Let's Encrypt account keys + issued certs across container
   # restarts. Wiping this volume forces a fresh ACME registration — be
   # mindful of LE rate limits (5 duplicate certs per week per domain).

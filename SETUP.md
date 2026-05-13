@@ -10,7 +10,8 @@ End-to-end guide for running the Aggregator Portal + API on a fresh machine. The
 | ----------------------- | ------- | ---------------------------------------------------------------------------- |
 | Node.js                 | 22 LTS  | The repo's `engines` field asks for `>=24` but 22 works for dev (CI runs 24) |
 | pnpm                    | 10.x    | `npm i -g pnpm`                                                              |
-| Docker + Docker Compose | recent  | For Postgres, Keycloak, Redis, MinIO, MailHog                                |
+| Docker + Docker Compose | recent  | For Postgres, Keycloak, Redis, Mailpit                                       |
+| AWS CLI + S3 bucket     | latest  | Object storage (CSV uploads, QR PNGs, errors.csv). IAM role on the VM.       |
 | `openssl`               | any     | Generating session + approval-token secrets                                  |
 
 Optional but recommended:
@@ -50,8 +51,13 @@ A single Docker Compose file brings up every backing service. The first run pull
 | Postgres | `5433` → 5432              | Aggregator DB (5433 leaves system Postgres on 5432 untouched)    |
 | Keycloak | `8080`                     | OIDC, OTP authenticator, admin REST API                          |
 | Redis    | `6379`                     | BFF session store, future BullMQ queues                          |
-| MailHog  | `1025` (SMTP), `8025` (UI) | Local SMTP catch-all — open <http://localhost:8025> to read mail |
-| MinIO    | `9000` (API), `9001` (UI)  | S3-compatible object storage for future uploads                  |
+| Mailpit  | `1025` (SMTP), `8025` (UI) | Local SMTP catch-all — open <http://localhost:8025> to read mail |
+
+Object storage (S3) is **not** in compose. The api + worker talk to AWS S3
+directly via the regional endpoint and IAM-role credentials. On the VM, the
+EC2 instance profile must grant `s3:{Get,Put,Head,Delete}Object` on
+`arn:aws:s3:::${S3_BUCKET}/*` and `s3:ListBucket` on the bucket. Locally,
+the SDK picks up creds from `~/.aws/credentials` (run `aws configure`).
 
 Compose needs a couple of secrets injected via the **root** `.env`:
 

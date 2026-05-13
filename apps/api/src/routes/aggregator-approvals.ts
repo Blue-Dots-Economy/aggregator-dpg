@@ -5,23 +5,30 @@
  *
  *   GET  /admin/v1/aggregator-registrations/read/:id?token=...&intent=approve|reject
  *     Renders an HTML confirmation page that tells the admin which action
- *     they're about to take. If the Keycloak user already carries a
- *     `decision_made` attribute (i.e. a previous approve / reject click
- *     already ran), it instead renders an "already decided" page so
- *     duplicate clicks never resend emails — even on the reject path.
+ *     they're about to take. If `aggregators.status` is already terminal
+ *     (`active` after approve / `inactive` after reject) — i.e. a previous
+ *     click ran to completion — it instead renders an "already decided"
+ *     page so duplicate clicks never resend emails.
  *
  *   POST /admin/v1/aggregator-registrations/decision/:id
  *     Body: { token, decision: 'approve' | 'reject', reason? }
- *     Verifies the JWT, re-checks the `decision_made` KC attribute (single-
- *     use guard), applies the action, sends the applicant a notification
- *     email, stamps the user with `decision_made` + `decided_at` (+
- *     `rejection_reason` on reject), and returns a result HTML page.
+ *     Verifies the JWT, re-checks `aggregators.status` (single-use guard),
+ *     applies the action:
+ *       approve → store.updateStatus(id, 'active') + idp.enableUser
+ *                 + idp.setUserDecision(kcId, 'approved')
+ *       reject  → store.updateStatus(id, 'inactive')
+ *                 + idp.setUserDecision(kcId, 'rejected')
+ *     Sends the applicant a notification email and returns a result page.
+ *
+ * Source of truth for the decision is the DB column `aggregators.status`.
+ * Keycloak mirrors the decision via the `decision_made` user attribute so
+ * the auth middleware can gate login at JWT-verify time without an extra
+ * DB hit.
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { config } from '../config.js';
-import { logger } from '../logger.js';
 import { verifyApprovalToken } from '../services/approval-token.js';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
 import { getIdpAdmin } from '../services/idp-admin/index.js';
@@ -94,7 +101,7 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
       const lookup = await loadAggregatorAndUser(aggregatorId);
       if (!lookup.ok) return sendHtml(reply, lookup.status, lookup.html);
 
-      const prior = readDecision(lookup.kcUser);
+      const prior = decisionFromStatus(lookup.aggregator.status);
       if (prior) {
         return sendHtml(reply, 200, renderResultPage(alreadyDecidedView(prior)));
       }
@@ -107,8 +114,10 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
           intent: effectiveIntent,
           token,
           applicantEmail: lookup.kcUser.email,
-          association: lookup.aggregator.orgSlug,
-          aggregatorType: lookup.aggregator.type,
+          association: lookup.aggregator.name,
+          // For aggregator actors `type` is null. Surface `actor_type`
+          // instead so the admin page always shows something meaningful.
+          aggregatorType: lookup.aggregator.type ?? lookup.aggregator.actorType,
           postUrl: `${config.PUBLIC_API_URL}/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
         }),
       );
@@ -119,6 +128,10 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
     '/admin/v1/aggregator-registrations/decision/:id',
     async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
       const aggregatorId = req.params.id;
+      const log = req.log.child({
+        operation: 'aggregator-approval.decide',
+        aggregator_id: aggregatorId,
+      });
       const parsed = DecisionBodySchema.safeParse(req.body);
       if (!parsed.success) {
         return sendHtml(
@@ -159,27 +172,54 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
       const lookup = await loadAggregatorAndUser(aggregatorId);
       if (!lookup.ok) return sendHtml(reply, lookup.status, lookup.html);
 
-      // Single-use guard: if the user already carries a `decision_made`
-      // attribute, ignore this replay (covers both approve and reject).
-      const prior = readDecision(lookup.kcUser);
+      // Single-use guard: DB status is the source of truth. Anything other
+      // than `pending` means this aggregator has already been decided.
+      const prior = decisionFromStatus(lookup.aggregator.status);
       if (prior) {
         return sendHtml(reply, 200, renderResultPage(alreadyDecidedView(prior)));
       }
 
+      const store = getAggregatorStore();
       const idp = getIdpAdmin();
       const mailer = getMailer();
-      const decidedAtIso = new Date().toISOString();
 
       if (parsed.data.decision === 'approve') {
+        // 1. DB first — flip status. KC mirror follows.
+        const dbUpdate = await store.updateStatus(aggregatorId, 'active', 'admin');
+        if (!dbUpdate.ok) {
+          log.error(
+            {
+              status: 'failure',
+              sub_operation: 'store.updateStatus.active',
+              code: dbUpdate.error.code,
+              cause: dbUpdate.error.message,
+            },
+            'failed to flip aggregator status to active',
+          );
+          return sendHtml(
+            reply,
+            503,
+            renderResultPage({
+              status: 'error',
+              title: 'Action failed',
+              message: 'Database unavailable. Please try again shortly.',
+            }),
+          );
+        }
+
         const enable = await idp.enableUser(lookup.kcUser.id);
         if (!enable.ok) {
-          logger.error({
-            operation: 'aggregator-approval.decide',
-            status: 'failure',
-            step: 'idp.enableUser',
-            error: enable.error.message,
-            aggregator_id: aggregatorId,
-          });
+          log.error(
+            {
+              status: 'failure',
+              sub_operation: 'idp.enableUser',
+              code: enable.error.code,
+              cause: enable.error.message,
+            },
+            'failed to enable KC user during approval (DB already flipped active)',
+          );
+          // Don't roll back the DB — the drift-reconciliation worker will
+          // notice the mismatch and re-enable the user on the next pass.
           return sendHtml(
             reply,
             503,
@@ -190,103 +230,134 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
             }),
           );
         }
-        const stamp = await idp.setAttributes(lookup.kcUser.id, {
-          [KC_ATTR.DECISION_MADE]: 'approved',
-          [KC_ATTR.DECIDED_AT]: decidedAtIso,
-          [KC_ATTR.REJECTION_REASON]: null,
-        });
+
+        const stamp = await idp.setUserDecision(lookup.kcUser.id, 'approved');
         if (!stamp.ok) {
-          logger.warn({
-            operation: 'aggregator-approval.decide',
-            status: 'failure',
-            step: 'idp.setAttributes.approved',
-            error: stamp.error.message,
-          });
+          log.warn(
+            {
+              status: 'failure',
+              sub_operation: 'idp.setUserDecision.approved',
+              code: stamp.error.code,
+              cause: stamp.error.message,
+            },
+            'failed to stamp decision_made=approved on KC user (auth-gate stays open via enabled flag)',
+          );
         }
+
         const approvedMail = renderApplicantApproved({
-          contactName: applicantNameOf(lookup.kcUser),
-          association: lookup.aggregator.orgSlug,
-          identifier: lookup.kcUser.email,
+          contactName: applicantNameOf(lookup),
+          association: lookup.aggregator.name,
+          identifier: lookup.aggregator.contact.email,
           signInUrl: `${config.PUBLIC_PORTAL_URL}/login`,
         });
         const sendResult = await mailer.send({
-          to: lookup.kcUser.email,
+          to: lookup.aggregator.contact.email,
           subject: approvedMail.subject,
           html: approvedMail.html,
           text: approvedMail.text,
         });
         if (!sendResult.ok) {
-          logger.error({
-            operation: 'aggregator-approval.decide',
-            status: 'failure',
-            step: 'mailer.send.approved',
-            error: sendResult.error.message,
-          });
+          log.error(
+            {
+              status: 'failure',
+              sub_operation: 'mailer.send.approved',
+              code: sendResult.error.code,
+              cause: sendResult.error.message,
+            },
+            'approved-email delivery failed',
+          );
         }
-        logger.info({
-          operation: 'aggregator-approval.decide',
-          status: 'success',
-          decision: 'approve',
-          aggregator_id: aggregatorId,
-        });
+        log.info(
+          { status: 'success', decision: 'approve', new_status: 'active' },
+          'aggregator approved',
+        );
         return sendHtml(
           reply,
           200,
           renderResultPage({
             status: 'success',
             title: 'Application approved',
-            message: `${lookup.kcUser.email} can now sign in to the portal.`,
+            message: `${lookup.aggregator.contact.email} can now sign in to the portal.`,
           }),
         );
       }
 
-      // Reject path — KC user stays disabled. Stamp `decision_made` so
-      // duplicate reject clicks don't resend the rejection email.
-      const stamp = await idp.setAttributes(lookup.kcUser.id, {
-        [KC_ATTR.DECISION_MADE]: 'rejected',
-        [KC_ATTR.DECIDED_AT]: decidedAtIso,
-        ...(parsed.data.reason ? { [KC_ATTR.REJECTION_REASON]: parsed.data.reason } : {}),
-      });
-      if (!stamp.ok) {
-        logger.warn({
-          operation: 'aggregator-approval.decide',
-          status: 'failure',
-          step: 'idp.setAttributes.rejected',
-          error: stamp.error.message,
-        });
+      // Reject path — DB status → 'inactive', KC user stays disabled.
+      // Rejection reason is logged for audit but not persisted (no column
+      // yet; revisit when an aggregator_decision_audit table lands).
+      const dbUpdate = await store.updateStatus(aggregatorId, 'inactive', 'admin');
+      if (!dbUpdate.ok) {
+        log.error(
+          {
+            status: 'failure',
+            sub_operation: 'store.updateStatus.inactive',
+            code: dbUpdate.error.code,
+            cause: dbUpdate.error.message,
+          },
+          'failed to flip aggregator status to inactive',
+        );
+        return sendHtml(
+          reply,
+          503,
+          renderResultPage({
+            status: 'error',
+            title: 'Action failed',
+            message: 'Database unavailable. Please try again shortly.',
+          }),
+        );
       }
+
+      const stamp = await idp.setUserDecision(lookup.kcUser.id, 'rejected');
+      if (!stamp.ok) {
+        log.warn(
+          {
+            status: 'failure',
+            sub_operation: 'idp.setUserDecision.rejected',
+            code: stamp.error.code,
+            cause: stamp.error.message,
+          },
+          'failed to stamp decision_made=rejected on KC user (drift-sync will repair)',
+        );
+      }
+
       const rejectedMail = renderApplicantRejected({
-        contactName: applicantNameOf(lookup.kcUser),
-        association: lookup.aggregator.orgSlug,
+        contactName: applicantNameOf(lookup),
+        association: lookup.aggregator.name,
         reason: parsed.data.reason,
       });
       const sendResult = await mailer.send({
-        to: lookup.kcUser.email,
+        to: lookup.aggregator.contact.email,
         subject: rejectedMail.subject,
         html: rejectedMail.html,
         text: rejectedMail.text,
       });
       if (!sendResult.ok) {
-        logger.error({
-          operation: 'aggregator-approval.decide',
-          status: 'failure',
-          step: 'mailer.send.rejected',
-          error: sendResult.error.message,
-        });
+        log.error(
+          {
+            status: 'failure',
+            sub_operation: 'mailer.send.rejected',
+            code: sendResult.error.code,
+            cause: sendResult.error.message,
+          },
+          'rejected-email delivery failed',
+        );
       }
-      logger.info({
-        operation: 'aggregator-approval.decide',
-        status: 'success',
-        decision: 'reject',
-        aggregator_id: aggregatorId,
-      });
+      log.info(
+        {
+          status: 'success',
+          decision: 'reject',
+          new_status: 'inactive',
+          reason: parsed.data.reason ?? null,
+        },
+        'aggregator rejected',
+      );
       return sendHtml(
         reply,
         200,
         renderResultPage({
           status: 'success',
           title: 'Application rejected',
-          message: `${lookup.kcUser.email} has been notified.`,
+          message: `${lookup.aggregator.contact.email} has been notified.`,
         }),
       );
     },
@@ -295,14 +366,27 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
 
 interface PriorDecision {
   decision: 'approved' | 'rejected';
-  decidedAt?: string;
 }
 
-function readDecision(user: IdpUser): PriorDecision | null {
-  const raw = user.attributes?.[KC_ATTR.DECISION_MADE]?.[0];
-  if (raw !== 'approved' && raw !== 'rejected') return null;
-  const decidedAt = user.attributes?.[KC_ATTR.DECIDED_AT]?.[0];
-  return decidedAt ? { decision: raw, decidedAt } : { decision: raw };
+/**
+ * Maps `aggregators.status` to a prior-decision marker. Returning `null`
+ * means the row is still in `pending` and the admin click should proceed.
+ *
+ * `retired` is treated as a prior approval (the aggregator was once active
+ * and was later retired) so the approve button doesn't reactivate a retired
+ * account behind the admin's back.
+ */
+function decisionFromStatus(status: Aggregator['status']): PriorDecision | null {
+  switch (status) {
+    case 'active':
+    case 'retired':
+      return { decision: 'approved' };
+    case 'inactive':
+      return { decision: 'rejected' };
+    case 'pending':
+    default:
+      return null;
+  }
 }
 
 function alreadyDecidedView(prior: PriorDecision): {
@@ -397,9 +481,18 @@ function tokenErrorMessage(code: 'EXPIRED' | 'INVALID' | 'MALFORMED'): string {
   }
 }
 
-function applicantNameOf(user: { firstName?: string; lastName?: string; email: string }): string {
-  const parts = [user.firstName, user.lastName].filter((p): p is string => Boolean(p));
-  return parts.length > 0 ? parts.join(' ') : user.email;
+/**
+ * Display name preference: Beckn contact.name → KC firstName+lastName →
+ * email. Aggregator's `contact.name` is filled at registration; KC names
+ * only appear after the applicant completes the Update Profile flow.
+ */
+function applicantNameOf(lookup: LookupOk): string {
+  const contactName = lookup.aggregator.contact.name;
+  if (contactName) return contactName;
+  const parts = [lookup.kcUser.firstName, lookup.kcUser.lastName].filter((p): p is string =>
+    Boolean(p),
+  );
+  return parts.length > 0 ? parts.join(' ') : lookup.kcUser.email;
 }
 
 function sendHtml(reply: FastifyReply, status: number, html: string): FastifyReply {

@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.bluedots.org/participant/seeker.v1.json",
+  "title": "Job Seeker Profile 1.0",
+  "description": "People looking for jobs.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "skills", "preferred_city", "experience_years"],
+  "properties": {
+    "participant_id": {
+      "type": "string",
+      "title": "Participant ID",
+      "description": "Stable aggregator-supplied identifier. Re-uploading a row with the same participant_id is treated as a duplicate (skipped). If omitted, the worker mints a UUID and dedup across uploads is not possible.",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9_.:-]+$"
+    },
+    "name": {
+      "type": "string",
+      "title": "Full Name",
+      "minLength": 1
+    },
+    "skills": {
+      "type": "array",
+      "title": "Skills",
+      "minItems": 1,
+      "items": { "type": "string" }
+    },
+    "preferred_city": {
+      "type": "string",
+      "title": "Preferred City"
+    },
+    "experience_years": {
+      "type": "integer",
+      "title": "Experience (years)",
+      "minimum": 0
+    },
+    "open_to_remote": {
+      "type": "boolean",
+      "title": "Open to remote work"
+    }
+  }
+}

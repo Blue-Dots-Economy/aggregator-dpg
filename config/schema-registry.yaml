@@ -1,0 +1,26 @@
+# Schema registry — allowlist of valid persona + service schema IDs.
+#
+# Aggregators may only register personas/services whose `id` appears below.
+# Names are advisory display labels — the API does NOT enforce that an
+# aggregator's `name` matches the registry entry (Beckn ID is the contract).
+#
+# Add new entries when a new persona/service schema is published. Future
+# work: replace with a dynamic registry service exposing /schemas/{id}.
+
+personas:
+  - id: persona-iti-seeker
+    name: ITI / Vocational Seeker
+  - id: persona-pwd-seeker
+    name: Person with Disability
+  - id: persona-traveller
+    name: Traveller
+  - id: persona-job-seeker
+    name: Job Seeker
+
+services:
+  - id: service-bluedots-job
+    name: BlueDots Job Posting
+  - id: service-orangedots-tac
+    name: OrangeDots Travel Advisory
+  - id: service-greendots-training
+    name: GreenDots Training

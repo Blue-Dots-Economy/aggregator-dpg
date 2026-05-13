@@ -73,4 +73,19 @@ export abstract class IdpAdminAdapter {
     userId: string,
     attributes: Record<string, string | string[] | null>,
   ): Promise<IdpResult<void>>;
+
+  /**
+   * Write only the `decision_made` attribute on a user. Convenience wrapper
+   * around {@link setAttributes} so the approval flow does not need to know
+   * the attribute name. Use `enableUser` / `disableUser` separately when
+   * the decision affects login (typically `approved` → enable, `rejected` →
+   * disable).
+   *
+   * @param userId  - Keycloak user id (from `findByAttribute(aggregator_id)`).
+   * @param decision - One of `'pending'`, `'approved'`, `'rejected'`.
+   */
+  abstract setUserDecision(
+    userId: string,
+    decision: 'pending' | 'approved' | 'rejected',
+  ): Promise<IdpResult<void>>;
 }

@@ -25,9 +25,11 @@ export function buildAggregatorProfile(
   const createdAt = overrides.createdAt ?? new Date('2026-01-01T00:00:00Z');
   return {
     aggregatorId: '00000000-0000-0000-0000-000000000001',
-    schemaVersion: 1,
-    data: {},
-    consent: {},
+    contactName: null,
+    personas: [],
+    services: [],
+    verifiedCertificate: [],
+    profileCompletedAt: null,
     createdBy: 'self',
     updatedBy: 'self',
     createdAt,
@@ -41,9 +43,6 @@ export function buildCreateAggregatorProfileInput(
 ): CreateAggregatorProfileInput {
   return {
     aggregatorId: '00000000-0000-0000-0000-000000000001',
-    schemaVersion: 1,
-    data: {},
-    consent: {},
     createdBy: 'self',
     updatedBy: 'self',
     ...overrides,

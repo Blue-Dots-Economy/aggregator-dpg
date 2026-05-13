@@ -58,10 +58,18 @@ describe('POST /v1/aggregator-registrations/create', () => {
   });
 
   const validBody = {
-    aggregator_type: 'seeker',
-    association: 'TRRAIN',
-    email: 'asha@trrain.org',
-    phone: '+919876543210',
+    name: 'TRRAIN',
+    type: 'seeker',
+    contact: {
+      name: 'Asha Kumari',
+      phone: '+919876543210',
+      email: 'asha@trrain.org',
+    },
+    consent: {
+      value: true,
+      given_at: '2026-01-15T10:00:00Z',
+      valid_till: '2027-01-15T10:00:00Z',
+    },
   };
 
   it('creates an aggregator + disabled KC user on valid payload', async () => {
@@ -87,16 +95,23 @@ describe('POST /v1/aggregator-registrations/create', () => {
     const profile = await profileStore.findByAggregatorId(body.aggregator_id);
     if (profile.ok) {
       expect(profile.value?.aggregatorId).toBe(body.aggregator_id);
-      expect(profile.value?.data).toEqual({});
-      expect(profile.value?.consent).toEqual({});
+      expect(profile.value?.contactName).toBeNull();
+      expect(profile.value?.personas).toEqual([]);
+      expect(profile.value?.services).toEqual([]);
+      expect(profile.value?.verifiedCertificate).toEqual([]);
+      expect(profile.value?.profileCompletedAt).toBeNull();
     }
 
-    const kcUser = await idp.findByEmail(validBody.email);
+    const kcUser = await idp.findByEmail(validBody.contact.email);
     if (kcUser.ok && kcUser.value) {
       expect(kcUser.value.enabled).toBe(false);
       expect(kcUser.value.attributes?.aggregator_id?.[0]).toBe(body.aggregator_id);
-      expect(kcUser.value.attributes?.org_slug?.[0]).toBe(body.org_slug);
-      expect(kcUser.value.attributes?.aggregator_type?.[0]).toBe('seeker');
+      expect(kcUser.value.attributes?.phoneNumber?.[0]).toBe(validBody.contact.phone);
+      expect(kcUser.value.attributes?.decision_made?.[0]).toBe('pending');
+      // Removed attributes per the new flow:
+      expect(kcUser.value.attributes?.org_slug).toBeUndefined();
+      expect(kcUser.value.attributes?.aggregator_type).toBeUndefined();
+      expect(kcUser.value.attributes?.association).toBeUndefined();
     }
 
     const sent = mailer.outbox;
@@ -134,11 +149,13 @@ describe('POST /v1/aggregator-registrations/create', () => {
       method: 'POST',
       url: '/v1/aggregator-registrations/create',
       headers: AUTH_HEADER,
-      payload: { contact_name: 'X' },
+      payload: { name: 'X' },
     });
     expect(res.statusCode).toBe(400);
-    const body = res.json() as { error: string };
-    expect(body.error).toBe('BadRequest');
+    const body = res.json() as { error: { code: string; title: string; requestId: string } };
+    expect(body.error.code).toBe('SCHEMA_VALIDATION');
+    expect(body.error.title).toBeTruthy();
+    expect(body.error.requestId).toMatch(/^req-/);
   });
 
   it('rejects malformed email', async () => {
@@ -146,13 +163,13 @@ describe('POST /v1/aggregator-registrations/create', () => {
       method: 'POST',
       url: '/v1/aggregator-registrations/create',
       headers: AUTH_HEADER,
-      payload: { ...validBody, email: 'not-an-email' },
+      payload: { ...validBody, contact: { ...validBody.contact, email: 'not-an-email' } },
     });
     expect(res.statusCode).toBe(400);
   });
 
   it('returns 409 when the email already exists in Keycloak', async () => {
-    await idp.createUser({ email: validBody.email });
+    await idp.createUser({ email: validBody.contact.email });
     const res = await app.inject({
       method: 'POST',
       url: '/v1/aggregator-registrations/create',
@@ -160,8 +177,10 @@ describe('POST /v1/aggregator-registrations/create', () => {
       payload: validBody,
     });
     expect(res.statusCode).toBe(409);
-    const body = res.json() as { code: string };
-    expect(body.code).toBe('USER_EXISTS');
+    const body = res.json() as { error: { code: string; title: string; detail: string } };
+    expect(body.error.code).toBe('USER_EXISTS');
+    expect(body.error.title).toBe('Email already registered');
+    expect(body.error.detail).toContain('already exists');
   });
 
   it('returns 409 when the phone is already used by another user', async () => {
@@ -174,11 +193,16 @@ describe('POST /v1/aggregator-registrations/create', () => {
       method: 'POST',
       url: '/v1/aggregator-registrations/create',
       headers: AUTH_HEADER,
-      payload: { ...validBody, email: 'asha2@trrain.org' },
+      payload: {
+        ...validBody,
+        contact: { ...validBody.contact, email: 'asha2@trrain.org' },
+      },
     });
     expect(res.statusCode).toBe(409);
-    const body = res.json() as { code: string };
-    expect(body.code).toBe('PHONE_EXISTS');
+    const body = res.json() as { error: { code: string; title: string; requestId: string } };
+    expect(body.error.code).toBe('PHONE_EXISTS');
+    expect(body.error.title).toBe('Phone already registered');
+    expect(body.error.requestId).toMatch(/^req-/);
   });
 
   it('rolls back the aggregator row when KC createUser fails', async () => {
@@ -193,7 +217,10 @@ describe('POST /v1/aggregator-registrations/create', () => {
       method: 'POST',
       url: '/v1/aggregator-registrations/create',
       headers: AUTH_HEADER,
-      payload: { ...validBody, email: 'asha2@trrain.org' },
+      payload: {
+        ...validBody,
+        contact: { ...validBody.contact, email: 'asha2@trrain.org' },
+      },
     });
     expect(res.statusCode).toBe(503);
 

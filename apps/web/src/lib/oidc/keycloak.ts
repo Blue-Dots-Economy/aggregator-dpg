@@ -21,6 +21,7 @@ import {
   type OidcResult,
   type TokenSet,
 } from './interface';
+import { logger } from '../logger';
 
 export interface KeycloakAdapterOptions {
   issuerUrl: string;
@@ -115,13 +116,20 @@ export class KeycloakAdapter extends IdentityProviderAdapter {
         e.error_description || e.error
           ? `${e.error ?? ''}: ${e.error_description ?? ''}`.trim()
           : (e.message ?? 'unknown error');
-      console.error('[oidc] exchangeCode failed', {
-        name: e.name,
-        message: e.message,
-        idpError: e.error,
-        idpErrorDesc: e.error_description,
-        status: e.response?.statusCode,
-      });
+      logger.error(
+        {
+          operation: 'oidc.exchangeCode',
+          status: 'failure',
+          code: 'TOKEN_EXCHANGE_FAILED',
+          err_name: e.name,
+          idp_error: e.error,
+          idp_error_description: e.error_description,
+          idp_status: e.response?.statusCode,
+          cause: e.message,
+          hint: 'openid-client.callback() rejected. Inspect idp_error for the precise OAuth2 reason.',
+        },
+        'oidc token exchange failed',
+      );
       return {
         ok: false,
         error: {

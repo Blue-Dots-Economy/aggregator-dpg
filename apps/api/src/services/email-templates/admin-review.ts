@@ -12,7 +12,7 @@ export interface AdminReviewVars {
   applicantEmail: string;
   applicantPhone: string;
   association: string;
-  aggregatorType: 'seeker' | 'provider';
+  aggregatorType: 'aggregator' | 'seeker' | 'provider' | 'both';
   state?: string | undefined;
   about?: string | undefined;
   /** Pre-built deep links — already include the signed token + intent. */

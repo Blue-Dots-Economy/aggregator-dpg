@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { slugify, randomSuffix, slugWithSuffix } from './slug.js';
+import { slugify, randomSuffix, slugFromName, slugWithSuffix } from './slug.js';
 
 describe('slug', () => {
   it('lowercases and replaces non-alphanumerics with hyphens', () => {
@@ -26,8 +26,24 @@ describe('slug', () => {
     expect(s.length).toBe(4);
   });
 
-  it('slugWithSuffix combines stem + hex', () => {
+  it('slugWithSuffix combines stem + hex (legacy alias)', () => {
     const s = slugWithSuffix('TRRAIN');
     expect(s).toMatch(/^trrain-[0-9a-f]{4}$/);
+  });
+
+  it('slugFromName produces slug(name)-<hex>', () => {
+    const s = slugFromName('SkillBridge Network');
+    expect(s).toMatch(/^skillbridge-network-[0-9a-f]{4}$/);
+  });
+
+  it('slugFromName falls back to "org" when name slugifies to empty', () => {
+    const s = slugFromName('!!!');
+    expect(s).toMatch(/^org-[0-9a-f]{4}$/);
+  });
+
+  it('slugFromName is non-deterministic across calls (suffix entropy)', () => {
+    const a = slugFromName('SkillBridge Network');
+    const b = slugFromName('SkillBridge Network');
+    expect(a).not.toBe(b);
   });
 });

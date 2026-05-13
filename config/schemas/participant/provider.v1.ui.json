@@ -1,0 +1,34 @@
+{
+  "ui:order": [
+    "company_name",
+    "role",
+    "city",
+    "employment_type",
+    "salary_range",
+    "required_skills",
+    "participant_id"
+  ],
+  "company_name": {
+    "ui:placeholder": "e.g. Acme Retail Pvt Ltd"
+  },
+  "role": {
+    "ui:placeholder": "e.g. Store Associate"
+  },
+  "city": {
+    "ui:placeholder": "e.g. Bengaluru"
+  },
+  "employment_type": {
+    "ui:widget": "select",
+    "ui:enumNames": ["Full-time", "Part-time", "Contract", "Internship"]
+  },
+  "salary_range": {
+    "ui:placeholder": "e.g. 5-8 LPA  or  ₹40,000–60,000/month"
+  },
+  "required_skills": {
+    "ui:widget": "CommaSeparatedArrayWidget",
+    "ui:placeholder": "e.g. customer-service, billing, inventory"
+  },
+  "participant_id": {
+    "ui:widget": "hidden"
+  }
+}

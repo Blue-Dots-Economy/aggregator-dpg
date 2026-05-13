@@ -20,10 +20,14 @@ import {
   sessionCookieOptions,
   verifyFlowState,
 } from '@/lib/cookies';
+import { logger, pickRequestId } from '@/lib/logger';
 
 export const runtime = 'nodejs';
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
+  const reqId = pickRequestId(req.headers);
+  const log = logger.child({ reqId, route: 'GET /api/auth/callback' });
+
   const url = req.nextUrl;
   const code = url.searchParams.get('code');
   const state = url.searchParams.get('state');
@@ -31,16 +35,32 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const oidcErrorDesc = url.searchParams.get('error_description');
 
   if (oidcError) {
-    console.error('[auth/callback] oidc error from idp', { oidcError, oidcErrorDesc });
+    log.error(
+      {
+        code: 'OIDC_PROVIDER_ERROR',
+        oidc_error: oidcError,
+        oidc_error_description: oidcErrorDesc,
+        hint: 'IdP returned error to redirect URI. User cancelled or IdP misconfig.',
+      },
+      'oidc error from idp',
+    );
     return failure(req, `oidc_error_${oidcError}`);
   }
   if (!code || !state) {
+    log.warn({ code: 'OIDC_MISSING_PARAMS' }, 'callback missing code or state param');
     return failure(req, 'missing_code_or_state');
   }
 
   const flowCookie = req.cookies.get(OIDC_FLOW_COOKIE)?.value;
   const flow = verifyFlowState(flowCookie);
   if (!flow) {
+    log.warn(
+      {
+        code: 'OIDC_FLOW_COOKIE_INVALID',
+        hint: 'Flow cookie missing/expired/tampered. User likely re-entered URL.',
+      },
+      'invalid flow cookie on callback',
+    );
     return failure(req, 'invalid_flow_cookie');
   }
 
@@ -60,7 +80,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     callbackParams,
   });
   if (!exchanged.ok) {
-    console.error('[auth/callback] token exchange failed', exchanged.error);
+    log.error(
+      {
+        code: exchanged.error.code,
+        sub_operation: 'oidc.exchangeCode',
+        cause: exchanged.error.message,
+        hint: 'Token exchange with Keycloak failed. Check client_id/secret + redirect_uri allowlist.',
+      },
+      'oidc token exchange failed',
+    );
     return failure(req, `exchange_${exchanged.error.code.toLowerCase()}`);
   }
 
