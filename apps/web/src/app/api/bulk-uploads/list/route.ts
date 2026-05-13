@@ -18,10 +18,25 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return await passthrough(upstream);
   } catch (err) {
     if (err instanceof Error && err.message === 'no active session') {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json(
+        {
+          error: 'Unauthorized',
+          code: 'NO_ACTIVE_SESSION',
+          message:
+            'No active session cookie was found, or your session has expired. Sign in again at /login and retry the request.',
+          hint: 'The BFF requires a valid `sid` cookie; the upstream API call was not attempted.',
+        },
+        { status: 401 },
+      );
     }
+    const detail = err instanceof Error ? err.message : 'unknown error';
     return NextResponse.json(
-      { error: 'ServiceUnavailable', message: 'bulk-uploads service unavailable' },
+      {
+        error: 'ServiceUnavailable',
+        code: 'BULK_UPLOADS_UPSTREAM_FAILED',
+        message: 'The bulk-uploads service is temporarily unreachable. Please try again shortly.',
+        detail,
+      },
       { status: 503 },
     );
   }
