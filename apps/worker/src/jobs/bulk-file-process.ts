@@ -165,12 +165,13 @@ export async function processBulkFile(job: BulkFileProcessJob): Promise<ProcessO
     }
   }
 
-  // 5. Transition to row_processing + record total.
+  // 5. Transition to row_processing. The total row count moves into Redis
+  // (see step 6 below) instead of the dropped `bulk_uploads.total_rows`
+  // column — keeps `bulk_uploads` as pure lifecycle state.
   await getDb()
     .update(schema.bulkUploads)
     .set({
       status: 'row_processing',
-      totalRows: rows.length,
       lastProgressAt: new Date(),
       updatedAt: new Date(),
     })

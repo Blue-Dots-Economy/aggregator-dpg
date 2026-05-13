@@ -140,9 +140,6 @@ export async function finaliseBulk(job: BulkFinaliseJob): Promise<FinaliseOutcom
       .update(schema.bulkUploads)
       .set({
         status: 'completed',
-        passed,
-        failed,
-        skipped,
         errorsCsvS3Key: errorsKey,
         completedAt,
         lastProgressAt: completedAt,

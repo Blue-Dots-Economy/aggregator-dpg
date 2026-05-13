@@ -127,14 +127,13 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       });
     }
 
-    // 2. Normalisation. On the public path the server ALWAYS mints the
-    // `participant_id` — accepting a client-supplied value would let an
-    // anonymous caller probe whether arbitrary aggregator-side IDs exist
-    // (the `ON CONFLICT DO NOTHING` branch is observable via the 409
-    // outcome). Authenticated bulk uploads still honour caller-supplied IDs
-    // for dedup; that path runs behind requireApproved.
+    // 2. Normalisation. The server discards any client-supplied
+    // `participant_id` (anonymous caller probing prevention) and derives the
+    // dedup key from the normalised phone — same person re-submitting the
+    // form hits the wrapper's ON CONFLICT path and returns outcome='skipped'.
+    // Falls back to a fresh UUID when phone is absent so dedup degrades
+    // gracefully for phone-optional schemas (no dedup, but still works).
     delete (body as Record<string, unknown>)['participant_id'];
-    const participantId = randomUUID();
     const phoneRaw = typeof body['phone'] === 'string' ? (body['phone'] as string) : '';
     let phoneNormalised: string | null = null;
     if (phoneRaw) {
@@ -146,6 +145,7 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
     }
     const emailRaw = typeof body['email'] === 'string' ? (body['email'] as string) : '';
     const emailNormalised = emailRaw ? emailRaw.trim().toLowerCase() : null;
+    const participantId = phoneNormalised ?? randomUUID();
 
     // 3 + 4. participant UPSERT (via shared writer) and link_submission
     // INSERT must commit atomically — otherwise a crash between them leaves a

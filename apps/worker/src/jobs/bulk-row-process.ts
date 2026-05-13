@@ -219,10 +219,12 @@ async function commit(
     return outcome;
   }
 
-  // Periodic DB counter flush (every PROGRESS_FLUSH_EVERY rows).
+  // Heartbeat: bump last_progress_at every PROGRESS_FLUSH_EVERY rows so the
+  // watchdog can detect stalled jobs. Counters live in Redis only — the
+  // bulk_uploads counter columns were dropped in migration 0009.
   if (result.processed % PROGRESS_FLUSH_EVERY === 0 || result.processed === result.total) {
-    await flushCounters(job.uploadId).catch((err) => {
-      log.warn({ status: 'warn', sub: 'flush_counters', error: (err as Error).message });
+    await bumpHeartbeat(job.uploadId).catch((err) => {
+      log.warn({ status: 'warn', sub: 'heartbeat', error: (err as Error).message });
     });
   }
 
@@ -242,10 +244,6 @@ async function commit(
   return outcome;
 }
 
-/**
- * Flush Redis counters (passed/failed/skipped) into bulk_uploads. Powers
- * DB-only API status reads. Idempotent — overwrites with the latest counts.
- */
 /**
  * Mutates `payload` in place: for every schema property declared with
  * `type: 'array'`, if the cell arrived as a string (CSV form), split it on
@@ -270,24 +268,15 @@ function preprocessArrayCells(
   }
 }
 
-async function flushCounters(uploadId: string): Promise<void> {
-  const redis = getRedis();
-  const ns = `bu:${uploadId}`;
-  const [passedRaw, failedRaw, skippedRaw] = await redis.hmget(
-    `${ns}:counters`,
-    'passed',
-    'failed',
-    'skipped',
-  );
-  const passed = parseInt(passedRaw ?? '0', 10) || 0;
-  const failed = parseInt(failedRaw ?? '0', 10) || 0;
-  const skipped = parseInt(skippedRaw ?? '0', 10) || 0;
+/**
+ * Heartbeat-only DB write — bumps `last_progress_at` so the watchdog can
+ * detect stalled jobs. Counters live exclusively in Redis (live) and the
+ * `onboarding` row (after `bulk-finalise`).
+ */
+async function bumpHeartbeat(uploadId: string): Promise<void> {
   await getDb()
     .update(schema.bulkUploads)
     .set({
-      passed,
-      failed,
-      skipped,
       lastProgressAt: new Date(),
       updatedAt: sql`NOW()`,
     })
