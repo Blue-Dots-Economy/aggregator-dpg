@@ -18,16 +18,29 @@
 
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { randomUUID } from 'node:crypto';
-import { and, eq } from 'drizzle-orm';
+import { PostgresParticipantsWriter } from '@aggregator-dpg/participants-writer/postgres';
+import type { ParticipantsWriterBase } from '@aggregator-dpg/participants-writer/interface';
 import { getRegistrationLinksStore } from '../services/registration-links-store/index.js';
 import type { RegistrationLink } from '../services/registration-links-store/index.js';
 import { getSchemaLoader } from '../services/schema-loader/index.js';
 import { normalisePhone } from '../services/phone.js';
 import { getDb } from '../db/client.js';
-import { participants, linkSubmissions } from '../db/schema.js';
+import { linkSubmissions } from '../db/schema.js';
 import { httpError } from '../errors/http-error.js';
 import { consume } from '../services/rate-limiter/index.js';
 import { config } from '../config.js';
+
+let participantsWriter: ParticipantsWriterBase | null = null;
+function getParticipantsWriter(): ParticipantsWriterBase {
+  if (participantsWriter) return participantsWriter;
+  participantsWriter = new PostgresParticipantsWriter(getDb());
+  return participantsWriter;
+}
+
+/** Test helper — override the writer (e.g., inject a fake). */
+export function _setParticipantsWriter(w: ParticipantsWriterBase | null): void {
+  participantsWriter = w;
+}
 
 interface OrgSlugParams {
   orgSlug?: string;
@@ -134,47 +147,37 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
     const emailRaw = typeof body['email'] === 'string' ? (body['email'] as string) : '';
     const emailNormalised = emailRaw ? emailRaw.trim().toLowerCase() : null;
 
-    // 3 + 4. participant INSERT (ON CONFLICT DO NOTHING) and link_submission
+    // 3 + 4. participant UPSERT (via shared writer) and link_submission
     // INSERT must commit atomically — otherwise a crash between them leaves a
     // participant without a corresponding submission row, and the metrics
     // rollup never credits the registration.
+    const writer = getParticipantsWriter();
     const txResult = await getDb().transaction(async (tx) => {
-      const inserted = await tx
-        .insert(participants)
-        .values({
-          aggregatorId: link.aggregatorId,
-          type: link.domain,
-          participantId,
-          data: body,
-          phone: phoneNormalised,
-          email: emailNormalised,
-          sourceLinkId: link.id,
-        })
-        .onConflictDoNothing({
-          target: [participants.aggregatorId, participants.type, participants.participantId],
-        })
-        .returning({ id: participants.id });
+      // Bind the writer to the active tx for atomicity. If a custom writer
+      // (test fake) was injected via _setParticipantsWriter, use it directly.
+      type DbCtor = ConstructorParameters<typeof PostgresParticipantsWriter>[0];
+      const txWriter: ParticipantsWriterBase =
+        writer instanceof PostgresParticipantsWriter
+          ? new PostgresParticipantsWriter(tx as unknown as DbCtor)
+          : writer;
 
-      let outcome: 'passed' | 'skipped';
-      let participantRowId: string | null = null;
-      if (inserted.length > 0 && inserted[0]) {
-        outcome = 'passed';
-        participantRowId = inserted[0].id;
-      } else {
-        const existing = await tx
-          .select({ id: participants.id })
-          .from(participants)
-          .where(
-            and(
-              eq(participants.aggregatorId, link.aggregatorId),
-              eq(participants.type, link.domain),
-              eq(participants.participantId, participantId),
-            ),
-          )
-          .limit(1);
-        participantRowId = existing[0]?.id ?? null;
-        outcome = 'skipped';
+      const writeResult = await txWriter.writeLinkSubmission({
+        aggregatorId: link.aggregatorId,
+        type: link.domain,
+        participantId,
+        data: body,
+        phone: phoneNormalised,
+        email: emailNormalised,
+        sourceLinkId: link.id,
+      });
+
+      if (!writeResult.success) {
+        // Bubble DB failure to fastify so the request returns 500.
+        throw new Error(writeResult.error.message);
       }
+      const { outcome: writeOutcome, participant } = writeResult.value;
+      const outcome: 'passed' | 'skipped' = writeOutcome;
+      const participantRowId = participant.id;
 
       const submission = await tx
         .insert(linkSubmissions)

@@ -56,6 +56,9 @@ importers:
       '@aggregator-dpg/db-schema':
         specifier: workspace:*
         version: link:../../packages/db-schema
+      '@aggregator-dpg/participants-writer':
+        specifier: workspace:*
+        version: link:../../packages/participants-writer
       '@aggregator-dpg/queue':
         specifier: workspace:*
         version: link:../../packages/queue
@@ -253,6 +256,9 @@ importers:
       '@aggregator-dpg/db-schema':
         specifier: workspace:*
         version: link:../../packages/db-schema
+      '@aggregator-dpg/participants-writer':
+        specifier: workspace:*
+        version: link:../../packages/participants-writer
       '@aggregator-dpg/queue':
         specifier: workspace:*
         version: link:../../packages/queue
@@ -364,6 +370,28 @@ importers:
 
   packages/db-schema:
     dependencies:
+      '@aggregator-dpg/shared-primitives':
+        specifier: workspace:*
+        version: link:../shared-primitives
+      drizzle-orm:
+        specifier: ^0.36.4
+        version: 0.36.4(@types/pg@8.20.0)(@types/react@18.3.28)(pg@8.20.0)(react@18.3.1)
+    devDependencies:
+      '@aggregator-dpg/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.17
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+
+  packages/participants-writer:
+    dependencies:
+      '@aggregator-dpg/db-schema':
+        specifier: workspace:*
+        version: link:../db-schema
       '@aggregator-dpg/shared-primitives':
         specifier: workspace:*
         version: link:../shared-primitives

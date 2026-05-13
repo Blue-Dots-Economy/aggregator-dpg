@@ -22,12 +22,26 @@ import {
   type BulkFinaliseJob,
   type BulkRowProcessJob,
 } from '@aggregator-dpg/queue';
+import { PostgresParticipantsWriter } from '@aggregator-dpg/participants-writer/postgres';
+import type { ParticipantsWriterBase } from '@aggregator-dpg/participants-writer/interface';
 import { getDb, schema } from '../db.js';
 import { getSchemaLoader } from '../services/schema-loader.js';
 import { getRedis } from '../services/redis.js';
 import { enqueueFinalise } from '../services/bulk-queue.js';
 import { normalisePhone, normaliseEmail } from '../services/phone.js';
 import { logger } from '../logger.js';
+
+let participantsWriter: ParticipantsWriterBase | null = null;
+function getParticipantsWriter(): ParticipantsWriterBase {
+  if (participantsWriter) return participantsWriter;
+  participantsWriter = new PostgresParticipantsWriter(getDb());
+  return participantsWriter;
+}
+
+/** Test helper — override the writer (e.g., inject a fake). */
+export function _setParticipantsWriter(w: ParticipantsWriterBase | null): void {
+  participantsWriter = w;
+}
 
 const VALID_PARTICIPANT_TYPES = new Set(['seeker', 'provider']);
 
@@ -131,30 +145,20 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
     typeof job.payload['email'] === 'string' ? (job.payload['email'] as string) : null,
   );
 
-  // 3. Persist.
+  // 3. Persist via the participants-writer wrapper (shared by bulk + link).
   let outcome: RowOutcome;
-  try {
-    const inserted = await getDb()
-      .insert(schema.participants)
-      .values({
-        aggregatorId: job.aggregatorId,
-        type: job.participantType,
-        participantId,
-        data: job.payload,
-        phone: phoneNormalised,
-        email: emailNormalised,
-        sourceBulkUploadId: job.uploadId,
-        sourceRowIndex: job.rowIndex,
-      })
-      .onConflictDoNothing({
-        target: [
-          schema.participants.aggregatorId,
-          schema.participants.type,
-          schema.participants.participantId,
-        ],
-      })
-      .returning({ id: schema.participants.id });
-    if (inserted.length > 0) {
+  const writeResult = await getParticipantsWriter().writeBulkRow({
+    aggregatorId: job.aggregatorId,
+    type: job.participantType,
+    participantId,
+    data: job.payload,
+    phone: phoneNormalised,
+    email: emailNormalised,
+    sourceBulkUploadId: job.uploadId,
+    sourceRowIndex: job.rowIndex,
+  });
+  if (writeResult.success) {
+    if (writeResult.value.outcome === 'passed') {
       outcome = { outcome: 'passed', category: null, reasons: [] };
     } else {
       outcome = {
@@ -163,12 +167,16 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
         reasons: [`participant_id '${participantId}' already registered for this aggregator`],
       };
     }
-  } catch (err) {
-    log.error({ status: 'failure', sub: 'db.insert', error: (err as Error).message });
+  } else {
+    log.error({
+      status: 'failure',
+      sub: 'participants.write',
+      error: writeResult.error.message,
+    });
     outcome = {
       outcome: 'failed',
       category: 'system_error',
-      reasons: [`db: ${(err as Error).message}`],
+      reasons: [`db: ${writeResult.error.message}`],
     };
   }
 

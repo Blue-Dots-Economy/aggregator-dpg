@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@aggregator-dpg/db-schema": "workspace:*",
+    "@aggregator-dpg/participants-writer": "workspace:*",
     "@aggregator-dpg/queue": "workspace:*",
     "@aggregator-dpg/schema-loader": "workspace:*",
     "@aggregator-dpg/shared-primitives": "workspace:*",
