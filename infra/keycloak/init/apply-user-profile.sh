@@ -118,3 +118,106 @@ if [ "$HTTP" != "204" ] && [ "$HTTP" != "200" ]; then
 fi
 
 echo "[kc-init] smtpServer configured: ${SMTP_HOST}:${SMTP_PORT:-587} (ssl=${SSL} starttls=${STARTTLS} auth=${AUTH})"
+
+# ────────────────────────────────────────────────────────────
+# 3) aggregator-portal client: enforce confidential + mappers
+#
+# realm.json is only consulted on first realm import. When the realm
+# already exists in postgres (e.g. an upgrade from a pre-merge stack),
+# any changes to client config or protocolMappers in realm.json are NOT
+# applied automatically. This block re-applies them idempotently on
+# every boot:
+#   - publicClient=false + clientAuthenticatorType=client-secret
+#   - client secret = $OIDC_CLIENT_SECRET (must match the BFF env var)
+#   - protocol mappers for decision_made + phone_number (required by
+#     requireApproved middleware on the API)
+# ────────────────────────────────────────────────────────────
+
+PORTAL_CLIENT_ID="${PORTAL_CLIENT_ID:-aggregator-portal}"
+
+# Use jq — the alpine entrypoint installs it. A greedy sed match here would
+# pick up the LAST `id` field in the JSON (a protocolMapper UUID), not the
+# client UUID, and the next call would 404.
+PORTAL_UUID=$(curl -fsS "${KC_URL}/admin/realms/${REALM}/clients?clientId=${PORTAL_CLIENT_ID}" \
+  -H "Authorization: Bearer ${TOKEN}" | jq -r '.[0].id // empty')
+
+if [ -z "$PORTAL_UUID" ]; then
+  echo "[kc-init] portal client '${PORTAL_CLIENT_ID}' not found — skip client/mapper reconcile"
+else
+  # --- 3a. publicClient + secret ----------------------------------------
+  if [ -n "${OIDC_CLIENT_SECRET:-}" ]; then
+    PORTAL_REP=$(curl -fsS "${KC_URL}/admin/realms/${REALM}/clients/${PORTAL_UUID}" \
+      -H "Authorization: Bearer ${TOKEN}")
+    if command -v jq > /dev/null 2>&1; then
+      UPDATED_PORTAL=$(echo "$PORTAL_REP" | jq --arg s "$OIDC_CLIENT_SECRET" \
+        '.publicClient = false | .clientAuthenticatorType = "client-secret" | .secret = $s')
+    else
+      # fallback: jq is installed by the keycloak-init entrypoint, so this
+      # branch is defensive — we just leave the client config alone.
+      UPDATED_PORTAL=""
+    fi
+    if [ -n "$UPDATED_PORTAL" ]; then
+      HTTP=$(curl -s -o /tmp/portal-resp.json -w "%{http_code}" -X PUT \
+        "${KC_URL}/admin/realms/${REALM}/clients/${PORTAL_UUID}" \
+        -H "Authorization: Bearer ${TOKEN}" \
+        -H "Content-Type: application/json" \
+        --data "${UPDATED_PORTAL}")
+      if [ "$HTTP" = "204" ] || [ "$HTTP" = "200" ]; then
+        echo "[kc-init] portal client: publicClient=false, secret synced from OIDC_CLIENT_SECRET"
+      else
+        echo "[kc-init] portal client update FAILED: HTTP ${HTTP}"
+        cat /tmp/portal-resp.json || true
+      fi
+    fi
+  else
+    echo "[kc-init] OIDC_CLIENT_SECRET empty — leaving portal client publicClient/secret untouched"
+  fi
+
+  # --- 3b. protocol mappers --------------------------------------------
+  ensure_mapper() {
+    mapper_name="$1"
+    user_attr="$2"
+    claim_name="$3"
+    userinfo_claim="$4"
+    existing=$(curl -fsS "${KC_URL}/admin/realms/${REALM}/clients/${PORTAL_UUID}/protocol-mappers/models" \
+      -H "Authorization: Bearer ${TOKEN}" \
+      | jq -r --arg n "${mapper_name}" '[.[] | select(.name == $n)] | length')
+    if [ "$existing" -gt 0 ]; then
+      echo "[kc-init] mapper '${mapper_name}' already present — skip"
+      return 0
+    fi
+    PAYLOAD=$(cat <<EOF
+{
+  "name": "${mapper_name}",
+  "protocol": "openid-connect",
+  "protocolMapper": "oidc-usermodel-attribute-mapper",
+  "consentRequired": false,
+  "config": {
+    "user.attribute": "${user_attr}",
+    "claim.name": "${claim_name}",
+    "jsonType.label": "String",
+    "id.token.claim": "false",
+    "access.token.claim": "true",
+    "userinfo.token.claim": "${userinfo_claim}",
+    "multivalued": "false",
+    "aggregate.attrs": "false"
+  }
+}
+EOF
+)
+    HTTP=$(curl -s -o /tmp/mapper-resp.json -w "%{http_code}" \
+      -X POST "${KC_URL}/admin/realms/${REALM}/clients/${PORTAL_UUID}/protocol-mappers/models" \
+      -H "Authorization: Bearer ${TOKEN}" \
+      -H "Content-Type: application/json" \
+      --data "${PAYLOAD}")
+    if [ "$HTTP" = "201" ]; then
+      echo "[kc-init] mapper '${mapper_name}' created"
+    else
+      echo "[kc-init] mapper '${mapper_name}' create FAILED: HTTP ${HTTP}"
+      cat /tmp/mapper-resp.json || true
+    fi
+  }
+
+  ensure_mapper "decision_made" "decision_made" "decision_made" "false"
+  ensure_mapper "phone_number"  "phoneNumber"   "phone_number"  "true"
+fi

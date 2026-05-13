@@ -180,6 +180,11 @@ services:
       SMTP_SECURE: ${SMTP_SECURE:-false}
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      # Drives client reconciliation in step 3 of apply-user-profile.sh:
+      # flips aggregator-portal to confidential and syncs the secret so it
+      # matches whatever the BFF (web service) is configured with.
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      PORTAL_CLIENT_ID: ${OIDC_CLIENT_ID:-aggregator-portal}
     volumes:
       - ./infra/keycloak/init:/init:ro
     entrypoint: ["sh", "-c", "apk add --no-cache curl jq > /dev/null && sh /init/apply-user-profile.sh"]
