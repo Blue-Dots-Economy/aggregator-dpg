@@ -15,9 +15,11 @@
 #   /                → web         (Next.js, owns /api/auth/* for OIDC handshake)
 #   /backend/        → api         (prefix stripped)
 #   /auth/           → keycloak    (KC_HTTP_RELATIVE_PATH=/auth — prefix preserved)
-#   /minio/          → minio       (web console, port 9001)
-#   /s3/             → minio       (S3 API, port 9000 — prefix stripped)
 #   /mail/           → mailhog UI
+#
+# Object storage is AWS S3 (regional endpoint, IAM-role credentials on the
+# VM). The api/worker services talk to S3 directly; the browser uses
+# presigned URLs issued by the api. No /minio/ or /s3/ proxy on the edge.
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ─── Port 80: ACME HTTP-01 challenge + 301 redirect to HTTPS ────────────
@@ -101,50 +103,6 @@ server {
 
         proxy_read_timeout  120s;
         proxy_send_timeout  120s;
-    }
-
-    # ─── /minio/ → MinIO web console ────────────────────────────────────
-    # Console is a SPA + websocket; MINIO_BROWSER_REDIRECT_URL set on the
-    # service tells the SPA its public origin so SSO/login redirects come
-    # back to /minio/ instead of bare :9001.
-    location /minio/ {
-        proxy_pass http://minio_console_upstream/;
-
-        proxy_set_header Host               $host;
-        proxy_set_header X-Real-IP          $remote_addr;
-        proxy_set_header X-Forwarded-For    $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto  $scheme;
-
-        # WebSocket for the live console.
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade            $http_upgrade;
-        proxy_set_header Connection         $connection_upgrade;
-
-        chunked_transfer_encoding off;
-        proxy_buffering            off;
-        proxy_request_buffering    off;
-        proxy_read_timeout         600s;
-    }
-
-    # ─── /s3/ → MinIO S3 API (strip prefix) ─────────────────────────────
-    # Trailing slash strips /s3/ before forwarding so SDK PUT/GET hits
-    # `/{bucket}/{key}` upstream. SigV4 signatures must be computed against
-    # the path the client sends — see gotchas about MINIO_SERVER_URL.
-    location /s3/ {
-        proxy_pass http://minio_s3_upstream/;
-
-        proxy_set_header Host               $host;
-        proxy_set_header X-Real-IP          $remote_addr;
-        proxy_set_header X-Forwarded-For    $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto  $scheme;
-
-        # Critical for streaming uploads / large objects.
-        proxy_buffering            off;
-        proxy_request_buffering    off;
-        chunked_transfer_encoding  off;
-        proxy_connect_timeout      300s;
-        proxy_read_timeout         600s;
-        proxy_send_timeout         600s;
     }
 
     # ─── /mail/ → MailHog UI ────────────────────────────────────────────
