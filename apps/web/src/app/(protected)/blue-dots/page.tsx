@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, type ReactNode } from 'react';
+import { useRouter } from 'next/navigation';
 import { createPortal } from 'react-dom';
 import { Button } from '../../../components/ui/Button';
 import { StatusPill } from '../../../components/ui/StatusPill';
@@ -304,9 +305,6 @@ function ParticipantTable<R extends ParticipantBase>({ kind, rows }: Participant
           <Button kind="ghost" icon={<I.filter size={14} />}>
             All filters
           </Button>
-          <Button kind="ghost" icon={<I.download size={14} />}>
-            Export
-          </Button>
         </div>
       </div>
 
@@ -526,11 +524,6 @@ function SeekersTab() {
           count="14"
           label="At Risk"
           hint="No activity 14–30 days"
-          action={
-            <Button kind="ghost" className="!py-1 !px-2 !text-[11.5px]" icon={<I.send size={12} />}>
-              Nudge all
-            </Button>
-          }
         />
         <StatCard tone="inactive" icon="pause" count="5" label="Inactive" hint="Dormant 30+ days" />
       </div>
@@ -670,6 +663,7 @@ const TAB_ITEMS: SegmentedTab<Tab>[] = [
 ];
 
 export default function BlueDotsPage() {
+  const router = useRouter();
   const [tab, setTab] = useState<Tab>('seekers');
 
   return (
@@ -679,10 +673,9 @@ export default function BlueDotsPage() {
         subtitle="Track every participant in your network — at a glance."
         right={
           <div className="flex items-center gap-2">
-            <Button kind="ghost" icon={<I.download size={14} />}>
-              Export
+            <Button icon={<I.plus size={14} />} onClick={() => router.push('/onboarding')}>
+              Add Participants
             </Button>
-            <Button icon={<I.plus size={14} />}>Add Participants</Button>
           </div>
         }
       />

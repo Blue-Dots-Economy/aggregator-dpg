@@ -60,12 +60,21 @@ export function LoginView({ returnTo, error }: LoginViewProps): JSX.Element {
           </div>
 
           {error ? (
-            <div
-              role="alert"
-              className="mb-5 rounded-[10px] border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-700"
-            >
-              Sign-in failed: {humanizeError(error)}. Please try again.
-            </div>
+            error === 'session_expired' ? (
+              <div
+                role="alert"
+                className="mb-5 rounded-[10px] border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-800"
+              >
+                Your session expired. Sign in again to continue.
+              </div>
+            ) : (
+              <div
+                role="alert"
+                className="mb-5 rounded-[10px] border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-700"
+              >
+                Sign-in failed: {humanizeError(error)}. Please try again.
+              </div>
+            )
           ) : null}
 
           <div className="fade-up">

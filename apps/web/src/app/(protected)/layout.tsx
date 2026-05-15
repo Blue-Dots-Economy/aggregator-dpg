@@ -21,9 +21,18 @@ import type { User } from '../../types';
 
 export default async function ProtectedLayout({ children }: { children: ReactNode }) {
   const session = await getSession();
+  const path = (await headers()).get('x-pathname') ?? '/';
+
   if (!session) {
-    const path = (await headers()).get('x-pathname') ?? '/';
     redirect(`/api/auth/login?returnTo=${encodeURIComponent(path)}`);
+  }
+
+  // Refresh token dead = unrecoverable session even if the Redis record
+  // still exists. Force a clean logout flow so the cookie is cleared and
+  // the user lands on /login?reason=expired&return=<path>.
+  const now = Date.now();
+  if (session.refreshTokenExp && session.refreshTokenExp <= now) {
+    redirect(`/api/auth/logout?reason=expired&return=${encodeURIComponent(path)}`);
   }
 
   const user: User = {
