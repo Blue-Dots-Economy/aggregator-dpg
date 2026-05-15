@@ -1,4 +1,5 @@
 import type { AggregatorProfile } from '../types';
+import { jsonFetch } from './http';
 
 /**
  * Server-side patch shape mirrored from the API's
@@ -105,11 +106,7 @@ class ApiProfileService implements ProfileService {
   }
 
   async getRaw(): Promise<ProfileApiResponse> {
-    const res = await fetch('/api/aggregator/profile/me', { credentials: 'include' });
-    if (!res.ok) {
-      throw new Error(`profile fetch failed: ${res.status}`);
-    }
-    return (await res.json()) as ProfileApiResponse;
+    return jsonFetch<ProfileApiResponse>('/api/aggregator/profile/me');
   }
 
   async update(patch: Partial<AggregatorProfile>): Promise<AggregatorProfile> {
@@ -121,20 +118,10 @@ class ApiProfileService implements ProfileService {
   }
 
   async edit(payload: ProfileEditPayload): Promise<AggregatorProfile> {
-    const res = await fetch('/api/aggregator/profile/me', {
+    const data = await jsonFetch<ProfileApiResponse>('/api/aggregator/profile/me', {
       method: 'PATCH',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
-    if (!res.ok) {
-      const body = (await res.json().catch(() => ({}))) as {
-        error?: { title?: string; detail?: string };
-      };
-      const detail = body.error?.detail ?? body.error?.title ?? `HTTP ${res.status}`;
-      throw new Error(detail);
-    }
-    const data = (await res.json()) as ProfileApiResponse;
     return mapToAggregatorProfile(data);
   }
 }

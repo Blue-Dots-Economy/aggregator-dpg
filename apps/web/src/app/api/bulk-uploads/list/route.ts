@@ -8,6 +8,7 @@
 
 import { type NextRequest, NextResponse } from 'next/server';
 import { callApi } from '../../../../lib/upstream-client';
+import { unauthorizedResponse, serviceUnavailableResponse } from '../../../../lib/bff-errors';
 
 export const runtime = 'nodejs';
 
@@ -18,26 +19,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return await passthrough(upstream);
   } catch (err) {
     if (err instanceof Error && err.message === 'no active session') {
-      return NextResponse.json(
-        {
-          error: 'Unauthorized',
-          code: 'NO_ACTIVE_SESSION',
-          message:
-            'No active session cookie was found, or your session has expired. Sign in again at /login and retry the request.',
-          hint: 'The BFF requires a valid `sid` cookie; the upstream API call was not attempted.',
-        },
-        { status: 401 },
-      );
+      return unauthorizedResponse();
     }
-    const detail = err instanceof Error ? err.message : 'unknown error';
-    return NextResponse.json(
-      {
-        error: 'ServiceUnavailable',
-        code: 'BULK_UPLOADS_UPSTREAM_FAILED',
-        message: 'The bulk-uploads service is temporarily unreachable. Please try again shortly.',
-        detail,
-      },
-      { status: 503 },
+    return serviceUnavailableResponse(
+      'bulk-uploads',
+      err instanceof Error ? err.message : undefined,
     );
   }
 }

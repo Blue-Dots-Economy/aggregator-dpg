@@ -25,8 +25,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     await getSessionStore().destroy(sid);
   }
 
-  const postLogoutRedirectUri =
-    process.env.OIDC_POST_LOGOUT_REDIRECT_URI ?? new URL('/', req.nextUrl.origin).toString();
+  // Build the post-logout landing URL on /login so the login page can show
+  // an "expired" banner and bounce back to the original path after re-auth.
+  const reason = req.nextUrl.searchParams.get('reason');
+  const returnTo = req.nextUrl.searchParams.get('return');
+  const loginUrl = new URL('/login', req.nextUrl.origin);
+  if (reason) loginUrl.searchParams.set('reason', reason);
+  if (returnTo) loginUrl.searchParams.set('return', returnTo);
+  const postLogoutRedirectUri = loginUrl.toString();
 
   let target = postLogoutRedirectUri;
   if (idToken) {

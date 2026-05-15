@@ -4,6 +4,8 @@
  * the BFF attaches the bearer header.
  */
 
+import { jsonFetch } from './http';
+
 export interface ApiRegistrationLink {
   link_id: string;
   slug: string;
@@ -99,23 +101,6 @@ export interface BulkUploadErrorsResponse {
     failed: number;
     skipped: number;
   };
-}
-
-async function jsonFetch<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
-  const res = await fetch(input, {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      ...(init?.headers ?? {}),
-    },
-    credentials: 'include',
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`request failed (${res.status}): ${text || res.statusText}`);
-  }
-  return (await res.json()) as T;
 }
 
 export const onboardingService = {
