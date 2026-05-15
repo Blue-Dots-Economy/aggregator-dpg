@@ -40,7 +40,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // Always send Keycloak to the bare /login path — query strings break the
   // strict redirect-URI match. The login page picks up reason + return from
   // the cookies below.
-  const postLogoutRedirectUri = new URL('/login', req.nextUrl.origin).toString();
+  //
+  // Use the configured public portal URL instead of `req.nextUrl.origin`:
+  // inside docker the latter resolves to the container bind address
+  // (e.g. `http://0.0.0.0:3000`) rather than the host-visible URL, which
+  // Keycloak then echoes back to the browser as a broken redirect.
+  const publicBase =
+    process.env.PUBLIC_PORTAL_URL ??
+    (process.env.OIDC_POST_LOGOUT_REDIRECT_URI
+      ? new URL(process.env.OIDC_POST_LOGOUT_REDIRECT_URI).origin
+      : req.nextUrl.origin);
+  const postLogoutRedirectUri = new URL('/login', publicBase).toString();
 
   let target = postLogoutRedirectUri;
   if (idToken) {
