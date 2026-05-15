@@ -5,6 +5,7 @@
 
 import { type NextRequest, NextResponse } from 'next/server';
 import { callApi } from '../../../../lib/upstream-client';
+import { unauthorizedResponse, serviceUnavailableResponse } from '../../../../lib/bff-errors';
 
 export const runtime = 'nodejs';
 
@@ -15,12 +16,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return await passthrough(upstream);
   } catch (err) {
     if (isNoSession(err)) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return unauthorizedResponse();
     }
-    return NextResponse.json(
-      { error: 'ServiceUnavailable', message: 'onboarding service unavailable' },
-      { status: 503 },
-    );
+    return serviceUnavailableResponse('onboarding', err instanceof Error ? err.message : undefined);
   }
 }
 

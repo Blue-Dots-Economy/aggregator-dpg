@@ -22,12 +22,26 @@ import {
   type BulkFinaliseJob,
   type BulkRowProcessJob,
 } from '@aggregator-dpg/queue';
+import { PostgresParticipantsWriter } from '@aggregator-dpg/participants-writer/postgres';
+import type { ParticipantsWriterBase } from '@aggregator-dpg/participants-writer/interface';
 import { getDb, schema } from '../db.js';
 import { getSchemaLoader } from '../services/schema-loader.js';
 import { getRedis } from '../services/redis.js';
 import { enqueueFinalise } from '../services/bulk-queue.js';
 import { normalisePhone, normaliseEmail } from '../services/phone.js';
 import { logger } from '../logger.js';
+
+let participantsWriter: ParticipantsWriterBase | null = null;
+function getParticipantsWriter(): ParticipantsWriterBase {
+  if (participantsWriter) return participantsWriter;
+  participantsWriter = new PostgresParticipantsWriter(getDb());
+  return participantsWriter;
+}
+
+/** Test helper — override the writer (e.g., inject a fake). */
+export function _setParticipantsWriter(w: ParticipantsWriterBase | null): void {
+  participantsWriter = w;
+}
 
 const VALID_PARTICIPANT_TYPES = new Set(['seeker', 'provider']);
 
@@ -131,30 +145,20 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
     typeof job.payload['email'] === 'string' ? (job.payload['email'] as string) : null,
   );
 
-  // 3. Persist.
+  // 3. Persist via the participants-writer wrapper (shared by bulk + link).
   let outcome: RowOutcome;
-  try {
-    const inserted = await getDb()
-      .insert(schema.participants)
-      .values({
-        aggregatorId: job.aggregatorId,
-        type: job.participantType,
-        participantId,
-        data: job.payload,
-        phone: phoneNormalised,
-        email: emailNormalised,
-        sourceBulkUploadId: job.uploadId,
-        sourceRowIndex: job.rowIndex,
-      })
-      .onConflictDoNothing({
-        target: [
-          schema.participants.aggregatorId,
-          schema.participants.type,
-          schema.participants.participantId,
-        ],
-      })
-      .returning({ id: schema.participants.id });
-    if (inserted.length > 0) {
+  const writeResult = await getParticipantsWriter().writeBulkRow({
+    aggregatorId: job.aggregatorId,
+    type: job.participantType,
+    participantId,
+    data: job.payload,
+    phone: phoneNormalised,
+    email: emailNormalised,
+    sourceBulkUploadId: job.uploadId,
+    sourceRowIndex: job.rowIndex,
+  });
+  if (writeResult.success) {
+    if (writeResult.value.outcome === 'passed') {
       outcome = { outcome: 'passed', category: null, reasons: [] };
     } else {
       outcome = {
@@ -163,12 +167,16 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
         reasons: [`participant_id '${participantId}' already registered for this aggregator`],
       };
     }
-  } catch (err) {
-    log.error({ status: 'failure', sub: 'db.insert', error: (err as Error).message });
+  } else {
+    log.error({
+      status: 'failure',
+      sub: 'participants.write',
+      error: writeResult.error.message,
+    });
     outcome = {
       outcome: 'failed',
       category: 'system_error',
-      reasons: [`db: ${(err as Error).message}`],
+      reasons: [`db: ${writeResult.error.message}`],
     };
   }
 
@@ -211,10 +219,12 @@ async function commit(
     return outcome;
   }
 
-  // Periodic DB counter flush (every PROGRESS_FLUSH_EVERY rows).
+  // Heartbeat: bump last_progress_at every PROGRESS_FLUSH_EVERY rows so the
+  // watchdog can detect stalled jobs. Counters live in Redis only — the
+  // bulk_uploads counter columns were dropped in migration 0009.
   if (result.processed % PROGRESS_FLUSH_EVERY === 0 || result.processed === result.total) {
-    await flushCounters(job.uploadId).catch((err) => {
-      log.warn({ status: 'warn', sub: 'flush_counters', error: (err as Error).message });
+    await bumpHeartbeat(job.uploadId).catch((err) => {
+      log.warn({ status: 'warn', sub: 'heartbeat', error: (err as Error).message });
     });
   }
 
@@ -234,10 +244,6 @@ async function commit(
   return outcome;
 }
 
-/**
- * Flush Redis counters (passed/failed/skipped) into bulk_uploads. Powers
- * DB-only API status reads. Idempotent — overwrites with the latest counts.
- */
 /**
  * Mutates `payload` in place: for every schema property declared with
  * `type: 'array'`, if the cell arrived as a string (CSV form), split it on
@@ -262,24 +268,15 @@ function preprocessArrayCells(
   }
 }
 
-async function flushCounters(uploadId: string): Promise<void> {
-  const redis = getRedis();
-  const ns = `bu:${uploadId}`;
-  const [passedRaw, failedRaw, skippedRaw] = await redis.hmget(
-    `${ns}:counters`,
-    'passed',
-    'failed',
-    'skipped',
-  );
-  const passed = parseInt(passedRaw ?? '0', 10) || 0;
-  const failed = parseInt(failedRaw ?? '0', 10) || 0;
-  const skipped = parseInt(skippedRaw ?? '0', 10) || 0;
+/**
+ * Heartbeat-only DB write — bumps `last_progress_at` so the watchdog can
+ * detect stalled jobs. Counters live exclusively in Redis (live) and the
+ * `onboarding` row (after `bulk-finalise`).
+ */
+async function bumpHeartbeat(uploadId: string): Promise<void> {
   await getDb()
     .update(schema.bulkUploads)
     .set({
-      passed,
-      failed,
-      skipped,
       lastProgressAt: new Date(),
       updatedAt: sql`NOW()`,
     })

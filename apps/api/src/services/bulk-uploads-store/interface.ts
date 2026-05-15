@@ -24,10 +24,6 @@ export interface BulkUpload {
   s3Etag: string | null;
   status: BulkUploadStatus;
   statusReason: string | null;
-  totalRows: number | null;
-  passed: number;
-  failed: number;
-  skipped: number;
   errorsCsvS3Key: string | null;
   schemaId: string;
   schemaVersion: string;

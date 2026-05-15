@@ -20,6 +20,7 @@
  */
 
 import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { and, eq, inArray } from 'drizzle-orm';
 import { requireApproved, type AuthContext } from '../services/auth/access-token.js';
 import { getBulkUploadsStore } from '../services/bulk-uploads-store/index.js';
 import { enqueueBulkFileProcess } from '../services/bulk-queue/index.js';
@@ -32,6 +33,9 @@ import { httpError } from '../errors/http-error.js';
 import { getSchemaLoader } from '../services/schema-loader/index.js';
 import { buildCsvTemplate } from '../services/csv-template/index.js';
 import { config } from '../config.js';
+import { getDb } from '../db/client.js';
+import { onboarding } from '../db/schema.js';
+import { getRedis } from '../services/redis/index.js';
 
 interface CreateBody {
   participant_type?: unknown;
@@ -223,8 +227,9 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
         await store.deletePending(uploadId, auth.aggregatorId);
         const existing = await store.findByAggregatorAndEtag(auth.aggregatorId, head.etag);
         if (existing.ok && existing.value) {
+          const existingCounts = await loadCounts(existing.value.id, existing.value.status);
           return reply.send({
-            ...toResponse(existing.value),
+            ...toResponse(existing.value, existingCounts),
             duplicate: true,
             message: 'This CSV was already uploaded earlier — showing the existing run.',
           });
@@ -275,8 +280,11 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
     if (!result.ok) {
       throw httpError('DB_UNAVAILABLE', { cause: new Error(result.error.message) });
     }
+    const countsBatch = await loadCountsBatch(result.value.rows);
     return reply.send({
-      items: result.value.rows.map(toResponse),
+      items: result.value.rows.map((row) =>
+        toResponse(row, countsBatch.get(row.id) ?? ZERO_COUNTS),
+      ),
       total: result.value.total,
       limit,
       offset,
@@ -300,7 +308,8 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
       throw httpError('FORBIDDEN', { detail: 'Upload not accessible.' });
     }
 
-    return reply.send(toResponse(found.value));
+    const counts = await loadCounts(found.value.id, found.value.status);
+    return reply.send(toResponse(found.value, counts));
   });
 
   app.get('/v1/bulk-uploads/:id/errors.csv', async (req, reply) => {
@@ -347,8 +356,6 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
       log.info({
         status: 'skipped',
         reason: 'no_errors_to_report',
-        passed: upload.passed,
-        failed: upload.failed,
       });
       throw httpError('NOT_FOUND', {
         detail: 'No errors to download — all rows in this upload passed.',
@@ -375,6 +382,7 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
       s3_key: upload.errorsCsvS3Key,
     });
 
+    const counts = await loadCounts(upload.id, upload.status);
     return reply.send({
       upload_id: upload.id,
       url: signed.url,
@@ -382,10 +390,10 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
       expires_at: signed.expiresAt,
       content_type: 'text/csv',
       counts: {
-        total_rows: upload.totalRows,
-        passed: upload.passed,
-        failed: upload.failed,
-        skipped: upload.skipped,
+        total_rows: counts.totalRows,
+        passed: counts.passed,
+        failed: counts.failed,
+        skipped: counts.skipped,
       },
     });
   });
@@ -407,36 +415,137 @@ interface BulkUploadResponseShape {
   completed_at: string | null;
 }
 
-function toResponse(upload: {
-  id: string;
-  status: string;
-  statusReason: string | null;
-  participantType: 'seeker' | 'provider';
+interface UploadCounts {
   totalRows: number | null;
   passed: number;
   failed: number;
   skipped: number;
+}
+
+const ZERO_COUNTS: UploadCounts = { totalRows: null, passed: 0, failed: 0, skipped: 0 };
+
+interface UploadShape {
+  id: string;
+  status: string;
+  statusReason: string | null;
+  participantType: 'seeker' | 'provider';
   errorsCsvS3Key: string | null;
   schemaId: string;
   schemaVersion: string;
   createdAt: Date;
   completedAt: Date | null;
-}): BulkUploadResponseShape {
+}
+
+function toResponse(
+  upload: UploadShape,
+  counts: UploadCounts = ZERO_COUNTS,
+): BulkUploadResponseShape {
   return {
     upload_id: upload.id,
     status: upload.status,
     status_reason: upload.statusReason,
     participant_type: upload.participantType,
-    total_rows: upload.totalRows,
-    passed: upload.passed,
-    failed: upload.failed,
-    skipped: upload.skipped,
+    total_rows: counts.totalRows,
+    passed: counts.passed,
+    failed: counts.failed,
+    skipped: counts.skipped,
     errors_csv_s3_key: upload.errorsCsvS3Key,
     schema_id: upload.schemaId,
     schema_version: upload.schemaVersion,
     created_at: upload.createdAt.toISOString(),
     completed_at: upload.completedAt ? upload.completedAt.toISOString() : null,
   };
+}
+
+/**
+ * Loads live counters from Redis for an in-flight upload. Returns ZERO_COUNTS
+ * when keys are missing (run not started, or already finalised + GC'd).
+ */
+async function loadCountsFromRedis(uploadId: string): Promise<UploadCounts> {
+  try {
+    const redis = getRedis();
+    const ns = `bu:${uploadId}`;
+    const [counters, meta] = await Promise.all([
+      redis.hmget(`${ns}:counters`, 'passed', 'failed', 'skipped'),
+      redis.hget(`${ns}:meta`, 'total_rows'),
+    ]);
+    const passed = parseInt(counters[0] ?? '0', 10) || 0;
+    const failed = parseInt(counters[1] ?? '0', 10) || 0;
+    const skipped = parseInt(counters[2] ?? '0', 10) || 0;
+    const totalRows = meta ? parseInt(meta, 10) || null : null;
+    return { totalRows, passed, failed, skipped };
+  } catch {
+    return ZERO_COUNTS;
+  }
+}
+
+/**
+ * Loads terminal counters from the `onboarding` row written by `bulk-finalise`.
+ * Returns ZERO_COUNTS if the row is missing (would indicate a stale completed
+ * upload that pre-dates the rollup migration).
+ */
+async function loadCountsFromOnboarding(uploadId: string): Promise<UploadCounts> {
+  const rows = await getDb()
+    .select({
+      total: onboarding.total,
+      passed: onboarding.passed,
+      failed: onboarding.failed,
+      skipped: onboarding.skipped,
+    })
+    .from(onboarding)
+    .where(and(eq(onboarding.source, 'bulk'), eq(onboarding.batchId, uploadId)))
+    .limit(1);
+  const row = rows[0];
+  if (!row) return ZERO_COUNTS;
+  return {
+    totalRows: row.total,
+    passed: row.passed,
+    failed: row.failed,
+    skipped: row.skipped,
+  };
+}
+
+/** Picks the right counter source based on upload status. */
+async function loadCounts(uploadId: string, status: string): Promise<UploadCounts> {
+  if (status === 'completed') return loadCountsFromOnboarding(uploadId);
+  if (status === 'pending' || status === 'uploaded') return ZERO_COUNTS;
+  return loadCountsFromRedis(uploadId);
+}
+
+/** Batch counter load for list view — one onboarding query, Redis fan-out for active rows. */
+async function loadCountsBatch(
+  uploads: Array<{ id: string; status: string }>,
+): Promise<Map<string, UploadCounts>> {
+  const out = new Map<string, UploadCounts>();
+  const completedIds = uploads.filter((u) => u.status === 'completed').map((u) => u.id);
+  if (completedIds.length > 0) {
+    const rows = await getDb()
+      .select({
+        batchId: onboarding.batchId,
+        total: onboarding.total,
+        passed: onboarding.passed,
+        failed: onboarding.failed,
+        skipped: onboarding.skipped,
+      })
+      .from(onboarding)
+      .where(and(eq(onboarding.source, 'bulk'), inArray(onboarding.batchId, completedIds)));
+    for (const r of rows) {
+      if (!r.batchId) continue;
+      out.set(r.batchId, {
+        totalRows: r.total,
+        passed: r.passed,
+        failed: r.failed,
+        skipped: r.skipped,
+      });
+    }
+  }
+  const liveUploads = uploads.filter(
+    (u) => u.status !== 'completed' && u.status !== 'pending' && u.status !== 'uploaded',
+  );
+  for (const u of liveUploads) {
+    out.set(u.id, await loadCountsFromRedis(u.id));
+  }
+  return out;
 }
 
 async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
