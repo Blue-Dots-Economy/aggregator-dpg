@@ -1,7 +1,11 @@
 import type { Metadata } from 'next';
+import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { getSession } from '../../../lib/server-session';
 import { LoginView } from './LoginView';
+
+const LOGOUT_REASON_COOKIE = 'bd_logout_reason';
+const LOGOUT_RETURN_COOKIE = 'bd_logout_return';
 
 export const metadata: Metadata = {
   title: 'Sign in — Blue Dots',
@@ -21,10 +25,16 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   if (session) redirect('/blue-dots');
 
   const params = await searchParams;
-  // Accept both `returnTo` (legacy) and `return` (set by the logout flow).
-  const returnCandidate = params.return ?? params.returnTo;
+  const cookieJar = await cookies();
+  // Logout flow drops these one-shot cookies because Keycloak strips query
+  // strings from `post_logout_redirect_uri` (it must match the registered
+  // URI exactly). Cookie values win over query string when both are set.
+  const cookieReturn = cookieJar.get(LOGOUT_RETURN_COOKIE)?.value;
+  const cookieReason = cookieJar.get(LOGOUT_REASON_COOKIE)?.value;
+
+  const returnCandidate = cookieReturn ?? params.return ?? params.returnTo;
   const returnTo = isSafePath(returnCandidate) ? returnCandidate! : '/blue-dots';
-  const reason = typeof params.reason === 'string' ? params.reason : null;
+  const reason = cookieReason ?? (typeof params.reason === 'string' ? params.reason : null);
   // Map well-known reasons to error codes the LoginView already understands.
   const error =
     reason === 'expired'
