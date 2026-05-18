@@ -98,6 +98,28 @@ const CreateLinkBodySchema = z.object({
     .transform((v) => (v ? new Date(v) : null)),
 });
 
+/**
+ * Patch shape for `PATCH /v1/links/:id`. Only fields editable on a draft are
+ * accepted; `domain` + `status` mutations go through dedicated endpoints
+ * (signup-time pin and activate/deactivate respectively).
+ */
+const UpdateLinkBodySchema = z
+  .object({
+    slug: z
+      .string()
+      .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'slug must be lowercase + hyphens (a-z, 0-9)')
+      .min(3)
+      .max(60)
+      .optional(),
+    context: z.record(z.unknown()).optional(),
+    expires_at: z
+      .string()
+      .datetime({ offset: true })
+      .nullish()
+      .transform((v) => (v === undefined ? undefined : v === null ? null : new Date(v))),
+  })
+  .strict();
+
 const SLUG_RETRIES = 5;
 
 const ListQuerySchema = z.object({
@@ -124,6 +146,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
       });
     }
     const body = parsed.data;
+    enforceAggregatorType(auth, body.domain);
 
     const store = getRegistrationLinksStore();
 
@@ -188,8 +211,25 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
     }
     const callerOrgSlug = aggLookup.value.orgSlug;
 
-    // QR generation + S3 upload. Keyed deterministically so a re-run after a
-    // partial failure overwrites identical bytes.
+    // QR + public URL are only minted when the link is published (status=live).
+    // Drafts are pure metadata — the slug may still change via PATCH, so
+    // generating a QR now would waste S3 work and risk publishing a stale
+    // image. Activation runs the QR pipeline.
+    if (created.status === 'draft') {
+      log.info({
+        status: 'success',
+        latency_ms: Date.now() - start,
+        link_id: created.id,
+        slug: created.slug,
+        domain: created.domain,
+        qr_object_key: null,
+        link_status: 'draft',
+      });
+      return reply.code(201).send(await buildResponse(created, callerOrgSlug));
+    }
+
+    // status === 'live' — eager activate-at-create path. Generate the QR
+    // PNG, upload to S3 keyed deterministically, then stamp qr_object_key.
     const publicUrl = buildPublicUrl(callerOrgSlug, slug);
     const qrKey = `qr/${auth.aggregatorId}/${created.id}.png`;
     let qrPng: Buffer;
@@ -295,6 +335,114 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
     });
   });
 
+  app.patch('/v1/links/:id', async (req, reply) => {
+    const auth = await requireAuth(req);
+    const params = req.params as { id?: string };
+    const linkId = params.id;
+    if (!linkId) {
+      throw httpError('SCHEMA_VALIDATION', { detail: 'link_id is required.' });
+    }
+    const log = req.log.child({
+      operation: 'registrationLinks.update',
+      actor: auth.userId,
+      link_id: linkId,
+    });
+    const start = Date.now();
+
+    const parsed = UpdateLinkBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      throw httpError('SCHEMA_VALIDATION', {
+        detail: 'Request body failed shape validation.',
+        fields: { issues: parsed.error.issues },
+      });
+    }
+    const body = parsed.data;
+
+    const store = getRegistrationLinksStore();
+    const found = await store.findById(linkId, auth.aggregatorId);
+    if (!found.ok) {
+      throw httpError('DB_UNAVAILABLE', { cause: new Error(found.error.message) });
+    }
+    if (!found.value) {
+      throw httpError('FORBIDDEN', { detail: 'Link not accessible.' });
+    }
+    if (found.value.status !== 'draft') {
+      throw httpError('CONFLICT', {
+        detail: 'Only draft links can be edited. Retire this link and create a new one.',
+        fields: { link_status: found.value.status },
+      });
+    }
+
+    // Slug-collision retry — mirror create flow. If the caller asks to set a
+    // slug that's already taken by a sibling link, append a short random
+    // suffix and try again. Without a caller-supplied slug, leave the
+    // existing slug in place (omit `slug` from the patch).
+    let updated;
+    let slug = found.value.slug;
+    if (body.slug !== undefined) {
+      for (let attempt = 0; attempt < SLUG_RETRIES; attempt += 1) {
+        slug = attempt === 0 ? body.slug : `${body.slug}-${randomSuffix()}`;
+        const result = await store.updateDraft(linkId, auth.aggregatorId, {
+          slug,
+          ...(body.context !== undefined ? { context: body.context } : {}),
+          ...(body.expires_at !== undefined ? { expiresAt: body.expires_at } : {}),
+        });
+        if (result.ok) {
+          updated = result.value;
+          break;
+        }
+        if (result.error.code !== 'SLUG_COLLISION') {
+          if (result.error.code === 'NOT_FOUND') {
+            throw httpError('CONFLICT', {
+              detail: 'Link is no longer a draft — edit blocked.',
+            });
+          }
+          log.error({
+            status: 'failure',
+            sub: 'store.updateDraft',
+            error: result.error.code,
+            latency_ms: Date.now() - start,
+          });
+          throw httpError('DB_UNAVAILABLE', { cause: new Error(result.error.message) });
+        }
+        log.warn({ status: 'retry', reason: 'slug_collision', attempt, slug });
+      }
+      if (!updated) {
+        log.error({
+          status: 'failure',
+          reason: 'slug_retries_exhausted',
+          latency_ms: Date.now() - start,
+        });
+        throw httpError('DUPLICATE_SLUG', {
+          detail: 'Could not allocate a unique slug for the link. Please retry.',
+        });
+      }
+    } else {
+      const result = await store.updateDraft(linkId, auth.aggregatorId, {
+        ...(body.context !== undefined ? { context: body.context } : {}),
+        ...(body.expires_at !== undefined ? { expiresAt: body.expires_at } : {}),
+      });
+      if (!result.ok) {
+        if (result.error.code === 'NOT_FOUND') {
+          throw httpError('CONFLICT', {
+            detail: 'Link is no longer a draft — edit blocked.',
+          });
+        }
+        throw httpError('DB_UNAVAILABLE', { cause: new Error(result.error.message) });
+      }
+      updated = result.value;
+    }
+
+    const orgSlug = await resolveOrgSlug(auth.aggregatorId);
+    log.info({
+      status: 'success',
+      latency_ms: Date.now() - start,
+      slug: updated.slug,
+      slug_changed: body.slug !== undefined,
+    });
+    return reply.send(await buildResponse(updated, orgSlug));
+  });
+
   app.get('/v1/links/:id', async (req, reply) => {
     const auth = await requireAuth(req);
     const params = req.params as { id?: string };
@@ -347,18 +495,56 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
       throw httpError('CONFLICT', { detail: 'Retired links cannot be reactivated.' });
     }
 
+    // Mint the QR PNG at activation time — the draft slug is now frozen and
+    // the public URL it encodes will not change. If a qr_object_key already
+    // exists (e.g. legacy row from when drafts also got QRs) we reuse the key
+    // and overwrite the bytes; the key is deterministic.
+    const publicUrl = buildPublicUrl(orgSlug, found.value.slug);
+    const qrKey = found.value.qrObjectKey ?? `qr/${auth.aggregatorId}/${found.value.id}.png`;
+    let qrPng: Buffer;
+    try {
+      qrPng = await QRCode.toBuffer(publicUrl, {
+        type: 'png',
+        errorCorrectionLevel: 'M',
+        margin: 1,
+        width: 512,
+      });
+    } catch (err) {
+      log.error({ status: 'failure', sub: 'qr.generate', error: (err as Error).message });
+      throw httpError('INTERNAL', { cause: err });
+    }
+    try {
+      await putObject(qrKey, qrPng, 'image/png');
+    } catch (err) {
+      log.error({ status: 'failure', sub: 's3.put', error: (err as Error).message });
+      throw httpError('INTERNAL', { cause: err });
+    }
+
+    const qrStamped = await store.updateQrKey(linkId, auth.aggregatorId, qrKey);
+    if (!qrStamped.ok) {
+      throw httpError('DB_UNAVAILABLE', { cause: new Error(qrStamped.error.message) });
+    }
+
     const updated = await store.updateStatus(linkId, auth.aggregatorId, 'live');
     if (!updated.ok) {
       throw httpError('DB_UNAVAILABLE', { cause: new Error(updated.error.message) });
     }
 
+    const qrSigned = await signQrDownloadUrl(qrKey);
+
     log.info({
       status: 'success',
       latency_ms: Date.now() - start,
       previous_status: found.value.status,
+      qr_object_key: qrKey,
     });
 
-    return reply.send(await buildResponse(updated.value, orgSlug));
+    return reply.send(
+      await buildResponse(updated.value, orgSlug, {
+        publicUrl,
+        qrSigned: { url: qrSigned.url, expiresAt: qrSigned.expiresAt },
+      }),
+    );
   });
 
   app.post('/v1/links/:id/deactivate', async (req, reply) => {
@@ -440,16 +626,23 @@ async function buildResponse(
   orgSlug: string,
   overrides: ResponseOverrides = {},
 ): Promise<Record<string, unknown>> {
-  const publicUrl = overrides.publicUrl ?? buildPublicUrl(orgSlug, row.slug);
+  // Drafts are metadata-only — the QR + public URL are minted at activation
+  // and never published while the row is still in draft. Retired links lose
+  // visibility of the QR for the same reason: the underlying poster is no
+  // longer authoritative.
+  const isPublished = row.status === 'live';
+  const publicUrl = isPublished ? (overrides.publicUrl ?? buildPublicUrl(orgSlug, row.slug)) : null;
   let qrUrl: string | null = null;
   let qrExpiresAt: string | null = null;
-  if (overrides.qrSigned) {
-    qrUrl = overrides.qrSigned.url;
-    qrExpiresAt = overrides.qrSigned.expiresAt;
-  } else if (row.qrObjectKey) {
-    const signed = await signQrDownloadUrl(row.qrObjectKey);
-    qrUrl = signed.url;
-    qrExpiresAt = signed.expiresAt;
+  if (isPublished) {
+    if (overrides.qrSigned) {
+      qrUrl = overrides.qrSigned.url;
+      qrExpiresAt = overrides.qrSigned.expiresAt;
+    } else if (row.qrObjectKey) {
+      const signed = await signQrDownloadUrl(row.qrObjectKey);
+      qrUrl = signed.url;
+      qrExpiresAt = signed.expiresAt;
+    }
   }
   // `metrics` may be supplied by the caller when responding to a list (one
   // grouped SQL aggregation per request); otherwise fall back to a per-link
@@ -509,4 +702,25 @@ async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
     throw httpError('UNAUTHORIZED', { detail: 'Token missing aggregator_id claim.' });
   }
   return result.context;
+}
+
+/**
+ * Reject when the requested link domain (seeker | provider) does not match
+ * the aggregator's registered type (JWT `aggregator_type` claim). An
+ * aggregator may only create registration links for the type it registered as.
+ */
+function enforceAggregatorType(auth: AuthContext, domain: 'seeker' | 'provider'): void {
+  if (!auth.aggregatorType) {
+    throw httpError('AGGREGATOR_TYPE_MISSING', {
+      fields: { aggregator_id: auth.aggregatorId },
+    });
+  }
+  if (auth.aggregatorType !== domain) {
+    throw httpError('AGGREGATOR_TYPE_MISMATCH', {
+      fields: {
+        aggregator_type: auth.aggregatorType,
+        requested_type: domain,
+      },
+    });
+  }
 }

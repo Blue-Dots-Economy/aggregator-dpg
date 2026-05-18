@@ -31,6 +31,17 @@ export interface CreateRegistrationLinkInput {
   createdBy: string;
 }
 
+/**
+ * Partial patch shape accepted by {@link RegistrationLinksStoreBase.updateDraft}.
+ * Only fields that should be mutated on a draft are present. `null` on
+ * `expiresAt` clears the expiry; omitting the key leaves the column untouched.
+ */
+export interface UpdateDraftInput {
+  slug?: string;
+  context?: Record<string, unknown>;
+  expiresAt?: Date | null;
+}
+
 export type StoreError =
   | { code: 'NOT_FOUND'; message: string }
   | { code: 'SLUG_COLLISION'; message: string }
@@ -87,6 +98,18 @@ export abstract class RegistrationLinksStoreBase {
     id: string,
     aggregatorId: string,
     qrObjectKey: string,
+  ): Promise<StoreResult<RegistrationLink>>;
+  /**
+   * Patch the editable fields on a draft row (`slug`, `context`, `expires_at`).
+   * Live + retired rows reject with `NOT_FOUND` so the caller can surface a
+   * "edits are only allowed on drafts" error without leaking the row's
+   * existence. Slug uniqueness violations return `SLUG_COLLISION`, mirroring
+   * {@link create}, so the caller can retry with a fresh suffix.
+   */
+  abstract updateDraft(
+    id: string,
+    aggregatorId: string,
+    patch: UpdateDraftInput,
   ): Promise<StoreResult<RegistrationLink>>;
   /**
    * Paginated list scoped to one aggregator. Most-recent first. Optional

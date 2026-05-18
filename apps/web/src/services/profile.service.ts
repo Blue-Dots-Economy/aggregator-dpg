@@ -73,7 +73,7 @@ export interface ProfileApiResponse {
   org_slug: string;
   org_name: string;
   actor_type: 'aggregator' | 'seeker' | 'provider';
-  type: 'seeker' | 'provider' | 'both' | null;
+  type: 'seeker' | 'provider' | null;
   url: string | null;
   contact: BecknContact;
   locations: BecknLocation[];

@@ -54,6 +54,7 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
         fields: { participant_type: 'invalid' },
       });
     }
+    enforceAggregatorType(auth, participantType as 'seeker' | 'provider');
 
     const schemaResult = await getSchemaLoader().getSchema({
       id: `participant-${participantType}`,
@@ -86,6 +87,7 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
         fields: { participant_type: 'invalid' },
       });
     }
+    enforceAggregatorType(auth, participantType as 'seeker' | 'provider');
 
     // Pin the active schema version at create time. v1 is the only published
     // version today; this becomes a registry lookup once schema versioning ships.
@@ -560,4 +562,25 @@ async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
     throw httpError('UNAUTHORIZED', { detail: 'Token missing aggregator_id claim.' });
   }
   return result.context;
+}
+
+/**
+ * Reject when the requested participant type does not match the aggregator's
+ * registered type (read from the JWT `aggregator_type` claim). An aggregator
+ * may only upload or template the type it registered as.
+ */
+function enforceAggregatorType(auth: AuthContext, participantType: 'seeker' | 'provider'): void {
+  if (!auth.aggregatorType) {
+    throw httpError('AGGREGATOR_TYPE_MISSING', {
+      fields: { aggregator_id: auth.aggregatorId },
+    });
+  }
+  if (auth.aggregatorType !== participantType) {
+    throw httpError('AGGREGATOR_TYPE_MISMATCH', {
+      fields: {
+        aggregator_type: auth.aggregatorType,
+        requested_type: participantType,
+      },
+    });
+  }
 }

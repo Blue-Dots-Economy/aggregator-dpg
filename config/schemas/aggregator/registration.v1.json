@@ -17,7 +17,7 @@
     "type": {
       "type": "string",
       "title": "Aggregator Type",
-      "enum": ["seeker", "provider", "both"]
+      "enum": ["seeker", "provider"]
     },
     "url": {
       "type": "string",
@@ -67,10 +67,8 @@
               "postalCode": { "type": "string", "title": "PIN code" },
               "addressCountry": {
                 "type": "string",
-                "title": "Country (ISO-2)",
-                "minLength": 2,
-                "maxLength": 2,
-                "default": "IN"
+                "title": "Country",
+                "minLength": 1
               }
             }
           }

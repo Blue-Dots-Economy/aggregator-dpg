@@ -106,11 +106,11 @@ describe('POST /v1/aggregator-registrations/create', () => {
     if (kcUser.ok && kcUser.value) {
       expect(kcUser.value.enabled).toBe(false);
       expect(kcUser.value.attributes?.aggregator_id?.[0]).toBe(body.aggregator_id);
+      expect(kcUser.value.attributes?.aggregator_type?.[0]).toBe(validBody.type);
       expect(kcUser.value.attributes?.phoneNumber?.[0]).toBe(validBody.contact.phone);
       expect(kcUser.value.attributes?.decision_made?.[0]).toBe('pending');
       // Removed attributes per the new flow:
       expect(kcUser.value.attributes?.org_slug).toBeUndefined();
-      expect(kcUser.value.attributes?.aggregator_type).toBeUndefined();
       expect(kcUser.value.attributes?.association).toBeUndefined();
     }
 

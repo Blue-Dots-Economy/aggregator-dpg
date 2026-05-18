@@ -239,12 +239,16 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
 }
 
 function toDomain(row: typeof aggregators.$inferSelect): Aggregator {
+  // Legacy `'both'` rows are coerced to null at the boundary — the app no
+  // longer treats `both` as a first-class participant focus. Backfill the
+  // column to a single value before dropping the DB enum entry.
+  const type = row.type === 'both' ? null : row.type;
   return {
     id: row.id,
     orgSlug: row.orgSlug,
     actorType: row.actorType,
     name: row.name,
-    type: row.type,
+    type,
     url: row.url,
     contact: row.contact,
     contactPhone: row.contactPhone,
