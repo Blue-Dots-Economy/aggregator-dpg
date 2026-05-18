@@ -45,7 +45,7 @@
   "type": {
     "ui:widget": "select",
     "ui:placeholder": "Select aggregator type",
-    "ui:enumNames": ["Seeker", "Provider", "Both"]
+    "ui:enumNames": ["Seeker", "Provider"]
   },
   "url": {
     "ui:placeholder": "https://yourorg.in",

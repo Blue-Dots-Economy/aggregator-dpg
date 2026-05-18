@@ -13,7 +13,13 @@ export interface ApiRegistrationLink {
   status: 'draft' | 'live' | 'retired';
   context: Record<string, unknown>;
   expires_at: string | null;
-  public_url: string;
+  /**
+   * `null` while the link is still a draft (or after retirement). The
+   * public URL + QR are minted only at activation, so a draft response
+   * deliberately omits both — the API returns nulls and the UI hides the
+   * artifacts.
+   */
+  public_url: string | null;
   qr_url: string | null;
   qr_expires_at: string | null;
   /**
@@ -48,6 +54,16 @@ export interface CreateLinkInput {
   title?: string;
   context?: Record<string, unknown>;
   status?: 'draft' | 'live';
+  expires_at?: string | null;
+}
+
+/**
+ * Patch shape for `PATCH /api/links/:id`. Server only honours these on
+ * drafts; live + retired rows return 409.
+ */
+export interface UpdateLinkInput {
+  slug?: string;
+  context?: Record<string, unknown>;
   expires_at?: string | null;
 }
 
@@ -128,6 +144,13 @@ export const onboardingService = {
     return jsonFetch<ApiRegistrationLink>('/api/links', {
       method: 'POST',
       body: JSON.stringify(input),
+    });
+  },
+
+  async updateLink(id: string, patch: UpdateLinkInput): Promise<ApiRegistrationLink> {
+    return jsonFetch<ApiRegistrationLink>(`/api/links/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
     });
   },
 

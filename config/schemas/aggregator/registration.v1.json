@@ -17,7 +17,7 @@
     "type": {
       "type": "string",
       "title": "Aggregator Type",
-      "enum": ["seeker", "provider", "both"]
+      "enum": ["seeker", "provider"]
     },
     "url": {
       "type": "string",

@@ -17,10 +17,12 @@
  *      If the profile insert fails, delete the aggregator (cascade clears
  *      anything that managed to land).
  *   6. Create the Keycloak user with attributes
- *      { aggregator_id, phoneNumber, decision_made: 'pending' }. Email is
- *      a built-in field. The user is created disabled — login is blocked
- *      until the admin approval flow flips `decision_made → approved` and
- *      enables the KC user.
+ *      { aggregator_id, aggregator_type, phoneNumber, decision_made: 'pending' }.
+ *      Email is a built-in field. The user is created disabled — login is
+ *      blocked until the admin approval flow flips `decision_made → approved`
+ *      and enables the KC user. `aggregator_type` (seeker | provider) is
+ *      published as a JWT claim and drives the single-type enforcement on
+ *      bulk uploads and public registration links.
  *   7. Mint approve / reject JWTs and email the configured admins.
  *
  * Failures throw `httpError(<CODE>)`. KC failure post-DB → rollback the
@@ -195,25 +197,30 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
         });
       }
 
-      // Keycloak gets ONLY the three attributes we promised it would carry:
-      // aggregator_id, phoneNumber, decision_made. Slug, association, and
-      // aggregator_type live in Postgres — KC is auth, not metadata.
+      // Keycloak carries four attributes:
+      //   - aggregator_id    reverse pointer to Postgres
+      //   - aggregator_type  participant focus, used by single-type enforcement
+      //   - phoneNumber      OTP login authenticator
+      //   - decision_made    login gate
+      // Slug, association, and decision metadata live in Postgres.
       const kcAttributes: Record<string, string> = {
         [KC_ATTR.AGGREGATOR_ID]: aggregatorId,
+        [KC_ATTR.AGGREGATOR_TYPE]: body.type,
         [KC_ATTR.PHONE_NUMBER]: phoneE164,
         [KC_ATTR.DECISION_MADE]: 'pending',
       };
 
+      // Split the Beckn `contact.name` into first / last for Keycloak. The
+      // signup form already collects the full name, so we don't ask for it
+      // again via an UPDATE_PROFILE required action on first login.
+      const { firstName, lastName } = splitName(contact.name);
       const kcResult = await idp.createUser({
         email: contact.email,
         username: contact.email,
         phone: phoneE164,
         enabled: false,
-        // Defer first/last name to the first login. Keycloak's
-        // UPDATE_PROFILE required action drives the prompt — the realm's
-        // user-profile config controls which fields appear and whether
-        // they are mandatory.
-        requiredActions: ['UPDATE_PROFILE'],
+        firstName,
+        lastName,
         attributes: kcAttributes,
       });
       if (!kcResult.ok) {
@@ -393,6 +400,23 @@ function mapStoreCreateError(
     default:
       return 'DB_UNAVAILABLE';
   }
+}
+
+/**
+ * Split a single-line contact name into Keycloak's first / last fields.
+ * Everything before the first whitespace is the first name; everything after
+ * is the last name. Single-token inputs (e.g. "Asha") produce an empty last
+ * name — Keycloak accepts that.
+ */
+function splitName(fullName: string): { firstName: string; lastName: string } {
+  const trimmed = fullName.trim();
+  if (!trimmed) return { firstName: '', lastName: '' };
+  const firstSpace = trimmed.search(/\s+/);
+  if (firstSpace === -1) return { firstName: trimmed, lastName: '' };
+  return {
+    firstName: trimmed.slice(0, firstSpace),
+    lastName: trimmed.slice(firstSpace).trim(),
+  };
 }
 
 function parseAdminEmails(): string[] {

@@ -25,7 +25,13 @@ import {
 export const ActorTypeSchema = z.enum(['aggregator', 'seeker', 'provider']);
 export type ActorType = z.infer<typeof ActorTypeSchema>;
 
-export const RoleTypeSchema = z.enum(['seeker', 'provider', 'both']);
+/**
+ * Aggregator participant focus. An aggregator registers as `seeker` OR
+ * `provider` — never both. The API enforces this at signup and on every
+ * bulk-upload / public-registration-link write by comparing the body's
+ * participant_type to the `aggregator_type` JWT claim.
+ */
+export const RoleTypeSchema = z.enum(['seeker', 'provider']);
 export type RoleType = z.infer<typeof RoleTypeSchema>;
 
 export const AggregatorStatusSchema = z.enum(['pending', 'active', 'inactive', 'retired']);
@@ -100,9 +106,10 @@ export const RegistrationPayloadSchema = z
   .object({
     name: z.string().min(2).max(200),
     /**
-     * Aggregator's domain focus — `seeker`, `provider`, or `both`. Stored on
-     * `aggregators.type` and surfaced to downstream filters (bulk upload
-     * participant_type defaulting, link domain, Beckn catalog facets).
+     * Aggregator's domain focus — `seeker` or `provider`. Mirrored to the
+     * Keycloak `aggregator_type` user attribute and published in the JWT
+     * claim of the same name. Routes that write participant data compare
+     * the request body to that claim.
      */
     type: RoleTypeSchema,
     url: z.string().url().max(2048).optional(),

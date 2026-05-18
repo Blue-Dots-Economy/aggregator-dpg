@@ -7,6 +7,7 @@ import {
   type BulkUploadStatus,
   type CreateLinkInput,
   type OnboardingSummary,
+  type UpdateLinkInput,
 } from '../services/onboarding.service';
 
 export function useRegistrationLinks(domain: 'seeker' | 'provider') {
@@ -24,6 +25,17 @@ export function useCreateLink() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (input: CreateLinkInput) => onboardingService.createLink(input),
+    onSuccess: (link) => {
+      qc.invalidateQueries({ queryKey: ['onboarding', 'links', link.domain] });
+    },
+  });
+}
+
+export function useUpdateLink() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: UpdateLinkInput }) =>
+      onboardingService.updateLink(id, patch),
     onSuccess: (link) => {
       qc.invalidateQueries({ queryKey: ['onboarding', 'links', link.domain] });
     },

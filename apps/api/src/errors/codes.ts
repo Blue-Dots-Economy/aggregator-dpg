@@ -70,6 +70,22 @@ export const ERR = {
       'Your aggregator account has not been approved yet. An admin must approve the registration before this action is available.',
     hint: 'JWT `decision_made` claim is missing, "pending", or "rejected". See requireApproved().',
   },
+  AGGREGATOR_TYPE_MISMATCH: {
+    code: 'AGGREGATOR_TYPE_MISMATCH',
+    status: 403,
+    title: 'Wrong participant type',
+    detail:
+      'Your aggregator is registered for a different participant type. You can only upload or create registration links for the type you registered as.',
+    hint: 'Request body participant_type does not match the JWT `aggregator_type` claim.',
+  },
+  AGGREGATOR_TYPE_MISSING: {
+    code: 'AGGREGATOR_TYPE_MISSING',
+    status: 403,
+    title: 'Aggregator type not set',
+    detail:
+      'Your account is missing its aggregator type. Sign out and back in to refresh your session; if the problem persists, contact support.',
+    hint: 'JWT has no `aggregator_type` claim. KC user attribute missing or mapper not configured. Refresh required after backfill.',
+  },
 
   // ── Registration ────────────────────────────────────────────────────────
   USER_EXISTS: {

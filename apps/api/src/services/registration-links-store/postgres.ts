@@ -17,6 +17,7 @@ import {
   type RegistrationLink,
   type RegistrationLinkStatus,
   type StoreResult,
+  type UpdateDraftInput,
 } from './interface.js';
 
 const PG_UNIQUE_VIOLATION = '23505';
@@ -189,6 +190,65 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
         operation: 'registrationLinksStore.list',
         status: 'failure',
         error: (err as Error).message,
+      });
+      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: (err as Error).message } };
+    }
+  }
+
+  async updateDraft(
+    id: string,
+    aggregatorId: string,
+    patch: UpdateDraftInput,
+  ): Promise<StoreResult<RegistrationLink>> {
+    const start = Date.now();
+    try {
+      const set: Record<string, unknown> = { updatedAt: new Date() };
+      if (patch.slug !== undefined) set.slug = patch.slug;
+      if (patch.context !== undefined) set.context = patch.context;
+      if (patch.expiresAt !== undefined) set.expiresAt = patch.expiresAt;
+      const rows = await getDb()
+        .update(registrationLinks)
+        .set(set)
+        .where(
+          and(
+            eq(registrationLinks.id, id),
+            eq(registrationLinks.aggregatorId, aggregatorId),
+            // Only drafts are mutable — live rows have already published the
+            // QR + public URL; mutating them in-place would invalidate the
+            // posters in the field. Live → retire → recreate is the right flow.
+            eq(registrationLinks.status, 'draft'),
+          ),
+        )
+        .returning();
+      const row = rows[0];
+      if (!row) {
+        return {
+          ok: false,
+          error: { code: 'NOT_FOUND', message: `draft link not found: ${id}` },
+        };
+      }
+      logger.info({
+        operation: 'registrationLinksStore.updateDraft',
+        status: 'success',
+        latency_ms: Date.now() - start,
+        link_id: row.id,
+        aggregator_id: row.aggregatorId,
+        slug_changed: patch.slug !== undefined,
+      });
+      return { ok: true, value: toDomain(row) };
+    } catch (err: unknown) {
+      const code = (err as { code?: string }).code;
+      if (code === PG_UNIQUE_VIOLATION) {
+        return {
+          ok: false,
+          error: { code: 'SLUG_COLLISION', message: 'slug already in use' },
+        };
+      }
+      logger.error({
+        operation: 'registrationLinksStore.updateDraft',
+        status: 'failure',
+        error: (err as Error).message,
+        latency_ms: Date.now() - start,
       });
       return { ok: false, error: { code: 'DB_UNAVAILABLE', message: (err as Error).message } };
     }
