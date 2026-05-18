@@ -34,7 +34,7 @@
         "addressLocality": { "ui:placeholder": "City" },
         "addressRegion": { "ui:placeholder": "State" },
         "postalCode": { "ui:placeholder": "PIN" },
-        "addressCountry": { "ui:placeholder": "IN" }
+        "addressCountry": { "ui:placeholder": "India" }
       }
     }
   },

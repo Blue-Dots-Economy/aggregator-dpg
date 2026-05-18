@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Button } from '../../../components/ui/Button';
 import { Topbar } from '../../../components/shell/Topbar';
 import { Dropzone } from '../../../components/ui/Dropzone';
@@ -472,13 +473,36 @@ function buildLinkTitle(f: CreateLinkFormState): string {
   return parts ? `${parts} — ${monYear}` : monYear;
 }
 
+/**
+ * Top-right green toast for success notifications. Portals to <body> so a
+ * transformed ancestor (e.g. `fade-up`) can't pin it inside the section. Auto-
+ * dismisses after 2400ms, matching the profile-save toast.
+ */
+function SuccessToast({ message, onDone }: { message: string; onDone: () => void }) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  useEffect(() => {
+    const t = setTimeout(onDone, 2400);
+    return () => clearTimeout(t);
+  }, [onDone]);
+  if (!mounted) return null;
+  return createPortal(
+    <div
+      role="status"
+      aria-live="polite"
+      className="fixed top-4 right-4 z-[100] rounded-[10px] border border-emerald-200 bg-emerald-50 px-4 py-3 text-[13px] text-emerald-700 shadow-lg inline-flex items-center gap-2"
+    >
+      <I.check size={14} /> {message}
+    </div>,
+    document.body,
+  );
+}
+
 function CreateLinkSection() {
   const [form, setForm] = useState<CreateLinkFormState>(EMPTY_FORM);
-  const [created, setCreated] = useState<ApiRegistrationLink | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
   const create = useCreateLink();
-  const update = useUpdateLink();
-  const activate = useActivateLink();
   const profile = useProfile();
   const rawProfile = useProfileRaw();
   const orgName = profile.data?.org ?? '';
@@ -517,7 +541,6 @@ function CreateLinkSection() {
       district: firstLoc?.addressLocality ?? '',
       event_location: firstLoc?.addressLocality ?? '',
     });
-    setCreated(null);
     setCreateError(null);
   };
 
@@ -530,7 +553,7 @@ function CreateLinkSection() {
     try {
       const title = buildLinkTitle(form);
       const slug = buildLinkSlug(form);
-      const link = await create.mutateAsync({
+      await create.mutateAsync({
         domain: form.domain,
         status: 'draft',
         ...(slug ? { slug } : {}),
@@ -545,47 +568,11 @@ function CreateLinkSection() {
           event_location: form.event_location || undefined,
         },
       });
-      setCreated(link);
-    } catch (err) {
-      setCreateError((err as Error).message);
-    }
-  };
-
-  const onMakeLive = async () => {
-    if (!created) return;
-    setCreateError(null);
-    try {
-      await activate.mutateAsync(created.link_id);
+      // Refresh the form so the user can compose the next link from scratch.
+      // The newly-created draft appears in "Your Registration Links" below;
+      // edits + Make Live happen on its card, not here.
       resetSection();
-    } catch (err) {
-      setCreateError((err as Error).message);
-    }
-  };
-
-  const onUpdateDraft = async () => {
-    if (!created) return;
-    setCreateError(null);
-    if (!form.state || !form.district || !form.lever_event) {
-      setCreateError('State, District, and Lever / Event are required.');
-      return;
-    }
-    try {
-      const title = buildLinkTitle(form);
-      const slug = buildLinkSlug(form);
-      const patch = {
-        ...(slug ? { slug } : {}),
-        context: {
-          org_name: orgName || undefined,
-          title,
-          state: form.state || undefined,
-          district: form.district || undefined,
-          lever_event: form.lever_event || undefined,
-          event_date: form.event_date || undefined,
-          event_location: form.event_location || undefined,
-        },
-      };
-      const link = await update.mutateAsync({ id: created.link_id, patch });
-      setCreated(link);
+      setToast('Registration link created');
     } catch (err) {
       setCreateError((err as Error).message);
     }
@@ -598,16 +585,9 @@ function CreateLinkSection() {
         <div className="font-display font-bold text-[16px] text-ink-900">
           Share a registration link
         </div>
-        {created ? (
-          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 text-[11.5px] font-semibold">
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-            Draft
-          </span>
-        ) : (
-          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-ink-50 text-ink-500 text-[11.5px] font-semibold">
-            New
-          </span>
-        )}
+        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-ink-50 text-ink-500 text-[11.5px] font-semibold">
+          New
+        </span>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px]">
@@ -676,35 +656,9 @@ function CreateLinkSection() {
             />
           </Field>
           <div className="md:col-span-2 flex items-center justify-end gap-2 mt-2 flex-wrap">
-            {created ? (
-              <>
-                <span className="mr-auto text-[12px] text-amber-700 font-semibold">
-                  Saved as draft — edit fields above and Update, or make it live to publish the link
-                  + QR.
-                </span>
-                <Button
-                  kind="ghost"
-                  onClick={resetSection}
-                  disabled={activate.isPending || update.isPending}
-                >
-                  New
-                </Button>
-                <Button
-                  kind="ghost"
-                  onClick={onUpdateDraft}
-                  disabled={activate.isPending || update.isPending}
-                >
-                  {update.isPending ? 'Saving…' : 'Update Draft'}
-                </Button>
-                <Button onClick={onMakeLive} disabled={activate.isPending || update.isPending}>
-                  {activate.isPending ? 'Going live…' : 'Make Live'}
-                </Button>
-              </>
-            ) : (
-              <Button onClick={onCreate} disabled={create.isPending}>
-                {create.isPending ? 'Creating…' : 'Create link'}
-              </Button>
-            )}
+            <Button onClick={onCreate} disabled={create.isPending}>
+              {create.isPending ? 'Creating…' : 'Create link'}
+            </Button>
           </div>
           {createError && (
             <div className="md:col-span-2 text-[12.5px] text-rose-700 bg-rose-50 border border-rose-200 rounded-[10px] px-3 py-2">
@@ -719,13 +673,12 @@ function CreateLinkSection() {
           </div>
           <div className="mt-4 p-3 bg-white rounded-[14px] border border-[var(--bd-border)] bd-shadow-lg">
             <div className="w-[200px] h-[200px] flex items-center justify-center text-ink-300 text-[12px] text-center px-4">
-              {created
-                ? 'QR will be generated when this draft is made live.'
-                : 'Create a link to start.'}
+              Create a link to start. QR appears once the draft is made live.
             </div>
           </div>
         </div>
       </div>
+      {toast && <SuccessToast message={toast} onDone={() => setToast(null)} />}
     </div>
   );
 }
