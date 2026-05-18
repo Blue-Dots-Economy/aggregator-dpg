@@ -10,11 +10,12 @@
  */
 
 /**
- * Per the two-table refactor, Keycloak only carries three attributes:
+ * Keycloak carries four attributes:
  *
- *   - `aggregator_id` — reverse pointer to Postgres
- *   - `phoneNumber`   — read by the OTP login authenticator
- *   - `decision_made` — gates login at the auth middleware
+ *   - `aggregator_id`   — reverse pointer to Postgres
+ *   - `aggregator_type` — `seeker` | `provider`, drives single-type enforcement
+ *   - `phoneNumber`     — read by the OTP login authenticator
+ *   - `decision_made`   — gates login at the auth middleware
  *
  * Everything else (org_slug, name, contact details, decision metadata,
  * rejection reason, etc.) lives in Postgres. The deprecated constants below
@@ -24,6 +25,12 @@
 export const KC_ATTR = {
   /** Postgres aggregator UUID — reverse pointer from KC to our DB. */
   AGGREGATOR_ID: 'aggregator_id',
+  /**
+   * `seeker` or `provider`. Set at signup, used by the API to enforce that
+   * an aggregator only operates on its registered participant type
+   * (bulk uploads + public registration links).
+   */
+  AGGREGATOR_TYPE: 'aggregator_type',
   /** Applicant phone in E.164. Read by the OTP login authenticator. */
   PHONE_NUMBER: 'phoneNumber',
   /** `pending` / `approved` / `rejected` — the login gate. */
@@ -32,8 +39,6 @@ export const KC_ATTR = {
   // ─── Deprecated (do not write from new code) ────────────────────────────
   /** @deprecated Slug lives in Postgres (`aggregators.org_slug`). */
   ORG_SLUG: 'org_slug',
-  /** @deprecated Type lives in Postgres (`aggregators.type` + `actor_type`). */
-  AGGREGATOR_TYPE: 'aggregator_type',
   /** @deprecated Display name lives in Postgres (`aggregators.name`). */
   ASSOCIATION: 'association',
   /** @deprecated Decision timestamp lives in Postgres (Phase 8 column). */

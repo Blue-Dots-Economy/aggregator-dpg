@@ -14,11 +14,19 @@ let cachedJwks: ReturnType<typeof createRemoteJWKSet> | null = null;
 let cachedJwksUrl: string | null = null;
 let testOverride: ((token: string) => Promise<JWTPayload>) | null = null;
 
+export type AggregatorType = 'seeker' | 'provider';
+
 export interface AuthContext {
   /** Keycloak `sub` claim — stable user id. */
   userId: string;
   /** Custom claim mapped from the `aggregator_id` user attribute. */
   aggregatorId: string;
+  /**
+   * Custom claim mapped from the `aggregator_type` user attribute. Drives the
+   * single-type enforcement on bulk uploads and public registration links —
+   * the aggregator may only operate on the type it registered as.
+   */
+  aggregatorType?: AggregatorType;
   /**
    * Approval state read from the `decision_made` user-attribute claim.
    * `'pending'` when the admin has not yet decided. Auth-gated routes call
@@ -129,6 +137,10 @@ export async function authenticate(req: FastifyRequest): Promise<AuthResult> {
   const decision = readStringOrFirst(claims.decision_made);
   if (decision === 'pending' || decision === 'approved' || decision === 'rejected') {
     ctx.decisionMade = decision;
+  }
+  const aggregatorType = readStringOrFirst(claims.aggregator_type);
+  if (aggregatorType === 'seeker' || aggregatorType === 'provider') {
+    ctx.aggregatorType = aggregatorType;
   }
   return { ok: true, context: ctx };
 }

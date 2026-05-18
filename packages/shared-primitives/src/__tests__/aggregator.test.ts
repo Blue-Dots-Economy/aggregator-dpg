@@ -39,6 +39,7 @@ describe('RegistrationPayloadSchema', () => {
   it('accepts the minimum valid signup body', () => {
     const parsed = RegistrationPayloadSchema.parse({
       name: 'SkillBridge Network',
+      type: 'seeker',
       contact: validContact,
       consent: validConsent,
     });
@@ -50,10 +51,22 @@ describe('RegistrationPayloadSchema', () => {
     expect(() => RegistrationPayloadSchema.parse({ name: 'x', consent: validConsent })).toThrow();
   });
 
+  it('rejects "both" — only seeker | provider allowed at signup', () => {
+    expect(() =>
+      RegistrationPayloadSchema.parse({
+        name: 'SkillBridge Network',
+        type: 'both',
+        contact: validContact,
+        consent: validConsent,
+      }),
+    ).toThrow();
+  });
+
   it('rejects unknown top-level fields (strict)', () => {
     expect(() =>
       RegistrationPayloadSchema.parse({
         name: 'x',
+        type: 'seeker',
         contact: validContact,
         consent: validConsent,
         personas: [],
@@ -119,9 +132,21 @@ describe('AggregatorViewSchema', () => {
     ).toThrow();
   });
 
-  it('accepts actor_type=seeker with type=both', () => {
+  it('rejects actor_type=seeker with type=both (legacy value no longer accepted)', () => {
     expect(() =>
       AggregatorViewSchema.parse({ ...baseView, actor_type: 'seeker', type: 'both' }),
+    ).toThrow();
+  });
+
+  it('accepts actor_type=seeker with type=seeker', () => {
+    expect(() =>
+      AggregatorViewSchema.parse({ ...baseView, actor_type: 'seeker', type: 'seeker' }),
+    ).not.toThrow();
+  });
+
+  it('accepts actor_type=provider with type=provider', () => {
+    expect(() =>
+      AggregatorViewSchema.parse({ ...baseView, actor_type: 'provider', type: 'provider' }),
     ).not.toThrow();
   });
 });

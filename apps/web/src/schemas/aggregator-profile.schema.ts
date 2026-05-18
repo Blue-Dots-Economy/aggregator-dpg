@@ -2,7 +2,7 @@ import type { RJSFSchema, UiSchema } from '@rjsf/utils';
 
 export interface AggregatorProfileFormData {
   org: string;
-  type: 'Seeker' | 'Provider' | 'Both';
+  type: 'Seeker' | 'Provider';
   registration: string;
   established?: string;
   coordinator: string;
@@ -43,7 +43,7 @@ export const aggregatorProfileSchema: RJSFSchema = {
     type: {
       type: 'string',
       title: 'Aggregator Type',
-      enum: ['Seeker', 'Provider', 'Both'],
+      enum: ['Seeker', 'Provider'],
     },
     registration: { type: 'string', title: 'Registration Number' },
     established: { type: 'string', title: 'Established', format: 'date' },

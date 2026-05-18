@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Button } from '../../../components/ui/Button';
 import { Topbar } from '../../../components/shell/Topbar';
 import { Dropzone } from '../../../components/ui/Dropzone';
@@ -13,6 +14,7 @@ import {
   useOnboardingSummary,
   useRecentBulkUploads,
   useRegistrationLinks,
+  useUpdateLink,
 } from '../../../hooks/useOnboarding';
 import type { ApiRegistrationLink, BulkUploadStatus } from '../../../services/onboarding.service';
 import { onboardingService } from '../../../services/onboarding.service';
@@ -85,24 +87,41 @@ function StatStrip() {
 }
 
 function CSVUpload() {
-  const [participantType, setParticipantType] = useState<'seeker' | 'provider'>('seeker');
+  const rawProfile = useProfileRaw();
+  // Aggregator registered participant focus, mirrored from the
+  // `aggregator_type` KC claim. While the profile is still loading we
+  // tentatively default to 'seeker' — the upload submit path is gated by
+  // the API anyway, so a transient mismatch in the picker is harmless.
+  const aggregatorType: 'seeker' | 'provider' = rawProfile.data?.type ?? 'seeker';
+  const [participantType, setParticipantType] = useState<'seeker' | 'provider'>(aggregatorType);
+  useEffect(() => {
+    if (rawProfile.data?.type) setParticipantType(rawProfile.data.type);
+  }, [rawProfile.data?.type]);
   const [pickedFile, setPickedFile] = useState<File | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadNotice, setUploadNotice] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const upload = useBulkUpload();
   const recent = useRecentBulkUploads(10);
-  // Summary lives in a sibling component (StatStrip) but the manual-refresh
-  // affordance should refetch both — the top counters lag behind otherwise.
-  const summary = useOnboardingSummary();
+
+  const acceptFile = (f: File) => {
+    if (!/\.csv$/i.test(f.name)) {
+      setUploadError('Only .csv files are accepted.');
+      return;
+    }
+    setPickedFile(f);
+    setUploadError(null);
+    setUploadNotice(null);
+  };
 
   const onPick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
-    if (f) {
-      setPickedFile(f);
-      setUploadError(null);
-      setUploadNotice(null);
-    }
+    if (f) acceptFile(f);
+  };
+
+  const onDropFiles = (files: File[]) => {
+    const f = files[0];
+    if (f) acceptFile(f);
   };
 
   const onUpload = async () => {
@@ -138,29 +157,30 @@ function CSVUpload() {
           </div>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
+          {/*
+           * Aggregators are scoped to a single participant type (seeker OR
+           * provider). The opposite button is omitted, not just disabled, so
+           * the UI matches what the API enforces: one tile per aggregator.
+           */}
           <div className="flex items-center bg-ink-50 border border-[var(--bd-border)] rounded-[10px] p-0.5">
-            <button
-              type="button"
-              onClick={() => setParticipantType('seeker')}
-              className={`px-3 py-1.5 rounded-[8px] text-[12.5px] font-semibold transition-all ${
-                participantType === 'seeker'
-                  ? 'bg-white text-amber-700 bd-shadow'
-                  : 'text-ink-500 hover:text-ink-700'
-              }`}
-            >
-              Seekers
-            </button>
-            <button
-              type="button"
-              onClick={() => setParticipantType('provider')}
-              className={`px-3 py-1.5 rounded-[8px] text-[12.5px] font-semibold transition-all ${
-                participantType === 'provider'
-                  ? 'bg-white text-primary-600 bd-shadow'
-                  : 'text-ink-500 hover:text-ink-700'
-              }`}
-            >
-              Providers
-            </button>
+            {aggregatorType === 'seeker' && (
+              <button
+                type="button"
+                onClick={() => setParticipantType('seeker')}
+                className="px-3 py-1.5 rounded-[8px] text-[12.5px] font-semibold bg-white text-amber-700 bd-shadow"
+              >
+                Seekers
+              </button>
+            )}
+            {aggregatorType === 'provider' && (
+              <button
+                type="button"
+                onClick={() => setParticipantType('provider')}
+                className="px-3 py-1.5 rounded-[8px] text-[12.5px] font-semibold bg-white text-primary-600 bd-shadow"
+              >
+                Providers
+              </button>
+            )}
           </div>
           <button
             type="button"
@@ -172,7 +192,7 @@ function CSVUpload() {
         </div>
       </div>
 
-      <Dropzone>
+      <Dropzone onFiles={onDropFiles}>
         <input
           ref={fileInputRef}
           type="file"
@@ -251,12 +271,7 @@ function CSVUpload() {
       <RecentUploadsTable
         items={recent.data?.items ?? []}
         loading={recent.isLoading}
-        fetching={recent.isFetching || summary.isFetching}
         error={recent.error as Error | null}
-        onRefresh={() => {
-          void recent.refetch();
-          void summary.refetch();
-        }}
       />
     </div>
   );
@@ -266,29 +281,15 @@ function RecentUploadsTable({
   items,
   loading,
   error,
-  fetching,
-  onRefresh,
 }: {
   items: BulkUploadStatus[];
   loading: boolean;
-  fetching: boolean;
   error: Error | null;
-  onRefresh: () => void;
 }) {
   return (
     <div className="mt-5 border-t border-[var(--bd-border)] pt-4">
       <div className="flex items-center justify-between mb-2">
         <div className="font-display font-bold text-[14px] text-ink-700">Recent uploads</div>
-        <button
-          type="button"
-          onClick={onRefresh}
-          disabled={fetching}
-          title="Refresh for latest status"
-          aria-label="Refresh"
-          className="inline-flex items-center justify-center w-7 h-7 rounded-full text-ink-500 hover:text-primary-600 hover:bg-[var(--bd-primary-50)] disabled:opacity-40 transition-colors"
-        >
-          <I.refresh size={14} className={fetching ? 'animate-spin' : ''} />
-        </button>
       </div>
       <div className="overflow-x-auto scroll-x">
         <table className="bd-table" style={{ minWidth: 800 }}>
@@ -472,16 +473,51 @@ function buildLinkTitle(f: CreateLinkFormState): string {
   return parts ? `${parts} — ${monYear}` : monYear;
 }
 
+/**
+ * Top-right green toast for success notifications. Portals to <body> so a
+ * transformed ancestor (e.g. `fade-up`) can't pin it inside the section. Auto-
+ * dismisses after 2400ms, matching the profile-save toast.
+ */
+function SuccessToast({ message, onDone }: { message: string; onDone: () => void }) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  useEffect(() => {
+    const t = setTimeout(onDone, 2400);
+    return () => clearTimeout(t);
+  }, [onDone]);
+  if (!mounted) return null;
+  return createPortal(
+    <div
+      role="status"
+      aria-live="polite"
+      className="fixed top-4 right-4 z-[100] rounded-[10px] border border-emerald-200 bg-emerald-50 px-4 py-3 text-[13px] text-emerald-700 shadow-lg inline-flex items-center gap-2"
+    >
+      <I.check size={14} /> {message}
+    </div>,
+    document.body,
+  );
+}
+
 function CreateLinkSection() {
   const [form, setForm] = useState<CreateLinkFormState>(EMPTY_FORM);
-  const [created, setCreated] = useState<ApiRegistrationLink | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
   const create = useCreateLink();
-  const activate = useActivateLink();
   const profile = useProfile();
   const rawProfile = useProfileRaw();
   const orgName = profile.data?.org ?? '';
+  const aggregatorType: 'seeker' | 'provider' = rawProfile.data?.type ?? 'seeker';
+
+  // Pin the link domain to the aggregator's registered type — the API
+  // rejects mismatches with AGGREGATOR_TYPE_MISMATCH, so the UI never lets
+  // the user pick the wrong one.
+  useEffect(() => {
+    if (rawProfile.data?.type) {
+      setForm((f) =>
+        f.domain === rawProfile.data.type ? f : { ...f, domain: rawProfile.data.type! },
+      );
+    }
+  }, [rawProfile.data?.type]);
 
   // Prefill state / district / event location from the aggregator's first
   // postal address. User can still override. Only fills on first load —
@@ -505,7 +541,6 @@ function CreateLinkSection() {
       district: firstLoc?.addressLocality ?? '',
       event_location: firstLoc?.addressLocality ?? '',
     });
-    setCreated(null);
     setCreateError(null);
   };
 
@@ -518,7 +553,7 @@ function CreateLinkSection() {
     try {
       const title = buildLinkTitle(form);
       const slug = buildLinkSlug(form);
-      const link = await create.mutateAsync({
+      await create.mutateAsync({
         domain: form.domain,
         status: 'draft',
         ...(slug ? { slug } : {}),
@@ -533,28 +568,14 @@ function CreateLinkSection() {
           event_location: form.event_location || undefined,
         },
       });
-      setCreated(link);
-    } catch (err) {
-      setCreateError((err as Error).message);
-    }
-  };
-
-  const onMakeLive = async () => {
-    if (!created) return;
-    setCreateError(null);
-    try {
-      await activate.mutateAsync(created.link_id);
+      // Refresh the form so the user can compose the next link from scratch.
+      // The newly-created draft appears in "Your Registration Links" below;
+      // edits + Make Live happen on its card, not here.
       resetSection();
+      setToast('Registration link created');
     } catch (err) {
       setCreateError((err as Error).message);
     }
-  };
-
-  const onCopy = async (value: string) => {
-    if (!navigator.clipboard) return;
-    await navigator.clipboard.writeText(value);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
   };
 
   return (
@@ -564,16 +585,9 @@ function CreateLinkSection() {
         <div className="font-display font-bold text-[16px] text-ink-900">
           Share a registration link
         </div>
-        {created ? (
-          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 text-[11.5px] font-semibold">
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-            Draft
-          </span>
-        ) : (
-          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-ink-50 text-ink-500 text-[11.5px] font-semibold">
-            New
-          </span>
-        )}
+        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-ink-50 text-ink-500 text-[11.5px] font-semibold">
+          New
+        </span>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px]">
@@ -629,57 +643,26 @@ function CreateLinkSection() {
             />
           </Field>
           <Field label="Domain *">
-            <select
+            {/*
+             * Pinned to the aggregator's registered type — single-type
+             * enforcement is what the API expects. Rendered read-only so
+             * the user sees the value but can't switch domains.
+             */}
+            <input
               className="bd-input"
-              value={form.domain}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, domain: e.target.value as 'seeker' | 'provider' }))
-              }
-            >
-              <option value="seeker">Seeker</option>
-              <option value="provider">Provider</option>
-            </select>
+              value={aggregatorType === 'seeker' ? 'Seeker' : 'Provider'}
+              readOnly
+              aria-readonly="true"
+            />
           </Field>
-          <div className="md:col-span-2 flex items-center justify-end gap-2 mt-2">
-            {created ? (
-              <>
-                <span className="mr-auto text-[12px] text-amber-700 font-semibold">
-                  Saved as draft — choose to make it live or keep it for later.
-                </span>
-                <Button kind="ghost" onClick={resetSection} disabled={activate.isPending}>
-                  Stay Draft
-                </Button>
-                <Button onClick={onMakeLive} disabled={activate.isPending}>
-                  {activate.isPending ? 'Going live…' : 'Make Live'}
-                </Button>
-              </>
-            ) : (
-              <Button onClick={onCreate} disabled={create.isPending}>
-                {create.isPending ? 'Creating…' : 'Create link'}
-              </Button>
-            )}
+          <div className="md:col-span-2 flex items-center justify-end gap-2 mt-2 flex-wrap">
+            <Button onClick={onCreate} disabled={create.isPending}>
+              {create.isPending ? 'Creating…' : 'Create link'}
+            </Button>
           </div>
           {createError && (
             <div className="md:col-span-2 text-[12.5px] text-rose-700 bg-rose-50 border border-rose-200 rounded-[10px] px-3 py-2">
               {createError}
-            </div>
-          )}
-          {created && (
-            <div className="md:col-span-2 mt-2">
-              <div className="bd-label">Public URL</div>
-              <div className="flex items-center gap-2 bg-[var(--bd-primary-50)] border border-[var(--bd-primary-100)] rounded-[10px] px-3 py-2.5">
-                <I.link size={14} className="text-primary-600" />
-                <span className="font-mono text-[12.5px] text-primary-600 truncate flex-1">
-                  {created.public_url}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => onCopy(created.public_url)}
-                  className="text-[12px] font-semibold text-primary-600 inline-flex items-center gap-1 hover:underline"
-                >
-                  <I.copy size={13} /> {copied ? 'Copied' : 'Copy'}
-                </button>
-              </div>
             </div>
           )}
         </div>
@@ -689,32 +672,13 @@ function CreateLinkSection() {
             <I.qr size={14} /> QR Code
           </div>
           <div className="mt-4 p-3 bg-white rounded-[14px] border border-[var(--bd-border)] bd-shadow-lg">
-            {created?.qr_url ? (
-              <img
-                src={created.qr_url}
-                alt="QR code"
-                width={200}
-                height={200}
-                className="w-[200px] h-[200px] object-contain"
-              />
-            ) : (
-              <div className="w-[200px] h-[200px] flex items-center justify-center text-ink-300 text-[12px] text-center px-4">
-                Create a link to generate the QR.
-              </div>
-            )}
+            <div className="w-[200px] h-[200px] flex items-center justify-center text-ink-300 text-[12px] text-center px-4">
+              Create a link to start. QR appears once the draft is made live.
+            </div>
           </div>
-          {created?.qr_url && (
-            <Button
-              kind="ghost"
-              className="mt-3"
-              icon={<I.download size={14} />}
-              onClick={() => window.open(created.qr_url ?? '', '_blank', 'noopener,noreferrer')}
-            >
-              Download QR
-            </Button>
-          )}
         </div>
       </div>
+      {toast && <SuccessToast message={toast} onDone={() => setToast(null)} />}
     </div>
   );
 }
@@ -730,11 +694,15 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function LinkCard({ link }: { link: ApiRegistrationLink }) {
   const [copied, setCopied] = useState(false);
+  const [editing, setEditing] = useState(false);
   const activate = useActivateLink();
   const deactivate = useDeactivateLink();
+  const update = useUpdateLink();
   const isLive = link.status === 'live';
   const isDraft = link.status === 'draft';
   const ctx = (link.context ?? {}) as Record<string, unknown>;
+  const ctxString = (key: string): string =>
+    typeof ctx[key] === 'string' ? (ctx[key] as string) : '';
   const title =
     (typeof ctx['title'] === 'string' && ctx['title']) ||
     [ctx['district'], ctx['lever_event']].filter(Boolean).join(' ') ||
@@ -742,23 +710,71 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
   const subtitle =
     [ctx['org_name'], ctx['event_location']].filter(Boolean).join(' · ') ||
     `Created ${new Date(link.created_at).toLocaleDateString()}`;
-  // Render `<host>/r/<slug>` as `host/register/org/<slug>` so the slug
-  // segment is visually emphasised (the screenshot's design choice).
-  let urlHost = link.public_url;
+
+  // Render `<host>/<orgSlug>/<slug>` with the slug emphasised. Only computed
+  // when the row is published (live) — drafts and retired rows carry a null
+  // public_url.
+  let urlHost = '';
   let urlPath = '';
-  try {
-    const u = new URL(link.public_url);
-    urlHost = u.host;
-    urlPath = u.pathname.replace(/^\//, '');
-  } catch {
-    /* keep raw */
+  if (link.public_url) {
+    urlHost = link.public_url;
+    try {
+      const u = new URL(link.public_url);
+      urlHost = u.host;
+      urlPath = u.pathname.replace(/^\//, '');
+    } catch {
+      /* keep raw */
+    }
   }
   const onCopy = async () => {
-    if (!navigator.clipboard) return;
+    if (!link.public_url || !navigator.clipboard) return;
     await navigator.clipboard.writeText(link.public_url);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };
+
+  // Inline edit form state — drafts only. Pre-populated from the link's
+  // current context. Slug is regenerated server-side from district+lever+date
+  // on save (matches the create flow).
+  const [editForm, setEditForm] = useState<CreateLinkFormState>(() => ({
+    domain: link.domain,
+    state: ctxString('state'),
+    district: ctxString('district'),
+    lever_event: ctxString('lever_event'),
+    event_date: ctxString('event_date'),
+    event_location: ctxString('event_location'),
+  }));
+  const [editError, setEditError] = useState<string | null>(null);
+  const onSaveEdit = async () => {
+    setEditError(null);
+    if (!editForm.state || !editForm.district || !editForm.lever_event) {
+      setEditError('State, District, and Lever / Event are required.');
+      return;
+    }
+    try {
+      const slug = buildLinkSlug(editForm);
+      const editTitle = buildLinkTitle(editForm);
+      await update.mutateAsync({
+        id: link.link_id,
+        patch: {
+          ...(slug ? { slug } : {}),
+          context: {
+            ...ctx,
+            title: editTitle,
+            state: editForm.state || undefined,
+            district: editForm.district || undefined,
+            lever_event: editForm.lever_event || undefined,
+            event_date: editForm.event_date || undefined,
+            event_location: editForm.event_location || undefined,
+          },
+        },
+      });
+      setEditing(false);
+    } catch (err) {
+      setEditError((err as Error).message);
+    }
+  };
+
   return (
     <div className="bd-card p-5 hover:border-[var(--bd-primary-100)] transition-colors">
       <div className="flex items-start justify-between gap-4">
@@ -791,48 +807,60 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
 
           <p className="text-[12.5px] text-ink-400 mt-1.5">{subtitle}</p>
 
-          {/* URL row */}
-          <div className="flex items-center gap-2 mt-3 flex-wrap">
-            <div className="inline-flex items-center gap-1 bg-ink-50 border border-[var(--bd-border)] rounded-[10px] px-3 py-1.5 text-[12.5px] font-mono">
-              <span className="text-ink-500">{urlHost}/</span>
-              <span className="text-amber-700 font-semibold">{urlPath}</span>
+          {/*
+           * Public URL + QR are only meaningful once the link is live. Drafts
+           * carry a null public_url from the API; rendering it here would
+           * show "host/null" and copy the literal string — both wrong.
+           */}
+          {isLive && link.public_url && (
+            <div className="flex items-center gap-2 mt-3 flex-wrap">
+              <div className="inline-flex items-center gap-1 bg-ink-50 border border-[var(--bd-border)] rounded-[10px] px-3 py-1.5 text-[12.5px] font-mono">
+                <span className="text-ink-500">{urlHost}/</span>
+                <span className="text-amber-700 font-semibold">{urlPath}</span>
+                <button
+                  type="button"
+                  onClick={onCopy}
+                  title="Copy link"
+                  className="ml-1 text-ink-400 hover:text-primary-600"
+                >
+                  <I.copy size={12} />
+                </button>
+              </div>
+              {link.qr_url && (
+                <a
+                  href={link.qr_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="View QR"
+                  className="inline-flex items-center justify-center w-8 h-8 rounded-[10px] border border-[var(--bd-border)] text-ink-500 hover:text-primary-600 hover:border-[var(--bd-primary-100)]"
+                >
+                  <I.qr size={14} />
+                </a>
+              )}
+              <a
+                href={link.public_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Open link"
+                className="inline-flex items-center justify-center w-8 h-8 rounded-[10px] border border-[var(--bd-border)] text-ink-500 hover:text-primary-600 hover:border-[var(--bd-primary-100)]"
+              >
+                <I.link size={14} />
+              </a>
               <button
                 type="button"
                 onClick={onCopy}
-                title="Copy link"
-                className="ml-1 text-ink-400 hover:text-primary-600"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] border border-[var(--bd-border)] text-ink-600 text-[12.5px] font-semibold hover:bg-ink-50"
               >
-                <I.copy size={12} />
+                {copied ? 'Copied!' : 'Copy link'}
               </button>
             </div>
-            {link.qr_url && (
-              <a
-                href={link.qr_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                title="View QR"
-                className="inline-flex items-center justify-center w-8 h-8 rounded-[10px] border border-[var(--bd-border)] text-ink-500 hover:text-primary-600 hover:border-[var(--bd-primary-100)]"
-              >
-                <I.qr size={14} />
-              </a>
-            )}
-            <a
-              href={link.public_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              title="Open link"
-              className="inline-flex items-center justify-center w-8 h-8 rounded-[10px] border border-[var(--bd-border)] text-ink-500 hover:text-primary-600 hover:border-[var(--bd-primary-100)]"
-            >
-              <I.link size={14} />
-            </a>
-            <button
-              type="button"
-              onClick={onCopy}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] border border-[var(--bd-border)] text-ink-600 text-[12.5px] font-semibold hover:bg-ink-50"
-            >
-              {copied ? 'Copied!' : 'Copy link'}
-            </button>
-          </div>
+          )}
+
+          {isDraft && !editing && (
+            <div className="mt-3 text-[12.5px] text-ink-400">
+              Public URL + QR appear after Make Live.
+            </div>
+          )}
 
           {/* Metadata row */}
           <div className="flex items-center gap-4 mt-3.5 text-[12.5px] flex-wrap">
@@ -863,8 +891,16 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
+          {isDraft && !editing && (
+            <Button kind="ghost" onClick={() => setEditing(true)} disabled={update.isPending}>
+              Edit
+            </Button>
+          )}
           {isDraft && (
-            <Button onClick={() => activate.mutate(link.link_id)} disabled={activate.isPending}>
+            <Button
+              onClick={() => activate.mutate(link.link_id)}
+              disabled={activate.isPending || editing || update.isPending}
+            >
               {activate.isPending ? 'Going live…' : 'Make Live'}
             </Button>
           )}
@@ -879,13 +915,70 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
           )}
         </div>
       </div>
+
+      {isDraft && editing && (
+        <div className="mt-4 pt-4 border-t border-[var(--bd-border)] grid grid-cols-1 md:grid-cols-2 gap-3">
+          <Field label="Instance (State Name) *">
+            <input
+              className="bd-input"
+              value={editForm.state}
+              onChange={(e) => setEditForm((f) => ({ ...f, state: e.target.value }))}
+            />
+          </Field>
+          <Field label="District *">
+            <input
+              className="bd-input"
+              value={editForm.district}
+              onChange={(e) => setEditForm((f) => ({ ...f, district: e.target.value }))}
+            />
+          </Field>
+          <Field label="Lever / Event *">
+            <input
+              className="bd-input"
+              value={editForm.lever_event}
+              onChange={(e) => setEditForm((f) => ({ ...f, lever_event: e.target.value }))}
+            />
+          </Field>
+          <Field label="Event Date">
+            <input
+              type="date"
+              className="bd-input"
+              value={editForm.event_date}
+              onChange={(e) => setEditForm((f) => ({ ...f, event_date: e.target.value }))}
+            />
+          </Field>
+          <Field label="Event Location">
+            <input
+              className="bd-input"
+              value={editForm.event_location}
+              onChange={(e) => setEditForm((f) => ({ ...f, event_location: e.target.value }))}
+            />
+          </Field>
+          {editError && (
+            <div className="md:col-span-2 text-[12.5px] text-rose-700 bg-rose-50 border border-rose-200 rounded-[10px] px-3 py-2">
+              {editError}
+            </div>
+          )}
+          <div className="md:col-span-2 flex items-center justify-end gap-2">
+            <Button kind="ghost" onClick={() => setEditing(false)} disabled={update.isPending}>
+              Cancel
+            </Button>
+            <Button onClick={onSaveEdit} disabled={update.isPending}>
+              {update.isPending ? 'Saving…' : 'Save Draft'}
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 function YourLinks() {
-  const [tab, setTab] = useState<'seeker' | 'provider'>('seeker');
-  const { data, isLoading, error } = useRegistrationLinks(tab);
+  const rawProfile = useProfileRaw();
+  const aggregatorType: 'seeker' | 'provider' = rawProfile.data?.type ?? 'seeker';
+  // The aggregator only ever has links of its registered type — no tab
+  // switcher needed. Filter is pinned via `aggregatorType`.
+  const { data, isLoading, error } = useRegistrationLinks(aggregatorType);
   const links: ApiRegistrationLink[] = data ?? [];
   const activeCount = links.filter((l) => l.status === 'live').length;
 
@@ -899,24 +992,9 @@ function YourLinks() {
           <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[11.5px] font-semibold">
             {activeCount} active
           </span>
-        </div>
-        <div className="flex items-center bg-ink-50 border border-[var(--bd-border)] rounded-[10px] p-0.5">
-          <button
-            type="button"
-            onClick={() => setTab('seeker')}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[8px] text-[12.5px] font-semibold transition-all
-              ${tab === 'seeker' ? 'bg-white text-amber-700 bd-shadow' : 'text-ink-500 hover:text-ink-700'}`}
-          >
-            <span className="text-amber-500">●</span> Seeker Links
-          </button>
-          <button
-            type="button"
-            onClick={() => setTab('provider')}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[8px] text-[12.5px] font-semibold transition-all
-              ${tab === 'provider' ? 'bg-white text-primary-600 bd-shadow' : 'text-ink-500 hover:text-ink-700'}`}
-          >
-            <I.briefcase size={12} /> Provider Links
-          </button>
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-ink-50 text-ink-600 text-[11.5px] font-semibold capitalize">
+            {aggregatorType} links
+          </span>
         </div>
       </div>
       <div className="p-5 flex flex-col gap-3">
@@ -928,7 +1006,7 @@ function YourLinks() {
           </div>
         ) : links.length === 0 ? (
           <div className="text-center py-10 text-ink-400 text-[13px]">
-            No {tab} links yet. Create one above.
+            No {aggregatorType} links yet. Create one above.
           </div>
         ) : (
           links.map((l) => <LinkCard key={l.link_id} link={l} />)
@@ -965,6 +1043,18 @@ export default function OnboardingPage() {
       <Topbar
         title="Onboarding"
         subtitle="Add participants to your network — by CSV, link, or QR."
+        right={
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            title="Refresh page"
+            aria-label="Refresh page"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] border border-[var(--bd-border)] bg-white text-[12.5px] font-semibold text-ink-700 hover:text-primary-600 hover:bg-[var(--bd-primary-50)] transition-colors"
+          >
+            <I.refresh size={14} />
+            Refresh
+          </button>
+        }
       />
       <StatStrip />
       <CSVUpload />
