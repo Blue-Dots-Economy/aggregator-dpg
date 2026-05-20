@@ -222,13 +222,24 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       const ss = getSignalStackWriter();
       if (ss) {
         const name = typeof body['name'] === 'string' ? (body['name'] as string) : participantRowId;
+        const phoneFromBody =
+          typeof body['phone'] === 'string' ? (body['phone'] as string) : phoneNormalised;
+        const pushPhone = phoneNormalised ?? phoneFromBody;
         const result = await ss.onboard({
-          user: { name, phoneNumber: phoneNormalised, email: emailNormalised },
+          // Signalstack's user schema treats email / phoneNumber as `.optional()`
+          // (not `.nullable()`), so we omit the keys entirely when we have no
+          // value rather than passing null — a literal null trips Zod's
+          // `expected: string` check and the whole push fails 400.
+          user: {
+            name,
+            ...(pushPhone ? { phoneNumber: pushPhone } : {}),
+            ...(emailNormalised ? { email: emailNormalised } : {}),
+          },
           profile: {
             item_network: config.SIGNALSTACK_ITEM_NETWORK,
             item_domain: link.domain,
             item_type: link.domain === 'provider' ? 'job_posting_1.0' : 'profile_1.0',
-            item_state: body,
+            item_state: buildSignalStackItemState(link.domain, body, pushPhone),
           },
           aggregator_id: link.aggregatorId,
         });
@@ -267,6 +278,30 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       submission_id: submissionId,
     });
   });
+}
+
+/**
+ * Build the `item_state` block sent to signalstack from the participant
+ * payload.
+ *
+ * Aggregator participant schemas already use the same field names as the
+ * signalstack profile_1.0 / job_posting_1.0 item_state, so the body flows
+ * through unchanged — we only override the phone for seekers so signalstack
+ * stores the E.164 form the writer resolved upstream, not whatever raw
+ * value the form / CSV carried.
+ */
+function buildSignalStackItemState(
+  domain: 'seeker' | 'provider',
+  body: Record<string, unknown>,
+  pushPhone: string | null,
+): Record<string, unknown> {
+  const itemState: Record<string, unknown> = { ...body };
+
+  if (domain === 'seeker' && pushPhone) {
+    itemState.phone = pushPhone;
+  }
+
+  return itemState;
 }
 
 /**
