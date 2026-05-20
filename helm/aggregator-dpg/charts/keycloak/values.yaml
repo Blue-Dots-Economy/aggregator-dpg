@@ -1,0 +1,16 @@
+replicaCount: 1
+image:
+  repository: aggregator-dpg/keycloak
+  tag: "26.5.5-aggregator"
+  pullPolicy: IfNotPresent
+bootstrapAdminUsername: admin
+smsProvider: log
+awsRegion: ap-south-1
+service:
+  port: 8080
+  mgmtPort: 9000
+resources:
+  requests: { cpu: 250m, memory: 768Mi }
+  limits:   { cpu: 1,    memory: 1500Mi }
+realmRenderer:
+  image: alpine:3.20
