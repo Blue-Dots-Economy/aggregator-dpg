@@ -68,6 +68,9 @@ importers:
       '@aggregator-dpg/shared-primitives':
         specifier: workspace:*
         version: link:../../packages/shared-primitives
+      '@aggregator-dpg/signalstack-writer':
+        specifier: workspace:*
+        version: link:../../packages/signalstack-writer
       '@aws-sdk/client-s3':
         specifier: ^3.1045.0
         version: 3.1045.0
@@ -268,6 +271,9 @@ importers:
       '@aggregator-dpg/shared-primitives':
         specifier: workspace:*
         version: link:../../packages/shared-primitives
+      '@aggregator-dpg/signalstack-writer':
+        specifier: workspace:*
+        version: link:../../packages/signalstack-writer
       '@aws-sdk/client-s3':
         specifier: ^3.1045.0
         version: 3.1045.0

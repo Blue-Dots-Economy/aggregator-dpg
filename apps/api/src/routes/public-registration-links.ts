@@ -24,6 +24,7 @@ import { getRegistrationLinksStore } from '../services/registration-links-store/
 import type { RegistrationLink } from '../services/registration-links-store/index.js';
 import { getSchemaLoader } from '../services/schema-loader/index.js';
 import { normalisePhone } from '../services/phone.js';
+import { getSignalStackWriter } from '../services/signalstack.js';
 import { getDb } from '../db/client.js';
 import { linkSubmissions } from '../db/schema.js';
 import { httpError } from '../errors/http-error.js';
@@ -209,6 +210,43 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       participant_id: participantRowId,
       submission_id: submissionId,
     });
+
+    // Outward signalstack push for newly-inserted participants only. Skipped
+    // outcomes are dedup hits — we already pushed (or chose not to) on the
+    // first submit, so re-pushing here would create duplicate signalstack
+    // profiles. Failures are logged but never affect the HTTP response: the
+    // local DB write is the source of truth, signalstack is a downstream sink.
+    if (outcome === 'passed') {
+      const ss = getSignalStackWriter();
+      if (ss) {
+        const name = typeof body['name'] === 'string' ? (body['name'] as string) : participantRowId;
+        const result = await ss.onboard({
+          user: { name, phoneNumber: phoneNormalised, email: emailNormalised },
+          profile: {
+            item_network: config.SIGNALSTACK_ITEM_NETWORK,
+            item_domain: link.domain,
+            item_type: link.domain === 'provider' ? 'job_posting_1.0' : 'profile_1.0',
+            item_state: body,
+          },
+          aggregator_id: link.aggregatorId,
+        });
+        if (!result.success) {
+          log.warn({
+            status: 'warn',
+            sub: 'signalstack.push',
+            error: result.error.message,
+            code: result.error.code,
+          });
+        } else {
+          log.info({
+            status: 'success',
+            sub: 'signalstack.push',
+            user_id: result.value.user.id,
+            profile_count: result.value.profiles.length,
+          });
+        }
+      }
+    }
 
     if (outcome === 'skipped') {
       // Surface dedup in the response status to match the design (409).

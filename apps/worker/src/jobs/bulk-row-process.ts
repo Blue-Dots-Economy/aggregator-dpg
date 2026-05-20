@@ -29,6 +29,8 @@ import { getSchemaLoader } from '../services/schema-loader.js';
 import { getRedis } from '../services/redis.js';
 import { enqueueFinalise } from '../services/bulk-queue.js';
 import { normalisePhone, normaliseEmail } from '../services/phone.js';
+import { getSignalStackWriter } from '../services/signalstack.js';
+import { config } from '../config.js';
 import { logger } from '../logger.js';
 
 let participantsWriter: ParticipantsWriterBase | null = null;
@@ -160,6 +162,7 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
   if (writeResult.success) {
     if (writeResult.value.outcome === 'passed') {
       outcome = { outcome: 'passed', category: null, reasons: [] };
+      await pushToSignalStack(job, participantId, phoneNormalised, emailNormalised, log);
     } else {
       outcome = {
         outcome: 'skipped',
@@ -242,6 +245,52 @@ async function commit(
     reader_done: result.readerDone,
   });
   return outcome;
+}
+
+/**
+ * Best-effort outward push of the freshly-inserted participant to signalstack.
+ *
+ * Sync-awaited (one HTTP call per row) so we can log a deterministic outcome
+ * per row, but failures NEVER alter the local participant write result —
+ * signalstack is treated as a downstream sink, not a transactional partner.
+ * Returns void; status is observable via structured logs.
+ */
+async function pushToSignalStack(
+  job: BulkRowProcessJob,
+  participantId: string,
+  phone: string | null,
+  email: string | null,
+  log: typeof logger,
+): Promise<void> {
+  const ss = getSignalStackWriter();
+  if (!ss) return;
+  const name =
+    typeof job.payload['name'] === 'string' ? (job.payload['name'] as string) : participantId;
+  const result = await ss.onboard({
+    user: { name, phoneNumber: phone, email },
+    profile: {
+      item_network: config.SIGNALSTACK_ITEM_NETWORK,
+      item_domain: job.participantType,
+      item_type: job.participantType === 'provider' ? 'job_posting_1.0' : 'profile_1.0',
+      item_state: job.payload,
+    },
+    aggregator_id: job.aggregatorId,
+  });
+  if (!result.success) {
+    log.warn({
+      status: 'warn',
+      sub: 'signalstack.push',
+      error: result.error.message,
+      code: result.error.code,
+    });
+    return;
+  }
+  log.info({
+    status: 'success',
+    sub: 'signalstack.push',
+    user_id: result.value.user.id,
+    profile_count: result.value.profiles.length,
+  });
 }
 
 /**
