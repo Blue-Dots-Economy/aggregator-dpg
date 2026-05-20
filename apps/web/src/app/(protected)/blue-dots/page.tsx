@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, type ReactNode } from 'react';
+import { useEffect, useState, useRef, useMemo, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { createPortal } from 'react-dom';
 import { Button } from '../../../components/ui/Button';
@@ -10,6 +10,7 @@ import { SegmentedTabs, type SegmentedTab } from '../../../components/ui/Segment
 import { Topbar } from '../../../components/shell/Topbar';
 import { I, type IconName } from '../../../icons';
 import { useSeekers, useProviders, useOppProviders } from '../../../hooks/useBlueDots';
+import { useProfileRaw } from '../../../hooks/useProfile';
 import type { ParticipantBase, Provider } from '../../../types';
 
 type Tab = 'seekers' | 'providers' | 'opp';
@@ -635,36 +636,54 @@ function OppProvidersTab() {
   );
 }
 
-const TAB_ITEMS: SegmentedTab<Tab>[] = [
-  {
-    id: 'seekers',
-    label: (
-      <span className="inline-flex items-center gap-2">
-        <I.users size={14} /> Seekers <span className="text-ink-300">·</span> 77
-      </span>
-    ),
-  },
-  {
-    id: 'providers',
-    label: (
-      <span className="inline-flex items-center gap-2">
-        <I.briefcase size={14} /> Providers <span className="text-ink-300">·</span> 24
-      </span>
-    ),
-  },
-  {
-    id: 'opp',
-    label: (
-      <span className="inline-flex items-center gap-2">
-        <I.spark size={14} /> Opportunity Providers <span className="text-ink-300">·</span> 18
-      </span>
-    ),
-  },
-];
+const SEEKER_TAB: SegmentedTab<Tab> = {
+  id: 'seekers',
+  label: (
+    <span className="inline-flex items-center gap-2">
+      <I.users size={14} /> Seekers <span className="text-ink-300">·</span> 77
+    </span>
+  ),
+};
+
+const PROVIDER_TAB: SegmentedTab<Tab> = {
+  id: 'providers',
+  label: (
+    <span className="inline-flex items-center gap-2">
+      <I.briefcase size={14} /> Providers <span className="text-ink-300">·</span> 24
+    </span>
+  ),
+};
+
+const OPP_TAB: SegmentedTab<Tab> = {
+  id: 'opp',
+  label: (
+    <span className="inline-flex items-center gap-2">
+      <I.spark size={14} /> Opportunity Providers <span className="text-ink-300">·</span> 18
+    </span>
+  ),
+};
 
 export default function BlueDotsPage() {
   const router = useRouter();
-  const [tab, setTab] = useState<Tab>('seekers');
+  const rawProfile = useProfileRaw();
+  // Tabs are scoped to the aggregator's registered participant focus —
+  // seeker aggregators see Seekers + Opportunity Providers; provider
+  // aggregators see Providers + Opportunity Providers. The opposite
+  // primary tab is hidden, not just disabled.
+  const aggregatorType: 'seeker' | 'provider' = rawProfile.data?.type ?? 'seeker';
+  const tabItems = useMemo<SegmentedTab<Tab>[]>(
+    () => (aggregatorType === 'provider' ? [PROVIDER_TAB, OPP_TAB] : [SEEKER_TAB, OPP_TAB]),
+    [aggregatorType],
+  );
+  const allowedIds = useMemo(() => new Set(tabItems.map((t) => t.id)), [tabItems]);
+  const [tab, setTab] = useState<Tab>(aggregatorType === 'provider' ? 'providers' : 'seekers');
+  // Snap the selected tab back into the allowed set whenever profile resolves
+  // or aggregatorType changes mid-session.
+  useEffect(() => {
+    if (!allowedIds.has(tab)) {
+      setTab(aggregatorType === 'provider' ? 'providers' : 'seekers');
+    }
+  }, [aggregatorType, allowedIds, tab]);
 
   return (
     <div className="fade-up">
@@ -680,7 +699,7 @@ export default function BlueDotsPage() {
         }
       />
 
-      <SegmentedTabs<Tab> value={tab} onChange={setTab} items={TAB_ITEMS} className="mb-6" />
+      <SegmentedTabs<Tab> value={tab} onChange={setTab} items={tabItems} className="mb-6" />
 
       {tab === 'seekers' && <SeekersTab />}
       {tab === 'providers' && <ProvidersTab />}
