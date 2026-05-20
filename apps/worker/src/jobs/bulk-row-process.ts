@@ -162,7 +162,6 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
   if (writeResult.success) {
     if (writeResult.value.outcome === 'passed') {
       outcome = { outcome: 'passed', category: null, reasons: [] };
-      await pushToSignalStack(job, participantId, phoneNormalised, emailNormalised, log);
     } else {
       outcome = {
         outcome: 'skipped',
@@ -170,6 +169,13 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
         reasons: [`participant_id '${participantId}' already registered for this aggregator`],
       };
     }
+    // Push to signalstack on both passed and skipped. The local participants
+    // table is deduped per (aggregator_id, type, participant_id), but
+    // signalstack is the global identity store: different aggregators
+    // submitting the same person — or the same aggregator re-submitting an
+    // updated profile — should still surface as distinct profile rows over
+    // there. Failed outcomes never push.
+    await pushToSignalStack(job, participantId, phoneNormalised, emailNormalised, log);
   } else {
     log.error({
       status: 'failure',

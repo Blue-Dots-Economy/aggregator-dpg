@@ -211,12 +211,14 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       submission_id: submissionId,
     });
 
-    // Outward signalstack push for newly-inserted participants only. Skipped
-    // outcomes are dedup hits — we already pushed (or chose not to) on the
-    // first submit, so re-pushing here would create duplicate signalstack
-    // profiles. Failures are logged but never affect the HTTP response: the
-    // local DB write is the source of truth, signalstack is a downstream sink.
-    if (outcome === 'passed') {
+    // Outward signalstack push. Fires on both passed and skipped: the local
+    // participants table is deduped per (aggregator_id, type, participant_id),
+    // but signalstack is the global identity store — a different aggregator
+    // bringing the same person, or the same aggregator re-submitting an
+    // updated profile, must still surface as a distinct profile row there.
+    // Failures are logged but never affect the HTTP response: the local DB
+    // write is the source of truth, signalstack is a downstream sink.
+    if (outcome === 'passed' || outcome === 'skipped') {
       const ss = getSignalStackWriter();
       if (ss) {
         const name = typeof body['name'] === 'string' ? (body['name'] as string) : participantRowId;
