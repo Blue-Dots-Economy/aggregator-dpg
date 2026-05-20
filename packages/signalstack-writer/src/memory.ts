@@ -18,6 +18,8 @@ import type { Result } from '@aggregator-dpg/shared-primitives/result';
 
 import {
   SignalStackWriterBase,
+  type SignalStackItemList,
+  type SignalStackItemQuery,
   type SignalStackOnboardInput,
   type SignalStackOnboardResult,
   type SignalStackProfile,
@@ -148,6 +150,30 @@ export class InMemorySignalStackWriter extends SignalStackWriterBase {
         profileExisted: false,
       },
     });
+  }
+
+  override async listItemsByAggregator(
+    query: SignalStackItemQuery,
+  ): Promise<Result<SignalStackItemList, BaseError>> {
+    if (!query.aggregator_id || !query.item_network || !query.item_domain) {
+      return err(
+        new UpstreamError('aggregator_id, item_network, and item_domain are required', {
+          code: 'SIGNALSTACK_INPUT_INVALID',
+        }),
+      );
+    }
+    const matching = Array.from(this.profiles.values()).filter((p) => {
+      if (p.aggregator_id !== query.aggregator_id) return false;
+      if (p.item_network !== query.item_network) return false;
+      if (p.item_domain !== query.item_domain) return false;
+      if (query.item_type && p.item_type !== query.item_type) return false;
+      return true;
+    });
+    const total = matching.length;
+    const offset = query.offset ?? 0;
+    const limit = query.limit ?? 50;
+    const page = matching.slice(offset, offset + limit).map(stripCreatedBy);
+    return ok({ meta: { total, limit, offset }, items: page });
   }
 
   /** Test helper — current user table snapshot. */

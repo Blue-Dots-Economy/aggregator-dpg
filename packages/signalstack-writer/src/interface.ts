@@ -102,10 +102,44 @@ export interface SignalStackOnboardResult {
 }
 
 /**
- * Persistence port for the signalstack onboard call.
+ * Filter for the aggregator-scoped read of signalstack items.
+ *
+ * `item_network` + `item_domain` are required so signalstack can look up the
+ * right partition; `aggregator_id` is the dashboard's primary scope; the
+ * rest are pagination + optional refinement.
+ */
+export interface SignalStackItemQuery {
+  aggregator_id: string;
+  item_network: string;
+  item_domain: string;
+  item_type?: string;
+  limit?: number;
+  offset?: number;
+}
+
+/**
+ * Paginated meta block returned alongside the items list.
+ */
+export interface SignalStackItemListMeta {
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+/**
+ * Response shape for the aggregator-scoped read.
+ */
+export interface SignalStackItemList {
+  meta: SignalStackItemListMeta;
+  items: SignalStackProfile[];
+}
+
+/**
+ * Persistence port for the signalstack admin endpoints.
  *
  * Implementations:
- *   - Http: real `POST /api/v1/admin/onboard` impl using fetch.
+ *   - Http: real `POST /api/v1/admin/onboard` + `GET /api/v1/admin/items`
+ *     using fetch.
  *   - InMemory: deterministic Map-backed impl for unit tests.
  *   - Fake: in-memory + `seed()` helper for cross-package consumer tests.
  */
@@ -120,4 +154,15 @@ export abstract class SignalStackWriterBase {
   abstract onboard(
     input: SignalStackOnboardInput,
   ): Promise<Result<SignalStackOnboardResult, BaseError>>;
+
+  /**
+   * Read all items signalstack has stored for the given aggregator_id
+   * within a single (item_network, item_domain[, item_type]) scope.
+   *
+   * @param query - Aggregator + network/domain scope + optional pagination.
+   * @returns ok(SignalStackItemList) on 2xx; err(BaseError) otherwise.
+   */
+  abstract listItemsByAggregator(
+    query: SignalStackItemQuery,
+  ): Promise<Result<SignalStackItemList, BaseError>>;
 }

@@ -16,6 +16,8 @@ import type { Result } from '@aggregator-dpg/shared-primitives/result';
 
 import {
   SignalStackWriterBase,
+  type SignalStackItemList,
+  type SignalStackItemQuery,
   type SignalStackOnboardInput,
   type SignalStackOnboardResult,
 } from './interface.js';
@@ -32,6 +34,7 @@ export interface HttpSignalStackWriterConfig {
 }
 
 export class HttpSignalStackWriter extends SignalStackWriterBase {
+  private readonly baseUrl: string;
   private readonly endpoint: string;
   private readonly headers: Record<string, string>;
   private readonly fetchImpl: typeof fetch;
@@ -45,7 +48,8 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
     if (!config.apiKey) {
       throw new Error('HttpSignalStackWriter requires apiKey');
     }
-    this.endpoint = `${config.baseUrl.replace(/\/+$/, '')}/api/v1/admin/onboard`;
+    this.baseUrl = config.baseUrl.replace(/\/+$/, '');
+    this.endpoint = `${this.baseUrl}/api/v1/admin/onboard`;
     this.headers = {
       'content-type': 'application/json',
       'x-api-key': config.apiKey,
@@ -99,6 +103,75 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
           aborted
             ? `signalstack onboard timed out after ${this.timeoutMs}ms`
             : `signalstack onboard transport failure: ${cause.message}`,
+          {
+            cause,
+            code: aborted ? 'SIGNALSTACK_TIMEOUT' : 'SIGNALSTACK_TRANSPORT_FAILED',
+          },
+        ),
+      );
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  override async listItemsByAggregator(
+    query: SignalStackItemQuery,
+  ): Promise<Result<SignalStackItemList, BaseError>> {
+    if (!query.aggregator_id || !query.item_network || !query.item_domain) {
+      return err(
+        new UpstreamError('aggregator_id, item_network, and item_domain are required', {
+          code: 'SIGNALSTACK_INPUT_INVALID',
+        }),
+      );
+    }
+
+    const params = new URLSearchParams();
+    params.set('aggregator_id', query.aggregator_id);
+    params.set('item_network', query.item_network);
+    params.set('item_domain', query.item_domain);
+    if (query.item_type) params.set('item_type', query.item_type);
+    if (query.limit !== undefined) params.set('limit', String(query.limit));
+    if (query.offset !== undefined) params.set('offset', String(query.offset));
+
+    const url = `${this.baseUrl}/api/v1/admin/items?${params.toString()}`;
+    const controller = this.timeoutMs ? new AbortController() : undefined;
+    const timer = controller ? setTimeout(() => controller.abort(), this.timeoutMs) : undefined;
+
+    try {
+      const res = await this.fetchImpl(url, {
+        method: 'GET',
+        headers: this.headers,
+        ...(controller ? { signal: controller.signal } : {}),
+      });
+
+      if (!res.ok) {
+        const bodyText = await safeReadText(res);
+        return err(
+          new UpstreamError(`signalstack list_items returned ${res.status}`, {
+            code: this.codeForStatus(res.status),
+            details: { status: res.status, body: bodyText },
+          }),
+        );
+      }
+
+      const payload = (await res.json()) as SignalStackItemList;
+      if (!payload || typeof payload !== 'object' || !Array.isArray(payload.items)) {
+        return err(
+          new UpstreamError('signalstack list_items returned unexpected payload', {
+            code: 'SIGNALSTACK_BAD_RESPONSE',
+            details: { payload },
+          }),
+        );
+      }
+      return ok(payload);
+    } catch (e) {
+      const cause = e as Error;
+      const aborted = cause.name === 'AbortError';
+      return err(
+        new UpstreamError(
+          aborted
+            ? `signalstack list_items timed out after ${this.timeoutMs}ms`
+            : `signalstack list_items transport failure: ${cause.message}`,
           {
             cause,
             code: aborted ? 'SIGNALSTACK_TIMEOUT' : 'SIGNALSTACK_TRANSPORT_FAILED',

@@ -1,12 +1,22 @@
+/**
+ * Blue-dots dashboard service.
+ *
+ * Reads signalstack-backed profile items via the BFF proxy and maps them
+ * into the existing ParticipantBase / Seeker / Provider / OpportunityProvider
+ * shape consumed by the dashboard. Columns that signalstack does not store
+ * (Applied / Pre-shortlisted / Status / Recommended Action) are filled with
+ * zero / safe defaults — the dashboard already renders blanks gracefully.
+ */
+
 import type {
+  OpportunityProvider,
   ParticipantBase,
   ParticipantFilter,
   ParticipantKind,
-  Seeker,
   Provider,
-  OpportunityProvider,
+  Seeker,
 } from '../types';
-import { SEEKERS, PROVIDERS, OPP_PROVIDERS } from '../data/mock';
+import { jsonFetch } from './http';
 
 export interface BlueDotsService {
   list(kind: ParticipantKind, filter?: ParticipantFilter): Promise<ParticipantBase[]>;
@@ -15,34 +25,52 @@ export interface BlueDotsService {
   oppProviders(filter?: ParticipantFilter): Promise<OpportunityProvider[]>;
 }
 
-function applyFilter<T extends ParticipantBase>(
-  rows: T[],
-  filter: ParticipantFilter | undefined,
-): T[] {
-  if (!filter) return rows;
-  return rows.filter((r) => {
-    if (filter.status && r.status !== filter.status) return false;
-    if (filter.city && !r.city.toLowerCase().includes(filter.city.toLowerCase())) return false;
-    if (filter.search) {
-      const q = filter.search.toLowerCase();
-      const haystack = `${r.name} ${r.id} ${r.profile.title}`.toLowerCase();
-      if (!haystack.includes(q)) return false;
-    }
-    return true;
-  });
+interface SignalStackItem {
+  item_id: string;
+  item_network: string;
+  item_domain: string;
+  item_type: string;
+  item_state: Record<string, unknown>;
+  item_latitude: number | null;
+  item_longitude: number | null;
+  aggregator_id: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
-class MockBlueDotsService implements BlueDotsService {
+interface SignalStackItemList {
+  meta: { total: number; limit: number; offset: number };
+  items: SignalStackItem[];
+}
+
+const ZERO_STATS = { total: 0, shortlisted: 0, accepted: 0, rejected: 0, pending: 0 };
+
+class HttpBlueDotsService implements BlueDotsService {
   async seekers(filter?: ParticipantFilter): Promise<Seeker[]> {
-    return applyFilter(SEEKERS, filter);
+    const raw = await this.fetchDomain('seeker');
+    return this.applyFilter(
+      raw.map((it) => this.toSeeker(it)),
+      filter,
+    );
   }
 
   async providers(filter?: ParticipantFilter): Promise<Provider[]> {
-    return applyFilter(PROVIDERS, filter);
+    const raw = await this.fetchDomain('provider');
+    return this.applyFilter(
+      raw.map((it) => this.toProvider(it)),
+      filter,
+    );
   }
 
   async oppProviders(filter?: ParticipantFilter): Promise<OpportunityProvider[]> {
-    return applyFilter(OPP_PROVIDERS, filter);
+    // Signalstack has no dedicated opp-provider item_type yet — provider rows
+    // cover the dashboard's data needs for now. Switch to a separate
+    // item_type when the schema lands.
+    const raw = await this.fetchDomain('provider');
+    return this.applyFilter(
+      raw.map((it) => this.toProvider(it)),
+      filter,
+    );
   }
 
   async list(kind: ParticipantKind, filter?: ParticipantFilter): Promise<ParticipantBase[]> {
@@ -50,6 +78,125 @@ class MockBlueDotsService implements BlueDotsService {
     if (kind === 'provider') return this.providers(filter);
     return this.oppProviders(filter);
   }
+
+  private async fetchDomain(domain: 'seeker' | 'provider'): Promise<SignalStackItem[]> {
+    const url = `/api/blue-dots/items?domain=${domain}&limit=200`;
+    const payload = await jsonFetch<SignalStackItemList>(url);
+    return payload.items ?? [];
+  }
+
+  private toSeeker(item: SignalStackItem): Seeker {
+    const state = item.item_state ?? {};
+    const name = pickString(state, 'name') ?? 'Unknown';
+    const city = pickString(state, 'location') ?? '';
+    return {
+      id: item.item_id,
+      name,
+      city,
+      joined: formatDate(item.created_at),
+      avatar: initials(name),
+      profile: {
+        title: pickString(state, 'nameOfJobRolesInterestedIn') ?? '',
+        exp: pickString(state, 'workExperienceYearsConditional') ?? '',
+        verified: false,
+        complete: completeness(state),
+      },
+      applied: { ...ZERO_STATS },
+      pre: { ...ZERO_STATS },
+      status: 'active',
+      last: relative(item.updated_at),
+    };
+  }
+
+  private toProvider(item: SignalStackItem): Provider {
+    const state = item.item_state ?? {};
+    const name = pickString(state, 'jobProviderName') ?? pickString(state, 'name') ?? 'Unknown';
+    const city = pickString(state, 'jobProviderLocation') ?? pickString(state, 'location') ?? '';
+    const role = pickString(state, 'role') ?? '';
+    const nature = pickString(state, 'natureOfJob') ?? '';
+    return {
+      id: item.item_id,
+      name,
+      city,
+      joined: formatDate(item.created_at),
+      avatar: initials(name),
+      profile: {
+        title: role,
+        exp: nature,
+        verified: false,
+        complete: completeness(state),
+      },
+      applied: { ...ZERO_STATS },
+      pre: { ...ZERO_STATS },
+      status: 'active',
+      last: relative(item.updated_at),
+      role: role && nature ? `${role} · ${nature}` : role || nature,
+    };
+  }
+
+  private applyFilter<T extends ParticipantBase>(rows: T[], filter?: ParticipantFilter): T[] {
+    if (!filter) return rows;
+    return rows.filter((r) => {
+      if (filter.status && r.status !== filter.status) return false;
+      if (filter.city && !r.city.toLowerCase().includes(filter.city.toLowerCase())) return false;
+      if (filter.search) {
+        const q = filter.search.toLowerCase();
+        const haystack = `${r.name} ${r.id} ${r.profile.title}`.toLowerCase();
+        if (!haystack.includes(q)) return false;
+      }
+      return true;
+    });
+  }
 }
 
-export const blueDotsService: BlueDotsService = new MockBlueDotsService();
+function pickString(state: Record<string, unknown>, key: string): string | null {
+  const v = state[key];
+  return typeof v === 'string' && v.length > 0 ? v : null;
+}
+
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '??';
+  if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase();
+  return (parts[0]![0]! + parts[parts.length - 1]![0]!).toUpperCase();
+}
+
+function formatDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+function relative(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const diffMs = Date.now() - d.getTime();
+  const mins = Math.floor(diffMs / 60_000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 30) return `${days}d ago`;
+  const months = Math.floor(days / 30);
+  return `${months}mo ago`;
+}
+
+/**
+ * Crude profile completeness ratio based on the count of non-empty string
+ * fields in item_state. Avoids hard-coding any schema and degrades safely
+ * for unknown shapes — the dashboard only uses it for the progress bar.
+ */
+function completeness(state: Record<string, unknown>): number {
+  const entries = Object.entries(state);
+  if (entries.length === 0) return 0;
+  const filled = entries.filter(([, v]) => {
+    if (v === null || v === undefined) return false;
+    if (typeof v === 'string') return v.length > 0;
+    if (Array.isArray(v)) return v.length > 0;
+    return true;
+  }).length;
+  return Math.round((filled / entries.length) * 100);
+}
+
+export const blueDotsService: BlueDotsService = new HttpBlueDotsService();
