@@ -126,7 +126,14 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
   // field is a meaningful business id or not.
   const rawParticipantId = String(job.payload['participant_id'] ?? '').trim();
   const participantId = rawParticipantId.length > 0 ? rawParticipantId : randomUUID();
-  const phoneRaw = typeof job.payload['phone'] === 'string' ? (job.payload['phone'] as string) : '';
+
+  // Provider schemas store contact under hiring-manager fields; seeker
+  // schemas keep them top-level. Source the columns + signalstack identity
+  // from the right keys based on participantType.
+  const phoneSourceKey = job.participantType === 'provider' ? 'hiringManagerPhoneNumber' : 'phone';
+  const emailSourceKey = job.participantType === 'provider' ? 'hiringManagerEmail' : 'email';
+  const phoneRaw =
+    typeof job.payload[phoneSourceKey] === 'string' ? (job.payload[phoneSourceKey] as string) : '';
   let phoneNormalised: string | null = null;
   if (phoneRaw) {
     const phone = normalisePhone(phoneRaw);
@@ -144,7 +151,9 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
     phoneNormalised = phone.value;
   }
   const emailNormalised = normaliseEmail(
-    typeof job.payload['email'] === 'string' ? (job.payload['email'] as string) : null,
+    typeof job.payload[emailSourceKey] === 'string'
+      ? (job.payload[emailSourceKey] as string)
+      : null,
   );
 
   // 3. Persist via the participants-writer wrapper (shared by bulk + link).
@@ -169,13 +178,20 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
         reasons: [`participant_id '${participantId}' already registered for this aggregator`],
       };
     }
-    // Push to signalstack on both passed and skipped. The local participants
-    // table is deduped per (aggregator_id, type, participant_id), but
-    // signalstack is the global identity store: different aggregators
-    // submitting the same person — or the same aggregator re-submitting an
-    // updated profile — should still surface as distinct profile rows over
-    // there. Failed outcomes never push.
-    await pushToSignalStack(job, participantId, phoneNormalised, emailNormalised, log);
+
+    // Outward signalstack push. The local participant write is now committed,
+    // so a push failure can NOT roll back the row — instead we flip this
+    // row's outcome to `failed` so it surfaces in errors.csv alongside any
+    // validation / normalisation failures. Operators see one consistent
+    // signal: a row only counts as "passed" once signalstack has it too.
+    const push = await pushToSignalStack(job, participantId, phoneNormalised, emailNormalised, log);
+    if (!push.success) {
+      outcome = {
+        outcome: 'failed',
+        category: 'system_error',
+        reasons: [`signalstack: ${push.code}: ${push.message}`],
+      };
+    }
   } else {
     log.error({
       status: 'failure',
@@ -261,19 +277,32 @@ async function commit(
  * signalstack is treated as a downstream sink, not a transactional partner.
  * Returns void; status is observable via structured logs.
  */
+type SignalStackPushResult = { success: true } | { success: false; code: string; message: string };
+
 async function pushToSignalStack(
   job: BulkRowProcessJob,
   participantId: string,
   phone: string | null,
   email: string | null,
   log: typeof logger,
-): Promise<void> {
+): Promise<SignalStackPushResult> {
   const ss = getSignalStackWriter();
-  if (!ss) return;
+  // Signalstack disabled in this env — treat as success so the row is not
+  // marked failed when the operator deliberately turned the push off.
+  if (!ss) return { success: true };
+  // Providers carry name + contact under hiring-manager / company fields;
+  // seekers keep them at the top level. Source per participantType so the
+  // signalstack user block is never built from missing keys.
+  const nameSourceKey = job.participantType === 'provider' ? 'jobProviderName' : 'name';
+  const phoneSourceKey = job.participantType === 'provider' ? 'hiringManagerPhoneNumber' : 'phone';
   const name =
-    typeof job.payload['name'] === 'string' ? (job.payload['name'] as string) : participantId;
+    typeof job.payload[nameSourceKey] === 'string'
+      ? (job.payload[nameSourceKey] as string)
+      : participantId;
   const phoneFromBody =
-    typeof job.payload['phone'] === 'string' ? (job.payload['phone'] as string) : phone;
+    typeof job.payload[phoneSourceKey] === 'string'
+      ? (job.payload[phoneSourceKey] as string)
+      : phone;
   const pushPhone = phone ?? phoneFromBody;
   const result = await ss.onboard({
     // Signalstack's user schema treats email / phoneNumber as `.optional()`
@@ -293,13 +322,17 @@ async function pushToSignalStack(
     aggregator_id: job.aggregatorId,
   });
   if (!result.success) {
-    log.warn({
-      status: 'warn',
+    log.error({
+      status: 'failure',
       sub: 'signalstack.push',
       error: result.error.message,
       code: result.error.code,
     });
-    return;
+    return {
+      success: false,
+      code: result.error.code,
+      message: result.error.message,
+    };
   }
   log.info({
     status: 'success',
@@ -307,6 +340,7 @@ async function pushToSignalStack(
     user_id: result.value.user.id,
     profile_count: result.value.profiles.length,
   });
+  return { success: true };
 }
 
 /**
@@ -325,8 +359,12 @@ function buildSignalStackItemState(
 ): Record<string, unknown> {
   const itemState: Record<string, unknown> = { ...body };
 
-  if (domain === 'seeker' && pushPhone) {
-    itemState.phone = pushPhone;
+  if (pushPhone) {
+    if (domain === 'provider') {
+      itemState.hiringManagerPhoneNumber = pushPhone;
+    } else {
+      itemState.phone = pushPhone;
+    }
   }
 
   return itemState;
