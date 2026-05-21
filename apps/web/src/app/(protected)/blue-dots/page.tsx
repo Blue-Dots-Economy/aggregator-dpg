@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef, useMemo, type ReactNode } from 'react';
+import { useState, useRef, useMemo, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { createPortal } from 'react-dom';
 import { Button } from '../../../components/ui/Button';
@@ -671,26 +671,36 @@ const PROVIDER_TAB: SegmentedTab<Tab> = {
 };
 
 export default function BlueDotsPage() {
-  const router = useRouter();
   const rawProfile = useProfileRaw();
+  // Wait for the profile to resolve before mounting any tab — the SeekersTab
+  // and ProvidersTab kick off their own /api/blue-dots/items?domain=... fetch
+  // on mount, so rendering a default before we know the aggregator's type
+  // fires a stale seeker request that a provider account should never make.
+  const profileType = rawProfile.data?.type;
+  if (!profileType) {
+    return (
+      <div className="fade-up">
+        <Topbar
+          title="My Blue Dots"
+          subtitle="Track every participant in your network — at a glance."
+        />
+        <div className="text-center text-[13px] text-ink-400 py-12">Loading…</div>
+      </div>
+    );
+  }
+  return <BlueDotsContent aggregatorType={profileType} />;
+}
+
+function BlueDotsContent({ aggregatorType }: { aggregatorType: 'seeker' | 'provider' }) {
+  const router = useRouter();
   // Tabs are scoped to the aggregator's registered participant focus —
-  // seeker aggregators see Seekers + Opportunity Providers; provider
-  // aggregators see Providers + Opportunity Providers. The opposite
-  // primary tab is hidden, not just disabled.
-  const aggregatorType: 'seeker' | 'provider' = rawProfile.data?.type ?? 'seeker';
+  // seeker aggregators see only Seekers; provider aggregators see only
+  // Providers. The opposite primary tab is hidden, not just disabled.
   const tabItems = useMemo<SegmentedTab<Tab>[]>(
     () => (aggregatorType === 'provider' ? [PROVIDER_TAB] : [SEEKER_TAB]),
     [aggregatorType],
   );
-  const allowedIds = useMemo(() => new Set(tabItems.map((t) => t.id)), [tabItems]);
   const [tab, setTab] = useState<Tab>(aggregatorType === 'provider' ? 'providers' : 'seekers');
-  // Snap the selected tab back into the allowed set whenever profile resolves
-  // or aggregatorType changes mid-session.
-  useEffect(() => {
-    if (!allowedIds.has(tab)) {
-      setTab(aggregatorType === 'provider' ? 'providers' : 'seekers');
-    }
-  }, [aggregatorType, allowedIds, tab]);
 
   return (
     <div className="fade-up">
