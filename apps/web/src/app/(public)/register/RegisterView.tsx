@@ -343,7 +343,6 @@ export function RegisterView({ schema, uiSchema }: RegisterViewProps): JSX.Eleme
                     requestId: rawDump,
                   });
                   if (typeof window !== 'undefined') {
-                     
                     console.error('[register] validation errors', errs);
                   }
                 }}

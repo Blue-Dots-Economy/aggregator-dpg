@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "api.appConfigMap" . }}
+  labels:
+    {{- include "api.labels" . | nindent 4 }}
+data:
+  PORT: "{{ .Values.service.port }}"
+  HOST: "0.0.0.0"
+  CORS_ORIGINS: "{{ include "api.publicBaseUrl" . }}"
+  RUN_MIGRATIONS_ON_BOOT: "{{ .Values.runMigrationsOnBoot }}"
+  ADMIN_EMAILS: "{{ .Values.adminEmails }}"
+  PUBLIC_API_URL: "{{ include "api.publicBaseUrl" . }}/backend"
+  BULK_UPLOAD_URL_TTL_SECONDS: "{{ .Values.bulk.uploadUrlTtlSeconds }}"
+  BULK_UPLOAD_MAX_BYTES: "{{ .Values.bulk.uploadMaxBytes }}"
+  QR_DOWNLOAD_URL_TTL_SECONDS: "{{ .Values.bulk.qrDownloadUrlTtlSeconds }}"
+  PUBLIC_LINK_BASE_URL: "{{ default (include "api.publicBaseUrl" .) .Values.publicLinkBaseUrl }}"
+  SCHEMA_ROOT_DIR: "/app/config/schemas"
+  S3_FORCE_PATH_STYLE: "{{ .Values.global.s3.forcePathStyle }}"

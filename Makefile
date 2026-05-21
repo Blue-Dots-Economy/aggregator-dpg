@@ -1,4 +1,11 @@
-.PHONY: help setup hosts env dev up down logs ps reset psql redis-cli mc kc rebuild-web rebuild-keycloak kc-plugin kc-logs
+.PHONY: help setup hosts env dev up down logs ps reset psql redis-cli mc kc rebuild-web rebuild-keycloak kc-plugin kc-logs \
+        helm-sync-files helm-deps helm-lint helm-template helm-package helm-install-dev helm-uninstall keycloak-image
+
+# ─── Helm chart settings ────────────────────────────────────────────────
+HELM_CHART_DIR    ?= helm/aggregator-dpg
+HELM_RELEASE_NAME ?= aggregator
+HELM_NAMESPACE    ?= aggregator
+KEYCLOAK_IMAGE    ?= aggregator-dpg/keycloak:26.5.5-aggregator
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
@@ -88,3 +95,38 @@ rebuild-keycloak: kc-plugin ## Rebuild the OTP plugin and restart Keycloak (re-i
 
 kc-logs: ## Tail Keycloak logs.
 	docker compose logs -f keycloak
+
+# ─── Helm chart targets ─────────────────────────────────────────────────
+
+helm-sync-files: ## Copy infra/ source-of-truth files into the chart's files/ dirs.
+	@mkdir -p $(HELM_CHART_DIR)/charts/keycloak/files $(HELM_CHART_DIR)/files
+	@cp infra/keycloak/realms/aggregator-realm.json   $(HELM_CHART_DIR)/charts/keycloak/files/aggregator-realm.json
+	@cp infra/keycloak/render-realm.sh                $(HELM_CHART_DIR)/charts/keycloak/files/render-realm.sh
+	@cp infra/keycloak/init/apply-user-profile.sh     $(HELM_CHART_DIR)/files/apply-user-profile.sh
+	@echo "Synced realm JSON, render-realm.sh, apply-user-profile.sh into $(HELM_CHART_DIR)/."
+
+helm-deps: helm-sync-files ## Run `helm dependency update` to fetch Bitnami subcharts.
+	helm dependency update $(HELM_CHART_DIR)
+
+helm-lint: helm-sync-files ## Lint the chart with values-dev.yaml overlay.
+	helm lint $(HELM_CHART_DIR) -f $(HELM_CHART_DIR)/values-dev.yaml
+
+helm-template: helm-sync-files ## Render the chart to stdout (no install).
+	helm template $(HELM_RELEASE_NAME) $(HELM_CHART_DIR) \
+	  -f $(HELM_CHART_DIR)/values-dev.yaml \
+	  --namespace $(HELM_NAMESPACE)
+
+helm-package: helm-deps ## Package the chart into helm/aggregator-dpg-<ver>.tgz.
+	helm package $(HELM_CHART_DIR) -d helm/
+
+helm-install-dev: helm-deps ## Install the chart into the current kube-context with values-dev.yaml.
+	helm upgrade --install $(HELM_RELEASE_NAME) $(HELM_CHART_DIR) \
+	  -f $(HELM_CHART_DIR)/values-dev.yaml \
+	  --namespace $(HELM_NAMESPACE) --create-namespace
+
+helm-uninstall: ## Remove the release (does NOT delete PVCs).
+	helm uninstall $(HELM_RELEASE_NAME) --namespace $(HELM_NAMESPACE)
+
+keycloak-image: ## Build the custom Keycloak image (SPI baked in + kc.sh build run).
+	docker build -f infra/keycloak/Dockerfile -t $(KEYCLOAK_IMAGE) infra/keycloak
+	@echo "Built $(KEYCLOAK_IMAGE)."

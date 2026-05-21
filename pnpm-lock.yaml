@@ -68,6 +68,9 @@ importers:
       '@aggregator-dpg/shared-primitives':
         specifier: workspace:*
         version: link:../../packages/shared-primitives
+      '@aggregator-dpg/signalstack-writer':
+        specifier: workspace:*
+        version: link:../../packages/signalstack-writer
       '@aws-sdk/client-s3':
         specifier: ^3.1045.0
         version: 3.1045.0
@@ -268,6 +271,9 @@ importers:
       '@aggregator-dpg/shared-primitives':
         specifier: workspace:*
         version: link:../../packages/shared-primitives
+      '@aggregator-dpg/signalstack-writer':
+        specifier: workspace:*
+        version: link:../../packages/signalstack-writer
       '@aws-sdk/client-s3':
         specifier: ^3.1045.0
         version: 3.1045.0
@@ -502,6 +508,22 @@ importers:
       vitest:
         specifier: ^3.2.0
         version: 3.2.4(@types/node@22.19.17)(jiti@2.6.1)(jsdom@25.0.1)(tsx@4.21.0)(yaml@2.8.3)
+
+  packages/signalstack-writer:
+    dependencies:
+      '@aggregator-dpg/shared-primitives':
+        specifier: workspace:*
+        version: link:../shared-primitives
+    devDependencies:
+      '@aggregator-dpg/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.17
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
 
   packages/tsconfig:
     devDependencies:

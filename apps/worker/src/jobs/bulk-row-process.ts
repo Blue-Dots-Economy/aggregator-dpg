@@ -29,6 +29,8 @@ import { getSchemaLoader } from '../services/schema-loader.js';
 import { getRedis } from '../services/redis.js';
 import { enqueueFinalise } from '../services/bulk-queue.js';
 import { normalisePhone, normaliseEmail } from '../services/phone.js';
+import { getSignalStackWriter } from '../services/signalstack.js';
+import { config } from '../config.js';
 import { logger } from '../logger.js';
 
 let participantsWriter: ParticipantsWriterBase | null = null;
@@ -167,6 +169,13 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
         reasons: [`participant_id '${participantId}' already registered for this aggregator`],
       };
     }
+    // Push to signalstack on both passed and skipped. The local participants
+    // table is deduped per (aggregator_id, type, participant_id), but
+    // signalstack is the global identity store: different aggregators
+    // submitting the same person — or the same aggregator re-submitting an
+    // updated profile — should still surface as distinct profile rows over
+    // there. Failed outcomes never push.
+    await pushToSignalStack(job, participantId, phoneNormalised, emailNormalised, log);
   } else {
     log.error({
       status: 'failure',
@@ -242,6 +251,85 @@ async function commit(
     reader_done: result.readerDone,
   });
   return outcome;
+}
+
+/**
+ * Best-effort outward push of the freshly-inserted participant to signalstack.
+ *
+ * Sync-awaited (one HTTP call per row) so we can log a deterministic outcome
+ * per row, but failures NEVER alter the local participant write result —
+ * signalstack is treated as a downstream sink, not a transactional partner.
+ * Returns void; status is observable via structured logs.
+ */
+async function pushToSignalStack(
+  job: BulkRowProcessJob,
+  participantId: string,
+  phone: string | null,
+  email: string | null,
+  log: typeof logger,
+): Promise<void> {
+  const ss = getSignalStackWriter();
+  if (!ss) return;
+  const name =
+    typeof job.payload['name'] === 'string' ? (job.payload['name'] as string) : participantId;
+  const phoneFromBody =
+    typeof job.payload['phone'] === 'string' ? (job.payload['phone'] as string) : phone;
+  const pushPhone = phone ?? phoneFromBody;
+  const result = await ss.onboard({
+    // Signalstack's user schema treats email / phoneNumber as `.optional()`
+    // (not `.nullable()`), so we omit the keys entirely when we have no
+    // value rather than passing null.
+    user: {
+      name,
+      ...(pushPhone ? { phoneNumber: pushPhone } : {}),
+      ...(email ? { email } : {}),
+    },
+    profile: {
+      item_network: config.SIGNALSTACK_ITEM_NETWORK,
+      item_domain: job.participantType,
+      item_type: job.participantType === 'provider' ? 'job_posting_1.0' : 'profile_1.0',
+      item_state: buildSignalStackItemState(job.participantType, job.payload, pushPhone),
+    },
+    aggregator_id: job.aggregatorId,
+  });
+  if (!result.success) {
+    log.warn({
+      status: 'warn',
+      sub: 'signalstack.push',
+      error: result.error.message,
+      code: result.error.code,
+    });
+    return;
+  }
+  log.info({
+    status: 'success',
+    sub: 'signalstack.push',
+    user_id: result.value.user.id,
+    profile_count: result.value.profiles.length,
+  });
+}
+
+/**
+ * Build the `item_state` block sent to signalstack from a bulk-upload row.
+ *
+ * Aggregator participant schemas already use the same field names as the
+ * signalstack profile_1.0 / job_posting_1.0 item_state, so the row payload
+ * flows through unchanged — we only override the phone for seekers so
+ * signalstack stores the E.164 form the writer resolved upstream, not
+ * whatever raw value the CSV cell carried.
+ */
+function buildSignalStackItemState(
+  domain: 'seeker' | 'provider',
+  body: Record<string, unknown>,
+  pushPhone: string | null,
+): Record<string, unknown> {
+  const itemState: Record<string, unknown> = { ...body };
+
+  if (domain === 'seeker' && pushPhone) {
+    itemState.phone = pushPhone;
+  }
+
+  return itemState;
 }
 
 /**

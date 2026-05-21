@@ -1,4 +1,6 @@
--- Runs once on first Postgres volume init. Creates the keycloak DB
--- owned by the same superuser used for the aggregator DB.
-CREATE DATABASE keycloak;
-GRANT ALL PRIVILEGES ON DATABASE keycloak TO CURRENT_USER;
+-- Postgres entrypoint scripts under /docker-entrypoint-initdb.d/ run only on
+-- first init (empty PGDATA). The compose POSTGRES_DB env var creates the
+-- `aggregator` database; Keycloak needs its own `keycloak` database, so we
+-- create it here. Owner matches POSTGRES_USER so the same connection string
+-- works without extra grants.
+CREATE DATABASE keycloak OWNER aggregator;
