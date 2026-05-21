@@ -4,6 +4,10 @@ image:
   tag: "26.5.5-aggregator"
   pullPolicy: IfNotPresent
 bootstrapAdminUsername: admin
+# When true, container starts with `--optimized` (skips build at runtime).
+# Set to false if a build-time SPI option (e.g. KC_SPI_SMS_PROVIDER) is supplied
+# at runtime — `--optimized` rejects build-time mismatches and exits.
+optimized: true
 smsProvider: log
 awsRegion: ap-south-1
 service:

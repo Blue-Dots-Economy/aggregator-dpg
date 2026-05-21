@@ -117,7 +117,9 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
             - start
+            {{- if .Values.optimized }}
             - --optimized
+            {{- end }}
             - --import-realm
           envFrom:
             - configMapRef:

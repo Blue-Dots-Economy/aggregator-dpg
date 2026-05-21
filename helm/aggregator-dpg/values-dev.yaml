@@ -7,8 +7,6 @@
 global:
   publicHost: portal.dev.local
   publicProtocol: http
-  # Empty registry => helper emits just `<repository>:<tag>`. Matches the
-  # docker-compose image refs (`aggregator-dpg/api:dev`).
   imageRegistry: ""
   storageClass: ""
   logLevel: debug
@@ -36,30 +34,51 @@ secrets:
 web:
   replicaCount: 1
   image:
-    tag: dev
+    repository: docker.io/vinodbbhorge/aggregator-dpg-web
+    tag: v1.0.0
     pullPolicy: IfNotPresent
 
 api:
   replicaCount: 1
   image:
-    tag: dev
+    repository: docker.io/vinodbbhorge/aggregator-dpg-api
+    tag: v1.0.0
 
 worker:
   replicaCount: 1
   image:
-    tag: dev
+    repository: docker.io/vinodbbhorge/aggregator-dpg-worker
+    tag: v1.0.0
 
 keycloak:
   replicaCount: 1
+  # v1.0.0 image baked `kc.sh build` without SMS SPI; --optimized at runtime
+  # rejects the KC_SPI_SMS_PROVIDER override and exits. Disable here so KC
+  # auto-rebuilds on boot. Re-enable once image is rebuilt with SPI baked in.
+  optimized: false
   image:
-    tag: "26.5.5-aggregator-dev"
+    repository: docker.io/vinodbbhorge/aggregator-dpg-keycloak
+    tag: v1.0.0
 
 postgresql:
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/postgresql
+    tag: 17.6.0
+  auth:
+    existingSecret: aggregator-secrets
+    secretKeys:
+      adminPasswordKey: postgres-password
+      userPasswordKey: password
   primary:
     persistence:
       size: 2Gi
 
 redis:
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/redis
+    tag: 7.2.5
   master:
     persistence:
       size: 1Gi
