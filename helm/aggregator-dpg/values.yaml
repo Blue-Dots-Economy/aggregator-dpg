@@ -55,11 +55,34 @@ ingress:
   className: nginx
   # cert-manager ClusterIssuer name. Must exist in the cluster already.
   clusterIssuer: letsencrypt-prod
+  # Email used when ClusterIssuer registers an ACME account with Let's Encrypt.
+  acmeEmail: ops@sanketika.in
   annotations:
+    # ── TLS / HSTS ────────────────────────────────────────────────────────
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/hsts: "true"
+    nginx.ingress.kubernetes.io/hsts-include-subdomains: "false"
+    nginx.ingress.kubernetes.io/hsts-max-age: "15724800"
+    # ── Body size (bulk uploads: CSV, QR images) ──────────────────────────
     nginx.ingress.kubernetes.io/proxy-body-size: "1024m"
-    nginx.ingress.kubernetes.io/proxy-buffer-size: "32k"
+    # ── Timeouts (long-running migrations, bulk processing, SSE) ──────────
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "60"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    # ── Proxy buffers (Keycloak auth tokens + Next.js streaming) ──────────
+    nginx.ingress.kubernetes.io/proxy-buffer-size: "32k"
+    nginx.ingress.kubernetes.io/proxy-buffers-number: "8"
+    nginx.ingress.kubernetes.io/proxy-busy-buffers-size: "64k"
+    # ── HTTP / Upstream protocol ──────────────────────────────────────────
+    nginx.ingress.kubernetes.io/proxy-http-version: "1.1"
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    # ── Compression ───────────────────────────────────────────────────────
+    nginx.ingress.kubernetes.io/enable-brotli: "true"
+    # Note: ingress-nginx already sets X-Forwarded-Proto / Host / Port from
+    # the request automatically. KC_PROXY_HEADERS=xforwarded (set in keycloak
+    # subchart) makes Keycloak trust them. No snippet needed — and snippet
+    # annotations are disabled by default since controller v1.9 (CVE-2023-5044).
 
 # ─── Secrets ───────────────────────────────────────────────────────────────
 # If existingSecret is set, the umbrella does NOT render its own Secret —
@@ -89,9 +112,9 @@ mail:
   smtp:
     # Real SMTP relay host. No in-cluster mailcatcher — wire to SES /
     # SendGrid / Workspace SMTP / etc. Empty value disables SMTP wiring.
-    host: ""
+    host: "smtp.gmail.com"
     port: 587
-    from: no-reply@bluedots.local
+    from: abhishekg@sanketika.in
     fromDisplay: "Blue Dots Aggregator"
     secure: false
     starttls: true

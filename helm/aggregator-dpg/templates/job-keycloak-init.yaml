@@ -92,8 +92,15 @@ spec:
                 secretKeyRef:
                   name: {{ include "aggregator.secretName" . }}
                   key: OIDC_CLIENT_SECRET
+            - name: BFF_SERVICE_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "aggregator.secretName" . }}
+                  key: BFF_SERVICE_CLIENT_SECRET
             - name: PORTAL_CLIENT_ID
               value: {{ .Values.global.oidc.clientId | quote }}
+            - name: SERVICE_CLIENT_ID
+              value: {{ default "aggregator-api" .Values.global.keycloakAdminClientId | quote }}
           volumeMounts:
             - name: init-scripts
               mountPath: /init

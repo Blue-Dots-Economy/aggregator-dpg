@@ -48,8 +48,6 @@ metadata:
   labels:
     {{- include "aggregator.labels" . | nindent 4 }}
   annotations:
-    nginx.ingress.kubernetes.io/proxy-buffer-size: "32k"
-    nginx.ingress.kubernetes.io/proxy-buffers-number: "8"
     {{- if .Values.ingress.clusterIssuer }}
     cert-manager.io/cluster-issuer: {{ .Values.ingress.clusterIssuer | quote }}
     {{- end }}

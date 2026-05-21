@@ -48,6 +48,16 @@ spec:
                 configMapKeyRef:
                   name: {{ include "keycloak.envConfigMap" . }}
                   key: PUBLIC_BASE_URL
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "keycloak.secretName" . }}
+                  key: OIDC_CLIENT_SECRET
+            - name: BFF_SERVICE_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "keycloak.secretName" . }}
+                  key: BFF_SERVICE_CLIENT_SECRET
             - name: SMTP_HOST
               valueFrom:
                 configMapKeyRef:

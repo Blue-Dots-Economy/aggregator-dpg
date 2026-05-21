@@ -120,6 +120,56 @@ fi
 echo "[kc-init] smtpServer configured: ${SMTP_HOST}:${SMTP_PORT:-587} (ssl=${SSL} starttls=${STARTTLS} auth=${AUTH})"
 
 # ────────────────────────────────────────────────────────────
+# 2b) Reconcile client secrets — keep KC in sync with k8s Secret
+#
+# Realm import is IGNORE_EXISTING, so secrets in realm.json don't propagate
+# on upgrades. Update via admin REST so rotated secrets take effect.
+# ────────────────────────────────────────────────────────────
+reconcile_client_secret() {
+  client_id="$1"
+  new_secret="$2"
+  [ -n "$new_secret" ] || { echo "[kc-init] $client_id: secret env empty — skip"; return 0; }
+
+  # Lookup client by clientId — returns array, take first
+  CLIENT_JSON=$(curl -fsS "${KC_URL}/admin/realms/${REALM}/clients?clientId=${client_id}" \
+    -H "Authorization: Bearer ${TOKEN}")
+  uuid=$(echo "$CLIENT_JSON" | jq -r '.[0].id // empty')
+  if [ -z "$uuid" ]; then
+    echo "[kc-init] $client_id: not found — skip"
+    return 0
+  fi
+
+  current_secret=$(echo "$CLIENT_JSON" | jq -r '.[0].secret // empty')
+  if [ "$current_secret" = "$new_secret" ]; then
+    echo "[kc-init] $client_id: secret already in sync — skip"
+    return 0
+  fi
+
+  # PUT replaces the entire client representation in KC. Fetch the existing
+  # client object (singular endpoint, gives the canonical shape), patch the
+  # .secret field, then PUT back — avoids wiping redirectUris / mappers etc.
+  PATCHED=$(curl -fsS "${KC_URL}/admin/realms/${REALM}/clients/${uuid}" \
+    -H "Authorization: Bearer ${TOKEN}" \
+    | jq --arg s "$new_secret" '.secret = $s')
+
+  HTTP=$(curl -s -o /tmp/cs-resp.json -w "%{http_code}" -X PUT \
+    "${KC_URL}/admin/realms/${REALM}/clients/${uuid}" \
+    -H "Authorization: Bearer ${TOKEN}" \
+    -H "Content-Type: application/json" \
+    --data "$PATCHED")
+  if [ "$HTTP" = "204" ] || [ "$HTTP" = "200" ]; then
+    echo "[kc-init] $client_id: secret reconciled (uuid=${uuid})"
+  else
+    echo "[kc-init] $client_id: secret PUT failed: HTTP ${HTTP}"
+    cat /tmp/cs-resp.json || true
+    exit 1
+  fi
+}
+
+reconcile_client_secret "${PORTAL_CLIENT_ID:-aggregator-portal}"  "${OIDC_CLIENT_SECRET:-}"
+reconcile_client_secret "${SERVICE_CLIENT_ID:-aggregator-api}"    "${BFF_SERVICE_CLIENT_SECRET:-}"
+
+# ────────────────────────────────────────────────────────────
 # 3) aggregator-portal client: enforce confidential + mappers
 #
 # realm.json is only consulted on first realm import. When the realm

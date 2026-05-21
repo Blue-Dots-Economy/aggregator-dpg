@@ -17,8 +17,8 @@ ingress:
   # cert-manager ClusterIssuer name. Must exist in the cluster (created by
   # umbrella template-clusterissuer.yaml or applied separately).
   clusterIssuer: letsencrypt-prod
-  annotations:
-    nginx.ingress.kubernetes.io/proxy-body-size: "1024m"
+  # Annotations inherited from values.yaml (TLS redirect, timeouts, buffers,
+  # HSTS, brotli, X-Forwarded-* headers). Override per-env if needed.
 
 secrets:
   existingSecret: ""
@@ -29,6 +29,11 @@ secrets:
   sessionKey: dev-session-key-32-chars-minimum-okay
   oidcClientSecret: aggregator-portal-dev-secret
   bffServiceClientSecret: ""               # falls back to keycloakAdminClientSecret
+  # SMTP credentials — inject at deploy time, do NOT commit real values:
+  #   helm upgrade ... --set secrets.smtpUser=you@example.com \
+  #                    --set secrets.smtpPassword='xxxx xxxx xxxx xxxx'
+  smtpUser: "CHANGE_ME"
+  smtpPassword: "CHANGE_ME"
 
 web:
   replicaCount: 1

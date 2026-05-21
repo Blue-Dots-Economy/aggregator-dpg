@@ -17,6 +17,8 @@ data:
     DST_DIR="/opt/keycloak/data/import"
 
     : "${PUBLIC_BASE_URL:?PUBLIC_BASE_URL must be set}"
+    : "${OIDC_CLIENT_SECRET:?OIDC_CLIENT_SECRET must be set}"
+    : "${BFF_SERVICE_CLIENT_SECRET:?BFF_SERVICE_CLIENT_SECRET must be set}"
     : "${SMTP_HOST:=mailhog}"
     : "${SMTP_PORT:=1025}"
     : "${SMTP_FROM:=no-reply@bluedots.local}"
@@ -34,6 +36,8 @@ data:
     }
 
     PUBLIC_BASE_URL_ESC=$(escape "$PUBLIC_BASE_URL")
+    OIDC_CLIENT_SECRET_ESC=$(escape "$OIDC_CLIENT_SECRET")
+    BFF_SERVICE_CLIENT_SECRET_ESC=$(escape "$BFF_SERVICE_CLIENT_SECRET")
     SMTP_HOST_ESC=$(escape "$SMTP_HOST")
     SMTP_PORT_ESC=$(escape "$SMTP_PORT")
     SMTP_FROM_ESC=$(escape "$SMTP_FROM")
@@ -49,6 +53,8 @@ data:
       dst="$DST_DIR/$(basename "$src")"
       sed \
         -e "s|__PUBLIC_BASE_URL__|${PUBLIC_BASE_URL_ESC}|g" \
+        -e "s|__OIDC_CLIENT_SECRET__|${OIDC_CLIENT_SECRET_ESC}|g" \
+        -e "s|__BFF_SERVICE_CLIENT_SECRET__|${BFF_SERVICE_CLIENT_SECRET_ESC}|g" \
         -e "s|__SMTP_HOST__|${SMTP_HOST_ESC}|g" \
         -e "s|__SMTP_PORT__|${SMTP_PORT_ESC}|g" \
         -e "s|__SMTP_FROM__|${SMTP_FROM_ESC}|g" \
