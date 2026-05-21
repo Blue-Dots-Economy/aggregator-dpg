@@ -125,22 +125,29 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       );
     }
 
-    const params = new URLSearchParams();
-    params.set('aggregator_id', query.aggregator_id);
-    params.set('item_network', query.item_network);
-    params.set('item_domain', query.item_domain);
-    if (query.item_type) params.set('item_type', query.item_type);
-    if (query.limit !== undefined) params.set('limit', String(query.limit));
-    if (query.offset !== undefined) params.set('offset', String(query.offset));
-
-    const url = `${this.baseUrl}/api/v1/admin/items?${params.toString()}`;
+    // Local-only network fetch (POST): hits this signalstack instance's
+    // items table directly with the aggregator_id filter. The sibling GET
+    // /api/v1/network/item/fetch aggregates across every instance listed in
+    // the network config and external instances do not know about
+    // aggregator_id, so totals there are inflated. fetch_local is the
+    // correct endpoint for an aggregator dashboard scoped to its own data.
+    const url = `${this.baseUrl}/api/v1/network/item/fetch_local`;
+    const body = {
+      aggregator_id: query.aggregator_id,
+      item_network: query.item_network,
+      item_domain: query.item_domain,
+      ...(query.item_type ? { item_type: query.item_type } : {}),
+      limit: query.limit ?? 50,
+      offset: query.offset ?? 0,
+    };
     const controller = this.timeoutMs ? new AbortController() : undefined;
     const timer = controller ? setTimeout(() => controller.abort(), this.timeoutMs) : undefined;
 
     try {
       const res = await this.fetchImpl(url, {
-        method: 'GET',
+        method: 'POST',
         headers: this.headers,
+        body: JSON.stringify(body),
         ...(controller ? { signal: controller.signal } : {}),
       });
 

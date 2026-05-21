@@ -80,7 +80,8 @@ class HttpBlueDotsService implements BlueDotsService {
   }
 
   private async fetchDomain(domain: 'seeker' | 'provider'): Promise<SignalStackItem[]> {
-    const url = `/api/blue-dots/items?domain=${domain}&limit=200`;
+    // Signalstack's FetchItemsBodySchema caps limit at 100. Match that here.
+    const url = `/api/blue-dots/items?domain=${domain}&limit=100`;
     const payload = await jsonFetch<SignalStackItemList>(url);
     return payload.items ?? [];
   }
