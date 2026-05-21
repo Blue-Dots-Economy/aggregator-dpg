@@ -2,12 +2,14 @@
 # Deploy aggregator-dpg umbrella chart into an existing Kubernetes cluster.
 #
 # Usage:
-#   scripts/deploy-k8s.sh -n <namespace> [-r <release>] [-f <values-file>] \
+#   scripts/deploy-k8s.sh -n <namespace> [-r <release>] [-f <extra-values>] \
 #                         [-R <image-registry>] [-t <image-tag>] [--dry-run]
 #
+# Defaults: chart values.yaml is used as-is (no overlay). Pass extra `-f` to
+# layer environment-specific overrides on top.
+#
 # Example:
-#   scripts/deploy-k8s.sh -n aggregator-stage -r aggregator \
-#                         -f helm/aggregator-dpg/values-dev.yaml \
+#   scripts/deploy-k8s.sh -n aggregator -r aggregator \
 #                         -R ghcr.io/sanketika-labs -t 0.1.0
 #
 # Pre-reqs in your shell: kubectl, helm v3.12+, current kube-context already
@@ -19,7 +21,7 @@ set -euo pipefail
 CHART_DIR="$(cd "$(dirname "$0")/.." && pwd)/helm/aggregator-dpg"
 RELEASE="aggregator"
 NAMESPACE="aggregator"
-VALUES_FILE="${CHART_DIR}/values-dev.yaml"
+VALUES_FILE=""               # empty => helm uses chart's values.yaml only
 IMAGE_REGISTRY=""
 IMAGE_TAG=""
 DRY_RUN=""
@@ -46,7 +48,7 @@ done
 
 [[ -z "$NAMESPACE"   ]] && { echo "ERROR: -n <namespace> is required" >&2; exit 2; }
 [[ ! -d "$CHART_DIR" ]] && { echo "ERROR: chart dir not found: $CHART_DIR" >&2; exit 2; }
-[[ ! -f "$VALUES_FILE" ]] && { echo "ERROR: values file not found: $VALUES_FILE" >&2; exit 2; }
+[[ -n "$VALUES_FILE" && ! -f "$VALUES_FILE" ]] && { echo "ERROR: values file not found: $VALUES_FILE" >&2; exit 2; }
 
 # ── Tooling check ──────────────────────────────────────────────────────────
 command -v helm    >/dev/null || { echo "ERROR: helm not installed"    >&2; exit 3; }
@@ -57,7 +59,7 @@ CTX="$(kubectl config current-context)"
 echo "▶ context  : $CTX"
 echo "▶ namespace: $NAMESPACE"
 echo "▶ release  : $RELEASE"
-echo "▶ values   : $VALUES_FILE"
+echo "▶ values   : ${VALUES_FILE:-<chart default>}"
 [[ -n "$IMAGE_REGISTRY" ]] && echo "▶ registry : $IMAGE_REGISTRY"
 [[ -n "$IMAGE_TAG"      ]] && echo "▶ tag      : $IMAGE_TAG"
 
@@ -78,15 +80,18 @@ for dep in ingress-nginx cert-manager postgresql redis web api worker keycloak; 
 done
 
 # ── Lint (fast safety net) ─────────────────────────────────────────────────
+VALUES_ARGS=()
+[[ -n "$VALUES_FILE" ]] && VALUES_ARGS=("-f" "$VALUES_FILE")
+
 echo "▶ helm lint ..."
-helm lint "$CHART_DIR" -f "$VALUES_FILE" >/dev/null
+helm lint "$CHART_DIR" "${VALUES_ARGS[@]+"${VALUES_ARGS[@]}"}" >/dev/null
 
 # ── Install / upgrade ──────────────────────────────────────────────────────
 echo "▶ helm upgrade --install ..."
 helm upgrade --install "$RELEASE" "$CHART_DIR" \
   --namespace "$NAMESPACE" \
   --create-namespace \
-  -f "$VALUES_FILE" \
+  "${VALUES_ARGS[@]+"${VALUES_ARGS[@]}"}" \
   "${SET_ARGS[@]+"${SET_ARGS[@]}"}" \
   --wait --timeout 10m \
   $DRY_RUN

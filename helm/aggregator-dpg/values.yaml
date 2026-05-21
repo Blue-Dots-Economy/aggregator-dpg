@@ -1,21 +1,25 @@
 # ═══════════════════════════════════════════════════════════════════════════
-# Default values for aggregator-dpg umbrella chart.
+# aggregator-dpg umbrella chart — single values file (dev + prod).
 #
-# This file ships dev-safe defaults. For real deployments, layer
-# values-prod.yaml on top with `-f values-prod.yaml` and supply secrets via
-# `secrets.existingSecret` (referencing a SealedSecret / ExternalSecret).
+# Defaults are dev-safe. For any deployment, review every line tagged
+# `# UPDATE:` and override via:
+#   1. Editing this file directly (single-cluster / dev), OR
+#   2. `helm upgrade ... --set key=value` (CI / per-deploy overrides), OR
+#   3. A vaulted Secret pointed to by `global.existingSecret` (prod).
 # ═══════════════════════════════════════════════════════════════════════════
 
 global:
-  # Public FQDN — must have a DNS A record reaching the ingress controller.
-  publicHost: portal.example.com
+  # UPDATE: public FQDN that ingress + KC issuer + email links use.
+  publicHost: bluedots-aggregator.duckdns.org
+  # UPDATE: http for local, https when cert-manager issues a cert.
   publicProtocol: https
 
-  # Container registry where web/api/worker/keycloak images are pushed.
-  imageRegistry: ghcr.io/your-org
+  # UPDATE: container registry. Empty = images use their `repository` as-is
+  # (Docker Hub). For GHCR/ECR set e.g. `ghcr.io/your-org`.
+  imageRegistry: ""
   imagePullSecrets: []
 
-  # Cluster storage class for PVCs. Empty = cluster default.
+  # UPDATE: cluster storage class for PVCs. EKS = "gp3", kind/minikube = "".
   storageClass: ""
 
   keycloakRealm: aggregator
@@ -24,118 +28,116 @@ global:
     clientId: aggregator-portal
     scope: "openid profile email"
 
-  # AWS S3 used for bulk uploads, QR pngs, error CSVs.
+  # UPDATE: S3 wiring for bulk uploads, QR PNGs, error CSVs.
   s3:
     region: ap-south-1
     bucket: aggregator-bulk-uploads
     forcePathStyle: false
 
-  # If set, subcharts reference this Secret name instead of the umbrella's
-  # templated `{release}-secrets`. The named Secret MUST exist before
-  # `helm install` and carry every key listed under `secrets.*` below.
+  # UPDATE (prod): point at an externally-managed Secret (SealedSecrets,
+  # ExternalSecretsOperator, SOPS, Vault). Must carry every key listed under
+  # `secrets:` below. Empty => umbrella renders its own Secret from `secrets:`.
   existingSecret: ""
 
-  # Workaround for the compose `extra_hosts: PUBLIC_HOST:host-gateway` quirk.
-  # Provide one entry per app pod so server-side back-channel calls to the
-  # OIDC issuer URL resolve to the ingress controller cluster IP rather
-  # than bouncing through external DNS.
-  #
-  #   hostAliases:
-  #     - ip: "10.0.0.42"
-  #       hostnames: [portal.example.com]
+  # Workaround for compose `extra_hosts: PUBLIC_HOST:host-gateway`. Add an
+  # entry per app pod so server-side OIDC discovery doesn't bounce through
+  # external DNS. Usually empty in cloud clusters.
   hostAliases: []
 
-  # Renamed from `logLevel` to avoid collision with cert-manager subchart's
-  # `global.logLevel` (integer schema). Consumed by configmap-global → LOG_LEVEL.
-  appLogLevel: info
+  # UPDATE: debug for local, info for prod.
+  appLogLevel: debug
 
 # ─── Ingress (single host, multi-path) ─────────────────────────────────────
 ingress:
   enabled: true
   className: nginx
-  # cert-manager ClusterIssuer name. Must exist in the cluster already.
+  # UPDATE: cert-manager ClusterIssuer. Empty disables TLS issuance.
   clusterIssuer: letsencrypt-prod
-  # Email used when ClusterIssuer registers an ACME account with Let's Encrypt.
+  # UPDATE: ACME registration email for Let's Encrypt account.
   acmeEmail: ops@sanketika.in
+  # Prod-grade nginx annotations — shared by both Ingress objects (api + main).
   annotations:
-    # ── TLS / HSTS ────────────────────────────────────────────────────────
+    # TLS / HSTS
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
     nginx.ingress.kubernetes.io/hsts: "true"
     nginx.ingress.kubernetes.io/hsts-include-subdomains: "false"
     nginx.ingress.kubernetes.io/hsts-max-age: "15724800"
-    # ── Body size (bulk uploads: CSV, QR images) ──────────────────────────
+    # Body size — bulk CSV / QR uploads
     nginx.ingress.kubernetes.io/proxy-body-size: "1024m"
-    # ── Timeouts (long-running migrations, bulk processing, SSE) ──────────
+    # Timeouts — long migrations, bulk jobs, SSE
     nginx.ingress.kubernetes.io/proxy-connect-timeout: "60"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
-    # ── Proxy buffers (Keycloak auth tokens + Next.js streaming) ──────────
+    # Proxy buffers — KC tokens + Next.js streaming
     nginx.ingress.kubernetes.io/proxy-buffer-size: "32k"
     nginx.ingress.kubernetes.io/proxy-buffers-number: "8"
     nginx.ingress.kubernetes.io/proxy-busy-buffers-size: "64k"
-    # ── HTTP / Upstream protocol ──────────────────────────────────────────
+    # Upstream protocol
     nginx.ingress.kubernetes.io/proxy-http-version: "1.1"
     nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
-    # ── Compression ───────────────────────────────────────────────────────
+    # Compression
     nginx.ingress.kubernetes.io/enable-brotli: "true"
-    # Note: ingress-nginx already sets X-Forwarded-Proto / Host / Port from
-    # the request automatically. KC_PROXY_HEADERS=xforwarded (set in keycloak
-    # subchart) makes Keycloak trust them. No snippet needed — and snippet
-    # annotations are disabled by default since controller v1.9 (CVE-2023-5044).
 
 # ─── Secrets ───────────────────────────────────────────────────────────────
-# If existingSecret is set, the umbrella does NOT render its own Secret —
-# the named Secret must already exist with the same keys listed below.
+# All values land in Secret `<release>-secrets`. For prod, set
+# `global.existingSecret` and skip this block — values here are ignored.
 secrets:
-  # Deprecated alias of global.existingSecret. If set, global.existingSecret
-  # takes precedence (kept for ergonomic top-level reference).
   existingSecret: ""
-  postgresPassword: change-me-postgres-password
-  kcBootstrapAdminPassword: change-me-keycloak-admin
-  keycloakAdminClientSecret: change-me-kc-admin-client-secret
-  approvalTokenSecret: change-me-32-hex-min-chars-required-here
-  sessionKey: change-me-32-hex-min-chars-required-here
-  oidcClientSecret: change-me-portal-client-secret
-  bffServiceClientSecret: ""
-  smtpUser: ""
-  smtpPassword: ""
+  # UPDATE: every value below before any non-throwaway deploy.
+  postgresPassword: aggregator-dev
+  kcBootstrapAdminPassword: kc-admin-dev
+  keycloakAdminClientSecret: aggregator-api-dev-secret
+  approvalTokenSecret: dev-approval-token-secret-32chars-min
+  sessionKey: dev-session-key-32-chars-minimum-okay
+  oidcClientSecret: aggregator-portal-dev-secret
+  bffServiceClientSecret: ""          # empty => falls back to keycloakAdminClientSecret
+  # UPDATE: inject at deploy time, do NOT commit real values.
+  #   helm upgrade ... --set secrets.smtpUser=you@example.com \
+  #                    --set secrets.smtpPassword='xxxx xxxx xxxx xxxx'
+  smtpUser: "CHANGE_ME"
+  smtpPassword: "CHANGE_ME"
   twilioAccountSid: ""
   twilioAuthToken: ""
   twilioFromNumber: ""
+  # Leave AWS keys empty when using IRSA / Pod Identity on EKS.
   awsAccessKeyId: ""
   awsSecretAccessKey: ""
 
 # ─── Mail wiring (shared by api + keycloak) ────────────────────────────────
 mail:
-  provider: smtp                  # smtp | ses
+  # UPDATE: smtp | ses
+  provider: smtp
   smtp:
-    # Real SMTP relay host. No in-cluster mailcatcher — wire to SES /
-    # SendGrid / Workspace SMTP / etc. Empty value disables SMTP wiring.
-    host: "smtp.gmail.com"
+    # UPDATE: SMTP relay. For Gmail use smtp.gmail.com:587 STARTTLS + App Password.
+    host: smtp.gmail.com
     port: 587
+    # UPDATE: sender address (must be a verified identity for SES/SendGrid).
     from: abhishekg@sanketika.in
     fromDisplay: "Blue Dots Aggregator"
     secure: false
     starttls: true
     auth: true
   ses:
+    # UPDATE (if provider=ses): verified SES sender + configuration set.
     from: ""
     configurationSet: ""
 
 # ─── App subcharts ─────────────────────────────────────────────────────────
 web:
-  replicaCount: 2
+  # UPDATE: bump for prod (2-3 replicas typical). HPA below scales further.
+  replicaCount: 1
   image:
-    repository: aggregator-dpg/web
-    tag: ""                        # falls back to Chart.AppVersion
+    # UPDATE: registry path + tag.
+    repository: docker.io/vinodbbhorge/aggregator-dpg-web
+    tag: v1.0.0
     pullPolicy: IfNotPresent
   service:
     port: 3000
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits:   { cpu: 1,    memory: 1Gi   }
-    # Tune up for prod (apps/web is a Next.js standalone build).
+  # UPDATE (prod): enable HPA for autoscaling.
   hpa:
     enabled: false
     minReplicas: 2
@@ -143,10 +145,11 @@ web:
     targetCPU: 70
 
 api:
-  replicaCount: 2
+  replicaCount: 1
   image:
-    repository: aggregator-dpg/api
-    tag: ""
+    # UPDATE: registry path + tag.
+    repository: docker.io/vinodbbhorge/aggregator-dpg-api
+    tag: v1.0.0
     pullPolicy: IfNotPresent
   service:
     port: 4000
@@ -158,13 +161,14 @@ api:
     uploadUrlTtlSeconds: 900
     uploadMaxBytes: 10485760
     qrDownloadUrlTtlSeconds: 900
+  # UPDATE: comma-separated admin notification recipients.
   adminEmails: "admin@bluedots.local"
   publicLinkBaseUrl: ""              # empty => derived from global.publicProtocol+publicHost
   serviceAccount:
     create: true
-    # For IRSA on EKS:
+    # UPDATE (EKS prod): IRSA role for S3/SES.
     #   annotations:
-    #     eks.amazonaws.com/role-arn: arn:aws:iam::<acct>:role/<role>
+    #     eks.amazonaws.com/role-arn: arn:aws:iam::<acct>:role/aggregator-api
     annotations: {}
   hpa:
     enabled: false
@@ -175,8 +179,9 @@ api:
 worker:
   replicaCount: 1
   image:
-    repository: aggregator-dpg/worker
-    tag: ""
+    # UPDATE: registry path + tag.
+    repository: docker.io/vinodbbhorge/aggregator-dpg-worker
+    tag: v1.0.0
     pullPolicy: IfNotPresent
   resources:
     requests: { cpu: 100m, memory: 384Mi }
@@ -189,16 +194,23 @@ worker:
     watchdogIntervalMs: 3600000
   serviceAccount:
     create: true
+    # UPDATE (EKS prod): IRSA role for S3/SES.
     annotations: {}
 
 keycloak:
   replicaCount: 1
   image:
-    repository: aggregator-dpg/keycloak
-    tag: "26.5.5-aggregator"
+    # UPDATE: registry path + tag.
+    repository: docker.io/vinodbbhorge/aggregator-dpg-keycloak
+    tag: v1.0.0
     pullPolicy: IfNotPresent
+  # Set true when the image was built with `kc.sh build` matching all
+  # build-time SPI options (faster cold start). Current v1.0.0 image lacks
+  # KC_SPI_SMS_PROVIDER baked in → keep false until image is rebuilt.
+  optimized: false
   bootstrapAdminUsername: admin
-  smsProvider: log                  # log | twilio | sns
+  # UPDATE: log | twilio | sns
+  smsProvider: log
   awsRegion: ap-south-1
   service:
     port: 8080
@@ -208,7 +220,7 @@ keycloak:
     limits:   { cpu: 1,    memory: 1500Mi }
 
 # ─── ingress-nginx subchart (cluster-level controller) ────────────────────
-# Disable if cluster already has ingress-nginx installed by another tenant.
+# UPDATE: set enabled=false if cluster already has ingress-nginx installed.
 ingress-nginx:
   enabled: true
   controller:
@@ -218,7 +230,7 @@ ingress-nginx:
       type: LoadBalancer
 
 # ─── cert-manager subchart (cluster-level controller) ─────────────────────
-# Disable if cluster already has cert-manager installed.
+# UPDATE: set enabled=false if cluster already has cert-manager installed.
 cert-manager:
   enabled: true
   crds:
@@ -232,20 +244,27 @@ cert-manager:
 # See: https://artifacthub.io/packages/helm/bitnami/postgresql
 postgresql:
   enabled: true
+  # UPDATE: Bitnami's free `postgresql` chart now requires a paid subscription
+  # for the official image; `bitnamilegacy/*` mirrors the last freely-licensed
+  # tags. Override here if you have a paid Bitnami license.
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/postgresql
+    tag: 17.6.0
   auth:
     username: aggregator
     database: aggregator
-    # When the umbrella templates a Secret, this is auto-set to that name in
-    # values-dev.yaml / via helm install --set. When existingSecret is wired
-    # at umbrella level, point this at the same Secret + use these key names.
-    existingSecret: ""
+    # Wire to the umbrella-rendered Secret so app + keycloak share creds.
+    # If using global.existingSecret, point this at the same Secret name.
+    existingSecret: aggregator-secrets
     secretKeys:
       adminPasswordKey: postgres-password
-      userPasswordKey: postgres-password
+      userPasswordKey: password
   primary:
     persistence:
       enabled: true
-      size: 10Gi
+      # UPDATE: bump for prod (50Gi+ typical).
+      size: 2Gi
     initdb:
       scripts:
         01-create-keycloak-db.sql: |
@@ -258,13 +277,19 @@ postgresql:
 # See: https://artifacthub.io/packages/helm/bitnami/redis
 redis:
   enabled: true
+  # UPDATE: same Bitnami licensing note as postgresql.
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/redis
+    tag: 7.2.5
   architecture: standalone
   auth:
     enabled: false
   master:
     persistence:
       enabled: true
-      size: 2Gi
+      # UPDATE: bump for prod (5Gi+ typical).
+      size: 1Gi
     extraFlags:
       - "--save"
       - "60"
