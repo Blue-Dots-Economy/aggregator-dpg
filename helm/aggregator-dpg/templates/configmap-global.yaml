@@ -12,7 +12,7 @@ data:
   PUBLIC_PORTAL_URL: {{ include "aggregator.publicBaseUrl" . | quote }}
 
   # ─── Logging ─────────────────────────────────────────────────────────
-  LOG_LEVEL: {{ .Values.global.logLevel | quote }}
+  LOG_LEVEL: {{ .Values.global.appLogLevel | quote }}
   NODE_ENV: production
 
   # ─── OIDC / Keycloak ─────────────────────────────────────────────────

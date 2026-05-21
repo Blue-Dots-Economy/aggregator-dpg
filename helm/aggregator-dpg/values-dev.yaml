@@ -5,19 +5,18 @@
 # secret values into git for non-dev environments.
 
 global:
-  publicHost: portal.dev.local
-  publicProtocol: http
+  publicHost: bluedots-aggregator.duckdns.org
+  publicProtocol: https
   imageRegistry: ""
   storageClass: ""
-  logLevel: debug
+  appLogLevel: debug
 
 ingress:
   enabled: true
   className: nginx
-  # No cert-manager in local clusters by default; chart still renders the
-  # annotation but the cluster issuer just won't act. Remove from chart if
-  # local dev doesn't have cert-manager installed at all.
-  clusterIssuer: ""
+  # cert-manager ClusterIssuer name. Must exist in the cluster (created by
+  # umbrella template-clusterissuer.yaml or applied separately).
+  clusterIssuer: letsencrypt-prod
   annotations:
     nginx.ingress.kubernetes.io/proxy-body-size: "1024m"
 

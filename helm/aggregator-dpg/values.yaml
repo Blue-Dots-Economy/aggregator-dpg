@@ -45,7 +45,9 @@ global:
   #       hostnames: [portal.example.com]
   hostAliases: []
 
-  logLevel: info
+  # Renamed from `logLevel` to avoid collision with cert-manager subchart's
+  # `global.logLevel` (integer schema). Consumed by configmap-global → LOG_LEVEL.
+  appLogLevel: info
 
 # ─── Ingress (single host, multi-path) ─────────────────────────────────────
 ingress:
@@ -181,6 +183,27 @@ keycloak:
   resources:
     requests: { cpu: 250m, memory: 768Mi }
     limits:   { cpu: 1,    memory: 1500Mi }
+
+# ─── ingress-nginx subchart (cluster-level controller) ────────────────────
+# Disable if cluster already has ingress-nginx installed by another tenant.
+ingress-nginx:
+  enabled: true
+  controller:
+    publishService:
+      enabled: true
+    service:
+      type: LoadBalancer
+
+# ─── cert-manager subchart (cluster-level controller) ─────────────────────
+# Disable if cluster already has cert-manager installed.
+cert-manager:
+  enabled: true
+  crds:
+    enabled: true
+  # cert-manager schema expects integer logLevel (1-5). Override umbrella's
+  # string `global.logLevel` so subchart values pass schema validation.
+  global:
+    logLevel: 2
 
 # ─── Bitnami postgresql subchart values (consumed verbatim) ────────────────
 # See: https://artifacthub.io/packages/helm/bitnami/postgresql

@@ -21,7 +21,7 @@ global:
   publicProtocol: https
   imageRegistry: ghcr.io/your-org
   storageClass: gp3
-  logLevel: info
+  appLogLevel: info
 
 ingress:
   enabled: true
