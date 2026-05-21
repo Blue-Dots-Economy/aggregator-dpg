@@ -77,8 +77,16 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
 
       if (!res.ok) {
         const bodyText = await safeReadText(res);
+        const upstreamMsg = extractUpstreamMessage(bodyText);
+        // Surface signalstack's own message (e.g. `INVALID_ITEM_STATE: must be
+        // equal to one of the allowed values`) when present so the caller can
+        // funnel it into the user-visible errors.csv. Falls back to the bare
+        // status code message if the body isn't JSON or carries no message.
+        const message = upstreamMsg
+          ? `signalstack onboard returned ${res.status}: ${upstreamMsg}`
+          : `signalstack onboard returned ${res.status}`;
         return err(
-          new UpstreamError(`signalstack onboard returned ${res.status}`, {
+          new UpstreamError(message, {
             code: this.codeForStatus(res.status),
             details: { status: res.status, body: bodyText },
           }),
@@ -229,4 +237,51 @@ async function safeReadText(res: Response): Promise<string> {
   } catch {
     return '';
   }
+}
+
+/**
+ * Extract the human-readable error string from a signalstack JSON error body.
+ *
+ * Signalstack returns shapes like:
+ *   { "error": "INVALID_ITEM_STATE", "message": "Invalid item_state: must be …" }
+ *   { "statusCode": 400, "error": "Bad Request", "message": "body/x Invalid …" }
+ *   { "error": { "message": "…" } }
+ *
+ * Returns the most specific message available, or `null` if the body is not
+ * JSON or carries no usable text. Combines `error` + `message` when both are
+ * present so the caller sees both the machine code and the human text.
+ */
+function extractUpstreamMessage(bodyText: string): string | null {
+  if (!bodyText) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bodyText);
+  } catch {
+    // Non-JSON body — return the raw text trimmed to a sensible length.
+    const trimmed = bodyText.trim();
+    return trimmed.length > 0 ? trimmed.slice(0, 500) : null;
+  }
+  if (!parsed || typeof parsed !== 'object') return null;
+  const obj = parsed as Record<string, unknown>;
+  const errField = obj['error'];
+  const errCode =
+    typeof errField === 'string'
+      ? errField
+      : isObject(errField) && typeof errField['code'] === 'string'
+        ? (errField['code'] as string)
+        : null;
+  const messageText =
+    typeof obj['message'] === 'string'
+      ? (obj['message'] as string)
+      : isObject(errField) && typeof errField['message'] === 'string'
+        ? (errField['message'] as string)
+        : null;
+  if (errCode && messageText) return `${errCode}: ${messageText}`;
+  if (messageText) return messageText;
+  if (errCode) return errCode;
+  return null;
+}
+
+function isObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
 }

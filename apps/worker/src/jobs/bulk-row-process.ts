@@ -186,10 +186,15 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
     // signal: a row only counts as "passed" once signalstack has it too.
     const push = await pushToSignalStack(job, participantId, phoneNormalised, emailNormalised, log);
     if (!push.success) {
+      // `push.message` already includes the upstream's own error text when
+      // signalstack returned a JSON body (e.g.
+      // `signalstack onboard returned 400: INVALID_ITEM_STATE: …`). Surface
+      // it directly so operators see the actual rejection reason in
+      // errors.csv instead of a generic status-code string.
       outcome = {
         outcome: 'failed',
         category: 'system_error',
-        reasons: [`signalstack: ${push.code}: ${push.message}`],
+        reasons: [`signalstack [${push.code}]: ${push.message}`],
       };
     }
   } else {
