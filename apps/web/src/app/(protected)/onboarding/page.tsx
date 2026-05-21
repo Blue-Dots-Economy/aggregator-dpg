@@ -8,6 +8,8 @@ import { I, type IconName } from '../../../icons';
 import { useRecentBulkUploads, useRegistrationLinks } from '../../../hooks/useOnboarding';
 import { useProfileRaw } from '../../../hooks/useProfile';
 import { StatStrip } from './_components/StatStrip';
+import { RecentUploadsBody } from './_components/CSVUpload';
+import { YourLinksBody } from './_components/RegistrationLinksSection';
 
 export default function OnboardingPage() {
   return (
@@ -79,6 +81,7 @@ function BulkUploadCard() {
       loading={recent.isLoading}
       ctaLabel="Go to Bulk Upload"
       onCta={() => router.push('/onboarding/bulk-uploads')}
+      body={<RecentUploadsBody />}
     />
   );
 }
@@ -128,8 +131,9 @@ function RegistrationLinkCard() {
         { label: 'Verified', value: metrics.passed, tone: 'emerald' },
       ]}
       loading={links.isLoading}
-      ctaLabel="Go to Registration Links"
+      ctaLabel="Create new link"
       onCta={() => router.push('/onboarding/links')}
+      body={<YourLinksBody />}
     />
   );
 }
@@ -152,11 +156,6 @@ const ACCENT_ICON_RING: Record<Accent, string> = {
   amber: 'bg-white border border-amber-200 text-amber-700',
 };
 
-const ACCENT_BAR: Record<Accent, string> = {
-  primary: 'bg-primary-600',
-  amber: 'bg-amber-500',
-};
-
 interface SummaryCardProps {
   icon: IconName;
   accent: Accent;
@@ -167,6 +166,8 @@ interface SummaryCardProps {
   loading: boolean;
   ctaLabel: string;
   onCta: () => void;
+  /** Optional body rendered below the action row inside the same card. */
+  body?: ReactNode;
 }
 
 function SummaryCard({
@@ -179,6 +180,7 @@ function SummaryCard({
   loading,
   ctaLabel,
   onCta,
+  body,
 }: SummaryCardProps) {
   const Ic = I[icon];
   return (
@@ -186,7 +188,6 @@ function SummaryCard({
       className="bd-card bd-shadow overflow-hidden flex flex-col transition-shadow hover:shadow-lg"
       style={{ background: ACCENT_BG[accent] }}
     >
-      <div className={`h-1 ${ACCENT_BAR[accent]}`} aria-hidden />
       <div className="px-5 py-4 flex flex-col gap-3 flex-1">
         <div className="flex items-start gap-3">
           <div
@@ -208,12 +209,18 @@ function SummaryCard({
           ))}
         </div>
 
-        <div className="mt-auto pt-2 border-t border-[var(--bd-border-soft)] flex items-center justify-between gap-3 flex-wrap">
+        <div className="pt-2 border-t border-[var(--bd-border-soft)] flex items-center justify-between gap-3 flex-wrap">
           <span className="text-[11.5px] text-ink-400">{footnote}</span>
           <Button onClick={onCta} icon={<I.arrowR size={14} />}>
             {ctaLabel}
           </Button>
         </div>
+
+        {body && (
+          <div className="pt-3 border-t border-[var(--bd-border-soft)] bg-white/60 -mx-5 -mb-4 px-5 pb-4 mt-1">
+            {body}
+          </div>
+        )}
       </div>
     </div>
   );
