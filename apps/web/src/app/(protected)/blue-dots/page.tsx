@@ -306,6 +306,22 @@ function ParticipantTable<R extends ParticipantBase>({ kind, rows }: Participant
           <Button kind="ghost" icon={<I.filter size={14} />}>
             All filters
           </Button>
+          {/*
+           * CSV export — placeholder. Wire up the actual client-side CSV
+           * serialisation (header row from schema, body from `rows`,
+           * `Papa.unparse` + Blob download) in a follow-up.
+           */}
+          <Button
+            kind="ghost"
+            icon={<I.download size={14} />}
+            onClick={() => {
+              /* TODO: client-side CSV export */
+            }}
+            title="Export as CSV"
+            aria-label="Export as CSV"
+          >
+            Export CSV
+          </Button>
         </div>
       </div>
 
@@ -654,15 +670,6 @@ const PROVIDER_TAB: SegmentedTab<Tab> = {
   ),
 };
 
-const OPP_TAB: SegmentedTab<Tab> = {
-  id: 'opp',
-  label: (
-    <span className="inline-flex items-center gap-2">
-      <I.spark size={14} /> Opportunity Providers <span className="text-ink-300">·</span> 18
-    </span>
-  ),
-};
-
 export default function BlueDotsPage() {
   const router = useRouter();
   const rawProfile = useProfileRaw();
@@ -672,7 +679,7 @@ export default function BlueDotsPage() {
   // primary tab is hidden, not just disabled.
   const aggregatorType: 'seeker' | 'provider' = rawProfile.data?.type ?? 'seeker';
   const tabItems = useMemo<SegmentedTab<Tab>[]>(
-    () => (aggregatorType === 'provider' ? [PROVIDER_TAB, OPP_TAB] : [SEEKER_TAB, OPP_TAB]),
+    () => (aggregatorType === 'provider' ? [PROVIDER_TAB] : [SEEKER_TAB]),
     [aggregatorType],
   );
   const allowedIds = useMemo(() => new Set(tabItems.map((t) => t.id)), [tabItems]);

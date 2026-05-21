@@ -1,1045 +1,17 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { useMemo, type ReactNode } from 'react';
+import { useRouter } from 'next/navigation';
 import { Button } from '../../../components/ui/Button';
 import { Topbar } from '../../../components/shell/Topbar';
-import { Dropzone } from '../../../components/ui/Dropzone';
-import { I } from '../../../icons';
-import {
-  useActivateLink,
-  useBulkUpload,
-  useCreateLink,
-  useDeactivateLink,
-  useOnboardingSummary,
-  useRecentBulkUploads,
-  useRegistrationLinks,
-  useUpdateLink,
-} from '../../../hooks/useOnboarding';
-import type { ApiRegistrationLink, BulkUploadStatus } from '../../../services/onboarding.service';
-import { onboardingService } from '../../../services/onboarding.service';
-import { useProfile, useProfileRaw } from '../../../hooks/useProfile';
-
-interface StatItem {
-  icon: 'users' | 'shield' | 'alert' | 'refresh';
-  label: string;
-  count: number;
-  tone: string;
-  bg: string;
-}
-
-function StatStrip() {
-  const summary = useOnboardingSummary();
-  const items: StatItem[] = useMemo(() => {
-    const total = summary.data?.total ?? 0;
-    const passed = summary.data?.passed ?? 0;
-    const failed = summary.data?.failed ?? 0;
-    return [
-      {
-        icon: 'users',
-        label: 'Total registered',
-        count: total,
-        tone: '#6366F1',
-        bg: '#EEF2FF',
-      },
-      {
-        icon: 'shield',
-        label: 'Verified & onboarded',
-        count: passed,
-        tone: '#10B981',
-        bg: '#ECFDF5',
-      },
-      {
-        icon: 'alert',
-        label: 'Failed validations',
-        count: failed,
-        tone: '#EF4444',
-        bg: '#FEF2F2',
-      },
-    ];
-  }, [summary.data]);
-  return (
-    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-      {items.map((it, i) => {
-        const Ic = I[it.icon];
-        return (
-          <div key={i} className="bd-card bd-shadow p-5 flex items-center gap-4">
-            <div
-              className="w-11 h-11 rounded-[12px] flex items-center justify-center"
-              style={{ background: it.bg, color: it.tone }}
-            >
-              <Ic size={20} />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div
-                className="font-display font-bold text-[28px] leading-none tracking-tight"
-                style={{ color: it.tone }}
-              >
-                {summary.isLoading ? '…' : it.count}
-              </div>
-              <div className="text-[13px] text-ink-500 mt-1.5">{it.label}</div>
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function CSVUpload() {
-  const rawProfile = useProfileRaw();
-  // Aggregator registered participant focus, mirrored from the
-  // `aggregator_type` KC claim. While the profile is still loading we
-  // tentatively default to 'seeker' — the upload submit path is gated by
-  // the API anyway, so a transient mismatch in the picker is harmless.
-  const aggregatorType: 'seeker' | 'provider' = rawProfile.data?.type ?? 'seeker';
-  const [participantType, setParticipantType] = useState<'seeker' | 'provider'>(aggregatorType);
-  useEffect(() => {
-    if (rawProfile.data?.type) setParticipantType(rawProfile.data.type);
-  }, [rawProfile.data?.type]);
-  const [pickedFile, setPickedFile] = useState<File | null>(null);
-  const [uploadError, setUploadError] = useState<string | null>(null);
-  const [uploadNotice, setUploadNotice] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const upload = useBulkUpload();
-  const recent = useRecentBulkUploads(10);
-
-  const acceptFile = (f: File) => {
-    if (!/\.csv$/i.test(f.name)) {
-      setUploadError('Only .csv files are accepted.');
-      return;
-    }
-    setPickedFile(f);
-    setUploadError(null);
-    setUploadNotice(null);
-  };
-
-  const onPick = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    if (f) acceptFile(f);
-  };
-
-  const onDropFiles = (files: File[]) => {
-    const f = files[0];
-    if (f) acceptFile(f);
-  };
-
-  const onUpload = async () => {
-    if (!pickedFile) return;
-    setUploadError(null);
-    setUploadNotice(null);
-    try {
-      const result = await upload.mutateAsync({ file: pickedFile, participantType });
-      setPickedFile(null);
-      if (fileInputRef.current) fileInputRef.current.value = '';
-      if (result.duplicate) {
-        setUploadNotice(
-          result.message ?? 'This CSV was already uploaded earlier — showing the existing run.',
-        );
-      }
-      recent.refetch();
-    } catch (err) {
-      setUploadError((err as Error).message);
-    }
-  };
-
-  const downloadTemplate = () => {
-    window.location.href = `/api/bulk-uploads/template?participant_type=${participantType}`;
-  };
-
-  return (
-    <div className="bd-card bd-shadow p-6">
-      <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
-        <div>
-          <div className="font-display font-bold text-[16px] text-ink-900">Add participants</div>
-          <div className="text-[12.5px] text-ink-400 mt-0.5">
-            Bulk upload via CSV — fastest way to import existing rosters.
-          </div>
-        </div>
-        <div className="flex items-center gap-3 flex-wrap">
-          {/*
-           * Aggregators are scoped to a single participant type (seeker OR
-           * provider). The opposite button is omitted, not just disabled, so
-           * the UI matches what the API enforces: one tile per aggregator.
-           */}
-          <div className="flex items-center bg-ink-50 border border-[var(--bd-border)] rounded-[10px] p-0.5">
-            {aggregatorType === 'seeker' && (
-              <button
-                type="button"
-                onClick={() => setParticipantType('seeker')}
-                className="px-3 py-1.5 rounded-[8px] text-[12.5px] font-semibold bg-white text-amber-700 bd-shadow"
-              >
-                Seekers
-              </button>
-            )}
-            {aggregatorType === 'provider' && (
-              <button
-                type="button"
-                onClick={() => setParticipantType('provider')}
-                className="px-3 py-1.5 rounded-[8px] text-[12.5px] font-semibold bg-white text-primary-600 bd-shadow"
-              >
-                Providers
-              </button>
-            )}
-          </div>
-          <button
-            type="button"
-            onClick={downloadTemplate}
-            className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-primary-600 hover:underline"
-          >
-            <I.download size={14} /> Download template
-          </button>
-        </div>
-      </div>
-
-      <Dropzone onFiles={onDropFiles}>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".csv"
-          onChange={onPick}
-          className="hidden"
-          id="csv-file-input"
-        />
-        {pickedFile ? (
-          // Selected-file chip with explicit × dismissal. Cleared state +
-          // resets the file input so the same filename can be re-picked.
-          <div className="flex items-center justify-center gap-2">
-            <div className="inline-flex items-center gap-2 max-w-full px-3 py-2 rounded-[10px] bg-[var(--bd-primary-50)] border border-[var(--bd-primary-100)]">
-              <I.upload size={14} className="text-primary-600 shrink-0" />
-              <span className="text-[13.5px] font-semibold text-primary-700 truncate">
-                {pickedFile.name}
-              </span>
-              <span className="text-[11.5px] text-ink-400 shrink-0">
-                {(pickedFile.size / 1024).toFixed(1)} KB
-              </span>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setPickedFile(null);
-                  setUploadError(null);
-                  setUploadNotice(null);
-                  if (fileInputRef.current) fileInputRef.current.value = '';
-                }}
-                title="Remove file"
-                aria-label="Remove file"
-                className="inline-flex items-center justify-center w-6 h-6 rounded-full text-ink-500 hover:text-rose-600 hover:bg-rose-50 transition-colors shrink-0"
-              >
-                <I.x size={13} />
-              </button>
-            </div>
-          </div>
-        ) : (
-          <label htmlFor="csv-file-input" className="cursor-pointer block text-center">
-            <div className="w-12 h-12 mx-auto rounded-full bg-white border border-[var(--bd-border)] flex items-center justify-center text-primary-600 mb-3 bd-shadow">
-              <I.upload size={20} />
-            </div>
-            <div className="text-[14px] font-semibold text-ink-700">
-              Drag your CSV here or{' '}
-              <span className="text-primary-600 underline-offset-2">click to browse</span>
-            </div>
-            <div className="text-[12px] text-ink-400 mt-1">
-              .csv only · UTF-8 encoded · uploaded as {participantType}s
-            </div>
-          </label>
-        )}
-      </Dropzone>
-
-      <div className="flex items-center justify-between mt-4">
-        <div className="text-[12px] text-ink-400 flex items-center gap-2">
-          <I.shield size={14} className="text-emerald-500" /> All uploads are scanned and validated
-          before import.
-        </div>
-        <Button onClick={onUpload} disabled={!pickedFile || upload.isPending}>
-          {upload.isPending ? 'Uploading…' : 'Upload'}
-        </Button>
-      </div>
-
-      {uploadError && (
-        <div className="mt-3 text-[12.5px] text-rose-700 bg-rose-50 border border-rose-200 rounded-[10px] px-3 py-2">
-          {uploadError}
-        </div>
-      )}
-      {uploadNotice && (
-        <div className="mt-3 text-[12.5px] text-amber-800 bg-amber-50 border border-amber-200 rounded-[10px] px-3 py-2">
-          {uploadNotice}
-        </div>
-      )}
-
-      <RecentUploadsTable
-        items={recent.data?.items ?? []}
-        loading={recent.isLoading}
-        error={recent.error as Error | null}
-      />
-    </div>
-  );
-}
-
-function RecentUploadsTable({
-  items,
-  loading,
-  error,
-}: {
-  items: BulkUploadStatus[];
-  loading: boolean;
-  error: Error | null;
-}) {
-  return (
-    <div className="mt-5 border-t border-[var(--bd-border)] pt-4">
-      <div className="flex items-center justify-between mb-2">
-        <div className="font-display font-bold text-[14px] text-ink-700">Recent uploads</div>
-      </div>
-      <div className="overflow-x-auto scroll-x">
-        <table className="bd-table" style={{ minWidth: 800 }}>
-          <thead>
-            <tr>
-              <th>Uploaded</th>
-              <th style={{ textAlign: 'center' }}>Type</th>
-              <th style={{ textAlign: 'center' }}>Status</th>
-              <th style={{ textAlign: 'center' }}>Total</th>
-              <th style={{ textAlign: 'center' }}>Passed</th>
-              <th style={{ textAlign: 'center' }}>Failed</th>
-              <th style={{ textAlign: 'center' }}>Skipped</th>
-              <th style={{ minWidth: 240 }}>Reason / errors</th>
-            </tr>
-          </thead>
-          <tbody>
-            {error && (
-              <tr>
-                <td colSpan={8} className="text-rose-600 text-[13px] py-6 text-center">
-                  {error.message}
-                </td>
-              </tr>
-            )}
-            {!error && items.length === 0 && !loading && (
-              <tr>
-                <td colSpan={8} className="text-ink-400 text-[13px] py-8 text-center">
-                  No uploads yet.
-                </td>
-              </tr>
-            )}
-            {items.map((it) => (
-              <UploadRow key={it.upload_id} upload={it} />
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-function UploadRow({ upload }: { upload: BulkUploadStatus }) {
-  const [downloading, setDownloading] = useState(false);
-  const onDownloadErrors = async () => {
-    setDownloading(true);
-    try {
-      const res = await onboardingService.errorsCsvUrl(upload.upload_id);
-      window.open(res.url, '_blank', 'noopener,noreferrer');
-    } catch (err) {
-      console.warn('errors download failed', err);
-    } finally {
-      setDownloading(false);
-    }
-  };
-
-  return (
-    <tr>
-      <td className="text-[12.5px] text-ink-700 whitespace-nowrap">
-        <div className="font-semibold">{formatRelative(upload.created_at)}</div>
-        <div className="text-[11px] text-ink-400">
-          {new Date(upload.created_at).toLocaleString()}
-        </div>
-      </td>
-      <td style={{ textAlign: 'center' }}>
-        <span
-          className={`inline-flex items-center px-2 py-0.5 rounded-full font-semibold text-[11.5px] ${
-            upload.participant_type === 'seeker'
-              ? 'bg-amber-50 text-amber-700'
-              : 'bg-sky-50 text-sky-700'
-          }`}
-        >
-          {upload.participant_type}
-        </span>
-      </td>
-      <td style={{ textAlign: 'center' }}>
-        <UploadStatusBadge status={upload.status} />
-      </td>
-      <td style={{ textAlign: 'center' }} className="tabular-nums font-semibold">
-        {upload.total_rows ?? '—'}
-      </td>
-      <td style={{ textAlign: 'center' }} className="tabular-nums text-emerald-600 font-semibold">
-        {upload.passed}
-      </td>
-      <td style={{ textAlign: 'center' }} className="tabular-nums text-rose-600 font-semibold">
-        {upload.failed}
-      </td>
-      <td style={{ textAlign: 'center' }} className="tabular-nums text-amber-700 font-semibold">
-        {upload.skipped}
-      </td>
-      <td className="text-[12px]">
-        {upload.status === 'completed' && upload.failed > 0 && upload.errors_csv_s3_key ? (
-          <button
-            type="button"
-            onClick={onDownloadErrors}
-            disabled={downloading}
-            className="inline-flex items-center gap-1.5 px-2 py-1 rounded-[8px] bg-[var(--bd-primary-50)] text-primary-600 font-semibold hover:bg-[var(--bd-primary-100)] disabled:opacity-60"
-          >
-            <I.download size={12} />
-            {downloading ? 'Signing…' : 'errors.csv'}
-          </button>
-        ) : upload.status === 'completed' ? (
-          <span className="text-emerald-600">All rows passed</span>
-        ) : upload.status_reason ? (
-          <span
-            title={upload.status_reason}
-            className="text-rose-600 block whitespace-pre-line break-words max-w-[240px] align-middle leading-snug"
-          >
-            {upload.status_reason.replace(/,\s*/g, ',\n')}
-          </span>
-        ) : (
-          <span className="text-ink-300">—</span>
-        )}
-      </td>
-    </tr>
-  );
-}
-
-function formatRelative(iso: string): string {
-  const ts = new Date(iso).getTime();
-  const diffSec = Math.round((Date.now() - ts) / 1000);
-  if (diffSec < 60) return `${diffSec}s ago`;
-  if (diffSec < 3600) return `${Math.round(diffSec / 60)}m ago`;
-  if (diffSec < 86400) return `${Math.round(diffSec / 3600)}h ago`;
-  return `${Math.round(diffSec / 86400)}d ago`;
-}
-
-interface CreateLinkFormState {
-  domain: 'seeker' | 'provider';
-  /** Instance (state of operation). Drives slug + display title. */
-  state: string;
-  /** District — required, drives slug + display title. */
-  district: string;
-  /** Free-form lever / event label (e.g. "Field Drive", "Bluedotathon"). */
-  lever_event: string;
-  /** ISO date string (yyyy-mm-dd) for the event. */
-  event_date: string;
-  /** Optional event venue / city. */
-  event_location: string;
-}
-
-const EMPTY_FORM: CreateLinkFormState = {
-  domain: 'seeker',
-  state: '',
-  district: '',
-  lever_event: '',
-  event_date: '',
-  event_location: '',
-};
-
-function slugifyForLink(input: string): string {
-  return input
-    .toLowerCase()
-    .normalize('NFKD')
-    .replace(/[̀-ͯ]/g, '')
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 40);
-}
-
-function buildLinkSlug(f: CreateLinkFormState): string | undefined {
-  const district = slugifyForLink(f.district);
-  const lever = slugifyForLink(f.lever_event);
-  if (!district || !lever) return undefined;
-  let dateSuffix = '';
-  if (f.event_date) {
-    const d = new Date(f.event_date);
-    if (!Number.isNaN(d.getTime())) {
-      const mon = d.toLocaleString('en-US', { month: 'short' }).toLowerCase();
-      const yy = String(d.getFullYear()).slice(-2);
-      dateSuffix = `-${mon}${yy}`;
-    }
-  }
-  return `${district}-${lever}${dateSuffix}`;
-}
-
-function buildLinkTitle(f: CreateLinkFormState): string {
-  const parts = [f.district, f.lever_event].filter(Boolean).join(' ');
-  if (!f.event_date) return parts || 'Untitled link';
-  const d = new Date(f.event_date);
-  if (Number.isNaN(d.getTime())) return parts;
-  const monYear = d.toLocaleString('en-US', { month: 'short', year: 'numeric' });
-  return parts ? `${parts} — ${monYear}` : monYear;
-}
-
-/**
- * Top-right green toast for success notifications. Portals to <body> so a
- * transformed ancestor (e.g. `fade-up`) can't pin it inside the section. Auto-
- * dismisses after 2400ms, matching the profile-save toast.
- */
-function SuccessToast({ message, onDone }: { message: string; onDone: () => void }) {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
-  useEffect(() => {
-    const t = setTimeout(onDone, 2400);
-    return () => clearTimeout(t);
-  }, [onDone]);
-  if (!mounted) return null;
-  return createPortal(
-    <div
-      role="status"
-      aria-live="polite"
-      className="fixed top-4 right-4 z-[100] rounded-[10px] border border-emerald-200 bg-emerald-50 px-4 py-3 text-[13px] text-emerald-700 shadow-lg inline-flex items-center gap-2"
-    >
-      <I.check size={14} /> {message}
-    </div>,
-    document.body,
-  );
-}
-
-function CreateLinkSection() {
-  const [form, setForm] = useState<CreateLinkFormState>(EMPTY_FORM);
-  const [createError, setCreateError] = useState<string | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
-  const create = useCreateLink();
-  const profile = useProfile();
-  const rawProfile = useProfileRaw();
-  const orgName = profile.data?.org ?? '';
-  const aggregatorType: 'seeker' | 'provider' = rawProfile.data?.type ?? 'seeker';
-
-  // Pin the link domain to the aggregator's registered type — the API
-  // rejects mismatches with AGGREGATOR_TYPE_MISMATCH, so the UI never lets
-  // the user pick the wrong one.
-  useEffect(() => {
-    if (rawProfile.data?.type) {
-      setForm((f) =>
-        f.domain === rawProfile.data.type ? f : { ...f, domain: rawProfile.data.type! },
-      );
-    }
-  }, [rawProfile.data?.type]);
-
-  // Prefill state / district / event location from the aggregator's first
-  // postal address. User can still override. Only fills on first load —
-  // subsequent edits stay sticky.
-  useEffect(() => {
-    const firstLoc = rawProfile.data?.locations?.[0]?.address;
-    if (!firstLoc) return;
-    setForm((f) => ({
-      ...f,
-      state: f.state || firstLoc.addressRegion || '',
-      district: f.district || firstLoc.addressLocality || '',
-      event_location: f.event_location || firstLoc.addressLocality || '',
-    }));
-  }, [rawProfile.data]);
-
-  const resetSection = () => {
-    const firstLoc = rawProfile.data?.locations?.[0]?.address;
-    setForm({
-      ...EMPTY_FORM,
-      state: firstLoc?.addressRegion ?? '',
-      district: firstLoc?.addressLocality ?? '',
-      event_location: firstLoc?.addressLocality ?? '',
-    });
-    setCreateError(null);
-  };
-
-  const onCreate = async () => {
-    setCreateError(null);
-    if (!form.state || !form.district || !form.lever_event) {
-      setCreateError('State, District, and Lever / Event are required.');
-      return;
-    }
-    try {
-      const title = buildLinkTitle(form);
-      const slug = buildLinkSlug(form);
-      await create.mutateAsync({
-        domain: form.domain,
-        status: 'draft',
-        ...(slug ? { slug } : {}),
-        title,
-        context: {
-          org_name: orgName || undefined,
-          title,
-          state: form.state || undefined,
-          district: form.district || undefined,
-          lever_event: form.lever_event || undefined,
-          event_date: form.event_date || undefined,
-          event_location: form.event_location || undefined,
-        },
-      });
-      // Refresh the form so the user can compose the next link from scratch.
-      // The newly-created draft appears in "Your Registration Links" below;
-      // edits + Make Live happen on its card, not here.
-      resetSection();
-      setToast('Registration link created');
-    } catch (err) {
-      setCreateError((err as Error).message);
-    }
-  };
-
-  return (
-    <div className="bd-card bd-shadow overflow-hidden">
-      <div className="px-6 py-5 flex items-center gap-3 border-b border-[var(--bd-border)]">
-        <I.link size={16} className="text-ink-500" />
-        <div className="font-display font-bold text-[16px] text-ink-900">
-          Share a registration link
-        </div>
-        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-ink-50 text-ink-500 text-[11.5px] font-semibold">
-          New
-        </span>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px]">
-        <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div className="md:col-span-2">
-            <Field label="Enter your Organisation Name">
-              <input
-                className="bd-input bg-ink-50 cursor-not-allowed"
-                value={orgName}
-                readOnly
-                placeholder="—"
-              />
-            </Field>
-          </div>
-          <Field label="Instance (State Name) *">
-            <input
-              className="bd-input"
-              value={form.state}
-              onChange={(e) => setForm((f) => ({ ...f, state: e.target.value }))}
-              placeholder="Karnataka"
-            />
-          </Field>
-          <Field label="Lever / Event">
-            <input
-              className="bd-input"
-              value={form.lever_event}
-              onChange={(e) => setForm((f) => ({ ...f, lever_event: e.target.value }))}
-              placeholder="Bluedotathon"
-            />
-          </Field>
-          <Field label="Event Date">
-            <input
-              type="date"
-              className="bd-input"
-              value={form.event_date}
-              onChange={(e) => setForm((f) => ({ ...f, event_date: e.target.value }))}
-            />
-          </Field>
-          <Field label="Event Location">
-            <input
-              className="bd-input"
-              value={form.event_location}
-              onChange={(e) => setForm((f) => ({ ...f, event_location: e.target.value }))}
-              placeholder="e.g. Hubli"
-            />
-          </Field>
-          <Field label="District *">
-            <input
-              className="bd-input"
-              value={form.district}
-              onChange={(e) => setForm((f) => ({ ...f, district: e.target.value }))}
-              placeholder="Dharwad"
-            />
-          </Field>
-          <Field label="Domain *">
-            {/*
-             * Pinned to the aggregator's registered type — single-type
-             * enforcement is what the API expects. Rendered read-only so
-             * the user sees the value but can't switch domains.
-             */}
-            <input
-              className="bd-input"
-              value={aggregatorType === 'seeker' ? 'Seeker' : 'Provider'}
-              readOnly
-              aria-readonly="true"
-            />
-          </Field>
-          <div className="md:col-span-2 flex items-center justify-end gap-2 mt-2 flex-wrap">
-            <Button onClick={onCreate} disabled={create.isPending}>
-              {create.isPending ? 'Creating…' : 'Create link'}
-            </Button>
-          </div>
-          {createError && (
-            <div className="md:col-span-2 text-[12.5px] text-rose-700 bg-rose-50 border border-rose-200 rounded-[10px] px-3 py-2">
-              {createError}
-            </div>
-          )}
-        </div>
-
-        <div className="border-t lg:border-t-0 lg:border-l border-[var(--bd-border)] bg-gradient-to-b from-[var(--bd-primary-50)] to-white p-6 flex flex-col items-center text-center">
-          <div className="flex items-center gap-2 self-start text-[12.5px] font-semibold text-ink-500">
-            <I.qr size={14} /> QR Code
-          </div>
-          <div className="mt-4 p-3 bg-white rounded-[14px] border border-[var(--bd-border)] bd-shadow-lg">
-            <div className="w-[200px] h-[200px] flex items-center justify-center text-ink-300 text-[12px] text-center px-4">
-              Create a link to start. QR appears once the draft is made live.
-            </div>
-          </div>
-        </div>
-      </div>
-      {toast && <SuccessToast message={toast} onDone={() => setToast(null)} />}
-    </div>
-  );
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label className="block">
-      <span className="bd-label">{label}</span>
-      {children}
-    </label>
-  );
-}
-
-function LinkCard({ link }: { link: ApiRegistrationLink }) {
-  const [copied, setCopied] = useState(false);
-  const [editing, setEditing] = useState(false);
-  const activate = useActivateLink();
-  const deactivate = useDeactivateLink();
-  const update = useUpdateLink();
-  const isLive = link.status === 'live';
-  const isDraft = link.status === 'draft';
-  const ctx = (link.context ?? {}) as Record<string, unknown>;
-  const ctxString = (key: string): string =>
-    typeof ctx[key] === 'string' ? (ctx[key] as string) : '';
-  const title =
-    (typeof ctx['title'] === 'string' && ctx['title']) ||
-    [ctx['district'], ctx['lever_event']].filter(Boolean).join(' ') ||
-    link.slug;
-  const subtitle =
-    [ctx['org_name'], ctx['event_location']].filter(Boolean).join(' · ') ||
-    `Created ${new Date(link.created_at).toLocaleDateString()}`;
-
-  // Render `<host>/<orgSlug>/<slug>` with the slug emphasised. Only computed
-  // when the row is published (live) — drafts and retired rows carry a null
-  // public_url.
-  let urlHost = '';
-  let urlPath = '';
-  if (link.public_url) {
-    urlHost = link.public_url;
-    try {
-      const u = new URL(link.public_url);
-      urlHost = u.host;
-      urlPath = u.pathname.replace(/^\//, '');
-    } catch {
-      /* keep raw */
-    }
-  }
-  const onCopy = async () => {
-    if (!link.public_url || !navigator.clipboard) return;
-    await navigator.clipboard.writeText(link.public_url);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  };
-
-  // Inline edit form state — drafts only. Pre-populated from the link's
-  // current context. Slug is regenerated server-side from district+lever+date
-  // on save (matches the create flow).
-  const [editForm, setEditForm] = useState<CreateLinkFormState>(() => ({
-    domain: link.domain,
-    state: ctxString('state'),
-    district: ctxString('district'),
-    lever_event: ctxString('lever_event'),
-    event_date: ctxString('event_date'),
-    event_location: ctxString('event_location'),
-  }));
-  const [editError, setEditError] = useState<string | null>(null);
-  const onSaveEdit = async () => {
-    setEditError(null);
-    if (!editForm.state || !editForm.district || !editForm.lever_event) {
-      setEditError('State, District, and Lever / Event are required.');
-      return;
-    }
-    try {
-      const slug = buildLinkSlug(editForm);
-      const editTitle = buildLinkTitle(editForm);
-      await update.mutateAsync({
-        id: link.link_id,
-        patch: {
-          ...(slug ? { slug } : {}),
-          context: {
-            ...ctx,
-            title: editTitle,
-            state: editForm.state || undefined,
-            district: editForm.district || undefined,
-            lever_event: editForm.lever_event || undefined,
-            event_date: editForm.event_date || undefined,
-            event_location: editForm.event_location || undefined,
-          },
-        },
-      });
-      setEditing(false);
-    } catch (err) {
-      setEditError((err as Error).message);
-    }
-  };
-
-  return (
-    <div className="bd-card p-5 hover:border-[var(--bd-primary-100)] transition-colors">
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 flex-wrap">
-            <h3 className="font-display font-bold text-[16px] text-ink-900 leading-tight">
-              {title}
-            </h3>
-            <span
-              className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold ${
-                isLive
-                  ? 'bg-emerald-50 text-emerald-700'
-                  : link.status === 'retired'
-                    ? 'bg-rose-50 text-rose-700'
-                    : 'bg-amber-50 text-amber-700'
-              }`}
-            >
-              <span
-                className={`w-1.5 h-1.5 rounded-full inline-block ${
-                  isLive
-                    ? 'bg-emerald-500'
-                    : link.status === 'retired'
-                      ? 'bg-rose-500'
-                      : 'bg-amber-500'
-                }`}
-              />
-              {isLive ? 'Active' : link.status}
-            </span>
-          </div>
-
-          <p className="text-[12.5px] text-ink-400 mt-1.5">{subtitle}</p>
-
-          {/*
-           * Public URL + QR are only meaningful once the link is live. Drafts
-           * carry a null public_url from the API; rendering it here would
-           * show "host/null" and copy the literal string — both wrong.
-           */}
-          {isLive && link.public_url && (
-            <div className="flex items-center gap-2 mt-3 flex-wrap">
-              <div className="inline-flex items-center gap-1 bg-ink-50 border border-[var(--bd-border)] rounded-[10px] px-3 py-1.5 text-[12.5px] font-mono">
-                <span className="text-ink-500">{urlHost}/</span>
-                <span className="text-amber-700 font-semibold">{urlPath}</span>
-                <button
-                  type="button"
-                  onClick={onCopy}
-                  title="Copy link"
-                  className="ml-1 text-ink-400 hover:text-primary-600"
-                >
-                  <I.copy size={12} />
-                </button>
-              </div>
-              {link.qr_url && (
-                <a
-                  href={link.qr_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  title="View QR"
-                  className="inline-flex items-center justify-center w-8 h-8 rounded-[10px] border border-[var(--bd-border)] text-ink-500 hover:text-primary-600 hover:border-[var(--bd-primary-100)]"
-                >
-                  <I.qr size={14} />
-                </a>
-              )}
-              <a
-                href={link.public_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                title="Open link"
-                className="inline-flex items-center justify-center w-8 h-8 rounded-[10px] border border-[var(--bd-border)] text-ink-500 hover:text-primary-600 hover:border-[var(--bd-primary-100)]"
-              >
-                <I.link size={14} />
-              </a>
-              <button
-                type="button"
-                onClick={onCopy}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] border border-[var(--bd-border)] text-ink-600 text-[12.5px] font-semibold hover:bg-ink-50"
-              >
-                {copied ? 'Copied!' : 'Copy link'}
-              </button>
-            </div>
-          )}
-
-          {isDraft && !editing && (
-            <div className="mt-3 text-[12.5px] text-ink-400">
-              Public URL + QR appear after Make Live.
-            </div>
-          )}
-
-          {/* Metadata row */}
-          <div className="flex items-center gap-4 mt-3.5 text-[12.5px] flex-wrap">
-            <span
-              className={`inline-flex items-center px-2 py-0.5 rounded-full font-semibold text-[11.5px] ${
-                link.domain === 'seeker' ? 'bg-amber-50 text-amber-700' : 'bg-sky-50 text-sky-700'
-              }`}
-            >
-              {link.domain}
-            </span>
-            <span className="text-ink-700">
-              <strong className="font-bold">{link.metrics?.total ?? 0}</strong>{' '}
-              <span className="text-ink-400">registrations</span>
-            </span>
-            <span className="text-ink-700">
-              <strong className="font-bold">{link.metrics?.passed ?? 0}</strong>{' '}
-              <span className="text-ink-400">verified</span>
-            </span>
-            <span className="text-ink-400">
-              Created {new Date(link.created_at).toLocaleDateString()}
-            </span>
-            {link.expires_at && (
-              <span className="text-ink-400">
-                Expires {new Date(link.expires_at).toLocaleDateString()}
-              </span>
-            )}
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2 shrink-0">
-          {isDraft && !editing && (
-            <Button kind="ghost" onClick={() => setEditing(true)} disabled={update.isPending}>
-              Edit
-            </Button>
-          )}
-          {isDraft && (
-            <Button
-              onClick={() => activate.mutate(link.link_id)}
-              disabled={activate.isPending || editing || update.isPending}
-            >
-              {activate.isPending ? 'Going live…' : 'Make Live'}
-            </Button>
-          )}
-          {isLive && (
-            <Button
-              kind="ghost"
-              onClick={() => deactivate.mutate(link.link_id)}
-              disabled={deactivate.isPending}
-            >
-              {deactivate.isPending ? 'Retiring…' : 'Deactivate'}
-            </Button>
-          )}
-        </div>
-      </div>
-
-      {isDraft && editing && (
-        <div className="mt-4 pt-4 border-t border-[var(--bd-border)] grid grid-cols-1 md:grid-cols-2 gap-3">
-          <Field label="Instance (State Name) *">
-            <input
-              className="bd-input"
-              value={editForm.state}
-              onChange={(e) => setEditForm((f) => ({ ...f, state: e.target.value }))}
-            />
-          </Field>
-          <Field label="District *">
-            <input
-              className="bd-input"
-              value={editForm.district}
-              onChange={(e) => setEditForm((f) => ({ ...f, district: e.target.value }))}
-            />
-          </Field>
-          <Field label="Lever / Event *">
-            <input
-              className="bd-input"
-              value={editForm.lever_event}
-              onChange={(e) => setEditForm((f) => ({ ...f, lever_event: e.target.value }))}
-            />
-          </Field>
-          <Field label="Event Date">
-            <input
-              type="date"
-              className="bd-input"
-              value={editForm.event_date}
-              onChange={(e) => setEditForm((f) => ({ ...f, event_date: e.target.value }))}
-            />
-          </Field>
-          <Field label="Event Location">
-            <input
-              className="bd-input"
-              value={editForm.event_location}
-              onChange={(e) => setEditForm((f) => ({ ...f, event_location: e.target.value }))}
-            />
-          </Field>
-          {editError && (
-            <div className="md:col-span-2 text-[12.5px] text-rose-700 bg-rose-50 border border-rose-200 rounded-[10px] px-3 py-2">
-              {editError}
-            </div>
-          )}
-          <div className="md:col-span-2 flex items-center justify-end gap-2">
-            <Button kind="ghost" onClick={() => setEditing(false)} disabled={update.isPending}>
-              Cancel
-            </Button>
-            <Button onClick={onSaveEdit} disabled={update.isPending}>
-              {update.isPending ? 'Saving…' : 'Save Draft'}
-            </Button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function YourLinks() {
-  const rawProfile = useProfileRaw();
-  const aggregatorType: 'seeker' | 'provider' = rawProfile.data?.type ?? 'seeker';
-  // The aggregator only ever has links of its registered type — no tab
-  // switcher needed. Filter is pinned via `aggregatorType`.
-  const { data, isLoading, error } = useRegistrationLinks(aggregatorType);
-  const links: ApiRegistrationLink[] = data ?? [];
-  const activeCount = links.filter((l) => l.status === 'live').length;
-
-  return (
-    <div className="bd-card bd-shadow overflow-hidden">
-      <div className="px-5 py-4 flex items-center justify-between gap-4 border-b border-[var(--bd-border)] flex-wrap">
-        <div className="flex items-center gap-3">
-          <h2 className="font-display font-bold text-[16px] text-primary-600 underline decoration-2 underline-offset-[6px] decoration-[var(--bd-primary)]">
-            Your Registration Links
-          </h2>
-          <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[11.5px] font-semibold">
-            {activeCount} active
-          </span>
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-ink-50 text-ink-600 text-[11.5px] font-semibold capitalize">
-            {aggregatorType} links
-          </span>
-        </div>
-      </div>
-      <div className="p-5 flex flex-col gap-3">
-        {isLoading ? (
-          <div className="text-center py-10 text-ink-400 text-[13px]">Loading links…</div>
-        ) : error ? (
-          <div className="text-center py-10 text-rose-600 text-[13px]">
-            {(error as Error).message}
-          </div>
-        ) : links.length === 0 ? (
-          <div className="text-center py-10 text-ink-400 text-[13px]">
-            No {aggregatorType} links yet. Create one above.
-          </div>
-        ) : (
-          links.map((l) => <LinkCard key={l.link_id} link={l} />)
-        )}
-      </div>
-    </div>
-  );
-}
-
-function UploadStatusBadge({ status }: { status: string }) {
-  const map: Record<string, { bg: string; tone: string }> = {
-    pending: { bg: 'bg-ink-50', tone: 'text-ink-600' },
-    uploaded: { bg: 'bg-sky-50', tone: 'text-sky-700' },
-    file_validating: { bg: 'bg-amber-50', tone: 'text-amber-700' },
-    file_failed: { bg: 'bg-rose-50', tone: 'text-rose-700' },
-    row_processing: { bg: 'bg-amber-50', tone: 'text-amber-700' },
-    finalising: { bg: 'bg-amber-50', tone: 'text-amber-700' },
-    completed: { bg: 'bg-emerald-50', tone: 'text-emerald-700' },
-    failed: { bg: 'bg-rose-50', tone: 'text-rose-700' },
-  };
-  const cfg = map[status] ?? { bg: 'bg-ink-50', tone: 'text-ink-600' };
-  return (
-    <span
-      className={`inline-flex items-center px-2 py-0.5 rounded-full font-semibold text-[11.5px] ${cfg.bg} ${cfg.tone}`}
-    >
-      {status}
-    </span>
-  );
-}
+import { I, type IconName } from '../../../icons';
+import { useRecentBulkUploads, useRegistrationLinks } from '../../../hooks/useOnboarding';
+import { useProfileRaw } from '../../../hooks/useProfile';
+import { StatStrip } from './_components/StatStrip';
 
 export default function OnboardingPage() {
   return (
-    <div className="fade-up flex flex-col gap-5">
+    <div className="fade-up flex flex-col gap-3">
       <Topbar
         title="Onboarding"
         subtitle="Add participants to your network — by CSV, link, or QR."
@@ -1057,9 +29,216 @@ export default function OnboardingPage() {
         }
       />
       <StatStrip />
-      <CSVUpload />
-      <CreateLinkSection />
-      <YourLinks />
+      <BulkUploadCard />
+      <RegistrationLinkCard />
     </div>
   );
+}
+
+/**
+ * Summary card for the bulk upload sub-flow. Counts come from the recent
+ * uploads list (same hook the detail page uses). Click → /onboarding/bulk-uploads.
+ */
+function BulkUploadCard() {
+  const router = useRouter();
+  const recent = useRecentBulkUploads(50);
+  const metrics = useMemo(() => {
+    const items = recent.data?.items ?? [];
+    let total = 0;
+    let passed = 0;
+    let failed = 0;
+    let lastUploadAt: string | null = null;
+    for (const it of items) {
+      total += it.total_rows ?? 0;
+      passed += it.passed ?? 0;
+      failed += it.failed ?? 0;
+      if (!lastUploadAt || it.created_at > lastUploadAt) lastUploadAt = it.created_at;
+    }
+    return { uploads: items.length, total, passed, failed, lastUploadAt };
+  }, [recent.data]);
+
+  return (
+    <SummaryCard
+      icon="upload"
+      accent="primary"
+      title="Bulk Upload"
+      subtitle="CSV import for existing rosters. Fastest path for large batches."
+      footnote={
+        metrics.lastUploadAt
+          ? `Last upload ${formatRelative(metrics.lastUploadAt)}`
+          : recent.isLoading
+            ? 'Loading…'
+            : 'No uploads yet'
+      }
+      metrics={[
+        { label: 'Files Uploaded', value: metrics.uploads, tone: 'ink' },
+        { label: 'Rows', value: metrics.total, tone: 'ink' },
+        { label: 'Passed', value: metrics.passed, tone: 'emerald' },
+        { label: 'Failed', value: metrics.failed, tone: 'rose' },
+      ]}
+      loading={recent.isLoading}
+      ctaLabel="Go to Bulk Upload"
+      onCta={() => router.push('/onboarding/bulk-uploads')}
+    />
+  );
+}
+
+/**
+ * Summary card for the registration link sub-flow. Counts come from the
+ * existing links list (scoped to the aggregator's type). Click →
+ * /onboarding/links.
+ */
+function RegistrationLinkCard() {
+  const router = useRouter();
+  const rawProfile = useProfileRaw();
+  const aggregatorType: 'seeker' | 'provider' = rawProfile.data?.type ?? 'seeker';
+  const links = useRegistrationLinks(aggregatorType);
+  const metrics = useMemo(() => {
+    const items = links.data ?? [];
+    let total = 0;
+    let passed = 0;
+    let active = 0;
+    let lastCreatedAt: string | null = null;
+    for (const l of items) {
+      if (l.status === 'live') active += 1;
+      total += l.metrics?.total ?? 0;
+      passed += l.metrics?.passed ?? 0;
+      if (!lastCreatedAt || l.created_at > lastCreatedAt) lastCreatedAt = l.created_at;
+    }
+    return { links: items.length, active, total, passed, lastCreatedAt };
+  }, [links.data]);
+
+  return (
+    <SummaryCard
+      icon="link"
+      accent="amber"
+      title="Registration via Link"
+      subtitle="Share a public link / QR. Participants self-register through it."
+      footnote={
+        metrics.lastCreatedAt
+          ? `Last link ${formatRelative(metrics.lastCreatedAt)}`
+          : links.isLoading
+            ? 'Loading…'
+            : 'No links yet'
+      }
+      metrics={[
+        { label: 'Links', value: metrics.links, tone: 'ink' },
+        { label: 'Active', value: metrics.active, tone: 'emerald' },
+        { label: 'Registrations', value: metrics.total, tone: 'ink' },
+        { label: 'Verified', value: metrics.passed, tone: 'emerald' },
+      ]}
+      loading={links.isLoading}
+      ctaLabel="Go to Registration Links"
+      onCta={() => router.push('/onboarding/links')}
+    />
+  );
+}
+
+type Accent = 'primary' | 'amber';
+
+interface MetricItem {
+  label: string;
+  value: number;
+  tone: 'ink' | 'emerald' | 'rose';
+}
+
+const ACCENT_BG: Record<Accent, string> = {
+  primary: 'linear-gradient(180deg,#EEF2FF 0%,#FFFFFF 55%)',
+  amber: 'linear-gradient(180deg,#FFFBEB 0%,#FFFFFF 55%)',
+};
+
+const ACCENT_ICON_RING: Record<Accent, string> = {
+  primary: 'bg-white border border-[var(--bd-primary-100)] text-primary-600',
+  amber: 'bg-white border border-amber-200 text-amber-700',
+};
+
+const ACCENT_BAR: Record<Accent, string> = {
+  primary: 'bg-primary-600',
+  amber: 'bg-amber-500',
+};
+
+interface SummaryCardProps {
+  icon: IconName;
+  accent: Accent;
+  title: string;
+  subtitle: string;
+  footnote: ReactNode;
+  metrics: MetricItem[];
+  loading: boolean;
+  ctaLabel: string;
+  onCta: () => void;
+}
+
+function SummaryCard({
+  icon,
+  accent,
+  title,
+  subtitle,
+  footnote,
+  metrics,
+  loading,
+  ctaLabel,
+  onCta,
+}: SummaryCardProps) {
+  const Ic = I[icon];
+  return (
+    <div
+      className="bd-card bd-shadow overflow-hidden flex flex-col transition-shadow hover:shadow-lg"
+      style={{ background: ACCENT_BG[accent] }}
+    >
+      <div className={`h-1 ${ACCENT_BAR[accent]}`} aria-hidden />
+      <div className="px-5 py-4 flex flex-col gap-3 flex-1">
+        <div className="flex items-start gap-3">
+          <div
+            className={`w-10 h-10 rounded-[12px] flex items-center justify-center shrink-0 bd-shadow ${ACCENT_ICON_RING[accent]}`}
+          >
+            <Ic size={18} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="font-display font-bold text-[15px] text-ink-900 leading-tight">
+              {title}
+            </div>
+            <div className="text-[12px] text-ink-500 mt-0.5 leading-snug">{subtitle}</div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          {metrics.map((m) => (
+            <MetricTile key={m.label} {...m} loading={loading} />
+          ))}
+        </div>
+
+        <div className="mt-auto pt-2 border-t border-[var(--bd-border-soft)] flex items-center justify-between gap-3 flex-wrap">
+          <span className="text-[11.5px] text-ink-400">{footnote}</span>
+          <Button onClick={onCta} icon={<I.arrowR size={14} />}>
+            {ctaLabel}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MetricTile({ label, value, tone, loading }: MetricItem & { loading: boolean }) {
+  const toneCls =
+    tone === 'emerald' ? 'text-emerald-600' : tone === 'rose' ? 'text-rose-600' : 'text-ink-900';
+  return (
+    <div className="bg-white/70 backdrop-blur-sm border border-[var(--bd-border)] rounded-[10px] px-3 py-2 flex flex-col gap-0.5">
+      <div
+        className={`font-display font-bold text-[18px] tabular-nums leading-none tracking-tight ${toneCls}`}
+      >
+        {loading ? '…' : value}
+      </div>
+      <div className="text-[11px] text-ink-500 font-medium">{label}</div>
+    </div>
+  );
+}
+
+function formatRelative(iso: string): string {
+  const ts = new Date(iso).getTime();
+  const diffSec = Math.round((Date.now() - ts) / 1000);
+  if (diffSec < 60) return `${diffSec}s ago`;
+  if (diffSec < 3600) return `${Math.round(diffSec / 60)}m ago`;
+  if (diffSec < 86400) return `${Math.round(diffSec / 3600)}h ago`;
+  return `${Math.round(diffSec / 86400)}d ago`;
 }
