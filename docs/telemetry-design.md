@@ -33,54 +33,160 @@ Async-only OpenTelemetry observability. Three first-class signals — **traces, 
 
 ## 3. Architecture (4 tiers)
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│ TIER 1 — Instrumentation (in-process, every block)               │
-│                                                                  │
-│   bootTelemetry() at process start                               │
-│     ├── TracerProvider  (BatchSpanProcessor → OTLP gRPC)         │
-│     ├── MeterProvider   (PeriodicReader → OTLP gRPC)             │
-│     ├── LoggerProvider  (pino-otel transport)                    │
-│     └── W3C propagator + Baggage                                 │
-│                                                                  │
-│   Hot path (synchronous emit, async export):                     │
-│     tracer.startActiveSpan('op', span => { ... })                │
-│     counter.add(1, { status: 'success' })                        │
-│     logger.info({ trace_id, span_id, ... }, 'message')           │
-└──────────────────────────┬───────────────────────────────────────┘
-                           │ OTLP gRPC :4317 (HTTP :4318 fallback)
-                           ▼
-┌──────────────────────────────────────────────────────────────────┐
-│ TIER 2 — Collection (OTel Collector)                             │
-│                                                                  │
-│   receivers:   otlp (grpc + http)                                │
-│   processors:  memory_limiter → batch → resource → attributes    │
-│                tail_sampling (errors=keep, latency>2s=keep,      │
-│                               10% baseline)                      │
-│   exporters:   otlphttp/tempo, loki, prometheusremotewrite       │
-└────────┬─────────────────┬──────────────────────┬────────────────┘
-         │ traces          │ logs                 │ metrics
-         ▼                 ▼                      ▼
-┌──────────────────────────────────────────────────────────────────┐
-│ TIER 3 — Storage                                                 │
-│   Jaeger   │  Loki  │  Prometheus                                │
-│   (retention: 7d) │ (30d)   │ (30d raw, 1y downsampled)          │
-└────────┬─────────────────┬──────────────────────┬────────────────┘
-         └─────────────────┴──────────────────────┘
-                           ▼
-┌──────────────────────────────────────────────────────────────────┐
-│ TIER 4 — Visualization + Alerting                                │
-│   Grafana (dashboards, exemplar deep-link)                       │
-│   Alertmanager → PagerDuty / Slack / email                       │
-└──────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────────────┐
+│  LEGEND                                                                              │
+│   🟦  span      📊  metric     📝  log     ⚡  API event     ◆  AUDIT event           │
+│   ── HTTPS ──     ── OTLP gRPC ──     ── trace-context ──     ─ ─ async ─ ─          │
+└──────────────────────────────────────────────────────────────────────────────────────┘
 
-ASYNC OUTCOME PATH:
-   service ──fire-and-forget POST──► observability-svc :8004
-                                       │
-                                       ▼
-                              OutcomeTracker FSM
-                                       │
-                                       └─► OTLP counter/histogram emit
+╔══════════════════════════════════════════════════════════════════════════════════════╗
+║                            TIER 1 — EDGE / CLIENT                                    ║
+╠══════════════════════════════════════════════════════════════════════════════════════╣
+║                                                                                      ║
+║   ┌──────────┐   ┌──────────┐   ┌──────────────┐   ┌──────────┐   ┌──────────┐       ║
+║   │ Browser  │   │  Admin   │   │ Aggregator   │   │ Partner  │   │  Mobile  │       ║
+║   │  (form)  │   │ console  │   │ CSV upload   │   │ webhooks │   │   SDK    │       ║
+║   └────┬─────┘   └────┬─────┘   └──────┬───────┘   └────┬─────┘   └────┬─────┘       ║
+║        │              │                │                │              │             ║
+║        └──── HTTPS  + W3C `traceparent` header  +  baggage (aggregator.id) ────┐     ║
+║                                                                                │     ║
+╚════════════════════════════════════════════════════════════════════════════════│═════╝
+                                                                                 ▼
+╔══════════════════════════════════════════════════════════════════════════════════════╗
+║                          TIER 2 — AGGREGATOR DPG                                     ║
+║                                                                                      ║
+║  Each block boots via shared package: init_otel(service_name, config)                ║
+║  ┌─────────────────────────────────────────────────────────────────────────────┐    ║
+║  │  @aggregator-dpg/observability                                              │    ║
+║  │   • TracerProvider  (W3C TraceContext + Baggage propagator)                 │    ║
+║  │   • MeterProvider   (PeriodicExportingMetricReader, 5s)                     │    ║
+║  │   • LoggerProvider  (LoggingHandler bridges stdlib/winston → OTLP)          │    ║
+║  │   • emitTransaction(name, payload)   →  ⚡ API event   (event.kind=transaction)   │
+║  │   • emitAudit(name, payload)         →  ◆ AUDIT event (event.kind=audit)    │    ║
+║  │   • PII redact list (single source of truth)                                │    ║
+║  └─────────────────────────────────────────────────────────────────────────────┘    ║
+║                                                                                      ║
+║  ┌──────────────────┐      ┌──────────────────┐      ┌──────────────────┐            ║
+║  │   web            │      │   api            │      │   worker         │            ║
+║  │   Next.js SSR    │ HTTP │   Fastify        │BullMQ│   BullMQ         │            ║
+║  │   :3000          ├─────►│   :8080          ├─────►│   processor      │            ║
+║  │                  │      │   (REST + SSE)   │ jobs │                  │            ║
+║  │                  │      │                  │      │                  │            ║
+║  │ 🟦 web.render    │      │ 🟦 api.request   │      │ 🟦 worker.       │            ║
+║  │ 🟦 web.api_proxy │      │ 🟦 api.bulk_     │      │     bulk_file_   │            ║
+║  │                  │      │     upload.create│      │     process      │            ║
+║  │ 📊 web.requests  │      │ 🟦 pg.insert     │      │ 🟦 worker.bulk_  │            ║
+║  │ 📊 web.ttfb_ms   │      │ 🟦 queue.enqueue │      │     row.process  │            ║
+║  │                  │      │                  │      │ 🟦 worker.       │            ║
+║  │ 📝 access log    │      │ 📊 api.requests  │      │     signalstack. │            ║
+║  │                  │      │ 📊 api.latency   │      │     onboard      │            ║
+║  │                  │      │ 📊 api.5xx       │      │                  │            ║
+║  │                  │      │                  │      │ 📊 bulk.rows_*   │            ║
+║  │                  │      │ ⚡ bulk_upload.   │      │ 📊 signalstack.  │            ║
+║  │                  │      │     created      │      │     calls_total  │            ║
+║  │                  │      │ ⚡ link.created   │      │ 📊 signalstack.  │            ║
+║  │                  │      │ ⚡ aggregator.    │      │     errors_total │            ║
+║  │                  │      │     registered   │      │ 📊 bulk.upload.  │            ║
+║  │                  │      │                  │      │     duration_ms  │            ║
+║  │                  │      │                  │      │                  │            ║
+║  │                  │      │                  │      │ ⚡ participant.   │            ║
+║  │                  │      │                  │      │     onboarded_   │            ║
+║  │                  │      │                  │      │     to_signal*   │            ║
+║  │                  │      │                  │      │ ⚡ participant.   │            ║
+║  │                  │      │                  │      │     signalstack_ │            ║
+║  │                  │      │                  │      │     failed       │            ║
+║  │                  │      │                  │      │ ⚡ bulk_upload.   │            ║
+║  │                  │      │                  │      │     completed    │            ║
+║  │                  │      │                  │      │                  │            ║
+║  │                  │      │                  │      │ ◆ bulk_upload.   │            ║
+║  │                  │      │                  │      │   file_validating│            ║
+║  │                  │      │                  │      │ ◆ bulk_row.      │            ║
+║  │                  │      │                  │      │   processed      │            ║
+║  └────────┬─────────┘      └────────┬─────────┘      └─────┬────────────┘            ║
+║           │                         │                      │                         ║
+║           │ traceparent + baggage   │ ctx in job.opts      │ traceparent  + baggage  ║
+║           └─────────────────────────┴──────────────────────┘  via httpx auto-instr   ║
+║                                                                      │               ║
+║                                                                      ▼               ║
+║                                                          ┌────────────────────┐      ║
+║                                                          │  SignalStack       │      ║
+║                                                          │  /onboard (extern) │      ║
+║                                                          │  continues trace   │      ║
+║                                                          └────────────────────┘      ║
+║                                                                                      ║
+║  ┌─────────────────────────────────────────────────────────────────────────────┐    ║
+║  │            STATE TIER (data stores, auto-instrumented child spans)          │    ║
+║  │                                                                             │    ║
+║  │   ┌───────────┐    ┌───────────┐    ┌──────────────┐   ┌────────────┐       │    ║
+║  │   │ Postgres  │    │  Redis    │    │ BullMQ Queue │   │     S3     │       │    ║
+║  │   │  (state)  │    │  (cache)  │    │   (Redis)    │   │ (CSVs +    │       │    ║
+║  │   │           │    │           │    │              │   │  err logs) │       │    ║
+║  │   └───────────┘    └───────────┘    └──────────────┘   └────────────┘       │    ║
+║  │   🟦 pg.*          🟦 redis.*       🟦 queue.*          🟦 s3.*              │    ║
+║  └─────────────────────────────────────────────────────────────────────────────┘    ║
+║                                                                                      ║
+╠══════════════════════════════════════════════════════════════════════════════════════╣
+║   ALL THREE BLOCKS EMIT VIA ONE WIRE:  OTLP gRPC :4317                               ║
+║   (traces + metrics + logs + events multiplexed; pipelines split at Collector)       ║
+╚════════════════════════════════════════│═════════════════════════════════════════════╝
+                                         ▼
+╔══════════════════════════════════════════════════════════════════════════════════════╗
+║                          TIER 3 — COLLECTION (OTel Collector)                        ║
+║                                                                                      ║
+║   ┌────────────────────────────────────────────────────────────────────────────┐    ║
+║   │  receivers:                                                                │    ║
+║   │     otlp { grpc: :4317, http: :4318 }                                      │    ║
+║   │                                                                            │    ║
+║   │  processors (chain):                                                       │    ║
+║   │     memory_limiter ──► attributes/redact ──► attributes/promote ──►        │    ║
+║   │     resource ──► batch (5s / 8k) ──► tail_sampling (phase 1+)              │    ║
+║   │                                                                            │    ║
+║   │     • redact:   strip pii_fields_excluded[] (email, phone, aadhaar, …)     │    ║
+║   │     • promote:  event.kind, event.name, severity → Loki labels             │    ║
+║   │     • resource: service.namespace=aggregator, deployment.environment       │    ║
+║   │                                                                            │    ║
+║   │  pipelines:                                                                │    ║
+║   │     traces  ─► [redact, batch]                ─► exporter: otlp/jaeger     │    ║
+║   │     metrics ─► [batch]                        ─► exporter: prometheus      │    ║
+║   │     logs    ─► [redact, promote, batch]       ─► exporter: loki            │    ║
+║   └─────────────┬──────────────────────┬─────────────────────────┬────────────┘    ║
+╚═════════════════│══════════════════════│═════════════════════════│═════════════════╝
+                  │ traces               │ logs + ⚡ + ◆           │ metrics
+                  ▼                      ▼                         ▼
+╔══════════════════════════════════════════════════════════════════════════════════════╗
+║              TIER 4 — BACKEND  (swappable; Jaeger + Loki + Prometheus today)         ║
+║                                                                                      ║
+║   ┌─────────────────────┐    ┌─────────────────────┐    ┌─────────────────────┐     ║
+║   │       Jaeger        │    │        Loki         │    │     Prometheus      │     ║
+║   │                     │    │                     │    │                     │     ║
+║   │  OTLP ingest :4317  │    │  push :3100         │    │  scrape :9090       │     ║
+║   │  UI         :16686  │    │  (logs + events)    │    │  (TSDB / PromQL)    │     ║
+║   │                     │    │                     │    │                     │     ║
+║   │  flame graph        │    │  labels: service,   │    │  exemplars link     │     ║
+║   │  service map        │    │   block, env,       │    │  back to Jaeger     │     ║
+║   │                     │    │   event_kind,       │    │                     │     ║
+║   │                     │    │   event_name        │    │                     │     ║
+║   │                     │    │  body: trace_id,    │    │                     │     ║
+║   │                     │    │   aggregator_id,    │    │                     │     ║
+║   │                     │    │   upload_id…        │    │                     │     ║
+║   └──────────┬──────────┘    └──────────┬──────────┘    └──────────┬──────────┘     ║
+║              │                          │                          │                ║
+║              └──────────────┬───────────┴──────────────────────────┘                ║
+║                             ▼                                                       ║
+║                      ┌─────────────┐                                                ║
+║                      │   Grafana   │   datasources: Jaeger / Loki / Prometheus      ║
+║                      └──────┬──────┘                                                ║
+║                             │                                                       ║
+║   ┌─────────────────────────┴────────────────────────────────────────────────┐     ║
+║   │  Dashboards                                                              │     ║
+║   │    • Onboarding funnel       (PromQL: signalstack_calls_total)           │     ║
+║   │    • Per-aggregator timeline (LogQL: aggregator_id filter + trace link)  │     ║
+║   │    • SignalStack health      (p95 latency, error rate by code)           │     ║
+║   │    • Trace explorer          (paste trace_id → Jaeger flame graph)       │     ║
+║   │  Alerts                                                                  │     ║
+║   │    • SLI breach              → Alertmanager → Slack / PagerDuty          │     ║
+║   └──────────────────────────────────────────────────────────────────────────┘     ║
+╚══════════════════════════════════════════════════════════════════════════════════════╝
 ```
 
 ## 4. Signal Model
