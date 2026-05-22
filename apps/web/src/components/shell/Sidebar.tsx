@@ -7,6 +7,7 @@ import { BlueDotsLogo } from '../ui/BlueDotsLogo';
 import { useAuth } from '../../lib/auth-context';
 import { useDashboard } from '../../hooks/useBlueDots';
 import { useProfileRaw } from '../../hooks/useProfile';
+import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../hooks/useAggregatorConfig';
 import { cn } from '../../lib/cn';
 
 interface NavItem {
@@ -16,11 +17,17 @@ interface NavItem {
   badge?: number;
 }
 
-const STATIC_NAV: NavItem[] = [
-  { to: '/blue-dots', label: 'My Blue Dots', icon: 'users' },
-  { to: '/onboarding', label: 'Onboarding', icon: 'upload' },
-  { to: '/profile', label: 'Profile', icon: 'user' },
-];
+/**
+ * Builds the side-nav with the brand short name in the primary link
+ * label. Onboarding + Profile stay generic across networks.
+ */
+function buildNav(brandShortName: string): NavItem[] {
+  return [
+    { to: '/blue-dots', label: `My ${brandShortName}`, icon: 'users' },
+    { to: '/onboarding', label: 'Onboarding', icon: 'upload' },
+    { to: '/profile', label: 'Profile', icon: 'user' },
+  ];
+}
 
 interface ActivityItem {
   who: string;
@@ -105,17 +112,23 @@ export function Sidebar() {
   const pathname = usePathname();
   const { user, signOut } = useAuth();
   const orgInitials = (user?.org ?? 'TR').slice(0, 2).toUpperCase();
-  // My Blue Dots badge mirrors the dashboard rollup so the sidebar count
-  // never drifts from what the /blue-dots page renders. Domain follows
-  // the aggregator's registered focus (seeker vs provider); falls back
-  // to seeker while the profile is still resolving.
+  // Brand + domain labels come from the aggregator config so the
+  // sidebar adapts to whichever signalstack network the deployment is
+  // bound to (blue / purple / yellow / ...) without code changes.
+  const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
+  // Dashboard rollup feeds the participant-count badge. Domain follows
+  // the aggregator's registered focus; falls back to the first domain
+  // declared by the network when the profile is still resolving.
   const profileType = useProfileRaw().data?.type;
+  const fallbackDomain = cfg.domains[0]?.id ?? 'seeker';
   const { data: dashboard } = useDashboard({
-    domain: profileType === 'provider' ? 'provider' : 'seeker',
+    domain: profileType ?? fallbackDomain,
   });
-  const blueDotsBadge = dashboard?.rollup.participants_total;
-  const nav: NavItem[] = STATIC_NAV.map((n) =>
-    n.to === '/blue-dots' && blueDotsBadge !== undefined ? { ...n, badge: blueDotsBadge } : n,
+  const participantsBadge = dashboard?.rollup.participants_total;
+  const nav: NavItem[] = buildNav(cfg.brand.short_name).map((n) =>
+    n.to === '/blue-dots' && participantsBadge !== undefined
+      ? { ...n, badge: participantsBadge }
+      : n,
   );
 
   return (
@@ -125,7 +138,7 @@ export function Sidebar() {
           <BlueDotsLogo size={40} />
           <div>
             <div className="font-display font-bold text-[17px] text-ink-900 leading-tight">
-              Blue Dots
+              {cfg.brand.short_name}
             </div>
             <div className="text-[12px] text-ink-400 leading-tight mt-0.5">Aggregator Portal</div>
           </div>

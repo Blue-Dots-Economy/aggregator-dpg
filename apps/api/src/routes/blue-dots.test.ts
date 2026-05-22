@@ -3,6 +3,8 @@ import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
 import { _setSignalStackWriter } from '../services/signalstack.js';
+import { _setNetworkConfig } from '../services/network-config.js';
+import { buildBlueDotConfig } from '@aggregator-dpg/network-config/testing';
 import {
   AggregatorStoreFake,
   _setAggregatorStore,
@@ -27,6 +29,7 @@ describe('blue-dots routes', () => {
     process.env.SIGNALSTACK_BASE_URL = 'http://stub-signalstack';
     process.env.SIGNALSTACK_ADMIN_KEY = 'stub-key';
     process.env.SIGNALSTACK_ITEM_NETWORK = 'blue_dot';
+    _setNetworkConfig(buildBlueDotConfig());
 
     writer = new SignalStackWriterFake();
     writer.seed({
@@ -116,6 +119,7 @@ describe('blue-dots routes', () => {
     await app?.close();
     _setSignalStackWriter(null);
     _setAccessTokenVerifier(null);
+    _setNetworkConfig(null);
   });
 
   it('401 without token', async () => {
@@ -196,6 +200,7 @@ describe('GET /v1/blue-dots/dashboard', () => {
     process.env.SIGNALSTACK_BASE_URL = 'http://stub-signalstack';
     process.env.SIGNALSTACK_ADMIN_KEY = 'stub-key';
     process.env.SIGNALSTACK_ACTING_ORG_ID = 'org_platform';
+    _setNetworkConfig(buildBlueDotConfig());
 
     idp = new IdpAdminFake();
     await idp.createUser({
@@ -307,6 +312,7 @@ describe('GET /v1/blue-dots/dashboard', () => {
     _setAggregatorStore(null);
     _setIdpAdmin(null);
     _setAccessTokenVerifier(null);
+    _setNetworkConfig(null);
   });
 
   it('401 without token', async () => {

@@ -10,6 +10,7 @@ import { SegmentedTabs, type SegmentedTab } from '../../../components/ui/Segment
 import { Topbar } from '../../../components/shell/Topbar';
 import { I, type IconName } from '../../../icons';
 import { useProviders, useOppProviders, useDashboard } from '../../../hooks/useBlueDots';
+import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
 import { blueDotsService, triggerCsvDownload } from '../../../services/blue-dots.service';
 import { useProfileRaw } from '../../../hooks/useProfile';
 import type { ParticipantBase, ParticipantStatus, Provider, Seeker } from '../../../types';
@@ -838,21 +839,27 @@ export default function BlueDotsPage() {
   // fires a stale seeker request that a provider account should never make.
   const profileType = rawProfile.data?.type;
   if (!profileType) {
-    return (
-      <div className="fade-up">
-        <Topbar
-          title="My Blue Dots"
-          subtitle="Track every participant in your network — at a glance."
-        />
-        <div className="text-center text-[13px] text-ink-400 py-12">Loading…</div>
-      </div>
-    );
+    return <BlueDotsLoadingFrame />;
   }
   return <BlueDotsContent aggregatorType={profileType} />;
 }
 
+function BlueDotsLoadingFrame() {
+  const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
+  return (
+    <div className="fade-up">
+      <Topbar
+        title={`My ${cfg.brand.short_name}`}
+        subtitle={cfg.brand.tagline ?? 'Track every participant in your network — at a glance.'}
+      />
+      <div className="text-center text-[13px] text-ink-400 py-12">Loading…</div>
+    </div>
+  );
+}
+
 function BlueDotsContent({ aggregatorType }: { aggregatorType: 'seeker' | 'provider' }) {
   const router = useRouter();
+  const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
   // Tabs are scoped to the aggregator's registered participant focus —
   // seeker aggregators see only Seekers; provider aggregators see only
   // Providers. The opposite primary tab is hidden, not just disabled.
@@ -872,8 +879,8 @@ function BlueDotsContent({ aggregatorType }: { aggregatorType: 'seeker' | 'provi
   return (
     <div className="fade-up">
       <Topbar
-        title="My Blue Dots"
-        subtitle="Track every participant in your network — at a glance."
+        title={`My ${cfg.brand.short_name}`}
+        subtitle={cfg.brand.tagline ?? 'Track every participant in your network — at a glance.'}
         right={
           <div className="flex items-center gap-2">
             <Button icon={<I.plus size={14} />} onClick={() => router.push('/onboarding')}>

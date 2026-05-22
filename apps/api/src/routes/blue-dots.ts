@@ -21,22 +21,21 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { authenticate, requireApproved, type AuthContext } from '../services/auth/access-token.js';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
+import { getNetworkConfig } from '../services/network-config.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
 import { config } from '../config.js';
 import { httpError } from '../errors/http-error.js';
 
+/**
+ * Domain accepts any string at the schema layer — the resolved network
+ * config decides which ids are valid for the live deployment. The route
+ * handler validates against `config.domainIds` after parse.
+ */
 const BlueDotsQuerySchema = z.object({
-  domain: z.enum(['seeker', 'provider']),
+  domain: z.string().min(1),
   limit: z.coerce.number().int().min(1).max(200).optional().default(50),
   offset: z.coerce.number().int().min(0).optional().default(0),
 });
-
-type BlueDotsQuery = z.infer<typeof BlueDotsQuerySchema>;
-
-const ITEM_TYPE_BY_DOMAIN: Record<BlueDotsQuery['domain'], string> = {
-  seeker: 'profile_1.0',
-  provider: 'job_posting_1.0',
-};
 
 /**
  * Dashboard query schema. `status` is a pass-through with a light shape
@@ -47,7 +46,7 @@ const ITEM_TYPE_BY_DOMAIN: Record<BlueDotsQuery['domain'], string> = {
  * once signalstack's dashboard endpoint accepts a domain filter.
  */
 const DashboardQuerySchema = z.object({
-  domain: z.enum(['seeker', 'provider']).optional().default('seeker'),
+  domain: z.string().min(1).optional(),
   page: z.coerce.number().int().min(1).optional().default(1),
   limit: z.coerce.number().int().min(1).max(200).optional().default(50),
   status: z
@@ -62,10 +61,11 @@ const DashboardQuerySchema = z.object({
 /**
  * Export query schema. Strict subset of {@link DashboardQuerySchema} —
  * signalstack's `/dashboard/export` endpoint accepts only `status` as a
- * filter today. `domain` is reserved for the provider rollout.
+ * filter today. `domain` is validated against the resolved network
+ * config in the handler.
  */
 const DashboardExportQuerySchema = z.object({
-  domain: z.enum(['seeker', 'provider']).optional().default('seeker'),
+  domain: z.string().min(1).optional(),
   status: z
     .string()
     .trim()
@@ -93,6 +93,14 @@ export async function registerBlueDotsRoutes(app: FastifyInstance): Promise<void
     }
     const { domain, limit, offset } = parsed.data;
 
+    const networkCfg = await getNetworkConfig();
+    const domainCfg = networkCfg.domains[domain];
+    if (!domainCfg) {
+      throw httpError('SCHEMA_VALIDATION', {
+        detail: `unknown domain '${domain}' — valid: ${networkCfg.domainIds.join(', ')}`,
+      });
+    }
+
     const ss = getSignalStackWriter();
     if (!ss) {
       log.warn({ status: 'failure', sub: 'signalstack.disabled' });
@@ -105,7 +113,7 @@ export async function registerBlueDotsRoutes(app: FastifyInstance): Promise<void
       aggregator_id: auth.aggregatorId,
       item_network: config.SIGNALSTACK_ITEM_NETWORK,
       item_domain: domain,
-      item_type: ITEM_TYPE_BY_DOMAIN[domain],
+      item_type: domainCfg.itemType,
       limit,
       offset,
     });
@@ -147,7 +155,14 @@ export async function registerBlueDotsRoutes(app: FastifyInstance): Promise<void
         fields: { issues: parsed.error.issues },
       });
     }
-    const { domain, page, limit, status } = parsed.data;
+    const { page, limit, status } = parsed.data;
+    const networkCfg = await getNetworkConfig();
+    const domain = parsed.data.domain ?? networkCfg.domainIds[0]!;
+    if (!networkCfg.domains[domain]) {
+      throw httpError('SCHEMA_VALIDATION', {
+        detail: `unknown domain '${domain}' — valid: ${networkCfg.domainIds.join(', ')}`,
+      });
+    }
 
     const ss = getSignalStackWriter();
     if (!ss) {
@@ -210,7 +225,14 @@ export async function registerBlueDotsRoutes(app: FastifyInstance): Promise<void
         fields: { issues: parsed.error.issues },
       });
     }
-    const { domain, status } = parsed.data;
+    const { status } = parsed.data;
+    const networkCfg = await getNetworkConfig();
+    const domain = parsed.data.domain ?? networkCfg.domainIds[0]!;
+    if (!networkCfg.domains[domain]) {
+      throw httpError('SCHEMA_VALIDATION', {
+        detail: `unknown domain '${domain}' — valid: ${networkCfg.domainIds.join(', ')}`,
+      });
+    }
 
     const ss = getSignalStackWriter();
     if (!ss) {

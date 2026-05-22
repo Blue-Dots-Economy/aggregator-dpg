@@ -176,7 +176,7 @@ export interface SignalStackDashboardQuery {
   page?: number;
   limit?: number;
   status?: string;
-  domain?: 'seeker' | 'provider';
+  domain?: string;
 }
 
 /**
@@ -232,7 +232,7 @@ export interface SignalStackDashboardPage {
 export interface SignalStackDashboardExportQuery {
   actingOrgId: string;
   status?: string;
-  domain?: 'seeker' | 'provider';
+  domain?: string;
 }
 
 /**

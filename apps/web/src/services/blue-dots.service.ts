@@ -28,7 +28,7 @@ import { jsonFetch } from './http';
  * server-side filter chip.
  */
 export interface BlueDotsDashboardQuery {
-  domain?: 'seeker' | 'provider';
+  domain?: string;
   page?: number;
   limit?: number;
   status?: string;
@@ -78,7 +78,7 @@ export interface BlueDotsDashboardPage {
  * `status` as a filter today.
  */
 export interface BlueDotsDashboardExportQuery {
-  domain?: 'seeker' | 'provider';
+  domain?: string;
   status?: string;
 }
 

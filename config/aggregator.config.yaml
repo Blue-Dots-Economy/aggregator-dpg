@@ -1,0 +1,36 @@
+# Active aggregator config for the running stack. Pinned to blue_dot;
+# swap `network.source` to deploy against another signalstack network.
+# Treat this file as deploy state; the .example.yaml sibling documents
+# every supported field.
+
+aggregator:
+  name: Blue Dots Aggregator
+  contact_email: ops@bluedots.local
+
+  network:
+    source: https://raw.githubusercontent.com/Blue-Dots-Economy/Signals-DPG/refs/heads/develop/examples/schemas/blue_dot/network.json
+    csv_array_delimiter: '|'
+
+  brand:
+    short_name: Blue Dots
+    long_name: Blue Dots Aggregator Portal
+    tagline: Track every participant in your network — at a glance.
+    url_slug: blue-dots
+    primary_color: '#2563EB'
+    accent_color: '#3B82F6'
+
+  domain_labels:
+    seeker:
+      singular: Seeker
+      plural: Seekers
+      tab_label: Seekers
+    provider:
+      singular: Provider
+      plural: Providers
+      tab_label: Providers
+
+  onboarding:
+    presume_consent: true
+    bulk_max_rows: 10000
+
+  admin_emails: []
