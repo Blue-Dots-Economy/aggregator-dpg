@@ -378,15 +378,6 @@ deactivate                                                            (activate 
 
 Global propagator is a **W3C composite**:
 
-```ts
-new CompositePropagator({
-  propagators: [
-    new W3CTraceContextPropagator(), // traceparent / tracestate
-    new W3CBaggagePropagator(), // baggage entries
-  ],
-});
-```
-
 `traceparent` carries trace identity. `baggage` carries cross-cutting context
 keys so workers don't re-derive them from job payloads.
 
@@ -754,120 +745,7 @@ CloudWatch + Managed Prometheus).
 
 ---
 
-## 10. Implementation phases
-
-```
-┌──────┬────────────────────────────────────────────────────────────────┬────────┐
-│ Phase│ Deliverable                                                    │ Effort │
-├──────┼────────────────────────────────────────────────────────────────┼────────┤
-│  0   │ Shared package @aggregator-dpg/observability                   │  3-4d  │
-│      │  - initTelemetry({ serviceName, config }) — idempotent,        │        │
-│      │    lock-guarded, never raises (see §10.1)                      │        │
-│      │  - getTracer(name), getMeter(name) accessors                   │        │
-│      │  - pino mixin for traceId/spanId/baggage auto-inject           │        │
-│      │  - BullMQ trace+baggage propagation helper                     │        │
-│      │  - emitTransaction(name, payload) + emitAudit(name, payload)   │        │
-│      │  - PII redaction list + mask helpers (single source)           │        │
-│      │  - events.ts: TypeScript enum of locked event names + types    │        │
-│      │  - resetForTesting() — test-only state clear                   │        │
-│      │ Local 3-pipeline stack (tempo + prometheus + loki + grafana    │        │
-│      │ + otel-collector) in docker-compose                            │        │
-├──────┼────────────────────────────────────────────────────────────────┼────────┤
-│  1   │ Wire emits at the 19 event sites locked in §3                  │  3-4d  │
-│      │ Add 7 manual business spans (per §6) on top of auto-instr.     │        │
-│      │ Validate end-to-end: upload a CSV, paste trace_id in Grafana,  │        │
-│      │ see full chain across api → worker → signalstack               │        │
-├──────┼────────────────────────────────────────────────────────────────┼────────┤
-│  2   │ Three starter Grafana dashboards:                              │  2d    │
-│      │  - Onboarding funnel (bulk + link)        ← PromQL + Loki      │        │
-│      │  - Per-aggregator timeline                ← Loki + Tempo links │        │
-│      │  - SignalStack health (error rate, p95)   ← PromQL             │        │
-│      │ Documented in docs/telemetry-runbook.md                        │        │
-├──────┼────────────────────────────────────────────────────────────────┼────────┤
-│  3   │ Staging hookup (collector points at staging stack)             │  1d    │
-│      │ Retention decisions (Loki 7d, Tempo 7d, Prometheus 15d)        │        │
-├──────┼────────────────────────────────────────────────────────────────┼────────┤
-│  4   │ Tail sampling + alert rules + SLOs (separate doc)              │  TBD   │
-│  5   │ External SSE / webhook subscription for API events             │  TBD   │
-│  6   │ Aggregator-facing self-service dashboard                       │  TBD   │
-└──────┴────────────────────────────────────────────────────────────────┴────────┘
-```
-
-### 10.1 `initTelemetry` — idempotency + never-raise contract
-
-The bootstrap function is the only place that touches the OTel SDK globals.
-Contract, modelled on adjacent Sanketika services:
-
-```ts
-// packages/observability/src/init.ts
-import { Mutex } from 'async-mutex';
-
-let _initialised = false;
-const _lock = new Mutex();
-
-export async function initTelemetry(opts: {
-  serviceName: 'aggregator-api' | 'aggregator-worker' | 'aggregator-web';
-  config: TelemetryConfig;
-}): Promise<void> {
-  return _lock.runExclusive(async () => {
-    if (_initialised) return; // idempotent
-
-    try {
-      const resource = buildResource(opts); // §4 resource attrs
-
-      // TracerProvider — required path
-      const tracerProvider = new NodeTracerProvider({
-        resource,
-        sampler: buildSampler(opts.config),
-      });
-      tracerProvider.addSpanProcessor(
-        new BatchSpanProcessor(new OTLPTraceExporter({ url: opts.config.collectorUrl })),
-      );
-      tracerProvider.register({ propagator: buildCompositePropagator() });
-
-      // MeterProvider — required path
-      const meterProvider = new MeterProvider({
-        resource,
-        readers: [
-          new PeriodicExportingMetricReader({
-            exporter: new OTLPMetricExporter({ url: opts.config.collectorUrl }),
-            exportIntervalMillis: opts.config.exportIntervalMs ?? 5000,
-          }),
-        ],
-      });
-      metrics.setGlobalMeterProvider(meterProvider);
-
-      // LoggerProvider — best-effort, never blocks
-      try {
-        const loggerProvider = new LoggerProvider({ resource });
-        loggerProvider.addLogRecordProcessor(
-          new BatchLogRecordProcessor(new OTLPLogExporter({ url: opts.config.collectorUrl })),
-        );
-        logs.setGlobalLoggerProvider(loggerProvider);
-      } catch (e) {
-        process.stderr.write(`[observability] logger setup failed (continuing): ${e}\n`);
-      }
-
-      registerAutoInstrumentations({ tracerProvider, meterProvider });
-
-      _initialised = true;
-    } catch (e) {
-      // CRITICAL — never propagate. Service must still boot.
-      process.stderr.write(`[observability] init failed, SDK in no-op state: ${e}\n`);
-    }
-  });
-}
-
-/** Test-only — clears all global SDK state. Never call in production. */
-export function _resetForTesting(): void {
-  _initialised = false;
-  trace.disable();
-  metrics.disable();
-  logs.disable();
-}
-```
-
-**Iron rules** (mirror `.claude/rules/error-handling.md` for this package):
+**Rules**:
 
 1. **Idempotent** — second call is a no-op. Hot-reload dev environments and
    test setup safe.
@@ -884,7 +762,7 @@ export function _resetForTesting(): void {
 Same contract applies to `emitTransaction()` and `emitAudit()`: log
 `aggregator.emit.failures_total` counter on internal failure, never throw.
 
-## 11. Glossary
+## 10. Glossary
 
 | Term              | Definition                                                                           |
 | ----------------- | ------------------------------------------------------------------------------------ |
