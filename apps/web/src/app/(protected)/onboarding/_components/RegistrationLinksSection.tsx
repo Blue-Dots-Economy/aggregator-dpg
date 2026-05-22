@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useRouter } from 'next/navigation';
 import { Button } from '../../../../components/ui/Button';
 import { I } from '../../../../icons';
 import {
@@ -107,6 +108,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 export function CreateLinkSection() {
+  const router = useRouter();
   const [form, setForm] = useState<CreateLinkFormState>(EMPTY_FORM);
   const [createError, setCreateError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -181,6 +183,7 @@ export function CreateLinkSection() {
       // edits + Make Live happen on its card, not here.
       resetSection();
       setToast('Registration link created');
+      router.push('/onboarding');
     } catch (err) {
       setCreateError((err as Error).message);
     }
