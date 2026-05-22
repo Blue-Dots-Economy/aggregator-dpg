@@ -135,6 +135,14 @@ export const aggregators = pgTable(
     updatedBy: text('updated_by').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+
+    // Signalstack organisation id returned by POST /admin/aggregator/upsert.
+    // Mirrors the `signalstack_org_id` Keycloak user attribute so the worker
+    // process (no KC admin client) and the anonymous public-link submission
+    // path can resolve the per-call `x-acting-org-id` header without an
+    // extra KC round-trip. NULL until the admin-approval flow (or the
+    // login-time backfill) records it.
+    signalstackOrgId: text('signalstack_org_id'),
   },
   (table) => ({
     // Auth-path lookups: phone/email are the credential identifiers a user

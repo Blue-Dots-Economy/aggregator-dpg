@@ -130,6 +130,15 @@ export const ERR = {
     hint: 'signalstack-writer.onboard returned a non-2xx. See response.error.fields.code for the writer-side classification (transport, timeout, validation, etc.).',
   },
 
+  SIGNALSTACK_ORG_NOT_REGISTERED: {
+    code: 'SIGNALSTACK_ORG_NOT_REGISTERED',
+    status: 503,
+    title: 'Aggregator not registered with signalstack',
+    detail:
+      'This aggregator has no signalstack organisation id on file. Submissions cannot be pushed until the aggregator owner signs into the portal once so the org registration completes.',
+    hint: 'aggregators.signalstack_org_id is NULL. Either the approval-time upsert failed and was never retried, or the login-time backfill has not run yet for this aggregator.',
+  },
+
   // ── Persistence ─────────────────────────────────────────────────────────
   DB_UNAVAILABLE: {
     code: 'DB_UNAVAILABLE',

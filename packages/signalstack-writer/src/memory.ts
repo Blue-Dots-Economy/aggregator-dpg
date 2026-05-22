@@ -19,19 +19,32 @@ import type { Result } from '@aggregator-dpg/shared-primitives/result';
 import {
   SignalStackWriterBase,
   type SignalStackAggregator,
+  type SignalStackDashboardPage,
+  type SignalStackDashboardQuery,
   type SignalStackItemList,
   type SignalStackItemQuery,
-  type SignalStackOnboardInput,
-  type SignalStackOnboardResult,
+  type SignalStackOnboardParticipantInput,
+  type SignalStackOnboardParticipantResult,
   type SignalStackProfile,
   type SignalStackUpsertAggregatorInput,
-  type SignalStackUser,
 } from './interface.js';
 
-type StoredUser = SignalStackUser;
+interface StoredUser {
+  id: string;
+  name: string;
+  email: string | null;
+  phoneNumber: string | null;
+  role: string | null;
+}
 
 interface StoredProfile extends SignalStackProfile {
   created_by: string;
+  /** Acting org id captured at onboard time; mirrored from x-acting-org-id. */
+  acting_org_id: string;
+  /** Channel attribution captured at onboard time. */
+  channel: 'bulk' | 'link';
+  /** Source id captured at onboard time (bulk_upload_id or link_id). */
+  source_id: string;
 }
 
 const ISO_FIXED = '2026-01-01T00:00:00.000Z';
@@ -50,16 +63,28 @@ export class InMemorySignalStackWriter extends SignalStackWriterBase {
   private nextAggregatorSeq = 1;
 
   override async onboard(
-    input: SignalStackOnboardInput,
-  ): Promise<Result<SignalStackOnboardResult, BaseError>> {
-    if (!input?.user?.name) {
-      return err(new UpstreamError('user.name is required', { code: 'SIGNALSTACK_INPUT_INVALID' }));
+    input: SignalStackOnboardParticipantInput,
+  ): Promise<Result<SignalStackOnboardParticipantResult, BaseError>> {
+    if (!input?.actingOrgId) {
+      return err(
+        new UpstreamError('actingOrgId is required', { code: 'SIGNALSTACK_INPUT_INVALID' }),
+      );
     }
-    const email = normalizeEmail(input.user.email);
-    const phone = normalizePhone(input.user.phoneNumber);
+    if (!input.name) {
+      return err(new UpstreamError('name is required', { code: 'SIGNALSTACK_INPUT_INVALID' }));
+    }
+    const email = normalizeEmail(input.email);
+    const phone = normalizePhone(input.phoneNumber);
     if (!email && !phone) {
       return err(
-        new UpstreamError('either user.email or user.phoneNumber is required', {
+        new UpstreamError('either email or phoneNumber is required', {
+          code: 'SIGNALSTACK_INPUT_INVALID',
+        }),
+      );
+    }
+    if (!input.channel || !input.source_id) {
+      return err(
+        new UpstreamError('channel and source_id are required', {
           code: 'SIGNALSTACK_INPUT_INVALID',
         }),
       );
@@ -76,88 +101,40 @@ export class InMemorySignalStackWriter extends SignalStackWriterBase {
     }
 
     let userRow = emailUser ?? phoneUser;
-    let userCreated = false;
-    const userExisted = Boolean(userRow);
-
     if (!userRow) {
-      if (input.profile?.item_id) {
-        return err(
-          new UpstreamError('item_id provided but user does not exist', {
-            code: 'SIGNALSTACK_BAD_REQUEST',
-          }),
-        );
-      }
       userRow = {
         id: `mem-user-${this.nextUserSeq++}`,
-        name: input.user.name,
+        name: input.name,
         email,
         phoneNumber: phone,
         role: 'user',
       };
       this.users.set(userRow.id, userRow);
-      userCreated = true;
     }
 
-    let profileCreated = false;
-    let profileUpdated = false;
-
-    if (input.profile) {
-      if (input.profile.item_id) {
-        const existing = this.profiles.get(input.profile.item_id);
-        if (!existing) {
-          return err(
-            new UpstreamError('Profile with given item_id not found', {
-              code: 'SIGNALSTACK_NOT_FOUND',
-            }),
-          );
-        }
-        if (existing.created_by !== userRow.id) {
-          return err(
-            new UpstreamError('item_id belongs to a different user', {
-              code: 'SIGNALSTACK_FORBIDDEN',
-            }),
-          );
-        }
-        existing.item_state = input.profile.item_state ?? existing.item_state;
-        existing.item_latitude = input.profile.item_latitude ?? existing.item_latitude;
-        existing.item_longitude = input.profile.item_longitude ?? existing.item_longitude;
-        existing.updated_at = ISO_FIXED;
-        // aggregator_id is immutable on update — intentionally not touched.
-        profileUpdated = true;
-      } else {
-        const id = `mem-item-${this.nextProfileSeq++}`;
-        const profile: StoredProfile = {
-          item_id: id,
-          item_network: input.profile.item_network,
-          item_domain: input.profile.item_domain,
-          item_type: input.profile.item_type,
-          item_state: input.profile.item_state ?? {},
-          item_latitude: input.profile.item_latitude ?? null,
-          item_longitude: input.profile.item_longitude ?? null,
-          aggregator_id: input.aggregator_id ?? null,
-          created_at: ISO_FIXED,
-          updated_at: ISO_FIXED,
-          created_by: userRow.id,
-        };
-        this.profiles.set(id, profile);
-        profileCreated = true;
-      }
-    }
-
-    const profiles = Array.from(this.profiles.values())
-      .filter((p) => p.created_by === userRow.id)
-      .map(stripCreatedBy);
+    const profileItemId = `mem-item-${this.nextProfileSeq++}`;
+    const profile: StoredProfile = {
+      item_id: profileItemId,
+      item_network: input.network,
+      item_domain: input.domain,
+      item_type: input.item_type,
+      item_state: input.profile,
+      item_latitude: null,
+      item_longitude: null,
+      aggregator_id: null,
+      created_at: ISO_FIXED,
+      updated_at: ISO_FIXED,
+      created_by: userRow.id,
+      acting_org_id: input.actingOrgId,
+      channel: input.channel,
+      source_id: input.source_id,
+    };
+    this.profiles.set(profileItemId, profile);
 
     return ok({
-      user: userRow,
-      profiles,
-      status: {
-        userCreated,
-        userExisted,
-        profileCreated,
-        profileUpdated,
-        profileExisted: false,
-      },
+      user_id: userRow.id,
+      profile_item_id: profileItemId,
+      onboarded_at: ISO_FIXED,
     });
   }
 
@@ -250,6 +227,44 @@ export class InMemorySignalStackWriter extends SignalStackWriterBase {
     return Array.from(this.aggregators.values());
   }
 
+  /**
+   * Pinned dashboard responses keyed by `actingOrgId`. Test helpers may
+   * write directly via `seed({ dashboards })` on the testing fake; when
+   * unset, {@link fetchDashboard} synthesises a deterministic empty
+   * rollup so callers that only care about the success path still get a
+   * usable shape.
+   */
+  protected readonly dashboards: Map<string, SignalStackDashboardPage> = new Map();
+
+  override async fetchDashboard(
+    query: SignalStackDashboardQuery,
+  ): Promise<Result<SignalStackDashboardPage, BaseError>> {
+    if (!query?.actingOrgId) {
+      return err(
+        new UpstreamError('actingOrgId is required', { code: 'SIGNALSTACK_INPUT_INVALID' }),
+      );
+    }
+    const pinned = this.dashboards.get(query.actingOrgId);
+    if (pinned) return ok(pinned);
+    return ok({
+      rollup: {
+        participants_total: 0,
+        by_status: {},
+        applications_pending: 0,
+        applications_accepted: 0,
+        applications_rejected: 0,
+      },
+      participants: [],
+      next_cursor: null,
+      total_matching: 0,
+      metadata: {
+        last_computed_at: ISO_FIXED,
+        ttl_seconds: 3600,
+        refreshed: true,
+      },
+    });
+  }
+
   protected findByEmail(email: string): StoredUser | undefined {
     for (const u of this.users.values()) {
       if (u.email === email) return u;
@@ -279,6 +294,6 @@ function normalizePhone(value: string | null | undefined): string | null {
 
 function stripCreatedBy(profile: StoredProfile): SignalStackProfile {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { created_by, ...rest } = profile;
+  const { created_by, acting_org_id, channel, source_id, ...rest } = profile;
   return rest;
 }

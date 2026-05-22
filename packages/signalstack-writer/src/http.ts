@@ -17,10 +17,12 @@ import type { Result } from '@aggregator-dpg/shared-primitives/result';
 import {
   SignalStackWriterBase,
   type SignalStackAggregator,
+  type SignalStackDashboardPage,
+  type SignalStackDashboardQuery,
   type SignalStackItemList,
   type SignalStackItemQuery,
-  type SignalStackOnboardInput,
-  type SignalStackOnboardResult,
+  type SignalStackOnboardParticipantInput,
+  type SignalStackOnboardParticipantResult,
   type SignalStackUpsertAggregatorInput,
 } from './interface.js';
 
@@ -64,7 +66,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       throw new Error('HttpSignalStackWriter requires apiKey');
     }
     this.baseUrl = config.baseUrl.replace(/\/+$/, '');
-    this.endpoint = `${this.baseUrl}/api/v1/admin/onboard`;
+    this.endpoint = `${this.baseUrl}/api/v1/admin/onboard_participant`;
     this.headers = {
       'content-type': 'application/json',
       'x-api-key': config.apiKey,
@@ -75,10 +77,33 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
   }
 
   override async onboard(
-    input: SignalStackOnboardInput,
-  ): Promise<Result<SignalStackOnboardResult, BaseError>> {
+    input: SignalStackOnboardParticipantInput,
+  ): Promise<Result<SignalStackOnboardParticipantResult, BaseError>> {
     const guardErr = this.guardInput(input);
     if (guardErr) return err(guardErr);
+
+    const body: Record<string, unknown> = {
+      name: input.name,
+      terms_accepted: input.terms_accepted,
+      privacy_accepted: input.privacy_accepted,
+      channel: input.channel,
+      source_id: input.source_id,
+      network: input.network,
+      domain: input.domain,
+      item_type: input.item_type,
+      profile: input.profile,
+    };
+    // Signalstack's user schema treats email / phoneNumber as `.optional()`
+    // (not `.nullable()`), so omit the keys entirely when we have no value
+    // rather than passing null — a literal null trips Zod's `expected:
+    // string` check and the whole push fails 400.
+    if (input.phoneNumber) body.phone_number = input.phoneNumber;
+    if (input.email) body.email = input.email;
+
+    const headers = {
+      ...this.headers,
+      'x-acting-org-id': input.actingOrgId,
+    };
 
     const controller = this.timeoutMs ? new AbortController() : undefined;
     const timer = controller ? setTimeout(() => controller.abort(), this.timeoutMs) : undefined;
@@ -86,8 +111,8 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
     try {
       const res = await this.fetchImpl(this.endpoint, {
         method: 'POST',
-        headers: this.headers,
-        body: JSON.stringify(input),
+        headers,
+        body: JSON.stringify(body),
         ...(controller ? { signal: controller.signal } : {}),
       });
 
@@ -109,8 +134,13 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
         );
       }
 
-      const payload = (await res.json()) as SignalStackOnboardResult;
-      if (!payload || typeof payload !== 'object' || !payload.user) {
+      const payload = (await res.json()) as SignalStackOnboardParticipantResult;
+      if (
+        !payload ||
+        typeof payload !== 'object' ||
+        typeof payload.user_id !== 'string' ||
+        typeof payload.profile_item_id !== 'string'
+      ) {
         return err(
           new UpstreamError('signalstack onboard returned unexpected payload', {
             code: 'SIGNALSTACK_BAD_RESPONSE',
@@ -318,25 +348,133 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
     }
   }
 
-  private guardInput(input: SignalStackOnboardInput): BaseError | null {
-    if (!input?.user?.name) {
-      return new UpstreamError('user.name is required', {
-        code: 'SIGNALSTACK_INPUT_INVALID',
-      });
-    }
-    const hasEmail = Boolean(input.user.email);
-    const hasPhone = Boolean(input.user.phoneNumber);
-    if (!hasEmail && !hasPhone) {
-      return new UpstreamError('either user.email or user.phoneNumber is required', {
-        code: 'SIGNALSTACK_INPUT_INVALID',
-      });
-    }
-    if (input.profile) {
-      if (!input.profile.item_network || !input.profile.item_domain || !input.profile.item_type) {
-        return new UpstreamError('profile requires item_network, item_domain, and item_type', {
+  /**
+   * Fetches the aggregator dashboard payload from signalstack.
+   *
+   * Builds a query string from `page`, `limit`, and `status` only — the
+   * `domain` field is reserved for the eventual provider rollout and is
+   * intentionally NOT forwarded today because signalstack's dashboard
+   * endpoint is seeker-only at present. When upstream gains domain
+   * support, swap the predicate that gates the `domain` append below.
+   *
+   * @param query - actingOrgId + optional pagination/status/domain.
+   * @returns ok(SignalStackDashboardPage) on 2xx; err(BaseError) otherwise.
+   */
+  override async fetchDashboard(
+    query: SignalStackDashboardQuery,
+  ): Promise<Result<SignalStackDashboardPage, BaseError>> {
+    if (!query?.actingOrgId) {
+      return err(
+        new UpstreamError('actingOrgId is required for dashboard fetch', {
           code: 'SIGNALSTACK_INPUT_INVALID',
-        });
+        }),
+      );
+    }
+
+    const params = new URLSearchParams();
+    if (query.page !== undefined) params.set('page', String(query.page));
+    if (query.limit !== undefined) params.set('limit', String(query.limit));
+    if (query.status) params.set('status', query.status);
+    // domain intentionally NOT forwarded — see method docblock.
+    const qs = params.toString();
+    const url = `${this.baseUrl}/api/v1/aggregator/dashboard${qs ? `?${qs}` : ''}`;
+
+    const headers = {
+      ...this.headers,
+      'x-acting-org-id': query.actingOrgId,
+    };
+
+    const controller = this.timeoutMs ? new AbortController() : undefined;
+    const timer = controller ? setTimeout(() => controller.abort(), this.timeoutMs) : undefined;
+
+    try {
+      const res = await this.fetchImpl(url, {
+        method: 'GET',
+        headers,
+        ...(controller ? { signal: controller.signal } : {}),
+      });
+
+      if (!res.ok) {
+        const bodyText = await safeReadText(res);
+        const upstreamMsg = extractUpstreamMessage(bodyText);
+        const message = upstreamMsg
+          ? `signalstack dashboard returned ${res.status}: ${upstreamMsg}`
+          : `signalstack dashboard returned ${res.status}`;
+        return err(
+          new UpstreamError(message, {
+            code: this.codeForStatus(res.status),
+            details: { status: res.status, body: bodyText },
+          }),
+        );
       }
+
+      const payload = (await res.json()) as SignalStackDashboardPage;
+      if (
+        !payload ||
+        typeof payload !== 'object' ||
+        !payload.rollup ||
+        !Array.isArray(payload.participants) ||
+        !payload.metadata
+      ) {
+        return err(
+          new UpstreamError('signalstack dashboard returned unexpected payload', {
+            code: 'SIGNALSTACK_BAD_RESPONSE',
+            details: { payload },
+          }),
+        );
+      }
+      return ok(payload);
+    } catch (e) {
+      const cause = e as Error;
+      const aborted = cause.name === 'AbortError';
+      return err(
+        new UpstreamError(
+          aborted
+            ? `signalstack dashboard timed out after ${this.timeoutMs}ms`
+            : `signalstack dashboard transport failure: ${cause.message}`,
+          {
+            cause,
+            code: aborted ? 'SIGNALSTACK_TIMEOUT' : 'SIGNALSTACK_TRANSPORT_FAILED',
+          },
+        ),
+      );
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  private guardInput(input: SignalStackOnboardParticipantInput): BaseError | null {
+    if (!input?.actingOrgId) {
+      return new UpstreamError('actingOrgId is required', {
+        code: 'SIGNALSTACK_INPUT_INVALID',
+      });
+    }
+    if (!input.name) {
+      return new UpstreamError('name is required', {
+        code: 'SIGNALSTACK_INPUT_INVALID',
+      });
+    }
+    const hasEmail = Boolean(input.email);
+    const hasPhone = Boolean(input.phoneNumber);
+    if (!hasEmail && !hasPhone) {
+      return new UpstreamError('either email or phoneNumber is required', {
+        code: 'SIGNALSTACK_INPUT_INVALID',
+      });
+    }
+    if (!input.network || !input.domain || !input.item_type) {
+      return new UpstreamError('network, domain, and item_type are required', {
+        code: 'SIGNALSTACK_INPUT_INVALID',
+      });
+    }
+    if (!input.source_id || !input.channel) {
+      return new UpstreamError('channel and source_id are required', {
+        code: 'SIGNALSTACK_INPUT_INVALID',
+      });
+    }
+    if (!input.profile || typeof input.profile !== 'object') {
+      return new UpstreamError('profile is required', {
+        code: 'SIGNALSTACK_INPUT_INVALID',
+      });
     }
     return null;
   }

@@ -18,11 +18,74 @@ import type {
 } from '../types';
 import { jsonFetch } from './http';
 
+/**
+ * Query for the signalstack-backed aggregator dashboard.
+ *
+ * `status` is intentionally optional — the dashboard's default render
+ * issues the call WITHOUT a status param so the rollup returns full
+ * by-status counts and the participants list is unfiltered. The page
+ * refetches with `status` set only when the user explicitly picks a
+ * server-side filter chip.
+ */
+export interface BlueDotsDashboardQuery {
+  domain?: 'seeker' | 'provider';
+  page?: number;
+  limit?: number;
+  status?: string;
+}
+
+/**
+ * Pre-computed rollup of participant counts returned alongside the
+ * dashboard page. `by_status` is an open map — signalstack adds status
+ * keys without bumping a version, so consumers MUST tolerate unknown
+ * keys instead of pinning an enum.
+ */
+export interface BlueDotsDashboardRollup {
+  participants_total: number;
+  by_status: Record<string, number>;
+  applications_pending: number;
+  applications_accepted: number;
+  applications_rejected: number;
+}
+
+/**
+ * Signalstack-side metadata about the cached rollup. Surfaced verbatim
+ * so the dashboard can display a "last updated" hint and decide whether
+ * the response is fresh or cache-served.
+ */
+export interface BlueDotsDashboardMetadata {
+  last_computed_at: string;
+  ttl_seconds: number;
+  refreshed: boolean;
+}
+
+/**
+ * Full payload of the dashboard fetch. `participants` is open-shape
+ * because signalstack owns the per-row schema — consumers decode only
+ * the keys they care about.
+ */
+export interface BlueDotsDashboardPage {
+  rollup: BlueDotsDashboardRollup;
+  participants: Array<Record<string, unknown>>;
+  next_cursor: string | null;
+  total_matching: number;
+  metadata: BlueDotsDashboardMetadata;
+}
+
 export interface BlueDotsService {
   list(kind: ParticipantKind, filter?: ParticipantFilter): Promise<ParticipantBase[]>;
   seekers(filter?: ParticipantFilter): Promise<Seeker[]>;
   providers(filter?: ParticipantFilter): Promise<Provider[]>;
   oppProviders(filter?: ParticipantFilter): Promise<OpportunityProvider[]>;
+  /**
+   * Fetch the signalstack-backed aggregator dashboard payload.
+   *
+   * Call without `status` for the default landing view (full rollup +
+   * unfiltered participants); call again with `status` set when the
+   * user selects a filter chip so signalstack returns the server-side
+   * filtered slice.
+   */
+  dashboard(query?: BlueDotsDashboardQuery): Promise<BlueDotsDashboardPage>;
 }
 
 interface SignalStackItem {
@@ -84,6 +147,19 @@ class HttpBlueDotsService implements BlueDotsService {
     const url = `/api/blue-dots/items?domain=${domain}&limit=100`;
     const payload = await jsonFetch<SignalStackItemList>(url);
     return payload.items ?? [];
+  }
+
+  async dashboard(query?: BlueDotsDashboardQuery): Promise<BlueDotsDashboardPage> {
+    const params = new URLSearchParams();
+    params.set('domain', query?.domain ?? 'seeker');
+    if (query?.page !== undefined) params.set('page', String(query.page));
+    if (query?.limit !== undefined) params.set('limit', String(query.limit));
+    // Skip `status` when the caller did not select a filter chip — the
+    // default landing render needs the full rollup + unfiltered list, so
+    // the BFF/API must NOT see a `status` param in that mode.
+    if (query?.status) params.set('status', query.status);
+    const url = `/api/blue-dots/dashboard?${params.toString()}`;
+    return jsonFetch<BlueDotsDashboardPage>(url);
   }
 
   private toSeeker(item: SignalStackItem): Seeker {

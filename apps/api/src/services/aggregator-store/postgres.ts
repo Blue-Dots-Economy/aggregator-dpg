@@ -171,6 +171,36 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
     return this.update(id, { status, updatedBy });
   }
 
+  async updateSignalstackOrgId(
+    id: string,
+    signalstackOrgId: string,
+    updatedBy: string,
+  ): Promise<StoreResult<Aggregator>> {
+    const start = Date.now();
+    try {
+      const rows = await getDb()
+        .update(aggregators)
+        .set({
+          signalstackOrgId,
+          updatedBy,
+          updatedAt: new Date(),
+        })
+        .where(eq(aggregators.id, id))
+        .returning();
+      const row = rows[0];
+      if (!row) return { ok: false, error: { code: 'NOT_FOUND', message: id } };
+      logger.info({
+        operation: 'aggregatorStore.updateSignalstackOrgId',
+        status: 'success',
+        latency_ms: Date.now() - start,
+        aggregator_id: id,
+      });
+      return { ok: true, value: toDomain(row) };
+    } catch (err: unknown) {
+      return this.mapWriteError('aggregatorStore.updateSignalstackOrgId', err, id, start);
+    }
+  }
+
   async deleteById(id: string): Promise<StoreResult<void>> {
     try {
       const rows = await getDb().delete(aggregators).where(eq(aggregators.id, id)).returning();
@@ -260,5 +290,6 @@ function toDomain(row: typeof aggregators.$inferSelect): Aggregator {
     updatedBy: row.updatedBy,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+    signalstackOrgId: row.signalstackOrgId,
   };
 }

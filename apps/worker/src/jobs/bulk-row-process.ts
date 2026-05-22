@@ -295,6 +295,32 @@ async function pushToSignalStack(
   // Signalstack disabled in this env — treat as success so the row is not
   // marked failed when the operator deliberately turned the push off.
   if (!ss) return { success: true };
+
+  // Resolve the aggregator's signalstack org id from the DB mirror written
+  // by the approval flow + login-time backfill. The worker carries no JWT,
+  // so the `signalstack_org_id` claim is unreachable here — `aggregators`
+  // is the only authoritative source available offline.
+  const orgIdRow = await getDb()
+    .select({ signalstackOrgId: schema.aggregators.signalstackOrgId })
+    .from(schema.aggregators)
+    .where(eq(schema.aggregators.id, job.aggregatorId))
+    .limit(1);
+  const signalstackOrgId = orgIdRow[0]?.signalstackOrgId ?? null;
+  if (!signalstackOrgId) {
+    log.error({
+      status: 'failure',
+      sub: 'signalstack.push',
+      code: 'SIGNALSTACK_ORG_NOT_REGISTERED',
+      aggregator_id: job.aggregatorId,
+    });
+    return {
+      success: false,
+      code: 'SIGNALSTACK_ORG_NOT_REGISTERED',
+      message:
+        'aggregator has no signalstack_org_id on file; ask the aggregator owner to sign into the portal once so the backfill records it',
+    };
+  }
+
   // Providers carry name + contact under hiring-manager / company fields;
   // seekers keep them at the top level. Source per participantType so the
   // signalstack user block is never built from missing keys.
@@ -310,21 +336,22 @@ async function pushToSignalStack(
       : phone;
   const pushPhone = phone ?? phoneFromBody;
   const result = await ss.onboard({
-    // Signalstack's user schema treats email / phoneNumber as `.optional()`
-    // (not `.nullable()`), so we omit the keys entirely when we have no
-    // value rather than passing null.
-    user: {
-      name,
-      ...(pushPhone ? { phoneNumber: pushPhone } : {}),
-      ...(email ? { email } : {}),
-    },
-    profile: {
-      item_network: config.SIGNALSTACK_ITEM_NETWORK,
-      item_domain: job.participantType,
-      item_type: job.participantType === 'provider' ? 'job_posting_1.0' : 'profile_1.0',
-      item_state: buildSignalStackItemState(job.participantType, job.payload, pushPhone),
-    },
-    aggregator_id: job.aggregatorId,
+    actingOrgId: signalstackOrgId,
+    name,
+    ...(pushPhone ? { phoneNumber: pushPhone } : {}),
+    ...(email ? { email } : {}),
+    // Aggregator-level consent captured at registration is the legal basis
+    // for the bulk-row push; signalstack still expects these flags per-row
+    // so we hardcode `true`. Surface as CSV columns if signalstack ever
+    // demands per-row participant consent.
+    terms_accepted: true,
+    privacy_accepted: true,
+    channel: 'bulk',
+    source_id: job.uploadId,
+    network: config.SIGNALSTACK_ITEM_NETWORK,
+    domain: job.participantType,
+    item_type: job.participantType === 'provider' ? 'job_posting_1.0' : 'profile_1.0',
+    profile: buildSignalStackItemState(job.participantType, job.payload, pushPhone),
   });
   if (!result.success) {
     log.error({
@@ -342,8 +369,9 @@ async function pushToSignalStack(
   log.info({
     status: 'success',
     sub: 'signalstack.push',
-    user_id: result.value.user.id,
-    profile_count: result.value.profiles.length,
+    user_id: result.value.user_id,
+    profile_item_id: result.value.profile_item_id,
+    onboarded_at: result.value.onboarded_at,
   });
   return { success: true };
 }

@@ -126,6 +126,13 @@ describe('requireApproved + signalstack backfill', () => {
       expect(after.value.attributes?.signalstack_org_id?.[0]).toBe(aggregators[0]?.org_id);
     }
 
+    // DB mirror is dual-written alongside the KC attribute so the worker
+    // and anonymous public-link path can resolve the org id offline.
+    const dbAfter = await store.findById(aggregatorId);
+    if (dbAfter.ok && dbAfter.value) {
+      expect(dbAfter.value.signalstackOrgId).toBe(aggregators[0]?.org_id);
+    }
+
     if (result.ok) {
       expect(result.context.signalstackOrgId).toBe(aggregators[0]?.org_id);
     }
@@ -145,6 +152,9 @@ describe('requireApproved + signalstack backfill', () => {
             code: 'SIGNALSTACK_SERVER_ERROR',
           }),
         );
+      }
+      async fetchDashboard() {
+        return err(new UpstreamError('not used', { code: 'X' }));
       }
     }
     _setSignalStackWriter(new FailingWriter());

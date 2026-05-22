@@ -36,6 +36,14 @@ export interface Aggregator {
   updatedBy: string;
   createdAt: Date;
   updatedAt: Date;
+  /**
+   * Signalstack organisation id returned by `POST /admin/aggregator/upsert`.
+   * Mirror of the `signalstack_org_id` Keycloak user attribute. NULL until
+   * the admin-approval flow (or the login-time backfill in `requireApproved`)
+   * records it. Worker rows + anonymous link submissions read this column to
+   * source the per-call `x-acting-org-id` header.
+   */
+  signalstackOrgId: string | null;
 }
 
 export interface CreateAggregatorInput {
@@ -105,6 +113,23 @@ export abstract class AggregatorStoreBase {
   abstract updateStatus(
     id: string,
     status: AggregatorStatus,
+    updatedBy: string,
+  ): Promise<StoreResult<Aggregator>>;
+  /**
+   * Stamps the signalstack organisation id on an aggregator row.
+   *
+   * Called by both the admin-approval flow (right after the signalstack
+   * aggregator upsert returns) and the login-time backfill helper in
+   * `requireApproved`. Idempotent: re-writing the same value is a no-op,
+   * so repeated approvals/backfills do not bump audit fields meaningfully.
+   *
+   * @param id - Aggregator UUID.
+   * @param signalstackOrgId - Org id returned by the upsert call.
+   * @param updatedBy - Audit field; the actor that triggered the write.
+   */
+  abstract updateSignalstackOrgId(
+    id: string,
+    signalstackOrgId: string,
     updatedBy: string,
   ): Promise<StoreResult<Aggregator>>;
   abstract deleteById(id: string): Promise<StoreResult<void>>;

@@ -256,9 +256,16 @@ async function backfillSignalstackOrgId(ctx: AuthContext): Promise<void> {
   }
 
   const idp = getIdpAdmin();
-  const attr = await idp.setAttributes(ctx.userId, {
-    [KC_ATTR.SIGNALSTACK_ORG_ID]: upsert.value.org_id,
-  });
+  const orgId = upsert.value.org_id;
+  // Dual-write to KC attr + DB column. The DB mirror is what the worker
+  // and anonymous public-link submission path read; the KC attribute is
+  // what the next token refresh surfaces back as a claim. The current
+  // request's context is patched in memory either way so the in-flight
+  // handler sees the value without waiting for the refresh.
+  const [attr, dbWrite] = await Promise.all([
+    idp.setAttributes(ctx.userId, { [KC_ATTR.SIGNALSTACK_ORG_ID]: orgId }),
+    store.updateSignalstackOrgId(ctx.aggregatorId, orgId, ctx.userId),
+  ]);
   if (!attr.ok) {
     log.warn(
       {
@@ -269,18 +276,30 @@ async function backfillSignalstackOrgId(ctx: AuthContext): Promise<void> {
       },
       'failed to stamp signalstack_org_id on KC user during login fallback',
     );
-    return;
+  }
+  if (!dbWrite.ok) {
+    log.warn(
+      {
+        status: 'failure',
+        sub_operation: 'store.updateSignalstackOrgId',
+        code: dbWrite.error.code,
+        cause: dbWrite.error.message,
+      },
+      'failed to persist signalstack_org_id on aggregators row during login fallback',
+    );
   }
 
-  ctx.signalstackOrgId = upsert.value.org_id;
-  log.info(
-    {
-      status: 'success',
-      signalstack_org_id: upsert.value.org_id,
-      latency_ms: Date.now() - start,
-    },
-    'signalstack_org_id backfilled on KC user',
-  );
+  ctx.signalstackOrgId = orgId;
+  if (attr.ok && dbWrite.ok) {
+    log.info(
+      {
+        status: 'success',
+        signalstack_org_id: orgId,
+        latency_ms: Date.now() - start,
+      },
+      'signalstack_org_id backfilled on KC user + aggregators row',
+    );
+  }
 }
 
 /**

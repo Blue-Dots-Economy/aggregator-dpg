@@ -270,9 +270,16 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
               'signalstack aggregator upsert failed — login fallback will retry',
             );
           } else {
-            const attrWrite = await idp.setAttributes(lookup.kcUser.id, {
-              signalstack_org_id: upsertResult.value.org_id,
-            });
+            const orgId = upsertResult.value.org_id;
+            // Dual-write to KC attr + Postgres mirror. The worker and the
+            // anonymous public-link submission path read the DB column
+            // (they have no KC admin client); the access-token claim is
+            // sourced from the KC attribute. Either write failure is
+            // soft-fail — the login backfill repairs whichever leg lags.
+            const [attrWrite, dbWrite] = await Promise.all([
+              idp.setAttributes(lookup.kcUser.id, { signalstack_org_id: orgId }),
+              store.updateSignalstackOrgId(aggregatorId, orgId, 'admin'),
+            ]);
             if (!attrWrite.ok) {
               log.warn(
                 {
@@ -283,12 +290,24 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
                 },
                 'failed to stamp signalstack_org_id on KC user — login fallback will retry',
               );
-            } else {
+            }
+            if (!dbWrite.ok) {
+              log.warn(
+                {
+                  status: 'failure',
+                  sub_operation: 'store.updateSignalstackOrgId',
+                  code: dbWrite.error.code,
+                  cause: dbWrite.error.message,
+                },
+                'failed to persist signalstack_org_id on aggregators row — login fallback will retry',
+              );
+            }
+            if (attrWrite.ok && dbWrite.ok) {
               log.info(
                 {
                   status: 'success',
                   sub_operation: 'signalstack.upsertAggregator',
-                  signalstack_org_id: upsertResult.value.org_id,
+                  signalstack_org_id: orgId,
                   latency_ms: Date.now() - upsertStart,
                 },
                 'aggregator registered in signalstack',

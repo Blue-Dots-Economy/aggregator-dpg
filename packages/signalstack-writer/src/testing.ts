@@ -9,6 +9,7 @@
  */
 
 import { InMemorySignalStackWriter } from './memory.js';
+import type { SignalStackDashboardPage } from './interface.js';
 
 export { InMemorySignalStackWriter };
 
@@ -32,6 +33,16 @@ export interface SignalStackProfileSeed {
   aggregator_id?: string | null;
   created_at?: string;
   updated_at?: string;
+  /**
+   * Signalstack organisation id the row is scoped under. Optional in
+   * seeds — defaults to an empty string so tests that don't care about
+   * onboard-channel attribution stay terse.
+   */
+  acting_org_id?: string;
+  /** Channel attribution; defaults to `'bulk'`. */
+  channel?: 'bulk' | 'link';
+  /** Source workflow id; defaults to empty string. */
+  source_id?: string;
 }
 
 /**
@@ -50,6 +61,17 @@ export interface SignalStackAggregatorSeed {
   metadata?: Record<string, unknown>;
 }
 
+/**
+ * Pre-built dashboard payload keyed by `acting_org_id`. Tests use this
+ * to pin the rollup the writer's {@link InMemorySignalStackWriter.fetchDashboard}
+ * returns for a given aggregator org. Without a pinned response the
+ * fake synthesises a deterministic empty rollup.
+ */
+export interface SignalStackDashboardSeed {
+  acting_org_id: string;
+  page: SignalStackDashboardPage;
+}
+
 const ISO_FIXED = '2026-01-01T00:00:00.000Z';
 
 export class SignalStackWriterFake extends InMemorySignalStackWriter {
@@ -66,6 +88,7 @@ export class SignalStackWriterFake extends InMemorySignalStackWriter {
     users?: SignalStackUserSeed[];
     profiles?: SignalStackProfileSeed[];
     aggregators?: SignalStackAggregatorSeed[];
+    dashboards?: SignalStackDashboardSeed[];
   }): void {
     let userCounter = 1;
     for (const s of seeds.users ?? []) {
@@ -96,6 +119,9 @@ export class SignalStackWriterFake extends InMemorySignalStackWriter {
         created_at: s.created_at ?? ISO_FIXED,
         updated_at: s.updated_at ?? ISO_FIXED,
         created_by: s.created_by,
+        acting_org_id: s.acting_org_id ?? '',
+        channel: s.channel ?? 'bulk',
+        source_id: s.source_id ?? '',
       });
     }
 
@@ -110,6 +136,11 @@ export class SignalStackWriterFake extends InMemorySignalStackWriter {
         slug: s.slug,
         ...(s.metadata !== undefined ? { metadata: s.metadata } : {}),
       });
+    }
+
+    for (const s of seeds.dashboards ?? []) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (this as any).dashboards.set(s.acting_org_id, s.page);
     }
   }
 }

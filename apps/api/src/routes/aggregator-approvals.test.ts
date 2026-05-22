@@ -155,8 +155,14 @@ describe('admin approval routes', () => {
     expect(res.body).toContain('Application approved');
 
     const dbAfter = await aggregatorStore.findById(aggregatorId);
+    expect(dbAfter.ok).toBe(true);
     if (dbAfter.ok && dbAfter.value) {
       expect(dbAfter.value.status).toBe('active');
+      // signalstack_org_id is mirrored from the upsert response onto the
+      // aggregators row so worker + anonymous link submission paths can
+      // read it without touching Keycloak.
+      expect(dbAfter.value.signalstackOrgId).toBeDefined();
+      expect(dbAfter.value.signalstackOrgId).not.toBeNull();
     }
 
     const after = await idp.findById(kcUserId);
@@ -174,6 +180,10 @@ describe('admin approval routes', () => {
       expect(aggregators[0]?.name).toBe('TRRAIN');
       expect(aggregators[0]?.slug).toBe('trrain-abcd');
       expect(orgIdAttr).toBe(aggregators[0]?.org_id);
+      // KC attr and DB mirror must agree.
+      if (dbAfter.ok && dbAfter.value) {
+        expect(dbAfter.value.signalstackOrgId).toBe(orgIdAttr);
+      }
     }
 
     expect(mailer.outbox).toHaveLength(1);
@@ -202,6 +212,9 @@ describe('admin approval routes', () => {
           }),
         );
       }
+      async fetchDashboard() {
+        return err(new UpstreamError('not used', { code: 'X' }));
+      }
     }
     _setSignalStackWriter(new FailingUpsertWriter());
 
@@ -218,8 +231,13 @@ describe('admin approval routes', () => {
     if (after.ok && after.value) {
       expect(after.value.enabled).toBe(true);
       expect(after.value.attributes?.decision_made?.[0]).toBe('approved');
-      // Soft-fail: attribute not written so the login-time fallback can retry.
+      // Soft-fail: KC attr not written so the login-time fallback can retry.
       expect(after.value.attributes?.signalstack_org_id).toBeUndefined();
+    }
+    // Soft-fail also leaves the DB column null — same backfill repairs both.
+    const dbAfter = await aggregatorStore.findById(aggregatorId);
+    if (dbAfter.ok && dbAfter.value) {
+      expect(dbAfter.value.signalstackOrgId).toBeNull();
     }
   });
 
@@ -236,6 +254,10 @@ describe('admin approval routes', () => {
     const after = await idp.findById(kcUserId);
     if (after.ok && after.value) {
       expect(after.value.attributes?.signalstack_org_id).toBeUndefined();
+    }
+    const dbAfter = await aggregatorStore.findById(aggregatorId);
+    if (dbAfter.ok && dbAfter.value) {
+      expect(dbAfter.value.signalstackOrgId).toBeNull();
     }
   });
 
