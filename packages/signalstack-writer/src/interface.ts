@@ -14,57 +14,20 @@ import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
 
 /**
- * User identity payload. At least one of `email` / `phoneNumber` is required;
- * the writer impl is responsible for enforcing that before dispatch.
+ * Channel attribution for a participant onboard call. Signalstack uses this
+ * to attribute the inbound row to the originating workflow:
+ *   - `bulk` — CSV upload processed by the worker; `source_id` is the
+ *      `bulk_uploads.id` row.
+ *   - `link` — public registration link submission; `source_id` is the
+ *      `registration_links.id` row.
  */
-export interface SignalStackUserInput {
-  name: string;
-  email?: string | null;
-  phoneNumber?: string | null;
-}
+export type SignalStackOnboardChannel = 'bulk' | 'link';
 
 /**
- * Profile payload. `item_id` switches the route into update mode; omitting it
- * creates a new profile under the resolved user.
- */
-export interface SignalStackProfileInput {
-  item_id?: string;
-  item_network: string;
-  item_domain: string;
-  item_type: string;
-  item_state?: Record<string, unknown>;
-  item_latitude?: number | null;
-  item_longitude?: number | null;
-}
-
-/**
- * Input for one onboard call.
- *
- * `aggregator_id` is set once on profile create and is immutable thereafter
- * (signalstack ignores it on update). Pass undefined for non-aggregator
- * call sites (e.g., if this writer is ever reused by the UI path).
- */
-export interface SignalStackOnboardInput {
-  user: SignalStackUserInput;
-  profile?: SignalStackProfileInput;
-  aggregator_id?: string;
-}
-
-/**
- * Echo of the user row resolved by signalstack — same row whether created or
- * found by phone/email lookup.
- */
-export interface SignalStackUser {
-  id: string;
-  name: string;
-  email: string | null;
-  phoneNumber: string | null;
-  role: string | null;
-}
-
-/**
- * Echo of one profile row stored in signalstack's `items` table. The full
- * list of profiles owned by the resolved user is returned on every call.
+ * Echo of one profile row stored in signalstack's `items` table. Returned
+ * by the `listItemsByAggregator` read endpoint (the participant onboard
+ * endpoint returns the slimmer {@link SignalStackOnboardParticipantResult}
+ * shape).
  */
 export interface SignalStackProfile {
   item_id: string;
@@ -80,25 +43,56 @@ export interface SignalStackProfile {
 }
 
 /**
- * Status flags returned by signalstack so the caller can attribute the
- * outcome without an extra round-trip.
+ * Input for one participant onboard call to signalstack.
+ *
+ * Mirrors the flat body shape signalstack expects on
+ * `POST /api/v1/admin/onboard_participant`. The `actingOrgId` is sent as
+ * the per-call `x-acting-org-id` header — it is the aggregator's own
+ * signalstack organisation id (sourced from `aggregators.signalstack_org_id`),
+ * NOT the platform-wide acting org id used by aggregator upsert.
  */
-export interface SignalStackOnboardStatus {
-  userCreated: boolean;
-  userExisted: boolean;
-  profileCreated: boolean;
-  profileUpdated: boolean;
-  profileExisted: boolean;
+export interface SignalStackOnboardParticipantInput {
+  /** Signalstack organisation id the participant is being linked under. */
+  actingOrgId: string;
+  /** Display name of the participant; falls back to participant UUID upstream. */
+  name: string;
+  /** Phone number (E.164) — at least one of phoneNumber / email is required. */
+  phoneNumber?: string;
+  /** Email address — at least one of phoneNumber / email is required. */
+  email?: string;
+  /** Whether the participant has accepted the aggregator's T&C. */
+  terms_accepted: boolean;
+  /** Whether the participant has accepted the aggregator's privacy policy. */
+  privacy_accepted: boolean;
+  /** Channel attribution — distinguishes bulk-upload from link submission. */
+  channel: SignalStackOnboardChannel;
+  /**
+   * Originating workflow row id. `bulk_uploads.id` when channel = `bulk`,
+   * `registration_links.id` when channel = `link`. Signalstack stores this
+   * verbatim for audit and dedupe.
+   */
+  source_id: string;
+  /** `blue_dot` etc — partition the row lands under. */
+  network: string;
+  /** `seeker` | `provider` — participant focus. */
+  domain: string;
+  /** `profile_1.0` (seeker) | `job_posting_1.0` (provider) — schema version tag. */
+  item_type: string;
+  /** Free-form item_state payload — the participant's profile fields. */
+  profile: Record<string, unknown>;
 }
 
 /**
- * Full signalstack response payload. `profiles` always contains every profile
- * the resolved user owns, not just the one this call wrote / updated.
+ * Response payload from `POST /api/v1/admin/onboard_participant`.
+ *
+ * Slim shape: signalstack returns only the identifiers it minted plus the
+ * server-side timestamp. The caller's audit log captures this verbatim;
+ * `listItemsByAggregator` is the canonical read path for the full row.
  */
-export interface SignalStackOnboardResult {
-  user: SignalStackUser;
-  profiles: SignalStackProfile[];
-  status: SignalStackOnboardStatus;
+export interface SignalStackOnboardParticipantResult {
+  user_id: string;
+  profile_item_id: string;
+  onboarded_at: string;
 }
 
 /**
@@ -135,25 +129,152 @@ export interface SignalStackItemList {
 }
 
 /**
+ * Input for the admin aggregator upsert call.
+ *
+ * `external_id` is our Postgres `aggregators.id` — signalstack stores it
+ * verbatim and uses it as the dedupe key. Calling upsert again with the
+ * same `external_id` returns the existing row instead of creating a new
+ * one, so the writer is safe to re-fire from a login-time fallback.
+ */
+export interface SignalStackUpsertAggregatorInput {
+  external_id: string;
+  name: string;
+  slug: string;
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Echo of the signalstack `aggregators` row resolved by the upsert call.
+ *
+ * `org_id` is the canonical signalstack organisation identifier — the
+ * value the aggregator API stores on the Keycloak user as
+ * `signalstack_org_id`. Surfaced as the access-token claim of the same
+ * name so route handlers can scope reads/writes against signalstack
+ * without an extra round-trip.
+ */
+export interface SignalStackAggregator {
+  org_id: string;
+  external_id: string;
+  name: string;
+  slug: string;
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Query parameters for the aggregator dashboard read.
+ *
+ * `actingOrgId` becomes the per-call `x-acting-org-id` header. `status` is
+ * forwarded verbatim — signalstack is the source of truth for the allowed
+ * set (`new`, `at_risk`, `accepted`, etc.), so the writer doesn't pin an
+ * enum that would drift. `domain` is reserved for the eventual
+ * provider rollout; signalstack currently scopes by aggregator only, so
+ * the HTTP impl drops the field today and threads it through unchanged
+ * when upstream support lands.
+ */
+export interface SignalStackDashboardQuery {
+  actingOrgId: string;
+  page?: number;
+  limit?: number;
+  status?: string;
+  domain?: 'seeker' | 'provider';
+}
+
+/**
+ * Pre-computed rollup of participant counts returned alongside the
+ * dashboard page. `by_status` is an open map — signalstack adds status
+ * keys without bumping a version, so consumers MUST tolerate unknown
+ * keys instead of pinning an enum.
+ */
+export interface SignalStackDashboardRollup {
+  participants_total: number;
+  by_status: Record<string, number>;
+  applications_pending: number;
+  applications_accepted: number;
+  applications_rejected: number;
+}
+
+/**
+ * Signalstack-side metadata about the cached rollup. `refreshed=true`
+ * means signalstack just recomputed; `false` means the response came
+ * from cache within the `ttl_seconds` window. Surfaced verbatim so the
+ * dashboard can show a "last updated" hint.
+ */
+export interface SignalStackDashboardMetadata {
+  last_computed_at: string;
+  ttl_seconds: number;
+  refreshed: boolean;
+}
+
+/**
+ * Full payload returned by `GET /api/v1/aggregator/dashboard`.
+ *
+ * `participants` is an open array — the per-row shape is owned by
+ * signalstack and may evolve, so the type is intentionally
+ * `Record<string, unknown>` and downstream consumers (web app)
+ * decode the keys they care about.
+ */
+export interface SignalStackDashboardPage {
+  rollup: SignalStackDashboardRollup;
+  participants: Array<Record<string, unknown>>;
+  next_cursor: string | null;
+  total_matching: number;
+  metadata: SignalStackDashboardMetadata;
+}
+
+/**
+ * Query parameters for the aggregator dashboard CSV export.
+ *
+ * Same `actingOrgId` semantics as the JSON dashboard read. `status` is
+ * the only filter accepted by the upstream `?status=…` query today;
+ * `domain` is reserved for the eventual provider rollout and the HTTP
+ * impl currently drops it.
+ */
+export interface SignalStackDashboardExportQuery {
+  actingOrgId: string;
+  status?: string;
+  domain?: 'seeker' | 'provider';
+}
+
+/**
+ * Result payload for the dashboard CSV export.
+ *
+ * `csv` is the raw `text/csv; charset=utf-8` body returned by signalstack.
+ * Callers stream it back to the requesting browser verbatim — we do not
+ * decode or rewrite the rows. `filename` is a sensible default derived
+ * from the status filter and current date; the API route may override.
+ */
+export interface SignalStackDashboardExport {
+  csv: string;
+  filename: string;
+}
+
+/**
  * Persistence port for the signalstack admin endpoints.
  *
  * Implementations:
- *   - Http: real `POST /api/v1/admin/onboard` + `GET /api/v1/admin/items`
- *     using fetch.
+ *   - Http: real fetch-backed adapter — calls
+ *     `POST /api/v1/admin/onboard_participant`,
+ *     `POST /api/v1/admin/aggregator/upsert`, and
+ *     `POST /api/v1/network/item/fetch_local`.
  *   - InMemory: deterministic Map-backed impl for unit tests.
  *   - Fake: in-memory + `seed()` helper for cross-package consumer tests.
  */
 export abstract class SignalStackWriterBase {
   /**
-   * Push one onboard event to signalstack.
+   * Onboard one participant under an aggregator's signalstack organisation.
    *
-   * @param input - User identifier + optional profile + optional aggregator_id.
-   * @returns ok(SignalStackOnboardResult) on 2xx; err(BaseError) on transport
-   *   failure, validation rejection, or any non-2xx response.
+   * Calls `POST /api/v1/admin/onboard_participant` with the per-call
+   * `x-acting-org-id: {input.actingOrgId}` header so signalstack scopes the
+   * write to the calling aggregator. The endpoint creates (or finds) the
+   * user by phone/email and writes the profile row in one round-trip.
+   *
+   * @param input - Flat participant payload + actingOrgId + channel/source.
+   * @returns ok(SignalStackOnboardParticipantResult) on 2xx; err(BaseError)
+   *   on transport failure, validation rejection, or any non-2xx response.
    */
   abstract onboard(
-    input: SignalStackOnboardInput,
-  ): Promise<Result<SignalStackOnboardResult, BaseError>>;
+    input: SignalStackOnboardParticipantInput,
+  ): Promise<Result<SignalStackOnboardParticipantResult, BaseError>>;
 
   /**
    * Read all items signalstack has stored for the given aggregator_id
@@ -165,4 +286,53 @@ export abstract class SignalStackWriterBase {
   abstract listItemsByAggregator(
     query: SignalStackItemQuery,
   ): Promise<Result<SignalStackItemList, BaseError>>;
+
+  /**
+   * Register (or look up) the aggregator's organisation row in signalstack.
+   *
+   * Idempotent on `external_id`: repeated calls with the same input return
+   * the same `org_id` and never create duplicates. Called once at admin
+   * approval, and again as a login-time fallback if the Keycloak attribute
+   * is missing.
+   *
+   * @param input - external_id (our aggregator UUID) + display name + slug.
+   * @returns ok(SignalStackAggregator) on 2xx; err(BaseError) otherwise.
+   */
+  abstract upsertAggregator(
+    input: SignalStackUpsertAggregatorInput,
+  ): Promise<Result<SignalStackAggregator, BaseError>>;
+
+  /**
+   * Fetch the aggregator dashboard rollup + paginated participant list.
+   *
+   * Calls `GET /api/v1/aggregator/dashboard` with the per-call
+   * `x-acting-org-id: {query.actingOrgId}` header. Signalstack caches the
+   * rollup per aggregator and refreshes on the TTL declared in the
+   * response `metadata.ttl_seconds` field; the writer returns whatever
+   * signalstack hands back without further interpretation.
+   *
+   * @param query - actingOrgId + optional page/limit/status/domain.
+   * @returns ok(SignalStackDashboardPage) on 2xx; err(BaseError) on
+   *   transport failure, validation rejection, or non-2xx.
+   */
+  abstract fetchDashboard(
+    query: SignalStackDashboardQuery,
+  ): Promise<Result<SignalStackDashboardPage, BaseError>>;
+
+  /**
+   * Export the aggregator dashboard as a CSV file.
+   *
+   * Calls `GET /api/v1/aggregator/dashboard/export` with the per-call
+   * `x-acting-org-id: {query.actingOrgId}` and `accept: text/csv` so
+   * signalstack returns the raw CSV body. The writer hands the body
+   * back as-is — the route streams it to the browser with a
+   * `Content-Disposition: attachment` header.
+   *
+   * @param query - actingOrgId + optional status/domain filter.
+   * @returns ok(SignalStackDashboardExport) on 2xx; err(BaseError) on
+   *   transport failure, validation rejection, or non-2xx.
+   */
+  abstract exportDashboardCsv(
+    query: SignalStackDashboardExportQuery,
+  ): Promise<Result<SignalStackDashboardExport, BaseError>>;
 }

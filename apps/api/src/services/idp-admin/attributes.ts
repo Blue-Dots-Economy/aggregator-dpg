@@ -10,12 +10,16 @@
  */
 
 /**
- * Keycloak carries four attributes:
+ * Keycloak carries five attributes:
  *
- *   - `aggregator_id`   — reverse pointer to Postgres
- *   - `aggregator_type` — `seeker` | `provider`, drives single-type enforcement
- *   - `phoneNumber`     — read by the OTP login authenticator
- *   - `decision_made`   — gates login at the auth middleware
+ *   - `aggregator_id`      — reverse pointer to Postgres
+ *   - `aggregator_type`    — `seeker` | `provider`, drives single-type enforcement
+ *   - `phoneNumber`        — read by the OTP login authenticator
+ *   - `decision_made`      — gates login at the auth middleware
+ *   - `signalstack_org_id` — signalstack organisation id written after the
+ *                            admin-approval upsert; surfaced as an access-
+ *                            token claim so route handlers can scope reads
+ *                            against signalstack without an extra round-trip
  *
  * Everything else (org_slug, name, contact details, decision metadata,
  * rejection reason, etc.) lives in Postgres. The deprecated constants below
@@ -35,6 +39,12 @@ export const KC_ATTR = {
   PHONE_NUMBER: 'phoneNumber',
   /** `pending` / `approved` / `rejected` — the login gate. */
   DECISION_MADE: 'decision_made',
+  /**
+   * Signalstack organisation id assigned by the `POST /admin/aggregator/upsert`
+   * call. Written by the aggregator-approval route after the admin approves,
+   * and backfilled by the login-time fallback when missing.
+   */
+  SIGNALSTACK_ORG_ID: 'signalstack_org_id',
 
   // ─── Deprecated (do not write from new code) ────────────────────────────
   /** @deprecated Slug lives in Postgres (`aggregators.org_slug`). */

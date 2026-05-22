@@ -59,6 +59,7 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
       updatedBy: input.updatedBy,
       createdAt: now,
       updatedAt: now,
+      signalstackOrgId: null,
     };
     this.indexInsert(row);
     return { ok: true, value: row };
@@ -144,6 +145,23 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
     updatedBy: string,
   ): Promise<StoreResult<Aggregator>> {
     return this.update(id, { status, updatedBy });
+  }
+
+  async updateSignalstackOrgId(
+    id: string,
+    signalstackOrgId: string,
+    updatedBy: string,
+  ): Promise<StoreResult<Aggregator>> {
+    const existing = this.byId.get(id);
+    if (!existing) return errResult('NOT_FOUND', id);
+    const next: Aggregator = {
+      ...existing,
+      signalstackOrgId,
+      updatedBy,
+      updatedAt: new Date(),
+    };
+    this.byId.set(id, next);
+    return { ok: true, value: next };
   }
 
   async deleteById(id: string): Promise<StoreResult<void>> {

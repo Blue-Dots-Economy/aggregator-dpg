@@ -16,10 +16,16 @@ import type { Result } from '@aggregator-dpg/shared-primitives/result';
 
 import {
   SignalStackWriterBase,
+  type SignalStackAggregator,
+  type SignalStackDashboardExport,
+  type SignalStackDashboardExportQuery,
+  type SignalStackDashboardPage,
+  type SignalStackDashboardQuery,
   type SignalStackItemList,
   type SignalStackItemQuery,
-  type SignalStackOnboardInput,
-  type SignalStackOnboardResult,
+  type SignalStackOnboardParticipantInput,
+  type SignalStackOnboardParticipantResult,
+  type SignalStackUpsertAggregatorInput,
 } from './interface.js';
 
 export interface HttpSignalStackWriterConfig {
@@ -27,6 +33,13 @@ export interface HttpSignalStackWriterConfig {
   baseUrl: string;
   /** Admin api-key issued by signalstack via better-auth. Sent as `x-api-key`. */
   apiKey: string;
+  /**
+   * Platform-wide signalstack organisation id under which admin upserts
+   * are performed. Sent as `x-acting-org-id` on the
+   * `POST /api/v1/admin/aggregator/upsert` call. Required for that call;
+   * other endpoints ignore it.
+   */
+  actingOrgId?: string;
   /** Optional override; defaults to global `fetch`. Lets tests inject a stub. */
   fetchImpl?: typeof fetch;
   /** Optional request timeout in ms; off by default. */
@@ -37,6 +50,12 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
   private readonly baseUrl: string;
   private readonly endpoint: string;
   private readonly headers: Record<string, string>;
+  /**
+   * Signalstack organisation id sent as `x-acting-org-id` on the aggregator
+   * upsert call. `undefined` when not configured — the upsert method then
+   * returns `SIGNALSTACK_CONFIG_MISSING` so the caller can soft-fail.
+   */
+  private readonly actingOrgId: string | undefined;
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number | undefined;
 
@@ -49,20 +68,44 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       throw new Error('HttpSignalStackWriter requires apiKey');
     }
     this.baseUrl = config.baseUrl.replace(/\/+$/, '');
-    this.endpoint = `${this.baseUrl}/api/v1/admin/onboard`;
+    this.endpoint = `${this.baseUrl}/api/v1/admin/onboard_participant`;
     this.headers = {
       'content-type': 'application/json',
       'x-api-key': config.apiKey,
     };
+    this.actingOrgId = config.actingOrgId;
     this.fetchImpl = config.fetchImpl ?? fetch;
     this.timeoutMs = config.timeoutMs;
   }
 
   override async onboard(
-    input: SignalStackOnboardInput,
-  ): Promise<Result<SignalStackOnboardResult, BaseError>> {
+    input: SignalStackOnboardParticipantInput,
+  ): Promise<Result<SignalStackOnboardParticipantResult, BaseError>> {
     const guardErr = this.guardInput(input);
     if (guardErr) return err(guardErr);
+
+    const body: Record<string, unknown> = {
+      name: input.name,
+      terms_accepted: input.terms_accepted,
+      privacy_accepted: input.privacy_accepted,
+      channel: input.channel,
+      source_id: input.source_id,
+      network: input.network,
+      domain: input.domain,
+      item_type: input.item_type,
+      profile: input.profile,
+    };
+    // Signalstack's user schema treats email / phoneNumber as `.optional()`
+    // (not `.nullable()`), so omit the keys entirely when we have no value
+    // rather than passing null — a literal null trips Zod's `expected:
+    // string` check and the whole push fails 400.
+    if (input.phoneNumber) body.phone_number = input.phoneNumber;
+    if (input.email) body.email = input.email;
+
+    const headers = {
+      ...this.headers,
+      'x-acting-org-id': input.actingOrgId,
+    };
 
     const controller = this.timeoutMs ? new AbortController() : undefined;
     const timer = controller ? setTimeout(() => controller.abort(), this.timeoutMs) : undefined;
@@ -70,8 +113,8 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
     try {
       const res = await this.fetchImpl(this.endpoint, {
         method: 'POST',
-        headers: this.headers,
-        body: JSON.stringify(input),
+        headers,
+        body: JSON.stringify(body),
         ...(controller ? { signal: controller.signal } : {}),
       });
 
@@ -93,8 +136,13 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
         );
       }
 
-      const payload = (await res.json()) as SignalStackOnboardResult;
-      if (!payload || typeof payload !== 'object' || !payload.user) {
+      const payload = (await res.json()) as SignalStackOnboardParticipantResult;
+      if (
+        !payload ||
+        typeof payload !== 'object' ||
+        typeof payload.user_id !== 'string' ||
+        typeof payload.profile_item_id !== 'string'
+      ) {
         return err(
           new UpstreamError('signalstack onboard returned unexpected payload', {
             code: 'SIGNALSTACK_BAD_RESPONSE',
@@ -198,25 +246,329 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
     }
   }
 
-  private guardInput(input: SignalStackOnboardInput): BaseError | null {
-    if (!input?.user?.name) {
-      return new UpstreamError('user.name is required', {
-        code: 'SIGNALSTACK_INPUT_INVALID',
-      });
-    }
-    const hasEmail = Boolean(input.user.email);
-    const hasPhone = Boolean(input.user.phoneNumber);
-    if (!hasEmail && !hasPhone) {
-      return new UpstreamError('either user.email or user.phoneNumber is required', {
-        code: 'SIGNALSTACK_INPUT_INVALID',
-      });
-    }
-    if (input.profile) {
-      if (!input.profile.item_network || !input.profile.item_domain || !input.profile.item_type) {
-        return new UpstreamError('profile requires item_network, item_domain, and item_type', {
+  /**
+   * Calls `POST {baseUrl}/api/v1/admin/aggregator/upsert` with the platform
+   * admin api-key and the configured `x-acting-org-id` header. The remote
+   * endpoint is idempotent on `external_id` (our Postgres aggregator UUID),
+   * so the same input may be re-fired safely from a login-time fallback.
+   *
+   * Non-2xx responses, transport failures, and unexpected payload shapes
+   * are mapped to `UpstreamError` — no exception ever leaves the method.
+   *
+   * @param input - external_id (our aggregator UUID) + display name + slug
+   *   + optional metadata bag forwarded verbatim to signalstack.
+   * @returns ok(SignalStackAggregator) on 2xx with a non-empty `org_id`;
+   *   err(BaseError) with a `SIGNALSTACK_*` code on every failure path.
+   */
+  override async upsertAggregator(
+    input: SignalStackUpsertAggregatorInput,
+  ): Promise<Result<SignalStackAggregator, BaseError>> {
+    if (!input?.external_id || !input?.name || !input?.slug) {
+      return err(
+        new UpstreamError('external_id, name, and slug are required', {
           code: 'SIGNALSTACK_INPUT_INVALID',
-        });
+        }),
+      );
+    }
+    if (!this.actingOrgId) {
+      return err(
+        new UpstreamError('actingOrgId is required for aggregator upsert', {
+          code: 'SIGNALSTACK_CONFIG_MISSING',
+        }),
+      );
+    }
+
+    const url = `${this.baseUrl}/api/v1/admin/aggregator/upsert`;
+    const body: Record<string, unknown> = {
+      external_id: input.external_id,
+      name: input.name,
+      slug: input.slug,
+    };
+    if (input.metadata) body.metadata = input.metadata;
+
+    const headers = {
+      ...this.headers,
+      'x-acting-org-id': this.actingOrgId,
+    };
+
+    const controller = this.timeoutMs ? new AbortController() : undefined;
+    const timer = controller ? setTimeout(() => controller.abort(), this.timeoutMs) : undefined;
+
+    try {
+      const res = await this.fetchImpl(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+        ...(controller ? { signal: controller.signal } : {}),
+      });
+
+      if (!res.ok) {
+        const bodyText = await safeReadText(res);
+        const upstreamMsg = extractUpstreamMessage(bodyText);
+        const message = upstreamMsg
+          ? `signalstack aggregator upsert returned ${res.status}: ${upstreamMsg}`
+          : `signalstack aggregator upsert returned ${res.status}`;
+        return err(
+          new UpstreamError(message, {
+            code: this.codeForStatus(res.status),
+            details: { status: res.status, body: bodyText },
+          }),
+        );
       }
+
+      const payload = (await res.json()) as SignalStackAggregator;
+      if (
+        !payload ||
+        typeof payload !== 'object' ||
+        typeof payload.org_id !== 'string' ||
+        payload.org_id.length === 0
+      ) {
+        return err(
+          new UpstreamError('signalstack aggregator upsert returned unexpected payload', {
+            code: 'SIGNALSTACK_BAD_RESPONSE',
+            details: { payload },
+          }),
+        );
+      }
+      return ok(payload);
+    } catch (e) {
+      const cause = e as Error;
+      const aborted = cause.name === 'AbortError';
+      return err(
+        new UpstreamError(
+          aborted
+            ? `signalstack aggregator upsert timed out after ${this.timeoutMs}ms`
+            : `signalstack aggregator upsert transport failure: ${cause.message}`,
+          {
+            cause,
+            code: aborted ? 'SIGNALSTACK_TIMEOUT' : 'SIGNALSTACK_TRANSPORT_FAILED',
+          },
+        ),
+      );
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  /**
+   * Fetches the aggregator dashboard payload from signalstack.
+   *
+   * Builds a query string from `page`, `limit`, and `status` only — the
+   * `domain` field is reserved for the eventual provider rollout and is
+   * intentionally NOT forwarded today because signalstack's dashboard
+   * endpoint is seeker-only at present. When upstream gains domain
+   * support, swap the predicate that gates the `domain` append below.
+   *
+   * @param query - actingOrgId + optional pagination/status/domain.
+   * @returns ok(SignalStackDashboardPage) on 2xx; err(BaseError) otherwise.
+   */
+  override async fetchDashboard(
+    query: SignalStackDashboardQuery,
+  ): Promise<Result<SignalStackDashboardPage, BaseError>> {
+    if (!query?.actingOrgId) {
+      return err(
+        new UpstreamError('actingOrgId is required for dashboard fetch', {
+          code: 'SIGNALSTACK_INPUT_INVALID',
+        }),
+      );
+    }
+
+    const params = new URLSearchParams();
+    if (query.page !== undefined) params.set('page', String(query.page));
+    if (query.limit !== undefined) params.set('limit', String(query.limit));
+    if (query.status) params.set('status', query.status);
+    // domain intentionally NOT forwarded — see method docblock.
+    const qs = params.toString();
+    const url = `${this.baseUrl}/api/v1/aggregator/dashboard${qs ? `?${qs}` : ''}`;
+
+    const headers = {
+      ...this.headers,
+      'x-acting-org-id': query.actingOrgId,
+    };
+
+    const controller = this.timeoutMs ? new AbortController() : undefined;
+    const timer = controller ? setTimeout(() => controller.abort(), this.timeoutMs) : undefined;
+
+    try {
+      const res = await this.fetchImpl(url, {
+        method: 'GET',
+        headers,
+        ...(controller ? { signal: controller.signal } : {}),
+      });
+
+      if (!res.ok) {
+        const bodyText = await safeReadText(res);
+        const upstreamMsg = extractUpstreamMessage(bodyText);
+        const message = upstreamMsg
+          ? `signalstack dashboard returned ${res.status}: ${upstreamMsg}`
+          : `signalstack dashboard returned ${res.status}`;
+        return err(
+          new UpstreamError(message, {
+            code: this.codeForStatus(res.status),
+            details: { status: res.status, body: bodyText },
+          }),
+        );
+      }
+
+      const payload = (await res.json()) as SignalStackDashboardPage;
+      if (
+        !payload ||
+        typeof payload !== 'object' ||
+        !payload.rollup ||
+        !Array.isArray(payload.participants) ||
+        !payload.metadata
+      ) {
+        return err(
+          new UpstreamError('signalstack dashboard returned unexpected payload', {
+            code: 'SIGNALSTACK_BAD_RESPONSE',
+            details: { payload },
+          }),
+        );
+      }
+      return ok(payload);
+    } catch (e) {
+      const cause = e as Error;
+      const aborted = cause.name === 'AbortError';
+      return err(
+        new UpstreamError(
+          aborted
+            ? `signalstack dashboard timed out after ${this.timeoutMs}ms`
+            : `signalstack dashboard transport failure: ${cause.message}`,
+          {
+            cause,
+            code: aborted ? 'SIGNALSTACK_TIMEOUT' : 'SIGNALSTACK_TRANSPORT_FAILED',
+          },
+        ),
+      );
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  /**
+   * Downloads the aggregator dashboard as a CSV file from signalstack.
+   *
+   * Forwards `status` as the only query parameter today (signalstack's
+   * export endpoint accepts no others); `domain` is reserved for the
+   * provider rollout and intentionally NOT forwarded. The
+   * `accept: text/csv` header tells signalstack to return the CSV body
+   * directly — the writer hands the raw string back and the route
+   * streams it as `text/csv` with a `Content-Disposition` attachment
+   * header.
+   *
+   * The default filename embeds the status filter and current date in
+   * UTC; the API route may override.
+   *
+   * @param query - actingOrgId + optional status/domain.
+   * @returns ok(SignalStackDashboardExport) on 2xx; err(BaseError) on
+   *   transport failure, validation rejection, or non-2xx.
+   */
+  override async exportDashboardCsv(
+    query: SignalStackDashboardExportQuery,
+  ): Promise<Result<SignalStackDashboardExport, BaseError>> {
+    if (!query?.actingOrgId) {
+      return err(
+        new UpstreamError('actingOrgId is required for dashboard export', {
+          code: 'SIGNALSTACK_INPUT_INVALID',
+        }),
+      );
+    }
+
+    const params = new URLSearchParams();
+    if (query.status) params.set('status', query.status);
+    const qs = params.toString();
+    const url = `${this.baseUrl}/api/v1/aggregator/dashboard/export${qs ? `?${qs}` : ''}`;
+
+    const headers = {
+      ...this.headers,
+      'x-acting-org-id': query.actingOrgId,
+      accept: 'text/csv',
+    };
+
+    const controller = this.timeoutMs ? new AbortController() : undefined;
+    const timer = controller ? setTimeout(() => controller.abort(), this.timeoutMs) : undefined;
+
+    try {
+      const res = await this.fetchImpl(url, {
+        method: 'GET',
+        headers,
+        ...(controller ? { signal: controller.signal } : {}),
+      });
+
+      if (!res.ok) {
+        const bodyText = await safeReadText(res);
+        const upstreamMsg = extractUpstreamMessage(bodyText);
+        const message = upstreamMsg
+          ? `signalstack dashboard export returned ${res.status}: ${upstreamMsg}`
+          : `signalstack dashboard export returned ${res.status}`;
+        return err(
+          new UpstreamError(message, {
+            code: this.codeForStatus(res.status),
+            details: { status: res.status, body: bodyText },
+          }),
+        );
+      }
+
+      const csv = await safeReadText(res);
+      if (!csv) {
+        return err(
+          new UpstreamError('signalstack dashboard export returned empty body', {
+            code: 'SIGNALSTACK_BAD_RESPONSE',
+          }),
+        );
+      }
+      return ok({ csv, filename: buildDefaultExportFilename(query.status) });
+    } catch (e) {
+      const cause = e as Error;
+      const aborted = cause.name === 'AbortError';
+      return err(
+        new UpstreamError(
+          aborted
+            ? `signalstack dashboard export timed out after ${this.timeoutMs}ms`
+            : `signalstack dashboard export transport failure: ${cause.message}`,
+          {
+            cause,
+            code: aborted ? 'SIGNALSTACK_TIMEOUT' : 'SIGNALSTACK_TRANSPORT_FAILED',
+          },
+        ),
+      );
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  private guardInput(input: SignalStackOnboardParticipantInput): BaseError | null {
+    if (!input?.actingOrgId) {
+      return new UpstreamError('actingOrgId is required', {
+        code: 'SIGNALSTACK_INPUT_INVALID',
+      });
+    }
+    if (!input.name) {
+      return new UpstreamError('name is required', {
+        code: 'SIGNALSTACK_INPUT_INVALID',
+      });
+    }
+    const hasEmail = Boolean(input.email);
+    const hasPhone = Boolean(input.phoneNumber);
+    if (!hasEmail && !hasPhone) {
+      return new UpstreamError('either email or phoneNumber is required', {
+        code: 'SIGNALSTACK_INPUT_INVALID',
+      });
+    }
+    if (!input.network || !input.domain || !input.item_type) {
+      return new UpstreamError('network, domain, and item_type are required', {
+        code: 'SIGNALSTACK_INPUT_INVALID',
+      });
+    }
+    if (!input.source_id || !input.channel) {
+      return new UpstreamError('channel and source_id are required', {
+        code: 'SIGNALSTACK_INPUT_INVALID',
+      });
+    }
+    if (!input.profile || typeof input.profile !== 'object') {
+      return new UpstreamError('profile is required', {
+        code: 'SIGNALSTACK_INPUT_INVALID',
+      });
     }
     return null;
   }
@@ -284,4 +636,19 @@ function extractUpstreamMessage(bodyText: string): string | null {
 
 function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+/**
+ * Default filename for the dashboard CSV export.
+ *
+ * Embeds the status filter (or `all` when omitted) plus the current
+ * UTC date so concurrent exports don't collide in the browser's
+ * downloads folder. Sanitises the status value so a hostile filter
+ * string can't inject path separators or quote chars into the
+ * `Content-Disposition` header.
+ */
+function buildDefaultExportFilename(status: string | undefined): string {
+  const sanitised = (status ?? 'all').replace(/[^a-z0-9_]/gi, '_').slice(0, 32);
+  const date = new Date().toISOString().slice(0, 10);
+  return `aggregator-dashboard-${sanitised}-${date}.csv`;
 }

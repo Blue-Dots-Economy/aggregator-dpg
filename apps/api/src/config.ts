@@ -112,6 +112,13 @@ const ConfigSchema = z.object({
   SIGNALSTACK_BASE_URL: z.string().url().optional(),
   /** Admin api-key for signalstack onboard. Required when SIGNALSTACK_BASE_URL is set. */
   SIGNALSTACK_ADMIN_KEY: z.string().optional(),
+  /**
+   * Platform-wide signalstack organisation id under which admin aggregator
+   * upserts are performed (sent as `x-acting-org-id`). Required when
+   * SIGNALSTACK_BASE_URL is set so the aggregator-approval flow can register
+   * each newly-approved aggregator as a signalstack org.
+   */
+  SIGNALSTACK_ACTING_ORG_ID: z.string().optional(),
   /** item_network sent on every onboard call. */
   SIGNALSTACK_ITEM_NETWORK: z.string().default('blue_dot'),
   /** Per-request timeout for signalstack onboard calls. */

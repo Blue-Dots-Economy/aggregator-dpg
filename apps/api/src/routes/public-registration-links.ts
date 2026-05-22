@@ -22,6 +22,7 @@ import { PostgresParticipantsWriter } from '@aggregator-dpg/participants-writer/
 import type { ParticipantsWriterBase } from '@aggregator-dpg/participants-writer/interface';
 import { getRegistrationLinksStore } from '../services/registration-links-store/index.js';
 import type { RegistrationLink } from '../services/registration-links-store/index.js';
+import { getAggregatorStore } from '../services/aggregator-store/index.js';
 import { getSchemaLoader } from '../services/schema-loader/index.js';
 import { normalisePhone } from '../services/phone.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
@@ -159,6 +160,33 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
     const emailNormalised = emailRaw ? emailRaw.trim().toLowerCase() : null;
     const participantId = phoneNormalised ?? randomUUID();
 
+    // 2a. Resolve the aggregator's signalstack org id BEFORE opening the
+    // transaction. Anonymous submitters carry no token, so the value must
+    // come from `aggregators.signalstack_org_id` (written at approval time
+    // or by the login-time backfill in `requireApproved`). A NULL here means
+    // the aggregator never completed the signalstack handshake — fail fast
+    // with 503 so the participant retries rather than landing a half-pushed
+    // row.
+    const ss = getSignalStackWriter();
+    let signalstackOrgId: string | null = null;
+    if (ss) {
+      const aggLookup = await getAggregatorStore().findById(link.aggregatorId);
+      if (!aggLookup.ok) {
+        throw httpError('DB_UNAVAILABLE', {
+          fields: { sub_operation: 'aggregatorStore.findById' },
+        });
+      }
+      if (!aggLookup.value) {
+        throw httpError('NOT_FOUND', { detail: 'Aggregator missing for live link.' });
+      }
+      signalstackOrgId = aggLookup.value.signalstackOrgId;
+      if (!signalstackOrgId) {
+        throw httpError('SIGNALSTACK_ORG_NOT_REGISTERED', {
+          fields: { aggregator_id: link.aggregatorId, link_id: link.id },
+        });
+      }
+    }
+
     // 3 + 4. participant UPSERT (via shared writer), link_submission INSERT,
     // AND signalstack push must all commit atomically. A signalstack failure
     // rolls back the local rows so the caller sees a single, honest outcome:
@@ -211,8 +239,7 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       // (aggregator_id, type, participant_id); signalstack is the global
       // identity store and must also see the row, otherwise the dashboard
       // and downstream consumers are out of sync.
-      const ss = getSignalStackWriter();
-      if (ss) {
+      if (ss && signalstackOrgId) {
         const nameSourceKey = link.domain === 'provider' ? 'jobProviderName' : 'name';
         const name =
           typeof body[nameSourceKey] === 'string'
@@ -224,22 +251,23 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
             : phoneNormalised;
         const pushPhone = phoneNormalised ?? phoneFromBody;
         const result = await ss.onboard({
-          // Signalstack's user schema treats email / phoneNumber as `.optional()`
-          // (not `.nullable()`), so we omit the keys entirely when we have no
-          // value rather than passing null — a literal null trips Zod's
-          // `expected: string` check and the whole push fails 400.
-          user: {
-            name,
-            ...(pushPhone ? { phoneNumber: pushPhone } : {}),
-            ...(emailNormalised ? { email: emailNormalised } : {}),
-          },
-          profile: {
-            item_network: config.SIGNALSTACK_ITEM_NETWORK,
-            item_domain: link.domain,
-            item_type: link.domain === 'provider' ? 'job_posting_1.0' : 'profile_1.0',
-            item_state: buildSignalStackItemState(link.domain, body, pushPhone),
-          },
-          aggregator_id: link.aggregatorId,
+          actingOrgId: signalstackOrgId,
+          name,
+          ...(pushPhone ? { phoneNumber: pushPhone } : {}),
+          ...(emailNormalised ? { email: emailNormalised } : {}),
+          // Aggregator-level consent captured at registration time is the
+          // legal basis for the participant push; signalstack still expects
+          // these flags per-row, so we hardcode `true` here. Surface as a
+          // checkbox on the public form when signalstack ever differentiates
+          // aggregator-level vs participant-level consent.
+          terms_accepted: true,
+          privacy_accepted: true,
+          channel: 'link',
+          source_id: link.id,
+          network: config.SIGNALSTACK_ITEM_NETWORK,
+          domain: link.domain,
+          item_type: link.domain === 'provider' ? 'job_posting_1.0' : 'profile_1.0',
+          profile: buildSignalStackItemState(link.domain, body, pushPhone),
         });
 
         if (!result.success) {
@@ -261,8 +289,9 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
         log.info({
           status: 'success',
           sub: 'signalstack.push',
-          user_id: result.value.user.id,
-          profile_count: result.value.profiles.length,
+          user_id: result.value.user_id,
+          profile_item_id: result.value.profile_item_id,
+          onboarded_at: result.value.onboarded_at,
           link_id: link.id,
           participant_id: participantRowId,
         });
