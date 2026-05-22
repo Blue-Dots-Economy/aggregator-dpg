@@ -321,6 +321,10 @@ services:
       # ── Outward push to signalstack (onboard) and read (blue-dots) ───
       SIGNALSTACK_BASE_URL: ${SIGNALSTACK_BASE_URL:-}
       SIGNALSTACK_ADMIN_KEY: ${SIGNALSTACK_ADMIN_KEY:-}
+      # Platform-wide acting-org id sent as `x-acting-org-id` on the admin
+      # aggregator upsert. Required for the approval flow to register each
+      # newly-approved aggregator as a signalstack org.
+      SIGNALSTACK_ACTING_ORG_ID: ${SIGNALSTACK_ACTING_ORG_ID:-}
       SIGNALSTACK_ITEM_NETWORK: ${SIGNALSTACK_ITEM_NETWORK:-blue_dot}
       SIGNALSTACK_TIMEOUT_MS: ${SIGNALSTACK_TIMEOUT_MS:-10000}
       # Dev-only: accept pebble cert on host-gateway calls to Keycloak.

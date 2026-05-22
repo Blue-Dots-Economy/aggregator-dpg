@@ -5,6 +5,8 @@ import { usePathname } from 'next/navigation';
 import { I, type IconName } from '../../icons';
 import { BlueDotsLogo } from '../ui/BlueDotsLogo';
 import { useAuth } from '../../lib/auth-context';
+import { useDashboard } from '../../hooks/useBlueDots';
+import { useProfileRaw } from '../../hooks/useProfile';
 import { cn } from '../../lib/cn';
 
 interface NavItem {
@@ -14,8 +16,8 @@ interface NavItem {
   badge?: number;
 }
 
-const NAV: NavItem[] = [
-  { to: '/blue-dots', label: 'My Blue Dots', icon: 'users', badge: 77 },
+const STATIC_NAV: NavItem[] = [
+  { to: '/blue-dots', label: 'My Blue Dots', icon: 'users' },
   { to: '/onboarding', label: 'Onboarding', icon: 'upload' },
   { to: '/profile', label: 'Profile', icon: 'user' },
 ];
@@ -103,6 +105,18 @@ export function Sidebar() {
   const pathname = usePathname();
   const { user, signOut } = useAuth();
   const orgInitials = (user?.org ?? 'TR').slice(0, 2).toUpperCase();
+  // My Blue Dots badge mirrors the dashboard rollup so the sidebar count
+  // never drifts from what the /blue-dots page renders. Domain follows
+  // the aggregator's registered focus (seeker vs provider); falls back
+  // to seeker while the profile is still resolving.
+  const profileType = useProfileRaw().data?.type;
+  const { data: dashboard } = useDashboard({
+    domain: profileType === 'provider' ? 'provider' : 'seeker',
+  });
+  const blueDotsBadge = dashboard?.rollup.participants_total;
+  const nav: NavItem[] = STATIC_NAV.map((n) =>
+    n.to === '/blue-dots' && blueDotsBadge !== undefined ? { ...n, badge: blueDotsBadge } : n,
+  );
 
   return (
     <aside className="w-[252px] shrink-0 bg-white border-r border-[var(--bd-border)] flex flex-col h-screen sticky top-0">
@@ -123,7 +137,7 @@ export function Sidebar() {
           Overview
         </div>
         <nav className="flex flex-col gap-0.5">
-          {NAV.map((n) => {
+          {nav.map((n) => {
             const Ic = I[n.icon];
             const isActive = pathname === n.to || pathname?.startsWith(`${n.to}/`);
             return (
