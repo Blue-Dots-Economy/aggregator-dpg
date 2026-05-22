@@ -122,6 +122,10 @@ resource
   eid                  "API" | "AUDIT"            ← discriminator
   producer             "aggregator-api" | "aggregator-worker" | "aggregator-web"
   producerType         "Aggregator"               (facility class, constant)
+  service.name         same as producer           (OTel semconv alias)
+  aggregator.block     same as producer           (filter alias for Grafana)
+  aggregator.env       "local" | "staging" | "prod"
+  service.version      semver from package.json   stamped at SDK init
 
 scope
   name                 "aggregator_api" | "aggregator_worker" | "aggregator_web"
@@ -372,14 +376,44 @@ deactivate                                                            (activate 
 
 ### Propagation
 
-| Hop                        | Mechanism                                                           |
-| -------------------------- | ------------------------------------------------------------------- |
-| browser → web (Next.js)    | W3C `traceparent` header (auto)                                     |
-| web BFF → api              | `traceparent` forwarded by `callApi` helper                         |
-| api → worker (BullMQ)      | `propagation.inject(ctx, jobPayload)`; worker `propagation.extract` |
-| api / worker → signalstack | fetch auto-instrumentation injects `traceparent`                    |
-| api / worker → KC          | fetch auto-instrumentation injects `traceparent`                    |
-| api / worker → postgres    | pg auto-instrumentation attaches spans (driver-level)               |
+Global propagator is a **W3C composite**:
+
+```ts
+new CompositePropagator({
+  propagators: [
+    new W3CTraceContextPropagator(), // traceparent / tracestate
+    new W3CBaggagePropagator(), // baggage entries
+  ],
+});
+```
+
+`traceparent` carries trace identity. `baggage` carries cross-cutting context
+keys so workers don't re-derive them from job payloads.
+
+**Baggage keys carried across hops:**
+
+| Key              | Set by          | Used by                          |
+| ---------------- | --------------- | -------------------------------- |
+| `aggregator.id`  | api (auth mw)   | worker, signalstack writer logs  |
+| `actor.kind`     | api (auth mw)   | worker (decides retry policy)    |
+| `upload.id`      | api (bulk POST) | worker.bulk_row, worker.finalise |
+| `link.id`        | api (link POST) | worker (public submission flow)  |
+| `request.id`     | api (Fastify)   | every downstream span            |
+| `deployment.env` | SDK init        | all spans / logs / metrics       |
+
+**Per-hop mechanism:**
+
+| Hop                        | Mechanism                                                                                    |
+| -------------------------- | -------------------------------------------------------------------------------------------- |
+| browser → web (Next.js)    | W3C `traceparent` + `baggage` headers (auto via fetch instr)                                 |
+| web BFF → api              | `traceparent` + `baggage` forwarded by `callApi` helper                                      |
+| api → worker (BullMQ)      | `propagation.inject(ctx, payload._otel)`; worker `propagation.extract` (carries baggage too) |
+| api / worker → signalstack | fetch auto-instr injects `traceparent` + `baggage`                                           |
+| api / worker → KC          | fetch auto-instr injects `traceparent` + `baggage`                                           |
+| api / worker → postgres    | pg auto-instr attaches spans; baggage NOT propagated to db                                   |
+
+Baggage is plaintext over the wire. Never put PII or secrets in baggage —
+only stable IDs and enum codes.
 
 ### Span naming
 
@@ -397,14 +431,30 @@ qr.<op>, s3.<op>, pg.<query>     (mix of manual + auto)
 
 ### Required span attributes (business spans)
 
-```
-aggregator_id, request_id, service.name, deployment.env
+Free from Resource (set once at SDK init, applied to every span):
 
-Context-specific (when applicable):
-  upload_id, link_id, row_index, participant_id, participant_type
+```
+service.name, service.version, aggregator.block, aggregator.env
+```
+
+Free from Baggage (active throughout request):
+
+```
+aggregator.id, actor.kind, request.id, upload.id?, link.id?
+```
+
+Manual on business spans (context-specific):
+
+```
+row.index, participant.id, participant.type, signalstack.user_id
+```
 
 On failure:
-  error.code, error.message, span.status = ERROR
+
+```
+span.recordException(err)        ← captures stack + error.type
+span.setStatus({ code: ERROR })
+attrs: error.code, error.message  ← upstream code + sanitised text
 ```
 
 ### Example — one bulk upload trace, all signals together
@@ -455,50 +505,110 @@ Glyphs:
 
 ---
 
-## 7. Metrics derivable from API + AUDIT events
+## 7. Metrics
 
-Loki queries return counts directly; no separate metric pipeline needed in
-phase 0. Collector's `attributes` processor promotes these `edata` fields to
-Loki labels (underscored — Loki labels can't carry dots): `edata.name` →
-`event_name`, `edata.attributes.aggregator.id` → `aggregator_id`, etc.
+Metrics are a first-class signal from phase 0 — emitted via the OTel Meter
+API, shipped over OTLP, exposed by the collector's Prometheus exporter, and
+scraped by Prometheus. Avoids the fragility of `count_over_time` over Loki
+logs (full-index scan, slow at scale).
+
+### Instrument inventory
+
+All instruments namespaced under `aggregator.*`. Labels listed include only
+high-signal, bounded-cardinality keys.
+
+| Instrument                                   | Type      | Unit | Labels                                        | Emitted from                            |
+| -------------------------------------------- | --------- | ---- | --------------------------------------------- | --------------------------------------- |
+| `aggregator.signalstack.onboard.duration_ms` | histogram | ms   | `outcome` (ok\|failed), `source` (bulk\|link) | `worker.signalstack.onboard` span       |
+| `aggregator.signalstack.calls_total`         | counter   | —    | `outcome`, `error_code`, `source`             | end of `worker.signalstack.onboard`     |
+| `aggregator.signalstack.errors_total`        | counter   | —    | `error_code` (upstream), `source`             | `participant.signalstack_failed`        |
+| `aggregator.bulk.upload.duration_ms`         | histogram | ms   | `outcome` (completed\|failed)                 | `bulk_upload.completed`                 |
+| `aggregator.bulk.uploads_total`              | counter   | —    | `outcome`                                     | `bulk_upload.completed`                 |
+| `aggregator.bulk.rows_per_upload`            | histogram | rows | `outcome`                                     | `bulk_upload.completed`                 |
+| `aggregator.bulk.row.duration_ms`            | histogram | ms   | `row.outcome` (passed\|skipped\|failed)       | `worker.bulk_row.process` span          |
+| `aggregator.bulk.rows_total`                 | counter   | —    | `row.outcome`                                 | `bulk_row.processed`                    |
+| `aggregator.link.submissions_total`          | counter   | —    | `participant_type`, `outcome`                 | `link.submission_received` / `…_failed` |
+| `aggregator.aggregator.registrations_total`  | counter   | —    | `org_type`                                    | `aggregator.registered`                 |
+| `aggregator.aggregator.decisions_total`      | counter   | —    | `decision` (approved\|rejected)               | `aggregator.approved` / `.rejected`     |
+| `aggregator.emit.failures_total`             | counter   | —    | `kind` (api\|audit), `reason`                 | observability pkg self-telemetry        |
+
+**Cardinality budget per instrument:**
+
+- `outcome` enum (2-3 values), `source` enum (2), `error_code` upstream-bounded
+  (~20). Multiplicative ceiling stays under 200 series per instrument — safe
+  for Prometheus.
+- `aggregator.id` is **not** a metric label (high cardinality). Filter by
+  aggregator via trace exemplars + Loki, not metrics.
+
+### Wire path
 
 ```
-PromQL-style sketches (over Loki log streams):
+emit helpers (@aggregator-dpg/observability)
+  ├─ create span event + log record  (Tempo + Loki, as today)
+  └─ also call meter.record(...)
+        │
+        ▼
+  OTel SDK MeterProvider (PeriodicExportingMetricReader, 5s flush)
+        │
+        ▼
+  OTLP gRPC :4317 → collector → prometheus exporter :8889
+                                       │
+                                       ▼
+                                  Prometheus :9090 (scrape 15s)
+                                       │
+                                       ▼
+                                  Grafana panels (PromQL)
+```
 
-# How many onboarded today
-count_over_time({event_name="participant.onboarded_to_signalstack"}[1d])
+### PromQL examples (replace Loki sketches)
 
-# Per aggregator over last 7 days
-sum by (aggregator_id) (
-  count_over_time({event_name="participant.onboarded_to_signalstack"}[7d])
+```promql
+# Onboarded today (counter rate over 1d)
+sum(increase(aggregator_signalstack_calls_total{outcome="ok"}[1d]))
+
+# Per-aggregator NOT possible from metrics (cardinality) — use Loki + trace
+# explorer for per-aggregator drill-down. Metrics give the fleet-wide rate.
+
+# SignalStack error rate (5m window)
+sum(rate(aggregator_signalstack_calls_total{outcome="failed"}[5m]))
+  /
+sum(rate(aggregator_signalstack_calls_total[5m]))
+
+# p95 onboard latency
+histogram_quantile(
+  0.95,
+  sum by (le) (rate(aggregator_signalstack_onboard_duration_ms_bucket[5m]))
 )
 
-# Signalstack error rate
-sum(rate({event_name="participant.signalstack_failed"}[5m]))
- /
-sum(rate({event_name=~"participant.onboarded_to_signalstack|participant.signalstack_failed"}[5m]))
+# Top upstream error codes last hour
+topk(5,
+  sum by (error_code) (increase(aggregator_signalstack_errors_total[1h]))
+)
 
 # Bulk uploads completed today
-count_over_time({event_name="bulk_upload.completed"}[1d])
+sum(increase(aggregator_bulk_uploads_total{outcome="completed"}[1d]))
 
-# Rows failing per aggregator in last hour
-sum by (aggregator_id) (
-  count_over_time({event_name="bulk_row.failed"}[1h])
+# Rows-per-upload distribution
+histogram_quantile(0.5,
+  sum by (le) (rate(aggregator_bulk_rows_per_upload_bucket[1d]))
 )
 
-# Link submissions per link
-sum by (link_id) (
-  count_over_time({event_name="link.submission_received"}[24h])
-)
-
-# Pending aggregator registrations (no follow-up decision)
-count_over_time({event_name="aggregator.registered"}[7d])
- -
-count_over_time({event_name=~"aggregator.approved|aggregator.rejected"}[7d])
+# Self-telemetry — emit failures should be ~0
+sum(rate(aggregator_emit_failures_total[5m]))
 ```
 
-If/when count traffic grows, the OTel collector can derive Prometheus metrics
-from the same event stream (`spanmetrics` or `logsdataset` connectors).
+### Per-aggregator views
+
+Metrics drop `aggregator.id` for cardinality reasons. For per-aggregator
+dashboards use **Loki + trace exemplars**:
+
+```
+{event_name="participant.onboarded_to_signalstack",
+ aggregator_id="<uuid>"} | line_format "{{.upload_id}} {{.latency_ms}}"
+```
+
+Or click a metric exemplar in Grafana → jumps to a Tempo trace with all
+aggregator_id attributes intact.
 
 ---
 
@@ -558,21 +668,223 @@ as the event envelope's forbidden list. One place to change.
 
 ## 9. Stack
 
-| Layer              | Phase 0 (local + staging)                                             |
-| ------------------ | --------------------------------------------------------------------- |
-| Instrumentation    | OpenTelemetry SDK (`@opentelemetry/sdk-node`) + auto-instrumentations |
-| Logger             | pino (existing) with OTel context mixin                               |
-| Transport          | OTLP gRPC :4317                                                       |
-| Collector          | `otel/opentelemetry-collector-contrib` as a docker compose service    |
-| Traces             | Tempo (compose)                                                       |
-| Logs + events      | Loki (compose)                                                        |
-| Dashboards         | Grafana (compose), datasources pre-wired                              |
-| Metrics (optional) | Prometheus / Mimir (deferrable — Loki count_over_time covers phase 0) |
+| Layer           | Phase 0 (local + staging)                                             |
+| --------------- | --------------------------------------------------------------------- |
+| Instrumentation | OpenTelemetry SDK (`@opentelemetry/sdk-node`) + auto-instrumentations |
+| Logger          | pino with OTel context mixin (single shared instance)                 |
+| Transport       | OTLP gRPC :4317 (all three signals)                                   |
+| Collector       | `otel/opentelemetry-collector-contrib` (docker compose service)       |
+| Traces backend  | Tempo (compose)                                                       |
+| Metrics backend | Prometheus (compose) — scrapes collector exporter :8889               |
+| Logs backend    | Loki (compose) — receives via collector's `loki` exporter             |
+| Dashboards      | Grafana (compose), datasources pre-wired (Tempo / Prometheus / Loki)  |
+
+### Three-pipeline collector config
+
+```yaml
+receivers:
+  otlp:
+    protocols:
+      grpc: { endpoint: 0.0.0.0:4317 }
+      http: { endpoint: 0.0.0.0:4318 }
+
+processors:
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+  attributes/redact:
+    actions:
+      - key: email
+        action: delete
+      - key: phone
+        action: delete
+      - key: db.statement
+        action: delete
+  attributes/promote:
+    actions:
+      - key: edata.name
+        from_attribute: event.name
+        action: insert
+      - key: edata.attributes.aggregator.id
+        from_attribute: aggregator.id
+        action: insert
+
+exporters:
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls: { insecure: true }
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    namespace: aggregator
+  loki:
+    endpoint: http://loki:3100/loki/api/v1/push
+    default_labels_enabled: { exporter: true, job: true, instance: true, level: true }
+
+service:
+  pipelines:
+    traces: { receivers: [otlp], processors: [attributes/redact, batch], exporters: [otlp/tempo] }
+    metrics: { receivers: [otlp], processors: [batch], exporters: [prometheus] }
+    logs:
+      {
+        receivers: [otlp],
+        processors: [attributes/redact, attributes/promote, batch],
+        exporters: [loki],
+      }
+```
+
+Pipelines are independent. A misconfigured logs exporter doesn't drop metrics.
+Each pipeline scales separately.
+
+### Compose services added in phase 0
+
+| Service          | Image                                         | Ports            | Role                        |
+| ---------------- | --------------------------------------------- | ---------------- | --------------------------- |
+| `otel-collector` | `otel/opentelemetry-collector-contrib:0.96.0` | 4317, 4318, 8889 | OTLP ingest + Prom exporter |
+| `tempo`          | `grafana/tempo:2.4.0`                         | 3200 (internal)  | Trace storage               |
+| `prometheus`     | `prom/prometheus:v2.50.1`                     | 9090 (internal)  | TSDB / PromQL               |
+| `loki`           | `grafana/loki:2.9.4`                          | 3100 (internal)  | Log store                   |
+| `grafana`        | `grafana/grafana:10.3.3`                      | 3000             | Visualisation               |
+
+All on `aggregator_net` bridge. No host ports exposed outside local network
+except Grafana (3000) unless explicitly opted in via compose override.
 
 Phase 1+ swap targets without touching app code by changing the collector's
-exporter config (e.g. Grafana Cloud, Datadog, Honeycomb, AWS X-Ray + CloudWatch).
+exporter config (e.g. Grafana Cloud, Datadog, Honeycomb, AWS X-Ray +
+CloudWatch + Managed Prometheus).
 
-## 10. Glossary
+---
+
+## 10. Implementation phases
+
+```
+┌──────┬────────────────────────────────────────────────────────────────┬────────┐
+│ Phase│ Deliverable                                                    │ Effort │
+├──────┼────────────────────────────────────────────────────────────────┼────────┤
+│  0   │ Shared package @aggregator-dpg/observability                   │  3-4d  │
+│      │  - initTelemetry({ serviceName, config }) — idempotent,        │        │
+│      │    lock-guarded, never raises (see §10.1)                      │        │
+│      │  - getTracer(name), getMeter(name) accessors                   │        │
+│      │  - pino mixin for traceId/spanId/baggage auto-inject           │        │
+│      │  - BullMQ trace+baggage propagation helper                     │        │
+│      │  - emitTransaction(name, payload) + emitAudit(name, payload)   │        │
+│      │  - PII redaction list + mask helpers (single source)           │        │
+│      │  - events.ts: TypeScript enum of locked event names + types    │        │
+│      │  - resetForTesting() — test-only state clear                   │        │
+│      │ Local 3-pipeline stack (tempo + prometheus + loki + grafana    │        │
+│      │ + otel-collector) in docker-compose                            │        │
+├──────┼────────────────────────────────────────────────────────────────┼────────┤
+│  1   │ Wire emits at the 19 event sites locked in §3                  │  3-4d  │
+│      │ Add 7 manual business spans (per §6) on top of auto-instr.     │        │
+│      │ Validate end-to-end: upload a CSV, paste trace_id in Grafana,  │        │
+│      │ see full chain across api → worker → signalstack               │        │
+├──────┼────────────────────────────────────────────────────────────────┼────────┤
+│  2   │ Three starter Grafana dashboards:                              │  2d    │
+│      │  - Onboarding funnel (bulk + link)        ← PromQL + Loki      │        │
+│      │  - Per-aggregator timeline                ← Loki + Tempo links │        │
+│      │  - SignalStack health (error rate, p95)   ← PromQL             │        │
+│      │ Documented in docs/telemetry-runbook.md                        │        │
+├──────┼────────────────────────────────────────────────────────────────┼────────┤
+│  3   │ Staging hookup (collector points at staging stack)             │  1d    │
+│      │ Retention decisions (Loki 7d, Tempo 7d, Prometheus 15d)        │        │
+├──────┼────────────────────────────────────────────────────────────────┼────────┤
+│  4   │ Tail sampling + alert rules + SLOs (separate doc)              │  TBD   │
+│  5   │ External SSE / webhook subscription for API events             │  TBD   │
+│  6   │ Aggregator-facing self-service dashboard                       │  TBD   │
+└──────┴────────────────────────────────────────────────────────────────┴────────┘
+```
+
+### 10.1 `initTelemetry` — idempotency + never-raise contract
+
+The bootstrap function is the only place that touches the OTel SDK globals.
+Contract, modelled on adjacent Sanketika services:
+
+```ts
+// packages/observability/src/init.ts
+import { Mutex } from 'async-mutex';
+
+let _initialised = false;
+const _lock = new Mutex();
+
+export async function initTelemetry(opts: {
+  serviceName: 'aggregator-api' | 'aggregator-worker' | 'aggregator-web';
+  config: TelemetryConfig;
+}): Promise<void> {
+  return _lock.runExclusive(async () => {
+    if (_initialised) return; // idempotent
+
+    try {
+      const resource = buildResource(opts); // §4 resource attrs
+
+      // TracerProvider — required path
+      const tracerProvider = new NodeTracerProvider({
+        resource,
+        sampler: buildSampler(opts.config),
+      });
+      tracerProvider.addSpanProcessor(
+        new BatchSpanProcessor(new OTLPTraceExporter({ url: opts.config.collectorUrl })),
+      );
+      tracerProvider.register({ propagator: buildCompositePropagator() });
+
+      // MeterProvider — required path
+      const meterProvider = new MeterProvider({
+        resource,
+        readers: [
+          new PeriodicExportingMetricReader({
+            exporter: new OTLPMetricExporter({ url: opts.config.collectorUrl }),
+            exportIntervalMillis: opts.config.exportIntervalMs ?? 5000,
+          }),
+        ],
+      });
+      metrics.setGlobalMeterProvider(meterProvider);
+
+      // LoggerProvider — best-effort, never blocks
+      try {
+        const loggerProvider = new LoggerProvider({ resource });
+        loggerProvider.addLogRecordProcessor(
+          new BatchLogRecordProcessor(new OTLPLogExporter({ url: opts.config.collectorUrl })),
+        );
+        logs.setGlobalLoggerProvider(loggerProvider);
+      } catch (e) {
+        process.stderr.write(`[observability] logger setup failed (continuing): ${e}\n`);
+      }
+
+      registerAutoInstrumentations({ tracerProvider, meterProvider });
+
+      _initialised = true;
+    } catch (e) {
+      // CRITICAL — never propagate. Service must still boot.
+      process.stderr.write(`[observability] init failed, SDK in no-op state: ${e}\n`);
+    }
+  });
+}
+
+/** Test-only — clears all global SDK state. Never call in production. */
+export function _resetForTesting(): void {
+  _initialised = false;
+  trace.disable();
+  metrics.disable();
+  logs.disable();
+}
+```
+
+**Iron rules** (mirror `.claude/rules/error-handling.md` for this package):
+
+1. **Idempotent** — second call is a no-op. Hot-reload dev environments and
+   test setup safe.
+2. **Lock-guarded** — concurrent callers serialise on `_lock`. No double SDK
+   registration.
+3. **Never raises** — collector outage, network DNS failure, malformed config
+   → log to stderr, leave SDK in no-op state, return normally. App boots.
+4. **LoggerProvider failures swallowed** — traces+metrics are required; logs
+   are best-effort. A missing Loki must not prevent Tempo+Prometheus from
+   working.
+5. **`_resetForTesting()` is test-only** — production code never imports it.
+   Lint rule enforces in CI.
+
+Same contract applies to `emitTransaction()` and `emitAudit()`: log
+`aggregator.emit.failures_total` counter on internal failure, never throw.
+
+## 11. Glossary
 
 | Term              | Definition                                                                           |
 | ----------------- | ------------------------------------------------------------------------------------ |
