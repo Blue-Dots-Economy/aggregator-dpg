@@ -33,161 +33,118 @@ Async-only OpenTelemetry observability. Three first-class signals — **traces, 
 
 ## 3. Architecture (4 tiers)
 
-┌──────────────────────────────────────────────────────────────────────────────────────┐
-│  LEGEND                                                                              │
-│   🟦  span      📊  metric     📝  log     ⚡  API event     ◆  AUDIT event           │
-│   ── HTTPS ──     ── OTLP gRPC ──     ── trace-context ──     ─ ─ async ─ ─          │
-└──────────────────────────────────────────────────────────────────────────────────────┘
+Four tiers: **Edge → Aggregator → Collection → Backend**. One `trace_id` flows
+end-to-end. All apps emit via shared `@aggregator-dpg/observability` package
+over OTLP gRPC. Collector fans signals into Jaeger / Loki / Prometheus.
 
-╔══════════════════════════════════════════════════════════════════════════════════════╗
-║                            TIER 1 — EDGE / CLIENT                                    ║
-╠══════════════════════════════════════════════════════════════════════════════════════╣
-║                                                                                      ║
-║   ┌──────────┐   ┌──────────┐   ┌──────────────┐   ┌──────────┐   ┌──────────┐       ║
-║   │ Browser  │   │  Admin   │   │ Aggregator   │   │ Partner  │   │  Mobile  │       ║
-║   │  (form)  │   │ console  │   │ CSV upload   │   │ webhooks │   │   SDK    │       ║
-║   └────┬─────┘   └────┬─────┘   └──────┬───────┘   └────┬─────┘   └────┬─────┘       ║
-║        │              │                │                │              │             ║
-║        └──── HTTPS  + W3C `traceparent` header  +  baggage (aggregator.id) ────┐     ║
-║                                                                                │     ║
-╚════════════════════════════════════════════════════════════════════════════════│═════╝
-                                                                                 ▼
-╔══════════════════════════════════════════════════════════════════════════════════════╗
-║                          TIER 2 — AGGREGATOR DPG                                     ║
-║                                                                                      ║
-║  Each block boots via shared package: init_otel(service_name, config)                ║
-║  ┌─────────────────────────────────────────────────────────────────────────────┐    ║
-║  │  @aggregator-dpg/observability                                              │    ║
-║  │   • TracerProvider  (W3C TraceContext + Baggage propagator)                 │    ║
-║  │   • MeterProvider   (PeriodicExportingMetricReader, 5s)                     │    ║
-║  │   • LoggerProvider  (LoggingHandler bridges stdlib/winston → OTLP)          │    ║
-║  │   • emitTransaction(name, payload)   →  ⚡ API event   (event.kind=transaction)   │
-║  │   • emitAudit(name, payload)         →  ◆ AUDIT event (event.kind=audit)    │    ║
-║  │   • PII redact list (single source of truth)                                │    ║
-║  └─────────────────────────────────────────────────────────────────────────────┘    ║
-║                                                                                      ║
-║  ┌──────────────────┐      ┌──────────────────┐      ┌──────────────────┐            ║
-║  │   web            │      │   api            │      │   worker         │            ║
-║  │   Next.js SSR    │ HTTP │   Fastify        │BullMQ│   BullMQ         │            ║
-║  │   :3000          ├─────►│   :8080          ├─────►│   processor      │            ║
-║  │                  │      │   (REST + SSE)   │ jobs │                  │            ║
-║  │                  │      │                  │      │                  │            ║
-║  │ 🟦 web.render    │      │ 🟦 api.request   │      │ 🟦 worker.       │            ║
-║  │ 🟦 web.api_proxy │      │ 🟦 api.bulk_     │      │     bulk_file_   │            ║
-║  │                  │      │     upload.create│      │     process      │            ║
-║  │ 📊 web.requests  │      │ 🟦 pg.insert     │      │ 🟦 worker.bulk_  │            ║
-║  │ 📊 web.ttfb_ms   │      │ 🟦 queue.enqueue │      │     row.process  │            ║
-║  │                  │      │                  │      │ 🟦 worker.       │            ║
-║  │ 📝 access log    │      │ 📊 api.requests  │      │     signalstack. │            ║
-║  │                  │      │ 📊 api.latency   │      │     onboard      │            ║
-║  │                  │      │ 📊 api.5xx       │      │                  │            ║
-║  │                  │      │                  │      │ 📊 bulk.rows_*   │            ║
-║  │                  │      │ ⚡ bulk_upload.   │      │ 📊 signalstack.  │            ║
-║  │                  │      │     created      │      │     calls_total  │            ║
-║  │                  │      │ ⚡ link.created   │      │ 📊 signalstack.  │            ║
-║  │                  │      │ ⚡ aggregator.    │      │     errors_total │            ║
-║  │                  │      │     registered   │      │ 📊 bulk.upload.  │            ║
-║  │                  │      │                  │      │     duration_ms  │            ║
-║  │                  │      │                  │      │                  │            ║
-║  │                  │      │                  │      │ ⚡ participant.   │            ║
-║  │                  │      │                  │      │     onboarded_   │            ║
-║  │                  │      │                  │      │     to_signal*   │            ║
-║  │                  │      │                  │      │ ⚡ participant.   │            ║
-║  │                  │      │                  │      │     signalstack_ │            ║
-║  │                  │      │                  │      │     failed       │            ║
-║  │                  │      │                  │      │ ⚡ bulk_upload.   │            ║
-║  │                  │      │                  │      │     completed    │            ║
-║  │                  │      │                  │      │                  │            ║
-║  │                  │      │                  │      │ ◆ bulk_upload.   │            ║
-║  │                  │      │                  │      │   file_validating│            ║
-║  │                  │      │                  │      │ ◆ bulk_row.      │            ║
-║  │                  │      │                  │      │   processed      │            ║
-║  └────────┬─────────┘      └────────┬─────────┘      └─────┬────────────┘            ║
-║           │                         │                      │                         ║
-║           │ traceparent + baggage   │ ctx in job.opts      │ traceparent  + baggage  ║
-║           └─────────────────────────┴──────────────────────┘  via httpx auto-instr   ║
-║                                                                      │               ║
-║                                                                      ▼               ║
-║                                                          ┌────────────────────┐      ║
-║                                                          │  SignalStack       │      ║
-║                                                          │  /onboard (extern) │      ║
-║                                                          │  continues trace   │      ║
-║                                                          └────────────────────┘      ║
-║                                                                                      ║
-║  ┌─────────────────────────────────────────────────────────────────────────────┐    ║
-║  │            STATE TIER (data stores, auto-instrumented child spans)          │    ║
-║  │                                                                             │    ║
-║  │   ┌───────────┐    ┌───────────┐    ┌──────────────┐   ┌────────────┐       │    ║
-║  │   │ Postgres  │    │  Redis    │    │ BullMQ Queue │   │     S3     │       │    ║
-║  │   │  (state)  │    │  (cache)  │    │   (Redis)    │   │ (CSVs +    │       │    ║
-║  │   │           │    │           │    │              │   │  err logs) │       │    ║
-║  │   └───────────┘    └───────────┘    └──────────────┘   └────────────┘       │    ║
-║  │   🟦 pg.*          🟦 redis.*       🟦 queue.*          🟦 s3.*              │    ║
-║  └─────────────────────────────────────────────────────────────────────────────┘    ║
-║                                                                                      ║
-╠══════════════════════════════════════════════════════════════════════════════════════╣
-║   ALL THREE BLOCKS EMIT VIA ONE WIRE:  OTLP gRPC :4317                               ║
-║   (traces + metrics + logs + events multiplexed; pipelines split at Collector)       ║
-╚════════════════════════════════════════│═════════════════════════════════════════════╝
-                                         ▼
-╔══════════════════════════════════════════════════════════════════════════════════════╗
-║                          TIER 3 — COLLECTION (OTel Collector)                        ║
-║                                                                                      ║
-║   ┌────────────────────────────────────────────────────────────────────────────┐    ║
-║   │  receivers:                                                                │    ║
-║   │     otlp { grpc: :4317, http: :4318 }                                      │    ║
-║   │                                                                            │    ║
-║   │  processors (chain):                                                       │    ║
-║   │     memory_limiter ──► attributes/redact ──► attributes/promote ──►        │    ║
-║   │     resource ──► batch (5s / 8k) ──► tail_sampling (phase 1+)              │    ║
-║   │                                                                            │    ║
-║   │     • redact:   strip pii_fields_excluded[] (email, phone, aadhaar, …)     │    ║
-║   │     • promote:  event.kind, event.name, severity → Loki labels             │    ║
-║   │     • resource: service.namespace=aggregator, deployment.environment       │    ║
-║   │                                                                            │    ║
-║   │  pipelines:                                                                │    ║
-║   │     traces  ─► [redact, batch]                ─► exporter: otlp/jaeger     │    ║
-║   │     metrics ─► [batch]                        ─► exporter: prometheus      │    ║
-║   │     logs    ─► [redact, promote, batch]       ─► exporter: loki            │    ║
-║   └─────────────┬──────────────────────┬─────────────────────────┬────────────┘    ║
-╚═════════════════│══════════════════════│═════════════════════════│═════════════════╝
-                  │ traces               │ logs + ⚡ + ◆           │ metrics
-                  ▼                      ▼                         ▼
-╔══════════════════════════════════════════════════════════════════════════════════════╗
-║              TIER 4 — BACKEND  (swappable; Jaeger + Loki + Prometheus today)         ║
-║                                                                                      ║
-║   ┌─────────────────────┐    ┌─────────────────────┐    ┌─────────────────────┐     ║
-║   │       Jaeger        │    │        Loki         │    │     Prometheus      │     ║
-║   │                     │    │                     │    │                     │     ║
-║   │  OTLP ingest :4317  │    │  push :3100         │    │  scrape :9090       │     ║
-║   │  UI         :16686  │    │  (logs + events)    │    │  (TSDB / PromQL)    │     ║
-║   │                     │    │                     │    │                     │     ║
-║   │  flame graph        │    │  labels: service,   │    │  exemplars link     │     ║
-║   │  service map        │    │   block, env,       │    │  back to Jaeger     │     ║
-║   │                     │    │   event_kind,       │    │                     │     ║
-║   │                     │    │   event_name        │    │                     │     ║
-║   │                     │    │  body: trace_id,    │    │                     │     ║
-║   │                     │    │   aggregator_id,    │    │                     │     ║
-║   │                     │    │   upload_id…        │    │                     │     ║
-║   └──────────┬──────────┘    └──────────┬──────────┘    └──────────┬──────────┘     ║
-║              │                          │                          │                ║
-║              └──────────────┬───────────┴──────────────────────────┘                ║
-║                             ▼                                                       ║
-║                      ┌─────────────┐                                                ║
-║                      │   Grafana   │   datasources: Jaeger / Loki / Prometheus      ║
-║                      └──────┬──────┘                                                ║
-║                             │                                                       ║
-║   ┌─────────────────────────┴────────────────────────────────────────────────┐     ║
-║   │  Dashboards                                                              │     ║
-║   │    • Onboarding funnel       (PromQL: signalstack_calls_total)           │     ║
-║   │    • Per-aggregator timeline (LogQL: aggregator_id filter + trace link)  │     ║
-║   │    • SignalStack health      (p95 latency, error rate by code)           │     ║
-║   │    • Trace explorer          (paste trace_id → Jaeger flame graph)       │     ║
-║   │  Alerts                                                                  │     ║
-║   │    • SLI breach              → Alertmanager → Slack / PagerDuty          │     ║
-║   └──────────────────────────────────────────────────────────────────────────┘     ║
-╚══════════════════════════════════════════════════════════════════════════════════════╝
+**Legend:** 🟦 span · 📊 metric · 📝 log · ⚡ API event · ◆ AUDIT event
+
 ```
++--------------------------------------------------------------------+
+|  TIER 1 — EDGE                                                     |
+|  Browser | Admin | CSV upload | Webhook | Mobile SDK               |
++--------------------------------------------------------------------+
+              | HTTPS + W3C traceparent + baggage(aggregator.id)
+              v
++--------------------------------------------------------------------+
+|  TIER 2 — AGGREGATOR DPG                                           |
+|                                                                    |
+|  Shared bootstrap: @aggregator-dpg/observability                   |
+|   - TracerProvider  (W3C TraceContext + Baggage)                   |
+|   - MeterProvider   (5s OTLP flush)                                |
+|   - LoggerProvider  (stdlib/winston -> OTLP)                       |
+|   - emitTransaction()  =>  API event   (event.kind=transaction)    |
+|   - emitAudit()        =>  AUDIT event (event.kind=audit)          |
+|                                                                    |
+|   +----------+        +----------+        +-------------+          |
+|   |   web    |  HTTP  |   api    | BullMQ |   worker    |          |
+|   | Next.js  |------->| Fastify  |------->|  processor  |          |
+|   |  :3000   |        |  :8080   |  jobs  |             |          |
+|   +----------+        +----------+        +-------------+          |
+|   web.render          api.request         worker.bulk_file_process |
+|   web.api_proxy       api.bulk_upload.*   worker.bulk_row.process  |
+|                       pg.insert           worker.signalstack.onboard
+|                       queue.enqueue                                |
+|                                                                    |
+|   Events emitted:                                                  |
+|     api    : bulk_upload.created, link.created, aggregator.*       |
+|     worker : bulk_row.processed (audit), participant.onboarded,    |
+|              participant.signalstack_failed, bulk_upload.completed |
+|                                                                    |
+|   State tier (auto-instrumented child spans):                      |
+|     Postgres | Redis | BullMQ Queue | S3                           |
+|                                                                    |
+|   Outbound -> SignalStack /onboard  (traceparent forwarded)        |
++--------------------------------------------------------------------+
+              | OTLP gRPC :4317  (traces + metrics + logs + events)
+              v
++--------------------------------------------------------------------+
+|  TIER 3 — COLLECTION  (OTel Collector)                             |
+|                                                                    |
+|  receivers : otlp { grpc :4317, http :4318 }                       |
+|  processors: memory_limiter -> redact -> promote -> batch          |
+|                -> tail_sampling (phase 1+)                         |
+|  pipelines :                                                       |
+|    traces   -> [redact, batch]           -> otlp/jaeger            |
+|    metrics  -> [batch]                   -> prometheus             |
+|    logs     -> [redact, promote, batch]  -> loki                   |
++--------------------------------------------------------------------+
+              |               |                |
+        traces|        logs+⚡+◆|         metrics|
+              v               v                v
++--------------------------------------------------------------------+
+|  TIER 4 — BACKEND  (swappable)                                     |
+|                                                                    |
+|   +-----------+      +-----------+      +-----------+              |
+|   |  Jaeger   |      |   Loki    |      |Prometheus |              |
+|   | OTLP:4317 |      | push:3100 |      | TSDB:9090 |              |
+|   | UI :16686 |      |           |      | exemplars |              |
+|   +-----------+      +-----------+      +-----------+              |
+|         \                |                 /                       |
+|          \               |                /                        |
+|           v              v               v                         |
+|                       +---------+                                  |
+|                       | Grafana | dashboards + Alertmanager        |
+|                       +---------+                                  |
++--------------------------------------------------------------------+
+```
+
+### Why this shape
+
+- **Same SDK in every block.** Bootstrap from one shared package. Apps never
+  talk to backends directly.
+- **OTel `LoggerProvider`, not pino.** stdlib / winston bridged via
+  `LoggingHandler` -> OTLP. `trace_id` + `span_id` auto-injected inside active
+  spans. One wire format. No file scraper.
+- **Backend tier is swappable.** Change Collector `exporters:` — apps unchanged.
+- **Collector is the only PII gate.** Redaction lives in one config, not in app
+  code. Apps emit raw structured records.
+- **One `trace_id`, three blocks, four hops.** Edge -> web -> api -> worker ->
+  SignalStack. W3C TraceContext on HTTP boundaries; injected into BullMQ job
+  payload across the queue boundary.
+
+### Service block catalogue (summary; full spans + metrics in §6, §7)
+
+| Block  | Stack       | Key spans                                                | Key metrics                                                  |
+| ------ | ----------- | -------------------------------------------------------- | ------------------------------------------------------------ |
+| web    | Next.js SSR | `web.render`, `web.api_proxy`                            | `web.ttfb_ms`, `web.requests`                                |
+| api    | Fastify     | `api.request`, `api.bulk_upload.create`, `queue.enqueue` | `api.requests`, `api.latency_ms`, `api.5xx`                  |
+| worker | BullMQ      | `worker.bulk_row.process`, `worker.signalstack.onboard`  | `signalstack.calls_total`, `bulk.rows_total`, `*.duration_ms`|
+
+### Resource attributes per block
+
+```js
+build_resource({
+  service_name:           "aggregator-api",     // or aggregator-web, aggregator-worker
+  service_namespace:      "aggregator",
+  service_version:        process.env.APP_VERSION,
+  "dpg.block":            "api",                // web | api | worker
+  deployment_environment: process.env.ENV,      // dev | staging | prod
+})
+```
+
+Loki labels (bounded): `{service_name, dpg_block, deployment_environment, event_kind, event_name}`.
+High-cardinality fields (`trace_id`, `aggregator_id`, `upload_id`) stay in the log body, queried via `| json | aggregator_id="…"`.
 
 ## 4. Signal Model
 
