@@ -20,6 +20,7 @@ export function getSignalStackWriter(): SignalStackWriterBase | null {
   if (writer !== undefined) return writer;
   const baseUrl = config.SIGNALSTACK_BASE_URL;
   const apiKey = config.SIGNALSTACK_ADMIN_KEY;
+  const actingOrgId = config.SIGNALSTACK_ACTING_ORG_ID;
   if (!baseUrl || !apiKey) {
     if (baseUrl && !apiKey) {
       logger.warn({
@@ -31,9 +32,21 @@ export function getSignalStackWriter(): SignalStackWriterBase | null {
     writer = null;
     return null;
   }
+  if (!actingOrgId) {
+    // Onboard + list still work without an acting org; aggregator upsert
+    // will fail loudly with SIGNALSTACK_CONFIG_MISSING. Warn so the
+    // operator notices before the first approval click.
+    logger.warn({
+      status: 'warn',
+      sub: 'signalstack.init',
+      message:
+        'SIGNALSTACK_ACTING_ORG_ID not set — aggregator upsert will fail on approval and login fallback',
+    });
+  }
   writer = new HttpSignalStackWriter({
     baseUrl,
     apiKey,
+    ...(actingOrgId ? { actingOrgId } : {}),
     timeoutMs: config.SIGNALSTACK_TIMEOUT_MS,
   });
   return writer;

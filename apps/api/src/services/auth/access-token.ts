@@ -9,6 +9,11 @@
 
 import { jwtVerify, createRemoteJWKSet, type JWTPayload } from 'jose';
 import type { FastifyRequest } from 'fastify';
+import { getAggregatorStore } from '../aggregator-store/index.js';
+import { getIdpAdmin } from '../idp-admin/index.js';
+import { KC_ATTR } from '../idp-admin/attributes.js';
+import { getSignalStackWriter } from '../signalstack.js';
+import { logger } from '../../logger.js';
 
 let cachedJwks: ReturnType<typeof createRemoteJWKSet> | null = null;
 let cachedJwksUrl: string | null = null;
@@ -33,6 +38,14 @@ export interface AuthContext {
    * {@link requireApproved} to reject anything other than `'approved'`.
    */
   decisionMade?: 'pending' | 'approved' | 'rejected';
+  /**
+   * Signalstack organisation id read from the `signalstack_org_id`
+   * user-attribute claim. Written at admin approval; backfilled by the
+   * login-time fallback when missing. May be absent on the very first
+   * authenticated request after an approval failure — handlers that need
+   * it should call the fallback helper before proceeding.
+   */
+  signalstackOrgId?: string;
   email?: string;
   emailVerified?: boolean;
   preferredUsername?: string;
@@ -142,6 +155,8 @@ export async function authenticate(req: FastifyRequest): Promise<AuthResult> {
   if (aggregatorType === 'seeker' || aggregatorType === 'provider') {
     ctx.aggregatorType = aggregatorType;
   }
+  const signalstackOrgId = readStringOrFirst(claims.signalstack_org_id);
+  if (signalstackOrgId) ctx.signalstackOrgId = signalstackOrgId;
   return { ok: true, context: ctx };
 }
 
@@ -151,6 +166,18 @@ export async function authenticate(req: FastifyRequest): Promise<AuthResult> {
  * protected business endpoints (everything except `/auth/*` and the
  * profile-self-read which legitimately needs to surface "pending" status to
  * the applicant's own dashboard).
+ *
+ * When the token is missing the `signalstack_org_id` claim — typically
+ * because the signalstack upsert failed during approval — the helper
+ * synchronously backfills it before returning: looks up the aggregator's
+ * name + slug, calls the (idempotent) admin upsert, writes the result on
+ * the KC user as `signalstack_org_id`, and patches the in-flight
+ * `AuthContext` so the current handler sees the value. The user's token
+ * still lacks the claim until they refresh; subsequent requests carry it.
+ *
+ * Backfill failures are logged but do not block the request — the
+ * authoritative gate is `decision_made`, and downstream handlers that
+ * genuinely require an org id can re-check `context.signalstackOrgId`.
  */
 export async function requireApproved(req: FastifyRequest): Promise<AuthResult> {
   const result = await authenticate(req);
@@ -164,7 +191,96 @@ export async function requireApproved(req: FastifyRequest): Promise<AuthResult> 
       },
     };
   }
+  if (!result.context.signalstackOrgId) {
+    await backfillSignalstackOrgId(result.context);
+  }
   return result;
+}
+
+/**
+ * Best-effort backfill of `signalstack_org_id` on the authenticated user.
+ *
+ * Idempotent — safe to call repeatedly because the signalstack upsert
+ * dedupes on `external_id`. Mutates the supplied context in place when a
+ * value is resolved; logs and returns silently on every failure path so
+ * the caller can continue.
+ */
+async function backfillSignalstackOrgId(ctx: AuthContext): Promise<void> {
+  const start = Date.now();
+  const log = logger.child({
+    operation: 'auth.backfillSignalstackOrgId',
+    aggregator_id: ctx.aggregatorId,
+    user_id: ctx.userId,
+  });
+
+  const signalstack = getSignalStackWriter();
+  if (!signalstack) {
+    log.debug({ status: 'skipped', reason: 'signalstack_disabled' });
+    return;
+  }
+
+  const store = getAggregatorStore();
+  const found = await store.findById(ctx.aggregatorId);
+  if (!found.ok) {
+    log.warn(
+      { status: 'failure', sub_operation: 'aggregatorStore.findById', code: found.error.code },
+      'aggregator lookup failed during signalstack backfill',
+    );
+    return;
+  }
+  if (!found.value) {
+    log.warn(
+      { status: 'failure', sub_operation: 'aggregatorStore.findById', reason: 'not_found' },
+      'aggregator row missing for approved KC user — manual cleanup required',
+    );
+    return;
+  }
+
+  const upsert = await signalstack.upsertAggregator({
+    external_id: ctx.aggregatorId,
+    name: found.value.name,
+    slug: found.value.orgSlug,
+  });
+  if (!upsert.success) {
+    log.warn(
+      {
+        status: 'failure',
+        sub_operation: 'signalstack.upsertAggregator',
+        code: upsert.error.code,
+        cause: upsert.error.message,
+        latency_ms: Date.now() - start,
+      },
+      'signalstack aggregator upsert failed during login fallback',
+    );
+    return;
+  }
+
+  const idp = getIdpAdmin();
+  const attr = await idp.setAttributes(ctx.userId, {
+    [KC_ATTR.SIGNALSTACK_ORG_ID]: upsert.value.org_id,
+  });
+  if (!attr.ok) {
+    log.warn(
+      {
+        status: 'failure',
+        sub_operation: 'idp.setAttributes.signalstack_org_id',
+        code: attr.error.code,
+        cause: attr.error.message,
+      },
+      'failed to stamp signalstack_org_id on KC user during login fallback',
+    );
+    return;
+  }
+
+  ctx.signalstackOrgId = upsert.value.org_id;
+  log.info(
+    {
+      status: 'success',
+      signalstack_org_id: upsert.value.org_id,
+      latency_ms: Date.now() - start,
+    },
+    'signalstack_org_id backfilled on KC user',
+  );
 }
 
 /**

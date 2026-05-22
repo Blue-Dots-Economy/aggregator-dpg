@@ -135,6 +135,38 @@ export interface SignalStackItemList {
 }
 
 /**
+ * Input for the admin aggregator upsert call.
+ *
+ * `external_id` is our Postgres `aggregators.id` — signalstack stores it
+ * verbatim and uses it as the dedupe key. Calling upsert again with the
+ * same `external_id` returns the existing row instead of creating a new
+ * one, so the writer is safe to re-fire from a login-time fallback.
+ */
+export interface SignalStackUpsertAggregatorInput {
+  external_id: string;
+  name: string;
+  slug: string;
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Echo of the signalstack `aggregators` row resolved by the upsert call.
+ *
+ * `org_id` is the canonical signalstack organisation identifier — the
+ * value the aggregator API stores on the Keycloak user as
+ * `signalstack_org_id`. Surfaced as the access-token claim of the same
+ * name so route handlers can scope reads/writes against signalstack
+ * without an extra round-trip.
+ */
+export interface SignalStackAggregator {
+  org_id: string;
+  external_id: string;
+  name: string;
+  slug: string;
+  metadata?: Record<string, unknown>;
+}
+
+/**
  * Persistence port for the signalstack admin endpoints.
  *
  * Implementations:
@@ -165,4 +197,19 @@ export abstract class SignalStackWriterBase {
   abstract listItemsByAggregator(
     query: SignalStackItemQuery,
   ): Promise<Result<SignalStackItemList, BaseError>>;
+
+  /**
+   * Register (or look up) the aggregator's organisation row in signalstack.
+   *
+   * Idempotent on `external_id`: repeated calls with the same input return
+   * the same `org_id` and never create duplicates. Called once at admin
+   * approval, and again as a login-time fallback if the Keycloak attribute
+   * is missing.
+   *
+   * @param input - external_id (our aggregator UUID) + display name + slug.
+   * @returns ok(SignalStackAggregator) on 2xx; err(BaseError) otherwise.
+   */
+  abstract upsertAggregator(
+    input: SignalStackUpsertAggregatorInput,
+  ): Promise<Result<SignalStackAggregator, BaseError>>;
 }

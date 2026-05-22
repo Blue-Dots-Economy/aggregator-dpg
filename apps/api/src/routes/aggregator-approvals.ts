@@ -33,6 +33,7 @@ import { verifyApprovalToken } from '../services/approval-token.js';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
 import { getIdpAdmin } from '../services/idp-admin/index.js';
 import { getMailer } from '../services/mailer/index.js';
+import { getSignalStackWriter } from '../services/signalstack.js';
 import {
   renderApplicantApproved,
   renderApplicantRejected,
@@ -242,6 +243,58 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
             },
             'failed to stamp decision_made=approved on KC user (auth-gate stays open via enabled flag)',
           );
+        }
+
+        // Register the aggregator with signalstack and stamp the returned
+        // org_id on the KC user. Soft-fail: an outage here must not block
+        // approval — the login-time fallback retries on the applicant's
+        // next authenticated request because the upsert is idempotent on
+        // external_id (our aggregatorId).
+        const signalstack = getSignalStackWriter();
+        if (signalstack) {
+          const upsertStart = Date.now();
+          const upsertResult = await signalstack.upsertAggregator({
+            external_id: aggregatorId,
+            name: lookup.aggregator.name,
+            slug: lookup.aggregator.orgSlug,
+          });
+          if (!upsertResult.success) {
+            log.warn(
+              {
+                status: 'failure',
+                sub_operation: 'signalstack.upsertAggregator',
+                code: upsertResult.error.code,
+                cause: upsertResult.error.message,
+                latency_ms: Date.now() - upsertStart,
+              },
+              'signalstack aggregator upsert failed — login fallback will retry',
+            );
+          } else {
+            const attrWrite = await idp.setAttributes(lookup.kcUser.id, {
+              signalstack_org_id: upsertResult.value.org_id,
+            });
+            if (!attrWrite.ok) {
+              log.warn(
+                {
+                  status: 'failure',
+                  sub_operation: 'idp.setAttributes.signalstack_org_id',
+                  code: attrWrite.error.code,
+                  cause: attrWrite.error.message,
+                },
+                'failed to stamp signalstack_org_id on KC user — login fallback will retry',
+              );
+            } else {
+              log.info(
+                {
+                  status: 'success',
+                  sub_operation: 'signalstack.upsertAggregator',
+                  signalstack_org_id: upsertResult.value.org_id,
+                  latency_ms: Date.now() - upsertStart,
+                },
+                'aggregator registered in signalstack',
+              );
+            }
+          }
         }
 
         const approvedMail = renderApplicantApproved({

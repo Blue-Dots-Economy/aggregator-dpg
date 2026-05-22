@@ -34,6 +34,22 @@ export interface SignalStackProfileSeed {
   updated_at?: string;
 }
 
+/**
+ * Pre-built signalstack aggregator row for `seed()`.
+ *
+ * Passing `org_id` lets a test pin the value the aggregator-approval flow
+ * will read back; leaving it unset triggers the fake's `seed-org-N`
+ * counter, which is sufficient for tests that only care that *some* id was
+ * resolved.
+ */
+export interface SignalStackAggregatorSeed {
+  org_id?: string;
+  external_id: string;
+  name: string;
+  slug: string;
+  metadata?: Record<string, unknown>;
+}
+
 const ISO_FIXED = '2026-01-01T00:00:00.000Z';
 
 export class SignalStackWriterFake extends InMemorySignalStackWriter {
@@ -46,7 +62,11 @@ export class SignalStackWriterFake extends InMemorySignalStackWriter {
    * Re-seeding the same user.id or profile.item_id overwrites the previous
    * row.
    */
-  seed(seeds: { users?: SignalStackUserSeed[]; profiles?: SignalStackProfileSeed[] }): void {
+  seed(seeds: {
+    users?: SignalStackUserSeed[];
+    profiles?: SignalStackProfileSeed[];
+    aggregators?: SignalStackAggregatorSeed[];
+  }): void {
     let userCounter = 1;
     for (const s of seeds.users ?? []) {
       const id = s.id ?? `seed-user-${userCounter++}`;
@@ -76,6 +96,19 @@ export class SignalStackWriterFake extends InMemorySignalStackWriter {
         created_at: s.created_at ?? ISO_FIXED,
         updated_at: s.updated_at ?? ISO_FIXED,
         created_by: s.created_by,
+      });
+    }
+
+    let aggregatorCounter = 1;
+    for (const s of seeds.aggregators ?? []) {
+      const orgId = s.org_id ?? `seed-org-${aggregatorCounter++}`;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (this as any).aggregators.set(s.external_id, {
+        org_id: orgId,
+        external_id: s.external_id,
+        name: s.name,
+        slug: s.slug,
+        ...(s.metadata !== undefined ? { metadata: s.metadata } : {}),
       });
     }
   }

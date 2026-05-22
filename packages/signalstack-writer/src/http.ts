@@ -16,10 +16,12 @@ import type { Result } from '@aggregator-dpg/shared-primitives/result';
 
 import {
   SignalStackWriterBase,
+  type SignalStackAggregator,
   type SignalStackItemList,
   type SignalStackItemQuery,
   type SignalStackOnboardInput,
   type SignalStackOnboardResult,
+  type SignalStackUpsertAggregatorInput,
 } from './interface.js';
 
 export interface HttpSignalStackWriterConfig {
@@ -27,6 +29,13 @@ export interface HttpSignalStackWriterConfig {
   baseUrl: string;
   /** Admin api-key issued by signalstack via better-auth. Sent as `x-api-key`. */
   apiKey: string;
+  /**
+   * Platform-wide signalstack organisation id under which admin upserts
+   * are performed. Sent as `x-acting-org-id` on the
+   * `POST /api/v1/admin/aggregator/upsert` call. Required for that call;
+   * other endpoints ignore it.
+   */
+  actingOrgId?: string;
   /** Optional override; defaults to global `fetch`. Lets tests inject a stub. */
   fetchImpl?: typeof fetch;
   /** Optional request timeout in ms; off by default. */
@@ -37,6 +46,12 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
   private readonly baseUrl: string;
   private readonly endpoint: string;
   private readonly headers: Record<string, string>;
+  /**
+   * Signalstack organisation id sent as `x-acting-org-id` on the aggregator
+   * upsert call. `undefined` when not configured — the upsert method then
+   * returns `SIGNALSTACK_CONFIG_MISSING` so the caller can soft-fail.
+   */
+  private readonly actingOrgId: string | undefined;
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number | undefined;
 
@@ -54,6 +69,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       'content-type': 'application/json',
       'x-api-key': config.apiKey,
     };
+    this.actingOrgId = config.actingOrgId;
     this.fetchImpl = config.fetchImpl ?? fetch;
     this.timeoutMs = config.timeoutMs;
   }
@@ -187,6 +203,110 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
           aborted
             ? `signalstack list_items timed out after ${this.timeoutMs}ms`
             : `signalstack list_items transport failure: ${cause.message}`,
+          {
+            cause,
+            code: aborted ? 'SIGNALSTACK_TIMEOUT' : 'SIGNALSTACK_TRANSPORT_FAILED',
+          },
+        ),
+      );
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  /**
+   * Calls `POST {baseUrl}/api/v1/admin/aggregator/upsert` with the platform
+   * admin api-key and the configured `x-acting-org-id` header. The remote
+   * endpoint is idempotent on `external_id` (our Postgres aggregator UUID),
+   * so the same input may be re-fired safely from a login-time fallback.
+   *
+   * Non-2xx responses, transport failures, and unexpected payload shapes
+   * are mapped to `UpstreamError` — no exception ever leaves the method.
+   *
+   * @param input - external_id (our aggregator UUID) + display name + slug
+   *   + optional metadata bag forwarded verbatim to signalstack.
+   * @returns ok(SignalStackAggregator) on 2xx with a non-empty `org_id`;
+   *   err(BaseError) with a `SIGNALSTACK_*` code on every failure path.
+   */
+  override async upsertAggregator(
+    input: SignalStackUpsertAggregatorInput,
+  ): Promise<Result<SignalStackAggregator, BaseError>> {
+    if (!input?.external_id || !input?.name || !input?.slug) {
+      return err(
+        new UpstreamError('external_id, name, and slug are required', {
+          code: 'SIGNALSTACK_INPUT_INVALID',
+        }),
+      );
+    }
+    if (!this.actingOrgId) {
+      return err(
+        new UpstreamError('actingOrgId is required for aggregator upsert', {
+          code: 'SIGNALSTACK_CONFIG_MISSING',
+        }),
+      );
+    }
+
+    const url = `${this.baseUrl}/api/v1/admin/aggregator/upsert`;
+    const body: Record<string, unknown> = {
+      external_id: input.external_id,
+      name: input.name,
+      slug: input.slug,
+    };
+    if (input.metadata) body.metadata = input.metadata;
+
+    const headers = {
+      ...this.headers,
+      'x-acting-org-id': this.actingOrgId,
+    };
+
+    const controller = this.timeoutMs ? new AbortController() : undefined;
+    const timer = controller ? setTimeout(() => controller.abort(), this.timeoutMs) : undefined;
+
+    try {
+      const res = await this.fetchImpl(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+        ...(controller ? { signal: controller.signal } : {}),
+      });
+
+      if (!res.ok) {
+        const bodyText = await safeReadText(res);
+        const upstreamMsg = extractUpstreamMessage(bodyText);
+        const message = upstreamMsg
+          ? `signalstack aggregator upsert returned ${res.status}: ${upstreamMsg}`
+          : `signalstack aggregator upsert returned ${res.status}`;
+        return err(
+          new UpstreamError(message, {
+            code: this.codeForStatus(res.status),
+            details: { status: res.status, body: bodyText },
+          }),
+        );
+      }
+
+      const payload = (await res.json()) as SignalStackAggregator;
+      if (
+        !payload ||
+        typeof payload !== 'object' ||
+        typeof payload.org_id !== 'string' ||
+        payload.org_id.length === 0
+      ) {
+        return err(
+          new UpstreamError('signalstack aggregator upsert returned unexpected payload', {
+            code: 'SIGNALSTACK_BAD_RESPONSE',
+            details: { payload },
+          }),
+        );
+      }
+      return ok(payload);
+    } catch (e) {
+      const cause = e as Error;
+      const aborted = cause.name === 'AbortError';
+      return err(
+        new UpstreamError(
+          aborted
+            ? `signalstack aggregator upsert timed out after ${this.timeoutMs}ms`
+            : `signalstack aggregator upsert transport failure: ${cause.message}`,
           {
             cause,
             code: aborted ? 'SIGNALSTACK_TIMEOUT' : 'SIGNALSTACK_TRANSPORT_FAILED',
