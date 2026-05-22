@@ -2,11 +2,7 @@
 
 ---
 
-## 0. TL;DR
-
 Async-only OpenTelemetry observability. Three first-class signals — **traces, metrics, logs** — plus a fourth post-hoc **outcome event** stream. A shared `@aggregator-dpg/telemetry` library boots OTel SDKs at process start; every block self-instruments via hot-path APIs that never block on I/O. Post-turn analytics fire to a standalone Observability service over an async transport. **Zero impact on response latency. Single `trace_id` stitches every block end-to-end. Outcome metrics are config-driven — no business logic hardcoded.**
-
-The design is a **replicable template**: a new service installs the shared lib, adds an `observability:` section to its YAML config, and inherits the full pipeline (collector → storage → Grafana → Alertmanager).
 
 ---
 
@@ -22,17 +18,6 @@ The design is a **replicable template**: a new service installs the shared lib, 
 | G6  | Outcome / lifecycle metrics expressed declaratively in YAML — no code change to add a new business KPI.                         |
 | G7  | Same instrumentation pattern works for `api` (Fastify), `worker` (BullMQ), `web` (Next.js BFF), and future services.            |
 
-
-### 1.1 Principles
-
-1. **Never in the response path.** Instrumentation buffers and exports out-of-band.
-2. **Single `trace_id` end-to-end** via W3C TraceContext + Baggage.
-3. **Config-driven outcomes** — lifecycle state machines and metric definitions live in YAML, validated by Zod (TS) / Pydantic (any Python service).
-4. **Bounded cardinality** — metric labels are enums; high-cardinality IDs go to spans/logs only.
-5. **Fail-silent** — telemetry errors never propagate to the user. Collector down ≠ request failure.
-
----
-
 ## 2. Glossary
 
 | Term                          | Meaning                                                                                                                |
@@ -46,34 +31,7 @@ The design is a **replicable template**: a new service installs the shared lib, 
 
 ---
 
-## 3. Current state vs Target state
-
-### 3.1 Today
-
-| Signal         | State                                                                                                                             | Gaps                                                                  |
-| -------------- | --------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| Logs           | `pino` in `apps/api`, `apps/worker`, `apps/web` with redaction, `service`/`env` bound at root, `x-request-id` propagation in API. | No `trace_id` field. No correlation to spans. No central aggregation. |
-| Traces         | None.                                                                                                                             | No span model, no propagation, no UI.                                 |
-| Metrics        | None (Fastify default `/metrics` not exposed).                                                                                    | No counters/histograms; no SLI calc.                                  |
-| Outcome events | Implicit in DB rows (`participants`, `linkSubmissions`).                                                                          | No metric, no funnel, no drop-off detection.                          |
-
-### 3.2 Target
-
-```
-┌────────────────┐     ┌─────────────────┐     ┌───────────────┐
-│ pino (logs)    │ ──► │                 │ ──► │ Loki          │
-│ OTel SDK       │ ──► │ OTel Collector  │ ──► │ Jaeger        │
-│ (traces+metrics│ ──► │  (otlp gRPC)    │ ──► │ Prometheus    │
-└────────────────┘     └─────────────────┘     └───────┬───────┘
-                                                       │
-                                            ┌──────────▼─────────┐
-                                            │ Grafana + Alertmgr │
-                                            └────────────────────┘
-```
-
----
-
-## 4. Architecture (4 tiers)
+## 3. Architecture (4 tiers)
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
@@ -125,18 +83,9 @@ ASYNC OUTCOME PATH:
                                        └─► OTLP counter/histogram emit
 ```
 
-### 4.1 Why a Collector and not direct exporters
+## 4. Signal Model
 
-- Decouples app from backend choice.
-- Batching, retry, and queue-based back-pressure live in the Collector — app stays thin.
-- Resource enrichment (k8s pod, region) added centrally.
-- Tail sampling impossible without a Collector (requires full-trace buffering).
-
----
-
-## 5. Signal Model
-
-### 5.1 Traces
+### 4.1 Traces
 
 | Aspect              | Convention                                                                                                 |
 | ------------------- | ---------------------------------------------------------------------------------------------------------- |
@@ -315,7 +264,7 @@ apps/observability-svc/
 
 ---
 
-## 10. Config Contract
+## 10. Configuration
 
 Lives under `config/observability/` and loaded by `@aggregator-dpg/config-loader`.
 
@@ -439,5 +388,3 @@ queueMicrotask(() => {
 | GET    | `/validate-config` | —                                                                                       | Returns loaded `observability:` config + parse warnings.                        |
 | GET    | `/health`          | —                                                                                       | Liveness only.                                                                  |
 | GET    | `/ready`           | —                                                                                       | Readiness — verifies OTLP exporter handshake.                                   |
-
-**Contract:** always 200. Never blocks the caller's response. Never raises.
