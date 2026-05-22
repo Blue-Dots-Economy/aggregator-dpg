@@ -59,6 +59,22 @@ const DashboardQuerySchema = z.object({
     .optional(),
 });
 
+/**
+ * Export query schema. Strict subset of {@link DashboardQuerySchema} —
+ * signalstack's `/dashboard/export` endpoint accepts only `status` as a
+ * filter today. `domain` is reserved for the provider rollout.
+ */
+const DashboardExportQuerySchema = z.object({
+  domain: z.enum(['seeker', 'provider']).optional().default('seeker'),
+  status: z
+    .string()
+    .trim()
+    .min(1)
+    .max(32)
+    .regex(/^[a-z0-9_]+$/i, 'status must be alphanumeric + underscore')
+    .optional(),
+});
+
 export async function registerBlueDotsRoutes(app: FastifyInstance): Promise<void> {
   app.get('/v1/blue-dots/items', async (req, reply) => {
     const auth = await requireAuth(req);
@@ -141,32 +157,7 @@ export async function registerBlueDotsRoutes(app: FastifyInstance): Promise<void
       });
     }
 
-    // Resolve actingOrgId: prefer the claim projected onto AuthContext
-    // (`requireApproved` triggers the login-time backfill if absent and
-    // mutates `context.signalstackOrgId` in place). Fall back to the
-    // Postgres mirror so a token refresh delay between approval and
-    // first dashboard hit does not strand the user.
-    let actingOrgId = auth.signalstackOrgId ?? null;
-    if (!actingOrgId) {
-      const row = await getAggregatorStore().findById(auth.aggregatorId);
-      if (!row.ok) {
-        log.error({
-          status: 'failure',
-          sub: 'aggregatorStore.findById',
-          code: row.error.code,
-        });
-        throw httpError('DB_UNAVAILABLE', {
-          fields: { sub_operation: 'aggregatorStore.findById' },
-        });
-      }
-      actingOrgId = row.value?.signalstackOrgId ?? null;
-    }
-    if (!actingOrgId) {
-      log.warn({ status: 'failure', sub: 'signalstack.org_not_registered' });
-      throw httpError('SIGNALSTACK_ORG_NOT_REGISTERED', {
-        fields: { aggregator_id: auth.aggregatorId },
-      });
-    }
+    const actingOrgId = await resolveActingOrgId(auth, log);
 
     const result = await ss.fetchDashboard({
       actingOrgId,
@@ -203,6 +194,108 @@ export async function registerBlueDotsRoutes(app: FastifyInstance): Promise<void
 
     return reply.send(result.value);
   });
+
+  app.get('/v1/blue-dots/dashboard/export', async (req, reply) => {
+    const auth = await requireApprovedAuth(req);
+    const log = req.log.child({
+      operation: 'blue-dots.dashboard.export',
+      aggregator_id: auth.aggregatorId,
+    });
+    const start = Date.now();
+
+    const parsed = DashboardExportQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      throw httpError('SCHEMA_VALIDATION', {
+        detail: 'Invalid query parameters.',
+        fields: { issues: parsed.error.issues },
+      });
+    }
+    const { domain, status } = parsed.data;
+
+    const ss = getSignalStackWriter();
+    if (!ss) {
+      log.warn({ status: 'failure', sub: 'signalstack.disabled' });
+      throw httpError('INTERNAL', {
+        detail: 'Signalstack is not configured for this environment.',
+      });
+    }
+
+    const actingOrgId = await resolveActingOrgId(auth, log);
+
+    const result = await ss.exportDashboardCsv({
+      actingOrgId,
+      ...(status ? { status } : {}),
+      domain,
+    });
+
+    if (!result.success) {
+      log.error({
+        status: 'failure',
+        sub: 'signalstack.dashboard.export',
+        error: result.error.message,
+        code: result.error.code,
+      });
+      throw httpError('INTERNAL', {
+        detail: `Signalstack dashboard export failed: ${result.error.code}`,
+        cause: result.error,
+      });
+    }
+
+    log.info({
+      status: 'success',
+      latency_ms: Date.now() - start,
+      domain,
+      status_filter: status ?? null,
+      bytes: result.value.csv.length,
+      filename: result.value.filename,
+    });
+
+    return reply
+      .header('Content-Type', 'text/csv; charset=utf-8')
+      .header(
+        'Content-Disposition',
+        `attachment; filename="${result.value.filename.replace(/"/g, '')}"`,
+      )
+      .send(result.value.csv);
+  });
+}
+
+/**
+ * Resolves the aggregator's signalstack organisation id for routes that
+ * proxy reads against signalstack. Prefers the access-token claim
+ * (`requireApproved` triggers the login-time backfill and mutates
+ * `context.signalstackOrgId` in place when the claim is absent) and
+ * falls back to the Postgres mirror so a token-refresh delay between
+ * approval and first dashboard hit does not strand the user.
+ *
+ * Throws DB_UNAVAILABLE if the store read fails, and
+ * SIGNALSTACK_ORG_NOT_REGISTERED when neither source carries a value —
+ * which means the aggregator has not yet completed the signalstack
+ * handshake (login backfill must run once before reads work).
+ */
+async function resolveActingOrgId(auth: AuthContext, log: FastifyRequest['log']): Promise<string> {
+  let actingOrgId: string | null = auth.signalstackOrgId ?? null;
+  if (!actingOrgId) {
+    const row = await getAggregatorStore().findById(auth.aggregatorId);
+    if (!row.ok) {
+      log.error({
+        status: 'failure',
+        sub: 'aggregatorStore.findById',
+        code: row.error.code,
+      });
+      throw httpError('DB_UNAVAILABLE', {
+        fields: { sub_operation: 'aggregatorStore.findById' },
+      });
+    }
+    actingOrgId = row.value?.signalstackOrgId ?? null;
+  }
+  if (!actingOrgId) {
+    log.warn({ status: 'failure', sub: 'signalstack.org_not_registered' });
+    throw httpError('SIGNALSTACK_ORG_NOT_REGISTERED', {
+      fields: { aggregator_id: auth.aggregatorId },
+    });
+  }
+  return actingOrgId;
 }
 
 /**

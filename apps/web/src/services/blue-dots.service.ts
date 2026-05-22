@@ -72,6 +72,28 @@ export interface BlueDotsDashboardPage {
   metadata: BlueDotsDashboardMetadata;
 }
 
+/**
+ * Query for the dashboard CSV export. Subset of {@link BlueDotsDashboardQuery}
+ * because signalstack's `/dashboard/export` endpoint accepts only
+ * `status` as a filter today.
+ */
+export interface BlueDotsDashboardExportQuery {
+  domain?: 'seeker' | 'provider';
+  status?: string;
+}
+
+/**
+ * Outcome of a dashboard CSV download. `blob` is the raw CSV payload
+ * for callers that want to render a preview or post-process. `filename`
+ * comes from the BFF's `Content-Disposition` header (falling back to a
+ * sensible default) so the browser's save dialog gets the same name
+ * signalstack minted.
+ */
+export interface BlueDotsDashboardExportResult {
+  blob: Blob;
+  filename: string;
+}
+
 export interface BlueDotsService {
   list(kind: ParticipantKind, filter?: ParticipantFilter): Promise<ParticipantBase[]>;
   seekers(filter?: ParticipantFilter): Promise<Seeker[]>;
@@ -86,6 +108,15 @@ export interface BlueDotsService {
    * filtered slice.
    */
   dashboard(query?: BlueDotsDashboardQuery): Promise<BlueDotsDashboardPage>;
+  /**
+   * Download the dashboard as a CSV file.
+   *
+   * Returns the Blob + the upstream filename so the caller can either
+   * trigger an automatic browser download via {@link triggerCsvDownload}
+   * or render a preview. CSV columns are owned by signalstack — the
+   * service does not parse, validate, or rewrite them.
+   */
+  dashboardExport(query?: BlueDotsDashboardExportQuery): Promise<BlueDotsDashboardExportResult>;
 }
 
 interface SignalStackItem {
@@ -160,6 +191,38 @@ class HttpBlueDotsService implements BlueDotsService {
     if (query?.status) params.set('status', query.status);
     const url = `/api/blue-dots/dashboard?${params.toString()}`;
     return jsonFetch<BlueDotsDashboardPage>(url);
+  }
+
+  async dashboardExport(
+    query?: BlueDotsDashboardExportQuery,
+  ): Promise<BlueDotsDashboardExportResult> {
+    const params = new URLSearchParams();
+    params.set('domain', query?.domain ?? 'seeker');
+    if (query?.status) params.set('status', query.status);
+    const url = `/api/blue-dots/dashboard/export?${params.toString()}`;
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: { accept: 'text/csv' },
+      credentials: 'same-origin',
+    });
+    if (!res.ok) {
+      // Error envelope is JSON; surface the upstream message so the
+      // caller's toast can show something more useful than "fetch failed".
+      let message = `dashboard export failed: ${res.status}`;
+      try {
+        const body = (await res.json()) as { error?: { detail?: string; message?: string } };
+        const detail = body?.error?.detail ?? body?.error?.message;
+        if (detail) message = detail;
+      } catch {
+        // non-JSON body — keep the default message.
+      }
+      throw new Error(message);
+    }
+    const blob = await res.blob();
+    const disposition = res.headers.get('content-disposition') ?? '';
+    const filename =
+      parseFilenameFromContentDisposition(disposition) ?? defaultExportFilename(query);
+    return { blob, filename };
   }
 
   private toSeeker(item: SignalStackItem): Seeker {
@@ -277,3 +340,55 @@ function completeness(state: Record<string, unknown>): number {
 }
 
 export const blueDotsService: BlueDotsService = new HttpBlueDotsService();
+
+/**
+ * Triggers a browser download for a CSV blob.
+ *
+ * Creates a transient `<a>` element, points it at an object URL for the
+ * blob, clicks it, and revokes the URL. Browser-only; no-op when called
+ * during SSR.
+ */
+export function triggerCsvDownload(result: BlueDotsDashboardExportResult): void {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return;
+  const url = URL.createObjectURL(result.blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = result.filename;
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * Extracts the filename from a `Content-Disposition` header. Returns
+ * null if the header is absent or malformed so the caller can apply a
+ * default.
+ */
+function parseFilenameFromContentDisposition(header: string): string | null {
+  if (!header) return null;
+  // RFC 6266: prefer the encoded `filename*` form when present, falling
+  // back to plain `filename=` for ASCII-only values.
+  const star = /filename\*\s*=\s*[^']*''([^;]+)/i.exec(header);
+  if (star && star[1]) {
+    try {
+      return decodeURIComponent(star[1].trim());
+    } catch {
+      // Fall through to the plain match below.
+    }
+  }
+  const plain = /filename\s*=\s*"?([^";]+)"?/i.exec(header);
+  return plain && plain[1] ? plain[1].trim() : null;
+}
+
+/**
+ * Last-resort filename used when the BFF didn't supply a
+ * `Content-Disposition`. Mirrors the API's default shape so file-save
+ * dialogs stay consistent across success paths.
+ */
+function defaultExportFilename(query?: BlueDotsDashboardExportQuery): string {
+  const status = (query?.status ?? 'all').replace(/[^a-z0-9_]/gi, '_').slice(0, 32);
+  const date = new Date().toISOString().slice(0, 10);
+  return `aggregator-dashboard-${status}-${date}.csv`;
+}

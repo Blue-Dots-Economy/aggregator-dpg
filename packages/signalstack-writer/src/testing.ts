@@ -72,6 +72,19 @@ export interface SignalStackDashboardSeed {
   page: SignalStackDashboardPage;
 }
 
+/**
+ * Pre-built CSV export payload keyed by `acting_org_id`. Tests pin the
+ * exact CSV string the writer's
+ * {@link InMemorySignalStackWriter.exportDashboardCsv} returns for a
+ * given aggregator org. Without a pinned response the fake returns a
+ * header-only CSV so callers can still assert content-type and
+ * filename without bespoke setup.
+ */
+export interface SignalStackDashboardExportSeed {
+  acting_org_id: string;
+  csv: string;
+}
+
 const ISO_FIXED = '2026-01-01T00:00:00.000Z';
 
 export class SignalStackWriterFake extends InMemorySignalStackWriter {
@@ -89,6 +102,7 @@ export class SignalStackWriterFake extends InMemorySignalStackWriter {
     profiles?: SignalStackProfileSeed[];
     aggregators?: SignalStackAggregatorSeed[];
     dashboards?: SignalStackDashboardSeed[];
+    dashboardExports?: SignalStackDashboardExportSeed[];
   }): void {
     let userCounter = 1;
     for (const s of seeds.users ?? []) {
@@ -141,6 +155,11 @@ export class SignalStackWriterFake extends InMemorySignalStackWriter {
     for (const s of seeds.dashboards ?? []) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (this as any).dashboards.set(s.acting_org_id, s.page);
+    }
+
+    for (const s of seeds.dashboardExports ?? []) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (this as any).dashboardExports.set(s.acting_org_id, s.csv);
     }
   }
 }

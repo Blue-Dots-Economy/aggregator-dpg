@@ -17,6 +17,8 @@ import type { Result } from '@aggregator-dpg/shared-primitives/result';
 import {
   SignalStackWriterBase,
   type SignalStackAggregator,
+  type SignalStackDashboardExport,
+  type SignalStackDashboardExportQuery,
   type SignalStackDashboardPage,
   type SignalStackDashboardQuery,
   type SignalStackItemList,
@@ -443,6 +445,98 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
     }
   }
 
+  /**
+   * Downloads the aggregator dashboard as a CSV file from signalstack.
+   *
+   * Forwards `status` as the only query parameter today (signalstack's
+   * export endpoint accepts no others); `domain` is reserved for the
+   * provider rollout and intentionally NOT forwarded. The
+   * `accept: text/csv` header tells signalstack to return the CSV body
+   * directly — the writer hands the raw string back and the route
+   * streams it as `text/csv` with a `Content-Disposition` attachment
+   * header.
+   *
+   * The default filename embeds the status filter and current date in
+   * UTC; the API route may override.
+   *
+   * @param query - actingOrgId + optional status/domain.
+   * @returns ok(SignalStackDashboardExport) on 2xx; err(BaseError) on
+   *   transport failure, validation rejection, or non-2xx.
+   */
+  override async exportDashboardCsv(
+    query: SignalStackDashboardExportQuery,
+  ): Promise<Result<SignalStackDashboardExport, BaseError>> {
+    if (!query?.actingOrgId) {
+      return err(
+        new UpstreamError('actingOrgId is required for dashboard export', {
+          code: 'SIGNALSTACK_INPUT_INVALID',
+        }),
+      );
+    }
+
+    const params = new URLSearchParams();
+    if (query.status) params.set('status', query.status);
+    const qs = params.toString();
+    const url = `${this.baseUrl}/api/v1/aggregator/dashboard/export${qs ? `?${qs}` : ''}`;
+
+    const headers = {
+      ...this.headers,
+      'x-acting-org-id': query.actingOrgId,
+      accept: 'text/csv',
+    };
+
+    const controller = this.timeoutMs ? new AbortController() : undefined;
+    const timer = controller ? setTimeout(() => controller.abort(), this.timeoutMs) : undefined;
+
+    try {
+      const res = await this.fetchImpl(url, {
+        method: 'GET',
+        headers,
+        ...(controller ? { signal: controller.signal } : {}),
+      });
+
+      if (!res.ok) {
+        const bodyText = await safeReadText(res);
+        const upstreamMsg = extractUpstreamMessage(bodyText);
+        const message = upstreamMsg
+          ? `signalstack dashboard export returned ${res.status}: ${upstreamMsg}`
+          : `signalstack dashboard export returned ${res.status}`;
+        return err(
+          new UpstreamError(message, {
+            code: this.codeForStatus(res.status),
+            details: { status: res.status, body: bodyText },
+          }),
+        );
+      }
+
+      const csv = await safeReadText(res);
+      if (!csv) {
+        return err(
+          new UpstreamError('signalstack dashboard export returned empty body', {
+            code: 'SIGNALSTACK_BAD_RESPONSE',
+          }),
+        );
+      }
+      return ok({ csv, filename: buildDefaultExportFilename(query.status) });
+    } catch (e) {
+      const cause = e as Error;
+      const aborted = cause.name === 'AbortError';
+      return err(
+        new UpstreamError(
+          aborted
+            ? `signalstack dashboard export timed out after ${this.timeoutMs}ms`
+            : `signalstack dashboard export transport failure: ${cause.message}`,
+          {
+            cause,
+            code: aborted ? 'SIGNALSTACK_TIMEOUT' : 'SIGNALSTACK_TRANSPORT_FAILED',
+          },
+        ),
+      );
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
   private guardInput(input: SignalStackOnboardParticipantInput): BaseError | null {
     if (!input?.actingOrgId) {
       return new UpstreamError('actingOrgId is required', {
@@ -542,4 +636,19 @@ function extractUpstreamMessage(bodyText: string): string | null {
 
 function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+/**
+ * Default filename for the dashboard CSV export.
+ *
+ * Embeds the status filter (or `all` when omitted) plus the current
+ * UTC date so concurrent exports don't collide in the browser's
+ * downloads folder. Sanitises the status value so a hostile filter
+ * string can't inject path separators or quote chars into the
+ * `Content-Disposition` header.
+ */
+function buildDefaultExportFilename(status: string | undefined): string {
+  const sanitised = (status ?? 'all').replace(/[^a-z0-9_]/gi, '_').slice(0, 32);
+  const date = new Date().toISOString().slice(0, 10);
+  return `aggregator-dashboard-${sanitised}-${date}.csv`;
 }

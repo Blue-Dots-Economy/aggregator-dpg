@@ -414,4 +414,43 @@ describe('GET /v1/blue-dots/dashboard', () => {
     });
     expect(res.statusCode).toBe(400);
   });
+
+  it('exports the seeded CSV body with the right headers', async () => {
+    const SAMPLE_CSV =
+      'user_id,profile_status,profile_completion_pct\n' + 'u-1,at_risk,42\n' + 'u-2,at_risk,58\n';
+    writer.seed({
+      dashboardExports: [{ acting_org_id: ORG_A, csv: SAMPLE_CSV }],
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/blue-dots/dashboard/export?status=at_risk',
+      headers: { authorization: 'Bearer agg-a-approved-with-org' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toContain('text/csv');
+    const disposition = res.headers['content-disposition'];
+    expect(disposition).toContain('attachment');
+    expect(disposition).toContain('aggregator-dashboard-at_risk-');
+    expect(res.body).toBe(SAMPLE_CSV);
+  });
+
+  it('export 5xx when signalstack writer is disabled', async () => {
+    _setSignalStackWriter(null);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/blue-dots/dashboard/export?status=at_risk',
+      headers: { authorization: 'Bearer agg-a-approved-with-org' },
+    });
+    expect(res.statusCode).toBeGreaterThanOrEqual(500);
+  });
+
+  it('export 400 on invalid status shape', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/blue-dots/dashboard/export?status=at-risk!',
+      headers: { authorization: 'Bearer agg-a-approved-with-org' },
+    });
+    expect(res.statusCode).toBe(400);
+  });
 });

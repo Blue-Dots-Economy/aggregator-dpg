@@ -222,6 +222,33 @@ export interface SignalStackDashboardPage {
 }
 
 /**
+ * Query parameters for the aggregator dashboard CSV export.
+ *
+ * Same `actingOrgId` semantics as the JSON dashboard read. `status` is
+ * the only filter accepted by the upstream `?status=…` query today;
+ * `domain` is reserved for the eventual provider rollout and the HTTP
+ * impl currently drops it.
+ */
+export interface SignalStackDashboardExportQuery {
+  actingOrgId: string;
+  status?: string;
+  domain?: 'seeker' | 'provider';
+}
+
+/**
+ * Result payload for the dashboard CSV export.
+ *
+ * `csv` is the raw `text/csv; charset=utf-8` body returned by signalstack.
+ * Callers stream it back to the requesting browser verbatim — we do not
+ * decode or rewrite the rows. `filename` is a sensible default derived
+ * from the status filter and current date; the API route may override.
+ */
+export interface SignalStackDashboardExport {
+  csv: string;
+  filename: string;
+}
+
+/**
  * Persistence port for the signalstack admin endpoints.
  *
  * Implementations:
@@ -291,4 +318,21 @@ export abstract class SignalStackWriterBase {
   abstract fetchDashboard(
     query: SignalStackDashboardQuery,
   ): Promise<Result<SignalStackDashboardPage, BaseError>>;
+
+  /**
+   * Export the aggregator dashboard as a CSV file.
+   *
+   * Calls `GET /api/v1/aggregator/dashboard/export` with the per-call
+   * `x-acting-org-id: {query.actingOrgId}` and `accept: text/csv` so
+   * signalstack returns the raw CSV body. The writer hands the body
+   * back as-is — the route streams it to the browser with a
+   * `Content-Disposition: attachment` header.
+   *
+   * @param query - actingOrgId + optional status/domain filter.
+   * @returns ok(SignalStackDashboardExport) on 2xx; err(BaseError) on
+   *   transport failure, validation rejection, or non-2xx.
+   */
+  abstract exportDashboardCsv(
+    query: SignalStackDashboardExportQuery,
+  ): Promise<Result<SignalStackDashboardExport, BaseError>>;
 }

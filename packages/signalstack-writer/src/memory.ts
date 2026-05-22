@@ -19,6 +19,8 @@ import type { Result } from '@aggregator-dpg/shared-primitives/result';
 import {
   SignalStackWriterBase,
   type SignalStackAggregator,
+  type SignalStackDashboardExport,
+  type SignalStackDashboardExportQuery,
   type SignalStackDashboardPage,
   type SignalStackDashboardQuery,
   type SignalStackItemList,
@@ -262,6 +264,39 @@ export class InMemorySignalStackWriter extends SignalStackWriterBase {
         ttl_seconds: 3600,
         refreshed: true,
       },
+    });
+  }
+
+  /**
+   * Pinned CSV exports keyed by `actingOrgId`. Tests that exercise the
+   * export route MUST seed a row here — the fake does not synthesise a
+   * CSV body because signalstack owns the column set and that shape
+   * changes over time. Unseeded callers get an empty body and a
+   * `SIGNALSTACK_BAD_RESPONSE` error so the test fails loud instead of
+   * passing on a stale hardcoded header list.
+   */
+  protected readonly dashboardExports: Map<string, string> = new Map();
+
+  override async exportDashboardCsv(
+    query: SignalStackDashboardExportQuery,
+  ): Promise<Result<SignalStackDashboardExport, BaseError>> {
+    if (!query?.actingOrgId) {
+      return err(
+        new UpstreamError('actingOrgId is required', { code: 'SIGNALSTACK_INPUT_INVALID' }),
+      );
+    }
+    const pinned = this.dashboardExports.get(query.actingOrgId);
+    if (!pinned) {
+      return err(
+        new UpstreamError('signalstack dashboard export returned empty body', {
+          code: 'SIGNALSTACK_BAD_RESPONSE',
+        }),
+      );
+    }
+    const sanitised = (query.status ?? 'all').replace(/[^a-z0-9_]/gi, '_').slice(0, 32);
+    return ok({
+      csv: pinned,
+      filename: `aggregator-dashboard-${sanitised}-${ISO_FIXED.slice(0, 10)}.csv`,
     });
   }
 

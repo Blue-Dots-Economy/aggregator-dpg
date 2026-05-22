@@ -156,6 +156,9 @@ describe('requireApproved + signalstack backfill', () => {
       async fetchDashboard() {
         return err(new UpstreamError('not used', { code: 'X' }));
       }
+      async exportDashboardCsv() {
+        return err(new UpstreamError('not used', { code: 'X' }));
+      }
     }
     _setSignalStackWriter(new FailingWriter());
 

@@ -215,6 +215,9 @@ describe('admin approval routes', () => {
       async fetchDashboard() {
         return err(new UpstreamError('not used', { code: 'X' }));
       }
+      async exportDashboardCsv() {
+        return err(new UpstreamError('not used', { code: 'X' }));
+      }
     }
     _setSignalStackWriter(new FailingUpsertWriter());
 
