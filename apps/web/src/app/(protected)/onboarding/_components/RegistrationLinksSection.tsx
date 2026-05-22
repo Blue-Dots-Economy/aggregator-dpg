@@ -575,7 +575,12 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
   );
 }
 
-export function YourLinks() {
+/**
+ * Body-only "Your Registration Links" list. Designed to be rendered INSIDE
+ * another card shell (the merged Registration via Link section on the
+ * onboarding landing). No outer card padding/border — parent owns chrome.
+ */
+export function YourLinksBody() {
   const rawProfile = useProfileRaw();
   const aggregatorType: 'seeker' | 'provider' = rawProfile.data?.type ?? 'seeker';
   // The aggregator only ever has links of its registered type — no tab
@@ -585,29 +590,29 @@ export function YourLinks() {
   const activeCount = links.filter((l) => l.status === 'live').length;
 
   return (
-    <div className="bd-card bd-shadow overflow-hidden">
-      <div className="px-5 py-4 flex items-center justify-between gap-4 border-b border-[var(--bd-border)] flex-wrap">
-        <div className="flex items-center gap-3">
-          <h2 className="font-display font-bold text-[16px] text-primary-600 underline decoration-2 underline-offset-[6px] decoration-[var(--bd-primary)]">
+    <div>
+      <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+        <div className="flex items-center gap-2">
+          <div className="font-display font-bold text-[14px] text-ink-700">
             Your Registration Links
-          </h2>
-          <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[11.5px] font-semibold">
+          </div>
+          <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[11px] font-semibold">
             {activeCount} active
           </span>
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-ink-50 text-ink-600 text-[11.5px] font-semibold capitalize">
+          <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-ink-50 text-ink-600 text-[11px] font-semibold capitalize">
             {aggregatorType} links
           </span>
         </div>
       </div>
-      <div className="p-5 flex flex-col gap-3">
+      <div className="flex flex-col gap-3 overflow-y-auto pr-1" style={{ maxHeight: 300 }}>
         {isLoading ? (
-          <div className="text-center py-10 text-ink-400 text-[13px]">Loading links…</div>
+          <div className="text-center py-8 text-ink-400 text-[13px]">Loading links…</div>
         ) : error ? (
-          <div className="text-center py-10 text-rose-600 text-[13px]">
+          <div className="text-center py-8 text-rose-600 text-[13px]">
             {(error as Error).message}
           </div>
         ) : links.length === 0 ? (
-          <div className="text-center py-10 text-ink-400 text-[13px]">
+          <div className="text-center py-8 text-ink-400 text-[13px]">
             No {aggregatorType} links yet. Create one above.
           </div>
         ) : (

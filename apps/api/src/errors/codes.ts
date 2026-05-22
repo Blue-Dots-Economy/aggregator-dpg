@@ -120,6 +120,16 @@ export const ERR = {
     hint: 'Keycloak admin API call failed (network/timeout/5xx). Check KC pod + admin creds.',
   },
 
+  // ── Downstream identity store (signalstack) ─────────────────────────────
+  SIGNALSTACK_PUSH_FAILED: {
+    code: 'SIGNALSTACK_PUSH_FAILED',
+    status: 502,
+    title: 'Could not register with signalstack',
+    detail:
+      'The participant was validated locally but could not be pushed to the signalstack identity store. Please retry; if the problem persists, contact support.',
+    hint: 'signalstack-writer.onboard returned a non-2xx. See response.error.fields.code for the writer-side classification (transport, timeout, validation, etc.).',
+  },
+
   // ── Persistence ─────────────────────────────────────────────────────────
   DB_UNAVAILABLE: {
     code: 'DB_UNAVAILABLE',

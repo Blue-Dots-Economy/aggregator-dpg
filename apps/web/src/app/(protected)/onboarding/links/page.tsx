@@ -3,7 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { Topbar } from '../../../../components/shell/Topbar';
 import { I } from '../../../../icons';
-import { CreateLinkSection, YourLinks } from '../_components/RegistrationLinksSection';
+import { CreateLinkSection } from '../_components/RegistrationLinksSection';
 
 export default function RegistrationLinksPage() {
   const router = useRouter();
@@ -36,7 +36,6 @@ export default function RegistrationLinksPage() {
         }
       />
       <CreateLinkSection />
-      <YourLinks />
     </div>
   );
 }

@@ -214,34 +214,31 @@ export function CSVUpload() {
           {uploadNotice}
         </div>
       )}
-
-      <RecentUploadsTable
-        items={recent.data?.items ?? []}
-        loading={recent.isLoading}
-        error={recent.error as Error | null}
-      />
       {toast && <UploadToast message={toast} onDone={() => setToast(null)} />}
     </div>
   );
 }
 
-function RecentUploadsTable({
-  items,
-  loading,
-  error,
-}: {
-  items: BulkUploadStatus[];
-  loading: boolean;
-  error: Error | null;
-}) {
+/**
+ * Body-only "Recent uploads" table. Designed to be rendered INSIDE another
+ * card shell (the merged Bulk Upload section on the onboarding landing).
+ * No outer card padding/border — the parent owns the chrome.
+ */
+export function RecentUploadsBody() {
+  const recent = useRecentBulkUploads(10);
+  const items = recent.data?.items ?? [];
+  const error = recent.error as Error | null;
+  const loading = recent.isLoading;
+
   return (
-    <div className="mt-5 border-t border-[var(--bd-border)] pt-4">
-      <div className="flex items-center justify-between mb-2">
+    <div>
+      <div className="flex items-center justify-between mb-3">
         <div className="font-display font-bold text-[14px] text-ink-700">Recent uploads</div>
+        <span className="text-[12px] text-ink-400">{items.length} shown</span>
       </div>
-      <div className="overflow-x-auto scroll-x">
+      <div className="overflow-auto scroll-x" style={{ maxHeight: 360 }}>
         <table className="bd-table" style={{ minWidth: 800 }}>
-          <thead>
+          <thead style={{ position: 'sticky', top: 0, zIndex: 2, background: '#FAFBFE' }}>
             <tr>
               <th>Uploaded</th>
               <th style={{ textAlign: 'center' }}>Type</th>

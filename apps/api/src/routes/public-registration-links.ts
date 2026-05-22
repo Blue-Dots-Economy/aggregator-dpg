@@ -135,7 +135,17 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
     // Falls back to a fresh UUID when phone is absent so dedup degrades
     // gracefully for phone-optional schemas (no dedup, but still works).
     delete (body as Record<string, unknown>)['participant_id'];
-    const phoneRaw = typeof body['phone'] === 'string' ? (body['phone'] as string) : '';
+
+    // Pick contact fields by domain. Seeker schemas keep them top-level
+    // (`phone`, `email`); provider schemas store them under the hiring
+    // manager nested fields (`hiringManagerPhoneNumber`,
+    // `hiringManagerEmail`). The signalstack user block + the
+    // participants.{phone,email} columns must come from whichever
+    // location the schema put them in.
+    const phoneSourceKey = link.domain === 'provider' ? 'hiringManagerPhoneNumber' : 'phone';
+    const emailSourceKey = link.domain === 'provider' ? 'hiringManagerEmail' : 'email';
+    const phoneRaw =
+      typeof body[phoneSourceKey] === 'string' ? (body[phoneSourceKey] as string) : '';
     let phoneNormalised: string | null = null;
     if (phoneRaw) {
       const phone = normalisePhone(phoneRaw);
@@ -144,14 +154,18 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       }
       phoneNormalised = phone.value;
     }
-    const emailRaw = typeof body['email'] === 'string' ? (body['email'] as string) : '';
+    const emailRaw =
+      typeof body[emailSourceKey] === 'string' ? (body[emailSourceKey] as string) : '';
     const emailNormalised = emailRaw ? emailRaw.trim().toLowerCase() : null;
     const participantId = phoneNormalised ?? randomUUID();
 
-    // 3 + 4. participant UPSERT (via shared writer) and link_submission
-    // INSERT must commit atomically — otherwise a crash between them leaves a
-    // participant without a corresponding submission row, and the metrics
-    // rollup never credits the registration.
+    // 3 + 4. participant UPSERT (via shared writer), link_submission INSERT,
+    // AND signalstack push must all commit atomically. A signalstack failure
+    // rolls back the local rows so the caller sees a single, honest outcome:
+    // a 2xx response means the participant exists in both stores. Tightens
+    // the DB connection hold time — acceptable for a public-link form submit
+    // (low volume). If push volume ever requires async fan-out, switch to an
+    // outbox table inside the tx + worker consumer.
     const writer = getParticipantsWriter();
     const txResult = await getDb().transaction(async (tx) => {
       // Bind the writer to the active tx for atomicity. If a custom writer
@@ -192,38 +206,22 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
         })
         .returning({ id: linkSubmissions.id });
 
-      return {
-        outcome,
-        participantRowId,
-        submissionId: submission[0]?.id,
-      };
-    });
-    const { outcome, participantRowId, submissionId } = txResult;
-
-    log.info({
-      status: 'success',
-      event_type: 'audit',
-      audit: 'link.submission_recorded',
-      latency_ms: Date.now() - start,
-      link_id: link.id,
-      outcome,
-      participant_id: participantRowId,
-      submission_id: submissionId,
-    });
-
-    // Outward signalstack push. Fires on both passed and skipped: the local
-    // participants table is deduped per (aggregator_id, type, participant_id),
-    // but signalstack is the global identity store — a different aggregator
-    // bringing the same person, or the same aggregator re-submitting an
-    // updated profile, must still surface as a distinct profile row there.
-    // Failures are logged but never affect the HTTP response: the local DB
-    // write is the source of truth, signalstack is a downstream sink.
-    if (outcome === 'passed' || outcome === 'skipped') {
+      // Outward signalstack push, inside the same tx so a downstream failure
+      // rolls the local rows back. Local participant table is deduped per
+      // (aggregator_id, type, participant_id); signalstack is the global
+      // identity store and must also see the row, otherwise the dashboard
+      // and downstream consumers are out of sync.
       const ss = getSignalStackWriter();
       if (ss) {
-        const name = typeof body['name'] === 'string' ? (body['name'] as string) : participantRowId;
+        const nameSourceKey = link.domain === 'provider' ? 'jobProviderName' : 'name';
+        const name =
+          typeof body[nameSourceKey] === 'string'
+            ? (body[nameSourceKey] as string)
+            : participantRowId;
         const phoneFromBody =
-          typeof body['phone'] === 'string' ? (body['phone'] as string) : phoneNormalised;
+          typeof body[phoneSourceKey] === 'string'
+            ? (body[phoneSourceKey] as string)
+            : phoneNormalised;
         const pushPhone = phoneNormalised ?? phoneFromBody;
         const result = await ss.onboard({
           // Signalstack's user schema treats email / phoneNumber as `.optional()`
@@ -243,23 +241,51 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
           },
           aggregator_id: link.aggregatorId,
         });
+
         if (!result.success) {
-          log.warn({
-            status: 'warn',
+          log.error({
+            status: 'failure',
             sub: 'signalstack.push',
             error: result.error.message,
             code: result.error.code,
+            link_id: link.id,
+            participant_id: participantRowId,
           });
-        } else {
-          log.info({
-            status: 'success',
-            sub: 'signalstack.push',
-            user_id: result.value.user.id,
-            profile_count: result.value.profiles.length,
+          throw httpError('SIGNALSTACK_PUSH_FAILED', {
+            detail: `Signalstack rejected the participant push (${result.error.code}).`,
+            fields: { code: result.error.code, message: result.error.message },
+            cause: result.error,
           });
         }
+
+        log.info({
+          status: 'success',
+          sub: 'signalstack.push',
+          user_id: result.value.user.id,
+          profile_count: result.value.profiles.length,
+          link_id: link.id,
+          participant_id: participantRowId,
+        });
       }
-    }
+
+      return {
+        outcome,
+        participantRowId,
+        submissionId: submission[0]?.id,
+      };
+    });
+    const { outcome, participantRowId, submissionId } = txResult;
+
+    log.info({
+      status: 'success',
+      event_type: 'audit',
+      audit: 'link.submission_recorded',
+      latency_ms: Date.now() - start,
+      link_id: link.id,
+      outcome,
+      participant_id: participantRowId,
+      submission_id: submissionId,
+    });
 
     if (outcome === 'skipped') {
       // Surface dedup in the response status to match the design (409).
@@ -297,8 +323,12 @@ function buildSignalStackItemState(
 ): Record<string, unknown> {
   const itemState: Record<string, unknown> = { ...body };
 
-  if (domain === 'seeker' && pushPhone) {
-    itemState.phone = pushPhone;
+  if (pushPhone) {
+    if (domain === 'provider') {
+      itemState.hiringManagerPhoneNumber = pushPhone;
+    } else {
+      itemState.phone = pushPhone;
+    }
   }
 
   return itemState;
