@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Button } from '../../../../components/ui/Button';
 import { Dropzone } from '../../../../components/ui/Dropzone';
 import { I } from '../../../../icons';
@@ -23,6 +24,7 @@ export function CSVUpload() {
   const [pickedFile, setPickedFile] = useState<File | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadNotice, setUploadNotice] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const upload = useBulkUpload();
   const recent = useRecentBulkUploads(10);
@@ -59,11 +61,33 @@ export function CSVUpload() {
         setUploadNotice(
           result.message ?? 'This CSV was already uploaded earlier — showing the existing run.',
         );
+      } else {
+        setToast('File uploaded');
       }
       recent.refetch();
     } catch (err) {
       setUploadError((err as Error).message);
     }
+  };
+
+  const UploadToast = ({ message, onDone }: { message: string; onDone: () => void }) => {
+    const [mounted, setMounted] = useState(false);
+    useEffect(() => setMounted(true), []);
+    useEffect(() => {
+      const t = setTimeout(onDone, 2400);
+      return () => clearTimeout(t);
+    }, [onDone]);
+    if (!mounted) return null;
+    return createPortal(
+      <div
+        role="status"
+        aria-live="polite"
+        className="fixed top-4 right-4 z-[100] rounded-[10px] border border-emerald-200 bg-emerald-50 px-4 py-3 text-[13px] text-emerald-700 shadow-lg inline-flex items-center gap-2"
+      >
+        <I.check size={14} /> {message}
+      </div>,
+      document.body,
+    );
   };
 
   const downloadTemplate = () => {
@@ -196,6 +220,7 @@ export function CSVUpload() {
         loading={recent.isLoading}
         error={recent.error as Error | null}
       />
+      {toast && <UploadToast message={toast} onDone={() => setToast(null)} />}
     </div>
   );
 }
