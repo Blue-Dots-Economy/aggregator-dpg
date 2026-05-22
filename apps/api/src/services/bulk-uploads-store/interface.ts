@@ -19,7 +19,7 @@ export type BulkUploadStatus =
 export interface BulkUpload {
   id: string;
   aggregatorId: string;
-  participantType: 'seeker' | 'provider';
+  participantType: string;
   s3Key: string;
   s3Etag: string | null;
   status: BulkUploadStatus;
@@ -36,7 +36,7 @@ export interface BulkUpload {
 
 export interface CreateBulkUploadInput {
   aggregatorId: string;
-  participantType: 'seeker' | 'provider';
+  participantType: string;
   s3Key: string;
   schemaId: string;
   schemaVersion: string;

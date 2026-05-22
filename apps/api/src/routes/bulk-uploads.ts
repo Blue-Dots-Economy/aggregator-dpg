@@ -54,7 +54,7 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
         fields: { participant_type: 'invalid' },
       });
     }
-    enforceAggregatorType(auth, participantType as 'seeker' | 'provider');
+    enforceAggregatorType(auth, participantType as string);
 
     const schemaResult = await getSchemaLoader().getSchema({
       id: `participant-${participantType}`,
@@ -87,7 +87,7 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
         fields: { participant_type: 'invalid' },
       });
     }
-    enforceAggregatorType(auth, participantType as 'seeker' | 'provider');
+    enforceAggregatorType(auth, participantType as string);
 
     // Pin the active schema version at create time. v1 is the only published
     // version today; this becomes a registry lookup once schema versioning ships.
@@ -97,7 +97,7 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
     const store = getBulkUploadsStore();
     const created = await store.create({
       aggregatorId: auth.aggregatorId,
-      participantType: participantType as 'seeker' | 'provider',
+      participantType: participantType as string,
       // Temporary placeholder; replaced after sign call below. We need the
       // row id to compute the deterministic key, so create-then-update.
       s3Key: 'pending',
@@ -405,7 +405,7 @@ interface BulkUploadResponseShape {
   upload_id: string;
   status: string;
   status_reason: string | null;
-  participant_type: 'seeker' | 'provider';
+  participant_type: string;
   total_rows: number | null;
   passed: number;
   failed: number;
@@ -430,7 +430,7 @@ interface UploadShape {
   id: string;
   status: string;
   statusReason: string | null;
-  participantType: 'seeker' | 'provider';
+  participantType: string;
   errorsCsvS3Key: string | null;
   schemaId: string;
   schemaVersion: string;
@@ -569,7 +569,7 @@ async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
  * registered type (read from the JWT `aggregator_type` claim). An aggregator
  * may only upload or template the type it registered as.
  */
-function enforceAggregatorType(auth: AuthContext, participantType: 'seeker' | 'provider'): void {
+function enforceAggregatorType(auth: AuthContext, participantType: string): void {
   if (!auth.aggregatorType) {
     throw httpError('AGGREGATOR_TYPE_MISSING', {
       fields: { aggregator_id: auth.aggregatorId },

@@ -19,7 +19,7 @@ export const dynamic = 'force-dynamic';
  */
 export default async function RegisterPage() {
   const session = await getSession();
-  if (session) redirect('/blue-dots');
+  if (session) redirect('/dashboard');
 
   const schemaPath = resolveSchemaPath('registration.v1.json');
   const uiSchemaPath = resolveSchemaPath('registration.v1.ui.json');

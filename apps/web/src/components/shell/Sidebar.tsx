@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 import { I, type IconName } from '../../icons';
 import { BlueDotsLogo } from '../ui/BlueDotsLogo';
 import { useAuth } from '../../lib/auth-context';
-import { useDashboard } from '../../hooks/useBlueDots';
+import { useDashboard } from '../../hooks/useDashboard';
 import { useProfileRaw } from '../../hooks/useProfile';
 import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../hooks/useAggregatorConfig';
 import { cn } from '../../lib/cn';
@@ -23,7 +23,7 @@ interface NavItem {
  */
 function buildNav(brandShortName: string): NavItem[] {
   return [
-    { to: '/blue-dots', label: `My ${brandShortName}`, icon: 'users' },
+    { to: '/dashboard', label: `My ${brandShortName}`, icon: 'users' },
     { to: '/onboarding', label: 'Onboarding', icon: 'upload' },
     { to: '/profile', label: 'Profile', icon: 'user' },
   ];
@@ -126,7 +126,7 @@ export function Sidebar() {
   });
   const participantsBadge = dashboard?.rollup.participants_total;
   const nav: NavItem[] = buildNav(cfg.brand.short_name).map((n) =>
-    n.to === '/blue-dots' && participantsBadge !== undefined
+    n.to === '/dashboard' && participantsBadge !== undefined
       ? { ...n, badge: participantsBadge }
       : n,
   );

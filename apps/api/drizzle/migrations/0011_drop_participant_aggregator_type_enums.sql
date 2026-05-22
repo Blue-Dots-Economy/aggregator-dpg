@@ -1,0 +1,40 @@
+-- Migration 0011 — drop `participant_type` + `aggregator_type` enums.
+--
+-- The aggregator is a generic platform that runs against ANY signalstack
+-- network. blue_dot has domains `seeker`/`provider`; yellow_dot has
+-- `learner`/`tutor`; purple_dot adds others. Pinning the columns to a
+-- closed enum forces a code+migration round-trip every time a new
+-- network lands. Convert both columns to `text` so the network config
+-- (config/aggregator.config.yaml + signalstack network.json) drives the
+-- valid set at the application layer.
+--
+-- Affected columns:
+--   participants.type              participant_type -> text
+--   bulk_uploads.participant_type  participant_type -> text
+--   registration_links.domain      participant_type -> text
+--   aggregators.type               aggregator_type  -> text
+--
+-- After the column conversions, both enums are unused and dropped.
+-- The matching check constraints (`type IN ('seeker','provider')`)
+-- are intentionally NOT re-introduced — app-layer validation against
+-- `getNetworkConfig().domainIds` is now the source of truth.
+
+BEGIN;
+
+ALTER TABLE participants
+  ALTER COLUMN type TYPE TEXT USING type::text;
+
+ALTER TABLE bulk_uploads
+  ALTER COLUMN participant_type TYPE TEXT USING participant_type::text;
+
+ALTER TABLE registration_links
+  ALTER COLUMN domain TYPE TEXT USING domain::text;
+
+ALTER TABLE aggregators
+  ALTER COLUMN type TYPE TEXT USING type::text;
+
+-- Drop the enum types now that nothing references them.
+DROP TYPE participant_type;
+DROP TYPE aggregator_type;
+
+COMMIT;

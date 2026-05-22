@@ -27,7 +27,7 @@ import { jsonFetch } from './http';
  * refetches with `status` set only when the user explicitly picks a
  * server-side filter chip.
  */
-export interface BlueDotsDashboardQuery {
+export interface DashboardQuery {
   domain?: string;
   page?: number;
   limit?: number;
@@ -40,7 +40,7 @@ export interface BlueDotsDashboardQuery {
  * keys without bumping a version, so consumers MUST tolerate unknown
  * keys instead of pinning an enum.
  */
-export interface BlueDotsDashboardRollup {
+export interface DashboardRollup {
   participants_total: number;
   by_status: Record<string, number>;
   applications_pending: number;
@@ -53,7 +53,7 @@ export interface BlueDotsDashboardRollup {
  * so the dashboard can display a "last updated" hint and decide whether
  * the response is fresh or cache-served.
  */
-export interface BlueDotsDashboardMetadata {
+export interface DashboardMetadata {
   last_computed_at: string;
   ttl_seconds: number;
   refreshed: boolean;
@@ -64,20 +64,20 @@ export interface BlueDotsDashboardMetadata {
  * because signalstack owns the per-row schema — consumers decode only
  * the keys they care about.
  */
-export interface BlueDotsDashboardPage {
-  rollup: BlueDotsDashboardRollup;
+export interface DashboardPage {
+  rollup: DashboardRollup;
   participants: Array<Record<string, unknown>>;
   next_cursor: string | null;
   total_matching: number;
-  metadata: BlueDotsDashboardMetadata;
+  metadata: DashboardMetadata;
 }
 
 /**
- * Query for the dashboard CSV export. Subset of {@link BlueDotsDashboardQuery}
+ * Query for the dashboard CSV export. Subset of {@link DashboardQuery}
  * because signalstack's `/dashboard/export` endpoint accepts only
  * `status` as a filter today.
  */
-export interface BlueDotsDashboardExportQuery {
+export interface DashboardExportQuery {
   domain?: string;
   status?: string;
 }
@@ -89,12 +89,12 @@ export interface BlueDotsDashboardExportQuery {
  * sensible default) so the browser's save dialog gets the same name
  * signalstack minted.
  */
-export interface BlueDotsDashboardExportResult {
+export interface DashboardExportResult {
   blob: Blob;
   filename: string;
 }
 
-export interface BlueDotsService {
+export interface DashboardService {
   list(kind: ParticipantKind, filter?: ParticipantFilter): Promise<ParticipantBase[]>;
   seekers(filter?: ParticipantFilter): Promise<Seeker[]>;
   providers(filter?: ParticipantFilter): Promise<Provider[]>;
@@ -107,7 +107,7 @@ export interface BlueDotsService {
    * user selects a filter chip so signalstack returns the server-side
    * filtered slice.
    */
-  dashboard(query?: BlueDotsDashboardQuery): Promise<BlueDotsDashboardPage>;
+  dashboard(query?: DashboardQuery): Promise<DashboardPage>;
   /**
    * Download the dashboard as a CSV file.
    *
@@ -116,7 +116,7 @@ export interface BlueDotsService {
    * or render a preview. CSV columns are owned by signalstack — the
    * service does not parse, validate, or rewrite them.
    */
-  dashboardExport(query?: BlueDotsDashboardExportQuery): Promise<BlueDotsDashboardExportResult>;
+  dashboardExport(query?: DashboardExportQuery): Promise<DashboardExportResult>;
 }
 
 interface SignalStackItem {
@@ -139,7 +139,7 @@ interface SignalStackItemList {
 
 const ZERO_STATS = { total: 0, shortlisted: 0, accepted: 0, rejected: 0, pending: 0 };
 
-class HttpBlueDotsService implements BlueDotsService {
+class HttpDashboardService implements DashboardService {
   async seekers(filter?: ParticipantFilter): Promise<Seeker[]> {
     const raw = await this.fetchDomain('seeker');
     return this.applyFilter(
@@ -175,12 +175,12 @@ class HttpBlueDotsService implements BlueDotsService {
 
   private async fetchDomain(domain: 'seeker' | 'provider'): Promise<SignalStackItem[]> {
     // Signalstack's FetchItemsBodySchema caps limit at 100. Match that here.
-    const url = `/api/blue-dots/items?domain=${domain}&limit=100`;
+    const url = `/api/dashboard/items?domain=${domain}&limit=100`;
     const payload = await jsonFetch<SignalStackItemList>(url);
     return payload.items ?? [];
   }
 
-  async dashboard(query?: BlueDotsDashboardQuery): Promise<BlueDotsDashboardPage> {
+  async dashboard(query?: DashboardQuery): Promise<DashboardPage> {
     const params = new URLSearchParams();
     params.set('domain', query?.domain ?? 'seeker');
     if (query?.page !== undefined) params.set('page', String(query.page));
@@ -189,17 +189,15 @@ class HttpBlueDotsService implements BlueDotsService {
     // default landing render needs the full rollup + unfiltered list, so
     // the BFF/API must NOT see a `status` param in that mode.
     if (query?.status) params.set('status', query.status);
-    const url = `/api/blue-dots/dashboard?${params.toString()}`;
-    return jsonFetch<BlueDotsDashboardPage>(url);
+    const url = `/api/dashboard?${params.toString()}`;
+    return jsonFetch<DashboardPage>(url);
   }
 
-  async dashboardExport(
-    query?: BlueDotsDashboardExportQuery,
-  ): Promise<BlueDotsDashboardExportResult> {
+  async dashboardExport(query?: DashboardExportQuery): Promise<DashboardExportResult> {
     const params = new URLSearchParams();
     params.set('domain', query?.domain ?? 'seeker');
     if (query?.status) params.set('status', query.status);
-    const url = `/api/blue-dots/dashboard/export?${params.toString()}`;
+    const url = `/api/dashboard/export?${params.toString()}`;
     const res = await fetch(url, {
       method: 'GET',
       headers: { accept: 'text/csv' },
@@ -339,7 +337,7 @@ function completeness(state: Record<string, unknown>): number {
   return Math.round((filled / entries.length) * 100);
 }
 
-export const blueDotsService: BlueDotsService = new HttpBlueDotsService();
+export const dashboardService: DashboardService = new HttpDashboardService();
 
 /**
  * Triggers a browser download for a CSV blob.
@@ -348,7 +346,7 @@ export const blueDotsService: BlueDotsService = new HttpBlueDotsService();
  * blob, clicks it, and revokes the URL. Browser-only; no-op when called
  * during SSR.
  */
-export function triggerCsvDownload(result: BlueDotsDashboardExportResult): void {
+export function triggerCsvDownload(result: DashboardExportResult): void {
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
   const url = URL.createObjectURL(result.blob);
   const a = document.createElement('a');
@@ -387,7 +385,7 @@ function parseFilenameFromContentDisposition(header: string): string | null {
  * `Content-Disposition`. Mirrors the API's default shape so file-save
  * dialogs stay consistent across success paths.
  */
-function defaultExportFilename(query?: BlueDotsDashboardExportQuery): string {
+function defaultExportFilename(query?: DashboardExportQuery): string {
   const status = (query?.status ?? 'all').replace(/[^a-z0-9_]/gi, '_').slice(0, 32);
   const date = new Date().toISOString().slice(0, 10);
   return `aggregator-dashboard-${status}-${date}.csv`;

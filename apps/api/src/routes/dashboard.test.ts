@@ -123,14 +123,14 @@ describe('blue-dots routes', () => {
   });
 
   it('401 without token', async () => {
-    const res = await app.inject({ method: 'GET', url: '/v1/blue-dots/items?domain=seeker' });
+    const res = await app.inject({ method: 'GET', url: '/v1/dashboard/items?domain=seeker' });
     expect(res.statusCode).toBe(401);
   });
 
   it('403 when token has no aggregator_id', async () => {
     const res = await app.inject({
       method: 'GET',
-      url: '/v1/blue-dots/items?domain=seeker',
+      url: '/v1/dashboard/items?domain=seeker',
       headers: { authorization: 'Bearer no-agg' },
     });
     expect(res.statusCode).toBe(403);
@@ -139,7 +139,7 @@ describe('blue-dots routes', () => {
   it('returns only AGG_A seekers when AGG_A asks', async () => {
     const res = await app.inject({
       method: 'GET',
-      url: '/v1/blue-dots/items?domain=seeker',
+      url: '/v1/dashboard/items?domain=seeker',
       headers: { authorization: 'Bearer agg-a-token' },
     });
     expect(res.statusCode).toBe(200);
@@ -155,7 +155,7 @@ describe('blue-dots routes', () => {
   it('returns only AGG_B seeker when AGG_B asks', async () => {
     const res = await app.inject({
       method: 'GET',
-      url: '/v1/blue-dots/items?domain=seeker',
+      url: '/v1/dashboard/items?domain=seeker',
       headers: { authorization: 'Bearer agg-b-token' },
     });
     expect(res.statusCode).toBe(200);
@@ -167,7 +167,7 @@ describe('blue-dots routes', () => {
   it('returns only provider items when domain=provider', async () => {
     const res = await app.inject({
       method: 'GET',
-      url: '/v1/blue-dots/items?domain=provider',
+      url: '/v1/dashboard/items?domain=provider',
       headers: { authorization: 'Bearer agg-a-token' },
     });
     expect(res.statusCode).toBe(200);
@@ -180,14 +180,14 @@ describe('blue-dots routes', () => {
   it('400 on invalid domain', async () => {
     const res = await app.inject({
       method: 'GET',
-      url: '/v1/blue-dots/items?domain=invalid',
+      url: '/v1/dashboard/items?domain=invalid',
       headers: { authorization: 'Bearer agg-a-token' },
     });
     expect(res.statusCode).toBe(400);
   });
 });
 
-describe('GET /v1/blue-dots/dashboard', () => {
+describe('GET /v1/dashboard/dashboard', () => {
   let app: FastifyInstance;
   let writer: SignalStackWriterFake;
   let aggregatorStore: AggregatorStoreFake;
@@ -316,14 +316,14 @@ describe('GET /v1/blue-dots/dashboard', () => {
   });
 
   it('401 without token', async () => {
-    const res = await app.inject({ method: 'GET', url: '/v1/blue-dots/dashboard' });
+    const res = await app.inject({ method: 'GET', url: '/v1/dashboard/dashboard' });
     expect(res.statusCode).toBe(401);
   });
 
   it('403 NOT_APPROVED when decision_made is pending', async () => {
     const res = await app.inject({
       method: 'GET',
-      url: '/v1/blue-dots/dashboard',
+      url: '/v1/dashboard/dashboard',
       headers: { authorization: 'Bearer agg-a-pending' },
     });
     expect(res.statusCode).toBe(403);
@@ -332,7 +332,7 @@ describe('GET /v1/blue-dots/dashboard', () => {
   it('returns rollup verbatim using actingOrgId from access-token claim', async () => {
     const res = await app.inject({
       method: 'GET',
-      url: '/v1/blue-dots/dashboard?page=1&limit=50',
+      url: '/v1/dashboard/dashboard?page=1&limit=50',
       headers: { authorization: 'Bearer agg-a-approved-with-org' },
     });
     expect(res.statusCode).toBe(200);
@@ -347,7 +347,7 @@ describe('GET /v1/blue-dots/dashboard', () => {
   it('falls back to aggregators.signalstack_org_id when claim missing', async () => {
     const res = await app.inject({
       method: 'GET',
-      url: '/v1/blue-dots/dashboard',
+      url: '/v1/dashboard/dashboard',
       headers: { authorization: 'Bearer agg-a-approved-no-claim' },
     });
     // requireApproved triggers backfill; the fake's upsertAggregator
@@ -366,7 +366,7 @@ describe('GET /v1/blue-dots/dashboard', () => {
     _setSignalStackWriter(null);
     const res = await app.inject({
       method: 'GET',
-      url: '/v1/blue-dots/dashboard',
+      url: '/v1/dashboard/dashboard',
       headers: { authorization: 'Bearer agg-b-approved-null-store' },
     });
     // Writer null short-circuits to INTERNAL (signalstack not configured)
@@ -403,7 +403,7 @@ describe('GET /v1/blue-dots/dashboard', () => {
     });
     const res = await app.inject({
       method: 'GET',
-      url: '/v1/blue-dots/dashboard?page=1&limit=50&status=at_risk',
+      url: '/v1/dashboard/dashboard?page=1&limit=50&status=at_risk',
       headers: { authorization: 'Bearer agg-a-approved-with-org' },
     });
     expect(res.statusCode).toBe(200);
@@ -415,7 +415,7 @@ describe('GET /v1/blue-dots/dashboard', () => {
   it('400 on invalid status shape', async () => {
     const res = await app.inject({
       method: 'GET',
-      url: '/v1/blue-dots/dashboard?status=at-risk!',
+      url: '/v1/dashboard/dashboard?status=at-risk!',
       headers: { authorization: 'Bearer agg-a-approved-with-org' },
     });
     expect(res.statusCode).toBe(400);
@@ -430,7 +430,7 @@ describe('GET /v1/blue-dots/dashboard', () => {
 
     const res = await app.inject({
       method: 'GET',
-      url: '/v1/blue-dots/dashboard/export?status=at_risk',
+      url: '/v1/dashboard/dashboard/export?status=at_risk',
       headers: { authorization: 'Bearer agg-a-approved-with-org' },
     });
     expect(res.statusCode).toBe(200);
@@ -445,7 +445,7 @@ describe('GET /v1/blue-dots/dashboard', () => {
     _setSignalStackWriter(null);
     const res = await app.inject({
       method: 'GET',
-      url: '/v1/blue-dots/dashboard/export?status=at_risk',
+      url: '/v1/dashboard/dashboard/export?status=at_risk',
       headers: { authorization: 'Bearer agg-a-approved-with-org' },
     });
     expect(res.statusCode).toBeGreaterThanOrEqual(500);
@@ -454,7 +454,7 @@ describe('GET /v1/blue-dots/dashboard', () => {
   it('export 400 on invalid status shape', async () => {
     const res = await app.inject({
       method: 'GET',
-      url: '/v1/blue-dots/dashboard/export?status=at-risk!',
+      url: '/v1/dashboard/dashboard/export?status=at-risk!',
       headers: { authorization: 'Bearer agg-a-approved-with-org' },
     });
     expect(res.statusCode).toBe(400);

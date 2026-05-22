@@ -1,10 +1,10 @@
 /**
  * BFF proxy for the signalstack-backed aggregator dashboard CSV export.
  *
- *   GET /api/blue-dots/dashboard/export?domain=seeker&status=at_risk
+ *   GET /api/dashboard/export?domain=seeker&status=at_risk
  *
  * Forwards verbatim to the aggregator API's
- * GET /v1/blue-dots/dashboard/export endpoint. Session cookie →
+ * GET /v1/dashboard/export endpoint. Session cookie →
  * access token swap is handled by callApi. The CSV body is streamed
  * straight back to the browser with the upstream `Content-Type` and
  * `Content-Disposition` headers preserved so file-save dialogs receive
@@ -12,14 +12,14 @@
  */
 
 import { type NextRequest, NextResponse } from 'next/server';
-import { callApi } from '../../../../../lib/upstream-client';
-import { unauthorizedResponse, serviceUnavailableResponse } from '../../../../../lib/bff-errors';
+import { callApi } from '../../../../lib/upstream-client';
+import { unauthorizedResponse, serviceUnavailableResponse } from '../../../../lib/bff-errors';
 
 export const runtime = 'nodejs';
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const search = req.nextUrl.searchParams.toString();
-  const path = `/v1/blue-dots/dashboard/export${search ? `?${search}` : ''}`;
+  const path = `/v1/dashboard/export${search ? `?${search}` : ''}`;
   try {
     const upstream = await callApi(path, {
       method: 'GET',
@@ -54,7 +54,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       return unauthorizedResponse();
     }
     return serviceUnavailableResponse(
-      'blue-dots-dashboard-export',
+      'dashboard-export',
       err instanceof Error ? err.message : undefined,
     );
   }

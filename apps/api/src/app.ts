@@ -22,7 +22,7 @@ import { registerBulkUploadsRoutes } from './routes/bulk-uploads.js';
 import { registerRegistrationLinksRoutes } from './routes/registration-links.js';
 import { registerPublicRegistrationLinkRoutes } from './routes/public-registration-links.js';
 import { registerOnboardingRoutes } from './routes/onboarding.js';
-import { registerBlueDotsRoutes } from './routes/blue-dots.js';
+import { registerDashboardRoutes } from './routes/dashboard.js';
 import { registerAggregatorConfigRoutes } from './routes/aggregator-config.js';
 import { ERR } from './errors/codes.js';
 import { HttpError } from './errors/http-error.js';
@@ -113,7 +113,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await registerRegistrationLinksRoutes(app);
   await registerPublicRegistrationLinkRoutes(app);
   await registerOnboardingRoutes(app);
-  await registerBlueDotsRoutes(app);
+  await registerDashboardRoutes(app);
   await registerAggregatorConfigRoutes(app);
 
   app.setErrorHandler((rawErr, req, reply) => {

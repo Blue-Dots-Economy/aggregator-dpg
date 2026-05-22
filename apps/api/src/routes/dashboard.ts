@@ -1,12 +1,12 @@
 /**
- * Blue-dots dashboard endpoints.
+ * Dashboard endpoints.
  *
- *   GET /v1/blue-dots/items?domain=seeker|provider&limit&offset
+ *   GET /v1/dashboard/items?domain=seeker|provider&limit&offset
  *     Returns every signalstack profile tagged with the caller aggregator's
  *     aggregator_id, scoped to the requested domain. Used by the /blue-dots
  *     page to render the participant table.
  *
- *   GET /v1/blue-dots/dashboard?domain=seeker&page&limit&status
+ *   GET /v1/dashboard/dashboard?domain=seeker&page&limit&status
  *     Proxies signalstack's pre-computed aggregator dashboard payload
  *     (rollup + paginated participants + cursor + metadata) for the
  *     calling aggregator's signalstack org. `domain` defaults to `seeker`;
@@ -31,7 +31,7 @@ import { httpError } from '../errors/http-error.js';
  * config decides which ids are valid for the live deployment. The route
  * handler validates against `config.domainIds` after parse.
  */
-const BlueDotsQuerySchema = z.object({
+const ItemsQuerySchema = z.object({
   domain: z.string().min(1),
   limit: z.coerce.number().int().min(1).max(200).optional().default(50),
   offset: z.coerce.number().int().min(0).optional().default(0),
@@ -75,16 +75,16 @@ const DashboardExportQuerySchema = z.object({
     .optional(),
 });
 
-export async function registerBlueDotsRoutes(app: FastifyInstance): Promise<void> {
-  app.get('/v1/blue-dots/items', async (req, reply) => {
+export async function registerDashboardRoutes(app: FastifyInstance): Promise<void> {
+  app.get('/v1/dashboard/items', async (req, reply) => {
     const auth = await requireAuth(req);
     const log = req.log.child({
-      operation: 'blue-dots.items',
+      operation: 'dashboard.items',
       aggregator_id: auth.aggregatorId,
     });
     const start = Date.now();
 
-    const parsed = BlueDotsQuerySchema.safeParse(req.query);
+    const parsed = ItemsQuerySchema.safeParse(req.query);
     if (!parsed.success) {
       throw httpError('SCHEMA_VALIDATION', {
         detail: 'Invalid query parameters.',
@@ -140,10 +140,10 @@ export async function registerBlueDotsRoutes(app: FastifyInstance): Promise<void
     return reply.send(result.value);
   });
 
-  app.get('/v1/blue-dots/dashboard', async (req, reply) => {
+  app.get('/v1/dashboard/dashboard', async (req, reply) => {
     const auth = await requireApprovedAuth(req);
     const log = req.log.child({
-      operation: 'blue-dots.dashboard',
+      operation: 'dashboard.dashboard',
       aggregator_id: auth.aggregatorId,
     });
     const start = Date.now();
@@ -210,10 +210,10 @@ export async function registerBlueDotsRoutes(app: FastifyInstance): Promise<void
     return reply.send(result.value);
   });
 
-  app.get('/v1/blue-dots/dashboard/export', async (req, reply) => {
+  app.get('/v1/dashboard/dashboard/export', async (req, reply) => {
     const auth = await requireApprovedAuth(req);
     const log = req.log.child({
-      operation: 'blue-dots.dashboard.export',
+      operation: 'dashboard.dashboard.export',
       aggregator_id: auth.aggregatorId,
     });
     const start = Date.now();

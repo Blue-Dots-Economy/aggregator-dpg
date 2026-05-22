@@ -9,9 +9,9 @@ import { Avatar } from '../../../components/ui/Avatar';
 import { SegmentedTabs, type SegmentedTab } from '../../../components/ui/SegmentedTabs';
 import { Topbar } from '../../../components/shell/Topbar';
 import { I, type IconName } from '../../../icons';
-import { useProviders, useOppProviders, useDashboard } from '../../../hooks/useBlueDots';
+import { useProviders, useOppProviders, useDashboard } from '../../../hooks/useDashboard';
 import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
-import { blueDotsService, triggerCsvDownload } from '../../../services/blue-dots.service';
+import { dashboardService, triggerCsvDownload } from '../../../services/dashboard.service';
 import { useProfileRaw } from '../../../hooks/useProfile';
 import type { ParticipantBase, ParticipantStatus, Provider, Seeker } from '../../../types';
 
@@ -277,7 +277,7 @@ function ParticipantTable<R extends ParticipantBase>({ kind, rows }: Participant
 
   // Map UI kind onto the signalstack domain. `opp` rides on the provider
   // dataset until signalstack exposes a dedicated opportunity-provider
-  // endpoint (mirrors the read path in blueDotsService).
+  // endpoint (mirrors the read path in dashboardService).
   const exportDomain: 'seeker' | 'provider' = kind === 'seeker' ? 'seeker' : 'provider';
 
   const onExportCsv = async () => {
@@ -285,7 +285,7 @@ function ParticipantTable<R extends ParticipantBase>({ kind, rows }: Participant
     setExporting(true);
     setExportError(null);
     try {
-      const result = await blueDotsService.dashboardExport({ domain: exportDomain });
+      const result = await dashboardService.dashboardExport({ domain: exportDomain });
       triggerCsvDownload(result);
     } catch (err) {
       setExportError(err instanceof Error ? err.message : 'export failed');
@@ -831,20 +831,20 @@ function providerTabLabel(count: number | undefined): SegmentedTab<Tab> {
   };
 }
 
-export default function BlueDotsPage() {
+export default function DashboardPageRoot() {
   const rawProfile = useProfileRaw();
   // Wait for the profile to resolve before mounting any tab — the SeekersTab
-  // and ProvidersTab kick off their own /api/blue-dots/items?domain=... fetch
+  // and ProvidersTab kick off their own /api/dashboard/items?domain=... fetch
   // on mount, so rendering a default before we know the aggregator's type
   // fires a stale seeker request that a provider account should never make.
   const profileType = rawProfile.data?.type;
   if (!profileType) {
-    return <BlueDotsLoadingFrame />;
+    return <DashboardLoadingFrame />;
   }
-  return <BlueDotsContent aggregatorType={profileType} />;
+  return <DashboardContent aggregatorType={profileType} />;
 }
 
-function BlueDotsLoadingFrame() {
+function DashboardLoadingFrame() {
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
   return (
     <div className="fade-up">
@@ -857,7 +857,7 @@ function BlueDotsLoadingFrame() {
   );
 }
 
-function BlueDotsContent({ aggregatorType }: { aggregatorType: 'seeker' | 'provider' }) {
+function DashboardContent({ aggregatorType }: { aggregatorType: 'seeker' | 'provider' }) {
   const router = useRouter();
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
   // Tabs are scoped to the aggregator's registered participant focus —

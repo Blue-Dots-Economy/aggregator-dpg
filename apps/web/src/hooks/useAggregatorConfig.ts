@@ -55,7 +55,7 @@ export const DEFAULT_AGGREGATOR_CONFIG: AggregatorConfigPayload = {
     short_name: 'Blue Dots',
     long_name: 'Blue Dots Aggregator Portal',
     tagline: 'Track every participant in your network — at a glance.',
-    url_slug: 'blue-dots',
+    url_slug: 'dashboard',
     primary_color: '#2563EB',
   },
   network: { id: 'blue_dot' },

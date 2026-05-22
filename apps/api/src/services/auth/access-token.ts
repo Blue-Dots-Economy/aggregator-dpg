@@ -19,7 +19,7 @@ let cachedJwks: ReturnType<typeof createRemoteJWKSet> | null = null;
 let cachedJwksUrl: string | null = null;
 let testOverride: ((token: string) => Promise<JWTPayload>) | null = null;
 
-export type AggregatorType = 'seeker' | 'provider';
+export type AggregatorType = string;
 
 export interface AuthContext {
   /** Keycloak `sub` claim — stable user id. */
@@ -152,7 +152,9 @@ export async function authenticate(req: FastifyRequest): Promise<AuthResult> {
     ctx.decisionMade = decision;
   }
   const aggregatorType = readStringOrFirst(claims.aggregator_type);
-  if (aggregatorType === 'seeker' || aggregatorType === 'provider') {
+  // Accept any non-empty domain id — the network config (loaded at the
+  // route layer) decides which values are valid for this deployment.
+  if (aggregatorType) {
     ctx.aggregatorType = aggregatorType;
   }
   const signalstackOrgId = readStringOrFirst(claims.signalstack_org_id);
