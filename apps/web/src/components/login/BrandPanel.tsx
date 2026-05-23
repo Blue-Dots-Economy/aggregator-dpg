@@ -38,6 +38,18 @@ export function BrandPanel(): JSX.Element {
   const heroTagline =
     cfg.brand.tagline ??
     'A unified network where aggregators, providers, and seekers move together — every dot is a person, an opportunity, a path forward.';
+  // Brand palette drives the hero gradient + canvas particle colors.
+  const primary = cfg.brand.primary_color ?? '#2563EB';
+  const accent = cfg.brand.accent_color ?? primary;
+  const heroGradient = `linear-gradient(135deg, ${mix(primary, '#000000', 0.7)} 0%, ${mix(primary, '#000000', 0.5)} 45%, ${mix(primary, '#000000', 0.35)} 100%)`;
+  const radialOverlay =
+    `radial-gradient(700px 500px at 75% 25%, ${hexToRgba(accent, 0.18)} 0%, ${hexToRgba(accent, 0)} 60%),` +
+    `radial-gradient(600px 480px at 15% 85%, ${hexToRgba(primary, 0.2)} 0%, ${hexToRgba(primary, 0)} 60%)`;
+  const dotColors = {
+    bright: mix(accent, '#FFFFFF', 0.4),
+    soft: mix(primary, '#FFFFFF', 0.5),
+  };
+  const linkRgba = hexToRgba(mix(accent, '#FFFFFF', 0.6), 0.55);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -120,7 +132,7 @@ export function BrandPanel(): JSX.Element {
           const d = Math.sqrt(dx * dx + dy * dy);
           if (d < LINK) {
             const o = 1 - d / LINK;
-            ctx.strokeStyle = `rgba(165,200,255,${o * 0.55})`;
+            ctx.strokeStyle = applyAlpha(linkRgba, o);
             ctx.lineWidth = 0.9;
             ctx.beginPath();
             ctx.moveTo(a.x, a.y);
@@ -141,8 +153,8 @@ export function BrandPanel(): JSX.Element {
         const r = d.r + pulse * 0.6;
 
         const isBright = d.hue === 'bright';
-        const core = isBright ? '#7DD3FC' : '#93C5FD';
-        const glow = isBright ? 'rgba(125,211,252,' : 'rgba(147,197,253,';
+        const core = isBright ? dotColors.bright : dotColors.soft;
+        const glow = isBright ? hexToRgbaPrefix(dotColors.bright) : hexToRgbaPrefix(dotColors.soft);
 
         const grad = ctx.createRadialGradient(d.x, d.y, 0, d.x, d.y, r * 6);
         grad.addColorStop(0, glow + (0.5 + pulse * 0.3) + ')');
@@ -166,12 +178,12 @@ export function BrandPanel(): JSX.Element {
       cancelAnimationFrame(raf);
       ro.disconnect();
     };
-  }, []);
+  }, [primary, accent, linkRgba, dotColors.bright, dotColors.soft]);
 
   return (
     <div
       className="hidden lg:flex relative w-[52%] flex-col justify-between p-12 overflow-hidden text-white"
-      style={{ background: 'linear-gradient(135deg, #0F172A 0%, #172554 45%, #1E3A5F 100%)' }}
+      style={{ background: heroGradient }}
     >
       <canvas
         ref={canvasRef}
@@ -182,11 +194,7 @@ export function BrandPanel(): JSX.Element {
       <div
         aria-hidden
         className="absolute inset-0 pointer-events-none"
-        style={{
-          background:
-            'radial-gradient(700px 500px at 75% 25%, rgba(56,189,248,0.18) 0%, rgba(56,189,248,0) 60%),' +
-            'radial-gradient(600px 480px at 15% 85%, rgba(99,102,241,0.20) 0%, rgba(99,102,241,0) 60%)',
-        }}
+        style={{ background: radialOverlay }}
       />
 
       <div className="relative z-10 max-w-[520px]">
@@ -220,4 +228,57 @@ function BrandStat({ n, label }: { n: string; label: string }): JSX.Element {
       <div className="text-[11.5px] text-white/55 mt-1.5">{label}</div>
     </div>
   );
+}
+
+/**
+ * Mix two #rrggbb hex colors. `weight=0` returns `a`, `weight=1` returns
+ * `b`. Used to darken the brand primary into the deep hero gradient and
+ * to brighten it into the high-contrast particle colors.
+ */
+function mix(a: string, b: string, weight: number): string {
+  const A = parseHex(a);
+  const B = parseHex(b);
+  if (!A || !B) return a;
+  const w = Math.max(0, Math.min(1, weight));
+  const r = Math.round(A[0] * (1 - w) + B[0] * w);
+  const g = Math.round(A[1] * (1 - w) + B[1] * w);
+  const bl = Math.round(A[2] * (1 - w) + B[2] * w);
+  return '#' + [r, g, bl].map((n) => n.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * `#rrggbb` → `rgba(r,g,b,alpha)`. Returns the original input when the
+ * hex form does not parse (defensive against malformed config).
+ */
+function hexToRgba(hex: string, alpha: number): string {
+  const c = parseHex(hex);
+  if (!c) return hex;
+  return `rgba(${c[0]},${c[1]},${c[2]},${alpha})`;
+}
+
+/** `#rrggbb` → `rgba(r,g,b,` (the canvas gradient code appends the alpha + `)`). */
+function hexToRgbaPrefix(hex: string): string {
+  const c = parseHex(hex);
+  if (!c) return 'rgba(255,255,255,';
+  return `rgba(${c[0]},${c[1]},${c[2]},`;
+}
+
+/**
+ * Replaces the trailing alpha of an `rgba(...)` string with the
+ * supplied opacity multiplied by the original. Lets the per-link
+ * connection-line fade respect the brand's base alpha.
+ */
+function applyAlpha(rgba: string, opacity: number): string {
+  return rgba.replace(/,\s*([0-9.]+)\)\s*$/, (_, a) => `,${Number(a) * opacity})`);
+}
+
+function parseHex(c: string): [number, number, number] | null {
+  const m = /^#?([0-9a-f]{6})$/i.exec(c.trim());
+  if (!m) return null;
+  const hex = m[1]!;
+  return [
+    parseInt(hex.slice(0, 2), 16),
+    parseInt(hex.slice(2, 4), 16),
+    parseInt(hex.slice(4, 6), 16),
+  ];
 }

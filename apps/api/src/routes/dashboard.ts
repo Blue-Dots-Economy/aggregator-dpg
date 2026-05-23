@@ -6,7 +6,7 @@
  *     aggregator_id, scoped to the requested domain. Used by the /blue-dots
  *     page to render the participant table.
  *
- *   GET /v1/dashboard/dashboard?domain=seeker&page&limit&status
+ *   GET /v1/dashboard?domain=seeker&page&limit&status
  *     Proxies signalstack's pre-computed aggregator dashboard payload
  *     (rollup + paginated participants + cursor + metadata) for the
  *     calling aggregator's signalstack org. `domain` defaults to `seeker`;
@@ -140,10 +140,10 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
     return reply.send(result.value);
   });
 
-  app.get('/v1/dashboard/dashboard', async (req, reply) => {
+  app.get('/v1/dashboard', async (req, reply) => {
     const auth = await requireApprovedAuth(req);
     const log = req.log.child({
-      operation: 'dashboard.dashboard',
+      operation: 'dashboard',
       aggregator_id: auth.aggregatorId,
     });
     const start = Date.now();
@@ -210,10 +210,10 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
     return reply.send(result.value);
   });
 
-  app.get('/v1/dashboard/dashboard/export', async (req, reply) => {
+  app.get('/v1/dashboard/export', async (req, reply) => {
     const auth = await requireApprovedAuth(req);
     const log = req.log.child({
-      operation: 'dashboard.dashboard.export',
+      operation: 'dashboard.export',
       aggregator_id: auth.aggregatorId,
     });
     const start = Date.now();
