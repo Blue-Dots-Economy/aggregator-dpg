@@ -240,6 +240,10 @@ async function backfillSignalstackOrgId(ctx: AuthContext): Promise<void> {
     external_id: ctx.aggregatorId,
     name: found.value.name,
     slug: found.value.orgSlug,
+    // Send the full domain list so signalstack's dashboard endpoint
+    // doesn't fail with NO_DOMAINS_CONFIGURED on a legacy org that
+    // was upserted before the field was required.
+    domains: ['seeker', 'provider'],
   });
   if (!upsert.success) {
     log.warn(

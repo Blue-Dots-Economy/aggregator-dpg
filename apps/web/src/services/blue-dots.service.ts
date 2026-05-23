@@ -35,17 +35,36 @@ export interface BlueDotsDashboardQuery {
 }
 
 /**
- * Pre-computed rollup of participant counts returned alongside the
- * dashboard page. `by_status` is an open map — signalstack adds status
- * keys without bumping a version, so consumers MUST tolerate unknown
- * keys instead of pinning an enum.
+ * Pre-computed rollup of participant + application counts returned
+ * per domain. `by_status` and `mode_wise_counts` are open maps —
+ * signalstack adds keys without bumping a version, so consumers MUST
+ * tolerate unknown keys instead of pinning an enum.
  */
 export interface BlueDotsDashboardRollup {
-  participants_total: number;
+  items_total: number;
   by_status: Record<string, number>;
+  applications_total: number;
   applications_pending: number;
-  applications_accepted: number;
+  applications_shortlisted: number;
   applications_rejected: number;
+  unique_users: number;
+  complete_profiles_count: number;
+  avg_profiles_per_user: number;
+  users_with_applications: number;
+  avg_applications_per_user: number;
+  new_users_last_7_days: number;
+  mode_wise_counts: Record<string, number>;
+}
+
+/**
+ * Per-domain slice of the dashboard payload. Carries the rollup +
+ * paginated participants list scoped to that domain id.
+ */
+export interface BlueDotsDashboardDomainSlice {
+  rollup: BlueDotsDashboardRollup;
+  participants: Array<Record<string, unknown>>;
+  total_matching: number;
+  next_cursor: string | null;
 }
 
 /**
@@ -60,15 +79,12 @@ export interface BlueDotsDashboardMetadata {
 }
 
 /**
- * Full payload of the dashboard fetch. `participants` is open-shape
- * because signalstack owns the per-row schema — consumers decode only
- * the keys they care about.
+ * Full payload of the dashboard fetch. Signalstack returns every
+ * served domain (seeker, provider, …) in a single response keyed by
+ * `by_domain[<id>]` — the dashboard renders all tabs from one fetch.
  */
 export interface BlueDotsDashboardPage {
-  rollup: BlueDotsDashboardRollup;
-  participants: Array<Record<string, unknown>>;
-  next_cursor: string | null;
-  total_matching: number;
+  by_domain: Record<string, BlueDotsDashboardDomainSlice>;
   metadata: BlueDotsDashboardMetadata;
 }
 

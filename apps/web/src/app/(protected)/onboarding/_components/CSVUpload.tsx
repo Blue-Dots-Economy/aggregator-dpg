@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { createPortal } from 'react-dom';
 import { Button } from '../../../../components/ui/Button';
 import { Dropzone } from '../../../../components/ui/Dropzone';
@@ -11,6 +12,7 @@ import type { BulkUploadStatus } from '../../../../services/onboarding.service';
 import { onboardingService } from '../../../../services/onboarding.service';
 
 export function CSVUpload() {
+  const router = useRouter();
   const rawProfile = useProfileRaw();
   // Aggregator registered participant focus, mirrored from the
   // `aggregator_type` KC claim. While the profile is still loading we
@@ -61,10 +63,16 @@ export function CSVUpload() {
         setUploadNotice(
           result.message ?? 'This CSV was already uploaded earlier — showing the existing run.',
         );
-      } else {
-        setToast('File uploaded');
+        recent.refetch();
+        return;
       }
+      setToast('File uploaded');
       recent.refetch();
+      // Mirror the link-creation flow: hand the user back to the
+      // onboarding home so they can pick the next action. Processing
+      // continues in the worker — the recent uploads section on
+      // /onboarding/bulk-uploads will reflect status when revisited.
+      router.push('/onboarding');
     } catch (err) {
       setUploadError((err as Error).message);
     }

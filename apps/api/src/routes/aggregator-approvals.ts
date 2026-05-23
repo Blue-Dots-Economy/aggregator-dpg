@@ -257,6 +257,13 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
             external_id: aggregatorId,
             name: lookup.aggregator.name,
             slug: lookup.aggregator.orgSlug,
+            // Signalstack's dashboard endpoint fails with
+            // NO_DOMAINS_CONFIGURED when the org's metadata.domains
+            // is empty. Send the full domain list every approval so
+            // the read endpoints work the moment the aggregator
+            // signs in. Aggregator participant focus is enforced at
+            // a different layer (KC `aggregator_type` claim).
+            domains: ['seeker', 'provider'],
           });
           if (!upsertResult.success) {
             log.warn(

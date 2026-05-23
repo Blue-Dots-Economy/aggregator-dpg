@@ -113,7 +113,8 @@ export function Sidebar() {
   const { data: dashboard } = useDashboard({
     domain: profileType === 'provider' ? 'provider' : 'seeker',
   });
-  const blueDotsBadge = dashboard?.rollup.participants_total;
+  const blueDotsBadge =
+    dashboard?.by_domain[profileType === 'provider' ? 'provider' : 'seeker']?.rollup.items_total;
   const nav: NavItem[] = STATIC_NAV.map((n) =>
     n.to === '/blue-dots' && blueDotsBadge !== undefined ? { ...n, badge: blueDotsBadge } : n,
   );

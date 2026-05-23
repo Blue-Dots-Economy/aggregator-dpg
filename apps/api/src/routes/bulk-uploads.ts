@@ -218,25 +218,12 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
       });
     }
 
+    // Aggregators are allowed to re-upload the same CSV bytes — the
+    // partial UNIQUE on (aggregator_id, s3_etag) was dropped in
+    // migration 0011. Any non-OK result here is a real DB / state
+    // error, not a duplicate.
     const marked = await store.markUploaded(uploadId, auth.aggregatorId, head.etag);
     if (!marked.ok) {
-      if (marked.error.code === 'DUPLICATE_ETAG') {
-        // Same CSV bytes are already attached to a non-failed run for this
-        // aggregator (the (aggregator_id, s3_etag) UNIQUE is partial — failed
-        // and file_failed rows are excluded so they never block a retry).
-        // Drop the orphan pending row we just created and surface the
-        // existing run.
-        await store.deletePending(uploadId, auth.aggregatorId);
-        const existing = await store.findByAggregatorAndEtag(auth.aggregatorId, head.etag);
-        if (existing.ok && existing.value) {
-          const existingCounts = await loadCounts(existing.value.id, existing.value.status);
-          return reply.send({
-            ...toResponse(existing.value, existingCounts),
-            duplicate: true,
-            message: 'This CSV was already uploaded earlier — showing the existing run.',
-          });
-        }
-      }
       throw httpError('DB_UNAVAILABLE', { cause: new Error(marked.error.message) });
     }
 

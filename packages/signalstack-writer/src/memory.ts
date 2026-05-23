@@ -249,16 +249,10 @@ export class InMemorySignalStackWriter extends SignalStackWriterBase {
     const pinned = this.dashboards.get(query.actingOrgId);
     if (pinned) return ok(pinned);
     return ok({
-      rollup: {
-        participants_total: 0,
-        by_status: {},
-        applications_pending: 0,
-        applications_accepted: 0,
-        applications_rejected: 0,
+      by_domain: {
+        seeker: emptyDomainSlice(),
+        provider: emptyDomainSlice(),
       },
-      participants: [],
-      next_cursor: null,
-      total_matching: 0,
       metadata: {
         last_computed_at: ISO_FIXED,
         ttl_seconds: 3600,
@@ -331,4 +325,52 @@ function stripCreatedBy(profile: StoredProfile): SignalStackProfile {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { created_by, acting_org_id, channel, source_id, ...rest } = profile;
   return rest;
+}
+
+/**
+ * Deterministic empty per-domain slice. The synthesised dashboard
+ * payload from {@link InMemorySignalStackWriter.fetchDashboard} uses
+ * this for every domain when the test hasn't pinned a response, so
+ * the shape always matches the live signalstack contract.
+ */
+function emptyDomainSlice(): {
+  rollup: {
+    items_total: number;
+    by_status: Record<string, number>;
+    applications_total: number;
+    applications_pending: number;
+    applications_shortlisted: number;
+    applications_rejected: number;
+    unique_users: number;
+    complete_profiles_count: number;
+    avg_profiles_per_user: number;
+    users_with_applications: number;
+    avg_applications_per_user: number;
+    new_users_last_7_days: number;
+    mode_wise_counts: Record<string, number>;
+  };
+  participants: Array<Record<string, unknown>>;
+  total_matching: number;
+  next_cursor: string | null;
+} {
+  return {
+    rollup: {
+      items_total: 0,
+      by_status: {},
+      applications_total: 0,
+      applications_pending: 0,
+      applications_shortlisted: 0,
+      applications_rejected: 0,
+      unique_users: 0,
+      complete_profiles_count: 0,
+      avg_profiles_per_user: 0,
+      users_with_applications: 0,
+      avg_applications_per_user: 0,
+      new_users_last_7_days: 0,
+      mode_wise_counts: {},
+    },
+    participants: [],
+    total_matching: 0,
+    next_cursor: null,
+  };
 }
