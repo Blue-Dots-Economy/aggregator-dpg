@@ -232,14 +232,6 @@ export const bulkUploads = pgTable(
     completedAt: timestamp('completed_at', { withTimezone: true }),
   },
   (table) => ({
-    // Re-upload of identical CSV under the same aggregator is idempotent for
-    // ACTIVE runs (pending / uploaded / processing / completed). Terminal
-    // failure rows (`file_failed`, `failed`) are EXCLUDED from this unique so
-    // the aggregator can fix a bad CSV and re-upload the same bytes. Failed
-    // rows stay in the table for audit history.
-    aggregatorEtagUnique: uniqueIndex('bulk_uploads_aggregator_etag_unique')
-      .on(table.aggregatorId, table.s3Etag)
-      .where(sql`status NOT IN ('file_failed', 'failed')`),
     // Watchdog scan: status + last_progress_at to detect stalled jobs.
     statusProgressIdx: index('bulk_uploads_status_progress_idx').on(
       table.status,

@@ -17,6 +17,46 @@ const AGG_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const AGG_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const ORG_A = 'org_aaa_signalstack';
 
+/**
+ * Builds a deterministic rollup with the same shape signalstack returns
+ * per domain. Defaults zero everything; tests override only the fields
+ * they care about.
+ */
+function makeRollup(
+  overrides: Partial<{
+    items_total: number;
+    by_status: Record<string, number>;
+    applications_total: number;
+    applications_pending: number;
+    applications_shortlisted: number;
+    applications_rejected: number;
+    unique_users: number;
+    complete_profiles_count: number;
+    avg_profiles_per_user: number;
+    users_with_applications: number;
+    avg_applications_per_user: number;
+    new_users_last_7_days: number;
+    mode_wise_counts: Record<string, number>;
+  }>,
+) {
+  return {
+    items_total: 0,
+    by_status: {},
+    applications_total: 0,
+    applications_pending: 0,
+    applications_shortlisted: 0,
+    applications_rejected: 0,
+    unique_users: 0,
+    complete_profiles_count: 0,
+    avg_profiles_per_user: 0,
+    users_with_applications: 0,
+    avg_applications_per_user: 0,
+    new_users_last_7_days: 0,
+    mode_wise_counts: {},
+    ...overrides,
+  };
+}
+
 describe('blue-dots routes', () => {
   let app: FastifyInstance;
   let writer: SignalStackWriterFake;
@@ -242,19 +282,30 @@ describe('GET /v1/dashboard', () => {
         {
           acting_org_id: ORG_A,
           page: {
-            rollup: {
-              participants_total: 5,
-              by_status: { new: 3, at_risk: 2 },
-              applications_pending: 1,
-              applications_accepted: 2,
-              applications_rejected: 0,
+            by_domain: {
+              seeker: {
+                rollup: makeRollup({
+                  items_total: 5,
+                  by_status: { new: 3, at_risk: 2 },
+                  applications_pending: 1,
+                  applications_shortlisted: 2,
+                  applications_total: 3,
+                  unique_users: 5,
+                }),
+                participants: [
+                  { participant_id: 'p1', status: 'new' },
+                  { participant_id: 'p2', status: 'at_risk' },
+                ],
+                next_cursor: null,
+                total_matching: 2,
+              },
+              provider: {
+                rollup: makeRollup({}),
+                participants: [],
+                next_cursor: null,
+                total_matching: 0,
+              },
             },
-            participants: [
-              { participant_id: 'p1', status: 'new' },
-              { participant_id: 'p2', status: 'at_risk' },
-            ],
-            next_cursor: null,
-            total_matching: 2,
             metadata: {
               last_computed_at: '2026-05-22T15:33:05.355Z',
               ttl_seconds: 3600,
@@ -337,10 +388,10 @@ describe('GET /v1/dashboard', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.rollup.participants_total).toBe(5);
-    expect(body.rollup.by_status).toEqual({ new: 3, at_risk: 2 });
-    expect(body.participants).toHaveLength(2);
-    expect(body.total_matching).toBe(2);
+    expect(body.by_domain.seeker.rollup.items_total).toBe(5);
+    expect(body.by_domain.seeker.rollup.by_status).toEqual({ new: 3, at_risk: 2 });
+    expect(body.by_domain.seeker.participants).toHaveLength(2);
+    expect(body.by_domain.seeker.total_matching).toBe(2);
     expect(body.metadata.refreshed).toBe(true);
   });
 
@@ -355,7 +406,7 @@ describe('GET /v1/dashboard', () => {
     // then resolves actingOrgId either from the just-patched context or
     // the DB lookup and returns the seeded rollup.
     expect(res.statusCode).toBe(200);
-    expect(res.json().rollup.participants_total).toBe(5);
+    expect(res.json().by_domain.seeker.rollup.items_total).toBe(5);
   });
 
   it('503 SIGNALSTACK_ORG_NOT_REGISTERED when DB column is null and backfill cannot resolve', async () => {
@@ -382,16 +433,23 @@ describe('GET /v1/dashboard', () => {
         {
           acting_org_id: ORG_A,
           page: {
-            rollup: {
-              participants_total: 2,
-              by_status: { at_risk: 2 },
-              applications_pending: 0,
-              applications_accepted: 0,
-              applications_rejected: 0,
+            by_domain: {
+              seeker: {
+                rollup: makeRollup({
+                  items_total: 2,
+                  by_status: { at_risk: 2 },
+                }),
+                participants: [],
+                next_cursor: null,
+                total_matching: 0,
+              },
+              provider: {
+                rollup: makeRollup({}),
+                participants: [],
+                next_cursor: null,
+                total_matching: 0,
+              },
             },
-            participants: [],
-            next_cursor: null,
-            total_matching: 0,
             metadata: {
               last_computed_at: '2026-05-22T15:33:05.355Z',
               ttl_seconds: 3600,
@@ -408,8 +466,8 @@ describe('GET /v1/dashboard', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.rollup.by_status.at_risk).toBe(2);
-    expect(body.total_matching).toBe(0);
+    expect(body.by_domain.seeker.rollup.by_status.at_risk).toBe(2);
+    expect(body.by_domain.seeker.total_matching).toBe(0);
   });
 
   it('400 on invalid status shape', async () => {

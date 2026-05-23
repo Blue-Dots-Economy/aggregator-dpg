@@ -195,6 +195,12 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
       });
     }
 
+    // Signalstack now returns every served domain in one payload under
+    // `by_domain[<id>]`. Log the requested domain's slice for parity
+    // with the previous single-domain log shape; the response itself
+    // is forwarded verbatim so the web app can render seeker + provider
+    // tabs from a single fetch.
+    const slice = result.value.by_domain[domain];
     log.info({
       status: 'success',
       latency_ms: Date.now() - start,
@@ -202,8 +208,8 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
       page,
       limit,
       status_filter: status ?? null,
-      total_matching: result.value.total_matching,
-      participants_total: result.value.rollup.participants_total,
+      total_matching: slice?.total_matching ?? null,
+      items_total: slice?.rollup.items_total ?? null,
       refreshed: result.value.metadata.refreshed,
     });
 

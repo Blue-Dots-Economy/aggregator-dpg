@@ -46,7 +46,7 @@ export interface SignalStackProfile {
  * Input for one participant onboard call to signalstack.
  *
  * Mirrors the flat body shape signalstack expects on
- * `POST /api/v1/admin/onboard_participant`. The `actingOrgId` is sent as
+ * `POST /api/v1/admin/participant`. The `actingOrgId` is sent as
  * the per-call `x-acting-org-id` header — it is the aggregator's own
  * signalstack organisation id (sourced from `aggregators.signalstack_org_id`),
  * NOT the platform-wide acting org id used by aggregator upsert.
@@ -83,7 +83,7 @@ export interface SignalStackOnboardParticipantInput {
 }
 
 /**
- * Response payload from `POST /api/v1/admin/onboard_participant`.
+ * Response payload from `POST /api/v1/admin/participant`.
  *
  * Slim shape: signalstack returns only the identifiers it minted plus the
  * server-side timestamp. The caller's audit log captures this verbatim;
@@ -140,6 +140,14 @@ export interface SignalStackUpsertAggregatorInput {
   external_id: string;
   name: string;
   slug: string;
+  /**
+   * Signalstack domain ids this aggregator org participates in
+   * (`seeker`, `provider`, …). Stored on the org record and gates the
+   * dashboard endpoint — `NO_DOMAINS_CONFIGURED` is returned when the
+   * array is empty. Should be the full list of domains declared by the
+   * active signalstack network.
+   */
+  domains?: string[];
   metadata?: Record<string, unknown>;
 }
 
@@ -180,17 +188,39 @@ export interface SignalStackDashboardQuery {
 }
 
 /**
- * Pre-computed rollup of participant counts returned alongside the
- * dashboard page. `by_status` is an open map — signalstack adds status
- * keys without bumping a version, so consumers MUST tolerate unknown
- * keys instead of pinning an enum.
+ * Pre-computed rollup of participant + application counts returned
+ * per domain. `by_status` and `mode_wise_counts` are open maps —
+ * signalstack adds keys without bumping a version, so consumers MUST
+ * tolerate unknown keys instead of pinning an enum.
  */
 export interface SignalStackDashboardRollup {
-  participants_total: number;
+  items_total: number;
   by_status: Record<string, number>;
+  applications_total: number;
   applications_pending: number;
-  applications_accepted: number;
+  applications_shortlisted: number;
   applications_rejected: number;
+  unique_users: number;
+  complete_profiles_count: number;
+  avg_profiles_per_user: number;
+  users_with_applications: number;
+  avg_applications_per_user: number;
+  new_users_last_7_days: number;
+  mode_wise_counts: Record<string, number>;
+}
+
+/**
+ * One domain slice of the dashboard response. Carries the rollup +
+ * paginated participants list scoped to that domain id.
+ *
+ * `participants` is open-shape because signalstack owns the per-row
+ * schema; downstream consumers decode the keys they care about.
+ */
+export interface SignalStackDashboardDomainSlice {
+  rollup: SignalStackDashboardRollup;
+  participants: Array<Record<string, unknown>>;
+  total_matching: number;
+  next_cursor: string | null;
 }
 
 /**
@@ -208,16 +238,13 @@ export interface SignalStackDashboardMetadata {
 /**
  * Full payload returned by `GET /api/v1/aggregator/dashboard`.
  *
- * `participants` is an open array — the per-row shape is owned by
- * signalstack and may evolve, so the type is intentionally
- * `Record<string, unknown>` and downstream consumers (web app)
- * decode the keys they care about.
+ * Signalstack returns every served domain (seeker, provider, …) in a
+ * single response keyed by `by_domain[<id>]`. The aggregator surfaces
+ * the whole map so the dashboard can render seeker + provider tabs in
+ * one render without a second round-trip.
  */
 export interface SignalStackDashboardPage {
-  rollup: SignalStackDashboardRollup;
-  participants: Array<Record<string, unknown>>;
-  next_cursor: string | null;
-  total_matching: number;
+  by_domain: Record<string, SignalStackDashboardDomainSlice>;
   metadata: SignalStackDashboardMetadata;
 }
 
@@ -253,7 +280,7 @@ export interface SignalStackDashboardExport {
  *
  * Implementations:
  *   - Http: real fetch-backed adapter — calls
- *     `POST /api/v1/admin/onboard_participant`,
+ *     `POST /api/v1/admin/participant`,
  *     `POST /api/v1/admin/aggregator/upsert`, and
  *     `POST /api/v1/network/item/fetch_local`.
  *   - InMemory: deterministic Map-backed impl for unit tests.
@@ -263,7 +290,7 @@ export abstract class SignalStackWriterBase {
   /**
    * Onboard one participant under an aggregator's signalstack organisation.
    *
-   * Calls `POST /api/v1/admin/onboard_participant` with the per-call
+   * Calls `POST /api/v1/admin/participant` with the per-call
    * `x-acting-org-id: {input.actingOrgId}` header so signalstack scopes the
    * write to the calling aggregator. The endpoint creates (or finds) the
    * user by phone/email and writes the profile row in one round-trip.

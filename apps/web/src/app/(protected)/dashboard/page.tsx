@@ -9,7 +9,7 @@ import { Avatar } from '../../../components/ui/Avatar';
 import { SegmentedTabs, type SegmentedTab } from '../../../components/ui/SegmentedTabs';
 import { Topbar } from '../../../components/shell/Topbar';
 import { I, type IconName } from '../../../icons';
-import { useProviders, useOppProviders, useDashboard } from '../../../hooks/useDashboard';
+import { useOppProviders, useDashboard } from '../../../hooks/useDashboard';
 import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
 import { dashboardService, triggerCsvDownload } from '../../../services/dashboard.service';
 import { useProfileRaw } from '../../../hooks/useProfile';
@@ -544,28 +544,23 @@ function ErrorCard() {
 function SeekersTab() {
   // Signalstack's `/aggregator/dashboard` is the only endpoint that
   // correctly scopes participant lookups by the caller's signalstack org
-  // (via the per-call `x-acting-org-id` header). The older
-  // `/network/item/fetch_local` route (used by `useSeekers`) ignores the
-  // `aggregator_id` body filter under the new onboard model, leaking
-  // unscoped rows across aggregators — fixed here by dropping that hook
-  // and sourcing both the rollup AND the participant rows from the
-  // dashboard payload.
+  // (via the per-call `x-acting-org-id` header). The response now
+  // wraps every served domain under `by_domain[<id>]` so seeker +
+  // provider tabs share a single fetch.
   const { data: dashboard, isLoading, isError } = useDashboard({ domain: 'seeker' });
-  const rollup = dashboard?.rollup;
-  const total = rollup?.participants_total;
+  const slice = dashboard?.by_domain.seeker;
+  const rollup = slice?.rollup;
+  const total = rollup?.items_total;
   const byStatus = rollup?.by_status ?? {};
   // Signalstack's status taxonomy is open — pick the keys the UI cares
   // about; unknown ones still surface in the participants list.
   const active = byStatus['active'] ?? byStatus['new'];
   const atRisk = byStatus['at_risk'];
   const inactive = byStatus['inactive'];
-  const applicationsTotal = rollup
-    ? rollup.applications_pending + rollup.applications_accepted + rollup.applications_rejected
-    : undefined;
-  const rows = useMemo(
-    () => (dashboard?.participants ?? []).map(toSeekerRow),
-    [dashboard?.participants],
-  );
+  const applicationsTotal = rollup?.applications_total;
+  const completeProfiles = rollup?.complete_profiles_count;
+  const newThisWeek = rollup?.new_users_last_7_days;
+  const rows = useMemo(() => (slice?.participants ?? []).map(toSeekerRow), [slice?.participants]);
   return (
     <div className="flex flex-col gap-5">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -594,13 +589,14 @@ function SeekersTab() {
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <MiniStat label="Total Participants" value={fmtCount(total)} />
-        {/* Complete-profile count requires per-row aggregation that
-            signalstack's rollup does not expose yet. */}
-        <MiniStat label="Complete Profiles" value="—" />
+        <MiniStat label="Complete Profiles" value={fmtCount(completeProfiles)} />
         <MiniStat label="Seekers with Applications" value={fmtCount(applicationsTotal)} />
-        {/* New-this-week needs a date-windowed rollup signalstack does
-            not return today. */}
-        <MiniStat label="New Participants" value="—" delta="this week" deltaTone="flat" />
+        <MiniStat
+          label="New Participants"
+          value={fmtCount(newThisWeek)}
+          delta="this week"
+          deltaTone="flat"
+        />
       </div>
 
       {isLoading ? (
@@ -636,7 +632,12 @@ function fmtCount(n: number | null | undefined): string {
  * progress indicator stays meaningful.
  */
 function toSeekerRow(participant: Record<string, unknown>): Seeker {
-  const userId = typeof participant.user_id === 'string' ? participant.user_id : '';
+  const userId =
+    typeof participant.owner_user_id === 'string'
+      ? participant.owner_user_id
+      : typeof participant.user_id === 'string'
+        ? participant.user_id
+        : '';
   const status = mapSeekerStatus(
     typeof participant.profile_status === 'string' ? participant.profile_status : null,
   );
@@ -648,9 +649,11 @@ function toSeekerRow(participant: Record<string, unknown>): Seeker {
     typeof participant.profile_last_updated_at === 'string'
       ? participant.profile_last_updated_at
       : '';
+  const name =
+    typeof participant.name === 'string' && participant.name.trim() ? participant.name : '—';
   return {
     id: userId,
-    name: '—',
+    name,
     city: '—',
     joined: created
       ? new Date(created).toLocaleDateString('en-IN', {
@@ -659,7 +662,7 @@ function toSeekerRow(participant: Record<string, unknown>): Seeker {
           year: 'numeric',
         })
       : '—',
-    avatar: '??',
+    avatar: avatarInitials(name),
     profile: { title: '—', exp: '—', verified: false, complete: completion },
     applied: {
       total: numberOr(participant.applications_total, 0),
@@ -685,6 +688,17 @@ function numberOr(v: unknown, fallback: number): number {
   return typeof v === 'number' ? v : fallback;
 }
 
+function avatarInitials(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed || trimmed === '—') return '??';
+  const parts = trimmed.split(/\s+/).filter(Boolean);
+  const first = parts[0] ?? '';
+  if (parts.length === 1) return first.slice(0, 2).toUpperCase() || '??';
+  const last = parts[parts.length - 1] ?? '';
+  const initials = (first.charAt(0) + last.charAt(0)).toUpperCase();
+  return initials || '??';
+}
+
 function formatRelative(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '—';
@@ -701,40 +715,61 @@ function formatRelative(iso: string): string {
 }
 
 function ProvidersTab() {
-  const { data, isLoading, isError } = useProviders();
-  const rows: Provider[] = data ?? [];
+  // Mirror SeekersTab: live counts come from the signalstack dashboard
+  // rollup. Provider domain reuses the same rollup shape (items_total,
+  // by_status, applications_*, complete_profiles_count, …) so the cards
+  // map field-for-field; only the labels differ.
+  const { data: dashboard, isLoading, isError } = useDashboard({ domain: 'provider' });
+  const slice = dashboard?.by_domain.provider;
+  const rollup = slice?.rollup;
+  const total = rollup?.items_total;
+  const byStatus = rollup?.by_status ?? {};
+  const satisfied = byStatus['satisfied'];
+  const active = byStatus['active'] ?? byStatus['new'];
+  const atRisk = byStatus['at_risk'];
+  const inactive = byStatus['inactive'];
+  const verified = rollup?.complete_profiles_count;
+  const openRoles = rollup?.applications_pending;
+  const hiresThisMonth = rollup?.applications_total;
+  const rows = useMemo(() => (slice?.participants ?? []).map(toProviderRow), [slice?.participants]);
   return (
     <div className="flex flex-col gap-5">
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <StatCard
           tone="satisfied"
           icon="check"
-          count="9"
+          count={fmtCount(satisfied)}
           label="Satisfied"
           hint="Roles filled successfully"
         />
         <StatCard
           tone="active"
           icon="briefcase"
-          count="11"
+          count={fmtCount(active)}
           label="Active"
           hint="Currently hiring"
         />
-        <StatCard tone="risk" icon="alert" count="3" label="At Risk" hint="Stalled requirements" />
+        <StatCard
+          tone="risk"
+          icon="alert"
+          count={fmtCount(atRisk)}
+          label="At Risk"
+          hint="Stalled requirements"
+        />
         <StatCard
           tone="inactive"
           icon="pause"
-          count="1"
+          count={fmtCount(inactive)}
           label="Inactive"
           hint="No openings 30+ days"
         />
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <MiniStat label="Total Providers" value="24" delta="+3" deltaTone="up" />
-        <MiniStat label="Verified Orgs" value="20" delta="83%" deltaTone="up" />
-        <MiniStat label="Open Roles" value="77" delta="+18" deltaTone="up" />
-        <MiniStat label="Hires this Month" value="34" delta="↑ 22%" deltaTone="up" />
+        <MiniStat label="Total Providers" value={fmtCount(total)} />
+        <MiniStat label="Verified Orgs" value={fmtCount(verified)} />
+        <MiniStat label="Open Roles" value={fmtCount(openRoles)} />
+        <MiniStat label="Hires this Month" value={fmtCount(hiresThisMonth)} />
       </div>
 
       {isLoading ? (
@@ -746,6 +781,11 @@ function ProvidersTab() {
       )}
     </div>
   );
+}
+
+function toProviderRow(participant: Record<string, unknown>): Provider {
+  const seeker = toSeekerRow(participant);
+  return { ...seeker, role: '—' };
 }
 
 function OppProvidersTab() {
@@ -868,7 +908,8 @@ function DashboardContent({ aggregatorType }: { aggregatorType: 'seeker' | 'prov
   const { data: dashboard } = useDashboard({
     domain: aggregatorType === 'provider' ? 'provider' : 'seeker',
   });
-  const liveCount = dashboard?.rollup.participants_total;
+  const liveCount =
+    dashboard?.by_domain[aggregatorType === 'provider' ? 'provider' : 'seeker']?.rollup.items_total;
   const tabItems = useMemo<SegmentedTab<Tab>[]>(
     () =>
       aggregatorType === 'provider' ? [providerTabLabel(liveCount)] : [seekerTabLabel(liveCount)],

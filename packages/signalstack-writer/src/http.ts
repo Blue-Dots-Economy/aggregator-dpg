@@ -68,7 +68,9 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       throw new Error('HttpSignalStackWriter requires apiKey');
     }
     this.baseUrl = config.baseUrl.replace(/\/+$/, '');
-    this.endpoint = `${this.baseUrl}/api/v1/admin/onboard_participant`;
+    // Plan-C tier-aware participant upsert. Replaced the old
+    // `/admin/onboard_participant` route which now returns 404.
+    this.endpoint = `${this.baseUrl}/api/v1/admin/participant`;
     this.headers = {
       'content-type': 'application/json',
       'x-api-key': config.apiKey,
@@ -93,7 +95,10 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       network: input.network,
       domain: input.domain,
       item_type: input.item_type,
-      profile: input.profile,
+      // Signalstack Plan-C renamed the body field from `profile` to
+      // `item_state` — the value is unchanged. Keep the writer input
+      // contract on `profile` so callers don't need to churn.
+      item_state: input.profile,
     };
     // Signalstack's user schema treats email / phoneNumber as `.optional()`
     // (not `.nullable()`), so omit the keys entirely when we have no value
@@ -136,21 +141,53 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
         );
       }
 
-      const payload = (await res.json()) as SignalStackOnboardParticipantResult;
-      if (
-        !payload ||
-        typeof payload !== 'object' ||
-        typeof payload.user_id !== 'string' ||
-        typeof payload.profile_item_id !== 'string'
-      ) {
+      // Plan-C response shape:
+      //   { user_id, user_existed, onboarded_at, items: [{ item_id, ... }] }
+      // The writer's public result still surfaces a flat
+      // `profile_item_id` so existing callers (worker, registration-link
+      // routes, audit logs) stay unchanged — pick the matching item for
+      // the requested network/domain/type, falling back to the first
+      // item when the request inserted a single row.
+      const raw = (await res.json()) as {
+        user_id?: unknown;
+        items?: Array<{
+          item_id?: unknown;
+          item_network?: unknown;
+          item_domain?: unknown;
+          item_type?: unknown;
+        }>;
+        onboarded_at?: unknown;
+      };
+      if (!raw || typeof raw !== 'object' || typeof raw.user_id !== 'string') {
         return err(
           new UpstreamError('signalstack onboard returned unexpected payload', {
             code: 'SIGNALSTACK_BAD_RESPONSE',
-            details: { payload },
+            details: { payload: raw },
           }),
         );
       }
-      return ok(payload);
+      const items = Array.isArray(raw.items) ? raw.items : [];
+      const matched =
+        items.find(
+          (it) =>
+            it.item_network === input.network &&
+            it.item_domain === input.domain &&
+            it.item_type === input.item_type,
+        ) ?? items[0];
+      if (!matched || typeof matched.item_id !== 'string') {
+        return err(
+          new UpstreamError('signalstack onboard returned no item for the request', {
+            code: 'SIGNALSTACK_BAD_RESPONSE',
+            details: { payload: raw },
+          }),
+        );
+      }
+      const result: SignalStackOnboardParticipantResult = {
+        user_id: raw.user_id,
+        profile_item_id: matched.item_id,
+        onboarded_at: typeof raw.onboarded_at === 'string' ? raw.onboarded_at : '',
+      };
+      return ok(result);
     } catch (e) {
       const cause = e as Error;
       const aborted = cause.name === 'AbortError';
@@ -284,6 +321,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       name: input.name,
       slug: input.slug,
     };
+    if (input.domains && input.domains.length > 0) body.domains = input.domains;
     if (input.metadata) body.metadata = input.metadata;
 
     const headers = {
@@ -414,8 +452,8 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       if (
         !payload ||
         typeof payload !== 'object' ||
-        !payload.rollup ||
-        !Array.isArray(payload.participants) ||
+        !payload.by_domain ||
+        typeof payload.by_domain !== 'object' ||
         !payload.metadata
       ) {
         return err(
