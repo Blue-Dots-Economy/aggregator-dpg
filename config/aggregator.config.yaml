@@ -1,32 +1,38 @@
-# Active aggregator config for the running stack. Pinned to blue_dot;
-# swap `network.source` to deploy against another signalstack network.
-# Treat this file as deploy state; the .example.yaml sibling documents
-# every supported field.
+# Active aggregator config for the running stack. Switched to purple_dot
+# for the PWD-services rollout; the same docker image runs blue_dot,
+# yellow_dot, or any other signalstack network by editing only this file.
+# Treat as deploy state; the .example.yaml sibling documents every
+# supported field.
 
 aggregator:
-  name: Blue Dots Aggregator
-  contact_email: ops@bluedots.local
+  name: Purple Dots Aggregator
+  contact_email: ops@purpledots.local
 
   network:
-    source: https://raw.githubusercontent.com/Blue-Dots-Economy/Signals-DPG/refs/heads/develop/examples/schemas/blue_dot/network.json
+    # Pin to a tag in production; develop is fine for local iteration.
+    source: https://raw.githubusercontent.com/Blue-Dots-Economy/Signals-DPG/refs/heads/develop/examples/schemas/purple_dot/network.json
+    # Purple_dot schemas have array-typed fields (disability_type,
+    # looking_for, documents_available) — bulk CSV cells use `|` as the
+    # delimiter.
     csv_array_delimiter: '|'
 
   brand:
-    short_name: Blue Dots
-    long_name: Blue Dots Aggregator Portal
-    tagline: Track every participant in your network — at a glance.
-    url_slug: blue-dots
-    primary_color: '#2563EB'
-    accent_color: '#3B82F6'
+    short_name: Purple Dots
+    long_name: Purple Dot Aggregator Portal
+    tagline: Discovery & services network for People with Disabilities
+    url_slug: purple-dots
+    # Light purple palette — softer than the dark violet defaults.
+    primary_color: '#A855F7'
+    accent_color: '#C084FC'
 
   domain_labels:
     seeker:
-      singular: Seeker
-      plural: Seekers
-      tab_label: Seekers
+      singular: Beneficiary
+      plural: Beneficiaries
+      tab_label: Beneficiaries
     provider:
-      singular: Provider
-      plural: Providers
+      singular: Service Provider
+      plural: Service Providers
       tab_label: Providers
 
   onboarding:

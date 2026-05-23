@@ -8,6 +8,7 @@ import { RjsfThemedForm } from '../../../components/forms/RjsfThemed';
 import { BlueDotsLogo } from '../../../components/ui/BlueDotsLogo';
 import { BrandPanel } from '../../../components/login/BrandPanel';
 import { I } from '../../../icons';
+import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
 
 export interface RegisterViewProps {
   schema: RJSFSchema;
@@ -147,6 +148,8 @@ function parseError(
  * the BFF, which proxies to the API.
  */
 export function RegisterView({ schema, uiSchema }: RegisterViewProps): JSX.Element {
+  const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
+  const brand = cfg.brand.short_name;
   // Controlled form data. The initial value seeds the location card +
   // consent timestamps; onChange keeps our state in sync with RJSF so that
   // a re-render triggered by `state` updates (e.g. showing an error alert)
@@ -251,7 +254,7 @@ export function RegisterView({ schema, uiSchema }: RegisterViewProps): JSX.Eleme
             <BlueDotsLogo size={48} />
             <div>
               <div className="font-display font-bold text-[18px] text-ink-900 leading-none tracking-tight">
-                Blue Dots
+                {brand}
               </div>
               <div className="text-[12.5px] text-ink-400 leading-none mt-1.5">
                 Aggregator Portal
@@ -280,8 +283,8 @@ export function RegisterView({ schema, uiSchema }: RegisterViewProps): JSX.Eleme
                 Reference ID: <code className="font-mono text-[12.5px]">{state.aggregatorId}</code>
               </p>
               <p className="text-[14px] text-emerald-700 mt-3">
-                The Blue Dots team will review your application within 1–2 business days. Once
-                approved, sign in via Blue Dots SSO using the email or mobile you registered.
+                The {brand} team will review your application within 1–2 business days. Once
+                approved, sign in via {brand} SSO using the email or mobile you registered.
               </p>
               <Link
                 href="/login"
@@ -368,8 +371,8 @@ export function RegisterView({ schema, uiSchema }: RegisterViewProps): JSX.Eleme
 
               <div className="mt-5 text-[12px] text-ink-400 flex items-start gap-2">
                 <span className="w-1 h-1 rounded-full bg-ink-300 mt-1.5 shrink-0" />
-                Your application will be reviewed by the Blue Dots team. You{'’'}ll receive an email
-                once approved, then sign in via Blue Dots SSO.
+                Your application will be reviewed by the {brand} team. You{'’'}ll receive an email
+                once approved, then sign in via {brand} SSO.
               </div>
             </div>
           )}

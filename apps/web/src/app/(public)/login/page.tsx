@@ -8,7 +8,7 @@ const LOGOUT_REASON_COOKIE = 'bd_logout_reason';
 const LOGOUT_RETURN_COOKIE = 'bd_logout_return';
 
 export const metadata: Metadata = {
-  title: 'Sign in — Blue Dots',
+  title: 'Sign in',
 };
 
 interface LoginPageProps {

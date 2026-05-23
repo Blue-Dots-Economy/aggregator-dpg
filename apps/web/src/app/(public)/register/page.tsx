@@ -7,7 +7,7 @@ import { RegisterView } from './RegisterView';
 import type { RJSFSchema } from '@rjsf/utils';
 
 export const metadata: Metadata = {
-  title: 'Register as Aggregator — Blue Dots',
+  title: 'Register as Aggregator',
 };
 
 export const dynamic = 'force-dynamic';

@@ -7,7 +7,7 @@ import type { RJSFSchema } from '@rjsf/utils';
 import { PublicRegistrationView } from './PublicRegistrationView';
 
 export const metadata: Metadata = {
-  title: 'Register — Blue Dots',
+  title: 'Register',
 };
 
 export const dynamic = 'force-dynamic';

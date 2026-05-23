@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, useEffect } from 'react';
+import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../hooks/useAggregatorConfig';
 
 interface Dot {
   ax: number;
@@ -27,6 +28,16 @@ interface Dot {
  */
 export function BrandPanel(): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
+  // Plural label of the first domain — drives the hero copy + the
+  // first stat tile so the brand panel speaks the network's own
+  // language (Seekers / Beneficiaries / Learners / …).
+  const firstDomain = cfg.domains[0];
+  const seekersLabel = firstDomain?.plural_label ?? 'Seekers';
+  const providersLabel = cfg.domains[1]?.plural_label ?? 'Providers';
+  const heroTagline =
+    cfg.brand.tagline ??
+    'A unified network where aggregators, providers, and seekers move together — every dot is a person, an opportunity, a path forward.';
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -180,33 +191,18 @@ export function BrandPanel(): JSX.Element {
 
       <div className="relative z-10 max-w-[520px]">
         <h1 className="font-display font-bold tracking-tight leading-[1.05] text-[48px] xl:text-[56px] text-white">
-          Connecting{' '}
-          <span
-            style={{
-              background: 'linear-gradient(120deg,#A5F3FC 0%,#93C5FD 50%,#C7D2FE 100%)',
-              WebkitBackgroundClip: 'text',
-              backgroundClip: 'text',
-              color: 'transparent',
-            }}
-          >
-            opportunity
-          </span>
-          <br />
-          seekers with the
-          <br />
-          right doors.
+          {cfg.brand.long_name}
         </h1>
 
         <p className="text-[15px] text-white/70 leading-relaxed mt-5 max-w-[460px]">
-          A unified network where aggregators, providers, and seekers move together — every blue dot
-          is a person, an opportunity, a path forward.
+          {heroTagline}
         </p>
 
         <div className="flex items-center gap-7 mt-8 pt-6 border-t border-white/10">
-          <BrandStat n="2.4M+" label="Seekers" />
-          <BrandStat n="18K" label="Providers" />
-          <BrandStat n="142" label="Aggregators" />
-          <BrandStat n="34%" label="Match rate" />
+          <BrandStat n="—" label={seekersLabel} />
+          <BrandStat n="—" label={providersLabel} />
+          <BrandStat n="—" label="Aggregators" />
+          <BrandStat n="—" label="Match rate" />
         </div>
       </div>
 
