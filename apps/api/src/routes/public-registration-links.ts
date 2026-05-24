@@ -23,6 +23,7 @@ import type { ParticipantsWriterBase } from '@aggregator-dpg/participants-writer
 import { getRegistrationLinksStore } from '../services/registration-links-store/index.js';
 import type { RegistrationLink } from '../services/registration-links-store/index.js';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
+import { getNetworkConfig } from '../services/network-config.js';
 import { getSchemaLoader } from '../services/schema-loader/index.js';
 import { normalisePhone } from '../services/phone.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
@@ -137,14 +138,19 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
     // gracefully for phone-optional schemas (no dedup, but still works).
     delete (body as Record<string, unknown>)['participant_id'];
 
-    // Pick contact fields by domain. Seeker schemas keep them top-level
-    // (`phone`, `email`); provider schemas store them under the hiring
-    // manager nested fields (`hiringManagerPhoneNumber`,
-    // `hiringManagerEmail`). The signalstack user block + the
-    // participants.{phone,email} columns must come from whichever
-    // location the schema put them in.
-    const phoneSourceKey = link.domain === 'provider' ? 'hiringManagerPhoneNumber' : 'phone';
-    const emailSourceKey = link.domain === 'provider' ? 'hiringManagerEmail' : 'email';
+    // Identity selectors come from the resolved network config so the
+    // route stays generic across signalstack networks. The sniffer
+    // picks them up from the schema; aggregator.config.yaml overrides
+    // when needed.
+    const networkCfg = await getNetworkConfig();
+    const linkDomainCfg = networkCfg.domains[link.domain];
+    if (!linkDomainCfg) {
+      throw httpError('NOT_FOUND', {
+        detail: `link domain '${link.domain}' not declared in network ${networkCfg.network.id}`,
+      });
+    }
+    const phoneSourceKey = linkDomainCfg.identity.phone;
+    const emailSourceKey = linkDomainCfg.identity.email;
     const phoneRaw =
       typeof body[phoneSourceKey] === 'string' ? (body[phoneSourceKey] as string) : '';
     let phoneNormalised: string | null = null;
@@ -240,7 +246,7 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       // identity store and must also see the row, otherwise the dashboard
       // and downstream consumers are out of sync.
       if (ss && signalstackOrgId) {
-        const nameSourceKey = link.domain === 'provider' ? 'jobProviderName' : 'name';
+        const nameSourceKey = linkDomainCfg.identity.name;
         const name =
           typeof body[nameSourceKey] === 'string'
             ? (body[nameSourceKey] as string)
@@ -255,19 +261,14 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
           name,
           ...(pushPhone ? { phoneNumber: pushPhone } : {}),
           ...(emailNormalised ? { email: emailNormalised } : {}),
-          // Aggregator-level consent captured at registration time is the
-          // legal basis for the participant push; signalstack still expects
-          // these flags per-row, so we hardcode `true` here. Surface as a
-          // checkbox on the public form when signalstack ever differentiates
-          // aggregator-level vs participant-level consent.
-          terms_accepted: true,
-          privacy_accepted: true,
+          terms_accepted: networkCfg.aggregator.onboarding.presume_consent,
+          privacy_accepted: networkCfg.aggregator.onboarding.presume_consent,
           channel: 'link',
           source_id: link.id,
           network: config.SIGNALSTACK_ITEM_NETWORK,
           domain: link.domain,
-          item_type: link.domain === 'provider' ? 'job_posting_1.0' : 'profile_1.0',
-          profile: buildSignalStackItemState(link.domain, body, pushPhone),
+          item_type: linkDomainCfg.itemType,
+          profile: buildSignalStackItemState(link.domain, body, pushPhone, linkDomainCfg),
         });
 
         if (!result.success) {
@@ -339,25 +340,29 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
  * Build the `item_state` block sent to signalstack from the participant
  * payload.
  *
- * Aggregator participant schemas already use the same field names as the
- * signalstack profile_1.0 / job_posting_1.0 item_state, so the body flows
- * through unchanged — we only override the phone for seekers so signalstack
- * stores the E.164 form the writer resolved upstream, not whatever raw
- * value the form / CSV carried.
+ * The body passes through unchanged — we only override the phone field
+ * (chosen via the domain's identity selectors) so signalstack stores
+ * the E.164 form the writer resolved upstream, not whatever raw value
+ * the form / CSV carried.
  */
 function buildSignalStackItemState(
-  domain: 'seeker' | 'provider',
+  _domain: string,
   body: Record<string, unknown>,
   pushPhone: string | null,
+  domainCfg: { identity: { phone: string } },
 ): Record<string, unknown> {
   const itemState: Record<string, unknown> = { ...body };
 
-  if (pushPhone) {
-    if (domain === 'provider') {
-      itemState.hiringManagerPhoneNumber = pushPhone;
-    } else {
-      itemState.phone = pushPhone;
-    }
+  // Signalstack's item_state schema validates the phone field with the
+  // network's own pattern (e.g. purple_dot mobile_number requires
+  // `^[0-9]{10}$`). The E.164 form is already carried up-stack as the
+  // user.phone_number identity arg, so item_state should keep the raw
+  // body value the user submitted. Only overwrite when the body had no
+  // value at all — preserves the bulk-CSV fallback while letting form
+  // submits pass schema validation upstream.
+  const rawPhone = body[domainCfg.identity.phone];
+  if (pushPhone && (typeof rawPhone !== 'string' || rawPhone.length === 0)) {
+    itemState[domainCfg.identity.phone] = pushPhone;
   }
 
   return itemState;

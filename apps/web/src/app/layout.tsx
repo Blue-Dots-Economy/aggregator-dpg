@@ -3,11 +3,34 @@ import type { ReactNode } from 'react';
 import { Providers } from '../lib/providers';
 import './globals.css';
 
-export const metadata: Metadata = {
-  title: 'Blue Dots — Aggregator Portal',
-  description:
-    'Track every participant in your network — at a glance. Blue Dots Aggregator Portal.',
-};
+/**
+ * Generates the page metadata from the active aggregator config.
+ *
+ * Fetched server-side from the api at build/render time so the browser
+ * tab title reflects whichever signalstack network this deployment is
+ * bound to. Falls back to a generic title on fetch failure so a cold
+ * boot before the api is healthy still renders something readable.
+ */
+export async function generateMetadata(): Promise<Metadata> {
+  try {
+    const base = process.env.API_BASE_URL ?? 'http://localhost:4000';
+    const res = await fetch(`${base}/v1/aggregator-config`, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`${res.status}`);
+    const cfg = (await res.json()) as {
+      brand: { long_name: string; tagline?: string };
+    };
+    return {
+      title: `${cfg.brand.long_name}`,
+      description:
+        cfg.brand.tagline ?? `${cfg.brand.long_name} — track every participant in your network.`,
+    };
+  } catch {
+    return {
+      title: 'Aggregator Portal',
+      description: 'Aggregator portal for signalstack-backed participant networks.',
+    };
+  }
+}
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (

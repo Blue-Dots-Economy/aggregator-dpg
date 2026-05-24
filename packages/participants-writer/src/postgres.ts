@@ -34,7 +34,7 @@ type DbHandle = PgDatabase<any, any, any>;
 
 interface WriteCommon {
   aggregatorId: string;
-  type: 'seeker' | 'provider';
+  type: string;
   participantId: string;
   data: Record<string, unknown>;
   phone: string | null;

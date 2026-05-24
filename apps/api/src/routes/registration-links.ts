@@ -709,7 +709,7 @@ async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
  * the aggregator's registered type (JWT `aggregator_type` claim). An
  * aggregator may only create registration links for the type it registered as.
  */
-function enforceAggregatorType(auth: AuthContext, domain: 'seeker' | 'provider'): void {
+function enforceAggregatorType(auth: AuthContext, domain: string): void {
   if (!auth.aggregatorType) {
     throw httpError('AGGREGATOR_TYPE_MISSING', {
       fields: { aggregator_id: auth.aggregatorId },

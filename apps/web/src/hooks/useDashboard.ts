@@ -1,27 +1,27 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { blueDotsService, type BlueDotsDashboardQuery } from '../services/blue-dots.service';
+import { dashboardService, type DashboardQuery } from '../services/dashboard.service';
 import type { ParticipantFilter } from '../types';
 
 export function useSeekers(filter?: ParticipantFilter) {
   return useQuery({
-    queryKey: ['blue-dots', 'seekers', filter],
-    queryFn: () => blueDotsService.seekers(filter),
+    queryKey: ['dashboard', 'seekers', filter],
+    queryFn: () => dashboardService.seekers(filter),
   });
 }
 
 export function useProviders(filter?: ParticipantFilter) {
   return useQuery({
-    queryKey: ['blue-dots', 'providers', filter],
-    queryFn: () => blueDotsService.providers(filter),
+    queryKey: ['dashboard', 'providers', filter],
+    queryFn: () => dashboardService.providers(filter),
   });
 }
 
 export function useOppProviders(filter?: ParticipantFilter) {
   return useQuery({
-    queryKey: ['blue-dots', 'opp-providers', filter],
-    queryFn: () => blueDotsService.oppProviders(filter),
+    queryKey: ['dashboard', 'opp-providers', filter],
+    queryFn: () => dashboardService.oppProviders(filter),
   });
 }
 
@@ -34,13 +34,13 @@ export function useOppProviders(filter?: ParticipantFilter) {
  * selects a server-side status filter, pass `status` and the query-key
  * change triggers a refetch with `?status=…` applied upstream.
  */
-export function useDashboard(query?: BlueDotsDashboardQuery) {
+export function useDashboard(query?: DashboardQuery) {
   const domain = query?.domain ?? 'seeker';
   const status = query?.status ?? null;
   const page = query?.page ?? 1;
   const limit = query?.limit ?? 50;
   return useQuery({
-    queryKey: ['blue-dots', 'dashboard', domain, status, page, limit],
-    queryFn: () => blueDotsService.dashboard(query),
+    queryKey: ['dashboard', 'dashboard', domain, status, page, limit],
+    queryFn: () => dashboardService.dashboard(query),
   });
 }

@@ -56,6 +56,9 @@ importers:
       '@aggregator-dpg/db-schema':
         specifier: workspace:*
         version: link:../../packages/db-schema
+      '@aggregator-dpg/network-config':
+        specifier: workspace:*
+        version: link:../../packages/network-config
       '@aggregator-dpg/participants-writer':
         specifier: workspace:*
         version: link:../../packages/participants-writer
@@ -259,6 +262,9 @@ importers:
       '@aggregator-dpg/db-schema':
         specifier: workspace:*
         version: link:../../packages/db-schema
+      '@aggregator-dpg/network-config':
+        specifier: workspace:*
+        version: link:../../packages/network-config
       '@aggregator-dpg/participants-writer':
         specifier: workspace:*
         version: link:../../packages/participants-writer
@@ -392,6 +398,34 @@ importers:
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
+
+  packages/network-config:
+    dependencies:
+      '@aggregator-dpg/shared-primitives':
+        specifier: workspace:*
+        version: link:../shared-primitives
+      yaml:
+        specifier: ^2.6.0
+        version: 2.8.3
+      zod:
+        specifier: ^3.24.0
+        version: 3.25.76
+    devDependencies:
+      '@aggregator-dpg/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.17
+      '@vitest/coverage-v8':
+        specifier: ^3.2.0
+        version: 3.2.4(vitest@3.2.4(@types/node@22.19.17)(jiti@2.6.1)(jsdom@25.0.1)(tsx@4.21.0)(yaml@2.8.3))
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^3.2.0
+        version: 3.2.4(@types/node@22.19.17)(jiti@2.6.1)(jsdom@25.0.1)(tsx@4.21.0)(yaml@2.8.3)
 
   packages/participants-writer:
     dependencies:

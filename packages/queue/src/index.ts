@@ -38,7 +38,7 @@ export interface BulkFileProcessJob {
   uploadId: string;
   aggregatorId: string;
   s3Key: string;
-  participantType: 'seeker' | 'provider';
+  participantType: string;
   schemaId: string;
   schemaVersion: string;
 }
@@ -52,7 +52,7 @@ export interface BulkRowProcessJob {
   /** Pinned schema version, propagated from File Processor. */
   schemaVersion: string;
   /** Pinned participant type, propagated from File Processor. */
-  participantType: 'seeker' | 'provider';
+  participantType: string;
   /** Parsed payload after CSV → object conversion. */
   payload: Record<string, unknown>;
 }

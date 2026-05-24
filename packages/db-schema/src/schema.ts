@@ -59,7 +59,12 @@ export const aggregatorActorTypeEnum = pgEnum('aggregator_actor_type', [
   'provider',
 ]);
 
-export const aggregatorTypeEnum = pgEnum('aggregator_type', ['seeker', 'provider', 'both']);
+// `participant_type` + `aggregator_type` Postgres enums were dropped in
+// migration 0011 — the aggregator is generic across signalstack networks
+// (blue_dot has seeker/provider, yellow_dot has learner/tutor, …) so the
+// closed enum no longer fits. Columns that used these enums are now plain
+// `text`; validation against the live network's `domainIds` happens at
+// the application layer.
 
 export const aggregatorStatusEnum = pgEnum('aggregator_status', [
   'pending',
@@ -67,8 +72,6 @@ export const aggregatorStatusEnum = pgEnum('aggregator_status', [
   'inactive',
   'retired',
 ]);
-
-export const participantTypeEnum = pgEnum('participant_type', ['seeker', 'provider']);
 
 export const bulkUploadStatusEnum = pgEnum('bulk_upload_status', [
   'pending',
@@ -106,7 +109,9 @@ export const aggregators = pgTable(
     actorType: aggregatorActorTypeEnum('actor_type').notNull(),
     name: text('name').notNull(),
     // `type` is NULL when actor_type='aggregator' (enforced by CHECK).
-    type: aggregatorTypeEnum('type'),
+    // Stored as text since 0011 — the network config decides which
+    // domain ids are valid for the active deployment.
+    type: text('type'),
     url: text('url'),
 
     // Beckn Contact (mirrored from Keycloak — KC is authoritative for
@@ -207,7 +212,10 @@ export const bulkUploads = pgTable(
     aggregatorId: uuid('aggregator_id')
       .notNull()
       .references(() => aggregators.id, { onDelete: 'cascade' }),
-    participantType: participantTypeEnum('participant_type').notNull(),
+    // Stored as text since 0011 — accepts any domain id declared by the
+    // active signalstack network. Application layer validates against
+    // `getNetworkConfig().domainIds`.
+    participantType: text('participant_type').notNull(),
     s3Key: text('s3_key').notNull(),
     // ETag captured by HEAD when the browser confirms upload (POST /:id/start).
     // NULL while status='pending'.
@@ -247,7 +255,7 @@ export const registrationLinks = pgTable(
       .notNull()
       .references(() => aggregators.id, { onDelete: 'cascade' }),
     slug: text('slug').notNull(),
-    domain: participantTypeEnum('domain').notNull(),
+    domain: text('domain').notNull(),
     context: jsonb('context').$type<Record<string, unknown>>().notNull().default({}),
     qrObjectKey: text('qr_object_key'),
     status: registrationLinkStatusEnum('status').notNull().default('draft'),
@@ -279,7 +287,7 @@ export const participants = pgTable(
     aggregatorId: uuid('aggregator_id')
       .notNull()
       .references(() => aggregators.id, { onDelete: 'cascade' }),
-    type: participantTypeEnum('type').notNull(),
+    type: text('type').notNull(),
     // Schema-supplied unique identifier from the data source (e.g. ITI roll
     // number, employee id). Not the same as `id` (DB row id). Dedup is
     // (aggregator_id, participant_id) — the same external id can exist

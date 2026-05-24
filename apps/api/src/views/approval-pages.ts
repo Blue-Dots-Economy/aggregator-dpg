@@ -6,10 +6,62 @@
  * like part of the same product even though it is served by the Fastify API.
  */
 
-const BRAND_PRIMARY = '#4f46e5';
-const BRAND_PRIMARY_DARK = '#4338ca';
-const BRAND_PRIMARY_50 = '#eef2ff';
-const BRAND_PRIMARY_100 = '#e0e7ff';
+/**
+ * Network-driven brand surface for the admin-approval pages. Sourced
+ * from `getNetworkConfig().aggregator.brand` at render time so the
+ * blue_dot / purple_dot / yellow_dot deployments each get their own
+ * label + palette without code changes.
+ */
+export interface PageBrand {
+  short_name: string;
+  long_name: string;
+  primary_color: string;
+  portal_url: string;
+}
+
+const DEFAULT_BRAND: PageBrand = {
+  short_name: 'Aggregator',
+  long_name: 'Aggregator Portal',
+  primary_color: '#4f46e5',
+  portal_url: 'http://localhost:3000',
+};
+
+/**
+ * Module-level brand seeded from the resolved network config at server
+ * boot. Render functions read this when the caller doesn't pass an
+ * explicit `brand` override — keeps the call sites churn-free while
+ * driving the whole admin-decision flow from the active deployment's
+ * aggregator.config.yaml.
+ */
+let runtimeBrand: PageBrand | null = null;
+
+/** Called once from the server boot path after network config resolves. */
+export function setApprovalBrand(brand: PageBrand): void {
+  runtimeBrand = brand;
+}
+
+function pickBrand(override: PageBrand | undefined): PageBrand {
+  return override ?? runtimeBrand ?? DEFAULT_BRAND;
+}
+
+function shade(hex: string, percent: number): string {
+  const m = /^#([0-9a-f]{6})$/i.exec(hex);
+  if (!m || !m[1]) return hex;
+  const num = parseInt(m[1], 16);
+  const r = (num >> 16) & 0xff;
+  const g = (num >> 8) & 0xff;
+  const b = num & 0xff;
+  const mix = (c: number): number =>
+    percent < 0
+      ? Math.max(0, Math.round(c * (1 + percent)))
+      : Math.min(255, Math.round(c + (255 - c) * percent));
+  const out = ((mix(r) << 16) | (mix(g) << 8) | mix(b)).toString(16).padStart(6, '0');
+  return `#${out}`;
+}
+
+function brandInitial(name: string): string {
+  return (name.trim()[0] ?? 'A').toUpperCase();
+}
 const INK_900 = '#0b1020';
 const INK_500 = '#475069';
 const INK_300 = '#a3a8bd';
@@ -24,19 +76,32 @@ const SUCCESS_BG = '#dcfce7';
 const INFO = '#1e40af';
 const INFO_BG = '#dbeafe';
 
-const BRAND_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect x="0.6" y="0.6" width="46.8" height="46.8" rx="13" fill="#EFF4FF" stroke="rgba(37,99,235,0.15)"/><g stroke="rgba(37,99,235,0.35)" stroke-width="0.9" stroke-linecap="round"><line x1="24" y1="24" x2="8" y2="12"/><line x1="24" y1="24" x2="40" y2="10"/><line x1="24" y1="24" x2="42" y2="26"/><line x1="24" y1="24" x2="34" y2="40"/><line x1="24" y1="24" x2="14" y2="38"/><line x1="24" y1="24" x2="6" y2="26"/></g><circle cx="8" cy="12" r="2.6" fill="#2563EB"/><circle cx="40" cy="10" r="2" fill="#2563EB"/><circle cx="42" cy="26" r="3.2" fill="#2563EB"/><circle cx="34" cy="40" r="2.4" fill="#2563EB"/><circle cx="14" cy="38" r="2.8" fill="#2563EB"/><circle cx="6" cy="26" r="2" fill="#2563EB"/><circle cx="24" cy="24" r="9.4" fill="rgba(37,99,235,0.35)"/><circle cx="24" cy="24" r="5.4" fill="#1D4ED8"/></svg>`;
-
 interface ShellOptions {
   title: string;
+  brand: PageBrand;
+}
+
+function hexToRgba(hex: string, alpha: number): string {
+  const m = /^#([0-9a-f]{6})$/i.exec(hex);
+  if (!m || !m[1]) return `rgba(79, 70, 229, ${alpha})`;
+  const num = parseInt(m[1], 16);
+  return `rgba(${(num >> 16) & 0xff}, ${(num >> 8) & 0xff}, ${num & 0xff}, ${alpha})`;
 }
 
 function shell(opts: ShellOptions, body: string): string {
+  const brand = opts.brand;
+  const primary = brand.primary_color;
+  const primaryDark = shade(primary, -0.12);
+  const primary50 = shade(primary, 0.92);
+  const primary100 = shade(primary, 0.84);
+  const primaryShadow = hexToRgba(primary, 0.28);
+  const primaryFocus = hexToRgba(primary, 0.06);
+  const initial = brandInitial(brand.short_name);
   return `<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>${escape(opts.title)} · Blue Dots</title>
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,${encodeURIComponent(BRAND_FAVICON_SVG)}" />
+<title>${escape(opts.title)} · ${escape(brand.short_name)}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -52,8 +117,8 @@ function shell(opts: ShellOptions, body: string): string {
     color: ${INK_900};
     min-height: 100vh;
     background-image:
-      radial-gradient(ellipse 60% 40% at 50% 0%, ${BRAND_PRIMARY_50} 0%, transparent 70%),
-      radial-gradient(rgba(79, 70, 229, 0.06) 1px, transparent 1px);
+      radial-gradient(ellipse 60% 40% at 50% 0%, ${primary50} 0%, transparent 70%),
+      radial-gradient(${primaryFocus} 1px, transparent 1px);
     background-size: 100% 100%, 22px 22px;
   }
   .wrap { max-width: 600px; margin: 0 auto; padding: 48px 20px 64px; }
@@ -63,11 +128,11 @@ function shell(opts: ShellOptions, body: string): string {
   }
   .brand-mark {
     width: 44px; height: 44px; border-radius: 12px;
-    background: ${BRAND_PRIMARY};
+    background: ${primary};
     display: flex; align-items: center; justify-content: center;
     color: #fff; font-weight: 700; font-size: 17px;
     letter-spacing: -0.02em;
-    box-shadow: 0 8px 22px rgba(79, 70, 229, 0.28);
+    box-shadow: 0 8px 22px ${primaryShadow};
   }
   .brand-text { line-height: 1.2; }
   .brand-name {
@@ -121,7 +186,7 @@ function shell(opts: ShellOptions, body: string): string {
     background: #fff;
     transition: border-color 0.15s ease, box-shadow 0.15s ease;
   }
-  textarea:focus { outline: none; border-color: ${BRAND_PRIMARY}; box-shadow: 0 0 0 4px ${BRAND_PRIMARY_100}; }
+  textarea:focus { outline: none; border-color: ${primary}; box-shadow: 0 0 0 4px ${primary100}; }
   label { display: block; font-size: 12px; font-weight: 600; color: ${INK_500}; text-transform: uppercase; letter-spacing: 0.06em; margin: 18px 0 8px; }
   button {
     font: inherit; cursor: pointer;
@@ -131,10 +196,10 @@ function shell(opts: ShellOptions, body: string): string {
   }
   button:active { transform: translateY(1px); }
   .btn-primary {
-    background: ${BRAND_PRIMARY}; color: #fff;
-    box-shadow: 0 8px 18px rgba(79, 70, 229, 0.28);
+    background: ${primary}; color: #fff;
+    box-shadow: 0 8px 18px ${primaryShadow};
   }
-  .btn-primary:hover { background: ${BRAND_PRIMARY_DARK}; }
+  .btn-primary:hover { background: ${primaryDark}; }
   .btn-danger {
     background: ${DANGER}; color: #fff;
     box-shadow: 0 8px 18px rgba(185, 28, 28, 0.22);
@@ -154,7 +219,7 @@ function shell(opts: ShellOptions, body: string): string {
   .pill-error { background: ${DANGER_BG}; color: ${DANGER}; border: 1px solid ${DANGER_BORDER}; }
   .pill-info { background: ${INFO_BG}; color: ${INFO}; }
   .accent-bar { height: 4px; }
-  .accent-primary { background: linear-gradient(90deg, ${BRAND_PRIMARY}, ${BRAND_PRIMARY_DARK}); }
+  .accent-primary { background: linear-gradient(90deg, ${primary}, ${primaryDark}); }
   .accent-danger { background: linear-gradient(90deg, ${DANGER}, #7f1d1d); }
   .accent-success { background: linear-gradient(90deg, ${SUCCESS}, #166534); }
   .accent-info { background: linear-gradient(90deg, ${INFO}, #1e3a8a); }
@@ -174,12 +239,12 @@ function shell(opts: ShellOptions, body: string): string {
   .result-cta {
     display: inline-flex; align-items: center; gap: 8px;
     padding: 11px 20px; border-radius: 11px;
-    background: ${BRAND_PRIMARY}; color: #fff;
+    background: ${primary}; color: #fff;
     text-decoration: none; font-weight: 600; font-size: 14px;
-    box-shadow: 0 8px 18px rgba(79, 70, 229, 0.28);
+    box-shadow: 0 8px 18px ${primaryShadow};
     transition: background 0.15s ease;
   }
-  .result-cta:hover { background: ${BRAND_PRIMARY_DARK}; }
+  .result-cta:hover { background: ${primaryDark}; }
   .result-cta-row { margin: 24px 0 4px; display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; }
   .result-secondary {
     display: inline-flex; align-items: center; gap: 6px;
@@ -197,10 +262,10 @@ function shell(opts: ShellOptions, body: string): string {
 <body>
   <div class="wrap">
     <div class="brand">
-      <div class="brand-mark">B</div>
+      <div class="brand-mark">${escape(initial)}</div>
       <div class="brand-text">
-        <div class="brand-name">Blue Dots</div>
-        <div class="brand-tag">Aggregator Portal · Admin review</div>
+        <div class="brand-name">${escape(brand.short_name)}</div>
+        <div class="brand-tag">${escape(brand.long_name)} · Admin review</div>
       </div>
     </div>
     ${body}
@@ -216,9 +281,11 @@ export interface ConfirmPageVars {
   association: string;
   aggregatorType: string;
   postUrl: string;
+  brand?: PageBrand;
 }
 
 export function renderConfirmPage(v: ConfirmPageVars): string {
+  const brand = pickBrand(v.brand);
   const isApprove = v.intent === 'approve';
   const verb = isApprove ? 'Approve' : 'Reject';
   const accentClass = isApprove ? 'accent-primary' : 'accent-danger';
@@ -293,16 +360,18 @@ export function renderConfirmPage(v: ConfirmPageVars): string {
         : ''
     }
   `;
-  return shell({ title: `${verb} aggregator` }, body);
+  return shell({ title: `${verb} aggregator`, brand }, body);
 }
 
 export interface ResultPageVars {
   status: 'success' | 'error' | 'info';
   title: string;
   message: string;
+  brand?: PageBrand;
 }
 
 export function renderResultPage(v: ResultPageVars): string {
+  const brand = pickBrand(v.brand);
   const accent =
     v.status === 'success'
       ? 'accent-success'
@@ -312,7 +381,7 @@ export function renderResultPage(v: ResultPageVars): string {
   const iconClass =
     v.status === 'success' ? 'icon-success' : v.status === 'error' ? 'icon-error' : 'icon-info';
   const iconSvg = resultIconSvg(v.status);
-  const portalUrl = process.env.PUBLIC_PORTAL_URL ?? 'http://localhost:3000';
+  const portalUrl = brand.portal_url;
   const decidedAt = new Date().toLocaleString('en-IN', {
     day: '2-digit',
     month: 'short',
@@ -331,7 +400,7 @@ export function renderResultPage(v: ResultPageVars): string {
         <span class="result-divider"></span>
         <div class="result-cta-row">
           <a class="result-cta" href="${escape(portalUrl)}">
-            Open Blue Dots Portal
+            Open ${escape(brand.short_name)} Portal
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 5l7 7-7 7"/></svg>
           </a>
         </div>
@@ -340,7 +409,7 @@ export function renderResultPage(v: ResultPageVars): string {
     </div>
     <p class="footer-note" style="text-align:center;">You can safely close this tab.</p>
   `;
-  return shell({ title: v.title }, body);
+  return shell({ title: v.title, brand }, body);
 }
 
 function resultIconSvg(status: 'success' | 'error' | 'info'): string {

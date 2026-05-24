@@ -7,7 +7,7 @@ import { RegisterView } from './RegisterView';
 import type { RJSFSchema } from '@rjsf/utils';
 
 export const metadata: Metadata = {
-  title: 'Register as Aggregator — Blue Dots',
+  title: 'Register as Aggregator',
 };
 
 export const dynamic = 'force-dynamic';
@@ -19,7 +19,7 @@ export const dynamic = 'force-dynamic';
  */
 export default async function RegisterPage() {
   const session = await getSession();
-  if (session) redirect('/blue-dots');
+  if (session) redirect('/dashboard');
 
   const schemaPath = resolveSchemaPath('registration.v1.json');
   const uiSchemaPath = resolveSchemaPath('registration.v1.ui.json');

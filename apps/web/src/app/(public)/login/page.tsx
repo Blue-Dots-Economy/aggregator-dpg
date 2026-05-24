@@ -8,7 +8,7 @@ const LOGOUT_REASON_COOKIE = 'bd_logout_reason';
 const LOGOUT_RETURN_COOKIE = 'bd_logout_return';
 
 export const metadata: Metadata = {
-  title: 'Sign in — Blue Dots',
+  title: 'Sign in',
 };
 
 interface LoginPageProps {
@@ -22,7 +22,7 @@ interface LoginPageProps {
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
   const session = await getSession();
-  if (session) redirect('/blue-dots');
+  if (session) redirect('/dashboard');
 
   const params = await searchParams;
   const cookieJar = await cookies();
@@ -33,7 +33,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   const cookieReason = cookieJar.get(LOGOUT_REASON_COOKIE)?.value;
 
   const returnCandidate = cookieReturn ?? params.return ?? params.returnTo;
-  const returnTo = isSafePath(returnCandidate) ? returnCandidate! : '/blue-dots';
+  const returnTo = isSafePath(returnCandidate) ? returnCandidate! : '/dashboard';
   const reason = cookieReason ?? (typeof params.reason === 'string' ? params.reason : null);
   // Map well-known reasons to error codes the LoginView already understands.
   const error =

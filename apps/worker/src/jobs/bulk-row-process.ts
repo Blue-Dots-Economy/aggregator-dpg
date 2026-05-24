@@ -29,6 +29,7 @@ import { getSchemaLoader } from '../services/schema-loader.js';
 import { getRedis } from '../services/redis.js';
 import { enqueueFinalise } from '../services/bulk-queue.js';
 import { normalisePhone, normaliseEmail } from '../services/phone.js';
+import { getNetworkConfig } from '../services/network-config.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
 import { config } from '../config.js';
 import { logger } from '../logger.js';
@@ -102,7 +103,12 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
     );
   }
   if (schemaResult.success) {
-    preprocessArrayCells(job.payload, schemaResult.value);
+    const cfg = await getNetworkConfig();
+    preprocessArrayCells(
+      job.payload,
+      schemaResult.value,
+      cfg.aggregator.network.csv_array_delimiter,
+    );
   }
   const validate = validatorResult.value;
   if (!validate(job.payload)) {
@@ -127,11 +133,25 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
   const rawParticipantId = String(job.payload['participant_id'] ?? '').trim();
   const participantId = rawParticipantId.length > 0 ? rawParticipantId : randomUUID();
 
-  // Provider schemas store contact under hiring-manager fields; seeker
-  // schemas keep them top-level. Source the columns + signalstack identity
-  // from the right keys based on participantType.
-  const phoneSourceKey = job.participantType === 'provider' ? 'hiringManagerPhoneNumber' : 'phone';
-  const emailSourceKey = job.participantType === 'provider' ? 'hiringManagerEmail' : 'email';
+  // Identity selectors come from the resolved network config — sniffer
+  // picks them up from the schema, or aggregator.config.yaml overrides
+  // them. Different signalstack networks (blue / purple / yellow) use
+  // different field names; the worker stays generic.
+  const networkCfg = await getNetworkConfig();
+  const domainCfg = networkCfg.domains[job.participantType];
+  if (!domainCfg) {
+    return await commit(
+      job,
+      {
+        outcome: 'failed',
+        category: 'system_error',
+        reasons: [`unknown domain '${job.participantType}' for network ${networkCfg.network.id}`],
+      },
+      log,
+    );
+  }
+  const phoneSourceKey = domainCfg.identity.phone;
+  const emailSourceKey = domainCfg.identity.email;
   const phoneRaw =
     typeof job.payload[phoneSourceKey] === 'string' ? (job.payload[phoneSourceKey] as string) : '';
   let phoneNormalised: string | null = null;
@@ -321,11 +341,26 @@ async function pushToSignalStack(
     };
   }
 
-  // Providers carry name + contact under hiring-manager / company fields;
-  // seekers keep them at the top level. Source per participantType so the
-  // signalstack user block is never built from missing keys.
-  const nameSourceKey = job.participantType === 'provider' ? 'jobProviderName' : 'name';
-  const phoneSourceKey = job.participantType === 'provider' ? 'hiringManagerPhoneNumber' : 'phone';
+  // Identity selectors + item_type come from the resolved network
+  // config so the worker stays generic across signalstack networks.
+  const networkCfg = await getNetworkConfig();
+  const domainCfg = networkCfg.domains[job.participantType];
+  if (!domainCfg) {
+    log.error({
+      status: 'failure',
+      sub: 'signalstack.push',
+      code: 'UNKNOWN_DOMAIN',
+      domain: job.participantType,
+      network_id: networkCfg.network.id,
+    });
+    return {
+      success: false,
+      code: 'UNKNOWN_DOMAIN',
+      message: `domain '${job.participantType}' not declared in network ${networkCfg.network.id}`,
+    };
+  }
+  const nameSourceKey = domainCfg.identity.name;
+  const phoneSourceKey = domainCfg.identity.phone;
   const name =
     typeof job.payload[nameSourceKey] === 'string'
       ? (job.payload[nameSourceKey] as string)
@@ -344,14 +379,14 @@ async function pushToSignalStack(
     // for the bulk-row push; signalstack still expects these flags per-row
     // so we hardcode `true`. Surface as CSV columns if signalstack ever
     // demands per-row participant consent.
-    terms_accepted: true,
-    privacy_accepted: true,
+    terms_accepted: networkCfg.aggregator.onboarding.presume_consent,
+    privacy_accepted: networkCfg.aggregator.onboarding.presume_consent,
     channel: 'bulk',
     source_id: job.uploadId,
     network: config.SIGNALSTACK_ITEM_NETWORK,
     domain: job.participantType,
-    item_type: job.participantType === 'provider' ? 'job_posting_1.0' : 'profile_1.0',
-    profile: buildSignalStackItemState(job.participantType, job.payload, pushPhone),
+    item_type: domainCfg.itemType,
+    profile: buildSignalStackItemState(job.participantType, job.payload, pushPhone, domainCfg),
   });
   if (!result.success) {
     log.error({
@@ -380,24 +415,27 @@ async function pushToSignalStack(
  * Build the `item_state` block sent to signalstack from a bulk-upload row.
  *
  * Aggregator participant schemas already use the same field names as the
- * signalstack profile_1.0 / job_posting_1.0 item_state, so the row payload
- * flows through unchanged — we only override the phone for seekers so
- * signalstack stores the E.164 form the writer resolved upstream, not
- * whatever raw value the CSV cell carried.
+ * upstream signalstack profile item_state, so the row payload flows
+ * through unchanged — we only override the phone field (chosen via the
+ * domain's identity selectors) so signalstack stores the E.164 form the
+ * writer resolved upstream, not whatever raw value the CSV cell carried.
  */
 function buildSignalStackItemState(
-  domain: 'seeker' | 'provider',
+  _domain: string,
   body: Record<string, unknown>,
   pushPhone: string | null,
+  domainCfg: { identity: { phone: string } },
 ): Record<string, unknown> {
   const itemState: Record<string, unknown> = { ...body };
 
-  if (pushPhone) {
-    if (domain === 'provider') {
-      itemState.hiringManagerPhoneNumber = pushPhone;
-    } else {
-      itemState.phone = pushPhone;
-    }
+  // Keep the raw body value when present — signalstack validates the
+  // phone field against the network's own pattern (purple_dot expects
+  // `^[0-9]{10}$`, blue_dot expects E.164). The E.164 form is already
+  // carried up-stack as the user.phone_number identity arg, so the
+  // override here is only a fallback for empty cells.
+  const rawPhone = body[domainCfg.identity.phone];
+  if (pushPhone && (typeof rawPhone !== 'string' || rawPhone.length === 0)) {
+    itemState[domainCfg.identity.phone] = pushPhone;
   }
 
   return itemState;
@@ -413,6 +451,7 @@ function buildSignalStackItemState(
 function preprocessArrayCells(
   payload: Record<string, unknown>,
   jsonSchema: Record<string, unknown>,
+  delimiter: string,
 ): void {
   const props = jsonSchema['properties'];
   if (!props || typeof props !== 'object') return;
@@ -421,7 +460,7 @@ function preprocessArrayCells(
     const cell = payload[field];
     if (typeof cell !== 'string') continue;
     payload[field] = cell
-      .split(',')
+      .split(delimiter)
       .map((s) => s.trim())
       .filter((s) => s.length > 0);
   }

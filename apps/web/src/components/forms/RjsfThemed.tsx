@@ -137,7 +137,7 @@ function CommaSeparatedArrayWidget(props: WidgetProps) {
       value={text}
       required={required}
       disabled={disabled || readonly}
-      placeholder={placeholder ?? 'e.g. tailoring, quality-check'}
+      placeholder={placeholder ?? 'Comma-separated values'}
       onChange={(e: ChangeEvent<HTMLInputElement>) => {
         setText(e.target.value);
         const arr = e.target.value
@@ -332,6 +332,86 @@ function TitleField(_props: TitleFieldProps) {
 }
 
 // RJSF picks specialised widgets for `format: "email" | "uri" | "tel"` etc.
+/**
+ * Multi-select dropdown for array-of-enum schemas. Visually mirrors the
+ * single-select SelectWidget (same `bd-input` chrome) so users get the
+ * familiar Qualification-style dropdown; picked values surface as
+ * removable chips above the dropdown. Writes the field as `string[]`
+ * (or `undefined` when empty) so RJSF + Ajv see the schema's expected
+ * array shape.
+ */
+function CheckboxesWidget(props: WidgetProps) {
+  const { id, value, disabled, readonly, onChange, options } = props;
+  const enumOptions =
+    (options['enumOptions'] as Array<{ value: string; label: string }> | undefined) ?? [];
+  // RJSF seeds array fields with `minItems` >= 1 as `[undefined]`, which
+  // produces a label-less chip. Filter to real string values so the chip
+  // list only shows things the user has actually picked.
+  const current: string[] = Array.isArray(value)
+    ? (value as unknown[]).filter((v): v is string => typeof v === 'string' && v.length > 0)
+    : [];
+  const remaining = enumOptions.filter((opt) => !current.includes(opt.value));
+  const remove = (v: string) => {
+    const next = current.filter((x) => x !== v);
+    onChange(next.length > 0 ? next : undefined);
+  };
+  const add = (v: string) => {
+    if (!v || current.includes(v)) return;
+    onChange([...current, v]);
+  };
+  return (
+    <div className="flex flex-col gap-2">
+      {current.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {current.map((v) => {
+            const label = enumOptions.find((o) => o.value === v)?.label ?? v;
+            return (
+              <span
+                key={v}
+                className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full bg-[var(--bd-primary-50)] text-[var(--bd-primary-600)] text-[12px] font-medium"
+              >
+                {label}
+                <button
+                  type="button"
+                  onClick={() => remove(v)}
+                  disabled={disabled || readonly}
+                  aria-label={`Remove ${label}`}
+                  className="w-[14px] h-[14px] inline-flex items-center justify-center rounded-full hover:bg-[var(--bd-primary-100)] text-[var(--bd-primary-600)]"
+                >
+                  ×
+                </button>
+              </span>
+            );
+          })}
+        </div>
+      )}
+      <select
+        id={id}
+        className="bd-input appearance-none pr-10"
+        value=""
+        disabled={disabled || readonly || remaining.length === 0}
+        onChange={(e) => {
+          add(e.target.value);
+          e.target.value = '';
+        }}
+      >
+        <option value="">
+          {remaining.length === 0
+            ? '— all selected —'
+            : current.length === 0
+              ? '— select —'
+              : '— add another —'}
+        </option>
+        {remaining.map((opt) => (
+          <option key={opt.value} value={opt.value}>
+            {opt.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 // The defaults render unstyled <input>s — alias them to TextWidget so the
 // shared `.bd-input` styling applies everywhere.
 const widgets: RegistryWidgetsType = {
@@ -340,6 +420,7 @@ const widgets: RegistryWidgetsType = {
   SelectWidget,
   DateWidget,
   CheckboxWidget,
+  CheckboxesWidget,
   CommaSeparatedArrayWidget,
   EmailWidget: TextWidget,
   URLWidget: TextWidget,

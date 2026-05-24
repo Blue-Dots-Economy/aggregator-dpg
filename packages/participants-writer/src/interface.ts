@@ -20,8 +20,13 @@
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
 
-/** participant_type enum mirror. */
-export type ParticipantType = 'seeker' | 'provider';
+/**
+ * Open string — the signalstack network's `network.json` declares the
+ * valid domain ids per deployment (blue_dot: seeker/provider;
+ * yellow_dot: learner/tutor; …). Application layer validates against
+ * `getNetworkConfig().domainIds`; the writer itself stays generic.
+ */
+export type ParticipantType = string;
 
 /**
  * Result classification returned per write attempt. Mirrors the semantics

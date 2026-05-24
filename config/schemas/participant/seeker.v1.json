@@ -1,84 +1,187 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://schemas.bluedots.org/participant/seeker.v1.json",
-  "title": "Job Seeker Profile 1.0",
-  "description": "People looking for jobs. Field names match the signalstack profile_1.0 item_state schema so submissions can flow through without re-shaping.",
+  "title": "PWD Beneficiary Profile 1.0",
   "type": "object",
   "additionalProperties": false,
-  "required": ["name", "gender", "location", "age", "phone"],
+  "$defs": {
+    "disability_type": {
+      "type": "string",
+      "enum": [
+        "Acid Attack Victim",
+        "Autism Spectrum Disorder",
+        "Blindness",
+        "Cerebral Palsy",
+        "Dwarfism",
+        "Hearing Impairment",
+        "Hemophilia",
+        "Intellectual Disability",
+        "Leprosy Cured",
+        "Locomotor Disability",
+        "Low Vision",
+        "Mental Illness",
+        "Multiple Sclerosis",
+        "Muscular Dystrophy",
+        "Parkinson's Disease",
+        "Sickle Cell Disease",
+        "Specific Learning Disabilities",
+        "Speech and Language Disability",
+        "Thalassemia",
+        "Chronic Neurological Conditions",
+        "Deaf",
+        "Hard of Hearing",
+        "Multiple Disabilities including deaf-blindness",
+        "Multiple Disabilities",
+        "Mental Retardation"
+      ]
+    },
+    "support_category": {
+      "type": "string",
+      "enum": [
+        "Assistive Devices",
+        "Health & Rehabilitation",
+        "Training & Skill Building",
+        "Application Support",
+        "Counselling & Mentorship",
+        "Accessibility Support",
+        "Employment Opportunities",
+        "Scholarships",
+        "Financial Products (Loans/Insurance)",
+        "Other"
+      ]
+    },
+    "document_type": {
+      "type": "string",
+      "enum": [
+        "Aadhaar",
+        "Income Certificate",
+        "Disability Certificate",
+        "School ID",
+        "Bank Account",
+        "Other"
+      ]
+    }
+  },
+  "required": [
+    "beneficiary_name",
+    "mobile_number",
+    "age",
+    "gender",
+    "disability_type",
+    "disability_percentage",
+    "looking_for",
+    "looking_for_details",
+    "service_city",
+    "documents_available"
+  ],
   "properties": {
-    "name": {
+    "beneficiary_name": {
       "type": "string",
-      "title": "Full Name",
+      "title": "Name",
       "minLength": 1
     },
-    "gender": {
+    "mobile_number": {
       "type": "string",
-      "title": "Gender",
-      "enum": ["male", "female", "other"]
+      "title": "Mobile",
+      "pattern": "^[0-9]{10}$",
+      "private": true
     },
-    "location": {
+    "email": {
       "type": "string",
-      "title": "Location",
-      "minLength": 1
+      "title": "Email",
+      "format": "email",
+      "private": true
     },
     "age": {
       "type": "integer",
       "title": "Age",
-      "minimum": 14,
-      "maximum": 65
+      "minimum": 0,
+      "maximum": 120
     },
-    "phone": {
+    "gender": {
       "type": "string",
-      "title": "Mobile Number",
-      "description": "E.164 format, e.g. +919876543210",
-      "minLength": 8
+      "title": "Gender",
+      "enum": ["Male", "Female", "Other", "Prefer not to say"]
     },
-    "workExperience": {
-      "type": "string",
-      "title": "Work Experience",
-      "enum": ["Fresher", "Worked before", "Returning after a break"]
+    "disability_type": {
+      "type": "array",
+      "title": "Disability",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/disability_type"
+      }
     },
-    "workExperienceYearsConditional": {
-      "type": "string",
-      "title": "Years of Work Experience",
-      "enum": [
-        "0",
-        "< 1 Year",
-        "1 Year",
-        "2 Years",
-        "3 Years",
-        "3-5 Years",
-        "5-10 Years",
-        "10-15 Years",
-        "15+ Years",
-        "Other"
-      ]
+    "disability_percentage": {
+      "type": "integer",
+      "title": "Disability %",
+      "minimum": 0,
+      "maximum": 100
     },
-    "highestQualificationOrSkill": {
-      "type": "string",
-      "title": "Highest Qualification / Skill",
-      "enum": [
-        "School",
-        "College",
-        "ITI / Other Vocational Trainings",
-        "Certification / Learned on the job"
-      ]
+    "looking_for": {
+      "type": "array",
+      "title": "Looking For",
+      "description": "What are you looking for?",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/support_category"
+      }
     },
-    "natureOfJobsInterestedIn": {
+    "looking_for_details": {
       "type": "string",
-      "title": "Nature of Jobs Interested In",
-      "enum": ["Internship", "Apprenticeship", "Full-time", "Flexible"]
-    },
-    "nameOfJobRolesInterestedIn": {
-      "type": "string",
-      "title": "Job Roles Interested In",
+      "title": "Details",
+      "description": "Explain your choice in more detail",
       "minLength": 1
     },
-    "otherHelpNeeded": {
+    "service_city": {
       "type": "string",
-      "title": "Other Help Needed",
-      "enum": ["Training", "Accommodation", "Travel", "Other"]
+      "title": "Service City",
+      "description": "City or village where you can receive the service or support",
+      "minLength": 1
+    },
+    "address": {
+      "type": "string",
+      "title": "Address",
+      "description": "Area, street, city to help reach you easily",
+      "private": true
+    },
+    "state": {
+      "type": "string",
+      "title": "State"
+    },
+    "district": {
+      "type": "string",
+      "title": "District"
+    },
+    "block": {
+      "type": "string",
+      "title": "Block"
+    },
+    "pincode": {
+      "type": "string",
+      "title": "Pincode",
+      "pattern": "^[0-9]{6}$"
+    },
+    "documents_available": {
+      "type": "array",
+      "title": "Documents",
+      "description": "Which documents do you have?",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/document_type"
+      }
+    },
+    "highest_qualification": {
+      "type": "string",
+      "title": "Qualification",
+      "description": "Highest qualification",
+      "enum": [
+        "10th Pass",
+        "12th Pass",
+        "Diploma Pass",
+        "ITI Graduate",
+        "College Graduate",
+        "Post Graduate",
+        "None of the above"
+      ]
     }
   }
 }

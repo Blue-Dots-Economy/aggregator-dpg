@@ -5,7 +5,7 @@ import type { RJSFSchema } from '@rjsf/utils';
 import { ProfileCompleteView } from './ProfileCompleteView';
 
 export const metadata: Metadata = {
-  title: 'Complete your profile — Blue Dots',
+  title: 'Complete your profile',
 };
 
 export const dynamic = 'force-dynamic';

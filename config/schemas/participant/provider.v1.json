@@ -1,70 +1,164 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://schemas.bluedots.org/participant/provider.v1.json",
-  "title": "Job Posting 1.0",
-  "description": "Employers and recruiters posting jobs. Field names match the signalstack job_posting_1.0 item_state schema so submissions can flow through without re-shaping.",
+  "title": "PWD Service Provider Profile 1.0",
   "type": "object",
   "additionalProperties": false,
+  "$defs": {
+    "disability_type": {
+      "type": "string",
+      "enum": [
+        "Acid Attack Victim",
+        "Autism Spectrum Disorder",
+        "Blindness",
+        "Cerebral Palsy",
+        "Dwarfism",
+        "Hearing Impairment",
+        "Hemophilia",
+        "Intellectual Disability",
+        "Leprosy Cured",
+        "Locomotor Disability",
+        "Low Vision",
+        "Mental Illness",
+        "Multiple Sclerosis",
+        "Muscular Dystrophy",
+        "Parkinson's Disease",
+        "Sickle Cell Disease",
+        "Specific Learning Disabilities",
+        "Speech and Language Disability",
+        "Thalassemia",
+        "Chronic Neurological Conditions",
+        "Deaf",
+        "Hard of Hearing",
+        "Multiple Disabilities including deaf-blindness",
+        "Multiple Disabilities",
+        "Mental Retardation"
+      ]
+    },
+    "support_category": {
+      "type": "string",
+      "enum": [
+        "Assistive Devices",
+        "Health & Rehabilitation",
+        "Training & Skill Building",
+        "Application Support",
+        "Counselling & Mentorship",
+        "Accessibility Support",
+        "Employment Opportunities",
+        "Scholarships",
+        "Financial Products (Loans/Insurance)",
+        "Other"
+      ]
+    }
+  },
   "required": [
-    "jobProviderName",
-    "role",
-    "natureOfJob",
-    "hiringManagerName",
-    "hiringManagerPhoneNumber",
-    "jobProviderLocation"
+    "contact_name",
+    "contact_phone",
+    "provider_category",
+    "organisation_name",
+    "disabilities_served",
+    "services_offered",
+    "service_cities",
+    "official_address",
+    "service_details"
   ],
   "properties": {
-    "jobProviderName": {
+    "contact_name": {
       "type": "string",
-      "title": "Company Name",
+      "title": "Contact Name",
       "minLength": 1
     },
-    "role": {
+    "contact_phone": {
       "type": "string",
-      "title": "Role",
+      "title": "Phone",
+      "pattern": "^[0-9]{10}$",
+      "private": true
+    },
+    "contact_email": {
+      "type": "string",
+      "title": "Email",
+      "format": "email",
+      "private": true
+    },
+    "provider_category": {
+      "type": "string",
+      "title": "Category",
+      "description": "Select the category that applies to you",
+      "enum": [
+        "NGO / Trust",
+        "Government Body",
+        "Private Company",
+        "Community Group",
+        "Private Individual Practice",
+        "Hospital / Clinic",
+        "Educational Institution",
+        "Professional Network",
+        "Digital Platform"
+      ]
+    },
+    "organisation_name": {
+      "type": "string",
+      "title": "Organisation",
+      "description": "Name of your organisation (or your name if individual)",
       "minLength": 1
     },
-    "positions": {
-      "type": "integer",
-      "title": "Open Positions",
-      "minimum": 1,
-      "default": 1
+    "disabilities_served": {
+      "type": "array",
+      "title": "Disabilities Served",
+      "description": "What type of seekers are you looking for?",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/disability_type"
+      }
     },
-    "natureOfJob": {
+    "services_offered": {
+      "type": "array",
+      "title": "Services Offered",
+      "description": "What services or support do you provide?",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/support_category"
+      }
+    },
+    "service_cities": {
       "type": "string",
-      "title": "Nature of Job",
-      "enum": ["Full-time", "Part-time", "Contract", "Internship"]
-    },
-    "taskRateMin": {
-      "type": "integer",
-      "title": "Min Rate (₹)",
-      "minimum": 0
-    },
-    "taskRateMax": {
-      "type": "integer",
-      "title": "Max Rate (₹)",
-      "minimum": 0
-    },
-    "hiringManagerName": {
-      "type": "string",
-      "title": "Hiring Manager Name",
+      "title": "Service Cities",
+      "description": "Cities where the service is provided",
       "minLength": 1
     },
-    "hiringManagerEmail": {
+    "official_address": {
       "type": "string",
-      "title": "Hiring Manager Email",
-      "format": "email"
-    },
-    "hiringManagerPhoneNumber": {
-      "type": "string",
-      "title": "Hiring Manager Mobile Number",
-      "description": "E.164 format, e.g. +919876543210",
-      "minLength": 8
-    },
-    "jobProviderLocation": {
-      "type": "string",
-      "title": "Job Location",
+      "title": "Address",
+      "description": "Official address",
       "minLength": 1
+    },
+    "state": {
+      "type": "string",
+      "title": "State"
+    },
+    "district": {
+      "type": "string",
+      "title": "District"
+    },
+    "block": {
+      "type": "string",
+      "title": "Block"
+    },
+    "pincode": {
+      "type": "string",
+      "title": "Pincode",
+      "pattern": "^[0-9]{6}$"
+    },
+    "service_details": {
+      "type": "string",
+      "title": "Service Details",
+      "description": "Share more about the service, opportunity, or support provided",
+      "minLength": 1
+    },
+    "catalog_url": {
+      "type": "string",
+      "title": "Catalog URL",
+      "description": "URL to a catalog or service list you provide",
+      "format": "uri"
     }
   }
 }

@@ -1,0 +1,42 @@
+{
+  "name": "@aggregator-dpg/network-config",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./interface": {
+      "import": "./dist/interface.js",
+      "types": "./dist/interface.d.ts"
+    },
+    "./loader": {
+      "import": "./dist/loader.js",
+      "types": "./dist/loader.d.ts"
+    },
+    "./sniffer": {
+      "import": "./dist/sniffer.js",
+      "types": "./dist/sniffer.d.ts"
+    },
+    "./testing": {
+      "import": "./dist/testing.js",
+      "types": "./dist/testing.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@aggregator-dpg/shared-primitives": "workspace:*",
+    "yaml": "^2.6.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@aggregator-dpg/tsconfig": "workspace:*",
+    "@types/node": "^22.0.0",
+    "@vitest/coverage-v8": "^3.2.0",
+    "typescript": "^6.0.3",
+    "vitest": "^3.2.0"
+  }
+}
