@@ -64,6 +64,16 @@ const ConfigSchema = z.object({
     .int()
     .positive()
     .default(60 * 60 * 1000),
+
+  // ─── SignalStack outward push ───────────────────────────────────────────
+  /** Base URL of the signalstack API. When unset, signalstack push is disabled. */
+  SIGNALSTACK_BASE_URL: z.string().url().optional(),
+  /** Admin api-key for signalstack onboard. Required when SIGNALSTACK_BASE_URL is set. */
+  SIGNALSTACK_ADMIN_KEY: z.string().optional(),
+  /** item_network sent on every onboard call. */
+  SIGNALSTACK_ITEM_NETWORK: z.string().default('blue_dot'),
+  /** Per-request timeout for signalstack onboard calls. */
+  SIGNALSTACK_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

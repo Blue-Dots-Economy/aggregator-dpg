@@ -29,6 +29,9 @@ import { getSchemaLoader } from '../services/schema-loader.js';
 import { getRedis } from '../services/redis.js';
 import { enqueueFinalise } from '../services/bulk-queue.js';
 import { normalisePhone, normaliseEmail } from '../services/phone.js';
+import { getNetworkConfig } from '../services/network-config.js';
+import { getSignalStackWriter } from '../services/signalstack.js';
+import { config } from '../config.js';
 import { logger } from '../logger.js';
 
 let participantsWriter: ParticipantsWriterBase | null = null;
@@ -100,7 +103,12 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
     );
   }
   if (schemaResult.success) {
-    preprocessArrayCells(job.payload, schemaResult.value);
+    const cfg = await getNetworkConfig();
+    preprocessArrayCells(
+      job.payload,
+      schemaResult.value,
+      cfg.aggregator.network.csv_array_delimiter,
+    );
   }
   const validate = validatorResult.value;
   if (!validate(job.payload)) {
@@ -124,7 +132,28 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
   // field is a meaningful business id or not.
   const rawParticipantId = String(job.payload['participant_id'] ?? '').trim();
   const participantId = rawParticipantId.length > 0 ? rawParticipantId : randomUUID();
-  const phoneRaw = typeof job.payload['phone'] === 'string' ? (job.payload['phone'] as string) : '';
+
+  // Identity selectors come from the resolved network config — sniffer
+  // picks them up from the schema, or aggregator.config.yaml overrides
+  // them. Different signalstack networks (blue / purple / yellow) use
+  // different field names; the worker stays generic.
+  const networkCfg = await getNetworkConfig();
+  const domainCfg = networkCfg.domains[job.participantType];
+  if (!domainCfg) {
+    return await commit(
+      job,
+      {
+        outcome: 'failed',
+        category: 'system_error',
+        reasons: [`unknown domain '${job.participantType}' for network ${networkCfg.network.id}`],
+      },
+      log,
+    );
+  }
+  const phoneSourceKey = domainCfg.identity.phone;
+  const emailSourceKey = domainCfg.identity.email;
+  const phoneRaw =
+    typeof job.payload[phoneSourceKey] === 'string' ? (job.payload[phoneSourceKey] as string) : '';
   let phoneNormalised: string | null = null;
   if (phoneRaw) {
     const phone = normalisePhone(phoneRaw);
@@ -142,7 +171,9 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
     phoneNormalised = phone.value;
   }
   const emailNormalised = normaliseEmail(
-    typeof job.payload['email'] === 'string' ? (job.payload['email'] as string) : null,
+    typeof job.payload[emailSourceKey] === 'string'
+      ? (job.payload[emailSourceKey] as string)
+      : null,
   );
 
   // 3. Persist via the participants-writer wrapper (shared by bulk + link).
@@ -165,6 +196,25 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
         outcome: 'skipped',
         category: 'duplicate',
         reasons: [`participant_id '${participantId}' already registered for this aggregator`],
+      };
+    }
+
+    // Outward signalstack push. The local participant write is now committed,
+    // so a push failure can NOT roll back the row — instead we flip this
+    // row's outcome to `failed` so it surfaces in errors.csv alongside any
+    // validation / normalisation failures. Operators see one consistent
+    // signal: a row only counts as "passed" once signalstack has it too.
+    const push = await pushToSignalStack(job, participantId, phoneNormalised, emailNormalised, log);
+    if (!push.success) {
+      // `push.message` already includes the upstream's own error text when
+      // signalstack returned a JSON body (e.g.
+      // `signalstack onboard returned 400: INVALID_ITEM_STATE: …`). Surface
+      // it directly so operators see the actual rejection reason in
+      // errors.csv instead of a generic status-code string.
+      outcome = {
+        outcome: 'failed',
+        category: 'system_error',
+        reasons: [`signalstack [${push.code}]: ${push.message}`],
       };
     }
   } else {
@@ -245,6 +295,153 @@ async function commit(
 }
 
 /**
+ * Best-effort outward push of the freshly-inserted participant to signalstack.
+ *
+ * Sync-awaited (one HTTP call per row) so we can log a deterministic outcome
+ * per row, but failures NEVER alter the local participant write result —
+ * signalstack is treated as a downstream sink, not a transactional partner.
+ * Returns void; status is observable via structured logs.
+ */
+type SignalStackPushResult = { success: true } | { success: false; code: string; message: string };
+
+async function pushToSignalStack(
+  job: BulkRowProcessJob,
+  participantId: string,
+  phone: string | null,
+  email: string | null,
+  log: typeof logger,
+): Promise<SignalStackPushResult> {
+  const ss = getSignalStackWriter();
+  // Signalstack disabled in this env — treat as success so the row is not
+  // marked failed when the operator deliberately turned the push off.
+  if (!ss) return { success: true };
+
+  // Resolve the aggregator's signalstack org id from the DB mirror written
+  // by the approval flow + login-time backfill. The worker carries no JWT,
+  // so the `signalstack_org_id` claim is unreachable here — `aggregators`
+  // is the only authoritative source available offline.
+  const orgIdRow = await getDb()
+    .select({ signalstackOrgId: schema.aggregators.signalstackOrgId })
+    .from(schema.aggregators)
+    .where(eq(schema.aggregators.id, job.aggregatorId))
+    .limit(1);
+  const signalstackOrgId = orgIdRow[0]?.signalstackOrgId ?? null;
+  if (!signalstackOrgId) {
+    log.error({
+      status: 'failure',
+      sub: 'signalstack.push',
+      code: 'SIGNALSTACK_ORG_NOT_REGISTERED',
+      aggregator_id: job.aggregatorId,
+    });
+    return {
+      success: false,
+      code: 'SIGNALSTACK_ORG_NOT_REGISTERED',
+      message:
+        'aggregator has no signalstack_org_id on file; ask the aggregator owner to sign into the portal once so the backfill records it',
+    };
+  }
+
+  // Identity selectors + item_type come from the resolved network
+  // config so the worker stays generic across signalstack networks.
+  const networkCfg = await getNetworkConfig();
+  const domainCfg = networkCfg.domains[job.participantType];
+  if (!domainCfg) {
+    log.error({
+      status: 'failure',
+      sub: 'signalstack.push',
+      code: 'UNKNOWN_DOMAIN',
+      domain: job.participantType,
+      network_id: networkCfg.network.id,
+    });
+    return {
+      success: false,
+      code: 'UNKNOWN_DOMAIN',
+      message: `domain '${job.participantType}' not declared in network ${networkCfg.network.id}`,
+    };
+  }
+  const nameSourceKey = domainCfg.identity.name;
+  const phoneSourceKey = domainCfg.identity.phone;
+  const name =
+    typeof job.payload[nameSourceKey] === 'string'
+      ? (job.payload[nameSourceKey] as string)
+      : participantId;
+  const phoneFromBody =
+    typeof job.payload[phoneSourceKey] === 'string'
+      ? (job.payload[phoneSourceKey] as string)
+      : phone;
+  const pushPhone = phone ?? phoneFromBody;
+  const result = await ss.onboard({
+    actingOrgId: signalstackOrgId,
+    name,
+    ...(pushPhone ? { phoneNumber: pushPhone } : {}),
+    ...(email ? { email } : {}),
+    // Aggregator-level consent captured at registration is the legal basis
+    // for the bulk-row push; signalstack still expects these flags per-row
+    // so we hardcode `true`. Surface as CSV columns if signalstack ever
+    // demands per-row participant consent.
+    terms_accepted: networkCfg.aggregator.onboarding.presume_consent,
+    privacy_accepted: networkCfg.aggregator.onboarding.presume_consent,
+    channel: 'bulk',
+    source_id: job.uploadId,
+    network: config.SIGNALSTACK_ITEM_NETWORK,
+    domain: job.participantType,
+    item_type: domainCfg.itemType,
+    profile: buildSignalStackItemState(job.participantType, job.payload, pushPhone, domainCfg),
+  });
+  if (!result.success) {
+    log.error({
+      status: 'failure',
+      sub: 'signalstack.push',
+      error: result.error.message,
+      code: result.error.code,
+    });
+    return {
+      success: false,
+      code: result.error.code,
+      message: result.error.message,
+    };
+  }
+  log.info({
+    status: 'success',
+    sub: 'signalstack.push',
+    user_id: result.value.user_id,
+    profile_item_id: result.value.profile_item_id,
+    onboarded_at: result.value.onboarded_at,
+  });
+  return { success: true };
+}
+
+/**
+ * Build the `item_state` block sent to signalstack from a bulk-upload row.
+ *
+ * Aggregator participant schemas already use the same field names as the
+ * upstream signalstack profile item_state, so the row payload flows
+ * through unchanged — we only override the phone field (chosen via the
+ * domain's identity selectors) so signalstack stores the E.164 form the
+ * writer resolved upstream, not whatever raw value the CSV cell carried.
+ */
+function buildSignalStackItemState(
+  _domain: string,
+  body: Record<string, unknown>,
+  pushPhone: string | null,
+  domainCfg: { identity: { phone: string } },
+): Record<string, unknown> {
+  const itemState: Record<string, unknown> = { ...body };
+
+  // Keep the raw body value when present — signalstack validates the
+  // phone field against the network's own pattern (purple_dot expects
+  // `^[0-9]{10}$`, blue_dot expects E.164). The E.164 form is already
+  // carried up-stack as the user.phone_number identity arg, so the
+  // override here is only a fallback for empty cells.
+  const rawPhone = body[domainCfg.identity.phone];
+  if (pushPhone && (typeof rawPhone !== 'string' || rawPhone.length === 0)) {
+    itemState[domainCfg.identity.phone] = pushPhone;
+  }
+
+  return itemState;
+}
+
+/**
  * Mutates `payload` in place: for every schema property declared with
  * `type: 'array'`, if the cell arrived as a string (CSV form), split it on
  * commas into a trimmed array. Empty cells become empty arrays. Non-string
@@ -254,6 +451,7 @@ async function commit(
 function preprocessArrayCells(
   payload: Record<string, unknown>,
   jsonSchema: Record<string, unknown>,
+  delimiter: string,
 ): void {
   const props = jsonSchema['properties'];
   if (!props || typeof props !== 'object') return;
@@ -262,7 +460,7 @@ function preprocessArrayCells(
     const cell = payload[field];
     if (typeof cell !== 'string') continue;
     payload[field] = cell
-      .split(',')
+      .split(delimiter)
       .map((s) => s.trim())
       .filter((s) => s.length > 0);
   }

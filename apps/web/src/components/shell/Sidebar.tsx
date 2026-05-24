@@ -5,6 +5,9 @@ import { usePathname } from 'next/navigation';
 import { I, type IconName } from '../../icons';
 import { BlueDotsLogo } from '../ui/BlueDotsLogo';
 import { useAuth } from '../../lib/auth-context';
+import { useDashboard } from '../../hooks/useDashboard';
+import { useProfileRaw } from '../../hooks/useProfile';
+import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../hooks/useAggregatorConfig';
 import { cn } from '../../lib/cn';
 
 interface NavItem {
@@ -14,11 +17,17 @@ interface NavItem {
   badge?: number;
 }
 
-const NAV: NavItem[] = [
-  { to: '/blue-dots', label: 'My Blue Dots', icon: 'users', badge: 77 },
-  { to: '/onboarding', label: 'Onboarding', icon: 'upload' },
-  { to: '/profile', label: 'Profile', icon: 'user' },
-];
+/**
+ * Builds the side-nav with the brand short name in the primary link
+ * label. Onboarding + Profile stay generic across networks.
+ */
+function buildNav(brandShortName: string): NavItem[] {
+  return [
+    { to: '/dashboard', label: `My ${brandShortName}`, icon: 'users' },
+    { to: '/onboarding', label: 'Onboarding', icon: 'upload' },
+    { to: '/profile', label: 'Profile', icon: 'user' },
+  ];
+}
 
 interface ActivityItem {
   who: string;
@@ -103,6 +112,30 @@ export function Sidebar() {
   const pathname = usePathname();
   const { user, signOut } = useAuth();
   const orgInitials = (user?.org ?? 'TR').slice(0, 2).toUpperCase();
+  // Brand + domain labels come from the aggregator config so the
+  // sidebar adapts to whichever signalstack network the deployment is
+  // bound to (blue / purple / yellow / ...) without code changes.
+  const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
+  // Dashboard rollup feeds the participant-count badge. Domain follows
+  // the aggregator's registered focus; falls back to the first domain
+  // declared by the network when the profile is still resolving.
+  const profileType = useProfileRaw().data?.type;
+  const fallbackDomain = cfg.domains[0]?.id ?? 'seeker';
+  const { data: dashboard } = useDashboard({
+    domain: profileType ?? fallbackDomain,
+  });
+  // Plan-C / by_domain dashboard shape: every served domain ships under
+  // `by_domain[<id>]`; the badge mirrors the active aggregator's domain
+  // rollup so the sidebar count stays in sync with /dashboard. Falls
+  // back to the network's first declared domain while the profile is
+  // still resolving.
+  const activeDomain = profileType ?? fallbackDomain;
+  const participantsBadge = dashboard?.by_domain[activeDomain]?.rollup.items_total;
+  const nav: NavItem[] = buildNav(cfg.brand.short_name).map((n) =>
+    n.to === '/dashboard' && participantsBadge !== undefined
+      ? { ...n, badge: participantsBadge }
+      : n,
+  );
 
   return (
     <aside className="w-[252px] shrink-0 bg-white border-r border-[var(--bd-border)] flex flex-col h-screen sticky top-0">
@@ -111,7 +144,7 @@ export function Sidebar() {
           <BlueDotsLogo size={40} />
           <div>
             <div className="font-display font-bold text-[17px] text-ink-900 leading-tight">
-              Blue Dots
+              {cfg.brand.short_name}
             </div>
             <div className="text-[12px] text-ink-400 leading-tight mt-0.5">Aggregator Portal</div>
           </div>
@@ -123,7 +156,7 @@ export function Sidebar() {
           Overview
         </div>
         <nav className="flex flex-col gap-0.5">
-          {NAV.map((n) => {
+          {nav.map((n) => {
             const Ic = I[n.icon];
             const isActive = pathname === n.to || pathname?.startsWith(`${n.to}/`);
             return (

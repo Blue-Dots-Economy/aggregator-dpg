@@ -22,8 +22,11 @@ import { PostgresParticipantsWriter } from '@aggregator-dpg/participants-writer/
 import type { ParticipantsWriterBase } from '@aggregator-dpg/participants-writer/interface';
 import { getRegistrationLinksStore } from '../services/registration-links-store/index.js';
 import type { RegistrationLink } from '../services/registration-links-store/index.js';
+import { getAggregatorStore } from '../services/aggregator-store/index.js';
+import { getNetworkConfig } from '../services/network-config.js';
 import { getSchemaLoader } from '../services/schema-loader/index.js';
 import { normalisePhone } from '../services/phone.js';
+import { getSignalStackWriter } from '../services/signalstack.js';
 import { getDb } from '../db/client.js';
 import { linkSubmissions } from '../db/schema.js';
 import { httpError } from '../errors/http-error.js';
@@ -134,7 +137,22 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
     // Falls back to a fresh UUID when phone is absent so dedup degrades
     // gracefully for phone-optional schemas (no dedup, but still works).
     delete (body as Record<string, unknown>)['participant_id'];
-    const phoneRaw = typeof body['phone'] === 'string' ? (body['phone'] as string) : '';
+
+    // Identity selectors come from the resolved network config so the
+    // route stays generic across signalstack networks. The sniffer
+    // picks them up from the schema; aggregator.config.yaml overrides
+    // when needed.
+    const networkCfg = await getNetworkConfig();
+    const linkDomainCfg = networkCfg.domains[link.domain];
+    if (!linkDomainCfg) {
+      throw httpError('NOT_FOUND', {
+        detail: `link domain '${link.domain}' not declared in network ${networkCfg.network.id}`,
+      });
+    }
+    const phoneSourceKey = linkDomainCfg.identity.phone;
+    const emailSourceKey = linkDomainCfg.identity.email;
+    const phoneRaw =
+      typeof body[phoneSourceKey] === 'string' ? (body[phoneSourceKey] as string) : '';
     let phoneNormalised: string | null = null;
     if (phoneRaw) {
       const phone = normalisePhone(phoneRaw);
@@ -143,14 +161,45 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       }
       phoneNormalised = phone.value;
     }
-    const emailRaw = typeof body['email'] === 'string' ? (body['email'] as string) : '';
+    const emailRaw =
+      typeof body[emailSourceKey] === 'string' ? (body[emailSourceKey] as string) : '';
     const emailNormalised = emailRaw ? emailRaw.trim().toLowerCase() : null;
     const participantId = phoneNormalised ?? randomUUID();
 
-    // 3 + 4. participant UPSERT (via shared writer) and link_submission
-    // INSERT must commit atomically — otherwise a crash between them leaves a
-    // participant without a corresponding submission row, and the metrics
-    // rollup never credits the registration.
+    // 2a. Resolve the aggregator's signalstack org id BEFORE opening the
+    // transaction. Anonymous submitters carry no token, so the value must
+    // come from `aggregators.signalstack_org_id` (written at approval time
+    // or by the login-time backfill in `requireApproved`). A NULL here means
+    // the aggregator never completed the signalstack handshake — fail fast
+    // with 503 so the participant retries rather than landing a half-pushed
+    // row.
+    const ss = getSignalStackWriter();
+    let signalstackOrgId: string | null = null;
+    if (ss) {
+      const aggLookup = await getAggregatorStore().findById(link.aggregatorId);
+      if (!aggLookup.ok) {
+        throw httpError('DB_UNAVAILABLE', {
+          fields: { sub_operation: 'aggregatorStore.findById' },
+        });
+      }
+      if (!aggLookup.value) {
+        throw httpError('NOT_FOUND', { detail: 'Aggregator missing for live link.' });
+      }
+      signalstackOrgId = aggLookup.value.signalstackOrgId;
+      if (!signalstackOrgId) {
+        throw httpError('SIGNALSTACK_ORG_NOT_REGISTERED', {
+          fields: { aggregator_id: link.aggregatorId, link_id: link.id },
+        });
+      }
+    }
+
+    // 3 + 4. participant UPSERT (via shared writer), link_submission INSERT,
+    // AND signalstack push must all commit atomically. A signalstack failure
+    // rolls back the local rows so the caller sees a single, honest outcome:
+    // a 2xx response means the participant exists in both stores. Tightens
+    // the DB connection hold time — acceptable for a public-link form submit
+    // (low volume). If push volume ever requires async fan-out, switch to an
+    // outbox table inside the tx + worker consumer.
     const writer = getParticipantsWriter();
     const txResult = await getDb().transaction(async (tx) => {
       // Bind the writer to the active tx for atomicity. If a custom writer
@@ -191,6 +240,64 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
         })
         .returning({ id: linkSubmissions.id });
 
+      // Outward signalstack push, inside the same tx so a downstream failure
+      // rolls the local rows back. Local participant table is deduped per
+      // (aggregator_id, type, participant_id); signalstack is the global
+      // identity store and must also see the row, otherwise the dashboard
+      // and downstream consumers are out of sync.
+      if (ss && signalstackOrgId) {
+        const nameSourceKey = linkDomainCfg.identity.name;
+        const name =
+          typeof body[nameSourceKey] === 'string'
+            ? (body[nameSourceKey] as string)
+            : participantRowId;
+        const phoneFromBody =
+          typeof body[phoneSourceKey] === 'string'
+            ? (body[phoneSourceKey] as string)
+            : phoneNormalised;
+        const pushPhone = phoneNormalised ?? phoneFromBody;
+        const result = await ss.onboard({
+          actingOrgId: signalstackOrgId,
+          name,
+          ...(pushPhone ? { phoneNumber: pushPhone } : {}),
+          ...(emailNormalised ? { email: emailNormalised } : {}),
+          terms_accepted: networkCfg.aggregator.onboarding.presume_consent,
+          privacy_accepted: networkCfg.aggregator.onboarding.presume_consent,
+          channel: 'link',
+          source_id: link.id,
+          network: config.SIGNALSTACK_ITEM_NETWORK,
+          domain: link.domain,
+          item_type: linkDomainCfg.itemType,
+          profile: buildSignalStackItemState(link.domain, body, pushPhone, linkDomainCfg),
+        });
+
+        if (!result.success) {
+          log.error({
+            status: 'failure',
+            sub: 'signalstack.push',
+            error: result.error.message,
+            code: result.error.code,
+            link_id: link.id,
+            participant_id: participantRowId,
+          });
+          throw httpError('SIGNALSTACK_PUSH_FAILED', {
+            detail: `Signalstack rejected the participant push (${result.error.code}).`,
+            fields: { code: result.error.code, message: result.error.message },
+            cause: result.error,
+          });
+        }
+
+        log.info({
+          status: 'success',
+          sub: 'signalstack.push',
+          user_id: result.value.user_id,
+          profile_item_id: result.value.profile_item_id,
+          onboarded_at: result.value.onboarded_at,
+          link_id: link.id,
+          participant_id: participantRowId,
+        });
+      }
+
       return {
         outcome,
         participantRowId,
@@ -227,6 +334,38 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       submission_id: submissionId,
     });
   });
+}
+
+/**
+ * Build the `item_state` block sent to signalstack from the participant
+ * payload.
+ *
+ * The body passes through unchanged — we only override the phone field
+ * (chosen via the domain's identity selectors) so signalstack stores
+ * the E.164 form the writer resolved upstream, not whatever raw value
+ * the form / CSV carried.
+ */
+function buildSignalStackItemState(
+  _domain: string,
+  body: Record<string, unknown>,
+  pushPhone: string | null,
+  domainCfg: { identity: { phone: string } },
+): Record<string, unknown> {
+  const itemState: Record<string, unknown> = { ...body };
+
+  // Signalstack's item_state schema validates the phone field with the
+  // network's own pattern (e.g. purple_dot mobile_number requires
+  // `^[0-9]{10}$`). The E.164 form is already carried up-stack as the
+  // user.phone_number identity arg, so item_state should keep the raw
+  // body value the user submitted. Only overwrite when the body had no
+  // value at all — preserves the bulk-CSV fallback while letting form
+  // submits pass schema validation upstream.
+  const rawPhone = body[domainCfg.identity.phone];
+  if (pushPhone && (typeof rawPhone !== 'string' || rawPhone.length === 0)) {
+    itemState[domainCfg.identity.phone] = pushPhone;
+  }
+
+  return itemState;
 }
 
 /**

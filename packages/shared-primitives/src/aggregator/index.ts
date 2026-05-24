@@ -26,13 +26,18 @@ export const ActorTypeSchema = z.enum(['aggregator', 'seeker', 'provider']);
 export type ActorType = z.infer<typeof ActorTypeSchema>;
 
 /**
- * Aggregator participant focus. An aggregator registers as `seeker` OR
- * `provider` — never both. The API enforces this at signup and on every
- * bulk-upload / public-registration-link write by comparing the body's
- * participant_type to the `aggregator_type` JWT claim.
+ * Aggregator participant focus / domain id. Open string — the
+ * signalstack network's `network.json` declares the valid values per
+ * deployment (blue_dot: seeker/provider; yellow_dot: learner/tutor;
+ * etc.). Callers validate against `getNetworkConfig().domainIds` at
+ * the route boundary instead of pinning a closed enum here.
  */
-export const RoleTypeSchema = z.enum(['seeker', 'provider']);
+export const RoleTypeSchema = z.string().min(1);
 export type RoleType = z.infer<typeof RoleTypeSchema>;
+
+/** Alias kept for new code paths — same shape as {@link RoleTypeSchema}. */
+export const DomainIdSchema = RoleTypeSchema;
+export type DomainId = RoleType;
 
 export const AggregatorStatusSchema = z.enum(['pending', 'active', 'inactive', 'retired']);
 export type AggregatorStatus = z.infer<typeof AggregatorStatusSchema>;

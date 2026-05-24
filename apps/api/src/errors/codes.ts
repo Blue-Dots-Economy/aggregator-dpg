@@ -120,6 +120,25 @@ export const ERR = {
     hint: 'Keycloak admin API call failed (network/timeout/5xx). Check KC pod + admin creds.',
   },
 
+  // ── Downstream identity store (signalstack) ─────────────────────────────
+  SIGNALSTACK_PUSH_FAILED: {
+    code: 'SIGNALSTACK_PUSH_FAILED',
+    status: 502,
+    title: 'Could not register with signalstack',
+    detail:
+      'The participant was validated locally but could not be pushed to the signalstack identity store. Please retry; if the problem persists, contact support.',
+    hint: 'signalstack-writer.onboard returned a non-2xx. See response.error.fields.code for the writer-side classification (transport, timeout, validation, etc.).',
+  },
+
+  SIGNALSTACK_ORG_NOT_REGISTERED: {
+    code: 'SIGNALSTACK_ORG_NOT_REGISTERED',
+    status: 503,
+    title: 'Aggregator not registered with signalstack',
+    detail:
+      'This aggregator has no signalstack organisation id on file. Submissions cannot be pushed until the aggregator owner signs into the portal once so the org registration completes.',
+    hint: 'aggregators.signalstack_org_id is NULL. Either the approval-time upsert failed and was never retried, or the login-time backfill has not run yet for this aggregator.',
+  },
+
   // ── Persistence ─────────────────────────────────────────────────────────
   DB_UNAVAILABLE: {
     code: 'DB_UNAVAILABLE',

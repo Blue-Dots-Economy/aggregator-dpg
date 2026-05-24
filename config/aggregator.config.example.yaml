@@ -1,0 +1,84 @@
+# ════════════════════════════════════════════════════════════════════════════
+# aggregator.config.yaml — single source of truth per deployment
+#
+# Copy this file to `config/aggregator.config.yaml`, edit the values, and
+# the api/worker pick it up on next boot. No code changes per network;
+# the same docker image runs blue_dot, purple_dot, yellow_dot, or any
+# other signalstack network just by swapping this file + the relevant
+# signalstack creds in .env.
+# ════════════════════════════════════════════════════════════════════════════
+
+aggregator:
+  # Display + audit identity for the org running this deployment.
+  name: BBMP
+  legal_name: Bruhat Bengaluru Mahanagara Palike
+  contact_email: ops@bbmp.gov.in
+
+  # ── Signalstack network binding ────────────────────────────────────────────
+  # The aggregator fetches the upstream `network.json` from this URL at
+  # boot. It declares the domains (seeker / provider / …) and the JSON
+  # Schemas the participant forms + bulk CSV are validated against.
+  #
+  # ALWAYS pin to a tag or commit SHA in production; never `refs/heads/...`.
+  network:
+    source: https://raw.githubusercontent.com/Blue-Dots-Economy/Signals-DPG/refs/heads/develop/examples/schemas/blue_dot/network.json
+
+    # CSV cell delimiter for schema fields typed as `array`. Purple_dot
+    # has multi-value fields (`disability_type`, `looking_for`,
+    # `documents_available`) — operators upload `"Blindness|Low Vision"`.
+    # Pipe is safe for India-data CSVs where commas are common in names.
+    csv_array_delimiter: '|'
+
+    # Optional — override the heuristic sniffer when a schema's field
+    # naming resists detection. The sniffer covers blue_dot + purple_dot
+    # + yellow_dot out of the box; only fill this in if a domain's
+    # identity selectors come out wrong.
+    #
+    # field_overrides:
+    #   seeker:
+    #     name: beneficiary_name
+    #     phone: mobile_number
+    #     email: email
+    #   provider:
+    #     name: contact_name
+    #     phone: contact_phone
+    #     email: contact_email
+
+  # ── Brand / UI ─────────────────────────────────────────────────────────────
+  # Sidebar, topbar, email templates, and the participant portal URL
+  # slug all read from these values. Restart the api+web to apply.
+  brand:
+    short_name: Blue Dots
+    long_name: Blue Dots Aggregator Portal
+    tagline: Track every participant in your network — at a glance.
+    url_slug: blue-dots
+    primary_color: '#2563EB'
+    accent_color: '#3B82F6'
+    # logo_url: https://cdn.example.com/blue-dots-logo.svg
+    # favicon_url: https://cdn.example.com/favicon-blue.ico
+
+  # ── Domain labels (optional UI overrides) ──────────────────────────────────
+  # Defaults: derived from the domain id in network.json. Override here
+  # to surface friendlier names in the dashboard tabs + sidebar.
+  domain_labels:
+    seeker:
+      singular: Seeker
+      plural: Seekers
+      tab_label: Seekers
+    provider:
+      singular: Provider
+      plural: Providers
+      tab_label: Providers
+
+  # ── Onboarding behaviour ───────────────────────────────────────────────────
+  onboarding:
+    # Whether `terms_accepted` + `privacy_accepted` are hardcoded `true`
+    # on each signalstack onboard push (aggregator-level consent acts as
+    # participant-level consent). Set false to require per-row consent
+    # capture via a CSV column / form checkbox.
+    presume_consent: true
+    bulk_max_rows: 10000
+
+  # ── Admin email recipients (registration approval notifications) ───────────
+  admin_emails:
+    - admin@bbmp.gov.in

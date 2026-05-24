@@ -51,15 +51,17 @@ describe('RegistrationPayloadSchema', () => {
     expect(() => RegistrationPayloadSchema.parse({ name: 'x', consent: validConsent })).toThrow();
   });
 
-  it('rejects "both" — only seeker | provider allowed at signup', () => {
-    expect(() =>
-      RegistrationPayloadSchema.parse({
-        name: 'SkillBridge Network',
-        type: 'both',
-        contact: validContact,
-        consent: validConsent,
-      }),
-    ).toThrow();
+  it('accepts any non-empty domain id (network config decides the valid set)', () => {
+    // `RoleTypeSchema` opened to z.string() in the genericisation refactor.
+    // Application-layer validation against `getNetworkConfig().domainIds`
+    // now handles the closed-set check, not the shared zod schema.
+    const parsed = RegistrationPayloadSchema.parse({
+      name: 'YellowDot Network',
+      type: 'learner',
+      contact: validContact,
+      consent: validConsent,
+    });
+    expect(parsed.type).toBe('learner');
   });
 
   it('rejects unknown top-level fields (strict)', () => {
@@ -132,10 +134,14 @@ describe('AggregatorViewSchema', () => {
     ).toThrow();
   });
 
-  it('rejects actor_type=seeker with type=both (legacy value no longer accepted)', () => {
+  it('accepts any non-empty type for a non-aggregator actor (network-driven)', () => {
+    // RoleType is now open string — yellow_dot uses `learner`/`tutor`,
+    // purple_dot uses `seeker`/`provider`, etc. The shared schema only
+    // enforces `type !== null` for non-aggregator actors; the exact
+    // valid set lives in the deployment's network config.
     expect(() =>
-      AggregatorViewSchema.parse({ ...baseView, actor_type: 'seeker', type: 'both' }),
-    ).toThrow();
+      AggregatorViewSchema.parse({ ...baseView, actor_type: 'seeker', type: 'learner' }),
+    ).not.toThrow();
   });
 
   it('accepts actor_type=seeker with type=seeker', () => {

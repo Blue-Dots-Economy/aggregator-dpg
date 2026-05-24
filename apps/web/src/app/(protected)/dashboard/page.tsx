@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef, useMemo, type ReactNode } from 'react';
+import { useState, useRef, useMemo, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { createPortal } from 'react-dom';
 import { Button } from '../../../components/ui/Button';
@@ -9,9 +9,11 @@ import { Avatar } from '../../../components/ui/Avatar';
 import { SegmentedTabs, type SegmentedTab } from '../../../components/ui/SegmentedTabs';
 import { Topbar } from '../../../components/shell/Topbar';
 import { I, type IconName } from '../../../icons';
-import { useSeekers, useProviders, useOppProviders } from '../../../hooks/useBlueDots';
+import { useOppProviders, useDashboard } from '../../../hooks/useDashboard';
+import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
+import { dashboardService, triggerCsvDownload } from '../../../services/dashboard.service';
 import { useProfileRaw } from '../../../hooks/useProfile';
-import type { ParticipantBase, Provider } from '../../../types';
+import type { ParticipantBase, ParticipantStatus, Provider, Seeker } from '../../../types';
 
 type Tab = 'seekers' | 'providers' | 'opp';
 
@@ -270,6 +272,28 @@ interface ParticipantTableProps<R extends ParticipantBase> {
 
 function ParticipantTable<R extends ParticipantBase>({ kind, rows }: ParticipantTableProps<R>) {
   const searchId = `bd-search-${kind}`;
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+
+  // Map UI kind onto the signalstack domain. `opp` rides on the provider
+  // dataset until signalstack exposes a dedicated opportunity-provider
+  // endpoint (mirrors the read path in dashboardService).
+  const exportDomain: 'seeker' | 'provider' = kind === 'seeker' ? 'seeker' : 'provider';
+
+  const onExportCsv = async () => {
+    if (exporting) return;
+    setExporting(true);
+    setExportError(null);
+    try {
+      const result = await dashboardService.dashboardExport({ domain: exportDomain });
+      triggerCsvDownload(result);
+    } catch (err) {
+      setExportError(err instanceof Error ? err.message : 'export failed');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <div className="bd-card bd-shadow overflow-hidden">
       <div className="px-5 py-4 flex items-center gap-3 border-b border-[var(--bd-border)]">
@@ -305,6 +329,16 @@ function ParticipantTable<R extends ParticipantBase>({ kind, rows }: Participant
           </div>
           <Button kind="ghost" icon={<I.filter size={14} />}>
             All filters
+          </Button>
+          <Button
+            kind="ghost"
+            icon={<I.download size={14} />}
+            onClick={onExportCsv}
+            disabled={exporting}
+            title={exportError ?? 'Export as CSV'}
+            aria-label="Export as CSV"
+          >
+            {exporting ? 'Exporting…' : 'Export CSV'}
           </Button>
         </div>
       </div>
@@ -508,32 +542,61 @@ function ErrorCard() {
 }
 
 function SeekersTab() {
-  const { data, isLoading, isError } = useSeekers();
+  // Signalstack's `/aggregator/dashboard` is the only endpoint that
+  // correctly scopes participant lookups by the caller's signalstack org
+  // (via the per-call `x-acting-org-id` header). The response now
+  // wraps every served domain under `by_domain[<id>]` so seeker +
+  // provider tabs share a single fetch.
+  const { data: dashboard, isLoading, isError } = useDashboard({ domain: 'seeker' });
+  const slice = dashboard?.by_domain.seeker;
+  const rollup = slice?.rollup;
+  const total = rollup?.items_total;
+  const byStatus = rollup?.by_status ?? {};
+  // Signalstack's status taxonomy is open — pick the keys the UI cares
+  // about; unknown ones still surface in the participants list.
+  const active = byStatus['active'] ?? byStatus['new'];
+  const atRisk = byStatus['at_risk'];
+  const inactive = byStatus['inactive'];
+  const applicationsTotal = rollup?.applications_total;
+  const completeProfiles = rollup?.complete_profiles_count;
+  const newThisWeek = rollup?.new_users_last_7_days;
+  const rows = useMemo(() => (slice?.participants ?? []).map(toSeekerRow), [slice?.participants]);
   return (
     <div className="flex flex-col gap-5">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <StatCard
           tone="active"
           icon="users"
-          count="58"
+          count={fmtCount(active)}
           label="Active seekers"
-          hint="Engaged in last 14 days"
+          hint="New or recently active"
         />
         <StatCard
           tone="risk"
           icon="alert"
-          count="14"
+          count={fmtCount(atRisk)}
           label="At Risk"
           hint="No activity 14–30 days"
         />
-        <StatCard tone="inactive" icon="pause" count="5" label="Inactive" hint="Dormant 30+ days" />
+        <StatCard
+          tone="inactive"
+          icon="pause"
+          count={fmtCount(inactive)}
+          label="Inactive"
+          hint="Dormant 30+ days"
+        />
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <MiniStat label="Total Participants" value="77" delta="+12" deltaTone="up" />
-        <MiniStat label="Complete Profiles" value="64" delta="83%" deltaTone="up" />
-        <MiniStat label="Seekers with Applications" value="51" delta="+6" deltaTone="up" />
-        <MiniStat label="New Participants" value="9" delta="this week" deltaTone="flat" />
+        <MiniStat label="Total Participants" value={fmtCount(total)} />
+        <MiniStat label="Complete Profiles" value={fmtCount(completeProfiles)} />
+        <MiniStat label="Seekers with Applications" value={fmtCount(applicationsTotal)} />
+        <MiniStat
+          label="New Participants"
+          value={fmtCount(newThisWeek)}
+          delta="this week"
+          deltaTone="flat"
+        />
       </div>
 
       {isLoading ? (
@@ -541,47 +604,172 @@ function SeekersTab() {
       ) : isError ? (
         <ErrorCard />
       ) : (
-        <ParticipantTable kind="seeker" rows={data ?? []} />
+        <ParticipantTable kind="seeker" rows={rows} />
       )}
     </div>
   );
 }
 
+/**
+ * Render a numeric stat value, falling back to an em-dash when the
+ * upstream rollup hasn't loaded yet or signalstack doesn't expose the
+ * field.
+ */
+function fmtCount(n: number | null | undefined): string {
+  if (n === undefined || n === null) return '—';
+  return String(n);
+}
+
+/**
+ * Maps a signalstack dashboard participant payload onto the `Seeker`
+ * shape the participant table expects.
+ *
+ * Signalstack's dashboard endpoint returns participant summaries only
+ * — `name`, `city`, and the role/exp profile fields are NOT in this
+ * response. They live in the per-user item detail endpoint, which the
+ * table does not yet call. Missing fields render as em-dashes; the
+ * `complete` profile bar uses `profile_completion_pct` directly so the
+ * progress indicator stays meaningful.
+ */
+function toSeekerRow(participant: Record<string, unknown>): Seeker {
+  const userId =
+    typeof participant.owner_user_id === 'string'
+      ? participant.owner_user_id
+      : typeof participant.user_id === 'string'
+        ? participant.user_id
+        : '';
+  const status = mapSeekerStatus(
+    typeof participant.profile_status === 'string' ? participant.profile_status : null,
+  );
+  const completion =
+    typeof participant.profile_completion_pct === 'number' ? participant.profile_completion_pct : 0;
+  const created =
+    typeof participant.profile_created_at === 'string' ? participant.profile_created_at : '';
+  const updated =
+    typeof participant.profile_last_updated_at === 'string'
+      ? participant.profile_last_updated_at
+      : '';
+  const name =
+    typeof participant.name === 'string' && participant.name.trim() ? participant.name : '—';
+  return {
+    id: userId,
+    name,
+    city: '—',
+    joined: created
+      ? new Date(created).toLocaleDateString('en-IN', {
+          day: '2-digit',
+          month: 'short',
+          year: 'numeric',
+        })
+      : '—',
+    avatar: avatarInitials(name),
+    profile: { title: '—', exp: '—', verified: false, complete: completion },
+    applied: {
+      total: numberOr(participant.applications_total, 0),
+      shortlisted: 0,
+      accepted: numberOr(participant.applications_accepted, 0),
+      rejected: numberOr(participant.applications_rejected, 0),
+      pending: numberOr(participant.applications_pending, 0),
+    },
+    pre: { total: 0, shortlisted: 0, accepted: 0, rejected: 0, pending: 0 },
+    status,
+    last: updated ? formatRelative(updated) : '—',
+  };
+}
+
+function mapSeekerStatus(raw: string | null): ParticipantStatus {
+  if (raw === 'at_risk') return 'at-risk';
+  if (raw === 'inactive') return 'inactive';
+  if (raw === 'satisfied') return 'satisfied';
+  return 'active';
+}
+
+function numberOr(v: unknown, fallback: number): number {
+  return typeof v === 'number' ? v : fallback;
+}
+
+function avatarInitials(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed || trimmed === '—') return '??';
+  const parts = trimmed.split(/\s+/).filter(Boolean);
+  const first = parts[0] ?? '';
+  if (parts.length === 1) return first.slice(0, 2).toUpperCase() || '??';
+  const last = parts[parts.length - 1] ?? '';
+  const initials = (first.charAt(0) + last.charAt(0)).toUpperCase();
+  return initials || '??';
+}
+
+function formatRelative(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  const diffMs = Date.now() - d.getTime();
+  const mins = Math.floor(diffMs / 60_000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 30) return `${days}d ago`;
+  const months = Math.floor(days / 30);
+  return `${months}mo ago`;
+}
+
 function ProvidersTab() {
-  const { data, isLoading, isError } = useProviders();
-  const rows: Provider[] = data ?? [];
+  // Mirror SeekersTab: live counts come from the signalstack dashboard
+  // rollup. Provider domain reuses the same rollup shape (items_total,
+  // by_status, applications_*, complete_profiles_count, …) so the cards
+  // map field-for-field; only the labels differ.
+  const { data: dashboard, isLoading, isError } = useDashboard({ domain: 'provider' });
+  const slice = dashboard?.by_domain.provider;
+  const rollup = slice?.rollup;
+  const total = rollup?.items_total;
+  const byStatus = rollup?.by_status ?? {};
+  const satisfied = byStatus['satisfied'];
+  const active = byStatus['active'] ?? byStatus['new'];
+  const atRisk = byStatus['at_risk'];
+  const inactive = byStatus['inactive'];
+  const verified = rollup?.complete_profiles_count;
+  const openRoles = rollup?.applications_pending;
+  const hiresThisMonth = rollup?.applications_total;
+  const rows = useMemo(() => (slice?.participants ?? []).map(toProviderRow), [slice?.participants]);
   return (
     <div className="flex flex-col gap-5">
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <StatCard
           tone="satisfied"
           icon="check"
-          count="9"
+          count={fmtCount(satisfied)}
           label="Satisfied"
           hint="Roles filled successfully"
         />
         <StatCard
           tone="active"
           icon="briefcase"
-          count="11"
+          count={fmtCount(active)}
           label="Active"
           hint="Currently hiring"
         />
-        <StatCard tone="risk" icon="alert" count="3" label="At Risk" hint="Stalled requirements" />
+        <StatCard
+          tone="risk"
+          icon="alert"
+          count={fmtCount(atRisk)}
+          label="At Risk"
+          hint="Stalled requirements"
+        />
         <StatCard
           tone="inactive"
           icon="pause"
-          count="1"
+          count={fmtCount(inactive)}
           label="Inactive"
           hint="No openings 30+ days"
         />
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <MiniStat label="Total Providers" value="24" delta="+3" deltaTone="up" />
-        <MiniStat label="Verified Orgs" value="20" delta="83%" deltaTone="up" />
-        <MiniStat label="Open Roles" value="77" delta="+18" deltaTone="up" />
-        <MiniStat label="Hires this Month" value="34" delta="↑ 22%" deltaTone="up" />
+        <MiniStat label="Total Providers" value={fmtCount(total)} />
+        <MiniStat label="Verified Orgs" value={fmtCount(verified)} />
+        <MiniStat label="Open Roles" value={fmtCount(openRoles)} />
+        <MiniStat label="Hires this Month" value={fmtCount(hiresThisMonth)} />
       </div>
 
       {isLoading ? (
@@ -593,6 +781,11 @@ function ProvidersTab() {
       )}
     </div>
   );
+}
+
+function toProviderRow(participant: Record<string, unknown>): Provider {
+  const seeker = toSeekerRow(participant);
+  return { ...seeker, role: '—' };
 }
 
 function OppProvidersTab() {
@@ -636,60 +829,99 @@ function OppProvidersTab() {
   );
 }
 
-const SEEKER_TAB: SegmentedTab<Tab> = {
-  id: 'seekers',
-  label: (
-    <span className="inline-flex items-center gap-2">
-      <I.users size={14} /> Seekers <span className="text-ink-300">·</span> 77
-    </span>
-  ),
-};
+/**
+ * Builds the seeker tab label with the live participants_total from the
+ * signalstack dashboard. Dot + count are suppressed while the rollup
+ * loads so the chip doesn't flash a stale "·" with no number.
+ */
+function seekerTabLabel(count: number | undefined): SegmentedTab<Tab> {
+  return {
+    id: 'seekers',
+    label: (
+      <span className="inline-flex items-center gap-2">
+        <I.users size={14} /> Seekers
+        {count !== undefined && (
+          <>
+            <span className="text-ink-300">·</span> {count}
+          </>
+        )}
+      </span>
+    ),
+  };
+}
 
-const PROVIDER_TAB: SegmentedTab<Tab> = {
-  id: 'providers',
-  label: (
-    <span className="inline-flex items-center gap-2">
-      <I.briefcase size={14} /> Providers <span className="text-ink-300">·</span> 24
-    </span>
-  ),
-};
+/**
+ * Builds the provider tab label. Count source is TBD — signalstack's
+ * dashboard endpoint is seeker-only today, so the chip stays
+ * count-less for the provider tab until the provider rollout lands.
+ */
+function providerTabLabel(count: number | undefined): SegmentedTab<Tab> {
+  return {
+    id: 'providers',
+    label: (
+      <span className="inline-flex items-center gap-2">
+        <I.briefcase size={14} /> Providers
+        {count !== undefined && (
+          <>
+            <span className="text-ink-300">·</span> {count}
+          </>
+        )}
+      </span>
+    ),
+  };
+}
 
-const OPP_TAB: SegmentedTab<Tab> = {
-  id: 'opp',
-  label: (
-    <span className="inline-flex items-center gap-2">
-      <I.spark size={14} /> Opportunity Providers <span className="text-ink-300">·</span> 18
-    </span>
-  ),
-};
-
-export default function BlueDotsPage() {
-  const router = useRouter();
+export default function DashboardPageRoot() {
   const rawProfile = useProfileRaw();
-  // Tabs are scoped to the aggregator's registered participant focus —
-  // seeker aggregators see Seekers + Opportunity Providers; provider
-  // aggregators see Providers + Opportunity Providers. The opposite
-  // primary tab is hidden, not just disabled.
-  const aggregatorType: 'seeker' | 'provider' = rawProfile.data?.type ?? 'seeker';
-  const tabItems = useMemo<SegmentedTab<Tab>[]>(
-    () => (aggregatorType === 'provider' ? [PROVIDER_TAB, OPP_TAB] : [SEEKER_TAB, OPP_TAB]),
-    [aggregatorType],
+  // Wait for the profile to resolve before mounting any tab — the SeekersTab
+  // and ProvidersTab kick off their own /api/dashboard/items?domain=... fetch
+  // on mount, so rendering a default before we know the aggregator's type
+  // fires a stale seeker request that a provider account should never make.
+  const profileType = rawProfile.data?.type;
+  if (!profileType) {
+    return <DashboardLoadingFrame />;
+  }
+  return <DashboardContent aggregatorType={profileType} />;
+}
+
+function DashboardLoadingFrame() {
+  const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
+  return (
+    <div className="fade-up">
+      <Topbar
+        title={`My ${cfg.brand.short_name}`}
+        subtitle={cfg.brand.tagline ?? 'Track every participant in your network — at a glance.'}
+      />
+      <div className="text-center text-[13px] text-ink-400 py-12">Loading…</div>
+    </div>
   );
-  const allowedIds = useMemo(() => new Set(tabItems.map((t) => t.id)), [tabItems]);
+}
+
+function DashboardContent({ aggregatorType }: { aggregatorType: 'seeker' | 'provider' }) {
+  const router = useRouter();
+  const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
+  // Tabs are scoped to the aggregator's registered participant focus —
+  // seeker aggregators see only Seekers; provider aggregators see only
+  // Providers. The opposite primary tab is hidden, not just disabled.
+  // The chip count reads from the same signalstack dashboard rollup the
+  // tab body renders, so the header total never drifts from the table.
+  const { data: dashboard } = useDashboard({
+    domain: aggregatorType === 'provider' ? 'provider' : 'seeker',
+  });
+  const liveCount =
+    dashboard?.by_domain[aggregatorType === 'provider' ? 'provider' : 'seeker']?.rollup.items_total;
+  const tabItems = useMemo<SegmentedTab<Tab>[]>(
+    () =>
+      aggregatorType === 'provider' ? [providerTabLabel(liveCount)] : [seekerTabLabel(liveCount)],
+    [aggregatorType, liveCount],
+  );
   const [tab, setTab] = useState<Tab>(aggregatorType === 'provider' ? 'providers' : 'seekers');
-  // Snap the selected tab back into the allowed set whenever profile resolves
-  // or aggregatorType changes mid-session.
-  useEffect(() => {
-    if (!allowedIds.has(tab)) {
-      setTab(aggregatorType === 'provider' ? 'providers' : 'seekers');
-    }
-  }, [aggregatorType, allowedIds, tab]);
 
   return (
     <div className="fade-up">
       <Topbar
-        title="My Blue Dots"
-        subtitle="Track every participant in your network — at a glance."
+        title={`My ${cfg.brand.short_name}`}
+        subtitle={cfg.brand.tagline ?? 'Track every participant in your network — at a glance.'}
         right={
           <div className="flex items-center gap-2">
             <Button icon={<I.plus size={14} />} onClick={() => router.push('/onboarding')}>

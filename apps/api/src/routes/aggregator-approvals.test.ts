@@ -13,6 +13,11 @@ import {
 import { IdpAdminFake, _setIdpAdmin } from '../services/idp-admin/index.js';
 import { FakeMailer, _setMailer } from '../services/mailer/index.js';
 import { _resetTokenKey, mintApprovalToken } from '../services/approval-token.js';
+import { _setSignalStackWriter } from '../services/signalstack.js';
+import { SignalStackWriterFake } from '@aggregator-dpg/signalstack-writer/testing';
+import { SignalStackWriterBase } from '@aggregator-dpg/signalstack-writer/interface';
+import { UpstreamError } from '@aggregator-dpg/shared-primitives/errors';
+import { err } from '@aggregator-dpg/shared-primitives/result';
 
 const aggregatorId = '11111111-1111-1111-1111-111111111111';
 
@@ -21,6 +26,7 @@ describe('admin approval routes', () => {
   let aggregatorStore: AggregatorStoreFake;
   let idp: IdpAdminFake;
   let mailer: FakeMailer;
+  let signalstack: SignalStackWriterFake;
   let kcUserId: string;
 
   beforeEach(async () => {
@@ -28,6 +34,10 @@ describe('admin approval routes', () => {
     process.env.APPROVAL_TOKEN_SECRET = 'k'.repeat(48);
     process.env.PUBLIC_API_URL = 'http://api.local';
     process.env.PUBLIC_PORTAL_URL = 'http://portal.local';
+    // Treat signalstack as enabled so the approval route hits our fake.
+    process.env.SIGNALSTACK_BASE_URL = 'http://stub-signalstack';
+    process.env.SIGNALSTACK_ADMIN_KEY = 'stub-key';
+    process.env.SIGNALSTACK_ACTING_ORG_ID = 'org_platform';
 
     aggregatorStore = new AggregatorStoreFake();
     aggregatorStore.seed([
@@ -63,6 +73,9 @@ describe('admin approval routes', () => {
     mailer = new FakeMailer();
     _setMailer(mailer);
 
+    signalstack = new SignalStackWriterFake();
+    _setSignalStackWriter(signalstack);
+
     app = await buildApp();
   });
 
@@ -72,6 +85,7 @@ describe('admin approval routes', () => {
     _setAggregatorProfileStore(null);
     _setIdpAdmin(null);
     _setMailer(null);
+    _setSignalStackWriter(null);
   });
 
   it('GET /read/:id renders the confirmation page when no decision yet', async () => {
@@ -141,8 +155,14 @@ describe('admin approval routes', () => {
     expect(res.body).toContain('Application approved');
 
     const dbAfter = await aggregatorStore.findById(aggregatorId);
+    expect(dbAfter.ok).toBe(true);
     if (dbAfter.ok && dbAfter.value) {
       expect(dbAfter.value.status).toBe('active');
+      // signalstack_org_id is mirrored from the upsert response onto the
+      // aggregators row so worker + anonymous link submission paths can
+      // read it without touching Keycloak.
+      expect(dbAfter.value.signalstackOrgId).toBeDefined();
+      expect(dbAfter.value.signalstackOrgId).not.toBeNull();
     }
 
     const after = await idp.findById(kcUserId);
@@ -151,6 +171,19 @@ describe('admin approval routes', () => {
       expect(after.value.attributes?.decision_made?.[0]).toBe('approved');
       // decided_at / rejection_reason attributes are no longer written to KC.
       expect(after.value.attributes?.decided_at).toBeUndefined();
+      // signalstack_org_id is written from the upsert response on approval.
+      const orgIdAttr = after.value.attributes?.signalstack_org_id?.[0];
+      expect(orgIdAttr).toBeDefined();
+      const aggregators = signalstack.listAggregators();
+      expect(aggregators).toHaveLength(1);
+      expect(aggregators[0]?.external_id).toBe(aggregatorId);
+      expect(aggregators[0]?.name).toBe('TRRAIN');
+      expect(aggregators[0]?.slug).toBe('trrain-abcd');
+      expect(orgIdAttr).toBe(aggregators[0]?.org_id);
+      // KC attr and DB mirror must agree.
+      if (dbAfter.ok && dbAfter.value) {
+        expect(dbAfter.value.signalstackOrgId).toBe(orgIdAttr);
+      }
     }
 
     expect(mailer.outbox).toHaveLength(1);
@@ -158,6 +191,77 @@ describe('admin approval routes', () => {
     if (!m) throw new Error('no mail captured');
     expect(m.to).toBe('asha@trrain.org');
     expect(m.subject).toContain('approved');
+  });
+
+  it('POST /decision/:id approve still succeeds when signalstack upsert fails (soft-fail)', async () => {
+    // Subclass the in-memory fake to force upsertAggregator into the err
+    // branch. Soft-fail policy: approval succeeds, KC attribute stays
+    // unset, and the login-time fallback retries on the next authenticated
+    // request.
+    class FailingUpsertWriter extends SignalStackWriterBase {
+      async onboard() {
+        return err(new UpstreamError('not used', { code: 'X' }));
+      }
+      async listItemsByAggregator() {
+        return err(new UpstreamError('not used', { code: 'X' }));
+      }
+      async upsertAggregator() {
+        return err(
+          new UpstreamError('signalstack upsert returned 503', {
+            code: 'SIGNALSTACK_SERVER_ERROR',
+          }),
+        );
+      }
+      async fetchDashboard() {
+        return err(new UpstreamError('not used', { code: 'X' }));
+      }
+      async exportDashboardCsv() {
+        return err(new UpstreamError('not used', { code: 'X' }));
+      }
+    }
+    _setSignalStackWriter(new FailingUpsertWriter());
+
+    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
+      payload: { token, decision: 'approve' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain('Application approved');
+
+    const after = await idp.findById(kcUserId);
+    if (after.ok && after.value) {
+      expect(after.value.enabled).toBe(true);
+      expect(after.value.attributes?.decision_made?.[0]).toBe('approved');
+      // Soft-fail: KC attr not written so the login-time fallback can retry.
+      expect(after.value.attributes?.signalstack_org_id).toBeUndefined();
+    }
+    // Soft-fail also leaves the DB column null — same backfill repairs both.
+    const dbAfter = await aggregatorStore.findById(aggregatorId);
+    if (dbAfter.ok && dbAfter.value) {
+      expect(dbAfter.value.signalstackOrgId).toBeNull();
+    }
+  });
+
+  it('POST /decision/:id approve skips upsert cleanly when signalstack writer is disabled', async () => {
+    _setSignalStackWriter(null);
+    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
+      payload: { token, decision: 'approve' },
+    });
+    expect(res.statusCode).toBe(200);
+
+    const after = await idp.findById(kcUserId);
+    if (after.ok && after.value) {
+      expect(after.value.attributes?.signalstack_org_id).toBeUndefined();
+    }
+    const dbAfter = await aggregatorStore.findById(aggregatorId);
+    if (dbAfter.ok && dbAfter.value) {
+      expect(dbAfter.value.signalstackOrgId).toBeNull();
+    }
   });
 
   it('POST /decision/:id reject flips DB status to inactive, keeps user disabled, emails applicant with reason', async () => {

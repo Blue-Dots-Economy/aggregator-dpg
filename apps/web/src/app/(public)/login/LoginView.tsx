@@ -3,6 +3,7 @@
 import { BlueDotsLogo } from '../../../components/ui/BlueDotsLogo';
 import { BrandPanel } from '../../../components/login/BrandPanel';
 import { I } from '../../../icons';
+import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
 
 export interface LoginViewProps {
   returnTo: string;
@@ -19,6 +20,8 @@ export interface LoginViewProps {
  * No credentials are collected on this page.
  */
 export function LoginView({ returnTo, error }: LoginViewProps): JSX.Element {
+  const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
+  const brand = cfg.brand.short_name;
   const goSignIn = (): void => {
     window.location.href = `/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`;
   };
@@ -51,7 +54,7 @@ export function LoginView({ returnTo, error }: LoginViewProps): JSX.Element {
             <BlueDotsLogo size={56} />
             <div>
               <div className="font-display font-bold text-[20px] text-ink-900 leading-none tracking-tight">
-                Blue Dots
+                {brand}
               </div>
               <div className="text-[12.5px] text-ink-400 leading-none mt-1.5">
                 Aggregator Portal
@@ -78,7 +81,7 @@ export function LoginView({ returnTo, error }: LoginViewProps): JSX.Element {
           ) : null}
 
           <div className="fade-up">
-            <Welcome onSignIn={goSignIn} onRegister={goRegister} />
+            <Welcome onSignIn={goSignIn} onRegister={goRegister} brand={brand} />
           </div>
 
           <div className="mt-8 text-[12px] text-ink-400">
@@ -96,7 +99,7 @@ export function LoginView({ returnTo, error }: LoginViewProps): JSX.Element {
           <div className="mt-6 pt-5 border-t border-ink-100 flex items-center justify-between text-[12px]">
             <div className="flex items-center gap-2 text-ink-500">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
-              Invite-only · Blue Dots SSO
+              Invite-only · {brand} SSO
             </div>
             <button type="button" className="text-primary-600 font-semibold hover:underline">
               Need help?
@@ -135,6 +138,7 @@ function humanizeError(code: string): string {
 interface WelcomeProps {
   onSignIn: () => void;
   onRegister: () => void;
+  brand: string;
 }
 
 /**
@@ -142,7 +146,7 @@ interface WelcomeProps {
  *
  * @param props - Callbacks for each card.
  */
-function Welcome({ onSignIn, onRegister }: WelcomeProps): JSX.Element {
+function Welcome({ onSignIn, onRegister, brand }: WelcomeProps): JSX.Element {
   return (
     <div>
       <h2 className="font-display font-bold text-[28px] text-ink-900 tracking-tight leading-tight">
@@ -171,7 +175,7 @@ function Welcome({ onSignIn, onRegister }: WelcomeProps): JSX.Element {
                 Existing user — Sign in
               </div>
               <div className="text-[12.5px] text-ink-400 mt-0.5">
-                Continue with email or mobile via Blue Dots SSO
+                Continue with email or mobile via {brand} SSO
               </div>
             </div>
           </div>
@@ -193,7 +197,7 @@ function Welcome({ onSignIn, onRegister }: WelcomeProps): JSX.Element {
             <div>
               <div className="font-display font-bold text-[15px] text-ink-900">Become a member</div>
               <div className="text-[12.5px] text-ink-400 mt-0.5">
-                Register your organisation with Blue Dots
+                Register your organisation with {brand}
               </div>
             </div>
           </div>
@@ -205,7 +209,7 @@ function Welcome({ onSignIn, onRegister }: WelcomeProps): JSX.Element {
 
       <div className="mt-5 text-[12px] text-ink-400 flex items-start gap-2">
         <span className="w-1 h-1 rounded-full bg-ink-300 mt-1.5 shrink-0" />
-        New registrations are reviewed by the Blue Dots team within 1–2 business days.
+        New registrations are reviewed by the {brand} team within 1–2 business days.
       </div>
     </div>
   );

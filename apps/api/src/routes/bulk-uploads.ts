@@ -54,7 +54,7 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
         fields: { participant_type: 'invalid' },
       });
     }
-    enforceAggregatorType(auth, participantType as 'seeker' | 'provider');
+    enforceAggregatorType(auth, participantType as string);
 
     const schemaResult = await getSchemaLoader().getSchema({
       id: `participant-${participantType}`,
@@ -87,7 +87,7 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
         fields: { participant_type: 'invalid' },
       });
     }
-    enforceAggregatorType(auth, participantType as 'seeker' | 'provider');
+    enforceAggregatorType(auth, participantType as string);
 
     // Pin the active schema version at create time. v1 is the only published
     // version today; this becomes a registry lookup once schema versioning ships.
@@ -97,7 +97,7 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
     const store = getBulkUploadsStore();
     const created = await store.create({
       aggregatorId: auth.aggregatorId,
-      participantType: participantType as 'seeker' | 'provider',
+      participantType: participantType as string,
       // Temporary placeholder; replaced after sign call below. We need the
       // row id to compute the deterministic key, so create-then-update.
       s3Key: 'pending',
@@ -218,25 +218,12 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
       });
     }
 
+    // Aggregators are allowed to re-upload the same CSV bytes — the
+    // partial UNIQUE on (aggregator_id, s3_etag) was dropped in
+    // migration 0011. Any non-OK result here is a real DB / state
+    // error, not a duplicate.
     const marked = await store.markUploaded(uploadId, auth.aggregatorId, head.etag);
     if (!marked.ok) {
-      if (marked.error.code === 'DUPLICATE_ETAG') {
-        // Same CSV bytes are already attached to a non-failed run for this
-        // aggregator (the (aggregator_id, s3_etag) UNIQUE is partial — failed
-        // and file_failed rows are excluded so they never block a retry).
-        // Drop the orphan pending row we just created and surface the
-        // existing run.
-        await store.deletePending(uploadId, auth.aggregatorId);
-        const existing = await store.findByAggregatorAndEtag(auth.aggregatorId, head.etag);
-        if (existing.ok && existing.value) {
-          const existingCounts = await loadCounts(existing.value.id, existing.value.status);
-          return reply.send({
-            ...toResponse(existing.value, existingCounts),
-            duplicate: true,
-            message: 'This CSV was already uploaded earlier — showing the existing run.',
-          });
-        }
-      }
       throw httpError('DB_UNAVAILABLE', { cause: new Error(marked.error.message) });
     }
 
@@ -405,7 +392,7 @@ interface BulkUploadResponseShape {
   upload_id: string;
   status: string;
   status_reason: string | null;
-  participant_type: 'seeker' | 'provider';
+  participant_type: string;
   total_rows: number | null;
   passed: number;
   failed: number;
@@ -430,7 +417,7 @@ interface UploadShape {
   id: string;
   status: string;
   statusReason: string | null;
-  participantType: 'seeker' | 'provider';
+  participantType: string;
   errorsCsvS3Key: string | null;
   schemaId: string;
   schemaVersion: string;
@@ -569,7 +556,7 @@ async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
  * registered type (read from the JWT `aggregator_type` claim). An aggregator
  * may only upload or template the type it registered as.
  */
-function enforceAggregatorType(auth: AuthContext, participantType: 'seeker' | 'provider'): void {
+function enforceAggregatorType(auth: AuthContext, participantType: string): void {
   if (!auth.aggregatorType) {
     throw httpError('AGGREGATOR_TYPE_MISSING', {
       fields: { aggregator_id: auth.aggregatorId },

@@ -11,7 +11,7 @@ export interface RegistrationLink {
   id: string;
   aggregatorId: string;
   slug: string;
-  domain: 'seeker' | 'provider';
+  domain: string;
   context: Record<string, unknown>;
   qrObjectKey: string | null;
   status: RegistrationLinkStatus;
@@ -24,7 +24,7 @@ export interface RegistrationLink {
 export interface CreateRegistrationLinkInput {
   aggregatorId: string;
   slug: string;
-  domain: 'seeker' | 'provider';
+  domain: string;
   context: Record<string, unknown>;
   status?: RegistrationLinkStatus;
   expiresAt?: Date | null;

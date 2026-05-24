@@ -1,3 +1,17 @@
+/**
+ * Brand-agnostic dots logo. The SVG geometry stays constant across
+ * deployments (a network of dots) — only the colors change. The fill /
+ * stroke / glow values reference the CSS variables set by
+ * `ThemeProvider` from the active aggregator config, so blue_dot,
+ * purple_dot, yellow_dot, and future networks all reuse this mark.
+ *
+ * `dark` keeps the inverted palette for use on dark surfaces (the
+ * brand panel hero card on the public login page).
+ *
+ * NOTE: CSS variables in SVG must live on `style`, not on the bare
+ * `fill`/`stroke` attribute — Chrome rejects `fill="var(...)"` as a
+ * literal string. Every fill below routes through inline style.
+ */
 interface BlueDotsLogoProps {
   size?: number;
   dark?: boolean;
@@ -25,12 +39,12 @@ export function BlueDotsLogo({ size = 44, dark = false }: BlueDotsLogoProps) {
     [sats[1]!, sats[2]!],
   ];
 
-  const bg = dark ? '#0B1A3A' : '#EFF4FF';
-  const ring = dark ? 'rgba(255,255,255,0.08)' : 'rgba(37,99,235,0.10)';
-  const lineCol = dark ? 'rgba(147,197,253,0.55)' : 'rgba(37,99,235,0.30)';
-  const dotCol = dark ? '#7DD3FC' : '#2563EB';
-  const coreCol = dark ? '#FFFFFF' : '#1D4ED8';
-  const glowCol = dark ? 'rgba(125,211,252,0.55)' : 'rgba(37,99,235,0.35)';
+  const bg = dark ? '#0B1A3A' : 'var(--bd-primary-50, #EFF4FF)';
+  const ringStroke = dark ? 'rgba(255,255,255,0.08)' : 'var(--bd-primary, #2563EB)';
+  const lineStroke = dark ? 'rgba(255,255,255,0.55)' : 'var(--bd-primary, #2563EB)';
+  const dotFill = dark ? 'var(--bd-primary-500, #7DD3FC)' : 'var(--bd-primary, #2563EB)';
+  const coreFill = dark ? '#FFFFFF' : 'var(--bd-primary-600, #1D4ED8)';
+  const glowFill = dark ? 'var(--bd-primary-500, #7DD3FC)' : 'var(--bd-primary, #2563EB)';
 
   return (
     <svg
@@ -43,8 +57,8 @@ export function BlueDotsLogo({ size = 44, dark = false }: BlueDotsLogoProps) {
         borderRadius: size * 0.28,
         background: bg,
         boxShadow: dark
-          ? '0 0 0 1px rgba(255,255,255,0.06), 0 18px 40px -10px rgba(37,99,235,0.55)'
-          : '0 0 0 1px rgba(37,99,235,0.08), 0 8px 20px -8px rgba(37,99,235,0.25)',
+          ? '0 0 0 1px rgba(255,255,255,0.06), 0 18px 40px -10px rgba(0,0,0,0.45)'
+          : '0 0 0 1px rgba(0,0,0,0.05), 0 8px 20px -8px rgba(0,0,0,0.15)',
       }}
     >
       <rect
@@ -54,19 +68,23 @@ export function BlueDotsLogo({ size = 44, dark = false }: BlueDotsLogoProps) {
         height="46.8"
         rx="13"
         fill="none"
-        stroke={ring}
+        style={{ stroke: ringStroke, strokeOpacity: dark ? 1 : 0.12 }}
         strokeWidth="1"
       />
-      <g stroke={lineCol} strokeWidth="0.9" strokeLinecap="round">
+      <g
+        style={{ stroke: lineStroke, strokeOpacity: dark ? 0.55 : 0.3 }}
+        strokeWidth="0.9"
+        strokeLinecap="round"
+      >
         {links.map(([a, b], i) => (
           <line key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y} />
         ))}
       </g>
       {sats.map((s, i) => (
-        <circle key={i} cx={s.x} cy={s.y} r={s.r} fill={dotCol} />
+        <circle key={i} cx={s.x} cy={s.y} r={s.r} style={{ fill: dotFill }} />
       ))}
-      <circle cx={core.x} cy={core.y} r={core.r + 4} fill={glowCol} opacity="0.55" />
-      <circle cx={core.x} cy={core.y} r={core.r} fill={coreCol} />
+      <circle cx={core.x} cy={core.y} r={core.r + 4} style={{ fill: glowFill, opacity: 0.3 }} />
+      <circle cx={core.x} cy={core.y} r={core.r} style={{ fill: coreFill }} />
       <circle
         cx={core.x - 1.4}
         cy={core.y - 1.4}

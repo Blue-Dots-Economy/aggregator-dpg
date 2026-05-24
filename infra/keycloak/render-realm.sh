@@ -19,7 +19,8 @@ DST_DIR="/opt/keycloak/data/import"
 : "${SMTP_HOST:=mailhog}"
 : "${SMTP_PORT:=1025}"
 : "${SMTP_FROM:=no-reply@bluedots.local}"
-: "${SMTP_FROM_DISPLAY:=Blue Dots Aggregator}"
+: "${SMTP_FROM_DISPLAY:=Aggregator Portal}"
+: "${BRAND_LONG_NAME:=Aggregator Portal}"
 : "${SMTP_SSL:=false}"
 : "${SMTP_STARTTLS:=false}"
 : "${SMTP_AUTH:=false}"
@@ -43,6 +44,7 @@ SMTP_STARTTLS_ESC=$(escape "$SMTP_STARTTLS")
 SMTP_AUTH_ESC=$(escape "$SMTP_AUTH")
 SMTP_USER_ESC=$(escape "$SMTP_USER")
 SMTP_PASSWORD_ESC=$(escape "$SMTP_PASSWORD")
+BRAND_LONG_NAME_ESC=$(escape "$BRAND_LONG_NAME")
 
 for src in "$SRC_DIR"/*.json; do
   [ -f "$src" ] || continue
@@ -58,6 +60,7 @@ for src in "$SRC_DIR"/*.json; do
     -e "s|__SMTP_AUTH__|${SMTP_AUTH_ESC}|g" \
     -e "s|__SMTP_USER__|${SMTP_USER_ESC}|g" \
     -e "s|__SMTP_PASSWORD__|${SMTP_PASSWORD_ESC}|g" \
+    -e "s|__BRAND_LONG_NAME__|${BRAND_LONG_NAME_ESC}|g" \
     "$src" > "$dst"
   echo "rendered $(basename "$src") -> $dst (PUBLIC_BASE_URL=$PUBLIC_BASE_URL, SMTP=$SMTP_HOST:$SMTP_PORT auth=$SMTP_AUTH)"
 done

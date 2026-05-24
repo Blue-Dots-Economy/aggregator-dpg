@@ -33,6 +33,7 @@ import { verifyApprovalToken } from '../services/approval-token.js';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
 import { getIdpAdmin } from '../services/idp-admin/index.js';
 import { getMailer } from '../services/mailer/index.js';
+import { getSignalStackWriter } from '../services/signalstack.js';
 import {
   renderApplicantApproved,
   renderApplicantRejected,
@@ -242,6 +243,84 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
             },
             'failed to stamp decision_made=approved on KC user (auth-gate stays open via enabled flag)',
           );
+        }
+
+        // Register the aggregator with signalstack and stamp the returned
+        // org_id on the KC user. Soft-fail: an outage here must not block
+        // approval — the login-time fallback retries on the applicant's
+        // next authenticated request because the upsert is idempotent on
+        // external_id (our aggregatorId).
+        const signalstack = getSignalStackWriter();
+        if (signalstack) {
+          const upsertStart = Date.now();
+          const upsertResult = await signalstack.upsertAggregator({
+            external_id: aggregatorId,
+            name: lookup.aggregator.name,
+            slug: lookup.aggregator.orgSlug,
+            // Signalstack's dashboard endpoint fails with
+            // NO_DOMAINS_CONFIGURED when the org's metadata.domains
+            // is empty. Send the full domain list every approval so
+            // the read endpoints work the moment the aggregator
+            // signs in. Aggregator participant focus is enforced at
+            // a different layer (KC `aggregator_type` claim).
+            domains: ['seeker', 'provider'],
+          });
+          if (!upsertResult.success) {
+            log.warn(
+              {
+                status: 'failure',
+                sub_operation: 'signalstack.upsertAggregator',
+                code: upsertResult.error.code,
+                cause: upsertResult.error.message,
+                latency_ms: Date.now() - upsertStart,
+              },
+              'signalstack aggregator upsert failed — login fallback will retry',
+            );
+          } else {
+            const orgId = upsertResult.value.org_id;
+            // Dual-write to KC attr + Postgres mirror. The worker and the
+            // anonymous public-link submission path read the DB column
+            // (they have no KC admin client); the access-token claim is
+            // sourced from the KC attribute. Either write failure is
+            // soft-fail — the login backfill repairs whichever leg lags.
+            const [attrWrite, dbWrite] = await Promise.all([
+              idp.setAttributes(lookup.kcUser.id, { signalstack_org_id: orgId }),
+              store.updateSignalstackOrgId(aggregatorId, orgId, 'admin'),
+            ]);
+            if (!attrWrite.ok) {
+              log.warn(
+                {
+                  status: 'failure',
+                  sub_operation: 'idp.setAttributes.signalstack_org_id',
+                  code: attrWrite.error.code,
+                  cause: attrWrite.error.message,
+                },
+                'failed to stamp signalstack_org_id on KC user — login fallback will retry',
+              );
+            }
+            if (!dbWrite.ok) {
+              log.warn(
+                {
+                  status: 'failure',
+                  sub_operation: 'store.updateSignalstackOrgId',
+                  code: dbWrite.error.code,
+                  cause: dbWrite.error.message,
+                },
+                'failed to persist signalstack_org_id on aggregators row — login fallback will retry',
+              );
+            }
+            if (attrWrite.ok && dbWrite.ok) {
+              log.info(
+                {
+                  status: 'success',
+                  sub_operation: 'signalstack.upsertAggregator',
+                  signalstack_org_id: orgId,
+                  latency_ms: Date.now() - upsertStart,
+                },
+                'aggregator registered in signalstack',
+              );
+            }
+          }
         }
 
         const approvedMail = renderApplicantApproved({
