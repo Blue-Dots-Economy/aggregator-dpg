@@ -5,11 +5,44 @@
 (function () {
   'use strict';
 
+  // Palette pulled from CSS vars at boot so the canvas matches whatever
+  // brand the active deployment ships (template.ftl's inline <style>
+  // block writes the per-network `--bd-primary*` values, and the hero
+  // panel sets `--bd-hero-grad` for the highlight tone).
+  function readPalette() {
+    var s = getComputedStyle(document.documentElement);
+    var primary = s.getPropertyValue('--bd-primary').trim() || '#2563EB';
+    var hero = getComputedStyle(document.querySelector('.bd-hero') || document.documentElement);
+    var grad = hero.color || '';
+    // `.bd-hero-grad { color: ${properties.brandHeroGrad}; }` is set on
+    // the highlight span — read directly from a probe element.
+    var probe = document.querySelector('.bd-hero-grad');
+    if (probe) grad = getComputedStyle(probe).color || grad;
+    grad = grad.trim() || primary;
+    return { primary: primary, bright: grad };
+  }
+  function hexToRgbTriple(hex) {
+    var m = /^#?([0-9a-f]{6})$/i.exec(hex);
+    if (!m) {
+      // accept `rgb(r, g, b)` (computed-style strings come back this way).
+      var rm = /rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i.exec(hex);
+      if (rm) return rm[1] + ',' + rm[2] + ',' + rm[3];
+      return '124,58,237';
+    }
+    var n = parseInt(m[1], 16);
+    return ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255);
+  }
+
   function init() {
     var canvas = document.getElementById('bd-hero-canvas');
     if (!canvas) return;
     var ctx = canvas.getContext('2d');
     if (!ctx) return;
+
+    var palette = readPalette();
+    var primaryRgb = hexToRgbTriple(palette.primary);
+    var brightRgb = hexToRgbTriple(palette.bright);
+    var lineRgb = brightRgb;
 
     var dpr = Math.min(window.devicePixelRatio || 1, 2);
     var dots = [];
@@ -85,7 +118,7 @@
           var d = Math.sqrt(dx * dx + dy * dy);
           if (d < LINK) {
             var o = 1 - d / LINK;
-            ctx.strokeStyle = 'rgba(165,200,255,' + o * 0.55 + ')';
+            ctx.strokeStyle = 'rgba(' + lineRgb + ',' + o * 0.55 + ')';
             ctx.lineWidth = 0.9;
             ctx.beginPath();
             ctx.moveTo(a.x, a.y);
@@ -107,8 +140,9 @@
         var rad = dot.r + pulse * 0.6;
 
         var isBright = dot.hue === 'bright';
-        var core = isBright ? '#7DD3FC' : '#93C5FD';
-        var glow = isBright ? 'rgba(125,211,252,' : 'rgba(147,197,253,';
+        var coreRgb = isBright ? brightRgb : primaryRgb;
+        var core = 'rgb(' + coreRgb + ')';
+        var glow = 'rgba(' + coreRgb + ',';
 
         var grad = ctx.createRadialGradient(dot.x, dot.y, 0, dot.x, dot.y, rad * 6);
         grad.addColorStop(0, glow + (0.5 + pulse * 0.3) + ')');

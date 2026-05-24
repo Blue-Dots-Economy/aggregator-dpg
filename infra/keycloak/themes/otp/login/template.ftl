@@ -25,9 +25,22 @@
         --bd-primary-500: ${properties.brandPrimary500!'#6366f1'};
         --bd-primary-100: ${properties.brandPrimary100!'#e0e7ff'};
         --bd-primary-50:  ${properties.brandPrimary50!'#eef2ff'};
+        --bd-hero-bg:     ${properties.brandHeroBg!'#0f172a'};
+        --bd-hero-grad:   ${properties.brandHeroGrad!'#7dd3fc'};
       }
-      .bd-hero { background: ${properties.brandHeroBg!'#0f172a'}; }
-      .bd-hero-grad { color: ${properties.brandHeroGrad!'#7dd3fc'}; }
+      .bd-hero { background: var(--bd-hero-bg) !important; }
+      .bd-hero-glow {
+        background:
+          radial-gradient(700px 500px at 75% 25%, var(--bd-primary-500) 0%, transparent 60%),
+          radial-gradient(600px 480px at 15% 85%, var(--bd-primary) 0%, transparent 60%) !important;
+        opacity: 0.22;
+      }
+      .bd-hero-grad {
+        background: none !important;
+        background-clip: initial !important;
+        -webkit-background-clip: initial !important;
+        color: var(--bd-hero-grad) !important;
+      }
     </style>
 
     <#if scripts??>
@@ -55,9 +68,13 @@
         <main class="bd-pane">
             <div class="bd-card">
                 <header class="bd-brand">
-                    <svg class="bd-logo-svg" width="56" height="56" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                        <rect x="0.6" y="0.6" width="46.8" height="46.8" rx="13" fill="#EFF4FF" stroke="rgba(37,99,235,0.10)" stroke-width="1"/>
-                        <g stroke="rgba(37,99,235,0.30)" stroke-width="0.9" stroke-linecap="round">
+                    <#-- Logo dots + lines pull from the active palette so a
+                         purple_dot deployment doesn't leak indigo into the
+                         brand mark. `currentColor` lets us drive every stop
+                         from a single `color` value set on the wrapper. -->
+                    <svg class="bd-logo-svg" width="56" height="56" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style="color: ${properties.brandPrimary!'#2563EB'};">
+                        <rect x="0.6" y="0.6" width="46.8" height="46.8" rx="13" fill="${properties.brandPrimary50!'#EFF4FF'}" stroke="currentColor" stroke-opacity="0.10" stroke-width="1"/>
+                        <g stroke="currentColor" stroke-opacity="0.30" stroke-width="0.9" stroke-linecap="round">
                             <line x1="24" y1="24" x2="8" y2="12"/>
                             <line x1="24" y1="24" x2="40" y2="10"/>
                             <line x1="24" y1="24" x2="42" y2="26"/>
@@ -68,14 +85,14 @@
                             <line x1="42" y1="26" x2="34" y2="40"/>
                             <line x1="40" y1="10" x2="42" y2="26"/>
                         </g>
-                        <circle cx="8" cy="12" r="2.6" fill="#2563EB"/>
-                        <circle cx="40" cy="10" r="2.0" fill="#2563EB"/>
-                        <circle cx="42" cy="26" r="3.2" fill="#2563EB"/>
-                        <circle cx="34" cy="40" r="2.4" fill="#2563EB"/>
-                        <circle cx="14" cy="38" r="2.8" fill="#2563EB"/>
-                        <circle cx="6" cy="26" r="2.0" fill="#2563EB"/>
-                        <circle cx="24" cy="24" r="9.4" fill="rgba(37,99,235,0.35)" opacity="0.55"/>
-                        <circle cx="24" cy="24" r="5.4" fill="#1D4ED8"/>
+                        <circle cx="8" cy="12" r="2.6" fill="currentColor"/>
+                        <circle cx="40" cy="10" r="2.0" fill="currentColor"/>
+                        <circle cx="42" cy="26" r="3.2" fill="currentColor"/>
+                        <circle cx="34" cy="40" r="2.4" fill="currentColor"/>
+                        <circle cx="14" cy="38" r="2.8" fill="currentColor"/>
+                        <circle cx="6" cy="26" r="2.0" fill="currentColor"/>
+                        <circle cx="24" cy="24" r="9.4" fill="currentColor" fill-opacity="0.35" opacity="0.55"/>
+                        <circle cx="24" cy="24" r="5.4" fill="${properties.brandPrimaryDark!'#1D4ED8'}"/>
                         <circle cx="22.6" cy="22.6" r="1.2" fill="rgba(255,255,255,0.7)"/>
                     </svg>
                     <div class="bd-brand-text">
