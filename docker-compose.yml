@@ -19,7 +19,6 @@ name: aggregator-dpg
 #   Web app           : ${PUBLIC_PROTOCOL}://${PUBLIC_HOST}/
 #   API               : ${PUBLIC_PROTOCOL}://${PUBLIC_HOST}/backend/
 #   Keycloak          : ${PUBLIC_PROTOCOL}://${PUBLIC_HOST}/auth/   admin / ${KC_BOOTSTRAP_ADMIN_PASSWORD}
-#   Mailpit UI        : ${PUBLIC_PROTOCOL}://${PUBLIC_HOST}/mail/   (captures every outbound email)
 #   Postgres          : localhost:5433             aggregator / ${POSTGRES_PASSWORD}  (direct, dev-only)
 #   Redis             : localhost:6379                                                (direct, dev-only)
 #
@@ -66,20 +65,6 @@ services:
       timeout: 3s
       retries: 10
 
-  mailhog:
-    image: axllent/mailpit:v1.20
-    container_name: aggregator-mailhog
-    restart: unless-stopped
-    # SMTP (1025) reached over docker network by api/keycloak; UI (8025) proxied via nginx /mail/.
-    environment:
-      MP_SMTP_AUTH_ACCEPT_ANY: "true"
-      MP_SMTP_AUTH_ALLOW_INSECURE: "true"
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8025/api/v1/messages"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-
   keycloak:
     image: quay.io/keycloak/keycloak:26.5.5
     container_name: aggregator-keycloak
@@ -125,8 +110,8 @@ services:
       # render-realm.sh — the realm JSON itself only has __SMTP_*__ placeholders.
       # Defaults target the in-stack Mailpit so first-boot login works with no
       # .env edits; override these per environment to point at real SMTP.
-      SMTP_HOST: ${SMTP_HOST:-mailhog}
-      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_FROM: ${SMTP_FROM:-no-reply@bluedots.local}
       SMTP_FROM_DISPLAY: ${SMTP_FROM_DISPLAY:-Blue Dots Aggregator}
       SMTP_AUTH: ${SMTP_AUTH:-false}
@@ -173,8 +158,8 @@ services:
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD}
       UNMANAGED_POLICY: ENABLED
-      SMTP_HOST: ${SMTP_HOST:-mailhog}
-      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_FROM: ${SMTP_FROM:-no-reply@bluedots.local}
       SMTP_FROM_DISPLAY: ${SMTP_FROM_DISPLAY:-Blue Dots Aggregator}
       SMTP_SECURE: ${SMTP_SECURE:-false}
@@ -284,8 +269,8 @@ services:
       KEYCLOAK_ADMIN_CLIENT_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET:-}
       # Mailer — `smtp` (default, points at Mailpit in compose) or `ses`
       MAIL_PROVIDER: ${MAIL_PROVIDER:-smtp}
-      SMTP_HOST: ${SMTP_HOST:-mailhog}
-      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_FROM: ${SMTP_FROM:-no-reply@bluedots.local}
@@ -348,8 +333,6 @@ services:
       postgres:
         condition: service_healthy
       keycloak:
-        condition: service_healthy
-      mailhog:
         condition: service_healthy
 
   # ── Bulk-upload + cron worker ────────────────────────────────────────────
@@ -449,8 +432,6 @@ services:
       api:
         condition: service_healthy
       keycloak:
-        condition: service_healthy
-      mailhog:
         condition: service_healthy
 
 volumes:
