@@ -15,6 +15,15 @@ aggregator:
     # looking_for, documents_available) — bulk CSV cells use `|` as the
     # delimiter.
     csv_array_delimiter: '|'
+    field_overrides:
+      seeker:
+        name: beneficiary_name
+        phone: mobile_number
+        email: email
+      provider:
+        name: contact_name
+        phone: contact_phone
+        email: contact_email
 
   brand:
     short_name: Purple Dots

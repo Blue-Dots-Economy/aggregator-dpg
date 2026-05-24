@@ -111,8 +111,12 @@ export default async function PublicRegistrationPage({ params }: PageProps) {
 function resolveParticipantSchemaPath(file: string): string {
   // Walk a small set of plausible roots so the same code works in dev
   // (`pnpm --filter web dev`, cwd = apps/web) and in the docker standalone
-  // build (cwd = /app, config copied via Dockerfile).
+  // build (cwd = /app, config copied via Dockerfile). Honour
+  // `SCHEMA_ROOT_DIR` first so a per-network deployment (e.g.
+  // `/app/config/blue_dot/schemas`) drives the path without web rebuilds.
+  const root = process.env.SCHEMA_ROOT_DIR;
   const candidates = [
+    ...(root ? [path.resolve(root, 'participant', file)] : []),
     path.resolve(process.cwd(), 'config/schemas/participant', file),
     path.resolve(process.cwd(), '../../config/schemas/participant', file),
     path.resolve(process.cwd(), '../config/schemas/participant', file),
