@@ -71,6 +71,39 @@ export function PublicRegistrationView({
     if (Array.isArray(required)) {
       (clone as { required?: string[] }).required = required.filter((r) => r !== 'participant_id');
     }
+    // Inline `items.$ref → #/$defs/<x>` enum hits so RJSF's checkboxes
+    // widget receives a populated `enumOptions` list. RJSF's runtime
+    // ref-resolver only follows refs through ajv during validation, not
+    // when computing widget options — without inlining the array fields
+    // render as empty boxes.
+    const defs = (clone as { $defs?: Record<string, Record<string, unknown>> }).$defs ?? {};
+    const inlined = (clone as { properties?: Record<string, Record<string, unknown>> }).properties;
+    if (inlined) {
+      for (const [field, def] of Object.entries(inlined)) {
+        if (def?.['type'] !== 'array') continue;
+        const items = def['items'] as Record<string, unknown> | undefined;
+        const ref = typeof items?.['$ref'] === 'string' ? (items['$ref'] as string) : null;
+        if (ref?.startsWith('#/$defs/')) {
+          const target = defs[ref.slice('#/$defs/'.length)];
+          if (target) {
+            // Drop the ref and copy the resolved enum/type onto items
+            // in place — RJSF reads from this shape directly.
+            const { $ref: _r, ...keep } = items as Record<string, unknown>;
+            (inlined[field] as Record<string, unknown>).items = { ...target, ...keep };
+          }
+        }
+        // RJSF only computes a populated `enumOptions` list on the
+        // array widget when `uniqueItems: true` is set. The purple_dot
+        // schemas omit it, so multi-select dropdowns render with zero
+        // options without this nudge.
+        const resolvedItems = (inlined[field] as Record<string, unknown>).items as
+          | Record<string, unknown>
+          | undefined;
+        if (resolvedItems && Array.isArray(resolvedItems['enum'])) {
+          (inlined[field] as Record<string, unknown>).uniqueItems = true;
+        }
+      }
+    }
     return clone;
   }, [schema]);
 
@@ -80,6 +113,20 @@ export function PublicRegistrationView({
   // Caller-supplied uiSchema entries override these defaults via spread.
   const mergedUiSchema = useMemo<Record<string, unknown>>(() => {
     const props = (schema as { properties?: Record<string, Record<string, unknown>> }).properties;
+    const defs = (schema as { $defs?: Record<string, Record<string, unknown>> }).$defs ?? {};
+    const resolveItemEnum = (itemsDef: Record<string, unknown> | undefined): string[] | null => {
+      if (!itemsDef) return null;
+      // Direct enum on items.
+      if (Array.isArray(itemsDef['enum'])) return itemsDef['enum'] as string[];
+      // $ref into $defs (purple_dot schemas pull enums through $defs).
+      const ref = itemsDef['$ref'];
+      if (typeof ref === 'string' && ref.startsWith('#/$defs/')) {
+        const key = ref.slice('#/$defs/'.length);
+        const target = defs[key];
+        if (target && Array.isArray(target['enum'])) return target['enum'] as string[];
+      }
+      return null;
+    };
     const required = new Set(
       ((schema as { required?: string[] }).required ?? []).filter((r) => r !== 'participant_id'),
     );
@@ -92,12 +139,26 @@ export function PublicRegistrationView({
         const type = def?.['type'];
         const isRequired = required.has(field);
         if (type === 'array') {
-          defaults[field] = {
-            'ui:widget': 'CommaSeparatedArrayWidget',
-            'ui:colSpan': 2,
-            'ui:options': { itemLabel: 'entry' },
-            items: { 'ui:label': false },
-          };
+          const items = def?.['items'] as Record<string, unknown> | undefined;
+          const itemEnum = resolveItemEnum(items);
+          if (itemEnum && itemEnum.length > 0) {
+            // Array of enum values — render as a multi-select checkbox
+            // group so users can only pick allowed values. Bypasses the
+            // free-text CommaSeparatedArrayWidget which lets the user
+            // type anything and trips Ajv's enum check at submit.
+            defaults[field] = {
+              'ui:widget': 'checkboxes',
+              'ui:colSpan': 2,
+              items: { 'ui:label': false },
+            };
+          } else {
+            defaults[field] = {
+              'ui:widget': 'CommaSeparatedArrayWidget',
+              'ui:colSpan': 2,
+              'ui:options': { itemLabel: 'entry' },
+              items: { 'ui:label': false },
+            };
+          }
           // Long-form fields land last so the short pairs sit tidy on top.
           tail.push(field);
         } else if (type === 'boolean') {
@@ -230,9 +291,23 @@ export function PublicRegistrationView({
               formData={formData}
               onChange={(e) => setFormData(e.formData as Record<string, unknown>)}
               onSubmit={handleSubmit}
-              showErrorList={false}
+              // Surface validation issues inline as the user fills the form
+              // — without liveValidate the only feedback is a silent
+              // submit-click that triggers a console warning, leaving the
+              // user wondering why nothing happens.
+              liveValidate
+              showErrorList="top"
               focusOnFirstError
               noHtml5Validate
+              onError={(errors) => {
+                const first = errors?.[0]?.message ?? 'Please fill all required fields.';
+                setState({
+                  status: 'error',
+                  title: 'Form validation failed',
+                  detail: `${first}${errors.length > 1 ? ` (and ${errors.length - 1} more)` : ''}`,
+                  code: 'VALIDATION',
+                });
+              }}
             >
               <div className="mt-4 flex flex-col gap-3">
                 <button

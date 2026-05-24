@@ -428,7 +428,13 @@ function buildSignalStackItemState(
 ): Record<string, unknown> {
   const itemState: Record<string, unknown> = { ...body };
 
-  if (pushPhone) {
+  // Keep the raw body value when present — signalstack validates the
+  // phone field against the network's own pattern (purple_dot expects
+  // `^[0-9]{10}$`, blue_dot expects E.164). The E.164 form is already
+  // carried up-stack as the user.phone_number identity arg, so the
+  // override here is only a fallback for empty cells.
+  const rawPhone = body[domainCfg.identity.phone];
+  if (pushPhone && (typeof rawPhone !== 'string' || rawPhone.length === 0)) {
     itemState[domainCfg.identity.phone] = pushPhone;
   }
 

@@ -353,7 +353,15 @@ function buildSignalStackItemState(
 ): Record<string, unknown> {
   const itemState: Record<string, unknown> = { ...body };
 
-  if (pushPhone) {
+  // Signalstack's item_state schema validates the phone field with the
+  // network's own pattern (e.g. purple_dot mobile_number requires
+  // `^[0-9]{10}$`). The E.164 form is already carried up-stack as the
+  // user.phone_number identity arg, so item_state should keep the raw
+  // body value the user submitted. Only overwrite when the body had no
+  // value at all — preserves the bulk-CSV fallback while letting form
+  // submits pass schema validation upstream.
+  const rawPhone = body[domainCfg.identity.phone];
+  if (pushPhone && (typeof rawPhone !== 'string' || rawPhone.length === 0)) {
     itemState[domainCfg.identity.phone] = pushPhone;
   }
 

@@ -39,4 +39,5 @@ aggregator:
     presume_consent: true
     bulk_max_rows: 10000
 
-  admin_emails: []
+  admin_emails:
+    - abhishekg@sanketika.in

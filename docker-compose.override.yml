@@ -1,0 +1,21 @@
+services:
+  api:
+    environment:
+      SIGNALSTACK_ITEM_NETWORK: purple_dot
+  worker:
+    environment:
+      SIGNALSTACK_ITEM_NETWORK: purple_dot
+  keycloak:
+    environment:
+      BRAND_SHORT_NAME: Purple Dots
+      BRAND_LONG_NAME: Purple Dot Aggregator Portal
+      BRAND_SSO_LABEL: SSO
+      HERO_TITLE_LEAD: Welcome to
+      HERO_TITLE_HIGHLIGHT: Purple Dots
+      HERO_TITLE_TAIL: discovery & services for people with disabilities.
+      HERO_SUBTITLE: Sign in to manage beneficiaries, service providers, and onboarding across the network.
+    volumes:
+      # Mount the extracted theme so disk version wins over the JAR's
+      # baked-in theme. KC resolves /opt/keycloak/themes before scanning
+      # provider JARs.
+      - ./infra/keycloak/themes:/opt/keycloak/themes:ro

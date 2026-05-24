@@ -52,7 +52,9 @@ ALTER TABLE aggregators
   );
 
 -- 4. Drop the now-unused enum types.
-DROP TYPE participant_type;
-DROP TYPE aggregator_type;
+-- `IF EXISTS` keeps the migration idempotent — a previous run of this
+-- branch may have already removed the enums.
+DROP TYPE IF EXISTS participant_type;
+DROP TYPE IF EXISTS aggregator_type;
 
 COMMIT;
