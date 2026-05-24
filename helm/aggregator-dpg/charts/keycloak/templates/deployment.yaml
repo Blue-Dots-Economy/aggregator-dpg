@@ -33,7 +33,25 @@ spec:
             defaultMode: 0755
         - name: realm-rendered
           emptyDir: {}
+        # Shared volume the themes-init container writes into and the
+        # main keycloak container mounts read-only at
+        # /opt/keycloak/themes. Lets us ship one vanilla KC image and
+        # swap brand surfaces per network via a tiny init image.
+        - name: kc-themes
+          emptyDir: {}
       initContainers:
+        {{- with .Values.themesInit }}
+        - name: themes-init
+          # Per-network theme image (built by `infra/keycloak/build-theme-image.sh`).
+          # Copies `/custom/otp` into the shared emptyDir and exits.
+          # Image hash uniquely identifies the brand baked into
+          # theme.properties, so swapping networks = swapping the tag.
+          image: {{ printf "%s:%s" .image .tag | quote }}
+          imagePullPolicy: {{ default "IfNotPresent" .pullPolicy }}
+          volumeMounts:
+            - name: kc-themes
+              mountPath: /shared
+        {{- end }}
         - name: realm-renderer
           # Translates the docker-compose render-realm.sh step into K8s land:
           # reads template realm JSON from a read-only ConfigMap, substitutes
@@ -180,6 +198,11 @@ spec:
           volumeMounts:
             - name: realm-rendered
               mountPath: /opt/keycloak/data/import
+            {{- if .Values.themesInit }}
+            - name: kc-themes
+              mountPath: /opt/keycloak/themes
+              readOnly: true
+            {{- end }}
           readinessProbe:
             httpGet:
               path: /auth/health/ready
