@@ -62,8 +62,12 @@ COPY --from=builder --chown=appuser:appgroup /app/apps/web/.next/static     ./ap
 COPY --from=builder --chown=appuser:appgroup /app/apps/web/public           ./apps/web/public
 # Participant JSON Schemas are loaded at runtime by the public /r/[slug]
 # page. Next's output-file tracer doesn't pick them up because they're
-# read via dynamic `path.resolve(...)`, so copy them explicitly.
-COPY --from=builder --chown=appuser:appgroup /app/config/schemas            ./config/schemas
+# read via dynamic `path.resolve(...)`, so copy them explicitly. Copying
+# the whole `config/` tree pulls in both the shared aggregator schemas
+# (`config/schemas/aggregator/`) and every per-network folder (e.g.
+# `config/blue_dot/schemas/participant/`); the active network is picked
+# via `SCHEMA_ROOT_DIR` at runtime.
+COPY --from=builder --chown=appuser:appgroup /app/config                    ./config
 
 USER appuser
 EXPOSE 3000

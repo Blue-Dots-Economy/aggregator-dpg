@@ -2,7 +2,7 @@
   "realm": "aggregator",
   "enabled": true,
   "sslRequired": "none",
-  "displayName": "Blue Dots Aggregator",
+  "displayName": "__BRAND_LONG_NAME__",
   "registrationAllowed": false,
   "loginWithEmailAllowed": true,
   "duplicateEmailsAllowed": false,

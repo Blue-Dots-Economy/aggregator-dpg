@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.bluedots.org/participant/seeker.v1.json",
+  "title": "Job Seeker Profile 1.0",
+  "description": "People looking for jobs. Field names match the signalstack profile_1.0 item_state schema so submissions can flow through without re-shaping.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "gender", "location", "age", "phone"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "title": "Full Name",
+      "minLength": 1
+    },
+    "gender": {
+      "type": "string",
+      "title": "Gender",
+      "enum": ["male", "female", "other"]
+    },
+    "location": {
+      "type": "string",
+      "title": "Location",
+      "minLength": 1
+    },
+    "age": {
+      "type": "integer",
+      "title": "Age",
+      "minimum": 14,
+      "maximum": 65
+    },
+    "phone": {
+      "type": "string",
+      "title": "Mobile Number",
+      "description": "E.164 format, e.g. +919876543210",
+      "minLength": 8
+    },
+    "workExperience": {
+      "type": "string",
+      "title": "Work Experience",
+      "enum": ["Fresher", "Worked before", "Returning after a break"]
+    },
+    "workExperienceYearsConditional": {
+      "type": "string",
+      "title": "Years of Work Experience",
+      "enum": [
+        "0",
+        "< 1 Year",
+        "1 Year",
+        "2 Years",
+        "3 Years",
+        "3-5 Years",
+        "5-10 Years",
+        "10-15 Years",
+        "15+ Years",
+        "Other"
+      ]
+    },
+    "highestQualificationOrSkill": {
+      "type": "string",
+      "title": "Highest Qualification / Skill",
+      "enum": [
+        "School",
+        "College",
+        "ITI / Other Vocational Trainings",
+        "Certification / Learned on the job"
+      ]
+    },
+    "natureOfJobsInterestedIn": {
+      "type": "string",
+      "title": "Nature of Jobs Interested In",
+      "enum": ["Internship", "Apprenticeship", "Full-time", "Flexible"]
+    },
+    "nameOfJobRolesInterestedIn": {
+      "type": "string",
+      "title": "Job Roles Interested In",
+      "minLength": 1
+    },
+    "otherHelpNeeded": {
+      "type": "string",
+      "title": "Other Help Needed",
+      "enum": ["Training", "Accommodation", "Travel", "Other"]
+    }
+  }
+}
