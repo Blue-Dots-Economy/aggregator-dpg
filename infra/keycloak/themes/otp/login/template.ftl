@@ -15,6 +15,20 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap">
     <link rel="stylesheet" href="${url.resourcesPath}/css/blue-dots.css">
+    <#-- Palette overrides come after the static CSS so per-network env
+         vars win over the file's :root defaults. Static file stays
+         network-agnostic; this block carries the colour swap. -->
+    <style>
+      :root {
+        --bd-primary:     ${properties.brandPrimary!'#4f46e5'};
+        --bd-primary-600: ${properties.brandPrimaryDark!'#4338ca'};
+        --bd-primary-500: ${properties.brandPrimary500!'#6366f1'};
+        --bd-primary-100: ${properties.brandPrimary100!'#e0e7ff'};
+        --bd-primary-50:  ${properties.brandPrimary50!'#eef2ff'};
+      }
+      .bd-hero { background: ${properties.brandHeroBg!'#0f172a'}; }
+      .bd-hero-grad { color: ${properties.brandHeroGrad!'#7dd3fc'}; }
+    </style>
 
     <#if scripts??>
         <#list scripts as script>
