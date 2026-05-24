@@ -20,6 +20,8 @@ COPY packages/queue/package.json                       packages/queue/
 COPY packages/schema-loader/package.json               packages/schema-loader/
 COPY packages/shared-primitives/package.json           packages/shared-primitives/
 COPY packages/participants-writer/package.json         packages/participants-writer/
+COPY packages/network-config/package.json              packages/network-config/
+COPY packages/signalstack-writer/package.json          packages/signalstack-writer/
 RUN pnpm install --frozen-lockfile
 
 # ── builder: compile workspace + worker ──────────────────────────────────────
@@ -29,6 +31,8 @@ RUN pnpm --filter @aggregator-dpg/shared-primitives build \
  && pnpm --filter @aggregator-dpg/db-schema build \
  && pnpm --filter @aggregator-dpg/queue build \
  && pnpm --filter @aggregator-dpg/schema-loader build \
+ && pnpm --filter @aggregator-dpg/network-config build \
+ && pnpm --filter @aggregator-dpg/signalstack-writer build \
  && pnpm --filter @aggregator-dpg/participants-writer build \
  && pnpm --filter @aggregator-dpg/worker build
 
