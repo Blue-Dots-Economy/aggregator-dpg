@@ -26,67 +26,98 @@ import { z } from 'zod';
  * - `otel.timeout_ms` — `10000` ms
  * - `pii_fields_excluded` — `[]`
  */
-export const TelemetryConfigSchema = z.object({
-  /**
-   * OpenTelemetry collector connection settings.
-   */
-  otel: z.object({
+export const TelemetryConfigSchema = z
+  .object({
     /**
-     * OTLP collector endpoint URL (e.g. `http://otel-collector:4317`).
-     * Must be a valid URL.
+     * OpenTelemetry collector connection settings.
      */
-    collector_endpoint: z.string().url(),
+    otel: z.object({
+      /**
+       * OTLP collector endpoint URL (e.g. `http://otel-collector:4317`).
+       * Must be a valid URL.
+       */
+      collector_endpoint: z.string().url(),
+
+      /**
+       * Transport protocol for the OTLP exporter.
+       * Defaults to `'grpc'`.
+       */
+      protocol: z.enum(['grpc', 'http']).default('grpc'),
+
+      /**
+       * Head-sampling rate in the range [0, 1].
+       * `0` drops all spans; `1` keeps all spans.
+       * Defaults to `0.1`.
+       */
+      sample_rate: z.number().min(0).max(1).default(0.1),
+
+      /**
+       * How often the periodic exporter flushes spans to the collector, in ms.
+       * Defaults to `5000`.
+       */
+      export_interval_ms: z.number().int().positive().default(5000),
+
+      /**
+       * Per-export request timeout in ms.
+       * Defaults to `10000`.
+       */
+      timeout_ms: z.number().int().positive().default(10000),
+    }),
 
     /**
-     * Transport protocol for the OTLP exporter.
-     * Defaults to `'grpc'`.
+     * Base URL for the outcomes/observability service.
+     * When present, business-outcome events are forwarded here.
+     * Must be set together with `outcomes_hmac_key_id` and `outcomes_hmac_secret`.
      */
-    protocol: z.enum(['grpc', 'http']).default('grpc'),
+    outcomes_svc_url: z.string().url().optional(),
 
     /**
-     * Head-sampling rate in the range [0, 1].
-     * `0` drops all spans; `1` keeps all spans.
-     * Defaults to `0.1`.
+     * HMAC key id sent in X-Outcome-Key-Id header.
+     * Must be set together with `outcomes_svc_url` and `outcomes_hmac_secret`.
      */
-    sample_rate: z.number().min(0).max(1).default(0.1),
+    outcomes_hmac_key_id: z.string().optional(),
 
     /**
-     * How often the periodic exporter flushes spans to the collector, in ms.
-     * Defaults to `5000`.
+     * HMAC shared secret for signing outcomes requests.
+     * Never logged — handled exclusively via the audit path.
+     * Must be set together with `outcomes_svc_url` and `outcomes_hmac_key_id`.
      */
-    export_interval_ms: z.number().int().positive().default(5000),
+    outcomes_hmac_secret: z.string().optional(),
 
     /**
-     * Per-export request timeout in ms.
-     * Defaults to `10000`.
+     * List of attribute keys whose values must be redacted before export.
+     * Defaults to an empty list.
      */
-    timeout_ms: z.number().int().positive().default(10000),
-  }),
+    pii_fields_excluded: z.array(z.string()).default([]),
+  })
+  .superRefine((val, ctx) => {
+    const hasUrl = val.outcomes_svc_url !== undefined;
+    const hasKeyId = val.outcomes_hmac_key_id !== undefined;
+    const hasSecret = val.outcomes_hmac_secret !== undefined;
 
-  /**
-   * Base URL for the outcomes/observability service.
-   * When present, business-outcome events are forwarded here.
-   */
-  outcomes_svc_url: z.string().url().optional(),
-
-  /**
-   * HMAC key identifier used for signing outcomes requests.
-   * Required only when `outcomes_svc_url` is set.
-   */
-  outcomes_hmac_key_id: z.string().optional(),
-
-  /**
-   * HMAC shared secret for signing outcomes requests.
-   * Never logged — handled exclusively via the audit path.
-   */
-  outcomes_hmac_secret: z.string().optional(),
-
-  /**
-   * List of attribute keys whose values must be redacted before export.
-   * Defaults to an empty list.
-   */
-  pii_fields_excluded: z.array(z.string()).default([]),
-});
+    if (hasUrl && !hasKeyId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['outcomes_hmac_key_id'],
+        message: 'outcomes_hmac_key_id is required when outcomes_svc_url is set',
+      });
+    }
+    if (hasUrl && !hasSecret) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['outcomes_hmac_secret'],
+        message: 'outcomes_hmac_secret is required when outcomes_svc_url is set',
+      });
+    }
+    if (!hasUrl && (hasKeyId || hasSecret)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['outcomes_svc_url'],
+        message:
+          'outcomes_svc_url is required when outcomes_hmac_key_id or outcomes_hmac_secret is set',
+      });
+    }
+  });
 
 /**
  * Inferred TypeScript type for the validated telemetry configuration.

@@ -30,3 +30,52 @@ describe('TelemetryConfigSchema', () => {
     expect(result.outcomes_svc_url).toBe('http://observability-svc:8080');
   });
 });
+
+describe('TelemetryConfigSchema outcomes field co-presence', () => {
+  const otel = { collector_endpoint: 'http://otel-collector:4317' };
+
+  it('rejects outcomes_svc_url without HMAC key id', () => {
+    expect(() =>
+      TelemetryConfigSchema.parse({
+        otel,
+        outcomes_svc_url: 'http://observability-svc:8080',
+        outcomes_hmac_secret: 'shh',
+      }),
+    ).toThrow(/outcomes_hmac/);
+  });
+
+  it('rejects outcomes_svc_url without HMAC secret', () => {
+    expect(() =>
+      TelemetryConfigSchema.parse({
+        otel,
+        outcomes_svc_url: 'http://observability-svc:8080',
+        outcomes_hmac_key_id: 'svc-api',
+      }),
+    ).toThrow(/outcomes_hmac/);
+  });
+
+  it('rejects HMAC fields without outcomes_svc_url', () => {
+    expect(() =>
+      TelemetryConfigSchema.parse({
+        otel,
+        outcomes_hmac_key_id: 'svc-api',
+        outcomes_hmac_secret: 'shh',
+      }),
+    ).toThrow(/outcomes_svc_url/);
+  });
+
+  it('accepts all three set together', () => {
+    expect(() =>
+      TelemetryConfigSchema.parse({
+        otel,
+        outcomes_svc_url: 'http://observability-svc:8080',
+        outcomes_hmac_key_id: 'svc-api',
+        outcomes_hmac_secret: 'shh',
+      }),
+    ).not.toThrow();
+  });
+
+  it('accepts none set (Phase 0-3 default)', () => {
+    expect(() => TelemetryConfigSchema.parse({ otel })).not.toThrow();
+  });
+});
