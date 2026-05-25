@@ -23,11 +23,18 @@ export async function generateMetadata(): Promise<Metadata> {
       title: `${cfg.brand.long_name}`,
       description:
         cfg.brand.tagline ?? `${cfg.brand.long_name} — track every participant in your network.`,
+      // Brand-coloured favicon. Served by `app/brand-icon/route.ts`
+      // which re-tints the network-mark SVG to the active
+      // `primary_color`. Pointed at via metadata so Next emits the
+      // right <link rel="icon"> without needing a static
+      // `app/icon.svg` (which would short-circuit the dynamic route).
+      icons: { icon: { url: '/brand-icon', type: 'image/svg+xml' } },
     };
   } catch {
     return {
       title: 'Aggregator Portal',
       description: 'Aggregator portal for signalstack-backed participant networks.',
+      icons: { icon: { url: '/brand-icon', type: 'image/svg+xml' } },
     };
   }
 }
