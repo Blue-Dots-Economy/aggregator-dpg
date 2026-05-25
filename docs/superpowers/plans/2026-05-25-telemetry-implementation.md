@@ -263,35 +263,43 @@ docs/telemetry-runbook.md               # NEW — kill switch, BSP env vars, on-
 }
 ```
 
-- [ ] **Step 2: Create `tsconfig.json`**
+- [ ] **Step 2: Create `tsconfig.json`** (mirrors `packages/_template/tsconfig.json` — every other package in the repo uses this exact shape)
 
 ```json
 {
-  "extends": "@aggregator-dpg/tsconfig/base.json",
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "@aggregator-dpg/tsconfig/node.json",
   "compilerOptions": {
+    "rootDir": "src",
     "outDir": "dist",
-    "rootDir": "src"
+    "declaration": true,
+    "declarationMap": true,
+    "composite": true
   },
-  "include": ["src/**/*"]
+  "include": ["src"],
+  "exclude": ["src/__tests__", "dist"]
 }
 ```
 
-- [ ] **Step 3: Create `vitest.config.ts`**
+- [ ] **Step 3: Create `vitest.config.ts`** (mirrors `packages/_template/vitest.config.ts`)
 
 ```ts
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
-    environment: 'node',
     include: ['src/**/__tests__/**/*.test.ts'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html'],
-      lines: 70,
-      functions: 70,
-      branches: 70,
-      statements: 70,
+      include: ['src/**/*.ts'],
+      exclude: ['src/__tests__/**', 'src/**/__tests__/**', 'src/testing/**'],
+      thresholds: {
+        lines: 70,
+        functions: 70,
+        branches: 70,
+        statements: 70,
+      },
     },
   },
 });
@@ -3545,22 +3553,38 @@ git commit --allow-empty -m "chore(telemetry): all three blocks live in prod (Ph
 
 - [ ] **Step 2: Standard tsconfig + vitest configs**
 
-`tsconfig.json`:
+`tsconfig.json` (mirrors `packages/_template/tsconfig.json`):
 
 ```json
 {
-  "extends": "@aggregator-dpg/tsconfig/base.json",
-  "compilerOptions": { "outDir": "dist", "rootDir": "src" },
-  "include": ["src/**/*"]
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "@aggregator-dpg/tsconfig/node.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "declaration": true,
+    "declarationMap": true,
+    "composite": true
+  },
+  "include": ["src"],
+  "exclude": ["src/__tests__", "dist"]
 }
 ```
 
-`vitest.config.ts`:
+`vitest.config.ts` (mirrors `packages/_template/vitest.config.ts`):
 
 ```ts
 import { defineConfig } from 'vitest/config';
 export default defineConfig({
-  test: { environment: 'node', include: ['src/**/__tests__/**/*.test.ts'] },
+  test: {
+    include: ['src/__tests__/**/*.test.ts'],
+    coverage: {
+      provider: 'v8',
+      include: ['src/**/*.ts'],
+      exclude: ['src/__tests__/**'],
+      thresholds: { lines: 70, functions: 70, branches: 70, statements: 70 },
+    },
+  },
 });
 ```
 
