@@ -21,7 +21,7 @@ interface CreateLinkFormState {
   state: string;
   /** District — required, drives slug + display title. */
   district: string;
-  /** Free-form lever / event label (e.g. "Field Drive", "Bluedotathon"). */
+  /** Free-form lever / event label (e.g. "Field Drive", "Campaign"). */
   lever_event: string;
   /** ISO date string (yyyy-mm-dd) for the event. */
   event_date: string;
@@ -218,7 +218,7 @@ export function CreateLinkSection() {
               className="bd-input"
               value={form.state}
               onChange={(e) => setForm((f) => ({ ...f, state: e.target.value }))}
-              placeholder="Karnataka"
+              placeholder="State"
             />
           </Field>
           <Field label="Lever / Event">
@@ -226,7 +226,7 @@ export function CreateLinkSection() {
               className="bd-input"
               value={form.lever_event}
               onChange={(e) => setForm((f) => ({ ...f, lever_event: e.target.value }))}
-              placeholder="Bluedotathon"
+              placeholder="Campaign or event name"
             />
           </Field>
           <Field label="Event Date">
@@ -242,7 +242,7 @@ export function CreateLinkSection() {
               className="bd-input"
               value={form.event_location}
               onChange={(e) => setForm((f) => ({ ...f, event_location: e.target.value }))}
-              placeholder="e.g. Hubli"
+              placeholder="City or venue"
             />
           </Field>
           <Field label="District *">
@@ -250,7 +250,7 @@ export function CreateLinkSection() {
               className="bd-input"
               value={form.district}
               onChange={(e) => setForm((f) => ({ ...f, district: e.target.value }))}
-              placeholder="Dharwad"
+              placeholder="District"
             />
           </Field>
           <Field label="Domain *">
