@@ -1,0 +1,9 @@
+{
+  "extends": "@aggregator-dpg/tsconfig/base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "files": [],
+  "include": ["src/**/*"]
+}
