@@ -16,13 +16,18 @@ global:
   imagePullSecrets: []
 
   # Cluster storage class for PVCs. Empty = cluster default.
-  storageClass: ""
+  storageClass: ''
 
   keycloakRealm: aggregator
 
+  # Active signalstack network. Drives the api/worker/web config-folder
+  # selection and the keycloak themes-init image tag. Override per
+  # release via -f values-purple.yaml (or values-blue.yaml).
+  aggregatorNetwork: blue_dot
+
   oidc:
     clientId: aggregator-portal
-    scope: "openid profile email"
+    scope: 'openid profile email'
 
   # AWS S3 used for bulk uploads, QR pngs, error CSVs.
   s3:
@@ -33,7 +38,7 @@ global:
   # If set, subcharts reference this Secret name instead of the umbrella's
   # templated `{release}-secrets`. The named Secret MUST exist before
   # `helm install` and carry every key listed under `secrets.*` below.
-  existingSecret: ""
+  existingSecret: ''
 
   # Workaround for the compose `extra_hosts: PUBLIC_HOST:host-gateway` quirk.
   # Provide one entry per app pod so server-side back-channel calls to the
@@ -54,10 +59,10 @@ ingress:
   # cert-manager ClusterIssuer name. Must exist in the cluster already.
   clusterIssuer: letsencrypt-prod
   annotations:
-    nginx.ingress.kubernetes.io/proxy-body-size: "1024m"
-    nginx.ingress.kubernetes.io/proxy-buffer-size: "32k"
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
-    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-body-size: '1024m'
+    nginx.ingress.kubernetes.io/proxy-buffer-size: '32k'
+    nginx.ingress.kubernetes.io/proxy-read-timeout: '300'
+    nginx.ingress.kubernetes.io/proxy-send-timeout: '300'
 
 # ─── Secrets ───────────────────────────────────────────────────────────────
 # If existingSecret is set, the umbrella does NOT render its own Secret —
@@ -65,51 +70,51 @@ ingress:
 secrets:
   # Deprecated alias of global.existingSecret. If set, global.existingSecret
   # takes precedence (kept for ergonomic top-level reference).
-  existingSecret: ""
+  existingSecret: ''
   postgresPassword: change-me-postgres-password
   kcBootstrapAdminPassword: change-me-keycloak-admin
   keycloakAdminClientSecret: change-me-kc-admin-client-secret
   approvalTokenSecret: change-me-32-hex-min-chars-required-here
   sessionKey: change-me-32-hex-min-chars-required-here
   oidcClientSecret: change-me-portal-client-secret
-  bffServiceClientSecret: ""
-  smtpUser: ""
-  smtpPassword: ""
-  twilioAccountSid: ""
-  twilioAuthToken: ""
-  twilioFromNumber: ""
-  awsAccessKeyId: ""
-  awsSecretAccessKey: ""
+  bffServiceClientSecret: ''
+  smtpUser: ''
+  smtpPassword: ''
+  twilioAccountSid: ''
+  twilioAuthToken: ''
+  twilioFromNumber: ''
+  awsAccessKeyId: ''
+  awsSecretAccessKey: ''
 
 # ─── Mail wiring (shared by api + keycloak) ────────────────────────────────
 mail:
-  provider: smtp                  # smtp | ses
+  provider: smtp # smtp | ses
   smtp:
     # Real SMTP relay host. No in-cluster mailcatcher — wire to SES /
     # SendGrid / Workspace SMTP / etc. Empty value disables SMTP wiring.
-    host: ""
+    host: ''
     port: 587
     from: no-reply@bluedots.local
-    fromDisplay: "Blue Dots Aggregator"
+    fromDisplay: 'Blue Dots Aggregator'
     secure: false
     starttls: true
     auth: true
   ses:
-    from: ""
-    configurationSet: ""
+    from: ''
+    configurationSet: ''
 
 # ─── App subcharts ─────────────────────────────────────────────────────────
 web:
   replicaCount: 2
   image:
     repository: aggregator-dpg/web
-    tag: ""                        # falls back to Chart.AppVersion
+    tag: '' # falls back to Chart.AppVersion
     pullPolicy: IfNotPresent
   service:
     port: 3000
   resources:
     requests: { cpu: 100m, memory: 256Mi }
-    limits:   { cpu: 1,    memory: 1Gi   }
+    limits: { cpu: 1, memory: 1Gi }
     # Tune up for prod (apps/web is a Next.js standalone build).
   hpa:
     enabled: false
@@ -121,20 +126,20 @@ api:
   replicaCount: 2
   image:
     repository: aggregator-dpg/api
-    tag: ""
+    tag: ''
     pullPolicy: IfNotPresent
   service:
     port: 4000
   resources:
     requests: { cpu: 200m, memory: 512Mi }
-    limits:   { cpu: 2,    memory: 1Gi   }
+    limits: { cpu: 2, memory: 1Gi }
   runMigrationsOnBoot: true
   bulk:
     uploadUrlTtlSeconds: 900
     uploadMaxBytes: 10485760
     qrDownloadUrlTtlSeconds: 900
-  adminEmails: "admin@bluedots.local"
-  publicLinkBaseUrl: ""              # empty => derived from global.publicProtocol+publicHost
+  adminEmails: 'admin@bluedots.local'
+  publicLinkBaseUrl: '' # empty => derived from global.publicProtocol+publicHost
   serviceAccount:
     create: true
     # For IRSA on EKS:
@@ -151,11 +156,11 @@ worker:
   replicaCount: 1
   image:
     repository: aggregator-dpg/worker
-    tag: ""
+    tag: ''
     pullPolicy: IfNotPresent
   resources:
     requests: { cpu: 100m, memory: 384Mi }
-    limits:   { cpu: 1,    memory: 1Gi   }
+    limits: { cpu: 1, memory: 1Gi }
   bulk:
     maxRows: 10000
     maxRowBytes: 65536
@@ -170,17 +175,17 @@ keycloak:
   replicaCount: 1
   image:
     repository: aggregator-dpg/keycloak
-    tag: "26.5.5-aggregator"
+    tag: '26.5.5-aggregator'
     pullPolicy: IfNotPresent
   bootstrapAdminUsername: admin
-  smsProvider: log                  # log | twilio | sns
+  smsProvider: log # log | twilio | sns
   awsRegion: ap-south-1
   service:
     port: 8080
     mgmtPort: 9000
   resources:
     requests: { cpu: 250m, memory: 768Mi }
-    limits:   { cpu: 1,    memory: 1500Mi }
+    limits: { cpu: 1, memory: 1500Mi }
 
 # ─── Bitnami postgresql subchart values (consumed verbatim) ────────────────
 # See: https://artifacthub.io/packages/helm/bitnami/postgresql
@@ -192,7 +197,7 @@ postgresql:
     # When the umbrella templates a Secret, this is auto-set to that name in
     # values-dev.yaml / via helm install --set. When existingSecret is wired
     # at umbrella level, point this at the same Secret + use these key names.
-    existingSecret: ""
+    existingSecret: ''
     secretKeys:
       adminPasswordKey: postgres-password
       userPasswordKey: postgres-password
@@ -206,7 +211,7 @@ postgresql:
           CREATE DATABASE keycloak OWNER aggregator;
     resources:
       requests: { cpu: 250m, memory: 512Mi }
-      limits:   { cpu: 2,    memory: 2Gi   }
+      limits: { cpu: 2, memory: 2Gi }
 
 # ─── Bitnami redis subchart values (consumed verbatim) ─────────────────────
 # See: https://artifacthub.io/packages/helm/bitnami/redis
@@ -220,11 +225,11 @@ redis:
       enabled: true
       size: 2Gi
     extraFlags:
-      - "--save"
-      - "60"
-      - "1"
-      - "--loglevel"
-      - "warning"
+      - '--save'
+      - '60'
+      - '1'
+      - '--loglevel'
+      - 'warning'
     resources:
       requests: { cpu: 50m, memory: 128Mi }
-      limits:   { cpu: 500m, memory: 512Mi }
+      limits: { cpu: 500m, memory: 512Mi }

@@ -5,7 +5,11 @@ metadata:
   labels:
     {{- include "worker.labels" . | nindent 4 }}
 data:
-  SCHEMA_ROOT_DIR: "/app/config/schemas"
+  # Per-network deployment — mirrors the api configmap so worker
+  # validates rows against the same schema the api accepts.
+  AGGREGATOR_CONFIG_PATH: "/app/config/{{ .Values.global.aggregatorNetwork }}/aggregator.config.yaml"
+  SCHEMA_ROOT_DIR: "/app/config/{{ .Values.global.aggregatorNetwork }}/schemas"
+  SIGNALSTACK_ITEM_NETWORK: "{{ .Values.global.aggregatorNetwork }}"
   BULK_MAX_ROWS: "{{ .Values.bulk.maxRows }}"
   BULK_MAX_ROW_BYTES: "{{ .Values.bulk.maxRowBytes }}"
   LINK_METRICS_ROLLUP_INTERVAL_MS: "{{ .Values.cron.linkMetricsRollupIntervalMs }}"

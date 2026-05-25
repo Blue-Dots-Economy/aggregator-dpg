@@ -15,5 +15,10 @@ data:
   BULK_UPLOAD_MAX_BYTES: "{{ .Values.bulk.uploadMaxBytes }}"
   QR_DOWNLOAD_URL_TTL_SECONDS: "{{ .Values.bulk.qrDownloadUrlTtlSeconds }}"
   PUBLIC_LINK_BASE_URL: "{{ default (include "api.publicBaseUrl" .) .Values.publicLinkBaseUrl }}"
-  SCHEMA_ROOT_DIR: "/app/config/schemas"
+  # Per-network deployment: every path-dependent var keys off
+  # `global.aggregatorNetwork` so flipping it in values-<net>.yaml
+  # redirects api + worker at the matching config folder.
+  AGGREGATOR_CONFIG_PATH: "/app/config/{{ .Values.global.aggregatorNetwork }}/aggregator.config.yaml"
+  SCHEMA_ROOT_DIR: "/app/config/{{ .Values.global.aggregatorNetwork }}/schemas"
+  SIGNALSTACK_ITEM_NETWORK: "{{ .Values.global.aggregatorNetwork }}"
   S3_FORCE_PATH_STYLE: "{{ .Values.global.s3.forcePathStyle }}"
