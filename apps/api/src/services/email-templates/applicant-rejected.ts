@@ -3,7 +3,7 @@
  * verbatim if supplied by the admin.
  */
 
-import { escapeHtml, renderShell } from './shared.js';
+import { escapeHtml, getEmailBrand, renderShell } from './shared.js';
 
 export interface ApplicantRejectedVars {
   contactName: string;
@@ -16,7 +16,8 @@ export function renderApplicantRejected(v: ApplicantRejectedVars): {
   html: string;
   text: string;
 } {
-  const subject = 'Update on your Blue Dots aggregator application';
+  const brand = getEmailBrand();
+  const subject = `Update on your ${brand.short_name} aggregator application`;
   const reasonBlock = v.reason
     ? `<div style="margin:18px 0 0;padding:14px;background:#fef2f2;border:1px solid #fecaca;border-radius:10px;font-size:13.5px;color:#7f1d1d;line-height:1.55;">
          <strong>Reason:</strong> ${escapeHtml(v.reason)}
@@ -28,7 +29,7 @@ export function renderApplicantRejected(v: ApplicantRejectedVars): {
   Hi ${escapeHtml(v.contactName)},
 </h1>
 <p style="margin:0 0 14px;font-size:14px;color:#475069;line-height:1.55;">
-  Thanks for applying to onboard <strong>${escapeHtml(v.association)}</strong> as a Blue Dots aggregator.
+  Thanks for applying to onboard <strong>${escapeHtml(v.association)}</strong> as a ${escapeHtml(brand.short_name)} aggregator.
 </p>
 <p style="margin:0 0 14px;font-size:14px;color:#475069;line-height:1.55;">
   After review, we are unable to approve your application at this time.
@@ -40,7 +41,7 @@ ${reasonBlock}
 `;
   const text = `Hi ${v.contactName},
 
-Thanks for applying to onboard ${v.association} as a Blue Dots aggregator.
+Thanks for applying to onboard ${v.association} as a ${brand.short_name} aggregator.
 
 After review, we are unable to approve your application at this time.${
     v.reason

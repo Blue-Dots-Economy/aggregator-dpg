@@ -10,6 +10,7 @@ import { runMigrations } from './db/migrate.js';
 import { closeDb } from './db/client.js';
 import { getNetworkConfig } from './services/network-config.js';
 import { setApprovalBrand } from './views/approval-pages.js';
+import { setEmailBrand } from './services/email-templates/shared.js';
 
 async function main(): Promise<void> {
   if (config.RUN_MIGRATIONS_ON_BOOT) {
@@ -34,6 +35,11 @@ async function main(): Promise<void> {
       long_name: cfg.aggregator.brand.long_name,
       primary_color: cfg.aggregator.brand.primary_color ?? '#4f46e5',
       portal_url: process.env.PUBLIC_PORTAL_URL ?? 'http://localhost:3000',
+    });
+    setEmailBrand({
+      short_name: cfg.aggregator.brand.short_name,
+      long_name: cfg.aggregator.brand.long_name,
+      primary_color: cfg.aggregator.brand.primary_color ?? '#4f46e5',
     });
   } catch (err) {
     logger.warn({ err }, 'approval brand seed failed — falling back to default');

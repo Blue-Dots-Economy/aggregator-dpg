@@ -53,7 +53,9 @@ describe('applicant-approved template', () => {
       identifier: 'asha@trrain.org',
       signInUrl: 'http://localhost:3000/login',
     });
-    expect(out.subject).toBe('Your Blue Dots aggregator account is approved');
+    // Subject uses the active brand short_name; default is "Aggregator"
+    // when setEmailBrand hasn't been called in the test boot path.
+    expect(out.subject).toMatch(/^Your .+ aggregator account is approved$/);
     expect(out.html).toContain('Asha');
     expect(out.html).toContain('TRRAIN');
     expect(out.html).toContain('asha@trrain.org');
