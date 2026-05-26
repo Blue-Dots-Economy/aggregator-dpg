@@ -1,0 +1,54 @@
+{
+  "title": "Aggregator Web",
+  "uid": "aggregator-web",
+  "schemaVersion": 38,
+  "version": 1,
+  "tags": ["aggregator"],
+  "timezone": "browser",
+  "time": { "from": "now-1h", "to": "now" },
+  "refresh": "30s",
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Web request rate (5m)",
+      "targets": [
+        {
+          "expr": "sum by (route, method) (rate(aggregator_web_requests_total[5m]))",
+          "legendFormat": "{{method}} {{route}}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "p95 TTFB (ms)",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, route) (rate(aggregator_web_ttfb_ms_bucket[5m])))",
+          "legendFormat": "{{route}}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "p95 API proxy duration (ms)",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, route) (rate(aggregator_web_api_proxy_duration_ms_bucket[5m])))",
+          "legendFormat": "proxy {{route}}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 8, "w": 24, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }
+    }
+  ]
+}

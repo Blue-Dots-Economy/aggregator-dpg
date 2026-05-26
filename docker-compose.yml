@@ -510,6 +510,7 @@ services:
       - --config.file=/etc/prometheus/prometheus.yml
     volumes:
       - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infra/prometheus/rules:/etc/prometheus/rules:ro
     ports:
       - "9090:9090"
 
@@ -524,6 +525,7 @@ services:
       GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
     volumes:
       - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
 
 volumes:
   aggregator-postgres-data:

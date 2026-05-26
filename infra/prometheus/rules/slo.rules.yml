@@ -1,0 +1,27 @@
+groups:
+  - name: aggregator-slo
+    interval: 30s
+    rules:
+      - record: slo:api_availability:ratio_rate5m
+        expr: |
+          1 - (
+            sum(rate(aggregator_api_5xx_total[5m]))
+            /
+            sum(rate(aggregator_api_requests_total[5m]))
+          )
+
+      - alert: ApiAvailabilityFastBurn
+        expr: |
+          (1 - slo:api_availability:ratio_rate5m) > (14.4 * (1 - 0.995))
+        for: 5m
+        labels: { severity: page, slo: api_availability }
+        annotations:
+          summary: 'api availability fast burn (1h)'
+
+      - alert: ApiAvailabilitySlowBurn
+        expr: |
+          (1 - slo:api_availability:ratio_rate5m) > (6 * (1 - 0.995))
+        for: 30m
+        labels: { severity: ticket, slo: api_availability }
+        annotations:
+          summary: 'api availability slow burn (6h)'
