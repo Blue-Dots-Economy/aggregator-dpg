@@ -25,7 +25,6 @@ export interface ParticipantBase {
   avatar: string;
   profile: ParticipantProfile;
   applied: ParticipantStats;
-  pre: ParticipantStats;
   status: ParticipantStatus;
   last: string;
 }
