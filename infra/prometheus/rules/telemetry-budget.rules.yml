@@ -1,0 +1,32 @@
+groups:
+  - name: telemetry-budget
+    interval: 5m
+    rules:
+      # Approximate per-day GB volume. The OTel Collector exports gauges and counters
+      # for spans/logs sent. The exact metric names depend on the Collector's
+      # internal-telemetry config; the rules below assume the contrib distro's
+      # default metric names. If the live names differ, the alert evaluates to
+      # an empty vector and silently does not fire — adjust once verified.
+      - record: telemetry:traces_gb_per_day
+        expr: |
+          sum(rate(otelcol_exporter_sent_spans[5m])) * 86400 * 0.000001
+
+      - record: telemetry:logs_gb_per_day
+        expr: |
+          sum(rate(otelcol_exporter_sent_log_records[5m])) * 86400 * 0.000001
+
+      # Design §6.4: budget 50 GB/day traces, 100 GB/day logs.
+      # Alert at 80% (40 GB / 80 GB).
+      - alert: TelemetryTracesBudgetAt80
+        expr: telemetry:traces_gb_per_day > 40
+        for: 30m
+        labels: { severity: ticket, signal: traces }
+        annotations:
+          summary: 'Traces volume >= 80% of 50 GB/day budget'
+
+      - alert: TelemetryLogsBudgetAt80
+        expr: telemetry:logs_gb_per_day > 80
+        for: 30m
+        labels: { severity: ticket, signal: logs }
+        annotations:
+          summary: 'Logs volume >= 80% of 100 GB/day budget'
