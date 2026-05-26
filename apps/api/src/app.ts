@@ -9,11 +9,12 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyBaseLogger, type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import formbody from '@fastify/formbody';
 import sensible from '@fastify/sensible';
 import { config, corsOrigins } from './config.js';
+import { logger } from './logger.js';
 import { registerHealthRoutes } from './routes/health.js';
 import { registerAggregatorRegistrationRoutes } from './routes/aggregator-registrations.js';
 import { registerAggregatorApprovalRoutes } from './routes/aggregator-approvals.js';
@@ -32,34 +33,7 @@ const REQUEST_ID_HEADER = 'x-request-id';
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
-    logger: {
-      level: config.LOG_LEVEL,
-      base: { service: 'aggregator-api', env: config.NODE_ENV },
-      redact: {
-        paths: [
-          'req.headers.authorization',
-          'req.headers.cookie',
-          '*.password',
-          '*.token',
-          '*.access_token',
-          '*.refresh_token',
-        ],
-        censor: '[REDACTED]',
-      },
-      ...(config.NODE_ENV === 'development'
-        ? {
-            transport: {
-              target: 'pino-pretty',
-              options: {
-                colorize: true,
-                translateTime: 'SYS:HH:MM:ss.l',
-                singleLine: false,
-                ignore: 'pid,hostname,service,env',
-              },
-            },
-          }
-        : {}),
-    },
+    loggerInstance: logger as FastifyBaseLogger,
     // Trust only the upstream proxies named in `TRUST_PROXY`. Blanket
     // `true` would let any caller forge `X-Forwarded-For` and bypass the
     // public rate limiter, which is keyed off `req.ip`. The default trusts
