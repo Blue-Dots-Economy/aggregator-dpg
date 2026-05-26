@@ -29,85 +29,6 @@ function buildNav(brandShortName: string): NavItem[] {
   ];
 }
 
-interface ActivityItem {
-  who: string;
-  what: string;
-  when: string;
-  tone: 'green' | 'blue' | 'amber';
-  type: 'placed' | 'profile' | 'risk';
-}
-
-const ACTIVITY: ActivityItem[] = [
-  {
-    type: 'placed',
-    who: 'Priya S.',
-    what: 'placed at Reliance Retail',
-    when: '12m',
-    tone: 'green',
-  },
-  { type: 'profile', who: 'Arjun K.', what: 'completed profile', when: '34m', tone: 'blue' },
-  { type: 'risk', who: 'Meera J.', what: 'marked at-risk', when: '1h', tone: 'amber' },
-];
-
-const TONES: Record<ActivityItem['tone'], { bg: string; dot: string }> = {
-  green: { bg: 'rgba(16,185,129,0.12)', dot: '#10B981' },
-  blue: { bg: 'rgba(37,99,235,0.12)', dot: '#2563EB' },
-  amber: { bg: 'rgba(245,158,11,0.14)', dot: '#F59E0B' },
-};
-
-function ActivityIconShape({ type }: { type: ActivityItem['type'] }) {
-  if (type === 'placed') return <path d="M20 6 9 17l-5-5" />;
-  if (type === 'profile')
-    return (
-      <>
-        <circle cx="12" cy="8" r="3.5" />
-        <path d="M5 21a7 7 0 0 1 14 0" />
-      </>
-    );
-  return (
-    <>
-      <path d="M12 9v4" />
-      <path d="M12 17h.01" />
-      <path d="M10.3 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-    </>
-  );
-}
-
-function ActivityRow({ who, what, when, tone, type }: ActivityItem) {
-  const t = TONES[tone];
-  return (
-    <button
-      type="button"
-      className="group flex items-start gap-2 px-3 py-1.5 rounded-[8px] text-left transition-colors hover:bg-ink-50/70"
-    >
-      <div
-        className="w-5 h-5 rounded-md flex items-center justify-center shrink-0 mt-0.5"
-        style={{ background: t.bg }}
-      >
-        <svg
-          width="10"
-          height="10"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke={t.dot}
-          strokeWidth="2.6"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <ActivityIconShape type={type} />
-        </svg>
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="text-[11.5px] text-ink-700 leading-tight truncate">
-          <span className="font-semibold text-ink-900">{who}</span>{' '}
-          <span className="text-ink-500">{what}</span>
-        </div>
-        <div className="text-[10px] text-ink-400 mt-0.5">{when} ago</div>
-      </div>
-    </button>
-  );
-}
-
 export function Sidebar() {
   const pathname = usePathname();
   const { user, signOut } = useAuth();
@@ -184,25 +105,6 @@ export function Sidebar() {
             );
           })}
         </nav>
-      </div>
-
-      <div className="px-3 mt-5 min-h-0 flex flex-col overflow-hidden">
-        <div className="px-3 pt-2 pb-1.5 flex items-center justify-between">
-          <div className="text-[10.5px] uppercase tracking-[0.12em] font-semibold text-ink-300">
-            Recent activity
-          </div>
-          <button
-            type="button"
-            className="text-[10.5px] font-semibold text-primary-600 hover:underline"
-          >
-            View all
-          </button>
-        </div>
-        <div className="flex flex-col">
-          {ACTIVITY.map((a, i) => (
-            <ActivityRow key={i} {...a} />
-          ))}
-        </div>
       </div>
 
       <div className="mt-auto p-3 shrink-0">
