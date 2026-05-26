@@ -1,0 +1,92 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+  attributes/redact:
+    actions:
+      - key: phone
+        action: delete
+      - key: email
+        action: delete
+      - key: user_message
+        action: delete
+      - key: password
+        action: delete
+  tail_sampling:
+    decision_wait: 10s
+    num_traces: 50000
+    expected_new_traces_per_sec: 100
+    policies:
+      - name: errors
+        type: status_code
+        status_code: { status_codes: [ERROR] }
+      - name: slow
+        type: latency
+        latency: { threshold_ms: 2000 }
+      - name: flagged-routes
+        type: string_attribute
+        string_attribute:
+          key: http.route
+          values:
+            - /v1/onboard/bulk-uploads
+            - /v1/onboard/bulk-uploads/.*
+            - /v1/onboard/links
+            - /v1/onboard/links/.*
+            - /v1/onboard/links/public/.*
+            - /v1/registration-requests
+            - /v1/registration-requests/.*
+            - /v1/aggregators/approvals/.*
+            - /v1/onboard/.*
+          enabled_regex_matching: true
+      - name: probabilistic
+        type: probabilistic
+        probabilistic: { sampling_percentage: 10 }
+      - name: never-health
+        type: string_attribute
+        string_attribute:
+          key: http.route
+          values: ['/v1/health', '/health', '/ready']
+          invert_match: true
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+
+exporters:
+  otlp/jaeger:
+    endpoint: jaeger:4317
+    tls:
+      insecure: true
+  prometheus:
+    endpoint: '0.0.0.0:8889'
+    namespace: aggregator
+  loki:
+    endpoint: http://loki:3100/loki/api/v1/push
+
+service:
+  extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, attributes/redact, tail_sampling, batch]
+      exporters: [otlp/jaeger]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [prometheus]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, attributes/redact, batch]
+      exporters: [loki]
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133

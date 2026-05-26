@@ -3,8 +3,8 @@ name: aggregator-dpg
 description: Blue Dots Aggregator Portal — full stack umbrella chart (web BFF, api, worker, Keycloak, Postgres, Redis).
 type: application
 version: 0.1.0
-appVersion: "0.1.0"
-kubeVersion: ">=1.24.0-0"
+appVersion: '0.1.0'
+kubeVersion: '>=1.24.0-0'
 keywords:
   - aggregator
   - bluedots
@@ -19,12 +19,12 @@ maintainers:
 
 dependencies:
   - name: postgresql
-    version: "15.5.x"
+    version: '15.5.x'
     repository: https://charts.bitnami.com/bitnami
     condition: postgresql.enabled
 
   - name: redis
-    version: "19.6.x"
+    version: '19.6.x'
     repository: https://charts.bitnami.com/bitnami
     condition: redis.enabled
 
@@ -43,3 +43,8 @@ dependencies:
   - name: keycloak
     version: 0.1.0
     repository: file://charts/keycloak
+
+  - name: otel-collector
+    version: 0.1.0
+    repository: file://charts/otel-collector
+    condition: otel-collector.enabled
