@@ -290,9 +290,15 @@ importers:
       '@aggregator-dpg/signalstack-writer':
         specifier: workspace:*
         version: link:../../packages/signalstack-writer
+      '@aggregator-dpg/telemetry':
+        specifier: workspace:*
+        version: link:../../packages/telemetry
       '@aws-sdk/client-s3':
         specifier: ^3.1045.0
         version: 3.1045.0
+      '@opentelemetry/api':
+        specifier: ^1.9.0
+        version: 1.9.1
       bullmq:
         specifier: ^5.76.6
         version: 5.76.6
