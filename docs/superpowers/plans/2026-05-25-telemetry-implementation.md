@@ -274,7 +274,8 @@ docs/telemetry-runbook.md               # NEW — kill switch, BSP env vars, on-
     "outDir": "dist",
     "declaration": true,
     "declarationMap": true,
-    "composite": true
+    "composite": true,
+    "types": ["node"]
   },
   "include": ["src"],
   "exclude": ["src/__tests__", "dist"]
@@ -554,13 +555,13 @@ git commit -m "feat(telemetry): add resource builder with service.instance.id"
 
 ```ts
 import { describe, expect, it } from 'vitest';
-import { propagation } from '@opentelemetry/api';
+import { propagation, ROOT_CONTEXT } from '@opentelemetry/api';
 import { configurePropagator } from '../propagator.js';
 
 describe('configurePropagator', () => {
   it('installs a propagator that extracts traceparent and baggage', () => {
     configurePropagator();
-    const ctx = propagation.extract({} as never, {
+    const ctx = propagation.extract(ROOT_CONTEXT, {
       traceparent: '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01',
       baggage: 'aggregator_id=agg-1',
     });
@@ -637,7 +638,7 @@ describe('HISTOGRAM_VIEWS', () => {
 - [ ] **Step 3: Implement**
 
 ```ts
-import { Aggregation, View } from '@opentelemetry/sdk-metrics';
+import { ExplicitBucketHistogramAggregation, View } from '@opentelemetry/sdk-metrics';
 
 interface HistogramFamily {
   instrumentName: string;
@@ -676,7 +677,7 @@ export function buildViews(): View[] {
     (f) =>
       new View({
         instrumentName: f.instrumentName,
-        aggregation: Aggregation.ExplicitBucketHistogram(f.boundaries, true),
+        aggregation: new ExplicitBucketHistogramAggregation(f.boundaries, true),
       }),
   );
 }
@@ -892,25 +893,43 @@ git commit -m "feat(telemetry): bootstrap with kill switch, BSP env vars, gracef
 
 - [ ] **Step 1: Failing test**
 
+The transport reads `trace_id`/`span_id` from the pino record (the mixin in
+Task 0.8 puts them there at log time on the main thread). It does NOT read
+active OTel context, because pino transports may run in a worker thread
+where the main-thread AsyncLocalStorage is unreachable.
+
 ```ts
 import { describe, expect, it, vi } from 'vitest';
-import { trace, context, ROOT_CONTEXT } from '@opentelemetry/api';
 import { handleRecord } from '../pino-otel-transport.js';
 
 describe('pino-otel-transport', () => {
-  it('emits a log record with trace_id/span_id when a span is active', () => {
+  it('emits a log record with body, attributes, and trace ids from the record', () => {
     const emit = vi.fn();
-    const fakeLogger = { emit };
-    const tracer = trace.getTracer('test');
-    const span = tracer.startSpan('t');
-    context.with(trace.setSpan(ROOT_CONTEXT, span), () => {
-      handleRecord({ level: 30, msg: 'hello', time: 1, foo: 'bar' }, fakeLogger as never);
-    });
-    span.end();
+    handleRecord(
+      {
+        level: 30,
+        msg: 'hello',
+        time: 1,
+        foo: 'bar',
+        trace_id: '0af7651916cd43dd8448eb211c80319c',
+        span_id: 'b7ad6b7169203331',
+      },
+      { emit } as never,
+    );
     expect(emit).toHaveBeenCalledTimes(1);
     const call = emit.mock.calls[0][0];
     expect(call.body).toBe('hello');
     expect(call.attributes.foo).toBe('bar');
+    expect(call.attributes['trace_id']).toBe('0af7651916cd43dd8448eb211c80319c');
+    expect(call.attributes['span_id']).toBe('b7ad6b7169203331');
+  });
+
+  it('emits a record without trace ids when the mixin did not add them', () => {
+    const emit = vi.fn();
+    handleRecord({ level: 30, msg: 'no trace', time: 1 }, { emit } as never);
+    expect(emit).toHaveBeenCalledTimes(1);
+    const call = emit.mock.calls[0][0];
+    expect(call.attributes['trace_id']).toBeUndefined();
   });
 
   it('redacts attributes listed in piiFieldsExcluded', () => {
@@ -930,17 +949,15 @@ describe('pino-otel-transport', () => {
 /**
  * pino transport that forwards records to the active OTel LoggerProvider.
  *
- * Application code logs via pino as usual. This transport runs in pino's
- * worker thread (or in-process when configured) and emits each record to
- * OTel's LoggerProvider so the Collector receives logs over OTLP.
- *
- * trace_id / span_id are pulled from the active OTel context at the
- * time of the emit call so logs deep-link to the originating trace.
+ * Application code logs via pino as usual. This transport may run in a
+ * pino worker thread, so it cannot read the main-thread OTel context.
+ * `trace_id` / `span_id` are injected into each record by a pino mixin
+ * (see `logger.ts`) at log time on the main thread; this transport
+ * simply forwards them to OTel logs.
  */
 
 import build from 'pino-abstract-transport';
 import { logs, SeverityNumber, type Logger as OtelLogger } from '@opentelemetry/api-logs';
-import { trace, context } from '@opentelemetry/api';
 
 const PINO_TO_OTEL_SEVERITY: Record<number, SeverityNumber> = {
   10: SeverityNumber.TRACE,
@@ -969,16 +986,12 @@ export function handleRecord(
     attrs[k] = piiExcluded.includes(k) ? '[REDACTED]' : v;
   }
 
-  const span = trace.getSpan(context.active());
-  const spanCtx = span?.spanContext();
-
   logger.emit({
     severityNumber: PINO_TO_OTEL_SEVERITY[level] ?? SeverityNumber.INFO,
     severityText: String(level),
     body: msg,
     timestamp: time,
     attributes: attrs,
-    context: spanCtx ? context.active() : undefined,
   });
 }
 
@@ -1156,17 +1169,24 @@ git commit -m "feat(telemetry): shared pino singleton with OTLP transport target
 ```ts
 import { describe, expect, it } from 'vitest';
 import { context, propagation } from '@opentelemetry/api';
-import { setAggregatorBaggage, getAggregatorId } from '../baggage.js';
+import { withAggregatorBaggage, withRequestIdBaggage, getAggregatorId } from '../baggage.js';
 
 describe('aggregator baggage helpers', () => {
-  it('round-trips aggregator_id through baggage', () => {
-    setAggregatorBaggage('agg-42');
-    expect(getAggregatorId()).toBe('agg-42');
+  it('round-trips aggregator_id through baggage inside the callback', async () => {
+    await withAggregatorBaggage('agg-42', () => {
+      expect(getAggregatorId()).toBe('agg-42');
+    });
+    expect(getAggregatorId()).toBeUndefined();
   });
 
   it('returns undefined when unset', () => {
-    context.with(propagation.setBaggage(context.active(), propagation.createBaggage({})), () => {
-      expect(getAggregatorId()).toBeUndefined();
+    expect(getAggregatorId()).toBeUndefined();
+  });
+
+  it('withRequestIdBaggage stamps x_request_id inside the callback', async () => {
+    await withRequestIdBaggage('req-123', () => {
+      const baggage = propagation.getBaggage(context.active());
+      expect(baggage?.getEntry('x_request_id')?.value).toBe('req-123');
     });
   });
 });
@@ -1177,37 +1197,55 @@ describe('aggregator baggage helpers', () => {
 - [ ] **Step 3: Implement**
 
 ```ts
+/**
+ * Aggregator / request-id Baggage helpers.
+ *
+ * `propagation.setBaggage(ctx, b)` returns a NEW context — it does not
+ * mutate the active context. To make the new baggage visible to OTel's
+ * propagator on the outbound side, the helper must enter the new context
+ * for the duration of a callback via `context.with`. The pattern is
+ * therefore wrapper-based.
+ *
+ * Each helper also stamps the value onto the currently active span as an
+ * attribute (which is guaranteed visible in this trace regardless of
+ * baggage propagation).
+ */
+
 import { context, propagation, trace } from '@opentelemetry/api';
 
 const AGG_KEY = 'aggregator_id';
 const REQ_ID_KEY = 'x_request_id';
 
 /**
- * Stamps `aggregator_id` onto the active span (guaranteed visible in this
- * trace) and best-effort updates the active baggage entry for downstream
- * W3C Baggage propagation through outbound HTTP / BullMQ.
+ * Runs `fn` inside a context where `aggregator_id` is set as a Baggage
+ * entry, so downstream HTTP / BullMQ outbound calls carry it via the
+ * W3C Baggage propagator. Also stamps it on the active span.
  */
-export function setAggregatorBaggage(aggregatorId: string): void {
+export async function withAggregatorBaggage<T>(
+  aggregatorId: string,
+  fn: () => Promise<T> | T,
+): Promise<T> {
   const span = trace.getSpan(context.active());
   span?.setAttribute('aggregator_id', aggregatorId);
-
   const baggage = propagation.getBaggage(context.active()) ?? propagation.createBaggage();
   const next = baggage.setEntry(AGG_KEY, { value: aggregatorId });
-  propagation.setBaggage(context.active(), next);
+  const ctx = propagation.setBaggage(context.active(), next);
+  return context.with(ctx, fn);
 }
 
 /**
- * Same pattern for the Fastify request id, so it can correlate with the
- * existing reqId log label and any downstream service can read it from
- * baggage on the wire.
+ * Same pattern for the Fastify request id.
  */
-export function setRequestIdBaggage(requestId: string): void {
+export async function withRequestIdBaggage<T>(
+  requestId: string,
+  fn: () => Promise<T> | T,
+): Promise<T> {
   const span = trace.getSpan(context.active());
   span?.setAttribute('http.request_id', requestId);
-
   const baggage = propagation.getBaggage(context.active()) ?? propagation.createBaggage();
   const next = baggage.setEntry(REQ_ID_KEY, { value: requestId });
-  propagation.setBaggage(context.active(), next);
+  const ctx = propagation.setBaggage(context.active(), next);
+  return context.with(ctx, fn);
 }
 
 export function getAggregatorId(): string | undefined {
@@ -1734,7 +1772,7 @@ git commit -m "feat(telemetry): TelemetryFake + buildSpanFixture for cross-packa
 export * from './interface.js';
 export { bootTelemetry, shutdownTelemetry, isTelemetryEnabled } from './bootstrap.js';
 export { getLogger, resetLoggerForTesting } from './logger.js';
-export { setAggregatorBaggage, setRequestIdBaggage, getAggregatorId } from './baggage.js';
+export { withAggregatorBaggage, withRequestIdBaggage, getAggregatorId } from './baggage.js';
 export { addJobWithTrace, wrapWorker, extractJobContext } from './bullmq.js';
 export { registerHttpInstrumentations } from './http.js';
 export { emitTurn, emitSignal, configureOutcomes } from './outcomes.js';
@@ -2113,31 +2151,39 @@ git commit -m "feat(api): boot telemetry first, flush on SIGTERM/SIGINT"
 Add at the top of every file listed above:
 
 ```ts
-import { setAggregatorBaggage } from '@aggregator-dpg/telemetry';
+import { withAggregatorBaggage } from '@aggregator-dpg/telemetry';
 ```
 
-- [ ] **Step 2: Insert the call after every `requireAuth(req)`**
+- [ ] **Step 2: Wrap each route handler body after `requireAuth(req)`**
 
-Pattern — for every line matching `const auth = await requireAuth(req);` add the next line:
+`propagation.setBaggage(...)` returns a new immutable context, so the only OTel-correct way to make `aggregator_id` visible to outbound HTTP / BullMQ via the W3C Baggage propagator is to run the rest of the handler inside `context.with(newCtx, fn)`. The `withAggregatorBaggage(id, fn)` helper does this.
+
+Pattern — for every handler matching `const auth = await requireAuth(req); ...rest...` wrap the `...rest...` portion in `withAggregatorBaggage`:
 
 ```ts
 const auth = await requireAuth(req);
-setAggregatorBaggage(auth.aggregatorId);
+return withAggregatorBaggage(auth.aggregatorId, async () => {
+  // ... the rest of the existing handler body, unchanged ...
+});
 ```
 
-Use this script to count occurrences first so you know how many edits to make:
+Identify the handlers first:
 
 ```bash
 grep -rn "const auth = await requireAuth(req)" apps/api/src/routes | wc -l
 ```
 
-- [ ] **Step 3: Verify each edit by re-running grep**
+For each match, wrap from the line after `requireAuth` to the end of the handler function (excluding any error fall-through that runs outside the handler body).
+
+- [ ] **Step 3: Verify each edit**
+
+After wrapping, the post-auth code in each handler should be inside the `withAggregatorBaggage` callback. Smoke check:
 
 ```bash
-grep -A1 "const auth = await requireAuth(req)" apps/api/src/routes/bulk-uploads.ts | head -20
+grep -A2 "withAggregatorBaggage" apps/api/src/routes/bulk-uploads.ts | head -20
 ```
 
-Every match should be followed by `setAggregatorBaggage(auth.aggregatorId);`.
+Every match should be followed by a callback opening.
 
 - [ ] **Step 4: Typecheck + test**
 
@@ -2161,29 +2207,15 @@ git commit -m "feat(api): set aggregator_id baggage after requireAuth in all rou
 
 - Modify: `apps/api/src/app.ts`
 
-- [ ] **Step 1: Import the instruments and baggage helper**
+- [ ] **Step 1: Import the instruments**
 
 Near the top of `app.ts`:
 
 ```ts
 import { apiRequests, apiLatencyMs, api5xx } from './telemetry.js';
-import { setRequestIdBaggage } from '@aggregator-dpg/telemetry';
 ```
 
-- [ ] **Step 1b: Stamp `x-request-id` into Baggage on every request**
-
-Update the existing `onRequest` hook so it also pushes the Fastify request id into Baggage (design §5.1 — Baggage entry retained so logs and downstream services correlate by the same id):
-
-```ts
-app.addHook('onRequest', async (req, reply) => {
-  reply.header(REQUEST_ID_HEADER, req.id);
-  setRequestIdBaggage(req.id);
-  req.log.info(
-    { event: 'request.start', method: req.method, url: req.url },
-    `→ ${req.method} ${req.url}`,
-  );
-});
-```
+> **Note on `x-request-id` and Baggage.** Design §5.1 calls for `x-request-id` to be retained as a Baggage entry. Implementing this correctly through a Fastify hook would require wrapping the entire request lifecycle in `context.with` (Fastify hooks don't natively wrap downstream execution). For now, log correlation via `req.id` is already handled by Fastify's built-in `reqId` log label, and span correlation is handled by the OTel HTTP auto-instrumentation which stamps `http.request.id` automatically. Cross-service baggage propagation of the request id is a deferred follow-on.
 
 - [ ] **Step 2: Update the `onResponse` hook to record metrics**
 
@@ -3564,7 +3596,8 @@ git commit --allow-empty -m "chore(telemetry): all three blocks live in prod (Ph
     "outDir": "dist",
     "declaration": true,
     "declarationMap": true,
-    "composite": true
+    "composite": true,
+    "types": ["node"]
   },
   "include": ["src"],
   "exclude": ["src/__tests__", "dist"]
