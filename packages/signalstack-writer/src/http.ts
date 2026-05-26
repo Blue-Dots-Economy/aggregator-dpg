@@ -463,6 +463,13 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
           }),
         );
       }
+      if (!payload.metadata || typeof payload.metadata !== 'object') {
+        return err(
+          new UpstreamError('Signalstack dashboard payload missing metadata', {
+            code: 'SIGNALSTACK_BAD_RESPONSE',
+          }),
+        );
+      }
 
       const byDomain = payload.by_domain as Record<string, unknown>;
       for (const [domainId, sliceRaw] of Object.entries(byDomain)) {
