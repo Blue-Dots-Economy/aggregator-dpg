@@ -46,7 +46,7 @@ ARG HERO_TITLE_TAIL=portal.
 ARG HERO_SUBTITLE=Sign in to manage participants, registrations, and onboarding for your network.
 # brand.json-driven values (PR #355). Slug + font stack get baked
 # into theme.properties so the runtime never falls back to default.
-ARG BRAND_LOGO_SLUG=blue-dot
+ARG BRAND_LOGO_SLUG=purple-dot
 ARG BRAND_FONT_SANS=Inter, system-ui, sans-serif
 ARG BRAND_FONT_HEADING=Plus Jakarta Sans, system-ui, sans-serif
 ARG BRAND_FONT_BODY=Inter, system-ui, sans-serif
