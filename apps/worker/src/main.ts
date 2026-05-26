@@ -1,11 +1,15 @@
 /**
  * Worker entrypoint.
  *
- * Wires BullMQ workers for the onboarding pipeline. At slice 9 this
- * exposes only the File Processor (`bulk-file-process` queue). Subsequent
- * slices add the Row Processor, Finaliser, and Metrics Aggregator workers
- * alongside.
+ * Boots telemetry FIRST so OTel can patch modules used by the BullMQ
+ * Workers we register below. Wires BullMQ workers for the onboarding
+ * pipeline.
+ *
+ * @module apps/worker/main
  */
+
+import { bootWorkerTelemetry, shutdownWorkerTelemetry, jobDurationMs } from './telemetry.js';
+await bootWorkerTelemetry();
 
 import { Queue, Worker } from 'bullmq';
 import {
@@ -17,6 +21,7 @@ import {
   type CronWatchdogJob,
   type LinkMetricsRollupJob,
 } from '@aggregator-dpg/queue';
+import { wrapWorker } from '@aggregator-dpg/telemetry';
 import { config } from './config.js';
 import { logger } from './logger.js';
 import { closeDb } from './db.js';
@@ -33,7 +38,16 @@ async function main(): Promise<void> {
 
   const fileWorker = new Worker<BulkFileProcessJob>(
     QueueName.BulkFileProcess,
-    async (job) => processBulkFile(job.data),
+    async (job) => {
+      const start = Date.now();
+      try {
+        return await wrapWorker(QueueName.BulkFileProcess, job.data, () =>
+          processBulkFile(job.data),
+        );
+      } finally {
+        jobDurationMs.record(Date.now() - start, { queue: QueueName.BulkFileProcess });
+      }
+    },
     {
       connection,
       concurrency: config.BULK_FILE_PROCESS_CONCURRENCY,
@@ -42,7 +56,14 @@ async function main(): Promise<void> {
 
   const rowWorker = new Worker<BulkRowProcessJob>(
     QueueName.BulkRowProcess,
-    async (job) => processBulkRow(job.data),
+    async (job) => {
+      const start = Date.now();
+      try {
+        return await wrapWorker(QueueName.BulkRowProcess, job.data, () => processBulkRow(job.data));
+      } finally {
+        jobDurationMs.record(Date.now() - start, { queue: QueueName.BulkRowProcess });
+      }
+    },
     {
       connection,
       concurrency: config.BULK_ROW_PROCESS_CONCURRENCY,
@@ -51,7 +72,14 @@ async function main(): Promise<void> {
 
   const finaliseWorker = new Worker<BulkFinaliseJob>(
     QueueName.BulkFinalise,
-    async (job) => finaliseBulk(job.data),
+    async (job) => {
+      const start = Date.now();
+      try {
+        return await wrapWorker(QueueName.BulkFinalise, job.data, () => finaliseBulk(job.data));
+      } finally {
+        jobDurationMs.record(Date.now() - start, { queue: QueueName.BulkFinalise });
+      }
+    },
     {
       connection,
       concurrency: config.BULK_FINALISE_CONCURRENCY,
@@ -60,7 +88,16 @@ async function main(): Promise<void> {
 
   const linkMetricsWorker = new Worker<LinkMetricsRollupJob>(
     QueueName.LinkMetricsRollup,
-    async (job) => rollupLinkMetrics(job.data),
+    async (job) => {
+      const start = Date.now();
+      try {
+        return await wrapWorker(QueueName.LinkMetricsRollup, job.data, () =>
+          rollupLinkMetrics(job.data),
+        );
+      } finally {
+        jobDurationMs.record(Date.now() - start, { queue: QueueName.LinkMetricsRollup });
+      }
+    },
     {
       connection,
       concurrency: 1,
@@ -69,7 +106,14 @@ async function main(): Promise<void> {
 
   const watchdogWorker = new Worker<CronWatchdogJob>(
     QueueName.CronWatchdog,
-    async () => runWatchdog(),
+    async (job) => {
+      const start = Date.now();
+      try {
+        return await wrapWorker(QueueName.CronWatchdog, job.data, () => runWatchdog());
+      } finally {
+        jobDurationMs.record(Date.now() - start, { queue: QueueName.CronWatchdog });
+      }
+    },
     {
       connection,
       concurrency: 1,
@@ -163,6 +207,7 @@ async function main(): Promise<void> {
     ]);
     await Promise.all([linkMetricsQueue.close(), watchdogQueue.close()]);
     await closeQueues();
+    await shutdownWorkerTelemetry();
     await closeRedis();
     await closeDb();
     process.exit(0);
