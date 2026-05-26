@@ -1,8 +1,13 @@
 /**
- * Process entrypoint. Builds the Fastify app and starts listening.
+ * Process entrypoint. Boots telemetry FIRST so OTel can patch modules
+ * before any other import side effects. Then builds the Fastify app
+ * and starts listening.
  */
 
 import './env.js';
+import { bootApiTelemetry, shutdownApiTelemetry } from './telemetry.js';
+await bootApiTelemetry();
+
 import { buildApp } from './app.js';
 import { config } from './config.js';
 import { logger } from './logger.js';
@@ -49,6 +54,7 @@ async function main(): Promise<void> {
     logger.info({ signal }, 'shutting down');
     try {
       await app.close();
+      await shutdownApiTelemetry();
       await closeDb();
       process.exit(0);
     } catch (err) {
