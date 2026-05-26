@@ -271,6 +271,14 @@ function buildStatusOptions(byStatus: Record<string, number> | undefined): Statu
   return opts;
 }
 
+/**
+ * Looks up a bucket label from the config-sourced map, falling back to
+ * `DEFAULT_BUCKET_LABELS` when the key is absent. Always returns a string.
+ */
+function getBucketLabel(labels: Record<string, string>, key: string): string {
+  return labels[key] ?? DEFAULT_BUCKET_LABELS[key] ?? key;
+}
+
 interface ParticipantTableProps<R extends ParticipantBase> {
   kind: RowKind;
   rows: R[];
@@ -296,6 +304,11 @@ interface ParticipantTableProps<R extends ParticipantBase> {
    * actually has for this aggregator.
    */
   statusOptions?: StatusOption[] | undefined;
+  /**
+   * Action-status bucket labels sourced from `dashboardBuckets.by_action_status`
+   * in the aggregator config. Falls back to `DEFAULT_BUCKET_LABELS` when absent.
+   */
+  bucketLabels?: Record<string, string> | undefined;
 }
 
 function ParticipantTable<R extends ParticipantBase>({
@@ -308,6 +321,7 @@ function ParticipantTable<R extends ParticipantBase>({
   statusFilter = 'all',
   onStatusFilterChange,
   statusOptions,
+  bucketLabels = DEFAULT_BUCKET_LABELS,
 }: ParticipantTableProps<R>) {
   const options: StatusOption[] = statusOptions ?? [{ value: 'all', label: 'All statuses' }];
   const searchId = `bd-search-${kind}`;
@@ -544,20 +558,20 @@ function ParticipantTable<R extends ParticipantBase>({
                         {
                           v: r.applied.shortlisted ?? 0,
                           color: '#10B981',
-                          label: 'Shortlisted',
-                          short: 'Shortlisted',
+                          label: getBucketLabel(bucketLabels, 'accept'),
+                          short: getBucketLabel(bucketLabels, 'accept'),
                         },
                         {
                           v: r.applied.rejected,
                           color: '#EF4444',
-                          label: 'Rejected',
-                          short: 'Rejected',
+                          label: getBucketLabel(bucketLabels, 'reject'),
+                          short: getBucketLabel(bucketLabels, 'reject'),
                         },
                         {
                           v: r.applied.pending,
                           color: '#F59E0B',
-                          label: 'Pending',
-                          short: 'Pending',
+                          label: getBucketLabel(bucketLabels, 'create'),
+                          short: getBucketLabel(bucketLabels, 'create'),
                         },
                       ]}
                     />
@@ -569,20 +583,20 @@ function ParticipantTable<R extends ParticipantBase>({
                         {
                           v: r.pre.accepted ?? 0,
                           color: '#6366F1',
-                          label: 'Accepted',
-                          short: 'Accepted',
+                          label: getBucketLabel(bucketLabels, 'accept'),
+                          short: getBucketLabel(bucketLabels, 'accept'),
                         },
                         {
                           v: r.pre.rejected,
                           color: '#EF4444',
-                          label: 'Rejected',
-                          short: 'Rejected',
+                          label: getBucketLabel(bucketLabels, 'reject'),
+                          short: getBucketLabel(bucketLabels, 'reject'),
                         },
                         {
                           v: r.pre.pending,
                           color: '#F59E0B',
-                          label: 'Pending',
-                          short: 'Pending',
+                          label: getBucketLabel(bucketLabels, 'create'),
+                          short: getBucketLabel(bucketLabels, 'create'),
                         },
                       ]}
                     />
@@ -782,10 +796,9 @@ function SeekersTab() {
   const seekerCfg = cfg?.domains?.find((d) => d.id === 'seeker');
   const seekerTileLabels = seekerCfg?.dashboardTiles ?? {};
   const seekerPlural = seekerCfg?.plural_label ?? 'Seekers';
-  // by_action_status bucket labels — used by the breakdown chips rendered in
-  // the participant table's action-count columns. Prefixed _ until Task 11
-  // wires the chip component.
-  const _bucketLabels = cfg?.dashboardBuckets?.by_action_status ?? DEFAULT_BUCKET_LABELS;
+  // by_action_status bucket labels — wired to the funnel cells in the
+  // participant table's action-count columns.
+  const bucketLabels = cfg?.dashboardBuckets?.by_action_status ?? DEFAULT_BUCKET_LABELS;
   const statusLabels = cfg?.dashboardBuckets?.by_status ?? DEFAULT_STATUS_LABELS;
   const total = rollup?.total_items;
   const byStatus = rollup?.by_status ?? {};
@@ -819,10 +832,12 @@ function SeekersTab() {
   const queryClient = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
 
   async function handleRefresh() {
     if (refreshing) return;
     setRefreshing(true);
+    setRefreshError(null);
     try {
       await dashboardService.dashboard({
         domain: 'seeker',
@@ -835,6 +850,9 @@ function SeekersTab() {
         queryKey: ['dashboard', 'dashboard', 'seeker'],
       });
       setLastRefreshedAt(Date.now());
+    } catch (err) {
+      console.error('Dashboard refresh failed', err);
+      setRefreshError(err instanceof Error ? err.message : 'Refresh failed');
     } finally {
       setRefreshing(false);
     }
@@ -863,7 +881,9 @@ function SeekersTab() {
           >
             {refreshing ? 'Refreshing…' : 'Refresh'}
           </Button>
-          {lastRefreshedAt !== null && Date.now() - lastRefreshedAt < 5000 ? (
+          {refreshError ? (
+            <span className="ml-2 text-xs text-red-600">Refresh failed: {refreshError}</span>
+          ) : lastRefreshedAt !== null && Date.now() - lastRefreshedAt < 5000 ? (
             <span className="text-xs text-ink-400">Refreshed just now</span>
           ) : null}
         </div>
@@ -928,6 +948,7 @@ function SeekersTab() {
           statusFilter={statusFilter}
           onStatusFilterChange={handleStatusFilterChange}
           statusOptions={statusOptions}
+          bucketLabels={bucketLabels}
         />
       )}
     </div>
@@ -1067,8 +1088,9 @@ function ProvidersTab() {
   const providerCfg = cfg?.domains?.find((d) => d.id === 'provider');
   const providerTileLabels = providerCfg?.dashboardTiles ?? {};
   const providerPlural = providerCfg?.plural_label ?? 'Providers';
-  // by_action_status bucket labels — prefixed _ until the chip component is wired.
-  const _bucketLabels = cfg?.dashboardBuckets?.by_action_status ?? DEFAULT_BUCKET_LABELS;
+  // by_action_status bucket labels — wired to the funnel cells in the
+  // participant table's action-count columns.
+  const bucketLabels = cfg?.dashboardBuckets?.by_action_status ?? DEFAULT_BUCKET_LABELS;
   const statusLabels = cfg?.dashboardBuckets?.by_status ?? DEFAULT_STATUS_LABELS;
   const slice = dashboard?.by_domain.provider;
   const rollup = slice?.rollup;
@@ -1097,10 +1119,12 @@ function ProvidersTab() {
   const queryClient = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
 
   async function handleRefresh() {
     if (refreshing) return;
     setRefreshing(true);
+    setRefreshError(null);
     try {
       await dashboardService.dashboard({
         domain: 'provider',
@@ -1113,6 +1137,9 @@ function ProvidersTab() {
         queryKey: ['dashboard', 'dashboard', 'provider'],
       });
       setLastRefreshedAt(Date.now());
+    } catch (err) {
+      console.error('Dashboard refresh failed', err);
+      setRefreshError(err instanceof Error ? err.message : 'Refresh failed');
     } finally {
       setRefreshing(false);
     }
@@ -1141,7 +1168,9 @@ function ProvidersTab() {
           >
             {refreshing ? 'Refreshing…' : 'Refresh'}
           </Button>
-          {lastRefreshedAt !== null && Date.now() - lastRefreshedAt < 5000 ? (
+          {refreshError ? (
+            <span className="ml-2 text-xs text-red-600">Refresh failed: {refreshError}</span>
+          ) : lastRefreshedAt !== null && Date.now() - lastRefreshedAt < 5000 ? (
             <span className="text-xs text-ink-400">Refreshed just now</span>
           ) : null}
         </div>
@@ -1200,6 +1229,7 @@ function ProvidersTab() {
           statusFilter={statusFilter}
           onStatusFilterChange={handleStatusFilterChange}
           statusOptions={statusOptions}
+          bucketLabels={bucketLabels}
         />
       )}
     </div>
