@@ -56,7 +56,7 @@ export function Sidebar() {
   // back to the network's first declared domain while the profile is
   // still resolving.
   const activeDomain = profileType ?? fallbackDomain;
-  const participantsBadge = dashboard?.by_domain[activeDomain]?.rollup.items_total;
+  const participantsBadge = dashboard?.by_domain[activeDomain]?.rollup.total_items;
   const nav: NavItem[] = buildNav(cfg.brand.short_name).map((n) =>
     n.to === '/dashboard' && participantsBadge !== undefined
       ? { ...n, badge: participantsBadge }
