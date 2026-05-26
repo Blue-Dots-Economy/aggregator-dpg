@@ -28,6 +28,7 @@ import { registerAggregatorConfigRoutes } from './routes/aggregator-config.js';
 import { ERR } from './errors/codes.js';
 import { HttpError } from './errors/http-error.js';
 import { coerceToHttpError, toEnvelope, toLogPayload } from './errors/serialize.js';
+import { apiRequests, apiLatencyMs, api5xx } from './telemetry.js';
 
 const REQUEST_ID_HEADER = 'x-request-id';
 
@@ -67,6 +68,14 @@ export async function buildApp(): Promise<FastifyInstance> {
   });
 
   app.addHook('onResponse', async (req, reply) => {
+    const labels = {
+      method: req.method,
+      route: req.routeOptions?.url ?? req.url,
+      status: String(reply.statusCode),
+    };
+    apiRequests.add(1, labels);
+    apiLatencyMs.record(reply.elapsedTime, labels);
+    if (reply.statusCode >= 500) api5xx.add(1, labels);
     req.log.info(
       {
         event: 'request.end',
