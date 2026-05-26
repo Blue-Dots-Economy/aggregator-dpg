@@ -199,17 +199,20 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
         let signalstackOrgId: string | null = null;
         if (signalstack) {
           const upsertStart = Date.now();
+          // Signalstack's dashboard endpoint fails with NO_DOMAINS_CONFIGURED
+          // when the org's metadata.domains is empty, so always send a
+          // non-empty list. Use the aggregator's chosen participant focus
+          // (`aggregators.type`, captured at registration as 'seeker' or
+          // 'provider'). Legacy rows with NULL type fall back to the full
+          // list so they keep functioning until the row is patched.
+          const aggregatorDomains: string[] = lookup.aggregator.type
+            ? [lookup.aggregator.type]
+            : ['seeker', 'provider'];
           const upsertResult = await signalstack.upsertAggregator({
             external_id: aggregatorId,
             name: lookup.aggregator.name,
             slug: lookup.aggregator.orgSlug,
-            // Signalstack's dashboard endpoint fails with
-            // NO_DOMAINS_CONFIGURED when the org's metadata.domains
-            // is empty. Send the full domain list every approval so
-            // the read endpoints work the moment the aggregator
-            // signs in. Aggregator participant focus is enforced at
-            // a different layer (KC `aggregator_type` claim).
-            domains: ['seeker', 'provider'],
+            domains: aggregatorDomains,
           });
           if (!upsertResult.success) {
             log.error(
@@ -239,6 +242,8 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
               status: 'success',
               sub_operation: 'signalstack.upsertAggregator',
               signalstack_org_id: signalstackOrgId,
+              domains: aggregatorDomains,
+              aggregator_type: lookup.aggregator.type,
               latency_ms: Date.now() - upsertStart,
             },
             'aggregator registered in signalstack',
