@@ -30,6 +30,16 @@ const PINO_TO_OTEL_SEVERITY: Record<number, SeverityNumber> = {
   60: SeverityNumber.FATAL,
 };
 
+/** Maps pino numeric levels to their human-readable label strings. */
+const PINO_LEVEL_LABELS: Record<number, string> = {
+  10: 'trace',
+  20: 'debug',
+  30: 'info',
+  40: 'warn',
+  50: 'error',
+  60: 'fatal',
+};
+
 /**
  * Converts a single pino log record to an OTel log record and emits it.
  *
@@ -71,7 +81,7 @@ export function handleRecord(
 
   logger.emit({
     severityNumber: PINO_TO_OTEL_SEVERITY[level] ?? SeverityNumber.INFO,
-    severityText: String(level),
+    severityText: PINO_LEVEL_LABELS[level] ?? String(level),
     ...(msg !== undefined && { body: msg }),
     timestamp: time,
     attributes: attrs,
