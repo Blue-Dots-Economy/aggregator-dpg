@@ -20,6 +20,8 @@ import type {
   BrandLogo,
   BrandPalette,
   BrandTypography,
+  DashboardBuckets,
+  DashboardTileLabels,
 } from '@aggregator-dpg/network-config/interface';
 import { getNetworkConfig } from '../services/network-config.js';
 
@@ -58,7 +60,9 @@ interface PublicAggregatorConfig {
     label: string;
     plural_label: string;
     item_type: string;
+    dashboardTiles?: DashboardTileLabels;
   }>;
+  dashboardBuckets?: DashboardBuckets;
 }
 
 export async function registerAggregatorConfigRoutes(app: FastifyInstance): Promise<void> {
@@ -101,8 +105,10 @@ export async function registerAggregatorConfigRoutes(app: FastifyInstance): Prom
           label: d.label,
           plural_label: d.pluralLabel,
           item_type: d.itemType,
+          ...(d.dashboardTiles ? { dashboardTiles: d.dashboardTiles } : {}),
         };
       }),
+      ...(cfg.dashboardBuckets ? { dashboardBuckets: cfg.dashboardBuckets } : {}),
     };
     return reply.header('Cache-Control', 'public, max-age=60').send(payload);
   });
