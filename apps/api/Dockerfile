@@ -6,26 +6,20 @@ ENV PATH="$PNPM_HOME:$PATH"
 RUN corepack enable
 
 # ── installer: resolve and cache workspace deps ───────────────────────────────
+# Copy the full repo so every workspace dep's package.json is present for
+# pnpm to resolve the api subgraph (api + all its transitive workspace deps).
+# Filter scopes the install to that subgraph — unrelated packages skipped.
 FROM base AS installer
 WORKDIR /app
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-COPY apps/api/package.json                            apps/api/
-COPY packages/tsconfig/package.json                   packages/tsconfig/
-COPY packages/db-schema/package.json                  packages/db-schema/
-COPY packages/queue/package.json                      packages/queue/
-COPY packages/schema-loader/package.json              packages/schema-loader/
-COPY packages/shared-primitives/package.json          packages/shared-primitives/
-RUN pnpm install --frozen-lockfile
+COPY . .
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
+    pnpm install --frozen-lockfile --filter "@aggregator-dpg/api..."
 
 # ── builder: compile TypeScript ───────────────────────────────────────────────
+# pnpm runs `build` topologically across the api subgraph, ensuring every
+# workspace dep is compiled before the api itself.
 FROM installer AS builder
-COPY . .
-# Build workspace deps first so the api can import their dist outputs.
-RUN pnpm --filter @aggregator-dpg/shared-primitives build \
- && pnpm --filter @aggregator-dpg/db-schema build \
- && pnpm --filter @aggregator-dpg/queue build \
- && pnpm --filter @aggregator-dpg/schema-loader build \
- && pnpm --filter @aggregator-dpg/api build
+RUN pnpm --filter "@aggregator-dpg/api..." build
 
 # ── deployer: prune to production deps only ───────────────────────────────────
 # Inherit FROM builder so workspace deps' dist/ is present when pnpm deploy
