@@ -59,6 +59,7 @@
     "@opentelemetry/exporter-logs-otlp-grpc": "^0.52.0",
     "@opentelemetry/exporter-metrics-otlp-grpc": "^0.52.0",
     "@opentelemetry/exporter-trace-otlp-grpc": "^0.52.0",
+    "@opentelemetry/instrumentation": "^0.218.0",
     "@opentelemetry/instrumentation-fastify": "^0.38.0",
     "@opentelemetry/instrumentation-undici": "^0.6.0",
     "@opentelemetry/propagator-b3": "^1.25.0",
