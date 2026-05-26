@@ -151,3 +151,17 @@ the following UIs are available:
 - **Loki** (logs): http://localhost:3100 — accessed via Grafana's Explore tab
 
 `OTEL_SDK_DISABLED=false` in `apps/api/.env.example` turns OTel on for the api. Phase 1 ships with sample rate `1.0` for dev so every request is captured.
+
+### Phase 1 smoke test
+
+Once the api is running with `OTEL_SDK_DISABLED=false` and the observability
+stack is up, run:
+
+```bash
+./scripts/telemetry-smoke-test.sh
+```
+
+It will hit the api's health endpoint to produce a trace and ping each
+observability backend. After it succeeds, open Jaeger and confirm a trace
+appears under the `aggregator-api` service with at least an `api.request`
+span and an `onResponse` child timing.
