@@ -2,14 +2,16 @@
  * Vitest global setup for @aggregator-dpg/telemetry tests.
  *
  * Installs an AsyncLocalStorage-backed OTel context manager so that
- * `context.with()` and `propagation.setBaggage()` behave correctly in the
- * test environment, matching production behaviour where the NodeSDK installs
- * the same context manager at start-up.
+ * `context.with()` behaves correctly in the test environment, matching
+ * production behaviour where the NodeSDK installs the same context manager
+ * at start-up.
  *
- * Also patches `propagation.setBaggage` to call `AsyncLocalStorage.enterWith`
- * so that baggage mutations made outside a `context.with` callback (e.g. in
- * Fastify / BullMQ request handlers) are visible to subsequent reads via
- * `context.active()` within the same test.
+ * No monkeypatching of `propagation.setBaggage` — that was the design flaw
+ * that Task 0.9 fixed. The correct OTel pattern is callback-based:
+ * use `context.with(newCtx, fn)` instead of mutating the active context.
+ *
+ * @module @aggregator-dpg/telemetry/tests/setup
+ * @package @aggregator-dpg/telemetry
  */
 
 import { context, propagation, ROOT_CONTEXT } from '@opentelemetry/api';
@@ -35,7 +37,7 @@ const contextManager = {
     const cb = (thisArg == null ? fn : fn.bind(thisArg)) as (...a: A) => ReturnType<F>;
     return als.run(ctx as unknown as typeof ROOT_CONTEXT, cb, ...args);
   },
-  bind<T>(ctx: typeof ROOT_CONTEXT, fn: T): T {
+  bind<T>(_ctx: typeof ROOT_CONTEXT, fn: T): T {
     return fn;
   },
   enable() {
@@ -58,19 +60,3 @@ propagation.setGlobalPropagator(
     propagators: [new W3CTraceContextPropagator(), new W3CBaggagePropagator()],
   }),
 );
-
-// Patch propagation.setBaggage to also call AsyncLocalStorage.enterWith so
-// that baggage mutations made outside a context.with callback are immediately
-// visible via context.active() in the same async frame.  This mirrors the
-// production behaviour where the NodeSDK's AsyncHooksContextManager wraps
-// every Fastify/BullMQ handler in a context.with call.
-const origSetBaggage = propagation.setBaggage.bind(propagation);
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-(propagation as any).setBaggage = function (
-  ctx: typeof ROOT_CONTEXT,
-  baggage: ReturnType<typeof propagation.createBaggage>,
-) {
-  const newCtx = origSetBaggage(ctx, baggage);
-  als.enterWith(newCtx as unknown as typeof ROOT_CONTEXT);
-  return newCtx;
-};

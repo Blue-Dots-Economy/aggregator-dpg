@@ -1,19 +1,15 @@
 /**
  * Aggregator / request-id Baggage helpers.
  *
- * These functions stamp ids onto the active span (guaranteed to appear in
- * the current trace) AND best-effort update active OTel baggage so the
- * Composite propagator (W3C TraceContext + Baggage) carries the entries
- * through outbound HTTP and BullMQ.
+ * `propagation.setBaggage(ctx, b)` returns a NEW context — it does not
+ * mutate the active context. To make the new baggage visible to OTel's
+ * propagator on the outbound side, the helper must enter the new context
+ * for the duration of a callback via `context.with`. The pattern is
+ * therefore wrapper-based.
  *
- * Note: OTel JS treats baggage as part of an immutable Context. Calling
- * `propagation.setBaggage(ctx, b)` returns a new context — to make it
- * the active context for the remainder of the current async chain, the
- * surrounding code must already be inside a `context.with` block or use
- * an AsyncHooksContextManager (which the NodeSDK installs by default).
- * For Fastify and BullMQ auto-instrumentation, the active context is
- * managed for us; calling these helpers inside a request/job handler
- * mutates the active context correctly.
+ * Each helper also stamps the value onto the currently active span as an
+ * attribute (which is guaranteed visible in this trace regardless of
+ * baggage propagation).
  *
  * @module @aggregator-dpg/telemetry/baggage
  * @package @aggregator-dpg/telemetry
@@ -25,35 +21,45 @@ const AGG_KEY = 'aggregator_id';
 const REQ_ID_KEY = 'x_request_id';
 
 /**
- * Stamps the given aggregator ID onto the active span as an attribute and
- * best-effort updates active OTel baggage so the value is propagated to
- * downstream services via the W3C `baggage` header.
+ * Runs `fn` inside a context where `aggregator_id` is set as a Baggage
+ * entry, so downstream HTTP / BullMQ outbound calls carry it via the
+ * W3C Baggage propagator. Also stamps it on the active span.
  *
  * @param aggregatorId - The aggregator identifier to propagate.
+ * @param fn - Callback to run within the new baggage context.
+ * @returns The return value of `fn`.
  */
-export function setAggregatorBaggage(aggregatorId: string): void {
+export async function withAggregatorBaggage<T>(
+  aggregatorId: string,
+  fn: () => Promise<T> | T,
+): Promise<T> {
   const span = trace.getSpan(context.active());
   span?.setAttribute('aggregator_id', aggregatorId);
-
   const baggage = propagation.getBaggage(context.active()) ?? propagation.createBaggage();
   const next = baggage.setEntry(AGG_KEY, { value: aggregatorId });
-  propagation.setBaggage(context.active(), next);
+  const ctx = propagation.setBaggage(context.active(), next);
+  return context.with(ctx, fn);
 }
 
 /**
- * Stamps the given request ID onto the active span as an attribute and
- * best-effort updates active OTel baggage so the value is propagated to
- * downstream services via the W3C `baggage` header.
+ * Runs `fn` inside a context where `x_request_id` is set as a Baggage
+ * entry, so downstream HTTP / BullMQ outbound calls carry it via the
+ * W3C Baggage propagator. Also stamps it on the active span.
  *
  * @param requestId - The HTTP request identifier (e.g. from `x-request-id` header).
+ * @param fn - Callback to run within the new baggage context.
+ * @returns The return value of `fn`.
  */
-export function setRequestIdBaggage(requestId: string): void {
+export async function withRequestIdBaggage<T>(
+  requestId: string,
+  fn: () => Promise<T> | T,
+): Promise<T> {
   const span = trace.getSpan(context.active());
   span?.setAttribute('http.request_id', requestId);
-
   const baggage = propagation.getBaggage(context.active()) ?? propagation.createBaggage();
   const next = baggage.setEntry(REQ_ID_KEY, { value: requestId });
-  propagation.setBaggage(context.active(), next);
+  const ctx = propagation.setBaggage(context.active(), next);
+  return context.with(ctx, fn);
 }
 
 /**
