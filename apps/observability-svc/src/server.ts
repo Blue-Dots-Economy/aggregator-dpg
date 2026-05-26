@@ -61,6 +61,19 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   });
   await app.register(sensible);
 
+  // Capture the raw JSON body bytes so HMAC verification can hash the exact
+  // bytes the producer signed — not a re-serialisation that may reorder keys.
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) => {
+    try {
+      const parsed = (body as string).length === 0 ? {} : JSON.parse(body as string);
+      // Stash the raw string for HMAC verification.
+      (_req as unknown as { rawBody: string }).rawBody = body as string;
+      done(null, parsed);
+    } catch (err) {
+      done(err as Error, undefined);
+    }
+  });
+
   const idem = new IdempotencyStore(deps.redis, deps.config.IDEM_TTL_DAYS);
   const tracker = new OutcomeTracker({ metrics: deps.config.OUTCOME_METRICS, meter: deps.meter });
 

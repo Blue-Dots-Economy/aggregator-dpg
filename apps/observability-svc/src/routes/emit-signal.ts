@@ -49,7 +49,7 @@ interface Deps {
  */
 export function registerEmitSignal(app: FastifyInstance, deps: Deps): void {
   app.post('/emit/signal', async (req, reply) => {
-    const raw = JSON.stringify(req.body ?? {});
+    const raw = (req as unknown as { rawBody?: string }).rawBody ?? '';
     const hmac = verifyHmac({
       keyId: req.headers['x-outcome-key-id'] as string | undefined,
       signature: req.headers['x-outcome-signature'] as string | undefined,
