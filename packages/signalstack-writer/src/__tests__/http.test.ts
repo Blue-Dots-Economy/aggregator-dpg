@@ -326,7 +326,7 @@ describe('HttpSignalStackWriter.fetchDashboard — happy path', () => {
     expect(result.success).toBe(true);
     if (!result.success) return;
 
-    const slice = result.value.by_domain['seeker'];
+    const slice = result.value.by_domain['seeker']!;
     expect(slice).toBeDefined();
     expect(Array.isArray(slice.items)).toBe(true);
     expect(slice.items).toHaveLength(1);
@@ -367,7 +367,7 @@ describe('HttpSignalStackWriter.fetchDashboard — happy path', () => {
     expect(result.success).toBe(true);
     if (!result.success) return;
 
-    const item = result.value.by_domain['seeker'].items[0];
+    const item = result.value.by_domain['seeker']!.items[0]!;
     expect(item['count_create']).toBe(1);
     expect(item['count_accept']).toBe(1);
     expect(item['count_reject']).toBe(0);

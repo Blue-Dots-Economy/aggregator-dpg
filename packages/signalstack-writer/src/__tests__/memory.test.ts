@@ -237,7 +237,7 @@ describe('InMemorySignalStackWriter.listItemsByAggregator', () => {
     expect(result.success).toBe(true);
     if (!result.success) return;
     expect(result.value.items).toHaveLength(1);
-    expect(result.value.items[0].item_id).toBe('item-a');
+    expect(result.value.items[0]!.item_id).toBe('item-a');
   });
 
   it('returns SIGNALSTACK_INPUT_INVALID when aggregator_id is empty', async () => {
@@ -318,7 +318,7 @@ describe('InMemorySignalStackWriter.fetchDashboard — canonical empty shape', (
     expect(result.value.by_domain['provider']).toBeDefined();
 
     // Validate new rollup shape for seeker
-    const slice = result.value.by_domain['seeker'];
+    const slice = result.value.by_domain['seeker']!;
     expect(Array.isArray(slice.items)).toBe(true);
     expect(slice.items).toEqual([]);
     expect(slice.rollup).toEqual({
@@ -413,7 +413,7 @@ describe('SignalStackWriterFake.seed — pinned dashboard', () => {
     expect(result.success).toBe(true);
     if (!result.success) return;
 
-    const slice = result.value.by_domain['seeker'];
+    const slice = result.value.by_domain['seeker']!;
     expect(slice.rollup.total_items).toBe(10);
     expect(slice.rollup.complete_profiles).toBe(7);
     expect(slice.rollup.has_applications).toBe(4);
@@ -432,7 +432,7 @@ describe('SignalStackWriterFake.seed — pinned dashboard', () => {
 
     expect(result.success).toBe(true);
     if (!result.success) return;
-    expect(result.value.by_domain['seeker'].rollup.total_items).toBe(0);
+    expect(result.value.by_domain['seeker']!.rollup.total_items).toBe(0);
   });
 });
 
