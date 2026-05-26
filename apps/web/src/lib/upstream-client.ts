@@ -6,11 +6,13 @@
  * with a Bearer header. Tokens never reach the browser.
  */
 
+import { SpanStatusCode } from '@opentelemetry/api';
 import { cookies } from 'next/headers';
 import { getOidcAdapter } from './oidc';
 import { getSessionStore, type SessionData } from './session';
 import { SESSION_COOKIE } from './cookies';
 import { getSession } from './server-session';
+import { tracer, webProxyDurationMs } from './telemetry.js';
 
 const REFRESH_BEFORE_EXPIRY_MS = 60_000;
 
@@ -58,6 +60,9 @@ export interface UpstreamCallOptions {
 /**
  * Calls the resource API with the active session's access token.
  *
+ * Wraps the outbound fetch in a `web.api_proxy` OTel span so BFF → API
+ * latency is visible in traces. Records duration via `webProxyDurationMs`.
+ *
  * @param path - Path relative to `API_BASE_URL` (e.g. `/links`).
  * @param opts - Method, headers, body.
  * @returns The raw `Response`. Caller decides JSON vs text.
@@ -76,10 +81,27 @@ export async function callApi(path: string, opts: UpstreamCallOptions = {}): Pro
 
   // Default 15s timeout so a hung upstream cannot block the BFF thread.
   const signal = opts.signal ?? AbortSignal.timeout(15_000);
-  return fetch(base + path, {
-    method: opts.method ?? 'GET',
-    headers,
-    ...(opts.body !== undefined ? { body: JSON.stringify(opts.body) } : {}),
-    signal,
+
+  return tracer.startActiveSpan('web.api_proxy', async (span) => {
+    span.setAttribute('http.route', path);
+    const start = Date.now();
+    try {
+      const res = await fetch(base + path, {
+        method: opts.method ?? 'GET',
+        headers,
+        ...(opts.body !== undefined ? { body: JSON.stringify(opts.body) } : {}),
+        signal,
+      });
+      span.setAttribute('http.status_code', res.status);
+      if (res.status >= 500) span.setStatus({ code: SpanStatusCode.ERROR });
+      return res;
+    } catch (e) {
+      span.recordException(e as Error);
+      span.setStatus({ code: SpanStatusCode.ERROR });
+      throw e;
+    } finally {
+      webProxyDurationMs.record(Date.now() - start, { path });
+      span.end();
+    }
   });
 }
