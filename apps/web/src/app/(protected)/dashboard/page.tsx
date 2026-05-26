@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef, useMemo, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { createPortal } from 'react-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '../../../components/ui/Button';
 import { StatusPill } from '../../../components/ui/StatusPill';
 import { Avatar } from '../../../components/ui/Avatar';
@@ -782,7 +783,7 @@ function SeekersTab() {
   const seekerTileLabels = seekerCfg?.dashboardTiles ?? {};
   const seekerPlural = seekerCfg?.plural_label ?? 'Seekers';
   // by_action_status bucket labels — used by the breakdown chips rendered in
-  // the participant table's action-count columns. Prefixed _ until Task 10
+  // the participant table's action-count columns. Prefixed _ until Task 11
   // wires the chip component.
   const _bucketLabels = cfg?.dashboardBuckets?.by_action_status ?? DEFAULT_BUCKET_LABELS;
   const statusLabels = cfg?.dashboardBuckets?.by_status ?? DEFAULT_STATUS_LABELS;
@@ -811,8 +812,62 @@ function SeekersTab() {
   const hasApplications = rollup?.has_applications;
   const newThisWeek = byStatus['new'];
   const rows = useMemo(() => (slice?.items ?? []).map(toSeekerRow), [slice?.items]);
+
+  // Refresh handler: hits the BFF with refresh=true to force signalstack to
+  // recompute the rollup synchronously, then invalidates the React Query
+  // cache so the next normal render picks up the freshly stored values.
+  const queryClient = useQueryClient();
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null);
+
+  async function handleRefresh() {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      await dashboardService.dashboard({
+        domain: 'seeker',
+        page,
+        limit: PAGE_SIZE,
+        ...(filterActive ? { status: statusFilter } : {}),
+        refresh: true,
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ['dashboard', 'dashboard', 'seeker'],
+      });
+      setLastRefreshedAt(Date.now());
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
   return (
     <div className="flex flex-col gap-5">
+      <div className="flex items-center justify-between">
+        <span className="text-[13px] font-semibold text-ink-700">{seekerPlural}</span>
+        <div className="flex items-center gap-2">
+          <Button
+            kind="ghost"
+            icon={
+              <I.refresh
+                size={14}
+                className={refreshing ? 'animate-spin' : undefined}
+                aria-hidden="true"
+              />
+            }
+            onClick={() => {
+              void handleRefresh();
+            }}
+            disabled={refreshing}
+            aria-label="Refresh dashboard"
+            title="Refresh dashboard"
+          >
+            {refreshing ? 'Refreshing…' : 'Refresh'}
+          </Button>
+          {lastRefreshedAt !== null && Date.now() - lastRefreshedAt < 5000 ? (
+            <span className="text-xs text-ink-400">Refreshed just now</span>
+          ) : null}
+        </div>
+      </div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <StatCard
           tone="active"
@@ -1035,8 +1090,62 @@ function ProvidersTab() {
     () => buildStatusOptions(cachedByStatus ?? byStatus),
     [cachedByStatus, byStatus],
   );
+
+  // Refresh handler: hits the BFF with refresh=true to force signalstack to
+  // recompute the rollup synchronously, then invalidates the React Query
+  // cache so the next normal render picks up the freshly stored values.
+  const queryClient = useQueryClient();
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null);
+
+  async function handleRefresh() {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      await dashboardService.dashboard({
+        domain: 'provider',
+        page,
+        limit: PAGE_SIZE,
+        ...(filterActive ? { status: statusFilter } : {}),
+        refresh: true,
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ['dashboard', 'dashboard', 'provider'],
+      });
+      setLastRefreshedAt(Date.now());
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
   return (
     <div className="flex flex-col gap-5">
+      <div className="flex items-center justify-between">
+        <span className="text-[13px] font-semibold text-ink-700">{providerPlural}</span>
+        <div className="flex items-center gap-2">
+          <Button
+            kind="ghost"
+            icon={
+              <I.refresh
+                size={14}
+                className={refreshing ? 'animate-spin' : undefined}
+                aria-hidden="true"
+              />
+            }
+            onClick={() => {
+              void handleRefresh();
+            }}
+            disabled={refreshing}
+            aria-label="Refresh dashboard"
+            title="Refresh dashboard"
+          >
+            {refreshing ? 'Refreshing…' : 'Refresh'}
+          </Button>
+          {lastRefreshedAt !== null && Date.now() - lastRefreshedAt < 5000 ? (
+            <span className="text-xs text-ink-400">Refreshed just now</span>
+          ) : null}
+        </div>
+      </div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <StatCard
           tone="active"
