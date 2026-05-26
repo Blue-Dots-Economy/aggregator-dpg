@@ -12,7 +12,8 @@
  * @package @aggregator-dpg/telemetry
  */
 
-import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
 import pino, { type Logger, type TransportTargetOptions } from 'pino';
 import { context, trace } from '@opentelemetry/api';
 
@@ -20,14 +21,18 @@ import { context, trace } from '@opentelemetry/api';
  * Resolves the absolute filesystem path to the OTLP pino transport.
  *
  * pino loads transport targets in a worker thread that uses its own module
- * resolution. Subpath exports of workspace packages (e.g.
- * `@aggregator-dpg/telemetry/pino-transport`) don't always resolve correctly
- * in the worker's context, so we resolve once on the main thread and hand
- * pino an absolute path it can `require()` directly.
+ * resolution. The package's `exports` map only declares `import` (ESM)
+ * conditions, so a `require()`-based resolver in the worker thread cannot
+ * find subpaths like `@aggregator-dpg/telemetry/pino-transport`.
+ *
+ * The compiled `dist/logger.js` and `dist/pino-otel-transport.js` live in
+ * the same directory, so we derive the transport path from this module's
+ * own `import.meta.url`. Works under pnpm's nested layout regardless of
+ * which app is consuming the package.
  */
 function resolvePinoTransportPath(): string {
-  const req = createRequire(import.meta.url);
-  return req.resolve('@aggregator-dpg/telemetry/pino-transport');
+  const here = dirname(fileURLToPath(import.meta.url));
+  return resolve(here, './pino-otel-transport.js');
 }
 
 /**
