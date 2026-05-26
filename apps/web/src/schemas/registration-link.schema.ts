@@ -16,11 +16,15 @@ export interface RegistrationLinkFormData {
 
 export const registrationLinkSchema: RJSFSchema = {
   type: 'object',
+  // `lever` is enforced client-side via the form's submit guard
+  // (see RegistrationLinksSection.tsx). Keeping it out of the schema
+  // `required` array preserves backward compat with pre-existing
+  // registration links that may have been created without a lever.
   required: ['org', 'state', 'district', 'domain'],
   properties: {
     org: { type: 'string', title: 'Organisation Name' },
     state: { type: 'string', title: 'Instance (State Name)' },
-    lever: { type: 'string', title: 'Lever / Event' },
+    lever: { type: 'string', title: 'Event' },
     date: { type: 'string', title: 'Event Date', format: 'date' },
     location: { type: 'string', title: 'Event Location' },
     district: { type: 'string', title: 'District' },

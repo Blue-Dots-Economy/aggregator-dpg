@@ -13,6 +13,7 @@ import { useOppProviders, useDashboard } from '../../../hooks/useDashboard';
 import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
 import { dashboardService, triggerCsvDownload } from '../../../services/dashboard.service';
 import { useProfileRaw } from '../../../hooks/useProfile';
+import { useThemeMode } from '../../../lib/theme-mode';
 import type { ParticipantBase, ParticipantStatus, Provider, Seeker } from '../../../types';
 
 type Tab = 'seekers' | 'providers' | 'opp';
@@ -26,30 +27,36 @@ interface ToneConfig {
   num: string;
 }
 
-const STAT_TONES: Record<StatTone, ToneConfig> = {
+interface ToneNumColors {
+  light: string;
+  dark: string;
+}
+type StatToneConfig = Omit<ToneConfig, 'num'> & { num: ToneNumColors };
+
+const STAT_TONES: Record<StatTone, StatToneConfig> = {
   active: {
     ring: '#A7F3D0',
-    bg: 'linear-gradient(180deg,#ECFDF5 0%,#FFFFFF 70%)',
+    bg: 'linear-gradient(180deg,var(--bd-tint-emerald) 0%,var(--bd-card) 70%)',
     icon: '#10B981',
-    num: '#047857',
+    num: { light: '#047857', dark: '#34D399' },
   },
   risk: {
     ring: '#FCD34D',
-    bg: 'linear-gradient(180deg,#FFFBEB 0%,#FFFFFF 70%)',
+    bg: 'linear-gradient(180deg,var(--bd-tint-amber) 0%,var(--bd-card) 70%)',
     icon: '#F59E0B',
-    num: '#B45309',
+    num: { light: '#B45309', dark: '#FBBF24' },
   },
   inactive: {
     ring: '#FCA5A5',
-    bg: 'linear-gradient(180deg,#FEF2F2 0%,#FFFFFF 70%)',
+    bg: 'linear-gradient(180deg,var(--bd-tint-rose) 0%,var(--bd-card) 70%)',
     icon: '#EF4444',
-    num: '#B91C1C',
+    num: { light: '#B91C1C', dark: '#F87171' },
   },
   satisfied: {
     ring: '#C7D2FE',
-    bg: 'linear-gradient(180deg,#EEF2FF 0%,#FFFFFF 70%)',
+    bg: 'linear-gradient(180deg,var(--bd-tint-primary) 0%,var(--bd-card) 70%)',
     icon: '#6366F1',
-    num: '#4338CA',
+    num: { light: '#4338CA', dark: '#A5B4FC' },
   },
 };
 
@@ -64,7 +71,9 @@ interface StatCardProps {
 
 function StatCard({ tone, count, label, icon, hint, action }: StatCardProps) {
   const t = STAT_TONES[tone] ?? STAT_TONES.inactive;
+  const { mode } = useThemeMode();
   const Ic = I[icon];
+  const numColor = mode === 'dark' ? t.num.dark : t.num.light;
   return (
     <div
       className="bd-card bd-shadow p-5 flex flex-col gap-3 relative overflow-hidden"
@@ -73,7 +82,7 @@ function StatCard({ tone, count, label, icon, hint, action }: StatCardProps) {
       <div className="flex items-start justify-between">
         <div
           className="w-9 h-9 rounded-[10px] flex items-center justify-center"
-          style={{ background: '#fff', border: `1px solid ${t.ring}`, color: t.icon }}
+          style={{ background: 'var(--bd-card)', border: `1px solid ${t.ring}`, color: t.icon }}
         >
           <Ic size={18} />
         </div>
@@ -82,7 +91,7 @@ function StatCard({ tone, count, label, icon, hint, action }: StatCardProps) {
       <div>
         <div
           className="font-display font-bold text-[28px] leading-none tracking-tight"
-          style={{ color: t.num }}
+          style={{ color: numColor }}
         >
           {count}
         </div>
@@ -436,14 +445,21 @@ function ParticipantTable<R extends ParticipantBase>({
 
       <div className="overflow-auto scroll-x" style={{ maxHeight: 520 }}>
         <table className="bd-table" style={{ minWidth: kind === 'provider' ? 1180 : 1080 }}>
-          <thead style={{ position: 'sticky', top: 0, zIndex: 4, background: '#FAFBFE' }}>
+          <thead
+            style={{
+              position: 'sticky',
+              top: 0,
+              zIndex: 4,
+              background: 'var(--bd-table-head-bg)',
+            }}
+          >
             <tr>
               <th
                 style={{
                   position: 'sticky',
                   left: 0,
                   zIndex: 5,
-                  background: '#FAFBFE',
+                  background: 'var(--bd-table-head-bg)',
                   minWidth: 240,
                 }}
               >
@@ -468,7 +484,7 @@ function ParticipantTable<R extends ParticipantBase>({
                       position: 'sticky',
                       left: 0,
                       background: 'inherit',
-                      backgroundColor: '#fff',
+                      backgroundColor: 'var(--bd-card)',
                       zIndex: 1,
                     }}
                   >

@@ -149,4 +149,56 @@ describe('FileNetworkConfigLoader', () => {
     if (result.success) return;
     expect((result.error as { code: string }).code).toBe('NETWORK_FETCH_FAILED');
   });
+
+  it('merges a sibling brand.json into the resolved brand block', async () => {
+    const brandJson = {
+      brand: { strapline: 'Seeded by EkStep Foundation' },
+      logo: { default: '/brand/blue-dot/logo.png' },
+      colours: {
+        primary: [{ name: 'Blue 500', hex: '#0074ff' }],
+        gradients: [{ name: 'Sky', from: '#0074ff', to: '#a4daff' }],
+      },
+      typography: { primaryFont: 'Arial' },
+    };
+    await fs.writeFile(path.join(tmpDir, 'brand.json'), JSON.stringify(brandJson), 'utf8');
+    const loader = new FileNetworkConfigLoader({
+      configPath,
+      fetchImpl: async () => new Response(JSON.stringify(BLUE_DOT_NETWORK), { status: 200 }),
+    });
+    const result = await loader.load();
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const brand = result.value.aggregator.brand;
+    expect(brand.strapline).toBe('Seeded by EkStep Foundation');
+    expect(brand.logo?.default).toBe('/brand/blue-dot/logo.png');
+    expect(brand.palette?.primary?.[0]?.hex).toBe('#0074ff');
+    expect(brand.palette?.gradients?.[0]?.from).toBe('#0074ff');
+    expect(brand.typography?.primaryFont).toBe('Arial');
+  });
+
+  it('boots cleanly when brand.json is absent (backward compat)', async () => {
+    const loader = new FileNetworkConfigLoader({
+      configPath,
+      fetchImpl: async () => new Response(JSON.stringify(BLUE_DOT_NETWORK), { status: 200 }),
+    });
+    const result = await loader.load();
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const brand = result.value.aggregator.brand;
+    expect(brand.palette).toBeUndefined();
+    expect(brand.typography).toBeUndefined();
+    expect(brand.logo).toBeUndefined();
+  });
+
+  it('rejects a malformed brand.json with CONFIG_PARSE_FAILED', async () => {
+    await fs.writeFile(path.join(tmpDir, 'brand.json'), '{ not json', 'utf8');
+    const loader = new FileNetworkConfigLoader({
+      configPath,
+      fetchImpl: async () => new Response(JSON.stringify(BLUE_DOT_NETWORK), { status: 200 }),
+    });
+    const result = await loader.load();
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect((result.error as { code: string }).code).toBe('CONFIG_PARSE_FAILED');
+  });
 });

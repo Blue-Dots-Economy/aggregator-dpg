@@ -31,6 +31,11 @@
   --bd-info: #1e40af;
   --bd-info-bg: #eef2ff;
   --bd-info-border: #c7d2fe;
+  /* Typography — overridden by template.ftl from theme.properties /
+     env vars (brand.json typography). */
+  --bd-font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --bd-font-heading: 'Plus Jakarta Sans', system-ui, sans-serif;
+  --bd-font-body: var(--bd-font-sans);
 }
 
 *,
@@ -45,7 +50,7 @@ body {
   padding: 0;
   background: var(--bd-bg);
   color: var(--bd-ink-900);
-  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  font-family: var(--bd-font-sans);
   font-size: 14px;
   line-height: 1.45;
   -webkit-font-smoothing: antialiased;
@@ -75,13 +80,25 @@ button {
 .bd-hero {
   position: relative;
   flex: 0 0 52%;
-  background: linear-gradient(135deg, #0F172A 0%, #172554 45%, #1E3A5F 100%);
+  /* Fallback for browsers without color-mix() (Chrome < 111, FF < 113,
+     Safari < 16.2). Uses the brand-dark colour as a flat background. */
+  background: var(--bd-primary-600, #0f172a);
   color: #fff;
   padding: 56px 56px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
+  justify-content: center;
+}
+@supports (background: color-mix(in srgb, red, blue)) {
+  .bd-hero {
+    background: linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--bd-primary) 30%, #000) 0%,
+      color-mix(in srgb, var(--bd-primary) 50%, #000) 45%,
+      color-mix(in srgb, var(--bd-primary) 65%, #000) 100%
+    );
+  }
 }
 
 .bd-hero-canvas {
@@ -106,10 +123,22 @@ button {
   position: relative;
   z-index: 1;
   max-width: 520px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.bd-hero-logo {
+  display: block;
+  height: 160px;
+  width: auto;
+  max-width: 100%;
+  object-fit: contain;
+  object-position: left center;
 }
 
 .bd-hero-title {
-  font-family: 'Plus Jakarta Sans', 'Inter', sans-serif;
+  font-family: var(--bd-font-heading);
   font-weight: 800;
   letter-spacing: -0.02em;
   line-height: 1.05;
@@ -149,7 +178,7 @@ button {
 }
 
 .bd-hero-stats strong {
-  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-family: var(--bd-font-heading);
   font-weight: 700;
   font-size: 22px;
   letter-spacing: -0.01em;
@@ -185,6 +214,7 @@ button {
 .bd-brand {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 14px;
   margin-bottom: 28px;
 }
@@ -198,9 +228,18 @@ button {
     0 8px 20px -8px rgba(37, 99, 235, 0.25);
 }
 
+.bd-brand-logo {
+  display: block;
+  height: 48px;
+  width: auto;
+  max-width: 220px;
+  object-fit: contain;
+  object-position: left center;
+}
+
 .bd-brand-text strong {
   display: block;
-  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+  font-family: var(--bd-font-heading);
   font-weight: 700;
   font-size: 20px;
   color: var(--bd-ink-900);
@@ -236,7 +275,7 @@ button {
 }
 
 .bd-title {
-  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+  font-family: var(--bd-font-heading);
   font-weight: 700;
   letter-spacing: -0.01em;
   font-size: 28px;
@@ -321,7 +360,7 @@ button {
   border: none;
   border-radius: 12px;
   padding: 13px 16px;
-  font-family: 'Plus Jakarta Sans', 'Inter', system-ui, sans-serif;
+  font-family: var(--bd-font-heading);
   font-weight: 700;
   font-size: 15px;
   letter-spacing: -0.01em;
@@ -514,7 +553,7 @@ button {
 
 .bd-channel-card-text strong {
   display: block;
-  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-family: var(--bd-font-heading);
   font-weight: 700;
   font-size: 14.5px;
   color: var(--bd-ink-900);

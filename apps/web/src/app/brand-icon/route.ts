@@ -57,24 +57,15 @@ export async function GET() {
   const primary = await loadPrimary();
   const primaryDark = deriveDark(primary);
   const primaryRgb = rgbaTriple(primary);
+  // Brand-mark dot — concentric rings + filled centre matching the "o"
+  // in the "dots" wordmark of the PDF guidelines.
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">
-  <rect width="48" height="48" rx="13" fill="rgba(${primaryRgb},0.08)"/>
-  <g stroke="rgba(${primaryRgb},0.3)" stroke-width="0.9" stroke-linecap="round">
-    <line x1="24" y1="24" x2="8" y2="12"/>
-    <line x1="24" y1="24" x2="40" y2="10"/>
-    <line x1="24" y1="24" x2="42" y2="26"/>
-    <line x1="24" y1="24" x2="34" y2="40"/>
-    <line x1="24" y1="24" x2="14" y2="38"/>
-    <line x1="24" y1="24" x2="6" y2="26"/>
-  </g>
-  <circle cx="8" cy="12" r="2.6" fill="${primary}"/>
-  <circle cx="40" cy="10" r="2.0" fill="${primary}"/>
-  <circle cx="42" cy="26" r="3.2" fill="${primary}"/>
-  <circle cx="34" cy="40" r="2.4" fill="${primary}"/>
-  <circle cx="14" cy="38" r="2.8" fill="${primary}"/>
-  <circle cx="6" cy="26" r="2.0" fill="${primary}"/>
-  <circle cx="24" cy="24" r="9.4" fill="rgba(${primaryRgb},0.35)"/>
-  <circle cx="24" cy="24" r="5.4" fill="${primaryDark}"/>
+  <rect width="48" height="48" rx="10" fill="#ffffff"/>
+  <circle cx="24" cy="24" r="22" fill="none" stroke="rgba(${primaryRgb},0.18)" stroke-width="1.2"/>
+  <circle cx="24" cy="24" r="17" fill="none" stroke="rgba(${primaryRgb},0.32)" stroke-width="1.4"/>
+  <circle cx="24" cy="24" r="12" fill="none" stroke="rgba(${primaryRgb},0.55)" stroke-width="1.6"/>
+  <circle cx="24" cy="24" r="8" fill="${primary}"/>
+  <circle cx="24" cy="24" r="3" fill="${primaryDark}"/>
 </svg>`;
   return new NextResponse(svg, {
     headers: {

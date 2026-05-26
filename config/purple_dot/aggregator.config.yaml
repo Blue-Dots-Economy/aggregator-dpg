@@ -30,9 +30,10 @@ aggregator:
     long_name: Purple Dot Aggregator Portal
     tagline: Discovery & services network for People with Disabilities
     url_slug: purple-dots
-    # Light purple palette — softer than the dark violet defaults.
-    primary_color: '#A855F7'
-    accent_color: '#C084FC'
+    # Canonical hex from Purple Dots Brand Guidelines (see brand.json).
+    # Purple 700 (deep) for CTAs — AAA contrast on white text.
+    primary_color: '#4c29c3'
+    accent_color: '#a176e4'
 
   domain_labels:
     seeker:
