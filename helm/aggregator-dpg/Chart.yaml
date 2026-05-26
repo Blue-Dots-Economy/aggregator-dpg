@@ -48,3 +48,8 @@ dependencies:
     version: 0.1.0
     repository: file://charts/otel-collector
     condition: otel-collector.enabled
+
+  - name: observability-svc
+    version: 0.1.0
+    repository: file://charts/observability-svc
+    condition: observability-svc.enabled
