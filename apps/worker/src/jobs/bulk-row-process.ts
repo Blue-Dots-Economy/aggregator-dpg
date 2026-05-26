@@ -18,6 +18,7 @@
 import { randomUUID } from 'node:crypto';
 import { eq, sql } from 'drizzle-orm';
 import { SpanStatusCode } from '@opentelemetry/api';
+import { emitTurn } from '@aggregator-dpg/telemetry';
 import {
   runBulkRowCommit,
   type BulkFinaliseJob,
@@ -430,6 +431,20 @@ async function pushToSignalStack(
       error: result.error.message,
       code: result.error.code,
     });
+    queueMicrotask(() => {
+      emitTurn({
+        event: 'participant.signalstack_failed',
+        idempotency_key: `participant.signalstack_failed:${job.uploadId}:${job.rowIndex}`,
+        attributes: {
+          aggregator_id: job.aggregatorId,
+          upload_id: job.uploadId,
+          row_id: job.rowIndex,
+          error_code: result.error.code,
+        },
+      }).catch(() => {
+        // intentional: outcome client is fire-and-forget; receiver tracks drops via metric
+      });
+    });
     return {
       success: false,
       code: result.error.code,
@@ -442,6 +457,18 @@ async function pushToSignalStack(
     user_id: result.value.user_id,
     profile_item_id: result.value.profile_item_id,
     onboarded_at: result.value.onboarded_at,
+  });
+  queueMicrotask(() => {
+    emitTurn({
+      event: 'participant.onboarded',
+      idempotency_key: `participant.onboarded:${result.value.user_id}`,
+      attributes: {
+        aggregator_id: job.aggregatorId,
+        source: 'bulk',
+      },
+    }).catch(() => {
+      // intentional: outcome client is fire-and-forget; receiver tracks drops via metric
+    });
   });
   return { success: true };
 }

@@ -21,7 +21,7 @@
 
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { and, eq, inArray } from 'drizzle-orm';
-import { withAggregatorBaggage } from '@aggregator-dpg/telemetry';
+import { withAggregatorBaggage, emitTurn } from '@aggregator-dpg/telemetry';
 import { requireApproved, type AuthContext } from '../services/auth/access-token.js';
 import { getBulkUploadsStore } from '../services/bulk-uploads-store/index.js';
 import { enqueueBulkFileProcess } from '../services/bulk-queue/index.js';
@@ -141,6 +141,19 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
         latency_ms: Date.now() - start,
         upload_id: uploadId,
         aggregator_id: auth.aggregatorId,
+      });
+
+      queueMicrotask(() => {
+        emitTurn({
+          event: 'bulk_upload.created',
+          idempotency_key: `bulk_upload.created:${uploadId}`,
+          attributes: {
+            aggregator_id: auth.aggregatorId,
+            upload_id: uploadId,
+          },
+        }).catch(() => {
+          // intentional: outcome client is fire-and-forget; receiver tracks drops via metric
+        });
       });
 
       return reply.code(201).send({

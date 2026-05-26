@@ -14,7 +14,7 @@
 import { randomBytes } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import QRCode from 'qrcode';
-import { withAggregatorBaggage } from '@aggregator-dpg/telemetry';
+import { withAggregatorBaggage, emitTurn } from '@aggregator-dpg/telemetry';
 import { z } from 'zod';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { requireApproved, type AuthContext } from '../services/auth/access-token.js';
@@ -227,6 +227,19 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
           qr_object_key: null,
           link_status: 'draft',
         });
+        queueMicrotask(() => {
+          emitTurn({
+            event: 'link.created',
+            idempotency_key: `link.created:${created.id}`,
+            attributes: {
+              aggregator_id: auth.aggregatorId,
+              target_role: created.domain,
+              link_id: created.id,
+            },
+          }).catch(() => {
+            // intentional: outcome client is fire-and-forget; receiver tracks drops via metric
+          });
+        });
         return reply.code(201).send(await buildResponse(created, callerOrgSlug));
       }
 
@@ -272,6 +285,20 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
         slug: updated.value.slug,
         domain: updated.value.domain,
         qr_object_key: qrKey,
+      });
+
+      queueMicrotask(() => {
+        emitTurn({
+          event: 'link.created',
+          idempotency_key: `link.created:${updated.value.id}`,
+          attributes: {
+            aggregator_id: auth.aggregatorId,
+            target_role: updated.value.domain,
+            link_id: updated.value.id,
+          },
+        }).catch(() => {
+          // intentional: outcome client is fire-and-forget; receiver tracks drops via metric
+        });
       });
 
       return reply.code(201).send(
