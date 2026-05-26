@@ -259,7 +259,6 @@ class HttpDashboardService implements DashboardService {
         complete: completeness(state),
       },
       applied: { ...ZERO_STATS },
-      pre: { ...ZERO_STATS },
       status: 'active',
       last: relative(item.updated_at),
     };
@@ -284,7 +283,6 @@ class HttpDashboardService implements DashboardService {
         complete: completeness(state),
       },
       applied: { ...ZERO_STATS },
-      pre: { ...ZERO_STATS },
       status: 'active',
       last: relative(item.updated_at),
       role: role && nature ? `${role} · ${nature}` : role || nature,

@@ -35,7 +35,7 @@ const DEFAULT_STATUS_LABELS: Record<string, string> = {
   inactive: 'Inactive',
 };
 
-type StatTone = 'active' | 'risk' | 'inactive' | 'satisfied';
+type StatTone = 'new' | 'active' | 'risk' | 'inactive' | 'satisfied';
 
 interface ToneConfig {
   ring: string;
@@ -51,6 +51,12 @@ interface ToneNumColors {
 type StatToneConfig = Omit<ToneConfig, 'num'> & { num: ToneNumColors };
 
 const STAT_TONES: Record<StatTone, StatToneConfig> = {
+  new: {
+    ring: '#6EE7B7',
+    bg: 'linear-gradient(180deg,var(--bd-tint-emerald) 0%,var(--bd-card) 70%)',
+    icon: '#059669',
+    num: { light: '#065F46', dark: '#6EE7B7' },
+  },
   active: {
     ring: '#A7F3D0',
     bg: 'linear-gradient(180deg,var(--bd-tint-emerald) 0%,var(--bd-card) 70%)',
@@ -499,8 +505,7 @@ function ParticipantTable<R extends ParticipantBase>({
               <th>Joined</th>
               {kind === 'provider' && <th>Job Role</th>}
               <th>Profile Status</th>
-              <th>Applied</th>
-              <th>Pre-shortlisted</th>
+              <th>{bucketLabels['create'] ?? 'Applied'}</th>
               <th>Status</th>
             </tr>
           </thead>
@@ -569,31 +574,6 @@ function ParticipantTable<R extends ParticipantBase>({
                         },
                         {
                           v: r.applied.pending,
-                          color: '#F59E0B',
-                          label: getBucketLabel(bucketLabels, 'create'),
-                          short: getBucketLabel(bucketLabels, 'create'),
-                        },
-                      ]}
-                    />
-                  </td>
-                  <td>
-                    <FunnelCell
-                      total={r.pre.total}
-                      parts={[
-                        {
-                          v: r.pre.accepted ?? 0,
-                          color: '#6366F1',
-                          label: getBucketLabel(bucketLabels, 'accept'),
-                          short: getBucketLabel(bucketLabels, 'accept'),
-                        },
-                        {
-                          v: r.pre.rejected,
-                          color: '#EF4444',
-                          label: getBucketLabel(bucketLabels, 'reject'),
-                          short: getBucketLabel(bucketLabels, 'reject'),
-                        },
-                        {
-                          v: r.pre.pending,
                           color: '#F59E0B',
                           label: getBucketLabel(bucketLabels, 'create'),
                           short: getBucketLabel(bucketLabels, 'create'),
@@ -888,7 +868,14 @@ function SeekersTab() {
           ) : null}
         </div>
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <StatCard
+          tone="new"
+          icon="spark"
+          count={fmtCount(byStatus['new'] ?? 0)}
+          label={statusLabels['new'] ?? 'New'}
+          hint="Recently joined"
+        />
         <StatCard
           tone="active"
           icon="users"
@@ -1020,7 +1007,6 @@ function toSeekerRow(participant: Record<string, unknown>): Seeker {
       rejected: numberOr(participant.count_reject, 0),
       pending: numberOr(participant.count_create, 0),
     },
-    pre: { total: 0, shortlisted: 0, accepted: 0, rejected: 0, pending: 0 },
     status,
     last: updated ? formatRelative(updated) : '—',
   };
@@ -1175,7 +1161,14 @@ function ProvidersTab() {
           ) : null}
         </div>
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <StatCard
+          tone="new"
+          icon="spark"
+          count={fmtCount(byStatus['new'] ?? 0)}
+          label={statusLabels['new'] ?? 'New'}
+          hint="Recently joined"
+        />
         <StatCard
           tone="active"
           icon="briefcase"
