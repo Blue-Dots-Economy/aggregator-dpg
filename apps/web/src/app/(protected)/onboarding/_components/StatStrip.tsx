@@ -24,21 +24,21 @@ export function StatStrip() {
         label: 'Total registered',
         count: total,
         tone: '#6366F1',
-        bg: '#EEF2FF',
+        bg: 'var(--bd-tint-primary)',
       },
       {
         icon: 'shield',
         label: 'Verified & onboarded',
         count: passed,
         tone: '#10B981',
-        bg: '#ECFDF5',
+        bg: 'var(--bd-tint-emerald)',
       },
       {
         icon: 'alert',
         label: 'Failed validations',
         count: failed,
         tone: '#EF4444',
-        bg: '#FEF2F2',
+        bg: 'var(--bd-tint-rose)',
       },
     ];
   }, [summary.data]);

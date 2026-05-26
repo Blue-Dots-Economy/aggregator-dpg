@@ -328,48 +328,39 @@ function stripCreatedBy(profile: StoredProfile): SignalStackProfile {
 }
 
 /**
- * Deterministic empty per-domain slice. The synthesised dashboard
- * payload from {@link InMemorySignalStackWriter.fetchDashboard} uses
- * this for every domain when the test hasn't pinned a response, so
- * the shape always matches the live signalstack contract.
+ * Deterministic empty per-domain slice. The synthesised dashboard payload
+ * from {@link InMemorySignalStackWriter.fetchDashboard} uses this for every
+ * domain when the test hasn't pinned a response — the shape mirrors the
+ * live signalstack contract so downstream consumers never branch on
+ * "shape from real api vs. fake".
  */
 function emptyDomainSlice(): {
   rollup: {
-    items_total: number;
+    total_items: number;
+    complete_profiles: number;
+    has_applications: number;
     by_status: Record<string, number>;
-    applications_total: number;
-    applications_pending: number;
-    applications_shortlisted: number;
-    applications_rejected: number;
-    unique_users: number;
-    complete_profiles_count: number;
-    avg_profiles_per_user: number;
-    users_with_applications: number;
-    avg_applications_per_user: number;
-    new_users_last_7_days: number;
+    by_action_status: Record<string, number>;
+    avg_items_per_user: number;
+    avg_actions_per_user: number;
     mode_wise_counts: Record<string, number>;
   };
-  participants: Array<Record<string, unknown>>;
+  items: Array<Record<string, unknown>>;
   total_matching: number;
   next_cursor: string | null;
 } {
   return {
     rollup: {
-      items_total: 0,
-      by_status: {},
-      applications_total: 0,
-      applications_pending: 0,
-      applications_shortlisted: 0,
-      applications_rejected: 0,
-      unique_users: 0,
-      complete_profiles_count: 0,
-      avg_profiles_per_user: 0,
-      users_with_applications: 0,
-      avg_applications_per_user: 0,
-      new_users_last_7_days: 0,
+      total_items: 0,
+      complete_profiles: 0,
+      has_applications: 0,
+      by_status: { new: 0, active: 0, at_risk: 0, inactive: 0 },
+      by_action_status: { create: 0, accept: 0, reject: 0, cancel: 0 },
+      avg_items_per_user: 0,
+      avg_actions_per_user: 0,
       mode_wise_counts: {},
     },
-    participants: [],
+    items: [],
     total_matching: 0,
     next_cursor: null,
   };

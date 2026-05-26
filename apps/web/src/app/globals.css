@@ -15,23 +15,120 @@
   --bd-card: #ffffff;
   --bd-border: #e8eaf1;
   --bd-border-soft: #f0f2f8;
+  --bd-fg: #0b1020;
+  --bd-fg-muted: #475069;
+  --bd-table-head-bg: #fafbfe;
+  --bd-table-group-bg: #f4f6fc;
+  --bd-tint-amber: #fffbeb;
+  --bd-tint-primary: #eef2ff;
+  --bd-tint-rose: #fff1f2;
+  --bd-tint-emerald: #ecfdf5;
+  --bd-tint-sky: #f0f9ff;
+  /* Typography — overridden by ThemeProvider from brand.json. */
+  --bd-font-sans: 'Inter', system-ui, sans-serif;
+  --bd-font-heading: 'Plus Jakarta Sans', system-ui, sans-serif;
+  --bd-font-body: var(--bd-font-sans);
 }
+
+/* Dark theme — toggled via `.dark` class on <html>. Brand primary
+   stays the same; surfaces, borders, and foregrounds flip. */
+:root.dark {
+  --bd-bg: #0b1020;
+  --bd-card: #141a2e;
+  --bd-border: #232a44;
+  --bd-border-soft: #1a2038;
+  --bd-fg: #e7ebf5;
+  --bd-fg-muted: #9aa3c0;
+  --bd-table-head-bg: #161c33;
+  --bd-table-group-bg: #1a2038;
+  --bd-tint-amber: #2a210e;
+  --bd-tint-primary: #1a1f3b;
+  --bd-tint-rose: #2a1418;
+  --bd-tint-emerald: #0e2a1f;
+  --bd-tint-sky: #0e1f2a;
+}
+
+/* Bulk dark overrides for Tailwind colour utilities used across the
+   app. Avoids per-component `dark:` variant churn. */
+.dark .bg-white { background-color: var(--bd-card) !important; }
+.dark .from-white { --tw-gradient-from: var(--bd-card) !important; }
+.dark .to-white { --tw-gradient-to: var(--bd-card) !important; }
+.dark .border-white { border-color: var(--bd-card); }
+
+.dark .text-ink-900 { color: #e7ebf5; }
+.dark .text-ink-800 { color: #d6dbeb; }
+.dark .text-ink-700 { color: #c4cae0; }
+.dark .text-ink-600 { color: #adb4cf; }
+.dark .text-ink-500 { color: #9aa3c0; }
+.dark .text-ink-400 { color: #818aab; }
+.dark .text-ink-300 { color: #5d6582; }
+.dark .text-ink-200 { color: #4a5168; }
+.dark .text-ink-100 { color: #353c54; }
+.dark .text-ink-50 { color: #2a3147; }
+
+.dark .bg-ink-50 { background-color: #181f37; }
+.dark .bg-ink-100 { background-color: #1d2440; }
+.dark .bg-ink-200 { background-color: #232a44; }
+
+.dark .hover\:bg-ink-50:hover { background-color: #181f37; }
+.dark .hover\:bg-ink-100:hover { background-color: #1d2440; }
+.dark .hover\:text-ink-900:hover { color: #e7ebf5; }
+.dark .hover\:bg-white:hover { background-color: var(--bd-card); }
+
+.dark .border-ink-100 { border-color: #2c334d; }
+.dark .border-ink-200 { border-color: #353c54; }
+
+/* Force-light scope — applied by (public)/layout.tsx so /login and
+   /register always render in light theme even when the authenticated
+   app's theme toggle is set to dark. Overrides both CSS variables and
+   the `.dark`-scoped Tailwind utility flips above. */
+.bd-public-light {
+  --bd-bg: #f7f8fb;
+  --bd-card: #ffffff;
+  --bd-border: #e8eaf1;
+  --bd-border-soft: #f0f2f8;
+  --bd-fg: #0b1020;
+  --bd-fg-muted: #475069;
+  --bd-table-head-bg: #fafbfe;
+  --bd-table-group-bg: #f4f6fc;
+  background: var(--bd-bg);
+  color: var(--bd-fg);
+}
+.dark .bd-public-light .bg-white { background-color: #ffffff !important; }
+.dark .bd-public-light .from-white { --tw-gradient-from: #ffffff !important; }
+.dark .bd-public-light .to-white { --tw-gradient-to: #ffffff !important; }
+.dark .bd-public-light .text-ink-900 { color: #0B1020; }
+.dark .bd-public-light .text-ink-800 { color: #141A2E; }
+.dark .bd-public-light .text-ink-700 { color: #1E263F; }
+.dark .bd-public-light .text-ink-600 { color: #2A3350; }
+.dark .bd-public-light .text-ink-500 { color: #475069; }
+.dark .bd-public-light .text-ink-400 { color: #6B7493; }
+.dark .bd-public-light .text-ink-300 { color: #9098B5; }
+.dark .bd-public-light .text-ink-200 { color: #C5CADD; }
+.dark .bd-public-light .text-ink-100 { color: #E5E8F2; }
+.dark .bd-public-light .text-ink-50 { color: #F4F6FB; }
+.dark .bd-public-light .bg-ink-50 { background-color: #F4F6FB; }
+.dark .bd-public-light .bg-ink-100 { background-color: #E5E8F2; }
+.dark .bd-public-light .border-ink-100 { border-color: #E5E8F2; }
+.dark .bd-public-light .hover\:bg-ink-50:hover { background-color: #F4F6FB; }
+.dark .bd-public-light .hover\:bg-white:hover { background-color: #fff; }
 
 html,
 body {
   background: var(--bd-bg);
+  color: var(--bd-fg);
 }
 
 body {
-  font-family: 'Inter', system-ui, sans-serif;
-  color: #0b1020;
+  font-family: var(--bd-font-body);
+  color: var(--bd-fg);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   font-feature-settings: 'ss01', 'cv11';
 }
 
 .font-display {
-  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+  font-family: var(--bd-font-heading);
   letter-spacing: -0.01em;
 }
 
@@ -50,7 +147,7 @@ body {
 .hover\:text-primary-600:hover { color: var(--bd-primary-600); }
 
 .bd-card {
-  background: #fff;
+  background: var(--bd-card);
   border: 1px solid var(--bd-border);
   border-radius: 14px;
 }
@@ -73,8 +170,8 @@ body {
 .bd-table thead th {
   position: sticky;
   top: 0;
-  background: #fafbfe;
-  color: #475069;
+  background: var(--bd-table-head-bg);
+  color: var(--bd-fg-muted);
   font-weight: 600;
   font-size: 11px;
   text-transform: uppercase;
@@ -86,7 +183,7 @@ body {
   z-index: 2;
 }
 .bd-table thead th.group-head {
-  background: #f4f6fc;
+  background: var(--bd-table-group-bg);
   border-bottom: 1px solid var(--bd-border-soft);
   text-align: center;
 }
@@ -97,7 +194,7 @@ body {
   vertical-align: middle;
   white-space: nowrap;
 }
-.bd-table tbody tr:hover { background: #fafbfe; }
+.bd-table tbody tr:hover { background: var(--bd-table-head-bg); }
 .bd-table tbody tr:last-child td { border-bottom: 0; }
 
 .scroll-x::-webkit-scrollbar { height: 10px; }
@@ -144,32 +241,32 @@ body {
 
 .bd-input {
   width: 100%;
-  background: #f7f8fb;
-  border: 1px solid #e8eaf1;
+  background: var(--bd-bg);
+  border: 1px solid var(--bd-border);
   border-radius: 10px;
   padding: 10px 12px;
   font-size: 14px;
-  color: #0b1020;
+  color: var(--bd-fg);
   transition: all 0.15s;
 }
-.bd-input:hover { background: #f4f6fb; }
+.bd-input:hover { background: var(--bd-border-soft); }
 .bd-input:focus {
   outline: none;
-  background: #fff;
+  background: var(--bd-card);
   border-color: var(--bd-primary);
   box-shadow: 0 0 0 4px var(--bd-primary-50);
 }
 .bd-label {
   font-size: 12.5px;
   font-weight: 500;
-  color: #475069;
+  color: var(--bd-fg-muted);
   margin-bottom: 6px;
   display: block;
 }
 
 .seg {
   display: inline-flex;
-  background: #f0f2f8;
+  background: var(--bd-border-soft);
   padding: 4px;
   border-radius: 12px;
   gap: 2px;
@@ -179,11 +276,11 @@ body {
   border-radius: 9px;
   font-size: 13.5px;
   font-weight: 500;
-  color: #475069;
+  color: var(--bd-fg-muted);
   transition: all 0.15s;
 }
 .seg button.active {
-  background: #fff;
+  background: var(--bd-card);
   color: var(--bd-primary-600);
   box-shadow:
     0 1px 2px rgba(11, 16, 32, 0.06),
@@ -192,21 +289,21 @@ body {
 
 .qr-pattern {
   background-image:
-    radial-gradient(#0b1020 35%, transparent 36%),
-    radial-gradient(#0b1020 35%, transparent 36%);
+    radial-gradient(var(--bd-fg) 35%, transparent 36%),
+    radial-gradient(var(--bd-fg) 35%, transparent 36%);
   background-size: 12px 12px, 12px 12px;
   background-position: 0 0, 6px 6px;
 }
 
 .dropzone {
-  border: 2px dashed #d8dcea;
+  border: 2px dashed var(--bd-border);
   border-radius: 12px;
   transition: all 0.2s;
-  background: linear-gradient(180deg, #fbfcfe 0%, #f7f8fb 100%);
+  background: linear-gradient(180deg, var(--bd-bg) 0%, var(--bd-border-soft) 100%);
 }
 .dropzone:hover {
   border-color: var(--bd-primary);
-  background: var(--bd-primary-50);
+  background: var(--bd-tint-primary);
 }
 
 @keyframes pulseDot {

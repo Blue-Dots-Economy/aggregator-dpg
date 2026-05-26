@@ -112,15 +112,26 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
 
     const body = (req.body ?? {}) as Record<string, unknown>;
 
-    // 1. Schema validation against the link's domain schema.
+    // 1. Schema validation against the link's domain schema. Load the
+    // raw schema as well so we can strip empty-string optional fields
+    // before Ajv runs — an empty cell for an optional `format: uri` /
+    // `format: email` field would otherwise trip the format check
+    // even though the field was never required.
     const schemaRef = { id: `participant-${link.domain}`, version: 'v1' };
-    const validatorResult = await getSchemaLoader().getValidator(schemaRef);
+    const loader = getSchemaLoader();
+    const [validatorResult, schemaResult] = await Promise.all([
+      loader.getValidator(schemaRef),
+      loader.getSchema(schemaRef),
+    ]);
     if (!validatorResult.success) {
       log.error({ status: 'failure', sub: 'schema.load', error: validatorResult.error.code });
       throw httpError('INTERNAL', {
         detail: 'Registration schema unavailable.',
         cause: new Error(validatorResult.error.message),
       });
+    }
+    if (schemaResult.success) {
+      stripEmptyOptionalCells(body, schemaResult.value as Record<string, unknown>);
     }
     const validate = validatorResult.value;
     if (!validate(body)) {
@@ -345,6 +356,28 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
  * the E.164 form the writer resolved upstream, not whatever raw value
  * the form / CSV carried.
  */
+/**
+ * Mutates `payload`: deletes any top-level field whose value is an
+ * empty string and is not declared in the schema's `required` array.
+ * Lets optional `format: uri` / `format: email` fields stay blank
+ * without tripping Ajv format checks. JSON-Schema-spec-compliant —
+ * `required: false` fields may be omitted entirely.
+ */
+function stripEmptyOptionalCells(
+  payload: Record<string, unknown>,
+  jsonSchema: Record<string, unknown>,
+): void {
+  const required = Array.isArray(jsonSchema['required'])
+    ? new Set(jsonSchema['required'] as string[])
+    : new Set<string>();
+  for (const [field, value] of Object.entries(payload)) {
+    if (required.has(field)) continue;
+    if (typeof value === 'string' && value.trim() === '') {
+      delete payload[field];
+    }
+  }
+}
+
 function buildSignalStackItemState(
   _domain: string,
   body: Record<string, unknown>,

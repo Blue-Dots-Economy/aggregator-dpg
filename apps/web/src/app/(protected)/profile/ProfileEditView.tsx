@@ -264,7 +264,7 @@ export function ProfileEditView({ onDone, onSaved }: ProfileEditViewProps): JSX.
   }
   if (raw.error) {
     return (
-      <div className="bd-card bd-shadow p-6 border border-rose-200 bg-rose-50">
+      <div className="bd-card bd-shadow p-6 border border-rose-200 bg-[var(--bd-tint-rose)]">
         <div className="font-display font-bold text-[15px] text-rose-700">
           Could not load profile
         </div>
@@ -275,7 +275,7 @@ export function ProfileEditView({ onDone, onSaved }: ProfileEditViewProps): JSX.
 
   return (
     <div className="bd-card bd-shadow overflow-hidden">
-      <div className="px-7 py-5 bg-gradient-to-r from-[var(--bd-primary-50)] to-white border-b border-[var(--bd-border)]">
+      <div className="px-7 py-5 bg-gradient-to-r from-[var(--bd-tint-primary)] to-[var(--bd-card)] border-b border-[var(--bd-border)]">
         <h2 className="font-display font-bold text-[17px] text-ink-900">Edit Profile</h2>
         <p className="text-[12.5px] text-ink-400 mt-0.5">{headingTagline}</p>
       </div>

@@ -188,6 +188,26 @@ spec:
                   name: {{ include "keycloak.secretName" . }}
                   key: AWS_SECRET_ACCESS_KEY
                   optional: true
+            - name: MSG91_AUTH_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "keycloak.secretName" . }}
+                  key: MSG91_AUTH_KEY
+                  optional: true
+            - name: MSG91_TEMPLATE_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "keycloak.secretName" . }}
+                  key: MSG91_TEMPLATE_ID
+                  optional: true
+            - name: MSG91_SENDER_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "keycloak.secretName" . }}
+                  key: MSG91_SENDER_ID
+                  optional: true
+            - name: MSG91_OTP_VAR_NAME
+              value: {{ .Values.msg91OtpVarName | default "var" | quote }}
           ports:
             - name: http
               containerPort: {{ .Values.service.port }}

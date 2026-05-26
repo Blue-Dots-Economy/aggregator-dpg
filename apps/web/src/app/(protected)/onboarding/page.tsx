@@ -147,13 +147,13 @@ interface MetricItem {
 }
 
 const ACCENT_BG: Record<Accent, string> = {
-  primary: 'linear-gradient(180deg,#EEF2FF 0%,#FFFFFF 55%)',
-  amber: 'linear-gradient(180deg,#FFFBEB 0%,#FFFFFF 55%)',
+  primary: 'linear-gradient(180deg, var(--bd-tint-primary) 0%, var(--bd-card) 55%)',
+  amber: 'linear-gradient(180deg, var(--bd-tint-amber) 0%, var(--bd-card) 55%)',
 };
 
 const ACCENT_ICON_RING: Record<Accent, string> = {
-  primary: 'bg-white border border-[var(--bd-primary-100)] text-primary-600',
-  amber: 'bg-white border border-amber-200 text-amber-700',
+  primary: 'bg-[var(--bd-card)] border border-[var(--bd-primary-100)] text-primary-600',
+  amber: 'bg-[var(--bd-card)] border border-[var(--bd-border)] text-amber-500',
 };
 
 interface SummaryCardProps {
@@ -217,7 +217,7 @@ function SummaryCard({
         </div>
 
         {body && (
-          <div className="pt-3 border-t border-[var(--bd-border-soft)] bg-white/60 -mx-5 -mb-4 px-5 pb-4 mt-1">
+          <div className="pt-3 border-t border-[var(--bd-border-soft)] bg-[var(--bd-card)] -mx-5 -mb-4 px-5 pb-4 mt-1">
             {body}
           </div>
         )}
@@ -230,7 +230,7 @@ function MetricTile({ label, value, tone, loading }: MetricItem & { loading: boo
   const toneCls =
     tone === 'emerald' ? 'text-emerald-600' : tone === 'rose' ? 'text-rose-600' : 'text-ink-900';
   return (
-    <div className="bg-white/70 backdrop-blur-sm border border-[var(--bd-border)] rounded-[10px] px-3 py-2 flex flex-col gap-0.5">
+    <div className="bg-[var(--bd-card)] border border-[var(--bd-border)] rounded-[10px] px-3 py-2 flex flex-col gap-0.5">
       <div
         className={`font-display font-bold text-[18px] tabular-nums leading-none tracking-tight ${toneCls}`}
       >

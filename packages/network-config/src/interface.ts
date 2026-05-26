@@ -46,7 +46,87 @@ export const DomainLabelsSchema = z.object({
 export type DomainLabels = z.infer<typeof DomainLabelsSchema>;
 
 /**
+ * Hex colour `#RRGGBB`. Lower or upper case accepted.
+ */
+const HexColorSchema = z.string().regex(/^#[0-9a-fA-F]{6}$/, 'must be #RRGGBB');
+
+/**
+ * Named palette swatch (`{ name, hex }`). Sourced from `brand.json`.
+ */
+export const PaletteSwatchSchema = z.object({
+  name: z.string().min(1),
+  hex: HexColorSchema,
+});
+export type PaletteSwatch = z.infer<typeof PaletteSwatchSchema>;
+
+/**
+ * Named gradient (`{ name, from, to }`). Sourced from `brand.json`.
+ */
+export const GradientSchema = z.object({
+  name: z.string().min(1),
+  from: HexColorSchema,
+  to: HexColorSchema,
+});
+export type Gradient = z.infer<typeof GradientSchema>;
+
+/**
+ * Full design-token palette loaded from a sibling `brand.json`.
+ * All groups are optional so the loader degrades cleanly when the
+ * file is absent.
+ */
+export const BrandPaletteSchema = z.object({
+  primary: z.array(PaletteSwatchSchema).optional(),
+  secondary: z.array(PaletteSwatchSchema).optional(),
+  accent: z.array(PaletteSwatchSchema).optional(),
+  gradients: z.array(GradientSchema).optional(),
+});
+export type BrandPalette = z.infer<typeof BrandPaletteSchema>;
+
+/**
+ * Single typography face (heading or body) — family + weight + an
+ * optional sample copy block lifted directly from `brand.json`.
+ */
+export const BrandTypographyFaceSchema = z.object({
+  family: z.string().min(1),
+  weight: z.string().min(1),
+  sampleCopy: z.string().optional(),
+});
+export type BrandTypographyFace = z.infer<typeof BrandTypographyFaceSchema>;
+
+/**
+ * Typography tokens loaded from `brand.json`. `primaryFont` drives the
+ * default CSS font stack; `headings` / `body` override per face when
+ * the design system differentiates them.
+ */
+export const BrandTypographySchema = z.object({
+  primaryFont: z.string().min(1),
+  headings: BrandTypographyFaceSchema.optional(),
+  body: BrandTypographyFaceSchema.optional(),
+});
+export type BrandTypography = z.infer<typeof BrandTypographySchema>;
+
+/**
+ * Logo variant paths. Values are absolute web paths under
+ * `apps/web/public/` (e.g. `/brand/blue-dot/logo.png`) or fully
+ * qualified URLs.
+ */
+export const BrandLogoSchema = z.object({
+  default: z.string().min(1).optional(),
+  light: z.string().min(1).optional(),
+  withStrapline: z.string().min(1).optional(),
+  withStraplineLight: z.string().min(1).optional(),
+  onBrand: z.string().min(1).optional(),
+});
+export type BrandLogo = z.infer<typeof BrandLogoSchema>;
+
+/**
  * Brand / UI surface — sidebar/topbar/email templates read from here.
+ *
+ * The flat fields (`short_name`, `primary_color`, ...) are the
+ * authoritative deploy-state values from `aggregator.config.yaml`.
+ * `palette`, `typography` and `logo` come from the sibling
+ * `brand.json` design-system file when present, and are merged in by
+ * the loader before validation.
  */
 export const BrandConfigSchema = z.object({
   short_name: z.string().min(1),
@@ -56,16 +136,14 @@ export const BrandConfigSchema = z.object({
     .string()
     .min(1)
     .regex(/^[a-z0-9-]+$/, 'url_slug must be kebab-case alphanumeric'),
-  primary_color: z
-    .string()
-    .regex(/^#[0-9a-fA-F]{6}$/, 'primary_color must be #RRGGBB')
-    .optional(),
-  accent_color: z
-    .string()
-    .regex(/^#[0-9a-fA-F]{6}$/, 'accent_color must be #RRGGBB')
-    .optional(),
+  primary_color: HexColorSchema.optional(),
+  accent_color: HexColorSchema.optional(),
   logo_url: z.string().url().optional(),
   favicon_url: z.string().url().optional(),
+  palette: BrandPaletteSchema.optional(),
+  typography: BrandTypographySchema.optional(),
+  logo: BrandLogoSchema.optional(),
+  strapline: z.string().optional(),
 });
 export type BrandConfig = z.infer<typeof BrandConfigSchema>;
 
@@ -109,6 +187,27 @@ export type AggregatorYaml = z.infer<typeof AggregatorYamlSchema>;
 // ─── Signalstack network.json (the subset the aggregator cares about) ────────
 
 /**
+ * Tile-label overrides for the dashboard. All keys optional — UI falls back
+ * to generic English when omitted. Carried verbatim from `network.json`'s
+ * per-domain block; the aggregator does not validate label content.
+ */
+export interface DashboardTileLabels {
+  total_items?: string;
+  complete_profiles?: string;
+  has_applications?: string;
+}
+
+/**
+ * Network-wide canonical-bucket label overrides. Keys are the fixed Signals
+ * vocab; values are the network's preferred copy ("Applied" vs "Requested",
+ * etc.). Optional throughout — UI defaults to English labels when missing.
+ */
+export interface DashboardBuckets {
+  by_status?: Partial<Record<'new' | 'active' | 'at_risk' | 'inactive', string>>;
+  by_action_status?: Partial<Record<'create' | 'accept' | 'reject' | 'cancel', string>>;
+}
+
+/**
  * One domain inside a signalstack network. Carries the JSON Schemas
  * keyed by `item_type` — the aggregator looks up the active schema by
  * `(domain_id, item_type)`.
@@ -116,6 +215,8 @@ export type AggregatorYaml = z.infer<typeof AggregatorYamlSchema>;
 export interface NetworkDomain {
   id: string;
   description?: string;
+  /** Per-domain tile labels for the dashboard. Optional passthrough from network.json. */
+  dashboard_tiles?: DashboardTileLabels;
   item_schemas: Record<string, Record<string, unknown>>;
 }
 
@@ -130,6 +231,8 @@ export interface SignalstackNetwork {
   display_name?: string;
   description?: string;
   domains: NetworkDomain[];
+  /** Shared bucket labels for the dashboard. Optional passthrough from network.json. */
+  dashboard_buckets?: DashboardBuckets;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   [extra: string]: any;
 }
@@ -154,6 +257,12 @@ export interface ResolvedDomain {
   schema: Record<string, unknown>;
   /** Identity selectors (sniffer-derived, overridden by config). */
   identity: IdentitySelectors;
+  /**
+   * Resolved per-domain dashboard tile labels — copy-through from
+   * `network.dashboard_tiles` on this domain. UI falls back to generic
+   * defaults when undefined.
+   */
+  dashboardTiles?: DashboardTileLabels;
 }
 
 /**
@@ -167,6 +276,12 @@ export interface ResolvedNetworkConfig {
   domains: Record<string, ResolvedDomain>;
   /** Domain ids in declaration order — preserves UI tab ordering. */
   domainIds: string[];
+  /**
+   * Convenience extract of `network.dashboard_buckets` so callers don't
+   * have to dive into the raw network object. Undefined when the loaded
+   * network.json doesn't declare the block.
+   */
+  dashboardBuckets?: DashboardBuckets;
 }
 
 // ─── Loader port ─────────────────────────────────────────────────────────────

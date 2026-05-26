@@ -117,24 +117,25 @@ export function CSVUpload() {
            * provider). The opposite button is omitted, not just disabled, so
            * the UI matches what the API enforces: one tile per aggregator.
            */}
-          <div className="flex items-center bg-ink-50 border border-[var(--bd-border)] rounded-[10px] p-0.5">
+          {/*
+           * Render as a passive label, not a button — aggregators are
+           * scoped to one participant type so the chip is informational
+           * only. Plain <div> avoids hover/cursor cues that suggest
+           * the value is changeable.
+           */}
+          <div
+            className="flex items-center bg-ink-50 border border-[var(--bd-border)] rounded-[10px] p-0.5"
+            aria-label={`Participant type: ${aggregatorType ?? ''}`}
+          >
             {aggregatorType === 'seeker' && (
-              <button
-                type="button"
-                onClick={() => setParticipantType('seeker')}
-                className="px-3 py-1.5 rounded-[8px] text-[12.5px] font-semibold bg-white text-amber-700 bd-shadow"
-              >
+              <div className="px-3 py-1.5 rounded-[8px] text-[12.5px] font-semibold bg-white text-amber-700 bd-shadow select-none">
                 Seekers
-              </button>
+              </div>
             )}
             {aggregatorType === 'provider' && (
-              <button
-                type="button"
-                onClick={() => setParticipantType('provider')}
-                className="px-3 py-1.5 rounded-[8px] text-[12.5px] font-semibold bg-white text-primary-600 bd-shadow"
-              >
+              <div className="px-3 py-1.5 rounded-[8px] text-[12.5px] font-semibold bg-white text-primary-600 bd-shadow select-none">
                 Providers
-              </button>
+              </div>
             )}
           </div>
           <button
@@ -246,7 +247,14 @@ export function RecentUploadsBody() {
       </div>
       <div className="overflow-auto scroll-x" style={{ maxHeight: 360 }}>
         <table className="bd-table" style={{ minWidth: 800 }}>
-          <thead style={{ position: 'sticky', top: 0, zIndex: 2, background: '#FAFBFE' }}>
+          <thead
+            style={{
+              position: 'sticky',
+              top: 0,
+              zIndex: 2,
+              background: 'var(--bd-table-head-bg)',
+            }}
+          >
             <tr>
               <th>Uploaded</th>
               <th style={{ textAlign: 'center' }}>Type</th>

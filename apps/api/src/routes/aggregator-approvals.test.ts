@@ -17,7 +17,7 @@ import { _setSignalStackWriter } from '../services/signalstack.js';
 import { SignalStackWriterFake } from '@aggregator-dpg/signalstack-writer/testing';
 import { SignalStackWriterBase } from '@aggregator-dpg/signalstack-writer/interface';
 import { UpstreamError } from '@aggregator-dpg/shared-primitives/errors';
-import { err } from '@aggregator-dpg/shared-primitives/result';
+import { err, ok } from '@aggregator-dpg/shared-primitives/result';
 
 const aggregatorId = '11111111-1111-1111-1111-111111111111';
 
@@ -193,11 +193,12 @@ describe('admin approval routes', () => {
     expect(m.subject).toContain('approved');
   });
 
-  it('POST /decision/:id approve still succeeds when signalstack upsert fails (soft-fail)', async () => {
-    // Subclass the in-memory fake to force upsertAggregator into the err
-    // branch. Soft-fail policy: approval succeeds, KC attribute stays
-    // unset, and the login-time fallback retries on the next authenticated
-    // request.
+  it('POST /decision/:id approve aborts with 503 when signalstack upsert fails — DB stays pending, KC user stays disabled', async () => {
+    // Hard-gate policy: signalstack upsert is step 1 of approval. If it
+    // fails, the route returns 503 without touching DB status or KC user
+    // state, so the admin can re-click the approval link once signalstack
+    // is reachable again. Single-use guard reads DB status (still pending)
+    // and the upsert is idempotent on external_id, so retry is clean.
     class FailingUpsertWriter extends SignalStackWriterBase {
       async onboard() {
         return err(new UpstreamError('not used', { code: 'X' }));
@@ -227,20 +228,132 @@ describe('admin approval routes', () => {
       url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
       payload: { token, decision: 'approve' },
     });
-    expect(res.statusCode).toBe(200);
-    expect(res.body).toContain('Application approved');
+    expect(res.statusCode).toBe(503);
+    expect(res.body).toContain('Action failed');
 
+    // KC user remains disabled — login still blocked. `decision_made` stays
+    // at the registration-time default of 'pending'.
+    const after = await idp.findById(kcUserId);
+    if (after.ok && after.value) {
+      expect(after.value.enabled).toBe(false);
+      expect(after.value.attributes?.decision_made?.[0]).toBe('pending');
+      expect(after.value.attributes?.signalstack_org_id).toBeUndefined();
+    }
+    // DB status stays pending — admin can re-click to retry.
+    const dbAfter = await aggregatorStore.findById(aggregatorId);
+    if (dbAfter.ok && dbAfter.value) {
+      expect(dbAfter.value.status).toBe('pending');
+      expect(dbAfter.value.signalstackOrgId).toBeNull();
+    }
+  });
+
+  it('POST /decision/:id approve aborts with 503 when KC enableUser fails — DB stays pending, signalstack idempotent on retry', async () => {
+    // Step 2 (idp.enableUser) failure path: signalstack already wrote
+    // (step 1 succeeded), but KC is unreachable. DB status must stay
+    // pending so admin can re-click. signalstack.upsertAggregator is
+    // idempotent on external_id, so the retry second call returns the
+    // same orgId.
+    const originalEnable = idp.enableUser.bind(idp);
+    let enableCalls = 0;
+    idp.enableUser = async (id: string) => {
+      enableCalls++;
+      if (enableCalls === 1) {
+        return { ok: false, error: { code: 'IDP_UNAVAILABLE', message: 'KC unreachable' } };
+      }
+      return originalEnable(id);
+    };
+
+    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+
+    const first = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
+      payload: { token, decision: 'approve' },
+    });
+    expect(first.statusCode).toBe(503);
+    expect(first.body).toContain('Identity service unavailable');
+
+    // KC user still disabled; DB still pending.
+    const afterFirst = await idp.findById(kcUserId);
+    if (afterFirst.ok && afterFirst.value) {
+      expect(afterFirst.value.enabled).toBe(false);
+    }
+    const dbAfterFirst = await aggregatorStore.findById(aggregatorId);
+    if (dbAfterFirst.ok && dbAfterFirst.value) {
+      expect(dbAfterFirst.value.status).toBe('pending');
+    }
+
+    // Retry — KC now responsive. Approval completes; signalstack returns
+    // same orgId via the in-memory fake's idempotency on external_id.
+    const second = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
+      payload: { token, decision: 'approve' },
+    });
+    expect(second.statusCode).toBe(200);
+    expect(second.body).toContain('Application approved');
+
+    const dbAfter = await aggregatorStore.findById(aggregatorId);
+    if (dbAfter.ok && dbAfter.value) {
+      expect(dbAfter.value.status).toBe('active');
+      expect(dbAfter.value.signalstackOrgId).not.toBeNull();
+    }
     const after = await idp.findById(kcUserId);
     if (after.ok && after.value) {
       expect(after.value.enabled).toBe(true);
-      expect(after.value.attributes?.decision_made?.[0]).toBe('approved');
-      // Soft-fail: KC attr not written so the login-time fallback can retry.
-      expect(after.value.attributes?.signalstack_org_id).toBeUndefined();
     }
-    // Soft-fail also leaves the DB column null — same backfill repairs both.
+    // Signalstack idempotency: upsert was called twice, both with same
+    // external_id, returning the same org row.
+    const aggregators = signalstack.listAggregators();
+    expect(aggregators).toHaveLength(1);
+  });
+
+  it('POST /decision/:id approve succeeds on retry after signalstack recovers', async () => {
+    // First click: signalstack down → 503, no state change.
+    class FailingUpsertWriter extends SignalStackWriterBase {
+      async onboard() {
+        return err(new UpstreamError('not used', { code: 'X' }));
+      }
+      async listItemsByAggregator() {
+        return err(new UpstreamError('not used', { code: 'X' }));
+      }
+      async upsertAggregator() {
+        return err(new UpstreamError('down', { code: 'SIGNALSTACK_SERVER_ERROR' }));
+      }
+      async fetchDashboard() {
+        return err(new UpstreamError('not used', { code: 'X' }));
+      }
+      async exportDashboardCsv() {
+        return err(new UpstreamError('not used', { code: 'X' }));
+      }
+    }
+    _setSignalStackWriter(new FailingUpsertWriter());
+    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+    const first = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
+      payload: { token, decision: 'approve' },
+    });
+    expect(first.statusCode).toBe(503);
+
+    // Second click: signalstack reachable — approval completes.
+    _setSignalStackWriter(signalstack);
+    const second = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
+      payload: { token, decision: 'approve' },
+    });
+    expect(second.statusCode).toBe(200);
+    expect(second.body).toContain('Application approved');
+
     const dbAfter = await aggregatorStore.findById(aggregatorId);
     if (dbAfter.ok && dbAfter.value) {
-      expect(dbAfter.value.signalstackOrgId).toBeNull();
+      expect(dbAfter.value.status).toBe('active');
+      expect(dbAfter.value.signalstackOrgId).not.toBeNull();
+    }
+    const after = await idp.findById(kcUserId);
+    if (after.ok && after.value) {
+      expect(after.value.enabled).toBe(true);
     }
   });
 
@@ -262,6 +375,89 @@ describe('admin approval routes', () => {
     if (dbAfter.ok && dbAfter.value) {
       expect(dbAfter.value.signalstackOrgId).toBeNull();
     }
+  });
+
+  // Capturing writer factory — records every upsertAggregator input so
+  // domain-restriction tests can assert what the approval flow dispatched
+  // without depending on the in-memory fake's internals.
+  const buildCapturingWriter = (
+    captured: Array<{ external_id: string; domains: string[] | undefined }>,
+    orgIdSeed: string,
+  ) =>
+    new (class extends SignalStackWriterBase {
+      async onboard() {
+        return err(new UpstreamError('not used', { code: 'X' }));
+      }
+      async listItemsByAggregator() {
+        return err(new UpstreamError('not used', { code: 'X' }));
+      }
+      async upsertAggregator(input: { external_id: string; domains?: string[] | undefined }) {
+        captured.push({ external_id: input.external_id, domains: input.domains });
+        return ok({
+          org_id: orgIdSeed,
+          external_id: input.external_id,
+          name: 'TRRAIN',
+          slug: 'trrain-abcd',
+        });
+      }
+      async fetchDashboard() {
+        return err(new UpstreamError('not used', { code: 'X' }));
+      }
+      async exportDashboardCsv() {
+        return err(new UpstreamError('not used', { code: 'X' }));
+      }
+    })();
+
+  const seedAggregatorWithType = (type: string | null) => {
+    aggregatorStore.seed([
+      buildAggregator({
+        id: aggregatorId,
+        orgSlug: 'trrain-abcd',
+        actorType: 'aggregator',
+        type,
+        name: 'TRRAIN',
+        contact: { name: 'Asha Rao', phone: '+919876543210', email: 'asha@trrain.org' },
+        status: 'pending',
+      }),
+    ]);
+  };
+
+  it.each([
+    ['seeker', ['seeker']],
+    ['provider', ['provider']],
+  ])(
+    'POST /decision/:id approve forwards only `%s` to signalstack domains',
+    async (type, expectedDomains) => {
+      seedAggregatorWithType(type);
+      const captured: Array<{ external_id: string; domains: string[] | undefined }> = [];
+      _setSignalStackWriter(buildCapturingWriter(captured, `mem-org-${type}`));
+
+      const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+      const res = await app.inject({
+        method: 'POST',
+        url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
+        payload: { token, decision: 'approve' },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(captured).toHaveLength(1);
+      expect(captured[0]?.domains).toEqual(expectedDomains);
+    },
+  );
+
+  it('POST /decision/:id approve falls back to both domains when aggregator.type is null (legacy)', async () => {
+    // Default seed uses type: null. Capture upsert + assert the
+    // legacy fallback list goes out.
+    const captured: Array<{ external_id: string; domains: string[] | undefined }> = [];
+    _setSignalStackWriter(buildCapturingWriter(captured, 'mem-org-legacy'));
+
+    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
+      payload: { token, decision: 'approve' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(captured[0]?.domains).toEqual(['seeker', 'provider']);
   });
 
   it('POST /decision/:id reject flips DB status to inactive, keeps user disabled, emails applicant with reason', async () => {

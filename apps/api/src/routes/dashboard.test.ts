@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterAll } from 'vitest';
+import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
@@ -24,34 +24,24 @@ const ORG_A = 'org_aaa_signalstack';
  */
 function makeRollup(
   overrides: Partial<{
-    items_total: number;
-    by_status: Record<string, number>;
-    applications_total: number;
-    applications_pending: number;
-    applications_shortlisted: number;
-    applications_rejected: number;
-    unique_users: number;
-    complete_profiles_count: number;
-    avg_profiles_per_user: number;
-    users_with_applications: number;
-    avg_applications_per_user: number;
-    new_users_last_7_days: number;
+    total_items: number;
+    complete_profiles: number;
+    has_applications: number;
+    by_status: Partial<Record<'new' | 'active' | 'at_risk' | 'inactive', number>>;
+    by_action_status: Partial<Record<'create' | 'accept' | 'reject' | 'cancel', number>>;
+    avg_items_per_user: number;
+    avg_actions_per_user: number;
     mode_wise_counts: Record<string, number>;
   }>,
 ) {
   return {
-    items_total: 0,
+    total_items: 0,
+    complete_profiles: 0,
+    has_applications: 0,
     by_status: {},
-    applications_total: 0,
-    applications_pending: 0,
-    applications_shortlisted: 0,
-    applications_rejected: 0,
-    unique_users: 0,
-    complete_profiles_count: 0,
-    avg_profiles_per_user: 0,
-    users_with_applications: 0,
-    avg_applications_per_user: 0,
-    new_users_last_7_days: 0,
+    by_action_status: {},
+    avg_items_per_user: 0,
+    avg_actions_per_user: 0,
     mode_wise_counts: {},
     ...overrides,
   };
@@ -285,23 +275,19 @@ describe('GET /v1/dashboard', () => {
             by_domain: {
               seeker: {
                 rollup: makeRollup({
-                  items_total: 5,
+                  total_items: 5,
                   by_status: { new: 3, at_risk: 2 },
-                  applications_pending: 1,
-                  applications_shortlisted: 2,
-                  applications_total: 3,
-                  unique_users: 5,
                 }),
-                participants: [
-                  { participant_id: 'p1', status: 'new' },
-                  { participant_id: 'p2', status: 'at_risk' },
+                items: [
+                  { item_id: 'p1', status: 'new' },
+                  { item_id: 'p2', status: 'at_risk' },
                 ],
                 next_cursor: null,
                 total_matching: 2,
               },
               provider: {
                 rollup: makeRollup({}),
-                participants: [],
+                items: [],
                 next_cursor: null,
                 total_matching: 0,
               },
@@ -388,9 +374,9 @@ describe('GET /v1/dashboard', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.by_domain.seeker.rollup.items_total).toBe(5);
+    expect(body.by_domain.seeker.rollup.total_items).toBe(5);
     expect(body.by_domain.seeker.rollup.by_status).toEqual({ new: 3, at_risk: 2 });
-    expect(body.by_domain.seeker.participants).toHaveLength(2);
+    expect(body.by_domain.seeker.items).toHaveLength(2);
     expect(body.by_domain.seeker.total_matching).toBe(2);
     expect(body.metadata.refreshed).toBe(true);
   });
@@ -406,7 +392,7 @@ describe('GET /v1/dashboard', () => {
     // then resolves actingOrgId either from the just-patched context or
     // the DB lookup and returns the seeded rollup.
     expect(res.statusCode).toBe(200);
-    expect(res.json().by_domain.seeker.rollup.items_total).toBe(5);
+    expect(res.json().by_domain.seeker.rollup.total_items).toBe(5);
   });
 
   it('503 SIGNALSTACK_ORG_NOT_REGISTERED when DB column is null and backfill cannot resolve', async () => {
@@ -436,16 +422,16 @@ describe('GET /v1/dashboard', () => {
             by_domain: {
               seeker: {
                 rollup: makeRollup({
-                  items_total: 2,
+                  total_items: 2,
                   by_status: { at_risk: 2 },
                 }),
-                participants: [],
+                items: [],
                 next_cursor: null,
                 total_matching: 0,
               },
               provider: {
                 rollup: makeRollup({}),
-                participants: [],
+                items: [],
                 next_cursor: null,
                 total_matching: 0,
               },
@@ -516,5 +502,28 @@ describe('GET /v1/dashboard', () => {
       headers: { authorization: 'Bearer agg-a-approved-with-org' },
     });
     expect(res.statusCode).toBe(400);
+  });
+
+  it('forwards ?refresh=true to the signalstack writer', async () => {
+    const spy = vi.spyOn(writer, 'fetchDashboard');
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/dashboard?refresh=true',
+      headers: { authorization: 'Bearer agg-a-approved-with-org' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(spy).toHaveBeenCalledWith(expect.objectContaining({ refresh: true }));
+  });
+
+  it('defaults refresh to false when ?refresh is unset', async () => {
+    const spy = vi.spyOn(writer, 'fetchDashboard');
+
+    await app.inject({
+      method: 'GET',
+      url: '/v1/dashboard',
+      headers: { authorization: 'Bearer agg-a-approved-with-org' },
+    });
+    expect(spy).toHaveBeenCalledWith(expect.objectContaining({ refresh: false }));
   });
 });
