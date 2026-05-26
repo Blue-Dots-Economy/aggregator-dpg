@@ -7,19 +7,14 @@
 
   // Palette pulled from CSS vars at boot so the canvas matches whatever
   // brand the active deployment ships (template.ftl's inline <style>
-  // block writes the per-network `--bd-primary*` values, and the hero
-  // panel sets `--bd-hero-grad` for the highlight tone).
+  // block writes the per-network `--bd-primary*` values). The bright
+  // particle/line tone uses `--bd-primary-500` (light variant from the
+  // brand palette).
   function readPalette() {
     var s = getComputedStyle(document.documentElement);
     var primary = s.getPropertyValue('--bd-primary').trim() || '#2563EB';
-    var hero = getComputedStyle(document.querySelector('.bd-hero') || document.documentElement);
-    var grad = hero.color || '';
-    // `.bd-hero-grad { color: ${properties.brandHeroGrad}; }` is set on
-    // the highlight span — read directly from a probe element.
-    var probe = document.querySelector('.bd-hero-grad');
-    if (probe) grad = getComputedStyle(probe).color || grad;
-    grad = grad.trim() || primary;
-    return { primary: primary, bright: grad };
+    var bright = s.getPropertyValue('--bd-primary-500').trim() || primary;
+    return { primary: primary, bright: bright };
   }
   function hexToRgbTriple(hex) {
     var m = /^#?([0-9a-f]{6})$/i.exec(hex);

@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import { useRef, useEffect } from 'react';
 import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../hooks/useAggregatorConfig';
 
@@ -29,15 +30,6 @@ interface Dot {
 export function BrandPanel(): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
-  // Plural label of the first domain — drives the hero copy + the
-  // first stat tile so the brand panel speaks the network's own
-  // language (Seekers / Beneficiaries / Learners / …).
-  const firstDomain = cfg.domains[0];
-  const seekersLabel = firstDomain?.plural_label ?? 'Seekers';
-  const providersLabel = cfg.domains[1]?.plural_label ?? 'Providers';
-  const heroTagline =
-    cfg.brand.tagline ??
-    'A unified network where aggregators, providers, and seekers move together — every dot is a person, an opportunity, a path forward.';
   // Brand palette drives the hero gradient + canvas particle colors.
   const primary = cfg.brand.primary_color ?? '#2563EB';
   const accent = cfg.brand.accent_color ?? primary;
@@ -197,35 +189,24 @@ export function BrandPanel(): JSX.Element {
         style={{ background: radialOverlay }}
       />
 
-      <div className="relative z-10 max-w-[520px]">
-        <h1 className="font-display font-bold tracking-tight leading-[1.05] text-[48px] xl:text-[56px] text-white">
-          {cfg.brand.long_name}
-        </h1>
-
-        <p className="text-[15px] text-white/70 leading-relaxed mt-5 max-w-[460px]">
-          {heroTagline}
-        </p>
-
-        <div className="flex items-center gap-7 mt-8 pt-6 border-t border-white/10">
-          <BrandStat n="—" label={seekersLabel} />
-          <BrandStat n="—" label={providersLabel} />
-          <BrandStat n="—" label="Aggregators" />
-          <BrandStat n="—" label="Match rate" />
-        </div>
+      <div className="relative z-10 flex flex-col items-start justify-center flex-1 max-w-[640px]">
+        {cfg.brand.logo?.withStraplineLight ? (
+          <Image
+            src={cfg.brand.logo.withStraplineLight}
+            alt={cfg.brand.short_name}
+            width={520}
+            height={180}
+            priority
+            className="w-auto h-[140px] xl:h-[160px] object-contain object-left"
+          />
+        ) : (
+          <h1 className="font-display font-bold tracking-tight leading-[1.05] text-[48px] xl:text-[56px] text-white">
+            {cfg.brand.short_name}
+          </h1>
+        )}
       </div>
 
       <div className="relative z-10" />
-    </div>
-  );
-}
-
-function BrandStat({ n, label }: { n: string; label: string }): JSX.Element {
-  return (
-    <div>
-      <div className="font-display font-bold text-[22px] text-white leading-none tracking-tight">
-        {n}
-      </div>
-      <div className="text-[11.5px] text-white/55 mt-1.5">{label}</div>
     </div>
   );
 }

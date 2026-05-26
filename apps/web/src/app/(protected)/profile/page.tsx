@@ -104,7 +104,7 @@ interface ActiveProfileProps {
 function ActiveProfile({ data, isLoading, isError, onEdit }: ActiveProfileProps) {
   if (isError) {
     return (
-      <div className="bd-card bd-shadow overflow-hidden border border-rose-200 bg-rose-50 px-7 py-6">
+      <div className="bd-card bd-shadow overflow-hidden border border-rose-200 bg-[var(--bd-tint-rose)] px-7 py-6">
         <div className="flex items-start gap-3">
           <I.alert size={18} className="text-rose-600 mt-0.5" />
           <div>
@@ -148,7 +148,7 @@ function ActiveProfile({ data, isLoading, isError, onEdit }: ActiveProfileProps)
 
   return (
     <div className={`bd-card bd-shadow overflow-hidden ${isLoading ? 'opacity-60' : ''}`}>
-      <div className="px-7 py-6 flex items-start justify-between gap-6 bg-gradient-to-r from-[var(--bd-primary-50)] via-white to-white">
+      <div className="px-7 py-6 flex items-start justify-between gap-6 bg-gradient-to-r from-[var(--bd-tint-primary)] via-[var(--bd-card)] to-[var(--bd-card)]">
         <div className="flex items-start gap-4">
           <div className="w-14 h-14 rounded-[14px] bg-[var(--bd-brand)] text-white flex items-center justify-center font-display font-bold text-[18px] bd-shadow-lg">
             {initials}

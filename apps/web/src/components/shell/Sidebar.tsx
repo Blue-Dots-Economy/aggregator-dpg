@@ -1,10 +1,14 @@
 'use client';
 
+import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { I, type IconName } from '../../icons';
 import { BlueDotsLogo } from '../ui/BlueDotsLogo';
 import { useAuth } from '../../lib/auth-context';
+import { useThemeMode } from '../../lib/theme-mode';
+// `mode` is also read here to swap to the light-on-dark logo variant
+// when the user is in dark theme — toggle UI itself lives in Topbar.
 import { useDashboard } from '../../hooks/useDashboard';
 import { useProfileRaw } from '../../hooks/useProfile';
 import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../hooks/useAggregatorConfig';
@@ -32,6 +36,7 @@ function buildNav(brandShortName: string): NavItem[] {
 export function Sidebar() {
   const pathname = usePathname();
   const { user, signOut } = useAuth();
+  const { mode } = useThemeMode();
   const orgInitials = (user?.org ?? 'TR').slice(0, 2).toUpperCase();
   // Brand + domain labels come from the aggregator config so the
   // sidebar adapts to whichever signalstack network the deployment is
@@ -59,21 +64,38 @@ export function Sidebar() {
   );
 
   return (
-    <aside className="w-[252px] shrink-0 bg-white border-r border-[var(--bd-border)] flex flex-col h-screen sticky top-0">
+    <aside className="w-[252px] shrink-0 bg-[var(--bd-card)] border-r border-[var(--bd-border)] flex flex-col h-screen sticky top-0">
       <div className="px-5 pt-6 pb-5">
-        <div className="flex items-center gap-3">
-          <BlueDotsLogo size={40} />
-          <div>
-            <div className="font-display font-bold text-[17px] text-ink-900 leading-tight">
-              {cfg.brand.short_name}
+        {cfg.brand.logo?.default ? (
+          <Image
+            src={
+              mode === 'dark' && cfg.brand.logo?.light
+                ? cfg.brand.logo.light
+                : cfg.brand.logo.default
+            }
+            alt={cfg.brand.short_name}
+            width={180}
+            height={48}
+            priority
+            className="h-10 w-auto object-contain object-left"
+          />
+        ) : (
+          <div className="flex items-center gap-3">
+            <BlueDotsLogo size={40} />
+            <div>
+              <div className="font-display font-bold text-[17px] text-[var(--bd-fg)] leading-tight">
+                {cfg.brand.short_name}
+              </div>
+              <div className="text-[12px] text-[var(--bd-fg-muted)] leading-tight mt-0.5">
+                Aggregator Portal
+              </div>
             </div>
-            <div className="text-[12px] text-ink-400 leading-tight mt-0.5">Aggregator Portal</div>
           </div>
-        </div>
+        )}
       </div>
 
       <div className="px-3">
-        <div className="px-3 pt-3 pb-2 text-[10.5px] uppercase tracking-[0.12em] font-semibold text-ink-300">
+        <div className="px-3 pt-3 pb-2 text-[10.5px] uppercase tracking-[0.12em] font-semibold text-[var(--bd-fg-muted)] opacity-60">
           Overview
         </div>
         <nav className="flex flex-col gap-0.5">
@@ -86,7 +108,9 @@ export function Sidebar() {
                 href={n.to}
                 className={cn(
                   'group flex items-center gap-3 px-3 py-2.5 rounded-[10px] text-[14px] font-medium transition-all',
-                  isActive ? 'nav-active' : 'text-ink-500 hover:bg-ink-50 hover:text-ink-900',
+                  isActive
+                    ? 'nav-active'
+                    : 'text-[var(--bd-fg-muted)] hover:bg-[var(--bd-border-soft)] hover:text-[var(--bd-fg)]',
                 )}
               >
                 <Ic size={18} stroke={isActive ? 2 : 1.7} />
@@ -95,7 +119,9 @@ export function Sidebar() {
                   <span
                     className={cn(
                       'ml-auto text-[11px] font-semibold px-1.5 py-0.5 rounded-md',
-                      isActive ? 'bg-white text-primary-600' : 'bg-ink-100 text-ink-500',
+                      isActive
+                        ? 'bg-[var(--bd-card)] text-primary-600'
+                        : 'bg-[var(--bd-border-soft)] text-[var(--bd-fg-muted)]',
                     )}
                   >
                     {n.badge}
@@ -108,15 +134,17 @@ export function Sidebar() {
       </div>
 
       <div className="mt-auto p-3 shrink-0">
-        <div className="rounded-[12px] bg-gradient-to-br from-[var(--bd-primary-50)] to-white border border-[var(--bd-border)] p-3 flex items-center gap-2.5">
+        <div className="rounded-[12px] bg-gradient-to-br from-[var(--bd-tint-primary)] to-[var(--bd-card)] border border-[var(--bd-border)] p-3 flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-lg bg-[var(--bd-brand)] text-white flex items-center justify-center font-display font-bold text-[12px] shrink-0">
             {orgInitials}
           </div>
           <div className="min-w-0 flex-1">
-            <div className="text-[13px] font-semibold text-ink-900 truncate">
+            <div className="text-[13px] font-semibold text-[var(--bd-fg)] truncate">
               {user?.org ?? 'TRRAIN'}
             </div>
-            <div className="text-[11px] text-ink-400 truncate">Aggregator · Karnataka</div>
+            <div className="text-[11px] text-[var(--bd-fg-muted)] truncate">
+              Aggregator · Karnataka
+            </div>
           </div>
           <button
             type="button"
@@ -125,7 +153,7 @@ export function Sidebar() {
             }}
             title="Sign Out"
             aria-label="Sign out"
-            className="w-7 h-7 rounded-md flex items-center justify-center text-ink-400 hover:bg-white hover:text-rose-600 transition-colors shrink-0"
+            className="w-7 h-7 rounded-md flex items-center justify-center text-[var(--bd-fg-muted)] hover:bg-[var(--bd-border-soft)] hover:text-rose-500 transition-colors shrink-0"
           >
             <I.signout size={15} />
           </button>

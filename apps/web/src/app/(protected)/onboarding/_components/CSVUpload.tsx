@@ -247,7 +247,14 @@ export function RecentUploadsBody() {
       </div>
       <div className="overflow-auto scroll-x" style={{ maxHeight: 360 }}>
         <table className="bd-table" style={{ minWidth: 800 }}>
-          <thead style={{ position: 'sticky', top: 0, zIndex: 2, background: '#FAFBFE' }}>
+          <thead
+            style={{
+              position: 'sticky',
+              top: 0,
+              zIndex: 2,
+              background: 'var(--bd-table-head-bg)',
+            }}
+          >
             <tr>
               <th>Uploaded</th>
               <th style={{ textAlign: 'center' }}>Type</th>

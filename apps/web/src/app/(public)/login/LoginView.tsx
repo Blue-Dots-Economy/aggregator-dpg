@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import { BlueDotsLogo } from '../../../components/ui/BlueDotsLogo';
 import { BrandPanel } from '../../../components/login/BrandPanel';
 import { I } from '../../../icons';
@@ -51,15 +52,28 @@ export function LoginView({ returnTo, error }: LoginViewProps): JSX.Element {
 
         <div className="w-full max-w-[440px] relative z-10">
           <div className="flex items-center gap-3.5 mb-7">
-            <BlueDotsLogo size={56} />
-            <div>
-              <div className="font-display font-bold text-[20px] text-ink-900 leading-none tracking-tight">
-                {brand}
-              </div>
-              <div className="text-[12.5px] text-ink-400 leading-none mt-1.5">
-                Aggregator Portal
-              </div>
-            </div>
+            {cfg.brand.logo?.default ? (
+              <Image
+                src={cfg.brand.logo.default}
+                alt={brand}
+                width={220}
+                height={56}
+                priority
+                className="h-12 w-auto object-contain object-left"
+              />
+            ) : (
+              <>
+                <BlueDotsLogo size={56} />
+                <div>
+                  <div className="font-display font-bold text-[20px] text-ink-900 leading-none tracking-tight">
+                    {brand}
+                  </div>
+                  <div className="text-[12.5px] text-ink-400 leading-none mt-1.5">
+                    Aggregator Portal
+                  </div>
+                </div>
+              </>
+            )}
           </div>
 
           {error ? (
@@ -209,7 +223,7 @@ function Welcome({ onSignIn, onRegister, brand }: WelcomeProps): JSX.Element {
 
       <div className="mt-5 text-[12px] text-ink-400 flex items-start gap-2">
         <span className="w-1 h-1 rounded-full bg-ink-300 mt-1.5 shrink-0" />
-        New registrations are reviewed by the {brand} team within 1–2 business days.
+        New registrations are reviewed by the {brand} team.
       </div>
     </div>
   );

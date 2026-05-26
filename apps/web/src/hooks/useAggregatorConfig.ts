@@ -21,6 +21,51 @@ export interface AggregatorConfigDomain {
   item_type: string;
 }
 
+/**
+ * Brand types mirror the Zod-inferred types exported from
+ * `@aggregator-dpg/network-config/interface`. They are duplicated here
+ * (as plain TS interfaces) instead of imported because the web app
+ * deliberately avoids pulling the runtime Zod schemas into the client
+ * bundle. Keep these in sync when `BrandConfigSchema` changes.
+ */
+export interface BrandPaletteSwatch {
+  name: string;
+  hex: string;
+}
+
+export interface BrandGradient {
+  name: string;
+  from: string;
+  to: string;
+}
+
+export interface BrandPalette {
+  primary?: BrandPaletteSwatch[];
+  secondary?: BrandPaletteSwatch[];
+  accent?: BrandPaletteSwatch[];
+  gradients?: BrandGradient[];
+}
+
+export interface BrandTypographyFace {
+  family: string;
+  weight: string;
+  sampleCopy?: string;
+}
+
+export interface BrandTypography {
+  primaryFont: string;
+  headings?: BrandTypographyFace;
+  body?: BrandTypographyFace;
+}
+
+export interface BrandLogo {
+  default?: string;
+  light?: string;
+  withStrapline?: string;
+  withStraplineLight?: string;
+  onBrand?: string;
+}
+
 export interface AggregatorConfigPayload {
   aggregator: {
     name: string;
@@ -31,11 +76,15 @@ export interface AggregatorConfigPayload {
     short_name: string;
     long_name: string;
     tagline?: string;
+    strapline?: string;
     url_slug: string;
     primary_color?: string;
     accent_color?: string;
     logo_url?: string;
     favicon_url?: string;
+    palette?: BrandPalette;
+    typography?: BrandTypography;
+    logo?: BrandLogo;
   };
   network: {
     id: string;

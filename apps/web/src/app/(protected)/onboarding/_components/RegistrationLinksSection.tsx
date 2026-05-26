@@ -98,10 +98,21 @@ function SuccessToast({ message, onDone }: { message: string; onDone: () => void
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({
+  label,
+  required,
+  children,
+}: {
+  label: string;
+  required?: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <label className="block">
-      <span className="bd-label">{label}</span>
+      <span className="bd-label">
+        {label}
+        {required && <span className="text-rose-500 ml-0.5">*</span>}
+      </span>
       {children}
     </label>
   );
@@ -157,7 +168,7 @@ export function CreateLinkSection() {
   const onCreate = async () => {
     setCreateError(null);
     if (!form.state || !form.district || !form.lever_event) {
-      setCreateError('State, District, and Lever / Event are required.');
+      setCreateError('State, District, and Event are required.');
       return;
     }
     try {
@@ -196,7 +207,10 @@ export function CreateLinkSection() {
         <div className="font-display font-bold text-[16px] text-ink-900">
           Share a registration link
         </div>
-        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-ink-50 text-ink-500 text-[11.5px] font-semibold">
+        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[11.5px] font-semibold">
+          <span className="relative w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block">
+            <span className="absolute inset-0 rounded-full bg-emerald-500 opacity-40 animate-pulse-dot" />
+          </span>
           New
         </span>
       </div>
@@ -213,7 +227,7 @@ export function CreateLinkSection() {
               />
             </Field>
           </div>
-          <Field label="Instance (State Name) *">
+          <Field label="Instance (State Name)" required>
             <input
               className="bd-input"
               value={form.state}
@@ -221,7 +235,7 @@ export function CreateLinkSection() {
               placeholder="State"
             />
           </Field>
-          <Field label="Lever / Event">
+          <Field label="Event" required>
             <input
               className="bd-input"
               value={form.lever_event}
@@ -245,7 +259,7 @@ export function CreateLinkSection() {
               placeholder="City or venue"
             />
           </Field>
-          <Field label="District *">
+          <Field label="District" required>
             <input
               className="bd-input"
               value={form.district}
@@ -253,7 +267,7 @@ export function CreateLinkSection() {
               placeholder="District"
             />
           </Field>
-          <Field label="Domain *">
+          <Field label="Domain" required>
             {/*
              * Pinned to the aggregator's registered type — single-type
              * enforcement is what the API expects. Rendered read-only so
@@ -278,7 +292,7 @@ export function CreateLinkSection() {
           )}
         </div>
 
-        <div className="border-t lg:border-t-0 lg:border-l border-[var(--bd-border)] bg-gradient-to-b from-[var(--bd-primary-50)] to-white p-6 flex flex-col items-center text-center">
+        <div className="border-t lg:border-t-0 lg:border-l border-[var(--bd-border)] bg-gradient-to-b from-[var(--bd-tint-primary)] to-[var(--bd-card)] p-6 flex flex-col items-center text-center">
           <div className="flex items-center gap-2 self-start text-[12.5px] font-semibold text-ink-500">
             <I.qr size={14} /> QR Code
           </div>
@@ -350,7 +364,7 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
   const onSaveEdit = async () => {
     setEditError(null);
     if (!editForm.state || !editForm.district || !editForm.lever_event) {
-      setEditError('State, District, and Lever / Event are required.');
+      setEditError('State, District, and Event are required.');
       return;
     }
     try {
@@ -520,21 +534,21 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
 
       {isDraft && editing && (
         <div className="mt-4 pt-4 border-t border-[var(--bd-border)] grid grid-cols-1 md:grid-cols-2 gap-3">
-          <Field label="Instance (State Name) *">
+          <Field label="Instance (State Name)" required>
             <input
               className="bd-input"
               value={editForm.state}
               onChange={(e) => setEditForm((f) => ({ ...f, state: e.target.value }))}
             />
           </Field>
-          <Field label="District *">
+          <Field label="District" required>
             <input
               className="bd-input"
               value={editForm.district}
               onChange={(e) => setEditForm((f) => ({ ...f, district: e.target.value }))}
             />
           </Field>
-          <Field label="Lever / Event *">
+          <Field label="Event" required>
             <input
               className="bd-input"
               value={editForm.lever_event}
