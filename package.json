@@ -26,6 +26,12 @@
       "eslint --fix --no-warn-ignored"
     ]
   },
+  "pnpm": {
+    "overrides": {
+      "@opentelemetry/sdk-trace-base": "1.25.1",
+      "@opentelemetry/sdk-metrics": "1.25.1"
+    }
+  },
   "devDependencies": {
     "@changesets/cli": "^2.31.0",
     "@commitlint/cli": "^20.5.0",
