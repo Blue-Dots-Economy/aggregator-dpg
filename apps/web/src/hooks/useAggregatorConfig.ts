@@ -14,11 +14,41 @@
 import { useQuery } from '@tanstack/react-query';
 import { jsonFetch } from '../services/http';
 
+/**
+ * Per-domain tile-label overrides from network.json. All keys optional —
+ * UI falls back to generic defaults when undefined.
+ */
+export interface DashboardTileLabels {
+  total_items?: string;
+  complete_profiles?: string;
+  has_applications?: string;
+}
+
+/**
+ * Network-wide bucket-label overrides from network.json. Keys are the
+ * canonical Signals vocab; values are network-specific copy.
+ */
+export interface DashboardBuckets {
+  by_status?: {
+    new?: string;
+    active?: string;
+    at_risk?: string;
+    inactive?: string;
+  };
+  by_action_status?: {
+    create?: string;
+    accept?: string;
+    reject?: string;
+    cancel?: string;
+  };
+}
+
 export interface AggregatorConfigDomain {
   id: string;
   label: string;
   plural_label: string;
   item_type: string;
+  dashboardTiles?: DashboardTileLabels;
 }
 
 /**
@@ -91,6 +121,7 @@ export interface AggregatorConfigPayload {
     display_name?: string;
   };
   domains: AggregatorConfigDomain[];
+  dashboardBuckets?: DashboardBuckets;
 }
 
 /**
