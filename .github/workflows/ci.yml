@@ -6,7 +6,7 @@ on:
       - main
       - feature
       - develop
-      - pipelines
+  
     tags:
       - 'web-v*.*.*'
       - 'api-v*.*.*'
@@ -16,7 +16,6 @@ on:
       - main
       - feature
       - develop
-      - pipelines
   workflow_dispatch:
 
 concurrency:
