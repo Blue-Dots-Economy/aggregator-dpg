@@ -1,11 +1,13 @@
 'use client';
 
+import Image from 'next/image';
 import { useMemo, useState, type FormEvent } from 'react';
 import type { RJSFSchema, UiSchema } from '@rjsf/utils';
 import type { IChangeEvent } from '@rjsf/core';
 import { RjsfThemedForm } from '../../../components/forms/RjsfThemed';
 import { BlueDotsLogo } from '../../../components/ui/BlueDotsLogo';
 import { I } from '../../../icons';
+import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
 
 export interface PublicRegistrationViewProps {
   org: string;
@@ -53,6 +55,14 @@ export function PublicRegistrationView({
 }: PublicRegistrationViewProps): JSX.Element {
   const [formData, setFormData] = useState<Record<string, unknown>>({});
   const [state, setState] = useState<SubmitState>({ status: 'idle' });
+  // Defer required-field error rendering until the user has actually
+  // interacted (typed in a field) or attempted submit once. Otherwise
+  // RJSF's `liveValidate` paints every required field red on first
+  // mount — unfriendly UX for a public-form first impression.
+  const [showValidation, setShowValidation] = useState(false);
+  const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
+  const brandShort = cfg.brand.short_name;
+  const brandLogo = cfg.brand.logo?.default;
 
   // Hide schema's verbose title/description from the form — the page header
   // owns the framing copy. Also drop `participant_id` from the public form:
@@ -229,18 +239,31 @@ export function PublicRegistrationView({
   };
 
   return (
-    <div className="min-h-screen w-full" style={{ background: '#FBFCFE' }}>
+    <div className="bd-public-light min-h-screen w-full" style={{ background: '#FBFCFE' }}>
       <div className="max-w-[640px] mx-auto px-6 lg:px-10 py-10">
         <header className="flex items-center gap-3.5 mb-8">
-          <BlueDotsLogo size={48} />
-          <div>
-            <div className="font-display font-bold text-[18px] text-ink-900 leading-none tracking-tight">
-              Blue Dots
-            </div>
-            <div className="text-[12.5px] text-ink-400 leading-none mt-1.5">
-              {domain === 'seeker' ? 'Seeker registration' : 'Provider registration'}
-            </div>
-          </div>
+          {brandLogo ? (
+            <Image
+              src={brandLogo}
+              alt={brandShort}
+              width={200}
+              height={48}
+              priority
+              className="h-10 w-auto object-contain object-left"
+            />
+          ) : (
+            <>
+              <BlueDotsLogo size={48} />
+              <div>
+                <div className="font-display font-bold text-[18px] text-ink-900 leading-none tracking-tight">
+                  {brandShort}
+                </div>
+                <div className="text-[12.5px] text-ink-400 leading-none mt-1.5">
+                  {domain === 'seeker' ? 'Seeker registration' : 'Provider registration'}
+                </div>
+              </div>
+            </>
+          )}
         </header>
 
         <h1 className="font-display font-bold text-[26px] text-ink-900 tracking-tight leading-tight">
@@ -291,15 +314,15 @@ export function PublicRegistrationView({
               formData={formData}
               onChange={(e) => setFormData(e.formData as Record<string, unknown>)}
               onSubmit={handleSubmit}
-              // Surface validation issues inline as the user fills the form
-              // — without liveValidate the only feedback is a silent
-              // submit-click that triggers a console warning, leaving the
-              // user wondering why nothing happens.
-              liveValidate
-              showErrorList="top"
+              // Only live-validate after the user has typed once OR
+              // attempted submit. Avoids the cold-start "every required
+              // field is red" look on first load.
+              liveValidate={showValidation}
+              showErrorList={showValidation ? 'top' : false}
               focusOnFirstError
               noHtml5Validate
               onError={(errors) => {
+                setShowValidation(true);
                 const first = errors?.[0]?.message ?? 'Please fill all required fields.';
                 setState({
                   status: 'error',
@@ -313,11 +336,16 @@ export function PublicRegistrationView({
                 <button
                   type="submit"
                   disabled={state.status === 'submitting'}
+                  style={
+                    state.status === 'submitting'
+                      ? undefined
+                      : { backgroundColor: cfg.brand.primary_color }
+                  }
                   className={`w-full py-3 rounded-[12px] font-display font-bold text-[15px] text-white transition-all
                     ${
                       state.status === 'submitting'
                         ? 'bg-[var(--bd-primary-100)] text-[var(--bd-primary-600)] cursor-not-allowed'
-                        : 'bg-[var(--bd-primary)] hover:bg-[var(--bd-primary-600)] bd-shadow-lg'
+                        : 'hover:opacity-90 bd-shadow-lg'
                     }`}
                 >
                   {state.status === 'submitting' ? 'Submitting…' : 'Submit registration'}
