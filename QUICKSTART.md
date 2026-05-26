@@ -139,3 +139,15 @@ make rebuild-web
 make reset       # wipe volumes
 make up          # rebuild — realm + mappers re-import automatically
 ```
+
+## Observability (dev)
+
+After running `docker compose up -d otel-collector jaeger loki prometheus grafana`,
+the following UIs are available:
+
+- **Jaeger** (traces): http://localhost:16686 — pick `aggregator-api` from the service dropdown
+- **Grafana** (dashboards + logs): http://localhost:3001 — anonymous access enabled in dev
+- **Prometheus** (metrics): http://localhost:9090 — query `aggregator_api_request_duration_ms_bucket`
+- **Loki** (logs): http://localhost:3100 — accessed via Grafana's Explore tab
+
+`OTEL_SDK_DISABLED=false` in `apps/api/.env.example` turns OTel on for the api. Phase 1 ships with sample rate `1.0` for dev so every request is captured.
