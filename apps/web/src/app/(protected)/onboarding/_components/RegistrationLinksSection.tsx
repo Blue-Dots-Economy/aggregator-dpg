@@ -227,7 +227,7 @@ export function CreateLinkSection() {
               />
             </Field>
           </div>
-          <Field label="Instance (State Name) *">
+          <Field label="Instance (State Name)" required>
             <input
               className="bd-input"
               value={form.state}
@@ -259,7 +259,7 @@ export function CreateLinkSection() {
               placeholder="City or venue"
             />
           </Field>
-          <Field label="District *">
+          <Field label="District" required>
             <input
               className="bd-input"
               value={form.district}
@@ -267,7 +267,7 @@ export function CreateLinkSection() {
               placeholder="District"
             />
           </Field>
-          <Field label="Domain *">
+          <Field label="Domain" required>
             {/*
              * Pinned to the aggregator's registered type — single-type
              * enforcement is what the API expects. Rendered read-only so
@@ -534,14 +534,14 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
 
       {isDraft && editing && (
         <div className="mt-4 pt-4 border-t border-[var(--bd-border)] grid grid-cols-1 md:grid-cols-2 gap-3">
-          <Field label="Instance (State Name) *">
+          <Field label="Instance (State Name)" required>
             <input
               className="bd-input"
               value={editForm.state}
               onChange={(e) => setEditForm((f) => ({ ...f, state: e.target.value }))}
             />
           </Field>
-          <Field label="District *">
+          <Field label="District" required>
             <input
               className="bd-input"
               value={editForm.district}
