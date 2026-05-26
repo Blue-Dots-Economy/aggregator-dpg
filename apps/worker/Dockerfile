@@ -19,6 +19,7 @@ COPY packages/db-schema/package.json                   packages/db-schema/
 COPY packages/queue/package.json                       packages/queue/
 COPY packages/schema-loader/package.json               packages/schema-loader/
 COPY packages/shared-primitives/package.json           packages/shared-primitives/
+COPY packages/telemetry/package.json                   packages/telemetry/
 RUN pnpm install --frozen-lockfile
 
 # ── builder: compile workspace + worker ──────────────────────────────────────
@@ -28,6 +29,7 @@ RUN pnpm --filter @aggregator-dpg/shared-primitives build \
  && pnpm --filter @aggregator-dpg/db-schema build \
  && pnpm --filter @aggregator-dpg/queue build \
  && pnpm --filter @aggregator-dpg/schema-loader build \
+ && pnpm --filter @aggregator-dpg/telemetry build \
  && pnpm --filter @aggregator-dpg/worker build
 
 # ── deployer: prune to prod deps (workspace dist/ already present) ───────────

@@ -15,6 +15,7 @@ COPY packages/db-schema/package.json                  packages/db-schema/
 COPY packages/queue/package.json                      packages/queue/
 COPY packages/schema-loader/package.json              packages/schema-loader/
 COPY packages/shared-primitives/package.json          packages/shared-primitives/
+COPY packages/telemetry/package.json                  packages/telemetry/
 RUN pnpm install --frozen-lockfile
 
 # ── builder: compile TypeScript ───────────────────────────────────────────────
@@ -25,6 +26,7 @@ RUN pnpm --filter @aggregator-dpg/shared-primitives build \
  && pnpm --filter @aggregator-dpg/db-schema build \
  && pnpm --filter @aggregator-dpg/queue build \
  && pnpm --filter @aggregator-dpg/schema-loader build \
+ && pnpm --filter @aggregator-dpg/telemetry build \
  && pnpm --filter @aggregator-dpg/api build
 
 # ── deployer: prune to production deps only ───────────────────────────────────
