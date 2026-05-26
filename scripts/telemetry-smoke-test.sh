@@ -68,3 +68,25 @@ echo "  - worker.signalstack.onboard (worker)"
 echo
 echo "All under one trace_id. If the worker spans appear as a separate trace,"
 echo "the producer-side addJobWithTrace or worker-side wrapWorker is not wired."
+
+echo
+echo "=== Phase 4 — Outcome event verification ==="
+echo
+echo "1. Confirm observability-svc is up:"
+echo "   curl -sf http://localhost:8080/health"
+echo "2. Trigger an outcome (POST a registration link — produces link.created):"
+echo
+echo "   curl -sf -X POST $API_URL/v1/links/create \\"
+echo "     -H 'Authorization: Bearer <dev-jwt>' \\"
+echo "     -H 'Content-Type: application/json' \\"
+echo "     -d '{\"target_role\":\"seeker\",\"label\":\"demo\"}'"
+echo
+echo "3. Check Prometheus for the counter:"
+echo "   $PROMETHEUS_URL/graph?g0.expr=aggregator_registration_link_created_total"
+echo "   Counter should be 1."
+echo
+echo "4. POST the SAME request again (same body, same auth)."
+echo "   Counter should STAY at 1 (idempotency dedup)."
+echo "   Verify with the duplicate counter:"
+echo "   $PROMETHEUS_URL/graph?g0.expr=aggregator_observability_outcome_duplicate_total"
+echo "   Should be 1."

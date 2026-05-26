@@ -188,6 +188,18 @@ docker compose up -d
 4. Open Jaeger and look for a trace whose root is the api request and whose
    leaves are `worker.signalstack.onboard` — all sharing the same `trace_id`.
 
+### Phase 4 smoke test (outcome events)
+
+After bringing the full stack up (`docker compose up -d`) and the api +
+worker are running:
+
+```bash
+./scripts/telemetry-smoke-test.sh
+```
+
+Read the script's Phase 4 section for the manual verification steps. The
+key gate is: a duplicate POST does NOT double-count the business metric.
+
 ### Production rollout
 
 See `docs/telemetry-rollout.md` for the staging → prod cutover sequence,

@@ -333,6 +333,10 @@ services:
       SIGNALSTACK_TIMEOUT_MS: ${SIGNALSTACK_TIMEOUT_MS:-10000}
       # Dev-only: accept pebble cert on host-gateway calls to Keycloak.
       NODE_TLS_REJECT_UNAUTHORIZED: ${NODE_TLS_REJECT_UNAUTHORIZED:-0}
+      # ─── Observability service (outcome events) ──────────────────────
+      OBS_SVC_URL: http://observability-svc:8080
+      OBS_HMAC_KEY_ID: svc-api
+      OBS_HMAC_SECRET: shh-dev
     # No host port mapping — exposed only via nginx at /backend/.
     # See `extra_hosts` rationale on the web service: api hits Keycloak via
     # the public URL for both admin REST + JWKS, so we short-circuit DNS to
@@ -399,6 +403,10 @@ services:
       SIGNALSTACK_ADMIN_KEY: ${SIGNALSTACK_ADMIN_KEY:-}
       SIGNALSTACK_ITEM_NETWORK: ${AGGREGATOR_NETWORK:-blue_dot}
       SIGNALSTACK_TIMEOUT_MS: ${SIGNALSTACK_TIMEOUT_MS:-10000}
+      # ─── Observability service (outcome events) ──────────────────────
+      OBS_SVC_URL: http://observability-svc:8080
+      OBS_HMAC_KEY_ID: svc-worker
+      OBS_HMAC_SECRET: shh-dev
     volumes:
       - ./config/schemas:/app/config/schemas:ro
       - ./config/aggregator.config.yaml:/app/config/aggregator.config.yaml:ro
@@ -526,6 +534,29 @@ services:
     volumes:
       - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
+
+  observability-svc:
+    build:
+      context: .
+      dockerfile: apps/observability-svc/Dockerfile
+    container_name: observability-svc
+    depends_on: [redis, otel-collector]
+    ports:
+      - '8080:8080'
+    environment:
+      REDIS_URL: redis://redis:6379
+      OUTCOMES_HMAC_SECRETS_JSON: '{"svc-api":"shh-dev","svc-worker":"shh-dev"}'
+      ADMIN_TOKEN: dev-admin-token-please-change-me
+      APP_VERSION: dev
+      OTEL_SDK_DISABLED: 'false'
+      OTEL_COLLECTOR_ENDPOINT: http://otel-collector:4317
+      OTEL_SAMPLE_RATE: '1.0'
+      OUTCOME_METRICS_JSON: |
+        [
+          {"name":"participant.registered.total","instrument":"counter","on_event":"participant.onboarded","attributes":["aggregator_id","source"]},
+          {"name":"bulk_upload.completed.total","instrument":"counter","on_event":"bulk_upload.completed","attributes":["aggregator_id"]},
+          {"name":"registration_link.created.total","instrument":"counter","on_event":"link.created","attributes":["aggregator_id","target_role"]}
+        ]
 
 volumes:
   aggregator-postgres-data:
