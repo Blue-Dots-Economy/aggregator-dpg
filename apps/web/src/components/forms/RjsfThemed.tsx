@@ -16,6 +16,8 @@ import type {
   GenericObjectType,
 } from '@rjsf/utils';
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/Select';
+import { MultiSelect } from '../ui/MultiSelect';
 
 function TextWidget(props: WidgetProps) {
   const {
@@ -66,25 +68,31 @@ function TextareaWidget(props: WidgetProps) {
 }
 
 function SelectWidget(props: WidgetProps) {
-  const { id, value, required, disabled, readonly, onChange, options } = props;
+  const { id, value, required, disabled, readonly, onChange, options, placeholder } = props;
   const enumOptions =
     (options['enumOptions'] as { value: unknown; label: string }[] | undefined) ?? [];
+  // shadcn Select disallows the empty-string sentinel as a value; map
+  // empty selection to a controlled `undefined` instead and surface the
+  // placeholder via SelectValue.
+  const current = value !== undefined && value !== null && value !== '' ? String(value) : undefined;
   return (
-    <select
-      id={id}
-      className="bd-input appearance-none pr-10"
-      value={value ?? ''}
-      required={required}
-      disabled={disabled || readonly}
-      onChange={(e) => onChange(e.target.value === '' ? options['emptyValue'] : e.target.value)}
+    <Select
+      {...(current !== undefined ? { value: current } : {})}
+      onValueChange={(v) => onChange(v === '' ? options['emptyValue'] : v)}
+      disabled={Boolean(disabled || readonly)}
+      required={Boolean(required)}
     >
-      <option value="">— select —</option>
-      {enumOptions.map((opt) => (
-        <option key={String(opt.value)} value={String(opt.value)}>
-          {opt.label}
-        </option>
-      ))}
-    </select>
+      <SelectTrigger id={id} {...(required ? { 'aria-required': true } : {})}>
+        <SelectValue placeholder={placeholder ?? 'Select…'} />
+      </SelectTrigger>
+      <SelectContent>
+        {enumOptions.map((opt) => (
+          <SelectItem key={String(opt.value)} value={String(opt.value)}>
+            {opt.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
 
@@ -341,74 +349,22 @@ function TitleField(_props: TitleFieldProps) {
  * array shape.
  */
 function CheckboxesWidget(props: WidgetProps) {
-  const { id, value, disabled, readonly, onChange, options } = props;
+  const { id, value, required, disabled, readonly, onChange, options, placeholder } = props;
   const enumOptions =
     (options['enumOptions'] as Array<{ value: string; label: string }> | undefined) ?? [];
-  // RJSF seeds array fields with `minItems` >= 1 as `[undefined]`, which
-  // produces a label-less chip. Filter to real string values so the chip
-  // list only shows things the user has actually picked.
   const current: string[] = Array.isArray(value)
     ? (value as unknown[]).filter((v): v is string => typeof v === 'string' && v.length > 0)
     : [];
-  const remaining = enumOptions.filter((opt) => !current.includes(opt.value));
-  const remove = (v: string) => {
-    const next = current.filter((x) => x !== v);
-    onChange(next.length > 0 ? next : undefined);
-  };
-  const add = (v: string) => {
-    if (!v || current.includes(v)) return;
-    onChange([...current, v]);
-  };
   return (
-    <div className="flex flex-col gap-2">
-      {current.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {current.map((v) => {
-            const label = enumOptions.find((o) => o.value === v)?.label ?? v;
-            return (
-              <span
-                key={v}
-                className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full bg-[var(--bd-primary-50)] text-[var(--bd-primary-600)] text-[12px] font-medium"
-              >
-                {label}
-                <button
-                  type="button"
-                  onClick={() => remove(v)}
-                  disabled={disabled || readonly}
-                  aria-label={`Remove ${label}`}
-                  className="w-[14px] h-[14px] inline-flex items-center justify-center rounded-full hover:bg-[var(--bd-primary-100)] text-[var(--bd-primary-600)]"
-                >
-                  ×
-                </button>
-              </span>
-            );
-          })}
-        </div>
-      )}
-      <select
-        id={id}
-        className="bd-input appearance-none pr-10"
-        value=""
-        disabled={disabled || readonly || remaining.length === 0}
-        onChange={(e) => {
-          add(e.target.value);
-          e.target.value = '';
-        }}
-      >
-        <option value="">
-          {remaining.length === 0
-            ? '— all selected —'
-            : current.length === 0
-              ? '— select —'
-              : '— add another —'}
-        </option>
-        {remaining.map((opt) => (
-          <option key={opt.value} value={opt.value}>
-            {opt.label}
-          </option>
-        ))}
-      </select>
-    </div>
+    <MultiSelect
+      id={id}
+      options={enumOptions}
+      value={current}
+      onChange={(next) => onChange(next.length > 0 ? next : undefined)}
+      placeholder={placeholder ?? 'Select options…'}
+      disabled={Boolean(disabled || readonly)}
+      required={Boolean(required)}
+    />
   );
 }
 
