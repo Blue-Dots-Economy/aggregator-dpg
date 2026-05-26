@@ -415,6 +415,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
     if (query.page !== undefined) params.set('page', String(query.page));
     if (query.limit !== undefined) params.set('limit', String(query.limit));
     if (query.status) params.set('status', query.status);
+    if (query.refresh) params.set('refresh', 'true');
     // domain intentionally NOT forwarded — see method docblock.
     const qs = params.toString();
     const url = `${this.baseUrl}/api/v1/aggregator/dashboard${qs ? `?${qs}` : ''}`;
@@ -452,16 +453,70 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       if (
         !payload ||
         typeof payload !== 'object' ||
+        !('by_domain' in payload) ||
         !payload.by_domain ||
-        typeof payload.by_domain !== 'object' ||
-        !payload.metadata
+        typeof payload.by_domain !== 'object'
       ) {
         return err(
-          new UpstreamError('signalstack dashboard returned unexpected payload', {
+          new UpstreamError('Signalstack dashboard payload missing by_domain', {
             code: 'SIGNALSTACK_BAD_RESPONSE',
-            details: { payload },
           }),
         );
+      }
+      if (!payload.metadata || typeof payload.metadata !== 'object') {
+        return err(
+          new UpstreamError('Signalstack dashboard payload missing metadata', {
+            code: 'SIGNALSTACK_BAD_RESPONSE',
+          }),
+        );
+      }
+
+      const byDomain = payload.by_domain as Record<string, unknown>;
+      for (const [domainId, sliceRaw] of Object.entries(byDomain)) {
+        if (!sliceRaw || typeof sliceRaw !== 'object') {
+          return err(
+            new UpstreamError(`Signalstack domain slice "${domainId}" is not an object`, {
+              code: 'SIGNALSTACK_BAD_RESPONSE',
+            }),
+          );
+        }
+        const slice = sliceRaw as Record<string, unknown>;
+        if (!Array.isArray(slice.items)) {
+          return err(
+            new UpstreamError(`Signalstack slice "${domainId}" missing items[]`, {
+              code: 'SIGNALSTACK_BAD_RESPONSE',
+            }),
+          );
+        }
+        if (!slice.rollup || typeof slice.rollup !== 'object') {
+          return err(
+            new UpstreamError(`Signalstack slice "${domainId}" missing rollup`, {
+              code: 'SIGNALSTACK_BAD_RESPONSE',
+            }),
+          );
+        }
+        const r = slice.rollup as Record<string, unknown>;
+        if (typeof r.total_items !== 'number') {
+          return err(
+            new UpstreamError(`Signalstack slice "${domainId}" rollup missing total_items`, {
+              code: 'SIGNALSTACK_BAD_RESPONSE',
+            }),
+          );
+        }
+        if (!r.by_action_status || typeof r.by_action_status !== 'object') {
+          return err(
+            new UpstreamError(`Signalstack slice "${domainId}" rollup missing by_action_status`, {
+              code: 'SIGNALSTACK_BAD_RESPONSE',
+            }),
+          );
+        }
+        if (!r.by_status || typeof r.by_status !== 'object') {
+          return err(
+            new UpstreamError(`Signalstack slice "${domainId}" rollup missing by_status`, {
+              code: 'SIGNALSTACK_BAD_RESPONSE',
+            }),
+          );
+        }
       }
       return ok(payload);
     } catch (e) {
@@ -514,6 +569,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
 
     const params = new URLSearchParams();
     if (query.status) params.set('status', query.status);
+    if (query.refresh) params.set('refresh', 'true');
     const qs = params.toString();
     const url = `${this.baseUrl}/api/v1/aggregator/dashboard/export${qs ? `?${qs}` : ''}`;
 

@@ -201,4 +201,80 @@ describe('FileNetworkConfigLoader', () => {
     if (result.success) return;
     expect((result.error as { code: string }).code).toBe('CONFIG_PARSE_FAILED');
   });
+
+  it('passes dashboard_tiles and dashboard_buckets through into the resolved config', async () => {
+    const networkWithDashboard = {
+      id: 'test_net',
+      display_name: 'Test',
+      domains: [
+        {
+          id: 'seeker',
+          description: 'Seekers',
+          item_schemas: {
+            'profile_1.0': {
+              properties: {
+                name: { type: 'string' },
+                phone: { type: 'string', format: 'tel' },
+                email: { type: 'string', format: 'email' },
+              },
+            },
+          },
+          dashboard_tiles: {
+            total_items: 'Total Seekers',
+            complete_profiles: 'Complete',
+            has_applications: 'Engaged',
+          },
+        },
+      ],
+      dashboard_buckets: {
+        by_status: { new: 'New', active: 'Active', at_risk: 'At Risk', inactive: 'Inactive' },
+        by_action_status: {
+          create: 'Requested',
+          accept: 'Connected',
+          reject: 'Declined',
+          cancel: 'Cancelled',
+        },
+      },
+    };
+    const loader = new FileNetworkConfigLoader({
+      configPath,
+      fetchImpl: async () =>
+        new Response(JSON.stringify(networkWithDashboard), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+    });
+    const result = await loader.load();
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const resolved = result.value;
+    expect(resolved.domains['seeker']?.dashboardTiles).toEqual({
+      total_items: 'Total Seekers',
+      complete_profiles: 'Complete',
+      has_applications: 'Engaged',
+    });
+    expect(resolved.dashboardBuckets?.by_action_status).toEqual({
+      create: 'Requested',
+      accept: 'Connected',
+      reject: 'Declined',
+      cancel: 'Cancelled',
+    });
+  });
+
+  it('leaves dashboardTiles and dashboardBuckets undefined when network.json omits them', async () => {
+    const loader = new FileNetworkConfigLoader({
+      configPath,
+      fetchImpl: async () =>
+        new Response(JSON.stringify(BLUE_DOT_NETWORK), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+    });
+    const result = await loader.load();
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const resolved = result.value;
+    expect(resolved.domains['seeker']?.dashboardTiles).toBeUndefined();
+    expect(resolved.dashboardBuckets).toBeUndefined();
+  });
 });

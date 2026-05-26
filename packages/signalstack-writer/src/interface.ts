@@ -185,40 +185,45 @@ export interface SignalStackDashboardQuery {
   limit?: number;
   status?: string;
   domain?: string;
+  /**
+   * When true, forwards `?refresh=true` to signalstack so it bypasses the
+   * TTL cache and recomputes the rollup synchronously. Off by default.
+   */
+  refresh?: boolean;
 }
 
 /**
- * Pre-computed rollup of participant + application counts returned
- * per domain. `by_status` and `mode_wise_counts` are open maps —
- * signalstack adds keys without bumping a version, so consumers MUST
- * tolerate unknown keys instead of pinning an enum.
+ * Pre-computed rollup of participant + action counts returned per domain.
+ *
+ * `by_status` and `by_action_status` use partial maps because signalstack
+ * may omit a bucket when its count is zero; consumers default missing keys
+ * to 0. `mode_wise_counts` is open-shape — signalstack adds keys for any
+ * `onboarded_via` value the aggregator emits.
  */
 export interface SignalStackDashboardRollup {
-  items_total: number;
-  by_status: Record<string, number>;
-  applications_total: number;
-  applications_pending: number;
-  applications_shortlisted: number;
-  applications_rejected: number;
-  unique_users: number;
-  complete_profiles_count: number;
-  avg_profiles_per_user: number;
-  users_with_applications: number;
-  avg_applications_per_user: number;
-  new_users_last_7_days: number;
+  total_items: number;
+  complete_profiles: number;
+  has_applications: number;
+  by_status: Partial<Record<'new' | 'active' | 'at_risk' | 'inactive', number>>;
+  by_action_status: Partial<Record<'create' | 'accept' | 'reject' | 'cancel', number>>;
+  avg_items_per_user: number;
+  avg_actions_per_user: number;
   mode_wise_counts: Record<string, number>;
 }
 
 /**
  * One domain slice of the dashboard response. Carries the rollup +
- * paginated participants list scoped to that domain id.
- *
- * `participants` is open-shape because signalstack owns the per-row
- * schema; downstream consumers decode the keys they care about.
+ * paginated items list scoped to that domain id.
  */
 export interface SignalStackDashboardDomainSlice {
   rollup: SignalStackDashboardRollup;
-  participants: Array<Record<string, unknown>>;
+  /**
+   * One row per item. Open-shape because signalstack owns the per-row
+   * schema; consumers decode the keys they care about (today: count_*,
+   * last_*_at, name, item_network, item_type, onboarded_via,
+   * profile_status, profile_completion_pct, age_days, actionable_tags).
+   */
+  items: Array<Record<string, unknown>>;
   total_matching: number;
   next_cursor: string | null;
 }
@@ -260,6 +265,8 @@ export interface SignalStackDashboardExportQuery {
   actingOrgId: string;
   status?: string;
   domain?: string;
+  /** Same semantics as on the dashboard query — bypass TTL, force recompute. */
+  refresh?: boolean;
 }
 
 /**

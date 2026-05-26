@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef, useMemo, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { createPortal } from 'react-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '../../../components/ui/Button';
 import { StatusPill } from '../../../components/ui/StatusPill';
 import { Avatar } from '../../../components/ui/Avatar';
@@ -17,6 +18,22 @@ import { useThemeMode } from '../../../lib/theme-mode';
 import type { ParticipantBase, ParticipantStatus, Provider, Seeker } from '../../../types';
 
 type Tab = 'seekers' | 'providers' | 'opp';
+
+/** Fallback bucket labels used when network.json doesn't override them. */
+const DEFAULT_BUCKET_LABELS: Record<string, string> = {
+  create: 'Created',
+  accept: 'Accepted',
+  reject: 'Rejected',
+  cancel: 'Cancelled',
+};
+
+/** Fallback status labels used when network.json doesn't override them. */
+const DEFAULT_STATUS_LABELS: Record<string, string> = {
+  new: 'New',
+  active: 'Active',
+  at_risk: 'At Risk',
+  inactive: 'Inactive',
+};
 
 type StatTone = 'active' | 'risk' | 'inactive' | 'satisfied';
 
@@ -254,6 +271,14 @@ function buildStatusOptions(byStatus: Record<string, number> | undefined): Statu
   return opts;
 }
 
+/**
+ * Looks up a bucket label from the config-sourced map, falling back to
+ * `DEFAULT_BUCKET_LABELS` when the key is absent. Always returns a string.
+ */
+function getBucketLabel(labels: Record<string, string>, key: string): string {
+  return labels[key] ?? DEFAULT_BUCKET_LABELS[key] ?? key;
+}
+
 interface ParticipantTableProps<R extends ParticipantBase> {
   kind: RowKind;
   rows: R[];
@@ -279,6 +304,11 @@ interface ParticipantTableProps<R extends ParticipantBase> {
    * actually has for this aggregator.
    */
   statusOptions?: StatusOption[] | undefined;
+  /**
+   * Action-status bucket labels sourced from `dashboardBuckets.by_action_status`
+   * in the aggregator config. Falls back to `DEFAULT_BUCKET_LABELS` when absent.
+   */
+  bucketLabels?: Record<string, string> | undefined;
 }
 
 function ParticipantTable<R extends ParticipantBase>({
@@ -291,6 +321,7 @@ function ParticipantTable<R extends ParticipantBase>({
   statusFilter = 'all',
   onStatusFilterChange,
   statusOptions,
+  bucketLabels = DEFAULT_BUCKET_LABELS,
 }: ParticipantTableProps<R>) {
   const options: StatusOption[] = statusOptions ?? [{ value: 'all', label: 'All statuses' }];
   const searchId = `bd-search-${kind}`;
@@ -527,20 +558,20 @@ function ParticipantTable<R extends ParticipantBase>({
                         {
                           v: r.applied.shortlisted ?? 0,
                           color: '#10B981',
-                          label: 'Shortlisted',
-                          short: 'Shortlisted',
+                          label: getBucketLabel(bucketLabels, 'accept'),
+                          short: getBucketLabel(bucketLabels, 'accept'),
                         },
                         {
                           v: r.applied.rejected,
                           color: '#EF4444',
-                          label: 'Rejected',
-                          short: 'Rejected',
+                          label: getBucketLabel(bucketLabels, 'reject'),
+                          short: getBucketLabel(bucketLabels, 'reject'),
                         },
                         {
                           v: r.applied.pending,
                           color: '#F59E0B',
-                          label: 'Pending',
-                          short: 'Pending',
+                          label: getBucketLabel(bucketLabels, 'create'),
+                          short: getBucketLabel(bucketLabels, 'create'),
                         },
                       ]}
                     />
@@ -552,20 +583,20 @@ function ParticipantTable<R extends ParticipantBase>({
                         {
                           v: r.pre.accepted ?? 0,
                           color: '#6366F1',
-                          label: 'Accepted',
-                          short: 'Accepted',
+                          label: getBucketLabel(bucketLabels, 'accept'),
+                          short: getBucketLabel(bucketLabels, 'accept'),
                         },
                         {
                           v: r.pre.rejected,
                           color: '#EF4444',
-                          label: 'Rejected',
-                          short: 'Rejected',
+                          label: getBucketLabel(bucketLabels, 'reject'),
+                          short: getBucketLabel(bucketLabels, 'reject'),
                         },
                         {
                           v: r.pre.pending,
                           color: '#F59E0B',
-                          label: 'Pending',
-                          short: 'Pending',
+                          label: getBucketLabel(bucketLabels, 'create'),
+                          short: getBucketLabel(bucketLabels, 'create'),
                         },
                       ]}
                     />
@@ -761,7 +792,15 @@ function SeekersTab() {
   });
   const slice = dashboard?.by_domain.seeker;
   const rollup = slice?.rollup;
-  const total = rollup?.items_total;
+  const { data: cfg } = useAggregatorConfig();
+  const seekerCfg = cfg?.domains?.find((d) => d.id === 'seeker');
+  const seekerTileLabels = seekerCfg?.dashboardTiles ?? {};
+  const seekerPlural = seekerCfg?.plural_label ?? 'Seekers';
+  // by_action_status bucket labels — wired to the funnel cells in the
+  // participant table's action-count columns.
+  const bucketLabels = cfg?.dashboardBuckets?.by_action_status ?? DEFAULT_BUCKET_LABELS;
+  const statusLabels = cfg?.dashboardBuckets?.by_status ?? DEFAULT_STATUS_LABELS;
+  const total = rollup?.total_items;
   const byStatus = rollup?.by_status ?? {};
   // Cache the unfiltered status taxonomy the first time it loads, so the
   // dropdown stays populated when the user picks a filter that narrows
@@ -778,46 +817,116 @@ function SeekersTab() {
     [cachedByStatus, byStatus],
   );
   // Signalstack's status taxonomy is open — pick the keys the UI cares
-  // about; unknown ones still surface in the participants list.
+  // about; unknown ones still surface in the items list.
   const active = byStatus['active'] ?? byStatus['new'];
   const atRisk = byStatus['at_risk'];
   const inactive = byStatus['inactive'];
-  const applicationsTotal = rollup?.applications_total;
-  const completeProfiles = rollup?.complete_profiles_count;
-  const newThisWeek = rollup?.new_users_last_7_days;
-  const rows = useMemo(() => (slice?.participants ?? []).map(toSeekerRow), [slice?.participants]);
+  const completeProfiles = rollup?.complete_profiles;
+  const hasApplications = rollup?.has_applications;
+  const newThisWeek = byStatus['new'];
+  const rows = useMemo(() => (slice?.items ?? []).map(toSeekerRow), [slice?.items]);
+
+  // Refresh handler: hits the BFF with refresh=true to force signalstack to
+  // recompute the rollup synchronously, then invalidates the React Query
+  // cache so the next normal render picks up the freshly stored values.
+  const queryClient = useQueryClient();
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+
+  async function handleRefresh() {
+    if (refreshing) return;
+    setRefreshing(true);
+    setRefreshError(null);
+    try {
+      await dashboardService.dashboard({
+        domain: 'seeker',
+        page,
+        limit: PAGE_SIZE,
+        ...(filterActive ? { status: statusFilter } : {}),
+        refresh: true,
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ['dashboard', 'dashboard', 'seeker'],
+      });
+      setLastRefreshedAt(Date.now());
+    } catch (err) {
+      console.error('Dashboard refresh failed', err);
+      setRefreshError(err instanceof Error ? err.message : 'Refresh failed');
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
   return (
     <div className="flex flex-col gap-5">
+      <div className="flex items-center justify-between">
+        <span className="text-[13px] font-semibold text-ink-700">{seekerPlural}</span>
+        <div className="flex items-center gap-2">
+          <Button
+            kind="ghost"
+            icon={
+              <I.refresh
+                size={14}
+                className={refreshing ? 'animate-spin' : undefined}
+                aria-hidden="true"
+              />
+            }
+            onClick={() => {
+              void handleRefresh();
+            }}
+            disabled={refreshing}
+            aria-label="Refresh dashboard"
+            title="Refresh dashboard"
+          >
+            {refreshing ? 'Refreshing…' : 'Refresh'}
+          </Button>
+          {refreshError ? (
+            <span className="ml-2 text-xs text-red-600">Refresh failed: {refreshError}</span>
+          ) : lastRefreshedAt !== null && Date.now() - lastRefreshedAt < 5000 ? (
+            <span className="text-xs text-ink-400">Refreshed just now</span>
+          ) : null}
+        </div>
+      </div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <StatCard
           tone="active"
           icon="users"
           count={fmtCount(active)}
-          label="Active seekers"
+          label={statusLabels['active'] ?? `Active ${seekerPlural}`}
           hint="New or recently active"
         />
         <StatCard
           tone="risk"
           icon="alert"
           count={fmtCount(atRisk)}
-          label="At Risk"
+          label={statusLabels['at_risk'] ?? 'At Risk'}
           hint="No activity 14–30 days"
         />
         <StatCard
           tone="inactive"
           icon="pause"
           count={fmtCount(inactive)}
-          label="Inactive"
+          label={statusLabels['inactive'] ?? 'Inactive'}
           hint="Dormant 30+ days"
         />
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <MiniStat label="Total Participants" value={fmtCount(total)} />
-        <MiniStat label="Complete Profiles" value={fmtCount(completeProfiles)} />
-        <MiniStat label="Seekers with Applications" value={fmtCount(applicationsTotal)} />
         <MiniStat
-          label="New Participants"
+          label={seekerTileLabels.total_items ?? `Total ${seekerPlural}`}
+          value={fmtCount(total)}
+        />
+        <MiniStat
+          label={seekerTileLabels.complete_profiles ?? 'Complete Profiles'}
+          value={fmtCount(completeProfiles)}
+        />
+        <MiniStat
+          label={seekerTileLabels.has_applications ?? `${seekerPlural} with Applications`}
+          value={fmtCount(hasApplications)}
+        />
+        <MiniStat
+          label={statusLabels['new'] ?? 'New Participants'}
           value={fmtCount(newThisWeek)}
           delta="this week"
           deltaTone="flat"
@@ -839,6 +948,7 @@ function SeekersTab() {
           statusFilter={statusFilter}
           onStatusFilterChange={handleStatusFilterChange}
           statusOptions={statusOptions}
+          bucketLabels={bucketLabels}
         />
       )}
     </div>
@@ -900,11 +1010,15 @@ function toSeekerRow(participant: Record<string, unknown>): Seeker {
     avatar: avatarInitials(name),
     profile: { title: '—', exp: '—', verified: false, complete: completion },
     applied: {
-      total: numberOr(participant.applications_total, 0),
+      total:
+        numberOr(participant.count_create, 0) +
+        numberOr(participant.count_accept, 0) +
+        numberOr(participant.count_reject, 0) +
+        numberOr(participant.count_cancel, 0),
       shortlisted: 0,
-      accepted: numberOr(participant.applications_accepted, 0),
-      rejected: numberOr(participant.applications_rejected, 0),
-      pending: numberOr(participant.applications_pending, 0),
+      accepted: numberOr(participant.count_accept, 0),
+      rejected: numberOr(participant.count_reject, 0),
+      pending: numberOr(participant.count_create, 0),
     },
     pre: { total: 0, shortlisted: 0, accepted: 0, rejected: 0, pending: 0 },
     status,
@@ -915,7 +1029,6 @@ function toSeekerRow(participant: Record<string, unknown>): Seeker {
 function mapSeekerStatus(raw: string | null): ParticipantStatus {
   if (raw === 'at_risk') return 'at-risk';
   if (raw === 'inactive') return 'inactive';
-  if (raw === 'satisfied') return 'satisfied';
   return 'active';
 }
 
@@ -951,9 +1064,9 @@ function formatRelative(iso: string): string {
 
 function ProvidersTab() {
   // Mirror SeekersTab: live counts come from the signalstack dashboard
-  // rollup. Provider domain reuses the same rollup shape (items_total,
-  // by_status, applications_*, complete_profiles_count, …) so the cards
-  // map field-for-field; only the labels differ.
+  // rollup. Provider domain reuses the same canonical rollup shape
+  // (total_items, by_status, by_action_status, complete_profiles, …)
+  // so the cards map field-for-field; only the labels differ.
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const handleStatusFilterChange = (next: StatusFilter) => {
@@ -971,18 +1084,24 @@ function ProvidersTab() {
     limit: PAGE_SIZE,
     ...(filterActive ? { status: statusFilter } : {}),
   });
+  const { data: cfg } = useAggregatorConfig();
+  const providerCfg = cfg?.domains?.find((d) => d.id === 'provider');
+  const providerTileLabels = providerCfg?.dashboardTiles ?? {};
+  const providerPlural = providerCfg?.plural_label ?? 'Providers';
+  // by_action_status bucket labels — wired to the funnel cells in the
+  // participant table's action-count columns.
+  const bucketLabels = cfg?.dashboardBuckets?.by_action_status ?? DEFAULT_BUCKET_LABELS;
+  const statusLabels = cfg?.dashboardBuckets?.by_status ?? DEFAULT_STATUS_LABELS;
   const slice = dashboard?.by_domain.provider;
   const rollup = slice?.rollup;
-  const total = rollup?.items_total;
+  const total = rollup?.total_items;
   const byStatus = rollup?.by_status ?? {};
-  const satisfied = byStatus['satisfied'];
   const active = byStatus['active'] ?? byStatus['new'];
   const atRisk = byStatus['at_risk'];
   const inactive = byStatus['inactive'];
-  const verified = rollup?.complete_profiles_count;
-  const openRoles = rollup?.applications_pending;
-  const hiresThisMonth = rollup?.applications_total;
-  const rows = useMemo(() => (slice?.participants ?? []).map(toProviderRow), [slice?.participants]);
+  const verified = rollup?.complete_profiles;
+  const hasApplications = rollup?.has_applications;
+  const rows = useMemo(() => (slice?.items ?? []).map(toProviderRow), [slice?.items]);
   const [cachedByStatus, setCachedByStatus] = useState<Record<string, number> | undefined>();
   useEffect(() => {
     if (!filterActive && rollup?.by_status) {
@@ -993,44 +1112,106 @@ function ProvidersTab() {
     () => buildStatusOptions(cachedByStatus ?? byStatus),
     [cachedByStatus, byStatus],
   );
+
+  // Refresh handler: hits the BFF with refresh=true to force signalstack to
+  // recompute the rollup synchronously, then invalidates the React Query
+  // cache so the next normal render picks up the freshly stored values.
+  const queryClient = useQueryClient();
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+
+  async function handleRefresh() {
+    if (refreshing) return;
+    setRefreshing(true);
+    setRefreshError(null);
+    try {
+      await dashboardService.dashboard({
+        domain: 'provider',
+        page,
+        limit: PAGE_SIZE,
+        ...(filterActive ? { status: statusFilter } : {}),
+        refresh: true,
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ['dashboard', 'dashboard', 'provider'],
+      });
+      setLastRefreshedAt(Date.now());
+    } catch (err) {
+      console.error('Dashboard refresh failed', err);
+      setRefreshError(err instanceof Error ? err.message : 'Refresh failed');
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
   return (
     <div className="flex flex-col gap-5">
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <StatCard
-          tone="satisfied"
-          icon="check"
-          count={fmtCount(satisfied)}
-          label="Satisfied"
-          hint="Roles filled successfully"
-        />
+      <div className="flex items-center justify-between">
+        <span className="text-[13px] font-semibold text-ink-700">{providerPlural}</span>
+        <div className="flex items-center gap-2">
+          <Button
+            kind="ghost"
+            icon={
+              <I.refresh
+                size={14}
+                className={refreshing ? 'animate-spin' : undefined}
+                aria-hidden="true"
+              />
+            }
+            onClick={() => {
+              void handleRefresh();
+            }}
+            disabled={refreshing}
+            aria-label="Refresh dashboard"
+            title="Refresh dashboard"
+          >
+            {refreshing ? 'Refreshing…' : 'Refresh'}
+          </Button>
+          {refreshError ? (
+            <span className="ml-2 text-xs text-red-600">Refresh failed: {refreshError}</span>
+          ) : lastRefreshedAt !== null && Date.now() - lastRefreshedAt < 5000 ? (
+            <span className="text-xs text-ink-400">Refreshed just now</span>
+          ) : null}
+        </div>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <StatCard
           tone="active"
           icon="briefcase"
           count={fmtCount(active)}
-          label="Active"
+          label={statusLabels['active'] ?? 'Active'}
           hint="Currently hiring"
         />
         <StatCard
           tone="risk"
           icon="alert"
           count={fmtCount(atRisk)}
-          label="At Risk"
+          label={statusLabels['at_risk'] ?? 'At Risk'}
           hint="Stalled requirements"
         />
         <StatCard
           tone="inactive"
           icon="pause"
           count={fmtCount(inactive)}
-          label="Inactive"
+          label={statusLabels['inactive'] ?? 'Inactive'}
           hint="No openings 30+ days"
         />
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <MiniStat label="Total Providers" value={fmtCount(total)} />
-        <MiniStat label="Verified Orgs" value={fmtCount(verified)} />
-        <MiniStat label="Open Roles" value={fmtCount(openRoles)} />
-        <MiniStat label="Hires this Month" value={fmtCount(hiresThisMonth)} />
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+        <MiniStat
+          label={providerTileLabels.total_items ?? `Total ${providerPlural}`}
+          value={fmtCount(total)}
+        />
+        <MiniStat
+          label={providerTileLabels.complete_profiles ?? 'Complete Profiles'}
+          value={fmtCount(verified)}
+        />
+        <MiniStat
+          label={providerTileLabels.has_applications ?? `${providerPlural} with Applications`}
+          value={fmtCount(hasApplications)}
+        />
       </div>
 
       {isLoading ? (
@@ -1048,6 +1229,7 @@ function ProvidersTab() {
           statusFilter={statusFilter}
           onStatusFilterChange={handleStatusFilterChange}
           statusOptions={statusOptions}
+          bucketLabels={bucketLabels}
         />
       )}
     </div>
@@ -1180,7 +1362,7 @@ function DashboardContent({ aggregatorType }: { aggregatorType: 'seeker' | 'prov
     domain: aggregatorType === 'provider' ? 'provider' : 'seeker',
   });
   const liveCount =
-    dashboard?.by_domain[aggregatorType === 'provider' ? 'provider' : 'seeker']?.rollup.items_total;
+    dashboard?.by_domain[aggregatorType === 'provider' ? 'provider' : 'seeker']?.rollup.total_items;
   const tabItems = useMemo<SegmentedTab<Tab>[]>(
     () =>
       aggregatorType === 'provider' ? [providerTabLabel(liveCount)] : [seekerTabLabel(liveCount)],
