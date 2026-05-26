@@ -315,6 +315,7 @@ function resolveDomains(
       itemType,
       schema,
       identity,
+      ...(d.dashboard_tiles !== undefined ? { dashboardTiles: d.dashboard_tiles } : {}),
     };
     order.push(d.id);
   }
@@ -324,6 +325,9 @@ function resolveDomains(
     network,
     domains,
     domainIds: order,
+    ...(network.dashboard_buckets !== undefined
+      ? { dashboardBuckets: network.dashboard_buckets }
+      : {}),
   });
 }
 

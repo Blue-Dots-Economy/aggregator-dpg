@@ -187,6 +187,27 @@ export type AggregatorYaml = z.infer<typeof AggregatorYamlSchema>;
 // ─── Signalstack network.json (the subset the aggregator cares about) ────────
 
 /**
+ * Tile-label overrides for the dashboard. All keys optional — UI falls back
+ * to generic English when omitted. Carried verbatim from `network.json`'s
+ * per-domain block; the aggregator does not validate label content.
+ */
+export interface DashboardTileLabels {
+  total_items?: string;
+  complete_profiles?: string;
+  has_applications?: string;
+}
+
+/**
+ * Network-wide canonical-bucket label overrides. Keys are the fixed Signals
+ * vocab; values are the network's preferred copy ("Applied" vs "Requested",
+ * etc.). Optional throughout — UI defaults to English labels when missing.
+ */
+export interface DashboardBuckets {
+  by_status?: Partial<Record<'new' | 'active' | 'at_risk' | 'inactive', string>>;
+  by_action_status?: Partial<Record<'create' | 'accept' | 'reject' | 'cancel', string>>;
+}
+
+/**
  * One domain inside a signalstack network. Carries the JSON Schemas
  * keyed by `item_type` — the aggregator looks up the active schema by
  * `(domain_id, item_type)`.
@@ -194,6 +215,8 @@ export type AggregatorYaml = z.infer<typeof AggregatorYamlSchema>;
 export interface NetworkDomain {
   id: string;
   description?: string;
+  /** Per-domain tile labels for the dashboard. Optional passthrough from network.json. */
+  dashboard_tiles?: DashboardTileLabels;
   item_schemas: Record<string, Record<string, unknown>>;
 }
 
@@ -208,6 +231,8 @@ export interface SignalstackNetwork {
   display_name?: string;
   description?: string;
   domains: NetworkDomain[];
+  /** Shared bucket labels for the dashboard. Optional passthrough from network.json. */
+  dashboard_buckets?: DashboardBuckets;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   [extra: string]: any;
 }
@@ -232,6 +257,12 @@ export interface ResolvedDomain {
   schema: Record<string, unknown>;
   /** Identity selectors (sniffer-derived, overridden by config). */
   identity: IdentitySelectors;
+  /**
+   * Resolved per-domain dashboard tile labels — copy-through from
+   * `network.dashboard_tiles` on this domain. UI falls back to generic
+   * defaults when undefined.
+   */
+  dashboardTiles?: DashboardTileLabels;
 }
 
 /**
@@ -245,6 +276,12 @@ export interface ResolvedNetworkConfig {
   domains: Record<string, ResolvedDomain>;
   /** Domain ids in declaration order — preserves UI tab ordering. */
   domainIds: string[];
+  /**
+   * Convenience extract of `network.dashboard_buckets` so callers don't
+   * have to dive into the raw network object. Undefined when the loaded
+   * network.json doesn't declare the block.
+   */
+  dashboardBuckets?: DashboardBuckets;
 }
 
 // ─── Loader port ─────────────────────────────────────────────────────────────
