@@ -4,7 +4,6 @@
  */
 
 import { createRequire } from 'node:module';
-import type { ValidateFunction } from 'ajv';
 import { ok, err, type Result } from '@aggregator-dpg/shared-primitives/result';
 import { type BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import {
@@ -13,6 +12,7 @@ import {
   SchemaCompileError,
   type JsonSchema,
   type SchemaRef,
+  type ValidateFunction,
 } from '../interface.js';
 
 const require = createRequire(import.meta.url);
