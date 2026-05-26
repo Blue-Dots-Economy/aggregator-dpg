@@ -1,16 +1,33 @@
 replicaCount: 1
 image:
   repository: aggregator-dpg/web
-  tag: ""
+  tag: ''
   pullPolicy: IfNotPresent
+
+telemetry:
+  enabled: true
+  appVersion: '' # set per release; falls back to chart appVersion
+  otel:
+    collectorEndpoint: 'http://otel-collector.observability.svc.cluster.local:4317'
+    sampleRate: '0.1'
+    exportIntervalMs: '5000'
+    # Per design §6.1 — caps on per-attribute and total attribute payload
+    # so a runaway payload can't blow up the Collector or backend storage.
+    attributeValueLengthLimit: '4096'
+  observabilitySvc:
+    url: '' # filled in Phase 4
+    hmacKeyIdEnv: 'OBS_HMAC_KEY_ID'
+    hmacSecretEnv: 'OBS_HMAC_SECRET'
+
+terminationGracePeriodSeconds: 45 # ≥ OTEL_BSP_EXPORT_TIMEOUT + worker drain budget
 service:
   port: 3000
 resources:
   requests: { cpu: 100m, memory: 256Mi }
-  limits:   { cpu: 1,    memory: 1Gi   }
+  limits: { cpu: 1, memory: 1Gi }
 session:
   cookieName: sid
-  cookieSecure: "true"
+  cookieSecure: 'true'
   ttlSeconds: 43200
 hpa:
   enabled: false

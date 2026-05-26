@@ -19,6 +19,7 @@ spec:
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
     spec:
       serviceAccountName: {{ include "api.serviceAccountName" . }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
       {{- include "api.imagePullSecrets" . | nindent 6 }}
       {{- include "api.hostAliases" . | nindent 6 }}
       containers:
@@ -77,6 +78,32 @@ spec:
                 secretKeyRef:
                   name: {{ include "api.secretName" . }}
                   key: AWS_SECRET_ACCESS_KEY
+                  optional: true
+            - name: APP_VERSION
+              value: '{{ .Values.telemetry.appVersion | default .Chart.AppVersion }}'
+            - name: OTEL_SDK_DISABLED
+              value: '{{ ternary "false" "true" .Values.telemetry.enabled }}'
+            - name: OTEL_COLLECTOR_ENDPOINT
+              value: '{{ .Values.telemetry.otel.collectorEndpoint }}'
+            - name: OTEL_SAMPLE_RATE
+              value: '{{ .Values.telemetry.otel.sampleRate }}'
+            - name: OTEL_EXPORT_INTERVAL_MS
+              value: '{{ .Values.telemetry.otel.exportIntervalMs }}'
+            - name: OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT
+              value: '{{ .Values.telemetry.otel.attributeValueLengthLimit }}'
+            - name: OBS_SVC_URL
+              value: '{{ .Values.telemetry.observabilitySvc.url }}'
+            - name: OBS_HMAC_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: aggregator-obs-secrets
+                  key: hmac-key-id
+                  optional: true
+            - name: OBS_HMAC_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: aggregator-obs-secrets
+                  key: hmac-secret
                   optional: true
           readinessProbe:
             httpGet:
