@@ -165,3 +165,25 @@ It will hit the api's health endpoint to produce a trace and ping each
 observability backend. After it succeeds, open Jaeger and confirm a trace
 appears under the `aggregator-api` service with at least an `api.request`
 span and an `onResponse` child timing.
+
+### Phase 2 smoke test (cross-process trace)
+
+To verify the api → worker stitching:
+
+1. Bring the full stack up:
+
+```bash
+docker compose up -d
+```
+
+2. Wait for migrations and worker to be ready.
+
+3. Run the smoke test script. The Phase 2 section will print the upload curl
+   you need to perform manually (auth token + CSV file are environment-specific):
+
+```bash
+./scripts/telemetry-smoke-test.sh
+```
+
+4. Open Jaeger and look for a trace whose root is the api request and whose
+   leaves are `worker.signalstack.onboard` — all sharing the same `trace_id`.

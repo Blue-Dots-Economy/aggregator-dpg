@@ -46,3 +46,25 @@ echo "  Prometheus: $PROMETHEUS_URL/graph?g0.expr=aggregator_api_requests_total"
 echo "  Grafana:    $GRAFANA_URL/explore (datasource: Loki, query: {service_name=\"aggregator-api\"})"
 echo
 echo "✓ Phase 1 smoke test complete."
+
+echo
+echo "=== Phase 2 — Cross-process trace verification ==="
+echo
+echo "POST a bulk upload to produce a trace that spans api → worker → SignalStack:"
+echo
+echo "  curl -sf -X POST $API_URL/v1/onboard/bulk-uploads \\"
+echo "    -H 'Authorization: Bearer <dev-jwt>' \\"
+echo "    -F file=@/tmp/sample-2rows.csv"
+echo
+echo "Then open Jaeger:"
+echo "  $JAEGER_URL/search?service=aggregator-api"
+echo
+echo "Look for a trace whose root is 'api.request POST /v1/onboard/bulk-uploads'."
+echo "It should contain children:"
+echo "  - queue.enqueue   (api side)"
+echo "  - worker.bulk-file-process.process (worker)"
+echo "  - one or more worker.bulk-row-process.process (worker)"
+echo "  - worker.signalstack.onboard (worker)"
+echo
+echo "All under one trace_id. If the worker spans appear as a separate trace,"
+echo "the producer-side addJobWithTrace or worker-side wrapWorker is not wired."
