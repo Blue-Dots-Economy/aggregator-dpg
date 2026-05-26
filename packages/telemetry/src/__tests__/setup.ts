@@ -6,10 +6,13 @@
  * production behaviour where the NodeSDK installs the same context manager
  * at start-up.
  *
- * Also registers a BasicTracerProvider so that `trace.getTracer()` returns a
- * real tracer capable of generating valid trace IDs, enabling span-context
- * propagation tests (e.g. bullmq.test.ts) to assert on injected traceparent
- * headers without booting the full SDK.
+ * Also installs the W3C composite propagator globally so that baggage and
+ * traceparent headers are handled correctly across all test files.
+ *
+ * NOTE: BasicTracerProvider is intentionally NOT registered here. OTel uses
+ * `allowOverride=false` for the global TracerProvider slot, so registering it
+ * here would prevent bootstrap.test.ts from installing the NodeSDK provider.
+ * bullmq.test.ts owns its own provider registration via beforeAll/afterAll.
  *
  * No monkeypatching of `propagation.setBaggage` — that was the design flaw
  * that Task 0.9 fixed. The correct OTel pattern is callback-based:
@@ -19,14 +22,13 @@
  * @package @aggregator-dpg/telemetry
  */
 
-import { context, propagation, trace, ROOT_CONTEXT } from '@opentelemetry/api';
+import { context, propagation, ROOT_CONTEXT } from '@opentelemetry/api';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import {
   CompositePropagator,
   W3CBaggagePropagator,
   W3CTraceContextPropagator,
 } from '@opentelemetry/core';
-import { BasicTracerProvider } from '@opentelemetry/sdk-trace-base';
 
 const als = new AsyncLocalStorage<typeof ROOT_CONTEXT>();
 
@@ -66,9 +68,3 @@ propagation.setGlobalPropagator(
     propagators: [new W3CTraceContextPropagator(), new W3CBaggagePropagator()],
   }),
 );
-
-// Register a real TracerProvider so that trace.getTracer() returns a tracer
-// that generates valid trace IDs. Without this, spans are no-op and
-// propagation.inject() produces an empty carrier (no traceparent header).
-const provider = new BasicTracerProvider();
-trace.setGlobalTracerProvider(provider);
