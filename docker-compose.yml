@@ -241,6 +241,11 @@ services:
       # Web reads participant schemas at runtime from the active network's
       # config folder. Mirrors the api/worker SCHEMA_ROOT_DIR wiring.
       SCHEMA_ROOT_DIR: /app/config/${AGGREGATOR_NETWORK:-blue_dot}/schemas
+      # ─── Telemetry (OTel SDK) ─────────────────────────────────────────
+      APP_VERSION: dev
+      OTEL_SDK_DISABLED: 'false'
+      OTEL_COLLECTOR_ENDPOINT: http://otel-collector:4317
+      OTEL_SAMPLE_RATE: '1.0'
     # No host port mapping — exposed only via nginx at /.
     # Resolve PUBLIC_HOST (the VM's public IP) to the docker host gateway so
     # the BFF's back-channel OIDC discovery + token exchange reaches nginx via
@@ -337,6 +342,11 @@ services:
       OBS_SVC_URL: http://observability-svc:8080
       OBS_HMAC_KEY_ID: svc-api
       OBS_HMAC_SECRET: shh-dev
+      # ─── Telemetry (OTel SDK) ─────────────────────────────────────────
+      APP_VERSION: dev
+      OTEL_SDK_DISABLED: 'false'
+      OTEL_COLLECTOR_ENDPOINT: http://otel-collector:4317
+      OTEL_SAMPLE_RATE: '1.0'
     # No host port mapping — exposed only via nginx at /backend/.
     # See `extra_hosts` rationale on the web service: api hits Keycloak via
     # the public URL for both admin REST + JWKS, so we short-circuit DNS to
@@ -407,6 +417,11 @@ services:
       OBS_SVC_URL: http://observability-svc:8080
       OBS_HMAC_KEY_ID: svc-worker
       OBS_HMAC_SECRET: shh-dev
+      # ─── Telemetry (OTel SDK) ─────────────────────────────────────────
+      APP_VERSION: dev
+      OTEL_SDK_DISABLED: 'false'
+      OTEL_COLLECTOR_ENDPOINT: http://otel-collector:4317
+      OTEL_SAMPLE_RATE: '1.0'
     volumes:
       - ./config/schemas:/app/config/schemas:ro
       - ./config/aggregator.config.yaml:/app/config/aggregator.config.yaml:ro

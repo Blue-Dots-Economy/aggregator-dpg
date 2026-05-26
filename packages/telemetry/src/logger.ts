@@ -12,8 +12,23 @@
  * @package @aggregator-dpg/telemetry
  */
 
+import { createRequire } from 'node:module';
 import pino, { type Logger, type TransportTargetOptions } from 'pino';
 import { context, trace } from '@opentelemetry/api';
+
+/**
+ * Resolves the absolute filesystem path to the OTLP pino transport.
+ *
+ * pino loads transport targets in a worker thread that uses its own module
+ * resolution. Subpath exports of workspace packages (e.g.
+ * `@aggregator-dpg/telemetry/pino-transport`) don't always resolve correctly
+ * in the worker's context, so we resolve once on the main thread and hand
+ * pino an absolute path it can `require()` directly.
+ */
+function resolvePinoTransportPath(): string {
+  const req = createRequire(import.meta.url);
+  return req.resolve('@aggregator-dpg/telemetry/pino-transport');
+}
 
 /**
  * Pino redact paths applied to every log record.
@@ -103,11 +118,18 @@ export function getLogger(opts: LoggerOptions): Logger {
   }
 
   if (opts.otlpEnabled) {
-    targets.push({
-      target: '@aggregator-dpg/telemetry/pino-transport',
-      level: opts.level ?? 'info',
-      options: { piiFieldsExcluded: opts.piiFieldsExcluded ?? [] },
-    });
+    try {
+      targets.push({
+        target: resolvePinoTransportPath(),
+        level: opts.level ?? 'info',
+        options: { piiFieldsExcluded: opts.piiFieldsExcluded ?? [] },
+      });
+    } catch {
+      // If the transport can't be resolved (e.g., wrong install layout in a
+      // worker container), skip OTLP log forwarding. Logs still reach stdout
+      // via the pino-pretty or pino/file target above, and traces + metrics
+      // are unaffected. Better degraded than refusing to boot.
+    }
   }
 
   singleton = pino({
