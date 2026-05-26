@@ -187,3 +187,8 @@ docker compose up -d
 
 4. Open Jaeger and look for a trace whose root is the api request and whose
    leaves are `worker.signalstack.onboard` — all sharing the same `trace_id`.
+
+### Production rollout
+
+See `docs/telemetry-rollout.md` for the staging → prod cutover sequence,
+including the `helm upgrade --install` commands, bake-in gates, and rollback.

@@ -12,7 +12,7 @@ import { getOidcAdapter } from './oidc';
 import { getSessionStore, type SessionData } from './session';
 import { SESSION_COOKIE } from './cookies';
 import { getSession } from './server-session';
-import { tracer, webProxyDurationMs } from './telemetry.js';
+import { tracer, webProxyDurationMs } from './telemetry';
 
 const REFRESH_BEFORE_EXPIRY_MS = 60_000;
 
