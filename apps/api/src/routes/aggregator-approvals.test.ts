@@ -17,7 +17,7 @@ import { _setSignalStackWriter } from '../services/signalstack.js';
 import { SignalStackWriterFake } from '@aggregator-dpg/signalstack-writer/testing';
 import { SignalStackWriterBase } from '@aggregator-dpg/signalstack-writer/interface';
 import { UpstreamError } from '@aggregator-dpg/shared-primitives/errors';
-import { err } from '@aggregator-dpg/shared-primitives/result';
+import { err, ok } from '@aggregator-dpg/shared-primitives/result';
 
 const aggregatorId = '11111111-1111-1111-1111-111111111111';
 
@@ -375,6 +375,89 @@ describe('admin approval routes', () => {
     if (dbAfter.ok && dbAfter.value) {
       expect(dbAfter.value.signalstackOrgId).toBeNull();
     }
+  });
+
+  // Capturing writer factory — records every upsertAggregator input so
+  // domain-restriction tests can assert what the approval flow dispatched
+  // without depending on the in-memory fake's internals.
+  const buildCapturingWriter = (
+    captured: Array<{ external_id: string; domains: string[] | undefined }>,
+    orgIdSeed: string,
+  ) =>
+    new (class extends SignalStackWriterBase {
+      async onboard() {
+        return err(new UpstreamError('not used', { code: 'X' }));
+      }
+      async listItemsByAggregator() {
+        return err(new UpstreamError('not used', { code: 'X' }));
+      }
+      async upsertAggregator(input: { external_id: string; domains?: string[] | undefined }) {
+        captured.push({ external_id: input.external_id, domains: input.domains });
+        return ok({
+          org_id: orgIdSeed,
+          external_id: input.external_id,
+          name: 'TRRAIN',
+          slug: 'trrain-abcd',
+        });
+      }
+      async fetchDashboard() {
+        return err(new UpstreamError('not used', { code: 'X' }));
+      }
+      async exportDashboardCsv() {
+        return err(new UpstreamError('not used', { code: 'X' }));
+      }
+    })();
+
+  const seedAggregatorWithType = (type: string | null) => {
+    aggregatorStore.seed([
+      buildAggregator({
+        id: aggregatorId,
+        orgSlug: 'trrain-abcd',
+        actorType: 'aggregator',
+        type,
+        name: 'TRRAIN',
+        contact: { name: 'Asha Rao', phone: '+919876543210', email: 'asha@trrain.org' },
+        status: 'pending',
+      }),
+    ]);
+  };
+
+  it.each([
+    ['seeker', ['seeker']],
+    ['provider', ['provider']],
+  ])(
+    'POST /decision/:id approve forwards only `%s` to signalstack domains',
+    async (type, expectedDomains) => {
+      seedAggregatorWithType(type);
+      const captured: Array<{ external_id: string; domains: string[] | undefined }> = [];
+      _setSignalStackWriter(buildCapturingWriter(captured, `mem-org-${type}`));
+
+      const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+      const res = await app.inject({
+        method: 'POST',
+        url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
+        payload: { token, decision: 'approve' },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(captured).toHaveLength(1);
+      expect(captured[0]?.domains).toEqual(expectedDomains);
+    },
+  );
+
+  it('POST /decision/:id approve falls back to both domains when aggregator.type is null (legacy)', async () => {
+    // Default seed uses type: null. Capture upsert + assert the
+    // legacy fallback list goes out.
+    const captured: Array<{ external_id: string; domains: string[] | undefined }> = [];
+    _setSignalStackWriter(buildCapturingWriter(captured, 'mem-org-legacy'));
+
+    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
+      payload: { token, decision: 'approve' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(captured[0]?.domains).toEqual(['seeker', 'provider']);
   });
 
   it('POST /decision/:id reject flips DB status to inactive, keeps user disabled, emails applicant with reason', async () => {

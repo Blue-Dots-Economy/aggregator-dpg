@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useMemo, type ReactNode } from 'react';
+import { useEffect, useState, useRef, useMemo, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { createPortal } from 'react-dom';
 import { Button } from '../../../components/ui/Button';
@@ -128,33 +128,6 @@ function MiniStat({ label, value, delta, deltaTone = 'flat' }: MiniStatProps) {
   );
 }
 
-type ChipTone = 'soft' | 'warm' | 'cool' | 'mute';
-
-interface ActionChipProps {
-  label: string;
-  tone?: ChipTone;
-  icon?: ReactNode;
-}
-
-const CHIP_TONES: Record<ChipTone, string> = {
-  soft: 'bg-[var(--bd-primary-50)] text-primary-600 hover:bg-[var(--bd-primary-100)]',
-  warm: 'bg-amber-50 text-amber-800 hover:bg-amber-100',
-  cool: 'bg-sky-50 text-sky-800 hover:bg-sky-100',
-  mute: 'bg-ink-100 text-ink-600 hover:bg-ink-200',
-};
-
-function ActionChip({ label, tone = 'soft', icon }: ActionChipProps) {
-  return (
-    <button
-      type="button"
-      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11.5px] font-semibold transition-colors ${CHIP_TONES[tone]}`}
-    >
-      {icon}
-      {label}
-    </button>
-  );
-}
-
 interface FunnelPart {
   v: number;
   color: string;
@@ -240,40 +213,112 @@ function ProgressTiny({ pct }: { pct: number }) {
 
 type RowKind = 'seeker' | 'provider' | 'opp';
 
-interface RecommendedAction {
+type StatusFilter = string; // 'all' | any key signalstack returns in rollup.by_status
+
+interface StatusOption {
+  value: StatusFilter;
   label: string;
-  tone: ChipTone;
-  icon: ReactNode;
+  count?: number;
 }
 
-function recommendedActions(row: ParticipantBase, kind: RowKind): RecommendedAction[] {
-  const out: RecommendedAction[] = [];
-  if (row.status === 'at-risk')
-    out.push({ label: 'Re-engage', tone: 'warm', icon: <I.send size={12} /> });
-  if (row.status === 'inactive')
-    out.push({ label: 'Send nudge', tone: 'mute', icon: <I.bell size={12} /> });
-  if (!row.profile.verified)
-    out.push({ label: 'Verify', tone: 'cool', icon: <I.shield size={12} /> });
-  if (row.profile.complete < 70)
-    out.push({ label: 'Complete profile', tone: 'soft', icon: <I.spark size={12} /> });
-  if (kind === 'provider' && row.status === 'active')
-    out.push({ label: 'Suggest match', tone: 'soft', icon: <I.trending size={12} /> });
-  if (kind === 'seeker' && (row.applied.shortlisted ?? 0) >= 5)
-    out.push({ label: 'Coach interview', tone: 'soft', icon: <I.message size={12} /> });
-  if (out.length === 0)
-    out.push({ label: 'View profile', tone: 'mute', icon: <I.external size={12} /> });
-  return out.slice(0, 2);
+/**
+ * Render a snake_case / kebab-case signalstack status key as a Title-Case
+ * label. Avoids hardcoding the status taxonomy — signalstack's by_status
+ * is an open map, so new statuses surface automatically.
+ */
+function statusLabel(key: string): string {
+  return key
+    .replace(/[_-]+/g, ' ')
+    .split(' ')
+    .filter(Boolean)
+    .map((w) => (w.length ? w[0]!.toUpperCase() + w.slice(1) : ''))
+    .join(' ');
+}
+
+function buildStatusOptions(byStatus: Record<string, number> | undefined): StatusOption[] {
+  const opts: StatusOption[] = [{ value: 'all', label: 'All statuses' }];
+  if (!byStatus) return opts;
+  for (const [key, count] of Object.entries(byStatus)) {
+    if (!key) continue;
+    opts.push({ value: key, label: statusLabel(key), count });
+  }
+  return opts;
 }
 
 interface ParticipantTableProps<R extends ParticipantBase> {
   kind: RowKind;
   rows: R[];
+  /**
+   * Total count from signalstack `total_matching` — required to compute
+   * the page list and decide whether to render the pagination footer.
+   * When equal to `rows.length` (single page), the page buttons are
+   * suppressed; the "Showing 1–N of N" line stays.
+   */
+  total?: number | undefined;
+  page?: number | undefined;
+  pageSize?: number | undefined;
+  onPageChange?: ((next: number) => void) | undefined;
+  /**
+   * Server-side status filter. `'all'` means no `?status=` is sent to
+   * signalstack. Other values map 1:1 to signalstack's status taxonomy.
+   */
+  statusFilter?: StatusFilter | undefined;
+  onStatusFilterChange?: ((next: StatusFilter) => void) | undefined;
+  /**
+   * Statuses available for this domain, derived from
+   * `rollup.by_status` so the popover always reflects what signalstack
+   * actually has for this aggregator.
+   */
+  statusOptions?: StatusOption[] | undefined;
 }
 
-function ParticipantTable<R extends ParticipantBase>({ kind, rows }: ParticipantTableProps<R>) {
+function ParticipantTable<R extends ParticipantBase>({
+  kind,
+  rows,
+  total,
+  page = 1,
+  pageSize = 25,
+  onPageChange,
+  statusFilter = 'all',
+  onStatusFilterChange,
+  statusOptions,
+}: ParticipantTableProps<R>) {
+  const options: StatusOption[] = statusOptions ?? [{ value: 'all', label: 'All statuses' }];
   const searchId = `bd-search-${kind}`;
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [filterOpen, setFilterOpen] = useState(false);
+  const filterRef = useRef<HTMLDivElement | null>(null);
+
+  // Close the filter popover on outside click. Tracks `mousedown` so the
+  // close fires before any button inside the popover would re-toggle it.
+  useEffect(() => {
+    if (!filterOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (filterRef.current && !filterRef.current.contains(e.target as Node)) {
+        setFilterOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [filterOpen]);
+
+  // Client-side search across the fields the table renders. The dashboard
+  // endpoint has no free-text query param, so search filters the visible
+  // page only — clearing it restores the full server-paginated view.
+  const visibleRows = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((r) => {
+      const hay = [r.name, r.id, r.city, (r as unknown as Provider).role ?? '']
+        .join(' ')
+        .toLowerCase();
+      return hay.includes(q);
+    });
+  }, [rows, query]);
+
+  const filterActive = statusFilter !== 'all';
 
   // Map UI kind onto the signalstack domain. `opp` rides on the provider
   // dataset until signalstack exposes a dedicated opportunity-provider
@@ -305,7 +350,7 @@ function ParticipantTable<R extends ParticipantBase>({ kind, rows }: Participant
               : 'Providers'}
         </div>
         <span className="text-[12px] text-ink-400">
-          {rows.length} of {rows.length}
+          {visibleRows.length} of {total ?? rows.length}
         </span>
 
         <div className="ml-auto flex items-center gap-2">
@@ -325,11 +370,57 @@ function ParticipantTable<R extends ParticipantBase>({ kind, rows }: Participant
               placeholder={
                 kind === 'seeker' ? 'Search name, ID, profile…' : 'Search org, role, ID…'
               }
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
             />
           </div>
-          <Button kind="ghost" icon={<I.filter size={14} />}>
-            All filters
-          </Button>
+          <div ref={filterRef} className="relative">
+            <Button
+              kind={filterActive ? 'primary' : 'ghost'}
+              icon={<I.filter size={14} />}
+              onClick={() => setFilterOpen((v) => !v)}
+              aria-haspopup="menu"
+              aria-expanded={filterOpen}
+            >
+              {filterActive
+                ? (options.find((o) => o.value === statusFilter)?.label ?? 'Filtered')
+                : 'All filters'}
+            </Button>
+            {filterOpen && (
+              <div
+                role="menu"
+                className="absolute right-0 top-full mt-1 z-20 min-w-[180px] bg-white border border-[var(--bd-border)] rounded-[10px] bd-shadow-lg p-1"
+              >
+                {options.map((opt) => {
+                  const active = statusFilter === opt.value;
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={active}
+                      onClick={() => {
+                        onStatusFilterChange?.(opt.value);
+                        setFilterOpen(false);
+                      }}
+                      className={`w-full text-left px-2.5 py-1.5 rounded-md text-[12.5px] flex items-center justify-between ${
+                        active
+                          ? 'bg-[var(--bd-primary-50)] text-primary-600 font-semibold'
+                          : 'text-ink-700 hover:bg-ink-50'
+                      }`}
+                    >
+                      <span>{opt.label}</span>
+                      {opt.count !== undefined ? (
+                        <span className="text-[11px] tabular-nums text-ink-400">{opt.count}</span>
+                      ) : active ? (
+                        <I.check size={12} />
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
           <Button
             kind="ghost"
             icon={<I.download size={14} />}
@@ -364,11 +455,10 @@ function ParticipantTable<R extends ParticipantBase>({ kind, rows }: Participant
               <th>Applied</th>
               <th>Pre-shortlisted</th>
               <th>Status</th>
-              <th>Recommended Action</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => {
+            {visibleRows.map((r) => {
               const roleParts =
                 kind === 'provider' ? (r as unknown as Provider).role.split(' · ') : [];
               return (
@@ -467,20 +557,6 @@ function ParticipantTable<R extends ParticipantBase>({ kind, rows }: Participant
                   <td>
                     <StatusPill status={r.status} />
                   </td>
-                  <td>
-                    <div className="flex items-center gap-1.5">
-                      {recommendedActions(r, kind).map((a, i) => (
-                        <ActionChip key={i} {...a} />
-                      ))}
-                      <button
-                        type="button"
-                        className="w-7 h-7 rounded-md hover:bg-ink-100 flex items-center justify-center text-ink-400"
-                        aria-label="More actions"
-                      >
-                        <I.more size={16} />
-                      </button>
-                    </div>
-                  </td>
                 </tr>
               );
             })}
@@ -488,41 +564,142 @@ function ParticipantTable<R extends ParticipantBase>({ kind, rows }: Participant
         </table>
       </div>
 
-      <div className="px-5 py-3 border-t border-[var(--bd-border)] flex items-center justify-between text-[12.5px] text-ink-500">
-        <div>
-          Showing 1–{rows.length} of {rows.length}
-        </div>
+      <PaginationFooter
+        page={page}
+        pageSize={pageSize}
+        total={total ?? rows.length}
+        rowsOnPage={rows.length}
+        onPageChange={onPageChange}
+        searchActive={query.trim().length > 0}
+        visibleCount={visibleRows.length}
+      />
+    </div>
+  );
+}
+
+interface PaginationFooterProps {
+  page: number;
+  pageSize: number;
+  total: number;
+  rowsOnPage: number;
+  onPageChange?: ((next: number) => void) | undefined;
+  /**
+   * Search filtering happens client-side on the current page, so when a
+   * search is active the page count is meaningless — hide the buttons
+   * and reflect the filtered count in the "Showing" line instead.
+   */
+  searchActive?: boolean | undefined;
+  visibleCount?: number | undefined;
+}
+
+/**
+ * Table footer. Always renders the "Showing X–Y of Z" line. Page buttons
+ * are rendered only when more than one page exists — single-page tables
+ * skip the numbered list entirely so a 5-row dashboard doesn't show
+ * dead "2" / "3" controls.
+ */
+function PaginationFooter({
+  page,
+  pageSize,
+  total,
+  rowsOnPage,
+  onPageChange,
+  searchActive = false,
+  visibleCount,
+}: PaginationFooterProps) {
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const start = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const end = (page - 1) * pageSize + rowsOnPage;
+  const canPrev = page > 1;
+  const canNext = page < totalPages;
+  // When a search query is active, the visible row count is filtered
+  // from the current page only — show that, not the unfiltered range,
+  // so the count line matches what the user sees in the table body.
+  const showSearchSummary = searchActive && visibleCount !== undefined;
+  const change = (next: number) => {
+    if (!onPageChange) return;
+    if (next < 1 || next > totalPages || next === page) return;
+    onPageChange(next);
+  };
+  // Numbered list capped at 7 entries with leading/trailing ellipsis
+  // so dashboards with many pages stay readable.
+  const pageList = buildPageList(page, totalPages);
+  return (
+    <div className="px-5 py-3 border-t border-[var(--bd-border)] flex items-center justify-between text-[12.5px] text-ink-500">
+      <div>
+        {showSearchSummary
+          ? `Matching ${visibleCount} of ${rowsOnPage} on this page`
+          : `Showing ${start}–${end} of ${total}`}
+      </div>
+      {totalPages > 1 && !searchActive && (
         <div className="flex items-center gap-1">
           <button
             type="button"
             aria-label="Previous page"
-            className="px-2.5 py-1.5 rounded-md hover:bg-ink-100 text-ink-400"
+            disabled={!canPrev}
+            onClick={() => change(page - 1)}
+            className="px-2.5 py-1.5 rounded-md hover:bg-ink-100 text-ink-400 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
           >
             <I.chevL size={14} />
           </button>
-          <button
-            type="button"
-            className="px-3 py-1 rounded-md bg-[var(--bd-primary-50)] text-primary-600 font-semibold"
-          >
-            1
-          </button>
-          <button type="button" className="px-3 py-1 rounded-md hover:bg-ink-100">
-            2
-          </button>
-          <button type="button" className="px-3 py-1 rounded-md hover:bg-ink-100">
-            3
-          </button>
+          {pageList.map((p, i) =>
+            p === '…' ? (
+              <span key={`gap-${i}`} className="px-2 text-ink-300 select-none">
+                …
+              </span>
+            ) : p === page ? (
+              <button
+                key={p}
+                type="button"
+                aria-current="page"
+                className="px-3 py-1 rounded-md bg-[var(--bd-primary-50)] text-primary-600 font-semibold"
+              >
+                {p}
+              </button>
+            ) : (
+              <button
+                key={p}
+                type="button"
+                onClick={() => change(p)}
+                className="px-3 py-1 rounded-md hover:bg-ink-100"
+              >
+                {p}
+              </button>
+            ),
+          )}
           <button
             type="button"
             aria-label="Next page"
-            className="px-2.5 py-1.5 rounded-md hover:bg-ink-100 text-ink-400"
+            disabled={!canNext}
+            onClick={() => change(page + 1)}
+            className="px-2.5 py-1.5 rounded-md hover:bg-ink-100 text-ink-400 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
           >
             <I.chevR size={14} />
           </button>
         </div>
-      </div>
+      )}
     </div>
   );
+}
+
+/**
+ * Returns the numbered button list with ellipsis markers. For ≤ 7 pages
+ * we render every number. Beyond that, we surround the current page with
+ * one neighbour on each side and pin the first / last pages, dropping
+ * the gaps with `…`.
+ */
+function buildPageList(current: number, totalPages: number): Array<number | '…'> {
+  if (totalPages <= 7) {
+    return Array.from({ length: totalPages }, (_, i) => i + 1);
+  }
+  const out: Array<number | '…'> = [1];
+  const left = Math.max(2, current - 1);
+  const right = Math.min(totalPages - 1, current + 1);
+  if (left > 2) out.push('…');
+  for (let p = left; p <= right; p++) out.push(p);
+  if (right < totalPages - 1) out.push('…');
+  out.push(totalPages);
+  return out;
 }
 
 function LoadingCard() {
@@ -541,17 +718,49 @@ function ErrorCard() {
   );
 }
 
+const PAGE_SIZE = 25;
+
 function SeekersTab() {
   // Signalstack's `/aggregator/dashboard` is the only endpoint that
   // correctly scopes participant lookups by the caller's signalstack org
   // (via the per-call `x-acting-org-id` header). The response now
   // wraps every served domain under `by_domain[<id>]` so seeker +
   // provider tabs share a single fetch.
-  const { data: dashboard, isLoading, isError } = useDashboard({ domain: 'seeker' });
+  const [page, setPage] = useState(1);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const handleStatusFilterChange = (next: StatusFilter) => {
+    setPage(1);
+    setStatusFilter(next);
+  };
+  const filterActive = statusFilter !== 'all';
+  const {
+    data: dashboard,
+    isLoading,
+    isError,
+  } = useDashboard({
+    domain: 'seeker',
+    page,
+    limit: PAGE_SIZE,
+    ...(filterActive ? { status: statusFilter } : {}),
+  });
   const slice = dashboard?.by_domain.seeker;
   const rollup = slice?.rollup;
   const total = rollup?.items_total;
   const byStatus = rollup?.by_status ?? {};
+  // Cache the unfiltered status taxonomy the first time it loads, so the
+  // dropdown stays populated when the user picks a filter that narrows
+  // `by_status` down to a single key. Refreshed only on unfiltered
+  // responses — keeps a single fetch per tab.
+  const [cachedByStatus, setCachedByStatus] = useState<Record<string, number> | undefined>();
+  useEffect(() => {
+    if (!filterActive && rollup?.by_status) {
+      setCachedByStatus(rollup.by_status);
+    }
+  }, [filterActive, rollup?.by_status]);
+  const statusOptions = useMemo(
+    () => buildStatusOptions(cachedByStatus ?? byStatus),
+    [cachedByStatus, byStatus],
+  );
   // Signalstack's status taxonomy is open — pick the keys the UI cares
   // about; unknown ones still surface in the participants list.
   const active = byStatus['active'] ?? byStatus['new'];
@@ -604,7 +813,17 @@ function SeekersTab() {
       ) : isError ? (
         <ErrorCard />
       ) : (
-        <ParticipantTable kind="seeker" rows={rows} />
+        <ParticipantTable
+          kind="seeker"
+          rows={rows}
+          total={slice?.total_matching ?? total}
+          page={page}
+          pageSize={PAGE_SIZE}
+          onPageChange={setPage}
+          statusFilter={statusFilter}
+          onStatusFilterChange={handleStatusFilterChange}
+          statusOptions={statusOptions}
+        />
       )}
     </div>
   );
@@ -719,7 +938,23 @@ function ProvidersTab() {
   // rollup. Provider domain reuses the same rollup shape (items_total,
   // by_status, applications_*, complete_profiles_count, …) so the cards
   // map field-for-field; only the labels differ.
-  const { data: dashboard, isLoading, isError } = useDashboard({ domain: 'provider' });
+  const [page, setPage] = useState(1);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const handleStatusFilterChange = (next: StatusFilter) => {
+    setPage(1);
+    setStatusFilter(next);
+  };
+  const filterActive = statusFilter !== 'all';
+  const {
+    data: dashboard,
+    isLoading,
+    isError,
+  } = useDashboard({
+    domain: 'provider',
+    page,
+    limit: PAGE_SIZE,
+    ...(filterActive ? { status: statusFilter } : {}),
+  });
   const slice = dashboard?.by_domain.provider;
   const rollup = slice?.rollup;
   const total = rollup?.items_total;
@@ -732,6 +967,16 @@ function ProvidersTab() {
   const openRoles = rollup?.applications_pending;
   const hiresThisMonth = rollup?.applications_total;
   const rows = useMemo(() => (slice?.participants ?? []).map(toProviderRow), [slice?.participants]);
+  const [cachedByStatus, setCachedByStatus] = useState<Record<string, number> | undefined>();
+  useEffect(() => {
+    if (!filterActive && rollup?.by_status) {
+      setCachedByStatus(rollup.by_status);
+    }
+  }, [filterActive, rollup?.by_status]);
+  const statusOptions = useMemo(
+    () => buildStatusOptions(cachedByStatus ?? byStatus),
+    [cachedByStatus, byStatus],
+  );
   return (
     <div className="flex flex-col gap-5">
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -777,7 +1022,17 @@ function ProvidersTab() {
       ) : isError ? (
         <ErrorCard />
       ) : (
-        <ParticipantTable<Provider> kind="provider" rows={rows} />
+        <ParticipantTable<Provider>
+          kind="provider"
+          rows={rows}
+          total={slice?.total_matching ?? total}
+          page={page}
+          pageSize={PAGE_SIZE}
+          onPageChange={setPage}
+          statusFilter={statusFilter}
+          onStatusFilterChange={handleStatusFilterChange}
+          statusOptions={statusOptions}
+        />
       )}
     </div>
   );
