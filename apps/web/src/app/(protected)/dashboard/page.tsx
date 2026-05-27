@@ -245,6 +245,66 @@ function ProgressTiny({ pct }: { pct: number }) {
 
 type RowKind = 'seeker' | 'provider' | 'opp';
 
+type ChipTone = 'soft' | 'warm' | 'cool' | 'mute';
+
+const CHIP_TONES: Record<ChipTone, string> = {
+  soft: 'bg-[var(--bd-primary-50)] text-primary-600 hover:bg-[var(--bd-primary-100)]',
+  warm: 'bg-amber-50 text-amber-800 hover:bg-amber-100',
+  cool: 'bg-sky-50 text-sky-800 hover:bg-sky-100',
+  mute: 'bg-ink-100 text-ink-600 hover:bg-ink-200',
+};
+
+interface RecommendedAction {
+  label: string;
+  tone: ChipTone;
+  icon: ReactNode;
+}
+
+/**
+ * Derives up to two suggested next-actions for a participant row from
+ * its status + profile completeness. Heuristic, client-side only — no
+ * server call. Always returns at least one ("View profile") so the
+ * column never renders empty.
+ */
+function recommendedActions(row: ParticipantBase, kind: RowKind): RecommendedAction[] {
+  const out: RecommendedAction[] = [];
+  if (row.status === 'at-risk')
+    out.push({ label: 'Re-engage', tone: 'warm', icon: <I.send size={12} /> });
+  if (row.status === 'inactive')
+    out.push({ label: 'Send nudge', tone: 'mute', icon: <I.bell size={12} /> });
+  if (!row.profile.verified)
+    out.push({ label: 'Verify', tone: 'cool', icon: <I.shield size={12} /> });
+  if (row.profile.complete < 70)
+    out.push({ label: 'Complete profile', tone: 'soft', icon: <I.spark size={12} /> });
+  if (kind === 'provider' && row.status === 'active')
+    out.push({ label: 'Suggest match', tone: 'soft', icon: <I.trending size={12} /> });
+  if (kind === 'seeker' && (row.applied.shortlisted ?? 0) >= 5)
+    out.push({ label: 'Coach interview', tone: 'soft', icon: <I.message size={12} /> });
+  if (out.length === 0)
+    out.push({ label: 'View profile', tone: 'mute', icon: <I.external size={12} /> });
+  return out.slice(0, 2);
+}
+
+function ActionChip({
+  label,
+  tone = 'soft',
+  icon,
+}: {
+  label: string;
+  tone?: ChipTone;
+  icon?: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11.5px] font-semibold transition-colors ${CHIP_TONES[tone]}`}
+    >
+      {icon}
+      {label}
+    </button>
+  );
+}
+
 type StatusFilter = string; // 'all' | any key signalstack returns in rollup.by_status
 
 interface StatusOption {
@@ -507,6 +567,7 @@ function ParticipantTable<R extends ParticipantBase>({
               <th>Profile Status</th>
               <th>{bucketLabels['create'] ?? 'Applied'}</th>
               <th>Status</th>
+              <th>Recommended Action</th>
             </tr>
           </thead>
           <tbody>
@@ -583,6 +644,13 @@ function ParticipantTable<R extends ParticipantBase>({
                   </td>
                   <td>
                     <StatusPill status={r.status} />
+                  </td>
+                  <td>
+                    <div className="flex items-center gap-1.5">
+                      {recommendedActions(r, kind).map((a, i) => (
+                        <ActionChip key={i} {...a} />
+                      ))}
+                    </div>
                   </td>
                 </tr>
               );
