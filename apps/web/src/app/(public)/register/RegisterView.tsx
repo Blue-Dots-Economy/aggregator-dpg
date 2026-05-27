@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import type { RJSFSchema, UiSchema } from '@rjsf/utils';
@@ -173,6 +173,18 @@ export function RegisterView({ schema, uiSchema }: RegisterViewProps): JSX.Eleme
     };
   });
   const [state, setState] = useState<SubmitState>({ status: 'idle' });
+  const errorRef = useRef<HTMLDivElement>(null);
+
+  // On any submit failure (server error or client validation), pull the
+  // error banner into view + focus it. The submit button sits far below
+  // the banner, so without this a first-time user clicks submit and sees
+  // nothing change — the reason is off-screen above the fold.
+  useEffect(() => {
+    if (state.status === 'error' && errorRef.current) {
+      errorRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      errorRef.current.focus();
+    }
+  }, [state]);
 
   // Page header uses the schema title plus a short user-facing tagline. The
   // schema's `description` field is intentionally technical (it documents
@@ -311,8 +323,10 @@ export function RegisterView({ schema, uiSchema }: RegisterViewProps): JSX.Eleme
             <div className="mt-7">
               {state.status === 'error' ? (
                 <div
+                  ref={errorRef}
                   role="alert"
-                  className="mb-5 rounded-[10px] border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-700"
+                  tabIndex={-1}
+                  className="mb-5 rounded-[10px] border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-700 scroll-mt-6 outline-none"
                 >
                   <div className="font-semibold">{state.title}</div>
                   {state.detail ? (

@@ -1,7 +1,7 @@
 'use client';
 
 import Image from 'next/image';
-import { useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import type { RJSFSchema, UiSchema } from '@rjsf/utils';
 import type { IChangeEvent } from '@rjsf/core';
 import { RjsfThemedForm } from '../../../components/forms/RjsfThemed';
@@ -63,6 +63,16 @@ export function PublicRegistrationView({
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
   const brandShort = cfg.brand.short_name;
   const brandLogo = cfg.brand.logo?.default;
+  const errorRef = useRef<HTMLDivElement>(null);
+
+  // Submit button sits below a long form; on failure pull the error
+  // banner into view + focus so the user sees why nothing happened.
+  useEffect(() => {
+    if (state.status === 'error' && errorRef.current) {
+      errorRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      errorRef.current.focus();
+    }
+  }, [state]);
 
   // Hide schema's verbose title/description from the form — the page header
   // owns the framing copy. Also drop `participant_id` from the public form:
@@ -315,8 +325,10 @@ export function PublicRegistrationView({
               <>
                 {state.status === 'error' ? (
                   <div
+                    ref={errorRef}
                     role="alert"
-                    className="mb-5 rounded-[10px] border border-rose-200 bg-rose-50 px-4 py-3 text-[13px] text-rose-700"
+                    tabIndex={-1}
+                    className="mb-5 rounded-[10px] border border-rose-200 bg-rose-50 px-4 py-3 text-[13px] text-rose-700 scroll-mt-6 outline-none"
                   >
                     <div className="font-semibold">{state.title}</div>
                     <div className="mt-1 text-rose-600">{state.detail}</div>
