@@ -45,6 +45,12 @@ COPY --from=builder --chown=appuser:appgroup /app/config ./config
 # Drizzle migrations are read at runtime by db/migrate.ts (resolved via
 # `../../drizzle/migrations` relative to dist/db/, i.e. /app/drizzle/migrations).
 COPY --from=builder --chown=appuser:appgroup /app/apps/api/drizzle ./drizzle
+# Copy the OTel preload alongside the compiled JS. It's a .mjs source
+# file — tsc skips it because it's not .ts — so we copy it from the
+# builder context directly.
+COPY --from=builder --chown=appuser:appgroup /app/apps/api/src/otel-register.mjs ./dist/otel-register.mjs
 USER appuser
 EXPOSE 4000
-CMD ["node", "dist/server.js"]
+# --import preloads the OTel ESM hook + boots the SDK before server.js
+# loads Fastify, so the auto-instrumentation actually patches it.
+CMD ["node", "--import", "./dist/otel-register.mjs", "dist/server.js"]

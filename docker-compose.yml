@@ -271,6 +271,13 @@ services:
     image: aggregator-dpg/api:dev
     container_name: aggregator-api
     restart: unless-stopped
+    # OTel ESM hook (import-in-the-middle) breaks drizzle-orm's CJS
+    # named exports. Override the Dockerfile CMD to drop --import so the
+    # app boots cleanly. Logs still reach Loki via the main-thread
+    # multistream in the shared logger. Fastify inbound auto-
+    # instrumentation is deferred to a follow-up that configures IITM
+    # ignore-list for drizzle-orm.
+    command: ['node', 'dist/server.js']
     environment:
       NODE_ENV: production
       PORT: "4000"
@@ -379,6 +386,8 @@ services:
     image: aggregator-dpg/worker:dev
     container_name: aggregator-worker
     restart: unless-stopped
+    # See `api.command` comment — same IITM/drizzle-orm issue.
+    command: ['node', 'dist/main.js']
     environment:
       NODE_ENV: production
       LOG_LEVEL: ${LOG_LEVEL:-info}
