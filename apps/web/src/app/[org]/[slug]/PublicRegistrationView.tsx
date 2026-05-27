@@ -277,7 +277,7 @@ export function PublicRegistrationView({
       }}
     >
       <div className="max-w-[760px] mx-auto px-4 sm:px-6 lg:px-10 py-8 sm:py-12">
-        <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+        <header className="flex items-center mb-6">
           {brandLogo ? (
             <Image
               src={brandLogo}
@@ -295,10 +295,6 @@ export function PublicRegistrationView({
               </div>
             </div>
           )}
-          <div className="flex items-center gap-1.5 text-[11.5px] text-ink-500">
-            <I.shield size={13} />
-            Secure registration
-          </div>
         </header>
 
         <div className="rounded-[18px] bg-white border border-[var(--bd-border)] overflow-hidden shadow-[0_1px_0_rgba(11,16,32,0.02),0_20px_60px_-30px_rgba(11,16,32,0.18)]">
