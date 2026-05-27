@@ -261,12 +261,40 @@ interface RecommendedAction {
 }
 
 /**
- * Derives up to two suggested next-actions for a participant row from
- * its status + profile completeness. Heuristic, client-side only — no
- * server call. Always returns at least one ("View profile") so the
- * column never renders empty.
+ * Turns a signalstack `actionable_tags` entry into a chip. Tags follow
+ * the `missing_<required_field>` shape (e.g. `missing_contact_phone`),
+ * which we surface as "Add Contact Phone". Unknown tag shapes are
+ * title-cased verbatim so new server-side tags still render readably.
+ */
+function tagToAction(tag: string): RecommendedAction {
+  if (tag.startsWith('missing_')) {
+    const field = tag
+      .slice('missing_'.length)
+      .split('_')
+      .filter(Boolean)
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+      .join(' ');
+    return { label: `Add ${field}`, tone: 'warm', icon: <I.alert size={12} /> };
+  }
+  const label = tag
+    .split('_')
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+  return { label, tone: 'cool', icon: <I.spark size={12} /> };
+}
+
+/**
+ * Recommended-action chips for a row. Prefers signalstack's
+ * server-computed `actionableTags`; when none are present, falls back
+ * to a small client-side heuristic on status + profile completeness so
+ * the column is never empty.
  */
 function recommendedActions(row: ParticipantBase, kind: RowKind): RecommendedAction[] {
+  const tags = row.actionableTags ?? [];
+  if (tags.length > 0) {
+    return tags.slice(0, 2).map(tagToAction);
+  }
   const out: RecommendedAction[] = [];
   if (row.status === 'at-risk')
     out.push({ label: 'Re-engage', tone: 'warm', icon: <I.send size={12} /> });
@@ -1077,6 +1105,9 @@ function toSeekerRow(participant: Record<string, unknown>): Seeker {
     },
     status,
     last: updated ? formatRelative(updated) : '—',
+    actionableTags: Array.isArray(participant.actionable_tags)
+      ? (participant.actionable_tags as unknown[]).filter((t): t is string => typeof t === 'string')
+      : [],
   };
 }
 
