@@ -106,17 +106,7 @@
                     <a href="#" class="bd-link">Privacy Policy</a> and
                     <a href="#" class="bd-link">Terms</a>.
                 </p>
-
-                <footer class="bd-foot">
-                    <span class="bd-pill">
-                        <span class="bd-pill-dot" aria-hidden="true"></span>
-                        Invite-only · ${properties.brandShortName!'Aggregator'} ${properties.brandSsoLabel!'SSO'}
-                    </span>
-                    <a href="#" class="bd-link bd-link-strong">Need help?</a>
-                </footer>
             </div>
-
-            <span class="bd-version" aria-hidden="true">v2.4.0 · build 7281</span>
         </main>
     </div>
     <script src="${url.resourcesPath}/js/blue-dots.js" defer></script>
