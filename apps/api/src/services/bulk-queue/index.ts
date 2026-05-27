@@ -13,6 +13,7 @@ import {
   type BulkFileProcessJob,
 } from '@aggregator-dpg/queue';
 import type { Redis } from 'ioredis';
+import { addJobWithTrace } from '@aggregator-dpg/telemetry';
 import { config } from '../../config.js';
 import { logger } from '../../logger.js';
 
@@ -47,7 +48,7 @@ function getFileProcessQueue(): Queue<BulkFileProcessJob> {
 export async function enqueueBulkFileProcess(payload: BulkFileProcessJob): Promise<void> {
   const start = Date.now();
   try {
-    await getFileProcessQueue().add(QueueName.BulkFileProcess, payload, {
+    await addJobWithTrace(getFileProcessQueue(), QueueName.BulkFileProcess, payload, {
       jobId: payload.uploadId,
     });
     logger.info({

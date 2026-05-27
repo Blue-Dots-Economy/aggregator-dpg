@@ -12,6 +12,7 @@ import {
   type BulkRowProcessJob,
   type BulkFinaliseJob,
 } from '@aggregator-dpg/queue';
+import { addJobWithTrace } from '@aggregator-dpg/telemetry';
 import { getRedis } from './redis.js';
 import { logger } from '../logger.js';
 
@@ -41,7 +42,7 @@ function getFinaliseQueue(): Queue<BulkFinaliseJob> {
  * safety. BullMQ rejects ':' in custom jobIds — use '__' as the separator.
  */
 export async function enqueueRowProcess(payload: BulkRowProcessJob): Promise<void> {
-  await getRowQueue().add(QueueName.BulkRowProcess, payload, {
+  await addJobWithTrace(getRowQueue(), QueueName.BulkRowProcess, payload, {
     jobId: `${payload.uploadId}__${payload.rowIndex}`,
   });
 }
@@ -54,12 +55,12 @@ export async function enqueueRowProcess(payload: BulkRowProcessJob): Promise<voi
 export async function enqueueRowProcessBulk(payloads: BulkRowProcessJob[]): Promise<void> {
   if (payloads.length === 0) return;
   const queue = getRowQueue();
-  await queue.addBulk(
-    payloads.map((p) => ({
-      name: QueueName.BulkRowProcess,
-      data: p,
-      opts: { jobId: `${p.uploadId}__${p.rowIndex}` },
-    })),
+  await Promise.all(
+    payloads.map((p) =>
+      addJobWithTrace(queue, QueueName.BulkRowProcess, p, {
+        jobId: `${p.uploadId}__${p.rowIndex}`,
+      }),
+    ),
   );
 }
 
@@ -69,7 +70,7 @@ export async function enqueueRowProcessBulk(payloads: BulkRowProcessJob[]): Prom
  * concurrently — only one finaliser ever runs.
  */
 export async function enqueueFinalise(payload: BulkFinaliseJob): Promise<void> {
-  await getFinaliseQueue().add(QueueName.BulkFinalise, payload, {
+  await addJobWithTrace(getFinaliseQueue(), QueueName.BulkFinalise, payload, {
     jobId: `${payload.uploadId}__finalise`,
   });
   logger.info({

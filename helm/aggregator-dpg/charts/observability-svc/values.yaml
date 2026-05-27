@@ -1,0 +1,37 @@
+image:
+  repository: ghcr.io/your-org/aggregator-observability-svc
+  tag: ''
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+service:
+  type: ClusterIP
+  port: 8080
+
+redisUrl: 'redis://redis:6379'
+adminTokenSecret: aggregator-obs-admin-token
+hmacSecretsSecret: aggregator-obs-secrets
+
+outcomeMetricsJson: |
+  [
+    {"name":"participant.registered.total","instrument":"counter","on_event":"participant.onboarded","attributes":["aggregator_id","source"]},
+    {"name":"bulk_upload.completed.total","instrument":"counter","on_event":"bulk_upload.completed","attributes":["aggregator_id"]},
+    {"name":"registration_link.created.total","instrument":"counter","on_event":"link.created","attributes":["aggregator_id","target_role"]}
+  ]
+
+networkPolicy:
+  enabled: true
+  allowedNamespaces: ['aggregator']
+  allowedServiceAccounts: ['api', 'worker']
+
+terminationGracePeriodSeconds: 45
+
+telemetry:
+  enabled: true
+  appVersion: ''
+  otel:
+    collectorEndpoint: 'http://otel-collector.observability.svc.cluster.local:4317'
+    sampleRate: '1.0'
+
+idemTtlDays: 90

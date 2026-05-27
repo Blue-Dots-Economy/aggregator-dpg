@@ -1,16 +1,26 @@
 /**
- * Process entrypoint. Builds the Fastify app and starts listening.
+ * Process entrypoint. Boots telemetry FIRST so OTel can patch Fastify and
+ * undici before they are loaded. All modules that import Fastify, BullMQ,
+ * or any HTTP client live behind a dynamic `import()` so OTel's
+ * require-in-the-middle hooks fire before those packages enter the module
+ * cache — otherwise the auto-instrumentation patches never apply.
  */
 
 import './env.js';
-import { buildApp } from './app.js';
-import { config } from './config.js';
-import { logger } from './logger.js';
-import { runMigrations } from './db/migrate.js';
-import { closeDb } from './db/client.js';
-import { getNetworkConfig } from './services/network-config.js';
-import { setApprovalBrand } from './views/approval-pages.js';
-import { setEmailBrand } from './services/email-templates/shared.js';
+import { bootApiTelemetry, shutdownApiTelemetry } from './telemetry.js';
+
+await bootApiTelemetry();
+
+// Dynamic imports — must come AFTER bootApiTelemetry() so OTel's
+// instrumentation patches install before Fastify / pg / undici are required.
+const { buildApp } = await import('./app.js');
+const { config } = await import('./config.js');
+const { logger } = await import('./logger.js');
+const { runMigrations } = await import('./db/migrate.js');
+const { closeDb } = await import('./db/client.js');
+const { getNetworkConfig } = await import('./services/network-config.js');
+const { setApprovalBrand } = await import('./views/approval-pages.js');
+const { setEmailBrand } = await import('./services/email-templates/shared.js');
 
 async function main(): Promise<void> {
   if (config.RUN_MIGRATIONS_ON_BOOT) {
@@ -49,6 +59,7 @@ async function main(): Promise<void> {
     logger.info({ signal }, 'shutting down');
     try {
       await app.close();
+      await shutdownApiTelemetry();
       await closeDb();
       process.exit(0);
     } catch (err) {

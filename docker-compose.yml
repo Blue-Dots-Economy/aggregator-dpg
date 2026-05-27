@@ -246,6 +246,11 @@ services:
       # Web reads participant schemas at runtime from the active network's
       # config folder. Mirrors the api/worker SCHEMA_ROOT_DIR wiring.
       SCHEMA_ROOT_DIR: /app/config/${AGGREGATOR_NETWORK:-blue_dot}/schemas
+      # ─── Telemetry (OTel SDK) ─────────────────────────────────────────
+      APP_VERSION: dev
+      OTEL_SDK_DISABLED: 'false'
+      OTEL_COLLECTOR_ENDPOINT: http://otel-collector:4317
+      OTEL_SAMPLE_RATE: '1.0'
     # No host port mapping — exposed only via nginx at /.
     # Resolve PUBLIC_HOST (the VM's public IP) to the docker host gateway so
     # the BFF's back-channel OIDC discovery + token exchange reaches nginx via
@@ -271,6 +276,13 @@ services:
     image: aggregator-dpg/api:dev
     container_name: aggregator-api
     restart: unless-stopped
+    # OTel ESM hook (import-in-the-middle) breaks drizzle-orm's CJS
+    # named exports. Override the Dockerfile CMD to drop --import so the
+    # app boots cleanly. Logs still reach Loki via the main-thread
+    # multistream in the shared logger. Fastify inbound auto-
+    # instrumentation is deferred to a follow-up that configures IITM
+    # ignore-list for drizzle-orm.
+    command: ['node', 'dist/server.js']
     environment:
       NODE_ENV: production
       PORT: "4000"
@@ -338,6 +350,15 @@ services:
       SIGNALSTACK_TIMEOUT_MS: ${SIGNALSTACK_TIMEOUT_MS:-10000}
       # Dev-only: accept pebble cert on host-gateway calls to Keycloak.
       NODE_TLS_REJECT_UNAUTHORIZED: ${NODE_TLS_REJECT_UNAUTHORIZED:-0}
+      # ─── Observability service (outcome events) ──────────────────────
+      OBS_SVC_URL: http://observability-svc:8080
+      OBS_HMAC_KEY_ID: svc-api
+      OBS_HMAC_SECRET: shh-dev
+      # ─── Telemetry (OTel SDK) ─────────────────────────────────────────
+      APP_VERSION: dev
+      OTEL_SDK_DISABLED: 'false'
+      OTEL_COLLECTOR_ENDPOINT: http://otel-collector:4317
+      OTEL_SAMPLE_RATE: '1.0'
     # No host port mapping — exposed only via nginx at /backend/.
     # See `extra_hosts` rationale on the web service: api hits Keycloak via
     # the public URL for both admin REST + JWKS, so we short-circuit DNS to
@@ -370,6 +391,8 @@ services:
     image: aggregator-dpg/worker:dev
     container_name: aggregator-worker
     restart: unless-stopped
+    # See `api.command` comment — same IITM/drizzle-orm issue.
+    command: ['node', 'dist/main.js']
     environment:
       NODE_ENV: production
       LOG_LEVEL: ${LOG_LEVEL:-info}
@@ -404,6 +427,15 @@ services:
       SIGNALSTACK_ADMIN_KEY: ${SIGNALSTACK_ADMIN_KEY:-}
       SIGNALSTACK_ITEM_NETWORK: ${AGGREGATOR_NETWORK:-blue_dot}
       SIGNALSTACK_TIMEOUT_MS: ${SIGNALSTACK_TIMEOUT_MS:-10000}
+      # ─── Observability service (outcome events) ──────────────────────
+      OBS_SVC_URL: http://observability-svc:8080
+      OBS_HMAC_KEY_ID: svc-worker
+      OBS_HMAC_SECRET: shh-dev
+      # ─── Telemetry (OTel SDK) ─────────────────────────────────────────
+      APP_VERSION: dev
+      OTEL_SDK_DISABLED: 'false'
+      OTEL_COLLECTOR_ENDPOINT: http://otel-collector:4317
+      OTEL_SAMPLE_RATE: '1.0'
     volumes:
       - ./config/schemas:/app/config/schemas:ro
       - ./config/aggregator.config.yaml:/app/config/aggregator.config.yaml:ro
@@ -462,6 +494,98 @@ services:
         condition: service_healthy
       keycloak:
         condition: service_healthy
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Observability: OTel Collector, Jaeger, Loki, Prometheus, Grafana
+  #
+  # The collector receives OTLP from the api/worker/web services and fans
+  # out to the appropriate backend:
+  #   traces  → Jaeger  (via OTLP gRPC)
+  #   metrics → Prometheus scrape endpoint on :8889
+  #   logs    → Loki    (via HTTP push)
+  # Grafana is pre-provisioned with all three datasources.
+  #
+  # Quick start (dev only):
+  #   docker compose up -d otel-collector jaeger loki prometheus grafana
+  # URLs:
+  #   Grafana   : http://localhost:3001   (anonymous Admin, no login needed)
+  #   Jaeger UI : http://localhost:16686
+  #   Prometheus: http://localhost:9090
+  # ─────────────────────────────────────────────────────────────────────────
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.96.0
+    container_name: otel-collector
+    command: ["--config=/etc/otelcol/otelcol-config.yaml"]
+    volumes:
+      - ./infra/otel-collector/otelcol-config.dev.yaml:/etc/otelcol/otelcol-config.yaml:ro
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+      - "8889:8889"
+      - "13133:13133"
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.55
+    container_name: jaeger
+    ports:
+      - "16686:16686"
+      - "14250:14250"
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+
+  loki:
+    image: grafana/loki:2.9.4
+    container_name: loki
+    ports:
+      - "3100:3100"
+
+  prometheus:
+    image: prom/prometheus:v2.50.1
+    container_name: prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infra/prometheus/rules:/etc/prometheus/rules:ro
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:10.3.3
+    container_name: grafana
+    depends_on: [prometheus, jaeger, loki]
+    ports:
+      - "3001:3000"
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
+
+  observability-svc:
+    build:
+      context: .
+      dockerfile: apps/observability-svc/Dockerfile
+    container_name: observability-svc
+    depends_on: [redis, otel-collector]
+    ports:
+      - '8080:8080'
+    environment:
+      REDIS_URL: redis://redis:6379
+      OUTCOMES_HMAC_SECRETS_JSON: '{"svc-api":"shh-dev","svc-worker":"shh-dev"}'
+      ADMIN_TOKEN: dev-admin-token-please-change-me
+      APP_VERSION: dev
+      OTEL_SDK_DISABLED: 'false'
+      OTEL_COLLECTOR_ENDPOINT: http://otel-collector:4317
+      OTEL_SAMPLE_RATE: '1.0'
+      OUTCOME_METRICS_JSON: |
+        [
+          {"name":"participant.registered.total","instrument":"counter","on_event":"participant.onboarded","attributes":["aggregator_id","source"]},
+          {"name":"bulk_upload.completed.total","instrument":"counter","on_event":"bulk_upload.completed","attributes":["aggregator_id"]},
+          {"name":"registration_link.created.total","instrument":"counter","on_event":"link.created","attributes":["aggregator_id","target_role"]}
+        ]
 
 volumes:
   aggregator-postgres-data:

@@ -35,5 +35,9 @@ WORKDIR /app
 COPY --from=deployer --chown=appuser:appgroup /standalone .
 # Worker reads JSON Schemas from /app/config at runtime (participant validator).
 COPY --from=builder --chown=appuser:appgroup /app/config ./config
+# Copy the OTel preload alongside the compiled JS.
+COPY --from=builder --chown=appuser:appgroup /app/apps/worker/src/otel-register.mjs ./dist/otel-register.mjs
 USER appuser
-CMD ["node", "dist/main.js"]
+# --import preloads the OTel ESM hook + boots the SDK before main.js
+# loads BullMQ, so the auto-instrumentation actually patches it.
+CMD ["node", "--import", "./dist/otel-register.mjs", "dist/main.js"]

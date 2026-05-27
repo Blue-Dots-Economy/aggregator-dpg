@@ -25,6 +25,7 @@ import { getNetworkConfig } from '../services/network-config.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
 import { config } from '../config.js';
 import { httpError } from '../errors/http-error.js';
+import { withAggregatorBaggage } from '@aggregator-dpg/telemetry';
 
 /**
  * Domain accepts any string at the schema layer — the resolved network
@@ -81,215 +82,221 @@ const DashboardExportQuerySchema = z.object({
 export async function registerDashboardRoutes(app: FastifyInstance): Promise<void> {
   app.get('/v1/dashboard/items', async (req, reply) => {
     const auth = await requireAuth(req);
-    const log = req.log.child({
-      operation: 'dashboard.items',
-      aggregator_id: auth.aggregatorId,
+    return withAggregatorBaggage(auth.aggregatorId, async () => {
+      const log = req.log.child({
+        operation: 'dashboard.items',
+        aggregator_id: auth.aggregatorId,
+      });
+      const start = Date.now();
+
+      const parsed = ItemsQuerySchema.safeParse(req.query);
+      if (!parsed.success) {
+        throw httpError('SCHEMA_VALIDATION', {
+          detail: 'Invalid query parameters.',
+          fields: { issues: parsed.error.issues },
+        });
+      }
+      const { domain, limit, offset } = parsed.data;
+
+      const networkCfg = await getNetworkConfig();
+      const domainCfg = networkCfg.domains[domain];
+      if (!domainCfg) {
+        throw httpError('SCHEMA_VALIDATION', {
+          detail: `unknown domain '${domain}' — valid: ${networkCfg.domainIds.join(', ')}`,
+        });
+      }
+
+      const ss = getSignalStackWriter();
+      if (!ss) {
+        log.warn({ status: 'failure', sub: 'signalstack.disabled' });
+        throw httpError('INTERNAL', {
+          detail: 'Signalstack push is not configured for this environment.',
+        });
+      }
+
+      const result = await ss.listItemsByAggregator({
+        aggregator_id: auth.aggregatorId,
+        item_network: config.SIGNALSTACK_ITEM_NETWORK,
+        item_domain: domain,
+        item_type: domainCfg.itemType,
+        limit,
+        offset,
+      });
+
+      if (!result.success) {
+        log.error({
+          status: 'failure',
+          sub: 'signalstack.list',
+          error: result.error.message,
+          code: result.error.code,
+        });
+        throw httpError('INTERNAL', {
+          detail: `Signalstack list failed: ${result.error.code}`,
+          cause: result.error,
+        });
+      }
+
+      log.info({
+        status: 'success',
+        latency_ms: Date.now() - start,
+        total: result.value.meta.total,
+      });
+
+      return reply.send(result.value);
     });
-    const start = Date.now();
-
-    const parsed = ItemsQuerySchema.safeParse(req.query);
-    if (!parsed.success) {
-      throw httpError('SCHEMA_VALIDATION', {
-        detail: 'Invalid query parameters.',
-        fields: { issues: parsed.error.issues },
-      });
-    }
-    const { domain, limit, offset } = parsed.data;
-
-    const networkCfg = await getNetworkConfig();
-    const domainCfg = networkCfg.domains[domain];
-    if (!domainCfg) {
-      throw httpError('SCHEMA_VALIDATION', {
-        detail: `unknown domain '${domain}' — valid: ${networkCfg.domainIds.join(', ')}`,
-      });
-    }
-
-    const ss = getSignalStackWriter();
-    if (!ss) {
-      log.warn({ status: 'failure', sub: 'signalstack.disabled' });
-      throw httpError('INTERNAL', {
-        detail: 'Signalstack push is not configured for this environment.',
-      });
-    }
-
-    const result = await ss.listItemsByAggregator({
-      aggregator_id: auth.aggregatorId,
-      item_network: config.SIGNALSTACK_ITEM_NETWORK,
-      item_domain: domain,
-      item_type: domainCfg.itemType,
-      limit,
-      offset,
-    });
-
-    if (!result.success) {
-      log.error({
-        status: 'failure',
-        sub: 'signalstack.list',
-        error: result.error.message,
-        code: result.error.code,
-      });
-      throw httpError('INTERNAL', {
-        detail: `Signalstack list failed: ${result.error.code}`,
-        cause: result.error,
-      });
-    }
-
-    log.info({
-      status: 'success',
-      latency_ms: Date.now() - start,
-      total: result.value.meta.total,
-    });
-
-    return reply.send(result.value);
   });
 
   app.get('/v1/dashboard', async (req, reply) => {
     const auth = await requireApprovedAuth(req);
-    const log = req.log.child({
-      operation: 'dashboard',
-      aggregator_id: auth.aggregatorId,
+    return withAggregatorBaggage(auth.aggregatorId, async () => {
+      const log = req.log.child({
+        operation: 'dashboard',
+        aggregator_id: auth.aggregatorId,
+      });
+      const start = Date.now();
+
+      const parsed = DashboardQuerySchema.safeParse(req.query);
+      if (!parsed.success) {
+        throw httpError('SCHEMA_VALIDATION', {
+          detail: 'Invalid query parameters.',
+          fields: { issues: parsed.error.issues },
+        });
+      }
+      const { page, limit, status, refresh } = parsed.data;
+      const networkCfg = await getNetworkConfig();
+      const domain = parsed.data.domain ?? networkCfg.domainIds[0]!;
+      if (!networkCfg.domains[domain]) {
+        throw httpError('SCHEMA_VALIDATION', {
+          detail: `unknown domain '${domain}' — valid: ${networkCfg.domainIds.join(', ')}`,
+        });
+      }
+
+      const ss = getSignalStackWriter();
+      if (!ss) {
+        log.warn({ status: 'failure', sub: 'signalstack.disabled' });
+        throw httpError('INTERNAL', {
+          detail: 'Signalstack is not configured for this environment.',
+        });
+      }
+
+      const actingOrgId = await resolveActingOrgId(auth, log);
+
+      const result = await ss.fetchDashboard({
+        actingOrgId,
+        page,
+        limit,
+        ...(status ? { status } : {}),
+        domain,
+        refresh,
+      });
+
+      if (!result.success) {
+        log.error({
+          status: 'failure',
+          sub: 'signalstack.dashboard',
+          error: result.error.message,
+          code: result.error.code,
+        });
+        throw httpError('INTERNAL', {
+          detail: `Signalstack dashboard fetch failed: ${result.error.code}`,
+          cause: result.error,
+        });
+      }
+
+      // Signalstack now returns every served domain in one payload under
+      // `by_domain[<id>]`. Log the requested domain's slice for parity
+      // with the previous single-domain log shape; the response itself
+      // is forwarded verbatim so the web app can render seeker + provider
+      // tabs from a single fetch.
+      const slice = result.value.by_domain[domain];
+      log.info({
+        status: 'success',
+        latency_ms: Date.now() - start,
+        domain,
+        page,
+        limit,
+        status_filter: status ?? null,
+        total_matching: slice?.total_matching ?? null,
+        items_total: slice?.rollup.total_items ?? null,
+        refreshed: result.value.metadata.refreshed,
+      });
+
+      return reply.send(result.value);
     });
-    const start = Date.now();
-
-    const parsed = DashboardQuerySchema.safeParse(req.query);
-    if (!parsed.success) {
-      throw httpError('SCHEMA_VALIDATION', {
-        detail: 'Invalid query parameters.',
-        fields: { issues: parsed.error.issues },
-      });
-    }
-    const { page, limit, status, refresh } = parsed.data;
-    const networkCfg = await getNetworkConfig();
-    const domain = parsed.data.domain ?? networkCfg.domainIds[0]!;
-    if (!networkCfg.domains[domain]) {
-      throw httpError('SCHEMA_VALIDATION', {
-        detail: `unknown domain '${domain}' — valid: ${networkCfg.domainIds.join(', ')}`,
-      });
-    }
-
-    const ss = getSignalStackWriter();
-    if (!ss) {
-      log.warn({ status: 'failure', sub: 'signalstack.disabled' });
-      throw httpError('INTERNAL', {
-        detail: 'Signalstack is not configured for this environment.',
-      });
-    }
-
-    const actingOrgId = await resolveActingOrgId(auth, log);
-
-    const result = await ss.fetchDashboard({
-      actingOrgId,
-      page,
-      limit,
-      ...(status ? { status } : {}),
-      domain,
-      refresh,
-    });
-
-    if (!result.success) {
-      log.error({
-        status: 'failure',
-        sub: 'signalstack.dashboard',
-        error: result.error.message,
-        code: result.error.code,
-      });
-      throw httpError('INTERNAL', {
-        detail: `Signalstack dashboard fetch failed: ${result.error.code}`,
-        cause: result.error,
-      });
-    }
-
-    // Signalstack now returns every served domain in one payload under
-    // `by_domain[<id>]`. Log the requested domain's slice for parity
-    // with the previous single-domain log shape; the response itself
-    // is forwarded verbatim so the web app can render seeker + provider
-    // tabs from a single fetch.
-    const slice = result.value.by_domain[domain];
-    log.info({
-      status: 'success',
-      latency_ms: Date.now() - start,
-      domain,
-      page,
-      limit,
-      status_filter: status ?? null,
-      total_matching: slice?.total_matching ?? null,
-      items_total: slice?.rollup.total_items ?? null,
-      refreshed: result.value.metadata.refreshed,
-    });
-
-    return reply.send(result.value);
   });
 
   app.get('/v1/dashboard/export', async (req, reply) => {
     const auth = await requireApprovedAuth(req);
-    const log = req.log.child({
-      operation: 'dashboard.export',
-      aggregator_id: auth.aggregatorId,
+    return withAggregatorBaggage(auth.aggregatorId, async () => {
+      const log = req.log.child({
+        operation: 'dashboard.export',
+        aggregator_id: auth.aggregatorId,
+      });
+      const start = Date.now();
+
+      const parsed = DashboardExportQuerySchema.safeParse(req.query);
+      if (!parsed.success) {
+        throw httpError('SCHEMA_VALIDATION', {
+          detail: 'Invalid query parameters.',
+          fields: { issues: parsed.error.issues },
+        });
+      }
+      const { status, refresh } = parsed.data;
+      const networkCfg = await getNetworkConfig();
+      const domain = parsed.data.domain ?? networkCfg.domainIds[0]!;
+      if (!networkCfg.domains[domain]) {
+        throw httpError('SCHEMA_VALIDATION', {
+          detail: `unknown domain '${domain}' — valid: ${networkCfg.domainIds.join(', ')}`,
+        });
+      }
+
+      const ss = getSignalStackWriter();
+      if (!ss) {
+        log.warn({ status: 'failure', sub: 'signalstack.disabled' });
+        throw httpError('INTERNAL', {
+          detail: 'Signalstack is not configured for this environment.',
+        });
+      }
+
+      const actingOrgId = await resolveActingOrgId(auth, log);
+
+      const result = await ss.exportDashboardCsv({
+        actingOrgId,
+        ...(status ? { status } : {}),
+        domain,
+        refresh,
+      });
+
+      if (!result.success) {
+        log.error({
+          status: 'failure',
+          sub: 'signalstack.dashboard.export',
+          error: result.error.message,
+          code: result.error.code,
+        });
+        throw httpError('INTERNAL', {
+          detail: `Signalstack dashboard export failed: ${result.error.code}`,
+          cause: result.error,
+        });
+      }
+
+      log.info({
+        status: 'success',
+        latency_ms: Date.now() - start,
+        domain,
+        status_filter: status ?? null,
+        bytes: result.value.csv.length,
+        filename: result.value.filename,
+      });
+
+      return reply
+        .header('Content-Type', 'text/csv; charset=utf-8')
+        .header(
+          'Content-Disposition',
+          `attachment; filename="${result.value.filename.replace(/"/g, '')}"`,
+        )
+        .send(result.value.csv);
     });
-    const start = Date.now();
-
-    const parsed = DashboardExportQuerySchema.safeParse(req.query);
-    if (!parsed.success) {
-      throw httpError('SCHEMA_VALIDATION', {
-        detail: 'Invalid query parameters.',
-        fields: { issues: parsed.error.issues },
-      });
-    }
-    const { status, refresh } = parsed.data;
-    const networkCfg = await getNetworkConfig();
-    const domain = parsed.data.domain ?? networkCfg.domainIds[0]!;
-    if (!networkCfg.domains[domain]) {
-      throw httpError('SCHEMA_VALIDATION', {
-        detail: `unknown domain '${domain}' — valid: ${networkCfg.domainIds.join(', ')}`,
-      });
-    }
-
-    const ss = getSignalStackWriter();
-    if (!ss) {
-      log.warn({ status: 'failure', sub: 'signalstack.disabled' });
-      throw httpError('INTERNAL', {
-        detail: 'Signalstack is not configured for this environment.',
-      });
-    }
-
-    const actingOrgId = await resolveActingOrgId(auth, log);
-
-    const result = await ss.exportDashboardCsv({
-      actingOrgId,
-      ...(status ? { status } : {}),
-      domain,
-      refresh,
-    });
-
-    if (!result.success) {
-      log.error({
-        status: 'failure',
-        sub: 'signalstack.dashboard.export',
-        error: result.error.message,
-        code: result.error.code,
-      });
-      throw httpError('INTERNAL', {
-        detail: `Signalstack dashboard export failed: ${result.error.code}`,
-        cause: result.error,
-      });
-    }
-
-    log.info({
-      status: 'success',
-      latency_ms: Date.now() - start,
-      domain,
-      status_filter: status ?? null,
-      bytes: result.value.csv.length,
-      filename: result.value.filename,
-    });
-
-    return reply
-      .header('Content-Type', 'text/csv; charset=utf-8')
-      .header(
-        'Content-Disposition',
-        `attachment; filename="${result.value.filename.replace(/"/g, '')}"`,
-      )
-      .send(result.value.csv);
   });
 }
 

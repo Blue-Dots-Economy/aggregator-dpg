@@ -23,6 +23,8 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/web/package.json               apps/web/package.json
 COPY packages/tsconfig/package.json      packages/tsconfig/package.json
+COPY packages/shared-primitives/package.json packages/shared-primitives/package.json
+COPY packages/telemetry/package.json     packages/telemetry/package.json
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm install --frozen-lockfile --filter @aggregator-dpg/web...
 
@@ -30,7 +32,11 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
 FROM installer AS builder
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY . .
-RUN pnpm --filter @aggregator-dpg/web build
+# Pre-build the telemetry package so its dist/ exists when next build
+# follows the @aggregator-dpg/telemetry import from the BFF.
+RUN pnpm --filter @aggregator-dpg/shared-primitives build \
+ && pnpm --filter @aggregator-dpg/telemetry build \
+ && pnpm --filter @aggregator-dpg/web build
 
 # ── runner ────────────────────────────────────────────────────────────────────
 FROM node:24-alpine AS runner

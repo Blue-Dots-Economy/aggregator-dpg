@@ -1,0 +1,59 @@
+{
+  "title": "Aggregator Worker",
+  "uid": "aggregator-worker",
+  "schemaVersion": 38,
+  "version": 1,
+  "tags": ["aggregator"],
+  "timezone": "browser",
+  "time": { "from": "now-1h", "to": "now" },
+  "refresh": "30s",
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Bulk rows processed (5m)",
+      "targets": [
+        {
+          "expr": "sum by (status) (rate(aggregator_worker_bulk_rows_total[5m]))",
+          "legendFormat": "{{status}}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "p95 bulk row duration (ms)",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(aggregator_worker_bulk_row_duration_ms_bucket[5m])))",
+          "legendFormat": "p95",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "SignalStack calls by status + job p95 duration by queue",
+      "targets": [
+        {
+          "expr": "sum by (status) (rate(aggregator_signalstack_calls_total[5m]))",
+          "legendFormat": "signalstack {{status}}",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, queue) (rate(aggregator_worker_job_duration_ms_bucket[5m])))",
+          "legendFormat": "job p95 {{queue}}",
+          "refId": "B"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 8, "w": 24, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }
+    }
+  ]
+}

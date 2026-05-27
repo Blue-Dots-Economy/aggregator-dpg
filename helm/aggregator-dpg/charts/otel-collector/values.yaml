@@ -1,0 +1,28 @@
+image:
+  repository: otel/opentelemetry-collector-contrib
+  tag: '0.96.0'
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  ports:
+    grpc: 4317
+    http: 4318
+    prometheus: 8889
+    healthcheck: 13133
+
+resources:
+  requests:
+    memory: '256Mi'
+    cpu: '100m'
+  limits:
+    memory: '600Mi'
+    cpu: '500m'
+
+# The actual config YAML is rendered into a ConfigMap and mounted at /etc/otelcol/.
+# To override per-environment, set `configYaml` to inline string content.
+configYaml: |
+  # See infra/otel-collector/otelcol-config.prod.yaml for the canonical config.
+  # This default is empty and is overridden by --set-file at deploy time.

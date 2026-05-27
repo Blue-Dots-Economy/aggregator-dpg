@@ -139,3 +139,68 @@ make rebuild-web
 make reset       # wipe volumes
 make up          # rebuild — realm + mappers re-import automatically
 ```
+
+## Observability (dev)
+
+After running `docker compose up -d otel-collector jaeger loki prometheus grafana`,
+the following UIs are available:
+
+- **Jaeger** (traces): http://localhost:16686 — pick `aggregator-api` from the service dropdown
+- **Grafana** (dashboards + logs): http://localhost:3001 — anonymous access enabled in dev
+- **Prometheus** (metrics): http://localhost:9090 — query `aggregator_api_request_duration_ms_bucket`
+- **Loki** (logs): http://localhost:3100 — accessed via Grafana's Explore tab
+
+`OTEL_SDK_DISABLED=false` in `apps/api/.env.example` turns OTel on for the api. Phase 1 ships with sample rate `1.0` for dev so every request is captured.
+
+### Phase 1 smoke test
+
+Once the api is running with `OTEL_SDK_DISABLED=false` and the observability
+stack is up, run:
+
+```bash
+./scripts/telemetry-smoke-test.sh
+```
+
+It will hit the api's health endpoint to produce a trace and ping each
+observability backend. After it succeeds, open Jaeger and confirm a trace
+appears under the `aggregator-api` service with at least an `api.request`
+span and an `onResponse` child timing.
+
+### Phase 2 smoke test (cross-process trace)
+
+To verify the api → worker stitching:
+
+1. Bring the full stack up:
+
+```bash
+docker compose up -d
+```
+
+2. Wait for migrations and worker to be ready.
+
+3. Run the smoke test script. The Phase 2 section will print the upload curl
+   you need to perform manually (auth token + CSV file are environment-specific):
+
+```bash
+./scripts/telemetry-smoke-test.sh
+```
+
+4. Open Jaeger and look for a trace whose root is the api request and whose
+   leaves are `worker.signalstack.onboard` — all sharing the same `trace_id`.
+
+### Phase 4 smoke test (outcome events)
+
+After bringing the full stack up (`docker compose up -d`) and the api +
+worker are running:
+
+```bash
+./scripts/telemetry-smoke-test.sh
+```
+
+Read the script's Phase 4 section for the manual verification steps. The
+key gate is: a duplicate POST does NOT double-count the business metric.
+
+### Production rollout
+
+See `docs/telemetry-rollout.md` for the staging → prod cutover sequence,
+including the `helm upgrade --install` commands, bake-in gates, and rollback.

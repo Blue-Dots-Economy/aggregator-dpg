@@ -30,6 +30,7 @@
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { emitTurn } from '@aggregator-dpg/telemetry';
 import { z } from 'zod';
 import { RegistrationPayloadSchema } from '@aggregator-dpg/shared-primitives/aggregator';
 import type { BecknContact } from '@aggregator-dpg/shared-primitives/aggregator';
@@ -292,6 +293,19 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
         },
         'aggregator registration submitted',
       );
+
+      queueMicrotask(() => {
+        emitTurn({
+          event: 'aggregator.created',
+          idempotency_key: `aggregator.created:${aggregatorId}`,
+          attributes: {
+            aggregator_id: aggregatorId,
+            source: 'registration',
+          },
+        }).catch(() => {
+          // intentional: outcome client is fire-and-forget; receiver tracks drops via metric
+        });
+      });
 
       return reply.status(201).send({
         aggregator_id: aggregatorId,

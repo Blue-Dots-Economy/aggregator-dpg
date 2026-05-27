@@ -123,6 +123,22 @@ const ConfigSchema = z.object({
   SIGNALSTACK_ITEM_NETWORK: z.string().default('blue_dot'),
   /** Per-request timeout for signalstack onboard calls. */
   SIGNALSTACK_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
+
+  // ─── Telemetry ───────────────────────────────────────────────────────────
+  APP_VERSION: z.string().default('dev'),
+  OTEL_SDK_DISABLED: z
+    .enum(['true', 'false'])
+    .default('true') // Phase 1 ships disabled-by-default; flip per env
+    .transform((v) => v === 'true'),
+  OTEL_COLLECTOR_ENDPOINT: z.string().default('http://otel-collector:4317'),
+  OTEL_PROTOCOL: z.enum(['grpc', 'http']).default('grpc'),
+  OTEL_SAMPLE_RATE: z.coerce.number().min(0).max(1).default(0.1),
+  OTEL_EXPORT_INTERVAL_MS: z.coerce.number().int().positive().default(5000),
+  OTEL_TIMEOUT_MS: z.coerce.number().int().positive().default(10000),
+  // Outcome events (Phase 4 — leave unset to make the client a no-op)
+  OBS_SVC_URL: z.string().url().optional(),
+  OBS_HMAC_KEY_ID: z.string().optional(),
+  OBS_HMAC_SECRET: z.string().optional(),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
@@ -136,3 +152,17 @@ export const corsOrigins: string[] = config.CORS_ORIGINS.split(',')
 export const adminEmails: string[] = config.ADMIN_EMAILS.split(',')
   .map((s) => s.trim())
   .filter(Boolean);
+
+export const telemetryConfig = {
+  otel: {
+    collector_endpoint: config.OTEL_COLLECTOR_ENDPOINT,
+    protocol: config.OTEL_PROTOCOL,
+    sample_rate: config.OTEL_SAMPLE_RATE,
+    export_interval_ms: config.OTEL_EXPORT_INTERVAL_MS,
+    timeout_ms: config.OTEL_TIMEOUT_MS,
+  },
+  ...(config.OBS_SVC_URL !== undefined && { outcomes_svc_url: config.OBS_SVC_URL }),
+  ...(config.OBS_HMAC_KEY_ID !== undefined && { outcomes_hmac_key_id: config.OBS_HMAC_KEY_ID }),
+  ...(config.OBS_HMAC_SECRET !== undefined && { outcomes_hmac_secret: config.OBS_HMAC_SECRET }),
+  pii_fields_excluded: ['user_message', 'phone', 'email'],
+};

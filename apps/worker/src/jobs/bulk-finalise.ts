@@ -20,6 +20,7 @@
 import { and, eq } from 'drizzle-orm';
 import Papa from 'papaparse';
 import type { BulkFinaliseJob } from '@aggregator-dpg/queue';
+import { emitTurn } from '@aggregator-dpg/telemetry';
 import { schema, getDb } from '../db.js';
 import { getRedis } from '../services/redis.js';
 import { putObject } from '../object-storage.js';
@@ -194,6 +195,22 @@ export async function finaliseBulk(job: BulkFinaliseJob): Promise<FinaliseOutcom
     skipped,
     errors_csv_s3_key: errorsKey,
   });
+
+  queueMicrotask(() => {
+    emitTurn({
+      event: 'bulk_upload.completed',
+      idempotency_key: `bulk_upload.completed:${job.uploadId}`,
+      attributes: {
+        aggregator_id: upload.aggregatorId,
+        upload_id: job.uploadId,
+        succeeded: passed,
+        failed,
+      },
+    }).catch(() => {
+      // intentional: outcome client is fire-and-forget; receiver tracks drops via metric
+    });
+  });
+
   return { status: 'completed', total, passed, failed, skipped };
 }
 

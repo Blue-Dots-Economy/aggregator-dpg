@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-otel-collector
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-otel-collector
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-otel-collector
+    spec:
+      containers:
+        - name: otel-collector
+          image: '{{ .Values.image.repository }}:{{ .Values.image.tag }}'
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ['--config=/etc/otelcol/otelcol-config.yaml']
+          ports:
+            - { name: grpc, containerPort: 4317 }
+            - { name: http, containerPort: 4318 }
+            - { name: prometheus, containerPort: 8889 }
+            - { name: health, containerPort: 13133 }
+          volumeMounts:
+            - name: config
+              mountPath: /etc/otelcol
+              readOnly: true
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          livenessProbe:
+            httpGet: { path: /, port: 13133 }
+            initialDelaySeconds: 10
+      volumes:
+        - name: config
+          configMap:
+            name: {{ .Release.Name }}-otel-collector

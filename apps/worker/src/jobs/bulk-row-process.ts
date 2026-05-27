@@ -17,6 +17,8 @@
 
 import { randomUUID } from 'node:crypto';
 import { eq, sql } from 'drizzle-orm';
+import { SpanStatusCode } from '@opentelemetry/api';
+import { emitTurn } from '@aggregator-dpg/telemetry';
 import {
   runBulkRowCommit,
   type BulkFinaliseJob,
@@ -33,6 +35,13 @@ import { getNetworkConfig } from '../services/network-config.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
 import { config } from '../config.js';
 import { logger } from '../logger.js';
+import {
+  tracer,
+  signalStackCalls,
+  signalStackDurationMs,
+  bulkRowsTotal,
+  bulkRowDurationMs,
+} from '../telemetry.js';
 
 let participantsWriter: ParticipantsWriterBase | null = null;
 function getParticipantsWriter(): ParticipantsWriterBase {
@@ -59,6 +68,7 @@ interface RowOutcome {
 const PROGRESS_FLUSH_EVERY = 500;
 
 export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome> {
+  const rowStart = Date.now();
   const log = logger.child({
     operation: 'bulkRowProcess',
     upload_id: job.uploadId,
@@ -70,15 +80,14 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
   // in the Finaliser and the File Processor entry guard; stale row jobs are a
   // non-issue here because the Lua commit script + jobId dedup absorb replays.
   if (!VALID_PARTICIPANT_TYPES.has(job.participantType)) {
-    return await commit(
-      job,
-      {
-        outcome: 'failed',
-        category: 'system_error',
-        reasons: [`invalid participant_type: ${job.participantType}`],
-      },
-      log,
-    );
+    const earlyOutcome: RowOutcome = {
+      outcome: 'failed',
+      category: 'system_error',
+      reasons: [`invalid participant_type: ${job.participantType}`],
+    };
+    bulkRowsTotal.add(1, { status: 'failure' });
+    bulkRowDurationMs.record(Date.now() - rowStart, { status: 'failure' });
+    return await commit(job, earlyOutcome, log);
   }
 
   // 1. Schema validation. Load schema + validator together (both cached
@@ -92,6 +101,8 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
     loader.getSchema(ref),
   ]);
   if (!validatorResult.success) {
+    bulkRowsTotal.add(1, { status: 'failure' });
+    bulkRowDurationMs.record(Date.now() - rowStart, { status: 'failure' });
     return await commit(
       job,
       {
@@ -116,6 +127,8 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
     const reasons = (validate.errors ?? []).map(
       (e) => `${e.instancePath || e.schemaPath}: ${e.message ?? 'invalid'}`,
     );
+    bulkRowsTotal.add(1, { status: 'failure' });
+    bulkRowDurationMs.record(Date.now() - rowStart, { status: 'failure' });
     return await commit(
       job,
       {
@@ -141,6 +154,8 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
   const networkCfg = await getNetworkConfig();
   const domainCfg = networkCfg.domains[job.participantType];
   if (!domainCfg) {
+    bulkRowsTotal.add(1, { status: 'failure' });
+    bulkRowDurationMs.record(Date.now() - rowStart, { status: 'failure' });
     return await commit(
       job,
       {
@@ -159,6 +174,8 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
   if (phoneRaw) {
     const phone = normalisePhone(phoneRaw);
     if (!phone.ok) {
+      bulkRowsTotal.add(1, { status: 'failure' });
+      bulkRowDurationMs.record(Date.now() - rowStart, { status: 'failure' });
       return await commit(
         job,
         {
@@ -231,6 +248,10 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
     };
   }
 
+  const rowStatus =
+    outcome.outcome === 'passed' || outcome.outcome === 'skipped' ? 'success' : 'failure';
+  bulkRowsTotal.add(1, { status: rowStatus });
+  bulkRowDurationMs.record(Date.now() - rowStart, { status: rowStatus });
   return await commit(job, outcome, log);
 }
 
@@ -371,23 +392,38 @@ async function pushToSignalStack(
       ? (job.payload[phoneSourceKey] as string)
       : phone;
   const pushPhone = phone ?? phoneFromBody;
-  const result = await ss.onboard({
-    actingOrgId: signalstackOrgId,
-    name,
-    ...(pushPhone ? { phoneNumber: pushPhone } : {}),
-    ...(email ? { email } : {}),
-    // Aggregator-level consent captured at registration is the legal basis
-    // for the bulk-row push; signalstack still expects these flags per-row
-    // so we hardcode `true`. Surface as CSV columns if signalstack ever
-    // demands per-row participant consent.
-    terms_accepted: networkCfg.aggregator.onboarding.presume_consent,
-    privacy_accepted: networkCfg.aggregator.onboarding.presume_consent,
-    channel: 'bulk',
-    source_id: job.uploadId,
-    network: config.SIGNALSTACK_ITEM_NETWORK,
-    domain: job.participantType,
-    item_type: domainCfg.itemType,
-    profile: buildSignalStackItemState(job.participantType, job.payload, pushPhone, domainCfg),
+  const callStart = Date.now();
+  const result = await tracer.startActiveSpan('worker.signalstack.onboard', async (span) => {
+    try {
+      const out = await ss.onboard({
+        actingOrgId: signalstackOrgId,
+        name,
+        ...(pushPhone ? { phoneNumber: pushPhone } : {}),
+        ...(email ? { email } : {}),
+        // Aggregator-level consent captured at registration is the legal basis
+        // for the bulk-row push; signalstack still expects these flags per-row
+        // so we hardcode `true`. Surface as CSV columns if signalstack ever
+        // demands per-row participant consent.
+        terms_accepted: networkCfg.aggregator.onboarding.presume_consent,
+        privacy_accepted: networkCfg.aggregator.onboarding.presume_consent,
+        channel: 'bulk',
+        source_id: job.uploadId,
+        network: config.SIGNALSTACK_ITEM_NETWORK,
+        domain: job.participantType,
+        item_type: domainCfg.itemType,
+        profile: buildSignalStackItemState(job.participantType, job.payload, pushPhone, domainCfg),
+      });
+      signalStackCalls.add(1, { status: out.success ? 'success' : 'failure' });
+      return out;
+    } catch (e) {
+      span.recordException(e as Error);
+      span.setStatus({ code: SpanStatusCode.ERROR });
+      signalStackCalls.add(1, { status: 'failure' });
+      throw e;
+    } finally {
+      signalStackDurationMs.record(Date.now() - callStart);
+      span.end();
+    }
   });
   if (!result.success) {
     log.error({
@@ -395,6 +431,20 @@ async function pushToSignalStack(
       sub: 'signalstack.push',
       error: result.error.message,
       code: result.error.code,
+    });
+    queueMicrotask(() => {
+      emitTurn({
+        event: 'participant.signalstack_failed',
+        idempotency_key: `participant.signalstack_failed:${job.uploadId}:${job.rowIndex}`,
+        attributes: {
+          aggregator_id: job.aggregatorId,
+          upload_id: job.uploadId,
+          row_id: job.rowIndex,
+          error_code: result.error.code,
+        },
+      }).catch(() => {
+        // intentional: outcome client is fire-and-forget; receiver tracks drops via metric
+      });
     });
     return {
       success: false,
@@ -408,6 +458,18 @@ async function pushToSignalStack(
     user_id: result.value.user_id,
     profile_item_id: result.value.profile_item_id,
     onboarded_at: result.value.onboarded_at,
+  });
+  queueMicrotask(() => {
+    emitTurn({
+      event: 'participant.onboarded',
+      idempotency_key: `participant.onboarded:${result.value.user_id}`,
+      attributes: {
+        aggregator_id: job.aggregatorId,
+        source: 'bulk',
+      },
+    }).catch(() => {
+      // intentional: outcome client is fire-and-forget; receiver tracks drops via metric
+    });
   });
   return { success: true };
 }

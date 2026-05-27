@@ -1,0 +1,33 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-observability-svc
+  labels:
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/part-of: aggregator-dpg
+    app.kubernetes.io/name: aggregator-dpg
+    app.kubernetes.io/component: observability-svc
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: aggregator-dpg
+      app.kubernetes.io/component: observability-svc
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        {{- range .Values.networkPolicy.allowedServiceAccounts }}
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: aggregator-dpg
+              app.kubernetes.io/component: {{ . }}
+              app.kubernetes.io/instance: {{ $.Release.Name }}
+        {{- end }}
+      ports:
+        - port: 8080
+          protocol: TCP
+{{- end }}

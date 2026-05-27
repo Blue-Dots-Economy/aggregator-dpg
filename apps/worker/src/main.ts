@@ -1,39 +1,60 @@
 /**
  * Worker entrypoint.
  *
- * Wires BullMQ workers for the onboarding pipeline. At slice 9 this
- * exposes only the File Processor (`bulk-file-process` queue). Subsequent
- * slices add the Row Processor, Finaliser, and Metrics Aggregator workers
- * alongside.
+ * Boots telemetry FIRST so OTel can patch BullMQ + undici + pg before
+ * they enter the module cache. ESM static imports are hoisted, so any
+ * module that loads BullMQ statically would race the OTel patches and
+ * skip auto-instrumentation. Dynamic imports after bootWorkerTelemetry()
+ * guarantee patches install first.
+ *
+ * @module apps/worker/main
  */
 
-import { Queue, Worker } from 'bullmq';
-import {
-  QueueName,
-  DEFAULT_JOB_OPTS,
-  type BulkFileProcessJob,
-  type BulkFinaliseJob,
-  type BulkRowProcessJob,
-  type CronWatchdogJob,
-  type LinkMetricsRollupJob,
+import { bootWorkerTelemetry, shutdownWorkerTelemetry, jobDurationMs } from './telemetry.js';
+import type {
+  BulkFileProcessJob,
+  BulkFinaliseJob,
+  BulkRowProcessJob,
+  CronWatchdogJob,
+  LinkMetricsRollupJob,
 } from '@aggregator-dpg/queue';
-import { config } from './config.js';
-import { logger } from './logger.js';
-import { closeDb } from './db.js';
-import { processBulkFile } from './jobs/bulk-file-process.js';
-import { processBulkRow } from './jobs/bulk-row-process.js';
-import { finaliseBulk } from './jobs/bulk-finalise.js';
-import { rollupLinkMetrics } from './jobs/link-metrics-rollup.js';
-import { runWatchdog } from './jobs/cron-watchdog.js';
-import { getRedis, closeRedis } from './services/redis.js';
-import { closeQueues } from './services/bulk-queue.js';
+
+await bootWorkerTelemetry();
+
+// Dynamic value imports — must come AFTER bootWorkerTelemetry() so OTel's
+// instrumentation patches install before BullMQ / pg / undici are loaded.
+// (Type-only `import type` above is erased at compile time, so it does
+// not cause runtime loading of the module's value graph.)
+const { Queue, Worker } = await import('bullmq');
+const queuePkg = await import('@aggregator-dpg/queue');
+const { QueueName, DEFAULT_JOB_OPTS } = queuePkg;
+const { wrapWorker } = await import('@aggregator-dpg/telemetry');
+const { config } = await import('./config.js');
+const { logger } = await import('./logger.js');
+const { closeDb } = await import('./db.js');
+const { processBulkFile } = await import('./jobs/bulk-file-process.js');
+const { processBulkRow } = await import('./jobs/bulk-row-process.js');
+const { finaliseBulk } = await import('./jobs/bulk-finalise.js');
+const { rollupLinkMetrics } = await import('./jobs/link-metrics-rollup.js');
+const { runWatchdog } = await import('./jobs/cron-watchdog.js');
+const { getRedis, closeRedis } = await import('./services/redis.js');
+const { closeQueues } = await import('./services/bulk-queue.js');
 
 async function main(): Promise<void> {
   const connection = getRedis();
 
   const fileWorker = new Worker<BulkFileProcessJob>(
     QueueName.BulkFileProcess,
-    async (job) => processBulkFile(job.data),
+    async (job) => {
+      const start = Date.now();
+      try {
+        return await wrapWorker(QueueName.BulkFileProcess, job.data, () =>
+          processBulkFile(job.data),
+        );
+      } finally {
+        jobDurationMs.record(Date.now() - start, { queue: QueueName.BulkFileProcess });
+      }
+    },
     {
       connection,
       concurrency: config.BULK_FILE_PROCESS_CONCURRENCY,
@@ -42,7 +63,14 @@ async function main(): Promise<void> {
 
   const rowWorker = new Worker<BulkRowProcessJob>(
     QueueName.BulkRowProcess,
-    async (job) => processBulkRow(job.data),
+    async (job) => {
+      const start = Date.now();
+      try {
+        return await wrapWorker(QueueName.BulkRowProcess, job.data, () => processBulkRow(job.data));
+      } finally {
+        jobDurationMs.record(Date.now() - start, { queue: QueueName.BulkRowProcess });
+      }
+    },
     {
       connection,
       concurrency: config.BULK_ROW_PROCESS_CONCURRENCY,
@@ -51,7 +79,14 @@ async function main(): Promise<void> {
 
   const finaliseWorker = new Worker<BulkFinaliseJob>(
     QueueName.BulkFinalise,
-    async (job) => finaliseBulk(job.data),
+    async (job) => {
+      const start = Date.now();
+      try {
+        return await wrapWorker(QueueName.BulkFinalise, job.data, () => finaliseBulk(job.data));
+      } finally {
+        jobDurationMs.record(Date.now() - start, { queue: QueueName.BulkFinalise });
+      }
+    },
     {
       connection,
       concurrency: config.BULK_FINALISE_CONCURRENCY,
@@ -60,7 +95,16 @@ async function main(): Promise<void> {
 
   const linkMetricsWorker = new Worker<LinkMetricsRollupJob>(
     QueueName.LinkMetricsRollup,
-    async (job) => rollupLinkMetrics(job.data),
+    async (job) => {
+      const start = Date.now();
+      try {
+        return await wrapWorker(QueueName.LinkMetricsRollup, job.data, () =>
+          rollupLinkMetrics(job.data),
+        );
+      } finally {
+        jobDurationMs.record(Date.now() - start, { queue: QueueName.LinkMetricsRollup });
+      }
+    },
     {
       connection,
       concurrency: 1,
@@ -69,7 +113,14 @@ async function main(): Promise<void> {
 
   const watchdogWorker = new Worker<CronWatchdogJob>(
     QueueName.CronWatchdog,
-    async () => runWatchdog(),
+    async (job) => {
+      const start = Date.now();
+      try {
+        return await wrapWorker(QueueName.CronWatchdog, job.data, () => runWatchdog());
+      } finally {
+        jobDurationMs.record(Date.now() - start, { queue: QueueName.CronWatchdog });
+      }
+    },
     {
       connection,
       concurrency: 1,
@@ -163,6 +214,7 @@ async function main(): Promise<void> {
     ]);
     await Promise.all([linkMetricsQueue.close(), watchdogQueue.close()]);
     await closeQueues();
+    await shutdownWorkerTelemetry();
     await closeRedis();
     await closeDb();
     process.exit(0);

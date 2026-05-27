@@ -21,6 +21,7 @@
 
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { and, eq, inArray } from 'drizzle-orm';
+import { withAggregatorBaggage, emitTurn } from '@aggregator-dpg/telemetry';
 import { requireApproved, type AuthContext } from '../services/auth/access-token.js';
 import { getBulkUploadsStore } from '../services/bulk-uploads-store/index.js';
 import { enqueueBulkFileProcess } from '../services/bulk-queue/index.js';
@@ -46,108 +47,126 @@ const VALID_TYPES = new Set(['seeker', 'provider']);
 export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<void> {
   app.get('/v1/bulk-uploads/template', async (req, reply) => {
     const auth = await requireAuth(req);
-    const query = req.query as { participant_type?: string };
-    const participantType = query.participant_type;
-    if (!participantType || !VALID_TYPES.has(participantType)) {
-      throw httpError('SCHEMA_VALIDATION', {
-        detail: 'participant_type must be "seeker" or "provider".',
-        fields: { participant_type: 'invalid' },
-      });
-    }
-    enforceAggregatorType(auth, participantType as string);
+    return withAggregatorBaggage(auth.aggregatorId, async () => {
+      const query = req.query as { participant_type?: string };
+      const participantType = query.participant_type;
+      if (!participantType || !VALID_TYPES.has(participantType)) {
+        throw httpError('SCHEMA_VALIDATION', {
+          detail: 'participant_type must be "seeker" or "provider".',
+          fields: { participant_type: 'invalid' },
+        });
+      }
+      enforceAggregatorType(auth, participantType as string);
 
-    const schemaResult = await getSchemaLoader().getSchema({
-      id: `participant-${participantType}`,
-      version: 'v1',
-    });
-    if (!schemaResult.success) {
-      throw httpError('INTERNAL', {
-        detail: 'Participant schema unavailable.',
-        cause: new Error(schemaResult.error.message),
+      const schemaResult = await getSchemaLoader().getSchema({
+        id: `participant-${participantType}`,
+        version: 'v1',
       });
-    }
-    const csv = buildCsvTemplate(schemaResult.value);
-    void auth; // authenticated for audit; csv content is schema-derived only
-    return reply
-      .header('Content-Type', 'text/csv; charset=utf-8')
-      .header('Content-Disposition', `attachment; filename="${participantType}-template.csv"`)
-      .send(csv);
+      if (!schemaResult.success) {
+        throw httpError('INTERNAL', {
+          detail: 'Participant schema unavailable.',
+          cause: new Error(schemaResult.error.message),
+        });
+      }
+      const csv = buildCsvTemplate(schemaResult.value);
+      void auth; // authenticated for audit; csv content is schema-derived only
+      return reply
+        .header('Content-Type', 'text/csv; charset=utf-8')
+        .header('Content-Disposition', `attachment; filename="${participantType}-template.csv"`)
+        .send(csv);
+    });
   });
 
   app.post('/v1/bulk-uploads', async (req, reply) => {
     const auth = await requireAuth(req);
-    const log = req.log.child({ operation: 'bulkUploads.create', actor: auth.userId });
-    const start = Date.now();
+    return withAggregatorBaggage(auth.aggregatorId, async () => {
+      const log = req.log.child({ operation: 'bulkUploads.create', actor: auth.userId });
+      const start = Date.now();
 
-    const body = (req.body ?? {}) as CreateBody;
-    const participantType = typeof body.participant_type === 'string' ? body.participant_type : '';
-    if (!VALID_TYPES.has(participantType)) {
-      throw httpError('SCHEMA_VALIDATION', {
-        detail: 'participant_type must be "seeker" or "provider".',
-        fields: { participant_type: 'invalid' },
+      const body = (req.body ?? {}) as CreateBody;
+      const participantType =
+        typeof body.participant_type === 'string' ? body.participant_type : '';
+      if (!VALID_TYPES.has(participantType)) {
+        throw httpError('SCHEMA_VALIDATION', {
+          detail: 'participant_type must be "seeker" or "provider".',
+          fields: { participant_type: 'invalid' },
+        });
+      }
+      enforceAggregatorType(auth, participantType as string);
+
+      // Pin the active schema version at create time. v1 is the only published
+      // version today; this becomes a registry lookup once schema versioning ships.
+      const schemaId = `participant-${participantType}`;
+      const schemaVersion = 'v1';
+
+      const store = getBulkUploadsStore();
+      const created = await store.create({
+        aggregatorId: auth.aggregatorId,
+        participantType: participantType as string,
+        // Temporary placeholder; replaced after sign call below. We need the
+        // row id to compute the deterministic key, so create-then-update.
+        s3Key: 'pending',
+        schemaId,
+        schemaVersion,
+        uploadedBy: auth.userId,
       });
-    }
-    enforceAggregatorType(auth, participantType as string);
+      if (!created.ok) {
+        log.error({
+          status: 'failure',
+          error: created.error.code,
+          latency_ms: Date.now() - start,
+        });
+        throw httpError('DB_UNAVAILABLE', { cause: new Error(created.error.message) });
+      }
 
-    // Pin the active schema version at create time. v1 is the only published
-    // version today; this becomes a registry lookup once schema versioning ships.
-    const schemaId = `participant-${participantType}`;
-    const schemaVersion = 'v1';
+      const uploadId = created.value.id;
+      const signed = await signBulkUploadUrl({
+        uploadId,
+        aggregatorId: auth.aggregatorId,
+      });
 
-    const store = getBulkUploadsStore();
-    const created = await store.create({
-      aggregatorId: auth.aggregatorId,
-      participantType: participantType as string,
-      // Temporary placeholder; replaced after sign call below. We need the
-      // row id to compute the deterministic key, so create-then-update.
-      s3Key: 'pending',
-      schemaId,
-      schemaVersion,
-      uploadedBy: auth.userId,
-    });
-    if (!created.ok) {
-      log.error({
-        status: 'failure',
-        error: created.error.code,
+      // Persist the real key now that we know it. The store doesn't yet expose
+      // an updateKey method; reach in via Drizzle directly. (Slice 8 cleanup
+      // can move this into the store interface.)
+      const { getDb } = await import('../db/client.js');
+      const { bulkUploads } = await import('../db/schema.js');
+      const { eq } = await import('drizzle-orm');
+      await getDb()
+        .update(bulkUploads)
+        .set({ s3Key: signed.key, updatedAt: new Date() })
+        .where(eq(bulkUploads.id, uploadId));
+
+      log.info({
+        status: 'success',
         latency_ms: Date.now() - start,
+        upload_id: uploadId,
+        aggregator_id: auth.aggregatorId,
       });
-      throw httpError('DB_UNAVAILABLE', { cause: new Error(created.error.message) });
-    }
 
-    const uploadId = created.value.id;
-    const signed = await signBulkUploadUrl({
-      uploadId,
-      aggregatorId: auth.aggregatorId,
-    });
+      queueMicrotask(() => {
+        emitTurn({
+          event: 'bulk_upload.created',
+          idempotency_key: `bulk_upload.created:${uploadId}`,
+          attributes: {
+            aggregator_id: auth.aggregatorId,
+            upload_id: uploadId,
+          },
+        }).catch(() => {
+          // intentional: outcome client is fire-and-forget; receiver tracks drops via metric
+        });
+      });
 
-    // Persist the real key now that we know it. The store doesn't yet expose
-    // an updateKey method; reach in via Drizzle directly. (Slice 8 cleanup
-    // can move this into the store interface.)
-    const { getDb } = await import('../db/client.js');
-    const { bulkUploads } = await import('../db/schema.js');
-    const { eq } = await import('drizzle-orm');
-    await getDb()
-      .update(bulkUploads)
-      .set({ s3Key: signed.key, updatedAt: new Date() })
-      .where(eq(bulkUploads.id, uploadId));
-
-    log.info({
-      status: 'success',
-      latency_ms: Date.now() - start,
-      upload_id: uploadId,
-      aggregator_id: auth.aggregatorId,
-    });
-
-    return reply.code(201).send({
-      upload_id: uploadId,
-      upload_url: signed.url,
-      s3_key: signed.key,
-      expires_at: signed.expiresAt,
-      content_type: signed.contentType,
-      max_bytes: signed.maxBytes,
-      schema_id: schemaId,
-      schema_version: schemaVersion,
-      status: 'pending',
+      return reply.code(201).send({
+        upload_id: uploadId,
+        upload_url: signed.url,
+        s3_key: signed.key,
+        expires_at: signed.expiresAt,
+        content_type: signed.contentType,
+        max_bytes: signed.maxBytes,
+        schema_id: schemaId,
+        schema_version: schemaVersion,
+        status: 'pending',
+      });
     });
   });
 
@@ -158,125 +177,129 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
     if (!uploadId) {
       throw httpError('SCHEMA_VALIDATION', { detail: 'upload_id is required.' });
     }
-    const log = req.log.child({
-      operation: 'bulkUploads.start',
-      actor: auth.userId,
-      upload_id: uploadId,
-    });
-    const start = Date.now();
+    return withAggregatorBaggage(auth.aggregatorId, async () => {
+      const log = req.log.child({
+        operation: 'bulkUploads.start',
+        actor: auth.userId,
+        upload_id: uploadId,
+      });
+      const start = Date.now();
 
-    const store = getBulkUploadsStore();
-    const found = await store.findById(uploadId, auth.aggregatorId);
-    if (!found.ok) {
-      throw httpError('DB_UNAVAILABLE', { cause: new Error(found.error.message) });
-    }
-    if (!found.value) {
-      // 403 to prevent cross-aggregator enumeration.
-      throw httpError('FORBIDDEN', { detail: 'Upload not accessible.' });
-    }
+      const store = getBulkUploadsStore();
+      const found = await store.findById(uploadId, auth.aggregatorId);
+      if (!found.ok) {
+        throw httpError('DB_UNAVAILABLE', { cause: new Error(found.error.message) });
+      }
+      if (!found.value) {
+        // 403 to prevent cross-aggregator enumeration.
+        throw httpError('FORBIDDEN', { detail: 'Upload not accessible.' });
+      }
 
-    const upload = found.value;
-    // Idempotent re-call: already past 'uploaded' → just return current.
-    if (upload.status !== 'pending' && upload.status !== 'uploaded') {
-      log.warn({
-        status: 'skipped',
-        reason: 'invalid_transition',
-        current_status: upload.status,
+      const upload = found.value;
+      // Idempotent re-call: already past 'uploaded' → just return current.
+      if (upload.status !== 'pending' && upload.status !== 'uploaded') {
+        log.warn({
+          status: 'skipped',
+          reason: 'invalid_transition',
+          current_status: upload.status,
+          latency_ms: Date.now() - start,
+        });
+        return reply.send(toResponse(upload));
+      }
+
+      const head = await headObject(upload.s3Key);
+      if (!head) {
+        log.warn({
+          status: 'failure',
+          reason: 's3_object_missing',
+          s3_key: upload.s3Key,
+          latency_ms: Date.now() - start,
+        });
+        throw httpError('SCHEMA_VALIDATION', {
+          detail: 'CSV upload not found in object storage. Complete the PUT and retry.',
+        });
+      }
+      if (head.contentLength === 0) {
+        throw httpError('SCHEMA_VALIDATION', { detail: 'Uploaded CSV is empty.' });
+      }
+      if (head.contentLength > config.BULK_UPLOAD_MAX_BYTES) {
+        // Belt + braces alongside the signed PUT — S3 PUT signing alone does not
+        // bind a max size on the GetObject side, and the worker downloads the
+        // whole object into memory. Reject before enqueueing.
+        log.warn({
+          status: 'failure',
+          reason: 'object_too_large',
+          s3_key: upload.s3Key,
+          content_length: head.contentLength,
+          max_bytes: config.BULK_UPLOAD_MAX_BYTES,
+        });
+        throw httpError('SCHEMA_VALIDATION', {
+          detail: `Uploaded CSV is too large (${head.contentLength} bytes; max ${config.BULK_UPLOAD_MAX_BYTES}).`,
+        });
+      }
+
+      // Aggregators are allowed to re-upload the same CSV bytes — the
+      // partial UNIQUE on (aggregator_id, s3_etag) was dropped in
+      // migration 0011. Any non-OK result here is a real DB / state
+      // error, not a duplicate.
+      const marked = await store.markUploaded(uploadId, auth.aggregatorId, head.etag);
+      if (!marked.ok) {
+        throw httpError('DB_UNAVAILABLE', { cause: new Error(marked.error.message) });
+      }
+
+      try {
+        await enqueueBulkFileProcess({
+          uploadId: marked.value.id,
+          aggregatorId: auth.aggregatorId,
+          s3Key: marked.value.s3Key,
+          participantType: marked.value.participantType,
+          schemaId: marked.value.schemaId,
+          schemaVersion: marked.value.schemaVersion,
+        });
+      } catch (err) {
+        // Enqueue failed but the row is already in 'uploaded' status. The
+        // stuck-job watchdog will surface this if no worker picks it up.
+        log.error({
+          status: 'failure',
+          sub_operation: 'enqueue.bulk-file-process',
+          error: (err as Error).message,
+        });
+        throw httpError('INTERNAL', { cause: err });
+      }
+
+      log.info({
+        status: 'success',
         latency_ms: Date.now() - start,
-      });
-      return reply.send(toResponse(upload));
-    }
-
-    const head = await headObject(upload.s3Key);
-    if (!head) {
-      log.warn({
-        status: 'failure',
-        reason: 's3_object_missing',
-        s3_key: upload.s3Key,
-        latency_ms: Date.now() - start,
-      });
-      throw httpError('SCHEMA_VALIDATION', {
-        detail: 'CSV upload not found in object storage. Complete the PUT and retry.',
-      });
-    }
-    if (head.contentLength === 0) {
-      throw httpError('SCHEMA_VALIDATION', { detail: 'Uploaded CSV is empty.' });
-    }
-    if (head.contentLength > config.BULK_UPLOAD_MAX_BYTES) {
-      // Belt + braces alongside the signed PUT — S3 PUT signing alone does not
-      // bind a max size on the GetObject side, and the worker downloads the
-      // whole object into memory. Reject before enqueueing.
-      log.warn({
-        status: 'failure',
-        reason: 'object_too_large',
-        s3_key: upload.s3Key,
+        etag: head.etag,
         content_length: head.contentLength,
-        max_bytes: config.BULK_UPLOAD_MAX_BYTES,
+        next_status: marked.value.status,
       });
-      throw httpError('SCHEMA_VALIDATION', {
-        detail: `Uploaded CSV is too large (${head.contentLength} bytes; max ${config.BULK_UPLOAD_MAX_BYTES}).`,
-      });
-    }
 
-    // Aggregators are allowed to re-upload the same CSV bytes — the
-    // partial UNIQUE on (aggregator_id, s3_etag) was dropped in
-    // migration 0011. Any non-OK result here is a real DB / state
-    // error, not a duplicate.
-    const marked = await store.markUploaded(uploadId, auth.aggregatorId, head.etag);
-    if (!marked.ok) {
-      throw httpError('DB_UNAVAILABLE', { cause: new Error(marked.error.message) });
-    }
-
-    try {
-      await enqueueBulkFileProcess({
-        uploadId: marked.value.id,
-        aggregatorId: auth.aggregatorId,
-        s3Key: marked.value.s3Key,
-        participantType: marked.value.participantType,
-        schemaId: marked.value.schemaId,
-        schemaVersion: marked.value.schemaVersion,
-      });
-    } catch (err) {
-      // Enqueue failed but the row is already in 'uploaded' status. The
-      // stuck-job watchdog will surface this if no worker picks it up.
-      log.error({
-        status: 'failure',
-        sub_operation: 'enqueue.bulk-file-process',
-        error: (err as Error).message,
-      });
-      throw httpError('INTERNAL', { cause: err });
-    }
-
-    log.info({
-      status: 'success',
-      latency_ms: Date.now() - start,
-      etag: head.etag,
-      content_length: head.contentLength,
-      next_status: marked.value.status,
+      return reply.send(toResponse(marked.value));
     });
-
-    return reply.send(toResponse(marked.value));
   });
 
   app.get('/v1/bulk-uploads', async (req, reply) => {
     const auth = await requireAuth(req);
-    const query = req.query as { limit?: string; offset?: string };
-    const limit = Math.max(1, Math.min(100, Number.parseInt(query.limit ?? '20', 10) || 20));
-    const offset = Math.max(0, Number.parseInt(query.offset ?? '0', 10) || 0);
+    return withAggregatorBaggage(auth.aggregatorId, async () => {
+      const query = req.query as { limit?: string; offset?: string };
+      const limit = Math.max(1, Math.min(100, Number.parseInt(query.limit ?? '20', 10) || 20));
+      const offset = Math.max(0, Number.parseInt(query.offset ?? '0', 10) || 0);
 
-    const store = getBulkUploadsStore();
-    const result = await store.list(auth.aggregatorId, { limit, offset });
-    if (!result.ok) {
-      throw httpError('DB_UNAVAILABLE', { cause: new Error(result.error.message) });
-    }
-    const countsBatch = await loadCountsBatch(result.value.rows);
-    return reply.send({
-      items: result.value.rows.map((row) =>
-        toResponse(row, countsBatch.get(row.id) ?? ZERO_COUNTS),
-      ),
-      total: result.value.total,
-      limit,
-      offset,
+      const store = getBulkUploadsStore();
+      const result = await store.list(auth.aggregatorId, { limit, offset });
+      if (!result.ok) {
+        throw httpError('DB_UNAVAILABLE', { cause: new Error(result.error.message) });
+      }
+      const countsBatch = await loadCountsBatch(result.value.rows);
+      return reply.send({
+        items: result.value.rows.map((row) =>
+          toResponse(row, countsBatch.get(row.id) ?? ZERO_COUNTS),
+        ),
+        total: result.value.total,
+        limit,
+        offset,
+      });
     });
   });
 
@@ -287,18 +310,19 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
     if (!uploadId) {
       throw httpError('SCHEMA_VALIDATION', { detail: 'upload_id is required.' });
     }
+    return withAggregatorBaggage(auth.aggregatorId, async () => {
+      const store = getBulkUploadsStore();
+      const found = await store.findById(uploadId, auth.aggregatorId);
+      if (!found.ok) {
+        throw httpError('DB_UNAVAILABLE', { cause: new Error(found.error.message) });
+      }
+      if (!found.value) {
+        throw httpError('FORBIDDEN', { detail: 'Upload not accessible.' });
+      }
 
-    const store = getBulkUploadsStore();
-    const found = await store.findById(uploadId, auth.aggregatorId);
-    if (!found.ok) {
-      throw httpError('DB_UNAVAILABLE', { cause: new Error(found.error.message) });
-    }
-    if (!found.value) {
-      throw httpError('FORBIDDEN', { detail: 'Upload not accessible.' });
-    }
-
-    const counts = await loadCounts(found.value.id, found.value.status);
-    return reply.send(toResponse(found.value, counts));
+      const counts = await loadCounts(found.value.id, found.value.status);
+      return reply.send(toResponse(found.value, counts));
+    });
   });
 
   app.get('/v1/bulk-uploads/:id/errors.csv', async (req, reply) => {
@@ -308,82 +332,84 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
     if (!uploadId) {
       throw httpError('SCHEMA_VALIDATION', { detail: 'upload_id is required.' });
     }
-    const log = req.log.child({
-      operation: 'bulkUploads.errorsCsv',
-      actor: auth.userId,
-      upload_id: uploadId,
-    });
-    const start = Date.now();
+    return withAggregatorBaggage(auth.aggregatorId, async () => {
+      const log = req.log.child({
+        operation: 'bulkUploads.errorsCsv',
+        actor: auth.userId,
+        upload_id: uploadId,
+      });
+      const start = Date.now();
 
-    const store = getBulkUploadsStore();
-    const found = await store.findById(uploadId, auth.aggregatorId);
-    if (!found.ok) {
-      throw httpError('DB_UNAVAILABLE', { cause: new Error(found.error.message) });
-    }
-    if (!found.value) {
-      // 403 to prevent cross-aggregator enumeration.
-      throw httpError('FORBIDDEN', { detail: 'Upload not accessible.' });
-    }
-    const upload = found.value;
+      const store = getBulkUploadsStore();
+      const found = await store.findById(uploadId, auth.aggregatorId);
+      if (!found.ok) {
+        throw httpError('DB_UNAVAILABLE', { cause: new Error(found.error.message) });
+      }
+      if (!found.value) {
+        // 403 to prevent cross-aggregator enumeration.
+        throw httpError('FORBIDDEN', { detail: 'Upload not accessible.' });
+      }
+      const upload = found.value;
 
-    if (upload.status !== 'completed') {
+      if (upload.status !== 'completed') {
+        log.info({
+          status: 'skipped',
+          reason: 'not_completed',
+          current_status: upload.status,
+          latency_ms: Date.now() - start,
+        });
+        throw httpError('BULK_UPLOAD_NOT_READY', {
+          detail: `Upload is in status '${upload.status}'. The errors report is generated only after finalisation.`,
+        });
+      }
+      if (!upload.errorsCsvS3Key) {
+        // The Finaliser only writes errors.csv when `failed > 0`. A null key
+        // on a completed run = clean upload (every row passed). Communicate
+        // that to the UI so it can hide the "Download errors" button instead
+        // of rendering it as a broken link.
+        log.info({
+          status: 'skipped',
+          reason: 'no_errors_to_report',
+        });
+        throw httpError('NOT_FOUND', {
+          detail: 'No errors to download — all rows in this upload passed.',
+        });
+      }
+      // Hardened: only sign keys that match the canonical errors.csv layout.
+      // Even though the worker writes a deterministic key, this guards against
+      // any future path (or DB tamper) signing a GET URL for an arbitrary object.
+      const expectedKey = `bulk-uploads/${upload.id}/errors.csv`;
+      if (upload.errorsCsvS3Key !== expectedKey) {
+        log.error({
+          status: 'failure',
+          reason: 'errors_csv_key_invalid',
+          s3_key: upload.errorsCsvS3Key,
+        });
+        throw httpError('NOT_FOUND', { detail: 'Errors report not available for this upload.' });
+      }
+
+      const signed = await signErrorsCsvDownloadUrl(upload.errorsCsvS3Key);
+
       log.info({
-        status: 'skipped',
-        reason: 'not_completed',
-        current_status: upload.status,
+        status: 'success',
         latency_ms: Date.now() - start,
-      });
-      throw httpError('BULK_UPLOAD_NOT_READY', {
-        detail: `Upload is in status '${upload.status}'. The errors report is generated only after finalisation.`,
-      });
-    }
-    if (!upload.errorsCsvS3Key) {
-      // The Finaliser only writes errors.csv when `failed > 0`. A null key
-      // on a completed run = clean upload (every row passed). Communicate
-      // that to the UI so it can hide the "Download errors" button instead
-      // of rendering it as a broken link.
-      log.info({
-        status: 'skipped',
-        reason: 'no_errors_to_report',
-      });
-      throw httpError('NOT_FOUND', {
-        detail: 'No errors to download — all rows in this upload passed.',
-      });
-    }
-    // Hardened: only sign keys that match the canonical errors.csv layout.
-    // Even though the worker writes a deterministic key, this guards against
-    // any future path (or DB tamper) signing a GET URL for an arbitrary object.
-    const expectedKey = `bulk-uploads/${upload.id}/errors.csv`;
-    if (upload.errorsCsvS3Key !== expectedKey) {
-      log.error({
-        status: 'failure',
-        reason: 'errors_csv_key_invalid',
         s3_key: upload.errorsCsvS3Key,
       });
-      throw httpError('NOT_FOUND', { detail: 'Errors report not available for this upload.' });
-    }
 
-    const signed = await signErrorsCsvDownloadUrl(upload.errorsCsvS3Key);
-
-    log.info({
-      status: 'success',
-      latency_ms: Date.now() - start,
-      s3_key: upload.errorsCsvS3Key,
-    });
-
-    const counts = await loadCounts(upload.id, upload.status);
-    return reply.send({
-      upload_id: upload.id,
-      url: signed.url,
-      s3_key: signed.key,
-      expires_at: signed.expiresAt,
-      content_type: 'text/csv',
-      counts: {
-        total_rows: counts.totalRows,
-        passed: counts.passed,
-        failed: counts.failed,
-        skipped: counts.skipped,
-      },
+      const counts = await loadCounts(upload.id, upload.status);
+      return reply.send({
+        upload_id: upload.id,
+        url: signed.url,
+        s3_key: signed.key,
+        expires_at: signed.expiresAt,
+        content_type: 'text/csv',
+        counts: {
+          total_rows: counts.totalRows,
+          passed: counts.passed,
+          failed: counts.failed,
+          skipped: counts.skipped,
+        },
+      });
     });
   });
 }
