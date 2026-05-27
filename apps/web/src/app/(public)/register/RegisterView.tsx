@@ -190,7 +190,7 @@ export function RegisterView({ schema, uiSchema }: RegisterViewProps): JSX.Eleme
   // schema's `description` field is intentionally technical (it documents
   // the API contract) and is hidden from the form UI.
   const headingTitle = (schema.title as string | undefined) ?? 'Aggregator Registration';
-  const headingTagline = 'Tell us about your organisation. Reviewed within 1–2 business days.';
+  const headingTagline = 'Tell us about your organisation.';
 
   const formSchema = useMemo<RJSFSchema>(() => {
     const clone: RJSFSchema = { ...schema };
@@ -309,8 +309,8 @@ export function RegisterView({ schema, uiSchema }: RegisterViewProps): JSX.Eleme
                 Reference ID: <code className="font-mono text-[12.5px]">{state.aggregatorId}</code>
               </p>
               <p className="text-[14px] text-emerald-700 mt-3">
-                The {brand} team will review your application within 1–2 business days. Once
-                approved, sign in via {brand} SSO using the email or mobile you registered.
+                The {brand} team will review your application. Once approved, sign in via {brand}{' '}
+                SSO using the email or mobile you registered.
               </p>
               <Link
                 href="/login"
