@@ -335,9 +335,23 @@ export function PublicRegistrationView({
                     ? 'Thanks — your details have been recorded. You will hear back from the aggregator soon.'
                     : 'This mobile number (or email) is already registered with this aggregator — no need to register again.'}
                 </p>
-                <div className="text-[11px] text-emerald-600/80 font-mono mt-3">
-                  Ref: {state.submissionId}
-                </div>
+                {state.submissionId ? (
+                  <div className="text-[11px] text-emerald-600/80 font-mono mt-3">
+                    Ref: {state.submissionId}
+                  </div>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFormData({});
+                    setShowValidation(false);
+                    setState({ status: 'idle' });
+                  }}
+                  style={{ backgroundColor: cfg.brand.primary_color }}
+                  className="mt-5 w-full py-3 rounded-[12px] font-display font-bold text-[15px] text-white hover:opacity-90 transition-opacity"
+                >
+                  Register another
+                </button>
               </div>
             ) : (
               <>
