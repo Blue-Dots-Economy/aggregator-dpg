@@ -1377,7 +1377,18 @@ function DashboardContent({ aggregatorType }: { aggregatorType: 'seeker' | 'prov
         }
       />
 
-      <SegmentedTabs<Tab> value={tab} onChange={setTab} items={tabItems} className="mb-6" />
+      {tabItems.length > 1 ? (
+        <SegmentedTabs<Tab> value={tab} onChange={setTab} items={tabItems} className="mb-6" />
+      ) : (
+        // Single-domain aggregator: the lone tab carries no navigation
+        // value, so render it as a static label chip instead of a
+        // clickable button.
+        <div className="seg mb-6">
+          <span className="px-4 py-2 rounded-[9px] text-[13.5px] font-medium bg-[var(--bd-card)] text-[var(--bd-primary-600)] inline-flex items-center gap-2 shadow-[0_1px_2px_rgba(11,16,32,0.06)] cursor-default select-none">
+            {tabItems[0]?.label}
+          </span>
+        </div>
+      )}
 
       {tab === 'seekers' && <SeekersTab />}
       {tab === 'providers' && <ProvidersTab />}
