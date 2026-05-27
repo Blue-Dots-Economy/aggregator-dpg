@@ -378,11 +378,8 @@ const widgets: RegistryWidgetsType = {
   CheckboxWidget,
   CheckboxesWidget,
   CommaSeparatedArrayWidget,
-  // Email + URL fields render TextWidget but pin the native HTML
-  // `type` so mobile keyboards default to the email / URL layout and
-  // the browser surfaces native autofill hints.
-  EmailWidget: (props: WidgetProps) => <TextWidget {...props} type="email" />,
-  URLWidget: (props: WidgetProps) => <TextWidget {...props} type="url" />,
+  EmailWidget: TextWidget,
+  URLWidget: TextWidget,
   UpDownWidget: TextWidget,
   RangeWidget: TextWidget,
   PasswordWidget: TextWidget,
