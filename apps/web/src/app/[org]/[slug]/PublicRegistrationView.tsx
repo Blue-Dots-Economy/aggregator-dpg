@@ -222,6 +222,24 @@ export function PublicRegistrationView({
           body: JSON.stringify(e.formData ?? {}),
         },
       );
+      // 409 with outcome=skipped is a dedup hit, not a failure: this
+      // person is already registered with this aggregator. Render the
+      // friendly "already registered" done screen instead of a red
+      // error banner.
+      if (res.status === 409) {
+        const dup = (await res.json().catch(() => ({}))) as {
+          outcome?: string;
+          submission_id?: string;
+        };
+        if (dup.outcome === 'skipped') {
+          setState({
+            status: 'done',
+            submissionId: dup.submission_id ?? '',
+            outcome: 'skipped',
+          });
+          return;
+        }
+      }
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as ApiErrorEnvelope;
         setState({
@@ -315,7 +333,7 @@ export function PublicRegistrationView({
                 <p className="text-[14px] text-emerald-700 mt-3 leading-relaxed">
                   {state.outcome === 'passed'
                     ? 'Thanks — your details have been recorded. You will hear back from the aggregator soon.'
-                    : 'A registration with these details already exists for this aggregator. No further action needed.'}
+                    : 'This mobile number (or email) is already registered with this aggregator — no need to register again.'}
                 </p>
                 <div className="text-[11px] text-emerald-600/80 font-mono mt-3">
                   Ref: {state.submissionId}

@@ -345,7 +345,7 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       return reply.code(409).send({
         outcome,
         submission_id: submissionId,
-        message: 'Already registered with this aggregator.',
+        message: 'This mobile number or email is already registered with this aggregator.',
       });
     }
 
