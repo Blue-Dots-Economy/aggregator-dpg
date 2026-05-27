@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState, type FormEvent } from 'react';
+import Image from 'next/image';
 import Link from 'next/link';
 import type { RJSFSchema, UiSchema } from '@rjsf/utils';
 import type { IChangeEvent } from '@rjsf/core';
@@ -251,15 +252,28 @@ export function RegisterView({ schema, uiSchema }: RegisterViewProps): JSX.Eleme
 
         <div className="relative z-10 w-full max-w-[640px] mx-auto px-6 lg:px-10 py-10">
           <header className="flex items-center gap-3.5 mb-8">
-            <BlueDotsLogo size={48} />
-            <div>
-              <div className="font-display font-bold text-[18px] text-ink-900 leading-none tracking-tight">
-                {brand}
-              </div>
-              <div className="text-[12.5px] text-ink-400 leading-none mt-1.5">
-                Aggregator Portal
-              </div>
-            </div>
+            {cfg.brand.logo?.default ? (
+              <Image
+                src={cfg.brand.logo.default}
+                alt={brand}
+                width={200}
+                height={48}
+                priority
+                className="h-10 w-auto object-contain object-left"
+              />
+            ) : (
+              <>
+                <BlueDotsLogo size={48} />
+                <div>
+                  <div className="font-display font-bold text-[18px] text-ink-900 leading-none tracking-tight">
+                    {brand}
+                  </div>
+                  <div className="text-[12.5px] text-ink-400 leading-none mt-1.5">
+                    Aggregator Portal
+                  </div>
+                </div>
+              </>
+            )}
           </header>
 
           <Link

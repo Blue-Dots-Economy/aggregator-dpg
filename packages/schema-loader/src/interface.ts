@@ -12,9 +12,26 @@
  *     (per-row validation against the schema pinned on `bulk_uploads`).
  */
 
-import type { ValidateFunction } from 'ajv';
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
 import { BaseError } from '@aggregator-dpg/shared-primitives/errors';
+
+/**
+ * Structural shape of a compiled JSON Schema validator. Mirrors Ajv's
+ * `ValidateFunction` so concrete implementations can return the real Ajv
+ * type without leaking Ajv into the interface contract.
+ */
+export interface ValidationError {
+  instancePath: string;
+  schemaPath: string;
+  keyword?: string;
+  message?: string;
+  params?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+export type ValidateFunction = ((data: unknown) => boolean) & {
+  errors?: ValidationError[] | null;
+};
 
 /** Logical reference to one schema document. */
 export interface SchemaRef {

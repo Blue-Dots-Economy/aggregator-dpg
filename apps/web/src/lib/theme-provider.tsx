@@ -5,16 +5,26 @@ import { useAggregatorConfig } from '../hooks/useAggregatorConfig';
 
 /**
  * Reads the active aggregator config and writes the brand colors onto
- * `:root` as CSS variables (`--bd-primary*`, `--bd-brand*`). All
- * tailwind utilities + components key off these variables, so a single
- * config change repaints the entire UI without touching component
- * source. Derived tint/shade ramps come from a lightweight hex-mix
- * helper so the brand only has to specify the base + accent colors.
+ * `:root` as CSS variables. All tailwind utilities + components key off
+ * these variables, so a single config change repaints the entire UI
+ * without touching component source.
+ *
+ * Two layers of variables:
+ *
+ *   1. **Primary ramp** (always set) — `--bd-primary*`, `--bd-brand`.
+ *      Derived from YAML `primary_color` + `accent_color` via hex mix
+ *      so brand only has to specify the base + accent.
+ *   2. **Design-system tokens** (set when `brand.json` is present) —
+ *      `--bd-secondary-1..N`, `--bd-accent-1..N`,
+ *      `--bd-gradient-<name>`, `--bd-font-sans`. Read from the
+ *      `palette` / `typography` blocks loaded out of `brand.json`.
  */
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const { data: cfg } = useAggregatorConfig();
   const primary = cfg?.brand.primary_color;
   const accent = cfg?.brand.accent_color;
+  const palette = cfg?.brand.palette;
+  const typography = cfg?.brand.typography;
 
   useEffect(() => {
     if (typeof document === 'undefined' || !primary) return;
@@ -31,7 +41,49 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     root.style.setProperty('--bd-brand', accentHex);
   }, [primary, accent]);
 
+  useEffect(() => {
+    if (typeof document === 'undefined' || !palette) return;
+    const root = document.documentElement;
+    const writeSwatches = (
+      group: 'secondary' | 'accent',
+      swatches: { name: string; hex: string }[] | undefined,
+    ) => {
+      if (!swatches) return;
+      swatches.forEach((s, idx) => {
+        root.style.setProperty(`--bd-${group}-${idx + 1}`, s.hex);
+        root.style.setProperty(`--bd-${group}-${slug(s.name)}`, s.hex);
+      });
+    };
+    writeSwatches('secondary', palette.secondary);
+    writeSwatches('accent', palette.accent);
+    palette.gradients?.forEach((g) => {
+      root.style.setProperty(
+        `--bd-gradient-${slug(g.name)}`,
+        `linear-gradient(135deg, ${g.from}, ${g.to})`,
+      );
+    });
+  }, [palette]);
+
+  useEffect(() => {
+    if (typeof document === 'undefined' || !typography) return;
+    const root = document.documentElement;
+    root.style.setProperty('--bd-font-sans', typography.primaryFont);
+    if (typography.headings?.family) {
+      root.style.setProperty('--bd-font-heading', typography.headings.family);
+    }
+    if (typography.body?.family) {
+      root.style.setProperty('--bd-font-body', typography.body.family);
+    }
+  }, [typography]);
+
   return <>{children}</>;
+}
+
+function slug(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
 }
 
 /**

@@ -25,8 +25,9 @@ aggregator:
     long_name: Blue Dots Aggregator Portal
     tagline: Track every participant in your network — at a glance.
     url_slug: blue-dots
-    primary_color: '#2563EB'
-    accent_color: '#3B82F6'
+    # Canonical hex from Blue Dots Brand Guidelines (see brand.json).
+    primary_color: '#0074ff'
+    accent_color: '#57abff'
 
   domain_labels:
     seeker:

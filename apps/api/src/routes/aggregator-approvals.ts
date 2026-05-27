@@ -185,29 +185,78 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
       const mailer = getMailer();
 
       if (parsed.data.decision === 'approve') {
-        // 1. DB first — flip status. KC mirror follows.
-        const dbUpdate = await store.updateStatus(aggregatorId, 'active', 'admin');
-        if (!dbUpdate.ok) {
-          log.error(
+        // 1. Signalstack first — approval is a hard-gated registration step.
+        //    Until the upsert succeeds we leave `aggregators.status` at
+        //    `pending` and the KC user disabled, so the applicant cannot log
+        //    in. Re-clicking the approval link retries cleanly because the
+        //    single-use guard at line ~178 reads DB status (still pending)
+        //    and the upsert is idempotent on `external_id` (aggregatorId).
+        //
+        //    When signalstack is unconfigured (getSignalStackWriter() returns
+        //    null), we skip this step — local/dev stacks without a
+        //    signalstack peer continue to function.
+        const signalstack = getSignalStackWriter();
+        let signalstackOrgId: string | null = null;
+        if (signalstack) {
+          const upsertStart = Date.now();
+          // Signalstack's dashboard endpoint fails with NO_DOMAINS_CONFIGURED
+          // when the org's metadata.domains is empty, so always send a
+          // non-empty list. Use the aggregator's chosen participant focus
+          // (`aggregators.type`, captured at registration as 'seeker' or
+          // 'provider'). Legacy rows with NULL type fall back to the full
+          // list so they keep functioning until the row is patched.
+          const aggregatorDomains: string[] = lookup.aggregator.type
+            ? [lookup.aggregator.type]
+            : ['seeker', 'provider'];
+          const upsertResult = await signalstack.upsertAggregator({
+            external_id: aggregatorId,
+            name: lookup.aggregator.name,
+            slug: lookup.aggregator.orgSlug,
+            domains: aggregatorDomains,
+          });
+          if (!upsertResult.success) {
+            log.error(
+              {
+                status: 'failure',
+                sub_operation: 'signalstack.upsertAggregator',
+                code: upsertResult.error.code,
+                cause: upsertResult.error.message,
+                latency_ms: Date.now() - upsertStart,
+              },
+              'signalstack aggregator upsert failed — approval aborted, admin can retry',
+            );
+            return sendHtml(
+              reply,
+              503,
+              renderResultPage({
+                status: 'error',
+                title: 'Action failed',
+                message:
+                  'Could not register the aggregator with the signalstack network. The application is still pending — open this approval link again once the signalstack service is reachable.',
+              }),
+            );
+          }
+          signalstackOrgId = upsertResult.value.org_id;
+          log.info(
             {
-              status: 'failure',
-              sub_operation: 'store.updateStatus.active',
-              code: dbUpdate.error.code,
-              cause: dbUpdate.error.message,
+              status: 'success',
+              sub_operation: 'signalstack.upsertAggregator',
+              signalstack_org_id: signalstackOrgId,
+              domains: aggregatorDomains,
+              aggregator_type: lookup.aggregator.type,
+              latency_ms: Date.now() - upsertStart,
             },
-            'failed to flip aggregator status to active',
-          );
-          return sendHtml(
-            reply,
-            503,
-            renderResultPage({
-              status: 'error',
-              title: 'Action failed',
-              message: 'Database unavailable. Please try again shortly.',
-            }),
+            'aggregator registered in signalstack',
           );
         }
 
+        // 2. KC enableUser — must succeed for the applicant to authenticate.
+        //    Idempotent set-state call; safe to retry on next click. Note:
+        //    the approval token TTL (DEFAULT_TTL_SEC=1h in
+        //    services/approval-token.ts) caps the retry window. If a
+        //    signalstack/IDP outage exceeds the TTL, the admin must
+        //    request a fresh approval email.
+        const enableStart = Date.now();
         const enable = await idp.enableUser(lookup.kcUser.id);
         if (!enable.ok) {
           log.error(
@@ -216,11 +265,10 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
               sub_operation: 'idp.enableUser',
               code: enable.error.code,
               cause: enable.error.message,
+              latency_ms: Date.now() - enableStart,
             },
-            'failed to enable KC user during approval (DB already flipped active)',
+            'failed to enable KC user during approval — admin can retry',
           );
-          // Don't roll back the DB — the drift-reconciliation worker will
-          // notice the mismatch and re-enable the user on the next pass.
           return sendHtml(
             reply,
             503,
@@ -232,6 +280,10 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
           );
         }
 
+        // 3. KC decision stamp — soft-fail. The drift-reconciliation worker
+        //    repairs the attribute on its next pass; auth-gate stays open
+        //    via the enabled flag set above.
+        const stampStart = Date.now();
         const stamp = await idp.setUserDecision(lookup.kcUser.id, 'approved');
         if (!stamp.ok) {
           log.warn(
@@ -240,87 +292,73 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
               sub_operation: 'idp.setUserDecision.approved',
               code: stamp.error.code,
               cause: stamp.error.message,
+              latency_ms: Date.now() - stampStart,
             },
             'failed to stamp decision_made=approved on KC user (auth-gate stays open via enabled flag)',
           );
         }
 
-        // Register the aggregator with signalstack and stamp the returned
-        // org_id on the KC user. Soft-fail: an outage here must not block
-        // approval — the login-time fallback retries on the applicant's
-        // next authenticated request because the upsert is idempotent on
-        // external_id (our aggregatorId).
-        const signalstack = getSignalStackWriter();
-        if (signalstack) {
-          const upsertStart = Date.now();
-          const upsertResult = await signalstack.upsertAggregator({
-            external_id: aggregatorId,
-            name: lookup.aggregator.name,
-            slug: lookup.aggregator.orgSlug,
-            // Signalstack's dashboard endpoint fails with
-            // NO_DOMAINS_CONFIGURED when the org's metadata.domains
-            // is empty. Send the full domain list every approval so
-            // the read endpoints work the moment the aggregator
-            // signs in. Aggregator participant focus is enforced at
-            // a different layer (KC `aggregator_type` claim).
-            domains: ['seeker', 'provider'],
-          });
-          if (!upsertResult.success) {
+        // 4. Stamp signalstack_org_id on KC attr + DB column. Soft-fail —
+        //    the login-time backfill repairs whichever leg lags because the
+        //    upstream upsert is idempotent on external_id.
+        if (signalstackOrgId) {
+          const stampOrgStart = Date.now();
+          const [attrWrite, dbWrite] = await Promise.all([
+            idp.setAttributes(lookup.kcUser.id, { signalstack_org_id: signalstackOrgId }),
+            store.updateSignalstackOrgId(aggregatorId, signalstackOrgId, 'admin'),
+          ]);
+          if (!attrWrite.ok) {
             log.warn(
               {
                 status: 'failure',
-                sub_operation: 'signalstack.upsertAggregator',
-                code: upsertResult.error.code,
-                cause: upsertResult.error.message,
-                latency_ms: Date.now() - upsertStart,
+                sub_operation: 'idp.setAttributes.signalstack_org_id',
+                code: attrWrite.error.code,
+                cause: attrWrite.error.message,
+                latency_ms: Date.now() - stampOrgStart,
               },
-              'signalstack aggregator upsert failed — login fallback will retry',
+              'failed to stamp signalstack_org_id on KC user — login fallback will retry',
             );
-          } else {
-            const orgId = upsertResult.value.org_id;
-            // Dual-write to KC attr + Postgres mirror. The worker and the
-            // anonymous public-link submission path read the DB column
-            // (they have no KC admin client); the access-token claim is
-            // sourced from the KC attribute. Either write failure is
-            // soft-fail — the login backfill repairs whichever leg lags.
-            const [attrWrite, dbWrite] = await Promise.all([
-              idp.setAttributes(lookup.kcUser.id, { signalstack_org_id: orgId }),
-              store.updateSignalstackOrgId(aggregatorId, orgId, 'admin'),
-            ]);
-            if (!attrWrite.ok) {
-              log.warn(
-                {
-                  status: 'failure',
-                  sub_operation: 'idp.setAttributes.signalstack_org_id',
-                  code: attrWrite.error.code,
-                  cause: attrWrite.error.message,
-                },
-                'failed to stamp signalstack_org_id on KC user — login fallback will retry',
-              );
-            }
-            if (!dbWrite.ok) {
-              log.warn(
-                {
-                  status: 'failure',
-                  sub_operation: 'store.updateSignalstackOrgId',
-                  code: dbWrite.error.code,
-                  cause: dbWrite.error.message,
-                },
-                'failed to persist signalstack_org_id on aggregators row — login fallback will retry',
-              );
-            }
-            if (attrWrite.ok && dbWrite.ok) {
-              log.info(
-                {
-                  status: 'success',
-                  sub_operation: 'signalstack.upsertAggregator',
-                  signalstack_org_id: orgId,
-                  latency_ms: Date.now() - upsertStart,
-                },
-                'aggregator registered in signalstack',
-              );
-            }
           }
+          if (!dbWrite.ok) {
+            log.warn(
+              {
+                status: 'failure',
+                sub_operation: 'store.updateSignalstackOrgId',
+                code: dbWrite.error.code,
+                cause: dbWrite.error.message,
+                latency_ms: Date.now() - stampOrgStart,
+              },
+              'failed to persist signalstack_org_id on aggregators row — login fallback will retry',
+            );
+          }
+        }
+
+        // 5. DB status → active is the atomic commit point. Once flipped,
+        //    the single-use guard treats the approval as decided. Earlier
+        //    steps are idempotent so a failure here leaves status=pending
+        //    and admin can re-click the link to retry without side effects.
+        const dbUpdateStart = Date.now();
+        const dbUpdate = await store.updateStatus(aggregatorId, 'active', 'admin');
+        if (!dbUpdate.ok) {
+          log.error(
+            {
+              status: 'failure',
+              sub_operation: 'store.updateStatus.active',
+              code: dbUpdate.error.code,
+              cause: dbUpdate.error.message,
+              latency_ms: Date.now() - dbUpdateStart,
+            },
+            'failed to flip aggregator status to active — admin can retry',
+          );
+          return sendHtml(
+            reply,
+            503,
+            renderResultPage({
+              status: 'error',
+              title: 'Action failed',
+              message: 'Database unavailable. Please try again shortly.',
+            }),
+          );
         }
 
         const approvedMail = renderApplicantApproved({

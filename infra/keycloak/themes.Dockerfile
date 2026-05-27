@@ -44,6 +44,12 @@ ARG HERO_TITLE_LEAD=Welcome to
 ARG HERO_TITLE_HIGHLIGHT=the Aggregator
 ARG HERO_TITLE_TAIL=portal.
 ARG HERO_SUBTITLE=Sign in to manage participants, registrations, and onboarding for your network.
+# brand.json-driven values (PR #355). Slug + font stack get baked
+# into theme.properties so the runtime never falls back to default.
+ARG BRAND_LOGO_SLUG=purple-dot
+ARG BRAND_FONT_SANS=Inter, system-ui, sans-serif
+ARG BRAND_FONT_HEADING=Plus Jakarta Sans, system-ui, sans-serif
+ARG BRAND_FONT_BODY=Inter, system-ui, sans-serif
 
 # Theme source — read from the repo's checked-in theme tree.
 COPY infra/keycloak/themes /custom
@@ -57,6 +63,10 @@ RUN { \
       printf 'brandShortName=%s\n'      "${BRAND_SHORT_NAME}"; \
       printf 'brandLongName=%s\n'       "${BRAND_LONG_NAME}"; \
       printf 'brandSsoLabel=%s\n'       "${BRAND_SSO_LABEL}"; \
+      printf 'brandLogoSlug=%s\n'       "${BRAND_LOGO_SLUG}"; \
+      printf 'brandFontSans=%s\n'       "${BRAND_FONT_SANS}"; \
+      printf 'brandFontHeading=%s\n'    "${BRAND_FONT_HEADING}"; \
+      printf 'brandFontBody=%s\n'       "${BRAND_FONT_BODY}"; \
       printf 'heroTitleLead=%s\n'       "${HERO_TITLE_LEAD}"; \
       printf 'heroTitleHighlight=%s\n'  "${HERO_TITLE_HIGHLIGHT}"; \
       printf 'heroTitleTail=%s\n'       "${HERO_TITLE_TAIL}"; \

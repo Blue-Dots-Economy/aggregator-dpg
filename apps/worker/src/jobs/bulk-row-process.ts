@@ -120,6 +120,7 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
       schemaResult.value,
       cfg.aggregator.network.csv_array_delimiter,
     );
+    stripEmptyOptionalCells(job.payload, schemaResult.value);
   }
   const validate = validatorResult.value;
   if (!validate(job.payload)) {
@@ -525,6 +526,29 @@ function preprocessArrayCells(
       .split(delimiter)
       .map((s) => s.trim())
       .filter((s) => s.length > 0);
+  }
+}
+
+/**
+ * Mutates `payload`: deletes any top-level field that is an empty
+ * string AND is not declared in the schema's `required` array. An
+ * empty cell for an optional field means "not provided" — leaving it
+ * as `""` triggers `format: uri` / `format: email` failures even
+ * though the field was never required. JSON-Schema-spec-compliant
+ * because `required: false` fields may be omitted entirely.
+ */
+function stripEmptyOptionalCells(
+  payload: Record<string, unknown>,
+  jsonSchema: Record<string, unknown>,
+): void {
+  const required = Array.isArray(jsonSchema['required'])
+    ? new Set(jsonSchema['required'] as string[])
+    : new Set<string>();
+  for (const [field, value] of Object.entries(payload)) {
+    if (required.has(field)) continue;
+    if (typeof value === 'string' && value.trim() === '') {
+      delete payload[field];
+    }
   }
 }
 

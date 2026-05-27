@@ -16,6 +16,13 @@
  */
 
 import type { FastifyInstance } from 'fastify';
+import type {
+  BrandLogo,
+  BrandPalette,
+  BrandTypography,
+  DashboardBuckets,
+  DashboardTileLabels,
+} from '@aggregator-dpg/network-config/interface';
 import { getNetworkConfig } from '../services/network-config.js';
 
 /**
@@ -34,11 +41,15 @@ interface PublicAggregatorConfig {
     short_name: string;
     long_name: string;
     tagline?: string;
+    strapline?: string;
     url_slug: string;
     primary_color?: string;
     accent_color?: string;
     logo_url?: string;
     favicon_url?: string;
+    palette?: BrandPalette;
+    typography?: BrandTypography;
+    logo?: BrandLogo;
   };
   network: {
     id: string;
@@ -49,7 +60,9 @@ interface PublicAggregatorConfig {
     label: string;
     plural_label: string;
     item_type: string;
+    dashboardTiles?: DashboardTileLabels;
   }>;
+  dashboardBuckets?: DashboardBuckets;
 }
 
 export async function registerAggregatorConfigRoutes(app: FastifyInstance): Promise<void> {
@@ -65,6 +78,7 @@ export async function registerAggregatorConfigRoutes(app: FastifyInstance): Prom
         short_name: cfg.aggregator.brand.short_name,
         long_name: cfg.aggregator.brand.long_name,
         ...(cfg.aggregator.brand.tagline ? { tagline: cfg.aggregator.brand.tagline } : {}),
+        ...(cfg.aggregator.brand.strapline ? { strapline: cfg.aggregator.brand.strapline } : {}),
         url_slug: cfg.aggregator.brand.url_slug,
         ...(cfg.aggregator.brand.primary_color
           ? { primary_color: cfg.aggregator.brand.primary_color }
@@ -76,6 +90,9 @@ export async function registerAggregatorConfigRoutes(app: FastifyInstance): Prom
         ...(cfg.aggregator.brand.favicon_url
           ? { favicon_url: cfg.aggregator.brand.favicon_url }
           : {}),
+        ...(cfg.aggregator.brand.palette ? { palette: cfg.aggregator.brand.palette } : {}),
+        ...(cfg.aggregator.brand.typography ? { typography: cfg.aggregator.brand.typography } : {}),
+        ...(cfg.aggregator.brand.logo ? { logo: cfg.aggregator.brand.logo } : {}),
       },
       network: {
         id: cfg.network.id,
@@ -88,8 +105,10 @@ export async function registerAggregatorConfigRoutes(app: FastifyInstance): Prom
           label: d.label,
           plural_label: d.pluralLabel,
           item_type: d.itemType,
+          ...(d.dashboardTiles ? { dashboardTiles: d.dashboardTiles } : {}),
         };
       }),
+      ...(cfg.dashboardBuckets ? { dashboardBuckets: cfg.dashboardBuckets } : {}),
     };
     return reply.header('Cache-Control', 'public, max-age=60').send(payload);
   });

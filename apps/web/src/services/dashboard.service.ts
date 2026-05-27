@@ -32,37 +32,39 @@ export interface DashboardQuery {
   page?: number;
   limit?: number;
   status?: string;
+  /**
+   * When true, the BFF forwards `?refresh=true` to signalstack to bypass
+   * the rollup TTL and recompute synchronously. The page sets this only
+   * for explicit user-initiated refreshes — passing it on every fetch
+   * would defeat caching.
+   */
+  refresh?: boolean;
 }
 
 /**
- * Pre-computed rollup of participant + application counts returned
- * per domain. `by_status` and `mode_wise_counts` are open maps —
- * signalstack adds keys without bumping a version, so consumers MUST
- * tolerate unknown keys instead of pinning an enum.
+ * Pre-computed rollup of participant + action counts returned per domain.
+ * `by_status` and `by_action_status` use open `Record<string, number>` so
+ * the page maps fixed keys with `?? 0` fallbacks defensively.
  */
 export interface DashboardRollup {
-  items_total: number;
+  total_items: number;
+  complete_profiles: number;
+  has_applications: number;
   by_status: Record<string, number>;
-  applications_total: number;
-  applications_pending: number;
-  applications_shortlisted: number;
-  applications_rejected: number;
-  unique_users: number;
-  complete_profiles_count: number;
-  avg_profiles_per_user: number;
-  users_with_applications: number;
-  avg_applications_per_user: number;
-  new_users_last_7_days: number;
+  by_action_status: Record<string, number>;
+  avg_items_per_user: number;
+  avg_actions_per_user: number;
   mode_wise_counts: Record<string, number>;
 }
 
 /**
  * Per-domain slice of the dashboard payload. Carries the rollup +
- * paginated participants list scoped to that domain id.
+ * paginated items list scoped to that domain id.
  */
 export interface DashboardDomainSlice {
   rollup: DashboardRollup;
-  participants: Array<Record<string, unknown>>;
+  /** One row per item — `participants` was the old name. */
+  items: Array<Record<string, unknown>>;
   total_matching: number;
   next_cursor: string | null;
 }
@@ -205,6 +207,7 @@ class HttpDashboardService implements DashboardService {
     // default landing render needs the full rollup + unfiltered list, so
     // the BFF/API must NOT see a `status` param in that mode.
     if (query?.status) params.set('status', query.status);
+    if (query?.refresh) params.set('refresh', 'true');
     const url = `/api/dashboard?${params.toString()}`;
     return jsonFetch<DashboardPage>(url);
   }
@@ -256,7 +259,6 @@ class HttpDashboardService implements DashboardService {
         complete: completeness(state),
       },
       applied: { ...ZERO_STATS },
-      pre: { ...ZERO_STATS },
       status: 'active',
       last: relative(item.updated_at),
     };
@@ -281,7 +283,6 @@ class HttpDashboardService implements DashboardService {
         complete: completeness(state),
       },
       applied: { ...ZERO_STATS },
-      pre: { ...ZERO_STATS },
       status: 'active',
       last: relative(item.updated_at),
       role: role && nature ? `${role} · ${nature}` : role || nature,

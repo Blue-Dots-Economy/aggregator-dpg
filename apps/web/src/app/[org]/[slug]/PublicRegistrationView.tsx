@@ -1,11 +1,13 @@
 'use client';
 
+import Image from 'next/image';
 import { useMemo, useState, type FormEvent } from 'react';
 import type { RJSFSchema, UiSchema } from '@rjsf/utils';
 import type { IChangeEvent } from '@rjsf/core';
 import { RjsfThemedForm } from '../../../components/forms/RjsfThemed';
 import { BlueDotsLogo } from '../../../components/ui/BlueDotsLogo';
 import { I } from '../../../icons';
+import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
 
 export interface PublicRegistrationViewProps {
   org: string;
@@ -53,6 +55,14 @@ export function PublicRegistrationView({
 }: PublicRegistrationViewProps): JSX.Element {
   const [formData, setFormData] = useState<Record<string, unknown>>({});
   const [state, setState] = useState<SubmitState>({ status: 'idle' });
+  // Defer required-field error rendering until the user has actually
+  // interacted (typed in a field) or attempted submit once. Otherwise
+  // RJSF's `liveValidate` paints every required field red on first
+  // mount — unfriendly UX for a public-form first impression.
+  const [showValidation, setShowValidation] = useState(false);
+  const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
+  const brandShort = cfg.brand.short_name;
+  const brandLogo = cfg.brand.logo?.default;
 
   // Hide schema's verbose title/description from the form — the page header
   // owns the framing copy. Also drop `participant_id` from the public form:
@@ -228,110 +238,179 @@ export function PublicRegistrationView({
     }
   };
 
+  const heroGradient = `linear-gradient(135deg, ${mixHex(cfg.brand.primary_color ?? '#4338ca', '#000', 0.6)} 0%, ${mixHex(cfg.brand.primary_color ?? '#4338ca', '#000', 0.35)} 100%)`;
+
   return (
-    <div className="min-h-screen w-full" style={{ background: '#FBFCFE' }}>
-      <div className="max-w-[640px] mx-auto px-6 lg:px-10 py-10">
-        <header className="flex items-center gap-3.5 mb-8">
-          <BlueDotsLogo size={48} />
-          <div>
-            <div className="font-display font-bold text-[18px] text-ink-900 leading-none tracking-tight">
-              Blue Dots
+    <div
+      className="bd-public-light min-h-screen w-full"
+      style={{
+        background:
+          'radial-gradient(1200px 600px at 50% -10%, var(--bd-tint-primary), transparent 70%), #FBFCFE',
+      }}
+    >
+      <div className="max-w-[760px] mx-auto px-4 sm:px-6 lg:px-10 py-8 sm:py-12">
+        <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+          {brandLogo ? (
+            <Image
+              src={brandLogo}
+              alt={brandShort}
+              width={200}
+              height={48}
+              priority
+              className="h-10 w-auto object-contain object-left"
+            />
+          ) : (
+            <div className="flex items-center gap-3">
+              <BlueDotsLogo size={40} />
+              <div className="font-display font-bold text-[18px] text-ink-900 leading-none tracking-tight">
+                {brandShort}
+              </div>
             </div>
-            <div className="text-[12.5px] text-ink-400 leading-none mt-1.5">
-              {domain === 'seeker' ? 'Seeker registration' : 'Provider registration'}
-            </div>
+          )}
+          <div className="flex items-center gap-1.5 text-[11.5px] text-ink-500">
+            <I.shield size={13} />
+            Secure registration
           </div>
         </header>
 
-        <h1 className="font-display font-bold text-[26px] text-ink-900 tracking-tight leading-tight">
-          {eventLabel}
-        </h1>
-        {(orgName || locationLabel) && (
-          <p className="text-[13.5px] text-ink-500 mt-2">
-            {orgName ? <span className="font-semibold">{orgName}</span> : null}
-            {orgName && locationLabel ? <span className="text-ink-300"> · </span> : null}
-            {locationLabel}
-          </p>
-        )}
-
-        {state.status === 'done' ? (
-          <div className="mt-8 rounded-[14px] border border-emerald-200 bg-emerald-50 p-6">
-            <div className="font-display font-bold text-[18px] text-emerald-800">
-              {state.outcome === 'passed' ? 'Registration received' : 'Already registered'}
+        <div className="rounded-[18px] bg-white border border-[var(--bd-border)] overflow-hidden shadow-[0_1px_0_rgba(11,16,32,0.02),0_20px_60px_-30px_rgba(11,16,32,0.18)]">
+          <div
+            className="px-6 sm:px-8 py-6 text-white relative overflow-hidden"
+            style={{ background: heroGradient }}
+          >
+            <div className="text-[11.5px] uppercase tracking-[0.14em] font-semibold text-white/70">
+              {domain === 'seeker' ? 'Seeker registration' : 'Provider registration'}
             </div>
-            <p className="text-[14px] text-emerald-700 mt-2">
-              {state.outcome === 'passed'
-                ? 'Thanks — your details have been recorded. You will hear back from the aggregator soon.'
-                : 'A registration with these details already exists for this aggregator. No further action needed.'}
-            </p>
-            <div className="text-[11px] text-emerald-600/80 font-mono mt-3">
-              Ref: {state.submissionId}
-            </div>
+            <h1 className="font-display font-bold text-[24px] sm:text-[28px] tracking-tight leading-tight mt-1.5">
+              {eventLabel}
+            </h1>
+            {(orgName || locationLabel) && (
+              <p className="text-[13.5px] text-white/85 mt-1.5">
+                {orgName ? <span className="font-semibold">{orgName}</span> : null}
+                {orgName && locationLabel ? <span className="text-white/60"> · </span> : null}
+                {locationLabel}
+              </p>
+            )}
           </div>
-        ) : (
-          <div className="mt-7">
-            {state.status === 'error' ? (
-              <div
-                role="alert"
-                className="mb-5 rounded-[10px] border border-rose-200 bg-rose-50 px-4 py-3 text-[13px] text-rose-700"
-              >
-                <div className="font-semibold">{state.title}</div>
-                <div className="mt-1 text-rose-600">{state.detail}</div>
-                {state.code !== 'UNKNOWN' && (
-                  <div className="mt-2 text-[11px] text-rose-500/80 font-mono">
-                    Code: {state.code}
-                  </div>
-                )}
-              </div>
-            ) : null}
 
-            <RjsfThemedForm
-              schema={formSchema}
-              uiSchema={mergedUiSchema as unknown as UiSchema<Record<string, unknown>>}
-              formData={formData}
-              onChange={(e) => setFormData(e.formData as Record<string, unknown>)}
-              onSubmit={handleSubmit}
-              // Surface validation issues inline as the user fills the form
-              // — without liveValidate the only feedback is a silent
-              // submit-click that triggers a console warning, leaving the
-              // user wondering why nothing happens.
-              liveValidate
-              showErrorList="top"
-              focusOnFirstError
-              noHtml5Validate
-              onError={(errors) => {
-                const first = errors?.[0]?.message ?? 'Please fill all required fields.';
-                setState({
-                  status: 'error',
-                  title: 'Form validation failed',
-                  detail: `${first}${errors.length > 1 ? ` (and ${errors.length - 1} more)` : ''}`,
-                  code: 'VALIDATION',
-                });
-              }}
-            >
-              <div className="mt-4 flex flex-col gap-3">
-                <button
-                  type="submit"
-                  disabled={state.status === 'submitting'}
-                  className={`w-full py-3 rounded-[12px] font-display font-bold text-[15px] text-white transition-all
+          <div className="px-6 sm:px-8 py-7">
+            {state.status === 'done' ? (
+              <div className="rounded-[14px] border border-emerald-200 bg-emerald-50 p-6">
+                <div className="flex items-center gap-2.5 font-display font-bold text-[18px] text-emerald-800">
+                  <span className="w-7 h-7 rounded-full bg-emerald-500 text-white inline-flex items-center justify-center">
+                    <I.check size={16} stroke={2.6} />
+                  </span>
+                  {state.outcome === 'passed' ? 'Registration received' : 'Already registered'}
+                </div>
+                <p className="text-[14px] text-emerald-700 mt-3 leading-relaxed">
+                  {state.outcome === 'passed'
+                    ? 'Thanks — your details have been recorded. You will hear back from the aggregator soon.'
+                    : 'A registration with these details already exists for this aggregator. No further action needed.'}
+                </p>
+                <div className="text-[11px] text-emerald-600/80 font-mono mt-3">
+                  Ref: {state.submissionId}
+                </div>
+              </div>
+            ) : (
+              <>
+                {state.status === 'error' ? (
+                  <div
+                    role="alert"
+                    className="mb-5 rounded-[10px] border border-rose-200 bg-rose-50 px-4 py-3 text-[13px] text-rose-700"
+                  >
+                    <div className="font-semibold">{state.title}</div>
+                    <div className="mt-1 text-rose-600">{state.detail}</div>
+                    {state.code !== 'UNKNOWN' && (
+                      <div className="mt-2 text-[11px] text-rose-500/80 font-mono">
+                        Code: {state.code}
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+
+                <RjsfThemedForm
+                  schema={formSchema}
+                  uiSchema={mergedUiSchema as unknown as UiSchema<Record<string, unknown>>}
+                  formData={formData}
+                  onChange={(e) => setFormData(e.formData as Record<string, unknown>)}
+                  onSubmit={handleSubmit}
+                  // Only live-validate after the user has typed once OR
+                  // attempted submit. Avoids the cold-start "every required
+                  // field is red" look on first load.
+                  liveValidate={showValidation}
+                  showErrorList={showValidation ? 'top' : false}
+                  focusOnFirstError
+                  noHtml5Validate
+                  onError={(errors) => {
+                    setShowValidation(true);
+                    const first = errors?.[0]?.message ?? 'Please fill all required fields.';
+                    setState({
+                      status: 'error',
+                      title: 'Form validation failed',
+                      detail: `${first}${errors.length > 1 ? ` (and ${errors.length - 1} more)` : ''}`,
+                      code: 'VALIDATION',
+                    });
+                  }}
+                >
+                  <div className="mt-4 flex flex-col gap-3">
+                    <button
+                      type="submit"
+                      disabled={state.status === 'submitting'}
+                      style={
+                        state.status === 'submitting'
+                          ? undefined
+                          : { backgroundColor: cfg.brand.primary_color }
+                      }
+                      className={`w-full py-3 rounded-[12px] font-display font-bold text-[15px] text-white transition-all
                     ${
                       state.status === 'submitting'
                         ? 'bg-[var(--bd-primary-100)] text-[var(--bd-primary-600)] cursor-not-allowed'
-                        : 'bg-[var(--bd-primary)] hover:bg-[var(--bd-primary-600)] bd-shadow-lg'
+                        : 'hover:opacity-90 bd-shadow-lg'
                     }`}
-                >
-                  {state.status === 'submitting' ? 'Submitting…' : 'Submit registration'}
-                </button>
-              </div>
-            </RjsfThemedForm>
+                    >
+                      {state.status === 'submitting' ? 'Submitting…' : 'Submit registration'}
+                    </button>
+                  </div>
+                </RjsfThemedForm>
 
-            <div className="mt-5 text-[12px] text-ink-400 flex items-start gap-2">
-              <I.shield size={13} className="mt-0.5 shrink-0" />
-              Your details are shared only with the aggregator who issued this link.
-            </div>
+                <div className="mt-5 text-[12px] text-ink-400 flex items-start gap-2">
+                  <I.shield size={13} className="mt-0.5 shrink-0" />
+                  Your details are shared only with the aggregator who issued this link.
+                </div>
+              </>
+            )}
           </div>
-        )}
+        </div>
+
+        <p className="text-center text-[11.5px] text-ink-400 mt-6">
+          Powered by{' '}
+          <span className="font-semibold" style={{ color: cfg.brand.primary_color }}>
+            {brandShort}
+          </span>
+        </p>
       </div>
     </div>
   );
+}
+
+/**
+ * Mix two hex colours toward `b`. Used to derive the hero gradient
+ * from the brand primary without re-running the ThemeProvider's
+ * full ramp logic on this server-rendered page.
+ */
+function mixHex(a: string, b: string, weight: number): string {
+  const parse = (h: string): [number, number, number] | null => {
+    const m = /^#?([0-9a-f]{6})$/i.exec(h.trim());
+    if (!m) return null;
+    const n = parseInt(m[1]!, 16);
+    return [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
+  };
+  const A = parse(a);
+  const B = parse(b);
+  if (!A || !B) return a;
+  const w = Math.max(0, Math.min(1, weight));
+  const r = Math.round(A[0] * (1 - w) + B[0] * w);
+  const g = Math.round(A[1] * (1 - w) + B[1] * w);
+  const bl = Math.round(A[2] * (1 - w) + B[2] * w);
+  return '#' + [r, g, bl].map((n) => n.toString(16).padStart(2, '0')).join('');
 }

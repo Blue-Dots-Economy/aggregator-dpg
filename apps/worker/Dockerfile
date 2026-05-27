@@ -10,27 +10,19 @@ ENV PATH="$PNPM_HOME:$PATH"
 RUN corepack enable
 
 # ── installer: resolve workspace deps ────────────────────────────────────────
+# Copy the full repo so every workspace dep's package.json is present for
+# pnpm to resolve the worker subgraph. Filter scopes the install to that
+# subgraph — unrelated packages skipped.
 FROM base AS installer
 WORKDIR /app
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-COPY apps/worker/package.json                          apps/worker/
-COPY packages/tsconfig/package.json                    packages/tsconfig/
-COPY packages/db-schema/package.json                   packages/db-schema/
-COPY packages/queue/package.json                       packages/queue/
-COPY packages/schema-loader/package.json               packages/schema-loader/
-COPY packages/shared-primitives/package.json           packages/shared-primitives/
-COPY packages/telemetry/package.json                   packages/telemetry/
-RUN pnpm install --frozen-lockfile
+COPY . .
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
+    pnpm install --frozen-lockfile --filter "@aggregator-dpg/worker..."
 
 # ── builder: compile workspace + worker ──────────────────────────────────────
+# pnpm runs `build` topologically across the worker subgraph.
 FROM installer AS builder
-COPY . .
-RUN pnpm --filter @aggregator-dpg/shared-primitives build \
- && pnpm --filter @aggregator-dpg/db-schema build \
- && pnpm --filter @aggregator-dpg/queue build \
- && pnpm --filter @aggregator-dpg/schema-loader build \
- && pnpm --filter @aggregator-dpg/telemetry build \
- && pnpm --filter @aggregator-dpg/worker build
+RUN pnpm --filter "@aggregator-dpg/worker..." build
 
 # ── deployer: prune to prod deps (workspace dist/ already present) ───────────
 FROM builder AS deployer

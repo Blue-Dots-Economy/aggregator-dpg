@@ -39,10 +39,23 @@ export async function generateMetadata(): Promise<Metadata> {
   }
 }
 
+// Inline no-flash script: applies the stored theme mode to <html>
+// before React hydrates so a dark-preferring user never sees a flash
+// of the light theme. Default is light if no preference is stored.
+const themeNoFlashScript = `
+(function () {
+  try {
+    var mode = localStorage.getItem('bd:theme-mode');
+    if (mode === 'dark') document.documentElement.classList.add('dark');
+  } catch (_) {}
+})();
+`;
+
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
+        <script dangerouslySetInnerHTML={{ __html: themeNoFlashScript }} />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
         <link

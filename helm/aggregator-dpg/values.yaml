@@ -85,6 +85,10 @@ secrets:
   twilioFromNumber: ''
   awsAccessKeyId: ''
   awsSecretAccessKey: ''
+  # MSG91 (used only when keycloak.smsProvider=msg91).
+  msg91AuthKey: ''
+  msg91TemplateId: ''
+  msg91SenderId: ''
 
 # ─── Mail wiring (shared by api + keycloak) ────────────────────────────────
 mail:
@@ -178,8 +182,10 @@ keycloak:
     tag: '26.5.5-aggregator'
     pullPolicy: IfNotPresent
   bootstrapAdminUsername: admin
-  smsProvider: log # log | twilio | sns
+  smsProvider: log # log | twilio | sns | msg91
   awsRegion: ap-south-1
+  # MSG91 template variable receiving OTP code (non-secret, defaults to 'var').
+  msg91OtpVarName: var
   service:
     port: 8080
     mgmtPort: 9000

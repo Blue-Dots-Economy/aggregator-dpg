@@ -57,6 +57,8 @@ const DashboardQuerySchema = z.object({
     .max(32)
     .regex(/^[a-z0-9_]+$/i, 'status must be alphanumeric + underscore')
     .optional(),
+  /** Bypass signalstack's TTL cache when true. Forwarded verbatim. */
+  refresh: z.coerce.boolean().optional().default(false),
 });
 
 /**
@@ -74,6 +76,7 @@ const DashboardExportQuerySchema = z.object({
     .max(32)
     .regex(/^[a-z0-9_]+$/i, 'status must be alphanumeric + underscore')
     .optional(),
+  refresh: z.coerce.boolean().optional().default(false),
 });
 
 export async function registerDashboardRoutes(app: FastifyInstance): Promise<void> {
@@ -159,7 +162,7 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
           fields: { issues: parsed.error.issues },
         });
       }
-      const { page, limit, status } = parsed.data;
+      const { page, limit, status, refresh } = parsed.data;
       const networkCfg = await getNetworkConfig();
       const domain = parsed.data.domain ?? networkCfg.domainIds[0]!;
       if (!networkCfg.domains[domain]) {
@@ -184,6 +187,7 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
         limit,
         ...(status ? { status } : {}),
         domain,
+        refresh,
       });
 
       if (!result.success) {
@@ -213,7 +217,7 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
         limit,
         status_filter: status ?? null,
         total_matching: slice?.total_matching ?? null,
-        items_total: slice?.rollup.items_total ?? null,
+        items_total: slice?.rollup.total_items ?? null,
         refreshed: result.value.metadata.refreshed,
       });
 
@@ -237,7 +241,7 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
           fields: { issues: parsed.error.issues },
         });
       }
-      const { status } = parsed.data;
+      const { status, refresh } = parsed.data;
       const networkCfg = await getNetworkConfig();
       const domain = parsed.data.domain ?? networkCfg.domainIds[0]!;
       if (!networkCfg.domains[domain]) {
@@ -260,6 +264,7 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
         actingOrgId,
         ...(status ? { status } : {}),
         domain,
+        refresh,
       });
 
       if (!result.success) {

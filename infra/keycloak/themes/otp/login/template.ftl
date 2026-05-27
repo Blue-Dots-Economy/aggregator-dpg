@@ -9,7 +9,7 @@
     <meta name="robots" content="noindex,nofollow">
     <title>${msg("loginTitle",(realm.displayName!''))}</title>
 
-    <link rel="icon" type="image/svg+xml" href="${url.resourcesPath}/img/favicon.svg">
+    <link rel="icon" type="image/svg+xml" href="${url.resourcesPath}/img/brand/${properties.brandLogoSlug!'blue-dot'}/favicon.svg">
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -20,26 +20,20 @@
          network-agnostic; this block carries the colour swap. -->
     <style>
       :root {
-        --bd-primary:     ${properties.brandPrimary!'#4f46e5'};
-        --bd-primary-600: ${properties.brandPrimaryDark!'#4338ca'};
-        --bd-primary-500: ${properties.brandPrimary500!'#6366f1'};
-        --bd-primary-100: ${properties.brandPrimary100!'#e0e7ff'};
-        --bd-primary-50:  ${properties.brandPrimary50!'#eef2ff'};
-        --bd-hero-bg:     ${properties.brandHeroBg!'#0f172a'};
-        --bd-hero-grad:   ${properties.brandHeroGrad!'#7dd3fc'};
+        --bd-primary:      ${properties.brandPrimary!'#4f46e5'};
+        --bd-primary-600:  ${properties.brandPrimaryDark!'#4338ca'};
+        --bd-primary-500:  ${properties.brandPrimary500!'#6366f1'};
+        --bd-primary-100:  ${properties.brandPrimary100!'#e0e7ff'};
+        --bd-primary-50:   ${properties.brandPrimary50!'#eef2ff'};
+        --bd-font-sans:    ${properties.brandFontSans!"'Inter', system-ui, sans-serif"};
+        --bd-font-heading: ${properties.brandFontHeading!"'Plus Jakarta Sans', system-ui, sans-serif"};
+        --bd-font-body:    ${properties.brandFontBody!"'Inter', system-ui, sans-serif"};
       }
-      .bd-hero { background: var(--bd-hero-bg) !important; }
       .bd-hero-glow {
         background:
           radial-gradient(700px 500px at 75% 25%, var(--bd-primary-500) 0%, transparent 60%),
           radial-gradient(600px 480px at 15% 85%, var(--bd-primary) 0%, transparent 60%) !important;
         opacity: 0.22;
-      }
-      .bd-hero-grad {
-        background: none !important;
-        background-clip: initial !important;
-        -webkit-background-clip: initial !important;
-        color: var(--bd-hero-grad) !important;
       }
     </style>
 
@@ -55,50 +49,18 @@
             <canvas id="bd-hero-canvas" class="bd-hero-canvas"></canvas>
             <div class="bd-hero-glow"></div>
             <div class="bd-hero-copy">
-                <h1 class="bd-hero-title">
-                    ${properties.heroTitleLead!'Welcome to'} <span class="bd-hero-grad">${properties.heroTitleHighlight!'the Aggregator'}</span><br>
-                    ${properties.heroTitleTail!'portal.'}
-                </h1>
-                <p class="bd-hero-sub">
-                    ${properties.heroSubtitle!'Sign in to manage participants, registrations, and onboarding for your network.'}
-                </p>
+                <img class="bd-hero-logo"
+                     src="${url.resourcesPath}/img/brand/${properties.brandLogoSlug!'blue-dot'}/logo-with-strapline-light.png"
+                     alt="${properties.brandShortName!'Aggregator'}"/>
             </div>
         </aside>
 
         <main class="bd-pane">
             <div class="bd-card">
                 <header class="bd-brand">
-                    <#-- Logo dots + lines pull from the active palette so a
-                         purple_dot deployment doesn't leak indigo into the
-                         brand mark. `currentColor` lets us drive every stop
-                         from a single `color` value set on the wrapper. -->
-                    <svg class="bd-logo-svg" width="56" height="56" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style="color: ${properties.brandPrimary!'#2563EB'};">
-                        <rect x="0.6" y="0.6" width="46.8" height="46.8" rx="13" fill="${properties.brandPrimary50!'#EFF4FF'}" stroke="currentColor" stroke-opacity="0.10" stroke-width="1"/>
-                        <g stroke="currentColor" stroke-opacity="0.30" stroke-width="0.9" stroke-linecap="round">
-                            <line x1="24" y1="24" x2="8" y2="12"/>
-                            <line x1="24" y1="24" x2="40" y2="10"/>
-                            <line x1="24" y1="24" x2="42" y2="26"/>
-                            <line x1="24" y1="24" x2="34" y2="40"/>
-                            <line x1="24" y1="24" x2="14" y2="38"/>
-                            <line x1="24" y1="24" x2="6" y2="26"/>
-                            <line x1="8" y1="12" x2="6" y2="26"/>
-                            <line x1="42" y1="26" x2="34" y2="40"/>
-                            <line x1="40" y1="10" x2="42" y2="26"/>
-                        </g>
-                        <circle cx="8" cy="12" r="2.6" fill="currentColor"/>
-                        <circle cx="40" cy="10" r="2.0" fill="currentColor"/>
-                        <circle cx="42" cy="26" r="3.2" fill="currentColor"/>
-                        <circle cx="34" cy="40" r="2.4" fill="currentColor"/>
-                        <circle cx="14" cy="38" r="2.8" fill="currentColor"/>
-                        <circle cx="6" cy="26" r="2.0" fill="currentColor"/>
-                        <circle cx="24" cy="24" r="9.4" fill="currentColor" fill-opacity="0.35" opacity="0.55"/>
-                        <circle cx="24" cy="24" r="5.4" fill="${properties.brandPrimaryDark!'#1D4ED8'}"/>
-                        <circle cx="22.6" cy="22.6" r="1.2" fill="rgba(255,255,255,0.7)"/>
-                    </svg>
-                    <div class="bd-brand-text">
-                        <strong>${properties.brandShortName!'Aggregator'}</strong>
-                        <span>${properties.brandLongName!'Aggregator Portal'}</span>
-                    </div>
+                    <img class="bd-brand-logo"
+                         src="${url.resourcesPath}/img/brand/${properties.brandLogoSlug!'blue-dot'}/logo.png"
+                         alt="${properties.brandShortName!'Aggregator'}"/>
                 </header>
 
                 <#if displayMessage && message?has_content && (message.type != 'warning' || !isAppInitiatedAction??)>

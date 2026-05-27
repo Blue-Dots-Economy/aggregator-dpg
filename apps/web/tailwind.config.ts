@@ -2,11 +2,20 @@ import type { Config } from 'tailwindcss';
 
 const config: Config = {
   content: ['./src/**/*.{ts,tsx}'],
+  // `class` strategy — toggle the `dark` class on `<html>` (managed by
+  // ThemeModeProvider) so we can flip between light/dark without
+  // following the OS preference unless the user opts in.
+  darkMode: 'class',
   theme: {
     extend: {
       fontFamily: {
-        display: ['"Plus Jakarta Sans"', 'system-ui', 'sans-serif'],
-        sans: ['Inter', 'system-ui', 'sans-serif'],
+        // Brand-driven CSS variables (set by ThemeProvider from
+        // `brand.json.typography`). Fall back to the original Plus
+        // Jakarta + Inter pairing so renders look reasonable before
+        // the network call resolves.
+        display: ['var(--bd-font-heading)', '"Plus Jakarta Sans"', 'system-ui', 'sans-serif'],
+        sans: ['var(--bd-font-sans)', 'Inter', 'system-ui', 'sans-serif'],
+        body: ['var(--bd-font-body)', 'var(--bd-font-sans)', 'Inter', 'system-ui', 'sans-serif'],
         mono: ['"JetBrains Mono"', 'monospace'],
       },
       colors: {
