@@ -591,7 +591,6 @@ function ParticipantTable<R extends ParticipantBase>({
                 {kind === 'seeker' ? 'Participant' : 'Provider'}
               </th>
               <th>Joined</th>
-              {kind === 'provider' && <th>Job Role</th>}
               <th>Profile Status</th>
               <th>{bucketLabels['create'] ?? 'Applied'}</th>
               <th>Status</th>
@@ -600,8 +599,6 @@ function ParticipantTable<R extends ParticipantBase>({
           </thead>
           <tbody>
             {visibleRows.map((r) => {
-              const roleParts =
-                kind === 'provider' ? (r as unknown as Provider).role.split(' · ') : [];
               return (
                 <tr key={r.id} className="fade-up">
                   <td
@@ -634,14 +631,6 @@ function ParticipantTable<R extends ParticipantBase>({
                     <div className="text-[13px] text-ink-700">{r.joined}</div>
                     <div className="text-[11px] text-ink-400 mt-0.5">last seen {r.last}</div>
                   </td>
-                  {kind === 'provider' && (
-                    <td>
-                      <div className="text-[13px] font-medium text-ink-800">
-                        {roleParts[0] ?? ''}
-                      </div>
-                      <div className="text-[11px] text-ink-400 mt-0.5">{roleParts[1] ?? ''}</div>
-                    </td>
-                  )}
                   <td>
                     <ProgressTiny pct={r.profile.complete} />
                   </td>
