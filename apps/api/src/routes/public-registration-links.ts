@@ -236,7 +236,7 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
         throw new Error(writeResult.error.message);
       }
       const { outcome: writeOutcome, participant } = writeResult.value;
-      const outcome: 'passed' | 'skipped' = writeOutcome;
+      let outcome: 'passed' | 'skipped' = writeOutcome;
       const participantRowId = participant.id;
 
       const submission = await tx
@@ -298,12 +298,21 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
           });
         }
 
+        // Cross-org existing user → signalstack has the person under a
+        // different aggregator and won't expose/duplicate them here.
+        // Record a skipped outcome so the form shows the friendly
+        // "already registered" screen instead of a hard failure.
+        if (result.value.already_registered) {
+          outcome = 'skipped';
+        }
+
         log.info({
           status: 'success',
           sub: 'signalstack.push',
           user_id: result.value.user_id,
           profile_item_id: result.value.profile_item_id,
           onboarded_at: result.value.onboarded_at,
+          already_registered: result.value.already_registered ?? false,
           link_id: link.id,
           participant_id: participantRowId,
         });
