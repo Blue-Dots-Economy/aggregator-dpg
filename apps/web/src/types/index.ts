@@ -5,9 +5,14 @@ export type ProfileStatus = 'complete' | 'incomplete';
 export interface ParticipantStats {
   total: number;
   shortlisted?: number;
+  /** accept bucket — "Connected" for purple_dot. */
   accepted?: number;
+  /** reject bucket — "Declined" for purple_dot. */
   rejected: number;
+  /** create bucket — "Requested" for purple_dot. */
   pending: number;
+  /** cancel bucket — "Cancelled". */
+  cancelled?: number;
 }
 
 export interface ParticipantProfile {
