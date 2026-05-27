@@ -27,6 +27,12 @@ export interface ParticipantBase {
   applied: ParticipantStats;
   status: ParticipantStatus;
   last: string;
+  /**
+   * Signalstack-computed `actionable_tags` for the row, e.g.
+   * `missing_contact_phone`. Drives the Recommended Action column.
+   * Empty when signalstack returns no tags.
+   */
+  actionableTags?: string[];
 }
 
 export type Seeker = ParticipantBase;

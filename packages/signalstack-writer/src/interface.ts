@@ -93,6 +93,14 @@ export interface SignalStackOnboardParticipantResult {
   user_id: string;
   profile_item_id: string;
   onboarded_at: string;
+  /**
+   * True when the user already exists in signalstack under a different
+   * aggregator (signalstack returns `user_existed: true` with an empty
+   * `items` array — that org's items are invisible to this one). The
+   * caller should treat this as a `skipped` outcome, not an error:
+   * `profile_item_id` is empty because no item was created or returned.
+   */
+  already_registered?: boolean;
 }
 
 /**

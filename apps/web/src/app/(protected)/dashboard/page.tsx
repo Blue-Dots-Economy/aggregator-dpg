@@ -245,6 +245,94 @@ function ProgressTiny({ pct }: { pct: number }) {
 
 type RowKind = 'seeker' | 'provider' | 'opp';
 
+type ChipTone = 'soft' | 'warm' | 'cool' | 'mute';
+
+const CHIP_TONES: Record<ChipTone, string> = {
+  soft: 'bg-[var(--bd-primary-50)] text-primary-600 hover:bg-[var(--bd-primary-100)]',
+  warm: 'bg-amber-50 text-amber-800 hover:bg-amber-100',
+  cool: 'bg-sky-50 text-sky-800 hover:bg-sky-100',
+  mute: 'bg-ink-100 text-ink-600 hover:bg-ink-200',
+};
+
+interface RecommendedAction {
+  label: string;
+  tone: ChipTone;
+  icon: ReactNode;
+}
+
+/**
+ * Turns a signalstack `actionable_tags` entry into a chip. Tags follow
+ * the `missing_<required_field>` shape (e.g. `missing_contact_phone`),
+ * which we surface as "Add Contact Phone". Unknown tag shapes are
+ * title-cased verbatim so new server-side tags still render readably.
+ */
+function tagToAction(tag: string): RecommendedAction {
+  if (tag.startsWith('missing_')) {
+    const field = tag
+      .slice('missing_'.length)
+      .split('_')
+      .filter(Boolean)
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+      .join(' ');
+    return { label: `Add ${field}`, tone: 'warm', icon: <I.alert size={12} /> };
+  }
+  const label = tag
+    .split('_')
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+  return { label, tone: 'cool', icon: <I.spark size={12} /> };
+}
+
+/**
+ * Recommended-action chips for a row. Prefers signalstack's
+ * server-computed `actionableTags`; when none are present, falls back
+ * to a small client-side heuristic on status + profile completeness so
+ * the column is never empty.
+ */
+function recommendedActions(row: ParticipantBase, kind: RowKind): RecommendedAction[] {
+  const tags = row.actionableTags ?? [];
+  if (tags.length > 0) {
+    return tags.slice(0, 2).map(tagToAction);
+  }
+  const out: RecommendedAction[] = [];
+  if (row.status === 'at-risk')
+    out.push({ label: 'Re-engage', tone: 'warm', icon: <I.send size={12} /> });
+  if (row.status === 'inactive')
+    out.push({ label: 'Send nudge', tone: 'mute', icon: <I.bell size={12} /> });
+  if (!row.profile.verified)
+    out.push({ label: 'Verify', tone: 'cool', icon: <I.shield size={12} /> });
+  if (row.profile.complete < 70)
+    out.push({ label: 'Complete profile', tone: 'soft', icon: <I.spark size={12} /> });
+  if (kind === 'provider' && row.status === 'active')
+    out.push({ label: 'Suggest match', tone: 'soft', icon: <I.trending size={12} /> });
+  if (kind === 'seeker' && (row.applied.shortlisted ?? 0) >= 5)
+    out.push({ label: 'Coach interview', tone: 'soft', icon: <I.message size={12} /> });
+  if (out.length === 0)
+    out.push({ label: 'View profile', tone: 'mute', icon: <I.external size={12} /> });
+  return out.slice(0, 2);
+}
+
+function ActionChip({
+  label,
+  tone = 'soft',
+  icon,
+}: {
+  label: string;
+  tone?: ChipTone;
+  icon?: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11.5px] font-semibold transition-colors ${CHIP_TONES[tone]}`}
+    >
+      {icon}
+      {label}
+    </button>
+  );
+}
+
 type StatusFilter = string; // 'all' | any key signalstack returns in rollup.by_status
 
 interface StatusOption {
@@ -503,16 +591,14 @@ function ParticipantTable<R extends ParticipantBase>({
                 {kind === 'seeker' ? 'Participant' : 'Provider'}
               </th>
               <th>Joined</th>
-              {kind === 'provider' && <th>Job Role</th>}
               <th>Profile Status</th>
               <th>{bucketLabels['create'] ?? 'Applied'}</th>
               <th>Status</th>
+              <th>Recommended Action</th>
             </tr>
           </thead>
           <tbody>
             {visibleRows.map((r) => {
-              const roleParts =
-                kind === 'provider' ? (r as unknown as Provider).role.split(' · ') : [];
               return (
                 <tr key={r.id} className="fade-up">
                   <td
@@ -545,14 +631,6 @@ function ParticipantTable<R extends ParticipantBase>({
                     <div className="text-[13px] text-ink-700">{r.joined}</div>
                     <div className="text-[11px] text-ink-400 mt-0.5">last seen {r.last}</div>
                   </td>
-                  {kind === 'provider' && (
-                    <td>
-                      <div className="text-[13px] font-medium text-ink-800">
-                        {roleParts[0] ?? ''}
-                      </div>
-                      <div className="text-[11px] text-ink-400 mt-0.5">{roleParts[1] ?? ''}</div>
-                    </td>
-                  )}
                   <td>
                     <ProgressTiny pct={r.profile.complete} />
                   </td>
@@ -583,6 +661,13 @@ function ParticipantTable<R extends ParticipantBase>({
                   </td>
                   <td>
                     <StatusPill status={r.status} />
+                  </td>
+                  <td>
+                    <div className="flex items-center gap-1.5">
+                      {recommendedActions(r, kind).map((a, i) => (
+                        <ActionChip key={i} {...a} />
+                      ))}
+                    </div>
                   </td>
                 </tr>
               );
@@ -1009,6 +1094,9 @@ function toSeekerRow(participant: Record<string, unknown>): Seeker {
     },
     status,
     last: updated ? formatRelative(updated) : '—',
+    actionableTags: Array.isArray(participant.actionable_tags)
+      ? (participant.actionable_tags as unknown[]).filter((t): t is string => typeof t === 'string')
+      : [],
   };
 }
 
@@ -1377,7 +1465,18 @@ function DashboardContent({ aggregatorType }: { aggregatorType: 'seeker' | 'prov
         }
       />
 
-      <SegmentedTabs<Tab> value={tab} onChange={setTab} items={tabItems} className="mb-6" />
+      {tabItems.length > 1 ? (
+        <SegmentedTabs<Tab> value={tab} onChange={setTab} items={tabItems} className="mb-6" />
+      ) : (
+        // Single-domain aggregator: the lone tab carries no navigation
+        // value, so render it as a static label chip instead of a
+        // clickable button.
+        <div className="seg mb-6">
+          <span className="px-4 py-2 rounded-[9px] text-[13.5px] font-medium bg-[var(--bd-card)] text-[var(--bd-primary-600)] inline-flex items-center gap-2 shadow-[0_1px_2px_rgba(11,16,32,0.06)] cursor-default select-none">
+            {tabItems[0]?.label}
+          </span>
+        </div>
+      )}
 
       {tab === 'seekers' && <SeekersTab />}
       {tab === 'providers' && <ProvidersTab />}
