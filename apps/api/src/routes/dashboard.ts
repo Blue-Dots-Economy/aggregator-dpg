@@ -111,319 +111,359 @@ const DashboardExportQuerySchema = z.object({
   refresh: z.coerce.boolean().optional().default(false),
 });
 
+const PassthroughResponse = z.object({}).passthrough();
+
 export async function registerDashboardRoutes(app: FastifyInstance): Promise<void> {
-  app.get('/v1/dashboard/items', async (req, reply) => {
-    const auth = await requireAuth(req);
-    const log = req.log.child({
-      operation: 'dashboard.items',
-      aggregator_id: auth.aggregatorId,
-    });
-    const start = Date.now();
-
-    const parsed = ItemsQuerySchema.safeParse(req.query);
-    if (!parsed.success) {
-      throw httpError('SCHEMA_VALIDATION', {
-        detail: 'Invalid query parameters.',
-        fields: { issues: parsed.error.issues },
+  app.get(
+    '/v1/dashboard/items',
+    {
+      schema: {
+        tags: ['dashboard'],
+        summary: 'List participants for the caller aggregator (paginated)',
+        description:
+          'Returns every signalstack profile tagged with the caller aggregator_id, scoped to the requested domain, with lifecycle tile counts. Used by /blue-dots to render the participant table.',
+        querystring: ItemsQuerySchema,
+        response: { 200: PassthroughResponse },
+      },
+    },
+    async (req, reply) => {
+      const auth = await requireAuth(req);
+      const log = req.log.child({
+        operation: 'dashboard.items',
+        aggregator_id: auth.aggregatorId,
       });
-    }
-    const { domain, limit, offset, lifecycle } = parsed.data;
+      const start = Date.now();
 
-    const networkCfg = await getNetworkConfig();
-    const domainCfg = networkCfg.domains[domain];
-    if (!domainCfg) {
-      throw httpError('SCHEMA_VALIDATION', {
-        detail: `unknown domain '${domain}' — valid: ${networkCfg.domainIds.join(', ')}`,
-      });
-    }
-
-    const ss = getSignalStackWriter();
-    if (!ss) {
-      log.warn({ status: 'failure', sub: 'signalstack.disabled' });
-      throw httpError('INTERNAL', {
-        detail: 'Signalstack push is not configured for this environment.',
-      });
-    }
-
-    // Tiles must reflect the FULL aggregator dataset, not the paginated
-    // items slice. Fetch the user's page and a separate tile-compute set
-    // in parallel. `TILE_CAP` is the upper bound on rows considered for
-    // tile counts: aggregators with more items than the cap get
-    // approximate tiles (capped at TILE_CAP each) until signals exposes
-    // a server-side per-lifecycle count endpoint.
-    const baseQuery = {
-      aggregator_id: auth.aggregatorId,
-      item_network: config.SIGNALSTACK_ITEM_NETWORK,
-      item_domain: domain,
-      item_type: domainCfg.itemType,
-      lifecycle_filter: 'all' as const,
-    };
-
-    // signalstack's `fetch_local` caps `limit` at SS_MAX_PAGE per request, so
-    // any window wider than that (a >100 page, or the TILE_CAP tile sweep) is
-    // gathered by paging. Returns the accumulated rows + the upstream `total`
-    // (taken from the first page's meta), or the upstream error verbatim so
-    // the existing error branches still fire.
-    const collect = async (
-      startOffset: number,
-      count: number,
-    ): Promise<
-      { ok: true; items: SignalStackProfile[]; total: number } | { ok: false; error: BaseError }
-    > => {
-      const items: SignalStackProfile[] = [];
-      let total = 0;
-      while (items.length < count) {
-        const pageLimit = Math.min(SS_MAX_PAGE, count - items.length);
-        const res = await ss.listItemsByAggregator({
-          ...baseQuery,
-          limit: pageLimit,
-          offset: startOffset + items.length,
+      const parsed = ItemsQuerySchema.safeParse(req.query);
+      if (!parsed.success) {
+        throw httpError('SCHEMA_VALIDATION', {
+          detail: 'Invalid query parameters.',
+          fields: { issues: parsed.error.issues },
         });
-        if (!res.success) return { ok: false, error: res.error };
-        total = res.value.meta.total;
-        items.push(...res.value.items);
-        if (res.value.items.length < pageLimit) break; // last page reached
       }
-      return { ok: true, items, total };
-    };
+      const { domain, limit, offset, lifecycle } = parsed.data;
 
-    const [itemsResult, tilesResult] = await Promise.all([
-      collect(offset, limit),
-      collect(0, TILE_CAP),
-    ]);
+      const networkCfg = await getNetworkConfig();
+      const domainCfg = networkCfg.domains[domain];
+      if (!domainCfg) {
+        throw httpError('SCHEMA_VALIDATION', {
+          detail: `unknown domain '${domain}' — valid: ${networkCfg.domainIds.join(', ')}`,
+        });
+      }
 
-    if (!itemsResult.ok) {
-      log.error({
-        status: 'failure',
-        sub: 'signalstack.list',
-        error: itemsResult.error.message,
-        code: itemsResult.error.code,
-      });
-      throw httpError('INTERNAL', {
-        detail: `Signalstack list failed: ${itemsResult.error.code}`,
-        cause: itemsResult.error,
-      });
-    }
-    if (!tilesResult.ok) {
-      log.error({
-        status: 'failure',
-        sub: 'signalstack.list.tiles',
-        error: tilesResult.error.message,
-        code: tilesResult.error.code,
-      });
-      throw httpError('INTERNAL', {
-        detail: `Signalstack tile list failed: ${tilesResult.error.code}`,
-        cause: tilesResult.error,
-      });
-    }
+      const ss = getSignalStackWriter();
+      if (!ss) {
+        log.warn({ status: 'failure', sub: 'signalstack.disabled' });
+        throw httpError('INTERNAL', {
+          detail: 'Signalstack push is not configured for this environment.',
+        });
+      }
 
-    // Normalise lifecycle on every row via `resolveLifecycle` so an absent
-    // `lifecycle_status` from older signals deployments shows up as `'live'`.
-    const normalisedItems = itemsResult.items.map((item) => {
-      const lifecycleStatus = resolveLifecycle(item);
-      return {
-        ...item,
-        lifecycle_status: lifecycleStatus ?? 'live',
+      // Tiles must reflect the FULL aggregator dataset, not the paginated
+      // items slice. Fetch the user's page and a separate tile-compute set
+      // in parallel. `TILE_CAP` is the upper bound on rows considered for
+      // tile counts: aggregators with more items than the cap get
+      // approximate tiles (capped at TILE_CAP each) until signals exposes
+      // a server-side per-lifecycle count endpoint.
+      const baseQuery = {
+        aggregator_id: auth.aggregatorId,
+        item_network: config.SIGNALSTACK_ITEM_NETWORK,
+        item_domain: domain,
+        item_type: domainCfg.itemType,
+        lifecycle_filter: 'all' as const,
       };
-    });
-    const tileRows = tilesResult.items.map((item) => resolveLifecycle(item) ?? 'live');
 
-    // Tiles count the full dataset (up to TILE_CAP). `account_only` is the
-    // local-only bucket — participants who exist in our table but have no
-    // signals item — and requires a participants reader not wired here
-    // yet. v1: report 0 and refine once that reader lands.
-    // TODO: when a participants reader is exposed, count participants for
-    //       this aggregator + domain whose identity (phone/email) is not in
-    //       `tileRows`-corresponding items and surface that here.
-    const tiles = {
-      draft: tileRows.filter((s) => s === 'draft').length,
-      live: tileRows.filter((s) => s === 'live').length,
-      paused: tileRows.filter((s) => s === 'paused').length,
-      account_only: 0,
-    };
-    const tilesTruncated = tilesResult.total > TILE_CAP;
+      // signalstack's `fetch_local` caps `limit` at SS_MAX_PAGE per request, so
+      // any window wider than that (a >100 page, or the TILE_CAP tile sweep) is
+      // gathered by paging. Returns the accumulated rows + the upstream `total`
+      // (taken from the first page's meta), or the upstream error verbatim so
+      // the existing error branches still fire.
+      const collect = async (
+        startOffset: number,
+        count: number,
+      ): Promise<
+        { ok: true; items: SignalStackProfile[]; total: number } | { ok: false; error: BaseError }
+      > => {
+        const items: SignalStackProfile[] = [];
+        let total = 0;
+        while (items.length < count) {
+          const pageLimit = Math.min(SS_MAX_PAGE, count - items.length);
+          const res = await ss.listItemsByAggregator({
+            ...baseQuery,
+            limit: pageLimit,
+            offset: startOffset + items.length,
+          });
+          if (!res.success) return { ok: false, error: res.error };
+          total = res.value.meta.total;
+          items.push(...res.value.items);
+          if (res.value.items.length < pageLimit) break; // last page reached
+        }
+        return { ok: true, items, total };
+      };
 
-    // Apply the lifecycle filter AFTER tile computation. `account_only` short
-    // circuits to an empty items array — those rows live in `participants`,
-    // not in the signals items response.
-    let filteredItems: typeof normalisedItems;
-    if (lifecycle === 'account_only') {
-      filteredItems = [];
-    } else if (lifecycle) {
-      filteredItems = normalisedItems.filter((i) => i.lifecycle_status === lifecycle);
-    } else {
-      filteredItems = normalisedItems;
-    }
+      const [itemsResult, tilesResult] = await Promise.all([
+        collect(offset, limit),
+        collect(0, TILE_CAP),
+      ]);
 
-    log.info({
-      status: 'success',
-      latency_ms: Date.now() - start,
-      total: itemsResult.total,
-      lifecycle_filter: lifecycle ?? null,
-      tiles,
-      tiles_truncated: tilesTruncated,
-    });
+      if (!itemsResult.ok) {
+        log.error({
+          status: 'failure',
+          sub: 'signalstack.list',
+          error: itemsResult.error.message,
+          code: itemsResult.error.code,
+        });
+        throw httpError('INTERNAL', {
+          detail: `Signalstack list failed: ${itemsResult.error.code}`,
+          cause: itemsResult.error,
+        });
+      }
+      if (!tilesResult.ok) {
+        log.error({
+          status: 'failure',
+          sub: 'signalstack.list.tiles',
+          error: tilesResult.error.message,
+          code: tilesResult.error.code,
+        });
+        throw httpError('INTERNAL', {
+          detail: `Signalstack tile list failed: ${tilesResult.error.code}`,
+          cause: tilesResult.error,
+        });
+      }
 
-    return reply.send({
-      meta: {
+      // Normalise lifecycle on every row via `resolveLifecycle` so an absent
+      // `lifecycle_status` from older signals deployments shows up as `'live'`.
+      const normalisedItems = itemsResult.items.map((item) => {
+        const lifecycleStatus = resolveLifecycle(item);
+        return {
+          ...item,
+          lifecycle_status: lifecycleStatus ?? 'live',
+        };
+      });
+      const tileRows = tilesResult.items.map((item) => resolveLifecycle(item) ?? 'live');
+
+      // Tiles count the full dataset (up to TILE_CAP). `account_only` is the
+      // local-only bucket — participants who exist in our table but have no
+      // signals item — and requires a participants reader not wired here
+      // yet. v1: report 0 and refine once that reader lands.
+      // TODO: when a participants reader is exposed, count participants for
+      //       this aggregator + domain whose identity (phone/email) is not in
+      //       `tileRows`-corresponding items and surface that here.
+      const tiles = {
+        draft: tileRows.filter((s) => s === 'draft').length,
+        live: tileRows.filter((s) => s === 'live').length,
+        paused: tileRows.filter((s) => s === 'paused').length,
+        account_only: 0,
+      };
+      const tilesTruncated = tilesResult.total > TILE_CAP;
+
+      // Apply the lifecycle filter AFTER tile computation. `account_only` short
+      // circuits to an empty items array — those rows live in `participants`,
+      // not in the signals items response.
+      let filteredItems: typeof normalisedItems;
+      if (lifecycle === 'account_only') {
+        filteredItems = [];
+      } else if (lifecycle) {
+        filteredItems = normalisedItems.filter((i) => i.lifecycle_status === lifecycle);
+      } else {
+        filteredItems = normalisedItems;
+      }
+
+      log.info({
+        status: 'success',
+        latency_ms: Date.now() - start,
         total: itemsResult.total,
-        limit,
-        offset,
+        lifecycle_filter: lifecycle ?? null,
         tiles,
         tiles_truncated: tilesTruncated,
+      });
+
+      return reply.send({
+        meta: {
+          total: itemsResult.total,
+          limit,
+          offset,
+          tiles,
+          tiles_truncated: tilesTruncated,
+        },
+        items: filteredItems,
+      });
+    },
+  );
+
+  app.get(
+    '/v1/dashboard',
+    {
+      schema: {
+        tags: ['dashboard'],
+        summary: 'Aggregator dashboard rollup + items',
+        description:
+          "Proxies signalstack's pre-computed dashboard payload (rollup + paginated participants + cursor + metadata) for the caller aggregator. by_domain[<id>] contains seeker/provider slices; refresh=true bypasses the TTL cache.",
+        querystring: DashboardQuerySchema,
+        response: { 200: PassthroughResponse },
       },
-      items: filteredItems,
-    });
-  });
-
-  app.get('/v1/dashboard', async (req, reply) => {
-    const auth = await requireApprovedAuth(req);
-    const log = req.log.child({
-      operation: 'dashboard',
-      aggregator_id: auth.aggregatorId,
-    });
-    const start = Date.now();
-
-    const parsed = DashboardQuerySchema.safeParse(req.query);
-    if (!parsed.success) {
-      throw httpError('SCHEMA_VALIDATION', {
-        detail: 'Invalid query parameters.',
-        fields: { issues: parsed.error.issues },
+    },
+    async (req, reply) => {
+      const auth = await requireApprovedAuth(req);
+      const log = req.log.child({
+        operation: 'dashboard',
+        aggregator_id: auth.aggregatorId,
       });
-    }
-    const { page, limit, status, refresh } = parsed.data;
-    const networkCfg = await getNetworkConfig();
-    const domain = parsed.data.domain ?? networkCfg.domainIds[0]!;
-    if (!networkCfg.domains[domain]) {
-      throw httpError('SCHEMA_VALIDATION', {
-        detail: `unknown domain '${domain}' — valid: ${networkCfg.domainIds.join(', ')}`,
+      const start = Date.now();
+
+      const parsed = DashboardQuerySchema.safeParse(req.query);
+      if (!parsed.success) {
+        throw httpError('SCHEMA_VALIDATION', {
+          detail: 'Invalid query parameters.',
+          fields: { issues: parsed.error.issues },
+        });
+      }
+      const { page, limit, status, refresh } = parsed.data;
+      const networkCfg = await getNetworkConfig();
+      const domain = parsed.data.domain ?? networkCfg.domainIds[0]!;
+      if (!networkCfg.domains[domain]) {
+        throw httpError('SCHEMA_VALIDATION', {
+          detail: `unknown domain '${domain}' — valid: ${networkCfg.domainIds.join(', ')}`,
+        });
+      }
+
+      const ss = getSignalStackWriter();
+      if (!ss) {
+        log.warn({ status: 'failure', sub: 'signalstack.disabled' });
+        throw httpError('INTERNAL', {
+          detail: 'Signalstack is not configured for this environment.',
+        });
+      }
+
+      const actingOrgId = await resolveActingOrgId(auth, log);
+
+      const result = await ss.fetchDashboard({
+        actingOrgId,
+        page,
+        limit,
+        ...(status ? { status } : {}),
+        domain,
+        refresh,
       });
-    }
 
-    const ss = getSignalStackWriter();
-    if (!ss) {
-      log.warn({ status: 'failure', sub: 'signalstack.disabled' });
-      throw httpError('INTERNAL', {
-        detail: 'Signalstack is not configured for this environment.',
+      if (!result.success) {
+        log.error({
+          status: 'failure',
+          sub: 'signalstack.dashboard',
+          error: result.error.message,
+          code: result.error.code,
+        });
+        throw httpError('INTERNAL', {
+          detail: `Signalstack dashboard fetch failed: ${result.error.code}`,
+          cause: result.error,
+        });
+      }
+
+      // Signalstack now returns every served domain in one payload under
+      // `by_domain[<id>]`. Log the requested domain's slice for parity
+      // with the previous single-domain log shape; the response itself
+      // is forwarded verbatim so the web app can render seeker + provider
+      // tabs from a single fetch.
+      const slice = result.value.by_domain[domain];
+      log.info({
+        status: 'success',
+        latency_ms: Date.now() - start,
+        domain,
+        page,
+        limit,
+        status_filter: status ?? null,
+        total_matching: slice?.total_matching ?? null,
+        items_total: slice?.rollup.total_items ?? null,
+        refreshed: result.value.metadata.refreshed,
       });
-    }
 
-    const actingOrgId = await resolveActingOrgId(auth, log);
+      return reply.send(result.value);
+    },
+  );
 
-    const result = await ss.fetchDashboard({
-      actingOrgId,
-      page,
-      limit,
-      ...(status ? { status } : {}),
-      domain,
-      refresh,
-    });
-
-    if (!result.success) {
-      log.error({
-        status: 'failure',
-        sub: 'signalstack.dashboard',
-        error: result.error.message,
-        code: result.error.code,
+  app.get(
+    '/v1/dashboard/export',
+    {
+      schema: {
+        tags: ['dashboard'],
+        summary: 'CSV export of dashboard items',
+        description:
+          'Returns a CSV (text/csv) of the dashboard items for the caller aggregator. Filters by optional status. Body is the CSV text, with Content-Disposition: attachment.',
+        querystring: DashboardExportQuerySchema,
+      },
+    },
+    async (req, reply) => {
+      const auth = await requireApprovedAuth(req);
+      const log = req.log.child({
+        operation: 'dashboard.export',
+        aggregator_id: auth.aggregatorId,
       });
-      throw httpError('INTERNAL', {
-        detail: `Signalstack dashboard fetch failed: ${result.error.code}`,
-        cause: result.error,
+      const start = Date.now();
+
+      const parsed = DashboardExportQuerySchema.safeParse(req.query);
+      if (!parsed.success) {
+        throw httpError('SCHEMA_VALIDATION', {
+          detail: 'Invalid query parameters.',
+          fields: { issues: parsed.error.issues },
+        });
+      }
+      const { status, refresh } = parsed.data;
+      const networkCfg = await getNetworkConfig();
+      const domain = parsed.data.domain ?? networkCfg.domainIds[0]!;
+      if (!networkCfg.domains[domain]) {
+        throw httpError('SCHEMA_VALIDATION', {
+          detail: `unknown domain '${domain}' — valid: ${networkCfg.domainIds.join(', ')}`,
+        });
+      }
+
+      const ss = getSignalStackWriter();
+      if (!ss) {
+        log.warn({ status: 'failure', sub: 'signalstack.disabled' });
+        throw httpError('INTERNAL', {
+          detail: 'Signalstack is not configured for this environment.',
+        });
+      }
+
+      const actingOrgId = await resolveActingOrgId(auth, log);
+
+      const result = await ss.exportDashboardCsv({
+        actingOrgId,
+        ...(status ? { status } : {}),
+        domain,
+        refresh,
       });
-    }
 
-    // Signalstack now returns every served domain in one payload under
-    // `by_domain[<id>]`. Log the requested domain's slice for parity
-    // with the previous single-domain log shape; the response itself
-    // is forwarded verbatim so the web app can render seeker + provider
-    // tabs from a single fetch.
-    const slice = result.value.by_domain[domain];
-    log.info({
-      status: 'success',
-      latency_ms: Date.now() - start,
-      domain,
-      page,
-      limit,
-      status_filter: status ?? null,
-      total_matching: slice?.total_matching ?? null,
-      items_total: slice?.rollup.total_items ?? null,
-      refreshed: result.value.metadata.refreshed,
-    });
+      if (!result.success) {
+        log.error({
+          status: 'failure',
+          sub: 'signalstack.dashboard.export',
+          error: result.error.message,
+          code: result.error.code,
+        });
+        throw httpError('INTERNAL', {
+          detail: `Signalstack dashboard export failed: ${result.error.code}`,
+          cause: result.error,
+        });
+      }
 
-    return reply.send(result.value);
-  });
-
-  app.get('/v1/dashboard/export', async (req, reply) => {
-    const auth = await requireApprovedAuth(req);
-    const log = req.log.child({
-      operation: 'dashboard.export',
-      aggregator_id: auth.aggregatorId,
-    });
-    const start = Date.now();
-
-    const parsed = DashboardExportQuerySchema.safeParse(req.query);
-    if (!parsed.success) {
-      throw httpError('SCHEMA_VALIDATION', {
-        detail: 'Invalid query parameters.',
-        fields: { issues: parsed.error.issues },
+      log.info({
+        status: 'success',
+        latency_ms: Date.now() - start,
+        domain,
+        status_filter: status ?? null,
+        bytes: result.value.csv.length,
+        filename: result.value.filename,
       });
-    }
-    const { status, refresh } = parsed.data;
-    const networkCfg = await getNetworkConfig();
-    const domain = parsed.data.domain ?? networkCfg.domainIds[0]!;
-    if (!networkCfg.domains[domain]) {
-      throw httpError('SCHEMA_VALIDATION', {
-        detail: `unknown domain '${domain}' — valid: ${networkCfg.domainIds.join(', ')}`,
-      });
-    }
 
-    const ss = getSignalStackWriter();
-    if (!ss) {
-      log.warn({ status: 'failure', sub: 'signalstack.disabled' });
-      throw httpError('INTERNAL', {
-        detail: 'Signalstack is not configured for this environment.',
-      });
-    }
-
-    const actingOrgId = await resolveActingOrgId(auth, log);
-
-    const result = await ss.exportDashboardCsv({
-      actingOrgId,
-      ...(status ? { status } : {}),
-      domain,
-      refresh,
-    });
-
-    if (!result.success) {
-      log.error({
-        status: 'failure',
-        sub: 'signalstack.dashboard.export',
-        error: result.error.message,
-        code: result.error.code,
-      });
-      throw httpError('INTERNAL', {
-        detail: `Signalstack dashboard export failed: ${result.error.code}`,
-        cause: result.error,
-      });
-    }
-
-    log.info({
-      status: 'success',
-      latency_ms: Date.now() - start,
-      domain,
-      status_filter: status ?? null,
-      bytes: result.value.csv.length,
-      filename: result.value.filename,
-    });
-
-    return reply
-      .header('Content-Type', 'text/csv; charset=utf-8')
-      .header(
-        'Content-Disposition',
-        `attachment; filename="${result.value.filename.replace(/"/g, '')}"`,
-      )
-      .send(result.value.csv);
-  });
+      return reply
+        .header('Content-Type', 'text/csv; charset=utf-8')
+        .header(
+          'Content-Disposition',
+          `attachment; filename="${result.value.filename.replace(/"/g, '')}"`,
+        )
+        .send(result.value.csv);
+    },
+  );
 }
 
 /**

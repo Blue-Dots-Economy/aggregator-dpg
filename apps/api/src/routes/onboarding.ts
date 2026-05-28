@@ -23,58 +23,80 @@ const RangeQuerySchema = z.object({
 });
 
 export async function registerOnboardingRoutes(app: FastifyInstance): Promise<void> {
-  app.get('/v1/onboarding/summary', async (req, reply) => {
-    const auth = await requireAuth(req);
-    const range = parseRange(req);
-    const conditions = [eq(onboarding.aggregatorId, auth.aggregatorId)];
-    if (range.from) conditions.push(gte(onboarding.periodStart, range.from));
-    if (range.to) conditions.push(lte(onboarding.periodEnd, range.to));
+  app.get(
+    '/v1/onboarding/summary',
+    {
+      schema: {
+        tags: ['onboarding'],
+        summary: 'Aggregated onboarding totals',
+        description:
+          'Sum of total / passed / failed / skipped onboarding attempts for the caller aggregator, optionally constrained by ?from=&to= ISO dates.',
+      },
+    },
+    async (req, reply) => {
+      const auth = await requireAuth(req);
+      const range = parseRange(req);
+      const conditions = [eq(onboarding.aggregatorId, auth.aggregatorId)];
+      if (range.from) conditions.push(gte(onboarding.periodStart, range.from));
+      if (range.to) conditions.push(lte(onboarding.periodEnd, range.to));
 
-    const rows = await getDb()
-      .select({
-        total: sql<number>`COALESCE(SUM(${onboarding.total}), 0)::int`,
-        passed: sql<number>`COALESCE(SUM(${onboarding.passed}), 0)::int`,
-        failed: sql<number>`COALESCE(SUM(${onboarding.failed}), 0)::int`,
-        skipped: sql<number>`COALESCE(SUM(${onboarding.skipped}), 0)::int`,
-      })
-      .from(onboarding)
-      .where(and(...conditions));
+      const rows = await getDb()
+        .select({
+          total: sql<number>`COALESCE(SUM(${onboarding.total}), 0)::int`,
+          passed: sql<number>`COALESCE(SUM(${onboarding.passed}), 0)::int`,
+          failed: sql<number>`COALESCE(SUM(${onboarding.failed}), 0)::int`,
+          skipped: sql<number>`COALESCE(SUM(${onboarding.skipped}), 0)::int`,
+        })
+        .from(onboarding)
+        .where(and(...conditions));
 
-    const r = rows[0] ?? { total: 0, passed: 0, failed: 0, skipped: 0 };
-    return reply.send({
-      aggregator_id: auth.aggregatorId,
-      from: range.from?.toISOString() ?? null,
-      to: range.to?.toISOString() ?? null,
-      ...r,
-    });
-  });
+      const r = rows[0] ?? { total: 0, passed: 0, failed: 0, skipped: 0 };
+      return reply.send({
+        aggregator_id: auth.aggregatorId,
+        from: range.from?.toISOString() ?? null,
+        to: range.to?.toISOString() ?? null,
+        ...r,
+      });
+    },
+  );
 
-  app.get('/v1/onboarding/by-source', async (req, reply) => {
-    const auth = await requireAuth(req);
-    const range = parseRange(req);
-    const conditions = [eq(onboarding.aggregatorId, auth.aggregatorId)];
-    if (range.from) conditions.push(gte(onboarding.periodStart, range.from));
-    if (range.to) conditions.push(lte(onboarding.periodEnd, range.to));
+  app.get(
+    '/v1/onboarding/by-source',
+    {
+      schema: {
+        tags: ['onboarding'],
+        summary: 'Onboarding totals grouped by source',
+        description:
+          'Per-source breakdown of onboarding counters for the caller aggregator (e.g. by_link / by_bulk_upload), optionally date-bounded by ?from=&to=.',
+      },
+    },
+    async (req, reply) => {
+      const auth = await requireAuth(req);
+      const range = parseRange(req);
+      const conditions = [eq(onboarding.aggregatorId, auth.aggregatorId)];
+      if (range.from) conditions.push(gte(onboarding.periodStart, range.from));
+      if (range.to) conditions.push(lte(onboarding.periodEnd, range.to));
 
-    const rows = await getDb()
-      .select({
-        source: onboarding.source,
-        total: sql<number>`COALESCE(SUM(${onboarding.total}), 0)::int`,
-        passed: sql<number>`COALESCE(SUM(${onboarding.passed}), 0)::int`,
-        failed: sql<number>`COALESCE(SUM(${onboarding.failed}), 0)::int`,
-        skipped: sql<number>`COALESCE(SUM(${onboarding.skipped}), 0)::int`,
-      })
-      .from(onboarding)
-      .where(and(...conditions))
-      .groupBy(onboarding.source);
+      const rows = await getDb()
+        .select({
+          source: onboarding.source,
+          total: sql<number>`COALESCE(SUM(${onboarding.total}), 0)::int`,
+          passed: sql<number>`COALESCE(SUM(${onboarding.passed}), 0)::int`,
+          failed: sql<number>`COALESCE(SUM(${onboarding.failed}), 0)::int`,
+          skipped: sql<number>`COALESCE(SUM(${onboarding.skipped}), 0)::int`,
+        })
+        .from(onboarding)
+        .where(and(...conditions))
+        .groupBy(onboarding.source);
 
-    return reply.send({
-      aggregator_id: auth.aggregatorId,
-      from: range.from?.toISOString() ?? null,
-      to: range.to?.toISOString() ?? null,
-      by_source: rows,
-    });
-  });
+      return reply.send({
+        aggregator_id: auth.aggregatorId,
+        from: range.from?.toISOString() ?? null,
+        to: range.to?.toISOString() ?? null,
+        by_source: rows,
+      });
+    },
+  );
 }
 
 function parseRange(req: FastifyRequest): { from?: Date; to?: Date } {

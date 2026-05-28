@@ -53,6 +53,14 @@ const DecisionBodySchema = z.object({
 export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Promise<void> {
   app.get(
     '/admin/v1/aggregator-registrations/read/:id',
+    {
+      schema: {
+        tags: ['aggregator-approvals'],
+        summary: 'Render the admin approve/reject page',
+        description:
+          'HTML page reached from the admin notification email. Verifies the signed token and renders the approval form for the given aggregator registration id.',
+      },
+    },
     async (
       req: FastifyRequest<{
         Params: { id: string };
@@ -128,6 +136,14 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
 
   app.post(
     '/admin/v1/aggregator-registrations/decision/:id',
+    {
+      schema: {
+        tags: ['aggregator-approvals'],
+        summary: 'Approve or reject a pending aggregator',
+        description:
+          'Records the admin decision (approve/reject) for the registration id. On approve, enables the disabled Keycloak user and confirms the signalstack push.',
+      },
+    },
     async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
       const aggregatorId = req.params.id;
       const log = req.log.child({

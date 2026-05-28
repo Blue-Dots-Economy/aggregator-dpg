@@ -53,6 +53,14 @@ const SLUG_RETRIES = 3;
 export async function registerAggregatorRegistrationRoutes(app: FastifyInstance): Promise<void> {
   app.post(
     '/v1/aggregator-registrations/create',
+    {
+      schema: {
+        tags: ['aggregator-registrations'],
+        summary: 'Submit a new aggregator registration',
+        description:
+          'Validates submission against config/schemas/aggregator/registration.v1.json, creates a disabled user (login enabled on admin approval), and pushes the org to signalstack. Reached via a non-aggregator Bearer token from Keycloak.',
+      },
+    },
     async (req: FastifyRequest, reply: FastifyReply) => {
       const log = req.log.child({ operation: 'aggregator-registration.create' });
       const start = Date.now();

@@ -13,6 +13,13 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import formbody from '@fastify/formbody';
 import sensible from '@fastify/sensible';
+import fastifySwagger from '@fastify/swagger';
+import {
+  jsonSchemaTransform,
+  serializerCompiler,
+  validatorCompiler,
+  type ZodTypeProvider,
+} from 'fastify-type-provider-zod';
 import { config, corsOrigins } from './config.js';
 import { registerHealthRoutes } from './routes/health.js';
 import { registerAggregatorRegistrationRoutes } from './routes/aggregator-registrations.js';
@@ -84,6 +91,58 @@ export async function buildApp(): Promise<FastifyInstance> {
   });
   await app.register(formbody);
   await app.register(sensible);
+
+  // Zod-based schema compilers — routes declare request/response shapes
+  // as zod schemas, fastify validates with them, and @fastify/swagger
+  // converts them to OpenAPI for the Scalar UI at /api/reference.
+  app.setValidatorCompiler(validatorCompiler);
+  app.setSerializerCompiler(serializerCompiler);
+  app.withTypeProvider<ZodTypeProvider>();
+
+  await app.register(fastifySwagger, {
+    openapi: {
+      info: {
+        title: 'Aggregator DPG API',
+        description:
+          'Aggregator BFF for the Blue Dots / Purple Dots networks — handles aggregator registration, brand + network config, public participant onboarding (link + bulk), and the dashboard rollup proxy to signalstack.',
+        version: '1.0.0',
+      },
+      tags: [
+        { name: 'health', description: 'Liveness + readiness probes.' },
+        {
+          name: 'aggregator-config',
+          description: 'Public brand + network config served to the web BFF.',
+        },
+        {
+          name: 'aggregator-registrations',
+          description: 'Self-serve aggregator onboarding (org create + approval).',
+        },
+        {
+          name: 'aggregator-approvals',
+          description: 'Admin approve/reject for pending aggregators.',
+        },
+        {
+          name: 'aggregator-profile',
+          description: 'Authenticated aggregator profile read/update.',
+        },
+        {
+          name: 'registration-links',
+          description: 'QR / shareable registration links (authenticated owner side).',
+        },
+        {
+          name: 'public-registration',
+          description: 'Public participant registration via QR link.',
+        },
+        { name: 'bulk-uploads', description: 'CSV bulk participant onboarding.' },
+        { name: 'onboarding', description: 'Single-participant onboarding (authenticated).' },
+        { name: 'dashboard', description: 'Dashboard rollup + items proxy to signalstack.' },
+      ],
+    },
+    transform: jsonSchemaTransform,
+  });
+  await app.register(import('@scalar/fastify-api-reference'), {
+    routePrefix: '/api/reference',
+  });
 
   app.addHook('onRequest', async (req, reply) => {
     reply.header(REQUEST_ID_HEADER, req.id);
