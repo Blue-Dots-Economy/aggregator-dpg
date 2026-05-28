@@ -316,6 +316,7 @@ function resolveDomains(
       schema,
       identity,
       ...(d.dashboard_tiles !== undefined ? { dashboardTiles: d.dashboard_tiles } : {}),
+      ...(d.status_rules !== undefined ? { statusRules: d.status_rules } : {}),
     };
     order.push(d.id);
   }

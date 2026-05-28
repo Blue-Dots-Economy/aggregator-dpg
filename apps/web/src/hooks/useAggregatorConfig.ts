@@ -43,12 +43,23 @@ export interface DashboardBuckets {
   };
 }
 
+/**
+ * One entry of a domain's `status_rules` from network.json. `label` and
+ * `description` are optional UI copy rendered on the dashboard status cards.
+ */
+export interface StatusRule {
+  status: string;
+  label?: string;
+  description?: string;
+}
+
 export interface AggregatorConfigDomain {
   id: string;
   label: string;
   plural_label: string;
   item_type: string;
   dashboardTiles?: DashboardTileLabels;
+  status_rules?: StatusRule[];
 }
 
 /**

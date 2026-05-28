@@ -24,6 +24,12 @@
   --bd-tint-rose: #fff1f2;
   --bd-tint-emerald: #ecfdf5;
   --bd-tint-sky: #f0f9ff;
+  /* Dashboard funnel segments. Requested follows the brand primary
+     (purple_dot vs blue_dot); the rest are semantic + dark-aware. */
+  --bd-funnel-requested: var(--bd-primary);
+  --bd-funnel-connected: #10b981;
+  --bd-funnel-declined: #ef4444;
+  --bd-funnel-cancelled: #94a3b8;
   /* Typography — overridden by ThemeProvider from brand.json. */
   --bd-font-sans: 'Inter', system-ui, sans-serif;
   --bd-font-heading: 'Plus Jakarta Sans', system-ui, sans-serif;
@@ -46,6 +52,9 @@
   --bd-tint-rose: #2a1418;
   --bd-tint-emerald: #0e2a1f;
   --bd-tint-sky: #0e1f2a;
+  --bd-funnel-connected: #34d399;
+  --bd-funnel-declined: #f87171;
+  --bd-funnel-cancelled: #64748b;
 }
 
 /* Bulk dark overrides for Tailwind colour utilities used across the

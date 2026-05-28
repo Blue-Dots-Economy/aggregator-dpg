@@ -208,6 +208,20 @@ export interface DashboardBuckets {
 }
 
 /**
+ * One entry of a domain's `status_rules` array from network.json. `when`
+ * is the condition DSL the metrics service evaluates — passed through
+ * verbatim. `label`/`description` are optional UI copy the dashboard
+ * renders on the status cards (e.g. "New" / "Last 7 days").
+ */
+export interface StatusRule {
+  status: string;
+  label?: string;
+  description?: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  when?: any;
+}
+
+/**
  * One domain inside a signalstack network. Carries the JSON Schemas
  * keyed by `item_type` — the aggregator looks up the active schema by
  * `(domain_id, item_type)`.
@@ -217,6 +231,8 @@ export interface NetworkDomain {
   description?: string;
   /** Per-domain tile labels for the dashboard. Optional passthrough from network.json. */
   dashboard_tiles?: DashboardTileLabels;
+  /** Per-domain status taxonomy + UI copy. Optional passthrough from network.json. */
+  status_rules?: StatusRule[];
   item_schemas: Record<string, Record<string, unknown>>;
 }
 
@@ -263,6 +279,11 @@ export interface ResolvedDomain {
    * defaults when undefined.
    */
   dashboardTiles?: DashboardTileLabels;
+  /**
+   * Per-domain status rules (copy-through from `network.status_rules` on
+   * this domain). Drives the dashboard status-card labels + descriptions.
+   */
+  statusRules?: StatusRule[];
 }
 
 /**

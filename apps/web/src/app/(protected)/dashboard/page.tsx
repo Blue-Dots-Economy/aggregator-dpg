@@ -35,6 +35,40 @@ const DEFAULT_STATUS_LABELS: Record<string, string> = {
   inactive: 'Inactive',
 };
 
+/**
+ * Domain-neutral subtitle for each status card. The status thresholds
+ * live in network.json `status_rules` (new ≤Nd, active recent, at_risk
+ * stale window, inactive default) but the config carries no hint copy,
+ * so these stay generic and accurate for any network (jobs, PWD
+ * services, etc.) rather than the old job-flavoured strings.
+ */
+const STATUS_HINTS = {
+  new: 'Recently joined',
+  active: 'Recently active',
+  at_risk: 'Slowing down',
+  inactive: 'No recent activity',
+} as const;
+
+/**
+ * Indexes a domain's `status_rules` by status key so the dashboard can
+ * pull per-status label/description copy onto the status cards.
+ *
+ * @param rules - The active domain's `status_rules` from network config.
+ * @returns Map of status key to its optional label/description copy.
+ */
+function indexStatusRules(
+  rules: { status: string; label?: string; description?: string }[] | undefined,
+): Record<string, { label?: string; description?: string }> {
+  const out: Record<string, { label?: string; description?: string }> = {};
+  for (const r of rules ?? []) {
+    out[r.status] = {
+      ...(r.label !== undefined ? { label: r.label } : {}),
+      ...(r.description !== undefined ? { description: r.description } : {}),
+    };
+  }
+  return out;
+}
+
 type StatTone = 'new' | 'active' | 'risk' | 'inactive' | 'satisfied';
 
 interface ToneConfig {
@@ -639,22 +673,28 @@ function ParticipantTable<R extends ParticipantBase>({
                       total={r.applied.total}
                       parts={[
                         {
-                          v: r.applied.shortlisted ?? 0,
-                          color: '#10B981',
+                          v: r.applied.pending,
+                          color: 'var(--bd-funnel-requested)',
+                          label: getBucketLabel(bucketLabels, 'create'),
+                          short: getBucketLabel(bucketLabels, 'create'),
+                        },
+                        {
+                          v: r.applied.accepted ?? 0,
+                          color: 'var(--bd-funnel-connected)',
                           label: getBucketLabel(bucketLabels, 'accept'),
                           short: getBucketLabel(bucketLabels, 'accept'),
                         },
                         {
                           v: r.applied.rejected,
-                          color: '#EF4444',
+                          color: 'var(--bd-funnel-declined)',
                           label: getBucketLabel(bucketLabels, 'reject'),
                           short: getBucketLabel(bucketLabels, 'reject'),
                         },
                         {
-                          v: r.applied.pending,
-                          color: '#F59E0B',
-                          label: getBucketLabel(bucketLabels, 'create'),
-                          short: getBucketLabel(bucketLabels, 'create'),
+                          v: r.applied.cancelled ?? 0,
+                          color: 'var(--bd-funnel-cancelled)',
+                          label: getBucketLabel(bucketLabels, 'cancel'),
+                          short: getBucketLabel(bucketLabels, 'cancel'),
                         },
                       ]}
                     />
@@ -865,6 +905,7 @@ function SeekersTab() {
   // participant table's action-count columns.
   const bucketLabels = cfg?.dashboardBuckets?.by_action_status ?? DEFAULT_BUCKET_LABELS;
   const statusLabels = cfg?.dashboardBuckets?.by_status ?? DEFAULT_STATUS_LABELS;
+  const statusRules = indexStatusRules(seekerCfg?.status_rules);
   const total = rollup?.total_items;
   const byStatus = rollup?.by_status ?? {};
   // Cache the unfiltered status taxonomy the first time it loads, so the
@@ -947,7 +988,9 @@ function SeekersTab() {
             {refreshing ? 'Refreshing…' : 'Refresh'}
           </Button>
           {refreshError ? (
-            <span className="ml-2 text-xs text-red-600">Refresh failed: {refreshError}</span>
+            <span className="ml-2 max-w-[220px] truncate text-xs text-red-600" title={refreshError}>
+              Refresh failed
+            </span>
           ) : lastRefreshedAt !== null && Date.now() - lastRefreshedAt < 5000 ? (
             <span className="text-xs text-ink-400">Refreshed just now</span>
           ) : null}
@@ -958,29 +1001,29 @@ function SeekersTab() {
           tone="new"
           icon="spark"
           count={fmtCount(byStatus['new'] ?? 0)}
-          label={statusLabels['new'] ?? 'New'}
-          hint="Recently joined"
+          label={statusRules['new']?.label ?? statusLabels['new'] ?? 'New'}
+          hint={statusRules['new']?.description ?? STATUS_HINTS.new}
         />
         <StatCard
           tone="active"
           icon="users"
           count={fmtCount(active)}
-          label={statusLabels['active'] ?? `Active ${seekerPlural}`}
-          hint="New or recently active"
+          label={statusRules['active']?.label ?? statusLabels['active'] ?? `Active ${seekerPlural}`}
+          hint={statusRules['active']?.description ?? STATUS_HINTS.active}
         />
         <StatCard
           tone="risk"
           icon="alert"
           count={fmtCount(atRisk)}
-          label={statusLabels['at_risk'] ?? 'At Risk'}
-          hint="No activity 14–30 days"
+          label={statusRules['at_risk']?.label ?? statusLabels['at_risk'] ?? 'At Risk'}
+          hint={statusRules['at_risk']?.description ?? STATUS_HINTS.at_risk}
         />
         <StatCard
           tone="inactive"
           icon="pause"
           count={fmtCount(inactive)}
-          label={statusLabels['inactive'] ?? 'Inactive'}
-          hint="Dormant 30+ days"
+          label={statusRules['inactive']?.label ?? statusLabels['inactive'] ?? 'Inactive'}
+          hint={statusRules['inactive']?.description ?? STATUS_HINTS.inactive}
         />
       </div>
 
@@ -1087,10 +1130,10 @@ function toSeekerRow(participant: Record<string, unknown>): Seeker {
         numberOr(participant.count_accept, 0) +
         numberOr(participant.count_reject, 0) +
         numberOr(participant.count_cancel, 0),
-      shortlisted: 0,
       accepted: numberOr(participant.count_accept, 0),
       rejected: numberOr(participant.count_reject, 0),
       pending: numberOr(participant.count_create, 0),
+      cancelled: numberOr(participant.count_cancel, 0),
     },
     status,
     last: updated ? formatRelative(updated) : '—',
@@ -1166,6 +1209,7 @@ function ProvidersTab() {
   // participant table's action-count columns.
   const bucketLabels = cfg?.dashboardBuckets?.by_action_status ?? DEFAULT_BUCKET_LABELS;
   const statusLabels = cfg?.dashboardBuckets?.by_status ?? DEFAULT_STATUS_LABELS;
+  const statusRules = indexStatusRules(providerCfg?.status_rules);
   const slice = dashboard?.by_domain.provider;
   const rollup = slice?.rollup;
   const total = rollup?.total_items;
@@ -1243,7 +1287,9 @@ function ProvidersTab() {
             {refreshing ? 'Refreshing…' : 'Refresh'}
           </Button>
           {refreshError ? (
-            <span className="ml-2 text-xs text-red-600">Refresh failed: {refreshError}</span>
+            <span className="ml-2 max-w-[220px] truncate text-xs text-red-600" title={refreshError}>
+              Refresh failed
+            </span>
           ) : lastRefreshedAt !== null && Date.now() - lastRefreshedAt < 5000 ? (
             <span className="text-xs text-ink-400">Refreshed just now</span>
           ) : null}
@@ -1254,29 +1300,29 @@ function ProvidersTab() {
           tone="new"
           icon="spark"
           count={fmtCount(byStatus['new'] ?? 0)}
-          label={statusLabels['new'] ?? 'New'}
-          hint="Recently joined"
+          label={statusRules['new']?.label ?? statusLabels['new'] ?? 'New'}
+          hint={statusRules['new']?.description ?? STATUS_HINTS.new}
         />
         <StatCard
           tone="active"
           icon="briefcase"
           count={fmtCount(active)}
-          label={statusLabels['active'] ?? 'Active'}
-          hint="Currently hiring"
+          label={statusRules['active']?.label ?? statusLabels['active'] ?? 'Active'}
+          hint={statusRules['active']?.description ?? STATUS_HINTS.active}
         />
         <StatCard
           tone="risk"
           icon="alert"
           count={fmtCount(atRisk)}
-          label={statusLabels['at_risk'] ?? 'At Risk'}
-          hint="Stalled requirements"
+          label={statusRules['at_risk']?.label ?? statusLabels['at_risk'] ?? 'At Risk'}
+          hint={statusRules['at_risk']?.description ?? STATUS_HINTS.at_risk}
         />
         <StatCard
           tone="inactive"
           icon="pause"
           count={fmtCount(inactive)}
-          label={statusLabels['inactive'] ?? 'Inactive'}
-          hint="No openings 30+ days"
+          label={statusRules['inactive']?.label ?? statusLabels['inactive'] ?? 'Inactive'}
+          hint={statusRules['inactive']?.description ?? STATUS_HINTS.inactive}
         />
       </div>
 
