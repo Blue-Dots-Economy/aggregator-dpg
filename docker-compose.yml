@@ -65,6 +65,60 @@ services:
       timeout: 3s
       retries: 10
 
+  # ── Local S3-compatible object storage (dev / docker-only testing) ────────
+  # Use only when S3_ENDPOINT is set in .env. In prod the stack still hits
+  # real AWS S3 via the EC2 instance role and this container is unused
+  # (it just runs idle on :9000/:9001 — harmless, or comment out the service).
+  #
+  # Host port mapping:
+  #   9000 → S3 API   (used by api/worker via http://minio:9000 inside the
+  #                    docker network, and by the BROWSER for presigned URLs
+  #                    via http://localhost:9000 → S3_PUBLIC_ENDPOINT)
+  #   9001 → console  (web UI, minioadmin / ${MINIO_ROOT_PASSWORD})
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    container_name: aggregator-minio
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      # MinIO ignores AWS region but the SDK signs requests with whatever
+      # S3_REGION the apps configure — keep them aligned to avoid sigv4 grief.
+      MINIO_REGION: ${S3_REGION:-us-east-1}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/live || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+  # Creates the bucket once MinIO is healthy. Idempotent — re-running is safe.
+  minio-init:
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    container_name: aggregator-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      S3_BUCKET: ${S3_BUCKET:-aggregator-bulk-uploads}
+    entrypoint:
+      - sh
+      - -c
+      - |
+        set -e
+        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
+        mc mb --ignore-existing "local/$$S3_BUCKET"
+        echo "minio-init: bucket '$$S3_BUCKET' ready"
+    restart: "no"
+
   keycloak:
     image: quay.io/keycloak/keycloak:26.5.5
     container_name: aggregator-keycloak
@@ -466,6 +520,7 @@ services:
 volumes:
   aggregator-postgres-data:
   redis-data:
+  minio-data:
   # Persists Let's Encrypt account keys + issued certs across container
   # restarts. Wiping this volume forces a fresh ACME registration — be
   # mindful of LE rate limits (5 duplicate certs per week per domain).
