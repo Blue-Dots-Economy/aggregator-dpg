@@ -264,19 +264,20 @@ export function RecentUploadsBody() {
               <th style={{ textAlign: 'center' }}>Failed</th>
               <th style={{ textAlign: 'center' }}>Skipped</th>
               <th style={{ minWidth: 240 }}>Reason / errors</th>
+              <th style={{ minWidth: 160 }}>Actions</th>
             </tr>
           </thead>
           <tbody>
             {error && (
               <tr>
-                <td colSpan={8} className="text-rose-600 text-[13px] py-6 text-center">
+                <td colSpan={9} className="text-rose-600 text-[13px] py-6 text-center">
                   {error.message}
                 </td>
               </tr>
             )}
             {!error && items.length === 0 && !loading && (
               <tr>
-                <td colSpan={8} className="text-ink-400 text-[13px] py-8 text-center">
+                <td colSpan={9} className="text-ink-400 text-[13px] py-8 text-center">
                   No uploads yet.
                 </td>
               </tr>
@@ -293,6 +294,8 @@ export function RecentUploadsBody() {
 
 function UploadRow({ upload }: { upload: BulkUploadStatus }) {
   const [downloading, setDownloading] = useState(false);
+  const [triggeredAction, setTriggeredAction] = useState<string | null>(null);
+
   const onDownloadErrors = async () => {
     setDownloading(true);
     try {
@@ -303,6 +306,17 @@ function UploadRow({ upload }: { upload: BulkUploadStatus }) {
     } finally {
       setDownloading(false);
     }
+  };
+
+  /**
+   * Stub handler for per-upload row actions. Surfaces a transient
+   * "{label} triggered" confirmation; wire each label to its real handler
+   * (webhook callback, retry-failed-rows, notify-operator, etc.) when those
+   * endpoints land.
+   */
+  const onTriggerAction = (label: string) => {
+    setTriggeredAction(label);
+    window.setTimeout(() => setTriggeredAction(null), 2000);
   };
 
   return (
@@ -361,6 +375,44 @@ function UploadRow({ upload }: { upload: BulkUploadStatus }) {
           </span>
         ) : (
           <span className="text-ink-300">—</span>
+        )}
+      </td>
+      <td className="text-[12px]">
+        {triggeredAction ? (
+          <span
+            className="inline-flex items-center gap-1.5 px-2 py-1 rounded-[8px] bg-emerald-50 text-emerald-700 font-semibold"
+            aria-live="polite"
+          >
+            <I.check size={12} />
+            {triggeredAction} triggered
+          </span>
+        ) : (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => onTriggerAction('Trigger Callback')}
+              className="inline-flex items-center gap-1.5 px-2 py-1 rounded-[8px] bg-[var(--bd-primary-50)] text-primary-600 font-semibold hover:bg-[var(--bd-primary-100)]"
+            >
+              <I.send size={12} />
+              Trigger Callback
+            </button>
+            <button
+              type="button"
+              onClick={() => onTriggerAction('Retry')}
+              className="inline-flex items-center gap-1.5 px-2 py-1 rounded-[8px] bg-ink-50 text-ink-700 font-semibold hover:bg-ink-100"
+            >
+              <I.refresh size={12} />
+              Retry
+            </button>
+            <button
+              type="button"
+              onClick={() => onTriggerAction('Notify')}
+              className="inline-flex items-center gap-1.5 px-2 py-1 rounded-[8px] bg-ink-50 text-ink-700 font-semibold hover:bg-ink-100"
+            >
+              <I.bell size={12} />
+              Notify
+            </button>
+          </div>
         )}
       </td>
     </tr>
