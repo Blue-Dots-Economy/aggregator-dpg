@@ -259,6 +259,12 @@ curl -s http://localhost:3000                 # 200 (login page)
 7.  After fill, you land on the Blue Dots portal. Profile page shows the data.
 ```
 
+> **If you previously ran the stack (before this commit):** the realm import used to
+> ship two seed users (`testuser@example.com` / `+919876543210` and
+> `alice@example.com` / `+919812345678`) that are now removed. They may still live
+> in your Keycloak DB from a prior boot — register with a different phone/email,
+> or wipe the volume once with `docker compose down -v && make up`.
+
 ---
 
 ## 9. Common workspace commands
