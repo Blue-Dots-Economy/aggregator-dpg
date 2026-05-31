@@ -22,6 +22,7 @@ import type {
   BrandTypography,
   DashboardBuckets,
   DashboardTileLabels,
+  StatusRule,
 } from '@aggregator-dpg/network-config/interface';
 import { getNetworkConfig } from '../services/network-config.js';
 
@@ -61,6 +62,7 @@ interface PublicAggregatorConfig {
     plural_label: string;
     item_type: string;
     dashboardTiles?: DashboardTileLabels;
+    status_rules?: StatusRule[];
   }>;
   dashboardBuckets?: DashboardBuckets;
 }
@@ -106,6 +108,7 @@ export async function registerAggregatorConfigRoutes(app: FastifyInstance): Prom
           plural_label: d.pluralLabel,
           item_type: d.itemType,
           ...(d.dashboardTiles ? { dashboardTiles: d.dashboardTiles } : {}),
+          ...(d.statusRules ? { status_rules: d.statusRules } : {}),
         };
       }),
       ...(cfg.dashboardBuckets ? { dashboardBuckets: cfg.dashboardBuckets } : {}),

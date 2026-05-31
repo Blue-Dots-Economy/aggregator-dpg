@@ -227,32 +227,6 @@
       "clientRoles": {
         "realm-management": ["view-users", "manage-users", "query-users"]
       }
-    },
-    {
-      "username": "testuser",
-      "enabled": true,
-      "email": "testuser@example.com",
-      "emailVerified": true,
-      "firstName": "Test",
-      "lastName": "User",
-      "attributes": {
-        "phoneNumber": ["+919876543210"],
-        "phoneNumberVerified": ["true"]
-      },
-      "realmRoles": ["default-roles-aggregator"]
-    },
-    {
-      "username": "alice",
-      "enabled": true,
-      "email": "alice@example.com",
-      "emailVerified": true,
-      "firstName": "Alice",
-      "lastName": "Provider",
-      "attributes": {
-        "phoneNumber": ["+919812345678"],
-        "phoneNumberVerified": ["true"]
-      },
-      "realmRoles": ["default-roles-aggregator"]
     }
   ]
 }

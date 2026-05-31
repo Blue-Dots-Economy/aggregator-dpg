@@ -109,20 +109,6 @@ export function LoginView({ returnTo, error }: LoginViewProps): JSX.Element {
             </button>
             .
           </div>
-
-          <div className="mt-6 pt-5 border-t border-ink-100 flex items-center justify-between text-[12px]">
-            <div className="flex items-center gap-2 text-ink-500">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
-              Invite-only · {brand} SSO
-            </div>
-            <button type="button" className="text-primary-600 font-semibold hover:underline">
-              Need help?
-            </button>
-          </div>
-        </div>
-
-        <div className="absolute bottom-5 right-6 text-[11px] text-ink-300 font-mono z-10">
-          v2.4.0 · build 7281
         </div>
       </div>
     </div>

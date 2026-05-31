@@ -150,6 +150,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       // item when the request inserted a single row.
       const raw = (await res.json()) as {
         user_id?: unknown;
+        user_existed?: unknown;
         items?: Array<{
           item_id?: unknown;
           item_network?: unknown;
@@ -167,6 +168,19 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
         );
       }
       const items = Array.isArray(raw.items) ? raw.items : [];
+      // Existing user owned by a different aggregator: signalstack
+      // returns `user_existed: true` with an empty `items` array (that
+      // org's items are private to it). This is not an error — surface
+      // it as an already-registered result so the caller records a
+      // `skipped` outcome instead of a 502.
+      if (raw.user_existed === true && items.length === 0) {
+        return ok({
+          user_id: raw.user_id,
+          profile_item_id: '',
+          onboarded_at: typeof raw.onboarded_at === 'string' ? raw.onboarded_at : '',
+          already_registered: true,
+        });
+      }
       const matched =
         items.find(
           (it) =>

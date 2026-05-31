@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import type { RJSFSchema, UiSchema } from '@rjsf/utils';
@@ -173,12 +173,24 @@ export function RegisterView({ schema, uiSchema }: RegisterViewProps): JSX.Eleme
     };
   });
   const [state, setState] = useState<SubmitState>({ status: 'idle' });
+  const errorRef = useRef<HTMLDivElement>(null);
+
+  // On any submit failure (server error or client validation), pull the
+  // error banner into view + focus it. The submit button sits far below
+  // the banner, so without this a first-time user clicks submit and sees
+  // nothing change — the reason is off-screen above the fold.
+  useEffect(() => {
+    if (state.status === 'error' && errorRef.current) {
+      errorRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      errorRef.current.focus();
+    }
+  }, [state]);
 
   // Page header uses the schema title plus a short user-facing tagline. The
   // schema's `description` field is intentionally technical (it documents
   // the API contract) and is hidden from the form UI.
   const headingTitle = (schema.title as string | undefined) ?? 'Aggregator Registration';
-  const headingTagline = 'Tell us about your organisation. Reviewed within 1–2 business days.';
+  const headingTagline = 'Tell us about your organisation.';
 
   const formSchema = useMemo<RJSFSchema>(() => {
     const clone: RJSFSchema = { ...schema };
@@ -297,8 +309,8 @@ export function RegisterView({ schema, uiSchema }: RegisterViewProps): JSX.Eleme
                 Reference ID: <code className="font-mono text-[12.5px]">{state.aggregatorId}</code>
               </p>
               <p className="text-[14px] text-emerald-700 mt-3">
-                The {brand} team will review your application within 1–2 business days. Once
-                approved, sign in via {brand} SSO using the email or mobile you registered.
+                The {brand} team will review your application. Once approved, sign in via {brand}{' '}
+                SSO using the email or mobile you registered.
               </p>
               <Link
                 href="/login"
@@ -311,8 +323,10 @@ export function RegisterView({ schema, uiSchema }: RegisterViewProps): JSX.Eleme
             <div className="mt-7">
               {state.status === 'error' ? (
                 <div
+                  ref={errorRef}
                   role="alert"
-                  className="mb-5 rounded-[10px] border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-700"
+                  tabIndex={-1}
+                  className="mb-5 rounded-[10px] border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-700 scroll-mt-6 outline-none"
                 >
                   <div className="font-semibold">{state.title}</div>
                   {state.detail ? (

@@ -35,6 +35,40 @@ const DEFAULT_STATUS_LABELS: Record<string, string> = {
   inactive: 'Inactive',
 };
 
+/**
+ * Domain-neutral subtitle for each status card. The status thresholds
+ * live in network.json `status_rules` (new ≤Nd, active recent, at_risk
+ * stale window, inactive default) but the config carries no hint copy,
+ * so these stay generic and accurate for any network (jobs, PWD
+ * services, etc.) rather than the old job-flavoured strings.
+ */
+const STATUS_HINTS = {
+  new: 'Recently joined',
+  active: 'Recently active',
+  at_risk: 'Slowing down',
+  inactive: 'No recent activity',
+} as const;
+
+/**
+ * Indexes a domain's `status_rules` by status key so the dashboard can
+ * pull per-status label/description copy onto the status cards.
+ *
+ * @param rules - The active domain's `status_rules` from network config.
+ * @returns Map of status key to its optional label/description copy.
+ */
+function indexStatusRules(
+  rules: { status: string; label?: string; description?: string }[] | undefined,
+): Record<string, { label?: string; description?: string }> {
+  const out: Record<string, { label?: string; description?: string }> = {};
+  for (const r of rules ?? []) {
+    out[r.status] = {
+      ...(r.label !== undefined ? { label: r.label } : {}),
+      ...(r.description !== undefined ? { description: r.description } : {}),
+    };
+  }
+  return out;
+}
+
 type StatTone = 'new' | 'active' | 'risk' | 'inactive' | 'satisfied';
 
 interface ToneConfig {
@@ -244,6 +278,94 @@ function ProgressTiny({ pct }: { pct: number }) {
 }
 
 type RowKind = 'seeker' | 'provider' | 'opp';
+
+type ChipTone = 'soft' | 'warm' | 'cool' | 'mute';
+
+const CHIP_TONES: Record<ChipTone, string> = {
+  soft: 'bg-[var(--bd-primary-50)] text-primary-600 hover:bg-[var(--bd-primary-100)]',
+  warm: 'bg-amber-50 text-amber-800 hover:bg-amber-100',
+  cool: 'bg-sky-50 text-sky-800 hover:bg-sky-100',
+  mute: 'bg-ink-100 text-ink-600 hover:bg-ink-200',
+};
+
+interface RecommendedAction {
+  label: string;
+  tone: ChipTone;
+  icon: ReactNode;
+}
+
+/**
+ * Turns a signalstack `actionable_tags` entry into a chip. Tags follow
+ * the `missing_<required_field>` shape (e.g. `missing_contact_phone`),
+ * which we surface as "Add Contact Phone". Unknown tag shapes are
+ * title-cased verbatim so new server-side tags still render readably.
+ */
+function tagToAction(tag: string): RecommendedAction {
+  if (tag.startsWith('missing_')) {
+    const field = tag
+      .slice('missing_'.length)
+      .split('_')
+      .filter(Boolean)
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+      .join(' ');
+    return { label: `Add ${field}`, tone: 'warm', icon: <I.alert size={12} /> };
+  }
+  const label = tag
+    .split('_')
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+  return { label, tone: 'cool', icon: <I.spark size={12} /> };
+}
+
+/**
+ * Recommended-action chips for a row. Prefers signalstack's
+ * server-computed `actionableTags`; when none are present, falls back
+ * to a small client-side heuristic on status + profile completeness so
+ * the column is never empty.
+ */
+function recommendedActions(row: ParticipantBase, kind: RowKind): RecommendedAction[] {
+  const tags = row.actionableTags ?? [];
+  if (tags.length > 0) {
+    return tags.slice(0, 2).map(tagToAction);
+  }
+  const out: RecommendedAction[] = [];
+  if (row.status === 'at-risk')
+    out.push({ label: 'Re-engage', tone: 'warm', icon: <I.send size={12} /> });
+  if (row.status === 'inactive')
+    out.push({ label: 'Send nudge', tone: 'mute', icon: <I.bell size={12} /> });
+  if (!row.profile.verified)
+    out.push({ label: 'Verify', tone: 'cool', icon: <I.shield size={12} /> });
+  if (row.profile.complete < 70)
+    out.push({ label: 'Complete profile', tone: 'soft', icon: <I.spark size={12} /> });
+  if (kind === 'provider' && row.status === 'active')
+    out.push({ label: 'Suggest match', tone: 'soft', icon: <I.trending size={12} /> });
+  if (kind === 'seeker' && (row.applied.shortlisted ?? 0) >= 5)
+    out.push({ label: 'Coach interview', tone: 'soft', icon: <I.message size={12} /> });
+  if (out.length === 0)
+    out.push({ label: 'View profile', tone: 'mute', icon: <I.external size={12} /> });
+  return out.slice(0, 2);
+}
+
+function ActionChip({
+  label,
+  tone = 'soft',
+  icon,
+}: {
+  label: string;
+  tone?: ChipTone;
+  icon?: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11.5px] font-semibold transition-colors ${CHIP_TONES[tone]}`}
+    >
+      {icon}
+      {label}
+    </button>
+  );
+}
 
 type StatusFilter = string; // 'all' | any key signalstack returns in rollup.by_status
 
@@ -503,16 +625,14 @@ function ParticipantTable<R extends ParticipantBase>({
                 {kind === 'seeker' ? 'Participant' : 'Provider'}
               </th>
               <th>Joined</th>
-              {kind === 'provider' && <th>Job Role</th>}
               <th>Profile Status</th>
               <th>{bucketLabels['create'] ?? 'Applied'}</th>
               <th>Status</th>
+              <th>Recommended Action</th>
             </tr>
           </thead>
           <tbody>
             {visibleRows.map((r) => {
-              const roleParts =
-                kind === 'provider' ? (r as unknown as Provider).role.split(' · ') : [];
               return (
                 <tr key={r.id} className="fade-up">
                   <td
@@ -545,14 +665,6 @@ function ParticipantTable<R extends ParticipantBase>({
                     <div className="text-[13px] text-ink-700">{r.joined}</div>
                     <div className="text-[11px] text-ink-400 mt-0.5">last seen {r.last}</div>
                   </td>
-                  {kind === 'provider' && (
-                    <td>
-                      <div className="text-[13px] font-medium text-ink-800">
-                        {roleParts[0] ?? ''}
-                      </div>
-                      <div className="text-[11px] text-ink-400 mt-0.5">{roleParts[1] ?? ''}</div>
-                    </td>
-                  )}
                   <td>
                     <ProgressTiny pct={r.profile.complete} />
                   </td>
@@ -561,28 +673,41 @@ function ParticipantTable<R extends ParticipantBase>({
                       total={r.applied.total}
                       parts={[
                         {
-                          v: r.applied.shortlisted ?? 0,
-                          color: '#10B981',
+                          v: r.applied.pending,
+                          color: 'var(--bd-funnel-requested)',
+                          label: getBucketLabel(bucketLabels, 'create'),
+                          short: getBucketLabel(bucketLabels, 'create'),
+                        },
+                        {
+                          v: r.applied.accepted ?? 0,
+                          color: 'var(--bd-funnel-connected)',
                           label: getBucketLabel(bucketLabels, 'accept'),
                           short: getBucketLabel(bucketLabels, 'accept'),
                         },
                         {
                           v: r.applied.rejected,
-                          color: '#EF4444',
+                          color: 'var(--bd-funnel-declined)',
                           label: getBucketLabel(bucketLabels, 'reject'),
                           short: getBucketLabel(bucketLabels, 'reject'),
                         },
                         {
-                          v: r.applied.pending,
-                          color: '#F59E0B',
-                          label: getBucketLabel(bucketLabels, 'create'),
-                          short: getBucketLabel(bucketLabels, 'create'),
+                          v: r.applied.cancelled ?? 0,
+                          color: 'var(--bd-funnel-cancelled)',
+                          label: getBucketLabel(bucketLabels, 'cancel'),
+                          short: getBucketLabel(bucketLabels, 'cancel'),
                         },
                       ]}
                     />
                   </td>
                   <td>
                     <StatusPill status={r.status} />
+                  </td>
+                  <td>
+                    <div className="flex items-center gap-1.5">
+                      {recommendedActions(r, kind).map((a, i) => (
+                        <ActionChip key={i} {...a} />
+                      ))}
+                    </div>
                   </td>
                 </tr>
               );
@@ -780,6 +905,7 @@ function SeekersTab() {
   // participant table's action-count columns.
   const bucketLabels = cfg?.dashboardBuckets?.by_action_status ?? DEFAULT_BUCKET_LABELS;
   const statusLabels = cfg?.dashboardBuckets?.by_status ?? DEFAULT_STATUS_LABELS;
+  const statusRules = indexStatusRules(seekerCfg?.status_rules);
   const total = rollup?.total_items;
   const byStatus = rollup?.by_status ?? {};
   // Cache the unfiltered status taxonomy the first time it loads, so the
@@ -862,7 +988,9 @@ function SeekersTab() {
             {refreshing ? 'Refreshing…' : 'Refresh'}
           </Button>
           {refreshError ? (
-            <span className="ml-2 text-xs text-red-600">Refresh failed: {refreshError}</span>
+            <span className="ml-2 max-w-[220px] truncate text-xs text-red-600" title={refreshError}>
+              Refresh failed
+            </span>
           ) : lastRefreshedAt !== null && Date.now() - lastRefreshedAt < 5000 ? (
             <span className="text-xs text-ink-400">Refreshed just now</span>
           ) : null}
@@ -873,29 +1001,29 @@ function SeekersTab() {
           tone="new"
           icon="spark"
           count={fmtCount(byStatus['new'] ?? 0)}
-          label={statusLabels['new'] ?? 'New'}
-          hint="Recently joined"
+          label={statusRules['new']?.label ?? statusLabels['new'] ?? 'New'}
+          hint={statusRules['new']?.description ?? STATUS_HINTS.new}
         />
         <StatCard
           tone="active"
           icon="users"
           count={fmtCount(active)}
-          label={statusLabels['active'] ?? `Active ${seekerPlural}`}
-          hint="New or recently active"
+          label={statusRules['active']?.label ?? statusLabels['active'] ?? `Active ${seekerPlural}`}
+          hint={statusRules['active']?.description ?? STATUS_HINTS.active}
         />
         <StatCard
           tone="risk"
           icon="alert"
           count={fmtCount(atRisk)}
-          label={statusLabels['at_risk'] ?? 'At Risk'}
-          hint="No activity 14–30 days"
+          label={statusRules['at_risk']?.label ?? statusLabels['at_risk'] ?? 'At Risk'}
+          hint={statusRules['at_risk']?.description ?? STATUS_HINTS.at_risk}
         />
         <StatCard
           tone="inactive"
           icon="pause"
           count={fmtCount(inactive)}
-          label={statusLabels['inactive'] ?? 'Inactive'}
-          hint="Dormant 30+ days"
+          label={statusRules['inactive']?.label ?? statusLabels['inactive'] ?? 'Inactive'}
+          hint={statusRules['inactive']?.description ?? STATUS_HINTS.inactive}
         />
       </div>
 
@@ -1002,13 +1130,16 @@ function toSeekerRow(participant: Record<string, unknown>): Seeker {
         numberOr(participant.count_accept, 0) +
         numberOr(participant.count_reject, 0) +
         numberOr(participant.count_cancel, 0),
-      shortlisted: 0,
       accepted: numberOr(participant.count_accept, 0),
       rejected: numberOr(participant.count_reject, 0),
       pending: numberOr(participant.count_create, 0),
+      cancelled: numberOr(participant.count_cancel, 0),
     },
     status,
     last: updated ? formatRelative(updated) : '—',
+    actionableTags: Array.isArray(participant.actionable_tags)
+      ? (participant.actionable_tags as unknown[]).filter((t): t is string => typeof t === 'string')
+      : [],
   };
 }
 
@@ -1078,6 +1209,7 @@ function ProvidersTab() {
   // participant table's action-count columns.
   const bucketLabels = cfg?.dashboardBuckets?.by_action_status ?? DEFAULT_BUCKET_LABELS;
   const statusLabels = cfg?.dashboardBuckets?.by_status ?? DEFAULT_STATUS_LABELS;
+  const statusRules = indexStatusRules(providerCfg?.status_rules);
   const slice = dashboard?.by_domain.provider;
   const rollup = slice?.rollup;
   const total = rollup?.total_items;
@@ -1155,7 +1287,9 @@ function ProvidersTab() {
             {refreshing ? 'Refreshing…' : 'Refresh'}
           </Button>
           {refreshError ? (
-            <span className="ml-2 text-xs text-red-600">Refresh failed: {refreshError}</span>
+            <span className="ml-2 max-w-[220px] truncate text-xs text-red-600" title={refreshError}>
+              Refresh failed
+            </span>
           ) : lastRefreshedAt !== null && Date.now() - lastRefreshedAt < 5000 ? (
             <span className="text-xs text-ink-400">Refreshed just now</span>
           ) : null}
@@ -1166,29 +1300,29 @@ function ProvidersTab() {
           tone="new"
           icon="spark"
           count={fmtCount(byStatus['new'] ?? 0)}
-          label={statusLabels['new'] ?? 'New'}
-          hint="Recently joined"
+          label={statusRules['new']?.label ?? statusLabels['new'] ?? 'New'}
+          hint={statusRules['new']?.description ?? STATUS_HINTS.new}
         />
         <StatCard
           tone="active"
           icon="briefcase"
           count={fmtCount(active)}
-          label={statusLabels['active'] ?? 'Active'}
-          hint="Currently hiring"
+          label={statusRules['active']?.label ?? statusLabels['active'] ?? 'Active'}
+          hint={statusRules['active']?.description ?? STATUS_HINTS.active}
         />
         <StatCard
           tone="risk"
           icon="alert"
           count={fmtCount(atRisk)}
-          label={statusLabels['at_risk'] ?? 'At Risk'}
-          hint="Stalled requirements"
+          label={statusRules['at_risk']?.label ?? statusLabels['at_risk'] ?? 'At Risk'}
+          hint={statusRules['at_risk']?.description ?? STATUS_HINTS.at_risk}
         />
         <StatCard
           tone="inactive"
           icon="pause"
           count={fmtCount(inactive)}
-          label={statusLabels['inactive'] ?? 'Inactive'}
-          hint="No openings 30+ days"
+          label={statusRules['inactive']?.label ?? statusLabels['inactive'] ?? 'Inactive'}
+          hint={statusRules['inactive']?.description ?? STATUS_HINTS.inactive}
         />
       </div>
 
@@ -1377,7 +1511,18 @@ function DashboardContent({ aggregatorType }: { aggregatorType: 'seeker' | 'prov
         }
       />
 
-      <SegmentedTabs<Tab> value={tab} onChange={setTab} items={tabItems} className="mb-6" />
+      {tabItems.length > 1 ? (
+        <SegmentedTabs<Tab> value={tab} onChange={setTab} items={tabItems} className="mb-6" />
+      ) : (
+        // Single-domain aggregator: the lone tab carries no navigation
+        // value, so render it as a static label chip instead of a
+        // clickable button.
+        <div className="seg mb-6">
+          <span className="px-4 py-2 rounded-[9px] text-[13.5px] font-medium bg-[var(--bd-card)] text-[var(--bd-primary-600)] inline-flex items-center gap-2 shadow-[0_1px_2px_rgba(11,16,32,0.06)] cursor-default select-none">
+            {tabItems[0]?.label}
+          </span>
+        </div>
+      )}
 
       {tab === 'seekers' && <SeekersTab />}
       {tab === 'providers' && <ProvidersTab />}

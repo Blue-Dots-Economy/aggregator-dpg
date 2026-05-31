@@ -5,9 +5,14 @@ export type ProfileStatus = 'complete' | 'incomplete';
 export interface ParticipantStats {
   total: number;
   shortlisted?: number;
+  /** accept bucket — "Connected" for purple_dot. */
   accepted?: number;
+  /** reject bucket — "Declined" for purple_dot. */
   rejected: number;
+  /** create bucket — "Requested" for purple_dot. */
   pending: number;
+  /** cancel bucket — "Cancelled". */
+  cancelled?: number;
 }
 
 export interface ParticipantProfile {
@@ -27,6 +32,12 @@ export interface ParticipantBase {
   applied: ParticipantStats;
   status: ParticipantStatus;
   last: string;
+  /**
+   * Signalstack-computed `actionable_tags` for the row, e.g.
+   * `missing_contact_phone`. Drives the Recommended Action column.
+   * Empty when signalstack returns no tags.
+   */
+  actionableTags?: string[];
 }
 
 export type Seeker = ParticipantBase;
