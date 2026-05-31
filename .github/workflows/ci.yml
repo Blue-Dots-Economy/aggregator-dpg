@@ -4,9 +4,8 @@ on:
   push:
     branches:
       - main
-      - feature
       - develop
-  
+
     tags:
       - 'web-v*.*.*'
       - 'api-v*.*.*'
@@ -14,7 +13,6 @@ on:
   pull_request:
     branches:
       - main
-      - feature
       - develop
   workflow_dispatch:
 
