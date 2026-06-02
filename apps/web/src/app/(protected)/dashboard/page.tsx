@@ -4,6 +4,7 @@ import { useEffect, useState, useRef, useMemo, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { createPortal } from 'react-dom';
 import { useQueryClient } from '@tanstack/react-query';
+import { useTranslations } from 'next-intl';
 import { Button } from '../../../components/ui/Button';
 import { StatusPill } from '../../../components/ui/StatusPill';
 import { Avatar } from '../../../components/ui/Avatar';
@@ -34,20 +35,6 @@ const DEFAULT_STATUS_LABELS: Record<string, string> = {
   at_risk: 'At Risk',
   inactive: 'Inactive',
 };
-
-/**
- * Domain-neutral subtitle for each status card. The status thresholds
- * live in network.json `status_rules` (new ≤Nd, active recent, at_risk
- * stale window, inactive default) but the config carries no hint copy,
- * so these stay generic and accurate for any network (jobs, PWD
- * services, etc.) rather than the old job-flavoured strings.
- */
-const STATUS_HINTS = {
-  new: 'Recently joined',
-  active: 'Recently active',
-  at_risk: 'Slowing down',
-  inactive: 'No recent activity',
-} as const;
 
 /**
  * Indexes a domain's `status_rules` by status key so the dashboard can
@@ -401,10 +388,19 @@ function buildStatusOptions(byStatus: Record<string, number> | undefined): Statu
 
 /**
  * Looks up a bucket label from the config-sourced map, falling back to
- * `DEFAULT_BUCKET_LABELS` when the key is absent. Always returns a string.
+ * an optional translated fallback supplier, then the raw key. Always returns a string.
+ *
+ * @param labels - Config-sourced bucket label map (may be from `dashboardBuckets.by_action_status`).
+ * @param key - Bucket key (e.g. `'create'`, `'accept'`).
+ * @param getFallback - Optional function that returns the localised fallback label for the key.
+ * @returns The resolved label string.
  */
-function getBucketLabel(labels: Record<string, string>, key: string): string {
-  return labels[key] ?? DEFAULT_BUCKET_LABELS[key] ?? key;
+function getBucketLabel(
+  labels: Record<string, string>,
+  key: string,
+  getFallback?: (k: string) => string,
+): string {
+  return labels[key] ?? (getFallback ? getFallback(key) : DEFAULT_BUCKET_LABELS[key]) ?? key;
 }
 
 interface ParticipantTableProps<R extends ParticipantBase> {
@@ -451,6 +447,17 @@ function ParticipantTable<R extends ParticipantBase>({
   statusOptions,
   bucketLabels = DEFAULT_BUCKET_LABELS,
 }: ParticipantTableProps<R>) {
+  const t = useTranslations('dashboard');
+  /** Localised fallback for bucket keys when config-sourced labels are absent. */
+  const getBucketFallback = (key: string): string => {
+    const map: Record<string, string> = {
+      create: t('buckets.created'),
+      accept: t('buckets.accepted'),
+      reject: t('buckets.rejected'),
+      cancel: t('buckets.cancelled'),
+    };
+    return map[key] ?? key;
+  };
   const options: StatusOption[] = statusOptions ?? [{ value: 'all', label: 'All statuses' }];
   const searchId = `bd-search-${kind}`;
   const [exporting, setExporting] = useState(false);
@@ -536,7 +543,7 @@ function ParticipantTable<R extends ParticipantBase>({
               className="bd-input w-[320px] text-[13px] py-1.5"
               style={{ paddingLeft: 36 }}
               placeholder={
-                kind === 'seeker' ? 'Search name, ID, profile…' : 'Search org, role, ID…'
+                kind === 'seeker' ? t('search.seekerPlaceholder') : t('search.providerPlaceholder')
               }
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -597,7 +604,7 @@ function ParticipantTable<R extends ParticipantBase>({
             title={exportError ?? 'Export as CSV'}
             aria-label="Export as CSV"
           >
-            {exporting ? 'Exporting…' : 'Export CSV'}
+            {exporting ? t('buttons.exporting') : t('buttons.exportCsv')}
           </Button>
         </div>
       </div>
@@ -622,13 +629,13 @@ function ParticipantTable<R extends ParticipantBase>({
                   minWidth: 240,
                 }}
               >
-                {kind === 'seeker' ? 'Participant' : 'Provider'}
+                {kind === 'seeker' ? t('table.participant') : t('table.provider')}
               </th>
-              <th>Joined</th>
-              <th>Profile Status</th>
-              <th>{bucketLabels['create'] ?? 'Applied'}</th>
-              <th>Status</th>
-              <th>Recommended Action</th>
+              <th>{t('table.joined')}</th>
+              <th>{t('table.profileStatus')}</th>
+              <th>{bucketLabels['create'] ?? t('table.applied')}</th>
+              <th>{t('table.status')}</th>
+              <th>{t('table.recommendedAction')}</th>
             </tr>
           </thead>
           <tbody>
@@ -675,26 +682,26 @@ function ParticipantTable<R extends ParticipantBase>({
                         {
                           v: r.applied.pending,
                           color: 'var(--bd-funnel-requested)',
-                          label: getBucketLabel(bucketLabels, 'create'),
-                          short: getBucketLabel(bucketLabels, 'create'),
+                          label: getBucketLabel(bucketLabels, 'create', getBucketFallback),
+                          short: getBucketLabel(bucketLabels, 'create', getBucketFallback),
                         },
                         {
                           v: r.applied.accepted ?? 0,
                           color: 'var(--bd-funnel-connected)',
-                          label: getBucketLabel(bucketLabels, 'accept'),
-                          short: getBucketLabel(bucketLabels, 'accept'),
+                          label: getBucketLabel(bucketLabels, 'accept', getBucketFallback),
+                          short: getBucketLabel(bucketLabels, 'accept', getBucketFallback),
                         },
                         {
                           v: r.applied.rejected,
                           color: 'var(--bd-funnel-declined)',
-                          label: getBucketLabel(bucketLabels, 'reject'),
-                          short: getBucketLabel(bucketLabels, 'reject'),
+                          label: getBucketLabel(bucketLabels, 'reject', getBucketFallback),
+                          short: getBucketLabel(bucketLabels, 'reject', getBucketFallback),
                         },
                         {
                           v: r.applied.cancelled ?? 0,
                           color: 'var(--bd-funnel-cancelled)',
-                          label: getBucketLabel(bucketLabels, 'cancel'),
-                          short: getBucketLabel(bucketLabels, 'cancel'),
+                          label: getBucketLabel(bucketLabels, 'cancel', getBucketFallback),
+                          short: getBucketLabel(bucketLabels, 'cancel', getBucketFallback),
                         },
                       ]}
                     />
@@ -759,6 +766,7 @@ function PaginationFooter({
   searchActive = false,
   visibleCount,
 }: PaginationFooterProps) {
+  const t = useTranslations('dashboard');
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const start = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const end = (page - 1) * pageSize + rowsOnPage;
@@ -781,7 +789,7 @@ function PaginationFooter({
       <div>
         {showSearchSummary
           ? `Matching ${visibleCount} of ${rowsOnPage} on this page`
-          : `Showing ${start}–${end} of ${total}`}
+          : t('pagination.showing', { from: start, to: end, total })}
       </div>
       {totalPages > 1 && !searchActive && (
         <div className="flex items-center gap-1">
@@ -873,6 +881,7 @@ function ErrorCard() {
 const PAGE_SIZE = 25;
 
 function SeekersTab() {
+  const t = useTranslations('dashboard');
   // Signalstack's `/aggregator/dashboard` is the only endpoint that
   // correctly scopes participant lookups by the caller's signalstack org
   // (via the per-call `x-acting-org-id` header). The response now
@@ -985,7 +994,7 @@ function SeekersTab() {
             aria-label="Refresh dashboard"
             title="Refresh dashboard"
           >
-            {refreshing ? 'Refreshing…' : 'Refresh'}
+            {refreshing ? t('buttons.refreshing') : t('buttons.refresh')}
           </Button>
           {refreshError ? (
             <span className="ml-2 max-w-[220px] truncate text-xs text-red-600" title={refreshError}>
@@ -1001,29 +1010,35 @@ function SeekersTab() {
           tone="new"
           icon="spark"
           count={fmtCount(byStatus['new'] ?? 0)}
-          label={statusRules['new']?.label ?? statusLabels['new'] ?? 'New'}
-          hint={statusRules['new']?.description ?? STATUS_HINTS.new}
+          label={statusRules['new']?.label ?? statusLabels['new'] ?? t('statuses.new')}
+          hint={statusRules['new']?.description ?? t('hints.new')}
         />
         <StatCard
           tone="active"
           icon="users"
           count={fmtCount(active)}
-          label={statusRules['active']?.label ?? statusLabels['active'] ?? `Active ${seekerPlural}`}
-          hint={statusRules['active']?.description ?? STATUS_HINTS.active}
+          label={
+            statusRules['active']?.label ??
+            statusLabels['active'] ??
+            `${t('statuses.active')} ${seekerPlural}`
+          }
+          hint={statusRules['active']?.description ?? t('hints.active')}
         />
         <StatCard
           tone="risk"
           icon="alert"
           count={fmtCount(atRisk)}
-          label={statusRules['at_risk']?.label ?? statusLabels['at_risk'] ?? 'At Risk'}
-          hint={statusRules['at_risk']?.description ?? STATUS_HINTS.at_risk}
+          label={statusRules['at_risk']?.label ?? statusLabels['at_risk'] ?? t('statuses.at_risk')}
+          hint={statusRules['at_risk']?.description ?? t('hints.at_risk')}
         />
         <StatCard
           tone="inactive"
           icon="pause"
           count={fmtCount(inactive)}
-          label={statusRules['inactive']?.label ?? statusLabels['inactive'] ?? 'Inactive'}
-          hint={statusRules['inactive']?.description ?? STATUS_HINTS.inactive}
+          label={
+            statusRules['inactive']?.label ?? statusLabels['inactive'] ?? t('statuses.inactive')
+          }
+          hint={statusRules['inactive']?.description ?? t('hints.inactive')}
         />
       </div>
 
@@ -1180,6 +1195,7 @@ function formatRelative(iso: string): string {
 }
 
 function ProvidersTab() {
+  const t = useTranslations('dashboard');
   // Mirror SeekersTab: live counts come from the signalstack dashboard
   // rollup. Provider domain reuses the same canonical rollup shape
   // (total_items, by_status, by_action_status, complete_profiles, …)
@@ -1284,7 +1300,7 @@ function ProvidersTab() {
             aria-label="Refresh dashboard"
             title="Refresh dashboard"
           >
-            {refreshing ? 'Refreshing…' : 'Refresh'}
+            {refreshing ? t('buttons.refreshing') : t('buttons.refresh')}
           </Button>
           {refreshError ? (
             <span className="ml-2 max-w-[220px] truncate text-xs text-red-600" title={refreshError}>
@@ -1300,29 +1316,31 @@ function ProvidersTab() {
           tone="new"
           icon="spark"
           count={fmtCount(byStatus['new'] ?? 0)}
-          label={statusRules['new']?.label ?? statusLabels['new'] ?? 'New'}
-          hint={statusRules['new']?.description ?? STATUS_HINTS.new}
+          label={statusRules['new']?.label ?? statusLabels['new'] ?? t('statuses.new')}
+          hint={statusRules['new']?.description ?? t('hints.new')}
         />
         <StatCard
           tone="active"
           icon="briefcase"
           count={fmtCount(active)}
-          label={statusRules['active']?.label ?? statusLabels['active'] ?? 'Active'}
-          hint={statusRules['active']?.description ?? STATUS_HINTS.active}
+          label={statusRules['active']?.label ?? statusLabels['active'] ?? t('statuses.active')}
+          hint={statusRules['active']?.description ?? t('hints.active')}
         />
         <StatCard
           tone="risk"
           icon="alert"
           count={fmtCount(atRisk)}
-          label={statusRules['at_risk']?.label ?? statusLabels['at_risk'] ?? 'At Risk'}
-          hint={statusRules['at_risk']?.description ?? STATUS_HINTS.at_risk}
+          label={statusRules['at_risk']?.label ?? statusLabels['at_risk'] ?? t('statuses.at_risk')}
+          hint={statusRules['at_risk']?.description ?? t('hints.at_risk')}
         />
         <StatCard
           tone="inactive"
           icon="pause"
           count={fmtCount(inactive)}
-          label={statusRules['inactive']?.label ?? statusLabels['inactive'] ?? 'Inactive'}
-          hint={statusRules['inactive']?.description ?? STATUS_HINTS.inactive}
+          label={
+            statusRules['inactive']?.label ?? statusLabels['inactive'] ?? t('statuses.inactive')
+          }
+          hint={statusRules['inactive']?.description ?? t('hints.inactive')}
         />
       </div>
 

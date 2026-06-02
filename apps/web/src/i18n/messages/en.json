@@ -20,6 +20,48 @@
     "footer_note": "Your application will be reviewed by the {brand} team. You'll receive an email once approved, then sign in via {brand} SSO.",
     "validation_error_title": "Please fix the highlighted fields"
   },
+  "dashboard": {
+    "buckets": {
+      "created": "Created",
+      "accepted": "Accepted",
+      "rejected": "Rejected",
+      "cancelled": "Cancelled"
+    },
+    "statuses": {
+      "new": "New",
+      "active": "Active",
+      "at_risk": "At Risk",
+      "inactive": "Inactive"
+    },
+    "hints": {
+      "new": "Recently joined",
+      "active": "Recently active",
+      "at_risk": "Slowing down",
+      "inactive": "No recent activity"
+    },
+    "table": {
+      "participant": "Participant",
+      "provider": "Provider",
+      "joined": "Joined",
+      "profileStatus": "Profile Status",
+      "status": "Status",
+      "recommendedAction": "Recommended Action",
+      "applied": "Applied"
+    },
+    "search": {
+      "seekerPlaceholder": "Search name, ID, profile…",
+      "providerPlaceholder": "Search org, role, ID…"
+    },
+    "pagination": {
+      "showing": "Showing {from}–{to} of {total}"
+    },
+    "buttons": {
+      "exportCsv": "Export CSV",
+      "exporting": "Exporting…",
+      "refresh": "Refresh",
+      "refreshing": "Refreshing…"
+    }
+  },
   "auth": {
     "welcome_heading": "Welcome back.",
     "welcome_sub": "Sign in or register your organisation to get started.",

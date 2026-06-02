@@ -20,6 +20,48 @@
     "footer_note": "आपके आवेदन की समीक्षा {brand} टीम द्वारा की जाएगी। स्वीकृति के बाद आपको एक ईमेल मिलेगा, फिर {brand} SSO के माध्यम से साइन इन करें।",
     "validation_error_title": "कृपया हाइलाइट किए गए फ़ील्ड ठीक करें"
   },
+  "dashboard": {
+    "buckets": {
+      "created": "बनाया गया",
+      "accepted": "स्वीकृत",
+      "rejected": "अस्वीकृत",
+      "cancelled": "रद्द किया गया"
+    },
+    "statuses": {
+      "new": "नया",
+      "active": "सक्रिय",
+      "at_risk": "जोखिम में",
+      "inactive": "निष्क्रिय"
+    },
+    "hints": {
+      "new": "हाल ही में जुड़े",
+      "active": "हाल ही में सक्रिय",
+      "at_risk": "धीमे पड़ रहे हैं",
+      "inactive": "कोई हालिया गतिविधि नहीं"
+    },
+    "table": {
+      "participant": "प्रतिभागी",
+      "provider": "प्रदाता",
+      "joined": "जुड़ने की तारीख",
+      "profileStatus": "प्रोफ़ाइल स्थिति",
+      "status": "स्थिति",
+      "recommendedAction": "अनुशंसित कार्रवाई",
+      "applied": "आवेदन किया"
+    },
+    "search": {
+      "seekerPlaceholder": "नाम, आईडी, प्रोफ़ाइल खोजें…",
+      "providerPlaceholder": "संगठन, भूमिका, आईडी खोजें…"
+    },
+    "pagination": {
+      "showing": "{total} में से {from}–{to} दिखाए जा रहे हैं"
+    },
+    "buttons": {
+      "exportCsv": "CSV निर्यात करें",
+      "exporting": "निर्यात हो रहा है…",
+      "refresh": "रिफ्रेश करें",
+      "refreshing": "रिफ्रेश हो रहा है…"
+    }
+  },
   "auth": {
     "welcome_heading": "वापसी पर स्वागत है।",
     "welcome_sub": "शुरू करने के लिए साइन इन करें या अपना संगठन पंजीकृत करें।",
