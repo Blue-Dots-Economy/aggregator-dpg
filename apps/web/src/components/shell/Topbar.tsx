@@ -3,6 +3,7 @@
 import type { ReactNode } from 'react';
 import { I } from '../../icons';
 import { useThemeMode } from '../../lib/theme-mode';
+import { LanguageSwitcher } from './LanguageSwitcher';
 
 interface TopbarProps {
   title: string;
@@ -22,6 +23,7 @@ export function Topbar({ title, subtitle, right }: TopbarProps) {
       </div>
       <div className="flex items-center gap-2 shrink-0">
         {right}
+        <LanguageSwitcher />
         <button
           type="button"
           onClick={toggle}

@@ -6,7 +6,10 @@ const { refresh, setLocale } = vi.hoisted(() => ({
   setLocale: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock('next-intl', () => ({ useLocale: () => 'en' }));
+vi.mock('next-intl', () => ({
+  useLocale: () => 'en',
+  useTranslations: () => (key: string) => (key === 'label' ? 'Language' : key),
+}));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }));
 vi.mock('@/i18n/locale-cookie', () => ({ setLocale }));
 

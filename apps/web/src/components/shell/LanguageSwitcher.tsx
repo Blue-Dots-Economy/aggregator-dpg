@@ -1,10 +1,10 @@
 'use client';
 
 import { useTransition } from 'react';
-import { useLocale } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { useRouter } from 'next/navigation';
 import { Languages } from 'lucide-react';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/Select';
 import { getEnabledLocales, LOCALE_NAMES } from '../../i18n/config';
 import { setLocale } from '../../i18n/locale-cookie';
 
@@ -16,6 +16,7 @@ import { setLocale } from '../../i18n/locale-cookie';
  */
 export function LanguageSwitcher() {
   const locale = useLocale();
+  const t = useTranslations('language');
   const router = useRouter();
   const [, startTransition] = useTransition();
   const enabled = getEnabledLocales();
@@ -31,7 +32,7 @@ export function LanguageSwitcher() {
 
   return (
     <Select value={locale} onValueChange={handleChange}>
-      <SelectTrigger aria-label={LOCALE_NAMES_LABEL} className="w-auto gap-1.5 px-2.5 py-2">
+      <SelectTrigger aria-label={t('label')} className="w-auto gap-1.5 px-2.5 py-2">
         <Languages className="h-4 w-4 shrink-0 opacity-70" />
         <SelectValue />
       </SelectTrigger>
@@ -45,8 +46,3 @@ export function LanguageSwitcher() {
     </Select>
   );
 }
-
-// Accessible name for the trigger. Kept as a constant for now so the Task 5
-// unit test stays isolated from the i18n provider; Task 6 swaps this for a
-// useTranslations('language') -> t('label') call.
-const LOCALE_NAMES_LABEL = 'Language';
