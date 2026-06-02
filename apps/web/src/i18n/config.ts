@@ -8,6 +8,9 @@
  */
 
 export const SUPPORTED_LOCALES = ['en', 'kn', 'hi'] as const;
+
+/** Cookie name that carries the user's chosen UI locale. */
+export const LOCALE_COOKIE = 'NEXT_LOCALE';
 export type Locale = (typeof SUPPORTED_LOCALES)[number];
 
 export const DEFAULT_LOCALE: Locale = 'en';

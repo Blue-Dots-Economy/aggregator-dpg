@@ -1,7 +1,6 @@
 import { getRequestConfig } from 'next-intl/server';
 import { cookies, headers } from 'next/headers';
-import { resolveLocale } from './config';
-import { LOCALE_COOKIE } from './locale-cookie';
+import { resolveLocale, LOCALE_COOKIE } from './config';
 
 /**
  * Server-side per-request i18n config for next-intl (no-routing mode).

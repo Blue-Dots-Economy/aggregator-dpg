@@ -1,10 +1,7 @@
 'use server';
 
 import { cookies } from 'next/headers';
-import { DEFAULT_LOCALE, isEnabledLocale } from './config';
-
-/** Cookie that carries the user's chosen UI locale. */
-export const LOCALE_COOKIE = 'NEXT_LOCALE';
+import { DEFAULT_LOCALE, isEnabledLocale, LOCALE_COOKIE } from './config';
 
 /**
  * Persists the chosen UI locale to the `NEXT_LOCALE` cookie.
