@@ -9,6 +9,7 @@ import { RjsfThemedForm } from '../../../components/forms/RjsfThemed';
 import { BlueDotsLogo } from '../../../components/ui/BlueDotsLogo';
 import { BrandPanel } from '../../../components/login/BrandPanel';
 import { I } from '../../../icons';
+import { useTranslations } from 'next-intl';
 import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
 
 export interface RegisterViewProps {
@@ -149,6 +150,7 @@ function parseError(
  * the BFF, which proxies to the API.
  */
 export function RegisterView({ schema, uiSchema }: RegisterViewProps): JSX.Element {
+  const t = useTranslations('register');
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
   const brand = cfg.brand.short_name;
   // Controlled form data. The initial value seeds the location card +
@@ -190,7 +192,7 @@ export function RegisterView({ schema, uiSchema }: RegisterViewProps): JSX.Eleme
   // schema's `description` field is intentionally technical (it documents
   // the API contract) and is hidden from the form UI.
   const headingTitle = (schema.title as string | undefined) ?? 'Aggregator Registration';
-  const headingTagline = 'Tell us about your organisation.';
+  const headingTagline = t('heading_tagline');
 
   const formSchema = useMemo<RJSFSchema>(() => {
     const clone: RJSFSchema = { ...schema };
@@ -303,14 +305,14 @@ export function RegisterView({ schema, uiSchema }: RegisterViewProps): JSX.Eleme
           {state.status === 'done' ? (
             <div className="mt-8 rounded-[14px] border border-emerald-200 bg-emerald-50 p-6">
               <div className="font-display font-bold text-[18px] text-emerald-800">
-                Application received
+                {t('success_heading')}
               </div>
               <p className="text-[14px] text-emerald-700 mt-2">
-                Reference ID: <code className="font-mono text-[12.5px]">{state.aggregatorId}</code>
+                {t('success_ref_id')}{' '}
+                <code className="font-mono text-[12.5px]">{state.aggregatorId}</code>
               </p>
               <p className="text-[14px] text-emerald-700 mt-3">
-                The {brand} team will review your application. Once approved, sign in via {brand}{' '}
-                SSO using the email or mobile you registered.
+                {t('success_approval', { brand })}
               </p>
               <Link
                 href="/login"
@@ -368,7 +370,7 @@ export function RegisterView({ schema, uiSchema }: RegisterViewProps): JSX.Eleme
                   const rawDump = JSON.stringify(errs, null, 2);
                   setState({
                     status: 'error',
-                    title: 'Please fix the highlighted fields',
+                    title: t('validation_error_title'),
                     detail: lines.join('\n'),
                     code: 'CLIENT_VALIDATION',
                     requestId: rawDump,
@@ -392,15 +394,14 @@ export function RegisterView({ schema, uiSchema }: RegisterViewProps): JSX.Eleme
                           : 'bg-[var(--bd-primary)] hover:bg-[var(--bd-primary-600)] bd-shadow-lg'
                       }`}
                   >
-                    {state.status === 'submitting' ? 'Submitting…' : 'Submit application'}
+                    {state.status === 'submitting' ? t('submitting') : t('submit')}
                   </button>
                 </div>
               </RjsfThemedForm>
 
               <div className="mt-5 text-[12px] text-ink-400 flex items-start gap-2">
                 <span className="w-1 h-1 rounded-full bg-ink-300 mt-1.5 shrink-0" />
-                Your application will be reviewed by the {brand} team. You{'’'}ll receive an email
-                once approved, then sign in via {brand} SSO.
+                {t('footer_note', { brand })}
               </div>
             </div>
           )}

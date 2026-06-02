@@ -10,6 +10,16 @@
     "continue": "Continue",
     "loading": "Loading…"
   },
+  "register": {
+    "heading_tagline": "Tell us about your organisation.",
+    "success_heading": "Application received",
+    "success_ref_id": "Reference ID:",
+    "success_approval": "The {brand} team will review your application. Once approved, sign in via {brand} SSO using the email or mobile you registered.",
+    "submit": "Submit application",
+    "submitting": "Submitting…",
+    "footer_note": "Your application will be reviewed by the {brand} team. You'll receive an email once approved, then sign in via {brand} SSO.",
+    "validation_error_title": "Please fix the highlighted fields"
+  },
   "auth": {
     "welcome_heading": "Welcome back.",
     "welcome_sub": "Sign in or register your organisation to get started.",
