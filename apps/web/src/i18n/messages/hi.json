@@ -1,5 +1,23 @@
 {
   "language": { "label": "भाषा" },
+  "theme": {
+    "switch_to_light": "लाइट थीम पर स्विच करें",
+    "switch_to_dark": "डार्क थीम पर स्विच करें",
+    "toggle_aria": "थीम टॉगल करें"
+  },
+  "form": {
+    "select_placeholder": "चुनें…",
+    "comma_separated": "अल्पविराम से अलग किए गए मान",
+    "select_options": "विकल्प चुनें…"
+  },
+  "status_pill": {
+    "active": "सक्रिय",
+    "at_risk": "जोखिम में",
+    "inactive": "निष्क्रिय",
+    "satisfied": "संतुष्ट",
+    "complete": "पूर्ण",
+    "incomplete": "अपूर्ण"
+  },
   "metadata": {
     "title": "एग्रीगेटर पोर्टल",
     "description": "सिग्नलस्टैक-समर्थित प्रतिभागी नेटवर्क के लिए एग्रीगेटर पोर्टल।"

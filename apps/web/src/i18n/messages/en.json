@@ -1,5 +1,23 @@
 {
   "language": { "label": "Language" },
+  "theme": {
+    "switch_to_light": "Switch to light theme",
+    "switch_to_dark": "Switch to dark theme",
+    "toggle_aria": "Toggle theme"
+  },
+  "form": {
+    "select_placeholder": "Select…",
+    "comma_separated": "Comma-separated values",
+    "select_options": "Select options…"
+  },
+  "status_pill": {
+    "active": "Active",
+    "at_risk": "At Risk",
+    "inactive": "Inactive",
+    "satisfied": "Satisfied",
+    "complete": "Complete",
+    "incomplete": "Incomplete"
+  },
   "metadata": {
     "title": "Aggregator Portal",
     "description": "Aggregator portal for signalstack-backed participant networks."

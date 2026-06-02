@@ -16,6 +16,7 @@ import type {
   GenericObjectType,
 } from '@rjsf/utils';
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
+import { useTranslations } from 'next-intl';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/Select';
 import { MultiSelect } from '../ui/MultiSelect';
 
@@ -69,6 +70,7 @@ function TextareaWidget(props: WidgetProps) {
 
 function SelectWidget(props: WidgetProps) {
   const { id, value, required, disabled, readonly, onChange, options, placeholder } = props;
+  const t = useTranslations('form');
   const enumOptions =
     (options['enumOptions'] as { value: unknown; label: string }[] | undefined) ?? [];
   // shadcn Select disallows the empty-string sentinel as a value; map
@@ -83,7 +85,7 @@ function SelectWidget(props: WidgetProps) {
       required={Boolean(required)}
     >
       <SelectTrigger id={id} {...(required ? { 'aria-required': true } : {})}>
-        <SelectValue placeholder={placeholder ?? 'Select…'} />
+        <SelectValue placeholder={placeholder ?? t('select_placeholder')} />
       </SelectTrigger>
       <SelectContent>
         {enumOptions.map((opt) => (
@@ -123,6 +125,7 @@ function DateWidget(props: WidgetProps) {
  */
 function CommaSeparatedArrayWidget(props: WidgetProps) {
   const { id, value, required, disabled, readonly, onChange, placeholder } = props;
+  const t = useTranslations('form');
   const arrayValue = Array.isArray(value) ? (value as unknown[]).filter(Boolean) : [];
   const [text, setText] = useState<string>(arrayValue.join(', '));
   const lastSyncedRef = useRef<string>(arrayValue.join('|'));
@@ -145,7 +148,7 @@ function CommaSeparatedArrayWidget(props: WidgetProps) {
       value={text}
       required={required}
       disabled={disabled || readonly}
-      placeholder={placeholder ?? 'Comma-separated values'}
+      placeholder={placeholder ?? t('comma_separated')}
       onChange={(e: ChangeEvent<HTMLInputElement>) => {
         setText(e.target.value);
         const arr = e.target.value
@@ -350,6 +353,7 @@ function TitleField(_props: TitleFieldProps) {
  */
 function CheckboxesWidget(props: WidgetProps) {
   const { id, value, required, disabled, readonly, onChange, options, placeholder } = props;
+  const t = useTranslations('form');
   const enumOptions =
     (options['enumOptions'] as Array<{ value: string; label: string }> | undefined) ?? [];
   const current: string[] = Array.isArray(value)
@@ -361,7 +365,7 @@ function CheckboxesWidget(props: WidgetProps) {
       options={enumOptions}
       value={current}
       onChange={(next) => onChange(next.length > 0 ? next : undefined)}
-      placeholder={placeholder ?? 'Select options…'}
+      placeholder={placeholder ?? t('select_options')}
       disabled={Boolean(disabled || readonly)}
       required={Boolean(required)}
     />

@@ -1,5 +1,23 @@
 {
   "language": { "label": "ಭಾಷೆ" },
+  "theme": {
+    "switch_to_light": "ಬೆಳಕಿನ ಥೀಮ್‌ಗೆ ಬದಲಿಸಿ",
+    "switch_to_dark": "ಗಾಢ ಥೀಮ್‌ಗೆ ಬದಲಿಸಿ",
+    "toggle_aria": "ಥೀಮ್ ಬದಲಿಸಿ"
+  },
+  "form": {
+    "select_placeholder": "ಆಯ್ಕೆಮಾಡಿ…",
+    "comma_separated": "ಅಲ್ಪವಿರಾಮದಿಂದ ಬೇರ್ಪಡಿಸಿದ ಮೌಲ್ಯಗಳು",
+    "select_options": "ಆಯ್ಕೆಗಳನ್ನು ಆರಿಸಿ…"
+  },
+  "status_pill": {
+    "active": "ಸಕ್ರಿಯ",
+    "at_risk": "ಅಪಾಯದಲ್ಲಿ",
+    "inactive": "ನಿಷ್ಕ್ರಿಯ",
+    "satisfied": "ತೃಪ್ತ",
+    "complete": "ಪೂರ್ಣ",
+    "incomplete": "ಅಪೂರ್ಣ"
+  },
   "metadata": {
     "title": "ಅಗ್ರಿಗೇಟರ್ ಪೋರ್ಟಲ್",
     "description": "ಸಿಗ್ನಲ್‌ಸ್ಟ್ಯಾಕ್ ಆಧಾರಿತ ಭಾಗವಹಿಸುವ ನೆಟ್‌ವರ್ಕ್‌ಗಳಿಗಾಗಿ ಅಗ್ರಿಗೇಟರ್ ಪೋರ್ಟಲ್."

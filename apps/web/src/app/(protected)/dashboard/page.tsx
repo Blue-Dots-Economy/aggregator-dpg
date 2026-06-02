@@ -20,22 +20,6 @@ import type { ParticipantBase, ParticipantStatus, Provider, Seeker } from '../..
 
 type Tab = 'seekers' | 'providers' | 'opp';
 
-/** Fallback bucket labels used when network.json doesn't override them. */
-const DEFAULT_BUCKET_LABELS: Record<string, string> = {
-  create: 'Created',
-  accept: 'Accepted',
-  reject: 'Rejected',
-  cancel: 'Cancelled',
-};
-
-/** Fallback status labels used when network.json doesn't override them. */
-const DEFAULT_STATUS_LABELS: Record<string, string> = {
-  new: 'New',
-  active: 'Active',
-  at_risk: 'At Risk',
-  inactive: 'Inactive',
-};
-
 /**
  * Indexes a domain's `status_rules` by status key so the dashboard can
  * pull per-status label/description copy onto the status cards.
@@ -403,7 +387,7 @@ function getBucketLabel(
   key: string,
   getFallback?: (k: string) => string,
 ): string {
-  return labels[key] ?? (getFallback ? getFallback(key) : DEFAULT_BUCKET_LABELS[key]) ?? key;
+  return labels[key] ?? getFallback?.(key) ?? key;
 }
 
 interface ParticipantTableProps<R extends ParticipantBase> {
@@ -433,7 +417,7 @@ interface ParticipantTableProps<R extends ParticipantBase> {
   statusOptions?: StatusOption[] | undefined;
   /**
    * Action-status bucket labels sourced from `dashboardBuckets.by_action_status`
-   * in the aggregator config. Falls back to `DEFAULT_BUCKET_LABELS` when absent.
+   * in the aggregator config. Falls back to localised `t('buckets.*')` when absent.
    */
   bucketLabels?: Record<string, string> | undefined;
 }
@@ -448,7 +432,7 @@ function ParticipantTable<R extends ParticipantBase>({
   statusFilter = 'all',
   onStatusFilterChange,
   statusOptions,
-  bucketLabels = DEFAULT_BUCKET_LABELS,
+  bucketLabels = {},
 }: ParticipantTableProps<R>) {
   const t = useTranslations('dashboard');
   /** Localised fallback for bucket keys when config-sourced labels are absent. */
@@ -918,8 +902,8 @@ function SeekersTab() {
   const seekerPlural = seekerCfg?.plural_label ?? t('tabs.seekers');
   // by_action_status bucket labels — wired to the funnel cells in the
   // participant table's action-count columns.
-  const bucketLabels = cfg?.dashboardBuckets?.by_action_status ?? DEFAULT_BUCKET_LABELS;
-  const statusLabels = cfg?.dashboardBuckets?.by_status ?? DEFAULT_STATUS_LABELS;
+  const bucketLabels = cfg?.dashboardBuckets?.by_action_status ?? {};
+  const statusLabels = cfg?.dashboardBuckets?.by_status ?? {};
   const statusRules = indexStatusRules(seekerCfg?.status_rules);
   const total = rollup?.total_items;
   const byStatus = rollup?.by_status ?? {};
@@ -1238,8 +1222,8 @@ function ProvidersTab() {
   const providerPlural = providerCfg?.plural_label ?? t('tabs.providers');
   // by_action_status bucket labels — wired to the funnel cells in the
   // participant table's action-count columns.
-  const bucketLabels = cfg?.dashboardBuckets?.by_action_status ?? DEFAULT_BUCKET_LABELS;
-  const statusLabels = cfg?.dashboardBuckets?.by_status ?? DEFAULT_STATUS_LABELS;
+  const bucketLabels = cfg?.dashboardBuckets?.by_action_status ?? {};
+  const statusLabels = cfg?.dashboardBuckets?.by_status ?? {};
   const statusRules = indexStatusRules(providerCfg?.status_rules);
   const slice = dashboard?.by_domain.provider;
   const rollup = slice?.rollup;
