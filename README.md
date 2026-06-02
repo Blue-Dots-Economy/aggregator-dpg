@@ -345,6 +345,32 @@ Engineering controls required regardless of how these resolve:
 - Content in English for MVP; copy externalised via i18n so Hindi and regional languages can be added without code changes (consistent with the PRD examples spanning PwD / Farming / Welfare / MSME use cases).
 - UI meets WCAG 2.1 AA — keyboard-navigable, screen-reader labels on all form fields in the dynamic profile form, contrast ≥ 4.5:1.
 
+#### i18n implementation (`apps/web`)
+
+**Library:** [next-intl](https://next-intl-docs.vercel.app/). Locale selection is cookie-based (`NEXT_LOCALE` cookie); no locale-prefixed URLs (e.g. `/en/dashboard`).
+
+**Message catalogs:** `apps/web/src/i18n/messages/<code>.json` — one file per locale. `en.json` is the canonical source of truth. `kn.json` and `hi.json` must mirror the full key tree; a parity test in the web package enforces this.
+
+**Runtime language switcher:** controlled by the `NEXT_PUBLIC_ENABLED_LANGUAGES` env var (comma-separated locale codes, e.g. `en,kn,hi`). Only codes listed here appear in the UI switcher; `en` is always included as the fallback. If the var is unset all supported locales are shown.
+
+**Adding a new language:**
+
+1. Add `apps/web/src/i18n/messages/<code>.json` with every key present in `en.json`.
+2. Add the locale code to `SUPPORTED_LOCALES` and a display name to `LOCALE_NAMES` in `apps/web/src/i18n/config.ts`.
+3. Include the code in `NEXT_PUBLIC_ENABLED_LANGUAGES` in your `.env` (dev) or as a Docker build arg (prod — see Docker section below).
+
+**Scope:** UI chrome only (navigation, labels, headings, status text). RJSF form field labels, API response strings, and transactional emails are **not** localised.
+
+**Docker / production note:** `NEXT_PUBLIC_ENABLED_LANGUAGES` is baked into the client bundle at `next build` time, not at runtime. When building the `web` Docker image you must pass it as a build arg:
+
+```bash
+docker build \
+  --build-arg NEXT_PUBLIC_ENABLED_LANGUAGES=en,kn,hi \
+  -f apps/web/Dockerfile .
+```
+
+With `docker compose` the value flows automatically from `.env` via the `build.args` entry in `docker-compose.yml`; override it in `.env` before running `make up` or `docker compose up -d --build`.
+
 ---
 
 ## 8. Open items and assumptions
