@@ -48,7 +48,18 @@
       "profileStatus": "ಪ್ರೊಫೈಲ್ ಸ್ಥಿತಿ",
       "status": "ಸ್ಥಿತಿ",
       "recommendedAction": "ಶಿಫಾರಸ್ಸು ಮಾಡಿದ ಕ್ರಮ",
-      "applied": "ಅರ್ಜಿ ಸಲ್ಲಿಸಿದ"
+      "applied": "ಅರ್ಜಿ ಸಲ್ಲಿಸಿದ",
+      "count": "{total} ರಲ್ಲಿ {shown}"
+    },
+    "filters": {
+      "all_statuses": "ಎಲ್ಲಾ ಸ್ಥಿತಿಗಳು"
+    },
+    "aria": {
+      "search_participants": "ಭಾಗವಹಿಸುವವರನ್ನು ಹುಡುಕಿ",
+      "export_csv": "CSV ಆಗಿ ರಫ್ತು ಮಾಡಿ",
+      "prev_page": "ಹಿಂದಿನ ಪುಟ",
+      "next_page": "ಮುಂದಿನ ಪುಟ",
+      "refresh": "ಡ್ಯಾಶ್‌ಬೋರ್ಡ್ ರಿಫ್ರೆಶ್ ಮಾಡಿ"
     },
     "tabs": {
       "seekers": "ಅರ್ಜಿದಾರರು",
@@ -79,7 +90,8 @@
       "completeProfiles": "ಪೂರ್ಣ ಪ್ರೊಫೈಲ್‌ಗಳು",
       "totalItems": "ಒಟ್ಟು {entityPlural}",
       "withApplications": "ಅರ್ಜಿಗಳೊಂದಿಗೆ {entityPlural}",
-      "newParticipants": "ಹೊಸ ಭಾಗವಹಿಸುವವರು"
+      "newParticipants": "ಹೊಸ ಭಾಗವಹಿಸುವವರು",
+      "delta_this_week": "ಈ ವಾರ"
     },
     "opp": {
       "activeProgramsLabel": "ಸಕ್ರಿಯ ಕಾರ್ಯಕ್ರಮಗಳು",
@@ -199,7 +211,8 @@
       "title": "ನಿಮ್ಮ ನೋಂದಣಿ ಲಿಂಕ್‌ಗಳು",
       "loading": "ಲಿಂಕ್‌ಗಳು ಲೋಡ್ ಆಗುತ್ತಿವೆ…",
       "empty": "ಇನ್ನೂ {type} ಲಿಂಕ್‌ಗಳಿಲ್ಲ. ಮೇಲೆ ಒಂದನ್ನು ರಚಿಸಿ.",
-      "active_count": "{count} ಸಕ್ರಿಯ"
+      "active_count": "{count} ಸಕ್ರಿಯ",
+      "type_pill": "{type} ಲಿಂಕ್‌ಗಳು"
     },
     "link_card": {
       "copy_link": "ಲಿಂಕ್ ನಕಲಿಸಿ",

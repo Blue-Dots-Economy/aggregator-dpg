@@ -48,7 +48,18 @@
       "profileStatus": "Profile Status",
       "status": "Status",
       "recommendedAction": "Recommended Action",
-      "applied": "Applied"
+      "applied": "Applied",
+      "count": "{shown} of {total}"
+    },
+    "filters": {
+      "all_statuses": "All statuses"
+    },
+    "aria": {
+      "search_participants": "Search participants",
+      "export_csv": "Export as CSV",
+      "prev_page": "Previous page",
+      "next_page": "Next page",
+      "refresh": "Refresh dashboard"
     },
     "tabs": {
       "seekers": "Seekers",
@@ -79,7 +90,8 @@
       "completeProfiles": "Complete Profiles",
       "totalItems": "Total {entityPlural}",
       "withApplications": "{entityPlural} with Applications",
-      "newParticipants": "New Participants"
+      "newParticipants": "New Participants",
+      "delta_this_week": "this week"
     },
     "opp": {
       "activeProgramsLabel": "Active programs",
@@ -199,7 +211,8 @@
       "title": "Your Registration Links",
       "loading": "Loading links…",
       "empty": "No {type} links yet. Create one above.",
-      "active_count": "{count} active"
+      "active_count": "{count} active",
+      "type_pill": "{type} links"
     },
     "link_card": {
       "copy_link": "Copy link",

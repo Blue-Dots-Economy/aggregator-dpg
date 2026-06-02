@@ -48,7 +48,18 @@
       "profileStatus": "प्रोफ़ाइल स्थिति",
       "status": "स्थिति",
       "recommendedAction": "अनुशंसित कार्रवाई",
-      "applied": "आवेदन किया"
+      "applied": "आवेदन किया",
+      "count": "{total} में से {shown}"
+    },
+    "filters": {
+      "all_statuses": "सभी स्थितियाँ"
+    },
+    "aria": {
+      "search_participants": "प्रतिभागियों को खोजें",
+      "export_csv": "CSV के रूप में निर्यात करें",
+      "prev_page": "पिछला पृष्ठ",
+      "next_page": "अगला पृष्ठ",
+      "refresh": "डैशबोर्ड रिफ्रेश करें"
     },
     "tabs": {
       "seekers": "आवेदक",
@@ -79,7 +90,8 @@
       "completeProfiles": "पूर्ण प्रोफ़ाइलें",
       "totalItems": "कुल {entityPlural}",
       "withApplications": "आवेदन वाले {entityPlural}",
-      "newParticipants": "नए प्रतिभागी"
+      "newParticipants": "नए प्रतिभागी",
+      "delta_this_week": "इस सप्ताह"
     },
     "opp": {
       "activeProgramsLabel": "सक्रिय कार्यक्रम",
@@ -199,7 +211,8 @@
       "title": "आपके पंजीकरण लिंक",
       "loading": "लिंक लोड हो रहे हैं…",
       "empty": "अभी तक कोई {type} लिंक नहीं। ऊपर एक बनाएं।",
-      "active_count": "{count} सक्रिय"
+      "active_count": "{count} सक्रिय",
+      "type_pill": "{type} लिंक"
     },
     "link_card": {
       "copy_link": "लिंक कॉपी करें",

@@ -329,7 +329,7 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
     link.slug;
   const subtitle =
     [ctx['org_name'], ctx['event_location']].filter(Boolean).join(' · ') ||
-    `Created ${format.dateTime(new Date(link.created_at), { day: '2-digit', month: 'short', year: 'numeric' })}`;
+    `${t('link_card.created_prefix')} ${format.dateTime(new Date(link.created_at), { day: '2-digit', month: 'short', year: 'numeric' })}`;
 
   // Render `<host>/<orgSlug>/<slug>` with the slug emphasised. Only computed
   // when the row is published (live) — drafts and retired rows carry a null
@@ -627,7 +627,7 @@ export function YourLinksBody() {
             {t('your_links.active_count', { count: activeCount })}
           </span>
           <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-ink-50 text-ink-600 text-[11px] font-semibold capitalize">
-            {aggregatorType} links
+            {t('your_links.type_pill', { type: aggregatorType })}
           </span>
         </div>
       </div>

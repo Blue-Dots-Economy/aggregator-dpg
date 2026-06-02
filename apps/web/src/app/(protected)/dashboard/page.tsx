@@ -376,8 +376,11 @@ function statusLabel(key: string): string {
     .join(' ');
 }
 
-function buildStatusOptions(byStatus: Record<string, number> | undefined): StatusOption[] {
-  const opts: StatusOption[] = [{ value: 'all', label: 'All statuses' }];
+function buildStatusOptions(
+  byStatus: Record<string, number> | undefined,
+  allLabel: string,
+): StatusOption[] {
+  const opts: StatusOption[] = [{ value: 'all', label: allLabel }];
   if (!byStatus) return opts;
   for (const [key, count] of Object.entries(byStatus)) {
     if (!key) continue;
@@ -458,7 +461,9 @@ function ParticipantTable<R extends ParticipantBase>({
     };
     return map[key] ?? key;
   };
-  const options: StatusOption[] = statusOptions ?? [{ value: 'all', label: 'All statuses' }];
+  const options: StatusOption[] = statusOptions ?? [
+    { value: 'all', label: t('filters.all_statuses') },
+  ];
   const searchId = `bd-search-${kind}`;
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -525,13 +530,13 @@ function ParticipantTable<R extends ParticipantBase>({
               : t('tabs.providers')}
         </div>
         <span className="text-[12px] text-ink-400">
-          {visibleRows.length} of {total ?? rows.length}
+          {t('table.count', { shown: visibleRows.length, total: total ?? rows.length })}
         </span>
 
         <div className="ml-auto flex items-center gap-2">
           <div className="relative">
             <label htmlFor={searchId} className="sr-only">
-              Search participants
+              {t('aria.search_participants')}
             </label>
             <I.search
               size={15}
@@ -539,7 +544,7 @@ function ParticipantTable<R extends ParticipantBase>({
             />
             <input
               id={searchId}
-              aria-label="Search participants"
+              aria-label={t('aria.search_participants')}
               className="bd-input w-[320px] text-[13px] py-1.5"
               style={{ paddingLeft: 36 }}
               placeholder={
@@ -601,8 +606,8 @@ function ParticipantTable<R extends ParticipantBase>({
             icon={<I.download size={14} />}
             onClick={onExportCsv}
             disabled={exporting}
-            title={exportError ?? 'Export as CSV'}
-            aria-label="Export as CSV"
+            title={exportError ?? t('aria.export_csv')}
+            aria-label={t('aria.export_csv')}
           >
             {exporting ? t('buttons.exporting') : t('buttons.exportCsv')}
           </Button>
@@ -795,7 +800,7 @@ function PaginationFooter({
         <div className="flex items-center gap-1">
           <button
             type="button"
-            aria-label="Previous page"
+            aria-label={t('aria.prev_page')}
             disabled={!canPrev}
             onClick={() => change(page - 1)}
             className="px-2.5 py-1.5 rounded-md hover:bg-ink-100 text-ink-400 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
@@ -829,7 +834,7 @@ function PaginationFooter({
           )}
           <button
             type="button"
-            aria-label="Next page"
+            aria-label={t('aria.next_page')}
             disabled={!canNext}
             onClick={() => change(page + 1)}
             className="px-2.5 py-1.5 rounded-md hover:bg-ink-100 text-ink-400 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
@@ -929,8 +934,8 @@ function SeekersTab() {
     }
   }, [filterActive, rollup?.by_status]);
   const statusOptions = useMemo(
-    () => buildStatusOptions(cachedByStatus ?? byStatus),
-    [cachedByStatus, byStatus],
+    () => buildStatusOptions(cachedByStatus ?? byStatus, t('filters.all_statuses')),
+    [cachedByStatus, byStatus, t],
   );
   // Signalstack's status taxonomy is open — pick the keys the UI cares
   // about; unknown ones still surface in the items list.
@@ -995,8 +1000,8 @@ function SeekersTab() {
               void handleRefresh();
             }}
             disabled={refreshing}
-            aria-label="Refresh dashboard"
-            title="Refresh dashboard"
+            aria-label={t('aria.refresh')}
+            title={t('aria.refresh')}
           >
             {refreshing ? t('buttons.refreshing') : t('buttons.refresh')}
           </Button>
@@ -1067,7 +1072,7 @@ function SeekersTab() {
         <MiniStat
           label={statusLabels['new'] ?? t('ministat.newParticipants')}
           value={fmtCount(newThisWeek)}
-          delta="this week"
+          delta={t('ministat.delta_this_week')}
           deltaTone="flat"
         />
       </div>
@@ -1256,8 +1261,8 @@ function ProvidersTab() {
     }
   }, [filterActive, rollup?.by_status]);
   const statusOptions = useMemo(
-    () => buildStatusOptions(cachedByStatus ?? byStatus),
-    [cachedByStatus, byStatus],
+    () => buildStatusOptions(cachedByStatus ?? byStatus, t('filters.all_statuses')),
+    [cachedByStatus, byStatus, t],
   );
 
   // Refresh handler: hits the BFF with refresh=true to force signalstack to
@@ -1310,8 +1315,8 @@ function ProvidersTab() {
               void handleRefresh();
             }}
             disabled={refreshing}
-            aria-label="Refresh dashboard"
-            title="Refresh dashboard"
+            aria-label={t('aria.refresh')}
+            title={t('aria.refresh')}
           >
             {refreshing ? t('buttons.refreshing') : t('buttons.refresh')}
           </Button>
