@@ -133,6 +133,23 @@ export const corsOrigins: string[] = config.CORS_ORIGINS.split(',')
   .map((s) => s.trim())
   .filter(Boolean);
 
-export const adminEmails: string[] = config.ADMIN_EMAILS.split(',')
-  .map((s) => s.trim())
-  .filter(Boolean);
+/**
+ * Comma-separated ADMIN_EMAILS env value parsed into a clean list.
+ * Resilient to wrapping quotes left in by Helm / ConfigMap `| quote`
+ * filters, stray whitespace, and newline separators.
+ */
+function parseEnvEmailList(raw: string | undefined): string[] {
+  let v = (raw ?? '').trim();
+  if (
+    v.length >= 2 &&
+    ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'")))
+  ) {
+    v = v.slice(1, -1).trim();
+  }
+  return v
+    .split(/[,\n]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+export const adminEmails: string[] = parseEnvEmailList(config.ADMIN_EMAILS);
