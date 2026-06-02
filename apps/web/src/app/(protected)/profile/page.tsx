@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { useTranslations } from 'next-intl';
 import { Topbar } from '../../../components/shell/Topbar';
 import { Button } from '../../../components/ui/Button';
 import { StatusPill } from '../../../components/ui/StatusPill';
@@ -102,6 +103,8 @@ interface ActiveProfileProps {
 }
 
 function ActiveProfile({ data, isLoading, isError, onEdit }: ActiveProfileProps) {
+  const t = useTranslations('profile.view');
+
   if (isError) {
     return (
       <div className="bd-card bd-shadow overflow-hidden border border-rose-200 bg-[var(--bd-tint-rose)] px-7 py-6">
@@ -109,11 +112,9 @@ function ActiveProfile({ data, isLoading, isError, onEdit }: ActiveProfileProps)
           <I.alert size={18} className="text-rose-600 mt-0.5" />
           <div>
             <div className="font-display font-bold text-[15px] text-rose-700">
-              Could not load profile
+              {t('error_load_title')}
             </div>
-            <div className="text-[13px] text-rose-600 mt-1">
-              We hit an error fetching the aggregator profile. Please try again shortly.
-            </div>
+            <div className="text-[13px] text-rose-600 mt-1">{t('error_load_detail')}</div>
           </div>
         </div>
       </div>
@@ -159,20 +160,22 @@ function ActiveProfile({ data, isLoading, isError, onEdit }: ActiveProfileProps)
             </h2>
             <div className="flex items-center gap-2 mt-2">
               <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11.5px] font-semibold bg-[var(--bd-primary-50)] text-primary-600">
-                <I.users size={11} /> Aggregator
+                <I.users size={11} /> {t('badge_aggregator')}
               </span>
               <StatusPill status="active" />
               <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11.5px] font-semibold bg-emerald-50 text-emerald-700">
-                <I.shield size={11} /> Verified
+                <I.shield size={11} /> {t('badge_verified')}
               </span>
             </div>
             <div className="text-[12.5px] text-ink-400 mt-2.5 flex items-center gap-3">
               <span>
-                Registered <strong className="text-ink-700 font-medium">{registered}</strong>
+                {t('meta_registered')}{' '}
+                <strong className="text-ink-700 font-medium">{registered}</strong>
               </span>
               <span className="text-ink-200">·</span>
               <span>
-                Coordinator <strong className="text-ink-700 font-medium">{coordinator}</strong>
+                {t('meta_coordinator')}{' '}
+                <strong className="text-ink-700 font-medium">{coordinator}</strong>
               </span>
               <span className="text-ink-200">·</span>
               <span className="font-mono">{aggId}</span>
@@ -180,32 +183,32 @@ function ActiveProfile({ data, isLoading, isError, onEdit }: ActiveProfileProps)
           </div>
         </div>
         <Button kind="ghost" icon={<I.edit size={14} />} onClick={onEdit}>
-          Edit
+          {t('btn_edit')}
         </Button>
       </div>
 
-      <Section title="Contact Information">
+      <Section title={t('section_contact')}>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-          <KV label="Name" value={contactName} />
-          <KV label="Mobile" value={contactMobile} mono />
-          <KV label="Email" value={contactEmail} />
+          <KV label={t('kv_name')} value={contactName} />
+          <KV label={t('kv_mobile')} value={contactMobile} mono />
+          <KV label={t('kv_email')} value={contactEmail} />
         </div>
         <div className="mt-5">
-          <div className="text-[11.5px] text-ink-400 font-medium mb-2">Preferred Contact Mode</div>
+          <div className="text-[11.5px] text-ink-400 font-medium mb-2">{t('kv_contact_mode')}</div>
           <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-[var(--bd-primary-50)] text-primary-600 text-[12.5px] font-semibold">
-            <I.phone size={12} /> Contact me first
+            <I.phone size={12} /> {t('kv_contact_mode_value')}
           </div>
         </div>
       </Section>
 
-      <Section title="Aggregator Details">
+      <Section title={t('section_details')}>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-5">
-          <KV label="Organisation Address" value={address} />
-          <KV label="Geographies Served" value={geographies} />
+          <KV label={t('kv_address')} value={address} />
+          <KV label={t('kv_geographies')} value={geographies} />
         </div>
       </Section>
 
-      <Section title="Personas Supported">
+      <Section title={t('section_personas')}>
         <div className="text-[14px] text-ink-900">
           {beneficiaries ? (
             <div className="flex flex-wrap gap-2">
@@ -224,7 +227,7 @@ function ActiveProfile({ data, isLoading, isError, onEdit }: ActiveProfileProps)
         </div>
       </Section>
 
-      <Section title="Services Supported">
+      <Section title={t('section_services')}>
         <div className="text-[14px] text-ink-900">
           {sectors ? (
             <div className="flex flex-wrap gap-2">
@@ -243,56 +246,63 @@ function ActiveProfile({ data, isLoading, isError, onEdit }: ActiveProfileProps)
         </div>
       </Section>
 
-      <Section title="Network Snapshot">
+      <Section title={t('section_network')}>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <MiniStat
-            label="Active Seekers"
+            label={t('stat_active_seekers')}
             value={String(activeSeekers)}
             delta="+12"
             deltaTone="up"
           />
-          <MiniStat label="Open Roles" value={String(openRoles)} delta="+18" deltaTone="up" />
-          <MiniStat label="Hires (3 mo)" value={String(hires3mo)} delta="↑ 22%" deltaTone="up" />
-          <MiniStat label="Match Rate" value={matchRate} delta="vs 28% avg" deltaTone="up" />
+          <MiniStat
+            label={t('stat_open_roles')}
+            value={String(openRoles)}
+            delta="+18"
+            deltaTone="up"
+          />
+          <MiniStat
+            label={t('stat_hires_3mo')}
+            value={String(hires3mo)}
+            delta="↑ 22%"
+            deltaTone="up"
+          />
+          <MiniStat
+            label={t('stat_match_rate')}
+            value={matchRate}
+            delta="vs 28% avg"
+            deltaTone="up"
+          />
         </div>
       </Section>
 
       <Section
-        title="Consent & Compliance"
+        title={t('section_consent')}
         right={
           <button
             type="button"
             className="text-[12px] font-semibold text-primary-600 hover:underline"
           >
-            Review history
+            {t('btn_review_history')}
           </button>
         }
       >
         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-10">
           <ConsentRow checked={consent?.profileCreation ?? true}>
-            Profile creation & representation in the ecosystem
+            {t('consent_profile_creation')}
           </ConsentRow>
-          <ConsentRow checked={consent?.sharing ?? true}>
-            Sharing information with relevant parties
-          </ConsentRow>
+          <ConsentRow checked={consent?.sharing ?? true}>{t('consent_sharing')}</ConsentRow>
           <ConsentRow checked={consent?.notifications ?? true}>
-            Receive opportunity notifications & nudges
+            {t('consent_notifications')}
           </ConsentRow>
-          <ConsentRow checked={consent?.analytics ?? true}>
-            Anonymous analytics for ecosystem improvement
-          </ConsentRow>
-          <ConsentRow checked={consent?.marketing ?? false}>
-            Marketing communication from partner orgs
-          </ConsentRow>
-          <ConsentRow checked={consent?.retention ?? true}>
-            Data retention per Blue Dots policy v2.3
-          </ConsentRow>
+          <ConsentRow checked={consent?.analytics ?? true}>{t('consent_analytics')}</ConsentRow>
+          <ConsentRow checked={consent?.marketing ?? false}>{t('consent_marketing')}</ConsentRow>
+          <ConsentRow checked={consent?.retention ?? true}>{t('consent_retention')}</ConsentRow>
         </div>
         <div className="mt-5 flex items-center gap-2 text-[12px] text-ink-400">
           <I.shield size={14} className="text-emerald-500" />
-          Last consent reviewed{' '}
-          <strong className="text-ink-700 font-medium ml-1">{consentLastReviewed}</strong>. Next
-          review due 02 Apr 2027.
+          {t('consent_last_reviewed')}{' '}
+          <strong className="text-ink-700 font-medium ml-1">{consentLastReviewed}</strong>.{' '}
+          {t('consent_next_review', { date: '02 Apr 2027' })}
         </div>
       </Section>
     </div>
@@ -300,11 +310,12 @@ function ActiveProfile({ data, isLoading, isError, onEdit }: ActiveProfileProps)
 }
 
 function SavedToast({ onDone }: { onDone: () => void }) {
+  const t = useTranslations('profile.view');
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
   useEffect(() => {
-    const t = setTimeout(onDone, 2400);
-    return () => clearTimeout(t);
+    const timer = setTimeout(onDone, 2400);
+    return () => clearTimeout(timer);
   }, [onDone]);
   if (!mounted) return null;
   // Portal to <body> so the toast is not contained by any ancestor with a
@@ -316,20 +327,21 @@ function SavedToast({ onDone }: { onDone: () => void }) {
       aria-live="polite"
       className="fixed top-4 right-4 z-[100] rounded-[10px] border border-emerald-200 bg-emerald-50 px-4 py-3 text-[13px] text-emerald-700 shadow-lg inline-flex items-center gap-2"
     >
-      <I.check size={14} /> Profile saved
+      <I.check size={14} /> {t('toast_saved')}
     </div>,
     document.body,
   );
 }
 
 export default function ProfilePage() {
+  const t = useTranslations('profile.view');
   const [isEditing, setIsEditing] = useState(false);
   const [showToast, setShowToast] = useState(false);
   const { data, isLoading, isError } = useProfile();
 
   return (
     <div className="fade-up">
-      <Topbar title="Aggregator Profile" subtitle="Manage your aggregator identity and settings." />
+      <Topbar title={t('topbar_title')} subtitle={t('topbar_subtitle')} />
       {isEditing ? (
         <ProfileEditView
           onDone={() => setIsEditing(false)}
