@@ -1,0 +1,13 @@
+{
+  "language": { "label": "Language" },
+  "metadata": {
+    "title": "Aggregator Portal",
+    "description": "Aggregator portal for signalstack-backed participant networks."
+  },
+  "common": {
+    "back": "Back",
+    "cancel": "Cancel",
+    "continue": "Continue",
+    "loading": "Loading…"
+  }
+}
