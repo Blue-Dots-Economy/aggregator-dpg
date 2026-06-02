@@ -71,6 +71,135 @@
     "sign_out": "साइन आउट",
     "aggregator_sublabel": "एग्रीगेटर · कर्नाटक"
   },
+  "onboarding": {
+    "title": "ऑनबोर्डिंग",
+    "subtitle": "CSV, लिंक, या QR के माध्यम से अपने नेटवर्क में प्रतिभागियों को जोड़ें।",
+    "refresh": "रिफ्रेश करें",
+    "bulk_upload": {
+      "title": "बल्क अपलोड",
+      "subtitle": "मौजूदा रोस्टर के लिए CSV आयात। बड़े बैच के लिए सबसे तेज़ तरीका।",
+      "no_uploads_yet": "अभी तक कोई अपलोड नहीं",
+      "loading": "लोड हो रहा है…",
+      "last_upload": "अंतिम अपलोड {when}",
+      "cta": "बल्क अपलोड पर जाएं",
+      "metrics": {
+        "files_uploaded": "अपलोड की गई फ़ाइलें",
+        "rows": "पंक्तियाँ",
+        "passed": "उत्तीर्ण",
+        "failed": "विफल"
+      }
+    },
+    "links": {
+      "title": "लिंक के माध्यम से पंजीकरण",
+      "subtitle": "एक सार्वजनिक लिंक / QR साझा करें। प्रतिभागी उसके माध्यम से स्वयं पंजीकरण करते हैं।",
+      "no_links_yet": "अभी तक कोई लिंक नहीं",
+      "loading": "लोड हो रहा है…",
+      "last_link": "अंतिम लिंक {when}",
+      "cta": "नया लिंक बनाएं",
+      "metrics": {
+        "links": "लिंक",
+        "active": "सक्रिय",
+        "registrations": "पंजीकरण",
+        "verified": "सत्यापित"
+      }
+    },
+    "stats": {
+      "total_registered": "कुल पंजीकृत",
+      "verified_onboarded": "सत्यापित और ऑनबोर्ड",
+      "failed_validations": "विफल सत्यापन"
+    },
+    "csv": {
+      "title": "प्रतिभागियों को जोड़ें",
+      "subtitle": "CSV के माध्यम से बल्क अपलोड — मौजूदा रोस्टर आयात करने का सबसे तेज़ तरीका।",
+      "download_template": "टेम्पलेट डाउनलोड करें",
+      "drag_prompt": "अपना CSV यहाँ खींचें या",
+      "browse": "ब्राउज़ करने के लिए क्लिक करें",
+      "hint": "केवल .csv · UTF-8 एन्कोडेड · {type}s के रूप में अपलोड",
+      "upload_button": "अपलोड करें",
+      "uploading": "अपलोड हो रहा है…",
+      "security_note": "सभी अपलोड को आयात से पहले स्कैन और सत्यापित किया जाता है।",
+      "remove_file": "फ़ाइल हटाएं",
+      "recent": {
+        "title": "हालिया अपलोड",
+        "shown_count": "{count} दिखाए गए",
+        "no_uploads": "अभी तक कोई अपलोड नहीं।",
+        "col_uploaded": "अपलोड किया गया",
+        "col_type": "प्रकार",
+        "col_status": "स्थिति",
+        "col_total": "कुल",
+        "col_passed": "उत्तीर्ण",
+        "col_failed": "विफल",
+        "col_skipped": "छोड़े गए",
+        "col_reason": "कारण / त्रुटियाँ",
+        "col_actions": "कार्रवाइयाँ",
+        "all_rows_passed": "सभी पंक्तियाँ उत्तीर्ण",
+        "signing": "हस्ताक्षर हो रहा है…",
+        "triggered": "{action} ट्रिगर किया गया",
+        "trigger_callback": "कॉलबैक ट्रिगर करें",
+        "retry": "पुनः प्रयास करें",
+        "notify": "सूचित करें"
+      }
+    },
+    "create_link": {
+      "title": "पंजीकरण लिंक साझा करें",
+      "new_badge": "नया",
+      "field_org_name": "अपने संगठन का नाम दर्ज करें",
+      "field_state": "आवृत्ति (राज्य का नाम)",
+      "field_event": "कार्यक्रम",
+      "field_event_date": "कार्यक्रम की तारीख",
+      "field_event_location": "कार्यक्रम का स्थान",
+      "field_district": "जिला",
+      "field_domain": "डोमेन",
+      "placeholder_state": "राज्य",
+      "placeholder_event": "अभियान या कार्यक्रम का नाम",
+      "placeholder_location": "शहर या स्थान",
+      "placeholder_district": "जिला",
+      "creating": "बनाया जा रहा है…",
+      "create_button": "लिंक बनाएं",
+      "qr_label": "QR कोड",
+      "qr_placeholder": "शुरू करने के लिए एक लिंक बनाएं। ड्राफ्ट लाइव होने पर QR दिखेगा।",
+      "error_required": "राज्य, जिला और कार्यक्रम आवश्यक हैं।",
+      "link_created": "पंजीकरण लिंक बनाया गया"
+    },
+    "your_links": {
+      "title": "आपके पंजीकरण लिंक",
+      "loading": "लिंक लोड हो रहे हैं…",
+      "empty": "अभी तक कोई {type} लिंक नहीं। ऊपर एक बनाएं।",
+      "active_count": "{count} सक्रिय"
+    },
+    "link_card": {
+      "copy_link": "लिंक कॉपी करें",
+      "copied": "कॉपी हो गया!",
+      "copy_title": "लिंक कॉपी करें",
+      "view_qr": "QR देखें",
+      "open_link": "लिंक खोलें",
+      "draft_notice": "लाइव करने के बाद सार्वजनिक URL + QR दिखेगा।",
+      "registrations": "पंजीकरण",
+      "verified": "सत्यापित",
+      "created_prefix": "बनाया गया",
+      "expires_prefix": "समाप्त होता है",
+      "edit": "संपादित करें",
+      "make_live": "लाइव करें",
+      "going_live": "लाइव हो रहा है…",
+      "deactivate": "निष्क्रिय करें",
+      "retiring": "निवृत्त किया जा रहा है…",
+      "active": "सक्रिय",
+      "cancel": "रद्द करें",
+      "save_draft": "ड्राफ्ट सहेजें",
+      "saving": "सहेजा जा रहा है…",
+      "error_required": "राज्य, जिला और कार्यक्रम आवश्यक हैं।"
+    },
+    "bulk_uploads_page": {
+      "title": "बल्क अपलोड",
+      "subtitle": "CSV फ़ाइल से प्रतिभागियों को आयात करें।",
+      "back": "ऑनबोर्डिंग पर वापस जाएं"
+    },
+    "links_page": {
+      "title": "पंजीकरण लिंक",
+      "subtitle": "सार्वजनिक पंजीकरण लिंक बनाएं, साझा करें और प्रबंधित करें।",
+      "back": "ऑनबोर्डिंग पर वापस जाएं"
+    }
+  },
   "auth": {
     "welcome_heading": "वापसी पर स्वागत है।",
     "welcome_sub": "शुरू करने के लिए साइन इन करें या अपना संगठन पंजीकृत करें।",

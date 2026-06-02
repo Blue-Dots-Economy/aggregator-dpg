@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createPortal } from 'react-dom';
+import { useTranslations } from 'next-intl';
 import { Button } from '../../../../components/ui/Button';
 import { Dropzone } from '../../../../components/ui/Dropzone';
 import { I } from '../../../../icons';
@@ -12,6 +13,7 @@ import type { BulkUploadStatus } from '../../../../services/onboarding.service';
 import { onboardingService } from '../../../../services/onboarding.service';
 
 export function CSVUpload() {
+  const t = useTranslations('onboarding');
   const router = useRouter();
   const rawProfile = useProfileRaw();
   // Aggregator registered participant focus, mirrored from the
@@ -106,10 +108,8 @@ export function CSVUpload() {
     <div className="bd-card bd-shadow p-6">
       <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
         <div>
-          <div className="font-display font-bold text-[16px] text-ink-900">Add participants</div>
-          <div className="text-[12.5px] text-ink-400 mt-0.5">
-            Bulk upload via CSV — fastest way to import existing rosters.
-          </div>
+          <div className="font-display font-bold text-[16px] text-ink-900">{t('csv.title')}</div>
+          <div className="text-[12.5px] text-ink-400 mt-0.5">{t('csv.subtitle')}</div>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
           {/*
@@ -143,7 +143,7 @@ export function CSVUpload() {
             onClick={downloadTemplate}
             className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-primary-600 hover:underline"
           >
-            <I.download size={14} /> Download template
+            <I.download size={14} /> {t('csv.download_template')}
           </button>
         </div>
       </div>
@@ -179,8 +179,8 @@ export function CSVUpload() {
                   setUploadNotice(null);
                   if (fileInputRef.current) fileInputRef.current.value = '';
                 }}
-                title="Remove file"
-                aria-label="Remove file"
+                title={t('csv.remove_file')}
+                aria-label={t('csv.remove_file')}
                 className="inline-flex items-center justify-center w-6 h-6 rounded-full text-ink-500 hover:text-rose-600 hover:bg-rose-50 transition-colors shrink-0"
               >
                 <I.x size={13} />
@@ -193,11 +193,11 @@ export function CSVUpload() {
               <I.upload size={20} />
             </div>
             <div className="text-[14px] font-semibold text-ink-700">
-              Drag your CSV here or{' '}
-              <span className="text-primary-600 underline-offset-2">click to browse</span>
+              {t('csv.drag_prompt')}{' '}
+              <span className="text-primary-600 underline-offset-2">{t('csv.browse')}</span>
             </div>
             <div className="text-[12px] text-ink-400 mt-1">
-              .csv only · UTF-8 encoded · uploaded as {participantType}s
+              {t('csv.hint', { type: participantType })}
             </div>
           </label>
         )}
@@ -205,11 +205,10 @@ export function CSVUpload() {
 
       <div className="flex items-center justify-between mt-4">
         <div className="text-[12px] text-ink-400 flex items-center gap-2">
-          <I.shield size={14} className="text-emerald-500" /> All uploads are scanned and validated
-          before import.
+          <I.shield size={14} className="text-emerald-500" /> {t('csv.security_note')}
         </div>
         <Button onClick={onUpload} disabled={!pickedFile || upload.isPending}>
-          {upload.isPending ? 'Uploading…' : 'Upload'}
+          {upload.isPending ? t('csv.uploading') : t('csv.upload_button')}
         </Button>
       </div>
 
@@ -234,6 +233,7 @@ export function CSVUpload() {
  * No outer card padding/border — the parent owns the chrome.
  */
 export function RecentUploadsBody() {
+  const t = useTranslations('onboarding');
   const recent = useRecentBulkUploads(10);
   const items = recent.data?.items ?? [];
   const error = recent.error as Error | null;
@@ -242,8 +242,12 @@ export function RecentUploadsBody() {
   return (
     <div>
       <div className="flex items-center justify-between mb-3">
-        <div className="font-display font-bold text-[14px] text-ink-700">Recent uploads</div>
-        <span className="text-[12px] text-ink-400">{items.length} shown</span>
+        <div className="font-display font-bold text-[14px] text-ink-700">
+          {t('csv.recent.title')}
+        </div>
+        <span className="text-[12px] text-ink-400">
+          {t('csv.recent.shown_count', { count: items.length })}
+        </span>
       </div>
       <div className="overflow-auto scroll-x" style={{ maxHeight: 360 }}>
         <table className="bd-table" style={{ minWidth: 800 }}>
@@ -256,15 +260,15 @@ export function RecentUploadsBody() {
             }}
           >
             <tr>
-              <th>Uploaded</th>
-              <th style={{ textAlign: 'center' }}>Type</th>
-              <th style={{ textAlign: 'center' }}>Status</th>
-              <th style={{ textAlign: 'center' }}>Total</th>
-              <th style={{ textAlign: 'center' }}>Passed</th>
-              <th style={{ textAlign: 'center' }}>Failed</th>
-              <th style={{ textAlign: 'center' }}>Skipped</th>
-              <th style={{ minWidth: 240 }}>Reason / errors</th>
-              <th style={{ minWidth: 160 }}>Actions</th>
+              <th>{t('csv.recent.col_uploaded')}</th>
+              <th style={{ textAlign: 'center' }}>{t('csv.recent.col_type')}</th>
+              <th style={{ textAlign: 'center' }}>{t('csv.recent.col_status')}</th>
+              <th style={{ textAlign: 'center' }}>{t('csv.recent.col_total')}</th>
+              <th style={{ textAlign: 'center' }}>{t('csv.recent.col_passed')}</th>
+              <th style={{ textAlign: 'center' }}>{t('csv.recent.col_failed')}</th>
+              <th style={{ textAlign: 'center' }}>{t('csv.recent.col_skipped')}</th>
+              <th style={{ minWidth: 240 }}>{t('csv.recent.col_reason')}</th>
+              <th style={{ minWidth: 160 }}>{t('csv.recent.col_actions')}</th>
             </tr>
           </thead>
           <tbody>
@@ -278,7 +282,7 @@ export function RecentUploadsBody() {
             {!error && items.length === 0 && !loading && (
               <tr>
                 <td colSpan={9} className="text-ink-400 text-[13px] py-8 text-center">
-                  No uploads yet.
+                  {t('csv.recent.no_uploads')}
                 </td>
               </tr>
             )}
@@ -293,6 +297,7 @@ export function RecentUploadsBody() {
 }
 
 function UploadRow({ upload }: { upload: BulkUploadStatus }) {
+  const t = useTranslations('onboarding');
   const [downloading, setDownloading] = useState(false);
   const [triggeredAction, setTriggeredAction] = useState<string | null>(null);
 
@@ -362,10 +367,10 @@ function UploadRow({ upload }: { upload: BulkUploadStatus }) {
             className="inline-flex items-center gap-1.5 px-2 py-1 rounded-[8px] bg-[var(--bd-primary-50)] text-primary-600 font-semibold hover:bg-[var(--bd-primary-100)] disabled:opacity-60"
           >
             <I.download size={12} />
-            {downloading ? 'Signing…' : 'errors.csv'}
+            {downloading ? t('csv.recent.signing') : 'errors.csv'}
           </button>
         ) : upload.status === 'completed' ? (
-          <span className="text-emerald-600">All rows passed</span>
+          <span className="text-emerald-600">{t('csv.recent.all_rows_passed')}</span>
         ) : upload.status_reason ? (
           <span
             title={upload.status_reason}
@@ -384,33 +389,33 @@ function UploadRow({ upload }: { upload: BulkUploadStatus }) {
             aria-live="polite"
           >
             <I.check size={12} />
-            {triggeredAction} triggered
+            {t('csv.recent.triggered', { action: triggeredAction })}
           </span>
         ) : (
           <div className="flex flex-wrap items-center gap-1.5">
             <button
               type="button"
-              onClick={() => onTriggerAction('Trigger Callback')}
+              onClick={() => onTriggerAction(t('csv.recent.trigger_callback'))}
               className="inline-flex items-center gap-1.5 px-2 py-1 rounded-[8px] bg-[var(--bd-primary-50)] text-primary-600 font-semibold hover:bg-[var(--bd-primary-100)]"
             >
               <I.send size={12} />
-              Trigger Callback
+              {t('csv.recent.trigger_callback')}
             </button>
             <button
               type="button"
-              onClick={() => onTriggerAction('Retry')}
+              onClick={() => onTriggerAction(t('csv.recent.retry'))}
               className="inline-flex items-center gap-1.5 px-2 py-1 rounded-[8px] bg-ink-50 text-ink-700 font-semibold hover:bg-ink-100"
             >
               <I.refresh size={12} />
-              Retry
+              {t('csv.recent.retry')}
             </button>
             <button
               type="button"
-              onClick={() => onTriggerAction('Notify')}
+              onClick={() => onTriggerAction(t('csv.recent.notify'))}
               className="inline-flex items-center gap-1.5 px-2 py-1 rounded-[8px] bg-ink-50 text-ink-700 font-semibold hover:bg-ink-100"
             >
               <I.bell size={12} />
-              Notify
+              {t('csv.recent.notify')}
             </button>
           </div>
         )}

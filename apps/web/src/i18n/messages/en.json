@@ -71,6 +71,135 @@
     "sign_out": "Sign Out",
     "aggregator_sublabel": "Aggregator · Karnataka"
   },
+  "onboarding": {
+    "title": "Onboarding",
+    "subtitle": "Add participants to your network — by CSV, link, or QR.",
+    "refresh": "Refresh",
+    "bulk_upload": {
+      "title": "Bulk Upload",
+      "subtitle": "CSV import for existing rosters. Fastest path for large batches.",
+      "no_uploads_yet": "No uploads yet",
+      "loading": "Loading…",
+      "last_upload": "Last upload {when}",
+      "cta": "Go to Bulk Upload",
+      "metrics": {
+        "files_uploaded": "Files Uploaded",
+        "rows": "Rows",
+        "passed": "Passed",
+        "failed": "Failed"
+      }
+    },
+    "links": {
+      "title": "Registration via Link",
+      "subtitle": "Share a public link / QR. Participants self-register through it.",
+      "no_links_yet": "No links yet",
+      "loading": "Loading…",
+      "last_link": "Last link {when}",
+      "cta": "Create new link",
+      "metrics": {
+        "links": "Links",
+        "active": "Active",
+        "registrations": "Registrations",
+        "verified": "Verified"
+      }
+    },
+    "stats": {
+      "total_registered": "Total registered",
+      "verified_onboarded": "Verified & onboarded",
+      "failed_validations": "Failed validations"
+    },
+    "csv": {
+      "title": "Add participants",
+      "subtitle": "Bulk upload via CSV — fastest way to import existing rosters.",
+      "download_template": "Download template",
+      "drag_prompt": "Drag your CSV here or",
+      "browse": "click to browse",
+      "hint": ".csv only · UTF-8 encoded · uploaded as {type}s",
+      "upload_button": "Upload",
+      "uploading": "Uploading…",
+      "security_note": "All uploads are scanned and validated before import.",
+      "remove_file": "Remove file",
+      "recent": {
+        "title": "Recent uploads",
+        "shown_count": "{count} shown",
+        "no_uploads": "No uploads yet.",
+        "col_uploaded": "Uploaded",
+        "col_type": "Type",
+        "col_status": "Status",
+        "col_total": "Total",
+        "col_passed": "Passed",
+        "col_failed": "Failed",
+        "col_skipped": "Skipped",
+        "col_reason": "Reason / errors",
+        "col_actions": "Actions",
+        "all_rows_passed": "All rows passed",
+        "signing": "Signing…",
+        "triggered": "{action} triggered",
+        "trigger_callback": "Trigger Callback",
+        "retry": "Retry",
+        "notify": "Notify"
+      }
+    },
+    "create_link": {
+      "title": "Share a registration link",
+      "new_badge": "New",
+      "field_org_name": "Enter your Organisation Name",
+      "field_state": "Instance (State Name)",
+      "field_event": "Event",
+      "field_event_date": "Event Date",
+      "field_event_location": "Event Location",
+      "field_district": "District",
+      "field_domain": "Domain",
+      "placeholder_state": "State",
+      "placeholder_event": "Campaign or event name",
+      "placeholder_location": "City or venue",
+      "placeholder_district": "District",
+      "creating": "Creating…",
+      "create_button": "Create link",
+      "qr_label": "QR Code",
+      "qr_placeholder": "Create a link to start. QR appears once the draft is made live.",
+      "error_required": "State, District, and Event are required.",
+      "link_created": "Registration link created"
+    },
+    "your_links": {
+      "title": "Your Registration Links",
+      "loading": "Loading links…",
+      "empty": "No {type} links yet. Create one above.",
+      "active_count": "{count} active"
+    },
+    "link_card": {
+      "copy_link": "Copy link",
+      "copied": "Copied!",
+      "copy_title": "Copy link",
+      "view_qr": "View QR",
+      "open_link": "Open link",
+      "draft_notice": "Public URL + QR appear after Make Live.",
+      "registrations": "registrations",
+      "verified": "verified",
+      "created_prefix": "Created",
+      "expires_prefix": "Expires",
+      "edit": "Edit",
+      "make_live": "Make Live",
+      "going_live": "Going live…",
+      "deactivate": "Deactivate",
+      "retiring": "Retiring…",
+      "active": "Active",
+      "cancel": "Cancel",
+      "save_draft": "Save Draft",
+      "saving": "Saving…",
+      "error_required": "State, District, and Event are required."
+    },
+    "bulk_uploads_page": {
+      "title": "Bulk Upload",
+      "subtitle": "Import participants from a CSV file.",
+      "back": "Back to Onboarding"
+    },
+    "links_page": {
+      "title": "Registration Links",
+      "subtitle": "Generate, share, and manage public registration links.",
+      "back": "Back to Onboarding"
+    }
+  },
   "auth": {
     "welcome_heading": "Welcome back.",
     "welcome_sub": "Sign in or register your organisation to get started.",
