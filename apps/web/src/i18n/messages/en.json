@@ -9,5 +9,33 @@
     "cancel": "Cancel",
     "continue": "Continue",
     "loading": "Loading…"
+  },
+  "auth": {
+    "welcome_heading": "Welcome back.",
+    "welcome_sub": "Sign in or register your organisation to get started.",
+    "existing_title": "Existing user — Sign in",
+    "existing_sub": "Continue with email or mobile via {brand} SSO",
+    "register_title": "Become a member",
+    "register_sub": "Register your organisation with {brand}",
+    "review_notice": "New registrations are reviewed by the {brand} team.",
+    "session_expired": "Your session expired. Sign in again to continue.",
+    "signin_failed": "Sign-in failed: {reason}. Please try again.",
+    "footer_prefix": "By continuing you agree to the",
+    "footer_and": "and",
+    "privacy": "Privacy Policy",
+    "terms": "Terms",
+    "errors": {
+      "invalid_flow_cookie": "session handshake expired",
+      "missing_code_or_state": "incomplete callback",
+      "oidc_error_temporarily_unavailable": "sign-in session expired before completing",
+      "oidc_error_login_required": "sign-in is required to continue",
+      "oidc_error_access_denied": "sign-in was cancelled",
+      "oidc_error_invalid_request": "sign-in request was invalid",
+      "oidc_error_server_error": "identity provider is temporarily unavailable",
+      "exchange_token_exchange_failed": "token exchange failed",
+      "exchange_state_mismatch": "security check failed (state mismatch)",
+      "exchange_token_verify_failed": "security check failed (token verification)",
+      "unknown": "unexpected sign-in error"
+    }
   }
 }
