@@ -62,6 +62,15 @@
       "refreshing": "Refreshing…"
     }
   },
+  "nav": {
+    "my": "My {brand}",
+    "onboarding": "Onboarding",
+    "profile": "Profile",
+    "overview": "Overview",
+    "portal_label": "Aggregator Portal",
+    "sign_out": "Sign Out",
+    "aggregator_sublabel": "Aggregator · Karnataka"
+  },
   "auth": {
     "welcome_heading": "Welcome back.",
     "welcome_sub": "Sign in or register your organisation to get started.",

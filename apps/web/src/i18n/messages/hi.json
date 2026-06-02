@@ -62,6 +62,15 @@
       "refreshing": "रिफ्रेश हो रहा है…"
     }
   },
+  "nav": {
+    "my": "मेरा {brand}",
+    "onboarding": "ऑनबोर्डिंग",
+    "profile": "प्रोफ़ाइल",
+    "overview": "अवलोकन",
+    "portal_label": "एग्रीगेटर पोर्टल",
+    "sign_out": "साइन आउट",
+    "aggregator_sublabel": "एग्रीगेटर · कर्नाटक"
+  },
   "auth": {
     "welcome_heading": "वापसी पर स्वागत है।",
     "welcome_sub": "शुरू करने के लिए साइन इन करें या अपना संगठन पंजीकृत करें।",
