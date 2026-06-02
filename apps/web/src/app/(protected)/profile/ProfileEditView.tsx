@@ -250,7 +250,7 @@ export function ProfileEditView({ onDone, onSaved }: ProfileEditViewProps): JSX.
       await edit.mutateAsync(formToPayload(data));
       onSaved?.();
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : t('btn_save'));
+      setErrorMessage(err instanceof Error ? err.message : t('save_failed'));
     }
   };
 

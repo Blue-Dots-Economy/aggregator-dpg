@@ -247,7 +247,8 @@
       "error_load_title": "Could not load profile",
       "btn_cancel": "Cancel",
       "btn_save": "Save changes",
-      "btn_saving": "Saving…"
+      "btn_saving": "Saving…",
+      "save_failed": "Save failed. Please try again."
     },
     "complete": {
       "topbar_title": "Complete your profile",
