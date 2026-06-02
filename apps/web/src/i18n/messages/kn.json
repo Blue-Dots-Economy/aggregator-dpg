@@ -41,6 +41,8 @@
     },
     "table": {
       "participant": "ಭಾಗವಹಿಸುವವರು",
+      "participants": "ಭಾಗವಹಿಸುವವರು",
+      "opportunityProviders": "ಅವಕಾಶ ಪೂರೈಕೆದಾರರು",
       "provider": "ಪೂರೈಕೆದಾರ",
       "joined": "ಸೇರಿದ ದಿನಾಂಕ",
       "profileStatus": "ಪ್ರೊಫೈಲ್ ಸ್ಥಿತಿ",
@@ -48,18 +50,50 @@
       "recommendedAction": "ಶಿಫಾರಸ್ಸು ಮಾಡಿದ ಕ್ರಮ",
       "applied": "ಅರ್ಜಿ ಸಲ್ಲಿಸಿದ"
     },
+    "tabs": {
+      "seekers": "ಅರ್ಜಿದಾರರು",
+      "providers": "ಪೂರೈಕೆದಾರರು"
+    },
     "search": {
       "seekerPlaceholder": "ಹೆಸರು, ಐಡಿ, ಪ್ರೊಫೈಲ್ ಹುಡುಕಿ…",
       "providerPlaceholder": "ಸಂಸ್ಥೆ, ಪಾತ್ರ, ಐಡಿ ಹುಡುಕಿ…"
     },
     "pagination": {
-      "showing": "{total} ರಲ್ಲಿ {from}–{to} ತೋರಿಸಲಾಗುತ್ತಿದೆ"
+      "showing": "{total} ರಲ್ಲಿ {from}–{to} ತೋರಿಸಲಾಗುತ್ತಿದೆ",
+      "matching": "ಈ ಪುಟದಲ್ಲಿ {rowsOnPage} ರಲ್ಲಿ {shown} ಹೊಂದಾಣಿಕೆ"
     },
     "buttons": {
       "exportCsv": "CSV ರಫ್ತು ಮಾಡಿ",
       "exporting": "ರಫ್ತು ಆಗುತ್ತಿದೆ…",
       "refresh": "ರಿಫ್ರೆಶ್",
-      "refreshing": "ರಿಫ್ರೆಶ್ ಆಗುತ್ತಿದೆ…"
+      "refreshing": "ರಿಫ್ರೆಶ್ ಆಗುತ್ತಿದೆ…",
+      "addParticipants": "ಭಾಗವಹಿಸುವವರನ್ನು ಸೇರಿಸಿ"
+    },
+    "state": {
+      "loading": "ಲೋಡ್ ಆಗುತ್ತಿದೆ…",
+      "failedToLoad": "ಲೋಡ್ ಮಾಡಲು ವಿಫಲವಾಗಿದೆ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
+      "refreshedJustNow": "ಇದೀಗ ರಿಫ್ರೆಶ್ ಆಗಿದೆ",
+      "refreshFailed": "ರಿಫ್ರೆಶ್ ವಿಫಲವಾಗಿದೆ"
+    },
+    "ministat": {
+      "completeProfiles": "ಪೂರ್ಣ ಪ್ರೊಫೈಲ್‌ಗಳು",
+      "totalItems": "ಒಟ್ಟು {entityPlural}",
+      "withApplications": "ಅರ್ಜಿಗಳೊಂದಿಗೆ {entityPlural}",
+      "newParticipants": "ಹೊಸ ಭಾಗವಹಿಸುವವರು"
+    },
+    "opp": {
+      "activeProgramsLabel": "ಸಕ್ರಿಯ ಕಾರ್ಯಕ್ರಮಗಳು",
+      "activeProgramsHint": "ಈಗ ನಡೆಯುತ್ತಿರುವ ತಂಡಗಳು",
+      "onboardedLabel": "ಆನ್‌ಬೋರ್ಡ್ ಆಗಿದ್ದಾರೆ",
+      "onboardedHint": "ನಿಯೋಜನೆ ನೀಡುತ್ತಿದ್ದಾರೆ",
+      "atRiskLabel": "ಅಪಾಯದಲ್ಲಿ",
+      "atRiskHint": "ಕಡಿಮೆ ತಂಡ ಪೂರ್ಣಗೊಳಿಸುವಿಕೆ",
+      "inactiveLabel": "ನಿಷ್ಕ್ರಿಯ",
+      "inactiveHint": "ಯಾವುದೂ ಚಾಲ್ತಿಯಲ್ಲಿಲ್ಲ",
+      "totalPrograms": "ಒಟ್ಟು ಕಾರ್ಯಕ್ರಮಗಳು",
+      "activeCohorts": "ಸಕ್ರಿಯ ತಂಡಗಳು",
+      "traineesEngaged": "ತರಬೇತಿ ಪಡೆಯುತ್ತಿರುವವರು",
+      "placementRate": "ನಿಯೋಜನೆ ದರ"
     }
   },
   "nav": {

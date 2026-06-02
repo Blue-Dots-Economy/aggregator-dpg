@@ -41,6 +41,8 @@
     },
     "table": {
       "participant": "प्रतिभागी",
+      "participants": "प्रतिभागी",
+      "opportunityProviders": "अवसर प्रदाता",
       "provider": "प्रदाता",
       "joined": "जुड़ने की तारीख",
       "profileStatus": "प्रोफ़ाइल स्थिति",
@@ -48,18 +50,50 @@
       "recommendedAction": "अनुशंसित कार्रवाई",
       "applied": "आवेदन किया"
     },
+    "tabs": {
+      "seekers": "आवेदक",
+      "providers": "प्रदाता"
+    },
     "search": {
       "seekerPlaceholder": "नाम, आईडी, प्रोफ़ाइल खोजें…",
       "providerPlaceholder": "संगठन, भूमिका, आईडी खोजें…"
     },
     "pagination": {
-      "showing": "{total} में से {from}–{to} दिखाए जा रहे हैं"
+      "showing": "{total} में से {from}–{to} दिखाए जा रहे हैं",
+      "matching": "इस पृष्ठ पर {rowsOnPage} में से {shown} मेल खा रहे हैं"
     },
     "buttons": {
       "exportCsv": "CSV निर्यात करें",
       "exporting": "निर्यात हो रहा है…",
       "refresh": "रिफ्रेश करें",
-      "refreshing": "रिफ्रेश हो रहा है…"
+      "refreshing": "रिफ्रेश हो रहा है…",
+      "addParticipants": "प्रतिभागी जोड़ें"
+    },
+    "state": {
+      "loading": "लोड हो रहा है…",
+      "failedToLoad": "लोड करने में विफल। कृपया पुनः प्रयास करें।",
+      "refreshedJustNow": "अभी रिफ्रेश हुआ",
+      "refreshFailed": "रिफ्रेश विफल"
+    },
+    "ministat": {
+      "completeProfiles": "पूर्ण प्रोफ़ाइलें",
+      "totalItems": "कुल {entityPlural}",
+      "withApplications": "आवेदन वाले {entityPlural}",
+      "newParticipants": "नए प्रतिभागी"
+    },
+    "opp": {
+      "activeProgramsLabel": "सक्रिय कार्यक्रम",
+      "activeProgramsHint": "अभी चल रहे समूह",
+      "onboardedLabel": "ऑनबोर्ड किए गए",
+      "onboardedHint": "नियुक्तियाँ दे रहे हैं",
+      "atRiskLabel": "जोखिम में",
+      "atRiskHint": "कम समूह पूर्णता",
+      "inactiveLabel": "निष्क्रिय",
+      "inactiveHint": "कोई निष्क्रिय नहीं",
+      "totalPrograms": "कुल कार्यक्रम",
+      "activeCohorts": "सक्रिय समूह",
+      "traineesEngaged": "प्रशिक्षु संलग्न",
+      "placementRate": "नियुक्ति दर"
     }
   },
   "nav": {

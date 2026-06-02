@@ -519,10 +519,10 @@ function ParticipantTable<R extends ParticipantBase>({
       <div className="px-5 py-4 flex items-center gap-3 border-b border-[var(--bd-border)]">
         <div className="font-display font-bold text-[15px] text-ink-900">
           {kind === 'seeker'
-            ? 'Participants'
+            ? t('table.participants')
             : kind === 'opp'
-              ? 'Opportunity Providers'
-              : 'Providers'}
+              ? t('table.opportunityProviders')
+              : t('tabs.providers')}
         </div>
         <span className="text-[12px] text-ink-400">
           {visibleRows.length} of {total ?? rows.length}
@@ -788,7 +788,7 @@ function PaginationFooter({
     <div className="px-5 py-3 border-t border-[var(--bd-border)] flex items-center justify-between text-[12.5px] text-ink-500">
       <div>
         {showSearchSummary
-          ? `Matching ${visibleCount} of ${rowsOnPage} on this page`
+          ? t('pagination.matching', { shown: visibleCount, rowsOnPage })
           : t('pagination.showing', { from: start, to: end, total })}
       </div>
       {totalPages > 1 && !searchActive && (
@@ -863,18 +863,18 @@ function buildPageList(current: number, totalPages: number): Array<number | '…
 }
 
 function LoadingCard() {
+  const t = useTranslations('dashboard');
   return (
     <div className="bd-card bd-shadow p-8 text-[13px] text-ink-400" style={{ opacity: 0.6 }}>
-      Loading…
+      {t('state.loading')}
     </div>
   );
 }
 
 function ErrorCard() {
+  const t = useTranslations('dashboard');
   return (
-    <div className="bd-card bd-shadow p-8 text-[13px] text-rose-600">
-      Failed to load. Please try again.
-    </div>
+    <div className="bd-card bd-shadow p-8 text-[13px] text-rose-600">{t('state.failedToLoad')}</div>
   );
 }
 
@@ -910,7 +910,7 @@ function SeekersTab() {
   const { data: cfg } = useAggregatorConfig();
   const seekerCfg = cfg?.domains?.find((d) => d.id === 'seeker');
   const seekerTileLabels = seekerCfg?.dashboardTiles ?? {};
-  const seekerPlural = seekerCfg?.plural_label ?? 'Seekers';
+  const seekerPlural = seekerCfg?.plural_label ?? t('tabs.seekers');
   // by_action_status bucket labels — wired to the funnel cells in the
   // participant table's action-count columns.
   const bucketLabels = cfg?.dashboardBuckets?.by_action_status ?? DEFAULT_BUCKET_LABELS;
@@ -1002,10 +1002,10 @@ function SeekersTab() {
           </Button>
           {refreshError ? (
             <span className="ml-2 max-w-[220px] truncate text-xs text-red-600" title={refreshError}>
-              Refresh failed
+              {t('state.refreshFailed')}
             </span>
           ) : lastRefreshedAt !== null && Date.now() - lastRefreshedAt < 5000 ? (
-            <span className="text-xs text-ink-400">Refreshed just now</span>
+            <span className="text-xs text-ink-400">{t('state.refreshedJustNow')}</span>
           ) : null}
         </div>
       </div>
@@ -1048,19 +1048,24 @@ function SeekersTab() {
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <MiniStat
-          label={seekerTileLabels.total_items ?? `Total ${seekerPlural}`}
+          label={
+            seekerTileLabels.total_items ?? t('ministat.totalItems', { entityPlural: seekerPlural })
+          }
           value={fmtCount(total)}
         />
         <MiniStat
-          label={seekerTileLabels.complete_profiles ?? 'Complete Profiles'}
+          label={seekerTileLabels.complete_profiles ?? t('ministat.completeProfiles')}
           value={fmtCount(completeProfiles)}
         />
         <MiniStat
-          label={seekerTileLabels.has_applications ?? `${seekerPlural} with Applications`}
+          label={
+            seekerTileLabels.has_applications ??
+            t('ministat.withApplications', { entityPlural: seekerPlural })
+          }
           value={fmtCount(hasApplications)}
         />
         <MiniStat
-          label={statusLabels['new'] ?? 'New Participants'}
+          label={statusLabels['new'] ?? t('ministat.newParticipants')}
           value={fmtCount(newThisWeek)}
           delta="this week"
           deltaTone="flat"
@@ -1225,7 +1230,7 @@ function ProvidersTab() {
   const { data: cfg } = useAggregatorConfig();
   const providerCfg = cfg?.domains?.find((d) => d.id === 'provider');
   const providerTileLabels = providerCfg?.dashboardTiles ?? {};
-  const providerPlural = providerCfg?.plural_label ?? 'Providers';
+  const providerPlural = providerCfg?.plural_label ?? t('tabs.providers');
   // by_action_status bucket labels — wired to the funnel cells in the
   // participant table's action-count columns.
   const bucketLabels = cfg?.dashboardBuckets?.by_action_status ?? DEFAULT_BUCKET_LABELS;
@@ -1312,10 +1317,10 @@ function ProvidersTab() {
           </Button>
           {refreshError ? (
             <span className="ml-2 max-w-[220px] truncate text-xs text-red-600" title={refreshError}>
-              Refresh failed
+              {t('state.refreshFailed')}
             </span>
           ) : lastRefreshedAt !== null && Date.now() - lastRefreshedAt < 5000 ? (
-            <span className="text-xs text-ink-400">Refreshed just now</span>
+            <span className="text-xs text-ink-400">{t('state.refreshedJustNow')}</span>
           ) : null}
         </div>
       </div>
@@ -1354,15 +1359,21 @@ function ProvidersTab() {
 
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
         <MiniStat
-          label={providerTileLabels.total_items ?? `Total ${providerPlural}`}
+          label={
+            providerTileLabels.total_items ??
+            t('ministat.totalItems', { entityPlural: providerPlural })
+          }
           value={fmtCount(total)}
         />
         <MiniStat
-          label={providerTileLabels.complete_profiles ?? 'Complete Profiles'}
+          label={providerTileLabels.complete_profiles ?? t('ministat.completeProfiles')}
           value={fmtCount(verified)}
         />
         <MiniStat
-          label={providerTileLabels.has_applications ?? `${providerPlural} with Applications`}
+          label={
+            providerTileLabels.has_applications ??
+            t('ministat.withApplications', { entityPlural: providerPlural })
+          }
           value={fmtCount(hasApplications)}
         />
       </div>
@@ -1395,6 +1406,7 @@ function toProviderRow(participant: Record<string, unknown>, locale: string): Pr
 }
 
 function OppProvidersTab() {
+  const t = useTranslations('dashboard');
   const { data, isLoading, isError } = useOppProviders();
   return (
     <div className="flex flex-col gap-5">
@@ -1403,25 +1415,37 @@ function OppProvidersTab() {
           tone="active"
           icon="spark"
           count="11"
-          label="Active programs"
-          hint="Cohorts running now"
+          label={t('opp.activeProgramsLabel')}
+          hint={t('opp.activeProgramsHint')}
         />
         <StatCard
           tone="satisfied"
           icon="check"
           count="5"
-          label="Onboarded"
-          hint="Producing placements"
+          label={t('opp.onboardedLabel')}
+          hint={t('opp.onboardedHint')}
         />
-        <StatCard tone="risk" icon="alert" count="2" label="At Risk" hint="Low cohort completion" />
-        <StatCard tone="inactive" icon="pause" count="0" label="Inactive" hint="None dormant" />
+        <StatCard
+          tone="risk"
+          icon="alert"
+          count="2"
+          label={t('opp.atRiskLabel')}
+          hint={t('opp.atRiskHint')}
+        />
+        <StatCard
+          tone="inactive"
+          icon="pause"
+          count="0"
+          label={t('opp.inactiveLabel')}
+          hint={t('opp.inactiveHint')}
+        />
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <MiniStat label="Total Programs" value="18" delta="+2" deltaTone="up" />
-        <MiniStat label="Active Cohorts" value="31" delta="+5" deltaTone="up" />
-        <MiniStat label="Trainees Engaged" value="612" delta="+58" deltaTone="up" />
-        <MiniStat label="Placement Rate" value="46%" delta="↑ 4%" deltaTone="up" />
+        <MiniStat label={t('opp.totalPrograms')} value="18" delta="+2" deltaTone="up" />
+        <MiniStat label={t('opp.activeCohorts')} value="31" delta="+5" deltaTone="up" />
+        <MiniStat label={t('opp.traineesEngaged')} value="612" delta="+58" deltaTone="up" />
+        <MiniStat label={t('opp.placementRate')} value="46%" delta="↑ 4%" deltaTone="up" />
       </div>
 
       {isLoading ? (
@@ -1439,13 +1463,16 @@ function OppProvidersTab() {
  * Builds the seeker tab label with the live participants_total from the
  * signalstack dashboard. Dot + count are suppressed while the rollup
  * loads so the chip doesn't flash a stale "·" with no number.
+ *
+ * @param count - Live total from the dashboard rollup; omit to suppress the chip.
+ * @param label - Localised tab label string (e.g. from `t('tabs.seekers')`).
  */
-function seekerTabLabel(count: number | undefined): SegmentedTab<Tab> {
+function seekerTabLabel(count: number | undefined, label: string): SegmentedTab<Tab> {
   return {
     id: 'seekers',
     label: (
       <span className="inline-flex items-center gap-2">
-        <I.users size={14} /> Seekers
+        <I.users size={14} /> {label}
         {count !== undefined && (
           <>
             <span className="text-ink-300">·</span> {count}
@@ -1460,13 +1487,16 @@ function seekerTabLabel(count: number | undefined): SegmentedTab<Tab> {
  * Builds the provider tab label. Count source is TBD — signalstack's
  * dashboard endpoint is seeker-only today, so the chip stays
  * count-less for the provider tab until the provider rollout lands.
+ *
+ * @param count - Live total from the dashboard rollup; omit to suppress the chip.
+ * @param label - Localised tab label string (e.g. from `t('tabs.providers')`).
  */
-function providerTabLabel(count: number | undefined): SegmentedTab<Tab> {
+function providerTabLabel(count: number | undefined, label: string): SegmentedTab<Tab> {
   return {
     id: 'providers',
     label: (
       <span className="inline-flex items-center gap-2">
-        <I.briefcase size={14} /> Providers
+        <I.briefcase size={14} /> {label}
         {count !== undefined && (
           <>
             <span className="text-ink-300">·</span> {count}
@@ -1491,6 +1521,7 @@ export default function DashboardPageRoot() {
 }
 
 function DashboardLoadingFrame() {
+  const t = useTranslations('dashboard');
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
   return (
     <div className="fade-up">
@@ -1498,13 +1529,14 @@ function DashboardLoadingFrame() {
         title={`My ${cfg.brand.short_name}`}
         subtitle={cfg.brand.tagline ?? 'Track every participant in your network — at a glance.'}
       />
-      <div className="text-center text-[13px] text-ink-400 py-12">Loading…</div>
+      <div className="text-center text-[13px] text-ink-400 py-12">{t('state.loading')}</div>
     </div>
   );
 }
 
 function DashboardContent({ aggregatorType }: { aggregatorType: 'seeker' | 'provider' }) {
   const router = useRouter();
+  const t = useTranslations('dashboard');
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
   // Tabs are scoped to the aggregator's registered participant focus —
   // seeker aggregators see only Seekers; provider aggregators see only
@@ -1518,8 +1550,10 @@ function DashboardContent({ aggregatorType }: { aggregatorType: 'seeker' | 'prov
     dashboard?.by_domain[aggregatorType === 'provider' ? 'provider' : 'seeker']?.rollup.total_items;
   const tabItems = useMemo<SegmentedTab<Tab>[]>(
     () =>
-      aggregatorType === 'provider' ? [providerTabLabel(liveCount)] : [seekerTabLabel(liveCount)],
-    [aggregatorType, liveCount],
+      aggregatorType === 'provider'
+        ? [providerTabLabel(liveCount, t('tabs.providers'))]
+        : [seekerTabLabel(liveCount, t('tabs.seekers'))],
+    [aggregatorType, liveCount, t],
   );
   const [tab, setTab] = useState<Tab>(aggregatorType === 'provider' ? 'providers' : 'seekers');
 
@@ -1531,7 +1565,7 @@ function DashboardContent({ aggregatorType }: { aggregatorType: 'seeker' | 'prov
         right={
           <div className="flex items-center gap-2">
             <Button icon={<I.plus size={14} />} onClick={() => router.push('/onboarding')}>
-              Add Participants
+              {t('buttons.addParticipants')}
             </Button>
           </div>
         }

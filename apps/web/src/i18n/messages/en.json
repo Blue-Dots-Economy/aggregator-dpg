@@ -41,6 +41,8 @@
     },
     "table": {
       "participant": "Participant",
+      "participants": "Participants",
+      "opportunityProviders": "Opportunity Providers",
       "provider": "Provider",
       "joined": "Joined",
       "profileStatus": "Profile Status",
@@ -48,18 +50,50 @@
       "recommendedAction": "Recommended Action",
       "applied": "Applied"
     },
+    "tabs": {
+      "seekers": "Seekers",
+      "providers": "Providers"
+    },
     "search": {
       "seekerPlaceholder": "Search name, ID, profile…",
       "providerPlaceholder": "Search org, role, ID…"
     },
     "pagination": {
-      "showing": "Showing {from}–{to} of {total}"
+      "showing": "Showing {from}–{to} of {total}",
+      "matching": "Matching {shown} of {rowsOnPage} on this page"
     },
     "buttons": {
       "exportCsv": "Export CSV",
       "exporting": "Exporting…",
       "refresh": "Refresh",
-      "refreshing": "Refreshing…"
+      "refreshing": "Refreshing…",
+      "addParticipants": "Add Participants"
+    },
+    "state": {
+      "loading": "Loading…",
+      "failedToLoad": "Failed to load. Please try again.",
+      "refreshedJustNow": "Refreshed just now",
+      "refreshFailed": "Refresh failed"
+    },
+    "ministat": {
+      "completeProfiles": "Complete Profiles",
+      "totalItems": "Total {entityPlural}",
+      "withApplications": "{entityPlural} with Applications",
+      "newParticipants": "New Participants"
+    },
+    "opp": {
+      "activeProgramsLabel": "Active programs",
+      "activeProgramsHint": "Cohorts running now",
+      "onboardedLabel": "Onboarded",
+      "onboardedHint": "Producing placements",
+      "atRiskLabel": "At Risk",
+      "atRiskHint": "Low cohort completion",
+      "inactiveLabel": "Inactive",
+      "inactiveHint": "None dormant",
+      "totalPrograms": "Total Programs",
+      "activeCohorts": "Active Cohorts",
+      "traineesEngaged": "Trainees Engaged",
+      "placementRate": "Placement Rate"
     }
   },
   "nav": {
