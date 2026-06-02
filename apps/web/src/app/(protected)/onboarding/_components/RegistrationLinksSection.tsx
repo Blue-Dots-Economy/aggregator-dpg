@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
-import { useTranslations } from 'next-intl';
+import { useTranslations, useFormatter } from 'next-intl';
 import { Button } from '../../../../components/ui/Button';
 import { I } from '../../../../icons';
 import {
@@ -312,6 +312,7 @@ export function CreateLinkSection() {
 
 function LinkCard({ link }: { link: ApiRegistrationLink }) {
   const t = useTranslations('onboarding');
+  const format = useFormatter();
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
   const activate = useActivateLink();
@@ -328,7 +329,7 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
     link.slug;
   const subtitle =
     [ctx['org_name'], ctx['event_location']].filter(Boolean).join(' · ') ||
-    `Created ${new Date(link.created_at).toLocaleDateString()}`;
+    `Created ${format.dateTime(new Date(link.created_at), { day: '2-digit', month: 'short', year: 'numeric' })}`;
 
   // Render `<host>/<orgSlug>/<slug>` with the slug emphasised. Only computed
   // when the row is published (live) — drafts and retired rows carry a null
@@ -497,11 +498,21 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
               <span className="text-ink-400">{t('link_card.verified')}</span>
             </span>
             <span className="text-ink-400">
-              {t('link_card.created_prefix')} {new Date(link.created_at).toLocaleDateString()}
+              {t('link_card.created_prefix')}{' '}
+              {format.dateTime(new Date(link.created_at), {
+                day: '2-digit',
+                month: 'short',
+                year: 'numeric',
+              })}
             </span>
             {link.expires_at && (
               <span className="text-ink-400">
-                {t('link_card.expires_prefix')} {new Date(link.expires_at).toLocaleDateString()}
+                {t('link_card.expires_prefix')}{' '}
+                {format.dateTime(new Date(link.expires_at), {
+                  day: '2-digit',
+                  month: 'short',
+                  year: 'numeric',
+                })}
               </span>
             )}
           </div>

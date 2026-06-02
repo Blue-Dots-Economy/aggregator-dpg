@@ -4,7 +4,7 @@ import { useEffect, useState, useRef, useMemo, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { createPortal } from 'react-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { useTranslations } from 'next-intl';
+import { useTranslations, useLocale } from 'next-intl';
 import { Button } from '../../../components/ui/Button';
 import { StatusPill } from '../../../components/ui/StatusPill';
 import { Avatar } from '../../../components/ui/Avatar';
@@ -882,6 +882,7 @@ const PAGE_SIZE = 25;
 
 function SeekersTab() {
   const t = useTranslations('dashboard');
+  const locale = useLocale();
   // Signalstack's `/aggregator/dashboard` is the only endpoint that
   // correctly scopes participant lookups by the caller's signalstack org
   // (via the per-call `x-acting-org-id` header). The response now
@@ -939,7 +940,10 @@ function SeekersTab() {
   const completeProfiles = rollup?.complete_profiles;
   const hasApplications = rollup?.has_applications;
   const newThisWeek = byStatus['new'];
-  const rows = useMemo(() => (slice?.items ?? []).map(toSeekerRow), [slice?.items]);
+  const rows = useMemo(
+    () => (slice?.items ?? []).map((p) => toSeekerRow(p, locale)),
+    [slice?.items, locale],
+  );
 
   // Refresh handler: hits the BFF with refresh=true to force signalstack to
   // recompute the rollup synchronously, then invalidates the React Query
@@ -1106,7 +1110,7 @@ function fmtCount(n: number | null | undefined): string {
  * `complete` profile bar uses `profile_completion_pct` directly so the
  * progress indicator stays meaningful.
  */
-function toSeekerRow(participant: Record<string, unknown>): Seeker {
+function toSeekerRow(participant: Record<string, unknown>, locale: string): Seeker {
   const userId =
     typeof participant.owner_user_id === 'string'
       ? participant.owner_user_id
@@ -1131,11 +1135,11 @@ function toSeekerRow(participant: Record<string, unknown>): Seeker {
     name,
     city: '—',
     joined: created
-      ? new Date(created).toLocaleDateString('en-IN', {
+      ? new Intl.DateTimeFormat(locale, {
           day: '2-digit',
           month: 'short',
           year: 'numeric',
-        })
+        }).format(new Date(created))
       : '—',
     avatar: avatarInitials(name),
     profile: { title: '—', exp: '—', verified: false, complete: completion },
@@ -1196,6 +1200,7 @@ function formatRelative(iso: string): string {
 
 function ProvidersTab() {
   const t = useTranslations('dashboard');
+  const locale = useLocale();
   // Mirror SeekersTab: live counts come from the signalstack dashboard
   // rollup. Provider domain reuses the same canonical rollup shape
   // (total_items, by_status, by_action_status, complete_profiles, …)
@@ -1235,7 +1240,10 @@ function ProvidersTab() {
   const inactive = byStatus['inactive'];
   const verified = rollup?.complete_profiles;
   const hasApplications = rollup?.has_applications;
-  const rows = useMemo(() => (slice?.items ?? []).map(toProviderRow), [slice?.items]);
+  const rows = useMemo(
+    () => (slice?.items ?? []).map((p) => toProviderRow(p, locale)),
+    [slice?.items, locale],
+  );
   const [cachedByStatus, setCachedByStatus] = useState<Record<string, number> | undefined>();
   useEffect(() => {
     if (!filterActive && rollup?.by_status) {
@@ -1381,8 +1389,8 @@ function ProvidersTab() {
   );
 }
 
-function toProviderRow(participant: Record<string, unknown>): Provider {
-  const seeker = toSeekerRow(participant);
+function toProviderRow(participant: Record<string, unknown>, locale: string): Provider {
+  const seeker = toSeekerRow(participant, locale);
   return { ...seeker, role: '—' };
 }
 

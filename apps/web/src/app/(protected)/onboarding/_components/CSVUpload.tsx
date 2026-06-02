@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createPortal } from 'react-dom';
-import { useTranslations } from 'next-intl';
+import { useTranslations, useFormatter } from 'next-intl';
 import { Button } from '../../../../components/ui/Button';
 import { Dropzone } from '../../../../components/ui/Dropzone';
 import { I } from '../../../../icons';
@@ -298,6 +298,7 @@ export function RecentUploadsBody() {
 
 function UploadRow({ upload }: { upload: BulkUploadStatus }) {
   const t = useTranslations('onboarding');
+  const format = useFormatter();
   const [downloading, setDownloading] = useState(false);
   const [triggeredAction, setTriggeredAction] = useState<string | null>(null);
 
@@ -329,7 +330,13 @@ function UploadRow({ upload }: { upload: BulkUploadStatus }) {
       <td className="text-[12.5px] text-ink-700 whitespace-nowrap">
         <div className="font-semibold">{formatRelative(upload.created_at)}</div>
         <div className="text-[11px] text-ink-400">
-          {new Date(upload.created_at).toLocaleString()}
+          {format.dateTime(new Date(upload.created_at), {
+            day: '2-digit',
+            month: 'short',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+          })}
         </div>
       </td>
       <td style={{ textAlign: 'center' }}>
