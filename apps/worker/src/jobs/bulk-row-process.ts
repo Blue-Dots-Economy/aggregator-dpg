@@ -171,8 +171,11 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
     }
     phoneNormalised = phone.value;
   }
+  // Email is optional in IdentitySelectors — domains like orange_dot's
+  // `tourist` have no email field. Skip the lookup when undefined;
+  // dedup degrades to phone-only.
   const emailNormalised = normaliseEmail(
-    typeof job.payload[emailSourceKey] === 'string'
+    emailSourceKey && typeof job.payload[emailSourceKey] === 'string'
       ? (job.payload[emailSourceKey] as string)
       : null,
   );
