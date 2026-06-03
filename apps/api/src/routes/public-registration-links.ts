@@ -172,8 +172,12 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       }
       phoneNormalised = phone.value;
     }
+    // Email is optional in IdentitySelectors
+    // override is undefined; dedup falls back to phone-only.
     const emailRaw =
-      typeof body[emailSourceKey] === 'string' ? (body[emailSourceKey] as string) : '';
+      emailSourceKey && typeof body[emailSourceKey] === 'string'
+        ? (body[emailSourceKey] as string)
+        : '';
     const emailNormalised = emailRaw ? emailRaw.trim().toLowerCase() : null;
     const participantId = phoneNormalised ?? randomUUID();
 
