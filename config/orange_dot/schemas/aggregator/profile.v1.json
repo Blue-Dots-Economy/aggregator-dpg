@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.bluedots.org/aggregator/profile.v1.json",
+  "title": "Aggregator Profile",
+  "description": "Post-login profile completion payload. Captures who the aggregator is, what they want from the network, and what they bring to it.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["who_i_am", "what_i_want", "what_i_have"],
+  "properties": {
+    "who_i_am": {
+      "type": "object",
+      "title": "Who I Am",
+      "additionalProperties": false,
+      "required": ["display_name", "address"],
+      "properties": {
+        "display_name": {
+          "type": "string",
+          "title": "Display Name",
+          "description": "Public display name shown on the network.",
+          "minLength": 2,
+          "maxLength": 200
+        },
+        "address": {
+          "type": "string",
+          "title": "Office Address",
+          "minLength": 5,
+          "maxLength": 500
+        },
+        "logo_url": {
+          "type": "string",
+          "title": "Logo URL",
+          "format": "uri",
+          "maxLength": 500
+        }
+      }
+    },
+    "what_i_want": {
+      "type": "object",
+      "title": "What I Want",
+      "additionalProperties": false,
+      "required": ["beneficiary_groups", "geographies"],
+      "properties": {
+        "beneficiary_groups": {
+          "type": "array",
+          "title": "Beneficiary Groups",
+          "items": { "type": "string", "minLength": 1, "maxLength": 100 },
+          "minItems": 1,
+          "maxItems": 12
+        },
+        "geographies": {
+          "type": "array",
+          "title": "Geographies Served",
+          "items": { "type": "string", "minLength": 1, "maxLength": 100 },
+          "minItems": 1,
+          "maxItems": 36
+        },
+        "sectors": {
+          "type": "array",
+          "title": "Sectors of Interest",
+          "items": { "type": "string", "minLength": 1, "maxLength": 100 },
+          "maxItems": 24
+        }
+      }
+    },
+    "what_i_have": {
+      "type": "object",
+      "title": "What I Have",
+      "additionalProperties": false,
+      "required": ["network_size"],
+      "properties": {
+        "network_size": {
+          "type": "integer",
+          "title": "Approximate Network Size",
+          "minimum": 0,
+          "maximum": 10000000
+        },
+        "capabilities": {
+          "type": "array",
+          "title": "Capabilities Offered",
+          "items": { "type": "string", "minLength": 1, "maxLength": 100 },
+          "maxItems": 24
+        }
+      }
+    },
+    "consent": {
+      "type": "object",
+      "title": "Consent",
+      "additionalProperties": false,
+      "properties": {
+        "profile_creation": { "type": "boolean", "title": "Profile creation & representation" },
+        "data_sharing": { "type": "boolean", "title": "Sharing information with relevant parties" },
+        "notifications": { "type": "boolean", "title": "Receive notifications" },
+        "analytics": { "type": "boolean", "title": "Anonymous analytics" },
+        "marketing": { "type": "boolean", "title": "Marketing communications" },
+        "retention": { "type": "boolean", "title": "Data retention per policy" }
+      }
+    }
+  }
+}
