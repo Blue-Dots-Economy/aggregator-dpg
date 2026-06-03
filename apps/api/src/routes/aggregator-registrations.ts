@@ -419,10 +419,30 @@ function splitName(fullName: string): { firstName: string; lastName: string } {
   };
 }
 
+/**
+ * Parse the comma-separated ADMIN_EMAILS env value into a clean array.
+ * Resilient to ConfigMap / Helm quirks that often slip through:
+ *
+ *   • Wrapping single or double quotes left in by `| quote` filters.
+ *   • Stray spaces / newlines / tabs around commas and entries.
+ *   • Empty or whitespace-only entries.
+ *
+ * Format ops provide (same pattern as `cc_email` in sibling projects):
+ *
+ *   ADMIN_EMAILS: "a@example.com,b@example.com,c@example.com"
+ *
+ * Returns the parsed list, or a safe default when the env is unset.
+ */
 function parseAdminEmails(): string[] {
-  const raw = process.env.ADMIN_EMAILS ?? '';
+  let raw = (process.env.ADMIN_EMAILS ?? '').trim();
+  if (
+    raw.length >= 2 &&
+    ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'")))
+  ) {
+    raw = raw.slice(1, -1).trim();
+  }
   const list = raw
-    .split(',')
+    .split(/[,\n]/)
     .map((s) => s.trim())
     .filter(Boolean);
   return list.length > 0 ? list : ['admin@bluedots.local'];
