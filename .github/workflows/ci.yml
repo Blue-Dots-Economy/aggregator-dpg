@@ -5,7 +5,7 @@ on:
     branches:
       - main
       - develop
-      - fix/admin-emails-csv-parser
+      - feat/orange-dot-and-network-schemas
 
     tags:
       - 'web-v*.*.*'
