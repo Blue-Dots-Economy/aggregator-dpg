@@ -10,9 +10,9 @@
     "paths": {
       "@/*": ["./src/*"]
     },
-    "types": ["node", "vitest/globals", "@testing-library/jest-dom"],
+    "types": ["node"],
     "resolveJsonModule": true
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules", ".next", "dist", "coverage", "vitest.config.ts"]
+  "exclude": ["node_modules", ".next", "dist", "coverage", "vitest.config.ts", "src/__tests__/**"]
 }
