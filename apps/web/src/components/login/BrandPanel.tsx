@@ -33,7 +33,11 @@ export function BrandPanel(): JSX.Element {
   // Brand palette drives the hero gradient + canvas particle colors.
   const primary = cfg.brand.primary_color ?? '#2563EB';
   const accent = cfg.brand.accent_color ?? primary;
-  const heroGradient = `linear-gradient(135deg, ${mix(primary, '#000000', 0.7)} 0%, ${mix(primary, '#000000', 0.5)} 45%, ${mix(primary, '#000000', 0.35)} 100%)`;
+  // Hero gradient — darken primary toward black for richness while
+  // keeping the brand hue dominant. Lighter mix than before so warm
+  // brand colours (e.g. orange #ff7a00) don't read as brown when
+  // pushed 70 % toward black.
+  const heroGradient = `linear-gradient(135deg, ${mix(primary, '#000000', 0.4)} 0%, ${mix(primary, '#000000', 0.2)} 45%, ${primary} 100%)`;
   const radialOverlay =
     `radial-gradient(700px 500px at 75% 25%, ${hexToRgba(accent, 0.18)} 0%, ${hexToRgba(accent, 0)} 60%),` +
     `radial-gradient(600px 480px at 15% 85%, ${hexToRgba(primary, 0.2)} 0%, ${hexToRgba(primary, 0)} 60%)`;
