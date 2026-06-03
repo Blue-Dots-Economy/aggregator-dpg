@@ -61,6 +61,19 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
 
     const link = await loadLiveLinkByOrgAndSlug(orgSlug, slug, log);
 
+    // Pull the link domain's JSON Schema from the live network config so
+    // the public registration page can render the form without a
+    // separate fetch (and without hardcoding any seeker/provider
+    // assumption). Networks that omit the domain return 404 — the link
+    // points at a no-longer-declared domain.
+    const networkCfg = await getNetworkConfig();
+    const linkDomainCfg = networkCfg.domains[link.domain];
+    if (!linkDomainCfg) {
+      throw httpError('NOT_FOUND', {
+        detail: `link domain '${link.domain}' not declared in network ${networkCfg.network.id}`,
+      });
+    }
+
     log.info({
       status: 'success',
       latency_ms: Date.now() - start,
@@ -74,6 +87,7 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       context: link.context,
       schema_id: `participant-${link.domain}`,
       schema_version: 'v1',
+      schema: linkDomainCfg.schema,
       expires_at: link.expiresAt ? link.expiresAt.toISOString() : null,
     });
   });
