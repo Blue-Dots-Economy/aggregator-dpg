@@ -29,6 +29,13 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
 # ── builder ───────────────────────────────────────────────────────────────────
 FROM installer AS builder
 ENV NEXT_TELEMETRY_DISABLED=1
+# NEXT_PUBLIC_* vars are inlined into the client bundle at build time by Next.js.
+# Declare them as ARGs so they can be forwarded from `docker build --build-arg`
+# or from docker-compose `build.args`, then promote to ENV so `next build` sees them.
+ARG NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+ARG NEXT_PUBLIC_ENABLED_LANGUAGES=en,kn,hi
+ENV NEXT_PUBLIC_ENABLED_LANGUAGES=$NEXT_PUBLIC_ENABLED_LANGUAGES
 COPY . .
 RUN pnpm --filter @aggregator-dpg/web build
 

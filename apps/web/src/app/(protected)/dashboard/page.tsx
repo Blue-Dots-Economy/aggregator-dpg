@@ -4,6 +4,7 @@ import { useEffect, useState, useRef, useMemo, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { createPortal } from 'react-dom';
 import { useQueryClient } from '@tanstack/react-query';
+import { useTranslations, useLocale } from 'next-intl';
 import { Button } from '../../../components/ui/Button';
 import { StatusPill } from '../../../components/ui/StatusPill';
 import { Avatar } from '../../../components/ui/Avatar';
@@ -18,36 +19,6 @@ import { useThemeMode } from '../../../lib/theme-mode';
 import type { ParticipantBase, ParticipantStatus, Provider, Seeker } from '../../../types';
 
 type Tab = 'seekers' | 'providers' | 'opp';
-
-/** Fallback bucket labels used when network.json doesn't override them. */
-const DEFAULT_BUCKET_LABELS: Record<string, string> = {
-  create: 'Created',
-  accept: 'Accepted',
-  reject: 'Rejected',
-  cancel: 'Cancelled',
-};
-
-/** Fallback status labels used when network.json doesn't override them. */
-const DEFAULT_STATUS_LABELS: Record<string, string> = {
-  new: 'New',
-  active: 'Active',
-  at_risk: 'At Risk',
-  inactive: 'Inactive',
-};
-
-/**
- * Domain-neutral subtitle for each status card. The status thresholds
- * live in network.json `status_rules` (new ≤Nd, active recent, at_risk
- * stale window, inactive default) but the config carries no hint copy,
- * so these stay generic and accurate for any network (jobs, PWD
- * services, etc.) rather than the old job-flavoured strings.
- */
-const STATUS_HINTS = {
-  new: 'Recently joined',
-  active: 'Recently active',
-  at_risk: 'Slowing down',
-  inactive: 'No recent activity',
-} as const;
 
 /**
  * Indexes a domain's `status_rules` by status key so the dashboard can
@@ -389,8 +360,11 @@ function statusLabel(key: string): string {
     .join(' ');
 }
 
-function buildStatusOptions(byStatus: Record<string, number> | undefined): StatusOption[] {
-  const opts: StatusOption[] = [{ value: 'all', label: 'All statuses' }];
+function buildStatusOptions(
+  byStatus: Record<string, number> | undefined,
+  allLabel: string,
+): StatusOption[] {
+  const opts: StatusOption[] = [{ value: 'all', label: allLabel }];
   if (!byStatus) return opts;
   for (const [key, count] of Object.entries(byStatus)) {
     if (!key) continue;
@@ -401,10 +375,19 @@ function buildStatusOptions(byStatus: Record<string, number> | undefined): Statu
 
 /**
  * Looks up a bucket label from the config-sourced map, falling back to
- * `DEFAULT_BUCKET_LABELS` when the key is absent. Always returns a string.
+ * an optional translated fallback supplier, then the raw key. Always returns a string.
+ *
+ * @param labels - Config-sourced bucket label map (may be from `dashboardBuckets.by_action_status`).
+ * @param key - Bucket key (e.g. `'create'`, `'accept'`).
+ * @param getFallback - Optional function that returns the localised fallback label for the key.
+ * @returns The resolved label string.
  */
-function getBucketLabel(labels: Record<string, string>, key: string): string {
-  return labels[key] ?? DEFAULT_BUCKET_LABELS[key] ?? key;
+function getBucketLabel(
+  labels: Record<string, string>,
+  key: string,
+  getFallback?: (k: string) => string,
+): string {
+  return labels[key] ?? getFallback?.(key) ?? key;
 }
 
 interface ParticipantTableProps<R extends ParticipantBase> {
@@ -434,7 +417,7 @@ interface ParticipantTableProps<R extends ParticipantBase> {
   statusOptions?: StatusOption[] | undefined;
   /**
    * Action-status bucket labels sourced from `dashboardBuckets.by_action_status`
-   * in the aggregator config. Falls back to `DEFAULT_BUCKET_LABELS` when absent.
+   * in the aggregator config. Falls back to localised `t('buckets.*')` when absent.
    */
   bucketLabels?: Record<string, string> | undefined;
 }
@@ -449,9 +432,22 @@ function ParticipantTable<R extends ParticipantBase>({
   statusFilter = 'all',
   onStatusFilterChange,
   statusOptions,
-  bucketLabels = DEFAULT_BUCKET_LABELS,
+  bucketLabels = {},
 }: ParticipantTableProps<R>) {
-  const options: StatusOption[] = statusOptions ?? [{ value: 'all', label: 'All statuses' }];
+  const t = useTranslations('dashboard');
+  /** Localised fallback for bucket keys when config-sourced labels are absent. */
+  const getBucketFallback = (key: string): string => {
+    const map: Record<string, string> = {
+      create: t('buckets.created'),
+      accept: t('buckets.accepted'),
+      reject: t('buckets.rejected'),
+      cancel: t('buckets.cancelled'),
+    };
+    return map[key] ?? key;
+  };
+  const options: StatusOption[] = statusOptions ?? [
+    { value: 'all', label: t('filters.all_statuses') },
+  ];
   const searchId = `bd-search-${kind}`;
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -512,19 +508,19 @@ function ParticipantTable<R extends ParticipantBase>({
       <div className="px-5 py-4 flex items-center gap-3 border-b border-[var(--bd-border)]">
         <div className="font-display font-bold text-[15px] text-ink-900">
           {kind === 'seeker'
-            ? 'Participants'
+            ? t('table.participants')
             : kind === 'opp'
-              ? 'Opportunity Providers'
-              : 'Providers'}
+              ? t('table.opportunityProviders')
+              : t('tabs.providers')}
         </div>
         <span className="text-[12px] text-ink-400">
-          {visibleRows.length} of {total ?? rows.length}
+          {t('table.count', { shown: visibleRows.length, total: total ?? rows.length })}
         </span>
 
         <div className="ml-auto flex items-center gap-2">
           <div className="relative">
             <label htmlFor={searchId} className="sr-only">
-              Search participants
+              {t('aria.search_participants')}
             </label>
             <I.search
               size={15}
@@ -532,11 +528,11 @@ function ParticipantTable<R extends ParticipantBase>({
             />
             <input
               id={searchId}
-              aria-label="Search participants"
+              aria-label={t('aria.search_participants')}
               className="bd-input w-[320px] text-[13px] py-1.5"
               style={{ paddingLeft: 36 }}
               placeholder={
-                kind === 'seeker' ? 'Search name, ID, profile…' : 'Search org, role, ID…'
+                kind === 'seeker' ? t('search.seekerPlaceholder') : t('search.providerPlaceholder')
               }
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -594,10 +590,10 @@ function ParticipantTable<R extends ParticipantBase>({
             icon={<I.download size={14} />}
             onClick={onExportCsv}
             disabled={exporting}
-            title={exportError ?? 'Export as CSV'}
-            aria-label="Export as CSV"
+            title={exportError ?? t('aria.export_csv')}
+            aria-label={t('aria.export_csv')}
           >
-            {exporting ? 'Exporting…' : 'Export CSV'}
+            {exporting ? t('buttons.exporting') : t('buttons.exportCsv')}
           </Button>
         </div>
       </div>
@@ -622,13 +618,13 @@ function ParticipantTable<R extends ParticipantBase>({
                   minWidth: 240,
                 }}
               >
-                {kind === 'seeker' ? 'Participant' : 'Provider'}
+                {kind === 'seeker' ? t('table.participant') : t('table.provider')}
               </th>
-              <th>Joined</th>
-              <th>Profile Status</th>
-              <th>{bucketLabels['create'] ?? 'Applied'}</th>
-              <th>Status</th>
-              <th>Recommended Action</th>
+              <th>{t('table.joined')}</th>
+              <th>{t('table.profileStatus')}</th>
+              <th>{bucketLabels['create'] ?? t('table.applied')}</th>
+              <th>{t('table.status')}</th>
+              <th>{t('table.recommendedAction')}</th>
             </tr>
           </thead>
           <tbody>
@@ -675,26 +671,26 @@ function ParticipantTable<R extends ParticipantBase>({
                         {
                           v: r.applied.pending,
                           color: 'var(--bd-funnel-requested)',
-                          label: getBucketLabel(bucketLabels, 'create'),
-                          short: getBucketLabel(bucketLabels, 'create'),
+                          label: getBucketLabel(bucketLabels, 'create', getBucketFallback),
+                          short: getBucketLabel(bucketLabels, 'create', getBucketFallback),
                         },
                         {
                           v: r.applied.accepted ?? 0,
                           color: 'var(--bd-funnel-connected)',
-                          label: getBucketLabel(bucketLabels, 'accept'),
-                          short: getBucketLabel(bucketLabels, 'accept'),
+                          label: getBucketLabel(bucketLabels, 'accept', getBucketFallback),
+                          short: getBucketLabel(bucketLabels, 'accept', getBucketFallback),
                         },
                         {
                           v: r.applied.rejected,
                           color: 'var(--bd-funnel-declined)',
-                          label: getBucketLabel(bucketLabels, 'reject'),
-                          short: getBucketLabel(bucketLabels, 'reject'),
+                          label: getBucketLabel(bucketLabels, 'reject', getBucketFallback),
+                          short: getBucketLabel(bucketLabels, 'reject', getBucketFallback),
                         },
                         {
                           v: r.applied.cancelled ?? 0,
                           color: 'var(--bd-funnel-cancelled)',
-                          label: getBucketLabel(bucketLabels, 'cancel'),
-                          short: getBucketLabel(bucketLabels, 'cancel'),
+                          label: getBucketLabel(bucketLabels, 'cancel', getBucketFallback),
+                          short: getBucketLabel(bucketLabels, 'cancel', getBucketFallback),
                         },
                       ]}
                     />
@@ -759,6 +755,7 @@ function PaginationFooter({
   searchActive = false,
   visibleCount,
 }: PaginationFooterProps) {
+  const t = useTranslations('dashboard');
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const start = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const end = (page - 1) * pageSize + rowsOnPage;
@@ -780,14 +777,14 @@ function PaginationFooter({
     <div className="px-5 py-3 border-t border-[var(--bd-border)] flex items-center justify-between text-[12.5px] text-ink-500">
       <div>
         {showSearchSummary
-          ? `Matching ${visibleCount} of ${rowsOnPage} on this page`
-          : `Showing ${start}–${end} of ${total}`}
+          ? t('pagination.matching', { shown: visibleCount, rowsOnPage })
+          : t('pagination.showing', { from: start, to: end, total })}
       </div>
       {totalPages > 1 && !searchActive && (
         <div className="flex items-center gap-1">
           <button
             type="button"
-            aria-label="Previous page"
+            aria-label={t('aria.prev_page')}
             disabled={!canPrev}
             onClick={() => change(page - 1)}
             className="px-2.5 py-1.5 rounded-md hover:bg-ink-100 text-ink-400 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
@@ -821,7 +818,7 @@ function PaginationFooter({
           )}
           <button
             type="button"
-            aria-label="Next page"
+            aria-label={t('aria.next_page')}
             disabled={!canNext}
             onClick={() => change(page + 1)}
             className="px-2.5 py-1.5 rounded-md hover:bg-ink-100 text-ink-400 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
@@ -855,24 +852,26 @@ function buildPageList(current: number, totalPages: number): Array<number | '…
 }
 
 function LoadingCard() {
+  const t = useTranslations('dashboard');
   return (
     <div className="bd-card bd-shadow p-8 text-[13px] text-ink-400" style={{ opacity: 0.6 }}>
-      Loading…
+      {t('state.loading')}
     </div>
   );
 }
 
 function ErrorCard() {
+  const t = useTranslations('dashboard');
   return (
-    <div className="bd-card bd-shadow p-8 text-[13px] text-rose-600">
-      Failed to load. Please try again.
-    </div>
+    <div className="bd-card bd-shadow p-8 text-[13px] text-rose-600">{t('state.failedToLoad')}</div>
   );
 }
 
 const PAGE_SIZE = 25;
 
 function SeekersTab() {
+  const t = useTranslations('dashboard');
+  const locale = useLocale();
   // Signalstack's `/aggregator/dashboard` is the only endpoint that
   // correctly scopes participant lookups by the caller's signalstack org
   // (via the per-call `x-acting-org-id` header). The response now
@@ -900,11 +899,11 @@ function SeekersTab() {
   const { data: cfg } = useAggregatorConfig();
   const seekerCfg = cfg?.domains?.find((d) => d.id === 'seeker');
   const seekerTileLabels = seekerCfg?.dashboardTiles ?? {};
-  const seekerPlural = seekerCfg?.plural_label ?? 'Seekers';
+  const seekerPlural = seekerCfg?.plural_label ?? t('tabs.seekers');
   // by_action_status bucket labels — wired to the funnel cells in the
   // participant table's action-count columns.
-  const bucketLabels = cfg?.dashboardBuckets?.by_action_status ?? DEFAULT_BUCKET_LABELS;
-  const statusLabels = cfg?.dashboardBuckets?.by_status ?? DEFAULT_STATUS_LABELS;
+  const bucketLabels = cfg?.dashboardBuckets?.by_action_status ?? {};
+  const statusLabels = cfg?.dashboardBuckets?.by_status ?? {};
   const statusRules = indexStatusRules(seekerCfg?.status_rules);
   const total = rollup?.total_items;
   const byStatus = rollup?.by_status ?? {};
@@ -919,8 +918,8 @@ function SeekersTab() {
     }
   }, [filterActive, rollup?.by_status]);
   const statusOptions = useMemo(
-    () => buildStatusOptions(cachedByStatus ?? byStatus),
-    [cachedByStatus, byStatus],
+    () => buildStatusOptions(cachedByStatus ?? byStatus, t('filters.all_statuses')),
+    [cachedByStatus, byStatus, t],
   );
   // Signalstack's status taxonomy is open — pick the keys the UI cares
   // about; unknown ones still surface in the items list.
@@ -930,7 +929,10 @@ function SeekersTab() {
   const completeProfiles = rollup?.complete_profiles;
   const hasApplications = rollup?.has_applications;
   const newThisWeek = byStatus['new'];
-  const rows = useMemo(() => (slice?.items ?? []).map(toSeekerRow), [slice?.items]);
+  const rows = useMemo(
+    () => (slice?.items ?? []).map((p) => toSeekerRow(p, locale)),
+    [slice?.items, locale],
+  );
 
   // Refresh handler: hits the BFF with refresh=true to force signalstack to
   // recompute the rollup synchronously, then invalidates the React Query
@@ -982,17 +984,17 @@ function SeekersTab() {
               void handleRefresh();
             }}
             disabled={refreshing}
-            aria-label="Refresh dashboard"
-            title="Refresh dashboard"
+            aria-label={t('aria.refresh')}
+            title={t('aria.refresh')}
           >
-            {refreshing ? 'Refreshing…' : 'Refresh'}
+            {refreshing ? t('buttons.refreshing') : t('buttons.refresh')}
           </Button>
           {refreshError ? (
             <span className="ml-2 max-w-[220px] truncate text-xs text-red-600" title={refreshError}>
-              Refresh failed
+              {t('state.refreshFailed')}
             </span>
           ) : lastRefreshedAt !== null && Date.now() - lastRefreshedAt < 5000 ? (
-            <span className="text-xs text-ink-400">Refreshed just now</span>
+            <span className="text-xs text-ink-400">{t('state.refreshedJustNow')}</span>
           ) : null}
         </div>
       </div>
@@ -1001,49 +1003,60 @@ function SeekersTab() {
           tone="new"
           icon="spark"
           count={fmtCount(byStatus['new'] ?? 0)}
-          label={statusRules['new']?.label ?? statusLabels['new'] ?? 'New'}
-          hint={statusRules['new']?.description ?? STATUS_HINTS.new}
+          label={statusRules['new']?.label ?? statusLabels['new'] ?? t('statuses.new')}
+          hint={statusRules['new']?.description ?? t('hints.new')}
         />
         <StatCard
           tone="active"
           icon="users"
           count={fmtCount(active)}
-          label={statusRules['active']?.label ?? statusLabels['active'] ?? `Active ${seekerPlural}`}
-          hint={statusRules['active']?.description ?? STATUS_HINTS.active}
+          label={
+            statusRules['active']?.label ??
+            statusLabels['active'] ??
+            `${t('statuses.active')} ${seekerPlural}`
+          }
+          hint={statusRules['active']?.description ?? t('hints.active')}
         />
         <StatCard
           tone="risk"
           icon="alert"
           count={fmtCount(atRisk)}
-          label={statusRules['at_risk']?.label ?? statusLabels['at_risk'] ?? 'At Risk'}
-          hint={statusRules['at_risk']?.description ?? STATUS_HINTS.at_risk}
+          label={statusRules['at_risk']?.label ?? statusLabels['at_risk'] ?? t('statuses.at_risk')}
+          hint={statusRules['at_risk']?.description ?? t('hints.at_risk')}
         />
         <StatCard
           tone="inactive"
           icon="pause"
           count={fmtCount(inactive)}
-          label={statusRules['inactive']?.label ?? statusLabels['inactive'] ?? 'Inactive'}
-          hint={statusRules['inactive']?.description ?? STATUS_HINTS.inactive}
+          label={
+            statusRules['inactive']?.label ?? statusLabels['inactive'] ?? t('statuses.inactive')
+          }
+          hint={statusRules['inactive']?.description ?? t('hints.inactive')}
         />
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <MiniStat
-          label={seekerTileLabels.total_items ?? `Total ${seekerPlural}`}
+          label={
+            seekerTileLabels.total_items ?? t('ministat.totalItems', { entityPlural: seekerPlural })
+          }
           value={fmtCount(total)}
         />
         <MiniStat
-          label={seekerTileLabels.complete_profiles ?? 'Complete Profiles'}
+          label={seekerTileLabels.complete_profiles ?? t('ministat.completeProfiles')}
           value={fmtCount(completeProfiles)}
         />
         <MiniStat
-          label={seekerTileLabels.has_applications ?? `${seekerPlural} with Applications`}
+          label={
+            seekerTileLabels.has_applications ??
+            t('ministat.withApplications', { entityPlural: seekerPlural })
+          }
           value={fmtCount(hasApplications)}
         />
         <MiniStat
-          label={statusLabels['new'] ?? 'New Participants'}
+          label={statusLabels['new'] ?? t('ministat.newParticipants')}
           value={fmtCount(newThisWeek)}
-          delta="this week"
+          delta={t('ministat.delta_this_week')}
           deltaTone="flat"
         />
       </div>
@@ -1091,7 +1104,7 @@ function fmtCount(n: number | null | undefined): string {
  * `complete` profile bar uses `profile_completion_pct` directly so the
  * progress indicator stays meaningful.
  */
-function toSeekerRow(participant: Record<string, unknown>): Seeker {
+function toSeekerRow(participant: Record<string, unknown>, locale: string): Seeker {
   const userId =
     typeof participant.owner_user_id === 'string'
       ? participant.owner_user_id
@@ -1116,11 +1129,11 @@ function toSeekerRow(participant: Record<string, unknown>): Seeker {
     name,
     city: '—',
     joined: created
-      ? new Date(created).toLocaleDateString('en-IN', {
+      ? new Intl.DateTimeFormat(locale, {
           day: '2-digit',
           month: 'short',
           year: 'numeric',
-        })
+        }).format(new Date(created))
       : '—',
     avatar: avatarInitials(name),
     profile: { title: '—', exp: '—', verified: false, complete: completion },
@@ -1180,6 +1193,8 @@ function formatRelative(iso: string): string {
 }
 
 function ProvidersTab() {
+  const t = useTranslations('dashboard');
+  const locale = useLocale();
   // Mirror SeekersTab: live counts come from the signalstack dashboard
   // rollup. Provider domain reuses the same canonical rollup shape
   // (total_items, by_status, by_action_status, complete_profiles, …)
@@ -1204,11 +1219,11 @@ function ProvidersTab() {
   const { data: cfg } = useAggregatorConfig();
   const providerCfg = cfg?.domains?.find((d) => d.id === 'provider');
   const providerTileLabels = providerCfg?.dashboardTiles ?? {};
-  const providerPlural = providerCfg?.plural_label ?? 'Providers';
+  const providerPlural = providerCfg?.plural_label ?? t('tabs.providers');
   // by_action_status bucket labels — wired to the funnel cells in the
   // participant table's action-count columns.
-  const bucketLabels = cfg?.dashboardBuckets?.by_action_status ?? DEFAULT_BUCKET_LABELS;
-  const statusLabels = cfg?.dashboardBuckets?.by_status ?? DEFAULT_STATUS_LABELS;
+  const bucketLabels = cfg?.dashboardBuckets?.by_action_status ?? {};
+  const statusLabels = cfg?.dashboardBuckets?.by_status ?? {};
   const statusRules = indexStatusRules(providerCfg?.status_rules);
   const slice = dashboard?.by_domain.provider;
   const rollup = slice?.rollup;
@@ -1219,7 +1234,10 @@ function ProvidersTab() {
   const inactive = byStatus['inactive'];
   const verified = rollup?.complete_profiles;
   const hasApplications = rollup?.has_applications;
-  const rows = useMemo(() => (slice?.items ?? []).map(toProviderRow), [slice?.items]);
+  const rows = useMemo(
+    () => (slice?.items ?? []).map((p) => toProviderRow(p, locale)),
+    [slice?.items, locale],
+  );
   const [cachedByStatus, setCachedByStatus] = useState<Record<string, number> | undefined>();
   useEffect(() => {
     if (!filterActive && rollup?.by_status) {
@@ -1227,8 +1245,8 @@ function ProvidersTab() {
     }
   }, [filterActive, rollup?.by_status]);
   const statusOptions = useMemo(
-    () => buildStatusOptions(cachedByStatus ?? byStatus),
-    [cachedByStatus, byStatus],
+    () => buildStatusOptions(cachedByStatus ?? byStatus, t('filters.all_statuses')),
+    [cachedByStatus, byStatus, t],
   );
 
   // Refresh handler: hits the BFF with refresh=true to force signalstack to
@@ -1281,17 +1299,17 @@ function ProvidersTab() {
               void handleRefresh();
             }}
             disabled={refreshing}
-            aria-label="Refresh dashboard"
-            title="Refresh dashboard"
+            aria-label={t('aria.refresh')}
+            title={t('aria.refresh')}
           >
-            {refreshing ? 'Refreshing…' : 'Refresh'}
+            {refreshing ? t('buttons.refreshing') : t('buttons.refresh')}
           </Button>
           {refreshError ? (
             <span className="ml-2 max-w-[220px] truncate text-xs text-red-600" title={refreshError}>
-              Refresh failed
+              {t('state.refreshFailed')}
             </span>
           ) : lastRefreshedAt !== null && Date.now() - lastRefreshedAt < 5000 ? (
-            <span className="text-xs text-ink-400">Refreshed just now</span>
+            <span className="text-xs text-ink-400">{t('state.refreshedJustNow')}</span>
           ) : null}
         </div>
       </div>
@@ -1300,43 +1318,51 @@ function ProvidersTab() {
           tone="new"
           icon="spark"
           count={fmtCount(byStatus['new'] ?? 0)}
-          label={statusRules['new']?.label ?? statusLabels['new'] ?? 'New'}
-          hint={statusRules['new']?.description ?? STATUS_HINTS.new}
+          label={statusRules['new']?.label ?? statusLabels['new'] ?? t('statuses.new')}
+          hint={statusRules['new']?.description ?? t('hints.new')}
         />
         <StatCard
           tone="active"
           icon="briefcase"
           count={fmtCount(active)}
-          label={statusRules['active']?.label ?? statusLabels['active'] ?? 'Active'}
-          hint={statusRules['active']?.description ?? STATUS_HINTS.active}
+          label={statusRules['active']?.label ?? statusLabels['active'] ?? t('statuses.active')}
+          hint={statusRules['active']?.description ?? t('hints.active')}
         />
         <StatCard
           tone="risk"
           icon="alert"
           count={fmtCount(atRisk)}
-          label={statusRules['at_risk']?.label ?? statusLabels['at_risk'] ?? 'At Risk'}
-          hint={statusRules['at_risk']?.description ?? STATUS_HINTS.at_risk}
+          label={statusRules['at_risk']?.label ?? statusLabels['at_risk'] ?? t('statuses.at_risk')}
+          hint={statusRules['at_risk']?.description ?? t('hints.at_risk')}
         />
         <StatCard
           tone="inactive"
           icon="pause"
           count={fmtCount(inactive)}
-          label={statusRules['inactive']?.label ?? statusLabels['inactive'] ?? 'Inactive'}
-          hint={statusRules['inactive']?.description ?? STATUS_HINTS.inactive}
+          label={
+            statusRules['inactive']?.label ?? statusLabels['inactive'] ?? t('statuses.inactive')
+          }
+          hint={statusRules['inactive']?.description ?? t('hints.inactive')}
         />
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
         <MiniStat
-          label={providerTileLabels.total_items ?? `Total ${providerPlural}`}
+          label={
+            providerTileLabels.total_items ??
+            t('ministat.totalItems', { entityPlural: providerPlural })
+          }
           value={fmtCount(total)}
         />
         <MiniStat
-          label={providerTileLabels.complete_profiles ?? 'Complete Profiles'}
+          label={providerTileLabels.complete_profiles ?? t('ministat.completeProfiles')}
           value={fmtCount(verified)}
         />
         <MiniStat
-          label={providerTileLabels.has_applications ?? `${providerPlural} with Applications`}
+          label={
+            providerTileLabels.has_applications ??
+            t('ministat.withApplications', { entityPlural: providerPlural })
+          }
           value={fmtCount(hasApplications)}
         />
       </div>
@@ -1363,12 +1389,13 @@ function ProvidersTab() {
   );
 }
 
-function toProviderRow(participant: Record<string, unknown>): Provider {
-  const seeker = toSeekerRow(participant);
+function toProviderRow(participant: Record<string, unknown>, locale: string): Provider {
+  const seeker = toSeekerRow(participant, locale);
   return { ...seeker, role: '—' };
 }
 
 function OppProvidersTab() {
+  const t = useTranslations('dashboard');
   const { data, isLoading, isError } = useOppProviders();
   return (
     <div className="flex flex-col gap-5">
@@ -1377,25 +1404,37 @@ function OppProvidersTab() {
           tone="active"
           icon="spark"
           count="11"
-          label="Active programs"
-          hint="Cohorts running now"
+          label={t('opp.activeProgramsLabel')}
+          hint={t('opp.activeProgramsHint')}
         />
         <StatCard
           tone="satisfied"
           icon="check"
           count="5"
-          label="Onboarded"
-          hint="Producing placements"
+          label={t('opp.onboardedLabel')}
+          hint={t('opp.onboardedHint')}
         />
-        <StatCard tone="risk" icon="alert" count="2" label="At Risk" hint="Low cohort completion" />
-        <StatCard tone="inactive" icon="pause" count="0" label="Inactive" hint="None dormant" />
+        <StatCard
+          tone="risk"
+          icon="alert"
+          count="2"
+          label={t('opp.atRiskLabel')}
+          hint={t('opp.atRiskHint')}
+        />
+        <StatCard
+          tone="inactive"
+          icon="pause"
+          count="0"
+          label={t('opp.inactiveLabel')}
+          hint={t('opp.inactiveHint')}
+        />
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <MiniStat label="Total Programs" value="18" delta="+2" deltaTone="up" />
-        <MiniStat label="Active Cohorts" value="31" delta="+5" deltaTone="up" />
-        <MiniStat label="Trainees Engaged" value="612" delta="+58" deltaTone="up" />
-        <MiniStat label="Placement Rate" value="46%" delta="↑ 4%" deltaTone="up" />
+        <MiniStat label={t('opp.totalPrograms')} value="18" delta="+2" deltaTone="up" />
+        <MiniStat label={t('opp.activeCohorts')} value="31" delta="+5" deltaTone="up" />
+        <MiniStat label={t('opp.traineesEngaged')} value="612" delta="+58" deltaTone="up" />
+        <MiniStat label={t('opp.placementRate')} value="46%" delta="↑ 4%" deltaTone="up" />
       </div>
 
       {isLoading ? (
@@ -1413,13 +1452,16 @@ function OppProvidersTab() {
  * Builds the seeker tab label with the live participants_total from the
  * signalstack dashboard. Dot + count are suppressed while the rollup
  * loads so the chip doesn't flash a stale "·" with no number.
+ *
+ * @param count - Live total from the dashboard rollup; omit to suppress the chip.
+ * @param label - Localised tab label string (e.g. from `t('tabs.seekers')`).
  */
-function seekerTabLabel(count: number | undefined): SegmentedTab<Tab> {
+function seekerTabLabel(count: number | undefined, label: string): SegmentedTab<Tab> {
   return {
     id: 'seekers',
     label: (
       <span className="inline-flex items-center gap-2">
-        <I.users size={14} /> Seekers
+        <I.users size={14} /> {label}
         {count !== undefined && (
           <>
             <span className="text-ink-300">·</span> {count}
@@ -1434,13 +1476,16 @@ function seekerTabLabel(count: number | undefined): SegmentedTab<Tab> {
  * Builds the provider tab label. Count source is TBD — signalstack's
  * dashboard endpoint is seeker-only today, so the chip stays
  * count-less for the provider tab until the provider rollout lands.
+ *
+ * @param count - Live total from the dashboard rollup; omit to suppress the chip.
+ * @param label - Localised tab label string (e.g. from `t('tabs.providers')`).
  */
-function providerTabLabel(count: number | undefined): SegmentedTab<Tab> {
+function providerTabLabel(count: number | undefined, label: string): SegmentedTab<Tab> {
   return {
     id: 'providers',
     label: (
       <span className="inline-flex items-center gap-2">
-        <I.briefcase size={14} /> Providers
+        <I.briefcase size={14} /> {label}
         {count !== undefined && (
           <>
             <span className="text-ink-300">·</span> {count}
@@ -1465,6 +1510,7 @@ export default function DashboardPageRoot() {
 }
 
 function DashboardLoadingFrame() {
+  const t = useTranslations('dashboard');
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
   return (
     <div className="fade-up">
@@ -1472,13 +1518,14 @@ function DashboardLoadingFrame() {
         title={`My ${cfg.brand.short_name}`}
         subtitle={cfg.brand.tagline ?? 'Track every participant in your network — at a glance.'}
       />
-      <div className="text-center text-[13px] text-ink-400 py-12">Loading…</div>
+      <div className="text-center text-[13px] text-ink-400 py-12">{t('state.loading')}</div>
     </div>
   );
 }
 
 function DashboardContent({ aggregatorType }: { aggregatorType: 'seeker' | 'provider' }) {
   const router = useRouter();
+  const t = useTranslations('dashboard');
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
   // Tabs are scoped to the aggregator's registered participant focus —
   // seeker aggregators see only Seekers; provider aggregators see only
@@ -1492,8 +1539,10 @@ function DashboardContent({ aggregatorType }: { aggregatorType: 'seeker' | 'prov
     dashboard?.by_domain[aggregatorType === 'provider' ? 'provider' : 'seeker']?.rollup.total_items;
   const tabItems = useMemo<SegmentedTab<Tab>[]>(
     () =>
-      aggregatorType === 'provider' ? [providerTabLabel(liveCount)] : [seekerTabLabel(liveCount)],
-    [aggregatorType, liveCount],
+      aggregatorType === 'provider'
+        ? [providerTabLabel(liveCount, t('tabs.providers'))]
+        : [seekerTabLabel(liveCount, t('tabs.seekers'))],
+    [aggregatorType, liveCount, t],
   );
   const [tab, setTab] = useState<Tab>(aggregatorType === 'provider' ? 'providers' : 'seekers');
 
@@ -1505,7 +1554,7 @@ function DashboardContent({ aggregatorType }: { aggregatorType: 'seeker' | 'prov
         right={
           <div className="flex items-center gap-2">
             <Button icon={<I.plus size={14} />} onClick={() => router.push('/onboarding')}>
-              Add Participants
+              {t('buttons.addParticipants')}
             </Button>
           </div>
         }

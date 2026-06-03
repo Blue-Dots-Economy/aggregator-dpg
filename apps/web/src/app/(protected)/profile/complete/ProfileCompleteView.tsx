@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, type FormEvent, type JSX } from 'react';
 import type { RJSFSchema } from '@rjsf/utils';
 import type { IChangeEvent } from '@rjsf/core';
+import { useTranslations } from 'next-intl';
 import { RjsfThemedForm } from '../../../../components/forms/RjsfThemed';
 import { Button } from '../../../../components/ui/Button';
 import { Topbar } from '../../../../components/shell/Topbar';
@@ -27,6 +28,7 @@ type SubmitState =
   | { status: 'error'; message: string };
 
 export function ProfileCompleteView({ schema, uiSchema }: ProfileCompleteViewProps): JSX.Element {
+  const t = useTranslations('profile.complete');
   const [formData, setFormData] = useState<Record<string, unknown>>({});
   const [consent, setConsent] = useState<Record<string, unknown>>({});
   const [state, setState] = useState<SubmitState>({ status: 'loading' });
@@ -97,15 +99,12 @@ export function ProfileCompleteView({ schema, uiSchema }: ProfileCompleteViewPro
 
   return (
     <div className="fade-up">
-      <Topbar
-        title="Complete your profile"
-        subtitle="A few details about your organisation so we can match you with the right opportunities."
-      />
+      <Topbar title={t('topbar_title')} subtitle={t('topbar_subtitle')} />
 
       <div className="bd-card bd-shadow overflow-hidden">
         <div className="px-7 py-7">
           {state.status === 'loading' && (
-            <div className="text-[13px] text-ink-400">Loading profile…</div>
+            <div className="text-[13px] text-ink-400">{t('loading')}</div>
           )}
           {state.status !== 'loading' && (
             <RjsfThemedForm<Record<string, unknown>>
@@ -118,7 +117,7 @@ export function ProfileCompleteView({ schema, uiSchema }: ProfileCompleteViewPro
               <div className="flex items-center justify-between border-t border-[var(--bd-border)] mt-6 pt-5">
                 {state.status === 'saved' && (
                   <span className="inline-flex items-center gap-1.5 text-emerald-700 text-[12.5px] font-semibold">
-                    <I.check size={14} /> Saved
+                    <I.check size={14} /> {t('status_saved')}
                   </span>
                 )}
                 {state.status === 'error' && (
@@ -132,7 +131,7 @@ export function ProfileCompleteView({ schema, uiSchema }: ProfileCompleteViewPro
                     icon={<I.check size={14} />}
                     disabled={state.status === 'submitting'}
                   >
-                    {state.status === 'submitting' ? 'Saving…' : 'Save profile'}
+                    {state.status === 'submitting' ? t('btn_saving') : t('btn_save')}
                   </Button>
                 </div>
               </div>

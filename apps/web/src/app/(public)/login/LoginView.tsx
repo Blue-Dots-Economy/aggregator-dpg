@@ -1,6 +1,7 @@
 'use client';
 
 import Image from 'next/image';
+import { useTranslations } from 'next-intl';
 import { BlueDotsLogo } from '../../../components/ui/BlueDotsLogo';
 import { BrandPanel } from '../../../components/login/BrandPanel';
 import { I } from '../../../icons';
@@ -21,6 +22,7 @@ export interface LoginViewProps {
  * No credentials are collected on this page.
  */
 export function LoginView({ returnTo, error }: LoginViewProps): JSX.Element {
+  const t = useTranslations('auth');
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
   const brand = cfg.brand.short_name;
   const goSignIn = (): void => {
@@ -82,30 +84,30 @@ export function LoginView({ returnTo, error }: LoginViewProps): JSX.Element {
                 role="alert"
                 className="mb-5 rounded-[10px] border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-800"
               >
-                Your session expired. Sign in again to continue.
+                {t('session_expired')}
               </div>
             ) : (
               <div
                 role="alert"
                 className="mb-5 rounded-[10px] border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-700"
               >
-                Sign-in failed: {humanizeError(error)}. Please try again.
+                {t('signin_failed', { reason: humanizeError(error, t) })}
               </div>
             )
           ) : null}
 
           <div className="fade-up">
-            <Welcome onSignIn={goSignIn} onRegister={goRegister} brand={brand} />
+            <Welcome onSignIn={goSignIn} onRegister={goRegister} brand={brand} t={t} />
           </div>
 
           <div className="mt-8 text-[12px] text-ink-400">
-            By continuing you agree to the{' '}
+            {t('footer_prefix')}{' '}
             <button type="button" className="text-primary-600 hover:underline">
-              Privacy Policy
+              {t('privacy')}
             </button>{' '}
-            and{' '}
+            {t('footer_and')}{' '}
             <button type="button" className="text-primary-600 hover:underline">
-              Terms
+              {t('terms')}
             </button>
             .
           </div>
@@ -115,46 +117,54 @@ export function LoginView({ returnTo, error }: LoginViewProps): JSX.Element {
   );
 }
 
-function humanizeError(code: string): string {
+type TFunction = ReturnType<typeof useTranslations<'auth'>>;
+
+function humanizeError(code: string, t: TFunction): string {
   // Map known codes to fixed copy. Anything unrecognised becomes a generic
   // message — never reflect the raw code into the DOM, since a malicious or
   // misconfigured IdP could deliver attacker-controlled text via this query
   // param.
-  const known: Record<string, string> = {
-    invalid_flow_cookie: 'session handshake expired',
-    missing_code_or_state: 'incomplete callback',
-    oidc_error_temporarily_unavailable: 'sign-in session expired before completing',
-    oidc_error_login_required: 'sign-in is required to continue',
-    oidc_error_access_denied: 'sign-in was cancelled',
-    oidc_error_invalid_request: 'sign-in request was invalid',
-    oidc_error_server_error: 'identity provider is temporarily unavailable',
-    exchange_token_exchange_failed: 'token exchange failed',
-    exchange_state_mismatch: 'security check failed (state mismatch)',
-    exchange_token_verify_failed: 'security check failed (token verification)',
-  };
-  return known[code] ?? 'unexpected sign-in error';
+  const knownKeys = [
+    'invalid_flow_cookie',
+    'missing_code_or_state',
+    'oidc_error_temporarily_unavailable',
+    'oidc_error_login_required',
+    'oidc_error_access_denied',
+    'oidc_error_invalid_request',
+    'oidc_error_server_error',
+    'exchange_token_exchange_failed',
+    'exchange_state_mismatch',
+    'exchange_token_verify_failed',
+  ] as const;
+
+  type ErrorKey = (typeof knownKeys)[number];
+  const known = new Set<string>(knownKeys);
+
+  if (known.has(code)) {
+    return t(`errors.${code as ErrorKey}`);
+  }
+  return t('errors.unknown');
 }
 
 interface WelcomeProps {
   onSignIn: () => void;
   onRegister: () => void;
   brand: string;
+  t: TFunction;
 }
 
 /**
  * Two-card welcome surface: existing user sign-in vs new member registration.
  *
- * @param props - Callbacks for each card.
+ * @param props - Callbacks for each card and translation function.
  */
-function Welcome({ onSignIn, onRegister, brand }: WelcomeProps): JSX.Element {
+function Welcome({ onSignIn, onRegister, brand, t }: WelcomeProps): JSX.Element {
   return (
     <div>
       <h2 className="font-display font-bold text-[28px] text-ink-900 tracking-tight leading-tight">
-        Welcome back.
+        {t('welcome_heading')}
       </h2>
-      <p className="text-[14px] text-ink-500 mt-2">
-        Sign in or register your organisation to get started.
-      </p>
+      <p className="text-[14px] text-ink-500 mt-2">{t('welcome_sub')}</p>
 
       <div className="grid grid-cols-1 gap-2.5 mt-7">
         <button
@@ -172,10 +182,10 @@ function Welcome({ onSignIn, onRegister, brand }: WelcomeProps): JSX.Element {
             </div>
             <div>
               <div className="font-display font-bold text-[15px] text-ink-900">
-                Existing user — Sign in
+                {t('existing_title')}
               </div>
               <div className="text-[12.5px] text-ink-400 mt-0.5">
-                Continue with email or mobile via {brand} SSO
+                {t('existing_sub', { brand })}
               </div>
             </div>
           </div>
@@ -195,9 +205,11 @@ function Welcome({ onSignIn, onRegister, brand }: WelcomeProps): JSX.Element {
               <I.spark size={16} className="text-ink-600" />
             </div>
             <div>
-              <div className="font-display font-bold text-[15px] text-ink-900">Become a member</div>
+              <div className="font-display font-bold text-[15px] text-ink-900">
+                {t('register_title')}
+              </div>
               <div className="text-[12.5px] text-ink-400 mt-0.5">
-                Register your organisation with {brand}
+                {t('register_sub', { brand })}
               </div>
             </div>
           </div>
@@ -209,7 +221,7 @@ function Welcome({ onSignIn, onRegister, brand }: WelcomeProps): JSX.Element {
 
       <div className="mt-5 text-[12px] text-ink-400 flex items-start gap-2">
         <span className="w-1 h-1 rounded-full bg-ink-300 mt-1.5 shrink-0" />
-        New registrations are reviewed by the {brand} team.
+        {t('review_notice', { brand })}
       </div>
     </div>
   );

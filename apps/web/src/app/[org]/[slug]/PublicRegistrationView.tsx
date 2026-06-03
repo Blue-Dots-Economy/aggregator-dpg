@@ -4,6 +4,7 @@ import Image from 'next/image';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import type { RJSFSchema, UiSchema } from '@rjsf/utils';
 import type { IChangeEvent } from '@rjsf/core';
+import { useTranslations } from 'next-intl';
 import { RjsfThemedForm } from '../../../components/forms/RjsfThemed';
 import { BlueDotsLogo } from '../../../components/ui/BlueDotsLogo';
 import { I } from '../../../icons';
@@ -53,6 +54,7 @@ export function PublicRegistrationView({
   schema,
   uiSchema,
 }: PublicRegistrationViewProps): JSX.Element {
+  const t = useTranslations('profile.public_reg');
   const [formData, setFormData] = useState<Record<string, unknown>>({});
   const [state, setState] = useState<SubmitState>({ status: 'idle' });
   // Defer required-field error rendering until the user has actually
@@ -244,8 +246,8 @@ export function PublicRegistrationView({
         const body = (await res.json().catch(() => ({}))) as ApiErrorEnvelope;
         setState({
           status: 'error',
-          title: body.error?.title ?? 'Submission failed',
-          detail: body.error?.detail ?? `Server returned HTTP ${res.status}.`,
+          title: body.error?.title ?? t('error_submission_title'),
+          detail: body.error?.detail ?? t('error_server_detail', { status: res.status }),
           code: body.error?.code ?? 'UNKNOWN',
         });
         return;
@@ -259,8 +261,8 @@ export function PublicRegistrationView({
     } catch (err) {
       setState({
         status: 'error',
-        title: 'Network error',
-        detail: err instanceof Error ? err.message : 'Could not reach the server.',
+        title: t('error_network_title'),
+        detail: err instanceof Error ? err.message : t('error_network_detail'),
         code: 'NETWORK_ERROR',
       });
     }
@@ -303,7 +305,7 @@ export function PublicRegistrationView({
             style={{ background: heroGradient }}
           >
             <div className="text-[11.5px] uppercase tracking-[0.14em] font-semibold text-white/70">
-              {domain === 'seeker' ? 'Seeker registration' : 'Provider registration'}
+              {domain === 'seeker' ? t('domain_seeker') : t('domain_provider')}
             </div>
             <h1 className="font-display font-bold text-[24px] sm:text-[28px] tracking-tight leading-tight mt-1.5">
               {eventLabel}
@@ -324,16 +326,14 @@ export function PublicRegistrationView({
                   <span className="w-7 h-7 rounded-full bg-emerald-500 text-white inline-flex items-center justify-center">
                     <I.check size={16} stroke={2.6} />
                   </span>
-                  {state.outcome === 'passed' ? 'Registration received' : 'Already registered'}
+                  {state.outcome === 'passed' ? t('done_passed_title') : t('done_skipped_title')}
                 </div>
                 <p className="text-[14px] text-emerald-700 mt-3 leading-relaxed">
-                  {state.outcome === 'passed'
-                    ? 'Thanks — your details have been recorded. You will hear back from the aggregator soon.'
-                    : 'This mobile number (or email) is already registered with this aggregator — no need to register again.'}
+                  {state.outcome === 'passed' ? t('done_passed_body') : t('done_skipped_body')}
                 </p>
                 {state.submissionId ? (
                   <div className="text-[11px] text-emerald-600/80 font-mono mt-3">
-                    Ref: {state.submissionId}
+                    {t('done_ref_prefix')} {state.submissionId}
                   </div>
                 ) : null}
                 <button
@@ -346,7 +346,7 @@ export function PublicRegistrationView({
                   style={{ backgroundColor: cfg.brand.primary_color }}
                   className="mt-5 w-full py-3 rounded-[12px] font-display font-bold text-[15px] text-white hover:opacity-90 transition-opacity"
                 >
-                  Register another
+                  {t('btn_register_another')}
                 </button>
               </div>
             ) : (
@@ -383,11 +383,11 @@ export function PublicRegistrationView({
                   noHtml5Validate
                   onError={(errors) => {
                     setShowValidation(true);
-                    const first = errors?.[0]?.message ?? 'Please fill all required fields.';
+                    const first = errors?.[0]?.message ?? t('validation_required');
                     setState({
                       status: 'error',
-                      title: 'Form validation failed',
-                      detail: `${first}${errors.length > 1 ? ` (and ${errors.length - 1} more)` : ''}`,
+                      title: t('validation_error_title'),
+                      detail: `${first}${errors.length > 1 ? ` ${t('validation_more', { count: errors.length - 1 })}` : ''}`,
                       code: 'VALIDATION',
                     });
                   }}
@@ -408,14 +408,14 @@ export function PublicRegistrationView({
                         : 'hover:opacity-90 bd-shadow-lg'
                     }`}
                     >
-                      {state.status === 'submitting' ? 'Submitting…' : 'Submit registration'}
+                      {state.status === 'submitting' ? t('btn_submitting') : t('btn_submit')}
                     </button>
                   </div>
                 </RjsfThemedForm>
 
                 <div className="mt-5 text-[12px] text-ink-400 flex items-start gap-2">
                   <I.shield size={13} className="mt-0.5 shrink-0" />
-                  Your details are shared only with the aggregator who issued this link.
+                  {t('privacy_note')}
                 </div>
               </>
             )}
@@ -423,7 +423,7 @@ export function PublicRegistrationView({
         </div>
 
         <p className="text-center text-[11.5px] text-ink-400 mt-6">
-          Powered by{' '}
+          {t('powered_by')}{' '}
           <span className="font-semibold" style={{ color: cfg.brand.primary_color }}>
             {brandShort}
           </span>
