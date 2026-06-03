@@ -9,7 +9,7 @@ import { jsonFetch } from './http';
 export interface ApiRegistrationLink {
   link_id: string;
   slug: string;
-  domain: 'seeker' | 'provider';
+  domain: string;
   status: 'draft' | 'live' | 'retired';
   context: Record<string, unknown>;
   expires_at: string | null;
@@ -44,7 +44,7 @@ export interface ListLinksResponse {
 }
 
 export interface CreateLinkInput {
-  domain: 'seeker' | 'provider';
+  domain: string;
   /** Optional human-readable slug. Server falls back to random when omitted. */
   slug?: string;
   /**
@@ -93,7 +93,7 @@ export interface BulkUploadStatus {
   upload_id: string;
   status: string;
   status_reason: string | null;
-  participant_type: 'seeker' | 'provider';
+  participant_type: string;
   total_rows: number | null;
   passed: number;
   failed: number;
@@ -122,7 +122,7 @@ export interface BulkUploadErrorsResponse {
 export const onboardingService = {
   async listLinks(
     opts: {
-      domain?: 'seeker' | 'provider';
+      domain?: string;
       status?: 'draft' | 'live' | 'retired';
       limit?: number;
       offset?: number;
@@ -174,9 +174,7 @@ export const onboardingService = {
     return jsonFetch<OnboardingSummary>(`/api/onboarding/summary${qs ? `?${qs}` : ''}`);
   },
 
-  async createBulkUpload(
-    participantType: 'seeker' | 'provider',
-  ): Promise<BulkUploadCreateResponse> {
+  async createBulkUpload(participantType: string): Promise<BulkUploadCreateResponse> {
     return jsonFetch<BulkUploadCreateResponse>('/api/bulk-uploads', {
       method: 'POST',
       body: JSON.stringify({ participant_type: participantType }),
@@ -219,7 +217,7 @@ export const onboardingService = {
    */
   async uploadCsv(
     file: File,
-    participantType: 'seeker' | 'provider',
+    participantType: string,
   ): Promise<{
     uploadId: string;
     status: BulkUploadStatus;

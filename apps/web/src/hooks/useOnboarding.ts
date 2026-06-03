@@ -10,7 +10,7 @@ import {
   type UpdateLinkInput,
 } from '../services/onboarding.service';
 
-export function useRegistrationLinks(domain: 'seeker' | 'provider') {
+export function useRegistrationLinks(domain: string) {
   return useQuery<ApiRegistrationLink[]>({
     queryKey: ['onboarding', 'links', domain],
     queryFn: async () => {
@@ -73,13 +73,8 @@ export function useOnboardingSummary() {
 export function useBulkUpload() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({
-      file,
-      participantType,
-    }: {
-      file: File;
-      participantType: 'seeker' | 'provider';
-    }) => onboardingService.uploadCsv(file, participantType),
+    mutationFn: ({ file, participantType }: { file: File; participantType: string }) =>
+      onboardingService.uploadCsv(file, participantType),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['onboarding', 'summary'] });
     },

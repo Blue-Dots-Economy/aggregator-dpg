@@ -14,10 +14,17 @@ import {
   useUpdateLink,
 } from '../../../../hooks/useOnboarding';
 import { useProfile, useProfileRaw } from '../../../../hooks/useProfile';
+import { useAggregatorConfig } from '../../../../hooks/useAggregatorConfig';
 import type { ApiRegistrationLink } from '../../../../services/onboarding.service';
 
 interface CreateLinkFormState {
-  domain: 'seeker' | 'provider';
+  /**
+   * Domain id from the live network config (e.g. 'seeker' on blue/purple,
+   * 'tourist' on orange_dot). Pinned to the aggregator's registered
+   * `type` at mount time — the read-only Domain field shows the matching
+   * `label`/`plural_label` from cfg.domains.
+   */
+  domain: string;
   /** Instance (state of operation). Drives slug + display title. */
   state: string;
   /** District — required, drives slug + display title. */
@@ -31,7 +38,9 @@ interface CreateLinkFormState {
 }
 
 const EMPTY_FORM: CreateLinkFormState = {
-  domain: 'seeker',
+  // Empty until rawProfile loads — the effect below pins it to the
+  // aggregator's registered domain id once the profile resolves.
+  domain: '',
   state: '',
   district: '',
   lever_event: '',
@@ -129,7 +138,12 @@ export function CreateLinkSection() {
   const profile = useProfile();
   const rawProfile = useProfileRaw();
   const orgName = profile.data?.org ?? '';
-  const aggregatorType: 'seeker' | 'provider' = rawProfile.data?.type ?? 'seeker';
+  const aggregatorType = rawProfile.data?.type ?? '';
+  const { data: cfg } = useAggregatorConfig();
+  const domainCfg = cfg?.domains?.find((d) => d.id === aggregatorType);
+  // Label rendered in the read-only Domain field. Pulls from the live
+  // network config so orange's `tourist` shows "Tourists" not "Provider".
+  const domainLabel = domainCfg?.plural_label ?? domainCfg?.label ?? aggregatorType;
 
   // Pin the link domain to the aggregator's registered type — the API
   // rejects mismatches with AGGREGATOR_TYPE_MISMATCH, so the UI never lets
@@ -275,12 +289,7 @@ export function CreateLinkSection() {
              * enforcement is what the API expects. Rendered read-only so
              * the user sees the value but can't switch domains.
              */}
-            <input
-              className="bd-input"
-              value={aggregatorType === 'seeker' ? 'Seeker' : 'Provider'}
-              readOnly
-              aria-readonly="true"
-            />
+            <input className="bd-input" value={domainLabel} readOnly aria-readonly="true" />
           </Field>
           <div className="md:col-span-2 flex items-center justify-end gap-2 mt-2 flex-wrap">
             <Button onClick={onCreate} disabled={create.isPending}>

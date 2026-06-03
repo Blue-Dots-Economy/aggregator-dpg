@@ -32,6 +32,7 @@ import {
 import { httpError } from '../errors/http-error.js';
 import { getSchemaLoader } from '../services/schema-loader/index.js';
 import { buildCsvTemplate } from '../services/csv-template/index.js';
+import { getNetworkConfig } from '../services/network-config.js';
 import { config } from '../config.js';
 import { getDb } from '../db/client.js';
 import { onboarding } from '../db/schema.js';
@@ -41,16 +42,25 @@ interface CreateBody {
   participant_type?: unknown;
 }
 
-const VALID_TYPES = new Set(['seeker', 'provider']);
+/**
+ * Loads the network config and returns the set of valid participant
+ * types for the active network (e.g. ['seeker','provider'] for blue/purple,
+ * ['tourist','practitioner'] for orange_dot).
+ */
+async function getValidParticipantTypes(): Promise<Set<string>> {
+  const cfg = await getNetworkConfig();
+  return new Set(cfg.domainIds);
+}
 
 export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<void> {
   app.get('/v1/bulk-uploads/template', async (req, reply) => {
     const auth = await requireAuth(req);
     const query = req.query as { participant_type?: string };
     const participantType = query.participant_type;
-    if (!participantType || !VALID_TYPES.has(participantType)) {
+    const validTypes = await getValidParticipantTypes();
+    if (!participantType || !validTypes.has(participantType)) {
       throw httpError('SCHEMA_VALIDATION', {
-        detail: 'participant_type must be "seeker" or "provider".',
+        detail: `participant_type must be one of: ${[...validTypes].join(', ')}.`,
         fields: { participant_type: 'invalid' },
       });
     }
@@ -81,9 +91,10 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
 
     const body = (req.body ?? {}) as CreateBody;
     const participantType = typeof body.participant_type === 'string' ? body.participant_type : '';
-    if (!VALID_TYPES.has(participantType)) {
+    const validTypes = await getValidParticipantTypes();
+    if (!validTypes.has(participantType)) {
       throw httpError('SCHEMA_VALIDATION', {
-        detail: 'participant_type must be "seeker" or "provider".',
+        detail: `participant_type must be one of: ${[...validTypes].join(', ')}.`,
         fields: { participant_type: 'invalid' },
       });
     }

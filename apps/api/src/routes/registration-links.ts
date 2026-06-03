@@ -25,6 +25,7 @@ import { httpError } from '../errors/http-error.js';
 import { config } from '../config.js';
 import { getDb } from '../db/client.js';
 import { onboarding } from '../db/schema.js';
+import { getNetworkConfig } from '../services/network-config.js';
 
 interface LinkMetrics {
   total: number;
@@ -75,8 +76,12 @@ async function fetchLinkMetrics(
   return out;
 }
 
+// `domain` is validated at parse-time as a non-empty string and then
+// checked against the live network config's `domainIds` inside the
+// handler — that lets the schema accept any network's domain (e.g.
+// orange_dot's `tourist`/`practitioner`) without hardcoding the enum.
 const CreateLinkBodySchema = z.object({
-  domain: z.enum(['seeker', 'provider']),
+  domain: z.string().min(1),
   /**
    * Optional client-supplied slug. URL-safe lowercase, hyphen-separated,
    * 3-60 chars. The route appends a short random suffix on collision so the
@@ -146,6 +151,13 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
       });
     }
     const body = parsed.data;
+    const networkCfg = await getNetworkConfig();
+    if (!networkCfg.domainIds.includes(body.domain)) {
+      throw httpError('SCHEMA_VALIDATION', {
+        detail: `unknown domain '${body.domain}' — valid: ${networkCfg.domainIds.join(', ')}`,
+        fields: { domain: 'invalid' },
+      });
+    }
     enforceAggregatorType(auth, body.domain);
 
     const store = getRegistrationLinksStore();
