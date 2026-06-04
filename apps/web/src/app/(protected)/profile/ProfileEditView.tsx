@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import type { RJSFSchema, UiSchema } from '@rjsf/utils';
 import type { IChangeEvent } from '@rjsf/core';
+import { useTranslations } from 'next-intl';
 import { RjsfThemedForm } from '../../../components/forms/RjsfThemed';
 import { Button } from '../../../components/ui/Button';
 import { I } from '../../../icons';
@@ -227,6 +228,7 @@ interface ProfileEditViewProps {
 }
 
 export function ProfileEditView({ onDone, onSaved }: ProfileEditViewProps): JSX.Element {
+  const t = useTranslations('profile.edit');
   const raw = useProfileRaw();
   const edit = useEditProfile();
   const [formData, setFormData] = useState<EditFormState>(EMPTY);
@@ -236,10 +238,7 @@ export function ProfileEditView({ onDone, onSaved }: ProfileEditViewProps): JSX.
     if (raw.data) setFormData(rawToForm(raw.data as unknown as RawProfile));
   }, [raw.data]);
 
-  const headingTagline = useMemo(
-    () => 'Update your organisation, contact and personas. Slug + status are read-only.',
-    [],
-  );
+  const headingTagline = useMemo(() => t('tagline'), [t]);
 
   const handleSubmit = async (
     e: IChangeEvent<EditFormState>,
@@ -251,14 +250,14 @@ export function ProfileEditView({ onDone, onSaved }: ProfileEditViewProps): JSX.
       await edit.mutateAsync(formToPayload(data));
       onSaved?.();
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : 'Save failed.');
+      setErrorMessage(err instanceof Error ? err.message : t('save_failed'));
     }
   };
 
   if (raw.isLoading) {
     return (
       <div className="bd-card bd-shadow p-8 text-center text-ink-400 text-[13.5px]">
-        Loading profile…
+        {t('loading')}
       </div>
     );
   }
@@ -266,7 +265,7 @@ export function ProfileEditView({ onDone, onSaved }: ProfileEditViewProps): JSX.
     return (
       <div className="bd-card bd-shadow p-6 border border-rose-200 bg-[var(--bd-tint-rose)]">
         <div className="font-display font-bold text-[15px] text-rose-700">
-          Could not load profile
+          {t('error_load_title')}
         </div>
         <div className="text-[13px] text-rose-600 mt-1">{(raw.error as Error).message}</div>
       </div>
@@ -276,7 +275,7 @@ export function ProfileEditView({ onDone, onSaved }: ProfileEditViewProps): JSX.
   return (
     <div className="bd-card bd-shadow overflow-hidden">
       <div className="px-7 py-5 bg-gradient-to-r from-[var(--bd-tint-primary)] to-[var(--bd-card)] border-b border-[var(--bd-border)]">
-        <h2 className="font-display font-bold text-[17px] text-ink-900">Edit Profile</h2>
+        <h2 className="font-display font-bold text-[17px] text-ink-900">{t('heading')}</h2>
         <p className="text-[12.5px] text-ink-400 mt-0.5">{headingTagline}</p>
       </div>
 
@@ -298,10 +297,10 @@ export function ProfileEditView({ onDone, onSaved }: ProfileEditViewProps): JSX.
         >
           <div className="mt-5 flex items-center justify-end gap-2">
             <Button kind="ghost" onClick={onDone} disabled={edit.isPending}>
-              Cancel
+              {t('btn_cancel')}
             </Button>
             <Button type="submit" icon={<I.check size={14} />} disabled={edit.isPending}>
-              {edit.isPending ? 'Saving…' : 'Save changes'}
+              {edit.isPending ? t('btn_saving') : t('btn_save')}
             </Button>
           </div>
         </RjsfThemedForm>

@@ -14,6 +14,8 @@ import { IdpAdminFake, _setIdpAdmin } from '../services/idp-admin/index.js';
 import { FakeMailer, _setMailer } from '../services/mailer/index.js';
 import { _resetTokenKey, mintApprovalToken } from '../services/approval-token.js';
 import { _setSignalStackWriter } from '../services/signalstack.js';
+import { _setNetworkConfig } from '../services/network-config.js';
+import { buildBlueDotConfig } from '@aggregator-dpg/network-config/testing';
 import { SignalStackWriterFake } from '@aggregator-dpg/signalstack-writer/testing';
 import { SignalStackWriterBase } from '@aggregator-dpg/signalstack-writer/interface';
 import { UpstreamError } from '@aggregator-dpg/shared-primitives/errors';
@@ -76,6 +78,11 @@ describe('admin approval routes', () => {
     signalstack = new SignalStackWriterFake();
     _setSignalStackWriter(signalstack);
 
+    // Approval flow now reads cfg.domainIds from the network config —
+    // pin a blue_dot-shaped config so the legacy `['seeker','provider']`
+    // assertions in this file still hold.
+    _setNetworkConfig(buildBlueDotConfig());
+
     app = await buildApp();
   });
 
@@ -86,6 +93,7 @@ describe('admin approval routes', () => {
     _setIdpAdmin(null);
     _setMailer(null);
     _setSignalStackWriter(null);
+    _setNetworkConfig(null);
   });
 
   it('GET /read/:id renders the confirmation page when no decision yet', async () => {

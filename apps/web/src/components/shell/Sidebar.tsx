@@ -3,6 +3,7 @@
 import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import { I, type IconName } from '../../icons';
 import { BlueDotsLogo } from '../ui/BlueDotsLogo';
 import { useAuth } from '../../lib/auth-context';
@@ -22,18 +23,20 @@ interface NavItem {
 }
 
 /**
- * Builds the side-nav with the brand short name in the primary link
- * label. Onboarding + Profile stay generic across networks.
+ * Returns the stable route/icon structure for the side-nav.
+ * Labels are resolved by the component using the `nav` translation namespace
+ * so brand interpolation and locale switching work without re-running this function.
  */
-function buildNav(brandShortName: string): NavItem[] {
+function buildNavBase(): Omit<NavItem, 'label'>[] {
   return [
-    { to: '/dashboard', label: `My ${brandShortName}`, icon: 'users' },
-    { to: '/onboarding', label: 'Onboarding', icon: 'upload' },
-    { to: '/profile', label: 'Profile', icon: 'user' },
+    { to: '/dashboard', icon: 'users' },
+    { to: '/onboarding', icon: 'upload' },
+    { to: '/profile', icon: 'user' },
   ];
 }
 
 export function Sidebar() {
+  const t = useTranslations('nav');
   const pathname = usePathname();
   const { user, signOut } = useAuth();
   const { mode } = useThemeMode();
@@ -46,22 +49,32 @@ export function Sidebar() {
   // the aggregator's registered focus; falls back to the first domain
   // declared by the network when the profile is still resolving.
   const profileType = useProfileRaw().data?.type;
-  const fallbackDomain = cfg.domains[0]?.id ?? 'seeker';
-  const { data: dashboard } = useDashboard({
-    domain: profileType ?? fallbackDomain,
-  });
+  // No 'seeker' fallback — until both profile + live network config have
+  // loaded, `activeDomain` is undefined and useDashboard skips the
+  // fetch (prevents a stale `?domain=seeker` request on cold mount).
+  const activeDomain = profileType ?? cfg.domains[0]?.id;
+  const { data: dashboard } = useDashboard(activeDomain ? { domain: activeDomain } : undefined);
   // Plan-C / by_domain dashboard shape: every served domain ships under
   // `by_domain[<id>]`; the badge mirrors the active aggregator's domain
-  // rollup so the sidebar count stays in sync with /dashboard. Falls
-  // back to the network's first declared domain while the profile is
-  // still resolving.
-  const activeDomain = profileType ?? fallbackDomain;
-  const participantsBadge = dashboard?.by_domain[activeDomain]?.rollup.total_items;
-  const nav: NavItem[] = buildNav(cfg.brand.short_name).map((n) =>
-    n.to === '/dashboard' && participantsBadge !== undefined
-      ? { ...n, badge: participantsBadge }
-      : n,
-  );
+  // rollup so the sidebar count stays in sync with /dashboard.
+  const participantsBadge = activeDomain
+    ? dashboard?.by_domain[activeDomain]?.rollup.total_items
+    : undefined;
+
+  // Resolve translated labels here so brand interpolation and locale switching
+  // work correctly; buildNavBase() supplies the stable route/icon skeleton.
+  const navLabels: Record<string, string> = {
+    '/dashboard': t('my', { brand: cfg.brand.short_name }),
+    '/onboarding': t('onboarding'),
+    '/profile': t('profile'),
+  };
+  const nav: NavItem[] = buildNavBase().map((n) => ({
+    ...n,
+    label: navLabels[n.to] ?? n.to,
+    ...(n.to === '/dashboard' && participantsBadge !== undefined
+      ? { badge: participantsBadge }
+      : {}),
+  }));
 
   return (
     <aside className="w-[252px] shrink-0 bg-[var(--bd-card)] border-r border-[var(--bd-border)] flex flex-col h-screen sticky top-0">
@@ -87,7 +100,7 @@ export function Sidebar() {
                 {cfg.brand.short_name}
               </div>
               <div className="text-[12px] text-[var(--bd-fg-muted)] leading-tight mt-0.5">
-                Aggregator Portal
+                {t('portal_label')}
               </div>
             </div>
           </div>
@@ -96,7 +109,7 @@ export function Sidebar() {
 
       <div className="px-3">
         <div className="px-3 pt-3 pb-2 text-[10.5px] uppercase tracking-[0.12em] font-semibold text-[var(--bd-fg-muted)] opacity-60">
-          Overview
+          {t('overview')}
         </div>
         <nav className="flex flex-col gap-0.5">
           {nav.map((n) => {
@@ -143,7 +156,7 @@ export function Sidebar() {
               {user?.org ?? 'TRRAIN'}
             </div>
             <div className="text-[11px] text-[var(--bd-fg-muted)] truncate">
-              Aggregator · Karnataka
+              {t('aggregator_sublabel')}
             </div>
           </div>
           <button
@@ -151,8 +164,8 @@ export function Sidebar() {
             onClick={() => {
               void signOut();
             }}
-            title="Sign Out"
-            aria-label="Sign out"
+            title={t('sign_out')}
+            aria-label={t('sign_out')}
             className="w-7 h-7 rounded-md flex items-center justify-center text-[var(--bd-fg-muted)] hover:bg-[var(--bd-border-soft)] hover:text-rose-500 transition-colors shrink-0"
           >
             <I.signout size={15} />

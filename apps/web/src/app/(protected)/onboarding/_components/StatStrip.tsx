@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
+import { useTranslations } from 'next-intl';
 import { I } from '../../../../icons';
 import { useOnboardingSummary } from '../../../../hooks/useOnboarding';
 
@@ -13,6 +14,7 @@ interface StatItem {
 }
 
 export function StatStrip() {
+  const t = useTranslations('onboarding');
   const summary = useOnboardingSummary();
   const items: StatItem[] = useMemo(() => {
     const total = summary.data?.total ?? 0;
@@ -21,27 +23,27 @@ export function StatStrip() {
     return [
       {
         icon: 'users',
-        label: 'Total registered',
+        label: t('stats.total_registered'),
         count: total,
         tone: '#6366F1',
         bg: 'var(--bd-tint-primary)',
       },
       {
         icon: 'shield',
-        label: 'Verified & onboarded',
+        label: t('stats.verified_onboarded'),
         count: passed,
         tone: '#10B981',
         bg: 'var(--bd-tint-emerald)',
       },
       {
         icon: 'alert',
-        label: 'Failed validations',
+        label: t('stats.failed_validations'),
         count: failed,
         tone: '#EF4444',
         bg: 'var(--bd-tint-rose)',
       },
     ];
-  }, [summary.data]);
+  }, [summary.data, t]);
   return (
     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
       {items.map((it, i) => {

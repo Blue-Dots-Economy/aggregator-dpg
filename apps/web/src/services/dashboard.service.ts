@@ -200,7 +200,13 @@ class HttpDashboardService implements DashboardService {
 
   async dashboard(query?: DashboardQuery): Promise<DashboardPage> {
     const params = new URLSearchParams();
-    params.set('domain', query?.domain ?? 'seeker');
+    // Domain is required by signalstack and must be a valid network domain
+    // id. Callers (Seekers/ProvidersTab) read this from
+    // cfg.domains[N].id — no static default here so the request fails
+    // loudly if the caller forgets, instead of silently going 'seeker'
+    // against networks that don't declare it (e.g. orange_dot).
+    if (!query?.domain) throw new Error('dashboard query requires `domain`');
+    params.set('domain', query.domain);
     if (query?.page !== undefined) params.set('page', String(query.page));
     if (query?.limit !== undefined) params.set('limit', String(query.limit));
     // Skip `status` when the caller did not select a filter chip — the
@@ -214,7 +220,8 @@ class HttpDashboardService implements DashboardService {
 
   async dashboardExport(query?: DashboardExportQuery): Promise<DashboardExportResult> {
     const params = new URLSearchParams();
-    params.set('domain', query?.domain ?? 'seeker');
+    if (!query?.domain) throw new Error('dashboardExport query requires `domain`');
+    params.set('domain', query.domain);
     if (query?.status) params.set('status', query.status);
     const url = `/api/dashboard/export?${params.toString()}`;
     const res = await fetch(url, {

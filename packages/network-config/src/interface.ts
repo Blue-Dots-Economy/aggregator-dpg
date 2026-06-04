@@ -30,7 +30,9 @@ import type { Result } from '@aggregator-dpg/shared-primitives/result';
 export const IdentitySelectorsSchema = z.object({
   name: z.string().min(1),
   phone: z.string().min(1),
-  email: z.string().min(1),
+  // Email is optional — some domain schemas (e.g. orange_dot tourist)
+  // have no email field. Dedup falls back to phone-only when absent.
+  email: z.string().min(1).optional(),
 });
 export type IdentitySelectors = z.infer<typeof IdentitySelectorsSchema>;
 

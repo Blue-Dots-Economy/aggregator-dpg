@@ -253,6 +253,12 @@ services:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
+      # NEXT_PUBLIC_* vars must be present at image build time (Next.js inlines
+      # them into the client bundle during `next build`). Pass them as build args
+      # so the Dockerfile ARG/ENV declarations can forward them to `next build`.
+      args:
+        NEXT_PUBLIC_API_URL: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}/backend"
+        NEXT_PUBLIC_ENABLED_LANGUAGES: "${NEXT_PUBLIC_ENABLED_LANGUAGES:-en,kn,hi}"
     image: aggregator-dpg/web:dev
     container_name: aggregator-web
     restart: unless-stopped
@@ -263,6 +269,7 @@ services:
       HOSTNAME: "0.0.0.0"
       # All browser-visible URLs go through nginx on :443 — no service port suffixes.
       NEXT_PUBLIC_API_URL: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}/backend"
+      NEXT_PUBLIC_ENABLED_LANGUAGES: "${NEXT_PUBLIC_ENABLED_LANGUAGES:-en,kn,hi}"
       API_BASE_URL: ${API_BASE_URL:-http://api:4000}
       # ─── OIDC (Authorization Code + PKCE) ────────────────────────────
       # OIDC_ISSUER must resolve identically from the browser AND the web

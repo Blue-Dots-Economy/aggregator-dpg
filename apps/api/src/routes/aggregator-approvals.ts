@@ -34,6 +34,7 @@ import { getAggregatorStore } from '../services/aggregator-store/index.js';
 import { getIdpAdmin } from '../services/idp-admin/index.js';
 import { getMailer } from '../services/mailer/index.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
+import { getNetworkConfig } from '../services/network-config.js';
 import {
   renderApplicantApproved,
   renderApplicantRejected,
@@ -202,12 +203,15 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
           // Signalstack's dashboard endpoint fails with NO_DOMAINS_CONFIGURED
           // when the org's metadata.domains is empty, so always send a
           // non-empty list. Use the aggregator's chosen participant focus
-          // (`aggregators.type`, captured at registration as 'seeker' or
-          // 'provider'). Legacy rows with NULL type fall back to the full
-          // list so they keep functioning until the row is patched.
-          const aggregatorDomains: string[] = lookup.aggregator.type
-            ? [lookup.aggregator.type]
-            : ['seeker', 'provider'];
+          // (`aggregators.type`) when it matches a domain declared by the
+          // active network; otherwise fall back to the FULL domain list
+          // from the live network config (so orange_dot legacy rows pick
+          // up `['tourist','practitioner']` instead of a stale
+          // `['seeker','provider']`).
+          const networkCfg = await getNetworkConfig();
+          const t = lookup.aggregator.type;
+          const aggregatorDomains: string[] =
+            t && networkCfg.domainIds.includes(t) ? [t] : networkCfg.domainIds;
           const upsertResult = await signalstack.upsertAggregator({
             external_id: aggregatorId,
             name: lookup.aggregator.name,

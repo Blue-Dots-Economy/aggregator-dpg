@@ -2,6 +2,7 @@
 
 import { useMemo, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import { Button } from '../../../components/ui/Button';
 import { Topbar } from '../../../components/shell/Topbar';
 import { I, type IconName } from '../../../icons';
@@ -12,21 +13,22 @@ import { RecentUploadsBody } from './_components/CSVUpload';
 import { YourLinksBody } from './_components/RegistrationLinksSection';
 
 export default function OnboardingPage() {
+  const t = useTranslations('onboarding');
   return (
     <div className="fade-up flex flex-col gap-3">
       <Topbar
-        title="Onboarding"
-        subtitle="Add participants to your network — by CSV, link, or QR."
+        title={t('title')}
+        subtitle={t('subtitle')}
         right={
           <button
             type="button"
             onClick={() => window.location.reload()}
-            title="Refresh page"
-            aria-label="Refresh page"
+            title={t('refresh')}
+            aria-label={t('refresh')}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] border border-[var(--bd-border)] bg-white text-[12.5px] font-semibold text-ink-700 hover:text-primary-600 hover:bg-[var(--bd-primary-50)] transition-colors"
           >
             <I.refresh size={14} />
-            Refresh
+            {t('refresh')}
           </button>
         }
       />
@@ -42,6 +44,7 @@ export default function OnboardingPage() {
  * uploads list (same hook the detail page uses). Click → /onboarding/bulk-uploads.
  */
 function BulkUploadCard() {
+  const t = useTranslations('onboarding');
   const router = useRouter();
   const recent = useRecentBulkUploads(50);
   const metrics = useMemo(() => {
@@ -63,23 +66,23 @@ function BulkUploadCard() {
     <SummaryCard
       icon="upload"
       accent="primary"
-      title="Bulk Upload"
-      subtitle="CSV import for existing rosters. Fastest path for large batches."
+      title={t('bulk_upload.title')}
+      subtitle={t('bulk_upload.subtitle')}
       footnote={
         metrics.lastUploadAt
-          ? `Last upload ${formatRelative(metrics.lastUploadAt)}`
+          ? t('bulk_upload.last_upload', { when: formatRelative(metrics.lastUploadAt) })
           : recent.isLoading
-            ? 'Loading…'
-            : 'No uploads yet'
+            ? t('bulk_upload.loading')
+            : t('bulk_upload.no_uploads_yet')
       }
       metrics={[
-        { label: 'Files Uploaded', value: metrics.uploads, tone: 'ink' },
-        { label: 'Rows', value: metrics.total, tone: 'ink' },
-        { label: 'Passed', value: metrics.passed, tone: 'emerald' },
-        { label: 'Failed', value: metrics.failed, tone: 'rose' },
+        { label: t('bulk_upload.metrics.files_uploaded'), value: metrics.uploads, tone: 'ink' },
+        { label: t('bulk_upload.metrics.rows'), value: metrics.total, tone: 'ink' },
+        { label: t('bulk_upload.metrics.passed'), value: metrics.passed, tone: 'emerald' },
+        { label: t('bulk_upload.metrics.failed'), value: metrics.failed, tone: 'rose' },
       ]}
       loading={recent.isLoading}
-      ctaLabel="Go to Bulk Upload"
+      ctaLabel={t('bulk_upload.cta')}
       onCta={() => router.push('/onboarding/bulk-uploads')}
       body={<RecentUploadsBody />}
     />
@@ -92,6 +95,7 @@ function BulkUploadCard() {
  * /onboarding/links.
  */
 function RegistrationLinkCard() {
+  const t = useTranslations('onboarding');
   const router = useRouter();
   const rawProfile = useProfileRaw();
   const aggregatorType: 'seeker' | 'provider' = rawProfile.data?.type ?? 'seeker';
@@ -115,23 +119,23 @@ function RegistrationLinkCard() {
     <SummaryCard
       icon="link"
       accent="amber"
-      title="Registration via Link"
-      subtitle="Share a public link / QR. Participants self-register through it."
+      title={t('links.title')}
+      subtitle={t('links.subtitle')}
       footnote={
         metrics.lastCreatedAt
-          ? `Last link ${formatRelative(metrics.lastCreatedAt)}`
+          ? t('links.last_link', { when: formatRelative(metrics.lastCreatedAt) })
           : links.isLoading
-            ? 'Loading…'
-            : 'No links yet'
+            ? t('links.loading')
+            : t('links.no_links_yet')
       }
       metrics={[
-        { label: 'Links', value: metrics.links, tone: 'ink' },
-        { label: 'Active', value: metrics.active, tone: 'emerald' },
-        { label: 'Registrations', value: metrics.total, tone: 'ink' },
-        { label: 'Verified', value: metrics.passed, tone: 'emerald' },
+        { label: t('links.metrics.links'), value: metrics.links, tone: 'ink' },
+        { label: t('links.metrics.active'), value: metrics.active, tone: 'emerald' },
+        { label: t('links.metrics.registrations'), value: metrics.total, tone: 'ink' },
+        { label: t('links.metrics.verified'), value: metrics.passed, tone: 'emerald' },
       ]}
       loading={links.isLoading}
-      ctaLabel="Create new link"
+      ctaLabel={t('links.cta')}
       onCta={() => router.push('/onboarding/links')}
       body={<YourLinksBody />}
     />

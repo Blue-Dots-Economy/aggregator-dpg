@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - develop
+      - feat/orange-dot
 
     tags:
       - 'web-v*.*.*'

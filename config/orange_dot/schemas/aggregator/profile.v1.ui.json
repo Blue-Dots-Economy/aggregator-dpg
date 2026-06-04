@@ -1,0 +1,31 @@
+{
+  "ui:order": ["who_i_am", "what_i_want", "what_i_have", "consent"],
+  "who_i_am": {
+    "display_name": { "ui:placeholder": "Public display name" },
+    "address": { "ui:widget": "textarea", "ui:options": { "rows": 3 } },
+    "logo_url": { "ui:placeholder": "https://...", "ui:options": { "inputType": "url" } }
+  },
+  "what_i_want": {
+    "beneficiary_groups": {
+      "ui:options": { "addable": true, "removable": true }
+    },
+    "geographies": {
+      "ui:options": { "addable": true, "removable": true }
+    },
+    "sectors": {
+      "ui:options": { "addable": true, "removable": true }
+    }
+  },
+  "what_i_have": {
+    "network_size": { "ui:placeholder": "0" },
+    "capabilities": { "ui:options": { "addable": true, "removable": true } }
+  },
+  "consent": {
+    "profile_creation": { "ui:widget": "checkbox" },
+    "data_sharing": { "ui:widget": "checkbox" },
+    "notifications": { "ui:widget": "checkbox" },
+    "analytics": { "ui:widget": "checkbox" },
+    "marketing": { "ui:widget": "checkbox" },
+    "retention": { "ui:widget": "checkbox" }
+  }
+}
