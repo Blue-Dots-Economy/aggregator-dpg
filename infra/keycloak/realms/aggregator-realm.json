@@ -94,7 +94,7 @@
     {
       "clientId": "aggregator-portal",
       "name": "Aggregator Portal (BFF)",
-      "description": "Confidential OIDC client for the Blue Dots Aggregator portal — Authorization Code + PKCE with client secret; tokens held server-side by Next.js BFF.",
+      "description": "Confidential OIDC client for the Aggregator portal — Authorization Code + PKCE with client secret; tokens held server-side by Next.js BFF.",
       "enabled": true,
       "publicClient": false,
       "clientAuthenticatorType": "client-secret",
