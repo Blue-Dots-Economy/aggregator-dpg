@@ -1541,7 +1541,7 @@ function DashboardLoadingFrame() {
   return (
     <div className="fade-up">
       <Topbar
-        title={`My ${cfg.brand.short_name}`}
+        title={`My ${cfg.network.display_name ?? cfg.brand.short_name}`}
         subtitle={cfg.brand.tagline ?? 'Track every participant in your network — at a glance.'}
       />
       <div className="text-center text-[13px] text-ink-400 py-12">{t('state.loading')}</div>
@@ -1581,7 +1581,7 @@ function DashboardContent({ aggregatorType }: { aggregatorType: string }) {
   return (
     <div className="fade-up">
       <Topbar
-        title={`My ${cfg.brand.short_name}`}
+        title={`My ${cfg.network.display_name ?? cfg.brand.short_name}`}
         subtitle={cfg.brand.tagline ?? 'Track every participant in your network — at a glance.'}
         right={
           <div className="flex items-center gap-2">

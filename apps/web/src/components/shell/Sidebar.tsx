@@ -64,7 +64,7 @@ export function Sidebar() {
   // Resolve translated labels here so brand interpolation and locale switching
   // work correctly; buildNavBase() supplies the stable route/icon skeleton.
   const navLabels: Record<string, string> = {
-    '/dashboard': t('my', { brand: cfg.brand.short_name }),
+    '/dashboard': t('my', { brand: cfg.network.display_name ?? cfg.brand.short_name }),
     '/onboarding': t('onboarding'),
     '/profile': t('profile'),
   };

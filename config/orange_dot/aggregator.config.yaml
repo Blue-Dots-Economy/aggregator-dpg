@@ -5,14 +5,12 @@
 # supported field.
 
 aggregator:
-  name: Orange Dots Aggregator
-  contact_email: ops@orangedots.local
+  name: OneTAC Aggregator
+  contact_email: ops@onetac.local
 
   network:
     # Pin to a tag in production; develop is fine for local iteration.
-    # Sourced from the signals-dpg `feature` branch until orange_dot/network.json
-    # lands on `develop`. Update to `refs/heads/develop` once merged.
-    source: https://raw.githubusercontent.com/Blue-Dots-Economy/Signals-DPG/refs/heads/feature/examples/schemas/orange_dot/network.json
+    source: https://raw.githubusercontent.com/Blue-Dots-Economy/Signals-DPG/refs/heads/develop/examples/schemas/orange_dot/network.json
     # Mirror the purple_dot bulk-CSV array-delimiter for now — adjust
     # if orange_dot's schemas use a different separator.
     csv_array_delimiter: '|'
@@ -25,15 +23,14 @@ aggregator:
         phone: contact_phone
 
   brand:
-    short_name: Orange Dots
-    long_name: Orange Dot Aggregator Portal
-    tagline: Udupi tourism discovery — practitioners & travellers
-    url_slug: orange-dots
-    # Orange 500 — the vivid brand orange. Orange 700 (#c45a00)
-    # served as the original CTA dark variant but read as brown
-    # when applied to large brand panels.
-    primary_color: '#ff7a00'
-    accent_color: '#ffa54d'
+    short_name: OneTAC
+    long_name: OneTAC Aggregator Portal
+    tagline: Discovering verified practitioners for every traveller across the network.
+    url_slug: onetac
+    # Sienna palette from `config/orange_dot/brand.json`.theme — matches
+    # the OneTAC logo's burnt-sienna wordmark + Caramel accent.
+    primary_color: '#9c5b1f'
+    accent_color: '#c79670'
 
   domain_labels:
     tourist:

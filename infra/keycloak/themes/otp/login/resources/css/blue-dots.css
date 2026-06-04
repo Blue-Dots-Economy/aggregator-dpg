@@ -88,15 +88,20 @@ button {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  align-items: center;
   justify-content: center;
+  text-align: center;
 }
 @supports (background: color-mix(in srgb, red, blue)) {
   .bd-hero {
+    /* Match the aggregator web BrandPanel gradient: 60% primary →
+       80% primary → 100% primary. Older ratios (30/50/65) rendered
+       vivid primaries (e.g. sienna #9c5b1f) as near-black brown. */
     background: linear-gradient(
       135deg,
-      color-mix(in srgb, var(--bd-primary) 30%, #000) 0%,
-      color-mix(in srgb, var(--bd-primary) 50%, #000) 45%,
-      color-mix(in srgb, var(--bd-primary) 65%, #000) 100%
+      color-mix(in srgb, var(--bd-primary) 60%, #000) 0%,
+      color-mix(in srgb, var(--bd-primary) 80%, #000) 45%,
+      var(--bd-primary) 100%
     );
   }
 }
@@ -125,7 +130,7 @@ button {
   max-width: 520px;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: center;
 }
 
 .bd-hero-logo {
@@ -135,6 +140,31 @@ button {
   max-width: 100%;
   object-fit: contain;
   object-position: left center;
+}
+
+.bd-hero-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  color: #fff;
+}
+
+.bd-hero-wordmark {
+  font-family: var(--bd-font-heading);
+  font-weight: 800;
+  font-size: 88px;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: #fff;
+}
+
+.bd-hero-strapline {
+  font-family: var(--bd-font-body);
+  font-size: 18px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: rgba(255, 255, 255, 0.85);
 }
 
 .bd-hero-title {
