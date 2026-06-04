@@ -6,26 +6,38 @@
   'use strict';
 
   // Palette pulled from CSS vars at boot so the canvas matches whatever
-  // brand the active deployment ships (template.ftl's inline <style>
-  // block writes the per-network `--bd-primary*` values). The bright
-  // particle/line tone uses `--bd-primary-500` (light variant from the
-  // brand palette).
+  // brand the active deployment ships. Particle/link colors are mixed
+  // toward white before use — mirrors the aggregator web BrandPanel
+  // (`mix(primary, '#FFFFFF', 0.5)` for soft, `mix(accent, '#FFFFFF',
+  // 0.4)` for bright) so a deep brand primary (e.g. sienna #9c5b1f)
+  // still produces vivid dots against the dark hero gradient.
+  function parseHex(hex) {
+    var m = /^#?([0-9a-f]{6})$/i.exec(String(hex).trim());
+    if (m) {
+      var n = parseInt(m[1], 16);
+      return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+    }
+    var rm = /rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i.exec(hex);
+    if (rm) return [parseInt(rm[1], 10), parseInt(rm[2], 10), parseInt(rm[3], 10)];
+    return null;
+  }
+  function mixToward(hex, target, w) {
+    var a = parseHex(hex) || [124, 58, 237];
+    var b = parseHex(target) || [255, 255, 255];
+    var r = Math.round(a[0] * (1 - w) + b[0] * w);
+    var g = Math.round(a[1] * (1 - w) + b[1] * w);
+    var bl = Math.round(a[2] * (1 - w) + b[2] * w);
+    return r + ',' + g + ',' + bl;
+  }
   function readPalette() {
     var s = getComputedStyle(document.documentElement);
     var primary = s.getPropertyValue('--bd-primary').trim() || '#2563EB';
-    var bright = s.getPropertyValue('--bd-primary-500').trim() || primary;
-    return { primary: primary, bright: bright };
+    var accent = s.getPropertyValue('--bd-primary-500').trim() || primary;
+    return { primary: primary, accent: accent };
   }
   function hexToRgbTriple(hex) {
-    var m = /^#?([0-9a-f]{6})$/i.exec(hex);
-    if (!m) {
-      // accept `rgb(r, g, b)` (computed-style strings come back this way).
-      var rm = /rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i.exec(hex);
-      if (rm) return rm[1] + ',' + rm[2] + ',' + rm[3];
-      return '124,58,237';
-    }
-    var n = parseInt(m[1], 16);
-    return ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255);
+    var rgb = parseHex(hex);
+    return rgb ? rgb.join(',') : '124,58,237';
   }
 
   function init() {
@@ -35,9 +47,11 @@
     if (!ctx) return;
 
     var palette = readPalette();
-    var primaryRgb = hexToRgbTriple(palette.primary);
-    var brightRgb = hexToRgbTriple(palette.bright);
-    var lineRgb = brightRgb;
+    // Mix toward white to brighten the particles against the dark
+    // hero gradient — matches the aggregator web BrandPanel exactly.
+    var primaryRgb = mixToward(palette.primary, '#FFFFFF', 0.5);
+    var brightRgb = mixToward(palette.accent, '#FFFFFF', 0.4);
+    var lineRgb = mixToward(palette.accent, '#FFFFFF', 0.6);
 
     var dpr = Math.min(window.devicePixelRatio || 1, 2);
     var dots = [];
