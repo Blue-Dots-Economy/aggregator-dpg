@@ -25,7 +25,7 @@ aggregator:
   brand:
     short_name: OneTAC
     long_name: OneTAC Aggregator Portal
-    tagline: Udupi tourism discovery — practitioners & travellers
+    tagline: Discovering verified practitioners for every traveller across the network.
     url_slug: onetac
     # Sienna palette from `config/orange_dot/brand.json`.theme — matches
     # the OneTAC logo's burnt-sienna wordmark + Caramel accent.
