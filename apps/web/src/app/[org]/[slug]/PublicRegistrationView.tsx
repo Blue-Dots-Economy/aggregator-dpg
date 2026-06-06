@@ -136,7 +136,12 @@ export function PublicRegistrationView({
   // it's a bulk-upload-only field (aggregator-supplied stable ID for dedup).
   // The submit endpoint server-side mints one when missing.
   const formSchema = useMemo<RJSFSchema>(() => {
-    const clone: RJSFSchema = { ...schema };
+    // Deep clone: the transforms below (ref inlining, partial-mode constraint
+    // stripping) mutate nested property objects. A shallow spread would leave
+    // those nested objects shared with the `schema` prop and leak mutations
+    // back into it across renders (e.g. partial-mode deletes surviving a
+    // toggle back to full mode).
+    const clone: RJSFSchema = structuredClone(schema);
     delete (clone as { title?: string }).title;
     delete (clone as { description?: string }).description;
     const props = (clone as { properties?: Record<string, unknown> }).properties;
@@ -192,6 +197,25 @@ export function PublicRegistrationView({
         if (resolvedItems && Array.isArray(resolvedItems['enum'])) {
           (inlined[field] as Record<string, unknown>).uniqueItems = true;
         }
+      }
+    }
+    // Partial mode: dropping a field from `required` is not enough — RJSF
+    // seeds array fields with an empty `[]`, which then trips `minItems: 1`
+    // (and empty strings trip `minLength`) even though the field is optional.
+    // Strip the "minimum-presence" constraints from every non-identity field
+    // so a bare identity submission validates. enum / format / type stay —
+    // those only fire on a value the user actually entered.
+    if (partial && inlined) {
+      const identityKeys = new Set(
+        [identity?.name, identity?.phone, identity?.email].filter(
+          (k): k is string => typeof k === 'string' && k.length > 0,
+        ),
+      );
+      for (const [field, def] of Object.entries(inlined)) {
+        if (identityKeys.has(field) || !def || typeof def !== 'object') continue;
+        delete (def as Record<string, unknown>)['minItems'];
+        delete (def as Record<string, unknown>)['minLength'];
+        delete (def as Record<string, unknown>)['minimum'];
       }
     }
     return clone;

@@ -195,11 +195,13 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
     const validate = validatorResult.value;
     if (!validate(body)) {
       let issues = validate.errors ?? [];
-      // `account_only` (partial) creates no item, so the profile's required
-      // fields don't apply — drop `required` errors except for the identity
-      // selectors (name + at least one contact), which signalstack still
-      // needs to create the user row. Type / format / additionalProperties
-      // errors on whatever WAS supplied still block.
+      // `account_only` (partial) creates no item — the profile fields are
+      // never written, so none of their constraints apply (required, minItems,
+      // minLength, enum, …). Keep only errors on the identity selectors (name
+      // + at least one contact, which signalstack needs for the user row) and
+      // `additionalProperties` (unknown top-level keys still rejected). The
+      // client seeds array fields with `[]`, so without this an optional
+      // `minItems: 1` field would block a bare identity submission.
       if (partial) {
         const identityKeys = new Set(
           [
@@ -208,11 +210,14 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
             linkDomainCfg.identity.email,
           ].filter((k): k is string => typeof k === 'string' && k.length > 0),
         );
-        issues = issues.filter(
-          (e) =>
-            e.keyword !== 'required' ||
-            identityKeys.has((e.params as { missingProperty?: string })?.missingProperty ?? ''),
-        );
+        issues = issues.filter((e) => {
+          if (e.keyword === 'additionalProperties') return true;
+          const field =
+            e.keyword === 'required'
+              ? ((e.params as { missingProperty?: string })?.missingProperty ?? '')
+              : (e.instancePath ?? '').split('/')[1] || '';
+          return identityKeys.has(field);
+        });
       }
       if (issues.length > 0) {
         throw httpError('SCHEMA_VALIDATION', {
