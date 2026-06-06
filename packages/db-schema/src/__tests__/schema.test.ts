@@ -1,18 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { registrationLinks } from '../schema.js';
 
-describe('registrationLinks.completion_actions', () => {
-  it('exists on the table', () => {
-    const col = (registrationLinks as unknown as Record<string, unknown>).completion_actions;
+describe('registrationLinks.completionActions', () => {
+  it('is declared as a non-null jsonb column with the snake_case SQL name', () => {
+    const col = registrationLinks.completionActions;
     expect(col).toBeDefined();
-  });
-
-  it('defaults to an empty JSON array', () => {
-    // Drizzle exposes the default via the column's config; tests just
-    // assert the symbol exists. Behavioural default is asserted at
-    // migration test time (Task 2) when a real DB runs the DDL.
-    expect(
-      typeof (registrationLinks as unknown as Record<string, unknown>).completion_actions,
-    ).toBe('object');
+    // SQL column name lives on the column metadata
+    expect(col.name).toBe('completion_actions');
+    expect(col.notNull).toBe(true);
   });
 });
