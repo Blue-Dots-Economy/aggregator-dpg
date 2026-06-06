@@ -86,6 +86,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
     const guardErr = this.guardInput(input);
     if (guardErr) return err(guardErr);
 
+    const submitMode: 'with_item' | 'account_only' = input.submit_mode ?? 'with_item';
     const body: Record<string, unknown> = {
       name: input.name,
       terms_accepted: input.terms_accepted,
@@ -95,11 +96,17 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       network: input.network,
       domain: input.domain,
       item_type: input.item_type,
-      // Signalstack Plan-C renamed the body field from `profile` to
-      // `item_state` — the value is unchanged. Keep the writer input
-      // contract on `profile` so callers don't need to churn.
-      item_state: input.profile,
     };
+    // Signalstack Plan-C renamed the body field from `profile` to
+    // `item_state` — the value is unchanged. When the caller opts out of
+    // item creation (`submit_mode === 'account_only'`), omit `item_state`
+    // entirely so signals creates only the user row. This is the
+    // upstream-friendly way to flag "account only": signals' own contract
+    // treats an absent item_state as "no item" rather than introducing a
+    // bespoke flag.
+    if (submitMode !== 'account_only') {
+      body.item_state = input.profile;
+    }
     // Signalstack's user schema treats email / phoneNumber as `.optional()`
     // (not `.nullable()`), so omit the keys entirely when we have no value
     // rather than passing null — a literal null trips Zod's `expected:
@@ -142,7 +149,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       }
 
       // Plan-C response shape:
-      //   { user_id, user_existed, onboarded_at, items: [{ item_id, ... }] }
+      //   { user_id, user_existed, onboarded_at, items: [{ item_id, lifecycle_status?, completion_pct?, ... }] }
       // The writer's public result still surfaces a flat
       // `profile_item_id` so existing callers (worker, registration-link
       // routes, audit logs) stay unchanged — pick the matching item for
@@ -151,11 +158,14 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       const raw = (await res.json()) as {
         user_id?: unknown;
         user_existed?: unknown;
+        owned_elsewhere?: unknown;
         items?: Array<{
           item_id?: unknown;
           item_network?: unknown;
           item_domain?: unknown;
           item_type?: unknown;
+          lifecycle_status?: unknown;
+          completion_pct?: unknown;
         }>;
         onboarded_at?: unknown;
       };
@@ -169,16 +179,31 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       }
       const items = Array.isArray(raw.items) ? raw.items : [];
       // Existing user owned by a different aggregator: signalstack
-      // returns `user_existed: true` with an empty `items` array (that
-      // org's items are private to it). This is not an error — surface
-      // it as an already-registered result so the caller records a
-      // `skipped` outcome instead of a 502.
-      if (raw.user_existed === true && items.length === 0) {
+      // returns `user_existed: true` (and, in newer builds, an explicit
+      // `owned_elsewhere: true`) with an empty `items` array — that org's
+      // items are private to it. This is not an error — surface it as an
+      // already-registered / owned_elsewhere result so the caller records
+      // a `skipped` outcome instead of a 502.
+      const ownedElsewhereSignal = raw.owned_elsewhere === true;
+      if ((raw.user_existed === true || ownedElsewhereSignal) && items.length === 0) {
         return ok({
           user_id: raw.user_id,
           profile_item_id: '',
           onboarded_at: typeof raw.onboarded_at === 'string' ? raw.onboarded_at : '',
           already_registered: true,
+          owned_elsewhere: true,
+        });
+      }
+      // account_only path — signalstack created the user row but no item.
+      // Surface as a `skipped`-style result with empty profile_item_id and
+      // no lifecycle fields so callers can branch on the absence of
+      // lifecycle_status rather than parsing submit_mode echoes.
+      if (submitMode === 'account_only') {
+        return ok({
+          user_id: raw.user_id,
+          profile_item_id: '',
+          onboarded_at: typeof raw.onboarded_at === 'string' ? raw.onboarded_at : '',
+          owned_elsewhere: false,
         });
       }
       const matched =
@@ -196,10 +221,25 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
           }),
         );
       }
+      const lifecycleStatus =
+        matched.lifecycle_status === 'draft' ||
+        matched.lifecycle_status === 'live' ||
+        matched.lifecycle_status === 'paused'
+          ? matched.lifecycle_status
+          : undefined;
+      const completionPct =
+        typeof matched.completion_pct === 'number' &&
+        matched.completion_pct >= 0 &&
+        matched.completion_pct <= 100
+          ? matched.completion_pct
+          : undefined;
       const result: SignalStackOnboardParticipantResult = {
         user_id: raw.user_id,
         profile_item_id: matched.item_id,
         onboarded_at: typeof raw.onboarded_at === 'string' ? raw.onboarded_at : '',
+        owned_elsewhere: false,
+        ...(lifecycleStatus !== undefined ? { lifecycle_status: lifecycleStatus } : {}),
+        ...(completionPct !== undefined ? { completion_pct: completionPct } : {}),
       };
       return ok(result);
     } catch (e) {
@@ -244,6 +284,10 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       item_network: query.item_network,
       item_domain: query.item_domain,
       ...(query.item_type ? { item_type: query.item_type } : {}),
+      // Forward the lifecycle filter only when set; signals defaults to
+      // 'live_only' so the writer omits the field for that case to keep
+      // the wire shape minimal and let signals own the default.
+      ...(query.lifecycle_filter ? { lifecycle_filter: query.lifecycle_filter } : {}),
       limit: query.limit ?? 50,
       offset: query.offset ?? 0,
     };

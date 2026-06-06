@@ -40,6 +40,18 @@ export interface SignalStackProfile {
   aggregator_id: string | null;
   created_at: string;
   updated_at: string;
+  /**
+   * Lifecycle classification of the item — `draft`, `live`, or `paused`.
+   * Optional because older signalstack versions do not emit this field;
+   * the aggregator's lifecycle helper treats an absent value as `'live'`
+   * for back-compat.
+   */
+  lifecycle_status?: 'draft' | 'live' | 'paused';
+  /**
+   * Completion percentage (0..100) signalstack computed against the
+   * profile schema. Optional — absent on older signalstack versions.
+   */
+  completion_pct?: number;
 }
 
 /**
@@ -80,6 +92,15 @@ export interface SignalStackOnboardParticipantInput {
   item_type: string;
   /** Free-form item_state payload — the participant's profile fields. */
   profile: Record<string, unknown>;
+  /**
+   * Controls signals' lifecycle path:
+   *   - `'with_item'` (default) — POST /admin/participant with profile
+   *     body; signals classifies draft|live based on completeness.
+   *   - `'account_only'` — no item_state forwarded; signals creates user
+   *     row only. Used by the lookup endpoint and partial-data
+   *     registrations that opt out of profile creation.
+   */
+  submit_mode?: 'with_item' | 'account_only';
 }
 
 /**
@@ -101,6 +122,17 @@ export interface SignalStackOnboardParticipantResult {
    * `profile_item_id` is empty because no item was created or returned.
    */
   already_registered?: boolean;
+  /** Present only when an item was created (`submit_mode === 'with_item'`). */
+  lifecycle_status?: 'draft' | 'live' | 'paused';
+  /** 0..100. Present iff {@link lifecycle_status} is present. */
+  completion_pct?: number;
+  /**
+   * Replaces the legacy {@link already_registered} field semantically
+   * (both populated during the transition). `true` when signals returns
+   * the user under a different aggregator, so no item is created or
+   * returned for the calling aggregator.
+   */
+  owned_elsewhere?: boolean;
 }
 
 /**
@@ -117,6 +149,14 @@ export interface SignalStackItemQuery {
   item_type?: string;
   limit?: number;
   offset?: number;
+  /**
+   * Restricts the returned items by lifecycle classification.
+   *   - `'live_only'` (signals default — applied when this field is
+   *     absent) returns rows with `lifecycle_status === 'live'`.
+   *   - `'all'` returns every row regardless of lifecycle, including
+   *     drafts and paused items.
+   */
+  lifecycle_filter?: 'live_only' | 'all';
 }
 
 /**

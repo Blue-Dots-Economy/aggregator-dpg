@@ -60,6 +60,23 @@ export class InMemorySignalStackWriter extends SignalStackWriterBase {
    * same input return the same `org_id` and never create duplicates.
    */
   protected readonly aggregators: Map<string, SignalStackAggregator> = new Map();
+  /**
+   * Pinned lifecycle classification used by the next `onboard()` call when
+   * `submit_mode !== 'account_only'`. Consumed (cleared) after one use so a
+   * second call falls back to the default `live` / `100` classification.
+   * Tests set this via {@link setNextClassification}.
+   */
+  protected nextClassification:
+    | { lifecycle_status: 'draft' | 'live' | 'paused'; completion_pct: number }
+    | undefined;
+  /**
+   * Foreign-user lookup keys (`email:...` / `phone:...`). When the next
+   * `onboard()` matches a key here, the writer returns `owned_elsewhere:
+   * true` with no item — mirroring signalstack's behaviour when the user
+   * already exists under a different aggregator. Tests seed entries via
+   * {@link seedForeignUser}.
+   */
+  protected readonly foreignUsers: Set<string> = new Set();
   private nextUserSeq = 1;
   private nextProfileSeq = 1;
   private nextAggregatorSeq = 1;
@@ -92,6 +109,27 @@ export class InMemorySignalStackWriter extends SignalStackWriterBase {
       );
     }
 
+    // Foreign-user short-circuit: signalstack reports the user already
+    // exists under a different aggregator, so we mint a synthetic user_id
+    // (signals would echo its own) and surface owned_elsewhere=true with
+    // no item. Lifecycle fields are omitted because no item exists for
+    // this aggregator.
+    const foreignEmailKey = email ? `email:${email}` : null;
+    const foreignPhoneKey = phone ? `phone:${phone}` : null;
+    const isForeign =
+      (foreignEmailKey !== null && this.foreignUsers.has(foreignEmailKey)) ||
+      (foreignPhoneKey !== null && this.foreignUsers.has(foreignPhoneKey));
+    if (isForeign) {
+      const foreignUserId = `mem-foreign-user-${this.nextUserSeq++}`;
+      return ok({
+        user_id: foreignUserId,
+        profile_item_id: '',
+        onboarded_at: ISO_FIXED,
+        already_registered: true,
+        owned_elsewhere: true,
+      });
+    }
+
     const emailUser = email ? this.findByEmail(email) : undefined;
     const phoneUser = phone ? this.findByPhone(phone) : undefined;
     if (emailUser && phoneUser && emailUser.id !== phoneUser.id) {
@@ -114,7 +152,30 @@ export class InMemorySignalStackWriter extends SignalStackWriterBase {
       this.users.set(userRow.id, userRow);
     }
 
+    // account_only: signalstack creates the user row but no item. Lookup
+    // endpoint + partial-data registrations use this path to opt out of
+    // item creation. No lifecycle fields are returned because no item
+    // exists yet.
+    const submitMode: 'with_item' | 'account_only' = input.submit_mode ?? 'with_item';
+    if (submitMode === 'account_only') {
+      return ok({
+        user_id: userRow.id,
+        profile_item_id: '',
+        onboarded_at: ISO_FIXED,
+        owned_elsewhere: false,
+      });
+    }
+
     const profileItemId = `mem-item-${this.nextProfileSeq++}`;
+    const classification = this.nextClassification ?? {
+      lifecycle_status: 'live' as const,
+      completion_pct: 100,
+    };
+    // Consume the pinned classification so a second call reverts to the
+    // default `live` / `100` shape — keeps test fixtures terse without
+    // forcing every test to reset the writer.
+    this.nextClassification = undefined;
+
     const profile: StoredProfile = {
       item_id: profileItemId,
       item_network: input.network,
@@ -126,6 +187,8 @@ export class InMemorySignalStackWriter extends SignalStackWriterBase {
       aggregator_id: null,
       created_at: ISO_FIXED,
       updated_at: ISO_FIXED,
+      lifecycle_status: classification.lifecycle_status,
+      completion_pct: classification.completion_pct,
       created_by: userRow.id,
       acting_org_id: input.actingOrgId,
       channel: input.channel,
@@ -137,7 +200,42 @@ export class InMemorySignalStackWriter extends SignalStackWriterBase {
       user_id: userRow.id,
       profile_item_id: profileItemId,
       onboarded_at: ISO_FIXED,
+      lifecycle_status: classification.lifecycle_status,
+      completion_pct: classification.completion_pct,
+      owned_elsewhere: false,
     });
+  }
+
+  /**
+   * Pins the lifecycle classification used by the next `onboard()` call
+   * (when `submit_mode !== 'account_only'`). The classification is
+   * consumed after one call — subsequent calls fall back to the default
+   * `live` / `100` shape until re-pinned.
+   *
+   * @param classification - Pinned lifecycle status + completion percent.
+   */
+  setNextClassification(classification: {
+    lifecycle_status: 'draft' | 'live' | 'paused';
+    completion_pct: number;
+  }): void {
+    this.nextClassification = classification;
+  }
+
+  /**
+   * Marks the given email and/or phone as belonging to a user that
+   * signalstack reports under a different aggregator. The next
+   * `onboard()` matching one of these keys returns `owned_elsewhere:
+   * true` with no item — mirroring signalstack's response when the user
+   * already exists outside the calling aggregator's scope.
+   *
+   * @param key - Email and/or phone to mark as foreign-owned. At least
+   *   one of `email` or `phoneNumber` must be provided.
+   */
+  seedForeignUser(key: { email?: string; phoneNumber?: string }): void {
+    const email = normalizeEmail(key.email);
+    const phone = normalizePhone(key.phoneNumber);
+    if (email) this.foreignUsers.add(`email:${email}`);
+    if (phone) this.foreignUsers.add(`phone:${phone}`);
   }
 
   override async listItemsByAggregator(
@@ -150,11 +248,20 @@ export class InMemorySignalStackWriter extends SignalStackWriterBase {
         }),
       );
     }
+    // signalstack's default is `live_only` — drafts and paused rows are
+    // hidden unless the caller passes `lifecycle_filter: 'all'`. Treat an
+    // absent lifecycle_status on a stored row as 'live' so seeds written
+    // before lifecycle support landed remain visible by default.
+    const lifecycleFilter: 'live_only' | 'all' = query.lifecycle_filter ?? 'live_only';
     const matching = Array.from(this.profiles.values()).filter((p) => {
       if (p.aggregator_id !== query.aggregator_id) return false;
       if (p.item_network !== query.item_network) return false;
       if (p.item_domain !== query.item_domain) return false;
       if (query.item_type && p.item_type !== query.item_type) return false;
+      if (lifecycleFilter === 'live_only') {
+        const status = p.lifecycle_status ?? 'live';
+        if (status !== 'live') return false;
+      }
       return true;
     });
     const total = matching.length;

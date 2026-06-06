@@ -9,7 +9,7 @@
  */
 
 import { InMemorySignalStackWriter } from './memory.js';
-import type { SignalStackDashboardPage } from './interface.js';
+import type { SignalStackDashboardPage, SignalStackOnboardParticipantInput } from './interface.js';
 
 export { InMemorySignalStackWriter };
 
@@ -162,4 +162,43 @@ export class SignalStackWriterFake extends InMemorySignalStackWriter {
       (this as any).dashboardExports.set(s.acting_org_id, s.csv);
     }
   }
+}
+
+/**
+ * Constructs a fully-populated `SignalStackOnboardParticipantInput` with
+ * deterministic defaults. Tests override the fields they care about via
+ * the `overrides` argument; everything else is pre-filled with safe
+ * dev-time values so each test stays terse.
+ *
+ * Defaults:
+ *   - `actingOrgId: 'org-1'`
+ *   - `name: 'Default User'`
+ *   - `email: 'user@example.com'`
+ *   - `terms_accepted: true`, `privacy_accepted: true`
+ *   - `channel: 'link'`, `source_id: 'link-1'`
+ *   - `network: 'blue_dot'`, `domain: 'seeker'`, `item_type: 'profile_1.0'`
+ *   - `profile: {}` — empty item_state
+ *
+ * @param overrides - Partial override map; any field set here replaces
+ *   the default in the returned input.
+ * @returns A complete `SignalStackOnboardParticipantInput` ready to pass
+ *   to a writer's `onboard()` method.
+ */
+export function buildOnboardInput(
+  overrides: Partial<SignalStackOnboardParticipantInput> = {},
+): SignalStackOnboardParticipantInput {
+  return {
+    actingOrgId: 'org-1',
+    name: 'Default User',
+    email: 'user@example.com',
+    terms_accepted: true,
+    privacy_accepted: true,
+    channel: 'link',
+    source_id: 'link-1',
+    network: 'blue_dot',
+    domain: 'seeker',
+    item_type: 'profile_1.0',
+    profile: {},
+    ...overrides,
+  };
 }
