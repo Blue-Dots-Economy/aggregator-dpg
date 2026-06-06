@@ -740,11 +740,15 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
     // Probe body — deliberately omits `item_state` so signals' Plan-C
     // account-only path runs (creates user row at most; never an item).
     // The sentinel `name: 'lookup'` mirrors what signals' own admin UI
-    // sends for identity-only checks.
+    // sends for identity-only checks. `channel` is required by signals'
+    // UpsertParticipantRequest schema even on the account-only path; the
+    // probe always originates from the public registration link, so 'link'
+    // is the truthful attribution surface.
     const body: Record<string, unknown> = {
       name: 'lookup',
       terms_accepted: true,
       privacy_accepted: true,
+      channel: 'link',
       network: input.network,
       domain: input.domain,
     };
