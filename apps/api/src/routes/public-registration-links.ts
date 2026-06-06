@@ -26,6 +26,7 @@ import { getAggregatorStore } from '../services/aggregator-store/index.js';
 import { getNetworkConfig } from '../services/network-config.js';
 import { getSchemaLoader } from '../services/schema-loader/index.js';
 import { normalisePhone } from '../services/phone.js';
+import { resolveLifecycle } from '../services/onboarding/lifecycle.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
 import { getDb } from '../db/client.js';
 import { linkSubmissions } from '../db/schema.js';
@@ -124,7 +125,19 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
 
     const link = await loadLiveLinkByOrgAndSlug(orgSlug, slug, log);
 
-    const body = (req.body ?? {}) as Record<string, unknown>;
+    const rawBody = (req.body ?? {}) as Record<string, unknown>;
+
+    // Pull the lifecycle hint off the envelope BEFORE Ajv runs against the
+    // domain schema (which would reject the unknown top-level field).
+    // `partial: true` flips signals' lifecycle path to `account_only` —
+    // signals creates the user row only, no item, and the response carries
+    // no lifecycle fields. v1 surfaces the toggle explicitly; we
+    // deliberately do not infer it from "body contains only identity
+    // fields" because implicit detection is brittle when schemas evolve.
+    const partial = rawBody['partial'] === true;
+    const body: Record<string, unknown> = { ...rawBody };
+    delete body['partial'];
+    const submitMode: 'with_item' | 'account_only' = partial ? 'account_only' : 'with_item';
 
     // 1. Schema validation against the link's domain schema. Load the
     // raw schema as well so we can strip empty-string optional fields
@@ -229,6 +242,13 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
     // the DB connection hold time — acceptable for a public-link form submit
     // (low volume). If push volume ever requires async fan-out, switch to an
     // outbox table inside the tx + worker consumer.
+    // Lifecycle fields hoisted out of the tx scope so the response path can
+    // surface them without re-reading the signals response. `null` is the
+    // honest default: signals is disabled (no push) OR the submit was
+    // account_only — neither produces a lifecycle classification.
+    let lifecycleStatusOut: 'draft' | 'live' | 'paused' | null = null;
+    let completionPctOut: number | null = null;
+    let ownedElsewhere = false;
     const writer = getParticipantsWriter();
     const txResult = await getDb().transaction(async (tx) => {
       // Bind the writer to the active tx for atomicity. If a custom writer
@@ -298,6 +318,7 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
           domain: link.domain,
           item_type: linkDomainCfg.itemType,
           profile: buildSignalStackItemState(link.domain, body, pushPhone, linkDomainCfg),
+          submit_mode: submitMode,
         });
 
         if (!result.success) {
@@ -320,9 +341,34 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
         // different aggregator and won't expose/duplicate them here.
         // Record a skipped outcome so the form shows the friendly
         // "already registered" screen instead of a hard failure.
-        if (result.value.already_registered) {
+        // `already_registered` (legacy) and `owned_elsewhere` (Task 4 rename)
+        // carry the same signal during the transition — OR them together so
+        // either field flips the outcome.
+        const isExisting =
+          Boolean(result.value.already_registered) || Boolean(result.value.owned_elsewhere);
+        if (isExisting) {
           outcome = 'skipped';
         }
+
+        // Resolve lifecycle through the back-compat helper so the absent →
+        // 'live' rule stays centralised. `account_only` submits produce no
+        // item, so we suppress lifecycle fields entirely (null) — the
+        // resolver would otherwise return 'live' for an absent column.
+        const lifecycleStatus =
+          submitMode === 'account_only' || !result.value.profile_item_id
+            ? null
+            : resolveLifecycle({
+                ...(result.value.lifecycle_status
+                  ? { lifecycle_status: result.value.lifecycle_status }
+                  : {}),
+              });
+        const completionPct =
+          submitMode === 'account_only' || !result.value.profile_item_id
+            ? null
+            : (result.value.completion_pct ?? null);
+        ownedElsewhere = Boolean(result.value.owned_elsewhere);
+        lifecycleStatusOut = lifecycleStatus;
+        completionPctOut = completionPct;
 
         log.info({
           status: 'success',
@@ -331,6 +377,10 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
           profile_item_id: result.value.profile_item_id,
           onboarded_at: result.value.onboarded_at,
           already_registered: result.value.already_registered ?? false,
+          owned_elsewhere: ownedElsewhere,
+          lifecycle_status: lifecycleStatus,
+          completion_pct: completionPct,
+          submit_mode: submitMode,
           link_id: link.id,
           participant_id: participantRowId,
         });
@@ -353,6 +403,10 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       outcome,
       participant_id: participantRowId,
       submission_id: submissionId,
+      lifecycle_status: lifecycleStatusOut,
+      completion_pct: completionPctOut,
+      owned_elsewhere: ownedElsewhere,
+      submit_mode: submitMode,
     });
 
     if (outcome === 'skipped') {
@@ -364,12 +418,18 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
         outcome,
         submission_id: submissionId,
         message: 'This mobile number or email is already registered with this aggregator.',
+        lifecycle_status: lifecycleStatusOut,
+        completion_pct: completionPctOut,
+        owned_elsewhere: ownedElsewhere,
       });
     }
 
     return reply.code(201).send({
       outcome,
       submission_id: submissionId,
+      lifecycle_status: lifecycleStatusOut,
+      completion_pct: completionPctOut,
+      owned_elsewhere: ownedElsewhere,
     });
   });
 }
