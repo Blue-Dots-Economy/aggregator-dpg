@@ -23,8 +23,19 @@ import { authenticate, requireApproved, type AuthContext } from '../services/aut
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
 import { getNetworkConfig } from '../services/network-config.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
+import { resolveLifecycle } from '../services/onboarding/lifecycle.js';
 import { config } from '../config.js';
 import { httpError } from '../errors/http-error.js';
+
+/**
+ * Lifecycle filter accepted by the dashboard items endpoint.
+ *
+ *   - `draft|live|paused` — narrows the returned items to that lifecycle bucket.
+ *   - `account_only` — participants that exist locally but have no signals
+ *     item; items array is always empty for this filter (account-only rows
+ *     live in the local `participants` table, not in signals items).
+ */
+const LifecycleFilterSchema = z.enum(['draft', 'live', 'paused', 'account_only']).optional();
 
 /**
  * Domain accepts any string at the schema layer — the resolved network
@@ -35,6 +46,7 @@ const ItemsQuerySchema = z.object({
   domain: z.string().min(1),
   limit: z.coerce.number().int().min(1).max(200).optional().default(50),
   offset: z.coerce.number().int().min(0).optional().default(0),
+  lifecycle: LifecycleFilterSchema,
 });
 
 /**
@@ -94,7 +106,7 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
         fields: { issues: parsed.error.issues },
       });
     }
-    const { domain, limit, offset } = parsed.data;
+    const { domain, limit, offset, lifecycle } = parsed.data;
 
     const networkCfg = await getNetworkConfig();
     const domainCfg = networkCfg.domains[domain];
@@ -112,6 +124,10 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
       });
     }
 
+    // Always request `lifecycle_filter: 'all'` so we can compute the tiles
+    // counts (draft + live + paused) client-side. Per-bucket filtering and
+    // the `account_only` filter are applied below, after tile computation,
+    // so tiles always reflect totals regardless of `?lifecycle=`.
     const result = await ss.listItemsByAggregator({
       aggregator_id: auth.aggregatorId,
       item_network: config.SIGNALSTACK_ITEM_NETWORK,
@@ -119,6 +135,7 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
       item_type: domainCfg.itemType,
       limit,
       offset,
+      lifecycle_filter: 'all',
     });
 
     if (!result.success) {
@@ -134,13 +151,60 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
       });
     }
 
+    // Normalise lifecycle on every row via `resolveLifecycle` so an absent
+    // `lifecycle_status` from older signals deployments shows up as `'live'`.
+    const normalisedItems = result.value.items.map((item) => {
+      const lifecycleStatus = resolveLifecycle(item);
+      return {
+        ...item,
+        lifecycle_status: lifecycleStatus ?? 'live',
+        completion_pct: item.completion_pct ?? null,
+      };
+    });
+
+    // Tiles always reflect the full dataset across all lifecycle states.
+    // `account_only` counts participants who exist locally but have no
+    // associated signals item — that requires a participants-table read
+    // we don't have wired into this route yet. v1: report 0 and refine
+    // once a participants reader lands.
+    // TODO: when a participants reader is exposed, count participants for
+    //       this aggregator + domain whose identity (phone/email) is not in
+    //       `normalisedItems[].item_state` and surface that here. Until then,
+    //       this tile is approximate but never negative.
+    const tiles = {
+      draft: normalisedItems.filter((i) => i.lifecycle_status === 'draft').length,
+      live: normalisedItems.filter((i) => i.lifecycle_status === 'live').length,
+      paused: normalisedItems.filter((i) => i.lifecycle_status === 'paused').length,
+      account_only: 0,
+    };
+
+    // Apply the lifecycle filter AFTER tile computation. `account_only` short
+    // circuits to an empty items array — those rows live in `participants`,
+    // not in the signals items response.
+    let filteredItems: typeof normalisedItems;
+    if (lifecycle === 'account_only') {
+      filteredItems = [];
+    } else if (lifecycle) {
+      filteredItems = normalisedItems.filter((i) => i.lifecycle_status === lifecycle);
+    } else {
+      filteredItems = normalisedItems;
+    }
+
     log.info({
       status: 'success',
       latency_ms: Date.now() - start,
       total: result.value.meta.total,
+      lifecycle_filter: lifecycle ?? null,
+      tiles,
     });
 
-    return reply.send(result.value);
+    return reply.send({
+      meta: {
+        ...result.value.meta,
+        tiles,
+      },
+      items: filteredItems,
+    });
   });
 
   app.get('/v1/dashboard', async (req, reply) => {
