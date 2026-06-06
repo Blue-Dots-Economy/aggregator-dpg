@@ -424,7 +424,7 @@ export const onboarding = pgTable(
 export const outboundDispatchLog = pgTable(
   'outbound_dispatch_log',
   {
-    id: uuid('id').defaultRandom().primaryKey(),
+    id: uuid('id').primaryKey().defaultRandom(),
     aggregatorId: uuid('aggregator_id')
       .notNull()
       .references(() => aggregators.id, { onDelete: 'cascade' }),
@@ -446,16 +446,16 @@ export const outboundDispatchLog = pgTable(
     sentAt: timestamp('sent_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => ({
+  (table) => ({
     idempotencyIdx: uniqueIndex('outbound_dispatch_idempotency_idx').on(
-      t.participantId,
-      t.itemId,
-      t.channel,
-      t.templateId,
+      table.participantId,
+      table.itemId,
+      table.channel,
+      table.templateId,
     ),
     aggregatorStatusIdx: index('outbound_dispatch_aggregator_status_idx').on(
-      t.aggregatorId,
-      t.status,
+      table.aggregatorId,
+      table.status,
     ),
   }),
 );

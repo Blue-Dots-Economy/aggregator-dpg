@@ -12,10 +12,6 @@ describe('registrationLinks.completionActions', () => {
 });
 
 describe('outboundDispatchLog', () => {
-  it('is defined as a table', () => {
-    expect(outboundDispatchLog).toBeDefined();
-  });
-
   it('exposes the expected primary columns with correct SQL names', () => {
     expect(outboundDispatchLog.id.name).toBe('id');
     expect(outboundDispatchLog.aggregatorId.name).toBe('aggregator_id');
