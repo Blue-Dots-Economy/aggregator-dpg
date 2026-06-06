@@ -14,6 +14,10 @@ export const dynamic = 'force-dynamic';
 
 interface ResolveResponse {
   slug: string;
+  // Active signalstack network id (e.g. 'blue_dot' / 'orange_dot').
+  // Optional in the type for back-compat with older API builds; the
+  // lookup BFF gracefully no-ops when missing.
+  network?: string;
   // Domain id is whatever the active network declares (e.g. 'seeker' /
   // 'provider' on blue/purple, 'tourist' / 'practitioner' on orange_dot).
   // No client-side allowlist — the API only returns domains it knows.
@@ -104,6 +108,7 @@ export default async function PublicRegistrationPage({ params }: PageProps) {
     <PublicRegistrationView
       org={org}
       slug={slug}
+      network={resolved.network ?? ''}
       domain={resolved.domain}
       context={resolved.context}
       schema={schema}

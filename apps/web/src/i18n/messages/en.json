@@ -363,7 +363,18 @@
       "error_network_title": "Network error",
       "error_network_detail": "Could not reach the server.",
       "error_submission_title": "Submission failed",
-      "error_server_detail": "Server returned HTTP {status}."
+      "error_server_detail": "Server returned HTTP {status}.",
+      "lookup": {
+        "owned_elsewhere_title": "Contact already registered",
+        "owned_elsewhere_body": "This email or mobile is already registered with another organisation. Please use a different contact or sign in through that organisation.",
+        "owned_elsewhere_cta": "Use a different contact",
+        "resume_title": "You have a profile in progress",
+        "resume_body": "We found an unfinished profile for this contact ({percent}% complete). Resume where you left off?",
+        "resume_cta": "Resume profile",
+        "resume_continue_new": "Continue with a new submission",
+        "partial_label": "Submit identity now, complete profile later",
+        "partial_hint": "We will contact you to finish the remaining details."
+      }
     }
   },
   "auth": {

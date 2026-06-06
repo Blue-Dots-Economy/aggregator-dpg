@@ -92,6 +92,10 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
 
     return reply.send({
       slug: link.slug,
+      // Active network id (e.g. 'blue_dot' / 'orange_dot'). The BFF needs
+      // it alongside the domain to call /lookup, which scopes the probe
+      // to the right signalstack network.
+      network: networkCfg.network.id,
       domain: link.domain,
       context: link.context,
       schema_id: `participant-${link.domain}`,

@@ -13,6 +13,12 @@ import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/u
 export interface PublicRegistrationViewProps {
   org: string;
   slug: string;
+  /**
+   * Active signalstack network id (e.g. 'blue_dot'). Required for the
+   * pre-submit identity probe (`/api/[org]/[slug]/lookup`). Empty string
+   * disables the probe — older API builds may not return this field.
+   */
+  network?: string;
   domain: string;
   context: Record<string, unknown>;
   schema: RJSFSchema;
@@ -24,6 +30,32 @@ type SubmitState =
   | { status: 'submitting' }
   | { status: 'done'; submissionId: string; outcome: 'passed' | 'skipped' }
   | { status: 'error'; title: string; detail: string; code: string };
+
+/**
+ * Outcome of the pre-submit identity probe — drives the branched UI
+ * (allow normal submit / show owned-elsewhere / offer resume).
+ */
+type LookupOutcome =
+  | { kind: 'allow' }
+  | { kind: 'owned_elsewhere' }
+  | {
+      kind: 'resume';
+      itemId: string;
+      lifecycleStatus: 'draft' | 'live' | 'paused';
+      completionPct: number;
+    };
+
+interface LookupResponse {
+  user_exists?: boolean;
+  owned_elsewhere?: boolean;
+  lifecycle_summary?: {
+    primary_item?: {
+      item_id: string;
+      lifecycle_status: 'draft' | 'live' | 'paused';
+      completion_pct: number;
+    } | null;
+  } | null;
+}
 
 interface SubmitResponse {
   outcome: 'passed' | 'skipped';
@@ -49,6 +81,7 @@ interface ApiErrorEnvelope {
 export function PublicRegistrationView({
   org,
   slug,
+  network = '',
   domain,
   context,
   schema,
@@ -57,6 +90,20 @@ export function PublicRegistrationView({
   const t = useTranslations('profile.public_reg');
   const [formData, setFormData] = useState<Record<string, unknown>>({});
   const [state, setState] = useState<SubmitState>({ status: 'idle' });
+  /**
+   * Pre-submit probe outcome. `null` = probe hasn't run yet (or returned
+   * "allow"); `owned_elsewhere` / `resume` short-circuit the submit
+   * pipeline and render branched UI instead.
+   */
+  const [lookup, setLookup] = useState<LookupOutcome | null>(null);
+  /** When true, the POST body carries `partial: true` (identity-only). */
+  const [partial, setPartial] = useState(false);
+  /**
+   * Forces the next submit to bypass the probe — set when the user picks
+   * "Continue with a new submission" from the resume prompt. One-shot:
+   * cleared the moment the submit fires.
+   */
+  const [bypassProbe, setBypassProbe] = useState(false);
   // Defer required-field error rendering until the user has actually
   // interacted (typed in a field) or attempted submit once. Otherwise
   // RJSF's `liveValidate` paints every required field red on first
@@ -210,10 +257,79 @@ export function PublicRegistrationView({
     .filter((v): v is string => typeof v === 'string' && v.length > 0)
     .join(' · ');
 
+  /**
+   * Runs the identity probe before the actual submit. Picks `email` or
+   * `phone` off the RJSF form data and asks the BFF whether this contact
+   * already lives in signalstack — either with another aggregator
+   * (`owned_elsewhere`) or as an unfinished profile under us (`resume`).
+   *
+   * Returns `{ kind: 'allow' }` when no identity is supplied, when the
+   * network id is unknown, when the BFF errors, or when the probe says
+   * the contact is new — i.e. the caller should proceed with submit.
+   *
+   * @param values - Current RJSF formData.
+   * @returns Branching outcome consumed by `handleSubmit`.
+   */
+  const runIdentityProbe = async (values: Record<string, unknown>): Promise<LookupOutcome> => {
+    if (!network) return { kind: 'allow' };
+    const emailRaw = values['email'];
+    const phoneRaw = values['phone'] ?? values['phone_number'] ?? values['mobile'];
+    const email = typeof emailRaw === 'string' && emailRaw.trim().length > 0 ? emailRaw.trim() : '';
+    const phone = typeof phoneRaw === 'string' && phoneRaw.trim().length > 0 ? phoneRaw.trim() : '';
+    if (!email && !phone) return { kind: 'allow' };
+    const qs = new URLSearchParams();
+    if (email) qs.set('email', email);
+    if (phone) qs.set('phone_number', phone);
+    qs.set('network', network);
+    qs.set('domain', domain);
+    let res: Response;
+    try {
+      res = await fetch(
+        `/api/${encodeURIComponent(org)}/${encodeURIComponent(slug)}/lookup?${qs.toString()}`,
+        { method: 'GET', headers: { accept: 'application/json' } },
+      );
+    } catch {
+      // Network blip — fall through to a normal submit; the API will
+      // either accept the row or surface a dedup 409 itself.
+      return { kind: 'allow' };
+    }
+    if (!res.ok) return { kind: 'allow' };
+    const body = (await res.json().catch(() => ({}))) as LookupResponse;
+    if (body.owned_elsewhere) return { kind: 'owned_elsewhere' };
+    const primary = body.lifecycle_summary?.primary_item;
+    if (
+      primary &&
+      (primary.lifecycle_status === 'draft' || primary.lifecycle_status === 'paused')
+    ) {
+      return {
+        kind: 'resume',
+        itemId: primary.item_id,
+        lifecycleStatus: primary.lifecycle_status,
+        completionPct: primary.completion_pct,
+      };
+    }
+    return { kind: 'allow' };
+  };
+
   const handleSubmit = async (
     e: IChangeEvent<Record<string, unknown>>,
     _event: FormEvent<HTMLFormElement>,
   ): Promise<void> => {
+    const values = (e.formData ?? {}) as Record<string, unknown>;
+    // Pre-submit probe. Skipped when the user has explicitly chosen
+    // "Continue with a new submission" after a resume prompt.
+    if (!bypassProbe) {
+      setState({ status: 'submitting' });
+      const outcome = await runIdentityProbe(values);
+      if (outcome.kind !== 'allow') {
+        setLookup(outcome);
+        setState({ status: 'idle' });
+        return;
+      }
+    } else {
+      setBypassProbe(false);
+    }
+    setLookup(null);
     setState({ status: 'submitting' });
     try {
       const res = await fetch(
@@ -221,7 +337,9 @@ export function PublicRegistrationView({
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(e.formData ?? {}),
+          // `partial: true` flips the upstream lifecycle to `account_only`
+          // (Task 7). Only forwarded when the user explicitly opted in.
+          body: JSON.stringify(partial ? { ...values, partial: true } : values),
         },
       );
       // 409 with outcome=skipped is a dedup hit, not a failure: this
@@ -372,6 +490,77 @@ export function PublicRegistrationView({
                   </div>
                 ) : null}
 
+                {lookup?.kind === 'owned_elsewhere' ? (
+                  <div
+                    role="alert"
+                    data-testid="lookup-owned-elsewhere"
+                    className="mb-5 rounded-[10px] border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-800"
+                  >
+                    <div className="font-semibold">{t('lookup.owned_elsewhere_title')}</div>
+                    <div className="mt-1 text-amber-700">{t('lookup.owned_elsewhere_body')}</div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLookup(null);
+                        // Clear the offending identity fields so the user
+                        // can edit and retry. Other field values stay.
+                        setFormData((prev) => {
+                          const next = { ...prev };
+                          delete next['email'];
+                          delete next['phone'];
+                          delete next['phone_number'];
+                          delete next['mobile'];
+                          return next;
+                        });
+                      }}
+                      className="mt-3 text-[12px] font-semibold underline text-amber-900 hover:text-amber-700"
+                    >
+                      {t('lookup.owned_elsewhere_cta')}
+                    </button>
+                  </div>
+                ) : null}
+
+                {lookup?.kind === 'resume' ? (
+                  <div
+                    role="alert"
+                    data-testid="lookup-resume"
+                    className="mb-5 rounded-[10px] border border-sky-200 bg-sky-50 px-4 py-3 text-[13px] text-sky-800"
+                  >
+                    <div className="font-semibold">{t('lookup.resume_title')}</div>
+                    <div className="mt-1 text-sky-700">
+                      {t('lookup.resume_body', { percent: lookup.completionPct })}
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          // Resume = let the upstream lifecycle parser
+                          // dedup against the existing item by identity.
+                          // No client-side state to thread: the server
+                          // finds the same item_id via signalstack probe.
+                          setLookup(null);
+                          setBypassProbe(true);
+                          setPartial(false);
+                        }}
+                        style={{ backgroundColor: cfg.brand.primary_color }}
+                        className="px-3 py-2 rounded-[8px] font-semibold text-[12px] text-white hover:opacity-90"
+                      >
+                        {t('lookup.resume_cta')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setLookup(null);
+                          setBypassProbe(true);
+                        }}
+                        className="px-3 py-2 rounded-[8px] font-semibold text-[12px] text-sky-900 underline hover:text-sky-700"
+                      >
+                        {t('lookup.resume_continue_new')}
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+
                 <RjsfThemedForm
                   schema={formSchema}
                   uiSchema={mergedUiSchema as unknown as UiSchema<Record<string, unknown>>}
@@ -397,6 +586,21 @@ export function PublicRegistrationView({
                   }}
                 >
                   <div className="mt-4 flex flex-col gap-3">
+                    <label className="flex items-start gap-2 text-[12.5px] text-ink-600 leading-snug cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        data-testid="lookup-partial-checkbox"
+                        checked={partial}
+                        onChange={(ev) => setPartial(ev.target.checked)}
+                        className="mt-0.5 h-4 w-4 rounded border-[var(--bd-border)] accent-[var(--bd-primary-600)]"
+                      />
+                      <span className="font-semibold text-ink-800">
+                        {t('lookup.partial_label')}
+                      </span>
+                      <span className="block text-[11.5px] text-ink-400 mt-0.5">
+                        {t('lookup.partial_hint')}
+                      </span>
+                    </label>
                     <button
                       type="submit"
                       disabled={state.status === 'submitting'}
