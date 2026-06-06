@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useRef, useMemo, type ReactNode } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { createPortal } from 'react-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useTranslations, useLocale } from 'next-intl';
@@ -10,13 +10,26 @@ import { StatusPill } from '../../../components/ui/StatusPill';
 import { Avatar } from '../../../components/ui/Avatar';
 import { SegmentedTabs, type SegmentedTab } from '../../../components/ui/SegmentedTabs';
 import { Topbar } from '../../../components/shell/Topbar';
+import { LifecyclePill } from '../../../components/LifecyclePill';
+import { CompletionBar } from '../../../components/CompletionBar';
 import { I, type IconName } from '../../../icons';
-import { useOppProviders, useDashboard } from '../../../hooks/useDashboard';
+import { useOppProviders, useDashboard, useDashboardItems } from '../../../hooks/useDashboard';
 import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
-import { dashboardService, triggerCsvDownload } from '../../../services/dashboard.service';
+import {
+  dashboardService,
+  triggerCsvDownload,
+  type DashboardItemsTiles,
+  type LifecycleFilter,
+} from '../../../services/dashboard.service';
 import { useProfileRaw } from '../../../hooks/useProfile';
 import { useThemeMode } from '../../../lib/theme-mode';
-import type { ParticipantBase, ParticipantStatus, Provider, Seeker } from '../../../types';
+import type {
+  LifecycleStatus,
+  ParticipantBase,
+  ParticipantStatus,
+  Provider,
+  Seeker,
+} from '../../../types';
 
 type Tab = 'seekers' | 'providers' | 'opp';
 
@@ -340,6 +353,32 @@ function ActionChip({
 
 type StatusFilter = string; // 'all' | any key signalstack returns in rollup.by_status
 
+/**
+ * Lifecycle dropdown values. `'all'` is the no-filter sentinel; the other
+ * four map 1:1 to {@link LifecycleFilter} on the items endpoint.
+ */
+type LifecycleFilterValue = 'all' | LifecycleFilter;
+
+const LIFECYCLE_FILTER_VALUES: LifecycleFilterValue[] = [
+  'all',
+  'draft',
+  'live',
+  'paused',
+  'account_only',
+];
+
+/**
+ * Parse `?lifecycle=` from a search-params bag, validating against the
+ * known enum. Unknown values resolve to `'all'` so a stale URL does not
+ * blank the filter dropdown.
+ */
+function parseLifecycleParam(raw: string | null): LifecycleFilterValue {
+  if (!raw) return 'all';
+  return (LIFECYCLE_FILTER_VALUES as readonly string[]).includes(raw)
+    ? (raw as LifecycleFilterValue)
+    : 'all';
+}
+
 interface StatusOption {
   value: StatusFilter;
   label: string;
@@ -420,6 +459,11 @@ interface ParticipantTableProps<R extends ParticipantBase> {
    * in the aggregator config. Falls back to localised `t('buckets.*')` when absent.
    */
   bucketLabels?: Record<string, string> | undefined;
+  /**
+   * Active lifecycle dropdown value. `'all'` hides the URL param.
+   */
+  lifecycleFilter?: LifecycleFilterValue | undefined;
+  onLifecycleFilterChange?: ((next: LifecycleFilterValue) => void) | undefined;
 }
 
 function ParticipantTable<R extends ParticipantBase>({
@@ -433,6 +477,8 @@ function ParticipantTable<R extends ParticipantBase>({
   onStatusFilterChange,
   statusOptions,
   bucketLabels = {},
+  lifecycleFilter = 'all',
+  onLifecycleFilterChange,
 }: ParticipantTableProps<R>) {
   const t = useTranslations('dashboard');
   /** Localised fallback for bucket keys when config-sourced labels are absent. */
@@ -538,6 +584,23 @@ function ParticipantTable<R extends ParticipantBase>({
               onChange={(e) => setQuery(e.target.value)}
             />
           </div>
+          {onLifecycleFilterChange ? (
+            <label className="flex items-center gap-2 text-[12px] text-ink-500">
+              <span className="font-medium">{t('filters.lifecycle_label')}</span>
+              <select
+                aria-label={t('filters.lifecycle_label')}
+                className="bd-input text-[12.5px] py-1.5 pr-7"
+                value={lifecycleFilter}
+                onChange={(e) => onLifecycleFilterChange(e.target.value as LifecycleFilterValue)}
+              >
+                <option value="all">{t('filters.lifecycle_all')}</option>
+                <option value="draft">{t('filters.lifecycle_draft')}</option>
+                <option value="live">{t('filters.lifecycle_live')}</option>
+                <option value="paused">{t('filters.lifecycle_paused')}</option>
+                <option value="account_only">{t('filters.lifecycle_account_only')}</option>
+              </select>
+            </label>
+          ) : null}
           <div ref={filterRef} className="relative">
             <Button
               kind={filterActive ? 'primary' : 'ghost'}
@@ -599,7 +662,7 @@ function ParticipantTable<R extends ParticipantBase>({
       </div>
 
       <div className="overflow-auto scroll-x" style={{ maxHeight: 520 }}>
-        <table className="bd-table" style={{ minWidth: kind === 'provider' ? 1180 : 1080 }}>
+        <table className="bd-table" style={{ minWidth: kind === 'provider' ? 1380 : 1280 }}>
           <thead
             style={{
               position: 'sticky',
@@ -622,6 +685,7 @@ function ParticipantTable<R extends ParticipantBase>({
               </th>
               <th>{t('table.joined')}</th>
               <th>{t('table.profileStatus')}</th>
+              <th>{t('table.lifecycle')}</th>
               <th>{bucketLabels['create'] ?? t('table.applied')}</th>
               <th>{t('table.status')}</th>
               <th>{t('table.recommendedAction')}</th>
@@ -663,6 +727,14 @@ function ParticipantTable<R extends ParticipantBase>({
                   </td>
                   <td>
                     <ProgressTiny pct={r.profile.complete} />
+                  </td>
+                  <td>
+                    <div className="flex items-center gap-2">
+                      <LifecyclePill status={r.lifecycle_status ?? null} />
+                      {r.lifecycle_status === 'draft' && typeof r.completion_pct === 'number' ? (
+                        <CompletionBar percent={r.completion_pct} />
+                      ) : null}
+                    </div>
                   </td>
                   <td>
                     <FunnelCell
@@ -869,6 +941,54 @@ function ErrorCard() {
 
 const PAGE_SIZE = 25;
 
+/**
+ * URL-backed lifecycle filter state. Reads `?lifecycle=` on every render
+ * via `useSearchParams` and updates the URL through `router.replace` (so
+ * the filter participates in browser history but doesn't push a new
+ * navigation entry per click).
+ *
+ * Returns the parsed value + a setter that mirrors changes back to the
+ * URL. `'all'` removes the param entirely so default views read clean.
+ */
+function useLifecycleUrlFilter(): [LifecycleFilterValue, (next: LifecycleFilterValue) => void] {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const value = parseLifecycleParam(searchParams.get('lifecycle'));
+  const setValue = (next: LifecycleFilterValue) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (next === 'all') params.delete('lifecycle');
+    else params.set('lifecycle', next);
+    const qs = params.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  };
+  return [value, setValue];
+}
+
+/**
+ * Builds a lookup keyed by signalstack `item_id` so per-row lifecycle
+ * data from `/v1/dashboard/items` can be merged into the rollup rows the
+ * participant table renders. Empty map when items haven't loaded yet.
+ */
+function buildLifecycleByItemId(
+  items: Array<Record<string, unknown>> | undefined,
+): Map<string, { lifecycle_status: LifecycleStatus; completion_pct: number | null }> {
+  const out = new Map<
+    string,
+    { lifecycle_status: LifecycleStatus; completion_pct: number | null }
+  >();
+  if (!items) return out;
+  for (const it of items) {
+    const id = typeof it.item_id === 'string' ? it.item_id : null;
+    if (!id) continue;
+    const ls = it.lifecycle_status;
+    const lifecycle_status: LifecycleStatus = ls === 'draft' || ls === 'paused' ? ls : 'live';
+    const completion_pct = typeof it.completion_pct === 'number' ? it.completion_pct : null;
+    out.set(id, { lifecycle_status, completion_pct });
+  }
+  return out;
+}
+
 function SeekersTab() {
   const t = useTranslations('dashboard');
   const locale = useLocale();
@@ -889,9 +1009,14 @@ function SeekersTab() {
   const seekerDomainId = cfgRaw?.domains?.[0]?.id;
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [lifecycleFilter, setLifecycleFilter] = useLifecycleUrlFilter();
   const handleStatusFilterChange = (next: StatusFilter) => {
     setPage(1);
     setStatusFilter(next);
+  };
+  const handleLifecycleFilterChange = (next: LifecycleFilterValue) => {
+    setPage(1);
+    setLifecycleFilter(next);
   };
   const filterActive = statusFilter !== 'all';
   const {
@@ -907,6 +1032,25 @@ function SeekersTab() {
           ...(filterActive ? { status: statusFilter } : {}),
         }
       : undefined,
+  );
+  // Parallel fetch for the lifecycle tile counts + per-item lifecycle
+  // payload. Forwards `?lifecycle=` end-to-end (URL → fetch → API). The
+  // items endpoint always returns `meta.tiles` reflecting the full
+  // unfiltered dataset, regardless of the lifecycle narrowing.
+  const lifecycleArg: LifecycleFilter | undefined =
+    lifecycleFilter === 'all' ? undefined : lifecycleFilter;
+  const { data: lifecycleItems } = useDashboardItems(
+    seekerDomainId
+      ? {
+          domain: seekerDomainId,
+          ...(lifecycleArg ? { lifecycle: lifecycleArg } : {}),
+        }
+      : undefined,
+  );
+  const tiles: DashboardItemsTiles | undefined = lifecycleItems?.meta.tiles;
+  const lifecycleByItemId = useMemo(
+    () => buildLifecycleByItemId(lifecycleItems?.items),
+    [lifecycleItems?.items],
   );
   const slice = seekerDomainId ? dashboard?.by_domain[seekerDomainId] : undefined;
   const rollup = slice?.rollup;
@@ -944,8 +1088,8 @@ function SeekersTab() {
   const hasApplications = rollup?.has_applications;
   const newThisWeek = byStatus['new'];
   const rows = useMemo(
-    () => (slice?.items ?? []).map((p) => toSeekerRow(p, locale)),
-    [slice?.items, locale],
+    () => (slice?.items ?? []).map((p) => toSeekerRow(p, locale, lifecycleByItemId)),
+    [slice?.items, locale, lifecycleByItemId],
   );
 
   // Refresh handler: hits the BFF with refresh=true to force signalstack to
@@ -1076,6 +1220,16 @@ function SeekersTab() {
         />
       </div>
 
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <MiniStat label={t('tiles.lifecycle.draft')} value={fmtCount(tiles?.draft ?? 0)} />
+        <MiniStat label={t('tiles.lifecycle.live')} value={fmtCount(tiles?.live ?? 0)} />
+        <MiniStat label={t('tiles.lifecycle.paused')} value={fmtCount(tiles?.paused ?? 0)} />
+        <MiniStat
+          label={t('tiles.lifecycle.account_only')}
+          value={fmtCount(tiles?.account_only ?? 0)}
+        />
+      </div>
+
       {isLoading ? (
         <LoadingCard />
       ) : isError ? (
@@ -1092,6 +1246,8 @@ function SeekersTab() {
           onStatusFilterChange={handleStatusFilterChange}
           statusOptions={statusOptions}
           bucketLabels={bucketLabels}
+          lifecycleFilter={lifecycleFilter}
+          onLifecycleFilterChange={handleLifecycleFilterChange}
         />
       )}
     </div>
@@ -1119,7 +1275,14 @@ function fmtCount(n: number | null | undefined): string {
  * `complete` profile bar uses `profile_completion_pct` directly so the
  * progress indicator stays meaningful.
  */
-function toSeekerRow(participant: Record<string, unknown>, locale: string): Seeker {
+function toSeekerRow(
+  participant: Record<string, unknown>,
+  locale: string,
+  lifecycleByItemId?: Map<
+    string,
+    { lifecycle_status: LifecycleStatus; completion_pct: number | null }
+  >,
+): Seeker {
   const userId =
     typeof participant.owner_user_id === 'string'
       ? participant.owner_user_id
@@ -1131,6 +1294,20 @@ function toSeekerRow(participant: Record<string, unknown>, locale: string): Seek
   );
   const completion =
     typeof participant.profile_completion_pct === 'number' ? participant.profile_completion_pct : 0;
+  // Lifecycle merge: signalstack's dashboard rollup may surface `item_id`
+  // (open-shape items). When present + matched against the lifecycle
+  // items fetch, we attach lifecycle_status + completion_pct so the new
+  // column renders accurately. Unmatched rows fall through with
+  // undefined — the LifecyclePill back-compat renders them as 'Live'.
+  const itemId = typeof participant.item_id === 'string' ? participant.item_id : null;
+  const merged = itemId ? lifecycleByItemId?.get(itemId) : undefined;
+  const lifecycleFields: Pick<Seeker, 'lifecycle_status' | 'completion_pct'> = {};
+  if (merged) {
+    lifecycleFields.lifecycle_status = merged.lifecycle_status;
+    if (merged.completion_pct !== null) {
+      lifecycleFields.completion_pct = merged.completion_pct;
+    }
+  }
   const created =
     typeof participant.profile_created_at === 'string' ? participant.profile_created_at : '';
   const updated =
@@ -1168,6 +1345,7 @@ function toSeekerRow(participant: Record<string, unknown>, locale: string): Seek
     actionableTags: Array.isArray(participant.actionable_tags)
       ? (participant.actionable_tags as unknown[]).filter((t): t is string => typeof t === 'string')
       : [],
+    ...lifecycleFields,
   };
 }
 
@@ -1222,9 +1400,14 @@ function ProvidersTab() {
   const providerDomainId = cfgRaw?.domains?.[1]?.id;
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [lifecycleFilter, setLifecycleFilter] = useLifecycleUrlFilter();
   const handleStatusFilterChange = (next: StatusFilter) => {
     setPage(1);
     setStatusFilter(next);
+  };
+  const handleLifecycleFilterChange = (next: LifecycleFilterValue) => {
+    setPage(1);
+    setLifecycleFilter(next);
   };
   const filterActive = statusFilter !== 'all';
   const {
@@ -1240,6 +1423,23 @@ function ProvidersTab() {
           ...(filterActive ? { status: statusFilter } : {}),
         }
       : undefined,
+  );
+  // Parallel fetch for lifecycle tiles + per-item lifecycle map.
+  // Mirrors SeekersTab; see comments there for the full rationale.
+  const lifecycleArg: LifecycleFilter | undefined =
+    lifecycleFilter === 'all' ? undefined : lifecycleFilter;
+  const { data: lifecycleItems } = useDashboardItems(
+    providerDomainId
+      ? {
+          domain: providerDomainId,
+          ...(lifecycleArg ? { lifecycle: lifecycleArg } : {}),
+        }
+      : undefined,
+  );
+  const tiles: DashboardItemsTiles | undefined = lifecycleItems?.meta.tiles;
+  const lifecycleByItemId = useMemo(
+    () => buildLifecycleByItemId(lifecycleItems?.items),
+    [lifecycleItems?.items],
   );
   const { data: cfg } = useAggregatorConfig();
   const providerCfg = cfg?.domains?.find((d) => d.id === providerDomainId);
@@ -1260,8 +1460,8 @@ function ProvidersTab() {
   const verified = rollup?.complete_profiles;
   const hasApplications = rollup?.has_applications;
   const rows = useMemo(
-    () => (slice?.items ?? []).map((p) => toProviderRow(p, locale)),
-    [slice?.items, locale],
+    () => (slice?.items ?? []).map((p) => toProviderRow(p, locale, lifecycleByItemId)),
+    [slice?.items, locale, lifecycleByItemId],
   );
   const [cachedByStatus, setCachedByStatus] = useState<Record<string, number> | undefined>();
   useEffect(() => {
@@ -1393,6 +1593,16 @@ function ProvidersTab() {
         />
       </div>
 
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <MiniStat label={t('tiles.lifecycle.draft')} value={fmtCount(tiles?.draft ?? 0)} />
+        <MiniStat label={t('tiles.lifecycle.live')} value={fmtCount(tiles?.live ?? 0)} />
+        <MiniStat label={t('tiles.lifecycle.paused')} value={fmtCount(tiles?.paused ?? 0)} />
+        <MiniStat
+          label={t('tiles.lifecycle.account_only')}
+          value={fmtCount(tiles?.account_only ?? 0)}
+        />
+      </div>
+
       {isLoading ? (
         <LoadingCard />
       ) : isError ? (
@@ -1409,14 +1619,23 @@ function ProvidersTab() {
           onStatusFilterChange={handleStatusFilterChange}
           statusOptions={statusOptions}
           bucketLabels={bucketLabels}
+          lifecycleFilter={lifecycleFilter}
+          onLifecycleFilterChange={handleLifecycleFilterChange}
         />
       )}
     </div>
   );
 }
 
-function toProviderRow(participant: Record<string, unknown>, locale: string): Provider {
-  const seeker = toSeekerRow(participant, locale);
+function toProviderRow(
+  participant: Record<string, unknown>,
+  locale: string,
+  lifecycleByItemId?: Map<
+    string,
+    { lifecycle_status: LifecycleStatus; completion_pct: number | null }
+  >,
+): Provider {
+  const seeker = toSeekerRow(participant, locale, lifecycleByItemId);
   return { ...seeker, role: '—' };
 }
 

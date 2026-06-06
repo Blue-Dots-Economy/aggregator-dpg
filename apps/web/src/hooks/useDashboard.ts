@@ -1,7 +1,11 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { dashboardService, type DashboardQuery } from '../services/dashboard.service';
+import {
+  dashboardService,
+  type DashboardQuery,
+  type DashboardItemsQuery,
+} from '../services/dashboard.service';
 import type { ParticipantFilter } from '../types';
 
 export function useSeekers(filter?: ParticipantFilter) {
@@ -39,6 +43,36 @@ export function useOppProviders(filter?: ParticipantFilter) {
  * query key so the forced refresh lands in a fresh React Query cache
  * entry rather than serving stale data from the prior key.
  */
+/**
+ * Reads the lifecycle-aware items endpoint (`/v1/dashboard/items`).
+ *
+ * Sources the lifecycle tile counts (`meta.tiles`) and the per-item
+ * `lifecycle_status` + `completion_pct` the page needs to render the
+ * lifecycle column. Pass `lifecycle` to narrow the items list to a
+ * single bucket; tiles always reflect totals regardless.
+ *
+ * `enabled` gates the call on `domain` so cold mount stays quiet until
+ * the network config resolves.
+ */
+export function useDashboardItems(query?: DashboardItemsQuery) {
+  const domain = query?.domain;
+  const lifecycle = query?.lifecycle ?? null;
+  const limit = query?.limit ?? 200;
+  const offset = query?.offset ?? 0;
+  return useQuery({
+    queryKey: ['dashboard', 'items', domain ?? '(no-domain)', lifecycle, limit, offset],
+    queryFn: () =>
+      dashboardService.dashboardItems({
+        domain: domain as string,
+        limit,
+        offset,
+        ...(lifecycle ? { lifecycle } : {}),
+      }),
+    enabled: Boolean(domain),
+    staleTime: 0,
+  });
+}
+
 export function useDashboard(query?: DashboardQuery) {
   // Domain must come from the network config (cfg.domains[N].id) so the
   // tab works for any network. Callers always pass it; we no longer

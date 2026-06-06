@@ -70,13 +70,20 @@
       "provider": "ಪೂರೈಕೆದಾರ",
       "joined": "ಸೇರಿದ ದಿನಾಂಕ",
       "profileStatus": "ಪ್ರೊಫೈಲ್ ಸ್ಥಿತಿ",
+      "lifecycle": "ಜೀವನಚಕ್ರ",
       "status": "ಸ್ಥಿತಿ",
       "recommendedAction": "ಶಿಫಾರಸ್ಸು ಮಾಡಿದ ಕ್ರಮ",
       "applied": "ಅರ್ಜಿ ಸಲ್ಲಿಸಿದ",
       "count": "{total} ರಲ್ಲಿ {shown}"
     },
     "filters": {
-      "all_statuses": "ಎಲ್ಲಾ ಸ್ಥಿತಿಗಳು"
+      "all_statuses": "ಎಲ್ಲಾ ಸ್ಥಿತಿಗಳು",
+      "lifecycle_label": "ಜೀವನಚಕ್ರ",
+      "lifecycle_all": "ಎಲ್ಲಾ ಜೀವನಚಕ್ರಗಳು",
+      "lifecycle_draft": "ಕರಡು",
+      "lifecycle_live": "ಸಕ್ರಿಯ",
+      "lifecycle_paused": "ತಡೆಹಿಡಿಯಲಾಗಿದೆ",
+      "lifecycle_account_only": "ಖಾತೆ ಮಾತ್ರ"
     },
     "aria": {
       "search_participants": "ಭಾಗವಹಿಸುವವರನ್ನು ಹುಡುಕಿ",
@@ -116,6 +123,14 @@
       "withApplications": "ಅರ್ಜಿಗಳೊಂದಿಗೆ {entityPlural}",
       "newParticipants": "ಹೊಸ ಭಾಗವಹಿಸುವವರು",
       "delta_this_week": "ಈ ವಾರ"
+    },
+    "tiles": {
+      "lifecycle": {
+        "draft": "ಕರಡು ಪ್ರೊಫೈಲ್‌ಗಳು",
+        "live": "ಸಕ್ರಿಯ ಪ್ರೊಫೈಲ್‌ಗಳು",
+        "paused": "ತಡೆಹಿಡಿದ ಪ್ರೊಫೈಲ್‌ಗಳು",
+        "account_only": "ಖಾತೆ-ಮಾತ್ರ ಬಳಕೆದಾರರು"
+      }
     },
     "opp": {
       "activeProgramsLabel": "ಸಕ್ರಿಯ ಕಾರ್ಯಕ್ರಮಗಳು",

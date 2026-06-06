@@ -22,6 +22,8 @@ export interface ParticipantProfile {
   complete: number;
 }
 
+export type LifecycleStatus = 'draft' | 'live' | 'paused';
+
 export interface ParticipantBase {
   id: string;
   name: string;
@@ -38,6 +40,19 @@ export interface ParticipantBase {
    * Empty when signalstack returns no tags.
    */
   actionableTags?: string[];
+  /**
+   * Onboarding lifecycle bucket for the row. Sourced from
+   * `/v1/dashboard/items` (which normalises via `resolveLifecycle` so
+   * legacy items without `lifecycle_status` surface as `'live'`).
+   * Undefined when the lifecycle fetch hasn't resolved yet or this row
+   * has no associated signals item.
+   */
+  lifecycle_status?: LifecycleStatus;
+  /**
+   * Profile completion percentage (0-100). Only meaningful for `draft`
+   * rows; rendered alongside the lifecycle pill as a CompletionBar.
+   */
+  completion_pct?: number;
 }
 
 export type Seeker = ParticipantBase;

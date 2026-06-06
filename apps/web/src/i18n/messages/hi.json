@@ -70,13 +70,20 @@
       "provider": "प्रदाता",
       "joined": "जुड़ने की तारीख",
       "profileStatus": "प्रोफ़ाइल स्थिति",
+      "lifecycle": "जीवनचक्र",
       "status": "स्थिति",
       "recommendedAction": "अनुशंसित कार्रवाई",
       "applied": "आवेदन किया",
       "count": "{total} में से {shown}"
     },
     "filters": {
-      "all_statuses": "सभी स्थितियाँ"
+      "all_statuses": "सभी स्थितियाँ",
+      "lifecycle_label": "जीवनचक्र",
+      "lifecycle_all": "सभी जीवनचक्र",
+      "lifecycle_draft": "ड्राफ्ट",
+      "lifecycle_live": "सक्रिय",
+      "lifecycle_paused": "रोका गया",
+      "lifecycle_account_only": "केवल खाता"
     },
     "aria": {
       "search_participants": "प्रतिभागियों को खोजें",
@@ -116,6 +123,14 @@
       "withApplications": "आवेदन वाले {entityPlural}",
       "newParticipants": "नए प्रतिभागी",
       "delta_this_week": "इस सप्ताह"
+    },
+    "tiles": {
+      "lifecycle": {
+        "draft": "ड्राफ्ट प्रोफ़ाइलें",
+        "live": "सक्रिय प्रोफ़ाइलें",
+        "paused": "रोकी गई प्रोफ़ाइलें",
+        "account_only": "केवल खाता वाले उपयोगकर्ता"
+      }
     },
     "opp": {
       "activeProgramsLabel": "सक्रिय कार्यक्रम",

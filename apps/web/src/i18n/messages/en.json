@@ -70,13 +70,20 @@
       "provider": "Provider",
       "joined": "Joined",
       "profileStatus": "Profile Status",
+      "lifecycle": "Lifecycle",
       "status": "Status",
       "recommendedAction": "Recommended Action",
       "applied": "Applied",
       "count": "{shown} of {total}"
     },
     "filters": {
-      "all_statuses": "All statuses"
+      "all_statuses": "All statuses",
+      "lifecycle_label": "Lifecycle",
+      "lifecycle_all": "All lifecycles",
+      "lifecycle_draft": "Draft",
+      "lifecycle_live": "Live",
+      "lifecycle_paused": "Paused",
+      "lifecycle_account_only": "Account only"
     },
     "aria": {
       "search_participants": "Search participants",
@@ -116,6 +123,14 @@
       "withApplications": "{entityPlural} with Applications",
       "newParticipants": "New Participants",
       "delta_this_week": "this week"
+    },
+    "tiles": {
+      "lifecycle": {
+        "draft": "Draft profiles",
+        "live": "Live profiles",
+        "paused": "Paused profiles",
+        "account_only": "Account-only users"
+      }
     },
     "opp": {
       "activeProgramsLabel": "Active programs",
