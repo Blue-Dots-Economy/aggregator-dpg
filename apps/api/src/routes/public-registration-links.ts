@@ -27,12 +27,20 @@ import { getNetworkConfig } from '../services/network-config.js';
 import { getSchemaLoader } from '../services/schema-loader/index.js';
 import { normalisePhone } from '../services/phone.js';
 import { resolveLifecycle } from '../services/onboarding/lifecycle.js';
+import {
+  planCompletionDispatch,
+  type CompletionAction,
+} from '../services/onboarding/dispatch_completion.js';
+import { getOutboundDispatchLog } from '../services/outbound-dispatch-log/index.js';
+import { getOutboundDispatchQueue } from '../services/queue.js';
+import { OUTBOUND_DISPATCH_QUEUE } from '@aggregator-dpg/queue';
 import { getSignalStackWriter } from '../services/signalstack.js';
 import { getDb } from '../db/client.js';
 import { linkSubmissions } from '../db/schema.js';
 import { httpError } from '../errors/http-error.js';
 import { consume } from '../services/rate-limiter/index.js';
 import { config } from '../config.js';
+import type { SignalStackOnboardParticipantResult } from '@aggregator-dpg/signalstack-writer/interface';
 
 let participantsWriter: ParticipantsWriterBase | null = null;
 function getParticipantsWriter(): ParticipantsWriterBase {
@@ -249,6 +257,12 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
     let lifecycleStatusOut: 'draft' | 'live' | 'paused' | null = null;
     let completionPctOut: number | null = null;
     let ownedElsewhere = false;
+    // Capture the raw signals onboard result outside the tx so the
+    // dispatcher fan-out (Task 11) can hand it to the planner without
+    // re-running onboard. `null` means signalstack was disabled OR push
+    // was skipped — the planner short-circuits on the empty actions list
+    // anyway, but we still gate on the result to keep the read crisp.
+    let onboardResultOut: SignalStackOnboardParticipantResult | null = null;
     const writer = getParticipantsWriter();
     const txResult = await getDb().transaction(async (tx) => {
       // Bind the writer to the active tx for atomicity. If a custom writer
@@ -369,6 +383,7 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
         ownedElsewhere = Boolean(result.value.owned_elsewhere);
         lifecycleStatusOut = lifecycleStatus;
         completionPctOut = completionPct;
+        onboardResultOut = result.value;
 
         log.info({
           status: 'success',
@@ -393,6 +408,100 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       };
     });
     const { outcome, participantRowId, submissionId } = txResult;
+
+    // Dispatcher fan-out — runs OUTSIDE the participant transaction so a
+    // Redis hiccup or a per-row enqueue failure cannot roll back the
+    // already-committed participant + link_submission rows. The planner
+    // is pure; it short-circuits to `[]` on owned_elsewhere, already-
+    // registered, missing item, empty actions, or non-draft lifecycle —
+    // we still call it so the gating logic lives in one place.
+    if (onboardResultOut && link.completionActions.length > 0) {
+      const directives = planCompletionDispatch({
+        onboardResult: onboardResultOut,
+        actions: link.completionActions as CompletionAction[],
+        participantId: participantRowId,
+        aggregatorId: link.aggregatorId,
+      });
+      const dispatchLog = getOutboundDispatchLog();
+      const dispatchQueue = getOutboundDispatchQueue();
+      for (const directive of directives) {
+        const enqueueStart = Date.now();
+        const enqueued = await dispatchLog.enqueue({
+          aggregator_id: directive.aggregator_id,
+          participant_id: directive.participant_id,
+          item_id: directive.item_id,
+          channel: directive.channel,
+          template_id: directive.template_id,
+          payload: {
+            delay_seconds: directive.delay_seconds,
+            max_retries: directive.max_retries,
+          },
+        });
+        if (!enqueued.success) {
+          // A persistence failure does not block the user's submit
+          // response. Log and continue with the next directive — the
+          // composite-key uniqueness guarantees a retry on the next
+          // submit attempt is safe.
+          log.error({
+            operation: 'outboundDispatch.enqueue',
+            status: 'failure',
+            error: enqueued.error.message,
+            error_type: enqueued.error.constructor.name,
+            latency_ms: Date.now() - enqueueStart,
+            participant_id: directive.participant_id,
+            item_id: directive.item_id,
+            channel: directive.channel,
+            template_id: directive.template_id,
+          });
+          continue;
+        }
+        try {
+          const job = await dispatchQueue.add(
+            OUTBOUND_DISPATCH_QUEUE,
+            { dispatchId: enqueued.value.id },
+            {
+              // Honour the link's per-action delay budget. BullMQ takes
+              // milliseconds — `delay_seconds * 1000`.
+              delay: directive.delay_seconds * 1000,
+              // BullMQ's `attempts` is total tries (initial + retries),
+              // so map the link's `max_retries` to attempts by adding 1.
+              attempts: directive.max_retries + 1,
+            },
+          );
+          log.info({
+            operation: 'outboundDispatch.enqueue',
+            status: 'success',
+            latency_ms: Date.now() - enqueueStart,
+            dispatch_id: enqueued.value.id,
+            job_id: job.id,
+            channel: directive.channel,
+            template_id: directive.template_id,
+            delay_seconds: directive.delay_seconds,
+            max_retries: directive.max_retries,
+            participant_id: directive.participant_id,
+            item_id: directive.item_id,
+          });
+        } catch (queueErr) {
+          // Same swallow-and-log policy as the dispatch-log failure: the
+          // user already has a participant row; the dispatcher will
+          // pick up the queued log row on a future enqueue retry or via
+          // a manual sweep.
+          log.error({
+            operation: 'outboundDispatch.enqueue',
+            status: 'failure',
+            sub: 'queue.add',
+            error: (queueErr as Error).message,
+            error_type: (queueErr as Error).constructor.name,
+            latency_ms: Date.now() - enqueueStart,
+            dispatch_id: enqueued.value.id,
+            channel: directive.channel,
+            template_id: directive.template_id,
+            participant_id: directive.participant_id,
+            item_id: directive.item_id,
+          });
+        }
+      }
+    }
 
     log.info({
       status: 'success',

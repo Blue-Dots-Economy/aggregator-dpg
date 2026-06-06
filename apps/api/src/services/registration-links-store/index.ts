@@ -23,6 +23,7 @@ export function _setRegistrationLinksStore(s: RegistrationLinksStoreBase | null)
 export { RegistrationLinksStoreBase } from './interface.js';
 export type {
   RegistrationLink,
+  RegistrationLinkCompletionAction,
   RegistrationLinkStatus,
   CreateRegistrationLinkInput,
   ListRegistrationLinksOptions,

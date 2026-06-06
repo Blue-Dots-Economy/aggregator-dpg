@@ -7,12 +7,31 @@
 
 export type RegistrationLinkStatus = 'draft' | 'live' | 'retired';
 
+/**
+ * One completion-dispatch action attached to a link. The route handler hands
+ * the array to the planner verbatim — fields are validated upstream when the
+ * link is created. Shape mirrors the JSONB column declared in
+ * `registration_links.completion_actions`.
+ */
+export interface RegistrationLinkCompletionAction {
+  channel: 'sms' | 'voice' | 'chat';
+  template_id: string;
+  delay_seconds: number;
+  max_retries: number;
+}
+
 export interface RegistrationLink {
   id: string;
   aggregatorId: string;
   slug: string;
   domain: string;
   context: Record<string, unknown>;
+  /**
+   * Completion-dispatch actions evaluated by the public submit handler when
+   * signals classifies the new item as `draft`. Empty array (default) means
+   * no dispatcher fan-out for this link.
+   */
+  completionActions: RegistrationLinkCompletionAction[];
   qrObjectKey: string | null;
   status: RegistrationLinkStatus;
   expiresAt: Date | null;

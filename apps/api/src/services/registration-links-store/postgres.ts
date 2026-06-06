@@ -15,6 +15,7 @@ import {
   type ListRegistrationLinksOptions,
   type ListRegistrationLinksResult,
   type RegistrationLink,
+  type RegistrationLinkCompletionAction,
   type RegistrationLinkStatus,
   type StoreResult,
   type UpdateDraftInput,
@@ -288,6 +289,16 @@ function toDomain(row: RegistrationLinkRow): RegistrationLink {
     slug: row.slug,
     domain: row.domain,
     context: row.context,
+    // The Drizzle column is `jsonb<Array<Record<string, unknown>>>` with a
+    // `[]` default, so absence is impossible in production rows. Treat any
+    // unexpected non-array (legacy back-fill, manual psql edit) as empty so
+    // the planner downstream just emits no directives. The two-step cast
+    // (`unknown` → typed) is intentional: the Drizzle column is unstructured
+    // jsonb, so we lean on the link-create-time schema validation rather
+    // than re-parsing every row read.
+    completionActions: Array.isArray(row.completionActions)
+      ? (row.completionActions as unknown as RegistrationLinkCompletionAction[])
+      : [],
     qrObjectKey: row.qrObjectKey,
     status: row.status,
     expiresAt: row.expiresAt,
