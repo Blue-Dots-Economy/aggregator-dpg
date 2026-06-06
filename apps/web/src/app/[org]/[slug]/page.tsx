@@ -30,6 +30,10 @@ interface ResolveResponse {
   // renders the form without a second fetch and without reading from
   // disk — aggregator no longer keeps per-domain schema files.
   schema: RJSFSchema;
+  // Identity field selectors for the domain. Used to relax required-field
+  // validation in "submit identity now" (partial / account-only) mode.
+  // Optional for back-compat with older API builds.
+  identity?: { name?: string; phone?: string; email?: string };
   expires_at: string | null;
 }
 
@@ -113,6 +117,7 @@ export default async function PublicRegistrationPage({ params }: PageProps) {
       context={resolved.context}
       schema={schema}
       uiSchema={uiSchema}
+      identity={resolved.identity}
     />
   );
 }

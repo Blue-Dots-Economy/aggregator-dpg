@@ -23,6 +23,13 @@ export interface PublicRegistrationViewProps {
   context: Record<string, unknown>;
   schema: RJSFSchema;
   uiSchema: Record<string, unknown>;
+  /**
+   * Identity field selectors for the domain (name / phone / email). When the
+   * user opts into "submit identity now, complete later" (partial /
+   * account-only), only these fields stay required — signalstack creates no
+   * item, so the rest of the profile is optional. Absent on older API builds.
+   */
+  identity?: { name?: string; phone?: string; email?: string } | undefined;
 }
 
 type SubmitState =
@@ -86,6 +93,7 @@ export function PublicRegistrationView({
   context,
   schema,
   uiSchema,
+  identity,
 }: PublicRegistrationViewProps): JSX.Element {
   const t = useTranslations('profile.public_reg');
   const [formData, setFormData] = useState<Record<string, unknown>>({});
@@ -138,7 +146,20 @@ export function PublicRegistrationView({
     }
     const required = (clone as { required?: string[] }).required;
     if (Array.isArray(required)) {
-      (clone as { required?: string[] }).required = required.filter((r) => r !== 'participant_id');
+      let next = required.filter((r) => r !== 'participant_id');
+      // "Submit identity now, complete later" (partial / account-only):
+      // signalstack creates no item, so only the identity fields it needs
+      // (name + at least one contact) stay required. Everything else becomes
+      // optional so the user can submit a bare identity and finish later.
+      if (partial) {
+        const identityKeys = new Set(
+          [identity?.name, identity?.phone, identity?.email].filter(
+            (k): k is string => typeof k === 'string' && k.length > 0,
+          ),
+        );
+        next = next.filter((r) => identityKeys.has(r));
+      }
+      (clone as { required?: string[] }).required = next;
     }
     // Inline `items.$ref → #/$defs/<x>` enum hits so RJSF's checkboxes
     // widget receives a populated `enumOptions` list. RJSF's runtime
@@ -174,7 +195,7 @@ export function PublicRegistrationView({
       }
     }
     return clone;
-  }, [schema]);
+  }, [schema, partial, identity]);
 
   // Default uiSchema cleanups: array fields become a single comma-separated
   // tag input (no "Add another entry" row-builder), boolean / required-string

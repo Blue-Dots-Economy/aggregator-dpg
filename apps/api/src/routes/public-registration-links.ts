@@ -101,6 +101,12 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       schema_id: `participant-${link.domain}`,
       schema_version: 'v1',
       schema: linkDomainCfg.schema,
+      // Identity field selectors (name / phone / email) for this domain.
+      // The public form needs them to relax required-field validation when
+      // the user opts into "submit identity now, complete later": account-only
+      // submits create no item, so only the identity fields signalstack needs
+      // (a name + at least one contact) stay mandatory.
+      identity: linkDomainCfg.identity,
       expires_at: link.expiresAt ? link.expiresAt.toISOString() : null,
     });
   });
@@ -151,6 +157,20 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
     delete body['partial'];
     const submitMode: 'with_item' | 'account_only' = partial ? 'account_only' : 'with_item';
 
+    // Identity selectors come from the resolved network config so the
+    // route stays generic across signalstack networks. The sniffer
+    // picks them up from the schema; aggregator.config.yaml overrides
+    // when needed. Loaded up front so `account_only` validation can keep
+    // just the identity fields required (see below).
+    const networkCfg = await getNetworkConfig();
+    const linkDomainCfg = networkCfg.domains[link.domain];
+    if (!linkDomainCfg) {
+      throw httpError('NOT_FOUND', {
+        detail: `link domain '${link.domain}' not declared in network ${networkCfg.network.id}`,
+      });
+    }
+    const phoneSourceKey = linkDomainCfg.identity.phone;
+
     // 1. Schema validation against the link's domain schema. Load the
     // raw schema as well so we can strip empty-string optional fields
     // before Ajv runs — an empty cell for an optional `format: uri` /
@@ -174,10 +194,32 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
     }
     const validate = validatorResult.value;
     if (!validate(body)) {
-      throw httpError('SCHEMA_VALIDATION', {
-        detail: 'Submission failed schema validation.',
-        fields: { issues: validate.errors ?? [] },
-      });
+      let issues = validate.errors ?? [];
+      // `account_only` (partial) creates no item, so the profile's required
+      // fields don't apply — drop `required` errors except for the identity
+      // selectors (name + at least one contact), which signalstack still
+      // needs to create the user row. Type / format / additionalProperties
+      // errors on whatever WAS supplied still block.
+      if (partial) {
+        const identityKeys = new Set(
+          [
+            linkDomainCfg.identity.name,
+            linkDomainCfg.identity.phone,
+            linkDomainCfg.identity.email,
+          ].filter((k): k is string => typeof k === 'string' && k.length > 0),
+        );
+        issues = issues.filter(
+          (e) =>
+            e.keyword !== 'required' ||
+            identityKeys.has((e.params as { missingProperty?: string })?.missingProperty ?? ''),
+        );
+      }
+      if (issues.length > 0) {
+        throw httpError('SCHEMA_VALIDATION', {
+          detail: 'Submission failed schema validation.',
+          fields: { issues },
+        });
+      }
     }
 
     // 2. Normalisation. The server discards any client-supplied
@@ -187,19 +229,6 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
     // Falls back to a fresh UUID when phone is absent so dedup degrades
     // gracefully for phone-optional schemas (no dedup, but still works).
     delete (body as Record<string, unknown>)['participant_id'];
-
-    // Identity selectors come from the resolved network config so the
-    // route stays generic across signalstack networks. The sniffer
-    // picks them up from the schema; aggregator.config.yaml overrides
-    // when needed.
-    const networkCfg = await getNetworkConfig();
-    const linkDomainCfg = networkCfg.domains[link.domain];
-    if (!linkDomainCfg) {
-      throw httpError('NOT_FOUND', {
-        detail: `link domain '${link.domain}' not declared in network ${networkCfg.network.id}`,
-      });
-    }
-    const phoneSourceKey = linkDomainCfg.identity.phone;
     const emailSourceKey = linkDomainCfg.identity.email;
     const phoneRaw =
       typeof body[phoneSourceKey] === 'string' ? (body[phoneSourceKey] as string) : '';
