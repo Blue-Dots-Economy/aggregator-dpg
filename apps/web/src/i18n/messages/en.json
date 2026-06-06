@@ -18,6 +18,12 @@
     "complete": "Complete",
     "incomplete": "Incomplete"
   },
+  "Lifecycle": {
+    "draft": "Draft",
+    "live": "Live",
+    "paused": "Paused",
+    "account_only": "Account only"
+  },
   "metadata": {
     "title": "Aggregator Portal",
     "description": "Aggregator portal for signalstack-backed participant networks."
