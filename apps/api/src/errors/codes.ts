@@ -139,6 +139,15 @@ export const ERR = {
     hint: 'aggregators.signalstack_org_id is NULL. Either the approval-time upsert failed and was never retried, or the login-time backfill has not run yet for this aggregator.',
   },
 
+  SIGNALSTACK_PROBE_FAILED: {
+    code: 'SIGNALSTACK_PROBE_FAILED',
+    status: 502,
+    title: 'Could not check identity with signalstack',
+    detail:
+      'The identity probe to signalstack failed. The lookup is idempotent; please retry. If the problem persists, contact support.',
+    hint: 'signalstack-writer.probeUser returned a non-2xx (transport, timeout, or upstream error). Distinct from SIGNALSTACK_PUSH_FAILED, which is the write-mode error.',
+  },
+
   // ── Persistence ─────────────────────────────────────────────────────────
   DB_UNAVAILABLE: {
     code: 'DB_UNAVAILABLE',

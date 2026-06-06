@@ -137,7 +137,7 @@ export async function registerPublicLookupRoute(app: FastifyInstance): Promise<v
         error: probe.error.message,
         error_type: probe.error.constructor.name,
       });
-      throw httpError('SIGNALSTACK_PUSH_FAILED', {
+      throw httpError('SIGNALSTACK_PROBE_FAILED', {
         detail: probe.error.message,
         fields: { code: (probe.error as { code?: string }).code ?? 'UNKNOWN' },
         cause: probe.error,
