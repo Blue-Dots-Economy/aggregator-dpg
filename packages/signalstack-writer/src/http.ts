@@ -9,7 +9,11 @@
  * concern (see notes in the design doc). One call → one network attempt.
  */
 
-import { UpstreamError } from '@aggregator-dpg/shared-primitives/errors';
+import {
+  AuthError,
+  UpstreamError,
+  ValidationError,
+} from '@aggregator-dpg/shared-primitives/errors';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import { err, ok } from '@aggregator-dpg/shared-primitives/result';
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
@@ -25,6 +29,8 @@ import {
   type SignalStackItemQuery,
   type SignalStackOnboardParticipantInput,
   type SignalStackOnboardParticipantResult,
+  type SignalStackProbeUserInput,
+  type SignalStackProbeUserResult,
   type SignalStackUpsertAggregatorInput,
 } from './interface.js';
 
@@ -678,6 +684,218 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
           aborted
             ? `signalstack dashboard export timed out after ${this.timeoutMs}ms`
             : `signalstack dashboard export transport failure: ${cause.message}`,
+          {
+            cause,
+            code: aborted ? 'SIGNALSTACK_TIMEOUT' : 'SIGNALSTACK_TRANSPORT_FAILED',
+          },
+        ),
+      );
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  /**
+   * Identity-only probe against signalstack's `/admin/participant` endpoint.
+   *
+   * Calls the same POST endpoint as {@link onboard} but with no
+   * `item_state` in the body and a sentinel `name: 'lookup'`. Signalstack
+   * treats that as an account-only path — it may create the user row but
+   * never an item — so the probe is safely idempotent for the caller.
+   * The response is reshaped into the slim {@link SignalStackProbeUserResult}
+   * tri-state so the caller never has to re-derive owned_elsewhere /
+   * lifecycle_summary from the raw items array.
+   *
+   * @param input - actingOrgId + email and/or phoneNumber + network/domain.
+   * @returns ok(SignalStackProbeUserResult) on 2xx; err(BaseError) on
+   *   validation failure, transport failure, or non-2xx.
+   */
+  override async probeUser(
+    input: SignalStackProbeUserInput,
+  ): Promise<Result<SignalStackProbeUserResult, BaseError>> {
+    if (!input?.actingOrgId) {
+      return err(
+        new ValidationError('actingOrgId is required', {
+          code: 'SIGNALSTACK_INPUT_INVALID',
+        }),
+      );
+    }
+    if (!input.email && !input.phoneNumber) {
+      return err(
+        new ValidationError('email or phoneNumber required', {
+          code: 'SIGNALSTACK_INPUT_INVALID',
+        }),
+      );
+    }
+    if (!input.network || !input.domain) {
+      return err(
+        new ValidationError('network and domain are required', {
+          code: 'SIGNALSTACK_INPUT_INVALID',
+        }),
+      );
+    }
+
+    // Probe body — deliberately omits `item_state` so signals' Plan-C
+    // account-only path runs (creates user row at most; never an item).
+    // The sentinel `name: 'lookup'` mirrors what signals' own admin UI
+    // sends for identity-only checks.
+    const body: Record<string, unknown> = {
+      name: 'lookup',
+      terms_accepted: true,
+      privacy_accepted: true,
+      network: input.network,
+      domain: input.domain,
+    };
+    if (input.email) body.email = input.email;
+    if (input.phoneNumber) body.phone_number = input.phoneNumber;
+
+    const headers = {
+      ...this.headers,
+      'x-acting-org-id': input.actingOrgId,
+    };
+
+    const controller = this.timeoutMs ? new AbortController() : undefined;
+    const timer = controller ? setTimeout(() => controller.abort(), this.timeoutMs) : undefined;
+
+    try {
+      const res = await this.fetchImpl(this.endpoint, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+        ...(controller ? { signal: controller.signal } : {}),
+      });
+
+      if (!res.ok) {
+        const bodyText = await safeReadText(res);
+        const upstreamMsg = extractUpstreamMessage(bodyText);
+        const message = upstreamMsg
+          ? `signalstack probe returned ${res.status}: ${upstreamMsg}`
+          : `signalstack probe returned ${res.status}`;
+        if (res.status === 400) {
+          return err(
+            new ValidationError(message, {
+              code: this.codeForStatus(res.status),
+              details: { status: res.status, body: bodyText },
+            }),
+          );
+        }
+        if (res.status === 401 || res.status === 403) {
+          return err(
+            new AuthError(message, {
+              code: this.codeForStatus(res.status),
+              details: { status: res.status, body: bodyText },
+            }),
+          );
+        }
+        return err(
+          new UpstreamError(message, {
+            code: this.codeForStatus(res.status),
+            details: { status: res.status, body: bodyText },
+          }),
+        );
+      }
+
+      // Account-only response shape:
+      //   { user_id, user_existed, owned_elsewhere?, items: [] | [item] }
+      // Reshape into the tri-state the caller branches on.
+      const raw = (await res.json()) as {
+        user_id?: unknown;
+        user_existed?: unknown;
+        owned_elsewhere?: unknown;
+        items?: Array<{
+          item_id?: unknown;
+          lifecycle_status?: unknown;
+          completion_pct?: unknown;
+        }>;
+      };
+      if (!raw || typeof raw !== 'object') {
+        return err(
+          new UpstreamError('signalstack probe returned unexpected payload', {
+            code: 'SIGNALSTACK_BAD_RESPONSE',
+            details: { payload: raw },
+          }),
+        );
+      }
+
+      const userExisted = raw.user_existed === true;
+      const ownedElsewhere = raw.owned_elsewhere === true;
+
+      if (userExisted && ownedElsewhere) {
+        return ok({
+          user_exists: true,
+          owned_elsewhere: true,
+          lifecycle_summary: null,
+        });
+      }
+
+      const items = Array.isArray(raw.items) ? raw.items : [];
+      if (userExisted && items.length > 0) {
+        const first = items[0]!;
+        const itemId = typeof first.item_id === 'string' ? first.item_id : '';
+        if (!itemId) {
+          return err(
+            new UpstreamError('signalstack probe primary item missing item_id', {
+              code: 'SIGNALSTACK_BAD_RESPONSE',
+              details: { payload: raw },
+            }),
+          );
+        }
+        // Back-compat fallback: older signalstack builds omit lifecycle_status /
+        // completion_pct on the account-only response. Treat absent values as
+        // a live, fully-complete item — same default the resolveLifecycle
+        // helper in apps/api applies for read-side rows. The writer cannot
+        // import that helper (apps/api sits above this package in the dep
+        // graph), so inline the fallback here.
+        const lifecycleStatus =
+          first.lifecycle_status === 'draft' ||
+          first.lifecycle_status === 'live' ||
+          first.lifecycle_status === 'paused'
+            ? first.lifecycle_status
+            : 'live';
+        const completionPct =
+          typeof first.completion_pct === 'number' &&
+          first.completion_pct >= 0 &&
+          first.completion_pct <= 100
+            ? first.completion_pct
+            : 100;
+        return ok({
+          user_exists: true,
+          owned_elsewhere: false,
+          lifecycle_summary: {
+            primary_item: {
+              item_id: itemId,
+              lifecycle_status: lifecycleStatus,
+              completion_pct: completionPct,
+            },
+          },
+        });
+      }
+
+      if (userExisted) {
+        // Own user but no item yet (account-only probe response).
+        return ok({
+          user_exists: true,
+          owned_elsewhere: false,
+          lifecycle_summary: null,
+        });
+      }
+
+      // user_existed: false (or absent) — signals either created the row
+      // just now or there is no matching identity. Either way the caller
+      // treats the user as new.
+      return ok({
+        user_exists: false,
+        owned_elsewhere: false,
+        lifecycle_summary: null,
+      });
+    } catch (e) {
+      const cause = e as Error;
+      const aborted = cause.name === 'AbortError';
+      return err(
+        new UpstreamError(
+          aborted
+            ? `signalstack probe timed out after ${this.timeoutMs}ms`
+            : `signalstack probe transport failure: ${cause.message}`,
           {
             cause,
             code: aborted ? 'SIGNALSTACK_TIMEOUT' : 'SIGNALSTACK_TRANSPORT_FAILED',

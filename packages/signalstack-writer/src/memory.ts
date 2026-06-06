@@ -11,7 +11,7 @@
  * writer to make assertions predictable.
  */
 
-import { UpstreamError } from '@aggregator-dpg/shared-primitives/errors';
+import { UpstreamError, ValidationError } from '@aggregator-dpg/shared-primitives/errors';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import { err, ok } from '@aggregator-dpg/shared-primitives/result';
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
@@ -27,6 +27,8 @@ import {
   type SignalStackItemQuery,
   type SignalStackOnboardParticipantInput,
   type SignalStackOnboardParticipantResult,
+  type SignalStackProbeUserInput,
+  type SignalStackProbeUserResult,
   type SignalStackProfile,
   type SignalStackUpsertAggregatorInput,
 } from './interface.js';
@@ -77,6 +79,29 @@ export class InMemorySignalStackWriter extends SignalStackWriterBase {
    * {@link seedForeignUser}.
    */
   protected readonly foreignUsers: Set<string> = new Set();
+  /**
+   * Own-user probe seeds keyed by `email:...` / `phone:...`. Each entry
+   * carries the acting org id and optionally the primary item's
+   * lifecycle classification. {@link probeUser} returns
+   * `user_exists: true` (with `lifecycle_summary` populated when the
+   * entry has an `item`) on a key hit. Tests seed entries via
+   * {@link seedOwnUser}. Kept separate from {@link profiles} because
+   * probes do not need a full StoredProfile row — only the slim
+   * classification triple a lifecycle resumption requires.
+   */
+  protected readonly ownUserProbes: Map<
+    string,
+    {
+      actingOrgId: string;
+      email: string | null;
+      phoneNumber: string | null;
+      item?: {
+        item_id: string;
+        lifecycle_status: 'draft' | 'live' | 'paused';
+        completion_pct: number;
+      };
+    }
+  > = new Map();
   private nextUserSeq = 1;
   private nextProfileSeq = 1;
   private nextAggregatorSeq = 1;
@@ -236,6 +261,116 @@ export class InMemorySignalStackWriter extends SignalStackWriterBase {
     const phone = normalizePhone(key.phoneNumber);
     if (email) this.foreignUsers.add(`email:${email}`);
     if (phone) this.foreignUsers.add(`phone:${phone}`);
+  }
+
+  /**
+   * Registers an own-aggregator user for {@link probeUser} matches.
+   * Tests seed an entry per identity (email, phoneNumber, or both) plus
+   * an optional `item` carrying the primary lifecycle classification.
+   *
+   * When the next `probeUser` call matches the email or phone key, the
+   * fake returns `user_exists: true`, `owned_elsewhere: false`, and
+   * (when `item` is present) a populated `lifecycle_summary`.
+   *
+   * Re-seeding the same key overwrites the previous entry. At least one
+   * of `email` or `phoneNumber` must be supplied.
+   *
+   * @param seed - actingOrgId + at least one identity + optional item.
+   */
+  seedOwnUser(seed: {
+    actingOrgId: string;
+    email?: string;
+    phoneNumber?: string;
+    item?: {
+      item_id: string;
+      lifecycle_status: 'draft' | 'live' | 'paused';
+      completion_pct: number;
+    };
+  }): void {
+    const email = normalizeEmail(seed.email);
+    const phone = normalizePhone(seed.phoneNumber);
+    const entry = {
+      actingOrgId: seed.actingOrgId,
+      email,
+      phoneNumber: phone,
+      ...(seed.item ? { item: seed.item } : {}),
+    };
+    if (email) this.ownUserProbes.set(`email:${email}`, entry);
+    if (phone) this.ownUserProbes.set(`phone:${phone}`, entry);
+  }
+
+  override async probeUser(
+    input: SignalStackProbeUserInput,
+  ): Promise<Result<SignalStackProbeUserResult, BaseError>> {
+    if (!input?.actingOrgId) {
+      return err(
+        new ValidationError('actingOrgId is required', {
+          code: 'SIGNALSTACK_INPUT_INVALID',
+        }),
+      );
+    }
+    const email = normalizeEmail(input.email);
+    const phone = normalizePhone(input.phoneNumber);
+    if (!email && !phone) {
+      return err(
+        new ValidationError('email or phoneNumber required', {
+          code: 'SIGNALSTACK_INPUT_INVALID',
+        }),
+      );
+    }
+    if (!input.network || !input.domain) {
+      return err(
+        new ValidationError('network and domain are required', {
+          code: 'SIGNALSTACK_INPUT_INVALID',
+        }),
+      );
+    }
+
+    // Foreign-owned user takes precedence over an own-user seed for the
+    // same identity — signals never returns lifecycle state across
+    // aggregator boundaries.
+    const emailKey = email ? `email:${email}` : null;
+    const phoneKey = phone ? `phone:${phone}` : null;
+    const isForeign =
+      (emailKey !== null && this.foreignUsers.has(emailKey)) ||
+      (phoneKey !== null && this.foreignUsers.has(phoneKey));
+    if (isForeign) {
+      return ok({
+        user_exists: true,
+        owned_elsewhere: true,
+        lifecycle_summary: null,
+      });
+    }
+
+    const ownEntry =
+      (emailKey ? this.ownUserProbes.get(emailKey) : undefined) ??
+      (phoneKey ? this.ownUserProbes.get(phoneKey) : undefined);
+    if (ownEntry) {
+      if (ownEntry.item) {
+        return ok({
+          user_exists: true,
+          owned_elsewhere: false,
+          lifecycle_summary: {
+            primary_item: {
+              item_id: ownEntry.item.item_id,
+              lifecycle_status: ownEntry.item.lifecycle_status,
+              completion_pct: ownEntry.item.completion_pct,
+            },
+          },
+        });
+      }
+      return ok({
+        user_exists: true,
+        owned_elsewhere: false,
+        lifecycle_summary: null,
+      });
+    }
+
+    return ok({
+      user_exists: false,
+      owned_elsewhere: false,
+      lifecycle_summary: null,
+    });
   }
 
   override async listItemsByAggregator(
