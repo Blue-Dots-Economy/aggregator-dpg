@@ -25,12 +25,14 @@ import {
   type SignalStackDashboardExportQuery,
   type SignalStackDashboardPage,
   type SignalStackDashboardQuery,
+  type SignalStackGetItemQuery,
   type SignalStackItemList,
   type SignalStackItemQuery,
   type SignalStackOnboardParticipantInput,
   type SignalStackOnboardParticipantResult,
   type SignalStackProbeUserInput,
   type SignalStackProbeUserResult,
+  type SignalStackProfile,
   type SignalStackUpsertAggregatorInput,
 } from './interface.js';
 
@@ -896,6 +898,93 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
           aborted
             ? `signalstack probe timed out after ${this.timeoutMs}ms`
             : `signalstack probe transport failure: ${cause.message}`,
+          {
+            cause,
+            code: aborted ? 'SIGNALSTACK_TIMEOUT' : 'SIGNALSTACK_TRANSPORT_FAILED',
+          },
+        ),
+      );
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  /**
+   * Fetch a single signals item by `item_id` from the
+   * `POST /api/v1/network/item/fetch_local` endpoint.
+   *
+   * The HTTP impl is minimal — the outbound-dispatch processor uses the
+   * in-memory fake in tests; this method is wired so the production
+   * worker can fall back to the live signals read path when configured.
+   * A 404 (or empty `items[]`) is mapped to `ok(null)` so the caller's
+   * "indeterminate → proceed" branch can fire without surfacing a
+   * spurious error. All other non-2xx responses and transport failures
+   * surface as `UpstreamError`.
+   *
+   * @param query - Item id to look up.
+   * @returns ok(SignalStackProfile) on hit; ok(null) on absent;
+   *   err(BaseError) on transport / protocol failure.
+   */
+  override async getItem(
+    query: SignalStackGetItemQuery,
+  ): Promise<Result<SignalStackProfile | null, BaseError>> {
+    if (!query?.item_id) {
+      return err(
+        new ValidationError('item_id is required', {
+          code: 'SIGNALSTACK_INPUT_INVALID',
+        }),
+      );
+    }
+
+    // fetch_local accepts a server-side `item_id` filter; signalstack
+    // returns a list payload with 0 or 1 row. We collapse the list into
+    // a single-item result here so the caller doesn't have to.
+    const url = `${this.baseUrl}/api/v1/network/item/fetch_local`;
+    const body = { item_id: query.item_id, limit: 1, offset: 0 };
+
+    const controller = this.timeoutMs ? new AbortController() : undefined;
+    const timer = controller ? setTimeout(() => controller.abort(), this.timeoutMs) : undefined;
+
+    try {
+      const res = await this.fetchImpl(url, {
+        method: 'POST',
+        headers: this.headers,
+        body: JSON.stringify(body),
+        ...(controller ? { signal: controller.signal } : {}),
+      });
+
+      if (res.status === 404) return ok(null);
+
+      if (!res.ok) {
+        const bodyText = await safeReadText(res);
+        return err(
+          new UpstreamError(`signalstack get_item returned ${res.status}`, {
+            code: this.codeForStatus(res.status),
+            details: { status: res.status, body: bodyText },
+          }),
+        );
+      }
+
+      const payload = (await res.json()) as { items?: unknown };
+      if (!payload || typeof payload !== 'object' || !Array.isArray(payload.items)) {
+        return err(
+          new UpstreamError('signalstack get_item returned unexpected payload', {
+            code: 'SIGNALSTACK_BAD_RESPONSE',
+            details: { payload },
+          }),
+        );
+      }
+      const first = payload.items[0];
+      if (!first || typeof first !== 'object') return ok(null);
+      return ok(first as SignalStackProfile);
+    } catch (e) {
+      const cause = e as Error;
+      const aborted = cause.name === 'AbortError';
+      return err(
+        new UpstreamError(
+          aborted
+            ? `signalstack get_item timed out after ${this.timeoutMs}ms`
+            : `signalstack get_item transport failure: ${cause.message}`,
           {
             cause,
             code: aborted ? 'SIGNALSTACK_TIMEOUT' : 'SIGNALSTACK_TRANSPORT_FAILED',

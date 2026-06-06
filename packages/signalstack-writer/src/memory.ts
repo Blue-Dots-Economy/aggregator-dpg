@@ -23,6 +23,7 @@ import {
   type SignalStackDashboardExportQuery,
   type SignalStackDashboardPage,
   type SignalStackDashboardQuery,
+  type SignalStackGetItemQuery,
   type SignalStackItemList,
   type SignalStackItemQuery,
   type SignalStackOnboardParticipantInput,
@@ -371,6 +372,63 @@ export class InMemorySignalStackWriter extends SignalStackWriterBase {
       owned_elsewhere: false,
       lifecycle_summary: null,
     });
+  }
+
+  override async getItem(
+    query: SignalStackGetItemQuery,
+  ): Promise<Result<SignalStackProfile | null, BaseError>> {
+    if (!query?.item_id) {
+      return err(
+        new ValidationError('item_id is required', {
+          code: 'SIGNALSTACK_INPUT_INVALID',
+        }),
+      );
+    }
+    const row = this.profiles.get(query.item_id);
+    if (!row) return ok(null);
+    return ok(stripCreatedBy(row));
+  }
+
+  /**
+   * Seeds a single signalstack item keyed by `itemId`, filling unspecified
+   * fields with deterministic defaults. Used by cross-package consumers
+   * (the outbound-dispatch processor in particular) to pin the lifecycle
+   * a `getItem(...)` re-check will surface for a given id.
+   *
+   * Re-seeding the same `itemId` overwrites the previous entry.
+   *
+   * @param itemId - Item id the seed is keyed under.
+   * @param partial - Optional overrides; `lifecycle_status` and
+   *   `completion_pct` are the fields the lifecycle re-check reads.
+   */
+  seedItem(
+    itemId: string,
+    partial: Partial<SignalStackProfile> & {
+      lifecycle_status?: 'draft' | 'live' | 'paused';
+      completion_pct?: number;
+    } = {},
+  ): void {
+    const row: StoredProfile = {
+      item_id: itemId,
+      item_network: partial.item_network ?? 'blue_dot',
+      item_domain: partial.item_domain ?? 'seeker',
+      item_type: partial.item_type ?? 'profile_1.0',
+      item_state: partial.item_state ?? {},
+      item_latitude: partial.item_latitude ?? null,
+      item_longitude: partial.item_longitude ?? null,
+      aggregator_id: partial.aggregator_id ?? null,
+      created_at: partial.created_at ?? ISO_FIXED,
+      updated_at: partial.updated_at ?? ISO_FIXED,
+      ...(partial.lifecycle_status !== undefined
+        ? { lifecycle_status: partial.lifecycle_status }
+        : {}),
+      ...(partial.completion_pct !== undefined ? { completion_pct: partial.completion_pct } : {}),
+      created_by: '',
+      acting_org_id: '',
+      channel: 'link',
+      source_id: '',
+    };
+    this.profiles.set(itemId, row);
   }
 
   override async listItemsByAggregator(

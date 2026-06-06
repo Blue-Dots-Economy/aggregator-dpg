@@ -16,6 +16,7 @@ import {
   type BulkRowProcessJob,
   type CronWatchdogJob,
   type LinkMetricsRollupJob,
+  type OutboundDispatchJobData,
 } from '@aggregator-dpg/queue';
 import { config } from './config.js';
 import { logger } from './logger.js';
@@ -25,8 +26,11 @@ import { processBulkRow } from './jobs/bulk-row-process.js';
 import { finaliseBulk } from './jobs/bulk-finalise.js';
 import { rollupLinkMetrics } from './jobs/link-metrics-rollup.js';
 import { runWatchdog } from './jobs/cron-watchdog.js';
+import { processOutboundDispatch } from './jobs/outbound-dispatch.js';
 import { getRedis, closeRedis } from './services/redis.js';
 import { closeQueues } from './services/bulk-queue.js';
+import { getSignalStackWriter } from './services/signalstack.js';
+import { getOutboundDispatchLog } from './services/outbound-dispatch-log.js';
 
 async function main(): Promise<void> {
   const connection = getRedis();
@@ -70,6 +74,36 @@ async function main(): Promise<void> {
   const watchdogWorker = new Worker<CronWatchdogJob>(
     QueueName.CronWatchdog,
     async () => runWatchdog(),
+    {
+      connection,
+      concurrency: 1,
+    },
+  );
+
+  // Outbound completion-dispatch worker. The signalstack writer is
+  // required for the lifecycle re-check — if signals push is disabled
+  // (no SIGNALSTACK_BASE_URL / SIGNALSTACK_ADMIN_KEY), the producer
+  // (registration handler) skips enqueue, so a no-op consumer is fine
+  // here. We mount the worker regardless so consumers don't drift; the
+  // processor short-circuits via getSignalStackWriter when null.
+  const outboundDispatchWorker = new Worker<OutboundDispatchJobData>(
+    QueueName.OutboundDispatch,
+    async (job) => {
+      const signalstack = getSignalStackWriter();
+      if (!signalstack) {
+        logger.warn({
+          operation: 'outboundDispatch.skipped',
+          status: 'skipped',
+          sub: 'no_signalstack_writer',
+          dispatch_id: job.data.dispatchId,
+        });
+        return;
+      }
+      await processOutboundDispatch(job.data, {
+        signalstack,
+        log: getOutboundDispatchLog(),
+      });
+    },
     {
       connection,
       concurrency: 1,
@@ -123,6 +157,7 @@ async function main(): Promise<void> {
     ['bulkFinalise', finaliseWorker],
     ['linkMetricsRollup', linkMetricsWorker],
     ['cronWatchdog', watchdogWorker],
+    ['outboundDispatch', outboundDispatchWorker],
   ] as const) {
     w.on('completed', (job, result) => {
       logger.debug({
@@ -149,6 +184,7 @@ async function main(): Promise<void> {
       QueueName.BulkFinalise,
       QueueName.LinkMetricsRollup,
       QueueName.CronWatchdog,
+      QueueName.OutboundDispatch,
     ],
   });
 
@@ -160,6 +196,7 @@ async function main(): Promise<void> {
       finaliseWorker.close(),
       linkMetricsWorker.close(),
       watchdogWorker.close(),
+      outboundDispatchWorker.close(),
     ]);
     await Promise.all([linkMetricsQueue.close(), watchdogQueue.close()]);
     await closeQueues();

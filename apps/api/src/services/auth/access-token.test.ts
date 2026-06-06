@@ -170,6 +170,9 @@ describe('requireApproved + signalstack backfill', () => {
       async probeUser() {
         return err(new UpstreamError('not used', { code: 'X' }));
       }
+      async getItem() {
+        return err(new UpstreamError('not used', { code: 'X' }));
+      }
     }
     _setSignalStackWriter(new FailingWriter());
 

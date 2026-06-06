@@ -384,6 +384,17 @@ export interface SignalStackProbeUserResult {
 }
 
 /**
+ * Filter for a single-item signalstack read. Used by the outbound
+ * completion-dispatch processor to re-check the item's lifecycle right
+ * before sending — so a draft that has since flipped to live or paused
+ * does not receive a stale prompt.
+ */
+export interface SignalStackGetItemQuery {
+  /** Signalstack item id minted by a prior `onboard()` call. */
+  item_id: string;
+}
+
+/**
  * Persistence port for the signalstack admin endpoints.
  *
  * Implementations:
@@ -492,4 +503,23 @@ export abstract class SignalStackWriterBase {
   abstract probeUser(
     input: SignalStackProbeUserInput,
   ): Promise<Result<SignalStackProbeUserResult, BaseError>>;
+
+  /**
+   * Fetch a single signals item by `item_id` for a lifecycle re-check.
+   *
+   * Returns `ok(null)` when the item is not known to signals (e.g. a
+   * race where the dispatcher job fires before the item replicates to
+   * the read path); the caller then treats the lifecycle as
+   * indeterminate and proceeds with the send (drafts dominate the
+   * race). HTTP impls that cannot derive the wire shape may return a
+   * structured `UpstreamError` — production wiring is a follow-up; the
+   * worker test path uses the in-memory fake.
+   *
+   * @param query - Item id to look up.
+   * @returns ok(SignalStackProfile) on hit; ok(null) when absent;
+   *   err(BaseError) on transport / protocol failure.
+   */
+  abstract getItem(
+    query: SignalStackGetItemQuery,
+  ): Promise<Result<SignalStackProfile | null, BaseError>>;
 }
