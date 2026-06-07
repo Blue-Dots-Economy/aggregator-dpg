@@ -191,9 +191,13 @@ Update `SignalStackDashboardRollup` and the item shape:
 - Item: add `profile_item_id` (required), `user_id` (optional), `initiated`, `received`,
   `last_initiated_at`, `last_received_at`; drop flat `count_*` / `last_*_at`.
 - Mirror in `apps/web/src/services/dashboard.service.ts` `DashboardRollup`.
-- `toSeekerRow` / `toProviderRow` (`dashboard/page.tsx`) currently use `user_id` as the row
-  `id`; switch the row `id`/React key to `profile_item_id` (one row per profile — `user_id`
-  is not unique per row). `user_id` becomes an optional passthrough, not the key.
+- `toSeekerRow` / `toProviderRow` (`dashboard/page.tsx`) currently derive the row `id` from
+  `owner_user_id → user_id → ''`. Switch the row `id`/React key to **`profile_item_id`, else
+  the array index** (one row per profile — `user_id` is not unique per row). Both
+  `owner_user_id` and `user_id` are dropped from the key; `user_id` stays only as an optional
+  passthrough field. The index fallback requires threading the row index into
+  `toSeekerRow`/`toProviderRow` (both are called as `items.map((p) => toRow(p, locale))` — add
+  the index arg).
 
 Both directional maps stay `Partial<Record<'create'|'accept'|'reject'|'cancel', number>>`
 to match the existing defensive `?? 0` reads.
@@ -304,3 +308,9 @@ omits them, the aggregator falls back to generic English labels.
 
 1. **Signalstack** (`Signals-DPG`): §1.1–1.3, ship enriched payload + update network.json.
 2. **Aggregator** (`aggregator-dpg`): §2.1 contracts → §2.2 config types → §2.3 API → §2.4/2.5 UI → §2.6 config files → tests.
+
+**Merge gate (hard cutover).** Flat `count_*` / `by_action_status` are removed with no
+back-compat alias, so the aggregator reads zeros until signalstack ships. The aggregator PR
+**must not merge** until the signalstack enriched payload (§1) is deployed and verified in the
+target environment. Defensive `?? 0` prevents a crash but the data is wrong in the interim —
+the gate, not the code, enforces correctness.

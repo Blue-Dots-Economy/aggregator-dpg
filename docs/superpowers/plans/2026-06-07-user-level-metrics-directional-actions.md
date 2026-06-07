@@ -23,6 +23,8 @@
 ## Part 0 — Signalstack prerequisite (separate `Signals-DPG` repo — NOT this plan)
 
 > Hand to the signalstack team. The aggregator work below is independently testable against fixtures, but production needs these shipped first (hard cutover — flat `count_*` removed).
+>
+> **Merge gate:** the aggregator PR (Task G1) must NOT merge to `develop` until this signalstack payload is deployed and verified in the target env. The aggregator survives the gap (defensive `?? 0`) but renders wrong/zero data until then — the gate enforces correctness, not the code.
 
 - [ ] Add `profile_item_id` (required) + `user_id` (optional) to each `by_domain[*].items[]` row.
 - [ ] Replace flat `count_*` / `last_*_at` per item with `initiated`, `received`, `last_initiated_at`, `last_received_at` (each a `{create,accept,reject,cancel}` map; `last_*` values are ISO string or null).
@@ -424,7 +426,10 @@ export function mapDirectional(raw: unknown): DirectionalStats {
 Run: `pnpm --filter @aggregator-dpg/web test -- src/services/__tests__/toRow.test.ts`
 Expected: PASS.
 
-- [ ] **Step 6: Wire mapping into `toSeekerRow`.** In `page.tsx:1122`, change the row `id` from `userId` to `profile_item_id` (fall back to `user_id` then `''`), keep `user_id` as a separate optional field, and populate `initiated`/`received`:
+- [ ] **Step 6: Wire mapping into `toSeekerRow` + thread the row index.** The current row `id` chain is `owner_user_id → user_id → ''` (page.tsx:1123-1143). Per the locked decision the new key is **`profile_item_id`, else the array index** — `owner_user_id`/`user_id` are dropped from the key (keep `user_id` as a separate optional field only). The index fallback needs a signature change:
+  - Change the signature to `toSeekerRow(participant: Record<string, unknown>, locale: string, index: number)`.
+  - Update both call sites — `page.tsx:947` and `page.tsx:1263` — from `.map((p) => toSeekerRow(p, locale))` / `toProviderRow(p, locale)` to `.map((p, i) => toSeekerRow(p, locale, i))` / `toProviderRow(p, locale, i)`.
+  - Update `toProviderRow` (page.tsx:1418-1419) to accept `index` and forward it: `const seeker = toSeekerRow(participant, locale, index);`.
 
 ```typescript
 const profileItemId =
@@ -432,14 +437,14 @@ const profileItemId =
 const userId = typeof participant.user_id === 'string' ? participant.user_id : '';
 // ...
 return {
-  id: profileItemId || userId, // row key — profile-level
+  id: profileItemId || String(index), // row key — profile_item_id, else array index
   initiated: mapDirectional(participant.initiated),
   received: mapDirectional(participant.received),
   // ...existing fields (name, city, joined, avatar, profile, applied, status, last)...
 };
 ```
 
-Import `mapDirectional` at the top of `page.tsx`. Leave the existing `applied` mapping in place for now (table swap happens in Part F); `toProviderRow` already delegates to `toSeekerRow` so it inherits the change.
+Import `mapDirectional` at the top of `page.tsx`. Leave the existing `applied` mapping in place for now (table swap happens in Part F). Add a `mapDirectional`/index unit-test case for the missing-`profile_item_id` → index path.
 
 - [ ] **Step 7: Run web tests (mapping green; page may still fail typecheck until Part F).**
 
@@ -604,7 +609,7 @@ const initiatedLabels = cfg?.dashboardBuckets?.by_initiated_action_status ?? {};
 const receivedLabels = cfg?.dashboardBuckets?.by_received_action_status ?? {};
 ```
 
-Thread both into `ParticipantTable` (replace the `bucketLabels={bucketLabels}` prop at line 1094 with `initiatedLabels={initiatedLabels} receivedLabels={receivedLabels}`), and update the provider tab's `ParticipantTable` call the same way. Update the `ParticipantTable` prop type accordingly (find its props interface — `grep -n "bucketLabels" page.tsx` — and replace `bucketLabels` with the two new props).
+`bucketLabels` is defined **twice** — seeker tab `:919` and provider tab `:1250`; replace both. Thread both maps into `ParticipantTable`: replace the `bucketLabels={bucketLabels}` prop at the seeker call `:1094` **and** the provider call `:1411` with `initiatedLabels={initiatedLabels} receivedLabels={receivedLabels}`. Update the `ParticipantTableProps` interface (`:393`, prop declared `:422`, defaulted `:435`) — replace `bucketLabels` with the two new props.
 
 - [ ] **Step 2: Replace the single action `<th>` (line 625)** with two headers:
 
