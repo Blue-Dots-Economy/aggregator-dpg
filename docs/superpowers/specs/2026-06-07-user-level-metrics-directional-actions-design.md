@@ -24,12 +24,18 @@ exactly like the existing `dashboard_tiles` / `dashboard_buckets` / `status_rule
 
 ## Decisions locked in brainstorming
 
-- **Compute lives in signalstack**, not the aggregator. User-level totals must span the
-  full dataset; the aggregator only ever holds a paginated 100-row page. Signalstack
-  already precomputes the rollup (`avg_items_per_user`, `avg_actions_per_user`), so
-  user-level numbers fold into the same code path. Aggregator stays display-only, matching
-  the documented Signal Processing Service architecture ("no computation happens within
-  the Aggregator platform").
+- **ALL compute lives in signalstack** — the aggregator does **zero** grouping or
+  aggregation. User-level totals must span the full dataset; the aggregator only ever holds
+  a paginated 100-row page. Signalstack already precomputes the rollup
+  (`avg_items_per_user`, `avg_actions_per_user`), so user-level numbers fold into the same
+  code path. Aggregator stays display-only, matching the documented Signal Processing
+  Service architecture ("no computation happens within the Aggregator platform").
+- **No `user_id` grouping in the aggregator.** Because signalstack owns user-level compute
+  and the table stays profile-level, the aggregator never groups by `user_id`. Items carry
+  **`profile_item_id` (required — the per-row key)** and **`user_id` (optional — traceability
+  / future profile→user drill-in only)**. `profile_item_id` is required because the table is
+  profile-level: a user with N profiles is N rows, so `user_id` is not unique per row and
+  cannot serve as the React key.
 - **Hard cutover on action fields.** Flat `count_*` is replaced by `initiated` / `received`
   maps. No back-compat alias. Signalstack and aggregator ship together.
 - **Direction comes from signalstack** (action role), never inferred by the aggregator.
@@ -48,17 +54,19 @@ exactly like the existing `dashboard_tiles` / `dashboard_buckets` / `status_rule
 Signalstack owns all computation. Three additions to the
 `GET /api/v1/aggregator/dashboard` payload.
 
-## 1.1 `user_id` + `profile_item_id` on every profile item
+## 1.1 `profile_item_id` (required) + `user_id` (optional) on every profile item
 
 Each item in `by_domain[<id>].items[]` gains:
 
-| Field             | Type   | Purpose                                         |
-| ----------------- | ------ | ----------------------------------------------- |
-| `user_id`         | string | groupby key — ties a profile to its owning user |
-| `profile_item_id` | string | stable profile identity (the row's own id)      |
+| Field             | Type   | Required | Purpose                                                                           |
+| ----------------- | ------ | -------- | --------------------------------------------------------------------------------- |
+| `profile_item_id` | string | yes      | stable per-row key for the profile table (`user_id` repeats across a user's rows) |
+| `user_id`         | string | no       | traceability / future profile→user drill-in. NOT used for any aggregator compute  |
 
-`user_id` is already known at profile-create time (signalstack returns it from the onboard
-call). This exposes it on the read path.
+The aggregator does **no** grouping by `user_id` — all user-level numbers come precomputed
+in the rollup (§1.3). `profile_item_id` exists purely as the row identity; `user_id` is an
+optional passthrough. Both are already known at profile-create time (signalstack returns
+them from the onboard call); this exposes them on the read path.
 
 ## 1.2 Directional action maps (replace flat `count_*`)
 
@@ -180,9 +188,12 @@ Update `SignalStackDashboardRollup` and the item shape:
 - Rollup: drop `by_action_status`; add `by_initiated_action_status`,
   `by_received_action_status`, `total_users`, `users_with_applications`, `new_users_7d`.
   Keep `avg_items_per_user`, `avg_actions_per_user`.
-- Item: add `user_id`, `profile_item_id`, `initiated`, `received`, `last_initiated_at`,
-  `last_received_at`; drop flat `count_*` / `last_*_at`.
+- Item: add `profile_item_id` (required), `user_id` (optional), `initiated`, `received`,
+  `last_initiated_at`, `last_received_at`; drop flat `count_*` / `last_*_at`.
 - Mirror in `apps/web/src/services/dashboard.service.ts` `DashboardRollup`.
+- `toSeekerRow` / `toProviderRow` (`dashboard/page.tsx`) currently use `user_id` as the row
+  `id`; switch the row `id`/React key to `profile_item_id` (one row per profile — `user_id`
+  is not unique per row). `user_id` becomes an optional passthrough, not the key.
 
 Both directional maps stay `Partial<Record<'create'|'accept'|'reject'|'cancel', number>>`
 to match the existing defensive `?? 0` reads.
@@ -260,13 +271,14 @@ omits them, the aggregator falls back to generic English labels.
 
 ## Edge cases
 
-| Case                                     | Behaviour                                                                                                                                   |
-| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| Item missing `user_id`                   | item still renders in the profile table; excluded from any per-page user grouping. User-level rollup is signalstack-computed so unaffected. |
-| Rollup missing a user-level field        | tile shows `0` / skipped; logged `warn` with `operation`, `status: 'skipped'`.                                                              |
-| `dashboard_tiles` absent in network.json | fall back to default English profile tiles; user group hidden.                                                                              |
-| Direction maps absent / empty            | columns render zeros, never throw (defensive `?? 0`).                                                                                       |
-| Unknown `field` in tile config           | tile skipped, `warn` logged.                                                                                                                |
+| Case                                     | Behaviour                                                                                                                                 |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| Item missing `profile_item_id`           | row falls back to a synthetic key (array index); logged `warn`. Should not happen — required upstream.                                    |
+| Item missing `user_id`                   | fine — optional, used only for traceability/drill-in. No grouping depends on it. User-level rollup is signalstack-computed so unaffected. |
+| Rollup missing a user-level field        | tile shows `0` / skipped; logged `warn` with `operation`, `status: 'skipped'`.                                                            |
+| `dashboard_tiles` absent in network.json | fall back to default English profile tiles; user group hidden.                                                                            |
+| Direction maps absent / empty            | columns render zeros, never throw (defensive `?? 0`).                                                                                     |
+| Unknown `field` in tile config           | tile skipped, `warn` logged.                                                                                                              |
 
 ## Testing
 
