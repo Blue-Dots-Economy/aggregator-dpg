@@ -112,7 +112,7 @@ pnpm -w test 2>&1 | tail -3
 - Modify: `packages/db-schema/src/schema.ts` (the `registrationLinks` definition around line 250)
 - Test: `packages/db-schema/src/__tests__/schema.test.ts` (create if absent)
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 // packages/db-schema/src/__tests__/schema.test.ts
@@ -134,14 +134,14 @@ describe('registrationLinks.completion_actions', () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 ```bash
 pnpm --filter @aggregator-dpg/db-schema test -- schema.test
 # expect FAIL: 'completion_actions' is undefined
 ```
 
-- [ ] **Step 3: Add the column to the Drizzle definition**
+- [x] **Step 3: Add the column to the Drizzle definition**
 
 In `packages/db-schema/src/schema.ts`, inside the `registrationLinks = pgTable('registration_links', { ... })` block, after `context: jsonb('context').notNull().default({}),` add:
 
@@ -149,7 +149,7 @@ In `packages/db-schema/src/schema.ts`, inside the `registrationLinks = pgTable('
   completion_actions: jsonb('completion_actions').notNull().default([]),
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 ```bash
 pnpm --filter @aggregator-dpg/db-schema test -- schema.test
@@ -158,7 +158,7 @@ pnpm --filter @aggregator-dpg/db-schema typecheck
 # expect: clean
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/db-schema/src/schema.ts packages/db-schema/src/__tests__/schema.test.ts
@@ -175,7 +175,7 @@ git commit -m "feat(db-schema): add registration_links.completion_actions JSONB 
 - Modify: `packages/db-schema/src/__tests__/schema.test.ts`
 - Modify: `packages/db-schema/src/index.ts` — re-export the new table.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `packages/db-schema/src/__tests__/schema.test.ts`:
 
@@ -204,14 +204,14 @@ describe('outboundDispatchLog', () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 ```bash
 pnpm --filter @aggregator-dpg/db-schema test -- schema.test
 # expect FAIL: outboundDispatchLog import is undefined
 ```
 
-- [ ] **Step 3: Add the Drizzle table**
+- [x] **Step 3: Add the Drizzle table**
 
 In `packages/db-schema/src/schema.ts`, append (mirror the existing style — use `uuid`, `text`, `jsonb`, `timestamp`, `index`, `uniqueIndex`):
 
@@ -260,7 +260,7 @@ If `integer` is not yet imported, add to the `drizzle-orm/pg-core` import line.
 
 In `packages/db-schema/src/index.ts`, ensure `outboundDispatchLog` is exported.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 ```bash
 pnpm --filter @aggregator-dpg/db-schema test -- schema.test
@@ -268,7 +268,7 @@ pnpm --filter @aggregator-dpg/db-schema typecheck
 # expect both clean
 ```
 
-- [ ] **Step 5: Generate the SQL migration**
+- [x] **Step 5: Generate the SQL migration**
 
 ```bash
 pnpm --filter @aggregator-dpg/api db:generate
@@ -283,7 +283,7 @@ Verify the generated SQL contains:
 
 If Drizzle Kit's auto-generated name is unwieldy, rename the file to `0009_lifecycle_followup.sql`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/db-schema/ apps/api/drizzle/migrations/
@@ -301,7 +301,7 @@ This is the single function every consumer uses to read `lifecycle_status` from 
 - Create: `apps/api/src/services/onboarding/lifecycle.ts`
 - Test: `apps/api/src/services/onboarding/__tests__/lifecycle.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 // apps/api/src/services/onboarding/__tests__/lifecycle.test.ts
@@ -330,14 +330,14 @@ describe('resolveLifecycle', () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 ```bash
 pnpm --filter @aggregator-dpg/api test -- onboarding/lifecycle
 # expect FAIL: cannot import lifecycle
 ```
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 ```ts
 // apps/api/src/services/onboarding/lifecycle.ts
@@ -367,14 +367,14 @@ export function resolveLifecycle(
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 ```bash
 pnpm --filter @aggregator-dpg/api test -- onboarding/lifecycle
 # expect PASS (4 tests)
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/api/src/services/onboarding/lifecycle.ts apps/api/src/services/onboarding/__tests__/lifecycle.test.ts
@@ -394,7 +394,7 @@ Add `submit_mode` to input and `owned_elsewhere`, `lifecycle_status`, `completio
 - Modify: `packages/signalstack-writer/src/testing.ts` (if separate)
 - Test: `packages/signalstack-writer/src/__tests__/onboard.lifecycle.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 // packages/signalstack-writer/src/__tests__/onboard.lifecycle.test.ts
@@ -443,14 +443,14 @@ describe('SignalStackWriterFake.onboard — lifecycle response shape', () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 ```bash
 pnpm --filter @aggregator-dpg/signalstack-writer test -- onboard.lifecycle
 # expect FAIL — buildOnboardInput / setNextClassification / seedForeignUser absent
 ```
 
-- [ ] **Step 3: Update the interface**
+- [x] **Step 3: Update the interface**
 
 In `packages/signalstack-writer/src/interface.ts`:
 
@@ -493,7 +493,7 @@ Also extend `SignalStackItemQuery` for the lifecycle filter pass-through:
   lifecycle_filter?: 'live_only' | 'all';
 ```
 
-- [ ] **Step 4: Update the in-memory implementation**
+- [x] **Step 4: Update the in-memory implementation**
 
 In `packages/signalstack-writer/src/memory.ts`, the `InMemorySignalStackWriter.onboard` method:
 
@@ -502,7 +502,7 @@ In `packages/signalstack-writer/src/memory.ts`, the `InMemorySignalStackWriter.o
 - Else: returns lifecycle fields from a `nextClassification` slot (default `{ lifecycle_status: 'live', completion_pct: 100 }`).
 - If the email is in `foreignUsers` set: returns `{ user_id, profile_item_id: '', owned_elsewhere: true, onboarded_at }`.
 
-- [ ] **Step 5: Update the testing fake + builder**
+- [x] **Step 5: Update the testing fake + builder**
 
 In `packages/signalstack-writer/src/testing.ts` (the public ./testing subpath):
 
@@ -510,7 +510,7 @@ In `packages/signalstack-writer/src/testing.ts` (the public ./testing subpath):
 - Add public methods `setNextClassification({ lifecycle_status, completion_pct })` and `seedForeignUser({ email?, phoneNumber? })` (these set fields on `InMemorySignalStackWriter`).
 - Add `buildOnboardInput(overrides)` that returns a valid `SignalStackOnboardParticipantInput` with deterministic defaults.
 
-- [ ] **Step 6: Run test to verify it passes**
+- [x] **Step 6: Run test to verify it passes**
 
 ```bash
 pnpm --filter @aggregator-dpg/signalstack-writer test -- onboard.lifecycle
@@ -519,7 +519,7 @@ pnpm --filter @aggregator-dpg/signalstack-writer typecheck
 # clean
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add packages/signalstack-writer/
@@ -540,7 +540,7 @@ Identity probe — POST to signals' `/admin/participant` with `submit_mode: 'acc
 - Modify: `packages/signalstack-writer/src/testing.ts`
 - Test: `packages/signalstack-writer/src/__tests__/probe-user.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 // packages/signalstack-writer/src/__tests__/probe-user.test.ts
@@ -615,14 +615,14 @@ describe('SignalStackWriterFake.probeUser', () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 ```bash
 pnpm --filter @aggregator-dpg/signalstack-writer test -- probe-user
 # expect FAIL — probeUser not on fake
 ```
 
-- [ ] **Step 3: Add the abstract method + types**
+- [x] **Step 3: Add the abstract method + types**
 
 In `packages/signalstack-writer/src/interface.ts`:
 
@@ -673,11 +673,11 @@ Add the abstract method on `SignalStackWriterBase`:
   ): Promise<Result<SignalStackProbeUserResult, BaseError>>;
 ```
 
-- [ ] **Step 4: Implement on the in-memory writer**
+- [x] **Step 4: Implement on the in-memory writer**
 
 In `memory.ts`, implement `probeUser` against the same in-memory user/item map already used by `onboard`. Honour `foreignUsers` and `ownUsers` seed maps.
 
-- [ ] **Step 5: Implement on the HTTP writer**
+- [x] **Step 5: Implement on the HTTP writer**
 
 In `http.ts`, POST to signals' `${baseUrl}/api/v1/admin/participant` with body `{ email, phone_number, name: 'lookup', terms_accepted: true, privacy_accepted: true, network, domain }` and **no `item_state`**. Required headers: `x-api-key`, `x-acting-org-id`. Read response `owned_elsewhere` + (optional) `items[0].{lifecycle_status,completion_pct,item_id}`. Use the existing fetch wrapper with timeout + retry + structured error mapping (mirror `onboard`).
 
@@ -687,11 +687,11 @@ Build the result:
 - `items[0]` present → populate `lifecycle_summary.primary_item` (using `resolveLifecycle` semantics via a local helper here — DO NOT import from `apps/api`; the writer package is below the api in the dep graph).
 - `owned_elsewhere === true` → strip lifecycle, return `{ user_exists: true, owned_elsewhere: true, lifecycle_summary: null }`.
 
-- [ ] **Step 6: Export probe helpers from `./testing`**
+- [x] **Step 6: Export probe helpers from `./testing`**
 
 Add `seedOwnUser({ actingOrgId, email?, phoneNumber?, item })` to the testing fake.
 
-- [ ] **Step 7: Run test to verify it passes**
+- [x] **Step 7: Run test to verify it passes**
 
 ```bash
 pnpm --filter @aggregator-dpg/signalstack-writer test
@@ -699,7 +699,7 @@ pnpm --filter @aggregator-dpg/signalstack-writer test
 pnpm --filter @aggregator-dpg/signalstack-writer typecheck
 ```
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add packages/signalstack-writer/
@@ -716,7 +716,7 @@ git commit -m "feat(signalstack-writer): probeUser identity-only lookup primitiv
 - Modify: `apps/api/src/app.ts` — register the new route.
 - Test: `apps/api/src/routes/__tests__/public-lookup.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 // apps/api/src/routes/__tests__/public-lookup.test.ts
@@ -811,14 +811,14 @@ describe('GET /public/v1/aggregators/:orgSlug/lookup', () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 ```bash
 pnpm --filter @aggregator-dpg/api test -- public-lookup
 # expect FAIL — route 404 (not registered)
 ```
 
-- [ ] **Step 3: Implement the route**
+- [x] **Step 3: Implement the route**
 
 ```ts
 // apps/api/src/routes/public-lookup.ts
@@ -916,14 +916,14 @@ import { registerPublicLookupRoute } from './routes/public-lookup.js';
 await registerPublicLookupRoute(app);
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 ```bash
 pnpm --filter @aggregator-dpg/api test -- public-lookup
 # expect PASS (5 tests, last one soft-asserts 200|429)
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/api/src/routes/public-lookup.ts apps/api/src/app.ts apps/api/src/routes/__tests__/public-lookup.test.ts
@@ -941,7 +941,7 @@ Forward `submit_mode`, parse the new response fields, log them, and (later, in T
 - Modify: `apps/api/src/routes/public-registration-links.ts` (the submit handler — around line 270 where `ss.onboard(...)` is called)
 - Test: `apps/api/src/routes/__tests__/public-registration-links.lifecycle.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 // apps/api/src/routes/__tests__/public-registration-links.lifecycle.test.ts
@@ -1009,14 +1009,14 @@ describe('public registration submit — lifecycle parse', () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 ```bash
 pnpm --filter @aggregator-dpg/api test -- public-registration-links.lifecycle
 # expect FAIL — response shape does not yet carry lifecycle fields
 ```
 
-- [ ] **Step 3: Update the handler**
+- [x] **Step 3: Update the handler**
 
 In `apps/api/src/routes/public-registration-links.ts`, where `ss.onboard({...})` is called:
 
@@ -1028,14 +1028,14 @@ In `apps/api/src/routes/public-registration-links.ts`, where `ss.onboard({...})`
   - Include them in the JSON response under stable keys (`lifecycle_status`, `completion_pct`).
 - On `owned_elsewhere === true`: surface as `outcome: 'skipped'` (already-registered branch already exists for `already_registered`; OR them together for one transition release).
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 ```bash
 pnpm --filter @aggregator-dpg/api test -- public-registration-links
 # expect all green (existing + 3 new)
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/api/src/routes/public-registration-links.ts apps/api/src/routes/__tests__/public-registration-links.lifecycle.test.ts
@@ -1053,7 +1053,7 @@ A pure function: given a signals onboard result + the link's `completion_actions
 - Create: `apps/api/src/services/onboarding/dispatch_completion.ts`
 - Test: `apps/api/src/services/onboarding/__tests__/dispatch_completion.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 import { describe, it, expect } from 'vitest';
@@ -1138,14 +1138,14 @@ describe('planCompletionDispatch', () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 ```bash
 pnpm --filter @aggregator-dpg/api test -- dispatch_completion
 # expect FAIL — module missing
 ```
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 ```ts
 // apps/api/src/services/onboarding/dispatch_completion.ts
@@ -1199,14 +1199,14 @@ export function planCompletionDispatch(input: PlannerInput): DispatchDirective[]
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 ```bash
 pnpm --filter @aggregator-dpg/api test -- dispatch_completion
 # expect PASS (5 tests)
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/api/src/services/onboarding/dispatch_completion.ts apps/api/src/services/onboarding/__tests__/dispatch_completion.test.ts
@@ -1225,7 +1225,7 @@ git commit -m "feat(api): pure planCompletionDispatch — actions × lifecycle g
 - Create: `apps/api/src/services/outbound-dispatch-log/index.ts` (DI getter + test setter)
 - Test: `apps/api/src/services/outbound-dispatch-log/__tests__/idempotency.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 import { describe, it, expect } from 'vitest';
@@ -1275,25 +1275,25 @@ describe('OutboundDispatchLog.enqueue', () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 ```bash
 pnpm --filter @aggregator-dpg/api test -- outbound-dispatch-log
 # expect FAIL — module missing
 ```
 
-- [ ] **Step 3: Implement (interface + postgres + memory + DI getter)**
+- [x] **Step 3: Implement (interface + postgres + memory + DI getter)**
 
 Mirror the existing aggregator-store / participants-writer pattern. Abstract methods: `enqueue(input)`, `markSent(id)`, `markFailed(id, error)`, `markSkippedLifecycle(id)`, `findById(id)`, `listByParticipant(participantId)`. Postgres impl uses Drizzle and `ON CONFLICT (participant_id, item_id, channel, template_id) DO UPDATE SET status = outbound_dispatch_log.status RETURNING *` to keep the call idempotent yet still return the existing row.
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 ```bash
 pnpm --filter @aggregator-dpg/api test -- outbound-dispatch-log
 # expect PASS
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/api/src/services/outbound-dispatch-log/
@@ -1311,7 +1311,7 @@ git commit -m "feat(api): outbound_dispatch_log typed CRUD with idempotent enque
 - Modify: `apps/worker/src/main.ts` — register the new queue + processor.
 - Test: `apps/worker/src/__tests__/jobs/outbound-dispatch.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 // apps/worker/src/__tests__/jobs/outbound-dispatch.test.ts
@@ -1392,14 +1392,14 @@ describe('processOutboundDispatch', () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 ```bash
 pnpm --filter @aggregator-dpg/worker test -- outbound-dispatch
 # expect FAIL — module missing
 ```
 
-- [ ] **Step 3: Implement the processor (stub send)**
+- [x] **Step 3: Implement the processor (stub send)**
 
 ```ts
 // apps/worker/src/jobs/outbound-dispatch.ts
@@ -1468,7 +1468,7 @@ If `getItem` isn't yet on the writer, extend in this same task:
 - Add `abstract getItem(query: { item_id: string }): Promise<Result<SignalStackProfile | null, BaseError>>` to interface.
 - Implement on `memory.ts`, `http.ts`, `testing.ts`.
 
-- [ ] **Step 4: Register the queue + processor in `main.ts`**
+- [x] **Step 4: Register the queue + processor in `main.ts`**
 
 Mirror the existing `bulk-file-process` wiring:
 
@@ -1489,14 +1489,14 @@ new Worker(
 );
 ```
 
-- [ ] **Step 5: Run the test to verify it passes**
+- [x] **Step 5: Run the test to verify it passes**
 
 ```bash
 pnpm --filter @aggregator-dpg/worker test -- outbound-dispatch
 # expect PASS (3 tests)
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/worker/src/jobs/outbound-dispatch.ts apps/worker/src/main.ts packages/queue/src/index.ts apps/worker/src/__tests__/jobs/outbound-dispatch.test.ts packages/signalstack-writer/
@@ -1514,7 +1514,7 @@ Wire planner output into the queue.
 - Modify: `apps/api/src/routes/public-registration-links.ts` — after `ss.onboard()` success, run `planCompletionDispatch` against the link's `completion_actions`; for each directive, `enqueue` into `outbound_dispatch_log` then add a BullMQ job.
 - Test: extend `public-registration-links.lifecycle.test.ts`.
 
-- [ ] **Step 1: Add tests**
+- [x] **Step 1: Add tests**
 
 ```ts
 it('enqueues completion_actions when lifecycle=draft', async () => {
@@ -1547,7 +1547,7 @@ it('does not enqueue when lifecycle=live', async () => {
 });
 ```
 
-- [ ] **Step 2: Run to fail, then implement, then run to pass**
+- [x] **Step 2: Run to fail, then implement, then run to pass**
 
 Implementation: in the success branch of `ss.onboard`:
 
@@ -1577,7 +1577,7 @@ for (const d of plan) {
 }
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add apps/api/src/routes/public-registration-links.ts apps/api/src/routes/__tests__/
@@ -1594,7 +1594,7 @@ git commit -m "feat(api): enqueue dispatcher jobs when signals returns draft"
 - Modify: `apps/api/src/services/signalstack.ts` — surface the tile rollup.
 - Test: `apps/api/src/routes/__tests__/dashboard.lifecycle.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 describe('GET /v1/dashboard/items — lifecycle', () => {
@@ -1628,7 +1628,7 @@ describe('GET /v1/dashboard/items — lifecycle', () => {
 });
 ```
 
-- [ ] **Step 2: Implement**
+- [x] **Step 2: Implement**
 
 In `dashboard.ts`:
 
@@ -1637,7 +1637,7 @@ In `dashboard.ts`:
 - Filter the returned items by `lifecycle` post-fetch (using `resolveLifecycle` for back-compat).
 - Compute `tiles = { draft, live, paused, account_only }`.
 
-- [ ] **Step 3: Run + commit**
+- [x] **Step 3: Run + commit**
 
 ```bash
 pnpm --filter @aggregator-dpg/api test -- dashboard.lifecycle
@@ -1656,7 +1656,7 @@ git commit -m "feat(api): dashboard lifecycle tiles + ?lifecycle filter (back-co
 - Test: `apps/web/src/__tests__/components/LifecyclePill.test.tsx`
 - Test: `apps/web/src/__tests__/components/CompletionBar.test.tsx`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```tsx
 // LifecyclePill.test.tsx
@@ -1707,7 +1707,7 @@ describe('<CompletionBar />', () => {
 });
 ```
 
-- [ ] **Step 2: Implement the components**
+- [x] **Step 2: Implement the components**
 
 ```tsx
 // LifecyclePill.tsx
@@ -1753,7 +1753,7 @@ export function CompletionBar({ percent }: { percent: number }) {
 
 Add i18n keys to `apps/web/src/i18n/messages/{en,kn,hi}.json` under `Lifecycle.{draft,live,paused,account_only}`.
 
-- [ ] **Step 3: Run + commit**
+- [x] **Step 3: Run + commit**
 
 ```bash
 pnpm --filter @aggregator-dpg/web test
@@ -1770,7 +1770,7 @@ git commit -m "feat(web): LifecyclePill + CompletionBar i18n components"
 - Modify: `apps/web/src/app/(protected)/dashboard/page.tsx` — extend `ParticipantBase` with `lifecycle_status?` / `completion_pct?`; insert new column between "Profile Status" and "Applied/Actions".
 - Modify: same file — add 4 mini-stat tiles consuming `meta.tiles` from the new API shape.
 
-- [ ] **Step 1: Add the column header**
+- [x] **Step 1: Add the column header**
 
 In the `<thead>` row inside `ParticipantTable`, after the Profile Status header, insert:
 
@@ -1778,7 +1778,7 @@ In the `<thead>` row inside `ParticipantTable`, after the Profile Status header,
 <th className="px-3 py-2 text-left text-xs font-medium text-slate-500">{t('Headers.lifecycle')}</th>
 ```
 
-- [ ] **Step 2: Add the cell**
+- [x] **Step 2: Add the cell**
 
 In the `<tbody>` row map, after the Profile Status cell:
 
@@ -1793,7 +1793,7 @@ In the `<tbody>` row map, after the Profile Status cell:
 </td>
 ```
 
-- [ ] **Step 3: Render the 4 new mini-stat tiles**
+- [x] **Step 3: Render the 4 new mini-stat tiles**
 
 In `SeekersTab`/`ProvidersTab`, after the existing mini-stat row, add:
 
@@ -1806,11 +1806,11 @@ In `SeekersTab`/`ProvidersTab`, after the existing mini-stat row, add:
 
 `tiles` comes from the dashboard fetch — extend the type and the service that returns dashboard payload.
 
-- [ ] **Step 4: Add fetch-side ?lifecycle plumbing**
+- [x] **Step 4: Add fetch-side ?lifecycle plumbing**
 
 Add a "Lifecycle" filter dropdown in the dashboard toolbar; URL-state via `useSearchParams`. Forward `lifecycle=draft|live|paused|account_only` to the BFF.
 
-- [ ] **Step 5: Run + commit**
+- [x] **Step 5: Run + commit**
 
 ```bash
 pnpm --filter @aggregator-dpg/web test
@@ -1829,7 +1829,7 @@ git commit -m "feat(web): dashboard lifecycle pill, completion bar, 4 new tiles,
 - Test: `apps/web/src/__tests__/app/api/lookup.route.test.ts`
 - Test: `apps/web/src/__tests__/views/PublicRegistrationView.lookup.test.tsx`
 
-- [ ] **Step 1: BFF lookup route**
+- [x] **Step 1: BFF lookup route**
 
 ```ts
 // apps/web/src/app/api/[org]/[slug]/lookup/route.ts
@@ -1856,11 +1856,11 @@ export async function GET(req: NextRequest, ctx: { params: { org: string; slug: 
 }
 ```
 
-- [ ] **Step 2: BFF route test**
+- [x] **Step 2: BFF route test**
 
 Mirror `apps/web/src/__tests__/services/profile.service.test.ts` pattern — stub `fetch`, drive both success and 404 branches.
 
-- [ ] **Step 3: Pre-submit lookup in the view**
+- [x] **Step 3: Pre-submit lookup in the view**
 
 In `PublicRegistrationView.tsx`, before the form's `onSubmit` actually POSTs:
 
@@ -1890,15 +1890,15 @@ Branch the UI:
 - `resume_item_id` → render a "Resume your profile" link.
 - `allow` → proceed.
 
-- [ ] **Step 4: Partial submit**
+- [x] **Step 4: Partial submit**
 
 Add a "Submit minimum required fields now, complete later" checkbox. When checked, submit body includes `partial: true` which the API maps to `submit_mode: 'account_only'`.
 
-- [ ] **Step 5: Test the view branches**
+- [x] **Step 5: Test the view branches**
 
 Use `vi.fn()` to stub global `fetch` for the three branches; assert the rendered copy.
 
-- [ ] **Step 6: Run + commit**
+- [x] **Step 6: Run + commit**
 
 ```bash
 pnpm --filter @aggregator-dpg/web test
@@ -1910,7 +1910,7 @@ git commit -m "feat(web): public registration form — pre-submit lookup + parti
 
 ## Task 16: Integration sweep — full pnpm -w test + lint + typecheck + dep-check
 
-- [ ] **Step 1: All packages**
+- [x] **Step 1: All packages**
 
 ```bash
 pnpm -w lint
@@ -1920,6 +1920,8 @@ pnpm dep-check
 ```
 
 Expected: all green. Fix any drift caused by the cumulative changes.
+
+Result on 2026-06-08: lint 2/2 green, typecheck 20/20 green, tests 18/18 packages green (api 161 passed, web 79 passed, others passed), dep-check 192 modules / 389 deps / 0 violations. No drift required.
 
 - [ ] **Step 2: Push the branch**
 
