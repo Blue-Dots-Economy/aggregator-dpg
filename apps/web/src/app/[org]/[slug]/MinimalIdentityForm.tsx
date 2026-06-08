@@ -36,6 +36,13 @@ export interface MinimalIdentityFormProps {
   onSubmit: (payload: MinimalIdentityPayload) => void | Promise<void>;
   /** Disables the submit button while the parent is in flight. */
   busy?: boolean;
+  /**
+   * Saturated brand colour for the header band + submit button. Caller
+   * threads `cfg.brand.primary_color` through so the minimal form looks
+   * native to the network (purple for purple_dot, sienna for orange_dot,
+   * etc.). Falls back to `var(--bd-primary-600)`.
+   */
+  brandColor?: string;
 }
 
 export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Element {
@@ -58,11 +65,14 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
 
   return (
     <div className="rounded-[18px] bg-white border border-[var(--bd-border)] overflow-hidden shadow-[0_1px_0_rgba(11,16,32,0.02),0_20px_60px_-30px_rgba(11,16,32,0.18)]">
-      <div className="px-6 sm:px-8 py-6 border-b border-[var(--bd-border)] bg-[var(--bd-tint-primary)]">
-        <h1 className="font-display font-bold text-[22px] sm:text-[26px] tracking-tight leading-tight text-ink-900">
+      <div
+        className="px-6 sm:px-8 py-6 text-white"
+        style={{ background: props.brandColor ?? 'var(--bd-primary-600)' }}
+      >
+        <h1 className="font-display font-bold text-[22px] sm:text-[26px] tracking-tight leading-tight">
           {t('title')}
         </h1>
-        <p className="text-[13.5px] text-ink-500 mt-1.5">{t('helper')}</p>
+        <p className="text-[13.5px] text-white/85 mt-1.5">{t('helper')}</p>
       </div>
 
       <form
@@ -160,6 +170,7 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
           <button
             type="submit"
             disabled={!valid || props.busy}
+            style={{ background: props.brandColor ?? undefined }}
             className="inline-flex items-center justify-center rounded-[10px] px-5 py-2.5 text-[14px] font-semibold text-white bg-[var(--bd-primary-600)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition"
           >
             {t('submit_label')}

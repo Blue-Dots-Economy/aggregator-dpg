@@ -477,7 +477,11 @@ export function PublicRegistrationView({
         }}
       >
         <div className="max-w-[640px] mx-auto px-4 sm:px-6 lg:px-10 py-8 sm:py-12">
-          <MinimalIdentityForm identity={identity ?? {}} onSubmit={handleMinimalSubmit} />
+          <MinimalIdentityForm
+            identity={identity ?? {}}
+            onSubmit={handleMinimalSubmit}
+            brandColor={heroGradient}
+          />
         </div>
       </div>
     );

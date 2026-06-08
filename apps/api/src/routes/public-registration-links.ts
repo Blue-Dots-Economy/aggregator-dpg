@@ -249,59 +249,66 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
     }
     const phoneSourceKey = linkDomainCfg.identity.phone;
 
-    // 1. Schema validation against the link's domain schema. Load the
-    // raw schema as well so we can strip empty-string optional fields
-    // before Ajv runs — an empty cell for an optional `format: uri` /
-    // `format: email` field would otherwise trip the format check
-    // even though the field was never required.
-    const schemaRef = { id: `participant-${link.domain}`, version: 'v1' };
-    const loader = getSchemaLoader();
-    const [validatorResult, schemaResult] = await Promise.all([
-      loader.getValidator(schemaRef),
-      loader.getSchema(schemaRef),
-    ]);
-    if (!validatorResult.success) {
-      log.error({ status: 'failure', sub: 'schema.load', error: validatorResult.error.code });
-      throw httpError('INTERNAL', {
-        detail: 'Registration schema unavailable.',
-        cause: new Error(validatorResult.error.message),
-      });
-    }
-    if (schemaResult.success) {
-      stripEmptyOptionalCells(body, schemaResult.value as Record<string, unknown>);
-    }
-    const validate = validatorResult.value;
-    if (!validate(body)) {
-      let issues = validate.errors ?? [];
-      // `account_only` (partial) creates no item — the profile fields are
-      // never written, so none of their constraints apply (required, minItems,
-      // minLength, enum, …). Keep only errors on the identity selectors (name
-      // + at least one contact, which signalstack needs for the user row) and
-      // `additionalProperties` (unknown top-level keys still rejected). The
-      // client seeds array fields with `[]`, so without this an optional
-      // `minItems: 1` field would block a bare identity submission.
-      if (partial) {
-        const identityKeys = new Set(
-          [
-            linkDomainCfg.identity.name,
-            linkDomainCfg.identity.phone,
-            linkDomainCfg.identity.email,
-          ].filter((k): k is string => typeof k === 'string' && k.length > 0),
-        );
-        issues = issues.filter((e) => {
-          if (e.keyword === 'additionalProperties') return true;
-          const field =
-            e.keyword === 'required'
-              ? ((e.params as { missingProperty?: string })?.missingProperty ?? '')
-              : (e.instancePath ?? '').split('/')[1] || '';
-          return identityKeys.has(field);
+    // 1. Schema validation against the link's domain schema. Skipped for
+    // `account_only` links — the upstream identity-presence guard already
+    // enforced shape (name + phone OR email + consent), no profile fields
+    // are written, and running Ajv would mis-flag the consent toggles as
+    // `additionalProperties` violations against the profile schema.
+    if (link.submissionMode !== 'account_only') {
+      // Load the raw schema as well so we can strip empty-string optional
+      // fields before Ajv runs — an empty cell for an optional
+      // `format: uri` / `format: email` field would otherwise trip the
+      // format check even though the field was never required.
+      const schemaRef = { id: `participant-${link.domain}`, version: 'v1' };
+      const loader = getSchemaLoader();
+      const [validatorResult, schemaResult] = await Promise.all([
+        loader.getValidator(schemaRef),
+        loader.getSchema(schemaRef),
+      ]);
+      if (!validatorResult.success) {
+        log.error({ status: 'failure', sub: 'schema.load', error: validatorResult.error.code });
+        throw httpError('INTERNAL', {
+          detail: 'Registration schema unavailable.',
+          cause: new Error(validatorResult.error.message),
         });
       }
-      if (issues.length > 0) {
-        throw httpError('SCHEMA_VALIDATION', {
-          detail: 'Submission failed schema validation.',
-          fields: { issues },
-        });
+      if (schemaResult.success) {
+        stripEmptyOptionalCells(body, schemaResult.value as Record<string, unknown>);
+      }
+      const validate = validatorResult.value;
+      if (!validate(body)) {
+        let issues = validate.errors ?? [];
+        // `partial: true` (per-submit account_only opt-in on full links)
+        // creates no item — profile fields aren't written, so their
+        // constraints don't apply. Keep only errors on the identity
+        // selectors (name + at least one contact, which signalstack needs
+        // for the user row) and `additionalProperties` (unknown top-level
+        // keys still rejected). The client seeds array fields with `[]`,
+        // so without this an optional `minItems: 1` field would block a
+        // bare identity submission.
+        if (partial) {
+          const identityKeys = new Set(
+            [
+              linkDomainCfg.identity.name,
+              linkDomainCfg.identity.phone,
+              linkDomainCfg.identity.email,
+            ].filter((k): k is string => typeof k === 'string' && k.length > 0),
+          );
+          issues = issues.filter((e) => {
+            if (e.keyword === 'additionalProperties') return true;
+            const field =
+              e.keyword === 'required'
+                ? ((e.params as { missingProperty?: string })?.missingProperty ?? '')
+                : (e.instancePath ?? '').split('/')[1] || '';
+            return identityKeys.has(field);
+          });
+        }
+        if (issues.length > 0) {
+          throw httpError('SCHEMA_VALIDATION', {
+            detail: 'Submission failed schema validation.',
+            fields: { issues },
+          });
+        }
       }
     }
 
