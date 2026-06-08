@@ -173,6 +173,7 @@ export class PostgresOutboundDispatchLog extends OutboundDispatchLogBase {
   }
 
   override async findById(id: string): Promise<Result<OutboundDispatchRow | null, BaseError>> {
+    const start = Date.now();
     try {
       const [row] = await this.db
         .select()
@@ -181,13 +182,14 @@ export class PostgresOutboundDispatchLog extends OutboundDispatchLogBase {
         .limit(1);
       return ok(row ? toDomain(row) : null);
     } catch (e) {
-      return this.mapReadError('outboundDispatchLog.findById', e);
+      return this.mapReadError('outboundDispatchLog.findById', e, start);
     }
   }
 
   override async listByParticipant(
     participantId: string,
   ): Promise<Result<OutboundDispatchRow[], BaseError>> {
+    const start = Date.now();
     try {
       const rows = await this.db
         .select()
@@ -196,7 +198,7 @@ export class PostgresOutboundDispatchLog extends OutboundDispatchLogBase {
         .orderBy(asc(outboundDispatchLog.createdAt));
       return ok(rows.map(toDomain));
     } catch (e) {
-      return this.mapReadError('outboundDispatchLog.listByParticipant', e);
+      return this.mapReadError('outboundDispatchLog.listByParticipant', e, start);
     }
   }
 
@@ -219,13 +221,14 @@ export class PostgresOutboundDispatchLog extends OutboundDispatchLogBase {
     );
   }
 
-  private mapReadError(op: string, e: unknown): Result<never, BaseError> {
+  private mapReadError(op: string, e: unknown, start: number): Result<never, BaseError> {
     const cause = e as Error;
     logger.error({
       operation: op,
       status: 'failure',
       error: cause.message,
       error_type: cause.constructor?.name,
+      latency_ms: Date.now() - start,
     });
     return err(
       new UpstreamError(`${op} failed: ${cause.message}`, {
