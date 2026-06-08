@@ -251,6 +251,31 @@ export const ERR = {
     detail: 'You have made too many requests. Please slow down and retry shortly.',
     hint: 'Per-slug+ip rate limiter on public submit; window/max in config.',
   },
+
+  // ── Submission mode (per-link account_only vs account_and_profile) ──────
+  SUBMISSION_MODE_MISMATCH: {
+    code: 'SUBMISSION_MODE_MISMATCH',
+    status: 400,
+    title: 'Submission mode mismatch',
+    detail:
+      'This registration link only accepts identity fields (name + phone or email + consent). It does not accept profile data.',
+    hint: 'POST body to an account_only link included item_state or unknown fields. Server rejects to prevent profile leakage into an account-only capture.',
+  },
+  SUBMISSION_MODE_IMMUTABLE: {
+    code: 'SUBMISSION_MODE_IMMUTABLE',
+    status: 400,
+    title: 'Submission mode cannot be changed',
+    detail:
+      'The submission mode is fixed at link creation time. Create a new link to use a different mode.',
+    hint: 'PATCH /v1/links/:id included submission_mode. Immutable by design — UpdateLinkBodySchema is .strict() so unknown keys 400 automatically.',
+  },
+  INVALID_CONFIG: {
+    code: 'INVALID_CONFIG',
+    status: 400,
+    title: 'Invalid configuration',
+    detail: 'The combination of fields supplied is not allowed by the API.',
+    hint: 'A field combination violates a business invariant (e.g. completion_actions on an account_only link). Inspect detail for the specific rule.',
+  },
 } as const satisfies Record<string, ErrorCatalogueEntry>;
 
 export type ErrorCode = keyof typeof ERR;
