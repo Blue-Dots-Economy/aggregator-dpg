@@ -11,6 +11,15 @@ describe('registrationLinks.completionActions', () => {
   });
 });
 
+describe('registrationLinks.submissionMode', () => {
+  it('is declared as a non-null text column with the snake_case SQL name', () => {
+    const col = registrationLinks.submissionMode;
+    expect(col).toBeDefined();
+    expect(col.name).toBe('submission_mode');
+    expect(col.notNull).toBe(true);
+  });
+});
+
 describe('outboundDispatchLog', () => {
   it('exposes the expected primary columns with correct SQL names', () => {
     expect(outboundDispatchLog.id.name).toBe('id');
