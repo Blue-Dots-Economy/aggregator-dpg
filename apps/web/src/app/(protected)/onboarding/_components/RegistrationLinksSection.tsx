@@ -35,6 +35,11 @@ interface CreateLinkFormState {
   event_date: string;
   /** Optional event venue / city. */
   event_location: string;
+  /**
+   * Per-link form shape — chosen at create time, immutable afterwards.
+   * Defaults to `account_and_profile` (existing behaviour).
+   */
+  submission_mode: 'account_only' | 'account_and_profile';
 }
 
 const EMPTY_FORM: CreateLinkFormState = {
@@ -46,6 +51,7 @@ const EMPTY_FORM: CreateLinkFormState = {
   lever_event: '',
   event_date: '',
   event_location: '',
+  submission_mode: 'account_and_profile',
 };
 
 function slugifyForLink(input: string): string {
@@ -193,6 +199,7 @@ export function CreateLinkSection() {
       await create.mutateAsync({
         domain: form.domain,
         status: 'draft',
+        submission_mode: form.submission_mode,
         ...(slug ? { slug } : {}),
         title,
         context: {
@@ -291,6 +298,56 @@ export function CreateLinkSection() {
              */}
             <input className="bd-input" value={domainLabel} readOnly aria-readonly="true" />
           </Field>
+          {/*
+           * Per-link submission mode — chosen here at create time, immutable
+           * afterwards. account_only locks the public form to identity-only
+           * capture (name + phone OR email + consent); account_and_profile
+           * (default) keeps the full RJSF profile flow.
+           */}
+          <div className="md:col-span-2">
+            <Field label={t('create_link.field_submission_mode')} required>
+              <div className="flex flex-col gap-2" role="radiogroup">
+                <label
+                  htmlFor="submission_mode_full"
+                  className="flex items-start gap-2 text-[13px] text-ink-900 cursor-pointer font-semibold"
+                >
+                  <input
+                    id="submission_mode_full"
+                    type="radio"
+                    name="submission_mode"
+                    value="account_and_profile"
+                    checked={form.submission_mode === 'account_and_profile'}
+                    onChange={() =>
+                      setForm((f) => ({ ...f, submission_mode: 'account_and_profile' }))
+                    }
+                    className="mt-0.5"
+                  />
+                  {t('create_link.submission_mode_full_label')}
+                </label>
+                <span className="text-[12px] text-ink-500 ml-6 -mt-1">
+                  {t('create_link.submission_mode_full_hint')}
+                </span>
+                <label
+                  htmlFor="submission_mode_account_only"
+                  className="flex items-start gap-2 text-[13px] text-ink-900 cursor-pointer font-semibold mt-1"
+                >
+                  <input
+                    id="submission_mode_account_only"
+                    type="radio"
+                    name="submission_mode"
+                    value="account_only"
+                    checked={form.submission_mode === 'account_only'}
+                    onChange={() => setForm((f) => ({ ...f, submission_mode: 'account_only' }))}
+                    className="mt-0.5"
+                  />
+                  {t('create_link.submission_mode_account_only_label')}
+                </label>
+                <span className="text-[12px] text-ink-500 ml-6 -mt-1">
+                  {t('create_link.submission_mode_account_only_hint')}
+                </span>
+              </div>
+            </Field>
+          </div>
           <div className="md:col-span-2 flex items-center justify-end gap-2 mt-2 flex-wrap">
             <Button onClick={onCreate} disabled={create.isPending}>
               {create.isPending ? t('create_link.creating') : t('create_link.create_button')}
@@ -372,6 +429,11 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
     lever_event: ctxString('lever_event'),
     event_date: ctxString('event_date'),
     event_location: ctxString('event_location'),
+    // Carry the existing link's mode so the edit form can render a
+    // read-only badge. submission_mode is immutable post-create so the
+    // edit path must not POST a new value.
+    submission_mode:
+      link.submission_mode === 'account_only' ? 'account_only' : 'account_and_profile',
   }));
   const [editError, setEditError] = useState<string | null>(null);
   const onSaveEdit = async () => {
