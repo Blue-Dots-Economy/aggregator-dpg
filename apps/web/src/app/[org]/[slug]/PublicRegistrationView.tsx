@@ -13,7 +13,7 @@ import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/u
 export interface PublicRegistrationViewProps {
   org: string;
   slug: string;
-  domain: 'seeker' | 'provider';
+  domain: string;
   context: Record<string, unknown>;
   schema: RJSFSchema;
   uiSchema: Record<string, unknown>;
@@ -268,7 +268,8 @@ export function PublicRegistrationView({
     }
   };
 
-  const heroGradient = `linear-gradient(135deg, ${mixHex(cfg.brand.primary_color ?? '#4338ca', '#000', 0.6)} 0%, ${mixHex(cfg.brand.primary_color ?? '#4338ca', '#000', 0.35)} 100%)`;
+  // Hero fill — flat solid primary. No gradient shades.
+  const heroGradient = cfg.brand.primary_color ?? '#4338ca';
 
   return (
     <div
@@ -305,7 +306,10 @@ export function PublicRegistrationView({
             style={{ background: heroGradient }}
           >
             <div className="text-[11.5px] uppercase tracking-[0.14em] font-semibold text-white/70">
-              {domain === 'seeker' ? t('domain_seeker') : t('domain_provider')}
+              {(() => {
+                const d = cfg.domains?.find((x) => x.id === domain);
+                return d?.label ?? d?.plural_label ?? domain;
+              })()}
             </div>
             <h1 className="font-display font-bold text-[24px] sm:text-[28px] tracking-tight leading-tight mt-1.5">
               {eventLabel}
@@ -431,26 +435,4 @@ export function PublicRegistrationView({
       </div>
     </div>
   );
-}
-
-/**
- * Mix two hex colours toward `b`. Used to derive the hero gradient
- * from the brand primary without re-running the ThemeProvider's
- * full ramp logic on this server-rendered page.
- */
-function mixHex(a: string, b: string, weight: number): string {
-  const parse = (h: string): [number, number, number] | null => {
-    const m = /^#?([0-9a-f]{6})$/i.exec(h.trim());
-    if (!m) return null;
-    const n = parseInt(m[1]!, 16);
-    return [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
-  };
-  const A = parse(a);
-  const B = parse(b);
-  if (!A || !B) return a;
-  const w = Math.max(0, Math.min(1, weight));
-  const r = Math.round(A[0] * (1 - w) + B[0] * w);
-  const g = Math.round(A[1] * (1 - w) + B[1] * w);
-  const bl = Math.round(A[2] * (1 - w) + B[2] * w);
-  return '#' + [r, g, bl].map((n) => n.toString(16).padStart(2, '0')).join('');
 }

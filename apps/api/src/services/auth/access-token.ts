@@ -13,6 +13,7 @@ import { getAggregatorStore } from '../aggregator-store/index.js';
 import { getIdpAdmin } from '../idp-admin/index.js';
 import { KC_ATTR } from '../idp-admin/attributes.js';
 import { getSignalStackWriter } from '../signalstack.js';
+import { getNetworkConfig } from '../network-config.js';
 import { logger } from '../../logger.js';
 
 let cachedJwks: ReturnType<typeof createRemoteJWKSet> | null = null;
@@ -238,14 +239,22 @@ async function backfillSignalstackOrgId(ctx: AuthContext): Promise<void> {
     return;
   }
 
+  // Resolve domains from the live network config (signalstack network.json)
+  // so the backfill never overwrites org.metadata.domains with a stale
+  // seeker/provider set on networks like orange_dot (tourist, practitioner).
+  // Prefer the aggregator's registered type when set; otherwise send the
+  // full domain list for the active network.
+  const networkCfg = await getNetworkConfig();
+  const aggregatorType = found.value.type;
+  const upsertDomains: string[] =
+    aggregatorType && networkCfg.domainIds.includes(aggregatorType)
+      ? [aggregatorType]
+      : networkCfg.domainIds;
   const upsert = await signalstack.upsertAggregator({
     external_id: ctx.aggregatorId,
     name: found.value.name,
     slug: found.value.orgSlug,
-    // Send the full domain list so signalstack's dashboard endpoint
-    // doesn't fail with NO_DOMAINS_CONFIGURED on a legacy org that
-    // was upserted before the field was required.
-    domains: ['seeker', 'provider'],
+    domains: upsertDomains,
   });
   if (!upsert.success) {
     log.warn(

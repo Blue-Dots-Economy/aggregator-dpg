@@ -10,6 +10,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import type { ValidateFunction } from 'ajv';
+import { getNetworkConfig } from './network-config.js';
 
 const require = createRequire(import.meta.url);
 // CJS interop — ajv 8 and ajv-formats publish CommonJS modules. Default
@@ -34,12 +35,33 @@ let cachedValidator: ValidateFunction | null = null;
 
 /**
  * Returns the shared compiled validator. Caches on first use.
+ *
+ * Patches `properties.type.enum` with the live network's domain ids
+ * (sourced from network-config / signalstack network.json) before
+ * compiling, so the validator accepts whatever domains the current
+ * network declares — not the hardcoded `[seeker, provider]` from
+ * the schema file.
  */
-export function getRegistrationValidator(): ValidateFunction {
+export async function getRegistrationValidator(): Promise<ValidateFunction> {
   if (cachedValidator) return cachedValidator;
   const schemaPath = resolveSchemaPath();
   const raw = readFileSync(schemaPath, 'utf8');
   const schema = JSON.parse(raw) as Record<string, unknown>;
+
+  try {
+    const cfg = await getNetworkConfig();
+    const ids = cfg.domainIds;
+    if (ids.length > 0) {
+      const props = schema['properties'] as Record<string, Record<string, unknown>> | undefined;
+      if (props?.['type']) {
+        props['type']['enum'] = ids;
+      }
+    }
+  } catch {
+    // Fall back to the schema file's static enum if network-config
+    // is unavailable — keeps the registration path open on cold boot.
+  }
+
   const ajv = new AjvCtor({ allErrors: true, strict: false });
   addFormats(ajv);
   const validator: ValidateFunction = ajv.compile(schema);

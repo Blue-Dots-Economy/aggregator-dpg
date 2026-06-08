@@ -81,7 +81,7 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
 
       // JSON Schema is the authoritative contract — keeps the form rules in
       // `config/` rather than code.
-      const validate = getRegistrationValidator();
+      const validate = await getRegistrationValidator();
       if (!validate(req.body)) {
         throw httpError('SCHEMA_VALIDATION', {
           detail: 'Payload failed JSON Schema validation.',

@@ -877,6 +877,16 @@ function SeekersTab() {
   // (via the per-call `x-acting-org-id` header). The response now
   // wraps every served domain under `by_domain[<id>]` so seeker +
   // provider tabs share a single fetch.
+  //
+  // Domain id comes from the live network config so networks that
+  // declare non-default ids (e.g. orange_dot's `tourist`) still resolve
+  // to the right `by_domain[<id>]` slice. Falls back to 'seeker' for
+  // legacy blue/purple defaults.
+  const { data: cfgRaw } = useAggregatorConfig();
+  // No fallback — undefined here lets useDashboard's `enabled` gate skip
+  // the call until the live network config loads (prevents a stale
+  // `?domain=seeker` fetch on cold mount with DEFAULT_AGGREGATOR_CONFIG).
+  const seekerDomainId = cfgRaw?.domains?.[0]?.id;
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const handleStatusFilterChange = (next: StatusFilter) => {
@@ -888,16 +898,20 @@ function SeekersTab() {
     data: dashboard,
     isLoading,
     isError,
-  } = useDashboard({
-    domain: 'seeker',
-    page,
-    limit: PAGE_SIZE,
-    ...(filterActive ? { status: statusFilter } : {}),
-  });
-  const slice = dashboard?.by_domain.seeker;
+  } = useDashboard(
+    seekerDomainId
+      ? {
+          domain: seekerDomainId,
+          page,
+          limit: PAGE_SIZE,
+          ...(filterActive ? { status: statusFilter } : {}),
+        }
+      : undefined,
+  );
+  const slice = seekerDomainId ? dashboard?.by_domain[seekerDomainId] : undefined;
   const rollup = slice?.rollup;
   const { data: cfg } = useAggregatorConfig();
-  const seekerCfg = cfg?.domains?.find((d) => d.id === 'seeker');
+  const seekerCfg = cfg?.domains?.find((d) => d.id === seekerDomainId);
   const seekerTileLabels = seekerCfg?.dashboardTiles ?? {};
   const seekerPlural = seekerCfg?.plural_label ?? t('tabs.seekers');
   // by_action_status bucket labels — wired to the funnel cells in the
@@ -947,15 +961,16 @@ function SeekersTab() {
     setRefreshing(true);
     setRefreshError(null);
     try {
+      if (!seekerDomainId) return;
       await dashboardService.dashboard({
-        domain: 'seeker',
+        domain: seekerDomainId,
         page,
         limit: PAGE_SIZE,
         ...(filterActive ? { status: statusFilter } : {}),
         refresh: true,
       });
       await queryClient.invalidateQueries({
-        queryKey: ['dashboard', 'dashboard', 'seeker'],
+        queryKey: ['dashboard', 'dashboard', seekerDomainId],
       });
       setLastRefreshedAt(Date.now());
     } catch (err) {
@@ -1199,6 +1214,12 @@ function ProvidersTab() {
   // rollup. Provider domain reuses the same canonical rollup shape
   // (total_items, by_status, by_action_status, complete_profiles, …)
   // so the cards map field-for-field; only the labels differ.
+  //
+  // Domain id from cfg so networks declaring non-default ids (e.g.
+  // orange_dot's `practitioner`) still pick the right by_domain slice.
+  const { data: cfgRaw } = useAggregatorConfig();
+  // No fallback — see SeekersTab.
+  const providerDomainId = cfgRaw?.domains?.[1]?.id;
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const handleStatusFilterChange = (next: StatusFilter) => {
@@ -1210,14 +1231,18 @@ function ProvidersTab() {
     data: dashboard,
     isLoading,
     isError,
-  } = useDashboard({
-    domain: 'provider',
-    page,
-    limit: PAGE_SIZE,
-    ...(filterActive ? { status: statusFilter } : {}),
-  });
+  } = useDashboard(
+    providerDomainId
+      ? {
+          domain: providerDomainId,
+          page,
+          limit: PAGE_SIZE,
+          ...(filterActive ? { status: statusFilter } : {}),
+        }
+      : undefined,
+  );
   const { data: cfg } = useAggregatorConfig();
-  const providerCfg = cfg?.domains?.find((d) => d.id === 'provider');
+  const providerCfg = cfg?.domains?.find((d) => d.id === providerDomainId);
   const providerTileLabels = providerCfg?.dashboardTiles ?? {};
   const providerPlural = providerCfg?.plural_label ?? t('tabs.providers');
   // by_action_status bucket labels — wired to the funnel cells in the
@@ -1225,7 +1250,7 @@ function ProvidersTab() {
   const bucketLabels = cfg?.dashboardBuckets?.by_action_status ?? {};
   const statusLabels = cfg?.dashboardBuckets?.by_status ?? {};
   const statusRules = indexStatusRules(providerCfg?.status_rules);
-  const slice = dashboard?.by_domain.provider;
+  const slice = providerDomainId ? dashboard?.by_domain[providerDomainId] : undefined;
   const rollup = slice?.rollup;
   const total = rollup?.total_items;
   const byStatus = rollup?.by_status ?? {};
@@ -1262,15 +1287,16 @@ function ProvidersTab() {
     setRefreshing(true);
     setRefreshError(null);
     try {
+      if (!providerDomainId) return;
       await dashboardService.dashboard({
-        domain: 'provider',
+        domain: providerDomainId,
         page,
         limit: PAGE_SIZE,
         ...(filterActive ? { status: statusFilter } : {}),
         refresh: true,
       });
       await queryClient.invalidateQueries({
-        queryKey: ['dashboard', 'dashboard', 'provider'],
+        queryKey: ['dashboard', 'dashboard', providerDomainId],
       });
       setLastRefreshedAt(Date.now());
     } catch (err) {
@@ -1515,7 +1541,7 @@ function DashboardLoadingFrame() {
   return (
     <div className="fade-up">
       <Topbar
-        title={`My ${cfg.brand.short_name}`}
+        title={`My ${cfg.network.display_name ?? cfg.brand.short_name}`}
         subtitle={cfg.brand.tagline ?? 'Track every participant in your network — at a glance.'}
       />
       <div className="text-center text-[13px] text-ink-400 py-12">{t('state.loading')}</div>
@@ -1523,33 +1549,39 @@ function DashboardLoadingFrame() {
   );
 }
 
-function DashboardContent({ aggregatorType }: { aggregatorType: 'seeker' | 'provider' }) {
+function DashboardContent({ aggregatorType }: { aggregatorType: string }) {
   const router = useRouter();
   const t = useTranslations('dashboard');
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
-  // Tabs are scoped to the aggregator's registered participant focus —
-  // seeker aggregators see only Seekers; provider aggregators see only
-  // Providers. The opposite primary tab is hidden, not just disabled.
-  // The chip count reads from the same signalstack dashboard rollup the
-  // tab body renders, so the header total never drifts from the table.
-  const { data: dashboard } = useDashboard({
-    domain: aggregatorType === 'provider' ? 'provider' : 'seeker',
-  });
-  const liveCount =
-    dashboard?.by_domain[aggregatorType === 'provider' ? 'provider' : 'seeker']?.rollup.total_items;
+  // Resolve the aggregator's primary domain id strictly from the live
+  // network config (matches against `aggregatorType`). No fallback:
+  // when the config has not loaded yet, `primaryDomain` is undefined
+  // and `useDashboard` skips the request — preventing a stale
+  // `?domain=seeker` fetch on cold mount with DEFAULT_AGGREGATOR_CONFIG.
+  const primaryDomainCfg = cfg.domains?.find((d) => d.id === aggregatorType);
+  const primaryDomain = primaryDomainCfg?.id;
+  const isProviderLike = !!primaryDomain && primaryDomain === cfg.domains?.[1]?.id;
+  const { data: dashboard } = useDashboard(primaryDomain ? { domain: primaryDomain } : undefined);
+  const liveCount = primaryDomain
+    ? dashboard?.by_domain[primaryDomain]?.rollup.total_items
+    : undefined;
+  // Tab label reads from the network config's `plural_label` so orange's
+  // `tourist` renders as "Tourists" not "Seekers".
+  const primaryLabel =
+    primaryDomainCfg?.plural_label ?? (isProviderLike ? t('tabs.providers') : t('tabs.seekers'));
   const tabItems = useMemo<SegmentedTab<Tab>[]>(
     () =>
-      aggregatorType === 'provider'
-        ? [providerTabLabel(liveCount, t('tabs.providers'))]
-        : [seekerTabLabel(liveCount, t('tabs.seekers'))],
-    [aggregatorType, liveCount, t],
+      isProviderLike
+        ? [providerTabLabel(liveCount, primaryLabel)]
+        : [seekerTabLabel(liveCount, primaryLabel)],
+    [isProviderLike, liveCount, primaryLabel],
   );
-  const [tab, setTab] = useState<Tab>(aggregatorType === 'provider' ? 'providers' : 'seekers');
+  const [tab, setTab] = useState<Tab>(isProviderLike ? 'providers' : 'seekers');
 
   return (
     <div className="fade-up">
       <Topbar
-        title={`My ${cfg.brand.short_name}`}
+        title={`My ${cfg.network.display_name ?? cfg.brand.short_name}`}
         subtitle={cfg.brand.tagline ?? 'Track every participant in your network — at a glance.'}
         right={
           <div className="flex items-center gap-2">

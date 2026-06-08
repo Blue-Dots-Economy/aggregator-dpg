@@ -14,10 +14,18 @@ export const dynamic = 'force-dynamic';
 
 interface ResolveResponse {
   slug: string;
-  domain: 'seeker' | 'provider';
+  // Domain id is whatever the active network declares (e.g. 'seeker' /
+  // 'provider' on blue/purple, 'tourist' / 'practitioner' on orange_dot).
+  // No client-side allowlist — the API only returns domains it knows.
+  domain: string;
   context: Record<string, unknown>;
   schema_id: string;
   schema_version: string;
+  // JSON Schema for the link's domain, sourced from the network config
+  // (signalstack network.json item_schemas). Inlined so the public page
+  // renders the form without a second fetch and without reading from
+  // disk — aggregator no longer keeps per-domain schema files.
+  schema: RJSFSchema;
   expires_at: string | null;
 }
 
@@ -61,32 +69,28 @@ export default async function PublicRegistrationPage({ params }: PageProps) {
     );
   }
 
-  // 2. Load participant schema + ui schema from disk (config-driven).
-  // Defence in depth: validate the `domain` value before composing the
-  // file path. The API is trusted but typing alone does not enforce a
-  // runtime allowlist, and any future API contract drift could otherwise
-  // turn this into a path-traversal vector.
-  if (resolved.domain !== 'seeker' && resolved.domain !== 'provider') {
-    notFound();
-  }
-  const schemaFile = `${resolved.domain}.v1.json`;
-  const uiFile = `${resolved.domain}.v1.ui.json`;
-  let schema: RJSFSchema;
-  let uiSchema: Record<string, unknown> = {};
-  try {
-    schema = JSON.parse(
-      await readFile(resolveParticipantSchemaPath(schemaFile), 'utf8'),
-    ) as RJSFSchema;
-  } catch (err) {
+  // 2. Schema arrives inlined in the resolve response (sourced from the
+  // network config). Aggregator no longer keeps per-domain schema files
+  // on disk — signalstack network.json is the single source of truth.
+  // Defence in depth: bail if the API somehow returned no schema (or a
+  // malformed domain id — only [a-z0-9_-] is acceptable as a domain).
+  if (!resolved.schema || typeof resolved.schema !== 'object') {
     return (
       <ErrorShell
         title="Form unavailable"
-        message={`Participant schema for "${resolved.domain}" is missing. ${
-          err instanceof Error ? err.message : ''
-        }`}
+        message={`Registration schema for "${resolved.domain}" is missing.`}
       />
     );
   }
+  if (!/^[a-z0-9_-]+$/i.test(resolved.domain)) {
+    notFound();
+  }
+  const schema: RJSFSchema = resolved.schema;
+  // Aggregator-side optional UI schema overlay (e.g. widget hints,
+  // ordering). Lives under config/<network>/schemas/participant/.
+  // Optional — RJSF renders defaults when absent.
+  const uiFile = `${resolved.domain}.v1.ui.json`;
+  let uiSchema: Record<string, unknown> = {};
   try {
     uiSchema = JSON.parse(await readFile(resolveParticipantSchemaPath(uiFile), 'utf8')) as Record<
       string,

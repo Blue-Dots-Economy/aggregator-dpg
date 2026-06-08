@@ -40,7 +40,10 @@ export function useOppProviders(filter?: ParticipantFilter) {
  * entry rather than serving stale data from the prior key.
  */
 export function useDashboard(query?: DashboardQuery) {
-  const domain = query?.domain ?? 'seeker';
+  // Domain must come from the network config (cfg.domains[N].id) so the
+  // tab works for any network. Callers always pass it; we no longer
+  // default to 'seeker' which silently broke orange_dot.
+  const domain = query?.domain;
   const status = query?.status ?? null;
   const page = query?.page ?? 1;
   const limit = query?.limit ?? 50;
@@ -48,8 +51,9 @@ export function useDashboard(query?: DashboardQuery) {
   return useQuery({
     // refresh is in the queryKey so a forced refresh gets a fresh cache
     // entry rather than serving stale data from the prior key.
-    queryKey: ['dashboard', 'dashboard', domain, status, page, limit, refresh],
+    queryKey: ['dashboard', 'dashboard', domain ?? '(no-domain)', status, page, limit, refresh],
     queryFn: () => dashboardService.dashboard(query),
+    enabled: Boolean(domain),
     staleTime: 0,
   });
 }

@@ -12,6 +12,8 @@ import {
 } from '../aggregator-store/index.js';
 import { IdpAdminFake, _setIdpAdmin } from '../idp-admin/index.js';
 import { _setSignalStackWriter } from '../signalstack.js';
+import { _setNetworkConfig } from '../network-config.js';
+import { buildBlueDotConfig } from '@aggregator-dpg/network-config/testing';
 import { SignalStackWriterFake } from '@aggregator-dpg/signalstack-writer/testing';
 import { SignalStackWriterBase } from '@aggregator-dpg/signalstack-writer/interface';
 import { UpstreamError } from '@aggregator-dpg/shared-primitives/errors';
@@ -66,6 +68,11 @@ describe('requireApproved + signalstack backfill', () => {
 
     writer = new SignalStackWriterFake();
     _setSignalStackWriter(writer);
+
+    // backfillSignalstackOrgId now sources upsert domains from the live
+    // network config — pin a blue_dot-shaped config so the legacy
+    // ['seeker','provider'] expectations in this file still hold.
+    _setNetworkConfig(buildBlueDotConfig());
   });
 
   afterEach(() => {
@@ -73,6 +80,7 @@ describe('requireApproved + signalstack backfill', () => {
     _setIdpAdmin(null);
     _setSignalStackWriter(null);
     _setAccessTokenVerifier(null);
+    _setNetworkConfig(null);
   });
 
   it('passes through when signalstack_org_id claim already present (no upsert)', async () => {

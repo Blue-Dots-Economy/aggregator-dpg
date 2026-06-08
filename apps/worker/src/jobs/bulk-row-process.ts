@@ -46,7 +46,16 @@ export function _setParticipantsWriter(w: ParticipantsWriterBase | null): void {
   participantsWriter = w;
 }
 
-const VALID_PARTICIPANT_TYPES = new Set(['seeker', 'provider']);
+/**
+ * Returns the set of participant types declared by the active network
+ * (e.g. `seeker`/`provider` for blue/purple, `tourist`/`practitioner`
+ * for orange_dot). Read once at network-config load — the network
+ * loader caches the result for the lifetime of the worker.
+ */
+async function loadValidParticipantTypes(): Promise<Set<string>> {
+  const cfg = await getNetworkConfig();
+  return new Set(cfg.domainIds);
+}
 
 type ErrorCategory = 'validation' | 'normalisation' | 'duplicate' | 'system_error';
 
@@ -69,7 +78,8 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
   // Processor — no per-row SELECT on bulk_uploads needed. Status guards live
   // in the Finaliser and the File Processor entry guard; stale row jobs are a
   // non-issue here because the Lua commit script + jobId dedup absorb replays.
-  if (!VALID_PARTICIPANT_TYPES.has(job.participantType)) {
+  const validTypes = await loadValidParticipantTypes();
+  if (!validTypes.has(job.participantType)) {
     return await commit(
       job,
       {
@@ -171,8 +181,11 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
     }
     phoneNormalised = phone.value;
   }
+  // Email is optional in IdentitySelectors — domains like orange_dot's
+  // `tourist` have no email field. Skip the lookup when undefined;
+  // dedup degrades to phone-only.
   const emailNormalised = normaliseEmail(
-    typeof job.payload[emailSourceKey] === 'string'
+    emailSourceKey && typeof job.payload[emailSourceKey] === 'string'
       ? (job.payload[emailSourceKey] as string)
       : null,
   );

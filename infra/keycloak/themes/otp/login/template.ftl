@@ -49,9 +49,10 @@
             <canvas id="bd-hero-canvas" class="bd-hero-canvas"></canvas>
             <div class="bd-hero-glow"></div>
             <div class="bd-hero-copy">
-                <img class="bd-hero-logo"
-                     src="${url.resourcesPath}/img/brand/${properties.brandLogoSlug!'blue-dot'}/logo-with-strapline-light.png"
-                     alt="${properties.brandShortName!'Aggregator'}"/>
+                <div class="bd-hero-brand">
+                    <span class="bd-hero-wordmark">${properties.brandShortName!'Aggregator'}</span>
+                    <span class="bd-hero-strapline">Seeded by EkStep Foundation</span>
+                </div>
             </div>
         </aside>
 

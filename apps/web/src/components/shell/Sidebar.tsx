@@ -49,22 +49,22 @@ export function Sidebar() {
   // the aggregator's registered focus; falls back to the first domain
   // declared by the network when the profile is still resolving.
   const profileType = useProfileRaw().data?.type;
-  const fallbackDomain = cfg.domains[0]?.id ?? 'seeker';
-  const { data: dashboard } = useDashboard({
-    domain: profileType ?? fallbackDomain,
-  });
+  // No 'seeker' fallback — until both profile + live network config have
+  // loaded, `activeDomain` is undefined and useDashboard skips the
+  // fetch (prevents a stale `?domain=seeker` request on cold mount).
+  const activeDomain = profileType ?? cfg.domains[0]?.id;
+  const { data: dashboard } = useDashboard(activeDomain ? { domain: activeDomain } : undefined);
   // Plan-C / by_domain dashboard shape: every served domain ships under
   // `by_domain[<id>]`; the badge mirrors the active aggregator's domain
-  // rollup so the sidebar count stays in sync with /dashboard. Falls
-  // back to the network's first declared domain while the profile is
-  // still resolving.
-  const activeDomain = profileType ?? fallbackDomain;
-  const participantsBadge = dashboard?.by_domain[activeDomain]?.rollup.total_items;
+  // rollup so the sidebar count stays in sync with /dashboard.
+  const participantsBadge = activeDomain
+    ? dashboard?.by_domain[activeDomain]?.rollup.total_items
+    : undefined;
 
   // Resolve translated labels here so brand interpolation and locale switching
   // work correctly; buildNavBase() supplies the stable route/icon skeleton.
   const navLabels: Record<string, string> = {
-    '/dashboard': t('my', { brand: cfg.brand.short_name }),
+    '/dashboard': t('my', { brand: cfg.network.display_name ?? cfg.brand.short_name }),
     '/onboarding': t('onboarding'),
     '/profile': t('profile'),
   };
