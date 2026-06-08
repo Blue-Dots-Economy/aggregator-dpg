@@ -300,54 +300,34 @@ export function CreateLinkSection() {
           </Field>
           {/*
            * Per-link submission mode — chosen here at create time, immutable
-           * afterwards. account_only locks the public form to identity-only
-           * capture (name + phone OR email + consent); account_and_profile
-           * (default) keeps the full RJSF profile flow.
+           * afterwards. Dropdown matches the rest of the form's input layout;
+           * a small hint below describes the currently-selected option so the
+           * user understands what the public link will collect.
            */}
-          <div className="md:col-span-2">
-            <Field label={t('create_link.field_submission_mode')} required>
-              <div className="flex flex-col gap-2" role="radiogroup">
-                <label
-                  htmlFor="submission_mode_full"
-                  className="flex items-start gap-2 text-[13px] text-ink-900 cursor-pointer font-semibold"
-                >
-                  <input
-                    id="submission_mode_full"
-                    type="radio"
-                    name="submission_mode"
-                    value="account_and_profile"
-                    checked={form.submission_mode === 'account_and_profile'}
-                    onChange={() =>
-                      setForm((f) => ({ ...f, submission_mode: 'account_and_profile' }))
-                    }
-                    className="mt-0.5"
-                  />
-                  {t('create_link.submission_mode_full_label')}
-                </label>
-                <span className="text-[12px] text-ink-500 ml-6 -mt-1">
-                  {t('create_link.submission_mode_full_hint')}
-                </span>
-                <label
-                  htmlFor="submission_mode_account_only"
-                  className="flex items-start gap-2 text-[13px] text-ink-900 cursor-pointer font-semibold mt-1"
-                >
-                  <input
-                    id="submission_mode_account_only"
-                    type="radio"
-                    name="submission_mode"
-                    value="account_only"
-                    checked={form.submission_mode === 'account_only'}
-                    onChange={() => setForm((f) => ({ ...f, submission_mode: 'account_only' }))}
-                    className="mt-0.5"
-                  />
-                  {t('create_link.submission_mode_account_only_label')}
-                </label>
-                <span className="text-[12px] text-ink-500 ml-6 -mt-1">
-                  {t('create_link.submission_mode_account_only_hint')}
-                </span>
-              </div>
-            </Field>
-          </div>
+          <Field label={t('create_link.field_submission_mode')} required>
+            <select
+              className="bd-input"
+              value={form.submission_mode}
+              onChange={(e) =>
+                setForm((f) => ({
+                  ...f,
+                  submission_mode: e.target.value as 'account_only' | 'account_and_profile',
+                }))
+              }
+            >
+              <option value="account_and_profile">
+                {t('create_link.submission_mode_full_label')}
+              </option>
+              <option value="account_only">
+                {t('create_link.submission_mode_account_only_label')}
+              </option>
+            </select>
+            <span className="block mt-1 text-[12px] text-ink-500">
+              {form.submission_mode === 'account_only'
+                ? t('create_link.submission_mode_account_only_hint')
+                : t('create_link.submission_mode_full_hint')}
+            </span>
+          </Field>
           <div className="md:col-span-2 flex items-center justify-end gap-2 mt-2 flex-wrap">
             <Button onClick={onCreate} disabled={create.isPending}>
               {create.isPending ? t('create_link.creating') : t('create_link.create_button')}
