@@ -1,0 +1,200 @@
+name: Keycloak
+
+# Builds the custom Keycloak SPI image (server) and the per-network theme
+# image. Manual-only (workflow_dispatch) — run on demand from the Actions
+# tab. Pick the networks via the `networks` input (default all three).
+#
+# The theme image is brand-specific: themes.Dockerfile bakes BRAND_* args
+# (sourced from config/<network>/keycloak.env) into theme.properties, so one
+# image is built per network and pushed under a network-prefixed tag set
+# (e.g. keycloak-theme:orange_dot-develop).
+
+on:
+  workflow_dispatch:
+    inputs:
+      networks:
+        description: 'Comma-separated networks to build the theme image for'
+        required: false
+        default: 'blue_dot,orange_dot,purple_dot'
+
+concurrency:
+  group: keycloak-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  # ── server: the custom Keycloak SPI image (network-agnostic) ──────────────
+  server:
+    name: Docker / keycloak-server
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image tags & labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}/keycloak-server
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+          labels: |
+            org.opencontainers.image.title=aggregator-dpg-keycloak-server
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.licenses=UNLICENSED
+
+      - name: Build & push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: infra/keycloak
+          file: infra/keycloak/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=keycloak-server
+          cache-to: type=gha,mode=max,scope=keycloak-server
+          provenance: true
+          sbom: true
+
+      - name: Image digest
+        run: |
+          echo "Pushed ${REGISTRY}/${REPO}/keycloak-server@${DIGEST}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Tags: ${TAGS}" >> "$GITHUB_STEP_SUMMARY"
+        env:
+          REPO: ${{ github.repository }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+
+  # ── prepare: resolve the network matrix for the theme job ─────────────────
+  # Splits the comma-separated `networks` dispatch input into a JSON array
+  # that drives the theme job's matrix.
+  prepare-theme:
+    name: Resolve theme network matrix
+    runs-on: ubuntu-latest
+    outputs:
+      networks: ${{ steps.set.outputs.networks }}
+    steps:
+      - id: set
+        env:
+          RAW: ${{ inputs.networks }}
+        run: |
+          json=$(printf '%s' "$RAW" \
+            | tr ',' '\n' \
+            | tr -d '[:space:]' \
+            | grep -v '^$' \
+            | jq -R . | jq -cs .)
+          echo "networks=$json" >> "$GITHUB_OUTPUT"
+          echo "Theme networks: $json" >> "$GITHUB_STEP_SUMMARY"
+
+  # ── theme: one brand-specific image per network ───────────────────────────
+  # Brand strings come from config/<network>/keycloak.env, fed verbatim as
+  # docker build-args (themes.Dockerfile bakes them into theme.properties).
+  # Tags are network-prefixed: <network>-<branch>, <network>-sha-xxxxxxx, and
+  # <network>-latest on the default branch.
+  theme:
+    name: Docker / keycloak-theme (${{ matrix.network }})
+    needs: prepare-theme
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        network: ${{ fromJSON(needs.prepare-theme.outputs.networks) }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Mirror build-theme-image.sh: every non-comment, non-blank KEY=value
+      # line in the network's keycloak.env becomes a build-arg, plus NETWORK.
+      # Fails loudly if the env file is missing so a bad network input can't
+      # silently produce a default-branded image.
+      - name: Collect brand build-args
+        id: brandargs
+        run: |
+          ENV_FILE="config/${{ matrix.network }}/keycloak.env"
+          if [ ! -f "$ENV_FILE" ]; then
+            echo "::error::missing $ENV_FILE for network '${{ matrix.network }}'"
+            exit 1
+          fi
+          {
+            echo 'args<<__ARGS_EOF__'
+            grep -vE '^[[:space:]]*#|^[[:space:]]*$' "$ENV_FILE"
+            echo "NETWORK=${{ matrix.network }}"
+            echo '__ARGS_EOF__'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Compute image tags & labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}/keycloak-theme
+          flavor: |
+            prefix=${{ matrix.network }}-,onlatest=true
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+          labels: |
+            org.opencontainers.image.title=aggregator-dpg-keycloak-theme-${{ matrix.network }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.licenses=UNLICENSED
+
+      - name: Build & push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/keycloak/themes.Dockerfile
+          platforms: linux/amd64
+          push: true
+          build-args: ${{ steps.brandargs.outputs.args }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=keycloak-theme-${{ matrix.network }}
+          cache-to: type=gha,mode=max,scope=keycloak-theme-${{ matrix.network }}
+          provenance: true
+          sbom: true
+
+      - name: Image digest
+        run: |
+          echo "Pushed ${REGISTRY}/${REPO}/keycloak-theme (${NETWORK})@${DIGEST}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Tags: ${TAGS}" >> "$GITHUB_STEP_SUMMARY"
+        env:
+          REPO: ${{ github.repository }}
+          NETWORK: ${{ matrix.network }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
