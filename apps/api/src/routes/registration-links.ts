@@ -80,6 +80,13 @@ async function fetchLinkMetrics(
 // checked against the live network config's `domainIds` inside the
 // handler — that lets the schema accept any network's domain (e.g.
 // orange_dot's `tourist`/`practitioner`) without hardcoding the enum.
+const CompletionActionSchema = z.object({
+  channel: z.enum(['sms', 'voice', 'chat']),
+  template_id: z.string().min(1),
+  delay_seconds: z.number().int().min(0).default(0),
+  max_retries: z.number().int().min(0).default(3),
+});
+
 const CreateLinkBodySchema = z.object({
   domain: z.string().min(1),
   /**
@@ -96,6 +103,18 @@ const CreateLinkBodySchema = z.object({
     .optional(),
   context: z.record(z.unknown()).default({}),
   status: z.enum(['draft', 'live']).default('draft'),
+  /**
+   * Per-link form shape. `account_only` locks the link to identity-only
+   * capture (name + phone OR email + consent); server skips dispatcher and
+   * forces submit_mode=account_only. Default keeps the legacy behaviour.
+   * Immutable after creation (PATCH route .strict()-rejects unknown keys).
+   */
+  submission_mode: z.enum(['account_only', 'account_and_profile']).default('account_and_profile'),
+  /**
+   * Completion-dispatch actions. Forbidden on `account_only` links — the
+   * dispatcher never fires for that mode by design (see T8 guard below).
+   */
+  completion_actions: z.array(CompletionActionSchema).default([]),
   expires_at: z
     .string()
     .datetime({ offset: true })
@@ -160,6 +179,12 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
     }
     enforceAggregatorType(auth, body.domain);
 
+    if (body.submission_mode === 'account_only' && body.completion_actions.length > 0) {
+      throw httpError('INVALID_CONFIG', {
+        detail: 'completion_actions are not allowed on account_only links',
+      });
+    }
+
     const store = getRegistrationLinksStore();
 
     // Slug allocation. If the caller supplied a slug, try it first; collisions
@@ -180,6 +205,8 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
         domain: body.domain,
         context: body.context,
         status: body.status,
+        submissionMode: body.submission_mode,
+        completionActions: body.completion_actions,
         expiresAt: body.expires_at,
         createdBy: auth.userId,
       });
@@ -668,6 +695,7 @@ async function buildResponse(
     slug: row.slug,
     domain: row.domain,
     status: row.status,
+    submission_mode: row.submissionMode,
     context: row.context,
     expires_at: row.expiresAt ? row.expiresAt.toISOString() : null,
     public_url: publicUrl,
