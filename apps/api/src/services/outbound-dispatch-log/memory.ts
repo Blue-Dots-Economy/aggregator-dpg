@@ -138,12 +138,67 @@ export class InMemoryOutboundDispatchLog extends OutboundDispatchLogBase {
 }
 
 /**
- * Cross-package test fake alias. Mirrors the convention used by every
- * other service in `apps/api/src/services/*` — same class, exported
- * under the public `*Fake` name so tests don't reach into the internal
- * `InMemory*` symbol.
+ * Partial seed shape — the arrange step supplies the few fields it cares
+ * about; the rest fall back to sensible defaults from
+ * {@link buildOutboundDispatchRow}.
  */
-export class OutboundDispatchLogFake extends InMemoryOutboundDispatchLog {}
+export interface OutboundDispatchSeed extends Partial<OutboundDispatchRow> {
+  aggregatorId: string;
+  participantId: string;
+  itemId: string;
+  channel: 'sms' | 'voice' | 'chat';
+  templateId: string;
+}
+
+/**
+ * Builds a fully-populated `OutboundDispatchRow` from a partial seed.
+ * Unspecified fields default to a freshly-queued row.
+ */
+export function buildOutboundDispatchRow(seed: OutboundDispatchSeed): OutboundDispatchRow {
+  const now = seed.createdAt ?? new Date();
+  return {
+    id: seed.id ?? randomUUID(),
+    aggregatorId: seed.aggregatorId,
+    participantId: seed.participantId,
+    itemId: seed.itemId,
+    channel: seed.channel,
+    templateId: seed.templateId,
+    status: seed.status ?? 'queued',
+    attempt: seed.attempt ?? 0,
+    error: seed.error ?? null,
+    payload: seed.payload ?? {},
+    queuedAt: seed.queuedAt ?? now,
+    sentAt: seed.sentAt ?? null,
+    createdAt: now,
+  };
+}
+
+/**
+ * Cross-package test fake. Mirrors the convention used by every other
+ * service in `apps/api/src/services/*` — same class, exported under the
+ * public `*Fake` name so tests don't reach into the internal `InMemory*`
+ * symbol. Adds a `seed()` helper for arrange-act-assert tests.
+ */
+export class OutboundDispatchLogFake extends InMemoryOutboundDispatchLog {
+  /**
+   * Inserts the given rows directly into the underlying store, bypassing
+   * the writer methods. Useful for tests that need a pre-existing row in
+   * a non-default state (`sent`, `failed`, `skipped_lifecycle`) without
+   * walking the state machine.
+   *
+   * Re-seeding the same idempotency key overwrites the previous row.
+   */
+  seed(seeds: OutboundDispatchSeed[]): void {
+    for (const s of seeds) {
+      const row = buildOutboundDispatchRow(s);
+      const key = idempotencyKey(row.participantId, row.itemId, row.channel, row.templateId);
+      const existingId = this.byKey.get(key);
+      if (existingId) this.byId.delete(existingId);
+      this.byId.set(row.id, row);
+      this.byKey.set(key, row.id);
+    }
+  }
+}
 
 /** Computes the composite idempotency key. */
 function idempotencyKey(

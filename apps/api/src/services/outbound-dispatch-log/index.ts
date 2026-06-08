@@ -34,5 +34,10 @@ export function _setOutboundDispatchLog(impl: OutboundDispatchLogBase | null): v
 export { OutboundDispatchLogBase } from './interface.js';
 export type { Channel, EnqueueInput, OutboundDispatchRow, Status } from './interface.js';
 export { ChannelSchema, EnqueueInputSchema, StatusSchema } from './interface.js';
-export { InMemoryOutboundDispatchLog, OutboundDispatchLogFake } from './memory.js';
+export {
+  InMemoryOutboundDispatchLog,
+  OutboundDispatchLogFake,
+  buildOutboundDispatchRow,
+} from './memory.js';
+export type { OutboundDispatchSeed } from './memory.js';
 export { PostgresOutboundDispatchLog } from './postgres.js';
