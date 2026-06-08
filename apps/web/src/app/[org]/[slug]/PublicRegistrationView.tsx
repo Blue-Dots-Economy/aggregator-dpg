@@ -9,6 +9,7 @@ import { RjsfThemedForm } from '../../../components/forms/RjsfThemed';
 import { BlueDotsLogo } from '../../../components/ui/BlueDotsLogo';
 import { I } from '../../../icons';
 import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
+import { MinimalIdentityForm, type MinimalIdentityPayload } from './MinimalIdentityForm';
 
 export interface PublicRegistrationViewProps {
   org: string;
@@ -30,6 +31,13 @@ export interface PublicRegistrationViewProps {
    * item, so the rest of the profile is optional. Absent on older API builds.
    */
   identity?: { name?: string; phone?: string; email?: string } | undefined;
+  /**
+   * Per-link submission shape. `account_only` locks the form to identity
+   * fields only and skips the RJSF profile schema entirely. Absent on
+   * older API builds — treated as `'account_and_profile'` (back-compat
+   * default, same as the server's default for unmodified rows).
+   */
+  submissionMode?: 'account_only' | 'account_and_profile' | undefined;
 }
 
 type SubmitState =
@@ -94,6 +102,7 @@ export function PublicRegistrationView({
   schema,
   uiSchema,
   identity,
+  submissionMode = 'account_and_profile',
 }: PublicRegistrationViewProps): JSX.Element {
   const t = useTranslations('profile.public_reg');
   const [formData, setFormData] = useState<Record<string, unknown>>({});
@@ -356,6 +365,22 @@ export function PublicRegistrationView({
     return { kind: 'allow' };
   };
 
+  /**
+   * Identity-only submit for `submission_mode === 'account_only'` links.
+   * Delegates to {@link handleSubmit} with a synthesised RJSF event so the
+   * probe + POST + state handling stays in one place. The server enforces
+   * the capture-scope; this form simply does not collect profile fields.
+   */
+  const handleMinimalSubmit = async (payload: MinimalIdentityPayload): Promise<void> => {
+    await handleSubmit(
+      { formData: payload as unknown as Record<string, unknown> } as IChangeEvent<
+        Record<string, unknown>
+      >,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      undefined as any,
+    );
+  };
+
   const handleSubmit = async (
     e: IChangeEvent<Record<string, unknown>>,
     _event: FormEvent<HTMLFormElement>,
@@ -433,6 +458,30 @@ export function PublicRegistrationView({
 
   // Hero fill — flat solid primary. No gradient shades.
   const heroGradient = cfg.brand.primary_color ?? '#4338ca';
+
+  // `submission_mode === 'account_only'` links lock the form to identity
+  // fields only — render MinimalIdentityForm and skip the RJSF profile
+  // tree entirely. Owned-elsewhere / resume / done / error states stay
+  // shared with the full form path; only the data-entry surface differs.
+  // The full handleSubmit pipeline runs underneath via handleMinimalSubmit
+  // so probe + dedup + 409 handling behave identically.
+  const isAccountOnly = submissionMode === 'account_only';
+
+  if (isAccountOnly && state.status === 'idle' && !lookup) {
+    return (
+      <div
+        className="bd-public-light min-h-screen w-full"
+        style={{
+          background:
+            'radial-gradient(1200px 600px at 50% -10%, var(--bd-tint-primary), transparent 70%), #FBFCFE',
+        }}
+      >
+        <div className="max-w-[640px] mx-auto px-4 sm:px-6 lg:px-10 py-8 sm:py-12">
+          <MinimalIdentityForm identity={identity ?? {}} onSubmit={handleMinimalSubmit} />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
