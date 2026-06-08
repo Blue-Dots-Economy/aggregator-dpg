@@ -103,13 +103,13 @@ Add `submission_mode` to the response:
   "submission_mode": "account_only",  // NEW
   "schema_id": "...",
   "schema_version": "...",
-  "schema": { ... },                  // null/omitted when account_only
+  "schema": null,                     // explicit null when account_only (field shape stays stable for back-compat clients)
   "identity": { ... },
   "expires_at": null
 }
 ```
 
-When `submission_mode === 'account_only'`, `schema` is **omitted** from the response (the form will not render it). Saves bytes and prevents the client from rendering a profile form for an account-only link even by accident.
+When `submission_mode === 'account_only'`, `schema` is set to explicit **`null`** in the response (the form will not render it). Saves bytes and prevents the client from rendering a profile form for an account-only link even by accident. Existing clients that expected a non-null `schema` must be tolerant of `null` — the only place that reads it is the public form, which already branches on submission_mode after this PR.
 
 ## 7. Public submit
 
@@ -119,7 +119,7 @@ Behavior gates on `link.submissionMode`:
 
 **`account_only` branch:**
 
-1. Validate body matches identity-only shape: `name` (required string) + at least one of `phone_number` / `email` (required) + consent flags (required). Any other field → `400 SUBMISSION_MODE_MISMATCH` with `detail: "account_only link does not accept item_state or profile fields"`.
+1. Validate body matches identity-only shape: `name` (required string) + at least one of `phone_number` / `email` (required) + consent flags (required). `partial` is **accepted and ignored** (treated as `true` regardless of value). `item_state` or any other field → `400 SUBMISSION_MODE_MISMATCH` with `detail: "account_only link does not accept item_state or profile fields"`.
 2. Force `submit_mode = 'account_only'` regardless of the body's `partial` flag.
 3. Call `signalstack.onboard({ submit_mode: 'account_only', ... })`.
 4. **Skip the dispatcher fan-out entirely** — no `planCompletionDispatch` call, no `outbound_dispatch_log` rows.
