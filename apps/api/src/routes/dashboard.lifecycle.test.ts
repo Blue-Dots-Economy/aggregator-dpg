@@ -222,4 +222,34 @@ describe('GET /v1/dashboard/items — lifecycle', () => {
     expect(r.statusCode).toBe(200);
     expect(r.json().meta.tiles.account_only).toBeGreaterThanOrEqual(0);
   });
+
+  it('tiles reflect the full dataset even when items is paginated to a smaller page', async () => {
+    // Seed 60 items across all three lifecycle states. Default page limit
+    // is 50, so a naive implementation would count only the first 50 and
+    // mis-report tile totals.
+    const seedOne = (id: string, status: 'draft' | 'live' | 'paused') => {
+      writer.seedItem(id, {
+        lifecycle_status: status,
+        aggregator_id: AGG_A,
+        item_network: 'blue_dot',
+        item_domain: 'seeker',
+        item_type: 'profile_1.0',
+      });
+    };
+    for (let i = 0; i < 40; i++) seedOne(`live-${i}`, 'live');
+    for (let i = 0; i < 15; i++) seedOne(`draft-${i}`, 'draft');
+    for (let i = 0; i < 5; i++) seedOne(`paused-${i}`, 'paused');
+
+    const r = await app.inject({
+      method: 'GET',
+      url: '/v1/dashboard/items?domain=seeker&limit=10',
+      headers: { authorization: 'Bearer agg-a-token' },
+    });
+    expect(r.statusCode).toBe(200);
+    const body = r.json();
+    expect(body.items).toHaveLength(10);
+    expect(body.meta.total).toBe(60);
+    expect(body.meta.tiles).toEqual(expect.objectContaining({ draft: 15, live: 40, paused: 5 }));
+    expect(body.meta.tiles_truncated).toBe(false);
+  });
 });
