@@ -277,12 +277,14 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       const validate = validatorResult.value;
       if (!validate(body)) {
         // Silent partial-accept: `account_and_profile` links always submit
-        // with_item, but a participant may save an incomplete profile. We
-        // drop `required`-keyword errors so partial submits land — signals'
-        // classifier marks the resulting item `draft` when required fields
+        // with_item, but a participant may save an incomplete profile. Drop
+        // the "minimum-presence" keywords — `required` (missing field),
+        // `minItems` (empty multi-select), `minLength`, `minimum` — so partial
+        // submits land; signals' classifier marks the item `draft` when fields
         // are missing, `live` otherwise. Type/format/pattern/enum/
         // additionalProperties errors still 400 (genuine malformed input).
-        const issues = (validate.errors ?? []).filter((e) => e.keyword !== 'required');
+        const PARTIAL_OK = new Set(['required', 'minItems', 'minLength', 'minimum']);
+        const issues = (validate.errors ?? []).filter((e) => !PARTIAL_OK.has(e.keyword ?? ''));
         if (issues.length > 0) {
           throw httpError('SCHEMA_VALIDATION', {
             detail: 'Submission failed schema validation.',
@@ -584,7 +586,16 @@ function stripEmptyOptionalCells(
     : new Set<string>();
   for (const [field, value] of Object.entries(payload)) {
     if (required.has(field)) continue;
-    if (typeof value === 'string' && value.trim() === '') {
+    // Partial submits seed unfilled fields with empty values — RJSF sends
+    // `[]` for unselected multi-selects and `''` for blank inputs. Drop them
+    // so they neither trip schema validation (minItems / minLength) nor reach
+    // signals as noise; only filled fields are forwarded.
+    const isEmpty =
+      value === null ||
+      value === undefined ||
+      (typeof value === 'string' && value.trim() === '') ||
+      (Array.isArray(value) && value.length === 0);
+    if (isEmpty) {
       delete payload[field];
     }
   }
