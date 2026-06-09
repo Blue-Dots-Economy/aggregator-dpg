@@ -186,13 +186,30 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
         );
       }
       const items = Array.isArray(raw.items) ? raw.items : [];
-      // Existing user owned by a different aggregator: signalstack
-      // returns `user_existed: true` (and, in newer builds, an explicit
-      // `owned_elsewhere: true`) with an empty `items` array — that org's
-      // items are private to it. This is not an error — surface it as an
-      // already-registered / owned_elsewhere result so the caller records
-      // a `skipped` outcome instead of a 502.
       const ownedElsewhereSignal = raw.owned_elsewhere === true;
+
+      // account_only path — signalstack created the user row but no item, so
+      // an empty `items` array is EXPECTED here, not a sign of foreign
+      // ownership. Derive ownership solely from the explicit `owned_elsewhere`
+      // signal; a returning own-aggregator user (`user_existed: true`) surfaces
+      // as `already_registered` (the caller maps that to a `skipped` dedup),
+      // NOT as `owned_elsewhere`. Checked BEFORE the with-item heuristic below
+      // precisely because that heuristic treats empty items as owned-elsewhere.
+      if (submitMode === 'account_only') {
+        return ok({
+          user_id: raw.user_id,
+          profile_item_id: '',
+          onboarded_at: typeof raw.onboarded_at === 'string' ? raw.onboarded_at : '',
+          already_registered: raw.user_existed === true,
+          owned_elsewhere: ownedElsewhereSignal,
+        });
+      }
+      // with_item path — an existing user with an empty `items` array belongs
+      // to a different aggregator (that org's items are private to it).
+      // signalstack returns `user_existed: true` (and, in newer builds, an
+      // explicit `owned_elsewhere: true`). Not an error — surface it as an
+      // already-registered / owned_elsewhere result so the caller records a
+      // `skipped` outcome instead of a 502.
       if ((raw.user_existed === true || ownedElsewhereSignal) && items.length === 0) {
         return ok({
           user_id: raw.user_id,
@@ -200,18 +217,6 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
           onboarded_at: typeof raw.onboarded_at === 'string' ? raw.onboarded_at : '',
           already_registered: true,
           owned_elsewhere: true,
-        });
-      }
-      // account_only path — signalstack created the user row but no item.
-      // Surface as a `skipped`-style result with empty profile_item_id and
-      // no lifecycle fields so callers can branch on the absence of
-      // lifecycle_status rather than parsing submit_mode echoes.
-      if (submitMode === 'account_only') {
-        return ok({
-          user_id: raw.user_id,
-          profile_item_id: '',
-          onboarded_at: typeof raw.onboarded_at === 'string' ? raw.onboarded_at : '',
-          owned_elsewhere: false,
         });
       }
       const matched =

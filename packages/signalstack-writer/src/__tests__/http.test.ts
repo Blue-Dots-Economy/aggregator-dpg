@@ -299,6 +299,59 @@ describe('HttpSignalStackWriter.onboard', () => {
     if (result.success) return;
     expect(result.error.code).toBe('SIGNALSTACK_BAD_RESPONSE');
   });
+
+  // Regression: account_only always returns an empty `items` array (signals
+  // creates the user row only). The with-item owned-elsewhere heuristic keys
+  // off empty-items, so account_only MUST be classified before it — otherwise
+  // a returning own-aggregator user (user_existed:true) is misread as
+  // owned_elsewhere. See dashboard 4.2.
+  const ACCOUNT_ONLY_INPUT = {
+    actingOrgId: 'org-abc',
+    name: 'Asha',
+    phoneNumber: '+919876543210',
+    terms_accepted: true,
+    privacy_accepted: true,
+    channel: 'link' as const,
+    source_id: 'link-1',
+    network: 'blue_dot',
+    domain: 'seeker',
+    item_type: 'profile_1.0',
+    profile: {},
+    submit_mode: 'account_only' as const,
+  };
+
+  it('account_only fresh user → owned_elsewhere=false, not already_registered', async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJsonResponse({ user_id: 'u-1', user_existed: false, owned_elsewhere: false, items: [] }),
+    );
+    const result = await writer.onboard(ACCOUNT_ONLY_INPUT);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.owned_elsewhere).toBe(false);
+    expect(result.value.already_registered ?? false).toBe(false);
+    expect(result.value.profile_item_id).toBe('');
+  });
+
+  it('account_only re-submit of own user (user_existed) → already_registered, NOT owned_elsewhere', async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJsonResponse({ user_id: 'u-1', user_existed: true, owned_elsewhere: false, items: [] }),
+    );
+    const result = await writer.onboard(ACCOUNT_ONLY_INPUT);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.owned_elsewhere).toBe(false);
+    expect(result.value.already_registered).toBe(true);
+  });
+
+  it('account_only genuinely foreign user (owned_elsewhere signal) → owned_elsewhere=true', async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJsonResponse({ user_id: 'u-1', user_existed: true, owned_elsewhere: true, items: [] }),
+    );
+    const result = await writer.onboard(ACCOUNT_ONLY_INPUT);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.owned_elsewhere).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------
