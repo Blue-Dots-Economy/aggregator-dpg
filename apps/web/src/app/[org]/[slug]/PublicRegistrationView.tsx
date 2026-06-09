@@ -296,8 +296,17 @@ export function PublicRegistrationView({
    */
   const runIdentityProbe = async (values: Record<string, unknown>): Promise<LookupOutcome> => {
     if (!network) return { kind: 'allow' };
-    const emailRaw = values['email'];
-    const phoneRaw = values['phone'] ?? values['phone_number'] ?? values['mobile'];
+    // Read identity off the form using the network's field selectors
+    // (e.g. purple_dot's `mobile_number`, orange_dot's own keys), not a
+    // hardcoded `phone`/`email`. Without this the probe silently misses the
+    // contact on non-standard-field networks and owned_elsewhere no-ops.
+    // Fall back to the common keys when the config omits a selector.
+    const emailKey = identity?.email;
+    const phoneKey = identity?.phone;
+    const emailRaw = emailKey ? values[emailKey] : values['email'];
+    const phoneRaw = phoneKey
+      ? values[phoneKey]
+      : (values['phone'] ?? values['phone_number'] ?? values['mobile']);
     const email = typeof emailRaw === 'string' && emailRaw.trim().length > 0 ? emailRaw.trim() : '';
     const phone = typeof phoneRaw === 'string' && phoneRaw.trim().length > 0 ? phoneRaw.trim() : '';
     if (!email && !phone) return { kind: 'allow' };
@@ -573,13 +582,21 @@ export function PublicRegistrationView({
                       onClick={() => {
                         setLookup(null);
                         // Clear the offending identity fields so the user
-                        // can edit and retry. Other field values stay.
+                        // can edit and retry. Use the network's field
+                        // selectors (config-driven) and fall back to the
+                        // common keys. Other field values stay.
                         setFormData((prev) => {
                           const next = { ...prev };
-                          delete next['email'];
-                          delete next['phone'];
-                          delete next['phone_number'];
-                          delete next['mobile'];
+                          for (const key of [
+                            identity?.email,
+                            identity?.phone,
+                            'email',
+                            'phone',
+                            'phone_number',
+                            'mobile',
+                          ]) {
+                            if (key) delete next[key];
+                          }
                           return next;
                         });
                       }}

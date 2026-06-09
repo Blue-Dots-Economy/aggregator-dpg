@@ -5,8 +5,7 @@
  *   - create defaults the field to `form` (legacy full-profile default)
  *   - create accepts a declared mode (`voice`) and persists it
  *   - create rejects an undeclared mode with 400 INVALID_REGISTRATION_MODE
- *   - create rejects `voice` (submission_shape=account_only) +
- *     completion_actions[] with 400 INVALID_CONFIG
+ *   - create rejects a non-snake_case mode value with 400 SCHEMA_VALIDATION
  *   - PATCH rejects any `registration_mode` in the body (UpdateLinkBodySchema
  *     is .strict(); this pins that as a regression)
  *

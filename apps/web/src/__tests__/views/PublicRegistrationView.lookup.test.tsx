@@ -256,4 +256,50 @@ describe('<PublicRegistrationView /> — lookup branches', () => {
     };
     expect(body.partial).toBeUndefined();
   });
+
+  it('probes using the network identity field-map (non-standard phone key)', async () => {
+    // Regression: purple_dot-style networks key phone as `mobile_number`,
+    // not `phone`. The probe must read the value via the `identity.phone`
+    // selector and forward it as `phone_number`, else owned_elsewhere no-ops.
+    const fetchMock = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
+      const url = input.toString();
+      if (url.includes('/lookup')) {
+        return new Response(
+          JSON.stringify({ user_exists: false, owned_elsewhere: false, lifecycle_summary: null }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return new Response(JSON.stringify({ outcome: 'passed', submission_id: 's' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    const schema = {
+      type: 'object' as const,
+      properties: { mobile_number: { type: 'string' as const, default: '+919800000000' } },
+    };
+    render(
+      <QueryClientProvider client={client}>
+        <NextIntlClientProvider locale="en" messages={messages as Record<string, unknown>}>
+          <PublicRegistrationView
+            {...baseProps}
+            schema={schema}
+            identity={{ name: 'name', phone: 'mobile_number', email: 'email' }}
+          />
+        </NextIntlClientProvider>
+      </QueryClientProvider>,
+    );
+    fireEvent.submit(screen.getByTestId('rjsf-shim'));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+    const lookupUrl = fetchMock.mock.calls[0]![0]!.toString();
+    expect(lookupUrl).toContain('/lookup');
+    expect(lookupUrl).toContain('phone_number=%2B919800000000');
+  });
 });
