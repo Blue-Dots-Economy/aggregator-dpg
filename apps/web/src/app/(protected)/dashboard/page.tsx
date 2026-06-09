@@ -988,6 +988,22 @@ function buildLifecycleByItemId(
   return out;
 }
 
+/**
+ * Narrows the rendered table rows to the selected lifecycle. The table is fed
+ * by the legacy dashboard rollup (not lifecycle-aware), so the dropdown filters
+ * the already-merged rows here. `'all'` is a no-op; `'account_only'` yields no
+ * rows (those participants have no signals item, hence no row); the rest match
+ * `lifecycle_status` with the back-compat default `'live'` for unmatched rows.
+ */
+function filterRowsByLifecycle<R extends { lifecycle_status?: LifecycleStatus }>(
+  rows: R[],
+  filter: LifecycleFilterValue,
+): R[] {
+  if (filter === 'all') return rows;
+  if (filter === 'account_only') return [];
+  return rows.filter((r) => (r.lifecycle_status ?? 'live') === filter);
+}
+
 function SeekersTab() {
   const t = useTranslations('dashboard');
   const locale = useLocale();
@@ -1032,19 +1048,13 @@ function SeekersTab() {
         }
       : undefined,
   );
-  // Parallel fetch for the lifecycle tile counts + per-item lifecycle
-  // payload. Forwards `?lifecycle=` end-to-end (URL → fetch → API). The
-  // items endpoint always returns `meta.tiles` reflecting the full
-  // unfiltered dataset, regardless of the lifecycle narrowing.
-  const lifecycleArg: LifecycleFilter | undefined =
-    lifecycleFilter === 'all' ? undefined : lifecycleFilter;
+  // Fetch the FULL (unfiltered) lifecycle payload so every table row gets its
+  // true lifecycle_status for the column, and so the dropdown can narrow the
+  // table client-side. The table rows come from the legacy dashboard rollup
+  // (`slice`), which is not lifecycle-aware — narrowing the items fetch alone
+  // would never change the table, so we narrow the rendered rows instead.
   const { data: lifecycleItems } = useDashboardItems(
-    seekerDomainId
-      ? {
-          domain: seekerDomainId,
-          ...(lifecycleArg ? { lifecycle: lifecycleArg } : {}),
-        }
-      : undefined,
+    seekerDomainId ? { domain: seekerDomainId } : undefined,
   );
   const lifecycleByItemId = useMemo(
     () => buildLifecycleByItemId(lifecycleItems?.items),
@@ -1088,6 +1098,10 @@ function SeekersTab() {
   const rows = useMemo(
     () => (slice?.items ?? []).map((p) => toSeekerRow(p, locale, lifecycleByItemId)),
     [slice?.items, locale, lifecycleByItemId],
+  );
+  const filteredRows = useMemo(
+    () => filterRowsByLifecycle(rows, lifecycleFilter),
+    [rows, lifecycleFilter],
   );
 
   // Refresh handler: hits the BFF with refresh=true to force signalstack to
@@ -1225,7 +1239,7 @@ function SeekersTab() {
       ) : (
         <ParticipantTable
           kind="seeker"
-          rows={rows}
+          rows={filteredRows}
           total={slice?.total_matching ?? total}
           page={page}
           pageSize={PAGE_SIZE}
@@ -1412,17 +1426,10 @@ function ProvidersTab() {
         }
       : undefined,
   );
-  // Parallel fetch for lifecycle tiles + per-item lifecycle map.
+  // Full (unfiltered) lifecycle map; the table is narrowed client-side.
   // Mirrors SeekersTab; see comments there for the full rationale.
-  const lifecycleArg: LifecycleFilter | undefined =
-    lifecycleFilter === 'all' ? undefined : lifecycleFilter;
   const { data: lifecycleItems } = useDashboardItems(
-    providerDomainId
-      ? {
-          domain: providerDomainId,
-          ...(lifecycleArg ? { lifecycle: lifecycleArg } : {}),
-        }
-      : undefined,
+    providerDomainId ? { domain: providerDomainId } : undefined,
   );
   const lifecycleByItemId = useMemo(
     () => buildLifecycleByItemId(lifecycleItems?.items),
@@ -1449,6 +1456,10 @@ function ProvidersTab() {
   const rows = useMemo(
     () => (slice?.items ?? []).map((p) => toProviderRow(p, locale, lifecycleByItemId)),
     [slice?.items, locale, lifecycleByItemId],
+  );
+  const filteredRows = useMemo(
+    () => filterRowsByLifecycle(rows, lifecycleFilter),
+    [rows, lifecycleFilter],
   );
   const [cachedByStatus, setCachedByStatus] = useState<Record<string, number> | undefined>();
   useEffect(() => {
@@ -1587,7 +1598,7 @@ function ProvidersTab() {
       ) : (
         <ParticipantTable<Provider>
           kind="provider"
-          rows={rows}
+          rows={filteredRows}
           total={slice?.total_matching ?? total}
           page={page}
           pageSize={PAGE_SIZE}
