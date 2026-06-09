@@ -917,13 +917,10 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
    * Fetch a single signals item by `item_id` from the
    * `POST /api/v1/network/item/fetch_local` endpoint.
    *
-   * The HTTP impl is minimal — the outbound-dispatch processor uses the
-   * in-memory fake in tests; this method is wired so the production
-   * worker can fall back to the live signals read path when configured.
-   * A 404 (or empty `items[]`) is mapped to `ok(null)` so the caller's
-   * "indeterminate → proceed" branch can fire without surfacing a
-   * spurious error. All other non-2xx responses and transport failures
-   * surface as `UpstreamError`.
+   * Generic single-item read primitive. A 404 (or empty `items[]`) is
+   * mapped to `ok(null)` so a caller can distinguish "absent" from an
+   * error. All other non-2xx responses and transport failures surface as
+   * `UpstreamError`.
    *
    * @param query - Item id to look up.
    * @returns ok(SignalStackProfile) on hit; ok(null) on absent;

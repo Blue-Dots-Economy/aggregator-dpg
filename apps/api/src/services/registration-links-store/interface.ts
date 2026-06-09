@@ -8,24 +8,10 @@
 export type RegistrationLinkStatus = 'draft' | 'live' | 'retired';
 
 /**
- * One completion-dispatch action attached to a link. The route handler hands
- * the array to the planner verbatim — fields are validated upstream when the
- * link is created. Shape mirrors the JSONB column declared in
- * `registration_links.completion_actions`.
- */
-export interface RegistrationLinkCompletionAction {
-  channel: 'sms' | 'voice' | 'chat';
-  template_id: string;
-  delay_seconds: number;
-  max_retries: number;
-}
-
-/**
  * Per-link form shape:
  *   - `account_and_profile` (default): identity + full profile schema.
  *   - `account_only`: identity only (name + phone OR email + consent).
- *     Server forces submit_mode=account_only and skips the dispatcher
- *     fan-out. Immutable after creation.
+ *     Server forces submit_mode=account_only. Immutable after creation.
  */
 export type RegistrationLinkSubmissionMode = 'account_only' | 'account_and_profile';
 
@@ -35,12 +21,6 @@ export interface RegistrationLink {
   slug: string;
   domain: string;
   context: Record<string, unknown>;
-  /**
-   * Completion-dispatch actions evaluated by the public submit handler when
-   * signals classifies the new item as `draft`. Empty array (default) means
-   * no dispatcher fan-out for this link.
-   */
-  completionActions: RegistrationLinkCompletionAction[];
   /** See {@link RegistrationLinkSubmissionMode}. */
   submissionMode: RegistrationLinkSubmissionMode;
   qrObjectKey: string | null;
@@ -59,8 +39,6 @@ export interface CreateRegistrationLinkInput {
   status?: RegistrationLinkStatus;
   /** Defaults to `'account_and_profile'` when omitted. */
   submissionMode?: RegistrationLinkSubmissionMode;
-  /** Defaults to `[]`. Rejected when `submissionMode === 'account_only'`. */
-  completionActions?: RegistrationLinkCompletionAction[];
   expiresAt?: Date | null;
   createdBy: string;
 }

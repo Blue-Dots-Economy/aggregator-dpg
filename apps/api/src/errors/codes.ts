@@ -274,7 +274,7 @@ export const ERR = {
     status: 400,
     title: 'Invalid configuration',
     detail: 'The combination of fields supplied is not allowed by the API.',
-    hint: 'A field combination violates a business invariant (e.g. completion_actions on an account_only link). Inspect detail for the specific rule.',
+    hint: 'A field combination violates a business invariant (e.g. profile fields on an account_only link). Inspect detail for the specific rule.',
   },
 } as const satisfies Record<string, ErrorCatalogueEntry>;
 

@@ -391,9 +391,8 @@ export class InMemorySignalStackWriter extends SignalStackWriterBase {
 
   /**
    * Seeds a single signalstack item keyed by `itemId`, filling unspecified
-   * fields with deterministic defaults. Used by cross-package consumers
-   * (the outbound-dispatch processor in particular) to pin the lifecycle
-   * a `getItem(...)` re-check will surface for a given id.
+   * fields with deterministic defaults. Used by tests to pin the lifecycle
+   * a `getItem(...)` lookup will surface for a given id.
    *
    * Re-seeding the same `itemId` overwrites the previous entry.
    *

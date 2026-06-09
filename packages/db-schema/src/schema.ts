@@ -257,10 +257,6 @@ export const registrationLinks = pgTable(
     slug: text('slug').notNull(),
     domain: text('domain').notNull(),
     context: jsonb('context').$type<Record<string, unknown>>().notNull().default({}),
-    completionActions: jsonb('completion_actions')
-      .$type<Array<Record<string, unknown>>>()
-      .notNull()
-      .default([]),
     submissionMode: text('submission_mode')
       .$type<'account_only' | 'account_and_profile'>()
       .notNull()
@@ -410,60 +406,6 @@ export const onboarding = pgTable(
   }),
 );
 
-// ─── outbound_dispatch_log ───────────────────────────────────────────────────
-
-/**
- * Outbound completion-dispatch audit log.
- *
- * One row per outbound campaign send attempt fired by the onboarding
- * dispatcher (sms / voice / chat). The composite unique key
- * (participantId, itemId, channel, templateId) makes the dispatcher's
- * enqueue idempotent: re-running the planner against the same signals
- * response cannot duplicate sends.
- *
- * Lifecycle re-check at send time may transition a row from `queued`
- * to `skipped_lifecycle` when the underlying signals item has moved
- * out of `draft` before the send fires.
- */
-export const outboundDispatchLog = pgTable(
-  'outbound_dispatch_log',
-  {
-    id: uuid('id').primaryKey().defaultRandom(),
-    aggregatorId: uuid('aggregator_id')
-      .notNull()
-      .references(() => aggregators.id, { onDelete: 'cascade' }),
-    participantId: uuid('participant_id')
-      .notNull()
-      .references(() => participants.id, { onDelete: 'cascade' }),
-    itemId: text('item_id').notNull(),
-    channel: text('channel', { enum: ['sms', 'voice', 'chat'] }).notNull(),
-    templateId: text('template_id').notNull(),
-    status: text('status', {
-      enum: ['queued', 'sent', 'skipped_lifecycle', 'failed'],
-    })
-      .notNull()
-      .default('queued'),
-    attempt: integer('attempt').notNull().default(0),
-    error: text('error'),
-    payload: jsonb('payload').$type<Record<string, unknown>>().notNull().default({}),
-    queuedAt: timestamp('queued_at', { withTimezone: true }).notNull().defaultNow(),
-    sentAt: timestamp('sent_at', { withTimezone: true }),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => ({
-    idempotencyIdx: uniqueIndex('outbound_dispatch_idempotency_idx').on(
-      table.participantId,
-      table.itemId,
-      table.channel,
-      table.templateId,
-    ),
-    aggregatorStatusIdx: index('outbound_dispatch_aggregator_status_idx').on(
-      table.aggregatorId,
-      table.status,
-    ),
-  }),
-);
-
 // ─── Inferred row types ──────────────────────────────────────────────────────
 
 export type AggregatorRow = typeof aggregators.$inferSelect;
@@ -480,5 +422,3 @@ export type LinkSubmissionRow = typeof linkSubmissions.$inferSelect;
 export type NewLinkSubmissionRow = typeof linkSubmissions.$inferInsert;
 export type OnboardingRow = typeof onboarding.$inferSelect;
 export type NewOnboardingRow = typeof onboarding.$inferInsert;
-export type OutboundDispatchLogRow = typeof outboundDispatchLog.$inferSelect;
-export type NewOutboundDispatchLogRow = typeof outboundDispatchLog.$inferInsert;

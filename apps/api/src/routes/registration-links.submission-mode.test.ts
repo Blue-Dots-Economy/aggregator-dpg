@@ -5,8 +5,6 @@
  *   - create defaults the field to `'account_and_profile'`
  *   - create accepts `'account_only'` and persists it
  *   - create rejects unknown enum values with 400
- *   - create rejects `'account_only' + completion_actions[]` with
- *     400 INVALID_CONFIG (Task 8 guard)
  *   - PATCH rejects any `submission_mode` in the body (already covered by
  *     UpdateLinkBodySchema.strict(), this test pins that as a regression)
  *
@@ -56,7 +54,6 @@ class TrackingRegistrationLinksStore extends RegistrationLinksStoreBase {
       slug: input.slug,
       domain: input.domain,
       context: input.context,
-      completionActions: input.completionActions ?? [],
       submissionMode: input.submissionMode ?? 'account_and_profile',
       qrObjectKey: null,
       status: input.status ?? 'draft',
@@ -191,41 +188,6 @@ describe('POST /v1/links/create — submission_mode', () => {
     });
     expect(r.statusCode).toBe(400);
     expect(r.json().error.code).toBe('SCHEMA_VALIDATION');
-  });
-
-  it('rejects account_only + completion_actions[] with 400 INVALID_CONFIG', async () => {
-    const r = await app.inject({
-      method: 'POST',
-      url: '/v1/links/create',
-      headers: { authorization: `Bearer ${AUTH_TOKEN}` },
-      payload: {
-        domain: 'seeker',
-        submission_mode: 'account_only',
-        completion_actions: [
-          { channel: 'sms', template_id: 't1', delay_seconds: 0, max_retries: 3 },
-        ],
-      },
-    });
-    expect(r.statusCode).toBe(400);
-    expect(r.json().error.code).toBe('INVALID_CONFIG');
-    expect(store.creates).toHaveLength(0);
-  });
-
-  it('allows account_and_profile + completion_actions[]', async () => {
-    const r = await app.inject({
-      method: 'POST',
-      url: '/v1/links/create',
-      headers: { authorization: `Bearer ${AUTH_TOKEN}` },
-      payload: {
-        domain: 'seeker',
-        submission_mode: 'account_and_profile',
-        completion_actions: [
-          { channel: 'sms', template_id: 't1', delay_seconds: 0, max_retries: 3 },
-        ],
-      },
-    });
-    expect(r.statusCode).toBe(201);
-    expect(store.creates[0]!.completionActions).toHaveLength(1);
   });
 });
 

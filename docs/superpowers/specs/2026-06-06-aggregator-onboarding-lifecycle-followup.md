@@ -110,6 +110,8 @@ For the empty-item edge (signals returns `items: []` with `owned_elsewhere: fals
 
 ## 7. Outbound completion dispatcher
 
+> **Deferred — removed, see future voice/chat spec.**
+
 A worker / queue consumer that:
 
 1. After every `/admin/participant` POST that returns a `draft`-status item (signals response's `items[i].lifecycle_status === 'draft'`), enqueue one job per `completion_actions[]` element.
