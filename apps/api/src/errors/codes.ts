@@ -252,29 +252,36 @@ export const ERR = {
     hint: 'Per-slug+ip rate limiter on public submit; window/max in config.',
   },
 
-  // ── Submission mode (per-link account_only vs account_and_profile) ──────
-  SUBMISSION_MODE_MISMATCH: {
-    code: 'SUBMISSION_MODE_MISMATCH',
+  // ── Registration mode (per-link admin channel; voice / form / future) ──
+  REGISTRATION_MODE_MISMATCH: {
+    code: 'REGISTRATION_MODE_MISMATCH',
     status: 400,
-    title: 'Submission mode mismatch',
+    title: 'Registration mode mismatch',
     detail:
       'This registration link only accepts identity fields (name + phone or email + consent). It does not accept profile data.',
-    hint: 'POST body to an account_only link included item_state or unknown fields. Server rejects to prevent profile leakage into an account-only capture.',
+    hint: 'POST body to a link whose registration_mode resolves to submission_shape=account_only included item_state or unknown fields. Server rejects to prevent profile leakage into an account-only capture.',
   },
-  SUBMISSION_MODE_IMMUTABLE: {
-    code: 'SUBMISSION_MODE_IMMUTABLE',
+  REGISTRATION_MODE_IMMUTABLE: {
+    code: 'REGISTRATION_MODE_IMMUTABLE',
     status: 400,
-    title: 'Submission mode cannot be changed',
+    title: 'Registration mode cannot be changed',
     detail:
-      'The submission mode is fixed at link creation time. Create a new link to use a different mode.',
-    hint: 'PATCH /v1/links/:id included submission_mode. Immutable by design — UpdateLinkBodySchema is .strict() so unknown keys 400 automatically.',
+      'The registration mode is fixed at link creation time. Create a new link to use a different mode.',
+    hint: 'PATCH /v1/links/:id included registration_mode. Immutable by design — UpdateLinkBodySchema is .strict() so unknown keys 400 automatically.',
+  },
+  INVALID_REGISTRATION_MODE: {
+    code: 'INVALID_REGISTRATION_MODE',
+    status: 400,
+    title: 'Invalid registration mode',
+    detail: 'The selected registration mode is not declared in this network configuration.',
+    hint: 'Create body referenced a mode key not present in aggregator.config.yaml registration_modes. Surface the declared keys via fields.declared.',
   },
   INVALID_CONFIG: {
     code: 'INVALID_CONFIG',
     status: 400,
     title: 'Invalid configuration',
     detail: 'The combination of fields supplied is not allowed by the API.',
-    hint: 'A field combination violates a business invariant (e.g. completion_actions on an account_only link). Inspect detail for the specific rule.',
+    hint: 'A field combination violates a business invariant (e.g. completion_actions on a registration_mode whose submission_shape is account_only). Inspect detail for the specific rule.',
   },
 } as const satisfies Record<string, ErrorCatalogueEntry>;
 
