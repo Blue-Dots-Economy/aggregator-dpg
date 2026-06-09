@@ -122,55 +122,33 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
     stripEmptyOptionalCells(job.payload, schemaResult.value);
   }
 
-  // Per-row partial-mode detection. A row qualifies for `submit_mode:
-  // account_only` when (a) identity is present (name + at least one
-  // contact) AND (b) at least one required profile field is missing.
-  // Such rows skip Ajv validation locally and push to signals with no
-  // item_state — signals creates the user row only, no item.
-  // Rows with full data run the normal Ajv path and push with
-  // submit_mode='with_item' (signals classifies as `live`).
-  // Rows missing identity still hard-fail on Ajv (no recovery possible).
-  let submitMode: 'with_item' | 'account_only' = 'with_item';
-  if (schemaResult.success) {
-    const networkCfgEarly = await getNetworkConfig();
-    const domainCfgEarly = networkCfgEarly.domains[job.participantType];
-    if (domainCfgEarly) {
-      const nameKey = domainCfgEarly.identity.name;
-      const phoneKey = domainCfgEarly.identity.phone;
-      const emailKey = domainCfgEarly.identity.email;
-      const cellPresent = (k: string | undefined): boolean => {
-        if (!k) return false;
-        const v = job.payload[k];
-        if (Array.isArray(v)) return v.length > 0;
-        return v !== undefined && v !== null && String(v).trim() !== '';
-      };
-      const hasName = cellPresent(nameKey);
-      const hasContact = cellPresent(phoneKey) || cellPresent(emailKey);
-      const schemaObj = schemaResult.value as Record<string, unknown>;
-      const required = Array.isArray(schemaObj['required'])
-        ? (schemaObj['required'] as string[])
-        : [];
-      const allRequiredFilled = required.every((k) => cellPresent(k));
-      if (hasName && hasContact && !allRequiredFilled) {
-        submitMode = 'account_only';
-      }
-    }
-  }
-
+  // Schema validation is advisory at this layer. Required-field gaps
+  // are NOT a failure: signals' /admin/participant accepts partial
+  // item_state and classifies the resulting item as `draft`. We still
+  // surface TYPE / FORMAT / PATTERN / ENUM mismatches as row failures
+  // because signals would 400 on them anyway and the local check gives
+  // a faster error path. Missing-required-only failures pass through —
+  // signals handles them.
   const validate = validatorResult.value;
-  if (submitMode !== 'account_only' && !validate(job.payload)) {
-    const reasons = (validate.errors ?? []).map(
-      (e) => `${e.instancePath || e.schemaPath}: ${e.message ?? 'invalid'}`,
-    );
-    return await commit(
-      job,
-      {
-        outcome: 'failed',
-        category: 'validation',
-        reasons: reasons.length > 0 ? reasons : ['schema validation failed'],
-      },
-      log,
-    );
+  if (!validate(job.payload)) {
+    const errors = validate.errors ?? [];
+    // Drop required-field errors; keep everything else (type, format,
+    // pattern, enum, additionalProperties, minLength, etc.).
+    const blocking = errors.filter((e) => e.keyword !== 'required');
+    if (blocking.length > 0) {
+      const reasons = blocking.map(
+        (e) => `${e.instancePath || e.schemaPath}: ${e.message ?? 'invalid'}`,
+      );
+      return await commit(
+        job,
+        {
+          outcome: 'failed',
+          category: 'validation',
+          reasons,
+        },
+        log,
+      );
+    }
   }
 
   // 2. Normalisation. Auto-allocate a UUID when the row carries no explicit
@@ -254,14 +232,7 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
     // row's outcome to `failed` so it surfaces in errors.csv alongside any
     // validation / normalisation failures. Operators see one consistent
     // signal: a row only counts as "passed" once signalstack has it too.
-    const push = await pushToSignalStack(
-      job,
-      participantId,
-      phoneNormalised,
-      emailNormalised,
-      submitMode,
-      log,
-    );
+    const push = await pushToSignalStack(job, participantId, phoneNormalised, emailNormalised, log);
     if (!push.success) {
       // `push.message` already includes the upstream's own error text when
       // signalstack returned a JSON body (e.g.
@@ -366,7 +337,6 @@ async function pushToSignalStack(
   participantId: string,
   phone: string | null,
   email: string | null,
-  submitMode: 'with_item' | 'account_only',
   log: typeof logger,
 ): Promise<SignalStackPushResult> {
   const ss = getSignalStackWriter();
@@ -444,15 +414,11 @@ async function pushToSignalStack(
     network: config.SIGNALSTACK_ITEM_NETWORK,
     domain: job.participantType,
     item_type: domainCfg.itemType,
-    // account_only rows skip item_state — signals creates the user row
-    // only, no item. The writer drops `profile` from the wire body when
-    // submit_mode is account_only (signalstack-writer/http.ts:115); we
-    // still hand it a placeholder so the interface stays satisfied.
-    profile:
-      submitMode === 'account_only'
-        ? {}
-        : buildSignalStackItemState(job.participantType, job.payload, pushPhone, domainCfg),
-    submit_mode: submitMode,
+    // Always pass the row's profile cells through verbatim. Signals
+    // accepts partial item_state and classifies the resulting item as
+    // `draft` when required fields are missing — that's signals' job,
+    // not ours. Aggregator stays a thin pass-through.
+    profile: buildSignalStackItemState(job.participantType, job.payload, pushPhone, domainCfg),
   });
   if (!result.success) {
     log.error({
