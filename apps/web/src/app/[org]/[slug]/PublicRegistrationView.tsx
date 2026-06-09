@@ -160,9 +160,21 @@ export function PublicRegistrationView({
       const { participant_id: _omit, ...rest } = props as Record<string, unknown>;
       (clone as { properties?: Record<string, unknown> }).properties = rest;
     }
+    // Form mode silently accepts partial submissions: only the identity
+    // fields signals needs (name + at least one contact) stay required, so a
+    // participant can save a partial profile and finish later. signals'
+    // classifier marks the resulting item `draft` when profile fields are
+    // missing. Everything else (including `participant_id`) drops out of
+    // `required`. The server re-applies the same leniency (drops Ajv
+    // `required` errors), so this only governs the client RJSF gate.
+    const identityKeys = new Set(
+      [identity?.name, identity?.phone, identity?.email].filter(
+        (k): k is string => typeof k === 'string' && k.length > 0,
+      ),
+    );
     const required = (clone as { required?: string[] }).required;
     if (Array.isArray(required)) {
-      (clone as { required?: string[] }).required = required.filter((r) => r !== 'participant_id');
+      (clone as { required?: string[] }).required = required.filter((r) => identityKeys.has(r));
     }
     // Inline `items.$ref → #/$defs/<x>` enum hits so RJSF's checkboxes
     // widget receives a populated `enumOptions` list. RJSF's runtime
@@ -196,9 +208,21 @@ export function PublicRegistrationView({
           (inlined[field] as Record<string, unknown>).uniqueItems = true;
         }
       }
+      // Partial-accept: dropping a field from `required` is not enough — RJSF
+      // seeds array fields with `[]` (trips `minItems`) and the form starts
+      // with empty strings (trips `minLength`). Strip the minimum-presence
+      // constraints from every non-identity field so a bare identity submit
+      // validates client-side. enum / format / type stay — those only fire on
+      // a value the participant actually entered.
+      for (const [field, def] of Object.entries(inlined)) {
+        if (identityKeys.has(field) || !def || typeof def !== 'object') continue;
+        delete (def as Record<string, unknown>)['minItems'];
+        delete (def as Record<string, unknown>)['minLength'];
+        delete (def as Record<string, unknown>)['minimum'];
+      }
     }
     return clone;
-  }, [schema]);
+  }, [schema, identity]);
 
   // Default uiSchema cleanups: array fields become a single comma-separated
   // tag input (no "Add another entry" row-builder), boolean / required-string
