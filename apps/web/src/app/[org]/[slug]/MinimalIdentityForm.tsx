@@ -1,6 +1,6 @@
 /**
  * Identity-only registration form rendered when a public link has
- * `submission_mode === 'account_only'`. Collects name + phone or email +
+ * the resolved `submission_shape === 'account_only'`. Collects name + phone or email +
  * consent and nothing else. The parent view (`PublicRegistrationView`)
  * passes the network's identity field names (e.g. `phone` vs
  * `mobile_number`) so the body posted to the API uses the right keys

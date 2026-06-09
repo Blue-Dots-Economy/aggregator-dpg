@@ -336,7 +336,7 @@ export function PublicRegistrationView({
   };
 
   /**
-   * Identity-only submit for `submission_mode === 'account_only'` links.
+   * Identity-only submit for `submission_shape === 'account_only'` links.
    * Delegates to {@link handleSubmit} with a synthesised RJSF event so the
    * probe + POST + state handling stays in one place. The server enforces
    * the capture-scope; this form simply does not collect profile fields.
