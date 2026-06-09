@@ -616,19 +616,16 @@ function ParticipantTable<R extends ParticipantBase>({
             />
           </div>
           {onLifecycleFilterChange ? (
-            <label className="flex items-center gap-2 text-[12px] text-ink-500">
-              <span className="font-medium">{t('filters.lifecycle_label')}</span>
-              <select
-                aria-label={t('filters.lifecycle_label')}
-                className="bd-input text-[12.5px] py-1.5 pr-7"
-                value={lifecycleFilter}
-                onChange={(e) => onLifecycleFilterChange(e.target.value as LifecycleFilterValue)}
-              >
-                <option value="all">{t('filters.lifecycle_all')}</option>
-                <option value="draft">{t('filters.lifecycle_draft')}</option>
-                <option value="live">{t('filters.lifecycle_live')}</option>
-              </select>
-            </label>
+            <select
+              aria-label={t('filters.lifecycle_label')}
+              className="bd-input text-[12.5px] py-1.5 pr-7"
+              value={lifecycleFilter}
+              onChange={(e) => onLifecycleFilterChange(e.target.value as LifecycleFilterValue)}
+            >
+              <option value="all">{t('filters.lifecycle_all')}</option>
+              <option value="draft">{t('filters.lifecycle_draft')}</option>
+              <option value="live">{t('filters.lifecycle_live')}</option>
+            </select>
           ) : null}
           <div ref={filterRef} className="relative">
             <Button
