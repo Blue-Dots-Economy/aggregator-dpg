@@ -257,6 +257,34 @@ describe('POST /public/v1/aggregators/:org/registrations/:slug — account_only 
     expect(r.json().submission_shape).toBe('account_only');
   });
 
+  it('re-submitting the same phone is an idempotent 201, not a 409 dedup', async () => {
+    const payload = {
+      name: 'A. User',
+      phone: '+919999900001',
+      consent_terms: true,
+      consent_privacy: true,
+    };
+    const first = await app.inject({
+      method: 'POST',
+      url: `/public/v1/aggregators/${ORG_SLUG}/registrations/${SLUG_AO}`,
+      payload,
+    });
+    expect(first.statusCode).toBe(201);
+    expect(first.json().outcome).toBe('passed');
+
+    // Second submit hits the local participants dedup (writeOutcome=skipped),
+    // but signals reports the same own user (owned_elsewhere=false) — so the
+    // response must stay a 201 success, not a 409 "already registered".
+    const second = await app.inject({
+      method: 'POST',
+      url: `/public/v1/aggregators/${ORG_SLUG}/registrations/${SLUG_AO}`,
+      payload,
+    });
+    expect(second.statusCode).toBe(201);
+    expect(second.json().outcome).toBe('passed');
+    expect(second.json().owned_elsewhere).toBe(false);
+  });
+
   it('rejects body containing item_state with 400 REGISTRATION_MODE_MISMATCH', async () => {
     const r = await app.inject({
       method: 'POST',

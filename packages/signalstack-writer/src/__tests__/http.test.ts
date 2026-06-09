@@ -332,15 +332,17 @@ describe('HttpSignalStackWriter.onboard', () => {
     expect(result.value.profile_item_id).toBe('');
   });
 
-  it('account_only re-submit of own user (user_existed) → already_registered, NOT owned_elsewhere', async () => {
+  it('account_only re-submit of own user (user_existed) → idempotent success, not skipped/owned_elsewhere', async () => {
     fetchMock.mockResolvedValueOnce(
       okJsonResponse({ user_id: 'u-1', user_existed: true, owned_elsewhere: false, items: [] }),
     );
     const result = await writer.onboard(ACCOUNT_ONLY_INPUT);
     expect(result.success).toBe(true);
     if (!result.success) return;
+    // Repeat phone is idempotent success — must NOT flag already_registered
+    // (which the caller maps to a 409 skip) nor owned_elsewhere.
     expect(result.value.owned_elsewhere).toBe(false);
-    expect(result.value.already_registered).toBe(true);
+    expect(result.value.already_registered ?? false).toBe(false);
   });
 
   it('account_only genuinely foreign user (owned_elsewhere signal) → owned_elsewhere=true', async () => {

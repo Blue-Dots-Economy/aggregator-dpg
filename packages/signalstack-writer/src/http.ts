@@ -188,19 +188,21 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       const items = Array.isArray(raw.items) ? raw.items : [];
       const ownedElsewhereSignal = raw.owned_elsewhere === true;
 
-      // account_only path — signalstack created the user row but no item, so
-      // an empty `items` array is EXPECTED here, not a sign of foreign
-      // ownership. Derive ownership solely from the explicit `owned_elsewhere`
-      // signal; a returning own-aggregator user (`user_existed: true`) surfaces
-      // as `already_registered` (the caller maps that to a `skipped` dedup),
-      // NOT as `owned_elsewhere`. Checked BEFORE the with-item heuristic below
-      // precisely because that heuristic treats empty items as owned-elsewhere.
+      // account_only path — signalstack created (or idempotently re-ensured)
+      // the user row but no item, so an empty `items` array is EXPECTED here,
+      // not a sign of foreign ownership. Re-submitting the same phone/email is
+      // an idempotent SUCCESS — signals returns the same user_id — so a
+      // returning own-aggregator user (`user_existed: true`) is NOT flagged
+      // `already_registered` (which would make the caller 409-skip it). Only a
+      // genuinely foreign user (explicit `owned_elsewhere`) skips. Checked
+      // BEFORE the with-item heuristic, which treats empty items as
+      // owned-elsewhere — invalid for account_only.
       if (submitMode === 'account_only') {
         return ok({
           user_id: raw.user_id,
           profile_item_id: '',
           onboarded_at: typeof raw.onboarded_at === 'string' ? raw.onboarded_at : '',
-          already_registered: raw.user_existed === true,
+          already_registered: false,
           owned_elsewhere: ownedElsewhereSignal,
         });
       }

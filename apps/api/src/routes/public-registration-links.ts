@@ -481,6 +481,16 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
         lifecycleStatusOut = lifecycleStatus;
         completionPctOut = completionPct;
 
+        // signalstack is the identity authority. The local participants table
+        // is a soon-to-be-removed mirror, so its per-phone dedup must not flip
+        // an account_only capture to `skipped`/409 — re-submitting the same
+        // phone is an idempotent success (signals returns the same user). Drive
+        // the account_only outcome from signals: skip only when the identity is
+        // genuinely owned by another aggregator (owned_elsewhere).
+        if (submitMode === 'account_only') {
+          outcome = ownedElsewhere ? 'skipped' : 'passed';
+        }
+
         log.info({
           status: 'success',
           sub: 'signalstack.push',
