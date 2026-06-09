@@ -257,10 +257,7 @@ export const registrationLinks = pgTable(
     slug: text('slug').notNull(),
     domain: text('domain').notNull(),
     context: jsonb('context').$type<Record<string, unknown>>().notNull().default({}),
-    submissionMode: text('submission_mode')
-      .$type<'account_only' | 'account_and_profile'>()
-      .notNull()
-      .default('account_and_profile'),
+    registrationMode: text('registration_mode').notNull().default('form'),
     qrObjectKey: text('qr_object_key'),
     status: registrationLinkStatusEnum('status').notNull().default('draft'),
     expiresAt: timestamp('expires_at', { withTimezone: true }),

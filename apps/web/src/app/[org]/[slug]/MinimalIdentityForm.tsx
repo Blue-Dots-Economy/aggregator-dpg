@@ -1,6 +1,6 @@
 /**
  * Identity-only registration form rendered when a public link has
- * `submission_mode === 'account_only'`. Collects name + phone or email +
+ * the resolved `submission_shape === 'account_only'`. Collects name + phone or email +
  * consent and nothing else. The parent view (`PublicRegistrationView`)
  * passes the network's identity field names (e.g. `phone` vs
  * `mobile_number`) so the body posted to the API uses the right keys
@@ -43,10 +43,19 @@ export interface MinimalIdentityFormProps {
    * etc.). Falls back to `var(--bd-primary-600)`.
    */
   brandColor?: string;
+  /**
+   * Optional i18n key (resolved against the root message namespace) for a
+   * hint rendered beneath the form — e.g. the voice-call notice declared on
+   * the link's registration mode. `null` / undefined renders nothing.
+   */
+  hintI18nKey?: string | null;
 }
 
 export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Element {
   const t = useTranslations('profile.public_reg.account_only');
+  // Root-scoped translator for the registration mode's public hint key,
+  // which is a top-level message key supplied by network config.
+  const tRoot = useTranslations();
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
@@ -176,6 +185,10 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
             {t('submit_label')}
           </button>
         </div>
+
+        {props.hintI18nKey ? (
+          <p className="mt-1 text-[12.5px] italic text-ink-500">{tRoot(props.hintI18nKey)}</p>
+        ) : null}
       </form>
     </div>
   );

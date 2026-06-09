@@ -1,15 +1,19 @@
 /**
  * Tests for the admin POST /v1/links/create + PATCH /v1/links/:id handlers'
- * behaviour around the per-link `submission_mode` toggle:
+ * behaviour around the per-link `registration_mode` key:
  *
- *   - create defaults the field to `'account_and_profile'`
- *   - create accepts `'account_only'` and persists it
- *   - create rejects unknown enum values with 400
- *   - PATCH rejects any `submission_mode` in the body (already covered by
- *     UpdateLinkBodySchema.strict(), this test pins that as a regression)
+ *   - create defaults the field to `form` (legacy full-profile default)
+ *   - create accepts a declared mode (`voice`) and persists it
+ *   - create rejects an undeclared mode with 400 INVALID_REGISTRATION_MODE
+ *   - create rejects `voice` (submission_shape=account_only) +
+ *     completion_actions[] with 400 INVALID_CONFIG
+ *   - PATCH rejects any `registration_mode` in the body (UpdateLinkBodySchema
+ *     is .strict(); this pins that as a regression)
  *
- * Uses a tracking stub for the registration-links store + the in-memory
- * aggregator fake. Auth is stubbed via `_setAccessTokenVerifier`.
+ * The blue_dot test fixture declares two modes: `voice` (account_only) and
+ * `form` (account_and_profile). Uses a tracking stub for the registration-links
+ * store + the in-memory aggregator fake. Auth is stubbed via
+ * `_setAccessTokenVerifier`.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { FastifyInstance } from 'fastify';
@@ -54,7 +58,7 @@ class TrackingRegistrationLinksStore extends RegistrationLinksStoreBase {
       slug: input.slug,
       domain: input.domain,
       context: input.context,
-      submissionMode: input.submissionMode ?? 'account_and_profile',
+      registrationMode: input.registrationMode ?? 'form',
       qrObjectKey: null,
       status: input.status ?? 'draft',
       expiresAt: input.expiresAt ?? null,
@@ -138,7 +142,7 @@ async function bootApp(): Promise<{ app: FastifyInstance; store: TrackingRegistr
   return { app, store };
 }
 
-describe('POST /v1/links/create — submission_mode', () => {
+describe('POST /v1/links/create — registration_mode', () => {
   let app: FastifyInstance;
   let store: TrackingRegistrationLinksStore;
 
@@ -154,7 +158,7 @@ describe('POST /v1/links/create — submission_mode', () => {
     _setDbClients(null, null);
   });
 
-  it('defaults submission_mode to account_and_profile when omitted', async () => {
+  it('defaults registration_mode to "form" when omitted', async () => {
     const r = await app.inject({
       method: 'POST',
       url: '/v1/links/create',
@@ -162,36 +166,48 @@ describe('POST /v1/links/create — submission_mode', () => {
       payload: { domain: 'seeker' },
     });
     expect(r.statusCode).toBe(201);
-    expect(r.json().submission_mode).toBe('account_and_profile');
+    expect(r.json().registration_mode).toBe('form');
     expect(store.creates).toHaveLength(1);
-    expect(store.creates[0]!.submissionMode).toBe('account_and_profile');
+    expect(store.creates[0]!.registrationMode).toBe('form');
   });
 
-  it('accepts submission_mode=account_only and persists it', async () => {
+  it('accepts registration_mode=voice and persists it', async () => {
     const r = await app.inject({
       method: 'POST',
       url: '/v1/links/create',
       headers: { authorization: `Bearer ${AUTH_TOKEN}` },
-      payload: { domain: 'seeker', submission_mode: 'account_only' },
+      payload: { domain: 'seeker', registration_mode: 'voice' },
     });
     expect(r.statusCode).toBe(201);
-    expect(r.json().submission_mode).toBe('account_only');
-    expect(store.creates[0]!.submissionMode).toBe('account_only');
+    expect(r.json().registration_mode).toBe('voice');
+    expect(store.creates[0]!.registrationMode).toBe('voice');
   });
 
-  it('rejects unknown submission_mode values with 400', async () => {
+  it('rejects an undeclared mode with 400 INVALID_REGISTRATION_MODE', async () => {
     const r = await app.inject({
       method: 'POST',
       url: '/v1/links/create',
       headers: { authorization: `Bearer ${AUTH_TOKEN}` },
-      payload: { domain: 'seeker', submission_mode: 'bogus' },
+      payload: { domain: 'seeker', registration_mode: 'kiosk' },
+    });
+    expect(r.statusCode).toBe(400);
+    expect(r.json().error.code).toBe('INVALID_REGISTRATION_MODE');
+    expect(store.creates).toHaveLength(0);
+  });
+
+  it('rejects a non-snake_case mode value with 400 SCHEMA_VALIDATION', async () => {
+    const r = await app.inject({
+      method: 'POST',
+      url: '/v1/links/create',
+      headers: { authorization: `Bearer ${AUTH_TOKEN}` },
+      payload: { domain: 'seeker', registration_mode: 'Bad-Key' },
     });
     expect(r.statusCode).toBe(400);
     expect(r.json().error.code).toBe('SCHEMA_VALIDATION');
   });
 });
 
-describe('PATCH /v1/links/:id — submission_mode immutability', () => {
+describe('PATCH /v1/links/:id — registration_mode immutability', () => {
   let app: FastifyInstance;
 
   beforeEach(async () => {
@@ -206,12 +222,12 @@ describe('PATCH /v1/links/:id — submission_mode immutability', () => {
     _setDbClients(null, null);
   });
 
-  it('rejects body containing submission_mode with 400', async () => {
+  it('rejects body containing registration_mode with 400', async () => {
     const r = await app.inject({
       method: 'PATCH',
       url: '/v1/links/00000000-0000-4000-8000-000000000001',
       headers: { authorization: `Bearer ${AUTH_TOKEN}` },
-      payload: { submission_mode: 'account_only' },
+      payload: { registration_mode: 'voice' },
     });
     expect(r.statusCode).toBe(400);
     expect(r.json().error.code).toBe('SCHEMA_VALIDATION');

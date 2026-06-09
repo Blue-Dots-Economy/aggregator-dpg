@@ -1,20 +1,22 @@
 /**
- * Tests for the per-link submission_mode contract on the public
- * registration endpoints:
+ * Tests for the per-link registration_mode contract on the public
+ * registration endpoints. The link carries a `registration_mode` key
+ * (`voice` / `form`); the resolved `submission_shape` (account_only /
+ * account_and_profile) — sourced from network config — drives form shape.
  *
- *   GET  /public/v1/aggregators/:org/links/:slug   (T6 — resolve)
- *   POST /public/v1/aggregators/:org/registrations/:slug   (T7 — submit)
+ *   GET  /public/v1/aggregators/:org/links/:slug   (resolve)
+ *   POST /public/v1/aggregators/:org/registrations/:slug   (submit)
  *
- * T6 (resolve):
- *   - surfaces `submission_mode` on the response
+ * Resolve:
+ *   - surfaces `registration_mode` + resolved `submission_shape`
  *   - nulls `schema`, `schema_id`, `schema_version` when account_only
  *   - keeps full schema body for account_and_profile (regression)
  *
- * T7 (submit, account_only branch):
+ * Submit (account_only shape, i.e. `voice` link):
  *   - identity-only body accepted, returns 201 with nulled lifecycle fields
- *   - body with `item_state` rejected as 400 SUBMISSION_MODE_MISMATCH
- *   - body with unknown keys rejected as 400 SUBMISSION_MODE_MISMATCH
- *   - `partial` body flag is accepted and ignored (forced account_only)
+ *   - body with `item_state` rejected as 400 REGISTRATION_MODE_MISMATCH
+ *   - body with unknown keys rejected as 400 REGISTRATION_MODE_MISMATCH
+ *   - a stray `partial` key is now an unknown key → 400 (flag removed)
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { FastifyInstance } from 'fastify';
@@ -150,13 +152,13 @@ async function bootApp(): Promise<{
     ...baseLink,
     id: LINK_ID_AO,
     slug: SLUG_AO,
-    submissionMode: 'account_only',
+    registrationMode: 'voice',
   };
   const fullLink: RegistrationLink = {
     ...baseLink,
     id: LINK_ID_FULL,
     slug: SLUG_FULL,
-    submissionMode: 'account_and_profile',
+    registrationMode: 'form',
   };
   _setRegistrationLinksStore(new TwoLinkStore(aoLink, fullLink));
   _setDbClients(null, buildFakeDb(SUBMISSION_ID) as never);
@@ -175,46 +177,49 @@ async function teardown(app: FastifyInstance | undefined): Promise<void> {
   _setDbClients(null, null);
 }
 
-describe('GET /public/v1/aggregators/:org/links/:slug — submission_mode (T6)', () => {
+describe('GET /public/v1/aggregators/:org/links/:slug — registration_mode (resolve)', () => {
   let app: FastifyInstance;
   beforeEach(async () => {
     ({ app } = await bootApp());
   });
-  afterEach(async () => teardown(app));
+  afterEach(() => teardown(app));
 
-  it('surfaces submission_mode and nulls schema fields for account_only', async () => {
+  it('surfaces voice mode → account_only shape and nulls schema fields', async () => {
     const r = await app.inject({
       method: 'GET',
       url: `/public/v1/aggregators/${ORG_SLUG}/links/${SLUG_AO}`,
     });
     expect(r.statusCode).toBe(200);
     const body = r.json();
-    expect(body.submission_mode).toBe('account_only');
+    expect(body.registration_mode).toBe('voice');
+    expect(body.submission_shape).toBe('account_only');
+    expect(body.public_hint_i18n_key).toBe('registration_mode.voice.hint');
     expect(body.schema).toBeNull();
     expect(body.schema_id).toBeNull();
     expect(body.schema_version).toBeNull();
   });
 
-  it('surfaces submission_mode and includes schema body for account_and_profile', async () => {
+  it('surfaces form mode → account_and_profile shape and includes schema body', async () => {
     const r = await app.inject({
       method: 'GET',
       url: `/public/v1/aggregators/${ORG_SLUG}/links/${SLUG_FULL}`,
     });
     expect(r.statusCode).toBe(200);
     const body = r.json();
-    expect(body.submission_mode).toBe('account_and_profile');
+    expect(body.registration_mode).toBe('form');
+    expect(body.submission_shape).toBe('account_and_profile');
+    expect(body.public_hint_i18n_key).toBeNull();
     expect(body.schema).not.toBeNull();
     expect(body.schema_id).toBe('participant-seeker');
     expect(body.schema_version).toBe('v1');
   });
 });
 
-describe('POST /public/v1/aggregators/:org/registrations/:slug — account_only (T7)', () => {
+describe('POST /public/v1/aggregators/:org/registrations/:slug — account_only (voice)', () => {
   let app: FastifyInstance;
-  let signalstack: SignalStackWriterFake;
 
   beforeEach(async () => {
-    ({ app, signalstack } = await bootApp());
+    ({ app } = await bootApp());
   });
   afterEach(() => teardown(app));
 
@@ -233,10 +238,11 @@ describe('POST /public/v1/aggregators/:org/registrations/:slug — account_only 
     const body = r.json();
     expect(body.lifecycle_status).toBeNull();
     expect(body.completion_pct).toBeNull();
-    expect(body.submission_mode).toBe('account_only');
+    expect(body.registration_mode).toBe('voice');
+    expect(body.submission_shape).toBe('account_only');
   });
 
-  it('account_only submit succeeds with email identity', async () => {
+  it('accepts an account_only submit with email identity (201)', async () => {
     const r = await app.inject({
       method: 'POST',
       url: `/public/v1/aggregators/${ORG_SLUG}/registrations/${SLUG_AO}`,
@@ -248,10 +254,10 @@ describe('POST /public/v1/aggregators/:org/registrations/:slug — account_only 
       },
     });
     expect(r.statusCode).toBe(201);
-    void signalstack;
+    expect(r.json().submission_shape).toBe('account_only');
   });
 
-  it('rejects body containing item_state with 400 SUBMISSION_MODE_MISMATCH', async () => {
+  it('rejects body containing item_state with 400 REGISTRATION_MODE_MISMATCH', async () => {
     const r = await app.inject({
       method: 'POST',
       url: `/public/v1/aggregators/${ORG_SLUG}/registrations/${SLUG_AO}`,
@@ -264,7 +270,7 @@ describe('POST /public/v1/aggregators/:org/registrations/:slug — account_only 
       },
     });
     expect(r.statusCode).toBe(400);
-    expect(r.json().error.code).toBe('SUBMISSION_MODE_MISMATCH');
+    expect(r.json().error.code).toBe('REGISTRATION_MODE_MISMATCH');
   });
 
   it('rejects body with unknown keys', async () => {
@@ -280,10 +286,10 @@ describe('POST /public/v1/aggregators/:org/registrations/:slug — account_only 
       },
     });
     expect(r.statusCode).toBe(400);
-    expect(r.json().error.code).toBe('SUBMISSION_MODE_MISMATCH');
+    expect(r.json().error.code).toBe('REGISTRATION_MODE_MISMATCH');
   });
 
-  it('accepts and ignores `partial: true` (always forces account_only)', async () => {
+  it('rejects a stray `partial` key (flag removed; now an unknown field)', async () => {
     const r = await app.inject({
       method: 'POST',
       url: `/public/v1/aggregators/${ORG_SLUG}/registrations/${SLUG_AO}`,
@@ -295,7 +301,8 @@ describe('POST /public/v1/aggregators/:org/registrations/:slug — account_only 
         partial: true,
       },
     });
-    expect(r.statusCode).toBe(201);
+    expect(r.statusCode).toBe(400);
+    expect(r.json().error.code).toBe('REGISTRATION_MODE_MISMATCH');
   });
 
   it('rejects missing identity fields (no phone or email)', async () => {

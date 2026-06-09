@@ -8,12 +8,13 @@
 export type RegistrationLinkStatus = 'draft' | 'live' | 'retired';
 
 /**
- * Per-link form shape:
- *   - `account_and_profile` (default): identity + full profile schema.
- *   - `account_only`: identity only (name + phone OR email + consent).
- *     Server forces submit_mode=account_only. Immutable after creation.
+ * Per-link admin-facing registration mode key. The mode → form-shape
+ * mapping lives in network config (aggregator.config.yaml under
+ * `registration_modes`); unknown keys at read time fall back to `form`
+ * shape via resolveSubmissionShape() (see services/registration-mode).
+ * Open snake_case identifier; not constrained to a fixed enum.
  */
-export type RegistrationLinkSubmissionMode = 'account_only' | 'account_and_profile';
+export type RegistrationLinkRegistrationMode = string;
 
 export interface RegistrationLink {
   id: string;
@@ -21,8 +22,8 @@ export interface RegistrationLink {
   slug: string;
   domain: string;
   context: Record<string, unknown>;
-  /** See {@link RegistrationLinkSubmissionMode}. */
-  submissionMode: RegistrationLinkSubmissionMode;
+  /** See {@link RegistrationLinkRegistrationMode}. */
+  registrationMode: RegistrationLinkRegistrationMode;
   qrObjectKey: string | null;
   status: RegistrationLinkStatus;
   expiresAt: Date | null;
@@ -37,8 +38,8 @@ export interface CreateRegistrationLinkInput {
   domain: string;
   context: Record<string, unknown>;
   status?: RegistrationLinkStatus;
-  /** Defaults to `'account_and_profile'` when omitted. */
-  submissionMode?: RegistrationLinkSubmissionMode;
+  /** Defaults to the network's `form` mode when omitted. */
+  registrationMode?: RegistrationLinkRegistrationMode;
   expiresAt?: Date | null;
   createdBy: string;
 }

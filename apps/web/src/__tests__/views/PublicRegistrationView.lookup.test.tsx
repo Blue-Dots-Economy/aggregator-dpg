@@ -78,6 +78,8 @@ const baseProps = {
     },
   },
   uiSchema: {},
+  submissionShape: 'account_and_profile' as const,
+  publicHintI18nKey: null,
 };
 
 function renderView(formData: Record<string, unknown> = { email: 'a@b.com', name: 'A' }) {
@@ -198,7 +200,7 @@ describe('<PublicRegistrationView /> — lookup branches', () => {
     ).toBeInTheDocument();
   });
 
-  it('forwards `partial: true` to /submit when the checkbox is checked', async () => {
+  it('renders no partial checkbox (flag removed; full form always submits)', async () => {
     const fetchMock = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
       const url = input.toString();
       if (url.includes('/lookup')) {
@@ -207,17 +209,14 @@ describe('<PublicRegistrationView /> — lookup branches', () => {
           { status: 200, headers: { 'content-type': 'application/json' } },
         );
       }
-      if (url.includes('/submit')) {
-        return new Response(JSON.stringify({ outcome: 'passed', submission_id: 'sub-2' }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        });
-      }
-      throw new Error(`unexpected fetch: ${url}`);
+      return new Response(JSON.stringify({ outcome: 'passed', submission_id: 'sub-2' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
     });
     globalThis.fetch = fetchMock as unknown as typeof fetch;
     renderView();
-    fireEvent.click(screen.getByTestId('lookup-partial-checkbox'));
+    expect(screen.queryByTestId('lookup-partial-checkbox')).toBeNull();
     fireEvent.submit(screen.getByTestId('rjsf-shim'));
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -227,11 +226,11 @@ describe('<PublicRegistrationView /> — lookup branches', () => {
       partial?: boolean;
       email?: string;
     };
-    expect(body.partial).toBe(true);
+    expect(body.partial).toBeUndefined();
     expect(body.email).toBe('a@b.com');
   });
 
-  it('omits `partial` from /submit when the checkbox is not checked', async () => {
+  it('omits `partial` from the /submit body', async () => {
     const fetchMock = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
       const url = input.toString();
       if (url.includes('/lookup')) {

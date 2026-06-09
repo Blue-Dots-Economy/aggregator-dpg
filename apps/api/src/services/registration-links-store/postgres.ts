@@ -34,7 +34,7 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
           domain: input.domain,
           context: input.context,
           status: input.status ?? 'draft',
-          submissionMode: input.submissionMode ?? 'account_and_profile',
+          registrationMode: input.registrationMode ?? 'form',
           expiresAt: input.expiresAt ?? null,
           createdBy: input.createdBy,
         })
@@ -289,10 +289,7 @@ function toDomain(row: RegistrationLinkRow): RegistrationLink {
     slug: row.slug,
     domain: row.domain,
     context: row.context,
-    submissionMode:
-      row.submissionMode === 'account_only' || row.submissionMode === 'account_and_profile'
-        ? row.submissionMode
-        : 'account_and_profile',
+    registrationMode: typeof row.registrationMode === 'string' ? row.registrationMode : 'form',
     qrObjectKey: row.qrObjectKey,
     status: row.status,
     expiresAt: row.expiresAt,

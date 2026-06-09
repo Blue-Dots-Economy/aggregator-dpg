@@ -63,6 +63,17 @@ export interface AggregatorConfigDomain {
 }
 
 /**
+ * One declared per-link registration mode from network config. `label_i18n_key`
+ * names the admin dropdown label; `submission_shape` drives the public form;
+ * `public_hint_i18n_key` (nullable) is rendered beneath the public form.
+ */
+export interface RegistrationModeConfig {
+  label_i18n_key: string;
+  submission_shape: 'account_only' | 'account_and_profile';
+  public_hint_i18n_key: string | null;
+}
+
+/**
  * Brand types mirror the Zod-inferred types exported from
  * `@aggregator-dpg/network-config/interface`. They are duplicated here
  * (as plain TS interfaces) instead of imported because the web app
@@ -133,6 +144,8 @@ export interface AggregatorConfigPayload {
   };
   domains: AggregatorConfigDomain[];
   dashboardBuckets?: DashboardBuckets;
+  /** Per-link registration modes declared by the network (admin dropdown source). */
+  registration_modes?: Record<string, RegistrationModeConfig>;
 }
 
 /**

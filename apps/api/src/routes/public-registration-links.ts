@@ -24,6 +24,7 @@ import { getRegistrationLinksStore } from '../services/registration-links-store/
 import type { RegistrationLink } from '../services/registration-links-store/index.js';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
 import { getNetworkConfig } from '../services/network-config.js';
+import { resolveSubmissionShape, publicHintI18nKey } from '../services/registration-mode/index.js';
 import { getSchemaLoader } from '../services/schema-loader/index.js';
 import { normalisePhone } from '../services/phone.js';
 import { resolveLifecycle } from '../services/onboarding/lifecycle.js';
@@ -82,11 +83,14 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       domain: link.domain,
     });
 
-    // Per-link submission_mode locks the form shape:
-    //   - 'account_and_profile' (default): identity + full profile schema.
+    // Per-link registration_mode resolves (via network config) to a form
+    // shape that locks the rendered form:
+    //   - 'account_and_profile': identity + full profile schema.
     //   - 'account_only': identity only — `schema` is nulled so the client
     //     never accidentally renders a profile form for this link.
-    const accountOnly = link.submissionMode === 'account_only';
+    const submissionShape = resolveSubmissionShape(link.registrationMode, networkCfg);
+    const hintKey = publicHintI18nKey(link.registrationMode, networkCfg);
+    const accountOnly = submissionShape === 'account_only';
 
     return reply.send({
       slug: link.slug,
@@ -96,7 +100,9 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       network: networkCfg.network.id,
       domain: link.domain,
       context: link.context,
-      submission_mode: link.submissionMode,
+      registration_mode: link.registrationMode,
+      submission_shape: submissionShape,
+      public_hint_i18n_key: hintKey,
       schema_id: accountOnly ? null : `participant-${link.domain}`,
       schema_version: accountOnly ? null : 'v1',
       schema: accountOnly ? null : linkDomainCfg.schema,
@@ -155,21 +161,23 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       });
     }
 
-    // `account_only` links lock the form shape: identity fields only, no
-    // profile payload, no schema render. Reject any item_state or stray
-    // top-level key BEFORE we touch the Ajv path. The `partial` flag is
-    // accepted but ignored (forced true / submit_mode=account_only
-    // regardless of value). Allowed identity field names come from the
+    // Resolve the link's registration_mode to a form shape via the live
+    // network config. Unknown keys fall back to `account_and_profile` (see
+    // resolveSubmissionShape) so config drift never hard-fails a live link.
+    const submissionShape = resolveSubmissionShape(link.registrationMode, networkCfgEarly);
+
+    // `account_only` shape locks the form: identity fields only, no profile
+    // payload, no schema render. Reject any item_state or stray top-level key
+    // BEFORE we touch the Ajv path. Allowed identity field names come from the
     // network config so the rule stays generic across signalstack networks
     // (blue_dot uses `phone`, purple_dot uses `mobile_number`, etc.). Server
-    // enforcement only — the web form already renders just identity fields
-    // when mode=account_only, but trusting the client would let a tampered
+    // enforcement only — the web form already renders just identity fields for
+    // an account_only link, but trusting the client would let a tampered
     // submit bypass the capture-scope intent.
-    if (link.submissionMode === 'account_only') {
+    if (submissionShape === 'account_only') {
       const allowed = new Set<string>([
         'consent_terms',
         'consent_privacy',
-        'partial',
         ...[
           linkDomainCfgEarly.identity.name,
           linkDomainCfgEarly.identity.phone,
@@ -178,7 +186,7 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       ]);
       for (const key of Object.keys(rawBody)) {
         if (!allowed.has(key)) {
-          throw httpError('SUBMISSION_MODE_MISMATCH', {
+          throw httpError('REGISTRATION_MODE_MISMATCH', {
             detail: `account_only link does not accept field '${key}'`,
             fields: { rejected_key: key },
           });
@@ -213,19 +221,18 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       }
     }
 
-    // Pull the lifecycle hint off the envelope BEFORE Ajv runs against the
-    // domain schema (which would reject the unknown top-level field).
-    // `partial: true` flips signals' lifecycle path to `account_only` —
-    // signals creates the user row only, no item, and the response carries
-    // no lifecycle fields. v1 surfaces the toggle explicitly; we
-    // deliberately do not infer it from "body contains only identity
-    // fields" because implicit detection is brittle when schemas evolve.
-    // For `account_only` links the link itself forces this — the body
-    // flag is meaningless because the route never accepts item_state.
-    const partial = link.submissionMode === 'account_only' || rawBody['partial'] === true;
+    // The submit shape is driven entirely by the link's resolved
+    // registration_mode — there is no client-supplied `partial` flag anymore.
+    // `account_only` flips signals' lifecycle path to user-row-only (no item,
+    // no lifecycle fields). `account_and_profile` always submits with_item;
+    // missing required profile fields are accepted silently (see the Ajv
+    // block below) and signals' classifier marks the item `draft`. The stray
+    // `partial` key is stripped defensively in case an old client still sends
+    // it.
     const body: Record<string, unknown> = { ...rawBody };
     delete body['partial'];
-    const submitMode: 'with_item' | 'account_only' = partial ? 'account_only' : 'with_item';
+    const submitMode: 'with_item' | 'account_only' =
+      submissionShape === 'account_only' ? 'account_only' : 'with_item';
 
     // Identity selectors come from the resolved network config so the
     // route stays generic across signalstack networks. The sniffer
@@ -242,11 +249,11 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
     const phoneSourceKey = linkDomainCfg.identity.phone;
 
     // 1. Schema validation against the link's domain schema. Skipped for
-    // `account_only` links — the upstream identity-presence guard already
+    // `account_only` shape — the upstream identity-presence guard already
     // enforced shape (name + phone OR email + consent), no profile fields
     // are written, and running Ajv would mis-flag the consent toggles as
     // `additionalProperties` violations against the profile schema.
-    if (link.submissionMode !== 'account_only') {
+    if (submissionShape !== 'account_only') {
       // Load the raw schema as well so we can strip empty-string optional
       // fields before Ajv runs — an empty cell for an optional
       // `format: uri` / `format: email` field would otherwise trip the
@@ -269,32 +276,13 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       }
       const validate = validatorResult.value;
       if (!validate(body)) {
-        let issues = validate.errors ?? [];
-        // `partial: true` (per-submit account_only opt-in on full links)
-        // creates no item — profile fields aren't written, so their
-        // constraints don't apply. Keep only errors on the identity
-        // selectors (name + at least one contact, which signalstack needs
-        // for the user row) and `additionalProperties` (unknown top-level
-        // keys still rejected). The client seeds array fields with `[]`,
-        // so without this an optional `minItems: 1` field would block a
-        // bare identity submission.
-        if (partial) {
-          const identityKeys = new Set(
-            [
-              linkDomainCfg.identity.name,
-              linkDomainCfg.identity.phone,
-              linkDomainCfg.identity.email,
-            ].filter((k): k is string => typeof k === 'string' && k.length > 0),
-          );
-          issues = issues.filter((e) => {
-            if (e.keyword === 'additionalProperties') return true;
-            const field =
-              e.keyword === 'required'
-                ? ((e.params as { missingProperty?: string })?.missingProperty ?? '')
-                : (e.instancePath ?? '').split('/')[1] || '';
-            return identityKeys.has(field);
-          });
-        }
+        // Silent partial-accept: `account_and_profile` links always submit
+        // with_item, but a participant may save an incomplete profile. We
+        // drop `required`-keyword errors so partial submits land — signals'
+        // classifier marks the resulting item `draft` when required fields
+        // are missing, `live` otherwise. Type/format/pattern/enum/
+        // additionalProperties errors still 400 (genuine malformed input).
+        const issues = (validate.errors ?? []).filter((e) => e.keyword !== 'required');
         if (issues.length > 0) {
           throw httpError('SCHEMA_VALIDATION', {
             detail: 'Submission failed schema validation.',
@@ -541,7 +529,8 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
         outcome,
         submission_id: submissionId,
         message: 'This mobile number or email is already registered with this aggregator.',
-        submission_mode: link.submissionMode,
+        registration_mode: link.registrationMode,
+        submission_shape: submissionShape,
         lifecycle_status: lifecycleStatusOut,
         completion_pct: completionPctOut,
         owned_elsewhere: ownedElsewhere,
@@ -551,7 +540,8 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
     return reply.code(201).send({
       outcome,
       submission_id: submissionId,
-      submission_mode: link.submissionMode,
+      registration_mode: link.registrationMode,
+      submission_shape: submissionShape,
       lifecycle_status: lifecycleStatusOut,
       completion_pct: completionPctOut,
       owned_elsewhere: ownedElsewhere,
