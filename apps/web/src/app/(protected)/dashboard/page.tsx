@@ -245,11 +245,11 @@ function FunnelCell({ total, parts }: FunnelCellProps) {
   );
 }
 
-function ProgressTiny({ pct }: { pct: number }) {
+function ProgressTiny({ pct, title }: { pct: number; title?: string }) {
   const color = pct >= 80 ? '#10B981' : pct >= 50 ? '#F59E0B' : '#EF4444';
   const label = pct >= 80 ? 'Complete' : 'Incomplete';
   return (
-    <div className="flex items-center gap-2" title={`${label} · ${pct}%`}>
+    <div className="flex items-center gap-2" title={title ?? `${label} · ${pct}%`}>
       <div className="w-14 h-1.5 rounded-full bg-ink-100 overflow-hidden">
         <div className="h-full rounded-full" style={{ width: `${pct}%`, background: color }} />
       </div>
@@ -718,15 +718,14 @@ function ParticipantTable<R extends ParticipantBase>({
                     <div className="text-[11px] text-ink-400 mt-0.5">last seen {r.last}</div>
                   </td>
                   <td>
-                    <div
+                    <ProgressTiny
+                      pct={r.profile.complete}
                       title={
                         r.lifecycle_status === 'live'
                           ? t('filters.lifecycle_live')
                           : t('filters.lifecycle_draft')
                       }
-                    >
-                      <ProgressTiny pct={r.profile.complete} />
-                    </div>
+                    />
                   </td>
                   <td>
                     <FunnelCell
