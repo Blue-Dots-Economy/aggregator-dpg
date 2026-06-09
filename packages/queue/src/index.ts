@@ -28,22 +28,9 @@ export const QueueName = {
   LinkMetricsRollup: 'link-metrics-rollup',
   /** Hourly watchdog + retention sweep. */
   CronWatchdog: 'cron-watchdog',
-  /**
-   * Onboarding completion-dispatch fan-out. One job per queued row in
-   * `outbound_dispatch_log`. The processor re-checks lifecycle on the
-   * signals item and either sends via the configured channel adapter or
-   * marks the row `skipped_lifecycle`.
-   */
-  OutboundDispatch: 'outbound-dispatch',
 } as const;
 
 export type QueueName = (typeof QueueName)[keyof typeof QueueName];
-
-/**
- * Convenience constant for callers that prefer the bare string name over
- * the namespaced enum. Mirrors `QueueName.OutboundDispatch`.
- */
-export const OUTBOUND_DISPATCH_QUEUE = QueueName.OutboundDispatch;
 
 // ─── Job payloads ────────────────────────────────────────────────────────────
 
@@ -81,16 +68,6 @@ export interface LinkMetricsRollupJob {
 
 export interface CronWatchdogJob {
   tick: number;
-}
-
-/**
- * Payload for the outbound-dispatch queue. The processor looks up the
- * full row in `outbound_dispatch_log` by `dispatchId`, re-checks the
- * signals item's lifecycle, and either sends (stub channel adapter in
- * MVP) or marks `skipped_lifecycle`.
- */
-export interface OutboundDispatchJobData {
-  dispatchId: string;
 }
 
 // ─── Redis connection ────────────────────────────────────────────────────────

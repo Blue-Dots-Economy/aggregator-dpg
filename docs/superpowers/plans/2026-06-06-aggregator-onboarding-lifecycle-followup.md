@@ -1046,6 +1046,8 @@ git commit -m "feat(api): forward submit_mode + parse lifecycle on registration 
 
 ## Task 8: Dispatch-completion planner (pure)
 
+> **Deferred — removed, see future voice/chat spec.**
+
 A pure function: given a signals onboard result + the link's `completion_actions`, returns the list of dispatch directives. No I/O, no DB.
 
 **Files:**

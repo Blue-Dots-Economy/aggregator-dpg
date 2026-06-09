@@ -505,15 +505,11 @@ export abstract class SignalStackWriterBase {
   ): Promise<Result<SignalStackProbeUserResult, BaseError>>;
 
   /**
-   * Fetch a single signals item by `item_id` for a lifecycle re-check.
+   * Fetch a single signals item by `item_id`.
    *
-   * Returns `ok(null)` when the item is not known to signals (e.g. a
-   * race where the dispatcher job fires before the item replicates to
-   * the read path); the caller then treats the lifecycle as
-   * indeterminate and proceeds with the send (drafts dominate the
-   * race). HTTP impls that cannot derive the wire shape may return a
-   * structured `UpstreamError` — production wiring is a follow-up; the
-   * worker test path uses the in-memory fake.
+   * Returns `ok(null)` when the item is not known to signals, so a caller
+   * can distinguish "absent" from a failure. Transport / protocol errors
+   * surface as a structured `BaseError`.
    *
    * @param query - Item id to look up.
    * @returns ok(SignalStackProfile) on hit; ok(null) when absent;

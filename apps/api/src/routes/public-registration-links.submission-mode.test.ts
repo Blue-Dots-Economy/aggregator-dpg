@@ -15,9 +15,8 @@
  *   - body with `item_state` rejected as 400 SUBMISSION_MODE_MISMATCH
  *   - body with unknown keys rejected as 400 SUBMISSION_MODE_MISMATCH
  *   - `partial` body flag is accepted and ignored (forced account_only)
- *   - dispatcher is NEVER enqueued for account_only submits
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
 import {
@@ -35,9 +34,6 @@ import {
   type StoreResult,
 } from '../services/registration-links-store/index.js';
 import { _setParticipantsWriter } from './public-registration-links.js';
-import { _setOutboundDispatchLog } from '../services/outbound-dispatch-log/index.js';
-import { OutboundDispatchLogFake } from '../services/outbound-dispatch-log/memory.js';
-import { _setOutboundDispatchQueue, type OutboundDispatchQueue } from '../services/queue.js';
 import { SignalStackWriterFake } from '@aggregator-dpg/signalstack-writer/testing';
 import { ParticipantsWriterFake } from '@aggregator-dpg/participants-writer/testing';
 import { buildBlueDotConfig } from '@aggregator-dpg/network-config/testing';
@@ -116,7 +112,6 @@ const baseLink = {
   aggregatorId: AGG_ID,
   domain: 'seeker' as const,
   context: {},
-  completionActions: [],
   qrObjectKey: null,
   status: 'live' as const,
   expiresAt: null,
@@ -128,8 +123,6 @@ const baseLink = {
 async function bootApp(): Promise<{
   app: FastifyInstance;
   signalstack: SignalStackWriterFake;
-  dispatchLog: OutboundDispatchLogFake;
-  queueAdd: ReturnType<typeof vi.fn>;
 }> {
   process.env.SIGNALSTACK_BASE_URL = 'http://stub-signalstack';
   process.env.SIGNALSTACK_ADMIN_KEY = 'stub-key';
@@ -153,13 +146,6 @@ async function bootApp(): Promise<{
   _setSignalStackWriter(signalstack);
   _setParticipantsWriter(new ParticipantsWriterFake());
 
-  const dispatchLog = new OutboundDispatchLogFake();
-  _setOutboundDispatchLog(dispatchLog);
-
-  const queueAdd = vi.fn().mockResolvedValue({ id: 'job-stub' });
-  const queue: OutboundDispatchQueue = { add: queueAdd };
-  _setOutboundDispatchQueue(queue);
-
   const aoLink: RegistrationLink = {
     ...baseLink,
     id: LINK_ID_AO,
@@ -176,7 +162,7 @@ async function bootApp(): Promise<{
   _setDbClients(null, buildFakeDb(SUBMISSION_ID) as never);
 
   const app = await buildApp();
-  return { app, signalstack, dispatchLog, queueAdd };
+  return { app, signalstack };
 }
 
 async function teardown(app: FastifyInstance | undefined): Promise<void> {
@@ -186,8 +172,6 @@ async function teardown(app: FastifyInstance | undefined): Promise<void> {
   _setRegistrationLinksStore(null);
   _setNetworkConfig(null);
   _setParticipantsWriter(null);
-  _setOutboundDispatchLog(null);
-  _setOutboundDispatchQueue(null);
   _setDbClients(null, null);
 }
 
@@ -196,7 +180,7 @@ describe('GET /public/v1/aggregators/:org/links/:slug — submission_mode (T6)',
   beforeEach(async () => {
     ({ app } = await bootApp());
   });
-  afterEach(() => teardown(app));
+  afterEach(async () => teardown(app));
 
   it('surfaces submission_mode and nulls schema fields for account_only', async () => {
     const r = await app.inject({
@@ -228,11 +212,9 @@ describe('GET /public/v1/aggregators/:org/links/:slug — submission_mode (T6)',
 describe('POST /public/v1/aggregators/:org/registrations/:slug — account_only (T7)', () => {
   let app: FastifyInstance;
   let signalstack: SignalStackWriterFake;
-  let dispatchLog: OutboundDispatchLogFake;
-  let queueAdd: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
-    ({ app, signalstack, dispatchLog, queueAdd } = await bootApp());
+    ({ app, signalstack } = await bootApp());
   });
   afterEach(() => teardown(app));
 
@@ -254,7 +236,7 @@ describe('POST /public/v1/aggregators/:org/registrations/:slug — account_only 
     expect(body.submission_mode).toBe('account_only');
   });
 
-  it('skips the dispatcher fan-out entirely for account_only', async () => {
+  it('account_only submit succeeds with email identity', async () => {
     const r = await app.inject({
       method: 'POST',
       url: `/public/v1/aggregators/${ORG_SLUG}/registrations/${SLUG_AO}`,
@@ -266,11 +248,6 @@ describe('POST /public/v1/aggregators/:org/registrations/:slug — account_only 
       },
     });
     expect(r.statusCode).toBe(201);
-    // No queue.add call; no outbound_dispatch_log row.
-    expect(queueAdd).not.toHaveBeenCalled();
-    // dispatchLog is a fake; the only way a row lands is via enqueue —
-    // confirm by listing for the participant (none seeded → 0 rows).
-    void dispatchLog; // referenced for parity with parent tests
     void signalstack;
   });
 
