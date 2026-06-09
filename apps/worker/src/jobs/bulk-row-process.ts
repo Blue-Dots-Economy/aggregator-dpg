@@ -119,7 +119,13 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
       schemaResult.value,
       cfg.aggregator.network.csv_array_delimiter,
     );
-    stripEmptyOptionalCells(job.payload, schemaResult.value);
+    // Strip every empty cell, required or not. Empty cells reaching Ajv
+    // trip `type`/`enum`/`minItems`/`minLength` even when the field
+    // wasn't filled in by the operator. Signals accepts missing keys
+    // (item_state is treated as partial) and classifies the resulting
+    // item as `draft`. Required-field gaps surface as Ajv `required`
+    // errors below — those are dropped so the row passes through.
+    stripAllEmptyCells(job.payload);
   }
 
   // Schema validation is advisory at this layer. Required-field gaps
@@ -506,17 +512,32 @@ function preprocessArrayCells(
  * though the field was never required. JSON-Schema-spec-compliant
  * because `required: false` fields may be omitted entirely.
  */
-function stripEmptyOptionalCells(
-  payload: Record<string, unknown>,
-  jsonSchema: Record<string, unknown>,
-): void {
-  const required = Array.isArray(jsonSchema['required'])
-    ? new Set(jsonSchema['required'] as string[])
-    : new Set<string>();
+/**
+ * Strips ALL empty cells from the payload — empty strings, empty
+ * arrays, null, undefined. Used by the bulk row processor so partial
+ * profiles can pass through to signals without tripping Ajv's
+ * content-shape checks (type/enum/minItems/minLength) on cells the
+ * operator never filled in. Signals' classifier handles partial
+ * item_state directly — see commit messages on `feat/account-only-
+ * onboarding-mode` for the contract.
+ *
+ * The earlier required-only `stripEmptyOptionalCells` was removed
+ * because the public link path uses its own copy in
+ * apps/api/src/routes/public-registration-links.ts.
+ */
+function stripAllEmptyCells(payload: Record<string, unknown>): void {
   for (const [field, value] of Object.entries(payload)) {
-    if (required.has(field)) continue;
+    if (value === null || value === undefined) {
+      delete payload[field];
+      continue;
+    }
     if (typeof value === 'string' && value.trim() === '') {
       delete payload[field];
+      continue;
+    }
+    if (Array.isArray(value) && value.length === 0) {
+      delete payload[field];
+      continue;
     }
   }
 }
