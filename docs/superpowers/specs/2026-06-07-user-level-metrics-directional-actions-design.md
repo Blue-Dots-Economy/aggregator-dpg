@@ -78,9 +78,14 @@ them from the onboard call); this exposes them on the read path.
 ```jsonc
 "initiated":        { "create": 1, "accept": 0, "reject": 0, "cancel": 0 },
 "received":         { "create": 0, "accept": 1, "reject": 0, "cancel": 0 },
-"last_initiated_at": { "create": "2026-01-01T00:00:00Z", "accept": null, "reject": null, "cancel": null },
-"last_received_at":  { "create": null, "accept": "2026-01-02T00:00:00Z", "reject": null, "cancel": null }
+"last_initiated_at": { "create": "2026-01-01T00:00:00Z" },
+"last_received_at":  { "accept": "2026-01-02T00:00:00Z" }
 ```
+
+`initiated` / `received` are full count maps. `last_initiated_at` / `last_received_at` are
+**sparse** maps keyed by action — only actions that actually occurred carry a timestamp; an
+action that never happened is **omitted** (no `null` entries). Map shape is retained so new
+action keys can be added later without a shape change. Reads stay `?? null` safe.
 
 Direction is assigned by signalstack from the action's role relative to the profile.
 
@@ -102,8 +107,6 @@ Replace `by_action_status` with two directional maps, and add user-level counts:
 
   // user-level (NEW — computed over the full dataset)
   "total_users": 4,
-  "users_with_applications": 3,
-  "new_users_7d": 1,
   "avg_items_per_user": 1.25,      // already present
   "avg_actions_per_user": 3.3,     // already present
 
@@ -125,8 +128,6 @@ Replace `by_action_status` with two directional maps, and add user-level counts:
         "by_initiated_action_status": { "create": 4, "accept": 0, "reject": 0, "cancel": 0 },
         "by_received_action_status": { "create": 0, "accept": 5, "reject": 1, "cancel": 0 },
         "total_users": 4,
-        "users_with_applications": 3,
-        "new_users_7d": 1,
         "avg_items_per_user": 1.25,
         "avg_actions_per_user": 3.3,
         "mode_wise_counts": { "link": 5 },
@@ -147,18 +148,8 @@ Replace `by_action_status` with two directional maps, and add user-level counts:
           "age_days": 5,
           "initiated": { "create": 1, "accept": 0, "reject": 0, "cancel": 0 },
           "received": { "create": 0, "accept": 1, "reject": 0, "cancel": 0 },
-          "last_initiated_at": {
-            "create": "2026-01-01T00:00:00Z",
-            "accept": null,
-            "reject": null,
-            "cancel": null,
-          },
-          "last_received_at": {
-            "create": null,
-            "accept": "2026-01-02T00:00:00Z",
-            "reject": null,
-            "cancel": null,
-          },
+          "last_initiated_at": { "create": "2026-01-01T00:00:00Z" },
+          "last_received_at": { "accept": "2026-01-02T00:00:00Z" },
           "actionable_tags": [],
         },
       ],
@@ -186,8 +177,8 @@ reshapes for display and reads labels/aggregation hints from `network.json`.
 Update `SignalStackDashboardRollup` and the item shape:
 
 - Rollup: drop `by_action_status`; add `by_initiated_action_status`,
-  `by_received_action_status`, `total_users`, `users_with_applications`, `new_users_7d`.
-  Keep `avg_items_per_user`, `avg_actions_per_user`.
+  `by_received_action_status`, `total_users`. Keep `avg_items_per_user`,
+  `avg_actions_per_user`.
 - Item: add `profile_item_id` (required), `user_id` (optional), `initiated`, `received`,
   `last_initiated_at`, `last_received_at`; drop flat `count_*` / `last_*_at`.
 - Mirror in `apps/web/src/services/dashboard.service.ts` `DashboardRollup`.
@@ -219,10 +210,8 @@ label, their source field, and (for user tiles) the metric level:
     { "field": "has_applications",  "label": "Profiles with Applications" }
   ],
   "user": [
-    { "field": "total_users",             "label": "Total Seekers" },
-    { "field": "avg_items_per_user",       "label": "Avg Profiles per Seeker" },
-    { "field": "users_with_applications",  "label": "Seekers with Applications" },
-    { "field": "new_users_7d",             "label": "New Seekers (7d)" }
+    { "field": "total_users",        "label": "Total Seekers" },
+    { "field": "avg_items_per_user", "label": "Avg Profiles per Seeker" }
   ]
 }
 ```
