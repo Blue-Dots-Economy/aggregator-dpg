@@ -20,6 +20,15 @@ export interface RegistrationLinkCompletionAction {
   max_retries: number;
 }
 
+/**
+ * Per-link form shape:
+ *   - `account_and_profile` (default): identity + full profile schema.
+ *   - `account_only`: identity only (name + phone OR email + consent).
+ *     Server forces submit_mode=account_only and skips the dispatcher
+ *     fan-out. Immutable after creation.
+ */
+export type RegistrationLinkSubmissionMode = 'account_only' | 'account_and_profile';
+
 export interface RegistrationLink {
   id: string;
   aggregatorId: string;
@@ -32,6 +41,8 @@ export interface RegistrationLink {
    * no dispatcher fan-out for this link.
    */
   completionActions: RegistrationLinkCompletionAction[];
+  /** See {@link RegistrationLinkSubmissionMode}. */
+  submissionMode: RegistrationLinkSubmissionMode;
   qrObjectKey: string | null;
   status: RegistrationLinkStatus;
   expiresAt: Date | null;
@@ -46,6 +57,10 @@ export interface CreateRegistrationLinkInput {
   domain: string;
   context: Record<string, unknown>;
   status?: RegistrationLinkStatus;
+  /** Defaults to `'account_and_profile'` when omitted. */
+  submissionMode?: RegistrationLinkSubmissionMode;
+  /** Defaults to `[]`. Rejected when `submissionMode === 'account_only'`. */
+  completionActions?: RegistrationLinkCompletionAction[];
   expiresAt?: Date | null;
   createdBy: string;
 }

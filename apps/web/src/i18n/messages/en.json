@@ -235,6 +235,11 @@
       "field_event_location": "Event Location",
       "field_district": "District",
       "field_domain": "Domain",
+      "field_submission_mode": "What does this link collect?",
+      "submission_mode_full_label": "Account + full profile",
+      "submission_mode_full_hint": "Collects identity and the complete profile schema in one submission.",
+      "submission_mode_account_only_label": "Account only (quick sign-up)",
+      "submission_mode_account_only_hint": "Collects name + phone OR email + consent only. The user can complete the profile later.",
       "placeholder_state": "State",
       "placeholder_event": "Campaign or event name",
       "placeholder_location": "City or venue",
@@ -374,6 +379,17 @@
         "resume_continue_new": "Continue with a new submission",
         "partial_label": "Submit identity now, complete profile later",
         "partial_hint": "We will contact you to finish the remaining details."
+      },
+      "account_only": {
+        "title": "Quick sign-up",
+        "helper": "Provide your name and a contact number or email. You can complete your profile later.",
+        "contact_label": "Provide a phone OR an email (at least one required)",
+        "name_label": "Name",
+        "phone_label": "Phone",
+        "email_label": "Email",
+        "consent_terms_label": "I accept the terms",
+        "consent_privacy_label": "I accept the privacy policy",
+        "submit_label": "Submit"
       }
     }
   },

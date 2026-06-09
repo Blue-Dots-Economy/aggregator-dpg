@@ -235,6 +235,11 @@
       "field_event_location": "कार्यक्रम का स्थान",
       "field_district": "जिला",
       "field_domain": "डोमेन",
+      "field_submission_mode": "यह लिंक क्या एकत्र करता है?",
+      "submission_mode_full_label": "खाता + पूरी प्रोफ़ाइल",
+      "submission_mode_full_hint": "एक ही सबमिशन में पहचान और पूरी प्रोफ़ाइल स्कीमा एकत्र करता है।",
+      "submission_mode_account_only_label": "केवल खाता (त्वरित साइन-अप)",
+      "submission_mode_account_only_hint": "केवल नाम + फ़ोन या ईमेल + सहमति एकत्र करता है। उपयोगकर्ता बाद में प्रोफ़ाइल पूरी कर सकता है।",
       "placeholder_state": "राज्य",
       "placeholder_event": "अभियान या कार्यक्रम का नाम",
       "placeholder_location": "शहर या स्थान",
@@ -374,6 +379,17 @@
         "resume_continue_new": "नई प्रविष्टि के साथ जारी रखें",
         "partial_label": "अभी पहचान जमा करें, प्रोफ़ाइल बाद में पूरी करें",
         "partial_hint": "हम बाकी विवरण पूरा करने के लिए आपसे संपर्क करेंगे।"
+      },
+      "account_only": {
+        "title": "त्वरित साइन-अप",
+        "helper": "अपना नाम और एक संपर्क नंबर या ईमेल दें। आप अपनी प्रोफ़ाइल बाद में पूरी कर सकते हैं।",
+        "contact_label": "एक फ़ोन या ईमेल दें (कम से कम एक आवश्यक)",
+        "name_label": "नाम",
+        "phone_label": "फ़ोन",
+        "email_label": "ईमेल",
+        "consent_terms_label": "मैं नियमों को स्वीकार करता/करती हूँ",
+        "consent_privacy_label": "मैं गोपनीयता नीति को स्वीकार करता/करती हूँ",
+        "submit_label": "जमा करें"
       }
     }
   },

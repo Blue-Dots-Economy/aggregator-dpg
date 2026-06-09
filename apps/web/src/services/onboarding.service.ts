@@ -11,6 +11,12 @@ export interface ApiRegistrationLink {
   slug: string;
   domain: string;
   status: 'draft' | 'live' | 'retired';
+  /**
+   * Per-link form shape, set at create time and immutable thereafter.
+   * Optional on the type for back-compat with older API builds that
+   * don't return the field — absent is treated as `account_and_profile`.
+   */
+  submission_mode?: 'account_only' | 'account_and_profile';
   context: Record<string, unknown>;
   expires_at: string | null;
   /**
@@ -54,6 +60,13 @@ export interface CreateLinkInput {
   title?: string;
   context?: Record<string, unknown>;
   status?: 'draft' | 'live';
+  /**
+   * Per-link form shape:
+   *   - `account_and_profile` (default): identity + full profile schema.
+   *   - `account_only`: identity only (name + phone OR email + consent).
+   * Immutable after creation.
+   */
+  submission_mode?: 'account_only' | 'account_and_profile';
   expires_at?: string | null;
 }
 
