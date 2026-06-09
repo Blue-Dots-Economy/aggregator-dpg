@@ -158,7 +158,7 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — lifecycle
       domain: 'seeker',
       context: {},
       completionActions: [],
-      submissionMode: 'account_and_profile',
+      registrationMode: 'form',
       qrObjectKey: null,
       status: 'live',
       expiresAt: null,
@@ -234,7 +234,12 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — lifecycle
     expect(body.completion_pct).toBe(40);
   });
 
-  it('returns null lifecycle fields when partial=true (account_only mode)', async () => {
+  it('ignores a stray `partial` flag on a form link (still creates an item)', async () => {
+    // The legacy per-submit `partial` opt-in was removed — form (account_and_
+    // profile) links always submit with_item and let signals classify. A
+    // stray `partial: true` from an old client is stripped, not honoured, so
+    // lifecycle fields are still populated (not nulled).
+    signalstack.setNextClassification({ lifecycle_status: 'draft', completion_pct: 50 });
     const r = await app.inject({
       method: 'POST',
       url: `/public/v1/aggregators/${ORG_SLUG}/registrations/${LINK_SLUG}`,
@@ -245,14 +250,14 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — lifecycle
         partial: true,
       },
     });
-    expect([200, 201]).toContain(r.statusCode);
+    expect(r.statusCode).toBe(201);
     const body = r.json() as {
       lifecycle_status: string | null;
       completion_pct: number | null;
       owned_elsewhere: boolean;
     };
-    expect(body.lifecycle_status).toBeNull();
-    expect(body.completion_pct).toBeNull();
+    expect(body.lifecycle_status).toBe('draft');
+    expect(body.completion_pct).toBe(50);
     expect(body.owned_elsewhere).toBe(false);
   });
 
@@ -306,7 +311,7 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — dispatche
       domain: 'seeker',
       context: {},
       completionActions,
-      submissionMode: 'account_and_profile',
+      registrationMode: 'form',
       qrObjectKey: null,
       status: 'live',
       expiresAt: null,
