@@ -97,21 +97,7 @@
       "idx": 13,
       "version": "7",
       "when": 1779300000000,
-      "tag": "0013_lifecycle_followup",
-      "breakpoints": true
-    },
-    {
-      "idx": 14,
-      "version": "7",
-      "when": 1779400000000,
-      "tag": "0014_per_link_submission_mode",
-      "breakpoints": true
-    },
-    {
-      "idx": 15,
-      "version": "7",
-      "when": 1779500000000,
-      "tag": "0015_registration_mode",
+      "tag": "0013_registration_mode",
       "breakpoints": true
     }
   ]
