@@ -358,13 +358,11 @@ type StatusFilter = string; // 'all' | any key signalstack returns in rollup.by_
  */
 type LifecycleFilterValue = 'all' | LifecycleFilter;
 
-const LIFECYCLE_FILTER_VALUES: LifecycleFilterValue[] = [
-  'all',
-  'draft',
-  'live',
-  'paused',
-  'account_only',
-];
+// Lifecycle states the aggregator surfaces today: `draft` (profile incomplete,
+// <100%) and `live` (100%). When signals introduces a new status, add it here,
+// add a matching <option> in the dropdown, and an i18n `filters.lifecycle_<x>`
+// key — the filter logic itself is status-agnostic (generic equality).
+const LIFECYCLE_FILTER_VALUES: LifecycleFilterValue[] = ['all', 'draft', 'live'];
 
 /**
  * Parse `?lifecycle=` from a search-params bag, validating against the
@@ -595,8 +593,6 @@ function ParticipantTable<R extends ParticipantBase>({
                 <option value="all">{t('filters.lifecycle_all')}</option>
                 <option value="draft">{t('filters.lifecycle_draft')}</option>
                 <option value="live">{t('filters.lifecycle_live')}</option>
-                <option value="paused">{t('filters.lifecycle_paused')}</option>
-                <option value="account_only">{t('filters.lifecycle_account_only')}</option>
               </select>
             </label>
           ) : null}
@@ -991,16 +987,19 @@ function buildLifecycleByItemId(
 /**
  * Narrows the rendered table rows to the selected lifecycle. The table is fed
  * by the legacy dashboard rollup (not lifecycle-aware), so the dropdown filters
- * the already-merged rows here. `'all'` is a no-op; `'account_only'` yields no
- * rows (those participants have no signals item, hence no row); the rest match
- * `lifecycle_status` with the back-compat default `'live'` for unmatched rows.
+ * the already-merged rows here. `'all'` (and any non-draft/live value) is a
+ * no-op; `'draft'` / `'live'` match `lifecycle_status` with the back-compat
+ * default `'live'` for unmatched rows.
  */
 function filterRowsByLifecycle<R extends { lifecycle_status?: LifecycleStatus }>(
   rows: R[],
   filter: LifecycleFilterValue,
 ): R[] {
   if (filter === 'all') return rows;
-  if (filter === 'account_only') return [];
+  // Generic equality match so any lifecycle status — including ones added in
+  // future — filters correctly without touching this function. Unmatched rows
+  // default to `'live'` (back-compat with signals deployments that omit the
+  // field).
   return rows.filter((r) => (r.lifecycle_status ?? 'live') === filter);
 }
 
