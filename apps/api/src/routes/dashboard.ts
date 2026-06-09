@@ -28,6 +28,17 @@ import { config } from '../config.js';
 import { httpError } from '../errors/http-error.js';
 
 /**
+ * Upper bound on items considered for lifecycle tile counts. Tiles are
+ * computed by fetching up to this many rows (lifecycle_filter='all') in
+ * parallel with the user's paginated items fetch. Aggregators with more
+ * items than this cap get approximate tile counts (capped at TILE_CAP per
+ * bucket); the response surfaces `meta.tiles_truncated: true` so the UI
+ * can render a "showing N+" affordance. Lift once signals exposes a
+ * server-side per-lifecycle count endpoint.
+ */
+const TILE_CAP = 1000;
+
+/**
  * Lifecycle filter accepted by the dashboard items endpoint.
  *
  *   - `draft|live|paused` — narrows the returned items to that lifecycle bucket.
@@ -124,36 +135,52 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
       });
     }
 
-    // Always request `lifecycle_filter: 'all'` so we can compute the tiles
-    // counts (draft + live + paused) client-side. Per-bucket filtering and
-    // the `account_only` filter are applied below, after tile computation,
-    // so tiles always reflect totals regardless of `?lifecycle=`.
-    const result = await ss.listItemsByAggregator({
+    // Tiles must reflect the FULL aggregator dataset, not the paginated
+    // items slice. Fetch the user's page and a separate tile-compute set
+    // in parallel. `TILE_CAP` is the upper bound on rows considered for
+    // tile counts: aggregators with more items than the cap get
+    // approximate tiles (capped at TILE_CAP each) until signals exposes
+    // a server-side per-lifecycle count endpoint.
+    const baseQuery = {
       aggregator_id: auth.aggregatorId,
       item_network: config.SIGNALSTACK_ITEM_NETWORK,
       item_domain: domain,
       item_type: domainCfg.itemType,
-      limit,
-      offset,
-      lifecycle_filter: 'all',
-    });
+      lifecycle_filter: 'all' as const,
+    };
+    const [itemsResult, tilesResult] = await Promise.all([
+      ss.listItemsByAggregator({ ...baseQuery, limit, offset }),
+      ss.listItemsByAggregator({ ...baseQuery, limit: TILE_CAP, offset: 0 }),
+    ]);
 
-    if (!result.success) {
+    if (!itemsResult.success) {
       log.error({
         status: 'failure',
         sub: 'signalstack.list',
-        error: result.error.message,
-        code: result.error.code,
+        error: itemsResult.error.message,
+        code: itemsResult.error.code,
       });
       throw httpError('INTERNAL', {
-        detail: `Signalstack list failed: ${result.error.code}`,
-        cause: result.error,
+        detail: `Signalstack list failed: ${itemsResult.error.code}`,
+        cause: itemsResult.error,
+      });
+    }
+    if (!tilesResult.success) {
+      log.error({
+        status: 'failure',
+        sub: 'signalstack.list.tiles',
+        error: tilesResult.error.message,
+        code: tilesResult.error.code,
+      });
+      throw httpError('INTERNAL', {
+        detail: `Signalstack tile list failed: ${tilesResult.error.code}`,
+        cause: tilesResult.error,
       });
     }
 
     // Normalise lifecycle on every row via `resolveLifecycle` so an absent
     // `lifecycle_status` from older signals deployments shows up as `'live'`.
-    const normalisedItems = result.value.items.map((item) => {
+    const normalisedItems = itemsResult.value.items.map((item) => {
       const lifecycleStatus = resolveLifecycle(item);
       return {
         ...item,
@@ -161,22 +188,22 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
         completion_pct: item.completion_pct ?? null,
       };
     });
+    const tileRows = tilesResult.value.items.map((item) => resolveLifecycle(item) ?? 'live');
 
-    // Tiles always reflect the full dataset across all lifecycle states.
-    // `account_only` counts participants who exist locally but have no
-    // associated signals item — that requires a participants-table read
-    // we don't have wired into this route yet. v1: report 0 and refine
-    // once a participants reader lands.
+    // Tiles count the full dataset (up to TILE_CAP). `account_only` is the
+    // local-only bucket — participants who exist in our table but have no
+    // signals item — and requires a participants reader not wired here
+    // yet. v1: report 0 and refine once that reader lands.
     // TODO: when a participants reader is exposed, count participants for
     //       this aggregator + domain whose identity (phone/email) is not in
-    //       `normalisedItems[].item_state` and surface that here. Until then,
-    //       this tile is approximate but never negative.
+    //       `tileRows`-corresponding items and surface that here.
     const tiles = {
-      draft: normalisedItems.filter((i) => i.lifecycle_status === 'draft').length,
-      live: normalisedItems.filter((i) => i.lifecycle_status === 'live').length,
-      paused: normalisedItems.filter((i) => i.lifecycle_status === 'paused').length,
+      draft: tileRows.filter((s) => s === 'draft').length,
+      live: tileRows.filter((s) => s === 'live').length,
+      paused: tileRows.filter((s) => s === 'paused').length,
       account_only: 0,
     };
+    const tilesTruncated = tilesResult.value.meta.total > TILE_CAP;
 
     // Apply the lifecycle filter AFTER tile computation. `account_only` short
     // circuits to an empty items array — those rows live in `participants`,
@@ -193,15 +220,17 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
     log.info({
       status: 'success',
       latency_ms: Date.now() - start,
-      total: result.value.meta.total,
+      total: itemsResult.value.meta.total,
       lifecycle_filter: lifecycle ?? null,
       tiles,
+      tiles_truncated: tilesTruncated,
     });
 
     return reply.send({
       meta: {
-        ...result.value.meta,
+        ...itemsResult.value.meta,
         tiles,
+        tiles_truncated: tilesTruncated,
       },
       items: filteredItems,
     });

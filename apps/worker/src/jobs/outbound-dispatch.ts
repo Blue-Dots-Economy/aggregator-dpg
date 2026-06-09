@@ -117,10 +117,14 @@ const defaultSender: ChannelSender = async (row) => {
  *      attempt proceeds.
  *   3. Dispatch via the configured channel adapter (default = stub).
  *      Success → `markSent`; failure → `markFailed` (which bumps
- *      `attempt` and stores the error message).
+ *      `attempt` and stores the error message) **then re-throw** so
+ *      BullMQ schedules the next attempt against the job's `attempts`
+ *      option (set to `max_retries + 1` at enqueue time). Without the
+ *      re-throw, the job resolves and is marked done after one try.
  *
- * Never throws — every external call's outcome is consumed and turned
- * into a structured log entry.
+ * Internal lookup / lifecycle errors do not throw — they are absorbed
+ * (warn-logged) so a transient signals or DB blip doesn't burn the
+ * entire retry budget.
  *
  * @param data - Job payload carrying the `dispatchId`.
  * @param deps - Injected signalstack writer + log adapter + optional sender.
@@ -204,4 +208,8 @@ export async function processOutboundDispatch(
     error_type: sent.error.constructor?.name,
   });
   await deps.log.markFailed(row.id, sent.error.message);
+  // Re-throw so BullMQ honours the job's `attempts` option (set from
+  // the directive's `max_retries + 1` at enqueue time). Without this,
+  // the job resolves successfully and is never retried.
+  throw sent.error;
 }

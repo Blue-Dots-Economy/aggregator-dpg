@@ -120,7 +120,7 @@ describe('processOutboundDispatch', () => {
     expect(log.rows.get('d-1')!.status).toBe('sent');
   });
 
-  it('marks failed and bumps attempt on sender error', async () => {
+  it('marks failed, bumps attempt, and re-throws on sender error so BullMQ retries', async () => {
     const ss = new SignalStackWriterFake();
     ss.seedItem('item-1', { lifecycle_status: 'draft' });
     const log = new LogFake();
@@ -136,7 +136,9 @@ describe('processOutboundDispatch', () => {
       error: new Error('vendor down'),
     }));
 
-    await processOutboundDispatch({ dispatchId: 'd-1' }, { signalstack: ss, log, sender });
+    await expect(
+      processOutboundDispatch({ dispatchId: 'd-1' }, { signalstack: ss, log, sender }),
+    ).rejects.toThrow('vendor down');
 
     expect(log.rows.get('d-1')!.status).toBe('failed');
     expect(log.rows.get('d-1')!.attempt).toBe(1);
