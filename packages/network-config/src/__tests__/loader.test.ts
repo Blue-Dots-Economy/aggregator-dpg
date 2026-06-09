@@ -220,16 +220,24 @@ describe('FileNetworkConfigLoader', () => {
             },
           },
           dashboard_tiles: {
-            total_items: 'Total Seekers',
-            complete_profiles: 'Complete',
-            has_applications: 'Engaged',
+            profile: [
+              { field: 'total_items', label: 'Profiles' },
+              { field: 'complete_profiles', label: 'Complete' },
+            ],
+            user: [{ field: 'total_users', label: 'Total Seekers' }],
           },
         },
       ],
       dashboard_buckets: {
         by_status: { new: 'New', active: 'Active', at_risk: 'At Risk', inactive: 'Inactive' },
-        by_action_status: {
+        by_initiated_action_status: {
           create: 'Requested',
+          accept: 'Accepted',
+          reject: 'Declined',
+          cancel: 'Cancelled',
+        },
+        by_received_action_status: {
+          create: 'Requests',
           accept: 'Connected',
           reject: 'Declined',
           cancel: 'Cancelled',
@@ -248,13 +256,22 @@ describe('FileNetworkConfigLoader', () => {
     expect(result.success).toBe(true);
     if (!result.success) return;
     const resolved = result.value;
-    expect(resolved.domains['seeker']?.dashboardTiles).toEqual({
-      total_items: 'Total Seekers',
-      complete_profiles: 'Complete',
-      has_applications: 'Engaged',
+    expect(resolved.domains['seeker']?.dashboardTiles?.profile?.[0]).toEqual({
+      field: 'total_items',
+      label: 'Profiles',
     });
-    expect(resolved.dashboardBuckets?.by_action_status).toEqual({
+    expect(resolved.domains['seeker']?.dashboardTiles?.user?.[0]).toEqual({
+      field: 'total_users',
+      label: 'Total Seekers',
+    });
+    expect(resolved.dashboardBuckets?.by_initiated_action_status).toEqual({
       create: 'Requested',
+      accept: 'Accepted',
+      reject: 'Declined',
+      cancel: 'Cancelled',
+    });
+    expect(resolved.dashboardBuckets?.by_received_action_status).toEqual({
+      create: 'Requests',
       accept: 'Connected',
       reject: 'Declined',
       cancel: 'Cancelled',
