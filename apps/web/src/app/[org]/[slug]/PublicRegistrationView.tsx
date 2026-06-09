@@ -25,19 +25,22 @@ export interface PublicRegistrationViewProps {
   schema: RJSFSchema;
   uiSchema: Record<string, unknown>;
   /**
-   * Identity field selectors for the domain (name / phone / email). When the
-   * user opts into "submit identity now, complete later" (partial /
-   * account-only), only these fields stay required — signalstack creates no
-   * item, so the rest of the profile is optional. Absent on older API builds.
+   * Identity field selectors for the domain (name / phone / email). For the
+   * account_only form, these are the only fields collected — signalstack
+   * creates a user row with no item. Absent on older API builds.
    */
   identity?: { name?: string; phone?: string; email?: string } | undefined;
   /**
-   * Per-link submission shape. `account_only` locks the form to identity
-   * fields only and skips the RJSF profile schema entirely. Absent on
-   * older API builds — treated as `'account_and_profile'` (back-compat
-   * default, same as the server's default for unmodified rows).
+   * Resolved per-link submission shape. `account_only` locks the form to
+   * identity fields only and skips the RJSF profile schema entirely;
+   * `account_and_profile` renders the full profile form.
    */
-  submissionMode?: 'account_only' | 'account_and_profile' | undefined;
+  submissionShape: 'account_only' | 'account_and_profile';
+  /**
+   * Optional i18n key for a hint rendered beneath the public form (e.g. the
+   * voice-call notice for an account_only link). `null` = no hint.
+   */
+  publicHintI18nKey: string | null;
 }
 
 type SubmitState =
@@ -102,7 +105,8 @@ export function PublicRegistrationView({
   schema,
   uiSchema,
   identity,
-  submissionMode = 'account_and_profile',
+  submissionShape,
+  publicHintI18nKey,
 }: PublicRegistrationViewProps): JSX.Element {
   const t = useTranslations('profile.public_reg');
   const [formData, setFormData] = useState<Record<string, unknown>>({});
@@ -113,8 +117,6 @@ export function PublicRegistrationView({
    * pipeline and render branched UI instead.
    */
   const [lookup, setLookup] = useState<LookupOutcome | null>(null);
-  /** When true, the POST body carries `partial: true` (identity-only). */
-  const [partial, setPartial] = useState(false);
   /**
    * Forces the next submit to bypass the probe — set when the user picks
    * "Continue with a new submission" from the resume prompt. One-shot:
@@ -160,20 +162,7 @@ export function PublicRegistrationView({
     }
     const required = (clone as { required?: string[] }).required;
     if (Array.isArray(required)) {
-      let next = required.filter((r) => r !== 'participant_id');
-      // "Submit identity now, complete later" (partial / account-only):
-      // signalstack creates no item, so only the identity fields it needs
-      // (name + at least one contact) stay required. Everything else becomes
-      // optional so the user can submit a bare identity and finish later.
-      if (partial) {
-        const identityKeys = new Set(
-          [identity?.name, identity?.phone, identity?.email].filter(
-            (k): k is string => typeof k === 'string' && k.length > 0,
-          ),
-        );
-        next = next.filter((r) => identityKeys.has(r));
-      }
-      (clone as { required?: string[] }).required = next;
+      (clone as { required?: string[] }).required = required.filter((r) => r !== 'participant_id');
     }
     // Inline `items.$ref → #/$defs/<x>` enum hits so RJSF's checkboxes
     // widget receives a populated `enumOptions` list. RJSF's runtime
@@ -208,27 +197,8 @@ export function PublicRegistrationView({
         }
       }
     }
-    // Partial mode: dropping a field from `required` is not enough — RJSF
-    // seeds array fields with an empty `[]`, which then trips `minItems: 1`
-    // (and empty strings trip `minLength`) even though the field is optional.
-    // Strip the "minimum-presence" constraints from every non-identity field
-    // so a bare identity submission validates. enum / format / type stay —
-    // those only fire on a value the user actually entered.
-    if (partial && inlined) {
-      const identityKeys = new Set(
-        [identity?.name, identity?.phone, identity?.email].filter(
-          (k): k is string => typeof k === 'string' && k.length > 0,
-        ),
-      );
-      for (const [field, def] of Object.entries(inlined)) {
-        if (identityKeys.has(field) || !def || typeof def !== 'object') continue;
-        delete (def as Record<string, unknown>)['minItems'];
-        delete (def as Record<string, unknown>)['minLength'];
-        delete (def as Record<string, unknown>)['minimum'];
-      }
-    }
     return clone;
-  }, [schema, partial, identity]);
+  }, [schema]);
 
   // Default uiSchema cleanups: array fields become a single comma-separated
   // tag input (no "Add another entry" row-builder), boolean / required-string
@@ -407,9 +377,10 @@ export function PublicRegistrationView({
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          // `partial: true` flips the upstream lifecycle to `account_only`
-          // (Task 7). Only forwarded when the user explicitly opted in.
-          body: JSON.stringify(partial ? { ...values, partial: true } : values),
+          // Full profile submit. The server resolves the link's
+          // registration_mode shape and silently accepts partial profiles
+          // (missing required fields → signals classifies the item `draft`).
+          body: JSON.stringify(values),
         },
       );
       // 409 with outcome=skipped is a dedup hit, not a failure: this
@@ -459,13 +430,13 @@ export function PublicRegistrationView({
   // Hero fill — flat solid primary. No gradient shades.
   const heroGradient = cfg.brand.primary_color ?? '#4338ca';
 
-  // `submission_mode === 'account_only'` links lock the form to identity
-  // fields only — render MinimalIdentityForm and skip the RJSF profile
-  // tree entirely. Owned-elsewhere / resume / done / error states stay
-  // shared with the full form path; only the data-entry surface differs.
-  // The full handleSubmit pipeline runs underneath via handleMinimalSubmit
-  // so probe + dedup + 409 handling behave identically.
-  const isAccountOnly = submissionMode === 'account_only';
+  // `account_only` shape locks the form to identity fields only — render
+  // MinimalIdentityForm and skip the RJSF profile tree entirely. Owned-
+  // elsewhere / resume / done / error states stay shared with the full form
+  // path; only the data-entry surface differs. The full handleSubmit
+  // pipeline runs underneath via handleMinimalSubmit so probe + dedup + 409
+  // handling behave identically.
+  const isAccountOnly = submissionShape === 'account_only';
 
   if (isAccountOnly && state.status === 'idle' && !lookup) {
     return (
@@ -481,6 +452,7 @@ export function PublicRegistrationView({
             identity={identity ?? {}}
             onSubmit={handleMinimalSubmit}
             brandColor={heroGradient}
+            hintI18nKey={publicHintI18nKey}
           />
         </div>
       </div>
@@ -638,7 +610,6 @@ export function PublicRegistrationView({
                           // finds the same item_id via signalstack probe.
                           setLookup(null);
                           setBypassProbe(true);
-                          setPartial(false);
                         }}
                         style={{ backgroundColor: cfg.brand.primary_color }}
                         className="px-3 py-2 rounded-[8px] font-semibold text-[12px] text-white hover:opacity-90"
@@ -684,21 +655,6 @@ export function PublicRegistrationView({
                   }}
                 >
                   <div className="mt-4 flex flex-col gap-3">
-                    <label className="flex items-start gap-2 text-[12.5px] text-ink-600 leading-snug cursor-pointer select-none">
-                      <input
-                        type="checkbox"
-                        data-testid="lookup-partial-checkbox"
-                        checked={partial}
-                        onChange={(ev) => setPartial(ev.target.checked)}
-                        className="mt-0.5 h-4 w-4 rounded border-[var(--bd-border)] accent-[var(--bd-primary-600)]"
-                      />
-                      <span className="font-semibold text-ink-800">
-                        {t('lookup.partial_label')}
-                      </span>
-                      <span className="block text-[11.5px] text-ink-400 mt-0.5">
-                        {t('lookup.partial_hint')}
-                      </span>
-                    </label>
                     <button
                       type="submit"
                       disabled={state.status === 'submitting'}

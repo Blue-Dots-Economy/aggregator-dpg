@@ -36,10 +36,11 @@ interface CreateLinkFormState {
   /** Optional event venue / city. */
   event_location: string;
   /**
-   * Per-link form shape — chosen at create time, immutable afterwards.
-   * Defaults to `account_and_profile` (existing behaviour).
+   * Per-link registration mode key — chosen at create time, immutable
+   * afterwards. Sourced from the live network config's `registration_modes`.
+   * Empty until the config loads (an effect pins the default).
    */
-  submission_mode: 'account_only' | 'account_and_profile';
+  registration_mode: string;
 }
 
 const EMPTY_FORM: CreateLinkFormState = {
@@ -51,7 +52,7 @@ const EMPTY_FORM: CreateLinkFormState = {
   lever_event: '',
   event_date: '',
   event_location: '',
-  submission_mode: 'account_and_profile',
+  registration_mode: '',
 };
 
 function slugifyForLink(input: string): string {
@@ -136,6 +137,10 @@ function Field({
 
 export function CreateLinkSection() {
   const t = useTranslations('onboarding');
+  // Root-scoped translator for runtime-config i18n keys (registration mode
+  // labels/hints are top-level keys declared in network config, not under
+  // the `onboarding` namespace).
+  const tRoot = useTranslations();
   const router = useRouter();
   const [form, setForm] = useState<CreateLinkFormState>(EMPTY_FORM);
   const [createError, setCreateError] = useState<string | null>(null);
@@ -161,6 +166,18 @@ export function CreateLinkSection() {
       );
     }
   }, [rawProfile.data?.type]);
+
+  // Pin the registration mode to the network's default once the config
+  // loads. Prefer the `form` key (full-profile, legacy default) when the
+  // network declares it, else the first declared mode. Only fills while
+  // empty so a user selection stays sticky.
+  useEffect(() => {
+    const modes = cfg?.registration_modes ?? {};
+    const keys = Object.keys(modes);
+    if (keys.length === 0) return;
+    const fallback = keys.includes('form') ? 'form' : keys[0]!;
+    setForm((f) => (f.registration_mode ? f : { ...f, registration_mode: fallback }));
+  }, [cfg?.registration_modes]);
 
   // Prefill state / district / event location from the aggregator's first
   // postal address. User can still override. Only fills on first load —
@@ -199,7 +216,7 @@ export function CreateLinkSection() {
       await create.mutateAsync({
         domain: form.domain,
         status: 'draft',
-        submission_mode: form.submission_mode,
+        registration_mode: form.registration_mode,
         ...(slug ? { slug } : {}),
         title,
         context: {
@@ -299,34 +316,33 @@ export function CreateLinkSection() {
             <input className="bd-input" value={domainLabel} readOnly aria-readonly="true" />
           </Field>
           {/*
-           * Per-link submission mode — chosen here at create time, immutable
-           * afterwards. Dropdown matches the rest of the form's input layout;
-           * a small hint below describes the currently-selected option so the
-           * user understands what the public link will collect.
+           * Per-link registration mode — chosen here at create time, immutable
+           * afterwards. Options are sourced from the live network config's
+           * `registration_modes` so adding a channel (sms, kiosk, …) needs no
+           * web change. The hint below renders the selected mode's
+           * `public_hint_i18n_key` when present.
            */}
-          <Field label={t('create_link.field_submission_mode')} required>
+          <Field label={t('create_link.field_registration_mode')} required>
             <select
               className="bd-input"
-              value={form.submission_mode}
-              onChange={(e) =>
-                setForm((f) => ({
-                  ...f,
-                  submission_mode: e.target.value as 'account_only' | 'account_and_profile',
-                }))
-              }
+              value={form.registration_mode}
+              onChange={(e) => setForm((f) => ({ ...f, registration_mode: e.target.value }))}
             >
-              <option value="account_and_profile">
-                {t('create_link.submission_mode_full_label')}
-              </option>
-              <option value="account_only">
-                {t('create_link.submission_mode_account_only_label')}
-              </option>
+              {Object.entries(cfg?.registration_modes ?? {}).map(([key, mode]) => (
+                <option key={key} value={key}>
+                  {tRoot(mode.label_i18n_key)}
+                </option>
+              ))}
             </select>
-            <span className="block mt-1 text-[12px] text-ink-500">
-              {form.submission_mode === 'account_only'
-                ? t('create_link.submission_mode_account_only_hint')
-                : t('create_link.submission_mode_full_hint')}
-            </span>
+            {(() => {
+              const mode = cfg?.registration_modes?.[form.registration_mode];
+              if (!mode?.public_hint_i18n_key) return null;
+              return (
+                <span className="block mt-1 text-[12px] text-ink-500">
+                  {tRoot(mode.public_hint_i18n_key)}
+                </span>
+              );
+            })()}
           </Field>
           <div className="md:col-span-2 flex items-center justify-end gap-2 mt-2 flex-wrap">
             <Button onClick={onCreate} disabled={create.isPending}>
@@ -410,10 +426,9 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
     event_date: ctxString('event_date'),
     event_location: ctxString('event_location'),
     // Carry the existing link's mode so the edit form can render a
-    // read-only badge. submission_mode is immutable post-create so the
+    // read-only badge. registration_mode is immutable post-create so the
     // edit path must not POST a new value.
-    submission_mode:
-      link.submission_mode === 'account_only' ? 'account_only' : 'account_and_profile',
+    registration_mode: link.registration_mode ?? 'form',
   }));
   const [editError, setEditError] = useState<string | null>(null);
   const onSaveEdit = async () => {

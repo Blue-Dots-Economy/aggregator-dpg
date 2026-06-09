@@ -29,17 +29,20 @@ interface ResolveResponse {
   // (signalstack network.json item_schemas). Inlined so the public page
   // renders the form without a second fetch and without reading from
   // disk — aggregator no longer keeps per-domain schema files.
-  // `null` when `submission_mode === 'account_only'`: the link is
-  // locked to identity-only capture and the form does not render the
-  // RJSF profile tree.
+  // `null` when the resolved `submission_shape === 'account_only'`: the
+  // link is locked to identity-only capture and the form does not render
+  // the RJSF profile tree.
   schema: RJSFSchema | null;
   // Identity field selectors for the domain. Used to relax required-field
-  // validation in "submit identity now" (partial / account-only) mode.
-  // Optional for back-compat with older API builds.
+  // validation for the account-only form. Optional for back-compat.
   identity?: { name?: string; phone?: string; email?: string };
-  // Per-link submission shape. Optional for back-compat with older API
-  // builds — absent means `'account_and_profile'` (the legacy default).
-  submission_mode?: 'account_only' | 'account_and_profile';
+  // Per-link admin-facing registration mode key (e.g. `voice`, `form`).
+  registration_mode?: string;
+  // Resolved form shape (from network config). Optional for back-compat
+  // with older API builds — absent means `'account_and_profile'`.
+  submission_shape?: 'account_only' | 'account_and_profile';
+  // Optional i18n key for a hint rendered beneath the public form.
+  public_hint_i18n_key?: string | null;
   expires_at: string | null;
 }
 
@@ -89,8 +92,9 @@ export default async function PublicRegistrationPage({ params }: PageProps) {
   // Defence in depth: bail if the API returned a non-null but non-object
   // schema (malformed). `null` is valid for `account_only` links and
   // means the MinimalIdentityForm renders instead of the RJSF tree.
-  const submissionMode = resolved.submission_mode ?? 'account_and_profile';
-  if (submissionMode !== 'account_only') {
+  const submissionShape = resolved.submission_shape ?? 'account_and_profile';
+  const hintKey = resolved.public_hint_i18n_key ?? null;
+  if (submissionShape !== 'account_only') {
     if (!resolved.schema || typeof resolved.schema !== 'object') {
       return (
         <ErrorShell
@@ -105,14 +109,14 @@ export default async function PublicRegistrationPage({ params }: PageProps) {
   }
   // `schema` is null for account_only links — the RJSF form is not
   // rendered in that path. Cast to satisfy the view prop's RJSFSchema
-  // type; the view ignores it when submissionMode === 'account_only'.
+  // type; the view ignores it when submissionShape === 'account_only'.
   const schema: RJSFSchema = resolved.schema ?? ({} as RJSFSchema);
   // Aggregator-side optional UI schema overlay (e.g. widget hints,
   // ordering). Lives under config/<network>/schemas/participant/.
   // Optional — RJSF renders defaults when absent. Skip the disk read
   // entirely for account_only links since no RJSF form is rendered.
   let uiSchema: Record<string, unknown> = {};
-  if (submissionMode !== 'account_only') {
+  if (submissionShape !== 'account_only') {
     const uiFile = `${resolved.domain}.v1.ui.json`;
     try {
       uiSchema = JSON.parse(await readFile(resolveParticipantSchemaPath(uiFile), 'utf8')) as Record<
@@ -134,7 +138,8 @@ export default async function PublicRegistrationPage({ params }: PageProps) {
       schema={schema}
       uiSchema={uiSchema}
       identity={resolved.identity}
-      submissionMode={submissionMode}
+      submissionShape={submissionShape}
+      publicHintI18nKey={hintKey}
     />
   );
 }

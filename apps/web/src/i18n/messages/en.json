@@ -235,11 +235,7 @@
       "field_event_location": "Event Location",
       "field_district": "District",
       "field_domain": "Domain",
-      "field_submission_mode": "What does this link collect?",
-      "submission_mode_full_label": "Account + full profile",
-      "submission_mode_full_hint": "Collects identity and the complete profile schema in one submission.",
-      "submission_mode_account_only_label": "Account only (quick sign-up)",
-      "submission_mode_account_only_hint": "Collects name + phone OR email + consent only. The user can complete the profile later.",
+      "field_registration_mode": "Registration mode",
       "placeholder_state": "State",
       "placeholder_event": "Campaign or event name",
       "placeholder_location": "City or venue",
@@ -376,9 +372,7 @@
         "resume_title": "You have a profile in progress",
         "resume_body": "We found an unfinished profile for this contact ({percent}% complete). Resume where you left off?",
         "resume_cta": "Resume profile",
-        "resume_continue_new": "Continue with a new submission",
-        "partial_label": "Submit identity now, complete profile later",
-        "partial_hint": "We will contact you to finish the remaining details."
+        "resume_continue_new": "Continue with a new submission"
       },
       "account_only": {
         "title": "Quick sign-up",
@@ -391,6 +385,17 @@
         "consent_privacy_label": "I accept the privacy policy",
         "submit_label": "Submit"
       }
+    }
+  },
+  "registration_mode": {
+    "field_label": "Registration mode",
+    "voice": {
+      "label": "Voice campaign",
+      "hint": "Our team will call you on this number to complete your profile."
+    },
+    "form": {
+      "label": "Form",
+      "hint": "Participants fill the full profile online. Partial submissions are accepted."
     }
   },
   "auth": {
