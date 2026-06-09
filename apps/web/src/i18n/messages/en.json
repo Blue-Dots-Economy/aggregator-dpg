@@ -391,7 +391,7 @@
     "field_label": "Registration mode",
     "voice": {
       "label": "Voice campaign",
-      "hint": "Our team will call you on this number to complete your profile."
+      "hint": "You'll receive a call on this number to complete your profile."
     },
     "form": {
       "label": "Form",
