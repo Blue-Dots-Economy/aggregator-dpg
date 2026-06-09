@@ -247,14 +247,47 @@ function FunnelCell({ total, parts }: FunnelCellProps) {
 
 function ProgressTiny({ pct, title }: { pct: number; title?: string }) {
   const color = pct >= 80 ? '#10B981' : pct >= 50 ? '#F59E0B' : '#EF4444';
-  const label = pct >= 80 ? 'Complete' : 'Incomplete';
+  const label = title ?? (pct >= 80 ? 'Complete' : 'Incomplete');
+  // Custom hover popover (mirrors FunnelCell) instead of a native `title`,
+  // which renders inconsistently and lags. Surfaces the lifecycle label
+  // (Draft / Live) + completion % on hover.
+  const [hover, setHover] = useState(false);
+  const [pos, setPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const ref = useRef<HTMLDivElement | null>(null);
+  const onEnter = () => {
+    const r = ref.current?.getBoundingClientRect();
+    if (!r) return;
+    setPos({ x: r.left + window.scrollX, y: r.bottom + window.scrollY + 8 });
+    setHover(true);
+  };
   return (
-    <div className="flex items-center gap-2" title={title ?? `${label} · ${pct}%`}>
-      <div className="w-14 h-1.5 rounded-full bg-ink-100 overflow-hidden">
-        <div className="h-full rounded-full" style={{ width: `${pct}%`, background: color }} />
+    <>
+      <div
+        ref={ref}
+        onMouseEnter={onEnter}
+        onMouseLeave={() => setHover(false)}
+        className="flex items-center gap-2 cursor-default"
+      >
+        <div className="w-14 h-1.5 rounded-full bg-ink-100 overflow-hidden">
+          <div className="h-full rounded-full" style={{ width: `${pct}%`, background: color }} />
+        </div>
+        <span className="text-[11px] tabular-nums text-ink-500 font-medium">{pct}%</span>
       </div>
-      <span className="text-[11px] tabular-nums text-ink-500 font-medium">{pct}%</span>
-    </div>
+      {hover &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            style={{ position: 'absolute', left: pos.x, top: pos.y, zIndex: 9999 }}
+            className="bg-white border border-[var(--bd-border)] rounded-[10px] bd-shadow-lg px-2.5 py-1.5 pointer-events-none animate-[fadeUp_.12s_ease-out]"
+          >
+            <div className="flex items-center gap-2 text-[12px] min-w-[120px]">
+              <span className="text-ink-500 flex-1">{label}</span>
+              <span className="font-semibold tabular-nums text-ink-900">{pct}%</span>
+            </div>
+          </div>,
+          document.body,
+        )}
+    </>
   );
 }
 
