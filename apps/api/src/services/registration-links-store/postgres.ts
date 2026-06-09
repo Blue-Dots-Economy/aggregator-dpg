@@ -35,7 +35,7 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
           domain: input.domain,
           context: input.context,
           status: input.status ?? 'draft',
-          submissionMode: input.submissionMode ?? 'account_and_profile',
+          registrationMode: input.registrationMode ?? 'form',
           // Cast: typed completion-action shape narrows the Drizzle column's
           // jsonb<Record<string, unknown>[]> at runtime; values are
           // structurally compatible but TS lacks a witness for that.
@@ -306,10 +306,7 @@ function toDomain(row: RegistrationLinkRow): RegistrationLink {
     completionActions: Array.isArray(row.completionActions)
       ? (row.completionActions as unknown as RegistrationLinkCompletionAction[])
       : [],
-    submissionMode:
-      row.submissionMode === 'account_only' || row.submissionMode === 'account_and_profile'
-        ? row.submissionMode
-        : 'account_and_profile',
+    registrationMode: typeof row.registrationMode === 'string' ? row.registrationMode : 'form',
     qrObjectKey: row.qrObjectKey,
     status: row.status,
     expiresAt: row.expiresAt,

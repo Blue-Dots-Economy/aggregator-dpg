@@ -21,13 +21,13 @@ export interface RegistrationLinkCompletionAction {
 }
 
 /**
- * Per-link form shape:
- *   - `account_and_profile` (default): identity + full profile schema.
- *   - `account_only`: identity only (name + phone OR email + consent).
- *     Server forces submit_mode=account_only and skips the dispatcher
- *     fan-out. Immutable after creation.
+ * Per-link admin-facing registration mode key. The mode → form-shape
+ * mapping lives in network config (aggregator.config.yaml under
+ * `registration_modes`); unknown keys at read time fall back to `form`
+ * shape via resolveSubmissionShape() (see services/registration-mode).
+ * Open snake_case identifier; not constrained to a fixed enum.
  */
-export type RegistrationLinkSubmissionMode = 'account_only' | 'account_and_profile';
+export type RegistrationLinkRegistrationMode = string;
 
 export interface RegistrationLink {
   id: string;
@@ -41,8 +41,7 @@ export interface RegistrationLink {
    * no dispatcher fan-out for this link.
    */
   completionActions: RegistrationLinkCompletionAction[];
-  /** See {@link RegistrationLinkSubmissionMode}. */
-  submissionMode: RegistrationLinkSubmissionMode;
+  registrationMode: RegistrationLinkRegistrationMode;
   qrObjectKey: string | null;
   status: RegistrationLinkStatus;
   expiresAt: Date | null;
@@ -57,9 +56,8 @@ export interface CreateRegistrationLinkInput {
   domain: string;
   context: Record<string, unknown>;
   status?: RegistrationLinkStatus;
-  /** Defaults to `'account_and_profile'` when omitted. */
-  submissionMode?: RegistrationLinkSubmissionMode;
-  /** Defaults to `[]`. Rejected when `submissionMode === 'account_only'`. */
+  registrationMode?: RegistrationLinkRegistrationMode;
+  /** Defaults to `[]`. Rejected when the resolved submission shape is `account_only`. */
   completionActions?: RegistrationLinkCompletionAction[];
   expiresAt?: Date | null;
   createdBy: string;
