@@ -67,6 +67,8 @@
       "status": "स्थिति",
       "recommendedAction": "अनुशंसित कार्रवाई",
       "applied": "आवेदन किया",
+      "initiated": "शुरू किया",
+      "received": "प्राप्त",
       "count": "{total} में से {shown}"
     },
     "filters": {

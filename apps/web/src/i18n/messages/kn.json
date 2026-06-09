@@ -67,6 +67,8 @@
       "status": "ಸ್ಥಿತಿ",
       "recommendedAction": "ಶಿಫಾರಸ್ಸು ಮಾಡಿದ ಕ್ರಮ",
       "applied": "ಅರ್ಜಿ ಸಲ್ಲಿಸಿದ",
+      "initiated": "ಪ್ರಾರಂಭಿಸಿದ",
+      "received": "ಸ್ವೀಕರಿಸಿದ",
       "count": "{total} ರಲ್ಲಿ {shown}"
     },
     "filters": {

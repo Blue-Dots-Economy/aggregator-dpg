@@ -22,6 +22,14 @@ export interface ParticipantProfile {
   complete: number;
 }
 
+/** One direction's action counts, keyed by canonical action state. */
+export interface DirectionalStats {
+  create: number;
+  accept: number;
+  reject: number;
+  cancel: number;
+}
+
 export interface ParticipantBase {
   id: string;
   name: string;
@@ -30,6 +38,10 @@ export interface ParticipantBase {
   avatar: string;
   profile: ParticipantProfile;
   applied: ParticipantStats;
+  /** Actions this profile INITIATED, by canonical action state. */
+  initiated: DirectionalStats;
+  /** Actions this profile RECEIVED, by canonical action state. */
+  received: DirectionalStats;
   status: ParticipantStatus;
   last: string;
   /**

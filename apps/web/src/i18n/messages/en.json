@@ -67,6 +67,8 @@
       "status": "Status",
       "recommendedAction": "Recommended Action",
       "applied": "Applied",
+      "initiated": "Initiated",
+      "received": "Received",
       "count": "{shown} of {total}"
     },
     "filters": {
