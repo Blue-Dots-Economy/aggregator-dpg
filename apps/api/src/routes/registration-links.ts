@@ -104,12 +104,16 @@ const CreateLinkBodySchema = z.object({
   context: z.record(z.unknown()).default({}),
   status: z.enum(['draft', 'live']).default('draft'),
   /**
-   * Per-link form shape. `account_only` locks the link to identity-only
-   * capture (name + phone OR email + consent); server skips dispatcher and
-   * forces submit_mode=account_only. Default keeps the legacy behaviour.
-   * Immutable after creation (PATCH route .strict()-rejects unknown keys).
+   * Per-link admin-facing registration mode key (e.g. `voice`, `form`). The
+   * mode → form-shape mapping lives in network config under
+   * `registration_modes`; the key is validated against the live config in the
+   * handler. Omitted defaults to the first declared mode. Open snake_case
+   * identifier. Immutable after creation (PATCH route .strict()-rejects it).
    */
-  submission_mode: z.enum(['account_only', 'account_and_profile']).default('account_and_profile'),
+  registration_mode: z
+    .string()
+    .regex(/^[a-z][a-z0-9_]*$/)
+    .optional(),
   /**
    * Completion-dispatch actions. Forbidden on `account_only` links — the
    * dispatcher never fires for that mode by design (see T8 guard below).
@@ -179,9 +183,26 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
     }
     enforceAggregatorType(auth, body.domain);
 
-    if (body.submission_mode === 'account_only' && body.completion_actions.length > 0) {
+    const declaredModes = Object.keys(networkCfg.aggregator.registration_modes ?? {});
+    // Omitted mode preserves the legacy full-profile default: prefer the
+    // `form` key (DB column default) when the network declares it, else the
+    // first declared mode. Never silently downgrade an omitted link to an
+    // account_only channel.
+    const modeKey =
+      body.registration_mode ??
+      (declaredModes.includes('form') ? 'form' : declaredModes[0]) ??
+      'form';
+    if (!declaredModes.includes(modeKey)) {
+      throw httpError('INVALID_REGISTRATION_MODE', {
+        detail: `registration_mode '${modeKey}' is not declared for this network`,
+        fields: { declared: declaredModes },
+      });
+    }
+    const modeShape = networkCfg.aggregator.registration_modes[modeKey]!.submission_shape;
+
+    if (modeShape === 'account_only' && body.completion_actions.length > 0) {
       throw httpError('INVALID_CONFIG', {
-        detail: 'completion_actions are not allowed on account_only links',
+        detail: `completion_actions are not allowed on registration_mode='${modeKey}' (submission_shape=account_only)`,
       });
     }
 
@@ -205,7 +226,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
         domain: body.domain,
         context: body.context,
         status: body.status,
-        submissionMode: body.submission_mode,
+        registrationMode: modeKey,
         completionActions: body.completion_actions,
         expiresAt: body.expires_at,
         createdBy: auth.userId,
@@ -695,7 +716,7 @@ async function buildResponse(
     slug: row.slug,
     domain: row.domain,
     status: row.status,
-    submission_mode: row.submissionMode,
+    registration_mode: row.registrationMode,
     context: row.context,
     expires_at: row.expiresAt ? row.expiresAt.toISOString() : null,
     public_url: publicUrl,
