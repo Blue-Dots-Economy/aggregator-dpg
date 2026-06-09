@@ -319,8 +319,9 @@ export function CreateLinkSection() {
            * Per-link registration mode — chosen here at create time, immutable
            * afterwards. Options are sourced from the live network config's
            * `registration_modes` so adding a channel (sms, kiosk, …) needs no
-           * web change. The hint below renders the selected mode's
-           * `public_hint_i18n_key` when present.
+           * web change. The mode's `public_hint_i18n_key` is intentionally NOT
+           * shown here — it is end-user copy for the public submission form,
+           * not for the aggregator creating the link.
            */}
           <Field label={t('create_link.field_registration_mode')} required>
             <select
@@ -334,15 +335,6 @@ export function CreateLinkSection() {
                 </option>
               ))}
             </select>
-            {(() => {
-              const mode = cfg?.registration_modes?.[form.registration_mode];
-              if (!mode?.public_hint_i18n_key) return null;
-              return (
-                <span className="block mt-1 text-[12px] text-ink-500">
-                  {tRoot(mode.public_hint_i18n_key)}
-                </span>
-              );
-            })()}
           </Field>
           <div className="md:col-span-2 flex items-center justify-end gap-2 mt-2 flex-wrap">
             <Button onClick={onCreate} disabled={create.isPending}>
