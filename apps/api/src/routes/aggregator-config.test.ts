@@ -37,6 +37,23 @@ describe('GET /v1/aggregator-config', () => {
     expect(Array.isArray(body.domains)).toBe(true);
   });
 
+  it('exposes the registration_modes block from the resolved config', async () => {
+    const res = await app.inject({ method: 'GET', url: '/v1/aggregator-config' });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as {
+      registration_modes: Record<
+        string,
+        { label_i18n_key: string; submission_shape: string; public_hint_i18n_key: string | null }
+      >;
+    };
+    expect(body.registration_modes).toBeDefined();
+    expect(body.registration_modes.voice?.submission_shape).toBe('account_only');
+    expect(body.registration_modes.form?.submission_shape).toBe('account_and_profile');
+    expect(body.registration_modes.voice?.public_hint_i18n_key).toBe(
+      'registration_mode.voice.hint',
+    );
+  });
+
   it('surfaces dashboardTiles per domain when the resolved config has them', async () => {
     const withTiles: ResolvedNetworkConfig = buildBlueDotConfig({
       domains: {
