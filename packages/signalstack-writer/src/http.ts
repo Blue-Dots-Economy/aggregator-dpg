@@ -517,11 +517,20 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
             }),
           );
         }
-        if (!r.by_action_status || typeof r.by_action_status !== 'object') {
+        if (!r.by_initiated_action_status || typeof r.by_initiated_action_status !== 'object') {
           return err(
-            new UpstreamError(`Signalstack slice "${domainId}" rollup missing by_action_status`, {
-              code: 'SIGNALSTACK_BAD_RESPONSE',
-            }),
+            new UpstreamError(
+              `Signalstack slice "${domainId}" rollup missing by_initiated_action_status`,
+              { code: 'SIGNALSTACK_BAD_RESPONSE' },
+            ),
+          );
+        }
+        if (!r.by_received_action_status || typeof r.by_received_action_status !== 'object') {
+          return err(
+            new UpstreamError(
+              `Signalstack slice "${domainId}" rollup missing by_received_action_status`,
+              { code: 'SIGNALSTACK_BAD_RESPONSE' },
+            ),
           );
         }
         if (!r.by_status || typeof r.by_status !== 'object') {

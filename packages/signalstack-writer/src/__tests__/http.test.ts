@@ -68,13 +68,17 @@ const CANONICAL_DASHBOARD_PAYLOAD = {
         complete_profiles: 2,
         has_applications: 3,
         by_status: { new: 1, active: 3, at_risk: 0, inactive: 1 },
-        by_action_status: { create: 4, accept: 5, reject: 1, cancel: 0 },
+        by_initiated_action_status: { create: 4, accept: 0, reject: 0, cancel: 0 },
+        by_received_action_status: { create: 0, accept: 5, reject: 1, cancel: 0 },
+        total_users: 4,
         avg_items_per_user: 1.25,
         avg_actions_per_user: 3.3,
         mode_wise_counts: { link: 5 },
       },
       items: [
         {
+          profile_item_id: 'p-abc',
+          user_id: 'u-123',
           name: 'Asha',
           item_network: 'purple_dot',
           item_domain: 'seeker',
@@ -85,14 +89,10 @@ const CANONICAL_DASHBOARD_PAYLOAD = {
           profile_created_at: '2026-01-01T00:00:00Z',
           profile_last_updated_at: '2026-01-02T00:00:00Z',
           age_days: 5,
-          count_create: 1,
-          count_accept: 1,
-          count_reject: 0,
-          count_cancel: 0,
-          last_create_at: '2026-01-01T00:00:00Z',
-          last_accept_at: '2026-01-02T00:00:00Z',
-          last_reject_at: null,
-          last_cancel_at: null,
+          initiated: { create: 1, accept: 0, reject: 0, cancel: 0 },
+          received: { create: 0, accept: 1, reject: 0, cancel: 0 },
+          last_initiated_at: { create: '2026-01-01T00:00:00Z' },
+          last_received_at: { accept: '2026-01-02T00:00:00Z' },
           actionable_tags: [],
         },
       ],
@@ -336,7 +336,19 @@ describe('HttpSignalStackWriter.fetchDashboard — happy path', () => {
     expect(slice.rollup.complete_profiles).toBe(2);
     expect(slice.rollup.has_applications).toBe(3);
     expect(slice.rollup.by_status).toEqual({ new: 1, active: 3, at_risk: 0, inactive: 1 });
-    expect(slice.rollup.by_action_status).toEqual({ create: 4, accept: 5, reject: 1, cancel: 0 });
+    expect(slice.rollup.by_initiated_action_status).toEqual({
+      create: 4,
+      accept: 0,
+      reject: 0,
+      cancel: 0,
+    });
+    expect(slice.rollup.by_received_action_status).toEqual({
+      create: 0,
+      accept: 5,
+      reject: 1,
+      cancel: 0,
+    });
+    expect(slice.rollup.total_users).toBe(4);
     expect(slice.rollup.avg_items_per_user).toBe(1.25);
     expect(slice.rollup.avg_actions_per_user).toBe(3.3);
     expect(slice.rollup.mode_wise_counts).toEqual({ link: 5 });
@@ -360,7 +372,7 @@ describe('HttpSignalStackWriter.fetchDashboard — happy path', () => {
     );
   });
 
-  it('item row carries count_* and last_*_at fields', async () => {
+  it('item row carries directional maps + identity fields', async () => {
     fetchMock.mockResolvedValueOnce(okJsonResponse(CANONICAL_DASHBOARD_PAYLOAD));
 
     const result = await writer.fetchDashboard({ actingOrgId: 'org-abc' });
@@ -368,13 +380,18 @@ describe('HttpSignalStackWriter.fetchDashboard — happy path', () => {
     if (!result.success) return;
 
     const item = result.value.by_domain['seeker']!.items[0]!;
-    expect(item['count_create']).toBe(1);
-    expect(item['count_accept']).toBe(1);
-    expect(item['count_reject']).toBe(0);
-    expect(item['count_cancel']).toBe(0);
-    expect(item['last_create_at']).toBe('2026-01-01T00:00:00Z');
-    expect(item['last_accept_at']).toBe('2026-01-02T00:00:00Z');
-    expect(item['last_reject_at']).toBeNull();
+    expect(item['profile_item_id']).toBe('p-abc');
+    expect(item['user_id']).toBe('u-123');
+    expect((item['initiated'] as Record<string, number>)['create']).toBe(1);
+    expect((item['received'] as Record<string, number>)['accept']).toBe(1);
+    expect((item['last_initiated_at'] as Record<string, string>)['create']).toBe(
+      '2026-01-01T00:00:00Z',
+    );
+    expect((item['last_received_at'] as Record<string, string>)['accept']).toBe(
+      '2026-01-02T00:00:00Z',
+    );
+    // Sparse maps omit buckets that never occurred.
+    expect((item['last_initiated_at'] as Record<string, string>)['reject']).toBeUndefined();
   });
 });
 
@@ -521,14 +538,15 @@ describe('HttpSignalStackWriter.fetchDashboard — malformed payload', () => {
     expect(result.error.code).toBe('SIGNALSTACK_BAD_RESPONSE');
   });
 
-  it('returns SIGNALSTACK_BAD_RESPONSE when rollup is missing by_action_status', async () => {
+  it('returns SIGNALSTACK_BAD_RESPONSE when rollup is missing by_initiated_action_status', async () => {
     const payload = {
       by_domain: {
         seeker: {
           items: [],
           rollup: {
             total_items: 0,
-            // by_action_status is missing
+            // by_initiated_action_status is missing
+            by_received_action_status: {},
             by_status: { new: 0 },
           },
           total_matching: 0,
@@ -545,7 +563,7 @@ describe('HttpSignalStackWriter.fetchDashboard — malformed payload', () => {
     expect(result.success).toBe(false);
     if (result.success) return;
     expect(result.error.code).toBe('SIGNALSTACK_BAD_RESPONSE');
-    expect(result.error.message).toContain('by_action_status');
+    expect(result.error.message).toContain('by_initiated_action_status');
   });
 
   it('returns SIGNALSTACK_BAD_RESPONSE when rollup is missing total_items', async () => {
