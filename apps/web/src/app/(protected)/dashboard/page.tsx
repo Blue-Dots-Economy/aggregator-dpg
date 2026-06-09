@@ -18,7 +18,6 @@ import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/u
 import {
   dashboardService,
   triggerCsvDownload,
-  type DashboardItemsTiles,
   type LifecycleFilter,
 } from '../../../services/dashboard.service';
 import { useProfileRaw } from '../../../hooks/useProfile';
@@ -1047,7 +1046,6 @@ function SeekersTab() {
         }
       : undefined,
   );
-  const tiles: DashboardItemsTiles | undefined = lifecycleItems?.meta.tiles;
   const lifecycleByItemId = useMemo(
     () => buildLifecycleByItemId(lifecycleItems?.items),
     [lifecycleItems?.items],
@@ -1217,16 +1215,6 @@ function SeekersTab() {
           value={fmtCount(newThisWeek)}
           delta={t('ministat.delta_this_week')}
           deltaTone="flat"
-        />
-      </div>
-
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <MiniStat label={t('tiles.lifecycle.draft')} value={fmtCount(tiles?.draft ?? 0)} />
-        <MiniStat label={t('tiles.lifecycle.live')} value={fmtCount(tiles?.live ?? 0)} />
-        <MiniStat label={t('tiles.lifecycle.paused')} value={fmtCount(tiles?.paused ?? 0)} />
-        <MiniStat
-          label={t('tiles.lifecycle.account_only')}
-          value={fmtCount(tiles?.account_only ?? 0)}
         />
       </div>
 
@@ -1436,7 +1424,6 @@ function ProvidersTab() {
         }
       : undefined,
   );
-  const tiles: DashboardItemsTiles | undefined = lifecycleItems?.meta.tiles;
   const lifecycleByItemId = useMemo(
     () => buildLifecycleByItemId(lifecycleItems?.items),
     [lifecycleItems?.items],
@@ -1590,16 +1577,6 @@ function ProvidersTab() {
             t('ministat.withApplications', { entityPlural: providerPlural })
           }
           value={fmtCount(hasApplications)}
-        />
-      </div>
-
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <MiniStat label={t('tiles.lifecycle.draft')} value={fmtCount(tiles?.draft ?? 0)} />
-        <MiniStat label={t('tiles.lifecycle.live')} value={fmtCount(tiles?.live ?? 0)} />
-        <MiniStat label={t('tiles.lifecycle.paused')} value={fmtCount(tiles?.paused ?? 0)} />
-        <MiniStat
-          label={t('tiles.lifecycle.account_only')}
-          value={fmtCount(tiles?.account_only ?? 0)}
         />
       </div>
 
