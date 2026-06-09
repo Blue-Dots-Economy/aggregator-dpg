@@ -1295,20 +1295,19 @@ function toSeekerRow(
   );
   const completion =
     typeof participant.profile_completion_pct === 'number' ? participant.profile_completion_pct : 0;
-  // Lifecycle merge: signalstack's dashboard rollup may surface `item_id`
-  // (open-shape items). When present + matched against the lifecycle
-  // items fetch, we attach lifecycle_status + completion_pct so the new
-  // column renders accurately. Unmatched rows fall through with
-  // undefined — the LifecyclePill back-compat renders them as 'Live'.
+  // Lifecycle is derived from completion %, not signals' lifecycle_status:
+  // `live` iff the profile is 100% complete, `draft` otherwise. Prefer the
+  // signals item's completion_pct (matched by `item_id`) when present, else
+  // the rollup's `profile_completion_pct` shown in the table. This keeps the
+  // lifecycle column + filter consistent with the displayed percentage.
   const itemId = typeof participant.item_id === 'string' ? participant.item_id : null;
   const merged = itemId ? lifecycleByItemId?.get(itemId) : undefined;
-  const lifecycleFields: Pick<Seeker, 'lifecycle_status' | 'completion_pct'> = {};
-  if (merged) {
-    lifecycleFields.lifecycle_status = merged.lifecycle_status;
-    if (merged.completion_pct !== null) {
-      lifecycleFields.completion_pct = merged.completion_pct;
-    }
-  }
+  const effectiveCompletion =
+    typeof merged?.completion_pct === 'number' ? merged.completion_pct : completion;
+  const lifecycleFields: Pick<Seeker, 'lifecycle_status' | 'completion_pct'> = {
+    lifecycle_status: effectiveCompletion >= 100 ? 'live' : 'draft',
+    completion_pct: effectiveCompletion,
+  };
   const created =
     typeof participant.profile_created_at === 'string' ? participant.profile_created_at : '';
   const updated =
