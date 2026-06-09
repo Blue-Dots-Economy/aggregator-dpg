@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { FileNetworkConfigLoader } from '../loader.js';
+import { AggregatorConfigSchema } from '../interface.js';
 
 const BLUE_DOT_YAML = `
 aggregator:
@@ -276,5 +277,86 @@ describe('FileNetworkConfigLoader', () => {
     const resolved = result.value;
     expect(resolved.domains['seeker']?.dashboardTiles).toBeUndefined();
     expect(resolved.dashboardBuckets).toBeUndefined();
+  });
+});
+
+describe('AggregatorConfigSchema.registration_modes', () => {
+  const baseAggregator = {
+    name: 'Test',
+    contact_email: 'a@x.com',
+    network: { source: 'http://x', csv_array_delimiter: '|', field_overrides: {} },
+    brand: {
+      short_name: 'T',
+      long_name: 'Test',
+      url_slug: 't',
+      primary_color: '#000000',
+      accent_color: '#111111',
+    },
+    domain_labels: {},
+    onboarding: { presume_consent: true },
+  };
+
+  it('accepts a declared mode with required fields', () => {
+    const result = AggregatorConfigSchema.safeParse({
+      aggregator: {
+        ...baseAggregator,
+        registration_modes: {
+          voice: {
+            label_i18n_key: 'registration_mode.voice.label',
+            submission_shape: 'account_only',
+            public_hint_i18n_key: 'registration_mode.voice.hint',
+          },
+        },
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects unknown submission_shape', () => {
+    const result = AggregatorConfigSchema.safeParse({
+      aggregator: {
+        ...baseAggregator,
+        registration_modes: {
+          weird: {
+            label_i18n_key: 'x',
+            submission_shape: 'BOGUS',
+            public_hint_i18n_key: null,
+          },
+        },
+      },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('accepts null public_hint_i18n_key', () => {
+    const result = AggregatorConfigSchema.safeParse({
+      aggregator: {
+        ...baseAggregator,
+        registration_modes: {
+          form: {
+            label_i18n_key: 'registration_mode.form.label',
+            submission_shape: 'account_and_profile',
+            public_hint_i18n_key: null,
+          },
+        },
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects non-snake_case mode keys', () => {
+    const result = AggregatorConfigSchema.safeParse({
+      aggregator: {
+        ...baseAggregator,
+        registration_modes: {
+          'Bad-Key': {
+            label_i18n_key: 'x',
+            submission_shape: 'account_only',
+            public_hint_i18n_key: null,
+          },
+        },
+      },
+    });
+    expect(result.success).toBe(false);
   });
 });
