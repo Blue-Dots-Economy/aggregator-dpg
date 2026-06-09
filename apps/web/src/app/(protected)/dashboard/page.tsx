@@ -10,8 +10,6 @@ import { StatusPill } from '../../../components/ui/StatusPill';
 import { Avatar } from '../../../components/ui/Avatar';
 import { SegmentedTabs, type SegmentedTab } from '../../../components/ui/SegmentedTabs';
 import { Topbar } from '../../../components/shell/Topbar';
-import { LifecyclePill } from '../../../components/LifecyclePill';
-import { CompletionBar } from '../../../components/CompletionBar';
 import { I, type IconName } from '../../../icons';
 import { useOppProviders, useDashboard, useDashboardItems } from '../../../hooks/useDashboard';
 import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
@@ -680,7 +678,6 @@ function ParticipantTable<R extends ParticipantBase>({
               </th>
               <th>{t('table.joined')}</th>
               <th>{t('table.profileStatus')}</th>
-              <th>{t('table.lifecycle')}</th>
               <th>{bucketLabels['create'] ?? t('table.applied')}</th>
               <th>{t('table.status')}</th>
               <th>{t('table.recommendedAction')}</th>
@@ -721,14 +718,14 @@ function ParticipantTable<R extends ParticipantBase>({
                     <div className="text-[11px] text-ink-400 mt-0.5">last seen {r.last}</div>
                   </td>
                   <td>
-                    <ProgressTiny pct={r.profile.complete} />
-                  </td>
-                  <td>
-                    <div className="flex items-center gap-2">
-                      <LifecyclePill status={r.lifecycle_status ?? null} />
-                      {r.lifecycle_status === 'draft' && typeof r.completion_pct === 'number' ? (
-                        <CompletionBar percent={r.completion_pct} />
-                      ) : null}
+                    <div
+                      title={
+                        r.lifecycle_status === 'live'
+                          ? t('filters.lifecycle_live')
+                          : t('filters.lifecycle_draft')
+                      }
+                    >
+                      <ProgressTiny pct={r.profile.complete} />
                     </div>
                   </td>
                   <td>
