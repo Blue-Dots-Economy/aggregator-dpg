@@ -10,9 +10,8 @@ import { StatusPill } from '../../../components/ui/StatusPill';
 import { Avatar } from '../../../components/ui/Avatar';
 import { SegmentedTabs, type SegmentedTab } from '../../../components/ui/SegmentedTabs';
 import { Topbar } from '../../../components/shell/Topbar';
-import { LifecyclePill } from '../../../components/LifecyclePill';
 import { I, type IconName } from '../../../icons';
-import { useOppProviders, useDashboard, useDashboardItems } from '../../../hooks/useDashboard';
+import { useOppProviders, useDashboard } from '../../../hooks/useDashboard';
 import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
 import {
   dashboardService,
@@ -238,6 +237,55 @@ function FunnelCell({ total, parts }: FunnelCellProps) {
                 <span className="text-ink-400 flex-1">Total</span>
                 <span className="font-display font-bold tabular-nums text-ink-900">{total}</span>
               </div>
+            </div>
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+}
+
+/**
+ * Profile-completion progress bar (driven by the dashboard rollup's
+ * `profile_completion_pct`). Hovering shows a popover (mirrors FunnelCell)
+ * with the lifecycle label — `title` carries the Draft/Live text. Native
+ * `title` renders inconsistently, so we use the portal popover instead.
+ */
+function ProgressTiny({ pct, title }: { pct: number; title?: string }) {
+  const color = pct >= 80 ? '#10B981' : pct >= 50 ? '#F59E0B' : '#EF4444';
+  const label = title ?? (pct >= 80 ? 'Complete' : 'Incomplete');
+  const [hover, setHover] = useState(false);
+  const [pos, setPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const ref = useRef<HTMLDivElement | null>(null);
+  const onEnter = () => {
+    const r = ref.current?.getBoundingClientRect();
+    if (!r) return;
+    setPos({ x: r.left + window.scrollX, y: r.bottom + window.scrollY + 8 });
+    setHover(true);
+  };
+  return (
+    <>
+      <div
+        ref={ref}
+        onMouseEnter={onEnter}
+        onMouseLeave={() => setHover(false)}
+        className="flex items-center gap-2 cursor-default"
+      >
+        <div className="w-14 h-1.5 rounded-full bg-ink-100 overflow-hidden">
+          <div className="h-full rounded-full" style={{ width: `${pct}%`, background: color }} />
+        </div>
+        <span className="text-[11px] tabular-nums text-ink-500 font-medium">{pct}%</span>
+      </div>
+      {hover &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            style={{ position: 'absolute', left: pos.x, top: pos.y, zIndex: 9999 }}
+            className="bg-white border border-[var(--bd-border)] rounded-[10px] bd-shadow-lg px-2.5 py-1.5 pointer-events-none animate-[fadeUp_.12s_ease-out]"
+          >
+            <div className="flex items-center gap-2 text-[12px] min-w-[120px]">
+              <span className="text-ink-500 flex-1">{label}</span>
+              <span className="font-semibold tabular-nums text-ink-900">{pct}%</span>
             </div>
           </div>,
           document.body,
@@ -706,7 +754,14 @@ function ParticipantTable<R extends ParticipantBase>({
                     <div className="text-[11px] text-ink-400 mt-0.5">last seen {r.last}</div>
                   </td>
                   <td>
-                    <LifecyclePill status={r.lifecycle_status ?? null} />
+                    <ProgressTiny
+                      pct={r.profile.complete}
+                      title={
+                        r.lifecycle_status === 'live'
+                          ? t('filters.lifecycle_live')
+                          : t('filters.lifecycle_draft')
+                      }
+                    />
                   </td>
                   <td>
                     <FunnelCell
@@ -938,26 +993,6 @@ function useLifecycleUrlFilter(): [LifecycleFilterValue, (next: LifecycleFilterV
 }
 
 /**
- * Builds a lookup keyed by signalstack `item_id` so per-row lifecycle
- * data from `/v1/dashboard/items` can be merged into the rollup rows the
- * participant table renders. Empty map when items haven't loaded yet.
- */
-function buildLifecycleByItemId(
-  items: Array<Record<string, unknown>> | undefined,
-): Map<string, LifecycleStatus> {
-  const out = new Map<string, LifecycleStatus>();
-  if (!items) return out;
-  for (const it of items) {
-    const id = typeof it.item_id === 'string' ? it.item_id : null;
-    if (!id) continue;
-    const ls = it.lifecycle_status;
-    const lifecycle_status: LifecycleStatus = ls === 'draft' || ls === 'paused' ? ls : 'live';
-    out.set(id, lifecycle_status);
-  }
-  return out;
-}
-
-/**
  * Narrows the rendered table rows to the selected lifecycle. The table is fed
  * by the legacy dashboard rollup (not lifecycle-aware), so the dropdown filters
  * the already-merged rows here. `'all'` (and any non-draft/live value) is a
@@ -1020,18 +1055,6 @@ function SeekersTab() {
         }
       : undefined,
   );
-  // Fetch the FULL (unfiltered) lifecycle payload so every table row gets its
-  // true lifecycle_status for the column, and so the dropdown can narrow the
-  // table client-side. The table rows come from the legacy dashboard rollup
-  // (`slice`), which is not lifecycle-aware — narrowing the items fetch alone
-  // would never change the table, so we narrow the rendered rows instead.
-  const { data: lifecycleItems } = useDashboardItems(
-    seekerDomainId ? { domain: seekerDomainId } : undefined,
-  );
-  const lifecycleByItemId = useMemo(
-    () => buildLifecycleByItemId(lifecycleItems?.items),
-    [lifecycleItems?.items],
-  );
   const slice = seekerDomainId ? dashboard?.by_domain[seekerDomainId] : undefined;
   const rollup = slice?.rollup;
   const { data: cfg } = useAggregatorConfig();
@@ -1068,8 +1091,8 @@ function SeekersTab() {
   const hasApplications = rollup?.has_applications;
   const newThisWeek = byStatus['new'];
   const rows = useMemo(
-    () => (slice?.items ?? []).map((p) => toSeekerRow(p, locale, lifecycleByItemId)),
-    [slice?.items, locale, lifecycleByItemId],
+    () => (slice?.items ?? []).map((p) => toSeekerRow(p, locale)),
+    [slice?.items, locale],
   );
   const filteredRows = useMemo(
     () => filterRowsByLifecycle(rows, lifecycleFilter),
@@ -1246,14 +1269,9 @@ function fmtCount(n: number | null | undefined): string {
  * — `name`, `city`, and the role/exp profile fields are NOT in this
  * response. They live in the per-user item detail endpoint, which the
  * table does not yet call. Missing fields render as em-dashes; the
- * Lifecycle status comes from signals (`lifecycle_status`); signals no longer
- * exposes a completion percentage.
+ * `complete` profile bar uses `profile_completion_pct` from the rollup.
  */
-function toSeekerRow(
-  participant: Record<string, unknown>,
-  locale: string,
-  lifecycleByItemId?: Map<string, LifecycleStatus>,
-): Seeker {
+function toSeekerRow(participant: Record<string, unknown>, locale: string): Seeker {
   const userId =
     typeof participant.owner_user_id === 'string'
       ? participant.owner_user_id
@@ -1265,13 +1283,12 @@ function toSeekerRow(
   );
   const completion =
     typeof participant.profile_completion_pct === 'number' ? participant.profile_completion_pct : 0;
-  // Lifecycle comes straight from signals' `lifecycle_status` (matched by
-  // `item_id`); signals no longer exposes a completion percentage. Unmatched
-  // rows default to `'live'` for back-compat.
-  const itemId = typeof participant.item_id === 'string' ? participant.item_id : null;
-  const merged = itemId ? lifecycleByItemId?.get(itemId) : undefined;
+  // Lifecycle is derived from completion %: `live` iff the profile is 100%
+  // complete, `draft` otherwise. signals no longer exposes a per-item
+  // completion/lifecycle on the responses we read, so the rollup's
+  // `profile_completion_pct` is the source of truth.
   const lifecycleFields: Pick<Seeker, 'lifecycle_status'> = {
-    lifecycle_status: merged ?? 'live',
+    lifecycle_status: completion >= 100 ? 'live' : 'draft',
   };
   const created =
     typeof participant.profile_created_at === 'string' ? participant.profile_created_at : '';
@@ -1389,15 +1406,6 @@ function ProvidersTab() {
         }
       : undefined,
   );
-  // Full (unfiltered) lifecycle map; the table is narrowed client-side.
-  // Mirrors SeekersTab; see comments there for the full rationale.
-  const { data: lifecycleItems } = useDashboardItems(
-    providerDomainId ? { domain: providerDomainId } : undefined,
-  );
-  const lifecycleByItemId = useMemo(
-    () => buildLifecycleByItemId(lifecycleItems?.items),
-    [lifecycleItems?.items],
-  );
   const { data: cfg } = useAggregatorConfig();
   const providerCfg = cfg?.domains?.find((d) => d.id === providerDomainId);
   const providerTileLabels = providerCfg?.dashboardTiles ?? {};
@@ -1417,8 +1425,8 @@ function ProvidersTab() {
   const verified = rollup?.complete_profiles;
   const hasApplications = rollup?.has_applications;
   const rows = useMemo(
-    () => (slice?.items ?? []).map((p) => toProviderRow(p, locale, lifecycleByItemId)),
-    [slice?.items, locale, lifecycleByItemId],
+    () => (slice?.items ?? []).map((p) => toProviderRow(p, locale)),
+    [slice?.items, locale],
   );
   const filteredRows = useMemo(
     () => filterRowsByLifecycle(rows, lifecycleFilter),
@@ -1578,12 +1586,8 @@ function ProvidersTab() {
   );
 }
 
-function toProviderRow(
-  participant: Record<string, unknown>,
-  locale: string,
-  lifecycleByItemId?: Map<string, LifecycleStatus>,
-): Provider {
-  const seeker = toSeekerRow(participant, locale, lifecycleByItemId);
+function toProviderRow(participant: Record<string, unknown>, locale: string): Provider {
+  const seeker = toSeekerRow(participant, locale);
   return { ...seeker, role: '—' };
 }
 
