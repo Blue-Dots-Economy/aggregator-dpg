@@ -23,6 +23,8 @@ import { authenticate, requireApproved, type AuthContext } from '../services/aut
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
 import { getNetworkConfig } from '../services/network-config.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
+import type { SignalStackProfile } from '@aggregator-dpg/signalstack-writer/interface';
+import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import { resolveLifecycle } from '../services/onboarding/lifecycle.js';
 import { config } from '../config.js';
 import { httpError } from '../errors/http-error.js';
@@ -37,6 +39,14 @@ import { httpError } from '../errors/http-error.js';
  * server-side per-lifecycle count endpoint.
  */
 const TILE_CAP = 1000;
+
+/**
+ * Max rows signalstack's `fetch_local` accepts per request (`limit` is
+ * validated `<= 100` upstream). Any wider window — a >100 page or the
+ * TILE_CAP sweep — is gathered by paging at this size. Keep in sync with
+ * signals' validator; exceeding it returns 400 SIGNALSTACK_BAD_REQUEST.
+ */
+const SS_MAX_PAGE = 100;
 
 /**
  * Lifecycle filter accepted by the dashboard items endpoint.
@@ -148,12 +158,41 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
       item_type: domainCfg.itemType,
       lifecycle_filter: 'all' as const,
     };
+
+    // signalstack's `fetch_local` caps `limit` at SS_MAX_PAGE per request, so
+    // any window wider than that (a >100 page, or the TILE_CAP tile sweep) is
+    // gathered by paging. Returns the accumulated rows + the upstream `total`
+    // (taken from the first page's meta), or the upstream error verbatim so
+    // the existing error branches still fire.
+    const collect = async (
+      startOffset: number,
+      count: number,
+    ): Promise<
+      { ok: true; items: SignalStackProfile[]; total: number } | { ok: false; error: BaseError }
+    > => {
+      const items: SignalStackProfile[] = [];
+      let total = 0;
+      while (items.length < count) {
+        const pageLimit = Math.min(SS_MAX_PAGE, count - items.length);
+        const res = await ss.listItemsByAggregator({
+          ...baseQuery,
+          limit: pageLimit,
+          offset: startOffset + items.length,
+        });
+        if (!res.success) return { ok: false, error: res.error };
+        total = res.value.meta.total;
+        items.push(...res.value.items);
+        if (res.value.items.length < pageLimit) break; // last page reached
+      }
+      return { ok: true, items, total };
+    };
+
     const [itemsResult, tilesResult] = await Promise.all([
-      ss.listItemsByAggregator({ ...baseQuery, limit, offset }),
-      ss.listItemsByAggregator({ ...baseQuery, limit: TILE_CAP, offset: 0 }),
+      collect(offset, limit),
+      collect(0, TILE_CAP),
     ]);
 
-    if (!itemsResult.success) {
+    if (!itemsResult.ok) {
       log.error({
         status: 'failure',
         sub: 'signalstack.list',
@@ -165,7 +204,7 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
         cause: itemsResult.error,
       });
     }
-    if (!tilesResult.success) {
+    if (!tilesResult.ok) {
       log.error({
         status: 'failure',
         sub: 'signalstack.list.tiles',
@@ -180,7 +219,7 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
 
     // Normalise lifecycle on every row via `resolveLifecycle` so an absent
     // `lifecycle_status` from older signals deployments shows up as `'live'`.
-    const normalisedItems = itemsResult.value.items.map((item) => {
+    const normalisedItems = itemsResult.items.map((item) => {
       const lifecycleStatus = resolveLifecycle(item);
       return {
         ...item,
@@ -188,7 +227,7 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
         completion_pct: item.completion_pct ?? null,
       };
     });
-    const tileRows = tilesResult.value.items.map((item) => resolveLifecycle(item) ?? 'live');
+    const tileRows = tilesResult.items.map((item) => resolveLifecycle(item) ?? 'live');
 
     // Tiles count the full dataset (up to TILE_CAP). `account_only` is the
     // local-only bucket — participants who exist in our table but have no
@@ -203,7 +242,7 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
       paused: tileRows.filter((s) => s === 'paused').length,
       account_only: 0,
     };
-    const tilesTruncated = tilesResult.value.meta.total > TILE_CAP;
+    const tilesTruncated = tilesResult.total > TILE_CAP;
 
     // Apply the lifecycle filter AFTER tile computation. `account_only` short
     // circuits to an empty items array — those rows live in `participants`,
@@ -220,7 +259,7 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
     log.info({
       status: 'success',
       latency_ms: Date.now() - start,
-      total: itemsResult.value.meta.total,
+      total: itemsResult.total,
       lifecycle_filter: lifecycle ?? null,
       tiles,
       tiles_truncated: tilesTruncated,
@@ -228,7 +267,9 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
 
     return reply.send({
       meta: {
-        ...itemsResult.value.meta,
+        total: itemsResult.total,
+        limit,
+        offset,
         tiles,
         tiles_truncated: tilesTruncated,
       },
