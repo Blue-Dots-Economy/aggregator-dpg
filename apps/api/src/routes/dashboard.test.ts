@@ -28,7 +28,9 @@ function makeRollup(
     complete_profiles: number;
     has_applications: number;
     by_status: Partial<Record<'new' | 'active' | 'at_risk' | 'inactive', number>>;
-    by_action_status: Partial<Record<'create' | 'accept' | 'reject' | 'cancel', number>>;
+    by_initiated_action_status: Partial<Record<'create' | 'accept' | 'reject' | 'cancel', number>>;
+    by_received_action_status: Partial<Record<'create' | 'accept' | 'reject' | 'cancel', number>>;
+    total_users: number;
     avg_items_per_user: number;
     avg_actions_per_user: number;
     mode_wise_counts: Record<string, number>;
@@ -39,7 +41,9 @@ function makeRollup(
     complete_profiles: 0,
     has_applications: 0,
     by_status: {},
-    by_action_status: {},
+    by_initiated_action_status: {},
+    by_received_action_status: {},
+    total_users: 0,
     avg_items_per_user: 0,
     avg_actions_per_user: 0,
     mode_wise_counts: {},
@@ -467,7 +471,9 @@ describe('GET /v1/dashboard', () => {
 
   it('exports the seeded CSV body with the right headers', async () => {
     const SAMPLE_CSV =
-      'user_id,profile_status,profile_completion_pct\n' + 'u-1,at_risk,42\n' + 'u-2,at_risk,58\n';
+      'profile_item_id,user_id,profile_status,profile_completion_pct\n' +
+      'p-1,u-1,at_risk,42\n' +
+      'p-2,u-2,at_risk,58\n';
     writer.seed({
       dashboardExports: [{ acting_org_id: ORG_A, csv: SAMPLE_CSV }],
     });

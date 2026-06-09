@@ -21,7 +21,7 @@ import type {
   BrandPalette,
   BrandTypography,
   DashboardBuckets,
-  DashboardTileLabels,
+  DashboardTiles,
   StatusRule,
 } from '@aggregator-dpg/network-config/interface';
 import { getNetworkConfig } from '../services/network-config.js';
@@ -61,7 +61,7 @@ interface PublicAggregatorConfig {
     label: string;
     plural_label: string;
     item_type: string;
-    dashboardTiles?: DashboardTileLabels;
+    dashboardTiles?: DashboardTiles;
     status_rules?: StatusRule[];
   }>;
   dashboardBuckets?: DashboardBuckets;
