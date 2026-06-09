@@ -235,11 +235,13 @@
       "field_event_location": "कार्यक्रम का स्थान",
       "field_district": "जिला",
       "field_domain": "डोमेन",
-      "field_registration_mode": "पंजीकरण मोड",
+      "field_registration_mode": "अभियान प्रकार",
+      "field_tags": "टैग (वैकल्पिक)",
       "placeholder_state": "राज्य",
       "placeholder_event": "अभियान या कार्यक्रम का नाम",
       "placeholder_location": "शहर या स्थान",
       "placeholder_district": "जिला",
+      "placeholder_tags": "अल्पविराम से अलग, जैसे priority, dharwad-drive",
       "creating": "बनाया जा रहा है…",
       "create_button": "लिंक बनाएं",
       "qr_label": "QR कोड",
@@ -388,13 +390,13 @@
     }
   },
   "registration_mode": {
-    "field_label": "पंजीकरण मोड",
+    "field_label": "अभियान प्रकार",
     "voice": {
       "label": "वॉयस अभियान",
       "hint": "प्रोफ़ाइल पूरी करने के लिए आपको इस नंबर पर एक कॉल आएगी।"
     },
     "form": {
-      "label": "फ़ॉर्म",
+      "label": "फ़ॉर्म भरना",
       "hint": "प्रतिभागी ऑनलाइन पूरी प्रोफ़ाइल भरते हैं। आंशिक सबमिशन स्वीकार किए जाते हैं।"
     }
   },

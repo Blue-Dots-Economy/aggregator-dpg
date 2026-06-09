@@ -41,6 +41,8 @@ interface CreateLinkFormState {
    * Empty until the config loads (an effect pins the default).
    */
   registration_mode: string;
+  /** Optional, comma-separated free-form tags. Stored on `context.tags`. */
+  tags: string;
 }
 
 const EMPTY_FORM: CreateLinkFormState = {
@@ -53,7 +55,18 @@ const EMPTY_FORM: CreateLinkFormState = {
   event_date: '',
   event_location: '',
   registration_mode: '',
+  tags: '',
 };
+
+/** Splits a comma-separated tags input into a trimmed, de-duped, non-empty list. */
+function parseTags(input: string): string[] {
+  const seen = new Set<string>();
+  for (const raw of input.split(',')) {
+    const t = raw.trim();
+    if (t) seen.add(t);
+  }
+  return [...seen];
+}
 
 function slugifyForLink(input: string): string {
   return input
@@ -227,6 +240,7 @@ export function CreateLinkSection() {
           lever_event: form.lever_event || undefined,
           event_date: form.event_date || undefined,
           event_location: form.event_location || undefined,
+          ...(parseTags(form.tags).length > 0 ? { tags: parseTags(form.tags) } : {}),
         },
       });
       // Refresh the form so the user can compose the next link from scratch.
@@ -336,6 +350,15 @@ export function CreateLinkSection() {
               ))}
             </select>
           </Field>
+          {/* Optional free-form tags (comma-separated). Stored on context.tags. */}
+          <Field label={t('create_link.field_tags')}>
+            <input
+              className="bd-input"
+              value={form.tags}
+              onChange={(e) => setForm((f) => ({ ...f, tags: e.target.value }))}
+              placeholder={t('create_link.placeholder_tags')}
+            />
+          </Field>
           <div className="md:col-span-2 flex items-center justify-end gap-2 mt-2 flex-wrap">
             <Button onClick={onCreate} disabled={create.isPending}>
               {create.isPending ? t('create_link.creating') : t('create_link.create_button')}
@@ -421,6 +444,7 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
     // read-only badge. registration_mode is immutable post-create so the
     // edit path must not POST a new value.
     registration_mode: link.registration_mode ?? 'form',
+    tags: Array.isArray(ctx['tags']) ? (ctx['tags'] as string[]).join(', ') : '',
   }));
   const [editError, setEditError] = useState<string | null>(null);
   const onSaveEdit = async () => {
@@ -444,6 +468,7 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
             lever_event: editForm.lever_event || undefined,
             event_date: editForm.event_date || undefined,
             event_location: editForm.event_location || undefined,
+            tags: parseTags(editForm.tags),
           },
         },
       });

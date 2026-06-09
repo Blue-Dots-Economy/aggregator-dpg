@@ -235,11 +235,13 @@
       "field_event_location": "ಕಾರ್ಯಕ್ರಮದ ಸ್ಥಳ",
       "field_district": "ಜಿಲ್ಲೆ",
       "field_domain": "ಡೊಮೇನ್",
-      "field_registration_mode": "ನೋಂದಣಿ ಮೋಡ್",
+      "field_registration_mode": "ಅಭಿಯಾನ ಪ್ರಕಾರ",
+      "field_tags": "ಟ್ಯಾಗ್‌ಗಳು (ಐಚ್ಛಿಕ)",
       "placeholder_state": "ರಾಜ್ಯ",
       "placeholder_event": "ಅಭಿಯಾನ ಅಥವಾ ಕಾರ್ಯಕ್ರಮದ ಹೆಸರು",
       "placeholder_location": "ನಗರ ಅಥವಾ ಸ್ಥಳ",
       "placeholder_district": "ಜಿಲ್ಲೆ",
+      "placeholder_tags": "ಅಲ್ಪವಿರಾಮದಿಂದ ಬೇರ್ಪಡಿಸಿ, ಉದಾ. priority, dharwad-drive",
       "creating": "ರಚಿಸಲಾಗುತ್ತಿದೆ…",
       "create_button": "ಲಿಂಕ್ ರಚಿಸಿ",
       "qr_label": "QR ಕೋಡ್",
@@ -388,13 +390,13 @@
     }
   },
   "registration_mode": {
-    "field_label": "ನೋಂದಣಿ ಮೋಡ್",
+    "field_label": "ಅಭಿಯಾನ ಪ್ರಕಾರ",
     "voice": {
       "label": "ವಾಯ್ಸ್ ಅಭಿಯಾನ",
       "hint": "ನಿಮ್ಮ ಪ್ರೊಫೈಲ್ ಪೂರ್ಣಗೊಳಿಸಲು ಈ ಸಂಖ್ಯೆಗೆ ನಿಮಗೆ ಕರೆ ಬರುತ್ತದೆ."
     },
     "form": {
-      "label": "ಫಾರ್ಮ್",
+      "label": "ಫಾರ್ಮ್ ಭರ್ತಿ",
       "hint": "ಭಾಗವಹಿಸುವವರು ಆನ್‌ಲೈನ್‌ನಲ್ಲಿ ಪೂರ್ಣ ಪ್ರೊಫೈಲ್ ಭರ್ತಿ ಮಾಡುತ್ತಾರೆ. ಭಾಗಶಃ ಸಲ್ಲಿಕೆಗಳನ್ನು ಸ್ವೀಕರಿಸಲಾಗುತ್ತದೆ."
     }
   },

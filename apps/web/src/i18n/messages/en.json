@@ -235,11 +235,13 @@
       "field_event_location": "Event Location",
       "field_district": "District",
       "field_domain": "Domain",
-      "field_registration_mode": "Registration mode",
+      "field_registration_mode": "Campaign type",
+      "field_tags": "Tags (optional)",
       "placeholder_state": "State",
       "placeholder_event": "Campaign or event name",
       "placeholder_location": "City or venue",
       "placeholder_district": "District",
+      "placeholder_tags": "Comma-separated, e.g. priority, dharwad-drive",
       "creating": "Creating…",
       "create_button": "Create link",
       "qr_label": "QR Code",
@@ -388,13 +390,13 @@
     }
   },
   "registration_mode": {
-    "field_label": "Registration mode",
+    "field_label": "Campaign type",
     "voice": {
-      "label": "Voice campaign",
+      "label": "Voice Campaign",
       "hint": "You'll receive a call on this number to complete your profile."
     },
     "form": {
-      "label": "Form",
+      "label": "Form Filling",
       "hint": "Participants fill the full profile online. Partial submissions are accepted."
     }
   },
