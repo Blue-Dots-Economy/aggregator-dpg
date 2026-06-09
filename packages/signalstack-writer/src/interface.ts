@@ -47,11 +47,6 @@ export interface SignalStackProfile {
    * for back-compat.
    */
   lifecycle_status?: 'draft' | 'live' | 'paused';
-  /**
-   * Completion percentage (0..100) signalstack computed against the
-   * profile schema. Optional — absent on older signalstack versions.
-   */
-  completion_pct?: number;
 }
 
 /**
@@ -124,8 +119,6 @@ export interface SignalStackOnboardParticipantResult {
   already_registered?: boolean;
   /** Present only when an item was created (`submit_mode === 'with_item'`). */
   lifecycle_status?: 'draft' | 'live' | 'paused';
-  /** 0..100. Present iff {@link lifecycle_status} is present. */
-  completion_pct?: number;
   /**
    * Replaces the legacy {@link already_registered} field semantically
    * (both populated during the transition). `true` when signals returns
@@ -378,7 +371,6 @@ export interface SignalStackProbeUserResult {
     primary_item: {
       item_id: string;
       lifecycle_status: 'draft' | 'live' | 'paused';
-      completion_pct: number;
     };
   } | null;
 }
@@ -492,8 +484,8 @@ export abstract class SignalStackWriterBase {
    * `owned_elsewhere: true` (with null `lifecycle_summary`) for
    * users owned by another aggregator. When the user belongs to the
    * calling aggregator, `lifecycle_summary` carries the primary item's
-   * `item_id`, `lifecycle_status`, and `completion_pct` so the caller
-   * can resume the lifecycle without an extra round-trip.
+   * `item_id` and `lifecycle_status` so the caller can resume the
+   * lifecycle without an extra round-trip.
    *
    * @param input - actingOrgId + email and/or phoneNumber + network/domain.
    * @returns ok(SignalStackProbeUserResult) on 2xx; err(BaseError) when

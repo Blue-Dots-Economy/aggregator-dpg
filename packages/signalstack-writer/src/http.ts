@@ -157,7 +157,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       }
 
       // Plan-C response shape:
-      //   { user_id, user_existed, onboarded_at, items: [{ item_id, lifecycle_status?, completion_pct?, ... }] }
+      //   { user_id, user_existed, onboarded_at, items: [{ item_id, lifecycle_status?, ... }] }
       // The writer's public result still surfaces a flat
       // `profile_item_id` so existing callers (worker, registration-link
       // routes, audit logs) stay unchanged — pick the matching item for
@@ -173,7 +173,6 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
           item_domain?: unknown;
           item_type?: unknown;
           lifecycle_status?: unknown;
-          completion_pct?: unknown;
         }>;
         onboarded_at?: unknown;
       };
@@ -242,19 +241,12 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
         matched.lifecycle_status === 'paused'
           ? matched.lifecycle_status
           : undefined;
-      const completionPct =
-        typeof matched.completion_pct === 'number' &&
-        matched.completion_pct >= 0 &&
-        matched.completion_pct <= 100
-          ? matched.completion_pct
-          : undefined;
       const result: SignalStackOnboardParticipantResult = {
         user_id: raw.user_id,
         profile_item_id: matched.item_id,
         onboarded_at: typeof raw.onboarded_at === 'string' ? raw.onboarded_at : '',
         owned_elsewhere: false,
         ...(lifecycleStatus !== undefined ? { lifecycle_status: lifecycleStatus } : {}),
-        ...(completionPct !== undefined ? { completion_pct: completionPct } : {}),
       };
       return ok(result);
     } catch (e) {
@@ -818,7 +810,6 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
         items?: Array<{
           item_id?: unknown;
           lifecycle_status?: unknown;
-          completion_pct?: unknown;
         }>;
       };
       if (!raw || typeof raw !== 'object') {
@@ -853,24 +844,17 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
             }),
           );
         }
-        // Back-compat fallback: older signalstack builds omit lifecycle_status /
-        // completion_pct on the account-only response. Treat absent values as
-        // a live, fully-complete item — same default the resolveLifecycle
-        // helper in apps/api applies for read-side rows. The writer cannot
-        // import that helper (apps/api sits above this package in the dep
-        // graph), so inline the fallback here.
+        // Back-compat fallback: older signalstack builds omit lifecycle_status
+        // on the account-only response. Treat absent as a live item — same
+        // default the resolveLifecycle helper in apps/api applies for read-side
+        // rows. The writer cannot import that helper (apps/api sits above this
+        // package in the dep graph), so inline the fallback here.
         const lifecycleStatus =
           first.lifecycle_status === 'draft' ||
           first.lifecycle_status === 'live' ||
           first.lifecycle_status === 'paused'
             ? first.lifecycle_status
             : 'live';
-        const completionPct =
-          typeof first.completion_pct === 'number' &&
-          first.completion_pct >= 0 &&
-          first.completion_pct <= 100
-            ? first.completion_pct
-            : 100;
         return ok({
           user_exists: true,
           owned_elsewhere: false,
@@ -878,7 +862,6 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
             primary_item: {
               item_id: itemId,
               lifecycle_status: lifecycleStatus,
-              completion_pct: completionPct,
             },
           },
         });

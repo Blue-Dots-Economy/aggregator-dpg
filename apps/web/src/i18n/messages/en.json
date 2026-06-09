@@ -370,7 +370,7 @@
         "owned_elsewhere_body": "This email or mobile is already registered with another organisation. Please use a different contact or sign in through that organisation.",
         "owned_elsewhere_cta": "Use a different contact",
         "resume_title": "You have a profile in progress",
-        "resume_body": "We found an unfinished profile for this contact ({percent}% complete). Resume where you left off?",
+        "resume_body": "We found an unfinished profile for this contact. Resume where you left off?",
         "resume_cta": "Resume profile",
         "resume_continue_new": "Continue with a new submission"
       },

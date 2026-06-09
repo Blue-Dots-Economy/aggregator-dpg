@@ -152,7 +152,6 @@ describe('<PublicRegistrationView /> — lookup branches', () => {
               primary_item: {
                 item_id: 'item-xyz',
                 lifecycle_status: 'draft',
-                completion_pct: 60,
               },
             },
           }),
@@ -166,7 +165,6 @@ describe('<PublicRegistrationView /> — lookup branches', () => {
     fireEvent.submit(screen.getByTestId('rjsf-shim'));
     const banner = await screen.findByTestId('lookup-resume');
     expect(banner).toBeInTheDocument();
-    expect(banner.textContent).toContain('60');
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 

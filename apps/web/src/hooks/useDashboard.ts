@@ -47,7 +47,7 @@ export function useOppProviders(filter?: ParticipantFilter) {
  * Reads the lifecycle-aware items endpoint (`/v1/dashboard/items`).
  *
  * Sources the lifecycle tile counts (`meta.tiles`) and the per-item
- * `lifecycle_status` + `completion_pct` the page needs to render the
+ * `lifecycle_status` the page needs to render the
  * lifecycle column. Pass `lifecycle` to narrow the items list to a
  * single bucket; tiles always reflect totals regardless.
  *

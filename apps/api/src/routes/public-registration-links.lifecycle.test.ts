@@ -4,7 +4,7 @@
  *
  *   - forwards `submit_mode` (derived from the optional `partial` envelope
  *     flag) into `SignalStackWriter.onboard`,
- *   - surfaces `lifecycle_status`, `completion_pct`, and `owned_elsewhere`
+ *   - surfaces `lifecycle_status` and `owned_elsewhere`
  *     on the route response,
  *   - returns null lifecycle fields on `account_only` submits (no item),
  *   - flags `owned_elsewhere: true` (with `outcome: skipped`, 409) when
@@ -194,7 +194,7 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — lifecycle
     email: 'asha@example.com',
   };
 
-  it('returns lifecycle_status="live" and completion_pct=100 on default classification', async () => {
+  it('returns lifecycle_status="live" on default classification', async () => {
     const r = await app.inject({
       method: 'POST',
       url: `/public/v1/aggregators/${ORG_SLUG}/registrations/${LINK_SLUG}`,
@@ -204,17 +204,15 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — lifecycle
     const body = r.json() as {
       outcome: string;
       lifecycle_status: string | null;
-      completion_pct: number | null;
       owned_elsewhere: boolean;
     };
     expect(body.outcome).toBe('passed');
     expect(body.lifecycle_status).toBe('live');
-    expect(body.completion_pct).toBe(100);
     expect(body.owned_elsewhere).toBe(false);
   });
 
   it('returns lifecycle_status="draft" when signals classifies as draft', async () => {
-    signalstack.setNextClassification({ lifecycle_status: 'draft', completion_pct: 40 });
+    signalstack.setNextClassification({ lifecycle_status: 'draft' });
     const r = await app.inject({
       method: 'POST',
       url: `/public/v1/aggregators/${ORG_SLUG}/registrations/${LINK_SLUG}`,
@@ -223,18 +221,16 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — lifecycle
     expect(r.statusCode).toBe(201);
     const body = r.json() as {
       lifecycle_status: string | null;
-      completion_pct: number | null;
     };
     expect(body.lifecycle_status).toBe('draft');
-    expect(body.completion_pct).toBe(40);
   });
 
   it('ignores a stray `partial` flag on a form link (still creates an item)', async () => {
     // The legacy per-submit `partial` opt-in was removed — form (account_and_
     // profile) links always submit with_item and let signals classify. A
     // stray `partial: true` from an old client is stripped, not honoured, so
-    // lifecycle fields are still populated (not nulled).
-    signalstack.setNextClassification({ lifecycle_status: 'draft', completion_pct: 50 });
+    // the lifecycle status is still populated (not nulled).
+    signalstack.setNextClassification({ lifecycle_status: 'draft' });
     const r = await app.inject({
       method: 'POST',
       url: `/public/v1/aggregators/${ORG_SLUG}/registrations/${LINK_SLUG}`,
@@ -248,11 +244,9 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — lifecycle
     expect(r.statusCode).toBe(201);
     const body = r.json() as {
       lifecycle_status: string | null;
-      completion_pct: number | null;
       owned_elsewhere: boolean;
     };
     expect(body.lifecycle_status).toBe('draft');
-    expect(body.completion_pct).toBe(50);
     expect(body.owned_elsewhere).toBe(false);
   });
 
@@ -271,11 +265,9 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — lifecycle
       outcome: string;
       owned_elsewhere: boolean;
       lifecycle_status: string | null;
-      completion_pct: number | null;
     };
     expect(body.outcome).toBe('skipped');
     expect(body.owned_elsewhere).toBe(true);
     expect(body.lifecycle_status).toBeNull();
-    expect(body.completion_pct).toBeNull();
   });
 });

@@ -360,7 +360,6 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
     // honest default: signals is disabled (no push) OR the submit was
     // account_only — neither produces a lifecycle classification.
     let lifecycleStatusOut: 'draft' | 'live' | 'paused' | null = null;
-    let completionPctOut: number | null = null;
     let ownedElsewhere = false;
     const writer = getParticipantsWriter();
     const txResult = await getDb().transaction(async (tx) => {
@@ -475,13 +474,8 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
                   ? { lifecycle_status: result.value.lifecycle_status }
                   : {}),
               });
-        const completionPct =
-          submitMode === 'account_only' || !result.value.profile_item_id
-            ? null
-            : (result.value.completion_pct ?? null);
         ownedElsewhere = Boolean(result.value.owned_elsewhere);
         lifecycleStatusOut = lifecycleStatus;
-        completionPctOut = completionPct;
 
         // signalstack is the identity authority. The local participants table
         // is a soon-to-be-removed mirror, so its per-phone dedup must not flip
@@ -502,7 +496,6 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
           already_registered: result.value.already_registered ?? false,
           owned_elsewhere: ownedElsewhere,
           lifecycle_status: lifecycleStatus,
-          completion_pct: completionPct,
           submit_mode: submitMode,
           link_id: link.id,
           participant_id: participantRowId,
@@ -527,7 +520,6 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       participant_id: participantRowId,
       submission_id: submissionId,
       lifecycle_status: lifecycleStatusOut,
-      completion_pct: completionPctOut,
       owned_elsewhere: ownedElsewhere,
       submit_mode: submitMode,
     });
@@ -544,7 +536,6 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
         registration_mode: link.registrationMode,
         submission_shape: submissionShape,
         lifecycle_status: lifecycleStatusOut,
-        completion_pct: completionPctOut,
         owned_elsewhere: ownedElsewhere,
       });
     }
@@ -555,7 +546,6 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       registration_mode: link.registrationMode,
       submission_shape: submissionShape,
       lifecycle_status: lifecycleStatusOut,
-      completion_pct: completionPctOut,
       owned_elsewhere: ownedElsewhere,
     });
   });

@@ -237,7 +237,6 @@ describe('POST /public/v1/aggregators/:org/registrations/:slug — account_only 
     expect(r.statusCode).toBe(201);
     const body = r.json();
     expect(body.lifecycle_status).toBeNull();
-    expect(body.completion_pct).toBeNull();
     expect(body.registration_mode).toBe('voice');
     expect(body.submission_shape).toBe('account_only');
   });

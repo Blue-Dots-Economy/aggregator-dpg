@@ -48,11 +48,6 @@ export interface ParticipantBase {
    * has no associated signals item.
    */
   lifecycle_status?: LifecycleStatus;
-  /**
-   * Profile completion percentage (0-100). Only meaningful for `draft`
-   * rows; rendered alongside the lifecycle pill as a CompletionBar.
-   */
-  completion_pct?: number;
 }
 
 export type Seeker = ParticipantBase;

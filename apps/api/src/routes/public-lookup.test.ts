@@ -94,7 +94,7 @@ describe('GET /public/v1/aggregators/:orgSlug/lookup', () => {
     signalstack.seedOwnUser({
       actingOrgId: ORG_ID,
       email: 'me@here.com',
-      item: { item_id: 'item-1', lifecycle_status: 'draft', completion_pct: 40 },
+      item: { item_id: 'item-1', lifecycle_status: 'draft' },
     });
     const r = await app.inject({
       method: 'GET',
@@ -105,14 +105,13 @@ describe('GET /public/v1/aggregators/:orgSlug/lookup', () => {
       user_exists: boolean;
       owned_elsewhere: boolean;
       lifecycle_summary: {
-        primary_item: { item_id: string; lifecycle_status: string; completion_pct: number };
+        primary_item: { item_id: string; lifecycle_status: string };
       } | null;
     };
     expect(body.user_exists).toBe(true);
     expect(body.owned_elsewhere).toBe(false);
     expect(body.lifecycle_summary?.primary_item.item_id).toBe('item-1');
     expect(body.lifecycle_summary?.primary_item.lifecycle_status).toBe('draft');
-    expect(body.lifecycle_summary?.primary_item.completion_pct).toBe(40);
   });
 
   it('400s when neither email nor phone_number is supplied', async () => {

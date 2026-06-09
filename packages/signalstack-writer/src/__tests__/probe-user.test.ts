@@ -41,7 +41,7 @@ describe('SignalStackWriterFake.probeUser', () => {
     fake.seedOwnUser({
       actingOrgId: 'org-1',
       email: 'a@b.com',
-      item: { item_id: 'item-1', lifecycle_status: 'draft', completion_pct: 40 },
+      item: { item_id: 'item-1', lifecycle_status: 'draft' },
     });
     const res = await fake.probeUser({
       actingOrgId: 'org-1',
@@ -54,7 +54,6 @@ describe('SignalStackWriterFake.probeUser', () => {
       expect(res.value.user_exists).toBe(true);
       expect(res.value.owned_elsewhere).toBe(false);
       expect(res.value.lifecycle_summary?.primary_item.lifecycle_status).toBe('draft');
-      expect(res.value.lifecycle_summary?.primary_item.completion_pct).toBe(40);
       expect(res.value.lifecycle_summary?.primary_item.item_id).toBe('item-1');
     }
   });
@@ -91,7 +90,7 @@ describe('SignalStackWriterFake.probeUser', () => {
     fake.seedOwnUser({
       actingOrgId: 'org-1',
       phoneNumber: '+918888888888',
-      item: { item_id: 'item-2', lifecycle_status: 'live', completion_pct: 100 },
+      item: { item_id: 'item-2', lifecycle_status: 'live' },
     });
     const res = await fake.probeUser({
       actingOrgId: 'org-1',

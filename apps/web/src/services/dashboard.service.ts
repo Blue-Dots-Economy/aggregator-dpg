@@ -125,13 +125,12 @@ export interface DashboardItemsTiles {
  * Per-item shape returned by `/v1/dashboard/items` with lifecycle
  * normalisation applied. Carries the raw signalstack item fields the
  * caller may need to merge into a participant row (item_id +
- * lifecycle_status + completion_pct).
+ * lifecycle_status).
  */
 export interface DashboardItemRow {
   item_id?: string;
   aggregator_id?: string | null;
   lifecycle_status: 'draft' | 'live' | 'paused';
-  completion_pct: number | null;
   /** Pass-through for any extra fields signalstack returns. */
   [key: string]: unknown;
 }

@@ -60,7 +60,6 @@ type LookupOutcome =
       kind: 'resume';
       itemId: string;
       lifecycleStatus: 'draft' | 'live' | 'paused';
-      completionPct: number;
     };
 
 interface LookupResponse {
@@ -70,7 +69,6 @@ interface LookupResponse {
     primary_item?: {
       item_id: string;
       lifecycle_status: 'draft' | 'live' | 'paused';
-      completion_pct: number;
     } | null;
   } | null;
 }
@@ -362,7 +360,6 @@ export function PublicRegistrationView({
         kind: 'resume',
         itemId: primary.item_id,
         lifecycleStatus: primary.lifecycle_status,
-        completionPct: primary.completion_pct,
       };
     }
     return { kind: 'allow' };
@@ -638,9 +635,7 @@ export function PublicRegistrationView({
                     className="mb-5 rounded-[10px] border border-sky-200 bg-sky-50 px-4 py-3 text-[13px] text-sky-800"
                   >
                     <div className="font-semibold">{t('lookup.resume_title')}</div>
-                    <div className="mt-1 text-sky-700">
-                      {t('lookup.resume_body', { percent: lookup.completionPct })}
-                    </div>
+                    <div className="mt-1 text-sky-700">{t('lookup.resume_body')}</div>
                     <div className="mt-3 flex flex-wrap gap-2">
                       <button
                         type="button"

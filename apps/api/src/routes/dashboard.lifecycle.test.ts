@@ -1,6 +1,6 @@
 /**
  * Tests for the lifecycle extensions to `GET /v1/dashboard/items`:
- *   - per-item `lifecycle_status` + `completion_pct` on the response
+ *   - per-item `lifecycle_status` on the response
  *   - `meta.tiles` block with `{ draft, live, paused, account_only }`
  *   - `?lifecycle=` query filter (rejects unknown values)
  *   - back-compat: items without `lifecycle_status` are treated as `live`
@@ -50,10 +50,9 @@ describe('GET /v1/dashboard/items — lifecycle', () => {
     _setNetworkConfig(null);
   });
 
-  it('returns lifecycle_status + completion_pct on each item', async () => {
+  it('returns lifecycle_status on each item', async () => {
     writer.seedItem('item-1', {
       lifecycle_status: 'draft',
-      completion_pct: 40,
       aggregator_id: AGG_A,
       item_network: 'blue_dot',
       item_domain: 'seeker',
@@ -61,7 +60,6 @@ describe('GET /v1/dashboard/items — lifecycle', () => {
     });
     writer.seedItem('item-2', {
       lifecycle_status: 'live',
-      completion_pct: 100,
       aggregator_id: AGG_A,
       item_network: 'blue_dot',
       item_domain: 'seeker',
@@ -74,19 +72,17 @@ describe('GET /v1/dashboard/items — lifecycle', () => {
     });
     expect(r.statusCode).toBe(200);
     const body = r.json();
-    const item1 = (
-      body.items as Array<{ item_id: string; lifecycle_status?: string; completion_pct?: number }>
-    ).find((i) => i.item_id === 'item-1');
+    const item1 = (body.items as Array<{ item_id: string; lifecycle_status?: string }>).find(
+      (i) => i.item_id === 'item-1',
+    );
     expect(item1).toBeDefined();
     expect(item1!.lifecycle_status).toBe('draft');
-    expect(item1!.completion_pct).toBe(40);
 
-    const item2 = (
-      body.items as Array<{ item_id: string; lifecycle_status?: string; completion_pct?: number }>
-    ).find((i) => i.item_id === 'item-2');
+    const item2 = (body.items as Array<{ item_id: string; lifecycle_status?: string }>).find(
+      (i) => i.item_id === 'item-2',
+    );
     expect(item2).toBeDefined();
     expect(item2!.lifecycle_status).toBe('live');
-    expect(item2!.completion_pct).toBe(100);
   });
 
   it('returns meta.tiles with per-status counts', async () => {

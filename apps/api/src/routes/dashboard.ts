@@ -224,7 +224,6 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
       return {
         ...item,
         lifecycle_status: lifecycleStatus ?? 'live',
-        completion_pct: item.completion_pct ?? null,
       };
     });
     const tileRows = tilesResult.items.map((item) => resolveLifecycle(item) ?? 'live');

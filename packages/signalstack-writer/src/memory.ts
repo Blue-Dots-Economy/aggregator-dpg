@@ -66,12 +66,10 @@ export class InMemorySignalStackWriter extends SignalStackWriterBase {
   /**
    * Pinned lifecycle classification used by the next `onboard()` call when
    * `submit_mode !== 'account_only'`. Consumed (cleared) after one use so a
-   * second call falls back to the default `live` / `100` classification.
+   * second call falls back to the default `live` classification.
    * Tests set this via {@link setNextClassification}.
    */
-  protected nextClassification:
-    | { lifecycle_status: 'draft' | 'live' | 'paused'; completion_pct: number }
-    | undefined;
+  protected nextClassification: { lifecycle_status: 'draft' | 'live' | 'paused' } | undefined;
   /**
    * Foreign-user lookup keys (`email:...` / `phone:...`). When the next
    * `onboard()` matches a key here, the writer returns `owned_elsewhere:
@@ -99,7 +97,6 @@ export class InMemorySignalStackWriter extends SignalStackWriterBase {
       item?: {
         item_id: string;
         lifecycle_status: 'draft' | 'live' | 'paused';
-        completion_pct: number;
       };
     }
   > = new Map();
@@ -193,13 +190,10 @@ export class InMemorySignalStackWriter extends SignalStackWriterBase {
     }
 
     const profileItemId = `mem-item-${this.nextProfileSeq++}`;
-    const classification = this.nextClassification ?? {
-      lifecycle_status: 'live' as const,
-      completion_pct: 100,
-    };
+    const classification = this.nextClassification ?? { lifecycle_status: 'live' as const };
     // Consume the pinned classification so a second call reverts to the
-    // default `live` / `100` shape — keeps test fixtures terse without
-    // forcing every test to reset the writer.
+    // default `live` shape — keeps test fixtures terse without forcing every
+    // test to reset the writer.
     this.nextClassification = undefined;
 
     const profile: StoredProfile = {
@@ -214,7 +208,6 @@ export class InMemorySignalStackWriter extends SignalStackWriterBase {
       created_at: ISO_FIXED,
       updated_at: ISO_FIXED,
       lifecycle_status: classification.lifecycle_status,
-      completion_pct: classification.completion_pct,
       created_by: userRow.id,
       acting_org_id: input.actingOrgId,
       channel: input.channel,
@@ -227,7 +220,6 @@ export class InMemorySignalStackWriter extends SignalStackWriterBase {
       profile_item_id: profileItemId,
       onboarded_at: ISO_FIXED,
       lifecycle_status: classification.lifecycle_status,
-      completion_pct: classification.completion_pct,
       owned_elsewhere: false,
     });
   }
@@ -240,10 +232,7 @@ export class InMemorySignalStackWriter extends SignalStackWriterBase {
    *
    * @param classification - Pinned lifecycle status + completion percent.
    */
-  setNextClassification(classification: {
-    lifecycle_status: 'draft' | 'live' | 'paused';
-    completion_pct: number;
-  }): void {
+  setNextClassification(classification: { lifecycle_status: 'draft' | 'live' | 'paused' }): void {
     this.nextClassification = classification;
   }
 
@@ -285,7 +274,6 @@ export class InMemorySignalStackWriter extends SignalStackWriterBase {
     item?: {
       item_id: string;
       lifecycle_status: 'draft' | 'live' | 'paused';
-      completion_pct: number;
     };
   }): void {
     const email = normalizeEmail(seed.email);
@@ -355,7 +343,6 @@ export class InMemorySignalStackWriter extends SignalStackWriterBase {
             primary_item: {
               item_id: ownEntry.item.item_id,
               lifecycle_status: ownEntry.item.lifecycle_status,
-              completion_pct: ownEntry.item.completion_pct,
             },
           },
         });
@@ -397,14 +384,13 @@ export class InMemorySignalStackWriter extends SignalStackWriterBase {
    * Re-seeding the same `itemId` overwrites the previous entry.
    *
    * @param itemId - Item id the seed is keyed under.
-   * @param partial - Optional overrides; `lifecycle_status` and
-   *   `completion_pct` are the fields the lifecycle re-check reads.
+   * @param partial - Optional overrides; `lifecycle_status` is the field the
+   *   lifecycle re-check reads.
    */
   seedItem(
     itemId: string,
     partial: Partial<SignalStackProfile> & {
       lifecycle_status?: 'draft' | 'live' | 'paused';
-      completion_pct?: number;
     } = {},
   ): void {
     const row: StoredProfile = {
@@ -421,7 +407,6 @@ export class InMemorySignalStackWriter extends SignalStackWriterBase {
       ...(partial.lifecycle_status !== undefined
         ? { lifecycle_status: partial.lifecycle_status }
         : {}),
-      ...(partial.completion_pct !== undefined ? { completion_pct: partial.completion_pct } : {}),
       created_by: '',
       acting_org_id: '',
       channel: 'link',
