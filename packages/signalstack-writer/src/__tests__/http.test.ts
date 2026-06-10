@@ -477,7 +477,15 @@ describe('HttpSignalStackWriter.fetchDashboard — malformed payload', () => {
     fetchMock.mockResolvedValueOnce(
       okJsonResponse({
         by_domain: {
-          seeker: { rollup: { total_items: 0, by_action_status: {}, by_status: {} }, items: [] },
+          seeker: {
+            rollup: {
+              total_items: 0,
+              by_initiated_action_status: {},
+              by_received_action_status: {},
+              by_status: {},
+            },
+            items: [],
+          },
         },
       }),
     );
@@ -496,7 +504,8 @@ describe('HttpSignalStackWriter.fetchDashboard — malformed payload', () => {
           // items is missing
           rollup: {
             total_items: 0,
-            by_action_status: {},
+            by_initiated_action_status: {},
+            by_received_action_status: {},
             by_status: {},
           },
           total_matching: 0,
@@ -573,7 +582,8 @@ describe('HttpSignalStackWriter.fetchDashboard — malformed payload', () => {
           items: [],
           rollup: {
             // total_items is missing
-            by_action_status: {},
+            by_initiated_action_status: {},
+            by_received_action_status: {},
             by_status: {},
           },
           total_matching: 0,

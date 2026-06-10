@@ -389,7 +389,7 @@ function buildStatusOptions(
  * Looks up a bucket label from the config-sourced map, falling back to
  * an optional translated fallback supplier, then the raw key. Always returns a string.
  *
- * @param labels - Config-sourced bucket label map (may be from `dashboardBuckets.by_action_status`).
+ * @param labels - Config-sourced bucket label map (e.g. `dashboardBuckets.by_initiated_action_status` / `by_received_action_status`).
  * @param key - Bucket key (e.g. `'create'`, `'accept'`).
  * @param getFallback - Optional function that returns the localised fallback label for the key.
  * @returns The resolved label string.
@@ -1277,7 +1277,8 @@ function ProvidersTab() {
   const locale = useLocale();
   // Mirror SeekersTab: live counts come from the signalstack dashboard
   // rollup. Provider domain reuses the same canonical rollup shape
-  // (total_items, by_status, by_action_status, complete_profiles, …)
+  // (total_items, by_status, by_initiated_action_status,
+  //  by_received_action_status, complete_profiles, …)
   // so the cards map field-for-field; only the labels differ.
   //
   // Domain id from cfg so networks declaring non-default ids (e.g.
