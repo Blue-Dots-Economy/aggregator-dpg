@@ -698,7 +698,7 @@ function ParticipantTable<R extends ParticipantBase>({
           {onLifecycleFilterChange ? (
             <select
               aria-label={t('filters.lifecycle_label')}
-              className="bd-input text-[12.5px] py-1.5 pr-7"
+              className="bd-input w-auto max-w-[150px] text-[12.5px] py-1.5 pr-7"
               value={lifecycleFilter}
               onChange={(e) => onLifecycleFilterChange(e.target.value as LifecycleFilterValue)}
             >
@@ -714,6 +714,7 @@ function ParticipantTable<R extends ParticipantBase>({
               onClick={() => setFilterOpen((v) => !v)}
               aria-haspopup="menu"
               aria-expanded={filterOpen}
+              className="whitespace-nowrap px-3 py-1.5 text-[12.5px]"
             >
               {filterActive
                 ? (options.find((o) => o.value === statusFilter)?.label ?? 'Filtered')
@@ -761,6 +762,7 @@ function ParticipantTable<R extends ParticipantBase>({
             disabled={exporting}
             title={exportError ?? t('aria.export_csv')}
             aria-label={t('aria.export_csv')}
+            className="whitespace-nowrap px-3 py-1.5 text-[12.5px]"
           >
             {exporting ? t('buttons.exporting') : t('buttons.exportCsv')}
           </Button>
