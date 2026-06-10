@@ -129,7 +129,23 @@
       "delta_this_week": "this week",
       "totalUsers": "Total Users",
       "avgProfilesPerUser": "Avg Profiles per User",
-      "avgActionsPerUser": "Avg Actions per User"
+      "avgActionsPerUser": "Avg Actions per User",
+      "sub_total": "All {entityPlural} records",
+      "sub_complete": "{pct}% of all profiles",
+      "sub_applications": "Profiles with submissions",
+      "sub_avgItems": "Profiles managed each",
+      "sub_avgActions": "Recorded interactions"
+    },
+    "summary": {
+      "total": "{count} total",
+      "hint": "Lifecycle and profile health across your network"
+    },
+    "groups": {
+      "profiles": "Profiles",
+      "users": "Users"
+    },
+    "funnel": {
+      "stage": "Stage {n}"
     },
     "tiles": {
       "lifecycle": {

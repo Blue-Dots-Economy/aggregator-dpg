@@ -108,38 +108,48 @@ interface StatCardProps {
   label: string;
   icon: IconName;
   hint?: string;
+  /**
+   * Pre-localised "Stage N" pill text. When set the card renders as a
+   * lifecycle-funnel stage (pill top-right, big toned number, bold name);
+   * `action` is ignored in that case.
+   */
+  stepLabel?: string;
   action?: ReactNode;
 }
 
-function StatCard({ tone, count, label, icon, hint, action }: StatCardProps) {
+function StatCard({ tone, count, label, icon, hint, stepLabel, action }: StatCardProps) {
   const t = STAT_TONES[tone] ?? STAT_TONES.inactive;
   const { mode } = useThemeMode();
   const Ic = I[icon];
   const numColor = mode === 'dark' ? t.num.dark : t.num.light;
   return (
     <div
-      className="bd-card bd-shadow p-5 flex flex-col gap-3 relative overflow-hidden"
+      className="bd-card bd-shadow p-5 flex flex-col relative overflow-hidden transition-transform hover:-translate-y-0.5"
       style={{ background: t.bg }}
     >
-      <div className="flex items-start justify-between">
+      <div className="flex items-center justify-between mb-3.5">
         <div
           className="w-9 h-9 rounded-[10px] flex items-center justify-center"
           style={{ background: 'var(--bd-card)', border: `1px solid ${t.ring}`, color: t.icon }}
         >
           <Ic size={18} />
         </div>
-        {action}
+        {stepLabel !== undefined ? (
+          <span className="text-[11px] font-bold tracking-wide text-ink-400 bg-[var(--bd-card)] px-2.5 py-1 rounded-full whitespace-nowrap">
+            {stepLabel}
+          </span>
+        ) : (
+          action
+        )}
       </div>
-      <div>
-        <div
-          className="font-display font-bold text-[28px] leading-none tracking-tight"
-          style={{ color: numColor }}
-        >
-          {count}
-        </div>
-        <div className="text-[13px] text-ink-500 mt-1.5 font-medium">{label}</div>
-        {hint && <div className="text-[11.5px] text-ink-400 mt-0.5">{hint}</div>}
+      <div
+        className="font-display font-bold text-[32px] leading-none tracking-tight"
+        style={{ color: numColor }}
+      >
+        {count}
       </div>
+      <div className="text-[15px] font-bold text-ink-900 mt-2.5">{label}</div>
+      {hint && <div className="text-[12.5px] text-ink-500 mt-1 font-medium">{hint}</div>}
     </div>
   );
 }
@@ -149,6 +159,10 @@ type DeltaTone = 'up' | 'down' | 'flat';
 interface MiniStatProps {
   label: string;
   value: string;
+  /** Optional leading icon rendered in a soft square next to the label. */
+  icon?: IconName | undefined;
+  /** Optional context line under the value (e.g. "50% of all profiles"). */
+  sub?: string | undefined;
   delta?: string;
   deltaTone?: DeltaTone;
 }
@@ -159,12 +173,20 @@ const DELTA_TONES: Record<DeltaTone, string> = {
   flat: 'text-ink-500 bg-ink-100',
 };
 
-function MiniStat({ label, value, delta, deltaTone = 'flat' }: MiniStatProps) {
+function MiniStat({ label, value, icon, sub, delta, deltaTone = 'flat' }: MiniStatProps) {
+  const Ic = icon ? I[icon] : null;
   return (
-    <div className="bd-card p-4 flex flex-col gap-1.5">
-      <div className="text-[12px] text-ink-400 font-medium">{label}</div>
+    <div className="bd-card p-4 flex flex-col gap-2.5 transition-transform hover:-translate-y-0.5">
+      <div className="flex items-center gap-2.5">
+        {Ic && (
+          <div className="w-8 h-8 rounded-[9px] bg-ink-50 text-ink-500 flex items-center justify-center shrink-0">
+            <Ic size={16} />
+          </div>
+        )}
+        <div className="text-[13px] text-ink-500 font-semibold">{label}</div>
+      </div>
       <div className="flex items-baseline gap-2">
-        <div className="font-display font-bold text-[22px] text-ink-900 leading-none tracking-tight">
+        <div className="font-display font-bold text-[26px] text-ink-900 leading-none tracking-tight">
           {value}
         </div>
         {delta && (
@@ -175,8 +197,149 @@ function MiniStat({ label, value, delta, deltaTone = 'flat' }: MiniStatProps) {
           </span>
         )}
       </div>
+      {sub && <div className="text-[12px] text-ink-400 font-medium -mt-1">{sub}</div>}
     </div>
   );
+}
+
+/**
+ * Domain summary bar — single strip above the lifecycle funnel carrying the
+ * domain label (from network-config `plural_label`), the live total, a
+ * context hint, and the refresh action. Replaces the old standalone label
+ * row + refresh button (design: Dashboard summary bar).
+ */
+function SummaryBar({
+  icon,
+  label,
+  total,
+  refreshing,
+  refreshError,
+  lastRefreshedAt,
+  onRefresh,
+}: {
+  icon: IconName;
+  label: string;
+  total: number | undefined;
+  refreshing: boolean;
+  refreshError: string | null;
+  lastRefreshedAt: number | null;
+  onRefresh: () => void;
+}) {
+  const t = useTranslations('dashboard');
+  const Ic = I[icon];
+  return (
+    <div className="bd-card bd-shadow px-5 py-4 flex items-center gap-4">
+      <div
+        className="w-11 h-11 rounded-[12px] flex items-center justify-center shrink-0"
+        style={{ background: 'var(--bd-primary-50)', color: 'var(--bd-primary-600)' }}
+      >
+        <Ic size={22} />
+      </div>
+      <div className="flex flex-col gap-0.5 min-w-0">
+        <span className="text-[11.5px] font-bold uppercase tracking-[.06em] text-ink-400 truncate">
+          {label}
+        </span>
+        <span className="font-display font-bold text-[18px] text-ink-900 leading-tight">
+          {t('summary.total', { count: fmtCount(total) })}
+        </span>
+      </div>
+      <div className="w-px self-stretch bg-[var(--bd-border)] mx-1 hidden sm:block" />
+      <span className="text-[13px] text-ink-500 font-medium hidden sm:block">
+        {t('summary.hint')}
+      </span>
+      <div className="ml-auto flex items-center gap-2">
+        {refreshError ? (
+          <span className="max-w-[220px] truncate text-xs text-red-600" title={refreshError}>
+            {t('state.refreshFailed')}
+          </span>
+        ) : lastRefreshedAt !== null && Date.now() - lastRefreshedAt < 5000 ? (
+          <span className="text-xs text-ink-400">{t('state.refreshedJustNow')}</span>
+        ) : null}
+        <Button
+          kind="ghost"
+          icon={
+            <I.refresh
+              size={14}
+              className={refreshing ? 'animate-spin' : undefined}
+              aria-hidden="true"
+            />
+          }
+          onClick={onRefresh}
+          disabled={refreshing}
+          aria-label={t('aria.refresh')}
+          title={t('aria.refresh')}
+        >
+          {refreshing ? t('buttons.refreshing') : t('buttons.refresh')}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Labelled metric group — eyebrow heading over a responsive card grid.
+ * Groups the dashboard tiles into "Profiles" / "Users" sections
+ * (design: grouped metric sections).
+ */
+function MetricGroup({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div>
+      <div className="text-[11.5px] font-bold uppercase tracking-[.09em] text-ink-400 mb-3">
+        {title}
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">{children}</div>
+    </div>
+  );
+}
+
+/**
+ * Icon per known rollup tile field. Config-defined tiles with unknown
+ * fields render without an icon rather than guessing one.
+ */
+const TILE_ICONS: Record<string, IconName> = {
+  total_items: 'copy',
+  complete_profiles: 'check',
+  has_applications: 'send',
+  total_users: 'users',
+  avg_items_per_user: 'trending',
+  avg_actions_per_user: 'spark',
+};
+
+/**
+ * Contextual sub-line for a known rollup tile field (design: metric card
+ * sub-labels). Unknown fields — and the completion share while either
+ * count is missing or total is 0 — return undefined so the card simply
+ * omits the line.
+ *
+ * @param field - The tile's rollup field name.
+ * @param t - Dashboard-scoped translator.
+ * @param entityPlural - Active domain's plural label for interpolation.
+ * @param rollup - Domain rollup, used to derive the completion share.
+ */
+function tileSub(
+  field: string,
+  t: ReturnType<typeof useTranslations>,
+  entityPlural: string,
+  rollup: { total_items: number; complete_profiles: number } | undefined,
+): string | undefined {
+  switch (field) {
+    case 'total_items':
+      return t('ministat.sub_total', { entityPlural });
+    case 'complete_profiles': {
+      if (!rollup || rollup.total_items <= 0) return undefined;
+      return t('ministat.sub_complete', {
+        pct: Math.round((rollup.complete_profiles / rollup.total_items) * 100),
+      });
+    }
+    case 'has_applications':
+      return t('ministat.sub_applications');
+    case 'avg_items_per_user':
+      return t('ministat.sub_avgItems');
+    case 'avg_actions_per_user':
+      return t('ministat.sub_avgActions');
+    default:
+      return undefined;
+  }
 }
 
 interface FunnelPart {
@@ -1196,40 +1359,22 @@ function SeekersTab() {
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex items-center justify-between">
-        <span className="text-[13px] font-semibold text-ink-700">{seekerPlural}</span>
-        <div className="flex items-center gap-2">
-          <Button
-            kind="ghost"
-            icon={
-              <I.refresh
-                size={14}
-                className={refreshing ? 'animate-spin' : undefined}
-                aria-hidden="true"
-              />
-            }
-            onClick={() => {
-              void handleRefresh();
-            }}
-            disabled={refreshing}
-            aria-label={t('aria.refresh')}
-            title={t('aria.refresh')}
-          >
-            {refreshing ? t('buttons.refreshing') : t('buttons.refresh')}
-          </Button>
-          {refreshError ? (
-            <span className="ml-2 max-w-[220px] truncate text-xs text-red-600" title={refreshError}>
-              {t('state.refreshFailed')}
-            </span>
-          ) : lastRefreshedAt !== null && Date.now() - lastRefreshedAt < 5000 ? (
-            <span className="text-xs text-ink-400">{t('state.refreshedJustNow')}</span>
-          ) : null}
-        </div>
-      </div>
+      <SummaryBar
+        icon="users"
+        label={seekerPlural}
+        total={total}
+        refreshing={refreshing}
+        refreshError={refreshError}
+        lastRefreshedAt={lastRefreshedAt}
+        onRefresh={() => {
+          void handleRefresh();
+        }}
+      />
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <StatCard
           tone="new"
           icon="spark"
+          stepLabel={t('funnel.stage', { n: 1 })}
           count={fmtCount(byStatus['new'] ?? 0)}
           label={statusRules['new']?.label ?? statusLabels['new'] ?? t('statuses.new')}
           hint={statusRules['new']?.description ?? t('hints.new')}
@@ -1237,6 +1382,7 @@ function SeekersTab() {
         <StatCard
           tone="active"
           icon="users"
+          stepLabel={t('funnel.stage', { n: 2 })}
           count={fmtCount(active)}
           label={
             statusRules['active']?.label ??
@@ -1248,6 +1394,7 @@ function SeekersTab() {
         <StatCard
           tone="risk"
           icon="alert"
+          stepLabel={t('funnel.stage', { n: 3 })}
           count={fmtCount(atRisk)}
           label={statusRules['at_risk']?.label ?? statusLabels['at_risk'] ?? t('statuses.at_risk')}
           hint={statusRules['at_risk']?.description ?? t('hints.at_risk')}
@@ -1255,6 +1402,7 @@ function SeekersTab() {
         <StatCard
           tone="inactive"
           icon="pause"
+          stepLabel={t('funnel.stage', { n: 4 })}
           count={fmtCount(inactive)}
           label={
             statusRules['inactive']?.label ?? statusLabels['inactive'] ?? t('statuses.inactive')
@@ -1263,20 +1411,34 @@ function SeekersTab() {
         />
       </div>
 
-      {/* Profile-level tiles */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {resolveTiles(seekerCfg?.dashboardTiles?.profile, defaultTiles.profile, rollup).map(
-          (tile) => (
-            <MiniStat key={`p-${tile.field}`} label={tile.label} value={fmtCount(tile.value)} />
-          ),
-        )}
-      </div>
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        {/* Profile-level tiles */}
+        <MetricGroup title={t('groups.profiles')}>
+          {resolveTiles(seekerCfg?.dashboardTiles?.profile, defaultTiles.profile, rollup).map(
+            (tile) => (
+              <MiniStat
+                key={`p-${tile.field}`}
+                icon={TILE_ICONS[tile.field]}
+                label={tile.label}
+                value={fmtCount(tile.value)}
+                sub={tileSub(tile.field, t, seekerPlural, rollup)}
+              />
+            ),
+          )}
+        </MetricGroup>
 
-      {/* User-level tiles */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {resolveTiles(seekerCfg?.dashboardTiles?.user, defaultTiles.user, rollup).map((tile) => (
-          <MiniStat key={`u-${tile.field}`} label={tile.label} value={fmtCount(tile.value)} />
-        ))}
+        {/* User-level tiles */}
+        <MetricGroup title={t('groups.users')}>
+          {resolveTiles(seekerCfg?.dashboardTiles?.user, defaultTiles.user, rollup).map((tile) => (
+            <MiniStat
+              key={`u-${tile.field}`}
+              icon={TILE_ICONS[tile.field]}
+              label={tile.label}
+              value={fmtCount(tile.value)}
+              sub={tileSub(tile.field, t, seekerPlural, rollup)}
+            />
+          ))}
+        </MetricGroup>
       </div>
 
       {isLoading ? (
@@ -1540,40 +1702,22 @@ function ProvidersTab() {
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex items-center justify-between">
-        <span className="text-[13px] font-semibold text-ink-700">{providerPlural}</span>
-        <div className="flex items-center gap-2">
-          <Button
-            kind="ghost"
-            icon={
-              <I.refresh
-                size={14}
-                className={refreshing ? 'animate-spin' : undefined}
-                aria-hidden="true"
-              />
-            }
-            onClick={() => {
-              void handleRefresh();
-            }}
-            disabled={refreshing}
-            aria-label={t('aria.refresh')}
-            title={t('aria.refresh')}
-          >
-            {refreshing ? t('buttons.refreshing') : t('buttons.refresh')}
-          </Button>
-          {refreshError ? (
-            <span className="ml-2 max-w-[220px] truncate text-xs text-red-600" title={refreshError}>
-              {t('state.refreshFailed')}
-            </span>
-          ) : lastRefreshedAt !== null && Date.now() - lastRefreshedAt < 5000 ? (
-            <span className="text-xs text-ink-400">{t('state.refreshedJustNow')}</span>
-          ) : null}
-        </div>
-      </div>
+      <SummaryBar
+        icon="briefcase"
+        label={providerPlural}
+        total={total}
+        refreshing={refreshing}
+        refreshError={refreshError}
+        lastRefreshedAt={lastRefreshedAt}
+        onRefresh={() => {
+          void handleRefresh();
+        }}
+      />
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <StatCard
           tone="new"
           icon="spark"
+          stepLabel={t('funnel.stage', { n: 1 })}
           count={fmtCount(byStatus['new'] ?? 0)}
           label={statusRules['new']?.label ?? statusLabels['new'] ?? t('statuses.new')}
           hint={statusRules['new']?.description ?? t('hints.new')}
@@ -1581,6 +1725,7 @@ function ProvidersTab() {
         <StatCard
           tone="active"
           icon="briefcase"
+          stepLabel={t('funnel.stage', { n: 2 })}
           count={fmtCount(active)}
           label={statusRules['active']?.label ?? statusLabels['active'] ?? t('statuses.active')}
           hint={statusRules['active']?.description ?? t('hints.active')}
@@ -1588,6 +1733,7 @@ function ProvidersTab() {
         <StatCard
           tone="risk"
           icon="alert"
+          stepLabel={t('funnel.stage', { n: 3 })}
           count={fmtCount(atRisk)}
           label={statusRules['at_risk']?.label ?? statusLabels['at_risk'] ?? t('statuses.at_risk')}
           hint={statusRules['at_risk']?.description ?? t('hints.at_risk')}
@@ -1595,6 +1741,7 @@ function ProvidersTab() {
         <StatCard
           tone="inactive"
           icon="pause"
+          stepLabel={t('funnel.stage', { n: 4 })}
           count={fmtCount(inactive)}
           label={
             statusRules['inactive']?.label ?? statusLabels['inactive'] ?? t('statuses.inactive')
@@ -1603,20 +1750,36 @@ function ProvidersTab() {
         />
       </div>
 
-      {/* Profile-level tiles */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {resolveTiles(providerCfg?.dashboardTiles?.profile, defaultTiles.profile, rollup).map(
-          (tile) => (
-            <MiniStat key={`p-${tile.field}`} label={tile.label} value={fmtCount(tile.value)} />
-          ),
-        )}
-      </div>
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        {/* Profile-level tiles */}
+        <MetricGroup title={t('groups.profiles')}>
+          {resolveTiles(providerCfg?.dashboardTiles?.profile, defaultTiles.profile, rollup).map(
+            (tile) => (
+              <MiniStat
+                key={`p-${tile.field}`}
+                icon={TILE_ICONS[tile.field]}
+                label={tile.label}
+                value={fmtCount(tile.value)}
+                sub={tileSub(tile.field, t, providerPlural, rollup)}
+              />
+            ),
+          )}
+        </MetricGroup>
 
-      {/* User-level tiles */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {resolveTiles(providerCfg?.dashboardTiles?.user, defaultTiles.user, rollup).map((tile) => (
-          <MiniStat key={`u-${tile.field}`} label={tile.label} value={fmtCount(tile.value)} />
-        ))}
+        {/* User-level tiles */}
+        <MetricGroup title={t('groups.users')}>
+          {resolveTiles(providerCfg?.dashboardTiles?.user, defaultTiles.user, rollup).map(
+            (tile) => (
+              <MiniStat
+                key={`u-${tile.field}`}
+                icon={TILE_ICONS[tile.field]}
+                label={tile.label}
+                value={fmtCount(tile.value)}
+                sub={tileSub(tile.field, t, providerPlural, rollup)}
+              />
+            ),
+          )}
+        </MetricGroup>
       </div>
 
       {isLoading ? (
@@ -1825,17 +1988,11 @@ function DashboardContent({ aggregatorType }: { aggregatorType: string }) {
         }
       />
 
-      {tabItems.length > 1 ? (
+      {/* Single-domain aggregators render no tab strip — the summary bar
+          inside each tab already carries the domain label + live total
+          (design: redundant pill removed). */}
+      {tabItems.length > 1 && (
         <SegmentedTabs<Tab> value={tab} onChange={setTab} items={tabItems} className="mb-6" />
-      ) : (
-        // Single-domain aggregator: the lone tab carries no navigation
-        // value, so render it as a static label chip instead of a
-        // clickable button.
-        <div className="seg mb-6">
-          <span className="px-4 py-2 rounded-[9px] text-[13.5px] font-medium bg-[var(--bd-card)] text-[var(--bd-primary-600)] inline-flex items-center gap-2 shadow-[0_1px_2px_rgba(11,16,32,0.06)] cursor-default select-none">
-            {tabItems[0]?.label}
-          </span>
-        </div>
       )}
 
       {tab === 'seekers' && <SeekersTab />}

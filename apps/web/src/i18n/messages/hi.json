@@ -129,7 +129,23 @@
       "delta_this_week": "इस सप्ताह",
       "totalUsers": "कुल उपयोगकर्ता",
       "avgProfilesPerUser": "प्रति उपयोगकर्ता औसत प्रोफ़ाइलें",
-      "avgActionsPerUser": "प्रति उपयोगकर्ता औसत क्रियाएँ"
+      "avgActionsPerUser": "प्रति उपयोगकर्ता औसत क्रियाएँ",
+      "sub_total": "सभी {entityPlural} रिकॉर्ड",
+      "sub_complete": "सभी प्रोफ़ाइलों का {pct}%",
+      "sub_applications": "आवेदन वाली प्रोफ़ाइलें",
+      "sub_avgItems": "प्रति उपयोगकर्ता प्रबंधित प्रोफ़ाइलें",
+      "sub_avgActions": "दर्ज की गई गतिविधियाँ"
+    },
+    "summary": {
+      "total": "कुल {count}",
+      "hint": "आपके नेटवर्क में जीवनचक्र और प्रोफ़ाइल स्थिति"
+    },
+    "groups": {
+      "profiles": "प्रोफ़ाइलें",
+      "users": "उपयोगकर्ता"
+    },
+    "funnel": {
+      "stage": "चरण {n}"
     },
     "tiles": {
       "lifecycle": {
