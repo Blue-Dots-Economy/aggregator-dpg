@@ -108,16 +108,10 @@ interface StatCardProps {
   label: string;
   icon: IconName;
   hint?: string;
-  /**
-   * Pre-localised "Stage N" pill text. When set the card renders as a
-   * lifecycle-funnel stage (pill top-right, big toned number, bold name);
-   * `action` is ignored in that case.
-   */
-  stepLabel?: string;
   action?: ReactNode;
 }
 
-function StatCard({ tone, count, label, icon, hint, stepLabel, action }: StatCardProps) {
+function StatCard({ tone, count, label, icon, hint, action }: StatCardProps) {
   const t = STAT_TONES[tone] ?? STAT_TONES.inactive;
   const { mode } = useThemeMode();
   const Ic = I[icon];
@@ -134,13 +128,7 @@ function StatCard({ tone, count, label, icon, hint, stepLabel, action }: StatCar
         >
           <Ic size={18} />
         </div>
-        {stepLabel !== undefined ? (
-          <span className="text-[11px] font-bold tracking-wide text-ink-400 bg-[var(--bd-card)] px-2.5 py-1 rounded-full whitespace-nowrap">
-            {stepLabel}
-          </span>
-        ) : (
-          action
-        )}
+        {action}
       </div>
       <div
         className="font-display font-bold text-[32px] leading-none tracking-tight"
@@ -1377,7 +1365,6 @@ function SeekersTab() {
         <StatCard
           tone="new"
           icon="spark"
-          stepLabel={t('funnel.stage', { n: 1 })}
           count={fmtCount(byStatus['new'] ?? 0)}
           label={statusRules['new']?.label ?? statusLabels['new'] ?? t('statuses.new')}
           hint={statusRules['new']?.description ?? t('hints.new')}
@@ -1385,7 +1372,6 @@ function SeekersTab() {
         <StatCard
           tone="active"
           icon="users"
-          stepLabel={t('funnel.stage', { n: 2 })}
           count={fmtCount(active)}
           label={
             statusRules['active']?.label ??
@@ -1397,7 +1383,6 @@ function SeekersTab() {
         <StatCard
           tone="risk"
           icon="alert"
-          stepLabel={t('funnel.stage', { n: 3 })}
           count={fmtCount(atRisk)}
           label={statusRules['at_risk']?.label ?? statusLabels['at_risk'] ?? t('statuses.at_risk')}
           hint={statusRules['at_risk']?.description ?? t('hints.at_risk')}
@@ -1405,7 +1390,6 @@ function SeekersTab() {
         <StatCard
           tone="inactive"
           icon="pause"
-          stepLabel={t('funnel.stage', { n: 4 })}
           count={fmtCount(inactive)}
           label={
             statusRules['inactive']?.label ?? statusLabels['inactive'] ?? t('statuses.inactive')
@@ -1720,7 +1704,6 @@ function ProvidersTab() {
         <StatCard
           tone="new"
           icon="spark"
-          stepLabel={t('funnel.stage', { n: 1 })}
           count={fmtCount(byStatus['new'] ?? 0)}
           label={statusRules['new']?.label ?? statusLabels['new'] ?? t('statuses.new')}
           hint={statusRules['new']?.description ?? t('hints.new')}
@@ -1728,7 +1711,6 @@ function ProvidersTab() {
         <StatCard
           tone="active"
           icon="briefcase"
-          stepLabel={t('funnel.stage', { n: 2 })}
           count={fmtCount(active)}
           label={statusRules['active']?.label ?? statusLabels['active'] ?? t('statuses.active')}
           hint={statusRules['active']?.description ?? t('hints.active')}
@@ -1736,7 +1718,6 @@ function ProvidersTab() {
         <StatCard
           tone="risk"
           icon="alert"
-          stepLabel={t('funnel.stage', { n: 3 })}
           count={fmtCount(atRisk)}
           label={statusRules['at_risk']?.label ?? statusLabels['at_risk'] ?? t('statuses.at_risk')}
           hint={statusRules['at_risk']?.description ?? t('hints.at_risk')}
@@ -1744,7 +1725,6 @@ function ProvidersTab() {
         <StatCard
           tone="inactive"
           icon="pause"
-          stepLabel={t('funnel.stage', { n: 4 })}
           count={fmtCount(inactive)}
           label={
             statusRules['inactive']?.label ?? statusLabels['inactive'] ?? t('statuses.inactive')

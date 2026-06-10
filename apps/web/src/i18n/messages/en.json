@@ -144,9 +144,6 @@
       "profiles": "Profiles",
       "users": "Users"
     },
-    "funnel": {
-      "stage": "Stage {n}"
-    },
     "tiles": {
       "lifecycle": {
         "draft": "Draft profiles",

@@ -144,9 +144,6 @@
       "profiles": "प्रोफ़ाइलें",
       "users": "उपयोगकर्ता"
     },
-    "funnel": {
-      "stage": "चरण {n}"
-    },
     "tiles": {
       "lifecycle": {
         "draft": "ड्राफ्ट प्रोफ़ाइलें",

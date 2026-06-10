@@ -144,9 +144,6 @@
       "profiles": "ಪ್ರೊಫೈಲ್‌ಗಳು",
       "users": "ಬಳಕೆದಾರರು"
     },
-    "funnel": {
-      "stage": "ಹಂತ {n}"
-    },
     "tiles": {
       "lifecycle": {
         "draft": "ಕರಡು ಪ್ರೊಫೈಲ್‌ಗಳು",
