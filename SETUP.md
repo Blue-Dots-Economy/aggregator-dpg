@@ -94,6 +94,8 @@ make setup        # copies infra/env.template → .env (mode 600) AND adds `127.
 make up           # docker compose up -d --build
 ```
 
+> **Cross-platform / Windows:** every `make <target>` for the local stack has a `pnpm stack:<target>` equivalent (`setup`, `up`, `down`, `reset`, `logs`, `ps`, `psql`, `rebuild-web`), both driven by `scripts/stack.mjs`. On native Windows (no WSL2) use the pnpm form; `make` is not required. See QUICKSTART.md §3 "Windows note".
+
 ### Why `/etc/hosts` needs `127.0.0.1 keycloak`
 
 When the web container is inside docker, browser and web container must resolve the OIDC issuer URL to the SAME Keycloak. With `OIDC_ISSUER=http://keycloak:8080/...`:
