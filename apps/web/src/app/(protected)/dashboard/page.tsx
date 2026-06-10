@@ -173,19 +173,25 @@ function MiniStat({ label, value, icon, sub, delta, deltaTone = 'flat' }: MiniSt
         )}
         <div className="text-[13px] text-ink-500 font-semibold">{label}</div>
       </div>
-      <div className="flex items-baseline gap-2">
-        <div className="font-display font-bold text-[26px] text-ink-900 leading-none tracking-tight">
-          {value}
+      {/* mt-auto pins the number block to the card bottom so values line up
+          across a row even when some labels wrap to a second line. */}
+      <div className="mt-auto flex flex-col gap-1">
+        <div className="flex items-baseline gap-2">
+          <div className="font-display font-bold text-[26px] text-ink-900 leading-none tracking-tight">
+            {value}
+          </div>
+          {delta && (
+            <span
+              className={`text-[11px] font-semibold px-1.5 py-0.5 rounded-md ${DELTA_TONES[deltaTone]}`}
+            >
+              {delta}
+            </span>
+          )}
         </div>
-        {delta && (
-          <span
-            className={`text-[11px] font-semibold px-1.5 py-0.5 rounded-md ${DELTA_TONES[deltaTone]}`}
-          >
-            {delta}
-          </span>
-        )}
+        {/* min-h reserves the subline slot so values still align when a
+            config-defined tile has no sub copy. */}
+        <div className="text-[12px] text-ink-400 font-medium min-h-[18px]">{sub}</div>
       </div>
-      {sub && <div className="text-[12px] text-ink-400 font-medium -mt-1">{sub}</div>}
     </div>
   );
 }
@@ -324,6 +330,8 @@ function tileSub(
     }
     case 'has_applications':
       return t('ministat.sub_applications');
+    case 'total_users':
+      return t('ministat.sub_totalUsers');
     case 'avg_items_per_user':
       return t('ministat.sub_avgItems');
     case 'avg_actions_per_user':

@@ -134,7 +134,8 @@
       "sub_complete": "{pct}% of all profiles",
       "sub_applications": "Profiles with submissions",
       "sub_avgItems": "Profiles managed each",
-      "sub_avgActions": "Recorded interactions"
+      "sub_avgActions": "Recorded interactions",
+      "sub_totalUsers": "Unique account holders"
     },
     "summary": {
       "total": "{count} total",

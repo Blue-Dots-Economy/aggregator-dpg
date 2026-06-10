@@ -134,7 +134,8 @@
       "sub_complete": "ಎಲ್ಲಾ ಪ್ರೊಫೈಲ್‌ಗಳ {pct}%",
       "sub_applications": "ಅರ್ಜಿಗಳಿರುವ ಪ್ರೊಫೈಲ್‌ಗಳು",
       "sub_avgItems": "ಪ್ರತಿ ಬಳಕೆದಾರ ನಿರ್ವಹಿಸುವ ಪ್ರೊಫೈಲ್‌ಗಳು",
-      "sub_avgActions": "ದಾಖಲಾದ ಚಟುವಟಿಕೆಗಳು"
+      "sub_avgActions": "ದಾಖಲಾದ ಚಟುವಟಿಕೆಗಳು",
+      "sub_totalUsers": "ವಿಶಿಷ್ಟ ಖಾತೆದಾರರು"
     },
     "summary": {
       "total": "ಒಟ್ಟು {count}",

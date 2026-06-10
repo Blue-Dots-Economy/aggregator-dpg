@@ -134,7 +134,8 @@
       "sub_complete": "सभी प्रोफ़ाइलों का {pct}%",
       "sub_applications": "आवेदन वाली प्रोफ़ाइलें",
       "sub_avgItems": "प्रति उपयोगकर्ता प्रबंधित प्रोफ़ाइलें",
-      "sub_avgActions": "दर्ज की गई गतिविधियाँ"
+      "sub_avgActions": "दर्ज की गई गतिविधियाँ",
+      "sub_totalUsers": "अद्वितीय खाता धारक"
     },
     "summary": {
       "total": "कुल {count}",
