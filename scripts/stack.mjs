@@ -6,7 +6,9 @@
 // replaces the POSIX-only Makefile recipe bodies. Uses only node: builtins.
 // Belongs to the aggregator-dpg local-dev tooling (host-side, not shipped code).
 
-import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
+import { existsSync, copyFileSync, chmodSync, readFileSync } from 'node:fs';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -123,4 +125,164 @@ export function parseCommand(argv) {
     throw new UsageError(cmd);
   }
   return cmd;
+}
+
+// ---- impure operations ----
+
+/**
+ * Runs a child process inheriting stdio; throws on failure.
+ *
+ * @param {string} cmd - Executable name.
+ * @param {string[]} args - Arguments.
+ * @param {object} [opts] - Extra spawnSync options (merged over defaults).
+ * @throws {Error} If the process cannot start or exits non-zero.
+ */
+function run(cmd, args, opts = {}) {
+  const res = spawnSync(cmd, args, { stdio: 'inherit', cwd: repoRoot, ...opts });
+  if (res.error) throw res.error;
+  if (typeof res.status === 'number' && res.status !== 0) {
+    throw new Error(`${cmd} ${args.join(' ')} exited with code ${res.status}`);
+  }
+  return res;
+}
+
+/** @returns true if the Docker daemon is reachable. */
+function dockerRunning() {
+  const res = spawnSync('docker', ['info'], { stdio: 'ignore' });
+  return !res.error && res.status === 0;
+}
+
+/** Exits with an actionable message if Docker is not running. */
+function ensureDocker() {
+  if (!dockerRunning()) {
+    console.error(
+      'Docker daemon not reachable. Start Docker Desktop (Windows/Mac) or the docker service (Linux), then retry.',
+    );
+    process.exit(1);
+  }
+}
+
+const envFile = join(repoRoot, '.env');
+
+/** Bootstraps .env, file perms, and hosts entries. Idempotent. */
+function setup() {
+  const platform = process.platform;
+
+  // 1. Resolve .env
+  const choice = chooseEnvSource({
+    envExists: existsSync(envFile),
+    localExists: existsSync(join(repoRoot, 'infra/env.local')),
+    templateExists: existsSync(join(repoRoot, 'infra/env.template')),
+  });
+  if (choice === 'skip') {
+    console.log('.env already exists — leaving untouched.');
+  } else if (choice === 'env.local') {
+    copyFileSync(join(repoRoot, 'infra/env.local'), envFile);
+    console.log('Created .env from infra/env.local. Ready to run: pnpm stack:up');
+  } else if (choice === 'env.template') {
+    copyFileSync(join(repoRoot, 'infra/env.template'), envFile);
+    console.log('Created .env from infra/env.template.');
+    console.log('Fill change-me-* placeholders. Generate a secret with:');
+    console.log(
+      "  node -e \"console.log(require('node:crypto').randomBytes(32).toString('hex'))\"",
+    );
+  } else {
+    console.error('No infra/env.local or infra/env.template found — cannot create .env.');
+    process.exit(1);
+  }
+
+  // 2. Permissions (Unix only)
+  if (shouldChmod(platform) && existsSync(envFile)) {
+    chmodSync(envFile, 0o600);
+  }
+
+  // 3. Hosts entries
+  const hostsPath = hostsFilePath(platform);
+  let content = '';
+  try {
+    content = readFileSync(hostsPath, 'utf8');
+  } catch {
+    content = ''; // unreadable hosts file → treat as empty, all entries "missing"
+  }
+  const missing = missingHostEntries(content);
+  if (missing.length === 0) {
+    console.log(`${hostsPath} already maps keycloak + minio — skipping.`);
+  } else if (platform === 'win32') {
+    console.log('');
+    console.log(windowsHostsInstructions(missing, platform));
+    console.log('');
+  } else {
+    console.log(`Adding host entries to ${hostsPath} (sudo required)...`);
+    const lines = missing.map(([ip, host]) => `${ip} ${host}`).join('\n') + '\n';
+    const res = spawnSync('sudo', ['tee', '-a', hostsPath], {
+      input: lines,
+      stdio: ['pipe', 'ignore', 'inherit'],
+    });
+    if (res.error || res.status !== 0) {
+      console.warn('Could not edit the hosts file automatically. Add these lines manually:');
+      console.warn(lines);
+    }
+  }
+
+  // 4. Final hint
+  console.log('');
+  console.log('Setup complete. Run: pnpm stack:up   (or: make up)');
+}
+
+/** Brings the full stack up after a Docker preflight + .env check. */
+function up() {
+  ensureDocker();
+  if (!existsSync(envFile)) {
+    console.error('No .env found — run: pnpm stack:setup');
+    process.exit(1);
+  }
+  run('docker', ['compose', 'up', '-d', '--build']);
+}
+
+const down = () => run('docker', ['compose', 'down']);
+const reset = () => run('docker', ['compose', 'down', '-v']);
+const logs = () => run('docker', ['compose', 'logs', '-f']);
+const ps = () => run('docker', ['compose', 'ps']);
+const psql = () =>
+  run('docker', ['compose', 'exec', 'postgres', 'psql', '-U', 'aggregator', '-d', 'aggregator']);
+
+/** Rebuilds the web image (with NEXT_PUBLIC_* baked at compile time) and restarts it. */
+function rebuildWeb() {
+  run('pnpm', ['--filter', '@aggregator-dpg/web', 'build']);
+  run('docker', ['compose', 'build', 'web']);
+  run('docker', ['compose', 'up', '-d', 'web']);
+}
+
+const HANDLERS = {
+  setup,
+  up,
+  dev: up, // `dev` is an alias for `up`
+  down,
+  reset,
+  logs,
+  ps,
+  psql,
+  'rebuild-web': rebuildWeb,
+};
+
+/** Parses argv and runs the matching handler. */
+function main() {
+  let cmd;
+  try {
+    cmd = parseCommand(process.argv);
+  } catch (err) {
+    if (err instanceof UsageError) {
+      console.error(err.message);
+      console.error(USAGE);
+      process.exit(2);
+    }
+    throw err;
+  }
+  HANDLERS[cmd]();
+}
+
+// Only run when invoked directly (`node scripts/stack.mjs ...`), not when
+// imported by the test module.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main();
 }
