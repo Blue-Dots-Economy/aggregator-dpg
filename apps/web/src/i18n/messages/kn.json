@@ -1,5 +1,7 @@
 {
-  "language": { "label": "ಭಾಷೆ" },
+  "language": {
+    "label": "ಭಾಷೆ"
+  },
   "theme": {
     "switch_to_light": "ಬೆಳಕಿನ ಥೀಮ್‌ಗೆ ಬದಲಿಸಿ",
     "switch_to_dark": "ಗಾಢ ಥೀಮ್‌ಗೆ ಬದಲಿಸಿ",
@@ -124,7 +126,10 @@
       "totalItems": "ಒಟ್ಟು {entityPlural}",
       "withApplications": "ಅರ್ಜಿಗಳೊಂದಿಗೆ {entityPlural}",
       "newParticipants": "ಹೊಸ ಭಾಗವಹಿಸುವವರು",
-      "delta_this_week": "ಈ ವಾರ"
+      "delta_this_week": "ಈ ವಾರ",
+      "totalUsers": "ಒಟ್ಟು ಬಳಕೆದಾರರು",
+      "avgProfilesPerUser": "ಪ್ರತಿ ಬಳಕೆದಾರರಿಗೆ ಸರಾಸರಿ ಪ್ರೊಫೈಲ್‌ಗಳು",
+      "avgActionsPerUser": "ಪ್ರತಿ ಬಳಕೆದಾರರಿಗೆ ಸರಾಸರಿ ಕ್ರಿಯೆಗಳು"
     },
     "tiles": {
       "lifecycle": {

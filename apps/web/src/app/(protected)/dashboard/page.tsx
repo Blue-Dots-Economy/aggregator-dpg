@@ -16,10 +16,10 @@ import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/u
 import {
   dashboardService,
   triggerCsvDownload,
-  type DashboardRollup,
   type LifecycleFilter,
 } from '../../../services/dashboard.service';
 import { mapDirectional } from '../../../services/row-mapping';
+import { resolveTiles } from '../../../services/tiles';
 import type { DashboardTileDef } from '../../../hooks/useAggregatorConfig';
 import { useProfileRaw } from '../../../hooks/useProfile';
 import { useThemeMode } from '../../../lib/theme-mode';
@@ -498,38 +498,31 @@ function buildActionParts(
   ];
 }
 
-/** Default profile-level tiles when network.json omits `dashboard_tiles.profile`. */
-const DEFAULT_PROFILE_TILES: DashboardTileDef[] = [
-  { field: 'total_items', label: 'Total Profiles' },
-  { field: 'complete_profiles', label: 'Complete Profiles' },
-  { field: 'has_applications', label: 'Profiles with Applications' },
-];
-/** Default user-level tiles when network.json omits `dashboard_tiles.user`. */
-const DEFAULT_USER_TILES: DashboardTileDef[] = [
-  { field: 'total_users', label: 'Total Users' },
-  { field: 'avg_items_per_user', label: 'Avg Profiles per User' },
-  { field: 'avg_actions_per_user', label: 'Avg Actions per User' },
-];
-
 /**
- * Resolves tile defs from config (falling back to defaults) and reads each
- * tile's value from the precomputed rollup by `field`. The aggregator never
- * aggregates — unknown fields render as 0.
- *
- * @param defs - Config-sourced tile defs for this group, or undefined.
- * @param fallback - Default tiles to use when `defs` is empty/undefined.
- * @param rollup - The domain rollup to read values from.
+ * Localised default tile groups, used when network.json omits
+ * `dashboard_tiles.profile` / `dashboard_tiles.user`. Built per-tab so
+ * `{entityPlural}` reflects the active domain's plural label.
  */
-function resolveTiles(
-  defs: DashboardTileDef[] | undefined,
-  fallback: DashboardTileDef[],
-  rollup: DashboardRollup | undefined,
-): Array<{ field: string; label: string; value: number }> {
-  return (defs && defs.length ? defs : fallback).map((d) => ({
-    field: d.field,
-    label: d.label,
-    value: rollup ? ((rollup as unknown as Record<string, number>)[d.field] ?? 0) : 0,
-  }));
+function useDefaultTiles(entityPlural: string): {
+  profile: DashboardTileDef[];
+  user: DashboardTileDef[];
+} {
+  const t = useTranslations('dashboard');
+  return useMemo(
+    () => ({
+      profile: [
+        { field: 'total_items', label: t('ministat.totalItems', { entityPlural }) },
+        { field: 'complete_profiles', label: t('ministat.completeProfiles') },
+        { field: 'has_applications', label: t('ministat.withApplications', { entityPlural }) },
+      ],
+      user: [
+        { field: 'total_users', label: t('ministat.totalUsers') },
+        { field: 'avg_items_per_user', label: t('ministat.avgProfilesPerUser') },
+        { field: 'avg_actions_per_user', label: t('ministat.avgActionsPerUser') },
+      ],
+    }),
+    [t, entityPlural],
+  );
 }
 
 interface ParticipantTableProps<R extends ParticipantBase> {
@@ -1131,6 +1124,7 @@ function SeekersTab() {
   const { data: cfg } = useAggregatorConfig();
   const seekerCfg = cfg?.domains?.find((d) => d.id === seekerDomainId);
   const seekerPlural = seekerCfg?.plural_label ?? t('tabs.seekers');
+  const defaultTiles = useDefaultTiles(seekerPlural);
   // Directional bucket labels — wired to the funnel cells in the participant
   // table's Initiated / Received action-count columns.
   const initiatedLabels = cfg?.dashboardBuckets?.by_initiated_action_status ?? {};
@@ -1271,7 +1265,7 @@ function SeekersTab() {
 
       {/* Profile-level tiles */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {resolveTiles(seekerCfg?.dashboardTiles?.profile, DEFAULT_PROFILE_TILES, rollup).map(
+        {resolveTiles(seekerCfg?.dashboardTiles?.profile, defaultTiles.profile, rollup).map(
           (tile) => (
             <MiniStat key={`p-${tile.field}`} label={tile.label} value={fmtCount(tile.value)} />
           ),
@@ -1280,7 +1274,7 @@ function SeekersTab() {
 
       {/* User-level tiles */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {resolveTiles(seekerCfg?.dashboardTiles?.user, DEFAULT_USER_TILES, rollup).map((tile) => (
+        {resolveTiles(seekerCfg?.dashboardTiles?.user, defaultTiles.user, rollup).map((tile) => (
           <MiniStat key={`u-${tile.field}`} label={tile.label} value={fmtCount(tile.value)} />
         ))}
       </div>
@@ -1319,7 +1313,8 @@ function fmtCount(n: number | null | undefined): string {
   if (n === undefined || n === null) return '—';
   // Integers render clean; fractional values (e.g. avg_items_per_user) are
   // capped at 2 decimals with trailing zeros dropped (1.1666… → "1.17").
-  return n.toLocaleString('en-US', { maximumFractionDigits: 2 });
+  // Locale left to the runtime so separators follow the user's language.
+  return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
 
 /**
@@ -1361,7 +1356,9 @@ function toSeekerRow(participant: Record<string, unknown>, locale: string, index
   const initiated = mapDirectional(participant.initiated);
   const received = mapDirectional(participant.received);
   return {
-    id: profileItemId || String(index),
+    // `row-` prefix keeps synthetic keys from colliding with a genuine
+    // numeric profile_item_id on the same page.
+    id: profileItemId || `row-${index}`,
     name,
     city: '—',
     joined: created
@@ -1475,6 +1472,7 @@ function ProvidersTab() {
   const { data: cfg } = useAggregatorConfig();
   const providerCfg = cfg?.domains?.find((d) => d.id === providerDomainId);
   const providerPlural = providerCfg?.plural_label ?? t('tabs.providers');
+  const defaultTiles = useDefaultTiles(providerPlural);
   // Directional bucket labels — wired to the funnel cells in the participant
   // table's Initiated / Received action-count columns.
   const initiatedLabels = cfg?.dashboardBuckets?.by_initiated_action_status ?? {};
@@ -1607,7 +1605,7 @@ function ProvidersTab() {
 
       {/* Profile-level tiles */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {resolveTiles(providerCfg?.dashboardTiles?.profile, DEFAULT_PROFILE_TILES, rollup).map(
+        {resolveTiles(providerCfg?.dashboardTiles?.profile, defaultTiles.profile, rollup).map(
           (tile) => (
             <MiniStat key={`p-${tile.field}`} label={tile.label} value={fmtCount(tile.value)} />
           ),
@@ -1616,7 +1614,7 @@ function ProvidersTab() {
 
       {/* User-level tiles */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {resolveTiles(providerCfg?.dashboardTiles?.user, DEFAULT_USER_TILES, rollup).map((tile) => (
+        {resolveTiles(providerCfg?.dashboardTiles?.user, defaultTiles.user, rollup).map((tile) => (
           <MiniStat key={`u-${tile.field}`} label={tile.label} value={fmtCount(tile.value)} />
         ))}
       </div>

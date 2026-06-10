@@ -1,5 +1,7 @@
 {
-  "language": { "label": "भाषा" },
+  "language": {
+    "label": "भाषा"
+  },
   "theme": {
     "switch_to_light": "लाइट थीम पर स्विच करें",
     "switch_to_dark": "डार्क थीम पर स्विच करें",
@@ -124,7 +126,10 @@
       "totalItems": "कुल {entityPlural}",
       "withApplications": "आवेदन वाले {entityPlural}",
       "newParticipants": "नए प्रतिभागी",
-      "delta_this_week": "इस सप्ताह"
+      "delta_this_week": "इस सप्ताह",
+      "totalUsers": "कुल उपयोगकर्ता",
+      "avgProfilesPerUser": "प्रति उपयोगकर्ता औसत प्रोफ़ाइलें",
+      "avgActionsPerUser": "प्रति उपयोगकर्ता औसत क्रियाएँ"
     },
     "tiles": {
       "lifecycle": {
