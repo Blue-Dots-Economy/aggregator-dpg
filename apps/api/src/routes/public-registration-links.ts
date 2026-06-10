@@ -552,15 +552,6 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
 }
 
 /**
- * Build the `item_state` block sent to signalstack from the participant
- * payload.
- *
- * The body passes through unchanged — we only override the phone field
- * (chosen via the domain's identity selectors) so signalstack stores
- * the E.164 form the writer resolved upstream, not whatever raw value
- * the form / CSV carried.
- */
-/**
  * Mutates `payload`: deletes any top-level field whose value is an
  * empty string and is not declared in the schema's `required` array.
  * Lets optional `format: uri` / `format: email` fields stay blank

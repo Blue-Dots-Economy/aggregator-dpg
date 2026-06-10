@@ -271,7 +271,14 @@ function ProgressTiny({ pct, title }: { pct: number; title?: string }) {
         onMouseLeave={() => setHover(false)}
         className="flex items-center gap-2 cursor-default"
       >
-        <div className="w-14 h-1.5 rounded-full bg-ink-100 overflow-hidden">
+        <div
+          role="progressbar"
+          aria-label={label}
+          aria-valuenow={Math.round(pct)}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          className="w-14 h-1.5 rounded-full bg-ink-100 overflow-hidden"
+        >
           <div className="h-full rounded-full" style={{ width: `${pct}%`, background: color }} />
         </div>
         <span className="text-[11px] tabular-nums text-ink-500 font-medium">{pct}%</span>

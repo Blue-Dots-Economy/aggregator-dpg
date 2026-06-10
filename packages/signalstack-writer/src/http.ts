@@ -5,8 +5,13 @@
  * response, network failure, or shape mismatch is mapped to UpstreamError so
  * the caller never sees a thrown exception.
  *
- * Retries are NOT performed here — idempotency strategy is a higher-level
- * concern (see notes in the design doc). One call → one network attempt.
+ * Every request goes through {@link HttpSignalStackWriter.requestWithRetry},
+ * which applies the configured per-attempt timeout and retries transient
+ * failures (transport errors, request timeouts, `429`, and `5xx`) with
+ * exponential backoff — per the repo `error-handling.md` rule. All signals
+ * write paths consumed here are idempotent (onboard/probe dedupe on identity;
+ * aggregator upsert dedupes on `external_id`; dashboard/get are reads), so a
+ * retry can never double-create.
  */
 
 import {
@@ -50,8 +55,21 @@ export interface HttpSignalStackWriterConfig {
   actingOrgId?: string;
   /** Optional override; defaults to global `fetch`. Lets tests inject a stub. */
   fetchImpl?: typeof fetch;
-  /** Optional request timeout in ms; off by default. */
+  /** Optional per-attempt request timeout in ms; off by default. */
   timeoutMs?: number;
+  /**
+   * Max retry attempts for transient failures (transport error, timeout,
+   * `429`, `5xx`). `2` by default → up to 3 total attempts. `0` disables
+   * retries (one attempt). Non-transient responses (`4xx` other than `429`)
+   * are never retried.
+   */
+  maxRetries?: number;
+  /**
+   * Base backoff in ms between retries; doubles each attempt
+   * (`base`, `base*2`, `base*4`, …). `200` by default. Set `0` in tests to
+   * remove the delay.
+   */
+  retryBaseMs?: number;
 }
 
 export class HttpSignalStackWriter extends SignalStackWriterBase {
@@ -66,6 +84,8 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
   private readonly actingOrgId: string | undefined;
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number | undefined;
+  private readonly maxRetries: number;
+  private readonly retryBaseMs: number;
 
   constructor(config: HttpSignalStackWriterConfig) {
     super();
@@ -86,6 +106,62 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
     this.actingOrgId = config.actingOrgId;
     this.fetchImpl = config.fetchImpl ?? fetch;
     this.timeoutMs = config.timeoutMs;
+    this.maxRetries = config.maxRetries ?? 2;
+    this.retryBaseMs = config.retryBaseMs ?? 200;
+  }
+
+  /**
+   * Perform a fetch with a per-attempt timeout and bounded exponential-backoff
+   * retry of transient failures.
+   *
+   * Retries on: a thrown transport error, an aborted (timed-out) request, and
+   * a `429` or `5xx` response. A `4xx` (other than `429`) is returned to the
+   * caller immediately so it can map the response to the right typed error.
+   * When all attempts are exhausted the last thrown error is re-thrown (so the
+   * caller's `catch` maps it to a `SIGNALSTACK_TIMEOUT` / `_TRANSPORT_FAILED`),
+   * or the last failing `Response` is returned (so the caller maps the status).
+   *
+   * @param url - Absolute request URL.
+   * @param init - Fetch init; the `signal` is supplied per attempt.
+   * @returns The final `Response` (success, non-retryable, or exhausted).
+   * @throws The last transport/timeout error when every attempt threw.
+   */
+  private async requestWithRetry(url: string, init: RequestInit): Promise<Response> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+      const controller = this.timeoutMs ? new AbortController() : undefined;
+      const timer = controller ? setTimeout(() => controller.abort(), this.timeoutMs) : undefined;
+      try {
+        const res = await this.fetchImpl(url, {
+          ...init,
+          ...(controller ? { signal: controller.signal } : {}),
+        });
+        if (attempt < this.maxRetries && (res.status === 429 || res.status >= 500)) {
+          await this.backoff(attempt);
+          continue;
+        }
+        return res;
+      } catch (e) {
+        lastError = e;
+        if (attempt < this.maxRetries) {
+          await this.backoff(attempt);
+          continue;
+        }
+        throw e;
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    }
+    // Unreachable — the loop always returns or throws — but satisfies the
+    // type checker that the function returns on every path.
+    throw lastError ?? new Error('signalstack request failed');
+  }
+
+  /** Sleep for `retryBaseMs * 2^attempt` ms before the next retry. */
+  private backoff(attempt: number): Promise<void> {
+    const ms = this.retryBaseMs * 2 ** attempt;
+    if (ms <= 0) return Promise.resolve();
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   override async onboard(
@@ -127,15 +203,11 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       'x-acting-org-id': input.actingOrgId,
     };
 
-    const controller = this.timeoutMs ? new AbortController() : undefined;
-    const timer = controller ? setTimeout(() => controller.abort(), this.timeoutMs) : undefined;
-
     try {
-      const res = await this.fetchImpl(this.endpoint, {
+      const res = await this.requestWithRetry(this.endpoint, {
         method: 'POST',
         headers,
         body: JSON.stringify(body),
-        ...(controller ? { signal: controller.signal } : {}),
       });
 
       if (!res.ok) {
@@ -263,8 +335,6 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
           },
         ),
       );
-    } finally {
-      if (timer) clearTimeout(timer);
     }
   }
 
@@ -273,7 +343,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
   ): Promise<Result<SignalStackItemList, BaseError>> {
     if (!query.aggregator_id || !query.item_network || !query.item_domain) {
       return err(
-        new UpstreamError('aggregator_id, item_network, and item_domain are required', {
+        new ValidationError('aggregator_id, item_network, and item_domain are required', {
           code: 'SIGNALSTACK_INPUT_INVALID',
         }),
       );
@@ -298,15 +368,11 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       limit: query.limit ?? 50,
       offset: query.offset ?? 0,
     };
-    const controller = this.timeoutMs ? new AbortController() : undefined;
-    const timer = controller ? setTimeout(() => controller.abort(), this.timeoutMs) : undefined;
-
     try {
-      const res = await this.fetchImpl(url, {
+      const res = await this.requestWithRetry(url, {
         method: 'POST',
         headers: this.headers,
         body: JSON.stringify(body),
-        ...(controller ? { signal: controller.signal } : {}),
       });
 
       if (!res.ok) {
@@ -343,8 +409,6 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
           },
         ),
       );
-    } finally {
-      if (timer) clearTimeout(timer);
     }
   }
 
@@ -367,7 +431,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
   ): Promise<Result<SignalStackAggregator, BaseError>> {
     if (!input?.external_id || !input?.name || !input?.slug) {
       return err(
-        new UpstreamError('external_id, name, and slug are required', {
+        new ValidationError('external_id, name, and slug are required', {
           code: 'SIGNALSTACK_INPUT_INVALID',
         }),
       );
@@ -394,15 +458,11 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       'x-acting-org-id': this.actingOrgId,
     };
 
-    const controller = this.timeoutMs ? new AbortController() : undefined;
-    const timer = controller ? setTimeout(() => controller.abort(), this.timeoutMs) : undefined;
-
     try {
-      const res = await this.fetchImpl(url, {
+      const res = await this.requestWithRetry(url, {
         method: 'POST',
         headers,
         body: JSON.stringify(body),
-        ...(controller ? { signal: controller.signal } : {}),
       });
 
       if (!res.ok) {
@@ -448,8 +508,6 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
           },
         ),
       );
-    } finally {
-      if (timer) clearTimeout(timer);
     }
   }
 
@@ -470,7 +528,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
   ): Promise<Result<SignalStackDashboardPage, BaseError>> {
     if (!query?.actingOrgId) {
       return err(
-        new UpstreamError('actingOrgId is required for dashboard fetch', {
+        new ValidationError('actingOrgId is required for dashboard fetch', {
           code: 'SIGNALSTACK_INPUT_INVALID',
         }),
       );
@@ -490,14 +548,10 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       'x-acting-org-id': query.actingOrgId,
     };
 
-    const controller = this.timeoutMs ? new AbortController() : undefined;
-    const timer = controller ? setTimeout(() => controller.abort(), this.timeoutMs) : undefined;
-
     try {
-      const res = await this.fetchImpl(url, {
+      const res = await this.requestWithRetry(url, {
         method: 'GET',
         headers,
-        ...(controller ? { signal: controller.signal } : {}),
       });
 
       if (!res.ok) {
@@ -598,8 +652,6 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
           },
         ),
       );
-    } finally {
-      if (timer) clearTimeout(timer);
     }
   }
 
@@ -626,7 +678,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
   ): Promise<Result<SignalStackDashboardExport, BaseError>> {
     if (!query?.actingOrgId) {
       return err(
-        new UpstreamError('actingOrgId is required for dashboard export', {
+        new ValidationError('actingOrgId is required for dashboard export', {
           code: 'SIGNALSTACK_INPUT_INVALID',
         }),
       );
@@ -644,14 +696,10 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       accept: 'text/csv',
     };
 
-    const controller = this.timeoutMs ? new AbortController() : undefined;
-    const timer = controller ? setTimeout(() => controller.abort(), this.timeoutMs) : undefined;
-
     try {
-      const res = await this.fetchImpl(url, {
+      const res = await this.requestWithRetry(url, {
         method: 'GET',
         headers,
-        ...(controller ? { signal: controller.signal } : {}),
       });
 
       if (!res.ok) {
@@ -691,8 +739,6 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
           },
         ),
       );
-    } finally {
-      if (timer) clearTimeout(timer);
     }
   }
 
@@ -759,15 +805,11 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       'x-acting-org-id': input.actingOrgId,
     };
 
-    const controller = this.timeoutMs ? new AbortController() : undefined;
-    const timer = controller ? setTimeout(() => controller.abort(), this.timeoutMs) : undefined;
-
     try {
-      const res = await this.fetchImpl(this.endpoint, {
+      const res = await this.requestWithRetry(this.endpoint, {
         method: 'POST',
         headers,
         body: JSON.stringify(body),
-        ...(controller ? { signal: controller.signal } : {}),
       });
 
       if (!res.ok) {
@@ -898,8 +940,6 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
           },
         ),
       );
-    } finally {
-      if (timer) clearTimeout(timer);
     }
   }
 
@@ -933,15 +973,11 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
     const url = `${this.baseUrl}/api/v1/network/item/fetch_local`;
     const body = { item_id: query.item_id, limit: 1, offset: 0 };
 
-    const controller = this.timeoutMs ? new AbortController() : undefined;
-    const timer = controller ? setTimeout(() => controller.abort(), this.timeoutMs) : undefined;
-
     try {
-      const res = await this.fetchImpl(url, {
+      const res = await this.requestWithRetry(url, {
         method: 'POST',
         headers: this.headers,
         body: JSON.stringify(body),
-        ...(controller ? { signal: controller.signal } : {}),
       });
 
       if (res.status === 404) return ok(null);
@@ -982,41 +1018,42 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
           },
         ),
       );
-    } finally {
-      if (timer) clearTimeout(timer);
     }
   }
 
   private guardInput(input: SignalStackOnboardParticipantInput): BaseError | null {
+    // Pre-send input validation → ValidationError (malformed input before the
+    // request leaves us), consistent with probeUser/getItem. The machine code
+    // stays SIGNALSTACK_INPUT_INVALID so existing callers/branches are intact.
     if (!input?.actingOrgId) {
-      return new UpstreamError('actingOrgId is required', {
+      return new ValidationError('actingOrgId is required', {
         code: 'SIGNALSTACK_INPUT_INVALID',
       });
     }
     if (!input.name) {
-      return new UpstreamError('name is required', {
+      return new ValidationError('name is required', {
         code: 'SIGNALSTACK_INPUT_INVALID',
       });
     }
     const hasEmail = Boolean(input.email);
     const hasPhone = Boolean(input.phoneNumber);
     if (!hasEmail && !hasPhone) {
-      return new UpstreamError('either email or phoneNumber is required', {
+      return new ValidationError('either email or phoneNumber is required', {
         code: 'SIGNALSTACK_INPUT_INVALID',
       });
     }
     if (!input.network || !input.domain || !input.item_type) {
-      return new UpstreamError('network, domain, and item_type are required', {
+      return new ValidationError('network, domain, and item_type are required', {
         code: 'SIGNALSTACK_INPUT_INVALID',
       });
     }
     if (!input.source_id || !input.channel) {
-      return new UpstreamError('channel and source_id are required', {
+      return new ValidationError('channel and source_id are required', {
         code: 'SIGNALSTACK_INPUT_INVALID',
       });
     }
     if (!input.profile || typeof input.profile !== 'object') {
-      return new UpstreamError('profile is required', {
+      return new ValidationError('profile is required', {
         code: 'SIGNALSTACK_INPUT_INVALID',
       });
     }

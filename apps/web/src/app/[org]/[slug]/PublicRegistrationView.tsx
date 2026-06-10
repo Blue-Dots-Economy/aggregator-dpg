@@ -478,6 +478,9 @@ export function PublicRegistrationView({
         }}
       >
         <div className="max-w-[640px] mx-auto px-4 sm:px-6 lg:px-10 py-8 sm:py-12">
+          {/* This branch only renders while state is 'idle', so the parent
+              has no in-flight signal to pass — the form's own internal submit
+              guard prevents the double-tap during the async probe. */}
           <MinimalIdentityForm
             identity={identity ?? {}}
             onSubmit={handleMinimalSubmit}
@@ -655,8 +658,28 @@ export function PublicRegistrationView({
                       <button
                         type="button"
                         onClick={() => {
+                          // "New submission" = the user wants to register
+                          // under different contact details. Clear the
+                          // identity fields and DON'T bypass — so the new
+                          // identity is re-probed on the next submit (rather
+                          // than silently resuming the existing draft, which
+                          // is what the "Resume" button above does).
                           setLookup(null);
-                          setBypassProbe(true);
+                          setBypassProbe(false);
+                          setFormData((prev) => {
+                            const next = { ...prev };
+                            for (const key of [
+                              identity?.email,
+                              identity?.phone,
+                              'email',
+                              'phone',
+                              'phone_number',
+                              'mobile',
+                            ]) {
+                              if (key) delete next[key];
+                            }
+                            return next;
+                          });
                         }}
                         className="px-3 py-2 rounded-[8px] font-semibold text-[12px] text-sky-900 underline hover:text-sky-700"
                       >

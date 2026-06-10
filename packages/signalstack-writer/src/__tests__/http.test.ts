@@ -143,6 +143,9 @@ describe('HttpSignalStackWriter.onboard', () => {
       baseUrl: 'http://signalstack.test',
       apiKey: 'test-key',
       fetchImpl: fetchMock as unknown as typeof fetch,
+      // Single-attempt: these suites assert the one-shot status/transport
+      // mapping. Retry/backoff behaviour is covered in its own describe below.
+      maxRetries: 0,
     });
   });
 
@@ -370,6 +373,9 @@ describe('HttpSignalStackWriter.fetchDashboard — happy path', () => {
       baseUrl: 'http://signalstack.test',
       apiKey: 'test-key',
       fetchImpl: fetchMock as unknown as typeof fetch,
+      // Single-attempt: these suites assert the one-shot status/transport
+      // mapping. Retry/backoff behaviour is covered in its own describe below.
+      maxRetries: 0,
     });
   });
 
@@ -447,6 +453,9 @@ describe('HttpSignalStackWriter.fetchDashboard — refresh flag', () => {
       baseUrl: 'http://signalstack.test',
       apiKey: 'test-key',
       fetchImpl: fetchMock as unknown as typeof fetch,
+      // Single-attempt: these suites assert the one-shot status/transport
+      // mapping. Retry/backoff behaviour is covered in its own describe below.
+      maxRetries: 0,
     });
   });
 
@@ -498,6 +507,9 @@ describe('HttpSignalStackWriter.fetchDashboard — malformed payload', () => {
       baseUrl: 'http://signalstack.test',
       apiKey: 'test-key',
       fetchImpl: fetchMock as unknown as typeof fetch,
+      // Single-attempt: these suites assert the one-shot status/transport
+      // mapping. Retry/backoff behaviour is covered in its own describe below.
+      maxRetries: 0,
     });
   });
 
@@ -673,6 +685,9 @@ describe('HttpSignalStackWriter.exportDashboardCsv', () => {
       baseUrl: 'http://signalstack.test',
       apiKey: 'test-key',
       fetchImpl: fetchMock as unknown as typeof fetch,
+      // Single-attempt: these suites assert the one-shot status/transport
+      // mapping. Retry/backoff behaviour is covered in its own describe below.
+      maxRetries: 0,
     });
   });
 
@@ -762,6 +777,7 @@ describe('HttpSignalStackWriter.upsertAggregator', () => {
       apiKey: 'test-key',
       actingOrgId: 'platform-org-1',
       fetchImpl: fetchMock as unknown as typeof fetch,
+      maxRetries: 0,
     });
   });
 
@@ -838,6 +854,9 @@ describe('HttpSignalStackWriter.listItemsByAggregator', () => {
       baseUrl: 'http://signalstack.test',
       apiKey: 'test-key',
       fetchImpl: fetchMock as unknown as typeof fetch,
+      // Single-attempt: these suites assert the one-shot status/transport
+      // mapping. Retry/backoff behaviour is covered in its own describe below.
+      maxRetries: 0,
     });
   });
 
@@ -882,6 +901,314 @@ describe('HttpSignalStackWriter.listItemsByAggregator', () => {
 
     expect(result.success).toBe(false);
     if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_INPUT_INVALID');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// requestWithRetry — transient-failure retry/backoff (error-handling.md rule)
+// ---------------------------------------------------------------------------
+
+describe('HttpSignalStackWriter — retry/backoff', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+  let writer: HttpSignalStackWriter;
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    writer = new HttpSignalStackWriter({
+      baseUrl: 'http://signalstack.test',
+      apiKey: 'test-key',
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      maxRetries: 2,
+      retryBaseMs: 0, // no real delay in tests
+    });
+  });
+
+  it('retries a 5xx and succeeds on the next attempt', async () => {
+    fetchMock
+      .mockResolvedValueOnce(errTextResponse(503, 'Service Unavailable'))
+      .mockResolvedValueOnce(okJsonResponse(CANONICAL_DASHBOARD_PAYLOAD));
+
+    const result = await writer.fetchDashboard({ actingOrgId: 'org-abc' });
+
+    expect(result.success).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries a 429 and succeeds on the next attempt', async () => {
+    fetchMock
+      .mockResolvedValueOnce(errTextResponse(429, 'Too Many Requests'))
+      .mockResolvedValueOnce(okJsonResponse(CANONICAL_DASHBOARD_PAYLOAD));
+
+    const result = await writer.fetchDashboard({ actingOrgId: 'org-abc' });
+
+    expect(result.success).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('exhausts retries on a persistent 5xx and maps the final status', async () => {
+    fetchMock.mockResolvedValue(errTextResponse(500, 'Internal Server Error'));
+
+    const result = await writer.fetchDashboard({ actingOrgId: 'org-abc' });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_SERVER_ERROR');
+    // maxRetries (2) + initial attempt = 3 total.
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('retries a thrown transport error and succeeds on the next attempt', async () => {
+    fetchMock
+      .mockRejectedValueOnce(new Error('connection reset'))
+      .mockResolvedValueOnce(okJsonResponse(CANONICAL_DASHBOARD_PAYLOAD));
+
+    const result = await writer.fetchDashboard({ actingOrgId: 'org-abc' });
+
+    expect(result.success).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('exhausts retries on a persistent transport error → SIGNALSTACK_TRANSPORT_FAILED', async () => {
+    fetchMock.mockRejectedValue(new Error('connection refused'));
+
+    const result = await writer.fetchDashboard({ actingOrgId: 'org-abc' });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_TRANSPORT_FAILED');
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('does NOT retry a non-transient 4xx (400)', async () => {
+    fetchMock.mockResolvedValue(errJsonResponse(400, { error: 'BAD' }));
+
+    const result = await writer.fetchDashboard({ actingOrgId: 'org-abc' });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_BAD_REQUEST');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// probeUser() — http-level reshape + back-compat (no fake)
+// ---------------------------------------------------------------------------
+
+describe('HttpSignalStackWriter.probeUser (http)', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+  let writer: HttpSignalStackWriter;
+
+  const PROBE_INPUT = {
+    actingOrgId: 'org-abc',
+    email: 'asha@example.com',
+    network: 'blue_dot',
+    domain: 'seeker',
+  };
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    writer = new HttpSignalStackWriter({
+      baseUrl: 'http://signalstack.test',
+      apiKey: 'test-key',
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      maxRetries: 0,
+    });
+  });
+
+  it('reports a new user with no lifecycle leak', async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJsonResponse({ user_id: 'u-1', user_existed: false, items: [] }),
+    );
+
+    const result = await writer.probeUser(PROBE_INPUT);
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.user_exists).toBe(false);
+    expect(result.value.owned_elsewhere).toBe(false);
+    expect(result.value.lifecycle_summary).toBeNull();
+  });
+
+  it('reshapes an own user with a draft item into lifecycle_summary', async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJsonResponse({
+        user_id: 'u-1',
+        user_existed: true,
+        owned_elsewhere: false,
+        items: [{ item_id: 'item-1', lifecycle_status: 'draft' }],
+      }),
+    );
+
+    const result = await writer.probeUser(PROBE_INPUT);
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.user_exists).toBe(true);
+    expect(result.value.lifecycle_summary?.primary_item.item_id).toBe('item-1');
+    expect(result.value.lifecycle_summary?.primary_item.lifecycle_status).toBe('draft');
+  });
+
+  it('back-compat: an item with ABSENT lifecycle_status defaults to live', async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJsonResponse({
+        user_id: 'u-1',
+        user_existed: true,
+        owned_elsewhere: false,
+        items: [{ item_id: 'item-1' }], // no lifecycle_status (older signals build)
+      }),
+    );
+
+    const result = await writer.probeUser(PROBE_INPUT);
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.lifecycle_summary?.primary_item.lifecycle_status).toBe('live');
+  });
+
+  it('owned_elsewhere → no lifecycle leak', async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJsonResponse({ user_id: 'u-1', user_existed: true, owned_elsewhere: true, items: [] }),
+    );
+
+    const result = await writer.probeUser(PROBE_INPUT);
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.owned_elsewhere).toBe(true);
+    expect(result.value.lifecycle_summary).toBeNull();
+  });
+
+  it('own user with no items yet → null lifecycle_summary', async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJsonResponse({ user_id: 'u-1', user_existed: true, owned_elsewhere: false, items: [] }),
+    );
+
+    const result = await writer.probeUser(PROBE_INPUT);
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.user_exists).toBe(true);
+    expect(result.value.owned_elsewhere).toBe(false);
+    expect(result.value.lifecycle_summary).toBeNull();
+  });
+
+  it('omits item_state and sends the lookup sentinel in the request body', async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJsonResponse({ user_id: 'u-1', user_existed: false, items: [] }),
+    );
+
+    await writer.probeUser(PROBE_INPUT);
+
+    const [, init] = fetchMock.mock.calls[0]!;
+    const sent = JSON.parse((init as RequestInit).body as string);
+    expect(sent).not.toHaveProperty('item_state');
+    expect(sent.name).toBe('lookup');
+    expect(sent.email).toBe('asha@example.com');
+  });
+
+  it('maps a 400 to a ValidationError with SIGNALSTACK_BAD_REQUEST', async () => {
+    fetchMock.mockResolvedValueOnce(errJsonResponse(400, { error: 'BAD_EMAIL' }));
+
+    const result = await writer.probeUser(PROBE_INPUT);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_BAD_REQUEST');
+    expect(result.error.name).toBe('ValidationError');
+  });
+
+  it('maps a 401 to SIGNALSTACK_FORBIDDEN', async () => {
+    fetchMock.mockResolvedValueOnce(errTextResponse(401, 'Unauthorized'));
+
+    const result = await writer.probeUser(PROBE_INPUT);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_FORBIDDEN');
+  });
+
+  it('returns a ValidationError when neither email nor phoneNumber is given', async () => {
+    const result = await writer.probeUser({
+      actingOrgId: 'org-abc',
+      network: 'blue_dot',
+      domain: 'seeker',
+    } as never);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.name).toBe('ValidationError');
+    expect(result.error.code).toBe('SIGNALSTACK_INPUT_INVALID');
+  });
+
+  it('returns SIGNALSTACK_TRANSPORT_FAILED when fetch throws', async () => {
+    fetchMock.mockRejectedValueOnce(new Error('network down'));
+
+    const result = await writer.probeUser(PROBE_INPUT);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_TRANSPORT_FAILED');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getItem()
+// ---------------------------------------------------------------------------
+
+describe('HttpSignalStackWriter.getItem', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+  let writer: HttpSignalStackWriter;
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    writer = new HttpSignalStackWriter({
+      baseUrl: 'http://signalstack.test',
+      apiKey: 'test-key',
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      maxRetries: 0,
+    });
+  });
+
+  it('returns ok(null) on 404', async () => {
+    fetchMock.mockResolvedValueOnce(errTextResponse(404, 'Not Found'));
+
+    const result = await writer.getItem({ item_id: 'missing' });
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value).toBeNull();
+  });
+
+  it('returns ok(null) when items[] is empty', async () => {
+    fetchMock.mockResolvedValueOnce(okJsonResponse({ items: [] }));
+
+    const result = await writer.getItem({ item_id: 'x' });
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value).toBeNull();
+  });
+
+  it('returns the first item on a hit', async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJsonResponse({ items: [{ item_id: 'item-1', lifecycle_status: 'live' }] }),
+    );
+
+    const result = await writer.getItem({ item_id: 'item-1' });
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect((result.value as { item_id: string }).item_id).toBe('item-1');
+  });
+
+  it('returns a ValidationError when item_id is missing', async () => {
+    const result = await writer.getItem({ item_id: '' });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.name).toBe('ValidationError');
     expect(result.error.code).toBe('SIGNALSTACK_INPUT_INVALID');
   });
 });

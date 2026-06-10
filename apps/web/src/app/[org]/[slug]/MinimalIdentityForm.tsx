@@ -61,6 +61,10 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
   const [email, setEmail] = useState('');
   const [consentTerms, setConsentTerms] = useState(false);
   const [consentPrivacy, setConsentPrivacy] = useState(false);
+  // Local double-submit guard. The parent runs an async probe before its own
+  // `submitting` state flips, so this form can stay mounted for one render
+  // after the click — a fast double-tap would otherwise fire two pipelines.
+  const [submitting, setSubmitting] = useState(false);
 
   const nameKey = props.identity.name;
   const phoneKey = props.identity.phone;
@@ -87,7 +91,8 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          if (!valid || !nameKey) return;
+          if (!valid || !nameKey || submitting) return;
+          setSubmitting(true);
           const payload: MinimalIdentityPayload = {
             [nameKey]: name.trim(),
             consent_terms: true,
@@ -178,7 +183,7 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
         <div className="flex justify-end pt-2">
           <button
             type="submit"
-            disabled={!valid || props.busy}
+            disabled={!valid || submitting || props.busy}
             style={{ background: props.brandColor ?? undefined }}
             className="inline-flex items-center justify-center rounded-[10px] px-5 py-2.5 text-[14px] font-semibold text-white bg-[var(--bd-primary-600)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition"
           >

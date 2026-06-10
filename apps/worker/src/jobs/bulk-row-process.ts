@@ -137,14 +137,8 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
   // signals handles them.
   const validate = validatorResult.value;
   if (!validate(job.payload)) {
-    const errors = validate.errors ?? [];
-    // Drop required-field errors; keep everything else (type, format,
-    // pattern, enum, additionalProperties, minLength, etc.).
-    const blocking = errors.filter((e) => e.keyword !== 'required');
-    if (blocking.length > 0) {
-      const reasons = blocking.map(
-        (e) => `${e.instancePath || e.schemaPath}: ${e.message ?? 'invalid'}`,
-      );
+    const reasons = blockingValidationReasons(validate.errors ?? []);
+    if (reasons.length > 0) {
       return await commit(
         job,
         {
@@ -504,28 +498,47 @@ function preprocessArrayCells(
   }
 }
 
+/** Minimal structural shape of an Ajv validation error (subset we read). */
+export interface SchemaValidationError {
+  keyword?: string;
+  instancePath?: string;
+  schemaPath?: string;
+  message?: string;
+}
+
 /**
- * Mutates `payload`: deletes any top-level field that is an empty
- * string AND is not declared in the schema's `required` array. An
- * empty cell for an optional field means "not provided" — leaving it
- * as `""` triggers `format: uri` / `format: email` failures even
- * though the field was never required. JSON-Schema-spec-compliant
- * because `required: false` fields may be omitted entirely.
+ * Reduce Ajv errors to the human-readable reasons that should FAIL a bulk row.
+ *
+ * Required-field gaps are NOT failures at this layer — signals accepts partial
+ * `item_state` and classifies the item as `draft`. Every other error
+ * (type/format/pattern/enum/additionalProperties/minLength/minItems/…) is
+ * surfaced so the row fails fast before reaching signals.
+ *
+ * @param errors - Ajv `validate.errors` (or `[]`).
+ * @returns One reason string per blocking (non-`required`) error; empty when
+ *   the only failures were missing required fields.
  */
+export function blockingValidationReasons(errors: readonly SchemaValidationError[]): string[] {
+  return errors
+    .filter((e) => e.keyword !== 'required')
+    .map((e) => `${e.instancePath || e.schemaPath}: ${e.message ?? 'invalid'}`);
+}
+
 /**
  * Strips ALL empty cells from the payload — empty strings, empty
  * arrays, null, undefined. Used by the bulk row processor so partial
  * profiles can pass through to signals without tripping Ajv's
  * content-shape checks (type/enum/minItems/minLength) on cells the
  * operator never filled in. Signals' classifier handles partial
- * item_state directly — see commit messages on `feat/account-only-
- * onboarding-mode` for the contract.
+ * item_state directly and classifies the resulting item as `draft`.
  *
- * The earlier required-only `stripEmptyOptionalCells` was removed
- * because the public link path uses its own copy in
- * apps/api/src/routes/public-registration-links.ts.
+ * Note: the public link path (apps/api/.../public-registration-links.ts)
+ * keeps its own required-only strip helper — that path validates with a
+ * different (interactive) contract, so the divergence is intentional.
+ *
+ * @param payload - The row payload; mutated in place.
  */
-function stripAllEmptyCells(payload: Record<string, unknown>): void {
+export function stripAllEmptyCells(payload: Record<string, unknown>): void {
   for (const [field, value] of Object.entries(payload)) {
     if (value === null || value === undefined) {
       delete payload[field];
