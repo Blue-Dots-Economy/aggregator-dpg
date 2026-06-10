@@ -174,6 +174,22 @@ export interface DashboardExportResult {
   filename: string;
 }
 
+/**
+ * Server-side bulk action request for a set of selected dashboard rows.
+ * `action` names the operation (validated against the BFF's allowlist);
+ * `ids` are the selected rows' item ids.
+ */
+export interface DashboardBulkActionInput {
+  action: string;
+  domain: string;
+  ids: string[];
+}
+
+/** Acknowledgement from the bulk-action endpoint (202 envelope). */
+export interface DashboardBulkActionResult {
+  accepted: number;
+}
+
 export interface DashboardService {
   list(kind: ParticipantKind, filter?: ParticipantFilter): Promise<ParticipantBase[]>;
   seekers(filter?: ParticipantFilter): Promise<Seeker[]>;
@@ -205,6 +221,14 @@ export interface DashboardService {
    * service does not parse, validate, or rewrite them.
    */
   dashboardExport(query?: DashboardExportQuery): Promise<DashboardExportResult>;
+  /**
+   * Submit a server-side bulk action (e.g. `trigger_callback`) for the
+   * selected row ids.
+   *
+   * The BFF validates the action name against its allowlist and returns
+   * a 202 acknowledgement; delivery is asynchronous (stubbed today).
+   */
+  dashboardBulkAction(input: DashboardBulkActionInput): Promise<DashboardBulkActionResult>;
 }
 
 interface SignalStackItem {
@@ -329,6 +353,30 @@ class HttpDashboardService implements DashboardService {
     const filename =
       parseFilenameFromContentDisposition(disposition) ?? defaultExportFilename(query);
     return { blob, filename };
+  }
+
+  async dashboardBulkAction(input: DashboardBulkActionInput): Promise<DashboardBulkActionResult> {
+    if (!input.action) throw new Error('dashboardBulkAction requires `action`');
+    if (!input.domain) throw new Error('dashboardBulkAction requires `domain`');
+    if (input.ids.length === 0) throw new Error('dashboardBulkAction requires at least one id');
+    const res = await fetch('/api/dashboard/actions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) {
+      let message = `bulk action failed: ${res.status}`;
+      try {
+        const body = (await res.json()) as { error?: { detail?: string; message?: string } };
+        const detail = body?.error?.detail ?? body?.error?.message;
+        if (detail) message = detail;
+      } catch {
+        // non-JSON body — keep the default message.
+      }
+      throw new Error(message);
+    }
+    return (await res.json()) as DashboardBulkActionResult;
   }
 
   private toSeeker(item: SignalStackItem): Seeker {
