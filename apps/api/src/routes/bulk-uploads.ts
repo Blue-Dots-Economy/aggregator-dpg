@@ -76,7 +76,10 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
         cause: new Error(schemaResult.error.message),
       });
     }
-    const csv = buildCsvTemplate(schemaResult.value);
+    const cfg = await getNetworkConfig();
+    const csv = buildCsvTemplate(schemaResult.value, {
+      arrayDelimiter: cfg.aggregator.network.csv_array_delimiter,
+    });
     void auth; // authenticated for audit; csv content is schema-derived only
     return reply
       .header('Content-Type', 'text/csv; charset=utf-8')

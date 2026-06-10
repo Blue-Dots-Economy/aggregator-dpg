@@ -236,17 +236,22 @@ export interface SignalStackDashboardQuery {
 /**
  * Pre-computed rollup of participant + action counts returned per domain.
  *
- * `by_status` and `by_action_status` use partial maps because signalstack
- * may omit a bucket when its count is zero; consumers default missing keys
- * to 0. `mode_wise_counts` is open-shape — signalstack adds keys for any
- * `onboarded_via` value the aggregator emits.
+ * `by_status` and the directional action maps use partial maps because
+ * signalstack may omit a bucket when its count is zero; consumers default
+ * missing keys to 0. `mode_wise_counts` is open-shape — signalstack adds keys
+ * for any `onboarded_via` value the aggregator emits.
  */
 export interface SignalStackDashboardRollup {
   total_items: number;
   complete_profiles: number;
   has_applications: number;
   by_status: Partial<Record<'new' | 'active' | 'at_risk' | 'inactive', number>>;
-  by_action_status: Partial<Record<'create' | 'accept' | 'reject' | 'cancel', number>>;
+  /** Actions this domain's profiles INITIATED, by action state. */
+  by_initiated_action_status: Partial<Record<'create' | 'accept' | 'reject' | 'cancel', number>>;
+  /** Actions this domain's profiles RECEIVED, by action state. */
+  by_received_action_status: Partial<Record<'create' | 'accept' | 'reject' | 'cancel', number>>;
+  /** Distinct users (one user may own many profiles). */
+  total_users: number;
   avg_items_per_user: number;
   avg_actions_per_user: number;
   mode_wise_counts: Record<string, number>;
@@ -259,10 +264,15 @@ export interface SignalStackDashboardRollup {
 export interface SignalStackDashboardDomainSlice {
   rollup: SignalStackDashboardRollup;
   /**
-   * One row per item. Open-shape because signalstack owns the per-row
-   * schema; consumers decode the keys they care about (today: count_*,
-   * last_*_at, name, item_network, item_type, onboarded_via,
-   * profile_status, profile_completion_pct, age_days, actionable_tags).
+   * One row per profile. Open-shape because signalstack owns the per-row
+   * schema; consumers decode the keys they care about (today:
+   * profile_item_id, user_id, name, item_network, item_type, onboarded_via,
+   * profile_status, profile_completion_pct, profile_created_at,
+   * profile_last_updated_at, age_days, initiated, received,
+   * last_initiated_at, last_received_at, actionable_tags). `initiated` /
+   * `received` are full `{create,accept,reject,cancel}` count maps;
+   * `last_initiated_at` / `last_received_at` are sparse maps (only buckets
+   * that occurred carry an ISO timestamp).
    */
   items: Array<Record<string, unknown>>;
   total_matching: number;

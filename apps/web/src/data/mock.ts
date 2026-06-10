@@ -1,4 +1,5 @@
 import type {
+  ParticipantBase,
   Seeker,
   Provider,
   OpportunityProvider,
@@ -6,7 +7,28 @@ import type {
   AggregatorProfile,
 } from '../types';
 
-export const SEEKERS: Seeker[] = [
+/**
+ * Adds directional `initiated` / `received` stats to demo rows that only
+ * declare the combined `applied` shape. The split is illustrative only — live
+ * dashboard rows come from signalstack via `toSeekerRow`, not this mock data.
+ */
+function withDir<T extends ParticipantBase>(rows: Array<Omit<T, 'initiated' | 'received'>>): T[] {
+  return rows.map(
+    (r) =>
+      ({
+        ...r,
+        initiated: {
+          create: r.applied.pending,
+          accept: r.applied.accepted ?? 0,
+          reject: r.applied.rejected,
+          cancel: r.applied.cancelled ?? 0,
+        },
+        received: { create: 0, accept: 0, reject: 0, cancel: 0 },
+      }) as T,
+  );
+}
+
+export const SEEKERS: Seeker[] = withDir<Seeker>([
   {
     id: 'BD-1042',
     name: 'Priya Hiremath',
@@ -139,9 +161,9 @@ export const SEEKERS: Seeker[] = [
     status: 'active',
     last: '4h ago',
   },
-];
+]);
 
-export const PROVIDERS: Provider[] = [
+export const PROVIDERS: Provider[] = withDir<Provider>([
   {
     id: 'OP-2031',
     name: 'Reliance Retail',
@@ -238,9 +260,9 @@ export const PROVIDERS: Provider[] = [
     status: 'satisfied',
     last: '7h ago',
   },
-];
+]);
 
-export const OPP_PROVIDERS: OpportunityProvider[] = [
+export const OPP_PROVIDERS: OpportunityProvider[] = withDir<OpportunityProvider>([
   {
     id: 'OPP-3041',
     name: 'Pankh Foundation',
@@ -337,7 +359,7 @@ export const OPP_PROVIDERS: OpportunityProvider[] = [
     status: 'satisfied',
     last: '5h ago',
   },
-];
+]);
 
 export const SEEKER_LINKS: RegistrationLink[] = [
   {

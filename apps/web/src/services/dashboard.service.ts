@@ -43,15 +43,17 @@ export interface DashboardQuery {
 
 /**
  * Pre-computed rollup of participant + action counts returned per domain.
- * `by_status` and `by_action_status` use open `Record<string, number>` so
- * the page maps fixed keys with `?? 0` fallbacks defensively.
+ * `by_status` and the directional action maps use open `Record<string, number>`
+ * so the page maps fixed keys with `?? 0` fallbacks defensively.
  */
 export interface DashboardRollup {
   total_items: number;
   complete_profiles: number;
   has_applications: number;
   by_status: Record<string, number>;
-  by_action_status: Record<string, number>;
+  by_initiated_action_status: Record<string, number>;
+  by_received_action_status: Record<string, number>;
+  total_users: number;
   avg_items_per_user: number;
   avg_actions_per_user: number;
   mode_wise_counts: Record<string, number>;
@@ -224,6 +226,7 @@ interface SignalStackItemList {
 }
 
 const ZERO_STATS = { total: 0, shortlisted: 0, accepted: 0, rejected: 0, pending: 0 };
+const ZERO_DIRECTIONAL = { create: 0, accept: 0, reject: 0, cancel: 0 };
 
 class HttpDashboardService implements DashboardService {
   async seekers(filter?: ParticipantFilter): Promise<Seeker[]> {
@@ -345,6 +348,8 @@ class HttpDashboardService implements DashboardService {
         complete: completeness(state),
       },
       applied: { ...ZERO_STATS },
+      initiated: { ...ZERO_DIRECTIONAL },
+      received: { ...ZERO_DIRECTIONAL },
       status: 'active',
       last: relative(item.updated_at),
     };
@@ -369,6 +374,8 @@ class HttpDashboardService implements DashboardService {
         complete: completeness(state),
       },
       applied: { ...ZERO_STATS },
+      initiated: { ...ZERO_DIRECTIONAL },
+      received: { ...ZERO_DIRECTIONAL },
       status: 'active',
       last: relative(item.updated_at),
       role: role && nature ? `${role} · ${nature}` : role || nature,

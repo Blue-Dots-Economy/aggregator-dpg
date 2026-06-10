@@ -221,24 +221,36 @@ export const AggregatorConfigSchema = AggregatorYamlSchema;
 // ─── Signalstack network.json (the subset the aggregator cares about) ────────
 
 /**
- * Tile-label overrides for the dashboard. All keys optional — UI falls back
- * to generic English when omitted. Carried verbatim from `network.json`'s
- * per-domain block; the aggregator does not validate label content.
+ * One dashboard tile: which rollup key to read and what to call it. `field`
+ * is a key on the signalstack rollup (e.g. `total_users`, `complete_profiles`).
+ * The aggregator reads the precomputed value — it never aggregates. Unknown
+ * `field` → tile skipped (logged `warn`).
  */
-export interface DashboardTileLabels {
-  total_items?: string;
-  complete_profiles?: string;
-  has_applications?: string;
+export interface DashboardTileDef {
+  field: string;
+  label: string;
+}
+
+/**
+ * Per-domain dashboard tiles, split into profile-level and user-level groups.
+ * Both optional — UI falls back to default English tiles when a group is
+ * absent. Carried verbatim from `network.json`.
+ */
+export interface DashboardTiles {
+  profile?: DashboardTileDef[];
+  user?: DashboardTileDef[];
 }
 
 /**
  * Network-wide canonical-bucket label overrides. Keys are the fixed Signals
  * vocab; values are the network's preferred copy ("Applied" vs "Requested",
- * etc.). Optional throughout — UI defaults to English labels when missing.
+ * etc.). Action labels are split by direction (initiated vs received).
+ * Optional throughout — UI defaults to English labels when missing.
  */
 export interface DashboardBuckets {
   by_status?: Partial<Record<'new' | 'active' | 'at_risk' | 'inactive', string>>;
-  by_action_status?: Partial<Record<'create' | 'accept' | 'reject' | 'cancel', string>>;
+  by_initiated_action_status?: Partial<Record<'create' | 'accept' | 'reject' | 'cancel', string>>;
+  by_received_action_status?: Partial<Record<'create' | 'accept' | 'reject' | 'cancel', string>>;
 }
 
 /**
@@ -263,8 +275,8 @@ export interface StatusRule {
 export interface NetworkDomain {
   id: string;
   description?: string;
-  /** Per-domain tile labels for the dashboard. Optional passthrough from network.json. */
-  dashboard_tiles?: DashboardTileLabels;
+  /** Per-domain dashboard tile groups (profile + user). Optional passthrough from network.json. */
+  dashboard_tiles?: DashboardTiles;
   /** Per-domain status taxonomy + UI copy. Optional passthrough from network.json. */
   status_rules?: StatusRule[];
   item_schemas: Record<string, Record<string, unknown>>;
@@ -308,11 +320,11 @@ export interface ResolvedDomain {
   /** Identity selectors (sniffer-derived, overridden by config). */
   identity: IdentitySelectors;
   /**
-   * Resolved per-domain dashboard tile labels — copy-through from
+   * Resolved per-domain dashboard tile groups — copy-through from
    * `network.dashboard_tiles` on this domain. UI falls back to generic
    * defaults when undefined.
    */
-  dashboardTiles?: DashboardTileLabels;
+  dashboardTiles?: DashboardTiles;
   /**
    * Per-domain status rules (copy-through from `network.status_rules` on
    * this domain). Drives the dashboard status-card labels + descriptions.

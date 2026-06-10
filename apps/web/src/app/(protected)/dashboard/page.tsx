@@ -18,9 +18,13 @@ import {
   triggerCsvDownload,
   type LifecycleFilter,
 } from '../../../services/dashboard.service';
+import { mapDirectional } from '../../../services/row-mapping';
+import { resolveTiles } from '../../../services/tiles';
+import type { DashboardTileDef } from '../../../hooks/useAggregatorConfig';
 import { useProfileRaw } from '../../../hooks/useProfile';
 import { useThemeMode } from '../../../lib/theme-mode';
 import type {
+  DirectionalStats,
   LifecycleStatus,
   ParticipantBase,
   ParticipantStatus,
@@ -454,7 +458,7 @@ function buildStatusOptions(
  * Looks up a bucket label from the config-sourced map, falling back to
  * an optional translated fallback supplier, then the raw key. Always returns a string.
  *
- * @param labels - Config-sourced bucket label map (may be from `dashboardBuckets.by_action_status`).
+ * @param labels - Config-sourced bucket label map (e.g. `dashboardBuckets.by_initiated_action_status` / `by_received_action_status`).
  * @param key - Bucket key (e.g. `'create'`, `'accept'`).
  * @param getFallback - Optional function that returns the localised fallback label for the key.
  * @returns The resolved label string.
@@ -465,6 +469,60 @@ function getBucketLabel(
   getFallback?: (k: string) => string,
 ): string {
   return labels[key] ?? getFallback?.(key) ?? key;
+}
+
+/**
+ * Builds the four funnel parts (create/accept/reject/cancel) for one direction
+ * of a row's action counts, labelling each from the direction's config map.
+ *
+ * @param stats - The directional counts for the row.
+ * @param labels - Config-sourced bucket labels for this direction.
+ * @param fallback - Localised fallback label supplier.
+ */
+function buildActionParts(
+  stats: DirectionalStats,
+  labels: Record<string, string>,
+  fallback: (k: string) => string,
+): Array<{ v: number; color: string; label: string; short: string }> {
+  const part = (key: keyof DirectionalStats, color: string) => ({
+    v: stats[key],
+    color,
+    label: getBucketLabel(labels, key, fallback),
+    short: getBucketLabel(labels, key, fallback),
+  });
+  return [
+    part('create', 'var(--bd-funnel-requested)'),
+    part('accept', 'var(--bd-funnel-connected)'),
+    part('reject', 'var(--bd-funnel-declined)'),
+    part('cancel', 'var(--bd-funnel-cancelled)'),
+  ];
+}
+
+/**
+ * Localised default tile groups, used when network.json omits
+ * `dashboard_tiles.profile` / `dashboard_tiles.user`. Built per-tab so
+ * `{entityPlural}` reflects the active domain's plural label.
+ */
+function useDefaultTiles(entityPlural: string): {
+  profile: DashboardTileDef[];
+  user: DashboardTileDef[];
+} {
+  const t = useTranslations('dashboard');
+  return useMemo(
+    () => ({
+      profile: [
+        { field: 'total_items', label: t('ministat.totalItems', { entityPlural }) },
+        { field: 'complete_profiles', label: t('ministat.completeProfiles') },
+        { field: 'has_applications', label: t('ministat.withApplications', { entityPlural }) },
+      ],
+      user: [
+        { field: 'total_users', label: t('ministat.totalUsers') },
+        { field: 'avg_items_per_user', label: t('ministat.avgProfilesPerUser') },
+        { field: 'avg_actions_per_user', label: t('ministat.avgActionsPerUser') },
+      ],
+    }),
+    [t, entityPlural],
+  );
 }
 
 interface ParticipantTableProps<R extends ParticipantBase> {
@@ -493,10 +551,17 @@ interface ParticipantTableProps<R extends ParticipantBase> {
    */
   statusOptions?: StatusOption[] | undefined;
   /**
-   * Action-status bucket labels sourced from `dashboardBuckets.by_action_status`
-   * in the aggregator config. Falls back to localised `t('buckets.*')` when absent.
+   * Action-status bucket labels for the INITIATED column, sourced from
+   * `dashboardBuckets.by_initiated_action_status`. Falls back to localised
+   * `t('buckets.*')` when absent.
    */
-  bucketLabels?: Record<string, string> | undefined;
+  initiatedLabels?: Record<string, string> | undefined;
+  /**
+   * Action-status bucket labels for the RECEIVED column, sourced from
+   * `dashboardBuckets.by_received_action_status`. Falls back to localised
+   * `t('buckets.*')` when absent.
+   */
+  receivedLabels?: Record<string, string> | undefined;
   /**
    * Active lifecycle dropdown value. `'all'` hides the URL param.
    */
@@ -514,7 +579,8 @@ function ParticipantTable<R extends ParticipantBase>({
   statusFilter = 'all',
   onStatusFilterChange,
   statusOptions,
-  bucketLabels = {},
+  initiatedLabels = {},
+  receivedLabels = {},
   lifecycleFilter = 'all',
   onLifecycleFilterChange,
 }: ParticipantTableProps<R>) {
@@ -625,7 +691,7 @@ function ParticipantTable<R extends ParticipantBase>({
           {onLifecycleFilterChange ? (
             <select
               aria-label={t('filters.lifecycle_label')}
-              className="bd-input text-[12.5px] py-1.5 pr-7"
+              className="bd-input w-auto max-w-[150px] text-[12.5px] py-1.5 pr-7"
               value={lifecycleFilter}
               onChange={(e) => onLifecycleFilterChange(e.target.value as LifecycleFilterValue)}
             >
@@ -641,6 +707,7 @@ function ParticipantTable<R extends ParticipantBase>({
               onClick={() => setFilterOpen((v) => !v)}
               aria-haspopup="menu"
               aria-expanded={filterOpen}
+              className="whitespace-nowrap px-3 py-1.5 text-[12.5px]"
             >
               {filterActive
                 ? (options.find((o) => o.value === statusFilter)?.label ?? 'Filtered')
@@ -688,6 +755,7 @@ function ParticipantTable<R extends ParticipantBase>({
             disabled={exporting}
             title={exportError ?? t('aria.export_csv')}
             aria-label={t('aria.export_csv')}
+            className="whitespace-nowrap px-3 py-1.5 text-[12.5px]"
           >
             {exporting ? t('buttons.exporting') : t('buttons.exportCsv')}
           </Button>
@@ -695,7 +763,7 @@ function ParticipantTable<R extends ParticipantBase>({
       </div>
 
       <div className="overflow-auto scroll-x" style={{ maxHeight: 520 }}>
-        <table className="bd-table" style={{ minWidth: kind === 'provider' ? 1380 : 1280 }}>
+        <table className="bd-table" style={{ minWidth: kind === 'provider' ? 1500 : 1400 }}>
           <thead
             style={{
               position: 'sticky',
@@ -718,7 +786,8 @@ function ParticipantTable<R extends ParticipantBase>({
               </th>
               <th>{t('table.joined')}</th>
               <th>{t('table.profileStatus')}</th>
-              <th>{bucketLabels['create'] ?? t('table.applied')}</th>
+              <th>{t('table.initiated')}</th>
+              <th>{t('table.received')}</th>
               <th>{t('table.status')}</th>
               <th>{t('table.recommendedAction')}</th>
             </tr>
@@ -769,33 +838,24 @@ function ParticipantTable<R extends ParticipantBase>({
                   </td>
                   <td>
                     <FunnelCell
-                      total={r.applied.total}
-                      parts={[
-                        {
-                          v: r.applied.pending,
-                          color: 'var(--bd-funnel-requested)',
-                          label: getBucketLabel(bucketLabels, 'create', getBucketFallback),
-                          short: getBucketLabel(bucketLabels, 'create', getBucketFallback),
-                        },
-                        {
-                          v: r.applied.accepted ?? 0,
-                          color: 'var(--bd-funnel-connected)',
-                          label: getBucketLabel(bucketLabels, 'accept', getBucketFallback),
-                          short: getBucketLabel(bucketLabels, 'accept', getBucketFallback),
-                        },
-                        {
-                          v: r.applied.rejected,
-                          color: 'var(--bd-funnel-declined)',
-                          label: getBucketLabel(bucketLabels, 'reject', getBucketFallback),
-                          short: getBucketLabel(bucketLabels, 'reject', getBucketFallback),
-                        },
-                        {
-                          v: r.applied.cancelled ?? 0,
-                          color: 'var(--bd-funnel-cancelled)',
-                          label: getBucketLabel(bucketLabels, 'cancel', getBucketFallback),
-                          short: getBucketLabel(bucketLabels, 'cancel', getBucketFallback),
-                        },
-                      ]}
+                      total={
+                        r.initiated.create +
+                        r.initiated.accept +
+                        r.initiated.reject +
+                        r.initiated.cancel
+                      }
+                      parts={buildActionParts(r.initiated, initiatedLabels, getBucketFallback)}
+                    />
+                  </td>
+                  <td>
+                    <FunnelCell
+                      total={
+                        r.received.create +
+                        r.received.accept +
+                        r.received.reject +
+                        r.received.cancel
+                      }
+                      parts={buildActionParts(r.received, receivedLabels, getBucketFallback)}
                     />
                   </td>
                   <td>
@@ -1063,11 +1123,12 @@ function SeekersTab() {
   const rollup = slice?.rollup;
   const { data: cfg } = useAggregatorConfig();
   const seekerCfg = cfg?.domains?.find((d) => d.id === seekerDomainId);
-  const seekerTileLabels = seekerCfg?.dashboardTiles ?? {};
   const seekerPlural = seekerCfg?.plural_label ?? t('tabs.seekers');
-  // by_action_status bucket labels — wired to the funnel cells in the
-  // participant table's action-count columns.
-  const bucketLabels = cfg?.dashboardBuckets?.by_action_status ?? {};
+  const defaultTiles = useDefaultTiles(seekerPlural);
+  // Directional bucket labels — wired to the funnel cells in the participant
+  // table's Initiated / Received action-count columns.
+  const initiatedLabels = cfg?.dashboardBuckets?.by_initiated_action_status ?? {};
+  const receivedLabels = cfg?.dashboardBuckets?.by_received_action_status ?? {};
   const statusLabels = cfg?.dashboardBuckets?.by_status ?? {};
   const statusRules = indexStatusRules(seekerCfg?.status_rules);
   const total = rollup?.total_items;
@@ -1091,11 +1152,8 @@ function SeekersTab() {
   const active = byStatus['active'] ?? byStatus['new'];
   const atRisk = byStatus['at_risk'];
   const inactive = byStatus['inactive'];
-  const completeProfiles = rollup?.complete_profiles;
-  const hasApplications = rollup?.has_applications;
-  const newThisWeek = byStatus['new'];
   const rows = useMemo(
-    () => (slice?.items ?? []).map((p) => toSeekerRow(p, locale)),
+    () => (slice?.items ?? []).map((p, i) => toSeekerRow(p, locale, i)),
     [slice?.items, locale],
   );
   const filteredRows = useMemo(
@@ -1205,30 +1263,20 @@ function SeekersTab() {
         />
       </div>
 
+      {/* Profile-level tiles */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <MiniStat
-          label={
-            seekerTileLabels.total_items ?? t('ministat.totalItems', { entityPlural: seekerPlural })
-          }
-          value={fmtCount(total)}
-        />
-        <MiniStat
-          label={seekerTileLabels.complete_profiles ?? t('ministat.completeProfiles')}
-          value={fmtCount(completeProfiles)}
-        />
-        <MiniStat
-          label={
-            seekerTileLabels.has_applications ??
-            t('ministat.withApplications', { entityPlural: seekerPlural })
-          }
-          value={fmtCount(hasApplications)}
-        />
-        <MiniStat
-          label={statusLabels['new'] ?? t('ministat.newParticipants')}
-          value={fmtCount(newThisWeek)}
-          delta={t('ministat.delta_this_week')}
-          deltaTone="flat"
-        />
+        {resolveTiles(seekerCfg?.dashboardTiles?.profile, defaultTiles.profile, rollup).map(
+          (tile) => (
+            <MiniStat key={`p-${tile.field}`} label={tile.label} value={fmtCount(tile.value)} />
+          ),
+        )}
+      </div>
+
+      {/* User-level tiles */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {resolveTiles(seekerCfg?.dashboardTiles?.user, defaultTiles.user, rollup).map((tile) => (
+          <MiniStat key={`u-${tile.field}`} label={tile.label} value={fmtCount(tile.value)} />
+        ))}
       </div>
 
       {isLoading ? (
@@ -1246,7 +1294,8 @@ function SeekersTab() {
           statusFilter={statusFilter}
           onStatusFilterChange={handleStatusFilterChange}
           statusOptions={statusOptions}
-          bucketLabels={bucketLabels}
+          initiatedLabels={initiatedLabels}
+          receivedLabels={receivedLabels}
           lifecycleFilter={lifecycleFilter}
           onLifecycleFilterChange={handleLifecycleFilterChange}
         />
@@ -1262,7 +1311,10 @@ function SeekersTab() {
  */
 function fmtCount(n: number | null | undefined): string {
   if (n === undefined || n === null) return '—';
-  return String(n);
+  // Integers render clean; fractional values (e.g. avg_items_per_user) are
+  // capped at 2 decimals with trailing zeros dropped (1.1666… → "1.17").
+  // Locale left to the runtime so separators follow the user's language.
+  return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
 
 /**
@@ -1275,13 +1327,12 @@ function fmtCount(n: number | null | undefined): string {
  * table does not yet call. Missing fields render as em-dashes; the
  * `complete` profile bar uses `profile_completion_pct` from the rollup.
  */
-function toSeekerRow(participant: Record<string, unknown>, locale: string): Seeker {
-  const userId =
-    typeof participant.owner_user_id === 'string'
-      ? participant.owner_user_id
-      : typeof participant.user_id === 'string'
-        ? participant.user_id
-        : '';
+function toSeekerRow(participant: Record<string, unknown>, locale: string, index: number): Seeker {
+  // Row key: profile_item_id (one row per profile), else the array index.
+  // user_id is not unique per row (a user may own many profiles), so it is no
+  // longer used as the key — kept only as an optional passthrough upstream.
+  const profileItemId =
+    typeof participant.profile_item_id === 'string' ? participant.profile_item_id : '';
   const status = mapSeekerStatus(
     typeof participant.profile_status === 'string' ? participant.profile_status : null,
   );
@@ -1302,8 +1353,12 @@ function toSeekerRow(participant: Record<string, unknown>, locale: string): Seek
       : '';
   const name =
     typeof participant.name === 'string' && participant.name.trim() ? participant.name : '—';
+  const initiated = mapDirectional(participant.initiated);
+  const received = mapDirectional(participant.received);
   return {
-    id: userId,
+    // `row-` prefix keeps synthetic keys from colliding with a genuine
+    // numeric profile_item_id on the same page.
+    id: profileItemId || `row-${index}`,
     name,
     city: '—',
     joined: created
@@ -1315,16 +1370,23 @@ function toSeekerRow(participant: Record<string, unknown>, locale: string): Seek
       : '—',
     avatar: avatarInitials(name),
     profile: { title: '—', exp: '—', verified: false, complete: completion },
+    initiated,
+    received,
+    // Combined (initiated + received) view, kept for non-table consumers.
     applied: {
       total:
-        numberOr(participant.count_create, 0) +
-        numberOr(participant.count_accept, 0) +
-        numberOr(participant.count_reject, 0) +
-        numberOr(participant.count_cancel, 0),
-      accepted: numberOr(participant.count_accept, 0),
-      rejected: numberOr(participant.count_reject, 0),
-      pending: numberOr(participant.count_create, 0),
-      cancelled: numberOr(participant.count_cancel, 0),
+        initiated.create +
+        initiated.accept +
+        initiated.reject +
+        initiated.cancel +
+        received.create +
+        received.accept +
+        received.reject +
+        received.cancel,
+      accepted: initiated.accept + received.accept,
+      rejected: initiated.reject + received.reject,
+      pending: initiated.create + received.create,
+      cancelled: initiated.cancel + received.cancel,
     },
     status,
     last: updated ? formatRelative(updated) : '—',
@@ -1339,10 +1401,6 @@ function mapSeekerStatus(raw: string | null): ParticipantStatus {
   if (raw === 'at_risk') return 'at-risk';
   if (raw === 'inactive') return 'inactive';
   return 'active';
-}
-
-function numberOr(v: unknown, fallback: number): number {
-  return typeof v === 'number' ? v : fallback;
 }
 
 function avatarInitials(name: string): string {
@@ -1376,7 +1434,8 @@ function ProvidersTab() {
   const locale = useLocale();
   // Mirror SeekersTab: live counts come from the signalstack dashboard
   // rollup. Provider domain reuses the same canonical rollup shape
-  // (total_items, by_status, by_action_status, complete_profiles, …)
+  // (total_items, by_status, by_initiated_action_status,
+  //  by_received_action_status, complete_profiles, …)
   // so the cards map field-for-field; only the labels differ.
   //
   // Domain id from cfg so networks declaring non-default ids (e.g.
@@ -1412,11 +1471,12 @@ function ProvidersTab() {
   );
   const { data: cfg } = useAggregatorConfig();
   const providerCfg = cfg?.domains?.find((d) => d.id === providerDomainId);
-  const providerTileLabels = providerCfg?.dashboardTiles ?? {};
   const providerPlural = providerCfg?.plural_label ?? t('tabs.providers');
-  // by_action_status bucket labels — wired to the funnel cells in the
-  // participant table's action-count columns.
-  const bucketLabels = cfg?.dashboardBuckets?.by_action_status ?? {};
+  const defaultTiles = useDefaultTiles(providerPlural);
+  // Directional bucket labels — wired to the funnel cells in the participant
+  // table's Initiated / Received action-count columns.
+  const initiatedLabels = cfg?.dashboardBuckets?.by_initiated_action_status ?? {};
+  const receivedLabels = cfg?.dashboardBuckets?.by_received_action_status ?? {};
   const statusLabels = cfg?.dashboardBuckets?.by_status ?? {};
   const statusRules = indexStatusRules(providerCfg?.status_rules);
   const slice = providerDomainId ? dashboard?.by_domain[providerDomainId] : undefined;
@@ -1426,10 +1486,8 @@ function ProvidersTab() {
   const active = byStatus['active'] ?? byStatus['new'];
   const atRisk = byStatus['at_risk'];
   const inactive = byStatus['inactive'];
-  const verified = rollup?.complete_profiles;
-  const hasApplications = rollup?.has_applications;
   const rows = useMemo(
-    () => (slice?.items ?? []).map((p) => toProviderRow(p, locale)),
+    () => (slice?.items ?? []).map((p, i) => toProviderRow(p, locale, i)),
     [slice?.items, locale],
   );
   const filteredRows = useMemo(
@@ -1545,25 +1603,20 @@ function ProvidersTab() {
         />
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-        <MiniStat
-          label={
-            providerTileLabels.total_items ??
-            t('ministat.totalItems', { entityPlural: providerPlural })
-          }
-          value={fmtCount(total)}
-        />
-        <MiniStat
-          label={providerTileLabels.complete_profiles ?? t('ministat.completeProfiles')}
-          value={fmtCount(verified)}
-        />
-        <MiniStat
-          label={
-            providerTileLabels.has_applications ??
-            t('ministat.withApplications', { entityPlural: providerPlural })
-          }
-          value={fmtCount(hasApplications)}
-        />
+      {/* Profile-level tiles */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {resolveTiles(providerCfg?.dashboardTiles?.profile, defaultTiles.profile, rollup).map(
+          (tile) => (
+            <MiniStat key={`p-${tile.field}`} label={tile.label} value={fmtCount(tile.value)} />
+          ),
+        )}
+      </div>
+
+      {/* User-level tiles */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {resolveTiles(providerCfg?.dashboardTiles?.user, defaultTiles.user, rollup).map((tile) => (
+          <MiniStat key={`u-${tile.field}`} label={tile.label} value={fmtCount(tile.value)} />
+        ))}
       </div>
 
       {isLoading ? (
@@ -1581,7 +1634,8 @@ function ProvidersTab() {
           statusFilter={statusFilter}
           onStatusFilterChange={handleStatusFilterChange}
           statusOptions={statusOptions}
-          bucketLabels={bucketLabels}
+          initiatedLabels={initiatedLabels}
+          receivedLabels={receivedLabels}
           lifecycleFilter={lifecycleFilter}
           onLifecycleFilterChange={handleLifecycleFilterChange}
         />
@@ -1590,8 +1644,12 @@ function ProvidersTab() {
   );
 }
 
-function toProviderRow(participant: Record<string, unknown>, locale: string): Provider {
-  const seeker = toSeekerRow(participant, locale);
+function toProviderRow(
+  participant: Record<string, unknown>,
+  locale: string,
+  index: number,
+): Provider {
+  const seeker = toSeekerRow(participant, locale, index);
   return { ...seeker, role: '—' };
 }
 

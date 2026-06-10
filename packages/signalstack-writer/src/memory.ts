@@ -624,7 +624,9 @@ function emptyDomainSlice(): {
     complete_profiles: number;
     has_applications: number;
     by_status: Record<string, number>;
-    by_action_status: Record<string, number>;
+    by_initiated_action_status: Record<string, number>;
+    by_received_action_status: Record<string, number>;
+    total_users: number;
     avg_items_per_user: number;
     avg_actions_per_user: number;
     mode_wise_counts: Record<string, number>;
@@ -639,7 +641,9 @@ function emptyDomainSlice(): {
       complete_profiles: 0,
       has_applications: 0,
       by_status: { new: 0, active: 0, at_risk: 0, inactive: 0 },
-      by_action_status: { create: 0, accept: 0, reject: 0, cancel: 0 },
+      by_initiated_action_status: { create: 0, accept: 0, reject: 0, cancel: 0 },
+      by_received_action_status: { create: 0, accept: 0, reject: 0, cancel: 0 },
+      total_users: 0,
       avg_items_per_user: 0,
       avg_actions_per_user: 0,
       mode_wise_counts: {},
