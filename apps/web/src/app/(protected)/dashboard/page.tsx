@@ -13,11 +13,7 @@ import { Topbar } from '../../../components/shell/Topbar';
 import { I, type IconName } from '../../../icons';
 import { useOppProviders, useDashboard } from '../../../hooks/useDashboard';
 import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
-import {
-  dashboardService,
-  triggerCsvDownload,
-  type LifecycleFilter,
-} from '../../../services/dashboard.service';
+import { dashboardService, type LifecycleFilter } from '../../../services/dashboard.service';
 import { mapDirectional } from '../../../services/row-mapping';
 import { resolveTiles } from '../../../services/tiles';
 import { DASHBOARD_BULK_ACTIONS, type BulkAction } from '../../../services/bulk-actions';
@@ -832,8 +828,6 @@ function ParticipantTable<R extends ParticipantBase>({
     { value: 'all', label: t('filters.all_statuses') },
   ];
   const searchId = `bd-search-${kind}`;
-  const [exporting, setExporting] = useState(false);
-  const [exportError, setExportError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [filterOpen, setFilterOpen] = useState(false);
   const filterRef = useRef<HTMLDivElement | null>(null);
@@ -867,9 +861,9 @@ function ParticipantTable<R extends ParticipantBase>({
 
   const filterActive = statusFilter !== 'all';
 
-  // Map UI kind onto the signalstack domain. `opp` rides on the provider
-  // dataset until signalstack exposes a dedicated opportunity-provider
-  // endpoint (mirrors the read path in dashboardService).
+  // Map UI kind onto the signalstack domain for bulk-action context. `opp`
+  // rides on the provider dataset until signalstack exposes a dedicated
+  // opportunity-provider endpoint (mirrors the read path in dashboardService).
   const exportDomain: 'seeker' | 'provider' = kind === 'seeker' ? 'seeker' : 'provider';
 
   // Bulk selection — snapshots full row data (not just ids) so client-side
@@ -909,20 +903,6 @@ function ParticipantTable<R extends ParticipantBase>({
       }
       return next;
     });
-  };
-
-  const onExportCsv = async () => {
-    if (exporting) return;
-    setExporting(true);
-    setExportError(null);
-    try {
-      const result = await dashboardService.dashboardExport({ domain: exportDomain });
-      triggerCsvDownload(result);
-    } catch (err) {
-      setExportError(err instanceof Error ? err.message : 'export failed');
-    } finally {
-      setExporting(false);
-    }
   };
 
   return (
@@ -1020,17 +1000,6 @@ function ParticipantTable<R extends ParticipantBase>({
               </div>
             )}
           </div>
-          <Button
-            kind="ghost"
-            icon={<I.download size={14} />}
-            onClick={onExportCsv}
-            disabled={exporting}
-            title={exportError ?? t('aria.export_csv')}
-            aria-label={t('aria.export_csv')}
-            className="whitespace-nowrap px-3 py-1.5 text-[12.5px]"
-          >
-            {exporting ? t('buttons.exporting') : t('buttons.exportCsv')}
-          </Button>
         </div>
       </div>
 
