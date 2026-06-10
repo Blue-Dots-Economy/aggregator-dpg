@@ -16,7 +16,8 @@
     "dev": "turbo run dev",
     "prepare": "husky",
     "new-service": "tsx scripts/new-service.ts",
-    "dep-check": "depcruise packages --config .dependency-cruiser.cjs --output-type err-long"
+    "dep-check": "depcruise packages --config .dependency-cruiser.cjs --output-type err-long",
+    "test:scripts": "node --test scripts/stack.test.mjs"
   },
   "lint-staged": {
     "*.{ts,tsx,js,mjs,cjs,json,yaml,md}": [
