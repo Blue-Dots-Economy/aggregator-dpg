@@ -17,7 +17,22 @@ let instance: Redis | null = null;
 
 function getRedis(): Redis {
   if (instance) return instance;
-  instance = createRedisConnection({ url: config.REDIS_URL });
+  // Dedicated fail-fast connection — NOT the BullMQ profile. The rate
+  // limiter fails open on Redis errors (see consume), so a downed Redis must
+  // surface an error promptly rather than buffering commands forever. A
+  // finite per-request retry + command timeout + disabled offline queue make
+  // the catch-and-allow path fire within ~1s instead of hanging the public
+  // submit endpoint.
+  instance = createRedisConnection({
+    url: config.REDIS_URL,
+    maxRetriesPerRequest: 1,
+    commandTimeout: 1000,
+    enableOfflineQueue: false,
+  });
+  // ioredis emits 'error' on every reconnect attempt; without a listener
+  // those bubble as unhandled. Swallow here — consume's try/catch owns the
+  // request-path behaviour (fail open).
+  instance.on('error', () => undefined);
   return instance;
 }
 

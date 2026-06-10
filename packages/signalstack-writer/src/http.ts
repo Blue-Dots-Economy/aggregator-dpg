@@ -5,11 +5,20 @@
  * response, network failure, or shape mismatch is mapped to UpstreamError so
  * the caller never sees a thrown exception.
  *
- * Retries are NOT performed here — idempotency strategy is a higher-level
- * concern (see notes in the design doc). One call → one network attempt.
+ * Every request goes through {@link HttpSignalStackWriter.requestWithRetry},
+ * which applies the configured per-attempt timeout and retries transient
+ * failures (transport errors, request timeouts, `429`, and `5xx`) with
+ * exponential backoff — per the repo `error-handling.md` rule. All signals
+ * write paths consumed here are idempotent (onboard/probe dedupe on identity;
+ * aggregator upsert dedupes on `external_id`; dashboard/get are reads), so a
+ * retry can never double-create.
  */
 
-import { UpstreamError } from '@aggregator-dpg/shared-primitives/errors';
+import {
+  AuthError,
+  UpstreamError,
+  ValidationError,
+} from '@aggregator-dpg/shared-primitives/errors';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import { err, ok } from '@aggregator-dpg/shared-primitives/result';
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
@@ -21,10 +30,14 @@ import {
   type SignalStackDashboardExportQuery,
   type SignalStackDashboardPage,
   type SignalStackDashboardQuery,
+  type SignalStackGetItemQuery,
   type SignalStackItemList,
   type SignalStackItemQuery,
   type SignalStackOnboardParticipantInput,
   type SignalStackOnboardParticipantResult,
+  type SignalStackProbeUserInput,
+  type SignalStackProbeUserResult,
+  type SignalStackProfile,
   type SignalStackUpsertAggregatorInput,
 } from './interface.js';
 
@@ -42,8 +55,21 @@ export interface HttpSignalStackWriterConfig {
   actingOrgId?: string;
   /** Optional override; defaults to global `fetch`. Lets tests inject a stub. */
   fetchImpl?: typeof fetch;
-  /** Optional request timeout in ms; off by default. */
+  /** Optional per-attempt request timeout in ms; off by default. */
   timeoutMs?: number;
+  /**
+   * Max retry attempts for transient failures (transport error, timeout,
+   * `429`, `5xx`). `2` by default → up to 3 total attempts. `0` disables
+   * retries (one attempt). Non-transient responses (`4xx` other than `429`)
+   * are never retried.
+   */
+  maxRetries?: number;
+  /**
+   * Base backoff in ms between retries; doubles each attempt
+   * (`base`, `base*2`, `base*4`, …). `200` by default. Set `0` in tests to
+   * remove the delay.
+   */
+  retryBaseMs?: number;
 }
 
 export class HttpSignalStackWriter extends SignalStackWriterBase {
@@ -58,6 +84,8 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
   private readonly actingOrgId: string | undefined;
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number | undefined;
+  private readonly maxRetries: number;
+  private readonly retryBaseMs: number;
 
   constructor(config: HttpSignalStackWriterConfig) {
     super();
@@ -78,6 +106,62 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
     this.actingOrgId = config.actingOrgId;
     this.fetchImpl = config.fetchImpl ?? fetch;
     this.timeoutMs = config.timeoutMs;
+    this.maxRetries = config.maxRetries ?? 2;
+    this.retryBaseMs = config.retryBaseMs ?? 200;
+  }
+
+  /**
+   * Perform a fetch with a per-attempt timeout and bounded exponential-backoff
+   * retry of transient failures.
+   *
+   * Retries on: a thrown transport error, an aborted (timed-out) request, and
+   * a `429` or `5xx` response. A `4xx` (other than `429`) is returned to the
+   * caller immediately so it can map the response to the right typed error.
+   * When all attempts are exhausted the last thrown error is re-thrown (so the
+   * caller's `catch` maps it to a `SIGNALSTACK_TIMEOUT` / `_TRANSPORT_FAILED`),
+   * or the last failing `Response` is returned (so the caller maps the status).
+   *
+   * @param url - Absolute request URL.
+   * @param init - Fetch init; the `signal` is supplied per attempt.
+   * @returns The final `Response` (success, non-retryable, or exhausted).
+   * @throws The last transport/timeout error when every attempt threw.
+   */
+  private async requestWithRetry(url: string, init: RequestInit): Promise<Response> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+      const controller = this.timeoutMs ? new AbortController() : undefined;
+      const timer = controller ? setTimeout(() => controller.abort(), this.timeoutMs) : undefined;
+      try {
+        const res = await this.fetchImpl(url, {
+          ...init,
+          ...(controller ? { signal: controller.signal } : {}),
+        });
+        if (attempt < this.maxRetries && (res.status === 429 || res.status >= 500)) {
+          await this.backoff(attempt);
+          continue;
+        }
+        return res;
+      } catch (e) {
+        lastError = e;
+        if (attempt < this.maxRetries) {
+          await this.backoff(attempt);
+          continue;
+        }
+        throw e;
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    }
+    // Unreachable — the loop always returns or throws — but satisfies the
+    // type checker that the function returns on every path.
+    throw lastError ?? new Error('signalstack request failed');
+  }
+
+  /** Sleep for `retryBaseMs * 2^attempt` ms before the next retry. */
+  private backoff(attempt: number): Promise<void> {
+    const ms = this.retryBaseMs * 2 ** attempt;
+    if (ms <= 0) return Promise.resolve();
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   override async onboard(
@@ -86,6 +170,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
     const guardErr = this.guardInput(input);
     if (guardErr) return err(guardErr);
 
+    const submitMode: 'with_item' | 'account_only' = input.submit_mode ?? 'with_item';
     const body: Record<string, unknown> = {
       name: input.name,
       terms_accepted: input.terms_accepted,
@@ -95,11 +180,17 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       network: input.network,
       domain: input.domain,
       item_type: input.item_type,
-      // Signalstack Plan-C renamed the body field from `profile` to
-      // `item_state` — the value is unchanged. Keep the writer input
-      // contract on `profile` so callers don't need to churn.
-      item_state: input.profile,
     };
+    // Signalstack Plan-C renamed the body field from `profile` to
+    // `item_state` — the value is unchanged. When the caller opts out of
+    // item creation (`submit_mode === 'account_only'`), omit `item_state`
+    // entirely so signals creates only the user row. This is the
+    // upstream-friendly way to flag "account only": signals' own contract
+    // treats an absent item_state as "no item" rather than introducing a
+    // bespoke flag.
+    if (submitMode !== 'account_only') {
+      body.item_state = input.profile;
+    }
     // Signalstack's user schema treats email / phoneNumber as `.optional()`
     // (not `.nullable()`), so omit the keys entirely when we have no value
     // rather than passing null — a literal null trips Zod's `expected:
@@ -112,15 +203,11 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       'x-acting-org-id': input.actingOrgId,
     };
 
-    const controller = this.timeoutMs ? new AbortController() : undefined;
-    const timer = controller ? setTimeout(() => controller.abort(), this.timeoutMs) : undefined;
-
     try {
-      const res = await this.fetchImpl(this.endpoint, {
+      const res = await this.requestWithRetry(this.endpoint, {
         method: 'POST',
         headers,
         body: JSON.stringify(body),
-        ...(controller ? { signal: controller.signal } : {}),
       });
 
       if (!res.ok) {
@@ -142,7 +229,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       }
 
       // Plan-C response shape:
-      //   { user_id, user_existed, onboarded_at, items: [{ item_id, ... }] }
+      //   { user_id, user_existed, onboarded_at, items: [{ item_id, lifecycle_status?, ... }] }
       // The writer's public result still surfaces a flat
       // `profile_item_id` so existing callers (worker, registration-link
       // routes, audit logs) stay unchanged — pick the matching item for
@@ -151,11 +238,13 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       const raw = (await res.json()) as {
         user_id?: unknown;
         user_existed?: unknown;
+        owned_elsewhere?: unknown;
         items?: Array<{
           item_id?: unknown;
           item_network?: unknown;
           item_domain?: unknown;
           item_type?: unknown;
+          lifecycle_status?: unknown;
         }>;
         onboarded_at?: unknown;
       };
@@ -168,17 +257,39 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
         );
       }
       const items = Array.isArray(raw.items) ? raw.items : [];
-      // Existing user owned by a different aggregator: signalstack
-      // returns `user_existed: true` with an empty `items` array (that
-      // org's items are private to it). This is not an error — surface
-      // it as an already-registered result so the caller records a
+      const ownedElsewhereSignal = raw.owned_elsewhere === true;
+
+      // account_only path — signalstack created (or idempotently re-ensured)
+      // the user row but no item, so an empty `items` array is EXPECTED here,
+      // not a sign of foreign ownership. Re-submitting the same phone/email is
+      // an idempotent SUCCESS — signals returns the same user_id — so a
+      // returning own-aggregator user (`user_existed: true`) is NOT flagged
+      // `already_registered` (which would make the caller 409-skip it). Only a
+      // genuinely foreign user (explicit `owned_elsewhere`) skips. Checked
+      // BEFORE the with-item heuristic, which treats empty items as
+      // owned-elsewhere — invalid for account_only.
+      if (submitMode === 'account_only') {
+        return ok({
+          user_id: raw.user_id,
+          profile_item_id: '',
+          onboarded_at: typeof raw.onboarded_at === 'string' ? raw.onboarded_at : '',
+          already_registered: false,
+          owned_elsewhere: ownedElsewhereSignal,
+        });
+      }
+      // with_item path — an existing user with an empty `items` array belongs
+      // to a different aggregator (that org's items are private to it).
+      // signalstack returns `user_existed: true` (and, in newer builds, an
+      // explicit `owned_elsewhere: true`). Not an error — surface it as an
+      // already-registered / owned_elsewhere result so the caller records a
       // `skipped` outcome instead of a 502.
-      if (raw.user_existed === true && items.length === 0) {
+      if ((raw.user_existed === true || ownedElsewhereSignal) && items.length === 0) {
         return ok({
           user_id: raw.user_id,
           profile_item_id: '',
           onboarded_at: typeof raw.onboarded_at === 'string' ? raw.onboarded_at : '',
           already_registered: true,
+          owned_elsewhere: true,
         });
       }
       const matched =
@@ -196,10 +307,18 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
           }),
         );
       }
+      const lifecycleStatus =
+        matched.lifecycle_status === 'draft' ||
+        matched.lifecycle_status === 'live' ||
+        matched.lifecycle_status === 'paused'
+          ? matched.lifecycle_status
+          : undefined;
       const result: SignalStackOnboardParticipantResult = {
         user_id: raw.user_id,
         profile_item_id: matched.item_id,
         onboarded_at: typeof raw.onboarded_at === 'string' ? raw.onboarded_at : '',
+        owned_elsewhere: false,
+        ...(lifecycleStatus !== undefined ? { lifecycle_status: lifecycleStatus } : {}),
       };
       return ok(result);
     } catch (e) {
@@ -216,8 +335,6 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
           },
         ),
       );
-    } finally {
-      if (timer) clearTimeout(timer);
     }
   }
 
@@ -226,7 +343,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
   ): Promise<Result<SignalStackItemList, BaseError>> {
     if (!query.aggregator_id || !query.item_network || !query.item_domain) {
       return err(
-        new UpstreamError('aggregator_id, item_network, and item_domain are required', {
+        new ValidationError('aggregator_id, item_network, and item_domain are required', {
           code: 'SIGNALSTACK_INPUT_INVALID',
         }),
       );
@@ -244,18 +361,18 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       item_network: query.item_network,
       item_domain: query.item_domain,
       ...(query.item_type ? { item_type: query.item_type } : {}),
+      // Forward the lifecycle filter only when set; signals defaults to
+      // 'live_only' so the writer omits the field for that case to keep
+      // the wire shape minimal and let signals own the default.
+      ...(query.lifecycle_filter ? { lifecycle_filter: query.lifecycle_filter } : {}),
       limit: query.limit ?? 50,
       offset: query.offset ?? 0,
     };
-    const controller = this.timeoutMs ? new AbortController() : undefined;
-    const timer = controller ? setTimeout(() => controller.abort(), this.timeoutMs) : undefined;
-
     try {
-      const res = await this.fetchImpl(url, {
+      const res = await this.requestWithRetry(url, {
         method: 'POST',
         headers: this.headers,
         body: JSON.stringify(body),
-        ...(controller ? { signal: controller.signal } : {}),
       });
 
       if (!res.ok) {
@@ -292,8 +409,6 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
           },
         ),
       );
-    } finally {
-      if (timer) clearTimeout(timer);
     }
   }
 
@@ -316,7 +431,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
   ): Promise<Result<SignalStackAggregator, BaseError>> {
     if (!input?.external_id || !input?.name || !input?.slug) {
       return err(
-        new UpstreamError('external_id, name, and slug are required', {
+        new ValidationError('external_id, name, and slug are required', {
           code: 'SIGNALSTACK_INPUT_INVALID',
         }),
       );
@@ -343,15 +458,11 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       'x-acting-org-id': this.actingOrgId,
     };
 
-    const controller = this.timeoutMs ? new AbortController() : undefined;
-    const timer = controller ? setTimeout(() => controller.abort(), this.timeoutMs) : undefined;
-
     try {
-      const res = await this.fetchImpl(url, {
+      const res = await this.requestWithRetry(url, {
         method: 'POST',
         headers,
         body: JSON.stringify(body),
-        ...(controller ? { signal: controller.signal } : {}),
       });
 
       if (!res.ok) {
@@ -397,8 +508,6 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
           },
         ),
       );
-    } finally {
-      if (timer) clearTimeout(timer);
     }
   }
 
@@ -419,7 +528,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
   ): Promise<Result<SignalStackDashboardPage, BaseError>> {
     if (!query?.actingOrgId) {
       return err(
-        new UpstreamError('actingOrgId is required for dashboard fetch', {
+        new ValidationError('actingOrgId is required for dashboard fetch', {
           code: 'SIGNALSTACK_INPUT_INVALID',
         }),
       );
@@ -439,14 +548,10 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       'x-acting-org-id': query.actingOrgId,
     };
 
-    const controller = this.timeoutMs ? new AbortController() : undefined;
-    const timer = controller ? setTimeout(() => controller.abort(), this.timeoutMs) : undefined;
-
     try {
-      const res = await this.fetchImpl(url, {
+      const res = await this.requestWithRetry(url, {
         method: 'GET',
         headers,
-        ...(controller ? { signal: controller.signal } : {}),
       });
 
       if (!res.ok) {
@@ -547,8 +652,6 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
           },
         ),
       );
-    } finally {
-      if (timer) clearTimeout(timer);
     }
   }
 
@@ -575,7 +678,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
   ): Promise<Result<SignalStackDashboardExport, BaseError>> {
     if (!query?.actingOrgId) {
       return err(
-        new UpstreamError('actingOrgId is required for dashboard export', {
+        new ValidationError('actingOrgId is required for dashboard export', {
           code: 'SIGNALSTACK_INPUT_INVALID',
         }),
       );
@@ -593,14 +696,10 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       accept: 'text/csv',
     };
 
-    const controller = this.timeoutMs ? new AbortController() : undefined;
-    const timer = controller ? setTimeout(() => controller.abort(), this.timeoutMs) : undefined;
-
     try {
-      const res = await this.fetchImpl(url, {
+      const res = await this.requestWithRetry(url, {
         method: 'GET',
         headers,
-        ...(controller ? { signal: controller.signal } : {}),
       });
 
       if (!res.ok) {
@@ -640,41 +739,321 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
           },
         ),
       );
-    } finally {
-      if (timer) clearTimeout(timer);
+    }
+  }
+
+  /**
+   * Identity-only probe against signalstack's `/admin/participant` endpoint.
+   *
+   * Calls the same POST endpoint as {@link onboard} but with no
+   * `item_state` in the body and a sentinel `name: 'lookup'`. Signalstack
+   * treats that as an account-only path — it may create the user row but
+   * never an item — so the probe is safely idempotent for the caller.
+   * The response is reshaped into the slim {@link SignalStackProbeUserResult}
+   * tri-state so the caller never has to re-derive owned_elsewhere /
+   * lifecycle_summary from the raw items array.
+   *
+   * @param input - actingOrgId + email and/or phoneNumber + network/domain.
+   * @returns ok(SignalStackProbeUserResult) on 2xx; err(BaseError) on
+   *   validation failure, transport failure, or non-2xx.
+   */
+  override async probeUser(
+    input: SignalStackProbeUserInput,
+  ): Promise<Result<SignalStackProbeUserResult, BaseError>> {
+    if (!input?.actingOrgId) {
+      return err(
+        new ValidationError('actingOrgId is required', {
+          code: 'SIGNALSTACK_INPUT_INVALID',
+        }),
+      );
+    }
+    if (!input.email && !input.phoneNumber) {
+      return err(
+        new ValidationError('email or phoneNumber required', {
+          code: 'SIGNALSTACK_INPUT_INVALID',
+        }),
+      );
+    }
+    if (!input.network || !input.domain) {
+      return err(
+        new ValidationError('network and domain are required', {
+          code: 'SIGNALSTACK_INPUT_INVALID',
+        }),
+      );
+    }
+
+    // Probe body — deliberately omits `item_state` so signals' Plan-C
+    // account-only path runs (creates user row at most; never an item).
+    // The sentinel `name: 'lookup'` mirrors what signals' own admin UI
+    // sends for identity-only checks. `channel` is required by signals'
+    // UpsertParticipantRequest schema even on the account-only path; the
+    // probe always originates from the public registration link, so 'link'
+    // is the truthful attribution surface.
+    const body: Record<string, unknown> = {
+      name: 'lookup',
+      terms_accepted: true,
+      privacy_accepted: true,
+      channel: 'link',
+      network: input.network,
+      domain: input.domain,
+    };
+    if (input.email) body.email = input.email;
+    if (input.phoneNumber) body.phone_number = input.phoneNumber;
+
+    const headers = {
+      ...this.headers,
+      'x-acting-org-id': input.actingOrgId,
+    };
+
+    try {
+      const res = await this.requestWithRetry(this.endpoint, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) {
+        const bodyText = await safeReadText(res);
+        const upstreamMsg = extractUpstreamMessage(bodyText);
+        const message = upstreamMsg
+          ? `signalstack probe returned ${res.status}: ${upstreamMsg}`
+          : `signalstack probe returned ${res.status}`;
+        if (res.status === 400) {
+          return err(
+            new ValidationError(message, {
+              code: this.codeForStatus(res.status),
+              details: { status: res.status, body: bodyText },
+            }),
+          );
+        }
+        if (res.status === 401 || res.status === 403) {
+          return err(
+            new AuthError(message, {
+              code: this.codeForStatus(res.status),
+              details: { status: res.status, body: bodyText },
+            }),
+          );
+        }
+        return err(
+          new UpstreamError(message, {
+            code: this.codeForStatus(res.status),
+            details: { status: res.status, body: bodyText },
+          }),
+        );
+      }
+
+      // Account-only response shape:
+      //   { user_id, user_existed, owned_elsewhere?, items: [] | [item] }
+      // Reshape into the tri-state the caller branches on.
+      const raw = (await res.json()) as {
+        user_id?: unknown;
+        user_existed?: unknown;
+        owned_elsewhere?: unknown;
+        items?: Array<{
+          item_id?: unknown;
+          lifecycle_status?: unknown;
+        }>;
+      };
+      if (!raw || typeof raw !== 'object') {
+        return err(
+          new UpstreamError('signalstack probe returned unexpected payload', {
+            code: 'SIGNALSTACK_BAD_RESPONSE',
+            details: { payload: raw },
+          }),
+        );
+      }
+
+      const userExisted = raw.user_existed === true;
+      const ownedElsewhere = raw.owned_elsewhere === true;
+
+      if (userExisted && ownedElsewhere) {
+        return ok({
+          user_exists: true,
+          owned_elsewhere: true,
+          lifecycle_summary: null,
+        });
+      }
+
+      const items = Array.isArray(raw.items) ? raw.items : [];
+      if (userExisted && items.length > 0) {
+        const first = items[0]!;
+        const itemId = typeof first.item_id === 'string' ? first.item_id : '';
+        if (!itemId) {
+          return err(
+            new UpstreamError('signalstack probe primary item missing item_id', {
+              code: 'SIGNALSTACK_BAD_RESPONSE',
+              details: { payload: raw },
+            }),
+          );
+        }
+        // Back-compat fallback: older signalstack builds omit lifecycle_status
+        // on the account-only response. Treat absent as a live item — same
+        // default the resolveLifecycle helper in apps/api applies for read-side
+        // rows. The writer cannot import that helper (apps/api sits above this
+        // package in the dep graph), so inline the fallback here.
+        const lifecycleStatus =
+          first.lifecycle_status === 'draft' ||
+          first.lifecycle_status === 'live' ||
+          first.lifecycle_status === 'paused'
+            ? first.lifecycle_status
+            : 'live';
+        return ok({
+          user_exists: true,
+          owned_elsewhere: false,
+          lifecycle_summary: {
+            primary_item: {
+              item_id: itemId,
+              lifecycle_status: lifecycleStatus,
+            },
+          },
+        });
+      }
+
+      if (userExisted) {
+        // Own user but no item yet (account-only probe response).
+        return ok({
+          user_exists: true,
+          owned_elsewhere: false,
+          lifecycle_summary: null,
+        });
+      }
+
+      // user_existed: false (or absent) — signals either created the row
+      // just now or there is no matching identity. Either way the caller
+      // treats the user as new.
+      return ok({
+        user_exists: false,
+        owned_elsewhere: false,
+        lifecycle_summary: null,
+      });
+    } catch (e) {
+      const cause = e as Error;
+      const aborted = cause.name === 'AbortError';
+      return err(
+        new UpstreamError(
+          aborted
+            ? `signalstack probe timed out after ${this.timeoutMs}ms`
+            : `signalstack probe transport failure: ${cause.message}`,
+          {
+            cause,
+            code: aborted ? 'SIGNALSTACK_TIMEOUT' : 'SIGNALSTACK_TRANSPORT_FAILED',
+          },
+        ),
+      );
+    }
+  }
+
+  /**
+   * Fetch a single signals item by `item_id` from the
+   * `POST /api/v1/network/item/fetch_local` endpoint.
+   *
+   * Generic single-item read primitive. A 404 (or empty `items[]`) is
+   * mapped to `ok(null)` so a caller can distinguish "absent" from an
+   * error. All other non-2xx responses and transport failures surface as
+   * `UpstreamError`.
+   *
+   * @param query - Item id to look up.
+   * @returns ok(SignalStackProfile) on hit; ok(null) on absent;
+   *   err(BaseError) on transport / protocol failure.
+   */
+  override async getItem(
+    query: SignalStackGetItemQuery,
+  ): Promise<Result<SignalStackProfile | null, BaseError>> {
+    if (!query?.item_id) {
+      return err(
+        new ValidationError('item_id is required', {
+          code: 'SIGNALSTACK_INPUT_INVALID',
+        }),
+      );
+    }
+
+    // fetch_local accepts a server-side `item_id` filter; signalstack
+    // returns a list payload with 0 or 1 row. We collapse the list into
+    // a single-item result here so the caller doesn't have to.
+    const url = `${this.baseUrl}/api/v1/network/item/fetch_local`;
+    const body = { item_id: query.item_id, limit: 1, offset: 0 };
+
+    try {
+      const res = await this.requestWithRetry(url, {
+        method: 'POST',
+        headers: this.headers,
+        body: JSON.stringify(body),
+      });
+
+      if (res.status === 404) return ok(null);
+
+      if (!res.ok) {
+        const bodyText = await safeReadText(res);
+        return err(
+          new UpstreamError(`signalstack get_item returned ${res.status}`, {
+            code: this.codeForStatus(res.status),
+            details: { status: res.status, body: bodyText },
+          }),
+        );
+      }
+
+      const payload = (await res.json()) as { items?: unknown };
+      if (!payload || typeof payload !== 'object' || !Array.isArray(payload.items)) {
+        return err(
+          new UpstreamError('signalstack get_item returned unexpected payload', {
+            code: 'SIGNALSTACK_BAD_RESPONSE',
+            details: { payload },
+          }),
+        );
+      }
+      const first = payload.items[0];
+      if (!first || typeof first !== 'object') return ok(null);
+      return ok(first as SignalStackProfile);
+    } catch (e) {
+      const cause = e as Error;
+      const aborted = cause.name === 'AbortError';
+      return err(
+        new UpstreamError(
+          aborted
+            ? `signalstack get_item timed out after ${this.timeoutMs}ms`
+            : `signalstack get_item transport failure: ${cause.message}`,
+          {
+            cause,
+            code: aborted ? 'SIGNALSTACK_TIMEOUT' : 'SIGNALSTACK_TRANSPORT_FAILED',
+          },
+        ),
+      );
     }
   }
 
   private guardInput(input: SignalStackOnboardParticipantInput): BaseError | null {
+    // Pre-send input validation → ValidationError (malformed input before the
+    // request leaves us), consistent with probeUser/getItem. The machine code
+    // stays SIGNALSTACK_INPUT_INVALID so existing callers/branches are intact.
     if (!input?.actingOrgId) {
-      return new UpstreamError('actingOrgId is required', {
+      return new ValidationError('actingOrgId is required', {
         code: 'SIGNALSTACK_INPUT_INVALID',
       });
     }
     if (!input.name) {
-      return new UpstreamError('name is required', {
+      return new ValidationError('name is required', {
         code: 'SIGNALSTACK_INPUT_INVALID',
       });
     }
     const hasEmail = Boolean(input.email);
     const hasPhone = Boolean(input.phoneNumber);
     if (!hasEmail && !hasPhone) {
-      return new UpstreamError('either email or phoneNumber is required', {
+      return new ValidationError('either email or phoneNumber is required', {
         code: 'SIGNALSTACK_INPUT_INVALID',
       });
     }
     if (!input.network || !input.domain || !input.item_type) {
-      return new UpstreamError('network, domain, and item_type are required', {
+      return new ValidationError('network, domain, and item_type are required', {
         code: 'SIGNALSTACK_INPUT_INVALID',
       });
     }
     if (!input.source_id || !input.channel) {
-      return new UpstreamError('channel and source_id are required', {
+      return new ValidationError('channel and source_id are required', {
         code: 'SIGNALSTACK_INPUT_INVALID',
       });
     }
     if (!input.profile || typeof input.profile !== 'object') {
-      return new UpstreamError('profile is required', {
+      return new ValidationError('profile is required', {
         code: 'SIGNALSTACK_INPUT_INVALID',
       });
     }

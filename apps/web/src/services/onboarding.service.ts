@@ -11,6 +11,13 @@ export interface ApiRegistrationLink {
   slug: string;
   domain: string;
   status: 'draft' | 'live' | 'retired';
+  /**
+   * Per-link admin-facing registration mode key (e.g. `voice`, `form`),
+   * set at create time and immutable thereafter. The mode → form-shape
+   * mapping lives in network config; the admin UI sources its dropdown
+   * from the live config. Optional for back-compat with older API builds.
+   */
+  registration_mode?: string;
   context: Record<string, unknown>;
   expires_at: string | null;
   /**
@@ -54,6 +61,12 @@ export interface CreateLinkInput {
   title?: string;
   context?: Record<string, unknown>;
   status?: 'draft' | 'live';
+  /**
+   * Per-link admin-facing registration mode key (e.g. `voice`, `form`).
+   * Validated against the live network config by the API. Omitted defaults
+   * to the network's `form` mode. Immutable after creation.
+   */
+  registration_mode?: string;
   expires_at?: string | null;
 }
 

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useRef, useMemo, type ReactNode } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { createPortal } from 'react-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useTranslations, useLocale } from 'next-intl';
@@ -13,10 +13,20 @@ import { Topbar } from '../../../components/shell/Topbar';
 import { I, type IconName } from '../../../icons';
 import { useOppProviders, useDashboard } from '../../../hooks/useDashboard';
 import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
-import { dashboardService, triggerCsvDownload } from '../../../services/dashboard.service';
+import {
+  dashboardService,
+  triggerCsvDownload,
+  type LifecycleFilter,
+} from '../../../services/dashboard.service';
 import { useProfileRaw } from '../../../hooks/useProfile';
 import { useThemeMode } from '../../../lib/theme-mode';
-import type { ParticipantBase, ParticipantStatus, Provider, Seeker } from '../../../types';
+import type {
+  LifecycleStatus,
+  ParticipantBase,
+  ParticipantStatus,
+  Provider,
+  Seeker,
+} from '../../../types';
 
 type Tab = 'seekers' | 'providers' | 'opp';
 
@@ -235,16 +245,59 @@ function FunnelCell({ total, parts }: FunnelCellProps) {
   );
 }
 
-function ProgressTiny({ pct }: { pct: number }) {
+/**
+ * Profile-completion progress bar (driven by the dashboard rollup's
+ * `profile_completion_pct`). Hovering shows a popover (mirrors FunnelCell)
+ * with the lifecycle label — `title` carries the Draft/Live text. Native
+ * `title` renders inconsistently, so we use the portal popover instead.
+ */
+function ProgressTiny({ pct, title }: { pct: number; title?: string }) {
   const color = pct >= 80 ? '#10B981' : pct >= 50 ? '#F59E0B' : '#EF4444';
-  const label = pct >= 80 ? 'Complete' : 'Incomplete';
+  const label = title ?? (pct >= 80 ? 'Complete' : 'Incomplete');
+  const [hover, setHover] = useState(false);
+  const [pos, setPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const ref = useRef<HTMLDivElement | null>(null);
+  const onEnter = () => {
+    const r = ref.current?.getBoundingClientRect();
+    if (!r) return;
+    setPos({ x: r.left + window.scrollX, y: r.bottom + window.scrollY + 8 });
+    setHover(true);
+  };
   return (
-    <div className="flex items-center gap-2" title={`${label} · ${pct}%`}>
-      <div className="w-14 h-1.5 rounded-full bg-ink-100 overflow-hidden">
-        <div className="h-full rounded-full" style={{ width: `${pct}%`, background: color }} />
+    <>
+      <div
+        ref={ref}
+        onMouseEnter={onEnter}
+        onMouseLeave={() => setHover(false)}
+        className="flex items-center gap-2 cursor-default"
+      >
+        <div
+          role="progressbar"
+          aria-label={label}
+          aria-valuenow={Math.round(pct)}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          className="w-14 h-1.5 rounded-full bg-ink-100 overflow-hidden"
+        >
+          <div className="h-full rounded-full" style={{ width: `${pct}%`, background: color }} />
+        </div>
+        <span className="text-[11px] tabular-nums text-ink-500 font-medium">{pct}%</span>
       </div>
-      <span className="text-[11px] tabular-nums text-ink-500 font-medium">{pct}%</span>
-    </div>
+      {hover &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            style={{ position: 'absolute', left: pos.x, top: pos.y, zIndex: 9999 }}
+            className="bg-white border border-[var(--bd-border)] rounded-[10px] bd-shadow-lg px-2.5 py-1.5 pointer-events-none animate-[fadeUp_.12s_ease-out]"
+          >
+            <div className="flex items-center gap-2 text-[12px] min-w-[120px]">
+              <span className="text-ink-500 flex-1">{label}</span>
+              <span className="font-semibold tabular-nums text-ink-900">{pct}%</span>
+            </div>
+          </div>,
+          document.body,
+        )}
+    </>
   );
 }
 
@@ -340,6 +393,30 @@ function ActionChip({
 
 type StatusFilter = string; // 'all' | any key signalstack returns in rollup.by_status
 
+/**
+ * Lifecycle dropdown values. `'all'` is the no-filter sentinel; the other
+ * four map 1:1 to {@link LifecycleFilter} on the items endpoint.
+ */
+type LifecycleFilterValue = 'all' | LifecycleFilter;
+
+// Lifecycle states the aggregator surfaces today: `draft` (profile incomplete,
+// <100%) and `live` (100%). When signals introduces a new status, add it here,
+// add a matching <option> in the dropdown, and an i18n `filters.lifecycle_<x>`
+// key — the filter logic itself is status-agnostic (generic equality).
+const LIFECYCLE_FILTER_VALUES: LifecycleFilterValue[] = ['all', 'draft', 'live'];
+
+/**
+ * Parse `?lifecycle=` from a search-params bag, validating against the
+ * known enum. Unknown values resolve to `'all'` so a stale URL does not
+ * blank the filter dropdown.
+ */
+function parseLifecycleParam(raw: string | null): LifecycleFilterValue {
+  if (!raw) return 'all';
+  return (LIFECYCLE_FILTER_VALUES as readonly string[]).includes(raw)
+    ? (raw as LifecycleFilterValue)
+    : 'all';
+}
+
 interface StatusOption {
   value: StatusFilter;
   label: string;
@@ -420,6 +497,11 @@ interface ParticipantTableProps<R extends ParticipantBase> {
    * in the aggregator config. Falls back to localised `t('buckets.*')` when absent.
    */
   bucketLabels?: Record<string, string> | undefined;
+  /**
+   * Active lifecycle dropdown value. `'all'` hides the URL param.
+   */
+  lifecycleFilter?: LifecycleFilterValue | undefined;
+  onLifecycleFilterChange?: ((next: LifecycleFilterValue) => void) | undefined;
 }
 
 function ParticipantTable<R extends ParticipantBase>({
@@ -433,6 +515,8 @@ function ParticipantTable<R extends ParticipantBase>({
   onStatusFilterChange,
   statusOptions,
   bucketLabels = {},
+  lifecycleFilter = 'all',
+  onLifecycleFilterChange,
 }: ParticipantTableProps<R>) {
   const t = useTranslations('dashboard');
   /** Localised fallback for bucket keys when config-sourced labels are absent. */
@@ -538,6 +622,18 @@ function ParticipantTable<R extends ParticipantBase>({
               onChange={(e) => setQuery(e.target.value)}
             />
           </div>
+          {onLifecycleFilterChange ? (
+            <select
+              aria-label={t('filters.lifecycle_label')}
+              className="bd-input text-[12.5px] py-1.5 pr-7"
+              value={lifecycleFilter}
+              onChange={(e) => onLifecycleFilterChange(e.target.value as LifecycleFilterValue)}
+            >
+              <option value="all">{t('filters.lifecycle_all')}</option>
+              <option value="draft">{t('filters.lifecycle_draft')}</option>
+              <option value="live">{t('filters.lifecycle_live')}</option>
+            </select>
+          ) : null}
           <div ref={filterRef} className="relative">
             <Button
               kind={filterActive ? 'primary' : 'ghost'}
@@ -599,7 +695,7 @@ function ParticipantTable<R extends ParticipantBase>({
       </div>
 
       <div className="overflow-auto scroll-x" style={{ maxHeight: 520 }}>
-        <table className="bd-table" style={{ minWidth: kind === 'provider' ? 1180 : 1080 }}>
+        <table className="bd-table" style={{ minWidth: kind === 'provider' ? 1380 : 1280 }}>
           <thead
             style={{
               position: 'sticky',
@@ -662,7 +758,14 @@ function ParticipantTable<R extends ParticipantBase>({
                     <div className="text-[11px] text-ink-400 mt-0.5">last seen {r.last}</div>
                   </td>
                   <td>
-                    <ProgressTiny pct={r.profile.complete} />
+                    <ProgressTiny
+                      pct={r.profile.complete}
+                      title={
+                        r.lifecycle_status === 'live'
+                          ? t('filters.lifecycle_live')
+                          : t('filters.lifecycle_draft')
+                      }
+                    />
                   </td>
                   <td>
                     <FunnelCell
@@ -869,6 +972,49 @@ function ErrorCard() {
 
 const PAGE_SIZE = 25;
 
+/**
+ * URL-backed lifecycle filter state. Reads `?lifecycle=` on every render
+ * via `useSearchParams` and updates the URL through `router.replace` (so
+ * the filter participates in browser history but doesn't push a new
+ * navigation entry per click).
+ *
+ * Returns the parsed value + a setter that mirrors changes back to the
+ * URL. `'all'` removes the param entirely so default views read clean.
+ */
+function useLifecycleUrlFilter(): [LifecycleFilterValue, (next: LifecycleFilterValue) => void] {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const value = parseLifecycleParam(searchParams.get('lifecycle'));
+  const setValue = (next: LifecycleFilterValue) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (next === 'all') params.delete('lifecycle');
+    else params.set('lifecycle', next);
+    const qs = params.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  };
+  return [value, setValue];
+}
+
+/**
+ * Narrows the rendered table rows to the selected lifecycle. The table is fed
+ * by the legacy dashboard rollup (not lifecycle-aware), so the dropdown filters
+ * the already-merged rows here. `'all'` (and any non-draft/live value) is a
+ * no-op; `'draft'` / `'live'` match `lifecycle_status` with the back-compat
+ * default `'live'` for unmatched rows.
+ */
+function filterRowsByLifecycle<R extends { lifecycle_status?: LifecycleStatus }>(
+  rows: R[],
+  filter: LifecycleFilterValue,
+): R[] {
+  if (filter === 'all') return rows;
+  // Generic equality match so any lifecycle status — including ones added in
+  // future — filters correctly without touching this function. Unmatched rows
+  // default to `'live'` (back-compat with signals deployments that omit the
+  // field).
+  return rows.filter((r) => (r.lifecycle_status ?? 'live') === filter);
+}
+
 function SeekersTab() {
   const t = useTranslations('dashboard');
   const locale = useLocale();
@@ -889,9 +1035,14 @@ function SeekersTab() {
   const seekerDomainId = cfgRaw?.domains?.[0]?.id;
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [lifecycleFilter, setLifecycleFilter] = useLifecycleUrlFilter();
   const handleStatusFilterChange = (next: StatusFilter) => {
     setPage(1);
     setStatusFilter(next);
+  };
+  const handleLifecycleFilterChange = (next: LifecycleFilterValue) => {
+    setPage(1);
+    setLifecycleFilter(next);
   };
   const filterActive = statusFilter !== 'all';
   const {
@@ -946,6 +1097,10 @@ function SeekersTab() {
   const rows = useMemo(
     () => (slice?.items ?? []).map((p) => toSeekerRow(p, locale)),
     [slice?.items, locale],
+  );
+  const filteredRows = useMemo(
+    () => filterRowsByLifecycle(rows, lifecycleFilter),
+    [rows, lifecycleFilter],
   );
 
   // Refresh handler: hits the BFF with refresh=true to force signalstack to
@@ -1083,7 +1238,7 @@ function SeekersTab() {
       ) : (
         <ParticipantTable
           kind="seeker"
-          rows={rows}
+          rows={filteredRows}
           total={slice?.total_matching ?? total}
           page={page}
           pageSize={PAGE_SIZE}
@@ -1092,6 +1247,8 @@ function SeekersTab() {
           onStatusFilterChange={handleStatusFilterChange}
           statusOptions={statusOptions}
           bucketLabels={bucketLabels}
+          lifecycleFilter={lifecycleFilter}
+          onLifecycleFilterChange={handleLifecycleFilterChange}
         />
       )}
     </div>
@@ -1116,8 +1273,7 @@ function fmtCount(n: number | null | undefined): string {
  * — `name`, `city`, and the role/exp profile fields are NOT in this
  * response. They live in the per-user item detail endpoint, which the
  * table does not yet call. Missing fields render as em-dashes; the
- * `complete` profile bar uses `profile_completion_pct` directly so the
- * progress indicator stays meaningful.
+ * `complete` profile bar uses `profile_completion_pct` from the rollup.
  */
 function toSeekerRow(participant: Record<string, unknown>, locale: string): Seeker {
   const userId =
@@ -1131,6 +1287,13 @@ function toSeekerRow(participant: Record<string, unknown>, locale: string): Seek
   );
   const completion =
     typeof participant.profile_completion_pct === 'number' ? participant.profile_completion_pct : 0;
+  // Lifecycle is derived from completion %: `live` iff the profile is 100%
+  // complete, `draft` otherwise. signals no longer exposes a per-item
+  // completion/lifecycle on the responses we read, so the rollup's
+  // `profile_completion_pct` is the source of truth.
+  const lifecycleFields: Pick<Seeker, 'lifecycle_status'> = {
+    lifecycle_status: completion >= 100 ? 'live' : 'draft',
+  };
   const created =
     typeof participant.profile_created_at === 'string' ? participant.profile_created_at : '';
   const updated =
@@ -1168,6 +1331,7 @@ function toSeekerRow(participant: Record<string, unknown>, locale: string): Seek
     actionableTags: Array.isArray(participant.actionable_tags)
       ? (participant.actionable_tags as unknown[]).filter((t): t is string => typeof t === 'string')
       : [],
+    ...lifecycleFields,
   };
 }
 
@@ -1222,9 +1386,14 @@ function ProvidersTab() {
   const providerDomainId = cfgRaw?.domains?.[1]?.id;
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [lifecycleFilter, setLifecycleFilter] = useLifecycleUrlFilter();
   const handleStatusFilterChange = (next: StatusFilter) => {
     setPage(1);
     setStatusFilter(next);
+  };
+  const handleLifecycleFilterChange = (next: LifecycleFilterValue) => {
+    setPage(1);
+    setLifecycleFilter(next);
   };
   const filterActive = statusFilter !== 'all';
   const {
@@ -1262,6 +1431,10 @@ function ProvidersTab() {
   const rows = useMemo(
     () => (slice?.items ?? []).map((p) => toProviderRow(p, locale)),
     [slice?.items, locale],
+  );
+  const filteredRows = useMemo(
+    () => filterRowsByLifecycle(rows, lifecycleFilter),
+    [rows, lifecycleFilter],
   );
   const [cachedByStatus, setCachedByStatus] = useState<Record<string, number> | undefined>();
   useEffect(() => {
@@ -1400,7 +1573,7 @@ function ProvidersTab() {
       ) : (
         <ParticipantTable<Provider>
           kind="provider"
-          rows={rows}
+          rows={filteredRows}
           total={slice?.total_matching ?? total}
           page={page}
           pageSize={PAGE_SIZE}
@@ -1409,6 +1582,8 @@ function ProvidersTab() {
           onStatusFilterChange={handleStatusFilterChange}
           statusOptions={statusOptions}
           bucketLabels={bucketLabels}
+          lifecycleFilter={lifecycleFilter}
+          onLifecycleFilterChange={handleLifecycleFilterChange}
         />
       )}
     </div>

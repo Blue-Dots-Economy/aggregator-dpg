@@ -40,6 +40,13 @@ export interface SignalStackProfile {
   aggregator_id: string | null;
   created_at: string;
   updated_at: string;
+  /**
+   * Lifecycle classification of the item — `draft`, `live`, or `paused`.
+   * Optional because older signalstack versions do not emit this field;
+   * the aggregator's lifecycle helper treats an absent value as `'live'`
+   * for back-compat.
+   */
+  lifecycle_status?: 'draft' | 'live' | 'paused';
 }
 
 /**
@@ -80,6 +87,15 @@ export interface SignalStackOnboardParticipantInput {
   item_type: string;
   /** Free-form item_state payload — the participant's profile fields. */
   profile: Record<string, unknown>;
+  /**
+   * Controls signals' lifecycle path:
+   *   - `'with_item'` (default) — POST /admin/participant with profile
+   *     body; signals classifies draft|live based on completeness.
+   *   - `'account_only'` — no item_state forwarded; signals creates user
+   *     row only. Used by the lookup endpoint and partial-data
+   *     registrations that opt out of profile creation.
+   */
+  submit_mode?: 'with_item' | 'account_only';
 }
 
 /**
@@ -101,6 +117,15 @@ export interface SignalStackOnboardParticipantResult {
    * `profile_item_id` is empty because no item was created or returned.
    */
   already_registered?: boolean;
+  /** Present only when an item was created (`submit_mode === 'with_item'`). */
+  lifecycle_status?: 'draft' | 'live' | 'paused';
+  /**
+   * Replaces the legacy {@link already_registered} field semantically
+   * (both populated during the transition). `true` when signals returns
+   * the user under a different aggregator, so no item is created or
+   * returned for the calling aggregator.
+   */
+  owned_elsewhere?: boolean;
 }
 
 /**
@@ -117,6 +142,14 @@ export interface SignalStackItemQuery {
   item_type?: string;
   limit?: number;
   offset?: number;
+  /**
+   * Restricts the returned items by lifecycle classification.
+   *   - `'live_only'` (signals default — applied when this field is
+   *     absent) returns rows with `lifecycle_status === 'live'`.
+   *   - `'all'` returns every row regardless of lifecycle, including
+   *     drafts and paused items.
+   */
+  lifecycle_filter?: 'live_only' | 'all';
 }
 
 /**
@@ -291,6 +324,69 @@ export interface SignalStackDashboardExport {
 }
 
 /**
+ * Input for an identity-only probe against signalstack's `/admin/participant`
+ * endpoint with `submit_mode: 'account_only'`.
+ *
+ * The probe is the read-side mirror of the {@link SignalStackOnboardParticipantInput}
+ * write path: signalstack matches the identity by email and/or phoneNumber
+ * (at least one is required) and returns whether the user already exists
+ * under the calling aggregator (`user_exists` + `lifecycle_summary`) or
+ * under a different aggregator (`owned_elsewhere`).
+ *
+ * `actingOrgId` is sent as the per-call `x-acting-org-id` header so
+ * signalstack scopes the lifecycle answer to the calling aggregator's view.
+ */
+export interface SignalStackProbeUserInput {
+  /** Signalstack organisation id the probe is performed under. */
+  actingOrgId: string;
+  /** Email address — at least one of email / phoneNumber is required. */
+  email?: string;
+  /** Phone number (E.164) — at least one of email / phoneNumber is required. */
+  phoneNumber?: string;
+  /** `blue_dot` etc — partition the user would be probed under. */
+  network: string;
+  /** `seeker` | `provider` — participant focus. */
+  domain: string;
+}
+
+/**
+ * Response payload from {@link SignalStackWriterBase.probeUser}.
+ *
+ * Reshapes the raw signalstack `/admin/participant` body into a single
+ * tri-state answer the caller can branch on without re-deriving:
+ *
+ *   - `user_exists: false` — truly new identity.
+ *   - `user_exists: true`, `owned_elsewhere: false`, `lifecycle_summary != null`
+ *     — own user with at least one item; the caller can resume the lifecycle.
+ *   - `user_exists: true`, `owned_elsewhere: false`, `lifecycle_summary == null`
+ *     — own user with no item yet (e.g., previous probe created the account).
+ *   - `user_exists: true`, `owned_elsewhere: true`, `lifecycle_summary == null`
+ *     — user exists under a different aggregator; we deliberately leak no
+ *     lifecycle state from another org.
+ */
+export interface SignalStackProbeUserResult {
+  user_exists: boolean;
+  owned_elsewhere: boolean;
+  lifecycle_summary: {
+    primary_item: {
+      item_id: string;
+      lifecycle_status: 'draft' | 'live' | 'paused';
+    };
+  } | null;
+}
+
+/**
+ * Filter for a single-item signalstack read. Used by the outbound
+ * completion-dispatch processor to re-check the item's lifecycle right
+ * before sending — so a draft that has since flipped to live or paused
+ * does not receive a stale prompt.
+ */
+export interface SignalStackGetItemQuery {
+  /** Signalstack item id minted by a prior `onboard()` call. */
+  item_id: string;
+}
+
+/**
  * Persistence port for the signalstack admin endpoints.
  *
  * Implementations:
@@ -377,4 +473,41 @@ export abstract class SignalStackWriterBase {
   abstract exportDashboardCsv(
     query: SignalStackDashboardExportQuery,
   ): Promise<Result<SignalStackDashboardExport, BaseError>>;
+
+  /**
+   * Identity probe — wraps signals' `/admin/participant` with
+   * `submit_mode: 'account_only'`. Idempotent and (from the signals
+   * caller's perspective) side-effect free: signals may create a user
+   * row at most; never an item.
+   *
+   * Returns `user_exists: false` for truly new identities, and
+   * `owned_elsewhere: true` (with null `lifecycle_summary`) for
+   * users owned by another aggregator. When the user belongs to the
+   * calling aggregator, `lifecycle_summary` carries the primary item's
+   * `item_id` and `lifecycle_status` so the caller can resume the
+   * lifecycle without an extra round-trip.
+   *
+   * @param input - actingOrgId + email and/or phoneNumber + network/domain.
+   * @returns ok(SignalStackProbeUserResult) on 2xx; err(BaseError) when
+   *   neither identifier is supplied, on transport failure, or any
+   *   non-2xx response.
+   */
+  abstract probeUser(
+    input: SignalStackProbeUserInput,
+  ): Promise<Result<SignalStackProbeUserResult, BaseError>>;
+
+  /**
+   * Fetch a single signals item by `item_id`.
+   *
+   * Returns `ok(null)` when the item is not known to signals, so a caller
+   * can distinguish "absent" from a failure. Transport / protocol errors
+   * surface as a structured `BaseError`.
+   *
+   * @param query - Item id to look up.
+   * @returns ok(SignalStackProfile) on hit; ok(null) when absent;
+   *   err(BaseError) on transport / protocol failure.
+   */
+  abstract getItem(
+    query: SignalStackGetItemQuery,
+  ): Promise<Result<SignalStackProfile | null, BaseError>>;
 }

@@ -43,5 +43,21 @@ aggregator:
     presume_consent: true
     bulk_max_rows: 10000
 
+  # Per-link registration modes. Each key names an admin-facing channel.
+  # `submission_shape` decides what the public form renders:
+  #   - account_only        : MinimalIdentityForm (name + phone OR email + consent).
+  #   - account_and_profile : full RJSF profile schema; partial submissions accepted.
+  # `public_hint_i18n_key` is the i18n key rendered beneath the form;
+  # null means no hint.
+  registration_modes:
+    voice:
+      label_i18n_key: registration_mode.voice.label
+      submission_shape: account_only
+      public_hint_i18n_key: registration_mode.voice.hint
+    form:
+      label_i18n_key: registration_mode.form.label
+      submission_shape: account_and_profile
+      public_hint_i18n_key: null
+
   admin_emails:
     - abhishekg@sanketika.in

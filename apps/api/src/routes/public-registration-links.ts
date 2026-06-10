@@ -24,8 +24,10 @@ import { getRegistrationLinksStore } from '../services/registration-links-store/
 import type { RegistrationLink } from '../services/registration-links-store/index.js';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
 import { getNetworkConfig } from '../services/network-config.js';
+import { resolveSubmissionShape, publicHintI18nKey } from '../services/registration-mode/index.js';
 import { getSchemaLoader } from '../services/schema-loader/index.js';
 import { normalisePhone } from '../services/phone.js';
+import { resolveLifecycle } from '../services/onboarding/lifecycle.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
 import { getDb } from '../db/client.js';
 import { linkSubmissions } from '../db/schema.js';
@@ -81,13 +83,35 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       domain: link.domain,
     });
 
+    // Per-link registration_mode resolves (via network config) to a form
+    // shape that locks the rendered form:
+    //   - 'account_and_profile': identity + full profile schema.
+    //   - 'account_only': identity only — `schema` is nulled so the client
+    //     never accidentally renders a profile form for this link.
+    const submissionShape = resolveSubmissionShape(link.registrationMode, networkCfg);
+    const hintKey = publicHintI18nKey(link.registrationMode, networkCfg);
+    const accountOnly = submissionShape === 'account_only';
+
     return reply.send({
       slug: link.slug,
+      // Active network id (e.g. 'blue_dot' / 'orange_dot'). The BFF needs
+      // it alongside the domain to call /lookup, which scopes the probe
+      // to the right signalstack network.
+      network: networkCfg.network.id,
       domain: link.domain,
       context: link.context,
-      schema_id: `participant-${link.domain}`,
-      schema_version: 'v1',
-      schema: linkDomainCfg.schema,
+      registration_mode: link.registrationMode,
+      submission_shape: submissionShape,
+      public_hint_i18n_key: hintKey,
+      schema_id: accountOnly ? null : `participant-${link.domain}`,
+      schema_version: accountOnly ? null : 'v1',
+      schema: accountOnly ? null : linkDomainCfg.schema,
+      // Identity field selectors (name / phone / email) for this domain.
+      // The public form needs them to relax required-field validation when
+      // the user opts into "submit identity now, complete later": account-only
+      // submits create no item, so only the identity fields signalstack needs
+      // (a name + at least one contact) stay mandatory.
+      identity: linkDomainCfg.identity,
       expires_at: link.expiresAt ? link.expiresAt.toISOString() : null,
     });
   });
@@ -124,35 +148,177 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
 
     const link = await loadLiveLinkByOrgAndSlug(orgSlug, slug, log);
 
-    const body = (req.body ?? {}) as Record<string, unknown>;
+    const rawBody = (req.body ?? {}) as Record<string, unknown>;
 
-    // 1. Schema validation against the link's domain schema. Load the
-    // raw schema as well so we can strip empty-string optional fields
-    // before Ajv runs — an empty cell for an optional `format: uri` /
-    // `format: email` field would otherwise trip the format check
-    // even though the field was never required.
-    const schemaRef = { id: `participant-${link.domain}`, version: 'v1' };
-    const loader = getSchemaLoader();
-    const [validatorResult, schemaResult] = await Promise.all([
-      loader.getValidator(schemaRef),
-      loader.getSchema(schemaRef),
-    ]);
-    if (!validatorResult.success) {
-      log.error({ status: 'failure', sub: 'schema.load', error: validatorResult.error.code });
-      throw httpError('INTERNAL', {
-        detail: 'Registration schema unavailable.',
-        cause: new Error(validatorResult.error.message),
+    // Identity selectors live in the network config; load them up front so
+    // both the account_only allowed-key guard and the downstream normaliser
+    // share one source of truth.
+    const networkCfgEarly = await getNetworkConfig();
+    const linkDomainCfgEarly = networkCfgEarly.domains[link.domain];
+    if (!linkDomainCfgEarly) {
+      throw httpError('NOT_FOUND', {
+        detail: `link domain '${link.domain}' not declared in network ${networkCfgEarly.network.id}`,
       });
     }
-    if (schemaResult.success) {
-      stripEmptyOptionalCells(body, schemaResult.value as Record<string, unknown>);
+
+    // Resolve the link's registration_mode to a form shape via the live
+    // network config. Unknown keys fall back to `account_and_profile` (see
+    // resolveSubmissionShape) so config drift never hard-fails a live link.
+    const submissionShape = resolveSubmissionShape(link.registrationMode, networkCfgEarly);
+
+    // `account_only` shape locks the form: identity fields only, no profile
+    // payload, no schema render. Reject any item_state or stray top-level key
+    // BEFORE we touch the Ajv path. Allowed identity field names come from the
+    // network config so the rule stays generic across signalstack networks
+    // (blue_dot uses `phone`, purple_dot uses `mobile_number`, etc.). Server
+    // enforcement only — the web form already renders just identity fields for
+    // an account_only link, but trusting the client would let a tampered
+    // submit bypass the capture-scope intent.
+    if (submissionShape === 'account_only') {
+      const allowed = new Set<string>([
+        'consent_terms',
+        'consent_privacy',
+        ...[
+          linkDomainCfgEarly.identity.name,
+          linkDomainCfgEarly.identity.phone,
+          linkDomainCfgEarly.identity.email,
+        ].filter((k): k is string => typeof k === 'string' && k.length > 0),
+      ]);
+      for (const key of Object.keys(rawBody)) {
+        if (!allowed.has(key)) {
+          throw httpError('REGISTRATION_MODE_MISMATCH', {
+            detail: `account_only link does not accept field '${key}'`,
+            fields: { rejected_key: key },
+          });
+        }
+      }
+      // Identity-presence guard: name AND (phone OR email) must be present.
+      // Without this we'd defer to signalstack-writer.onboard's guardInput
+      // which 502s — wrong status code for a client-side missing-field.
+      const nameKey = linkDomainCfgEarly.identity.name;
+      const phoneKey = linkDomainCfgEarly.identity.phone;
+      const emailKey = linkDomainCfgEarly.identity.email;
+      const hasName =
+        nameKey && typeof rawBody[nameKey] === 'string' && (rawBody[nameKey] as string).length > 0;
+      const hasPhone =
+        phoneKey &&
+        typeof rawBody[phoneKey] === 'string' &&
+        (rawBody[phoneKey] as string).length > 0;
+      const hasEmail =
+        emailKey &&
+        typeof rawBody[emailKey] === 'string' &&
+        (rawBody[emailKey] as string).length > 0;
+      if (!hasName || (!hasPhone && !hasEmail)) {
+        throw httpError('SCHEMA_VALIDATION', {
+          detail: 'account_only requires name and at least one of phone or email',
+          fields: {
+            missing: [
+              ...(!hasName ? [nameKey ?? 'name'] : []),
+              ...(!hasPhone && !hasEmail ? ['phone_or_email'] : []),
+            ],
+          },
+        });
+      }
     }
-    const validate = validatorResult.value;
-    if (!validate(body)) {
-      throw httpError('SCHEMA_VALIDATION', {
-        detail: 'Submission failed schema validation.',
-        fields: { issues: validate.errors ?? [] },
+
+    // The submit shape is driven entirely by the link's resolved
+    // registration_mode — there is no client-supplied `partial` flag anymore.
+    // `account_only` flips signals' lifecycle path to user-row-only (no item,
+    // no lifecycle fields). `account_and_profile` always submits with_item;
+    // missing required profile fields are accepted silently (see the Ajv
+    // block below) and signals' classifier marks the item `draft`. The stray
+    // `partial` key is stripped defensively in case an old client still sends
+    // it.
+    const body: Record<string, unknown> = { ...rawBody };
+    delete body['partial'];
+    const submitMode: 'with_item' | 'account_only' =
+      submissionShape === 'account_only' ? 'account_only' : 'with_item';
+
+    // Identity selectors come from the resolved network config so the
+    // route stays generic across signalstack networks. The sniffer
+    // picks them up from the schema; aggregator.config.yaml overrides
+    // when needed. Loaded up front so `account_only` validation can keep
+    // just the identity fields required (see below).
+    const networkCfg = await getNetworkConfig();
+    const linkDomainCfg = networkCfg.domains[link.domain];
+    if (!linkDomainCfg) {
+      throw httpError('NOT_FOUND', {
+        detail: `link domain '${link.domain}' not declared in network ${networkCfg.network.id}`,
       });
+    }
+    const phoneSourceKey = linkDomainCfg.identity.phone;
+
+    // 1. Schema validation against the link's domain schema. Skipped for
+    // `account_only` shape — the upstream identity-presence guard already
+    // enforced shape (name + phone OR email + consent), no profile fields
+    // are written, and running Ajv would mis-flag the consent toggles as
+    // `additionalProperties` violations against the profile schema.
+    if (submissionShape !== 'account_only') {
+      // Strip every empty cell (required or not) BEFORE Ajv runs. An empty
+      // cell means "not provided" — leaving it trips `format`/`type`/
+      // `minItems`/`minLength` even on fields the participant never filled.
+      // Removing it makes the field absent, which is exactly what signals'
+      // shape-only validation relaxes (missing-required ⇒ `draft`). Mirrors
+      // the worker's bulk-row strip so both ingest paths behave identically.
+      const schemaRef = { id: `participant-${link.domain}`, version: 'v1' };
+      const loader = getSchemaLoader();
+      const validatorResult = await loader.getValidator(schemaRef);
+      if (!validatorResult.success) {
+        log.error({ status: 'failure', sub: 'schema.load', error: validatorResult.error.code });
+        throw httpError('INTERNAL', {
+          detail: 'Registration schema unavailable.',
+          cause: new Error(validatorResult.error.message),
+        });
+      }
+      stripEmptyCells(body);
+
+      // Identity-presence guard — mandatory even on a partial profile submit.
+      // The relaxed Ajv pass below drops `required` so profile fields may be
+      // blank (signals classifies the item `draft`), but identity itself —
+      // name AND at least one contact — must always be present. Without this,
+      // a blank name would silently fall back to the participant UUID and a
+      // contactless row would 502 at signals' onboard guard. Mirrors the
+      // account_only guard above so both shapes enforce the same invariant.
+      {
+        const present = (k?: string): boolean =>
+          !!k && typeof body[k] === 'string' && (body[k] as string).length > 0;
+        const nameKey = linkDomainCfg.identity.name;
+        const emailKey = linkDomainCfg.identity.email;
+        const hasName = present(nameKey);
+        const hasPhone = present(phoneSourceKey);
+        const hasEmail = present(emailKey);
+        if (!hasName || (!hasPhone && !hasEmail)) {
+          throw httpError('SCHEMA_VALIDATION', {
+            detail: 'Registration requires name and at least one of phone or email.',
+            fields: {
+              missing: [
+                ...(!hasName ? [nameKey ?? 'name'] : []),
+                ...(!hasPhone && !hasEmail ? ['phone_or_email'] : []),
+              ],
+            },
+          });
+        }
+      }
+
+      const validate = validatorResult.value;
+      if (!validate(body)) {
+        // Silent partial-accept: `account_and_profile` links always submit
+        // with_item, but a participant may save an incomplete profile. Drop
+        // ONLY `required` errors (a missing field) — signals relaxes exactly
+        // and only missing-required, classifying the item `draft`. Every
+        // value constraint on a PRESENT field — `minItems`/`minLength`/
+        // `minimum`/`type`/`format`/`pattern`/`enum`/`additionalProperties` —
+        // still 400s here, matching signals' shape-only validation. Relaxing
+        // value constraints would green-light data signals later rejects.
+        const PARTIAL_OK = new Set(['required']);
+        const issues = (validate.errors ?? []).filter((e) => !PARTIAL_OK.has(e.keyword ?? ''));
+        if (issues.length > 0) {
+          throw httpError('SCHEMA_VALIDATION', {
+            detail: 'Submission failed schema validation.',
+            fields: { issues },
+          });
+        }
+      }
     }
 
     // 2. Normalisation. The server discards any client-supplied
@@ -162,19 +328,6 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
     // Falls back to a fresh UUID when phone is absent so dedup degrades
     // gracefully for phone-optional schemas (no dedup, but still works).
     delete (body as Record<string, unknown>)['participant_id'];
-
-    // Identity selectors come from the resolved network config so the
-    // route stays generic across signalstack networks. The sniffer
-    // picks them up from the schema; aggregator.config.yaml overrides
-    // when needed.
-    const networkCfg = await getNetworkConfig();
-    const linkDomainCfg = networkCfg.domains[link.domain];
-    if (!linkDomainCfg) {
-      throw httpError('NOT_FOUND', {
-        detail: `link domain '${link.domain}' not declared in network ${networkCfg.network.id}`,
-      });
-    }
-    const phoneSourceKey = linkDomainCfg.identity.phone;
     const emailSourceKey = linkDomainCfg.identity.email;
     const phoneRaw =
       typeof body[phoneSourceKey] === 'string' ? (body[phoneSourceKey] as string) : '';
@@ -229,6 +382,12 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
     // the DB connection hold time — acceptable for a public-link form submit
     // (low volume). If push volume ever requires async fan-out, switch to an
     // outbox table inside the tx + worker consumer.
+    // Lifecycle fields hoisted out of the tx scope so the response path can
+    // surface them without re-reading the signals response. `null` is the
+    // honest default: signals is disabled (no push) OR the submit was
+    // account_only — neither produces a lifecycle classification.
+    let lifecycleStatusOut: 'draft' | 'live' | 'paused' | null = null;
+    let ownedElsewhere = false;
     const writer = getParticipantsWriter();
     const txResult = await getDb().transaction(async (tx) => {
       // Bind the writer to the active tx for atomicity. If a custom writer
@@ -298,6 +457,7 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
           domain: link.domain,
           item_type: linkDomainCfg.itemType,
           profile: buildSignalStackItemState(link.domain, body, pushPhone, linkDomainCfg),
+          submit_mode: submitMode,
         });
 
         if (!result.success) {
@@ -320,8 +480,38 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
         // different aggregator and won't expose/duplicate them here.
         // Record a skipped outcome so the form shows the friendly
         // "already registered" screen instead of a hard failure.
-        if (result.value.already_registered) {
+        // `already_registered` (legacy) and `owned_elsewhere` (Task 4 rename)
+        // carry the same signal during the transition — OR them together so
+        // either field flips the outcome.
+        const isExisting =
+          Boolean(result.value.already_registered) || Boolean(result.value.owned_elsewhere);
+        if (isExisting) {
           outcome = 'skipped';
+        }
+
+        // Resolve lifecycle through the back-compat helper so the absent →
+        // 'live' rule stays centralised. `account_only` submits produce no
+        // item, so we suppress lifecycle fields entirely (null) — the
+        // resolver would otherwise return 'live' for an absent column.
+        const lifecycleStatus =
+          submitMode === 'account_only' || !result.value.profile_item_id
+            ? null
+            : resolveLifecycle({
+                ...(result.value.lifecycle_status
+                  ? { lifecycle_status: result.value.lifecycle_status }
+                  : {}),
+              });
+        ownedElsewhere = Boolean(result.value.owned_elsewhere);
+        lifecycleStatusOut = lifecycleStatus;
+
+        // signalstack is the identity authority. The local participants table
+        // is a soon-to-be-removed mirror, so its per-phone dedup must not flip
+        // an account_only capture to `skipped`/409 — re-submitting the same
+        // phone is an idempotent success (signals returns the same user). Drive
+        // the account_only outcome from signals: skip only when the identity is
+        // genuinely owned by another aggregator (owned_elsewhere).
+        if (submitMode === 'account_only') {
+          outcome = ownedElsewhere ? 'skipped' : 'passed';
         }
 
         log.info({
@@ -331,6 +521,9 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
           profile_item_id: result.value.profile_item_id,
           onboarded_at: result.value.onboarded_at,
           already_registered: result.value.already_registered ?? false,
+          owned_elsewhere: ownedElsewhere,
+          lifecycle_status: lifecycleStatus,
+          submit_mode: submitMode,
           link_id: link.id,
           participant_id: participantRowId,
         });
@@ -353,6 +546,9 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       outcome,
       participant_id: participantRowId,
       submission_id: submissionId,
+      lifecycle_status: lifecycleStatusOut,
+      owned_elsewhere: ownedElsewhere,
+      submit_mode: submitMode,
     });
 
     if (outcome === 'skipped') {
@@ -364,42 +560,46 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
         outcome,
         submission_id: submissionId,
         message: 'This mobile number or email is already registered with this aggregator.',
+        registration_mode: link.registrationMode,
+        submission_shape: submissionShape,
+        lifecycle_status: lifecycleStatusOut,
+        owned_elsewhere: ownedElsewhere,
       });
     }
 
     return reply.code(201).send({
       outcome,
       submission_id: submissionId,
+      registration_mode: link.registrationMode,
+      submission_shape: submissionShape,
+      lifecycle_status: lifecycleStatusOut,
+      owned_elsewhere: ownedElsewhere,
     });
   });
 }
 
 /**
- * Build the `item_state` block sent to signalstack from the participant
- * payload.
+ * Mutates `payload`: deletes any top-level field whose value is empty —
+ * `null`, `undefined`, an empty/whitespace string, or an empty array —
+ * regardless of whether the field is required.
  *
- * The body passes through unchanged — we only override the phone field
- * (chosen via the domain's identity selectors) so signalstack stores
- * the E.164 form the writer resolved upstream, not whatever raw value
- * the form / CSV carried.
+ * Partial submits seed unfilled fields with empty values (RJSF sends `[]`
+ * for unselected multi-selects and `''` for blank inputs). Removing them
+ * makes the field absent, which is exactly what signals' shape-only
+ * validation relaxes: a missing required field classifies the item `draft`,
+ * while value constraints on present fields stay enforced on both sides.
+ * Mirrors the worker's `stripAllEmptyCells` so the two ingest paths agree.
+ *
+ * @param payload - The submission body; mutated in place.
  */
-/**
- * Mutates `payload`: deletes any top-level field whose value is an
- * empty string and is not declared in the schema's `required` array.
- * Lets optional `format: uri` / `format: email` fields stay blank
- * without tripping Ajv format checks. JSON-Schema-spec-compliant —
- * `required: false` fields may be omitted entirely.
- */
-function stripEmptyOptionalCells(
-  payload: Record<string, unknown>,
-  jsonSchema: Record<string, unknown>,
-): void {
-  const required = Array.isArray(jsonSchema['required'])
-    ? new Set(jsonSchema['required'] as string[])
-    : new Set<string>();
+function stripEmptyCells(payload: Record<string, unknown>): void {
   for (const [field, value] of Object.entries(payload)) {
-    if (required.has(field)) continue;
-    if (typeof value === 'string' && value.trim() === '') {
+    const isEmpty =
+      value === null ||
+      value === undefined ||
+      (typeof value === 'string' && value.trim() === '') ||
+      (Array.isArray(value) && value.length === 0);
+    if (isEmpty) {
       delete payload[field];
     }
   }
