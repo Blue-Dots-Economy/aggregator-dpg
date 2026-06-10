@@ -16,7 +16,7 @@ End-to-end guide for running the Aggregator Portal + API on a fresh machine. The
 
 Optional but recommended:
 
-- A Mac/Linux shell. Windows works under WSL2.
+- A Mac/Linux shell, or native Windows (Docker Desktop). On Windows use the `pnpm stack:*` scripts (`make` not required) — see QUICKSTART.md §3 "Windows note". WSL2 also works.
 - A REST client (Postman, curl, HTTPie) for poking the API directly.
 
 ---
@@ -105,7 +105,7 @@ When the web container is inside docker, browser and web container must resolve 
 
 Both sides agree, JWT issuer claim validates. Without the hosts entry, browser cannot resolve `keycloak` and OIDC redirect fails.
 
-`make hosts` is idempotent — safe to re-run.
+`make setup` (or `pnpm stack:setup`) is idempotent — safe to re-run; it never duplicates host entries.
 
 ### `.env` structure
 
