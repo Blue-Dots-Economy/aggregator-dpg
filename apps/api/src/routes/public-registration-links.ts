@@ -271,6 +271,35 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
         });
       }
       stripEmptyCells(body);
+
+      // Identity-presence guard — mandatory even on a partial profile submit.
+      // The relaxed Ajv pass below drops `required` so profile fields may be
+      // blank (signals classifies the item `draft`), but identity itself —
+      // name AND at least one contact — must always be present. Without this,
+      // a blank name would silently fall back to the participant UUID and a
+      // contactless row would 502 at signals' onboard guard. Mirrors the
+      // account_only guard above so both shapes enforce the same invariant.
+      {
+        const present = (k?: string): boolean =>
+          !!k && typeof body[k] === 'string' && (body[k] as string).length > 0;
+        const nameKey = linkDomainCfg.identity.name;
+        const emailKey = linkDomainCfg.identity.email;
+        const hasName = present(nameKey);
+        const hasPhone = present(phoneSourceKey);
+        const hasEmail = present(emailKey);
+        if (!hasName || (!hasPhone && !hasEmail)) {
+          throw httpError('SCHEMA_VALIDATION', {
+            detail: 'Registration requires name and at least one of phone or email.',
+            fields: {
+              missing: [
+                ...(!hasName ? [nameKey ?? 'name'] : []),
+                ...(!hasPhone && !hasEmail ? ['phone_or_email'] : []),
+              ],
+            },
+          });
+        }
+      }
+
       const validate = validatorResult.value;
       if (!validate(body)) {
         // Silent partial-accept: `account_and_profile` links always submit
