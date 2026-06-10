@@ -282,12 +282,15 @@ function SummaryBar({
  * (design: grouped metric sections).
  */
 function MetricGroup({ title, children }: { title: string; children: ReactNode }) {
+  // h-full + flex-1 stretch the two side-by-side groups to equal height,
+  // so Profiles and Users cards stay the same size even when one group's
+  // labels wrap to more lines.
   return (
-    <div>
+    <div className="flex h-full flex-col">
       <div className="text-[11.5px] font-bold uppercase tracking-[.09em] text-ink-400 mb-3">
         {title}
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">{children}</div>
+      <div className="grid flex-1 grid-cols-1 sm:grid-cols-3 gap-4">{children}</div>
     </div>
   );
 }
