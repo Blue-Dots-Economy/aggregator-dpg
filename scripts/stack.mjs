@@ -278,7 +278,12 @@ function main() {
     }
     throw err;
   }
-  HANDLERS[cmd]();
+  try {
+    HANDLERS[cmd]();
+  } catch (err) {
+    console.error(err.message);
+    process.exit(1);
+  }
 }
 
 // Only run when invoked directly (`node scripts/stack.mjs ...`), not when
