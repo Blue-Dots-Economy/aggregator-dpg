@@ -254,16 +254,15 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
     // are written, and running Ajv would mis-flag the consent toggles as
     // `additionalProperties` violations against the profile schema.
     if (submissionShape !== 'account_only') {
-      // Load the raw schema as well so we can strip empty-string optional
-      // fields before Ajv runs — an empty cell for an optional
-      // `format: uri` / `format: email` field would otherwise trip the
-      // format check even though the field was never required.
+      // Strip every empty cell (required or not) BEFORE Ajv runs. An empty
+      // cell means "not provided" — leaving it trips `format`/`type`/
+      // `minItems`/`minLength` even on fields the participant never filled.
+      // Removing it makes the field absent, which is exactly what signals'
+      // shape-only validation relaxes (missing-required ⇒ `draft`). Mirrors
+      // the worker's bulk-row strip so both ingest paths behave identically.
       const schemaRef = { id: `participant-${link.domain}`, version: 'v1' };
       const loader = getSchemaLoader();
-      const [validatorResult, schemaResult] = await Promise.all([
-        loader.getValidator(schemaRef),
-        loader.getSchema(schemaRef),
-      ]);
+      const validatorResult = await loader.getValidator(schemaRef);
       if (!validatorResult.success) {
         log.error({ status: 'failure', sub: 'schema.load', error: validatorResult.error.code });
         throw httpError('INTERNAL', {
@@ -271,19 +270,18 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
           cause: new Error(validatorResult.error.message),
         });
       }
-      if (schemaResult.success) {
-        stripEmptyOptionalCells(body, schemaResult.value as Record<string, unknown>);
-      }
+      stripEmptyCells(body);
       const validate = validatorResult.value;
       if (!validate(body)) {
         // Silent partial-accept: `account_and_profile` links always submit
         // with_item, but a participant may save an incomplete profile. Drop
-        // the "minimum-presence" keywords — `required` (missing field),
-        // `minItems` (empty multi-select), `minLength`, `minimum` — so partial
-        // submits land; signals' classifier marks the item `draft` when fields
-        // are missing, `live` otherwise. Type/format/pattern/enum/
-        // additionalProperties errors still 400 (genuine malformed input).
-        const PARTIAL_OK = new Set(['required', 'minItems', 'minLength', 'minimum']);
+        // ONLY `required` errors (a missing field) — signals relaxes exactly
+        // and only missing-required, classifying the item `draft`. Every
+        // value constraint on a PRESENT field — `minItems`/`minLength`/
+        // `minimum`/`type`/`format`/`pattern`/`enum`/`additionalProperties` —
+        // still 400s here, matching signals' shape-only validation. Relaxing
+        // value constraints would green-light data signals later rejects.
+        const PARTIAL_OK = new Set(['required']);
         const issues = (validate.errors ?? []).filter((e) => !PARTIAL_OK.has(e.keyword ?? ''));
         if (issues.length > 0) {
           throw httpError('SCHEMA_VALIDATION', {
@@ -552,25 +550,21 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
 }
 
 /**
- * Mutates `payload`: deletes any top-level field whose value is an
- * empty string and is not declared in the schema's `required` array.
- * Lets optional `format: uri` / `format: email` fields stay blank
- * without tripping Ajv format checks. JSON-Schema-spec-compliant —
- * `required: false` fields may be omitted entirely.
+ * Mutates `payload`: deletes any top-level field whose value is empty —
+ * `null`, `undefined`, an empty/whitespace string, or an empty array —
+ * regardless of whether the field is required.
+ *
+ * Partial submits seed unfilled fields with empty values (RJSF sends `[]`
+ * for unselected multi-selects and `''` for blank inputs). Removing them
+ * makes the field absent, which is exactly what signals' shape-only
+ * validation relaxes: a missing required field classifies the item `draft`,
+ * while value constraints on present fields stay enforced on both sides.
+ * Mirrors the worker's `stripAllEmptyCells` so the two ingest paths agree.
+ *
+ * @param payload - The submission body; mutated in place.
  */
-function stripEmptyOptionalCells(
-  payload: Record<string, unknown>,
-  jsonSchema: Record<string, unknown>,
-): void {
-  const required = Array.isArray(jsonSchema['required'])
-    ? new Set(jsonSchema['required'] as string[])
-    : new Set<string>();
+function stripEmptyCells(payload: Record<string, unknown>): void {
   for (const [field, value] of Object.entries(payload)) {
-    if (required.has(field)) continue;
-    // Partial submits seed unfilled fields with empty values — RJSF sends
-    // `[]` for unselected multi-selects and `''` for blank inputs. Drop them
-    // so they neither trip schema validation (minItems / minLength) nor reach
-    // signals as noise; only filled fields are forwarded.
     const isEmpty =
       value === null ||
       value === undefined ||
