@@ -236,13 +236,8 @@
         "col_failed": "ವಿಫಲ",
         "col_skipped": "ಬಿಟ್ಟುಬಿಡಲಾಗಿದೆ",
         "col_reason": "ಕಾರಣ / ದೋಷಗಳು",
-        "col_actions": "ಕ್ರಮಗಳು",
         "all_rows_passed": "ಎಲ್ಲಾ ಸಾಲುಗಳು ಉತ್ತೀರ್ಣ",
-        "signing": "ಸಹಿ ಮಾಡುತ್ತಿದೆ…",
-        "triggered": "{action} ಪ್ರಚೋದಿಸಲಾಗಿದೆ",
-        "trigger_callback": "ಕಾಲ್‌ಬ್ಯಾಕ್ ಪ್ರಚೋದಿಸಿ",
-        "retry": "ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ",
-        "notify": "ಸೂಚಿಸಿ"
+        "signing": "ಸಹಿ ಮಾಡುತ್ತಿದೆ…"
       }
     },
     "create_link": {

@@ -477,58 +477,23 @@ interface RecommendedAction {
 }
 
 /**
- * Turns a signalstack `actionable_tags` entry into a chip. Tags follow
- * the `missing_<required_field>` shape (e.g. `missing_contact_phone`),
- * which we surface as "Add Contact Phone". Unknown tag shapes are
- * title-cased verbatim so new server-side tags still render readably.
+ * Fixed operator actions surfaced for every participant row. Stubs for
+ * now — each chip flashes a transient confirmation on click; wire each
+ * label to its real handler (callback trigger, operator notify) when
+ * those endpoints land.
  */
-function tagToAction(tag: string): RecommendedAction {
-  if (tag.startsWith('missing_')) {
-    const field = tag
-      .slice('missing_'.length)
-      .split('_')
-      .filter(Boolean)
-      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-      .join(' ');
-    return { label: `Add ${field}`, tone: 'warm', icon: <I.alert size={12} /> };
-  }
-  const label = tag
-    .split('_')
-    .filter(Boolean)
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(' ');
-  return { label, tone: 'cool', icon: <I.spark size={12} /> };
+function recommendedActions(): RecommendedAction[] {
+  return [
+    { label: 'Trigger Callback', tone: 'cool', icon: <I.send size={12} /> },
+    { label: 'Notify', tone: 'mute', icon: <I.bell size={12} /> },
+  ];
 }
 
 /**
- * Recommended-action chips for a row. Prefers signalstack's
- * server-computed `actionableTags`; when none are present, falls back
- * to a small client-side heuristic on status + profile completeness so
- * the column is never empty.
+ * Recommended-action chip. Stub interaction: clicking flips the chip to a
+ * transient "{label} triggered" confirmation for 2s, then reverts. Replace
+ * the timeout stub with the real per-action handler once endpoints exist.
  */
-function recommendedActions(row: ParticipantBase, kind: RowKind): RecommendedAction[] {
-  const tags = row.actionableTags ?? [];
-  if (tags.length > 0) {
-    return tags.slice(0, 2).map(tagToAction);
-  }
-  const out: RecommendedAction[] = [];
-  if (row.status === 'at-risk')
-    out.push({ label: 'Re-engage', tone: 'warm', icon: <I.send size={12} /> });
-  if (row.status === 'inactive')
-    out.push({ label: 'Send nudge', tone: 'mute', icon: <I.bell size={12} /> });
-  if (!row.profile.verified)
-    out.push({ label: 'Verify', tone: 'cool', icon: <I.shield size={12} /> });
-  if (row.profile.complete < 70)
-    out.push({ label: 'Complete profile', tone: 'soft', icon: <I.spark size={12} /> });
-  if (kind === 'provider' && row.status === 'active')
-    out.push({ label: 'Suggest match', tone: 'soft', icon: <I.trending size={12} /> });
-  if (kind === 'seeker' && (row.applied.shortlisted ?? 0) >= 5)
-    out.push({ label: 'Coach interview', tone: 'soft', icon: <I.message size={12} /> });
-  if (out.length === 0)
-    out.push({ label: 'View profile', tone: 'mute', icon: <I.external size={12} /> });
-  return out.slice(0, 2);
-}
-
 function ActionChip({
   label,
   tone = 'soft',
@@ -538,9 +503,26 @@ function ActionChip({
   tone?: ChipTone;
   icon?: ReactNode;
 }) {
+  const [triggered, setTriggered] = useState(false);
+  const onClick = () => {
+    setTriggered(true);
+    window.setTimeout(() => setTriggered(false), 2000);
+  };
+  if (triggered) {
+    return (
+      <span
+        aria-live="polite"
+        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11.5px] font-semibold bg-emerald-50 text-emerald-700"
+      >
+        <I.check size={12} />
+        {label} triggered
+      </span>
+    );
+  }
   return (
     <button
       type="button"
+      onClick={onClick}
       className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11.5px] font-semibold transition-colors ${CHIP_TONES[tone]}`}
     >
       {icon}
@@ -1017,7 +999,7 @@ function ParticipantTable<R extends ParticipantBase>({
                   </td>
                   <td>
                     <div className="flex items-center gap-1.5">
-                      {recommendedActions(r, kind).map((a, i) => (
+                      {recommendedActions().map((a, i) => (
                         <ActionChip key={i} {...a} />
                       ))}
                     </div>

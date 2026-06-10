@@ -236,13 +236,8 @@
         "col_failed": "Failed",
         "col_skipped": "Skipped",
         "col_reason": "Reason / errors",
-        "col_actions": "Actions",
         "all_rows_passed": "All rows passed",
-        "signing": "Signing…",
-        "triggered": "{action} triggered",
-        "trigger_callback": "Trigger Callback",
-        "retry": "Retry",
-        "notify": "Notify"
+        "signing": "Signing…"
       }
     },
     "create_link": {

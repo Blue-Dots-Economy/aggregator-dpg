@@ -236,13 +236,8 @@
         "col_failed": "विफल",
         "col_skipped": "छोड़े गए",
         "col_reason": "कारण / त्रुटियाँ",
-        "col_actions": "कार्रवाइयाँ",
         "all_rows_passed": "सभी पंक्तियाँ उत्तीर्ण",
-        "signing": "हस्ताक्षर हो रहा है…",
-        "triggered": "{action} ट्रिगर किया गया",
-        "trigger_callback": "कॉलबैक ट्रिगर करें",
-        "retry": "पुनः प्रयास करें",
-        "notify": "सूचित करें"
+        "signing": "हस्ताक्षर हो रहा है…"
       }
     },
     "create_link": {
