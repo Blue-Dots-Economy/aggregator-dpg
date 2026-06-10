@@ -99,6 +99,8 @@
       "select_all_page": "इस पृष्ठ की सभी पंक्तियाँ चुनें"
     },
     "bulk": {
+      "select": "चुनें",
+      "cancel": "रद्द करें",
       "selected": "{count} चयनित",
       "clear": "चयन हटाएँ",
       "exportSelected": "चयनित CSV निर्यात करें",

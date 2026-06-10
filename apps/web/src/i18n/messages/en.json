@@ -99,6 +99,8 @@
       "select_all_page": "Select all rows on this page"
     },
     "bulk": {
+      "select": "Select",
+      "cancel": "Cancel",
       "selected": "{count} selected",
       "clear": "Clear selection",
       "exportSelected": "Export selected CSV",

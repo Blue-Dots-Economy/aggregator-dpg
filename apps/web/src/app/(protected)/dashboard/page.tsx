@@ -866,6 +866,11 @@ function ParticipantTable<R extends ParticipantBase>({
   // opportunity-provider endpoint (mirrors the read path in dashboardService).
   const exportDomain: 'seeker' | 'provider' = kind === 'seeker' ? 'seeker' : 'provider';
 
+  // Explicit selection mode — the checkbox column only exists while the
+  // operator is in "Select" mode (toolbar toggle). Exiting the mode clears
+  // the selection.
+  const [selectMode, setSelectMode] = useState(false);
+
   // Bulk selection — snapshots full row data (not just ids) so client-side
   // actions like CSV export can include rows from pages no longer mounted.
   // Persists across page changes; resets when a filter changes because the
@@ -874,6 +879,13 @@ function ParticipantTable<R extends ParticipantBase>({
   useEffect(() => {
     setSelected(new Map());
   }, [statusFilter, lifecycleFilter]);
+
+  const toggleSelectMode = () => {
+    setSelectMode((on) => {
+      if (on) setSelected(new Map());
+      return !on;
+    });
+  };
 
   // Rows without a real profile_item_id carry synthetic `row-<index>` keys
   // that collide across pages — those rows are not selectable.
@@ -952,6 +964,15 @@ function ParticipantTable<R extends ParticipantBase>({
               <option value="live">{t('filters.lifecycle_live')}</option>
             </select>
           ) : null}
+          <Button
+            kind={selectMode ? 'primary' : 'ghost'}
+            icon={<I.check size={14} />}
+            onClick={toggleSelectMode}
+            aria-pressed={selectMode}
+            className="whitespace-nowrap px-3 py-1.5 text-[12.5px]"
+          >
+            {selectMode ? t('bulk.cancel') : t('bulk.select')}
+          </Button>
           <div ref={filterRef} className="relative">
             <Button
               kind={filterActive ? 'primary' : 'ghost'}
@@ -1012,7 +1033,10 @@ function ParticipantTable<R extends ParticipantBase>({
       )}
 
       <div className="overflow-auto scroll-x" style={{ maxHeight: 520 }}>
-        <table className="bd-table" style={{ minWidth: kind === 'provider' ? 1544 : 1444 }}>
+        <table
+          className="bd-table"
+          style={{ minWidth: (kind === 'provider' ? 1500 : 1400) + (selectMode ? 44 : 0) }}
+        >
           <thead
             style={{
               position: 'sticky',
@@ -1022,35 +1046,35 @@ function ParticipantTable<R extends ParticipantBase>({
             }}
           >
             <tr>
-              <th
-                style={{
-                  position: 'sticky',
-                  left: 0,
-                  zIndex: 5,
-                  background: 'var(--bd-table-head-bg)',
-                  width: 44,
-                  minWidth: 44,
-                }}
-              >
-                <input
-                  type="checkbox"
-                  className={`w-4 h-4 cursor-pointer align-middle transition-opacity ${
-                    selected.size > 0 ? 'opacity-100' : 'opacity-50 hover:opacity-100'
-                  }`}
-                  style={{ accentColor: 'var(--bd-primary-600)' }}
-                  ref={(el) => {
-                    if (el) el.indeterminate = somePageSelected && !allPageSelected;
+              {selectMode && (
+                <th
+                  style={{
+                    position: 'sticky',
+                    left: 0,
+                    zIndex: 5,
+                    background: 'var(--bd-table-head-bg)',
+                    width: 44,
+                    minWidth: 44,
                   }}
-                  checked={allPageSelected}
-                  onChange={togglePage}
-                  disabled={selectablePageRows.length === 0}
-                  aria-label={t('aria.select_all_page')}
-                />
-              </th>
+                >
+                  <input
+                    type="checkbox"
+                    className="w-4 h-4 cursor-pointer align-middle"
+                    style={{ accentColor: 'var(--bd-primary-600)' }}
+                    ref={(el) => {
+                      if (el) el.indeterminate = somePageSelected && !allPageSelected;
+                    }}
+                    checked={allPageSelected}
+                    onChange={togglePage}
+                    disabled={selectablePageRows.length === 0}
+                    aria-label={t('aria.select_all_page')}
+                  />
+                </th>
+              )}
               <th
                 style={{
                   position: 'sticky',
-                  left: 44,
+                  left: selectMode ? 44 : 0,
                   zIndex: 5,
                   background: 'var(--bd-table-head-bg)',
                   minWidth: 240,
@@ -1069,39 +1093,34 @@ function ParticipantTable<R extends ParticipantBase>({
           <tbody>
             {visibleRows.map((r) => {
               return (
-                <tr key={r.id} className="fade-up group">
+                <tr key={r.id} className="fade-up">
+                  {selectMode && (
+                    <td
+                      style={{
+                        position: 'sticky',
+                        left: 0,
+                        background: 'inherit',
+                        backgroundColor: 'var(--bd-card)',
+                        zIndex: 1,
+                        width: 44,
+                      }}
+                    >
+                      {isSelectable(r) && (
+                        <input
+                          type="checkbox"
+                          className="w-4 h-4 cursor-pointer align-middle"
+                          style={{ accentColor: 'var(--bd-primary-600)' }}
+                          checked={selected.has(r.id)}
+                          onChange={() => toggleRow(r)}
+                          aria-label={t('aria.select_row', { name: r.name })}
+                        />
+                      )}
+                    </td>
+                  )}
                   <td
                     style={{
                       position: 'sticky',
-                      left: 0,
-                      background: 'inherit',
-                      backgroundColor: 'var(--bd-card)',
-                      zIndex: 1,
-                      width: 44,
-                    }}
-                  >
-                    {isSelectable(r) && (
-                      /* Hover-reveal: invisible until the row is hovered or the
-                         checkbox is focused; once any selection exists, every
-                         checkbox stays visible so the selection is scannable. */
-                      <input
-                        type="checkbox"
-                        className={`w-4 h-4 cursor-pointer align-middle transition-opacity ${
-                          selected.size > 0
-                            ? 'opacity-100'
-                            : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100'
-                        }`}
-                        style={{ accentColor: 'var(--bd-primary-600)' }}
-                        checked={selected.has(r.id)}
-                        onChange={() => toggleRow(r)}
-                        aria-label={t('aria.select_row', { name: r.name })}
-                      />
-                    )}
-                  </td>
-                  <td
-                    style={{
-                      position: 'sticky',
-                      left: 44,
+                      left: selectMode ? 44 : 0,
                       background: 'inherit',
                       backgroundColor: 'var(--bd-card)',
                       zIndex: 1,

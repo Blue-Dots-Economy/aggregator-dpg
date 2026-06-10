@@ -99,6 +99,8 @@
       "select_all_page": "ಈ ಪುಟದ ಎಲ್ಲಾ ಸಾಲುಗಳನ್ನು ಆಯ್ಕೆಮಾಡಿ"
     },
     "bulk": {
+      "select": "ಆಯ್ಕೆಮಾಡಿ",
+      "cancel": "ರದ್ದುಮಾಡಿ",
       "selected": "{count} ಆಯ್ಕೆಯಾಗಿದೆ",
       "clear": "ಆಯ್ಕೆ ತೆರವುಗೊಳಿಸಿ",
       "exportSelected": "ಆಯ್ದ CSV ರಫ್ತು ಮಾಡಿ",
