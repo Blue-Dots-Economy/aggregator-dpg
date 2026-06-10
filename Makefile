@@ -1,4 +1,4 @@
-.PHONY: help setup hosts env dev up down logs ps reset psql redis-cli mc kc rebuild-web rebuild-keycloak kc-plugin kc-logs \
+.PHONY: help setup dev up down logs ps reset psql redis-cli mc kc rebuild-web rebuild-keycloak kc-plugin kc-logs \
         helm-sync-files helm-deps helm-lint helm-template helm-package helm-install-dev helm-uninstall keycloak-image
 
 # ─── Helm chart settings ────────────────────────────────────────────────
@@ -10,60 +10,28 @@ KEYCLOAK_IMAGE    ?= aggregator-dpg/keycloak:26.5.5-aggregator
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
 
-setup: env hosts ## One-shot: bootstrap .env + add `127.0.0.1 keycloak` to /etc/hosts.
-	@echo ""
-	@echo "Setup complete. Edit .env (fill change-me-* + secrets), then run 'make up'."
-
-env: ## Copy infra/env.local (preferred) or infra/env.template → .env if missing, chmod 600.
-	@if [ -f .env ]; then \
-		echo ".env already exists — leaving untouched."; \
-	elif [ -f infra/env.local ]; then \
-		cp infra/env.local .env; \
-		chmod 600 .env; \
-		echo "Created .env from infra/env.local (mode 600). Ready to run 'make up'."; \
-	else \
-		cp infra/env.template .env; \
-		chmod 600 .env; \
-		echo "Created .env from infra/env.template (mode 600)."; \
-		echo "Fill change-me-* placeholders. Generate secrets:  openssl rand -hex 32"; \
-	fi
-
-hosts: ## Add `127.0.0.1 keycloak` to /etc/hosts (needed when running web in docker).
-	@if grep -q "^127\.0\.0\.1[[:space:]]\+keycloak\b" /etc/hosts; then \
-		echo "/etc/hosts already maps keycloak → 127.0.0.1 — skipping."; \
-	else \
-		echo "Adding '127.0.0.1 keycloak' to /etc/hosts (sudo required)..."; \
-		echo "127.0.0.1 keycloak" | sudo tee -a /etc/hosts > /dev/null; \
-		echo "Done."; \
-	fi
-	@if grep -q "^127\.0\.0\.1[[:space:]]\+minio\b" /etc/hosts; then \
-		echo "/etc/hosts already maps minio → 127.0.0.1 — skipping."; \
-	else \
-		echo "Adding '127.0.0.1 minio' to /etc/hosts (sudo required)..."; \
-		echo "127.0.0.1 minio" | sudo tee -a /etc/hosts > /dev/null; \
-		echo "Done."; \
-	fi
+setup: ## One-shot: bootstrap .env + add keycloak/minio host entries (delegates to scripts/stack.mjs).
+	pnpm stack:setup
 
 dev: up ## Alias for `up`. Brings the full local stack up.
 
 up: ## Start all foundations + apps in the background.
-	@test -f .env || (echo ".env missing — run 'make setup' first" && exit 1)
-	docker compose up -d --build
+	pnpm stack:up
 
 down: ## Stop and remove all containers (data volumes preserved).
-	docker compose down
+	pnpm stack:down
 
 reset: ## Stop everything and wipe data volumes. Destructive.
-	docker compose down -v
+	pnpm stack:reset
 
 logs: ## Tail logs for all services.
-	docker compose logs -f
+	pnpm stack:logs
 
 ps: ## Show service status.
-	docker compose ps
+	pnpm stack:ps
 
 psql: ## Open psql against the local Postgres.
-	docker compose exec postgres psql -U aggregator -d aggregator
+	pnpm stack:psql
 
 redis-cli: ## Open redis-cli against the local Redis.
 	docker compose exec redis redis-cli
@@ -77,9 +45,7 @@ kc: ## Print Keycloak admin URL.
 	@echo "http://localhost:8080  (admin / \$${KC_BOOTSTRAP_ADMIN_PASSWORD:-admin})"
 
 rebuild-web: ## Rebuild the web image and restart only the web container.
-	pnpm --filter @aggregator-dpg/web build
-	docker compose build web
-	docker compose up -d web
+	pnpm stack:rebuild-web
 
 KC_PLUGIN_REPO ?= ../keycloak-otp-authenticator
 KC_PLUGIN_JAR  := keycloak-otp-1.0.0-SNAPSHOT.jar
