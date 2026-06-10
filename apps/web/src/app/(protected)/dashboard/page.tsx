@@ -1034,7 +1034,9 @@ function ParticipantTable<R extends ParticipantBase>({
               >
                 <input
                   type="checkbox"
-                  className="w-4 h-4 cursor-pointer align-middle"
+                  className={`w-4 h-4 cursor-pointer align-middle transition-opacity ${
+                    selected.size > 0 ? 'opacity-100' : 'opacity-50 hover:opacity-100'
+                  }`}
                   style={{ accentColor: 'var(--bd-primary-600)' }}
                   ref={(el) => {
                     if (el) el.indeterminate = somePageSelected && !allPageSelected;
@@ -1067,7 +1069,7 @@ function ParticipantTable<R extends ParticipantBase>({
           <tbody>
             {visibleRows.map((r) => {
               return (
-                <tr key={r.id} className="fade-up">
+                <tr key={r.id} className="fade-up group">
                   <td
                     style={{
                       position: 'sticky',
@@ -1079,9 +1081,16 @@ function ParticipantTable<R extends ParticipantBase>({
                     }}
                   >
                     {isSelectable(r) && (
+                      /* Hover-reveal: invisible until the row is hovered or the
+                         checkbox is focused; once any selection exists, every
+                         checkbox stays visible so the selection is scannable. */
                       <input
                         type="checkbox"
-                        className="w-4 h-4 cursor-pointer align-middle"
+                        className={`w-4 h-4 cursor-pointer align-middle transition-opacity ${
+                          selected.size > 0
+                            ? 'opacity-100'
+                            : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100'
+                        }`}
                         style={{ accentColor: 'var(--bd-primary-600)' }}
                         checked={selected.has(r.id)}
                         onChange={() => toggleRow(r)}
