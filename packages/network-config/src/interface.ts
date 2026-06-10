@@ -170,6 +170,24 @@ export const OnboardingConfigSchema = z.object({
 export type OnboardingConfig = z.infer<typeof OnboardingConfigSchema>;
 
 /**
+ * Validated key for a registration mode entry. Must be a snake_case
+ * identifier starting with a lowercase letter.
+ */
+const RegistrationModeKey = z.string().regex(/^[a-z][a-z0-9_]*$/);
+
+/**
+ * One entry in the per-network `registration_modes` config block.
+ * Maps an admin-facing channel name (e.g. `voice`, `form`) to a
+ * rendering shape and an optional public hint.
+ */
+export const RegistrationModeSchema = z.object({
+  label_i18n_key: z.string().min(1),
+  submission_shape: z.enum(['account_only', 'account_and_profile']),
+  public_hint_i18n_key: z.string().min(1).nullable(),
+});
+export type RegistrationMode = z.infer<typeof RegistrationModeSchema>;
+
+/**
  * Root aggregator config — the YAML the operator edits per deployment.
  */
 export const AggregatorYamlSchema = z.object({
@@ -182,9 +200,23 @@ export const AggregatorYamlSchema = z.object({
     domain_labels: z.record(z.string(), DomainLabelsSchema).optional(),
     onboarding: OnboardingConfigSchema.default({}),
     admin_emails: z.array(z.string().email()).default([]),
+    registration_modes: z.record(RegistrationModeKey, RegistrationModeSchema).default({
+      form: {
+        label_i18n_key: 'registration_mode.form.label',
+        submission_shape: 'account_and_profile',
+        public_hint_i18n_key: null,
+      },
+    }),
   }),
 });
 export type AggregatorYaml = z.infer<typeof AggregatorYamlSchema>;
+
+/**
+ * Alias for `AggregatorYamlSchema`. Exported under both names so tests
+ * and future refactors can reference the schema by its logical concept
+ * ("config") rather than the serialisation format ("yaml").
+ */
+export const AggregatorConfigSchema = AggregatorYamlSchema;
 
 // ─── Signalstack network.json (the subset the aggregator cares about) ────────
 

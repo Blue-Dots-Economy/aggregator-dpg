@@ -18,6 +18,12 @@
     "complete": "Complete",
     "incomplete": "Incomplete"
   },
+  "Lifecycle": {
+    "draft": "Draft",
+    "live": "Live",
+    "paused": "Paused",
+    "account_only": "Account only"
+  },
   "metadata": {
     "title": "Aggregator Portal",
     "description": "Aggregator portal for signalstack-backed participant networks."
@@ -64,6 +70,7 @@
       "provider": "Provider",
       "joined": "Joined",
       "profileStatus": "Profile Status",
+      "lifecycle": "Lifecycle",
       "status": "Status",
       "recommendedAction": "Recommended Action",
       "applied": "Applied",
@@ -72,7 +79,13 @@
       "count": "{shown} of {total}"
     },
     "filters": {
-      "all_statuses": "All statuses"
+      "all_statuses": "All statuses",
+      "lifecycle_label": "Lifecycle",
+      "lifecycle_all": "All lifecycles",
+      "lifecycle_draft": "Draft",
+      "lifecycle_live": "Live",
+      "lifecycle_paused": "Paused",
+      "lifecycle_account_only": "Account only"
     },
     "aria": {
       "search_participants": "Search participants",
@@ -112,6 +125,14 @@
       "withApplications": "{entityPlural} with Applications",
       "newParticipants": "New Participants",
       "delta_this_week": "this week"
+    },
+    "tiles": {
+      "lifecycle": {
+        "draft": "Draft profiles",
+        "live": "Live profiles",
+        "paused": "Paused profiles",
+        "account_only": "Account-only users"
+      }
     },
     "opp": {
       "activeProgramsLabel": "Active programs",
@@ -216,10 +237,13 @@
       "field_event_location": "Event Location",
       "field_district": "District",
       "field_domain": "Domain",
+      "field_registration_mode": "Campaign type",
+      "field_tags": "Tags (optional)",
       "placeholder_state": "State",
       "placeholder_event": "Campaign or event name",
       "placeholder_location": "City or venue",
       "placeholder_district": "District",
+      "placeholder_tags": "Comma-separated, e.g. priority, dharwad-drive",
       "creating": "Creating…",
       "create_button": "Create link",
       "qr_label": "QR Code",
@@ -344,7 +368,38 @@
       "error_network_title": "Network error",
       "error_network_detail": "Could not reach the server.",
       "error_submission_title": "Submission failed",
-      "error_server_detail": "Server returned HTTP {status}."
+      "error_server_detail": "Server returned HTTP {status}.",
+      "lookup": {
+        "owned_elsewhere_title": "Contact already registered",
+        "owned_elsewhere_body": "This email or mobile is already registered with another organisation. Please use a different contact or sign in through that organisation.",
+        "owned_elsewhere_cta": "Use a different contact",
+        "resume_title": "You have a profile in progress",
+        "resume_body": "We found an unfinished profile for this contact. Resume where you left off?",
+        "resume_cta": "Resume profile",
+        "resume_continue_new": "Continue with a new submission"
+      },
+      "account_only": {
+        "title": "Quick sign-up",
+        "helper": "Provide your name and a contact number or email. You can complete your profile later.",
+        "contact_label": "Provide a phone OR an email (at least one required)",
+        "name_label": "Name",
+        "phone_label": "Phone",
+        "email_label": "Email",
+        "consent_terms_label": "I accept the terms",
+        "consent_privacy_label": "I accept the privacy policy",
+        "submit_label": "Submit"
+      }
+    }
+  },
+  "registration_mode": {
+    "field_label": "Campaign type",
+    "voice": {
+      "label": "Voice Campaign",
+      "hint": "You'll receive a call on this number to complete your profile."
+    },
+    "form": {
+      "label": "Form Filling",
+      "hint": "Participants fill the full profile online. Partial submissions are accepted."
     }
   },
   "auth": {

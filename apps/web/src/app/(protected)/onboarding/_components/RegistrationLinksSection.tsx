@@ -35,6 +35,14 @@ interface CreateLinkFormState {
   event_date: string;
   /** Optional event venue / city. */
   event_location: string;
+  /**
+   * Per-link registration mode key — chosen at create time, immutable
+   * afterwards. Sourced from the live network config's `registration_modes`.
+   * Empty until the config loads (an effect pins the default).
+   */
+  registration_mode: string;
+  /** Optional, comma-separated free-form tags. Stored on `context.tags`. */
+  tags: string;
 }
 
 const EMPTY_FORM: CreateLinkFormState = {
@@ -46,7 +54,19 @@ const EMPTY_FORM: CreateLinkFormState = {
   lever_event: '',
   event_date: '',
   event_location: '',
+  registration_mode: '',
+  tags: '',
 };
+
+/** Splits a comma-separated tags input into a trimmed, de-duped, non-empty list. */
+function parseTags(input: string): string[] {
+  const seen = new Set<string>();
+  for (const raw of input.split(',')) {
+    const t = raw.trim();
+    if (t) seen.add(t);
+  }
+  return [...seen];
+}
 
 function slugifyForLink(input: string): string {
   return input
@@ -130,6 +150,10 @@ function Field({
 
 export function CreateLinkSection() {
   const t = useTranslations('onboarding');
+  // Root-scoped translator for runtime-config i18n keys (registration mode
+  // labels/hints are top-level keys declared in network config, not under
+  // the `onboarding` namespace).
+  const tRoot = useTranslations();
   const router = useRouter();
   const [form, setForm] = useState<CreateLinkFormState>(EMPTY_FORM);
   const [createError, setCreateError] = useState<string | null>(null);
@@ -155,6 +179,18 @@ export function CreateLinkSection() {
       );
     }
   }, [rawProfile.data?.type]);
+
+  // Pin the registration mode to the network's default once the config
+  // loads. Prefer the `form` key (full-profile, legacy default) when the
+  // network declares it, else the first declared mode. Only fills while
+  // empty so a user selection stays sticky.
+  useEffect(() => {
+    const modes = cfg?.registration_modes ?? {};
+    const keys = Object.keys(modes);
+    if (keys.length === 0) return;
+    const fallback = keys.includes('form') ? 'form' : keys[0]!;
+    setForm((f) => (f.registration_mode ? f : { ...f, registration_mode: fallback }));
+  }, [cfg?.registration_modes]);
 
   // Prefill state / district / event location from the aggregator's first
   // postal address. User can still override. Only fills on first load —
@@ -193,6 +229,7 @@ export function CreateLinkSection() {
       await create.mutateAsync({
         domain: form.domain,
         status: 'draft',
+        registration_mode: form.registration_mode,
         ...(slug ? { slug } : {}),
         title,
         context: {
@@ -203,6 +240,7 @@ export function CreateLinkSection() {
           lever_event: form.lever_event || undefined,
           event_date: form.event_date || undefined,
           event_location: form.event_location || undefined,
+          ...(parseTags(form.tags).length > 0 ? { tags: parseTags(form.tags) } : {}),
         },
       });
       // Refresh the form so the user can compose the next link from scratch.
@@ -291,6 +329,36 @@ export function CreateLinkSection() {
              */}
             <input className="bd-input" value={domainLabel} readOnly aria-readonly="true" />
           </Field>
+          {/*
+           * Per-link registration mode — chosen here at create time, immutable
+           * afterwards. Options are sourced from the live network config's
+           * `registration_modes` so adding a channel (sms, kiosk, …) needs no
+           * web change. The mode's `public_hint_i18n_key` is intentionally NOT
+           * shown here — it is end-user copy for the public submission form,
+           * not for the aggregator creating the link.
+           */}
+          <Field label={t('create_link.field_registration_mode')} required>
+            <select
+              className="bd-input"
+              value={form.registration_mode}
+              onChange={(e) => setForm((f) => ({ ...f, registration_mode: e.target.value }))}
+            >
+              {Object.entries(cfg?.registration_modes ?? {}).map(([key, mode]) => (
+                <option key={key} value={key}>
+                  {tRoot(mode.label_i18n_key)}
+                </option>
+              ))}
+            </select>
+          </Field>
+          {/* Optional free-form tags (comma-separated). Stored on context.tags. */}
+          <Field label={t('create_link.field_tags')}>
+            <input
+              className="bd-input"
+              value={form.tags}
+              onChange={(e) => setForm((f) => ({ ...f, tags: e.target.value }))}
+              placeholder={t('create_link.placeholder_tags')}
+            />
+          </Field>
           <div className="md:col-span-2 flex items-center justify-end gap-2 mt-2 flex-wrap">
             <Button onClick={onCreate} disabled={create.isPending}>
               {create.isPending ? t('create_link.creating') : t('create_link.create_button')}
@@ -372,6 +440,11 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
     lever_event: ctxString('lever_event'),
     event_date: ctxString('event_date'),
     event_location: ctxString('event_location'),
+    // Carry the existing link's mode so the edit form can render a
+    // read-only badge. registration_mode is immutable post-create so the
+    // edit path must not POST a new value.
+    registration_mode: link.registration_mode ?? 'form',
+    tags: Array.isArray(ctx['tags']) ? (ctx['tags'] as string[]).join(', ') : '',
   }));
   const [editError, setEditError] = useState<string | null>(null);
   const onSaveEdit = async () => {
@@ -395,6 +468,7 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
             lever_event: editForm.lever_event || undefined,
             event_date: editForm.event_date || undefined,
             event_location: editForm.event_location || undefined,
+            tags: parseTags(editForm.tags),
           },
         },
       });

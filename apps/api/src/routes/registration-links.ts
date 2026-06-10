@@ -76,10 +76,6 @@ async function fetchLinkMetrics(
   return out;
 }
 
-// `domain` is validated at parse-time as a non-empty string and then
-// checked against the live network config's `domainIds` inside the
-// handler — that lets the schema accept any network's domain (e.g.
-// orange_dot's `tourist`/`practitioner`) without hardcoding the enum.
 const CreateLinkBodySchema = z.object({
   domain: z.string().min(1),
   /**
@@ -96,6 +92,17 @@ const CreateLinkBodySchema = z.object({
     .optional(),
   context: z.record(z.unknown()).default({}),
   status: z.enum(['draft', 'live']).default('draft'),
+  /**
+   * Per-link admin-facing registration mode key (e.g. `voice`, `form`). The
+   * mode → form-shape mapping lives in network config under
+   * `registration_modes`; the key is validated against the live config in the
+   * handler. Omitted defaults to the network's `form` mode. Open snake_case
+   * identifier. Immutable after creation (PATCH route .strict()-rejects it).
+   */
+  registration_mode: z
+    .string()
+    .regex(/^[a-z][a-z0-9_]*$/)
+    .optional(),
   expires_at: z
     .string()
     .datetime({ offset: true })
@@ -160,6 +167,21 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
     }
     enforceAggregatorType(auth, body.domain);
 
+    const declaredModes = Object.keys(networkCfg.aggregator.registration_modes ?? {});
+    // Omitted mode preserves the legacy full-profile default: prefer the
+    // `form` key (DB column default) when the network declares it, else the
+    // first declared mode. Never silently downgrade an omitted link to an
+    // account_only channel.
+    const modeKey =
+      body.registration_mode ??
+      (declaredModes.includes('form') ? 'form' : declaredModes[0]) ??
+      'form';
+    if (!declaredModes.includes(modeKey)) {
+      throw httpError('INVALID_REGISTRATION_MODE', {
+        detail: `registration_mode '${modeKey}' is not declared for this network`,
+        fields: { declared: declaredModes },
+      });
+    }
     const store = getRegistrationLinksStore();
 
     // Slug allocation. If the caller supplied a slug, try it first; collisions
@@ -180,6 +202,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
         domain: body.domain,
         context: body.context,
         status: body.status,
+        registrationMode: modeKey,
         expiresAt: body.expires_at,
         createdBy: auth.userId,
       });
@@ -668,6 +691,7 @@ async function buildResponse(
     slug: row.slug,
     domain: row.domain,
     status: row.status,
+    registration_mode: row.registrationMode,
     context: row.context,
     expires_at: row.expiresAt ? row.expiresAt.toISOString() : null,
     public_url: publicUrl,

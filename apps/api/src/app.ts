@@ -21,6 +21,7 @@ import { registerAggregatorProfileRoutes } from './routes/aggregator-profile.js'
 import { registerBulkUploadsRoutes } from './routes/bulk-uploads.js';
 import { registerRegistrationLinksRoutes } from './routes/registration-links.js';
 import { registerPublicRegistrationLinkRoutes } from './routes/public-registration-links.js';
+import { registerPublicLookupRoute } from './routes/public-lookup.js';
 import { registerOnboardingRoutes } from './routes/onboarding.js';
 import { registerDashboardRoutes } from './routes/dashboard.js';
 import { registerAggregatorConfigRoutes } from './routes/aggregator-config.js';
@@ -112,6 +113,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await registerBulkUploadsRoutes(app);
   await registerRegistrationLinksRoutes(app);
   await registerPublicRegistrationLinkRoutes(app);
+  await registerPublicLookupRoute(app);
   await registerOnboardingRoutes(app);
   await registerDashboardRoutes(app);
   await registerAggregatorConfigRoutes(app);

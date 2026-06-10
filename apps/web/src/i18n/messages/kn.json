@@ -18,6 +18,12 @@
     "complete": "ಪೂರ್ಣ",
     "incomplete": "ಅಪೂರ್ಣ"
   },
+  "Lifecycle": {
+    "draft": "ಕರಡು",
+    "live": "ಸಕ್ರಿಯ",
+    "paused": "ತಡೆಹಿಡಿಯಲಾಗಿದೆ",
+    "account_only": "ಖಾತೆ ಮಾತ್ರ"
+  },
   "metadata": {
     "title": "ಅಗ್ರಿಗೇಟರ್ ಪೋರ್ಟಲ್",
     "description": "ಸಿಗ್ನಲ್‌ಸ್ಟ್ಯಾಕ್ ಆಧಾರಿತ ಭಾಗವಹಿಸುವ ನೆಟ್‌ವರ್ಕ್‌ಗಳಿಗಾಗಿ ಅಗ್ರಿಗೇಟರ್ ಪೋರ್ಟಲ್."
@@ -64,6 +70,7 @@
       "provider": "ಪೂರೈಕೆದಾರ",
       "joined": "ಸೇರಿದ ದಿನಾಂಕ",
       "profileStatus": "ಪ್ರೊಫೈಲ್ ಸ್ಥಿತಿ",
+      "lifecycle": "ಜೀವನಚಕ್ರ",
       "status": "ಸ್ಥಿತಿ",
       "recommendedAction": "ಶಿಫಾರಸ್ಸು ಮಾಡಿದ ಕ್ರಮ",
       "applied": "ಅರ್ಜಿ ಸಲ್ಲಿಸಿದ",
@@ -72,7 +79,13 @@
       "count": "{total} ರಲ್ಲಿ {shown}"
     },
     "filters": {
-      "all_statuses": "ಎಲ್ಲಾ ಸ್ಥಿತಿಗಳು"
+      "all_statuses": "ಎಲ್ಲಾ ಸ್ಥಿತಿಗಳು",
+      "lifecycle_label": "ಜೀವನಚಕ್ರ",
+      "lifecycle_all": "ಎಲ್ಲಾ ಜೀವನಚಕ್ರಗಳು",
+      "lifecycle_draft": "ಕರಡು",
+      "lifecycle_live": "ಸಕ್ರಿಯ",
+      "lifecycle_paused": "ತಡೆಹಿಡಿಯಲಾಗಿದೆ",
+      "lifecycle_account_only": "ಖಾತೆ ಮಾತ್ರ"
     },
     "aria": {
       "search_participants": "ಭಾಗವಹಿಸುವವರನ್ನು ಹುಡುಕಿ",
@@ -112,6 +125,14 @@
       "withApplications": "ಅರ್ಜಿಗಳೊಂದಿಗೆ {entityPlural}",
       "newParticipants": "ಹೊಸ ಭಾಗವಹಿಸುವವರು",
       "delta_this_week": "ಈ ವಾರ"
+    },
+    "tiles": {
+      "lifecycle": {
+        "draft": "ಕರಡು ಪ್ರೊಫೈಲ್‌ಗಳು",
+        "live": "ಸಕ್ರಿಯ ಪ್ರೊಫೈಲ್‌ಗಳು",
+        "paused": "ತಡೆಹಿಡಿದ ಪ್ರೊಫೈಲ್‌ಗಳು",
+        "account_only": "ಖಾತೆ-ಮಾತ್ರ ಬಳಕೆದಾರರು"
+      }
     },
     "opp": {
       "activeProgramsLabel": "ಸಕ್ರಿಯ ಕಾರ್ಯಕ್ರಮಗಳು",
@@ -216,10 +237,13 @@
       "field_event_location": "ಕಾರ್ಯಕ್ರಮದ ಸ್ಥಳ",
       "field_district": "ಜಿಲ್ಲೆ",
       "field_domain": "ಡೊಮೇನ್",
+      "field_registration_mode": "ಅಭಿಯಾನ ಪ್ರಕಾರ",
+      "field_tags": "ಟ್ಯಾಗ್‌ಗಳು (ಐಚ್ಛಿಕ)",
       "placeholder_state": "ರಾಜ್ಯ",
       "placeholder_event": "ಅಭಿಯಾನ ಅಥವಾ ಕಾರ್ಯಕ್ರಮದ ಹೆಸರು",
       "placeholder_location": "ನಗರ ಅಥವಾ ಸ್ಥಳ",
       "placeholder_district": "ಜಿಲ್ಲೆ",
+      "placeholder_tags": "ಅಲ್ಪವಿರಾಮದಿಂದ ಬೇರ್ಪಡಿಸಿ, ಉದಾ. priority, dharwad-drive",
       "creating": "ರಚಿಸಲಾಗುತ್ತಿದೆ…",
       "create_button": "ಲಿಂಕ್ ರಚಿಸಿ",
       "qr_label": "QR ಕೋಡ್",
@@ -344,7 +368,38 @@
       "error_network_title": "ನೆಟ್‌ವರ್ಕ್ ದೋಷ",
       "error_network_detail": "ಸರ್ವರ್ ತಲುಪಲಾಗಲಿಲ್ಲ.",
       "error_submission_title": "ಸಲ್ಲಿಕೆ ವಿಫಲವಾಗಿದೆ",
-      "error_server_detail": "ಸರ್ವರ್ HTTP {status} ಹಿಂದಿರುಗಿಸಿದೆ."
+      "error_server_detail": "ಸರ್ವರ್ HTTP {status} ಹಿಂದಿರುಗಿಸಿದೆ.",
+      "lookup": {
+        "owned_elsewhere_title": "ಸಂಪರ್ಕ ಈಗಾಗಲೇ ನೋಂದಾಯಿಸಲಾಗಿದೆ",
+        "owned_elsewhere_body": "ಈ ಇಮೇಲ್ ಅಥವಾ ಮೊಬೈಲ್ ಬೇರೊಂದು ಸಂಸ್ಥೆಯೊಂದಿಗೆ ಈಗಾಗಲೇ ನೋಂದಾಯಿಸಲಾಗಿದೆ. ದಯವಿಟ್ಟು ಬೇರೆ ಸಂಪರ್ಕ ಬಳಸಿ ಅಥವಾ ಆ ಸಂಸ್ಥೆಯ ಮೂಲಕ ಸೈನ್ ಇನ್ ಮಾಡಿ.",
+        "owned_elsewhere_cta": "ಬೇರೆ ಸಂಪರ್ಕ ಬಳಸಿ",
+        "resume_title": "ನಿಮ್ಮ ಪ್ರೊಫೈಲ್ ಪ್ರಗತಿಯಲ್ಲಿದೆ",
+        "resume_body": "ಈ ಸಂಪರ್ಕಕ್ಕಾಗಿ ಅಪೂರ್ಣ ಪ್ರೊಫೈಲ್ ಕಂಡುಬಂದಿದೆ. ಬಿಟ್ಟ ಸ್ಥಳದಿಂದ ಮುಂದುವರಿಸಬೇಕೆ?",
+        "resume_cta": "ಪ್ರೊಫೈಲ್ ಮುಂದುವರಿಸಿ",
+        "resume_continue_new": "ಹೊಸ ಸಲ್ಲಿಕೆಯೊಂದಿಗೆ ಮುಂದುವರಿಸಿ"
+      },
+      "account_only": {
+        "title": "ತ್ವರಿತ ಸೈನ್-ಅಪ್",
+        "helper": "ನಿಮ್ಮ ಹೆಸರು ಮತ್ತು ಒಂದು ಸಂಪರ್ಕ ಸಂಖ್ಯೆ ಅಥವಾ ಇಮೇಲ್ ನೀಡಿ. ನಿಮ್ಮ ಪ್ರೊಫೈಲ್ ಅನ್ನು ನೀವು ನಂತರ ಪೂರ್ಣಗೊಳಿಸಬಹುದು.",
+        "contact_label": "ಫೋನ್ ಅಥವಾ ಇಮೇಲ್ ನೀಡಿ (ಕನಿಷ್ಠ ಒಂದು ಅಗತ್ಯವಿದೆ)",
+        "name_label": "ಹೆಸರು",
+        "phone_label": "ಫೋನ್",
+        "email_label": "ಇಮೇಲ್",
+        "consent_terms_label": "ನಾನು ನಿಯಮಗಳನ್ನು ಒಪ್ಪುತ್ತೇನೆ",
+        "consent_privacy_label": "ನಾನು ಗೌಪ್ಯತಾ ನೀತಿಯನ್ನು ಒಪ್ಪುತ್ತೇನೆ",
+        "submit_label": "ಸಲ್ಲಿಸಿ"
+      }
+    }
+  },
+  "registration_mode": {
+    "field_label": "ಅಭಿಯಾನ ಪ್ರಕಾರ",
+    "voice": {
+      "label": "ವಾಯ್ಸ್ ಅಭಿಯಾನ",
+      "hint": "ನಿಮ್ಮ ಪ್ರೊಫೈಲ್ ಪೂರ್ಣಗೊಳಿಸಲು ಈ ಸಂಖ್ಯೆಗೆ ನಿಮಗೆ ಕರೆ ಬರುತ್ತದೆ."
+    },
+    "form": {
+      "label": "ಫಾರ್ಮ್ ಭರ್ತಿ",
+      "hint": "ಭಾಗವಹಿಸುವವರು ಆನ್‌ಲೈನ್‌ನಲ್ಲಿ ಪೂರ್ಣ ಪ್ರೊಫೈಲ್ ಭರ್ತಿ ಮಾಡುತ್ತಾರೆ. ಭಾಗಶಃ ಸಲ್ಲಿಕೆಗಳನ್ನು ಸ್ವೀಕರಿಸಲಾಗುತ್ತದೆ."
     }
   },
   "auth": {

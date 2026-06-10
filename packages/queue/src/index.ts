@@ -75,19 +75,42 @@ export interface CronWatchdogJob {
 export interface RedisConnectionOptions {
   /** redis://host:port[/db] — full URL form. Defaults to REDIS_URL env. */
   url?: string;
+  /**
+   * Per-request retry cap. Defaults to `null` (required for BullMQ queue
+   * connections). Non-queue callers (e.g. the API rate limiter) should set a
+   * finite value so a Redis outage fails fast instead of queueing forever.
+   */
+  maxRetriesPerRequest?: number | null;
+  /**
+   * Per-command timeout in ms. Unset for queue connections (BullMQ manages
+   * its own). Set by callers that must bound a single command so a downed
+   * Redis surfaces an error promptly rather than hanging the request.
+   */
+  commandTimeout?: number;
+  /**
+   * When `false`, commands issued while disconnected reject immediately
+   * instead of buffering. Non-queue callers that fail open on Redis errors
+   * should disable it so an outage never blocks the request path.
+   */
+  enableOfflineQueue?: boolean;
 }
 
 /**
- * Returns an ioredis instance configured for BullMQ. Per BullMQ docs,
- * `maxRetriesPerRequest` MUST be `null` for queue connections.
+ * Returns an ioredis instance. Defaults are configured for BullMQ (per its
+ * docs, `maxRetriesPerRequest` MUST be `null` for queue connections); pass
+ * overrides for non-queue callers that need fail-fast semantics.
  *
  * Caller owns the lifetime — call `.disconnect()` on shutdown.
  */
 export function createRedisConnection(opts: RedisConnectionOptions = {}): Redis {
   const url = opts.url ?? process.env.REDIS_URL ?? 'redis://localhost:6379';
   return new Redis(url, {
-    maxRetriesPerRequest: null,
+    maxRetriesPerRequest: opts.maxRetriesPerRequest ?? null,
     enableReadyCheck: true,
+    ...(opts.commandTimeout !== undefined ? { commandTimeout: opts.commandTimeout } : {}),
+    ...(opts.enableOfflineQueue !== undefined
+      ? { enableOfflineQueue: opts.enableOfflineQueue }
+      : {}),
   });
 }
 

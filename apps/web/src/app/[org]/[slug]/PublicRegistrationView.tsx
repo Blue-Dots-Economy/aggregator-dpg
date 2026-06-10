@@ -9,14 +9,38 @@ import { RjsfThemedForm } from '../../../components/forms/RjsfThemed';
 import { BlueDotsLogo } from '../../../components/ui/BlueDotsLogo';
 import { I } from '../../../icons';
 import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
+import { MinimalIdentityForm, type MinimalIdentityPayload } from './MinimalIdentityForm';
 
 export interface PublicRegistrationViewProps {
   org: string;
   slug: string;
+  /**
+   * Active signalstack network id (e.g. 'blue_dot'). Required for the
+   * pre-submit identity probe (`/api/[org]/[slug]/lookup`). Empty string
+   * disables the probe — older API builds may not return this field.
+   */
+  network?: string;
   domain: string;
   context: Record<string, unknown>;
   schema: RJSFSchema;
   uiSchema: Record<string, unknown>;
+  /**
+   * Identity field selectors for the domain (name / phone / email). For the
+   * account_only form, these are the only fields collected — signalstack
+   * creates a user row with no item. Absent on older API builds.
+   */
+  identity?: { name?: string; phone?: string; email?: string } | undefined;
+  /**
+   * Resolved per-link submission shape. `account_only` locks the form to
+   * identity fields only and skips the RJSF profile schema entirely;
+   * `account_and_profile` renders the full profile form.
+   */
+  submissionShape: 'account_only' | 'account_and_profile';
+  /**
+   * Optional i18n key for a hint rendered beneath the public form (e.g. the
+   * voice-call notice for an account_only link). `null` = no hint.
+   */
+  publicHintI18nKey: string | null;
 }
 
 type SubmitState =
@@ -24,6 +48,30 @@ type SubmitState =
   | { status: 'submitting' }
   | { status: 'done'; submissionId: string; outcome: 'passed' | 'skipped' }
   | { status: 'error'; title: string; detail: string; code: string };
+
+/**
+ * Outcome of the pre-submit identity probe — drives the branched UI
+ * (allow normal submit / show owned-elsewhere / offer resume).
+ */
+type LookupOutcome =
+  | { kind: 'allow' }
+  | { kind: 'owned_elsewhere' }
+  | {
+      kind: 'resume';
+      itemId: string;
+      lifecycleStatus: 'draft' | 'live' | 'paused';
+    };
+
+interface LookupResponse {
+  user_exists?: boolean;
+  owned_elsewhere?: boolean;
+  lifecycle_summary?: {
+    primary_item?: {
+      item_id: string;
+      lifecycle_status: 'draft' | 'live' | 'paused';
+    } | null;
+  } | null;
+}
 
 interface SubmitResponse {
   outcome: 'passed' | 'skipped';
@@ -49,14 +97,30 @@ interface ApiErrorEnvelope {
 export function PublicRegistrationView({
   org,
   slug,
+  network = '',
   domain,
   context,
   schema,
   uiSchema,
+  identity,
+  submissionShape,
+  publicHintI18nKey,
 }: PublicRegistrationViewProps): JSX.Element {
   const t = useTranslations('profile.public_reg');
   const [formData, setFormData] = useState<Record<string, unknown>>({});
   const [state, setState] = useState<SubmitState>({ status: 'idle' });
+  /**
+   * Pre-submit probe outcome. `null` = probe hasn't run yet (or returned
+   * "allow"); `owned_elsewhere` / `resume` short-circuit the submit
+   * pipeline and render branched UI instead.
+   */
+  const [lookup, setLookup] = useState<LookupOutcome | null>(null);
+  /**
+   * Forces the next submit to bypass the probe — set when the user picks
+   * "Continue with a new submission" from the resume prompt. One-shot:
+   * cleared the moment the submit fires.
+   */
+  const [bypassProbe, setBypassProbe] = useState(false);
   // Defer required-field error rendering until the user has actually
   // interacted (typed in a field) or attempted submit once. Otherwise
   // RJSF's `liveValidate` paints every required field red on first
@@ -81,7 +145,12 @@ export function PublicRegistrationView({
   // it's a bulk-upload-only field (aggregator-supplied stable ID for dedup).
   // The submit endpoint server-side mints one when missing.
   const formSchema = useMemo<RJSFSchema>(() => {
-    const clone: RJSFSchema = { ...schema };
+    // Deep clone: the transforms below (ref inlining, partial-mode constraint
+    // stripping) mutate nested property objects. A shallow spread would leave
+    // those nested objects shared with the `schema` prop and leak mutations
+    // back into it across renders (e.g. partial-mode deletes surviving a
+    // toggle back to full mode).
+    const clone: RJSFSchema = structuredClone(schema);
     delete (clone as { title?: string }).title;
     delete (clone as { description?: string }).description;
     const props = (clone as { properties?: Record<string, unknown> }).properties;
@@ -89,9 +158,21 @@ export function PublicRegistrationView({
       const { participant_id: _omit, ...rest } = props as Record<string, unknown>;
       (clone as { properties?: Record<string, unknown> }).properties = rest;
     }
+    // Form mode silently accepts partial submissions: only the identity
+    // fields signals needs (name + at least one contact) stay required, so a
+    // participant can save a partial profile and finish later. signals'
+    // classifier marks the resulting item `draft` when profile fields are
+    // missing. Everything else (including `participant_id`) drops out of
+    // `required`. The server re-applies the same leniency (drops Ajv
+    // `required` errors), so this only governs the client RJSF gate.
+    const identityKeys = new Set(
+      [identity?.name, identity?.phone, identity?.email].filter(
+        (k): k is string => typeof k === 'string' && k.length > 0,
+      ),
+    );
     const required = (clone as { required?: string[] }).required;
     if (Array.isArray(required)) {
-      (clone as { required?: string[] }).required = required.filter((r) => r !== 'participant_id');
+      (clone as { required?: string[] }).required = required.filter((r) => identityKeys.has(r));
     }
     // Inline `items.$ref → #/$defs/<x>` enum hits so RJSF's checkboxes
     // widget receives a populated `enumOptions` list. RJSF's runtime
@@ -125,9 +206,21 @@ export function PublicRegistrationView({
           (inlined[field] as Record<string, unknown>).uniqueItems = true;
         }
       }
+      // Partial-accept: dropping a field from `required` is not enough — RJSF
+      // seeds array fields with `[]` (trips `minItems`) and the form starts
+      // with empty strings (trips `minLength`). Strip the minimum-presence
+      // constraints from every non-identity field so a bare identity submit
+      // validates client-side. enum / format / type stay — those only fire on
+      // a value the participant actually entered.
+      for (const [field, def] of Object.entries(inlined)) {
+        if (identityKeys.has(field) || !def || typeof def !== 'object') continue;
+        delete (def as Record<string, unknown>)['minItems'];
+        delete (def as Record<string, unknown>)['minLength'];
+        delete (def as Record<string, unknown>)['minimum'];
+      }
     }
     return clone;
-  }, [schema]);
+  }, [schema, identity]);
 
   // Default uiSchema cleanups: array fields become a single comma-separated
   // tag input (no "Add another entry" row-builder), boolean / required-string
@@ -210,10 +303,103 @@ export function PublicRegistrationView({
     .filter((v): v is string => typeof v === 'string' && v.length > 0)
     .join(' · ');
 
+  /**
+   * Runs the identity probe before the actual submit. Picks `email` or
+   * `phone` off the RJSF form data and asks the BFF whether this contact
+   * already lives in signalstack — either with another aggregator
+   * (`owned_elsewhere`) or as an unfinished profile under us (`resume`).
+   *
+   * Returns `{ kind: 'allow' }` when no identity is supplied, when the
+   * network id is unknown, when the BFF errors, or when the probe says
+   * the contact is new — i.e. the caller should proceed with submit.
+   *
+   * @param values - Current RJSF formData.
+   * @returns Branching outcome consumed by `handleSubmit`.
+   */
+  const runIdentityProbe = async (values: Record<string, unknown>): Promise<LookupOutcome> => {
+    if (!network) return { kind: 'allow' };
+    // Read identity off the form using the network's field selectors
+    // (e.g. purple_dot's `mobile_number`, orange_dot's own keys), not a
+    // hardcoded `phone`/`email`. Without this the probe silently misses the
+    // contact on non-standard-field networks and owned_elsewhere no-ops.
+    // Fall back to the common keys when the config omits a selector.
+    const emailKey = identity?.email;
+    const phoneKey = identity?.phone;
+    const emailRaw = emailKey ? values[emailKey] : values['email'];
+    const phoneRaw = phoneKey
+      ? values[phoneKey]
+      : (values['phone'] ?? values['phone_number'] ?? values['mobile']);
+    const email = typeof emailRaw === 'string' && emailRaw.trim().length > 0 ? emailRaw.trim() : '';
+    const phone = typeof phoneRaw === 'string' && phoneRaw.trim().length > 0 ? phoneRaw.trim() : '';
+    if (!email && !phone) return { kind: 'allow' };
+    const qs = new URLSearchParams();
+    if (email) qs.set('email', email);
+    if (phone) qs.set('phone_number', phone);
+    qs.set('network', network);
+    qs.set('domain', domain);
+    let res: Response;
+    try {
+      res = await fetch(
+        `/api/${encodeURIComponent(org)}/${encodeURIComponent(slug)}/lookup?${qs.toString()}`,
+        { method: 'GET', headers: { accept: 'application/json' } },
+      );
+    } catch {
+      // Network blip — fall through to a normal submit; the API will
+      // either accept the row or surface a dedup 409 itself.
+      return { kind: 'allow' };
+    }
+    if (!res.ok) return { kind: 'allow' };
+    const body = (await res.json().catch(() => ({}))) as LookupResponse;
+    if (body.owned_elsewhere) return { kind: 'owned_elsewhere' };
+    const primary = body.lifecycle_summary?.primary_item;
+    if (
+      primary &&
+      (primary.lifecycle_status === 'draft' || primary.lifecycle_status === 'paused')
+    ) {
+      return {
+        kind: 'resume',
+        itemId: primary.item_id,
+        lifecycleStatus: primary.lifecycle_status,
+      };
+    }
+    return { kind: 'allow' };
+  };
+
+  /**
+   * Identity-only submit for `submission_shape === 'account_only'` links.
+   * Delegates to {@link handleSubmit} with a synthesised RJSF event so the
+   * probe + POST + state handling stays in one place. The server enforces
+   * the capture-scope; this form simply does not collect profile fields.
+   */
+  const handleMinimalSubmit = async (payload: MinimalIdentityPayload): Promise<void> => {
+    await handleSubmit(
+      { formData: payload as unknown as Record<string, unknown> } as IChangeEvent<
+        Record<string, unknown>
+      >,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      undefined as any,
+    );
+  };
+
   const handleSubmit = async (
     e: IChangeEvent<Record<string, unknown>>,
     _event: FormEvent<HTMLFormElement>,
   ): Promise<void> => {
+    const values = (e.formData ?? {}) as Record<string, unknown>;
+    // Pre-submit probe. Skipped when the user has explicitly chosen
+    // "Continue with a new submission" after a resume prompt.
+    if (!bypassProbe) {
+      setState({ status: 'submitting' });
+      const outcome = await runIdentityProbe(values);
+      if (outcome.kind !== 'allow') {
+        setLookup(outcome);
+        setState({ status: 'idle' });
+        return;
+      }
+    } else {
+      setBypassProbe(false);
+    }
+    setLookup(null);
     setState({ status: 'submitting' });
     try {
       const res = await fetch(
@@ -221,7 +407,10 @@ export function PublicRegistrationView({
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(e.formData ?? {}),
+          // Full profile submit. The server resolves the link's
+          // registration_mode shape and silently accepts partial profiles
+          // (missing required fields → signals classifies the item `draft`).
+          body: JSON.stringify(values),
         },
       );
       // 409 with outcome=skipped is a dedup hit, not a failure: this
@@ -270,6 +459,38 @@ export function PublicRegistrationView({
 
   // Hero fill — flat solid primary. No gradient shades.
   const heroGradient = cfg.brand.primary_color ?? '#4338ca';
+
+  // `account_only` shape locks the form to identity fields only — render
+  // MinimalIdentityForm and skip the RJSF profile tree entirely. Owned-
+  // elsewhere / resume / done / error states stay shared with the full form
+  // path; only the data-entry surface differs. The full handleSubmit
+  // pipeline runs underneath via handleMinimalSubmit so probe + dedup + 409
+  // handling behave identically.
+  const isAccountOnly = submissionShape === 'account_only';
+
+  if (isAccountOnly && state.status === 'idle' && !lookup) {
+    return (
+      <div
+        className="bd-public-light min-h-screen w-full"
+        style={{
+          background:
+            'radial-gradient(1200px 600px at 50% -10%, var(--bd-tint-primary), transparent 70%), #FBFCFE',
+        }}
+      >
+        <div className="max-w-[640px] mx-auto px-4 sm:px-6 lg:px-10 py-8 sm:py-12">
+          {/* This branch only renders while state is 'idle', so the parent
+              has no in-flight signal to pass — the form's own internal submit
+              guard prevents the double-tap during the async probe. */}
+          <MinimalIdentityForm
+            identity={identity ?? {}}
+            onSubmit={handleMinimalSubmit}
+            brandColor={heroGradient}
+            hintI18nKey={publicHintI18nKey}
+          />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -369,6 +590,102 @@ export function PublicRegistrationView({
                         Code: {state.code}
                       </div>
                     )}
+                  </div>
+                ) : null}
+
+                {lookup?.kind === 'owned_elsewhere' ? (
+                  <div
+                    role="alert"
+                    data-testid="lookup-owned-elsewhere"
+                    className="mb-5 rounded-[10px] border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-800"
+                  >
+                    <div className="font-semibold">{t('lookup.owned_elsewhere_title')}</div>
+                    <div className="mt-1 text-amber-700">{t('lookup.owned_elsewhere_body')}</div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLookup(null);
+                        // Clear the offending identity fields so the user
+                        // can edit and retry. Use the network's field
+                        // selectors (config-driven) and fall back to the
+                        // common keys. Other field values stay.
+                        setFormData((prev) => {
+                          const next = { ...prev };
+                          for (const key of [
+                            identity?.email,
+                            identity?.phone,
+                            'email',
+                            'phone',
+                            'phone_number',
+                            'mobile',
+                          ]) {
+                            if (key) delete next[key];
+                          }
+                          return next;
+                        });
+                      }}
+                      className="mt-3 text-[12px] font-semibold underline text-amber-900 hover:text-amber-700"
+                    >
+                      {t('lookup.owned_elsewhere_cta')}
+                    </button>
+                  </div>
+                ) : null}
+
+                {lookup?.kind === 'resume' ? (
+                  <div
+                    role="alert"
+                    data-testid="lookup-resume"
+                    className="mb-5 rounded-[10px] border border-sky-200 bg-sky-50 px-4 py-3 text-[13px] text-sky-800"
+                  >
+                    <div className="font-semibold">{t('lookup.resume_title')}</div>
+                    <div className="mt-1 text-sky-700">{t('lookup.resume_body')}</div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          // Resume = let the upstream lifecycle parser
+                          // dedup against the existing item by identity.
+                          // No client-side state to thread: the server
+                          // finds the same item_id via signalstack probe.
+                          setLookup(null);
+                          setBypassProbe(true);
+                        }}
+                        style={{ backgroundColor: cfg.brand.primary_color }}
+                        className="px-3 py-2 rounded-[8px] font-semibold text-[12px] text-white hover:opacity-90"
+                      >
+                        {t('lookup.resume_cta')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          // "New submission" = the user wants to register
+                          // under different contact details. Clear the
+                          // identity fields and DON'T bypass — so the new
+                          // identity is re-probed on the next submit (rather
+                          // than silently resuming the existing draft, which
+                          // is what the "Resume" button above does).
+                          setLookup(null);
+                          setBypassProbe(false);
+                          setFormData((prev) => {
+                            const next = { ...prev };
+                            for (const key of [
+                              identity?.email,
+                              identity?.phone,
+                              'email',
+                              'phone',
+                              'phone_number',
+                              'mobile',
+                            ]) {
+                              if (key) delete next[key];
+                            }
+                            return next;
+                          });
+                        }}
+                        className="px-3 py-2 rounded-[8px] font-semibold text-[12px] text-sky-900 underline hover:text-sky-700"
+                      >
+                        {t('lookup.resume_continue_new')}
+                      </button>
+                    </div>
                   </div>
                 ) : null}
 

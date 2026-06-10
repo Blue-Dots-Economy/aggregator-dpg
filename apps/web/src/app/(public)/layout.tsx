@@ -10,7 +10,7 @@ import { LanguageSwitcher } from '../../components/shell/LanguageSwitcher';
 export default function PublicAuthLayout({ children }: { children: ReactNode }) {
   return (
     <div className="bd-public-light relative">
-      <div className="absolute right-4 top-4 z-10">
+      <div className="absolute right-4 top-4 z-50">
         <LanguageSwitcher />
       </div>
       {children}

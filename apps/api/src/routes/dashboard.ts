@@ -23,8 +23,40 @@ import { authenticate, requireApproved, type AuthContext } from '../services/aut
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
 import { getNetworkConfig } from '../services/network-config.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
+import type { SignalStackProfile } from '@aggregator-dpg/signalstack-writer/interface';
+import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
+import { resolveLifecycle } from '../services/onboarding/lifecycle.js';
 import { config } from '../config.js';
 import { httpError } from '../errors/http-error.js';
+
+/**
+ * Upper bound on items considered for lifecycle tile counts. Tiles are
+ * computed by fetching up to this many rows (lifecycle_filter='all') in
+ * parallel with the user's paginated items fetch. Aggregators with more
+ * items than this cap get approximate tile counts (capped at TILE_CAP per
+ * bucket); the response surfaces `meta.tiles_truncated: true` so the UI
+ * can render a "showing N+" affordance. Lift once signals exposes a
+ * server-side per-lifecycle count endpoint.
+ */
+const TILE_CAP = 1000;
+
+/**
+ * Max rows signalstack's `fetch_local` accepts per request (`limit` is
+ * validated `<= 100` upstream). Any wider window — a >100 page or the
+ * TILE_CAP sweep — is gathered by paging at this size. Keep in sync with
+ * signals' validator; exceeding it returns 400 SIGNALSTACK_BAD_REQUEST.
+ */
+const SS_MAX_PAGE = 100;
+
+/**
+ * Lifecycle filter accepted by the dashboard items endpoint.
+ *
+ *   - `draft|live|paused` — narrows the returned items to that lifecycle bucket.
+ *   - `account_only` — participants that exist locally but have no signals
+ *     item; items array is always empty for this filter (account-only rows
+ *     live in the local `participants` table, not in signals items).
+ */
+const LifecycleFilterSchema = z.enum(['draft', 'live', 'paused', 'account_only']).optional();
 
 /**
  * Domain accepts any string at the schema layer — the resolved network
@@ -35,6 +67,7 @@ const ItemsQuerySchema = z.object({
   domain: z.string().min(1),
   limit: z.coerce.number().int().min(1).max(200).optional().default(50),
   offset: z.coerce.number().int().min(0).optional().default(0),
+  lifecycle: LifecycleFilterSchema,
 });
 
 /**
@@ -94,7 +127,7 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
         fields: { issues: parsed.error.issues },
       });
     }
-    const { domain, limit, offset } = parsed.data;
+    const { domain, limit, offset, lifecycle } = parsed.data;
 
     const networkCfg = await getNetworkConfig();
     const domainCfg = networkCfg.domains[domain];
@@ -112,35 +145,135 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
       });
     }
 
-    const result = await ss.listItemsByAggregator({
+    // Tiles must reflect the FULL aggregator dataset, not the paginated
+    // items slice. Fetch the user's page and a separate tile-compute set
+    // in parallel. `TILE_CAP` is the upper bound on rows considered for
+    // tile counts: aggregators with more items than the cap get
+    // approximate tiles (capped at TILE_CAP each) until signals exposes
+    // a server-side per-lifecycle count endpoint.
+    const baseQuery = {
       aggregator_id: auth.aggregatorId,
       item_network: config.SIGNALSTACK_ITEM_NETWORK,
       item_domain: domain,
       item_type: domainCfg.itemType,
-      limit,
-      offset,
-    });
+      lifecycle_filter: 'all' as const,
+    };
 
-    if (!result.success) {
+    // signalstack's `fetch_local` caps `limit` at SS_MAX_PAGE per request, so
+    // any window wider than that (a >100 page, or the TILE_CAP tile sweep) is
+    // gathered by paging. Returns the accumulated rows + the upstream `total`
+    // (taken from the first page's meta), or the upstream error verbatim so
+    // the existing error branches still fire.
+    const collect = async (
+      startOffset: number,
+      count: number,
+    ): Promise<
+      { ok: true; items: SignalStackProfile[]; total: number } | { ok: false; error: BaseError }
+    > => {
+      const items: SignalStackProfile[] = [];
+      let total = 0;
+      while (items.length < count) {
+        const pageLimit = Math.min(SS_MAX_PAGE, count - items.length);
+        const res = await ss.listItemsByAggregator({
+          ...baseQuery,
+          limit: pageLimit,
+          offset: startOffset + items.length,
+        });
+        if (!res.success) return { ok: false, error: res.error };
+        total = res.value.meta.total;
+        items.push(...res.value.items);
+        if (res.value.items.length < pageLimit) break; // last page reached
+      }
+      return { ok: true, items, total };
+    };
+
+    const [itemsResult, tilesResult] = await Promise.all([
+      collect(offset, limit),
+      collect(0, TILE_CAP),
+    ]);
+
+    if (!itemsResult.ok) {
       log.error({
         status: 'failure',
         sub: 'signalstack.list',
-        error: result.error.message,
-        code: result.error.code,
+        error: itemsResult.error.message,
+        code: itemsResult.error.code,
       });
       throw httpError('INTERNAL', {
-        detail: `Signalstack list failed: ${result.error.code}`,
-        cause: result.error,
+        detail: `Signalstack list failed: ${itemsResult.error.code}`,
+        cause: itemsResult.error,
       });
+    }
+    if (!tilesResult.ok) {
+      log.error({
+        status: 'failure',
+        sub: 'signalstack.list.tiles',
+        error: tilesResult.error.message,
+        code: tilesResult.error.code,
+      });
+      throw httpError('INTERNAL', {
+        detail: `Signalstack tile list failed: ${tilesResult.error.code}`,
+        cause: tilesResult.error,
+      });
+    }
+
+    // Normalise lifecycle on every row via `resolveLifecycle` so an absent
+    // `lifecycle_status` from older signals deployments shows up as `'live'`.
+    const normalisedItems = itemsResult.items.map((item) => {
+      const lifecycleStatus = resolveLifecycle(item);
+      return {
+        ...item,
+        lifecycle_status: lifecycleStatus ?? 'live',
+      };
+    });
+    const tileRows = tilesResult.items.map((item) => resolveLifecycle(item) ?? 'live');
+
+    // Tiles count the full dataset (up to TILE_CAP). `account_only` is the
+    // local-only bucket — participants who exist in our table but have no
+    // signals item — and requires a participants reader not wired here
+    // yet. v1: report 0 and refine once that reader lands.
+    // TODO: when a participants reader is exposed, count participants for
+    //       this aggregator + domain whose identity (phone/email) is not in
+    //       `tileRows`-corresponding items and surface that here.
+    const tiles = {
+      draft: tileRows.filter((s) => s === 'draft').length,
+      live: tileRows.filter((s) => s === 'live').length,
+      paused: tileRows.filter((s) => s === 'paused').length,
+      account_only: 0,
+    };
+    const tilesTruncated = tilesResult.total > TILE_CAP;
+
+    // Apply the lifecycle filter AFTER tile computation. `account_only` short
+    // circuits to an empty items array — those rows live in `participants`,
+    // not in the signals items response.
+    let filteredItems: typeof normalisedItems;
+    if (lifecycle === 'account_only') {
+      filteredItems = [];
+    } else if (lifecycle) {
+      filteredItems = normalisedItems.filter((i) => i.lifecycle_status === lifecycle);
+    } else {
+      filteredItems = normalisedItems;
     }
 
     log.info({
       status: 'success',
       latency_ms: Date.now() - start,
-      total: result.value.meta.total,
+      total: itemsResult.total,
+      lifecycle_filter: lifecycle ?? null,
+      tiles,
+      tiles_truncated: tilesTruncated,
     });
 
-    return reply.send(result.value);
+    return reply.send({
+      meta: {
+        total: itemsResult.total,
+        limit,
+        offset,
+        tiles,
+        tiles_truncated: tilesTruncated,
+      },
+      items: filteredItems,
+    });
   });
 
   app.get('/v1/dashboard', async (req, reply) => {

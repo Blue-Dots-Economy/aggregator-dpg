@@ -73,6 +73,18 @@ export function buildBlueDotConfig(
       },
       onboarding: { presume_consent: true, bulk_max_rows: 10000 },
       admin_emails: [],
+      registration_modes: {
+        voice: {
+          label_i18n_key: 'registration_mode.voice.label',
+          submission_shape: 'account_only',
+          public_hint_i18n_key: 'registration_mode.voice.hint',
+        },
+        form: {
+          label_i18n_key: 'registration_mode.form.label',
+          submission_shape: 'account_and_profile',
+          public_hint_i18n_key: null,
+        },
+      },
     },
     network: {
       id: 'blue_dot',
@@ -126,6 +138,18 @@ export function buildPurpleDotConfig(
       },
       onboarding: { presume_consent: true, bulk_max_rows: 10000 },
       admin_emails: [],
+      registration_modes: {
+        voice: {
+          label_i18n_key: 'registration_mode.voice.label',
+          submission_shape: 'account_only',
+          public_hint_i18n_key: 'registration_mode.voice.hint',
+        },
+        form: {
+          label_i18n_key: 'registration_mode.form.label',
+          submission_shape: 'account_and_profile',
+          public_hint_i18n_key: null,
+        },
+      },
     },
     network: {
       id: 'purple_dot',
