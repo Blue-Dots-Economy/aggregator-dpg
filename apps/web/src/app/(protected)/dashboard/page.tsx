@@ -1317,7 +1317,9 @@ function SeekersTab() {
  */
 function fmtCount(n: number | null | undefined): string {
   if (n === undefined || n === null) return '—';
-  return String(n);
+  // Integers render clean; fractional values (e.g. avg_items_per_user) are
+  // capped at 2 decimals with trailing zeros dropped (1.1666… → "1.17").
+  return n.toLocaleString('en-US', { maximumFractionDigits: 2 });
 }
 
 /**
