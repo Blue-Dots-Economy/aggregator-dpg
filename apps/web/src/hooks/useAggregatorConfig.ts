@@ -30,6 +30,9 @@ export interface DashboardTileDef {
 export interface DashboardTiles {
   profile?: DashboardTileDef[];
   user?: DashboardTileDef[];
+  /** Optional group-heading overrides; UI falls back to localised "Profiles" / "Users". */
+  profile_title?: string;
+  user_title?: string;
 }
 
 /**

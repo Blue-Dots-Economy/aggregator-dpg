@@ -1827,7 +1827,7 @@ function SeekersTab() {
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         {/* Profile-level tiles */}
-        <MetricGroup title={t('groups.profiles')}>
+        <MetricGroup title={seekerCfg?.dashboardTiles?.profile_title ?? t('groups.profiles')}>
           {resolveTiles(seekerCfg?.dashboardTiles?.profile, defaultTiles.profile, rollup).map(
             (tile) => (
               <MiniStat
@@ -1842,7 +1842,7 @@ function SeekersTab() {
         </MetricGroup>
 
         {/* User-level tiles */}
-        <MetricGroup title={t('groups.users')}>
+        <MetricGroup title={seekerCfg?.dashboardTiles?.user_title ?? t('groups.users')}>
           {resolveTiles(seekerCfg?.dashboardTiles?.user, defaultTiles.user, rollup).map((tile) => (
             <MiniStat
               key={`u-${tile.field}`}
@@ -2165,7 +2165,7 @@ function ProvidersTab() {
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         {/* Profile-level tiles */}
-        <MetricGroup title={t('groups.profiles')}>
+        <MetricGroup title={providerCfg?.dashboardTiles?.profile_title ?? t('groups.profiles')}>
           {resolveTiles(providerCfg?.dashboardTiles?.profile, defaultTiles.profile, rollup).map(
             (tile) => (
               <MiniStat
@@ -2180,7 +2180,7 @@ function ProvidersTab() {
         </MetricGroup>
 
         {/* User-level tiles */}
-        <MetricGroup title={t('groups.users')}>
+        <MetricGroup title={providerCfg?.dashboardTiles?.user_title ?? t('groups.users')}>
           {resolveTiles(providerCfg?.dashboardTiles?.user, defaultTiles.user, rollup).map(
             (tile) => (
               <MiniStat
