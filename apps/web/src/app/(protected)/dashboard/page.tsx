@@ -12,6 +12,7 @@ import { SegmentedTabs, type SegmentedTab } from '../../../components/ui/Segment
 import { Topbar } from '../../../components/shell/Topbar';
 import { I, type IconName } from '../../../icons';
 import { useOppProviders, useDashboard } from '../../../hooks/useDashboard';
+import { useOnboardingSummary, useOnboardingBySource } from '../../../hooks/useOnboarding';
 import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
 import { dashboardService, type LifecycleFilter } from '../../../services/dashboard.service';
 import { mapDirectional } from '../../../services/row-mapping';
@@ -283,6 +284,238 @@ function MetricGroup({ title, children }: { title: string; children: ReactNode }
       </div>
       <div className="grid flex-1 grid-cols-1 sm:grid-cols-3 gap-4">{children}</div>
     </div>
+  );
+}
+
+/** Tone classes per onboarding outcome card (design: colored chip + value). */
+const ONBOARDING_TONES = {
+  total: {
+    chip: 'bg-[var(--bd-primary-50)] text-[var(--bd-primary-600)]',
+    value: 'text-ink-900',
+  },
+  passed: { chip: 'bg-emerald-50 text-emerald-600', value: 'text-emerald-700' },
+  failed: { chip: 'bg-rose-50 text-rose-600', value: 'text-rose-600' },
+  skipped: { chip: 'bg-ink-100 text-ink-500', value: 'text-ink-400' },
+} as const;
+
+type OnboardingTone = keyof typeof ONBOARDING_TONES;
+
+function OnboardingStatCard({
+  tone,
+  icon,
+  label,
+  value,
+  sub,
+}: {
+  tone: OnboardingTone;
+  icon: IconName;
+  label: string;
+  value: string;
+  sub: string;
+}) {
+  const t = ONBOARDING_TONES[tone];
+  const Ic = I[icon];
+  return (
+    <div className="bd-card p-4 flex flex-col gap-2.5">
+      <div className={`w-8 h-8 rounded-[9px] flex items-center justify-center ${t.chip}`}>
+        <Ic size={16} />
+      </div>
+      <div className="text-[13px] text-ink-500 font-semibold">{label}</div>
+      <div
+        className={`font-display font-bold text-[26px] leading-none tracking-tight -mt-0.5 ${t.value}`}
+      >
+        {value}
+      </div>
+      <div className="text-[12px] text-ink-400 font-medium -mt-1">{sub}</div>
+    </div>
+  );
+}
+
+/**
+ * Icon + bar colour per onboarding entry source (`onboarding_source` enum).
+ * Unknown future sources fall back to a neutral entry rather than breaking.
+ */
+const ONBOARDING_MODE_META: Record<string, { icon: IconName; color: string }> = {
+  bulk: { icon: 'upload', color: '#10B981' },
+  link: { icon: 'link', color: 'var(--bd-primary-600)' },
+  qr: { icon: 'qr', color: '#F59E0B' },
+};
+
+const ONBOARDING_MODE_FALLBACK: { icon: IconName; color: string } = {
+  icon: 'spark',
+  color: '#8B91A3',
+};
+
+/**
+ * Aggregator-wide onboarding metrics section (design: Onboarding group,
+ * variant A — metric cards + joins-by-mode share bar).
+ *
+ * Renders below the per-domain Profiles/Users groups on every tab. Data
+ * comes from the aggregator's own rollup (`/v1/onboarding/summary` +
+ * `/v1/onboarding/by-source`), NOT signalstack — the header pill and
+ * helper line make the aggregator-wide scope explicit. React Query
+ * dedupes the fetches across tabs.
+ */
+function OnboardingMetrics() {
+  const t = useTranslations('dashboard');
+  const router = useRouter();
+  const summary = useOnboardingSummary();
+  const bySource = useOnboardingBySource();
+
+  const slices = bySource.data?.by_source ?? [];
+  const totalJoins = slices.reduce((acc, s) => acc + s.passed, 0);
+  const pct = (n: number): string =>
+    totalJoins > 0 ? `${Math.round((n / totalJoins) * 1000) / 10}%` : '0%';
+
+  return (
+    <section>
+      <div className="flex items-center justify-between gap-4 flex-wrap mb-1">
+        <div className="flex items-center gap-3">
+          <span className="text-[11.5px] font-bold uppercase tracking-[.09em] text-ink-400">
+            {t('onboardingGroup.title')}
+          </span>
+          <span className="inline-flex items-center gap-1.5 bg-[var(--bd-primary-50)] text-[var(--bd-primary-600)] font-bold text-[11.5px] px-2.5 py-1 rounded-full">
+            <I.globe size={13} />
+            {t('onboardingGroup.aggregatorWide')}
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={() => router.push('/onboarding')}
+          className="inline-flex items-center gap-1.5 text-[13px] font-bold text-[var(--bd-primary-600)]"
+        >
+          {t('onboardingGroup.view')}
+          <I.arrowR size={14} />
+        </button>
+      </div>
+      <div className="text-[13px] text-ink-400 font-medium mb-3.5">
+        {t('onboardingGroup.helper')}
+      </div>
+
+      {summary.isError ? (
+        <div className="bd-card p-5 flex items-center gap-4 flex-wrap border-rose-200 bg-rose-50/50">
+          <div className="w-10 h-10 rounded-[11px] bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
+            <I.alert size={19} />
+          </div>
+          <div className="flex-1 min-w-[200px]">
+            <div className="text-[14.5px] font-bold text-ink-900">
+              {t('onboardingGroup.error_title')}
+            </div>
+            <div className="text-[13px] text-ink-500 mt-0.5">{t('onboardingGroup.error_body')}</div>
+          </div>
+          <Button
+            kind="ghost"
+            icon={<I.refresh size={14} />}
+            onClick={() => {
+              void summary.refetch();
+              void bySource.refetch();
+            }}
+          >
+            {t('onboardingGroup.retry')}
+          </Button>
+        </div>
+      ) : summary.isLoading ? (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {Array.from({ length: 4 }, (_, i) => (
+            <div key={i} className="bd-card p-4 animate-pulse">
+              <div className="w-8 h-8 rounded-[9px] bg-ink-100" />
+              <div className="h-3 w-2/3 rounded-md bg-ink-100 mt-3.5" />
+              <div className="h-6 w-2/5 rounded-md bg-ink-100 mt-3" />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <OnboardingStatCard
+              tone="total"
+              icon="users"
+              label={t('onboardingGroup.total')}
+              value={fmtCount(summary.data?.total)}
+              sub={t('onboardingGroup.total_sub')}
+            />
+            <OnboardingStatCard
+              tone="passed"
+              icon="shield"
+              label={t('onboardingGroup.passed')}
+              value={fmtCount(summary.data?.passed)}
+              sub={t('onboardingGroup.passed_sub')}
+            />
+            <OnboardingStatCard
+              tone="failed"
+              icon="alert"
+              label={t('onboardingGroup.failed')}
+              value={fmtCount(summary.data?.failed)}
+              sub={t('onboardingGroup.failed_sub')}
+            />
+            <OnboardingStatCard
+              tone="skipped"
+              icon="pause"
+              label={t('onboardingGroup.skipped')}
+              value={fmtCount(summary.data?.skipped)}
+              sub={t('onboardingGroup.skipped_sub')}
+            />
+          </div>
+
+          {slices.length > 0 && (
+            <div className="bd-card p-5 mt-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-[14px] font-bold text-ink-700">
+                  {t('onboardingGroup.byMode')}
+                </div>
+                <div className="text-[12.5px] text-ink-400 tabular-nums">
+                  {t('onboardingGroup.joins', { count: totalJoins })}
+                </div>
+              </div>
+              <div className="flex h-3 rounded-full overflow-hidden bg-ink-100 mt-3.5 mb-4 gap-0.5">
+                {slices.map((s) => (
+                  <div
+                    key={s.source}
+                    className="rounded-full"
+                    style={{
+                      width: pct(s.passed),
+                      background: (ONBOARDING_MODE_META[s.source] ?? ONBOARDING_MODE_FALLBACK)
+                        .color,
+                    }}
+                  />
+                ))}
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                {slices.map((s) => {
+                  const meta = ONBOARDING_MODE_META[s.source] ?? ONBOARDING_MODE_FALLBACK;
+                  const Ic = I[meta.icon];
+                  return (
+                    <div key={s.source} className="flex items-center gap-3 min-w-0">
+                      <span
+                        className="w-9 h-9 rounded-[10px] flex items-center justify-center shrink-0 bg-ink-50"
+                        style={{ color: meta.color }}
+                      >
+                        <Ic size={17} />
+                      </span>
+                      <div className="min-w-0">
+                        <div className="text-[12.5px] font-semibold text-ink-500 whitespace-nowrap">
+                          {ONBOARDING_MODE_META[s.source]
+                            ? t(`onboardingGroup.mode_${s.source}`)
+                            : statusLabel(s.source)}
+                        </div>
+                        <div className="flex items-baseline gap-2 mt-0.5">
+                          <span className="font-display font-bold text-[20px] text-ink-900 tabular-nums leading-none">
+                            {s.passed}
+                          </span>
+                          <span className="text-[12px] text-ink-400 tabular-nums">
+                            {pct(s.passed)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </section>
   );
 }
 
@@ -1595,6 +1828,8 @@ function SeekersTab() {
         </MetricGroup>
       </div>
 
+      <OnboardingMetrics />
+
       {isLoading ? (
         <LoadingCard />
       ) : isError ? (
@@ -1931,6 +2166,8 @@ function ProvidersTab() {
           )}
         </MetricGroup>
       </div>
+
+      <OnboardingMetrics />
 
       {isLoading ? (
         <LoadingCard />
