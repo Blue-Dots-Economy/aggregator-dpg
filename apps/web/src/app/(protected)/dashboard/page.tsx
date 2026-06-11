@@ -1008,6 +1008,13 @@ function BulkActionBar({
 
 interface ParticipantTableProps<R extends ParticipantBase> {
   kind: RowKind;
+  /**
+   * Signalstack domain id this table shows, from the live network config
+   * (e.g. `seeker`, or orange_dot's `tourist`). Feeds the bulk-action
+   * context; when omitted, falls back to the legacy seeker/provider
+   * mapping derived from `kind`.
+   */
+  domain?: string | undefined;
   rows: R[];
   /**
    * Total count from signalstack `total_matching` — required to compute
@@ -1052,6 +1059,7 @@ interface ParticipantTableProps<R extends ParticipantBase> {
 
 function ParticipantTable<R extends ParticipantBase>({
   kind,
+  domain,
   rows,
   total,
   page = 1,
@@ -1113,10 +1121,10 @@ function ParticipantTable<R extends ParticipantBase>({
 
   const filterActive = statusFilter !== 'all';
 
-  // Map UI kind onto the signalstack domain for bulk-action context. `opp`
-  // rides on the provider dataset until signalstack exposes a dedicated
-  // opportunity-provider endpoint (mirrors the read path in dashboardService).
-  const exportDomain: 'seeker' | 'provider' = kind === 'seeker' ? 'seeker' : 'provider';
+  // Domain id for the bulk-action context. Prefer the network-config id the
+  // tab resolved (orange_dot's `tourist`, etc.); the legacy seeker/provider
+  // mapping only backstops callers that pass no domain (the opp demo tab).
+  const bulkDomain: string = domain ?? (kind === 'seeker' ? 'seeker' : 'provider');
 
   // Explicit selection mode — the checkbox column only exists while the
   // operator is in "Select" mode (toolbar toggle). Exiting the mode clears
@@ -1279,7 +1287,7 @@ function ParticipantTable<R extends ParticipantBase>({
       {selected.size > 0 && (
         <BulkActionBar
           selectedRows={[...selected.values()]}
-          domain={exportDomain}
+          domain={bulkDomain}
           onClear={() => setSelected(new Map())}
         />
       )}
@@ -1868,6 +1876,7 @@ function SeekersTab() {
           receivedLabels={receivedLabels}
           lifecycleFilter={lifecycleFilter}
           onLifecycleFilterChange={handleLifecycleFilterChange}
+          domain={seekerDomainId}
         />
       )}
     </div>
@@ -2207,6 +2216,7 @@ function ProvidersTab() {
           receivedLabels={receivedLabels}
           lifecycleFilter={lifecycleFilter}
           onLifecycleFilterChange={handleLifecycleFilterChange}
+          domain={providerDomainId}
         />
       )}
     </div>
