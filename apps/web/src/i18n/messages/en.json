@@ -160,7 +160,6 @@
     },
     "onboardingGroup": {
       "title": "Onboarding",
-      "aggregatorWide": "Aggregator-wide",
       "helper": "Rolled up across your network",
       "view": "View onboarding",
       "total": "Total registered",

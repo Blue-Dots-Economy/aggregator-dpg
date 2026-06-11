@@ -370,15 +370,9 @@ function OnboardingMetrics() {
   return (
     <section>
       <div className="flex items-center justify-between gap-4 flex-wrap mb-1">
-        <div className="flex items-center gap-3">
-          <span className="text-[11.5px] font-bold uppercase tracking-[.09em] text-ink-400">
-            {t('onboardingGroup.title')}
-          </span>
-          <span className="inline-flex items-center gap-1.5 bg-[var(--bd-primary-50)] text-[var(--bd-primary-600)] font-bold text-[11.5px] px-2.5 py-1 rounded-full">
-            <I.globe size={13} />
-            {t('onboardingGroup.aggregatorWide')}
-          </span>
-        </div>
+        <span className="text-[11.5px] font-bold uppercase tracking-[.09em] text-ink-400">
+          {t('onboardingGroup.title')}
+        </span>
         <button
           type="button"
           onClick={() => router.push('/onboarding')}
