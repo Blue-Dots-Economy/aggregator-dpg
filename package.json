@@ -16,7 +16,16 @@
     "dev": "turbo run dev",
     "prepare": "husky",
     "new-service": "tsx scripts/new-service.ts",
-    "dep-check": "depcruise packages --config .dependency-cruiser.cjs --output-type err-long"
+    "dep-check": "depcruise packages --config .dependency-cruiser.cjs --output-type err-long",
+    "test:scripts": "node --test scripts/stack.test.mjs",
+    "stack:setup": "node scripts/stack.mjs setup",
+    "stack:up": "node scripts/stack.mjs up",
+    "stack:down": "node scripts/stack.mjs down",
+    "stack:reset": "node scripts/stack.mjs reset",
+    "stack:logs": "node scripts/stack.mjs logs",
+    "stack:ps": "node scripts/stack.mjs ps",
+    "stack:psql": "node scripts/stack.mjs psql",
+    "stack:rebuild-web": "node scripts/stack.mjs rebuild-web"
   },
   "lint-staged": {
     "*.{ts,tsx,js,mjs,cjs,json,yaml,md}": [

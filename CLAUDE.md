@@ -39,6 +39,10 @@ pnpm --filter @aggregator-dpg/api db:migrate   # apply migrations
 pnpm --filter @aggregator-dpg/api db:studio    # Drizzle Studio
 
 # Local stack
+# Cross-platform entrypoint (Windows-friendly; make not required):
+pnpm stack:setup        # = make setup  (env + hosts via scripts/stack.mjs)
+pnpm stack:up           # = make up
+# stack:down | stack:reset | stack:logs | stack:ps | stack:psql | stack:rebuild-web
 make setup    # one-shot: copies infra/env.template -> .env (chmod 600) + adds 127.0.0.1 keycloak to /etc/hosts
 make up       # docker compose up -d --build (everything containerised)
 make down     # stop containers (volumes preserved)
