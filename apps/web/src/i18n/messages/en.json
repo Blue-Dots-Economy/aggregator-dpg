@@ -161,7 +161,7 @@
     "onboardingGroup": {
       "title": "Onboarding",
       "aggregatorWide": "Aggregator-wide",
-      "helper": "Rolled up across every domain in your network — not a single domain.",
+      "helper": "Rolled up across your network",
       "view": "View onboarding",
       "total": "Total registered",
       "total_sub": "All entry modes",
