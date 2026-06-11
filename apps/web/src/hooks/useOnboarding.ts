@@ -6,6 +6,7 @@ import {
   type ApiRegistrationLink,
   type BulkUploadStatus,
   type CreateLinkInput,
+  type OnboardingBySource,
   type OnboardingSummary,
   type UpdateLinkInput,
 } from '../services/onboarding.service';
@@ -66,6 +67,18 @@ export function useOnboardingSummary() {
   return useQuery<OnboardingSummary>({
     queryKey: ['onboarding', 'summary'],
     queryFn: () => onboardingService.summary(),
+    staleTime: 30_000,
+  });
+}
+
+/**
+ * Aggregator-wide onboarding counters grouped by entry source
+ * (`bulk` / `link`). Drives the dashboard's "joins by entry mode" card.
+ */
+export function useOnboardingBySource() {
+  return useQuery<OnboardingBySource>({
+    queryKey: ['onboarding', 'by-source'],
+    queryFn: () => onboardingService.bySource(),
     staleTime: 30_000,
   });
 }

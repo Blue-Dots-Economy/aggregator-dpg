@@ -90,6 +90,22 @@ export interface OnboardingSummary {
   skipped: number;
 }
 
+/** One entry-source slice of the onboarding rollup (`source` is the API's `onboarding_source` enum — `bulk` | `link` today). */
+export interface OnboardingSourceSlice {
+  source: string;
+  total: number;
+  passed: number;
+  failed: number;
+  skipped: number;
+}
+
+export interface OnboardingBySource {
+  aggregator_id: string;
+  from: string | null;
+  to: string | null;
+  by_source: OnboardingSourceSlice[];
+}
+
 export interface BulkUploadCreateResponse {
   upload_id: string;
   upload_url: string;
@@ -185,6 +201,14 @@ export const onboardingService = {
     if (opts.to) params.set('to', opts.to);
     const qs = params.toString();
     return jsonFetch<OnboardingSummary>(`/api/onboarding/summary${qs ? `?${qs}` : ''}`);
+  },
+
+  async bySource(opts: { from?: string; to?: string } = {}): Promise<OnboardingBySource> {
+    const params = new URLSearchParams();
+    if (opts.from) params.set('from', opts.from);
+    if (opts.to) params.set('to', opts.to);
+    const qs = params.toString();
+    return jsonFetch<OnboardingBySource>(`/api/onboarding/by-source${qs ? `?${qs}` : ''}`);
   },
 
   async createBulkUpload(participantType: string): Promise<BulkUploadCreateResponse> {

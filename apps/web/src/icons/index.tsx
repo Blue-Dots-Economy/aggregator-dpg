@@ -254,6 +254,14 @@ const external: IconComponent = (p) => (
   </Icon>
 );
 
+const globe: IconComponent = (p) => (
+  <Icon {...p}>
+    <circle cx="12" cy="12" r="10" />
+    <path d="M2 12h20" />
+    <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+  </Icon>
+);
+
 const sun: IconComponent = (p) => (
   <Icon {...p}>
     <circle cx="12" cy="12" r="4" />
@@ -304,6 +312,7 @@ export const I = {
   pause,
   refresh,
   external,
+  globe,
 };
 
 export type IconName = keyof typeof I;

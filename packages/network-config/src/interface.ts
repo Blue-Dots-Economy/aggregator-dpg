@@ -234,11 +234,15 @@ export interface DashboardTileDef {
 /**
  * Per-domain dashboard tiles, split into profile-level and user-level groups.
  * Both optional — UI falls back to default English tiles when a group is
- * absent. Carried verbatim from `network.json`.
+ * absent. `profile_title` / `user_title` override the group headings
+ * ("Profiles" / "Users" eyebrows); the UI falls back to localised
+ * defaults when unset. Carried verbatim from `network.json`.
  */
 export interface DashboardTiles {
   profile?: DashboardTileDef[];
   user?: DashboardTileDef[];
+  profile_title?: string;
+  user_title?: string;
 }
 
 /**

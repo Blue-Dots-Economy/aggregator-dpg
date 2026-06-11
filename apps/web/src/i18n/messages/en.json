@@ -158,6 +158,27 @@
       "profiles": "Profiles",
       "users": "Users"
     },
+    "onboardingGroup": {
+      "title": "Onboarding",
+      "helper": "Rolled up across your network",
+      "view": "View onboarding",
+      "total": "Total submissions",
+      "total_sub": "All entry modes",
+      "passed": "Verified & onboarded",
+      "passed_sub": "Cleared validation",
+      "failed": "Failed validations",
+      "failed_sub": "Need attention",
+      "skipped": "Skipped",
+      "skipped_sub": "Duplicates ignored",
+      "byMode": "Joins by entry mode",
+      "joins": "{count} verified joins",
+      "mode_bulk": "CSV upload",
+      "mode_link": "Registration link",
+      "mode_qr": "QR code",
+      "error_title": "Couldn’t load onboarding summary",
+      "error_body": "The summary service didn’t respond. Your other metrics are unaffected.",
+      "retry": "Retry"
+    },
     "tiles": {
       "lifecycle": {
         "draft": "Draft profiles",
