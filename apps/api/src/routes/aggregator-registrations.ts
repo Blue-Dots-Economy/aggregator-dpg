@@ -46,9 +46,19 @@ import { slugFromName } from '../services/slug.js';
 import { authenticateAny } from '../services/auth/access-token.js';
 import { KC_ATTR } from '../services/idp-admin/index.js';
 import { httpError } from '../errors/http-error.js';
+import { errorResponses } from '../errors/openapi.js';
 import type { ErrorCode } from '../errors/codes.js';
 
 const SLUG_RETRIES = 3;
+
+const RegistrationCreatedResponseSchema = z
+  .object({
+    aggregator_id: z.string(),
+    org_slug: z.string(),
+    status: z.string(),
+    message: z.string(),
+  })
+  .passthrough();
 
 export async function registerAggregatorRegistrationRoutes(app: FastifyInstance): Promise<void> {
   app.post(
@@ -59,6 +69,11 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
         summary: 'Submit a new aggregator registration',
         description:
           'Validates submission against config/schemas/aggregator/registration.v1.json, creates a disabled user (login enabled on admin approval), and pushes the org to signalstack. Reached via a non-aggregator Bearer token from Keycloak.',
+        body: RegistrationPayloadSchema,
+        response: {
+          201: RegistrationCreatedResponseSchema,
+          ...errorResponses(400, 401, 409, 500, 503),
+        },
       },
     },
     async (req: FastifyRequest, reply: FastifyReply) => {

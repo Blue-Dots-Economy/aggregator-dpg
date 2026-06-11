@@ -19,12 +19,17 @@ import { getAggregatorStore } from '../services/aggregator-store/index.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
 import { normalisePhone } from '../services/phone.js';
 import { httpError } from '../errors/http-error.js';
+import { errorResponses } from '../errors/openapi.js';
 import { consume } from '../services/rate-limiter/index.js';
 import { config } from '../config.js';
 
 interface OrgSlugParams {
   orgSlug?: string;
 }
+
+const ParamsSchema = z.object({
+  orgSlug: z.string().min(1).describe('Aggregator organisation slug.'),
+});
 
 const QuerySchema = z
   .object({
@@ -37,6 +42,25 @@ const QuerySchema = z
     message: 'Either email or phone_number is required.',
   });
 
+/** Wire shape of the signalstack identity probe forwarded verbatim to the BFF. */
+const LookupResponseSchema = z
+  .object({
+    user_exists: z.boolean(),
+    owned_elsewhere: z.boolean(),
+    lifecycle_summary: z
+      .object({
+        primary_item: z
+          .object({
+            item_id: z.string(),
+            lifecycle_status: z.enum(['draft', 'live', 'paused']),
+          })
+          .passthrough(),
+      })
+      .passthrough()
+      .nullable(),
+  })
+  .passthrough();
+
 /**
  * Registers the public lookup route on the Fastify instance.
  *
@@ -47,110 +71,127 @@ const QuerySchema = z
  * signalstack returns an error.
  */
 export async function registerPublicLookupRoute(app: FastifyInstance): Promise<void> {
-  app.get('/public/v1/aggregators/:orgSlug/lookup', async (req, reply) => {
-    const { orgSlug } = req.params as OrgSlugParams;
-    if (!orgSlug) {
-      throw httpError('SCHEMA_VALIDATION', { detail: 'orgSlug is required.' });
-    }
-    const log = req.log.child({ operation: 'public.lookup', org_slug: orgSlug });
-    const start = Date.now();
-
-    // Reuse the same window/max as the link-submit limiter — the lookup is
-    // a cheaper read but still exposed unauthenticated, so we keep a
-    // coarse fallback in case the BFF Turnstile gate is misconfigured.
-    const ip = (req.ip ?? '0.0.0.0').toString();
-    const rate = await consume({
-      namespace: 'public-lookup',
-      key: `${orgSlug}:${ip}`,
-      windowSeconds: config.PUBLIC_SUBMIT_RATE_WINDOW_SECONDS,
-      max: config.PUBLIC_SUBMIT_RATE_MAX_PER_WINDOW,
-    });
-    if (!rate.allowed) {
-      void reply.header('Retry-After', String(rate.retryAfterSeconds));
-      log.warn({ status: 'rate_limited', count: rate.count, ip });
-      throw httpError('RATE_LIMITED', {
-        detail: `Retry in ${rate.retryAfterSeconds}s.`,
-      });
-    }
-
-    const parsed = QuerySchema.safeParse(req.query);
-    if (!parsed.success) {
-      throw httpError('SCHEMA_VALIDATION', {
-        detail: 'Either email or phone_number is required, plus network and domain.',
-        fields: { issues: parsed.error.issues },
-      });
-    }
-    const q = parsed.data;
-
-    // Resolve the aggregator's signalstack org id by slug. Absent slug or
-    // missing signalstack_org_id both surface as 404 — the lookup
-    // endpoint is opaque about whether a given slug exists yet, by
-    // design (anonymous enumeration prevention).
-    const aggLookup = await getAggregatorStore().findBySlug(orgSlug);
-    if (!aggLookup.ok) {
-      throw httpError('DB_UNAVAILABLE', {
-        fields: { sub_operation: 'aggregatorStore.findBySlug' },
-      });
-    }
-    if (!aggLookup.value || !aggLookup.value.signalstackOrgId) {
-      log.warn({ status: 'failure', sub: 'aggregator.not_found' });
-      throw httpError('NOT_FOUND', { detail: 'Unknown aggregator.' });
-    }
-    const actingOrgId = aggLookup.value.signalstackOrgId;
-
-    // Normalise phone to E.164 before forwarding so signals matches the
-    // same canonical form the onboard path writes. Empty/invalid input
-    // falls through as a 400 rather than a silent miss.
-    let phoneNumber: string | undefined;
-    if (q.phone_number) {
-      const normalised = normalisePhone(q.phone_number);
-      if (!normalised.ok) {
-        throw httpError('INVALID_PHONE', { detail: normalised.error.message });
+  app.get(
+    '/public/v1/aggregators/:orgSlug/lookup',
+    {
+      schema: {
+        tags: ['public-registration'],
+        summary: 'Probe an identity before opening the registration form',
+        description:
+          'Anonymous identity probe used by the public registration form. Classifies the supplied email/phone as new (user_exists=false), an own user with optional lifecycle summary, or owned by another aggregator (owned_elsewhere=true). Requires at least one of email or phone_number, plus the network and domain to scope the signalstack probe.',
+        params: ParamsSchema,
+        querystring: QuerySchema,
+        response: {
+          200: LookupResponseSchema,
+          ...errorResponses(400, 404, 429, 502, 503),
+        },
+      },
+    },
+    async (req, reply) => {
+      const { orgSlug } = req.params as OrgSlugParams;
+      if (!orgSlug) {
+        throw httpError('SCHEMA_VALIDATION', { detail: 'orgSlug is required.' });
       }
-      phoneNumber = normalised.value;
-    }
+      const log = req.log.child({ operation: 'public.lookup', org_slug: orgSlug });
+      const start = Date.now();
 
-    const ss = getSignalStackWriter();
-    if (!ss) {
-      // Operator hasn't configured signalstack — without it we can't
-      // answer the probe truthfully. Surface as 503 so the BFF can
-      // distinguish from a 404 "unknown aggregator".
-      log.error({ status: 'failure', sub: 'signalstack.disabled' });
-      throw httpError('SIGNALSTACK_ORG_NOT_REGISTERED', {
-        detail: 'Signalstack integration is not configured.',
+      // Reuse the same window/max as the link-submit limiter — the lookup is
+      // a cheaper read but still exposed unauthenticated, so we keep a
+      // coarse fallback in case the BFF Turnstile gate is misconfigured.
+      const ip = (req.ip ?? '0.0.0.0').toString();
+      const rate = await consume({
+        namespace: 'public-lookup',
+        key: `${orgSlug}:${ip}`,
+        windowSeconds: config.PUBLIC_SUBMIT_RATE_WINDOW_SECONDS,
+        max: config.PUBLIC_SUBMIT_RATE_MAX_PER_WINDOW,
       });
-    }
+      if (!rate.allowed) {
+        void reply.header('Retry-After', String(rate.retryAfterSeconds));
+        log.warn({ status: 'rate_limited', count: rate.count, ip });
+        throw httpError('RATE_LIMITED', {
+          detail: `Retry in ${rate.retryAfterSeconds}s.`,
+        });
+      }
 
-    const probe = await ss.probeUser({
-      actingOrgId,
-      ...(q.email ? { email: q.email } : {}),
-      ...(phoneNumber ? { phoneNumber } : {}),
-      network: q.network,
-      domain: q.domain,
-    });
+      const parsed = QuerySchema.safeParse(req.query);
+      if (!parsed.success) {
+        throw httpError('SCHEMA_VALIDATION', {
+          detail: 'Either email or phone_number is required, plus network and domain.',
+          fields: { issues: parsed.error.issues },
+        });
+      }
+      const q = parsed.data;
 
-    if (!probe.success) {
-      log.error({
-        status: 'failure',
-        sub: 'signalstack.probe',
+      // Resolve the aggregator's signalstack org id by slug. Absent slug or
+      // missing signalstack_org_id both surface as 404 — the lookup
+      // endpoint is opaque about whether a given slug exists yet, by
+      // design (anonymous enumeration prevention).
+      const aggLookup = await getAggregatorStore().findBySlug(orgSlug);
+      if (!aggLookup.ok) {
+        throw httpError('DB_UNAVAILABLE', {
+          fields: { sub_operation: 'aggregatorStore.findBySlug' },
+        });
+      }
+      if (!aggLookup.value || !aggLookup.value.signalstackOrgId) {
+        log.warn({ status: 'failure', sub: 'aggregator.not_found' });
+        throw httpError('NOT_FOUND', { detail: 'Unknown aggregator.' });
+      }
+      const actingOrgId = aggLookup.value.signalstackOrgId;
+
+      // Normalise phone to E.164 before forwarding so signals matches the
+      // same canonical form the onboard path writes. Empty/invalid input
+      // falls through as a 400 rather than a silent miss.
+      let phoneNumber: string | undefined;
+      if (q.phone_number) {
+        const normalised = normalisePhone(q.phone_number);
+        if (!normalised.ok) {
+          throw httpError('INVALID_PHONE', { detail: normalised.error.message });
+        }
+        phoneNumber = normalised.value;
+      }
+
+      const ss = getSignalStackWriter();
+      if (!ss) {
+        // Operator hasn't configured signalstack — without it we can't
+        // answer the probe truthfully. Surface as 503 so the BFF can
+        // distinguish from a 404 "unknown aggregator".
+        log.error({ status: 'failure', sub: 'signalstack.disabled' });
+        throw httpError('SIGNALSTACK_ORG_NOT_REGISTERED', {
+          detail: 'Signalstack integration is not configured.',
+        });
+      }
+
+      const probe = await ss.probeUser({
+        actingOrgId,
+        ...(q.email ? { email: q.email } : {}),
+        ...(phoneNumber ? { phoneNumber } : {}),
+        network: q.network,
+        domain: q.domain,
+      });
+
+      if (!probe.success) {
+        log.error({
+          status: 'failure',
+          sub: 'signalstack.probe',
+          latency_ms: Date.now() - start,
+          error: probe.error.message,
+          error_type: probe.error.constructor.name,
+        });
+        throw httpError('SIGNALSTACK_PROBE_FAILED', {
+          detail: probe.error.message,
+          fields: { code: (probe.error as { code?: string }).code ?? 'UNKNOWN' },
+          cause: probe.error,
+        });
+      }
+
+      log.info({
+        status: 'success',
         latency_ms: Date.now() - start,
-        error: probe.error.message,
-        error_type: probe.error.constructor.name,
+        user_exists: probe.value.user_exists,
+        owned_elsewhere: probe.value.owned_elsewhere,
+        has_lifecycle: probe.value.lifecycle_summary !== null,
       });
-      throw httpError('SIGNALSTACK_PROBE_FAILED', {
-        detail: probe.error.message,
-        fields: { code: (probe.error as { code?: string }).code ?? 'UNKNOWN' },
-        cause: probe.error,
-      });
-    }
-
-    log.info({
-      status: 'success',
-      latency_ms: Date.now() - start,
-      user_exists: probe.value.user_exists,
-      owned_elsewhere: probe.value.owned_elsewhere,
-      has_lifecycle: probe.value.lifecycle_summary !== null,
-    });
-    return reply.send(probe.value);
-  });
+      return reply.send(probe.value);
+    },
+  );
 }

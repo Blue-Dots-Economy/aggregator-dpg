@@ -20,6 +20,7 @@
  */
 
 import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { z } from 'zod';
 import { and, eq, inArray } from 'drizzle-orm';
 import { requireApproved, type AuthContext } from '../services/auth/access-token.js';
 import { getBulkUploadsStore } from '../services/bulk-uploads-store/index.js';
@@ -30,6 +31,7 @@ import {
   signErrorsCsvDownloadUrl,
 } from '../services/object-storage/index.js';
 import { httpError } from '../errors/http-error.js';
+import { errorResponses } from '../errors/openapi.js';
 import { getSchemaLoader } from '../services/schema-loader/index.js';
 import { buildCsvTemplate } from '../services/csv-template/index.js';
 import { getNetworkConfig } from '../services/network-config.js';
@@ -52,6 +54,105 @@ async function getValidParticipantTypes(): Promise<Set<string>> {
   return new Set(cfg.domainIds);
 }
 
+/**
+ * Query shape for the CSV template download. Valid `participant_type` values
+ * are network-config driven (e.g. seeker/provider), so the schema stays an
+ * open string and the handler validates against the live config.
+ */
+const TemplateQuerySchema = z.object({
+  participant_type: z
+    .string()
+    .optional()
+    .describe('Participant domain id declared by the active network (e.g. seeker, provider).'),
+});
+
+/**
+ * Body for creating a bulk-upload job. `participant_type` is validated
+ * against the active network config at request time.
+ */
+const CreateBulkUploadBodySchema = z
+  .object({
+    participant_type: z
+      .string()
+      .min(1)
+      .describe('Participant domain id declared by the active network (e.g. seeker, provider).'),
+  })
+  .passthrough();
+
+/** Path params for routes addressing a single bulk-upload job. */
+const BulkUploadParamsSchema = z.object({
+  id: z.string().min(1).describe('Bulk-upload job id (UUID).'),
+});
+
+/** Pagination query for the bulk-uploads list. */
+const ListBulkUploadsQuerySchema = z.object({
+  limit: z.coerce.number().int().optional().describe('Page size (1-100, default 20).'),
+  offset: z.coerce.number().int().optional().describe('Rows to skip (default 0).'),
+});
+
+/** Wire shape of a bulk-upload job row (see {@link toResponse}). */
+const BulkUploadResponseSchema = z
+  .object({
+    upload_id: z.string(),
+    status: z.string(),
+    status_reason: z.string().nullable(),
+    participant_type: z.string(),
+    total_rows: z.number().nullable(),
+    passed: z.number(),
+    failed: z.number(),
+    skipped: z.number(),
+    errors_csv_s3_key: z.string().nullable(),
+    schema_id: z.string(),
+    schema_version: z.string(),
+    created_at: z.string(),
+    completed_at: z.string().nullable(),
+  })
+  .passthrough();
+
+/** 201 payload for POST /v1/bulk-uploads — pre-signed S3 PUT reservation. */
+const CreateBulkUploadResponseSchema = z
+  .object({
+    upload_id: z.string(),
+    upload_url: z.string(),
+    s3_key: z.string(),
+    expires_at: z.string(),
+    content_type: z.string(),
+    max_bytes: z.number(),
+    schema_id: z.string(),
+    schema_version: z.string(),
+    status: z.string(),
+  })
+  .passthrough();
+
+/** 200 payload for the paginated bulk-uploads list. */
+const ListBulkUploadsResponseSchema = z
+  .object({
+    items: z.array(BulkUploadResponseSchema),
+    total: z.number(),
+    limit: z.number(),
+    offset: z.number(),
+  })
+  .passthrough();
+
+/** 200 payload for the errors.csv signed-download endpoint. */
+const ErrorsCsvResponseSchema = z
+  .object({
+    upload_id: z.string(),
+    url: z.string(),
+    s3_key: z.string(),
+    expires_at: z.string(),
+    content_type: z.string(),
+    counts: z
+      .object({
+        total_rows: z.number().nullable(),
+        passed: z.number(),
+        failed: z.number(),
+        skipped: z.number(),
+      })
+      .passthrough(),
+  })
+  .passthrough();
+
 export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<void> {
   app.get(
     '/v1/bulk-uploads/template',
@@ -60,7 +161,11 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
         tags: ['bulk-uploads'],
         summary: 'Download CSV template for a domain',
         description:
-          "Returns a CSV template (text/csv) with the header row + sample row for the requested ?domain= (seeker/provider). Array-typed fields use the network's csv_array_delimiter.",
+          "Returns a CSV template (text/csv) with the header row + sample row for the requested ?participant_type= (seeker/provider). Array-typed fields use the network's csv_array_delimiter. Responds with a text/csv attachment on 200 (no JSON body).",
+        querystring: TemplateQuerySchema,
+        response: {
+          ...errorResponses(400, 401, 403, 500),
+        },
       },
     },
     async (req, reply) => {
@@ -105,7 +210,12 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
         tags: ['bulk-uploads'],
         summary: 'Create a new bulk-upload job',
         description:
-          'Uploads a CSV file and creates a pending bulk-upload job for the caller aggregator. The job is parsed + validated row-by-row but not committed until /start is called.',
+          'Reserves a pending bulk-upload job for the caller aggregator and returns a pre-signed S3 PUT URL. The browser uploads CSV bytes directly to S3, then calls /start. `participant_type` is validated against the active network config at request time.',
+        body: CreateBulkUploadBodySchema,
+        response: {
+          201: CreateBulkUploadResponseSchema,
+          ...errorResponses(400, 401, 403, 503),
+        },
       },
     },
     async (req, reply) => {
@@ -114,7 +224,8 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
       const start = Date.now();
 
       const body = (req.body ?? {}) as CreateBody;
-      const participantType = typeof body.participant_type === 'string' ? body.participant_type : '';
+      const participantType =
+        typeof body.participant_type === 'string' ? body.participant_type : '';
       const validTypes = await getValidParticipantTypes();
       if (!validTypes.has(participantType)) {
         throw httpError('SCHEMA_VALIDATION', {
@@ -195,6 +306,11 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
         summary: 'Start processing a pending bulk-upload job',
         description:
           'Transitions a pending job to running; the worker onboards each valid row to signalstack. Idempotent on already-running/completed jobs.',
+        params: BulkUploadParamsSchema,
+        response: {
+          200: BulkUploadResponseSchema,
+          ...errorResponses(400, 401, 403, 500, 503),
+        },
       },
     },
     async (req, reply) => {
@@ -312,6 +428,11 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
         tags: ['bulk-uploads'],
         summary: 'List bulk-upload jobs',
         description: 'Paginated list of bulk-upload jobs (newest first) for the caller aggregator.',
+        querystring: ListBulkUploadsQuerySchema,
+        response: {
+          200: ListBulkUploadsResponseSchema,
+          ...errorResponses(400, 401, 403, 503),
+        },
       },
     },
     async (req, reply) => {
@@ -345,6 +466,11 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
         summary: 'Read a bulk-upload job',
         description:
           'Returns the full job row including status, per-row counters, and error summary.',
+        params: BulkUploadParamsSchema,
+        response: {
+          200: BulkUploadResponseSchema,
+          ...errorResponses(400, 401, 403, 503),
+        },
       },
     },
     async (req, reply) => {
@@ -376,7 +502,12 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
         tags: ['bulk-uploads'],
         summary: 'Download per-row error CSV',
         description:
-          'CSV (text/csv) listing the rows that failed validation/onboarding with reason + offending fields.',
+          'Returns a JSON payload carrying a short-lived pre-signed S3 GET URL for the errors.csv report (rows that failed validation/onboarding with reason + offending fields), plus the final counters. Only available once the upload is completed and at least one row failed.',
+        params: BulkUploadParamsSchema,
+        response: {
+          200: ErrorsCsvResponseSchema,
+          ...errorResponses(400, 401, 403, 404, 410, 503),
+        },
       },
     },
     async (req, reply) => {

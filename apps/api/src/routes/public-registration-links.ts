@@ -18,6 +18,7 @@
 
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { randomUUID } from 'node:crypto';
+import { z } from 'zod';
 import { PostgresParticipantsWriter } from '@aggregator-dpg/participants-writer/postgres';
 import type { ParticipantsWriterBase } from '@aggregator-dpg/participants-writer/interface';
 import { getRegistrationLinksStore } from '../services/registration-links-store/index.js';
@@ -32,6 +33,7 @@ import { getSignalStackWriter } from '../services/signalstack.js';
 import { getDb } from '../db/client.js';
 import { linkSubmissions } from '../db/schema.js';
 import { httpError } from '../errors/http-error.js';
+import { errorResponses } from '../errors/openapi.js';
 import { consume } from '../services/rate-limiter/index.js';
 import { config } from '../config.js';
 
@@ -52,6 +54,68 @@ interface OrgSlugParams {
   slug?: string;
 }
 
+const LinkParamsSchema = z.object({
+  orgSlug: z.string().min(1).describe('Aggregator organisation slug.'),
+  slug: z.string().min(1).describe('Registration link slug.'),
+});
+
+/** Public-safe shape of a live link returned by the resolve endpoint. */
+const ResolveLinkResponseSchema = z
+  .object({
+    slug: z.string(),
+    network: z.string().describe("Active signalstack network id (e.g. 'blue_dot')."),
+    domain: z.string(),
+    context: z.object({}).passthrough().describe('Link context snapshot (free-form metadata).'),
+    registration_mode: z.string(),
+    submission_shape: z.string().describe("'account_and_profile' or 'account_only'."),
+    public_hint_i18n_key: z.string().nullable(),
+    schema_id: z.string().nullable(),
+    schema_version: z.string().nullable(),
+    schema: z
+      .unknown()
+      .nullable()
+      .describe("JSON Schema for the link's domain; null for account_only links."),
+    identity: z
+      .object({})
+      .passthrough()
+      .describe('Identity field selectors (name / phone / email) for this domain.'),
+    expires_at: z.string().nullable(),
+  })
+  .passthrough();
+
+/**
+ * Submission body. The profile portion is dynamic — it is validated at
+ * runtime (Ajv) against the active participant JSON Schema for the link's
+ * domain, so no static shape can be pinned here. Identity field names
+ * (name / phone / email) also vary per network and come from the network
+ * config; `consent_terms` / `consent_privacy` booleans are accepted on
+ * account_only links.
+ */
+const PublicRegistrationSubmitBodySchema = z
+  .object({})
+  .passthrough()
+  .describe(
+    "Dynamic registration payload validated at runtime against the link domain's participant JSON Schema (identity fields such as name/phone/email plus profile fields). consent_terms / consent_privacy are accepted on account_only links.",
+  );
+
+/** 201 payload — participant created (or saved as draft) and pushed to signalstack. */
+const SubmitAcceptedResponseSchema = z
+  .object({
+    outcome: z.string().describe("'passed'"),
+    submission_id: z.string().optional(),
+    registration_mode: z.string(),
+    submission_shape: z.string(),
+    lifecycle_status: z.enum(['draft', 'live', 'paused']).nullable(),
+    owned_elsewhere: z.boolean(),
+  })
+  .passthrough();
+
+/** 409 payload — dedup hit: the phone/email is already registered. */
+const SubmitSkippedResponseSchema = SubmitAcceptedResponseSchema.extend({
+  outcome: z.string().describe("'skipped'"),
+  message: z.string(),
+}).passthrough();
+
 export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance): Promise<void> {
   app.get(
     '/public/v1/aggregators/:orgSlug/links/:slug',
@@ -60,7 +124,12 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
         tags: ['public-registration'],
         summary: 'Resolve a public registration link',
         description:
-          'Looks up a live (non-expired, active) registration link by org slug + link slug. Returns the link metadata (domain, context, schema id) that the public registration form needs.',
+          'Looks up a live (non-expired, active) registration link by org slug + link slug. Returns the link metadata (domain, context, schema id) that the public registration form needs. 404 for missing/draft slugs, 410 for retired or expired ones.',
+        params: LinkParamsSchema,
+        response: {
+          200: ResolveLinkResponseSchema,
+          ...errorResponses(400, 404, 410, 503),
+        },
       },
     },
     async (req, reply) => {
@@ -134,7 +203,14 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
         tags: ['public-registration'],
         summary: 'Submit a public participant registration',
         description:
-          "Public endpoint reached by the QR-link registration form. Validates the submission against the link's domain schema, creates the participant + user, and pushes to signalstack. 409 with already_registered:true when the phone/email is already onboarded.",
+          "Public endpoint reached by the QR-link registration form. Validates the submission against the link's domain schema (runtime Ajv — the body shape is dynamic per network/domain), creates the participant + user, and pushes to signalstack. Returns 201 on success, 409 (outcome:'skipped') when the phone/email is already registered with this aggregator, and 429 when the per-link rate limit trips.",
+        params: LinkParamsSchema,
+        body: PublicRegistrationSubmitBodySchema,
+        response: {
+          201: SubmitAcceptedResponseSchema,
+          409: SubmitSkippedResponseSchema,
+          ...errorResponses(400, 404, 410, 429, 500, 502, 503),
+        },
       },
     },
     async (req, reply) => {
@@ -220,7 +296,9 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
         const phoneKey = linkDomainCfgEarly.identity.phone;
         const emailKey = linkDomainCfgEarly.identity.email;
         const hasName =
-          nameKey && typeof rawBody[nameKey] === 'string' && (rawBody[nameKey] as string).length > 0;
+          nameKey &&
+          typeof rawBody[nameKey] === 'string' &&
+          (rawBody[nameKey] as string).length > 0;
         const hasPhone =
           phoneKey &&
           typeof rawBody[phoneKey] === 'string' &&

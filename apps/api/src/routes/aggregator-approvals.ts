@@ -50,6 +50,15 @@ const DecisionBodySchema = z.object({
   reason: z.string().max(2000).optional(),
 });
 
+const ApprovalParamsSchema = z.object({
+  id: z.string(),
+});
+
+const ReadQuerySchema = z.object({
+  token: z.string().optional(),
+  intent: z.string().optional(),
+});
+
 export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Promise<void> {
   app.get(
     '/admin/v1/aggregator-registrations/read/:id',
@@ -58,7 +67,9 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
         tags: ['aggregator-approvals'],
         summary: 'Render the admin approve/reject page',
         description:
-          'HTML page reached from the admin notification email. Verifies the signed token and renders the approval form for the given aggregator registration id.',
+          'HTML page reached from the admin notification email. Verifies the signed token and renders the approval form for the given aggregator registration id. All responses (200, 400 invalid/missing token, 404 unknown aggregator, 503 backing service down) are text/html pages, so no JSON response schema is declared.',
+        params: ApprovalParamsSchema,
+        querystring: ReadQuerySchema,
       },
     },
     async (
@@ -141,7 +152,9 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
         tags: ['aggregator-approvals'],
         summary: 'Approve or reject a pending aggregator',
         description:
-          'Records the admin decision (approve/reject) for the registration id. On approve, enables the disabled Keycloak user and confirms the signalstack push.',
+          'Records the admin decision (approve/reject) for the registration id. On approve, enables the disabled Keycloak user and confirms the signalstack push. All handler responses (200 result page, 400 invalid token, 404 unknown aggregator, 503 backing service down) are text/html pages, so no JSON response schema is declared; a body that fails schema validation returns the standard JSON error envelope (400).',
+        params: ApprovalParamsSchema,
+        body: DecisionBodySchema,
       },
     },
     async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {

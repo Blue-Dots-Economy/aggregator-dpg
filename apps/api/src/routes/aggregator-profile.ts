@@ -49,6 +49,7 @@ import type { IdpUser } from '../services/idp-admin/index.js';
 import { normalisePhone } from '../services/phone.js';
 import { getSchemaRegistry } from '../services/schema-registry/index.js';
 import { httpError } from '../errors/http-error.js';
+import { errorResponses } from '../errors/openapi.js';
 
 // ─── Body schemas ───────────────────────────────────────────────────────────
 
@@ -81,6 +82,55 @@ const ProfileUpdateBodySchema = z
     message: 'body must include at least one of `aggregator` or `profile`',
   });
 
+// ─── Response schemas (OpenAPI) ─────────────────────────────────────────────
+
+const ProfileIdentitySchema = z
+  .object({
+    first_name: z.string().nullable(),
+    last_name: z.string().nullable(),
+    email: z.string().nullable(),
+    email_verified: z.boolean(),
+    phone: z.string().nullable(),
+    phone_verified: z.boolean(),
+    active: z.boolean(),
+  })
+  .passthrough();
+
+const ProfileCommonResponseShape = {
+  aggregator_id: z.string(),
+  org_slug: z.string(),
+  actor_type: z.string(),
+  type: z.string().nullable(),
+  url: z.string().nullable(),
+  contact: z.object({}).passthrough(),
+  locations: z.array(z.object({}).passthrough()),
+  consent: z.object({}).passthrough(),
+  status: z.string(),
+  contact_name: z.string().nullable(),
+  personas: z.array(z.object({}).passthrough()),
+  services: z.array(z.object({}).passthrough()),
+  verified_certificate: z.array(z.object({}).passthrough()),
+  profile_completed_at: z.string().nullable(),
+  is_complete: z.boolean(),
+  updated_at: z.string(),
+};
+
+const ProfileReadResponseSchema = z
+  .object({
+    ...ProfileCommonResponseShape,
+    org_name: z.string(),
+    identity: ProfileIdentitySchema,
+    created_at: z.string(),
+  })
+  .passthrough();
+
+const ProfileUpdateResponseSchema = z
+  .object({
+    ...ProfileCommonResponseShape,
+    name: z.string(),
+  })
+  .passthrough();
+
 export async function registerAggregatorProfileRoutes(app: FastifyInstance): Promise<void> {
   app.get(
     '/v1/aggregators/profile/me',
@@ -90,6 +140,10 @@ export async function registerAggregatorProfileRoutes(app: FastifyInstance): Pro
         summary: 'Read the caller aggregator profile',
         description:
           'Returns the full aggregator row + brand + contact + status for the aggregator bound to the Bearer token claim.',
+        response: {
+          200: ProfileReadResponseSchema,
+          ...errorResponses(401, 403, 404, 503),
+        },
       },
     },
     async (req, reply) => {
@@ -175,6 +229,11 @@ export async function registerAggregatorProfileRoutes(app: FastifyInstance): Pro
         summary: 'Update the caller aggregator profile',
         description:
           'Partial update of profile fields (contact, locations, etc) for the caller aggregator. Validates the patch against profile.v1.json. Re-syncs to signalstack on success.',
+        body: ProfileUpdateBodySchema,
+        response: {
+          200: ProfileUpdateResponseSchema,
+          ...errorResponses(400, 401, 403, 404, 409, 500, 503),
+        },
       },
     },
     async (req, reply) => {

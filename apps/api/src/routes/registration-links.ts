@@ -22,6 +22,7 @@ import { getRegistrationLinksStore } from '../services/registration-links-store/
 import type { RegistrationLink } from '../services/registration-links-store/index.js';
 import { putObject, signQrDownloadUrl } from '../services/object-storage/index.js';
 import { httpError } from '../errors/http-error.js';
+import { errorResponses } from '../errors/openapi.js';
 import { config } from '../config.js';
 import { getDb } from '../db/client.js';
 import { onboarding } from '../db/schema.js';
@@ -140,6 +141,63 @@ const ListQuerySchema = z.object({
   offset: z.coerce.number().int().min(0).default(0),
 });
 
+/**
+ * Wire-format variant of {@link CreateLinkBodySchema} for the route's OpenAPI
+ * `body` block. Identical shape minus the `expires_at` string→Date transform:
+ * fastify mutates `req.body` with the parsed output, and a transformed Date
+ * would make the handler's own `safeParse` (which expects the wire string)
+ * fail. Keep both schemas' fields in sync.
+ */
+const CreateLinkOpenApiBodySchema = CreateLinkBodySchema.extend({
+  expires_at: z.string().datetime({ offset: true }).nullish(),
+});
+
+/** Wire-format variant of {@link UpdateLinkBodySchema} — see note above. */
+const UpdateLinkOpenApiBodySchema = UpdateLinkBodySchema.extend({
+  expires_at: z.string().datetime({ offset: true }).nullish(),
+});
+
+/** Path params for routes addressing a single registration link. */
+const LinkParamsSchema = z.object({
+  id: z.string().min(1).describe('Registration link id (UUID).'),
+});
+
+/** Canonical wire shape of a registration link (see {@link buildResponse}). */
+const LinkResponseSchema = z
+  .object({
+    link_id: z.string(),
+    slug: z.string(),
+    domain: z.string(),
+    status: z.string(),
+    registration_mode: z.string(),
+    context: z.record(z.unknown()),
+    expires_at: z.string().nullable(),
+    public_url: z.string().nullable(),
+    qr_url: z.string().nullable(),
+    qr_expires_at: z.string().nullable(),
+    metrics: z
+      .object({
+        total: z.number(),
+        passed: z.number(),
+        failed: z.number(),
+        skipped: z.number(),
+      })
+      .passthrough(),
+    created_at: z.string(),
+    updated_at: z.string(),
+  })
+  .passthrough();
+
+/** 200 payload for the paginated links list. */
+const ListLinksResponseSchema = z
+  .object({
+    items: z.array(LinkResponseSchema),
+    total: z.number(),
+    limit: z.number(),
+    offset: z.number(),
+  })
+  .passthrough();
+
 export async function registerRegistrationLinksRoutes(app: FastifyInstance): Promise<void> {
   app.post(
     '/v1/links/create',
@@ -148,7 +206,12 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
         tags: ['registration-links'],
         summary: 'Create a shareable registration link',
         description:
-          'Creates a QR / shareable registration link for the caller aggregator, scoped to a domain (seeker/provider). Returns the public URL.',
+          'Creates a QR / shareable registration link for the caller aggregator, scoped to a domain (seeker/provider). `domain` and `registration_mode` are validated against the active network config at request time. Drafts are metadata-only; status=live also mints the QR + public URL.',
+        body: CreateLinkOpenApiBodySchema,
+        response: {
+          201: LinkResponseSchema,
+          ...errorResponses(400, 401, 403, 500, 503),
+        },
       },
     },
     async (req, reply) => {
@@ -333,6 +396,11 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
         tags: ['registration-links'],
         summary: "List the caller aggregator's registration links",
         description: 'Paginated list (newest first) of registration links with status + counters.',
+        querystring: ListQuerySchema,
+        response: {
+          200: ListLinksResponseSchema,
+          ...errorResponses(400, 401, 403, 503),
+        },
       },
     },
     async (req, reply) => {
@@ -397,7 +465,14 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
       schema: {
         tags: ['registration-links'],
         summary: 'Update a registration link',
-        description: 'Partial update of mutable link fields (name, context, expiry, max uses).',
+        description:
+          'Partial update of mutable draft-link fields (slug, context, expiry). Only draft links can be edited; `registration_mode` and `domain` are immutable and unknown keys are rejected with 400.',
+        params: LinkParamsSchema,
+        body: UpdateLinkOpenApiBodySchema,
+        response: {
+          200: LinkResponseSchema,
+          ...errorResponses(400, 401, 403, 409, 503),
+        },
       },
     },
     async (req, reply) => {
@@ -516,6 +591,11 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
         tags: ['registration-links'],
         summary: 'Read a registration link',
         description: 'Full link row including counters + status.',
+        params: LinkParamsSchema,
+        response: {
+          200: LinkResponseSchema,
+          ...errorResponses(400, 401, 403, 503),
+        },
       },
     },
     async (req, reply) => {
@@ -545,7 +625,13 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
       schema: {
         tags: ['registration-links'],
         summary: 'Activate a registration link',
-        description: 'Flips the link status to active so the public form accepts submissions.',
+        description:
+          'Flips the link status to live so the public form accepts submissions; mints the QR PNG + public URL. Idempotent when already live; retired links cannot be reactivated (409).',
+        params: LinkParamsSchema,
+        response: {
+          200: LinkResponseSchema,
+          ...errorResponses(400, 401, 403, 409, 500, 503),
+        },
       },
     },
     async (req, reply) => {
@@ -640,7 +726,12 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
         tags: ['registration-links'],
         summary: 'Deactivate a registration link',
         description:
-          'Flips status to inactive — the public form returns 410 for further submissions.',
+          'Flips status to retired — the public form returns 410 for further submissions. Idempotent when already retired.',
+        params: LinkParamsSchema,
+        response: {
+          200: LinkResponseSchema,
+          ...errorResponses(400, 401, 403, 503),
+        },
       },
     },
     async (req, reply) => {

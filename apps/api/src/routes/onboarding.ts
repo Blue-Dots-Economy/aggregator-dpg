@@ -16,11 +16,35 @@ import { requireApproved, type AuthContext } from '../services/auth/access-token
 import { getDb } from '../db/client.js';
 import { onboarding } from '../db/schema.js';
 import { httpError } from '../errors/http-error.js';
+import { errorResponses } from '../errors/openapi.js';
 
 const RangeQuerySchema = z.object({
   from: z.string().datetime({ offset: true }).optional(),
   to: z.string().datetime({ offset: true }).optional(),
 });
+
+/** Shared counter columns summed from the onboarding rollup table. */
+const OnboardingCountersSchema = z.object({
+  total: z.number().int(),
+  passed: z.number().int(),
+  failed: z.number().int(),
+  skipped: z.number().int(),
+});
+
+const OnboardingSummaryResponseSchema = OnboardingCountersSchema.extend({
+  aggregator_id: z.string(),
+  from: z.string().nullable(),
+  to: z.string().nullable(),
+}).passthrough();
+
+const OnboardingBySourceResponseSchema = z
+  .object({
+    aggregator_id: z.string(),
+    from: z.string().nullable(),
+    to: z.string().nullable(),
+    by_source: z.array(OnboardingCountersSchema.extend({ source: z.string() }).passthrough()),
+  })
+  .passthrough();
 
 export async function registerOnboardingRoutes(app: FastifyInstance): Promise<void> {
   app.get(
@@ -31,6 +55,11 @@ export async function registerOnboardingRoutes(app: FastifyInstance): Promise<vo
         summary: 'Aggregated onboarding totals',
         description:
           'Sum of total / passed / failed / skipped onboarding attempts for the caller aggregator, optionally constrained by ?from=&to= ISO dates.',
+        querystring: RangeQuerySchema,
+        response: {
+          200: OnboardingSummaryResponseSchema,
+          ...errorResponses(400, 401, 403),
+        },
       },
     },
     async (req, reply) => {
@@ -68,6 +97,11 @@ export async function registerOnboardingRoutes(app: FastifyInstance): Promise<vo
         summary: 'Onboarding totals grouped by source',
         description:
           'Per-source breakdown of onboarding counters for the caller aggregator (e.g. by_link / by_bulk_upload), optionally date-bounded by ?from=&to=.',
+        querystring: RangeQuerySchema,
+        response: {
+          200: OnboardingBySourceResponseSchema,
+          ...errorResponses(400, 401, 403),
+        },
       },
     },
     async (req, reply) => {
