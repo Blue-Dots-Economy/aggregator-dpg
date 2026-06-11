@@ -139,6 +139,15 @@ export const ERR = {
     hint: 'aggregators.signalstack_org_id is NULL. Either the approval-time upsert failed and was never retried, or the login-time backfill has not run yet for this aggregator.',
   },
 
+  SIGNALSTACK_PROBE_FAILED: {
+    code: 'SIGNALSTACK_PROBE_FAILED',
+    status: 502,
+    title: 'Could not check identity with signalstack',
+    detail:
+      'The identity probe to signalstack failed. The lookup is idempotent; please retry. If the problem persists, contact support.',
+    hint: 'signalstack-writer.probeUser returned a non-2xx (transport, timeout, or upstream error). Distinct from SIGNALSTACK_PUSH_FAILED, which is the write-mode error.',
+  },
+
   // ── Persistence ─────────────────────────────────────────────────────────
   DB_UNAVAILABLE: {
     code: 'DB_UNAVAILABLE',
@@ -241,6 +250,38 @@ export const ERR = {
     title: 'Too many requests',
     detail: 'You have made too many requests. Please slow down and retry shortly.',
     hint: 'Per-slug+ip rate limiter on public submit; window/max in config.',
+  },
+
+  // ── Registration mode (per-link admin channel; voice / form / future) ──
+  REGISTRATION_MODE_MISMATCH: {
+    code: 'REGISTRATION_MODE_MISMATCH',
+    status: 400,
+    title: 'Registration mode mismatch',
+    detail:
+      'This registration link only accepts identity fields (name + phone or email + consent). It does not accept profile data.',
+    hint: 'POST body to a link whose registration_mode resolves to submission_shape=account_only included item_state or unknown fields. Server rejects to prevent profile leakage into an account-only capture.',
+  },
+  REGISTRATION_MODE_IMMUTABLE: {
+    code: 'REGISTRATION_MODE_IMMUTABLE',
+    status: 400,
+    title: 'Registration mode cannot be changed',
+    detail:
+      'The registration mode is fixed at link creation time. Create a new link to use a different mode.',
+    hint: 'PATCH /v1/links/:id included registration_mode. Immutable by design — UpdateLinkBodySchema is .strict() so unknown keys 400 automatically.',
+  },
+  INVALID_REGISTRATION_MODE: {
+    code: 'INVALID_REGISTRATION_MODE',
+    status: 400,
+    title: 'Invalid registration mode',
+    detail: 'The selected registration mode is not declared in this network configuration.',
+    hint: 'Create body referenced a mode key not present in aggregator.config.yaml registration_modes. Surface the declared keys via fields.declared.',
+  },
+  INVALID_CONFIG: {
+    code: 'INVALID_CONFIG',
+    status: 400,
+    title: 'Invalid configuration',
+    detail: 'The combination of fields supplied is not allowed by the API.',
+    hint: 'A field combination violates a business invariant (e.g. profile fields on an account_only link). Inspect detail for the specific rule.',
   },
 } as const satisfies Record<string, ErrorCatalogueEntry>;
 

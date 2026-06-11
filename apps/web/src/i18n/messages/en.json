@@ -1,5 +1,7 @@
 {
-  "language": { "label": "Language" },
+  "language": {
+    "label": "Language"
+  },
   "theme": {
     "switch_to_light": "Switch to light theme",
     "switch_to_dark": "Switch to dark theme",
@@ -17,6 +19,12 @@
     "satisfied": "Satisfied",
     "complete": "Complete",
     "incomplete": "Incomplete"
+  },
+  "Lifecycle": {
+    "draft": "Draft",
+    "live": "Live",
+    "paused": "Paused",
+    "account_only": "Account only"
   },
   "metadata": {
     "title": "Aggregator Portal",
@@ -64,20 +72,42 @@
       "provider": "Provider",
       "joined": "Joined",
       "profileStatus": "Profile Status",
+      "lifecycle": "Lifecycle",
       "status": "Status",
       "recommendedAction": "Recommended Action",
       "applied": "Applied",
+      "initiated": "Initiated",
+      "received": "Received",
       "count": "{shown} of {total}"
     },
     "filters": {
-      "all_statuses": "All statuses"
+      "all_statuses": "All statuses",
+      "lifecycle_label": "Lifecycle",
+      "lifecycle_all": "All lifecycles",
+      "lifecycle_draft": "Draft",
+      "lifecycle_live": "Live",
+      "lifecycle_paused": "Paused",
+      "lifecycle_account_only": "Account only"
     },
     "aria": {
       "search_participants": "Search participants",
       "export_csv": "Export as CSV",
       "prev_page": "Previous page",
       "next_page": "Next page",
-      "refresh": "Refresh dashboard"
+      "refresh": "Refresh dashboard",
+      "select_row": "Select {name}",
+      "select_all_page": "Select all rows on this page"
+    },
+    "bulk": {
+      "select": "Select",
+      "cancel": "Cancel",
+      "selected": "{count} selected",
+      "clear": "Clear selection",
+      "exportSelected": "Export selected CSV",
+      "triggerCallback": "Trigger callback",
+      "running": "Working…",
+      "success": "{count} processed",
+      "failed": "Action failed"
     },
     "tabs": {
       "seekers": "Seekers",
@@ -109,7 +139,53 @@
       "totalItems": "Total {entityPlural}",
       "withApplications": "{entityPlural} with Applications",
       "newParticipants": "New Participants",
-      "delta_this_week": "this week"
+      "delta_this_week": "this week",
+      "totalUsers": "Total Users",
+      "avgProfilesPerUser": "Avg Profiles per User",
+      "avgActionsPerUser": "Avg Actions per User",
+      "sub_total": "All {entityPlural} records",
+      "sub_complete": "{pct}% of all profiles",
+      "sub_applications": "Profiles with submissions",
+      "sub_avgItems": "Profiles managed each",
+      "sub_avgActions": "Recorded interactions",
+      "sub_totalUsers": "Unique account holders"
+    },
+    "summary": {
+      "total": "{count} total",
+      "hint": "Lifecycle and profile health across your network"
+    },
+    "groups": {
+      "profiles": "Profiles",
+      "users": "Users"
+    },
+    "onboardingGroup": {
+      "title": "Onboarding",
+      "helper": "Rolled up across your network",
+      "view": "View onboarding",
+      "total": "Total submissions",
+      "total_sub": "All entry modes",
+      "passed": "Verified & onboarded",
+      "passed_sub": "Cleared validation",
+      "failed": "Failed validations",
+      "failed_sub": "Need attention",
+      "skipped": "Skipped",
+      "skipped_sub": "Duplicates ignored",
+      "byMode": "Joins by entry mode",
+      "joins": "{count} verified joins",
+      "mode_bulk": "CSV upload",
+      "mode_link": "Registration link",
+      "mode_qr": "QR code",
+      "error_title": "Couldn’t load onboarding summary",
+      "error_body": "The summary service didn’t respond. Your other metrics are unaffected.",
+      "retry": "Retry"
+    },
+    "tiles": {
+      "lifecycle": {
+        "draft": "Draft profiles",
+        "live": "Live profiles",
+        "paused": "Paused profiles",
+        "account_only": "Account-only users"
+      }
     },
     "opp": {
       "activeProgramsLabel": "Active programs",
@@ -195,13 +271,8 @@
         "col_failed": "Failed",
         "col_skipped": "Skipped",
         "col_reason": "Reason / errors",
-        "col_actions": "Actions",
         "all_rows_passed": "All rows passed",
-        "signing": "Signing…",
-        "triggered": "{action} triggered",
-        "trigger_callback": "Trigger Callback",
-        "retry": "Retry",
-        "notify": "Notify"
+        "signing": "Signing…"
       }
     },
     "create_link": {
@@ -214,10 +285,13 @@
       "field_event_location": "Event Location",
       "field_district": "District",
       "field_domain": "Domain",
+      "field_registration_mode": "Campaign type",
+      "field_tags": "Tags (optional)",
       "placeholder_state": "State",
       "placeholder_event": "Campaign or event name",
       "placeholder_location": "City or venue",
       "placeholder_district": "District",
+      "placeholder_tags": "Comma-separated, e.g. priority, dharwad-drive",
       "creating": "Creating…",
       "create_button": "Create link",
       "qr_label": "QR Code",
@@ -342,7 +416,38 @@
       "error_network_title": "Network error",
       "error_network_detail": "Could not reach the server.",
       "error_submission_title": "Submission failed",
-      "error_server_detail": "Server returned HTTP {status}."
+      "error_server_detail": "Server returned HTTP {status}.",
+      "lookup": {
+        "owned_elsewhere_title": "Contact already registered",
+        "owned_elsewhere_body": "This email or mobile is already registered with another organisation. Please use a different contact or sign in through that organisation.",
+        "owned_elsewhere_cta": "Use a different contact",
+        "resume_title": "You have a profile in progress",
+        "resume_body": "We found an unfinished profile for this contact. Resume where you left off?",
+        "resume_cta": "Resume profile",
+        "resume_continue_new": "Continue with a new submission"
+      },
+      "account_only": {
+        "title": "Quick sign-up",
+        "helper": "Provide your name and a contact number or email. You can complete your profile later.",
+        "contact_label": "Provide a phone OR an email (at least one required)",
+        "name_label": "Name",
+        "phone_label": "Phone",
+        "email_label": "Email",
+        "consent_terms_label": "I accept the terms",
+        "consent_privacy_label": "I accept the privacy policy",
+        "submit_label": "Submit"
+      }
+    }
+  },
+  "registration_mode": {
+    "field_label": "Campaign type",
+    "voice": {
+      "label": "Voice Campaign",
+      "hint": "You'll receive a call on this number to complete your profile."
+    },
+    "form": {
+      "label": "Form Filling",
+      "hint": "Participants fill the full profile online. Partial submissions are accepted."
     }
   },
   "auth": {

@@ -11,7 +11,7 @@
  * writer to make assertions predictable.
  */
 
-import { UpstreamError } from '@aggregator-dpg/shared-primitives/errors';
+import { UpstreamError, ValidationError } from '@aggregator-dpg/shared-primitives/errors';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import { err, ok } from '@aggregator-dpg/shared-primitives/result';
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
@@ -23,10 +23,13 @@ import {
   type SignalStackDashboardExportQuery,
   type SignalStackDashboardPage,
   type SignalStackDashboardQuery,
+  type SignalStackGetItemQuery,
   type SignalStackItemList,
   type SignalStackItemQuery,
   type SignalStackOnboardParticipantInput,
   type SignalStackOnboardParticipantResult,
+  type SignalStackProbeUserInput,
+  type SignalStackProbeUserResult,
   type SignalStackProfile,
   type SignalStackUpsertAggregatorInput,
 } from './interface.js';
@@ -60,6 +63,43 @@ export class InMemorySignalStackWriter extends SignalStackWriterBase {
    * same input return the same `org_id` and never create duplicates.
    */
   protected readonly aggregators: Map<string, SignalStackAggregator> = new Map();
+  /**
+   * Pinned lifecycle classification used by the next `onboard()` call when
+   * `submit_mode !== 'account_only'`. Consumed (cleared) after one use so a
+   * second call falls back to the default `live` classification.
+   * Tests set this via {@link setNextClassification}.
+   */
+  protected nextClassification: { lifecycle_status: 'draft' | 'live' | 'paused' } | undefined;
+  /**
+   * Foreign-user lookup keys (`email:...` / `phone:...`). When the next
+   * `onboard()` matches a key here, the writer returns `owned_elsewhere:
+   * true` with no item — mirroring signalstack's behaviour when the user
+   * already exists under a different aggregator. Tests seed entries via
+   * {@link seedForeignUser}.
+   */
+  protected readonly foreignUsers: Set<string> = new Set();
+  /**
+   * Own-user probe seeds keyed by `email:...` / `phone:...`. Each entry
+   * carries the acting org id and optionally the primary item's
+   * lifecycle classification. {@link probeUser} returns
+   * `user_exists: true` (with `lifecycle_summary` populated when the
+   * entry has an `item`) on a key hit. Tests seed entries via
+   * {@link seedOwnUser}. Kept separate from {@link profiles} because
+   * probes do not need a full StoredProfile row — only the slim
+   * classification triple a lifecycle resumption requires.
+   */
+  protected readonly ownUserProbes: Map<
+    string,
+    {
+      actingOrgId: string;
+      email: string | null;
+      phoneNumber: string | null;
+      item?: {
+        item_id: string;
+        lifecycle_status: 'draft' | 'live' | 'paused';
+      };
+    }
+  > = new Map();
   private nextUserSeq = 1;
   private nextProfileSeq = 1;
   private nextAggregatorSeq = 1;
@@ -92,6 +132,27 @@ export class InMemorySignalStackWriter extends SignalStackWriterBase {
       );
     }
 
+    // Foreign-user short-circuit: signalstack reports the user already
+    // exists under a different aggregator, so we mint a synthetic user_id
+    // (signals would echo its own) and surface owned_elsewhere=true with
+    // no item. Lifecycle fields are omitted because no item exists for
+    // this aggregator.
+    const foreignEmailKey = email ? `email:${email}` : null;
+    const foreignPhoneKey = phone ? `phone:${phone}` : null;
+    const isForeign =
+      (foreignEmailKey !== null && this.foreignUsers.has(foreignEmailKey)) ||
+      (foreignPhoneKey !== null && this.foreignUsers.has(foreignPhoneKey));
+    if (isForeign) {
+      const foreignUserId = `mem-foreign-user-${this.nextUserSeq++}`;
+      return ok({
+        user_id: foreignUserId,
+        profile_item_id: '',
+        onboarded_at: ISO_FIXED,
+        already_registered: true,
+        owned_elsewhere: true,
+      });
+    }
+
     const emailUser = email ? this.findByEmail(email) : undefined;
     const phoneUser = phone ? this.findByPhone(phone) : undefined;
     if (emailUser && phoneUser && emailUser.id !== phoneUser.id) {
@@ -114,7 +175,27 @@ export class InMemorySignalStackWriter extends SignalStackWriterBase {
       this.users.set(userRow.id, userRow);
     }
 
+    // account_only: signalstack creates the user row but no item. Lookup
+    // endpoint + partial-data registrations use this path to opt out of
+    // item creation. No lifecycle fields are returned because no item
+    // exists yet.
+    const submitMode: 'with_item' | 'account_only' = input.submit_mode ?? 'with_item';
+    if (submitMode === 'account_only') {
+      return ok({
+        user_id: userRow.id,
+        profile_item_id: '',
+        onboarded_at: ISO_FIXED,
+        owned_elsewhere: false,
+      });
+    }
+
     const profileItemId = `mem-item-${this.nextProfileSeq++}`;
+    const classification = this.nextClassification ?? { lifecycle_status: 'live' as const };
+    // Consume the pinned classification so a second call reverts to the
+    // default `live` shape — keeps test fixtures terse without forcing every
+    // test to reset the writer.
+    this.nextClassification = undefined;
+
     const profile: StoredProfile = {
       item_id: profileItemId,
       item_network: input.network,
@@ -126,6 +207,7 @@ export class InMemorySignalStackWriter extends SignalStackWriterBase {
       aggregator_id: null,
       created_at: ISO_FIXED,
       updated_at: ISO_FIXED,
+      lifecycle_status: classification.lifecycle_status,
       created_by: userRow.id,
       acting_org_id: input.actingOrgId,
       channel: input.channel,
@@ -137,7 +219,200 @@ export class InMemorySignalStackWriter extends SignalStackWriterBase {
       user_id: userRow.id,
       profile_item_id: profileItemId,
       onboarded_at: ISO_FIXED,
+      lifecycle_status: classification.lifecycle_status,
+      owned_elsewhere: false,
     });
+  }
+
+  /**
+   * Pins the lifecycle classification used by the next `onboard()` call
+   * (when `submit_mode !== 'account_only'`). The classification is
+   * consumed after one call — subsequent calls fall back to the default
+   * `live` / `100` shape until re-pinned.
+   *
+   * @param classification - Pinned lifecycle status + completion percent.
+   */
+  setNextClassification(classification: { lifecycle_status: 'draft' | 'live' | 'paused' }): void {
+    this.nextClassification = classification;
+  }
+
+  /**
+   * Marks the given email and/or phone as belonging to a user that
+   * signalstack reports under a different aggregator. The next
+   * `onboard()` matching one of these keys returns `owned_elsewhere:
+   * true` with no item — mirroring signalstack's response when the user
+   * already exists outside the calling aggregator's scope.
+   *
+   * @param key - Email and/or phone to mark as foreign-owned. At least
+   *   one of `email` or `phoneNumber` must be provided.
+   */
+  seedForeignUser(key: { email?: string; phoneNumber?: string }): void {
+    const email = normalizeEmail(key.email);
+    const phone = normalizePhone(key.phoneNumber);
+    if (email) this.foreignUsers.add(`email:${email}`);
+    if (phone) this.foreignUsers.add(`phone:${phone}`);
+  }
+
+  /**
+   * Registers an own-aggregator user for {@link probeUser} matches.
+   * Tests seed an entry per identity (email, phoneNumber, or both) plus
+   * an optional `item` carrying the primary lifecycle classification.
+   *
+   * When the next `probeUser` call matches the email or phone key, the
+   * fake returns `user_exists: true`, `owned_elsewhere: false`, and
+   * (when `item` is present) a populated `lifecycle_summary`.
+   *
+   * Re-seeding the same key overwrites the previous entry. At least one
+   * of `email` or `phoneNumber` must be supplied.
+   *
+   * @param seed - actingOrgId + at least one identity + optional item.
+   */
+  seedOwnUser(seed: {
+    actingOrgId: string;
+    email?: string;
+    phoneNumber?: string;
+    item?: {
+      item_id: string;
+      lifecycle_status: 'draft' | 'live' | 'paused';
+    };
+  }): void {
+    const email = normalizeEmail(seed.email);
+    const phone = normalizePhone(seed.phoneNumber);
+    const entry = {
+      actingOrgId: seed.actingOrgId,
+      email,
+      phoneNumber: phone,
+      ...(seed.item ? { item: seed.item } : {}),
+    };
+    if (email) this.ownUserProbes.set(`email:${email}`, entry);
+    if (phone) this.ownUserProbes.set(`phone:${phone}`, entry);
+  }
+
+  override async probeUser(
+    input: SignalStackProbeUserInput,
+  ): Promise<Result<SignalStackProbeUserResult, BaseError>> {
+    if (!input?.actingOrgId) {
+      return err(
+        new ValidationError('actingOrgId is required', {
+          code: 'SIGNALSTACK_INPUT_INVALID',
+        }),
+      );
+    }
+    const email = normalizeEmail(input.email);
+    const phone = normalizePhone(input.phoneNumber);
+    if (!email && !phone) {
+      return err(
+        new ValidationError('email or phoneNumber required', {
+          code: 'SIGNALSTACK_INPUT_INVALID',
+        }),
+      );
+    }
+    if (!input.network || !input.domain) {
+      return err(
+        new ValidationError('network and domain are required', {
+          code: 'SIGNALSTACK_INPUT_INVALID',
+        }),
+      );
+    }
+
+    // Foreign-owned user takes precedence over an own-user seed for the
+    // same identity — signals never returns lifecycle state across
+    // aggregator boundaries.
+    const emailKey = email ? `email:${email}` : null;
+    const phoneKey = phone ? `phone:${phone}` : null;
+    const isForeign =
+      (emailKey !== null && this.foreignUsers.has(emailKey)) ||
+      (phoneKey !== null && this.foreignUsers.has(phoneKey));
+    if (isForeign) {
+      return ok({
+        user_exists: true,
+        owned_elsewhere: true,
+        lifecycle_summary: null,
+      });
+    }
+
+    const ownEntry =
+      (emailKey ? this.ownUserProbes.get(emailKey) : undefined) ??
+      (phoneKey ? this.ownUserProbes.get(phoneKey) : undefined);
+    if (ownEntry) {
+      if (ownEntry.item) {
+        return ok({
+          user_exists: true,
+          owned_elsewhere: false,
+          lifecycle_summary: {
+            primary_item: {
+              item_id: ownEntry.item.item_id,
+              lifecycle_status: ownEntry.item.lifecycle_status,
+            },
+          },
+        });
+      }
+      return ok({
+        user_exists: true,
+        owned_elsewhere: false,
+        lifecycle_summary: null,
+      });
+    }
+
+    return ok({
+      user_exists: false,
+      owned_elsewhere: false,
+      lifecycle_summary: null,
+    });
+  }
+
+  override async getItem(
+    query: SignalStackGetItemQuery,
+  ): Promise<Result<SignalStackProfile | null, BaseError>> {
+    if (!query?.item_id) {
+      return err(
+        new ValidationError('item_id is required', {
+          code: 'SIGNALSTACK_INPUT_INVALID',
+        }),
+      );
+    }
+    const row = this.profiles.get(query.item_id);
+    if (!row) return ok(null);
+    return ok(stripCreatedBy(row));
+  }
+
+  /**
+   * Seeds a single signalstack item keyed by `itemId`, filling unspecified
+   * fields with deterministic defaults. Used by tests to pin the lifecycle
+   * a `getItem(...)` lookup will surface for a given id.
+   *
+   * Re-seeding the same `itemId` overwrites the previous entry.
+   *
+   * @param itemId - Item id the seed is keyed under.
+   * @param partial - Optional overrides; `lifecycle_status` is the field the
+   *   lifecycle re-check reads.
+   */
+  seedItem(
+    itemId: string,
+    partial: Partial<SignalStackProfile> & {
+      lifecycle_status?: 'draft' | 'live' | 'paused';
+    } = {},
+  ): void {
+    const row: StoredProfile = {
+      item_id: itemId,
+      item_network: partial.item_network ?? 'blue_dot',
+      item_domain: partial.item_domain ?? 'seeker',
+      item_type: partial.item_type ?? 'profile_1.0',
+      item_state: partial.item_state ?? {},
+      item_latitude: partial.item_latitude ?? null,
+      item_longitude: partial.item_longitude ?? null,
+      aggregator_id: partial.aggregator_id ?? null,
+      created_at: partial.created_at ?? ISO_FIXED,
+      updated_at: partial.updated_at ?? ISO_FIXED,
+      ...(partial.lifecycle_status !== undefined
+        ? { lifecycle_status: partial.lifecycle_status }
+        : {}),
+      created_by: '',
+      acting_org_id: '',
+      channel: 'link',
+      source_id: '',
+    };
+    this.profiles.set(itemId, row);
   }
 
   override async listItemsByAggregator(
@@ -150,11 +425,20 @@ export class InMemorySignalStackWriter extends SignalStackWriterBase {
         }),
       );
     }
+    // signalstack's default is `live_only` — drafts and paused rows are
+    // hidden unless the caller passes `lifecycle_filter: 'all'`. Treat an
+    // absent lifecycle_status on a stored row as 'live' so seeds written
+    // before lifecycle support landed remain visible by default.
+    const lifecycleFilter: 'live_only' | 'all' = query.lifecycle_filter ?? 'live_only';
     const matching = Array.from(this.profiles.values()).filter((p) => {
       if (p.aggregator_id !== query.aggregator_id) return false;
       if (p.item_network !== query.item_network) return false;
       if (p.item_domain !== query.item_domain) return false;
       if (query.item_type && p.item_type !== query.item_type) return false;
+      if (lifecycleFilter === 'live_only') {
+        const status = p.lifecycle_status ?? 'live';
+        if (status !== 'live') return false;
+      }
       return true;
     });
     const total = matching.length;
@@ -340,7 +624,9 @@ function emptyDomainSlice(): {
     complete_profiles: number;
     has_applications: number;
     by_status: Record<string, number>;
-    by_action_status: Record<string, number>;
+    by_initiated_action_status: Record<string, number>;
+    by_received_action_status: Record<string, number>;
+    total_users: number;
     avg_items_per_user: number;
     avg_actions_per_user: number;
     mode_wise_counts: Record<string, number>;
@@ -355,7 +641,9 @@ function emptyDomainSlice(): {
       complete_profiles: 0,
       has_applications: 0,
       by_status: { new: 0, active: 0, at_risk: 0, inactive: 0 },
-      by_action_status: { create: 0, accept: 0, reject: 0, cancel: 0 },
+      by_initiated_action_status: { create: 0, accept: 0, reject: 0, cancel: 0 },
+      by_received_action_status: { create: 0, accept: 0, reject: 0, cancel: 0 },
+      total_users: 0,
       avg_items_per_user: 0,
       avg_actions_per_user: 0,
       mode_wise_counts: {},

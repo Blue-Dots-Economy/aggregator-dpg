@@ -1,5 +1,7 @@
 {
-  "language": { "label": "भाषा" },
+  "language": {
+    "label": "भाषा"
+  },
   "theme": {
     "switch_to_light": "लाइट थीम पर स्विच करें",
     "switch_to_dark": "डार्क थीम पर स्विच करें",
@@ -17,6 +19,12 @@
     "satisfied": "संतुष्ट",
     "complete": "पूर्ण",
     "incomplete": "अपूर्ण"
+  },
+  "Lifecycle": {
+    "draft": "ड्राफ्ट",
+    "live": "सक्रिय",
+    "paused": "रोका गया",
+    "account_only": "केवल खाता"
   },
   "metadata": {
     "title": "एग्रीगेटर पोर्टल",
@@ -64,20 +72,42 @@
       "provider": "प्रदाता",
       "joined": "जुड़ने की तारीख",
       "profileStatus": "प्रोफ़ाइल स्थिति",
+      "lifecycle": "जीवनचक्र",
       "status": "स्थिति",
       "recommendedAction": "अनुशंसित कार्रवाई",
       "applied": "आवेदन किया",
+      "initiated": "शुरू किया",
+      "received": "प्राप्त",
       "count": "{total} में से {shown}"
     },
     "filters": {
-      "all_statuses": "सभी स्थितियाँ"
+      "all_statuses": "सभी स्थितियाँ",
+      "lifecycle_label": "जीवनचक्र",
+      "lifecycle_all": "सभी जीवनचक्र",
+      "lifecycle_draft": "ड्राफ्ट",
+      "lifecycle_live": "सक्रिय",
+      "lifecycle_paused": "रोका गया",
+      "lifecycle_account_only": "केवल खाता"
     },
     "aria": {
       "search_participants": "प्रतिभागियों को खोजें",
       "export_csv": "CSV के रूप में निर्यात करें",
       "prev_page": "पिछला पृष्ठ",
       "next_page": "अगला पृष्ठ",
-      "refresh": "डैशबोर्ड रिफ्रेश करें"
+      "refresh": "डैशबोर्ड रिफ्रेश करें",
+      "select_row": "{name} चुनें",
+      "select_all_page": "इस पृष्ठ की सभी पंक्तियाँ चुनें"
+    },
+    "bulk": {
+      "select": "चुनें",
+      "cancel": "रद्द करें",
+      "selected": "{count} चयनित",
+      "clear": "चयन हटाएँ",
+      "exportSelected": "चयनित CSV निर्यात करें",
+      "triggerCallback": "कॉलबैक ट्रिगर करें",
+      "running": "प्रक्रिया जारी…",
+      "success": "{count} संसाधित",
+      "failed": "कार्रवाई विफल"
     },
     "tabs": {
       "seekers": "आवेदक",
@@ -109,7 +139,53 @@
       "totalItems": "कुल {entityPlural}",
       "withApplications": "आवेदन वाले {entityPlural}",
       "newParticipants": "नए प्रतिभागी",
-      "delta_this_week": "इस सप्ताह"
+      "delta_this_week": "इस सप्ताह",
+      "totalUsers": "कुल उपयोगकर्ता",
+      "avgProfilesPerUser": "प्रति उपयोगकर्ता औसत प्रोफ़ाइलें",
+      "avgActionsPerUser": "प्रति उपयोगकर्ता औसत क्रियाएँ",
+      "sub_total": "सभी {entityPlural} रिकॉर्ड",
+      "sub_complete": "सभी प्रोफ़ाइलों का {pct}%",
+      "sub_applications": "आवेदन वाली प्रोफ़ाइलें",
+      "sub_avgItems": "प्रति उपयोगकर्ता प्रबंधित प्रोफ़ाइलें",
+      "sub_avgActions": "दर्ज की गई गतिविधियाँ",
+      "sub_totalUsers": "अद्वितीय खाता धारक"
+    },
+    "summary": {
+      "total": "कुल {count}",
+      "hint": "आपके नेटवर्क में जीवनचक्र और प्रोफ़ाइल स्थिति"
+    },
+    "groups": {
+      "profiles": "प्रोफ़ाइलें",
+      "users": "उपयोगकर्ता"
+    },
+    "onboardingGroup": {
+      "title": "ऑनबोर्डिंग",
+      "helper": "आपके पूरे नेटवर्क में समेकित",
+      "view": "ऑनबोर्डिंग देखें",
+      "total": "कुल सबमिशन",
+      "total_sub": "सभी प्रवेश माध्यम",
+      "passed": "सत्यापित और ऑनबोर्ड",
+      "passed_sub": "सत्यापन उत्तीर्ण",
+      "failed": "विफल सत्यापन",
+      "failed_sub": "ध्यान आवश्यक",
+      "skipped": "छोड़ा गया",
+      "skipped_sub": "डुप्लिकेट अनदेखा",
+      "byMode": "प्रवेश माध्यम अनुसार जॉइन",
+      "joins": "{count} सत्यापित जॉइन",
+      "mode_bulk": "CSV अपलोड",
+      "mode_link": "पंजीकरण लिंक",
+      "mode_qr": "QR कोड",
+      "error_title": "ऑनबोर्डिंग सारांश लोड नहीं हो सका",
+      "error_body": "सारांश सेवा ने प्रतिक्रिया नहीं दी। आपके अन्य मेट्रिक्स अप्रभावित हैं।",
+      "retry": "पुनः प्रयास"
+    },
+    "tiles": {
+      "lifecycle": {
+        "draft": "ड्राफ्ट प्रोफ़ाइलें",
+        "live": "सक्रिय प्रोफ़ाइलें",
+        "paused": "रोकी गई प्रोफ़ाइलें",
+        "account_only": "केवल खाता वाले उपयोगकर्ता"
+      }
     },
     "opp": {
       "activeProgramsLabel": "सक्रिय कार्यक्रम",
@@ -195,13 +271,8 @@
         "col_failed": "विफल",
         "col_skipped": "छोड़े गए",
         "col_reason": "कारण / त्रुटियाँ",
-        "col_actions": "कार्रवाइयाँ",
         "all_rows_passed": "सभी पंक्तियाँ उत्तीर्ण",
-        "signing": "हस्ताक्षर हो रहा है…",
-        "triggered": "{action} ट्रिगर किया गया",
-        "trigger_callback": "कॉलबैक ट्रिगर करें",
-        "retry": "पुनः प्रयास करें",
-        "notify": "सूचित करें"
+        "signing": "हस्ताक्षर हो रहा है…"
       }
     },
     "create_link": {
@@ -214,10 +285,13 @@
       "field_event_location": "कार्यक्रम का स्थान",
       "field_district": "जिला",
       "field_domain": "डोमेन",
+      "field_registration_mode": "अभियान प्रकार",
+      "field_tags": "टैग (वैकल्पिक)",
       "placeholder_state": "राज्य",
       "placeholder_event": "अभियान या कार्यक्रम का नाम",
       "placeholder_location": "शहर या स्थान",
       "placeholder_district": "जिला",
+      "placeholder_tags": "अल्पविराम से अलग, जैसे priority, dharwad-drive",
       "creating": "बनाया जा रहा है…",
       "create_button": "लिंक बनाएं",
       "qr_label": "QR कोड",
@@ -342,7 +416,38 @@
       "error_network_title": "नेटवर्क त्रुटि",
       "error_network_detail": "सर्वर तक नहीं पहुंचा जा सका।",
       "error_submission_title": "जमा करना विफल",
-      "error_server_detail": "सर्वर ने HTTP {status} लौटाया।"
+      "error_server_detail": "सर्वर ने HTTP {status} लौटाया।",
+      "lookup": {
+        "owned_elsewhere_title": "संपर्क पहले से पंजीकृत",
+        "owned_elsewhere_body": "यह ईमेल या मोबाइल किसी अन्य संगठन के साथ पहले से पंजीकृत है। कृपया अलग संपर्क का उपयोग करें या उस संगठन के माध्यम से साइन इन करें।",
+        "owned_elsewhere_cta": "अलग संपर्क का उपयोग करें",
+        "resume_title": "आपकी एक प्रोफ़ाइल अधूरी है",
+        "resume_body": "हमें इस संपर्क के लिए एक अधूरी प्रोफ़ाइल मिली। क्या आप वहीं से जारी रखना चाहेंगे?",
+        "resume_cta": "प्रोफ़ाइल जारी रखें",
+        "resume_continue_new": "नई प्रविष्टि के साथ जारी रखें"
+      },
+      "account_only": {
+        "title": "त्वरित साइन-अप",
+        "helper": "अपना नाम और एक संपर्क नंबर या ईमेल दें। आप अपनी प्रोफ़ाइल बाद में पूरी कर सकते हैं।",
+        "contact_label": "एक फ़ोन या ईमेल दें (कम से कम एक आवश्यक)",
+        "name_label": "नाम",
+        "phone_label": "फ़ोन",
+        "email_label": "ईमेल",
+        "consent_terms_label": "मैं नियमों को स्वीकार करता/करती हूँ",
+        "consent_privacy_label": "मैं गोपनीयता नीति को स्वीकार करता/करती हूँ",
+        "submit_label": "जमा करें"
+      }
+    }
+  },
+  "registration_mode": {
+    "field_label": "अभियान प्रकार",
+    "voice": {
+      "label": "वॉयस अभियान",
+      "hint": "प्रोफ़ाइल पूरी करने के लिए आपको इस नंबर पर एक कॉल आएगी।"
+    },
+    "form": {
+      "label": "फ़ॉर्म भरना",
+      "hint": "प्रतिभागी ऑनलाइन पूरी प्रोफ़ाइल भरते हैं। आंशिक सबमिशन स्वीकार किए जाते हैं।"
     }
   },
   "auth": {

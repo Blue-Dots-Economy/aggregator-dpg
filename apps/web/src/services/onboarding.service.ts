@@ -11,6 +11,13 @@ export interface ApiRegistrationLink {
   slug: string;
   domain: string;
   status: 'draft' | 'live' | 'retired';
+  /**
+   * Per-link admin-facing registration mode key (e.g. `voice`, `form`),
+   * set at create time and immutable thereafter. The mode → form-shape
+   * mapping lives in network config; the admin UI sources its dropdown
+   * from the live config. Optional for back-compat with older API builds.
+   */
+  registration_mode?: string;
   context: Record<string, unknown>;
   expires_at: string | null;
   /**
@@ -54,6 +61,12 @@ export interface CreateLinkInput {
   title?: string;
   context?: Record<string, unknown>;
   status?: 'draft' | 'live';
+  /**
+   * Per-link admin-facing registration mode key (e.g. `voice`, `form`).
+   * Validated against the live network config by the API. Omitted defaults
+   * to the network's `form` mode. Immutable after creation.
+   */
+  registration_mode?: string;
   expires_at?: string | null;
 }
 
@@ -75,6 +88,22 @@ export interface OnboardingSummary {
   passed: number;
   failed: number;
   skipped: number;
+}
+
+/** One entry-source slice of the onboarding rollup (`source` is the API's `onboarding_source` enum — `bulk` | `link` today). */
+export interface OnboardingSourceSlice {
+  source: string;
+  total: number;
+  passed: number;
+  failed: number;
+  skipped: number;
+}
+
+export interface OnboardingBySource {
+  aggregator_id: string;
+  from: string | null;
+  to: string | null;
+  by_source: OnboardingSourceSlice[];
 }
 
 export interface BulkUploadCreateResponse {
@@ -172,6 +201,14 @@ export const onboardingService = {
     if (opts.to) params.set('to', opts.to);
     const qs = params.toString();
     return jsonFetch<OnboardingSummary>(`/api/onboarding/summary${qs ? `?${qs}` : ''}`);
+  },
+
+  async bySource(opts: { from?: string; to?: string } = {}): Promise<OnboardingBySource> {
+    const params = new URLSearchParams();
+    if (opts.from) params.set('from', opts.from);
+    if (opts.to) params.set('to', opts.to);
+    const qs = params.toString();
+    return jsonFetch<OnboardingBySource>(`/api/onboarding/by-source${qs ? `?${qs}` : ''}`);
   },
 
   async createBulkUpload(participantType: string): Promise<BulkUploadCreateResponse> {

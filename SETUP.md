@@ -16,7 +16,7 @@ End-to-end guide for running the Aggregator Portal + API on a fresh machine. The
 
 Optional but recommended:
 
-- A Mac/Linux shell. Windows works under WSL2.
+- A Mac/Linux shell, or native Windows (Docker Desktop). On Windows use the `pnpm stack:*` scripts (`make` not required) — see QUICKSTART.md §3 "Windows note". WSL2 also works.
 - A REST client (Postman, curl, HTTPie) for poking the API directly.
 
 ---
@@ -94,6 +94,8 @@ make setup        # copies infra/env.template → .env (mode 600) AND adds `127.
 make up           # docker compose up -d --build
 ```
 
+> **Cross-platform / Windows:** every `make <target>` for the local stack has a `pnpm stack:<target>` equivalent (`setup`, `up`, `down`, `reset`, `logs`, `ps`, `psql`, `rebuild-web`), both driven by `scripts/stack.mjs`. On native Windows (no WSL2) use the pnpm form; `make` is not required. See QUICKSTART.md §3 "Windows note".
+
 ### Why `/etc/hosts` needs `127.0.0.1 keycloak`
 
 When the web container is inside docker, browser and web container must resolve the OIDC issuer URL to the SAME Keycloak. With `OIDC_ISSUER=http://keycloak:8080/...`:
@@ -103,7 +105,7 @@ When the web container is inside docker, browser and web container must resolve 
 
 Both sides agree, JWT issuer claim validates. Without the hosts entry, browser cannot resolve `keycloak` and OIDC redirect fails.
 
-`make hosts` is idempotent — safe to re-run.
+`make setup` (or `pnpm stack:setup`) is idempotent — safe to re-run; it never duplicates host entries.
 
 ### `.env` structure
 

@@ -167,6 +167,12 @@ describe('requireApproved + signalstack backfill', () => {
       async exportDashboardCsv() {
         return err(new UpstreamError('not used', { code: 'X' }));
       }
+      async probeUser() {
+        return err(new UpstreamError('not used', { code: 'X' }));
+      }
+      async getItem() {
+        return err(new UpstreamError('not used', { code: 'X' }));
+      }
     }
     _setSignalStackWriter(new FailingWriter());
 

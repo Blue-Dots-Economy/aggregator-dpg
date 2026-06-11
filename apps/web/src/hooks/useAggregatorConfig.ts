@@ -15,18 +15,30 @@ import { useQuery } from '@tanstack/react-query';
 import { jsonFetch } from '../services/http';
 
 /**
- * Per-domain tile-label overrides from network.json. All keys optional —
- * UI falls back to generic defaults when undefined.
+ * One dashboard tile: which rollup key to read and what to call it. Mirrors
+ * the network-config `DashboardTileDef`.
  */
-export interface DashboardTileLabels {
-  total_items?: string;
-  complete_profiles?: string;
-  has_applications?: string;
+export interface DashboardTileDef {
+  field: string;
+  label: string;
+}
+
+/**
+ * Per-domain dashboard tiles, split into profile-level and user-level groups.
+ * Both optional — UI falls back to default English tiles when absent.
+ */
+export interface DashboardTiles {
+  profile?: DashboardTileDef[];
+  user?: DashboardTileDef[];
+  /** Optional group-heading overrides; UI falls back to localised "Profiles" / "Users". */
+  profile_title?: string;
+  user_title?: string;
 }
 
 /**
  * Network-wide bucket-label overrides from network.json. Keys are the
- * canonical Signals vocab; values are network-specific copy.
+ * canonical Signals vocab; values are network-specific copy. Action labels
+ * are split by direction (initiated vs received).
  */
 export interface DashboardBuckets {
   by_status?: {
@@ -35,7 +47,13 @@ export interface DashboardBuckets {
     at_risk?: string;
     inactive?: string;
   };
-  by_action_status?: {
+  by_initiated_action_status?: {
+    create?: string;
+    accept?: string;
+    reject?: string;
+    cancel?: string;
+  };
+  by_received_action_status?: {
     create?: string;
     accept?: string;
     reject?: string;
@@ -58,8 +76,19 @@ export interface AggregatorConfigDomain {
   label: string;
   plural_label: string;
   item_type: string;
-  dashboardTiles?: DashboardTileLabels;
+  dashboardTiles?: DashboardTiles;
   status_rules?: StatusRule[];
+}
+
+/**
+ * One declared per-link registration mode from network config. `label_i18n_key`
+ * names the admin dropdown label; `submission_shape` drives the public form;
+ * `public_hint_i18n_key` (nullable) is rendered beneath the public form.
+ */
+export interface RegistrationModeConfig {
+  label_i18n_key: string;
+  submission_shape: 'account_only' | 'account_and_profile';
+  public_hint_i18n_key: string | null;
 }
 
 /**
@@ -133,6 +162,8 @@ export interface AggregatorConfigPayload {
   };
   domains: AggregatorConfigDomain[];
   dashboardBuckets?: DashboardBuckets;
+  /** Per-link registration modes declared by the network (admin dropdown source). */
+  registration_modes?: Record<string, RegistrationModeConfig>;
 }
 
 /**

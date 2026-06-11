@@ -37,6 +37,23 @@ describe('GET /v1/aggregator-config', () => {
     expect(Array.isArray(body.domains)).toBe(true);
   });
 
+  it('exposes the registration_modes block from the resolved config', async () => {
+    const res = await app.inject({ method: 'GET', url: '/v1/aggregator-config' });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as {
+      registration_modes: Record<
+        string,
+        { label_i18n_key: string; submission_shape: string; public_hint_i18n_key: string | null }
+      >;
+    };
+    expect(body.registration_modes).toBeDefined();
+    expect(body.registration_modes.voice?.submission_shape).toBe('account_only');
+    expect(body.registration_modes.form?.submission_shape).toBe('account_and_profile');
+    expect(body.registration_modes.voice?.public_hint_i18n_key).toBe(
+      'registration_mode.voice.hint',
+    );
+  });
+
   it('surfaces dashboardTiles per domain when the resolved config has them', async () => {
     const withTiles: ResolvedNetworkConfig = buildBlueDotConfig({
       domains: {
@@ -48,9 +65,11 @@ describe('GET /v1/aggregator-config', () => {
           schema: {},
           identity: { name: 'name', phone: 'phone', email: 'email' },
           dashboardTiles: {
-            total_items: 'Total Seekers',
-            complete_profiles: 'Complete',
-            has_applications: 'Engaged',
+            profile: [
+              { field: 'total_items', label: 'Profiles' },
+              { field: 'complete_profiles', label: 'Complete' },
+            ],
+            user: [{ field: 'total_users', label: 'Total Seekers' }],
           },
         },
         provider: {
@@ -67,8 +86,14 @@ describe('GET /v1/aggregator-config', () => {
         },
       },
       dashboardBuckets: {
-        by_action_status: {
+        by_initiated_action_status: {
           create: 'Requested',
+          accept: 'Accepted',
+          reject: 'Declined',
+          cancel: 'Cancelled',
+        },
+        by_received_action_status: {
+          create: 'Requests',
           accept: 'Connected',
           reject: 'Declined',
           cancel: 'Cancelled',
@@ -82,20 +107,35 @@ describe('GET /v1/aggregator-config', () => {
     const body = res.json() as {
       domains: Array<{
         id: string;
-        dashboardTiles?: Record<string, string>;
+        dashboardTiles?: {
+          profile?: Array<{ field: string; label: string }>;
+          user?: Array<{ field: string; label: string }>;
+        };
       }>;
-      dashboardBuckets?: { by_action_status?: Record<string, string> };
+      dashboardBuckets?: {
+        by_initiated_action_status?: Record<string, string>;
+        by_received_action_status?: Record<string, string>;
+      };
     };
 
     const seeker = body.domains.find((d) => d.id === 'seeker');
-    expect(seeker?.dashboardTiles).toEqual({
-      total_items: 'Total Seekers',
-      complete_profiles: 'Complete',
-      has_applications: 'Engaged',
+    expect(seeker?.dashboardTiles?.profile?.[0]).toEqual({
+      field: 'total_items',
+      label: 'Profiles',
+    });
+    expect(seeker?.dashboardTiles?.user?.[0]).toEqual({
+      field: 'total_users',
+      label: 'Total Seekers',
     });
 
-    expect(body.dashboardBuckets?.by_action_status).toEqual({
+    expect(body.dashboardBuckets?.by_initiated_action_status).toEqual({
       create: 'Requested',
+      accept: 'Accepted',
+      reject: 'Declined',
+      cancel: 'Cancelled',
+    });
+    expect(body.dashboardBuckets?.by_received_action_status).toEqual({
+      create: 'Requests',
       accept: 'Connected',
       reject: 'Declined',
       cancel: 'Cancelled',

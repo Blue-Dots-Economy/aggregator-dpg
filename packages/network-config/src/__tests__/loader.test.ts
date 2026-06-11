@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { FileNetworkConfigLoader } from '../loader.js';
+import { AggregatorConfigSchema } from '../interface.js';
 
 const BLUE_DOT_YAML = `
 aggregator:
@@ -220,16 +221,24 @@ describe('FileNetworkConfigLoader', () => {
             },
           },
           dashboard_tiles: {
-            total_items: 'Total Seekers',
-            complete_profiles: 'Complete',
-            has_applications: 'Engaged',
+            profile: [
+              { field: 'total_items', label: 'Profiles' },
+              { field: 'complete_profiles', label: 'Complete' },
+            ],
+            user: [{ field: 'total_users', label: 'Total Seekers' }],
           },
         },
       ],
       dashboard_buckets: {
         by_status: { new: 'New', active: 'Active', at_risk: 'At Risk', inactive: 'Inactive' },
-        by_action_status: {
+        by_initiated_action_status: {
           create: 'Requested',
+          accept: 'Accepted',
+          reject: 'Declined',
+          cancel: 'Cancelled',
+        },
+        by_received_action_status: {
+          create: 'Requests',
           accept: 'Connected',
           reject: 'Declined',
           cancel: 'Cancelled',
@@ -248,13 +257,22 @@ describe('FileNetworkConfigLoader', () => {
     expect(result.success).toBe(true);
     if (!result.success) return;
     const resolved = result.value;
-    expect(resolved.domains['seeker']?.dashboardTiles).toEqual({
-      total_items: 'Total Seekers',
-      complete_profiles: 'Complete',
-      has_applications: 'Engaged',
+    expect(resolved.domains['seeker']?.dashboardTiles?.profile?.[0]).toEqual({
+      field: 'total_items',
+      label: 'Profiles',
     });
-    expect(resolved.dashboardBuckets?.by_action_status).toEqual({
+    expect(resolved.domains['seeker']?.dashboardTiles?.user?.[0]).toEqual({
+      field: 'total_users',
+      label: 'Total Seekers',
+    });
+    expect(resolved.dashboardBuckets?.by_initiated_action_status).toEqual({
       create: 'Requested',
+      accept: 'Accepted',
+      reject: 'Declined',
+      cancel: 'Cancelled',
+    });
+    expect(resolved.dashboardBuckets?.by_received_action_status).toEqual({
+      create: 'Requests',
       accept: 'Connected',
       reject: 'Declined',
       cancel: 'Cancelled',
@@ -276,5 +294,86 @@ describe('FileNetworkConfigLoader', () => {
     const resolved = result.value;
     expect(resolved.domains['seeker']?.dashboardTiles).toBeUndefined();
     expect(resolved.dashboardBuckets).toBeUndefined();
+  });
+});
+
+describe('AggregatorConfigSchema.registration_modes', () => {
+  const baseAggregator = {
+    name: 'Test',
+    contact_email: 'a@x.com',
+    network: { source: 'http://x', csv_array_delimiter: '|', field_overrides: {} },
+    brand: {
+      short_name: 'T',
+      long_name: 'Test',
+      url_slug: 't',
+      primary_color: '#000000',
+      accent_color: '#111111',
+    },
+    domain_labels: {},
+    onboarding: { presume_consent: true },
+  };
+
+  it('accepts a declared mode with required fields', () => {
+    const result = AggregatorConfigSchema.safeParse({
+      aggregator: {
+        ...baseAggregator,
+        registration_modes: {
+          voice: {
+            label_i18n_key: 'registration_mode.voice.label',
+            submission_shape: 'account_only',
+            public_hint_i18n_key: 'registration_mode.voice.hint',
+          },
+        },
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects unknown submission_shape', () => {
+    const result = AggregatorConfigSchema.safeParse({
+      aggregator: {
+        ...baseAggregator,
+        registration_modes: {
+          weird: {
+            label_i18n_key: 'x',
+            submission_shape: 'BOGUS',
+            public_hint_i18n_key: null,
+          },
+        },
+      },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('accepts null public_hint_i18n_key', () => {
+    const result = AggregatorConfigSchema.safeParse({
+      aggregator: {
+        ...baseAggregator,
+        registration_modes: {
+          form: {
+            label_i18n_key: 'registration_mode.form.label',
+            submission_shape: 'account_and_profile',
+            public_hint_i18n_key: null,
+          },
+        },
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects non-snake_case mode keys', () => {
+    const result = AggregatorConfigSchema.safeParse({
+      aggregator: {
+        ...baseAggregator,
+        registration_modes: {
+          'Bad-Key': {
+            label_i18n_key: 'x',
+            submission_shape: 'account_only',
+            public_hint_i18n_key: null,
+          },
+        },
+      },
+    });
+    expect(result.success).toBe(false);
   });
 });

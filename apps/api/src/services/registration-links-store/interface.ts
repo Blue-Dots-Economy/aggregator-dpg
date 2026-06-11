@@ -7,12 +7,23 @@
 
 export type RegistrationLinkStatus = 'draft' | 'live' | 'retired';
 
+/**
+ * Per-link admin-facing registration mode key. The mode → form-shape
+ * mapping lives in network config (aggregator.config.yaml under
+ * `registration_modes`); unknown keys at read time fall back to `form`
+ * shape via resolveSubmissionShape() (see services/registration-mode).
+ * Open snake_case identifier; not constrained to a fixed enum.
+ */
+export type RegistrationLinkRegistrationMode = string;
+
 export interface RegistrationLink {
   id: string;
   aggregatorId: string;
   slug: string;
   domain: string;
   context: Record<string, unknown>;
+  /** See {@link RegistrationLinkRegistrationMode}. */
+  registrationMode: RegistrationLinkRegistrationMode;
   qrObjectKey: string | null;
   status: RegistrationLinkStatus;
   expiresAt: Date | null;
@@ -27,6 +38,8 @@ export interface CreateRegistrationLinkInput {
   domain: string;
   context: Record<string, unknown>;
   status?: RegistrationLinkStatus;
+  /** Defaults to the network's `form` mode when omitted. */
+  registrationMode?: RegistrationLinkRegistrationMode;
   expiresAt?: Date | null;
   createdBy: string;
 }

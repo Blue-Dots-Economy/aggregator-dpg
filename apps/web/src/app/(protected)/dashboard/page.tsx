@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useRef, useMemo, type ReactNode } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { createPortal } from 'react-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useTranslations, useLocale } from 'next-intl';
@@ -12,11 +12,23 @@ import { SegmentedTabs, type SegmentedTab } from '../../../components/ui/Segment
 import { Topbar } from '../../../components/shell/Topbar';
 import { I, type IconName } from '../../../icons';
 import { useOppProviders, useDashboard } from '../../../hooks/useDashboard';
+import { useOnboardingSummary, useOnboardingBySource } from '../../../hooks/useOnboarding';
 import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
-import { dashboardService, triggerCsvDownload } from '../../../services/dashboard.service';
+import { dashboardService, type LifecycleFilter } from '../../../services/dashboard.service';
+import { mapDirectional } from '../../../services/row-mapping';
+import { resolveTiles } from '../../../services/tiles';
+import { DASHBOARD_BULK_ACTIONS, type BulkAction } from '../../../services/bulk-actions';
+import type { DashboardTileDef } from '../../../hooks/useAggregatorConfig';
 import { useProfileRaw } from '../../../hooks/useProfile';
 import { useThemeMode } from '../../../lib/theme-mode';
-import type { ParticipantBase, ParticipantStatus, Provider, Seeker } from '../../../types';
+import type {
+  DirectionalStats,
+  LifecycleStatus,
+  ParticipantBase,
+  ParticipantStatus,
+  Provider,
+  Seeker,
+} from '../../../types';
 
 type Tab = 'seekers' | 'providers' | 'opp';
 
@@ -104,10 +116,10 @@ function StatCard({ tone, count, label, icon, hint, action }: StatCardProps) {
   const numColor = mode === 'dark' ? t.num.dark : t.num.light;
   return (
     <div
-      className="bd-card bd-shadow p-5 flex flex-col gap-3 relative overflow-hidden"
+      className="bd-card bd-shadow p-5 flex flex-col relative overflow-hidden transition-transform hover:-translate-y-0.5"
       style={{ background: t.bg }}
     >
-      <div className="flex items-start justify-between">
+      <div className="flex items-center justify-between mb-3.5">
         <div
           className="w-9 h-9 rounded-[10px] flex items-center justify-center"
           style={{ background: 'var(--bd-card)', border: `1px solid ${t.ring}`, color: t.icon }}
@@ -116,16 +128,14 @@ function StatCard({ tone, count, label, icon, hint, action }: StatCardProps) {
         </div>
         {action}
       </div>
-      <div>
-        <div
-          className="font-display font-bold text-[28px] leading-none tracking-tight"
-          style={{ color: numColor }}
-        >
-          {count}
-        </div>
-        <div className="text-[13px] text-ink-500 mt-1.5 font-medium">{label}</div>
-        {hint && <div className="text-[11.5px] text-ink-400 mt-0.5">{hint}</div>}
+      <div
+        className="font-display font-bold text-[32px] leading-none tracking-tight"
+        style={{ color: numColor }}
+      >
+        {count}
       </div>
+      <div className="text-[15px] font-bold text-ink-900 mt-2.5">{label}</div>
+      {hint && <div className="text-[12.5px] text-ink-500 mt-1 font-medium">{hint}</div>}
     </div>
   );
 }
@@ -135,6 +145,10 @@ type DeltaTone = 'up' | 'down' | 'flat';
 interface MiniStatProps {
   label: string;
   value: string;
+  /** Optional leading icon rendered in a soft square next to the label. */
+  icon?: IconName | undefined;
+  /** Optional context line under the value (e.g. "50% of all profiles"). */
+  sub?: string | undefined;
   delta?: string;
   deltaTone?: DeltaTone;
 }
@@ -145,24 +159,435 @@ const DELTA_TONES: Record<DeltaTone, string> = {
   flat: 'text-ink-500 bg-ink-100',
 };
 
-function MiniStat({ label, value, delta, deltaTone = 'flat' }: MiniStatProps) {
+function MiniStat({ label, value, icon, sub, delta, deltaTone = 'flat' }: MiniStatProps) {
+  const Ic = icon ? I[icon] : null;
   return (
-    <div className="bd-card p-4 flex flex-col gap-1.5">
-      <div className="text-[12px] text-ink-400 font-medium">{label}</div>
-      <div className="flex items-baseline gap-2">
-        <div className="font-display font-bold text-[22px] text-ink-900 leading-none tracking-tight">
-          {value}
-        </div>
-        {delta && (
-          <span
-            className={`text-[11px] font-semibold px-1.5 py-0.5 rounded-md ${DELTA_TONES[deltaTone]}`}
-          >
-            {delta}
-          </span>
+    <div className="bd-card p-4 flex flex-col gap-2.5 transition-transform hover:-translate-y-0.5">
+      <div className="flex items-center gap-2.5">
+        {Ic && (
+          <div className="w-8 h-8 rounded-[9px] bg-ink-50 text-ink-500 flex items-center justify-center shrink-0">
+            <Ic size={16} />
+          </div>
         )}
+        <div className="text-[13px] text-ink-500 font-semibold">{label}</div>
+      </div>
+      {/* mt-auto pins the number block to the card bottom so values line up
+          across a row even when some labels wrap to a second line. */}
+      <div className="mt-auto flex flex-col gap-1">
+        <div className="flex items-baseline gap-2">
+          <div className="font-display font-bold text-[26px] text-ink-900 leading-none tracking-tight">
+            {value}
+          </div>
+          {delta && (
+            <span
+              className={`text-[11px] font-semibold px-1.5 py-0.5 rounded-md ${DELTA_TONES[deltaTone]}`}
+            >
+              {delta}
+            </span>
+          )}
+        </div>
+        {/* min-h reserves the subline slot so values still align when a
+            config-defined tile has no sub copy. */}
+        <div className="text-[12px] text-ink-400 font-medium min-h-[18px]">{sub}</div>
       </div>
     </div>
   );
+}
+
+/**
+ * Domain summary bar — single strip above the lifecycle funnel carrying the
+ * domain label (from network-config `plural_label`), the live total, a
+ * context hint, and the refresh action. Replaces the old standalone label
+ * row + refresh button (design: Dashboard summary bar).
+ */
+function SummaryBar({
+  icon,
+  label,
+  total,
+  refreshing,
+  refreshError,
+  lastRefreshedAt,
+  onRefresh,
+}: {
+  icon: IconName;
+  label: string;
+  total: number | undefined;
+  refreshing: boolean;
+  refreshError: string | null;
+  lastRefreshedAt: number | null;
+  onRefresh: () => void;
+}) {
+  const t = useTranslations('dashboard');
+  const Ic = I[icon];
+  return (
+    <div className="bd-card bd-shadow px-5 py-4 flex items-center gap-4">
+      <div
+        className="w-11 h-11 rounded-[12px] flex items-center justify-center shrink-0"
+        style={{ background: 'var(--bd-primary-50)', color: 'var(--bd-primary-600)' }}
+      >
+        <Ic size={22} />
+      </div>
+      <div className="flex flex-col gap-0.5 min-w-0">
+        <span className="text-[11.5px] font-bold uppercase tracking-[.06em] text-ink-400 truncate">
+          {label}
+        </span>
+        <span className="font-display font-bold text-[18px] text-ink-900 leading-tight">
+          {t('summary.total', { count: fmtCount(total) })}
+        </span>
+      </div>
+      <div className="w-px self-stretch bg-[var(--bd-border)] mx-1 hidden sm:block" />
+      <span className="text-[13px] text-ink-500 font-medium hidden sm:block">
+        {t('summary.hint')}
+      </span>
+      <div className="ml-auto flex items-center gap-2">
+        {refreshError ? (
+          <span className="max-w-[220px] truncate text-xs text-red-600" title={refreshError}>
+            {t('state.refreshFailed')}
+          </span>
+        ) : lastRefreshedAt !== null && Date.now() - lastRefreshedAt < 5000 ? (
+          <span className="text-xs text-ink-400">{t('state.refreshedJustNow')}</span>
+        ) : null}
+        <Button
+          kind="ghost"
+          icon={
+            <I.refresh
+              size={14}
+              className={refreshing ? 'animate-spin' : undefined}
+              aria-hidden="true"
+            />
+          }
+          onClick={onRefresh}
+          disabled={refreshing}
+          aria-label={t('aria.refresh')}
+          title={t('aria.refresh')}
+        >
+          {refreshing ? t('buttons.refreshing') : t('buttons.refresh')}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Labelled metric group — eyebrow heading over a responsive card grid.
+ * Groups the dashboard tiles into "Profiles" / "Users" sections
+ * (design: grouped metric sections).
+ */
+function MetricGroup({ title, children }: { title: string; children: ReactNode }) {
+  // h-full + flex-1 stretch the two side-by-side groups to equal height,
+  // so Profiles and Users cards stay the same size even when one group's
+  // labels wrap to more lines.
+  return (
+    <div className="flex h-full flex-col">
+      <div className="text-[11.5px] font-bold uppercase tracking-[.09em] text-ink-400 mb-3">
+        {title}
+      </div>
+      <div className="grid flex-1 grid-cols-1 sm:grid-cols-3 gap-4">{children}</div>
+    </div>
+  );
+}
+
+/** Tone classes per onboarding outcome card (design: colored chip + value). */
+const ONBOARDING_TONES = {
+  total: {
+    chip: 'bg-[var(--bd-primary-50)] text-[var(--bd-primary-600)]',
+    value: 'text-ink-900',
+  },
+  passed: { chip: 'bg-emerald-50 text-emerald-600', value: 'text-emerald-700' },
+  failed: { chip: 'bg-rose-50 text-rose-600', value: 'text-rose-600' },
+  skipped: { chip: 'bg-ink-100 text-ink-500', value: 'text-ink-400' },
+} as const;
+
+type OnboardingTone = keyof typeof ONBOARDING_TONES;
+
+function OnboardingStatCard({
+  tone,
+  icon,
+  label,
+  value,
+  sub,
+}: {
+  tone: OnboardingTone;
+  icon: IconName;
+  label: string;
+  value: string;
+  sub: string;
+}) {
+  const t = ONBOARDING_TONES[tone];
+  const Ic = I[icon];
+  return (
+    <div className="bd-card p-4 flex flex-col gap-2.5">
+      <div className={`w-8 h-8 rounded-[9px] flex items-center justify-center ${t.chip}`}>
+        <Ic size={16} />
+      </div>
+      <div className="text-[13px] text-ink-500 font-semibold">{label}</div>
+      <div
+        className={`font-display font-bold text-[26px] leading-none tracking-tight -mt-0.5 ${t.value}`}
+      >
+        {value}
+      </div>
+      <div className="text-[12px] text-ink-400 font-medium -mt-1">{sub}</div>
+    </div>
+  );
+}
+
+/**
+ * Display registry for onboarding entry sources (the API's
+ * `onboarding_source` enum). The joins-by-mode card renders whatever
+ * sources the `/v1/onboarding/by-source` response carries, in order —
+ * nothing else in the component is source-specific.
+ *
+ * Adding a new registration mode (e.g. `voice`, `whatsapp`) is therefore:
+ *   1. backend: extend the `onboarding_source` enum + write rollup rows;
+ *   2. here: ONE registry entry (icon, colour, label key);
+ *   3. i18n: `dashboard.onboardingGroup.mode_<source>` in en/hi/kn.
+ * A source missing from the registry still renders safely — title-cased
+ * label and a colour cycled from {@link ONBOARDING_FALLBACK_COLORS} — so
+ * a backend enum landing before the UI entry never blanks the dashboard.
+ */
+const ONBOARDING_MODES: Record<string, { icon: IconName; color: string; labelKey: string }> = {
+  bulk: { icon: 'upload', color: '#10B981', labelKey: 'onboardingGroup.mode_bulk' },
+  link: { icon: 'link', color: 'var(--bd-primary-600)', labelKey: 'onboardingGroup.mode_link' },
+  qr: { icon: 'qr', color: '#F59E0B', labelKey: 'onboardingGroup.mode_qr' },
+};
+
+/** Distinct colours for unregistered sources so two unknowns stay tellable apart in the share bar. */
+const ONBOARDING_FALLBACK_COLORS = ['#8B91A3', '#0EA5E9', '#EC4899', '#8B5CF6'];
+
+/**
+ * Resolves the display meta for one entry source, falling back to a
+ * neutral icon + cycled colour (and `null` labelKey → title-cased source).
+ *
+ * @param source - The `onboarding_source` value from the API.
+ * @param index - The slice's position, used to cycle fallback colours.
+ */
+function onboardingModeMeta(
+  source: string,
+  index: number,
+): { icon: IconName; color: string; labelKey: string | null } {
+  return (
+    ONBOARDING_MODES[source] ?? {
+      icon: 'spark',
+      color: ONBOARDING_FALLBACK_COLORS[index % ONBOARDING_FALLBACK_COLORS.length]!,
+      labelKey: null,
+    }
+  );
+}
+
+/**
+ * Aggregator-wide onboarding metrics section (design: Onboarding group,
+ * variant A — metric cards + joins-by-mode share bar).
+ *
+ * Renders below the per-domain Profiles/Users groups on every tab. Data
+ * comes from the aggregator's own rollup (`/v1/onboarding/summary` +
+ * `/v1/onboarding/by-source`), NOT signalstack — the header pill and
+ * helper line make the aggregator-wide scope explicit. React Query
+ * dedupes the fetches across tabs.
+ */
+function OnboardingMetrics() {
+  const t = useTranslations('dashboard');
+  const router = useRouter();
+  const summary = useOnboardingSummary();
+  const bySource = useOnboardingBySource();
+
+  const slices = bySource.data?.by_source ?? [];
+  const totalJoins = slices.reduce((acc, s) => acc + s.passed, 0);
+  const pct = (n: number): string =>
+    totalJoins > 0 ? `${Math.round((n / totalJoins) * 1000) / 10}%` : '0%';
+
+  return (
+    <section>
+      <div className="flex items-center justify-between gap-4 flex-wrap mb-1">
+        <span className="text-[11.5px] font-bold uppercase tracking-[.09em] text-ink-400">
+          {t('onboardingGroup.title')}
+        </span>
+        <button
+          type="button"
+          onClick={() => router.push('/onboarding')}
+          className="inline-flex items-center gap-1.5 text-[13px] font-bold text-[var(--bd-primary-600)]"
+        >
+          {t('onboardingGroup.view')}
+          <I.arrowR size={14} />
+        </button>
+      </div>
+      <div className="text-[13px] text-ink-400 font-medium mb-3.5">
+        {t('onboardingGroup.helper')}
+      </div>
+
+      {summary.isError ? (
+        <div className="bd-card p-5 flex items-center gap-4 flex-wrap border-rose-200 bg-rose-50/50">
+          <div className="w-10 h-10 rounded-[11px] bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
+            <I.alert size={19} />
+          </div>
+          <div className="flex-1 min-w-[200px]">
+            <div className="text-[14.5px] font-bold text-ink-900">
+              {t('onboardingGroup.error_title')}
+            </div>
+            <div className="text-[13px] text-ink-500 mt-0.5">{t('onboardingGroup.error_body')}</div>
+          </div>
+          <Button
+            kind="ghost"
+            icon={<I.refresh size={14} />}
+            onClick={() => {
+              void summary.refetch();
+              void bySource.refetch();
+            }}
+          >
+            {t('onboardingGroup.retry')}
+          </Button>
+        </div>
+      ) : summary.isLoading ? (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {Array.from({ length: 4 }, (_, i) => (
+            <div key={i} className="bd-card p-4 animate-pulse">
+              <div className="w-8 h-8 rounded-[9px] bg-ink-100" />
+              <div className="h-3 w-2/3 rounded-md bg-ink-100 mt-3.5" />
+              <div className="h-6 w-2/5 rounded-md bg-ink-100 mt-3" />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <OnboardingStatCard
+              tone="total"
+              icon="users"
+              label={t('onboardingGroup.total')}
+              value={fmtCount(summary.data?.total)}
+              sub={t('onboardingGroup.total_sub')}
+            />
+            <OnboardingStatCard
+              tone="passed"
+              icon="shield"
+              label={t('onboardingGroup.passed')}
+              value={fmtCount(summary.data?.passed)}
+              sub={t('onboardingGroup.passed_sub')}
+            />
+            <OnboardingStatCard
+              tone="failed"
+              icon="alert"
+              label={t('onboardingGroup.failed')}
+              value={fmtCount(summary.data?.failed)}
+              sub={t('onboardingGroup.failed_sub')}
+            />
+            <OnboardingStatCard
+              tone="skipped"
+              icon="pause"
+              label={t('onboardingGroup.skipped')}
+              value={fmtCount(summary.data?.skipped)}
+              sub={t('onboardingGroup.skipped_sub')}
+            />
+          </div>
+
+          {slices.length > 0 && (
+            <div className="bd-card p-5 mt-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-[14px] font-bold text-ink-700">
+                  {t('onboardingGroup.byMode')}
+                </div>
+                <div className="text-[12.5px] text-ink-400 tabular-nums">
+                  {t('onboardingGroup.joins', { count: totalJoins })}
+                </div>
+              </div>
+              <div className="flex h-3 rounded-full overflow-hidden bg-ink-100 mt-3.5 mb-4 gap-0.5">
+                {slices.map((s, i) => (
+                  <div
+                    key={s.source}
+                    className="rounded-full"
+                    style={{
+                      width: pct(s.passed),
+                      background: onboardingModeMeta(s.source, i).color,
+                    }}
+                  />
+                ))}
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                {slices.map((s, i) => {
+                  const meta = onboardingModeMeta(s.source, i);
+                  const Ic = I[meta.icon];
+                  return (
+                    <div key={s.source} className="flex items-center gap-3 min-w-0">
+                      <span
+                        className="w-9 h-9 rounded-[10px] flex items-center justify-center shrink-0 bg-ink-50"
+                        style={{ color: meta.color }}
+                      >
+                        <Ic size={17} />
+                      </span>
+                      <div className="min-w-0">
+                        <div className="text-[12.5px] font-semibold text-ink-500 whitespace-nowrap">
+                          {meta.labelKey ? t(meta.labelKey) : statusLabel(s.source)}
+                        </div>
+                        <div className="flex items-baseline gap-2 mt-0.5">
+                          <span className="font-display font-bold text-[20px] text-ink-900 tabular-nums leading-none">
+                            {s.passed}
+                          </span>
+                          <span className="text-[12px] text-ink-400 tabular-nums">
+                            {pct(s.passed)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+/**
+ * Icon per known rollup tile field. Config-defined tiles with unknown
+ * fields render without an icon rather than guessing one.
+ */
+const TILE_ICONS: Record<string, IconName> = {
+  total_items: 'copy',
+  complete_profiles: 'check',
+  has_applications: 'send',
+  total_users: 'users',
+  avg_items_per_user: 'trending',
+  avg_actions_per_user: 'spark',
+};
+
+/**
+ * Contextual sub-line for a known rollup tile field (design: metric card
+ * sub-labels). Unknown fields — and the completion share while either
+ * count is missing or total is 0 — return undefined so the card simply
+ * omits the line.
+ *
+ * @param field - The tile's rollup field name.
+ * @param t - Dashboard-scoped translator.
+ * @param entityPlural - Active domain's plural label for interpolation.
+ * @param rollup - Domain rollup, used to derive the completion share.
+ */
+function tileSub(
+  field: string,
+  t: ReturnType<typeof useTranslations>,
+  entityPlural: string,
+  rollup: { total_items: number; complete_profiles: number } | undefined,
+): string | undefined {
+  switch (field) {
+    case 'total_items':
+      return t('ministat.sub_total', { entityPlural });
+    case 'complete_profiles': {
+      if (!rollup || rollup.total_items <= 0) return undefined;
+      return t('ministat.sub_complete', {
+        pct: Math.round((rollup.complete_profiles / rollup.total_items) * 100),
+      });
+    }
+    case 'has_applications':
+      return t('ministat.sub_applications');
+    case 'total_users':
+      return t('ministat.sub_totalUsers');
+    case 'avg_items_per_user':
+      return t('ministat.sub_avgItems');
+    case 'avg_actions_per_user':
+      return t('ministat.sub_avgActions');
+    default:
+      return undefined;
+  }
 }
 
 interface FunnelPart {
@@ -235,16 +660,59 @@ function FunnelCell({ total, parts }: FunnelCellProps) {
   );
 }
 
-function ProgressTiny({ pct }: { pct: number }) {
+/**
+ * Profile-completion progress bar (driven by the dashboard rollup's
+ * `profile_completion_pct`). Hovering shows a popover (mirrors FunnelCell)
+ * with the lifecycle label — `title` carries the Draft/Live text. Native
+ * `title` renders inconsistently, so we use the portal popover instead.
+ */
+function ProgressTiny({ pct, title }: { pct: number; title?: string }) {
   const color = pct >= 80 ? '#10B981' : pct >= 50 ? '#F59E0B' : '#EF4444';
-  const label = pct >= 80 ? 'Complete' : 'Incomplete';
+  const label = title ?? (pct >= 80 ? 'Complete' : 'Incomplete');
+  const [hover, setHover] = useState(false);
+  const [pos, setPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const ref = useRef<HTMLDivElement | null>(null);
+  const onEnter = () => {
+    const r = ref.current?.getBoundingClientRect();
+    if (!r) return;
+    setPos({ x: r.left + window.scrollX, y: r.bottom + window.scrollY + 8 });
+    setHover(true);
+  };
   return (
-    <div className="flex items-center gap-2" title={`${label} · ${pct}%`}>
-      <div className="w-14 h-1.5 rounded-full bg-ink-100 overflow-hidden">
-        <div className="h-full rounded-full" style={{ width: `${pct}%`, background: color }} />
+    <>
+      <div
+        ref={ref}
+        onMouseEnter={onEnter}
+        onMouseLeave={() => setHover(false)}
+        className="flex items-center gap-2 cursor-default"
+      >
+        <div
+          role="progressbar"
+          aria-label={label}
+          aria-valuenow={Math.round(pct)}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          className="w-14 h-1.5 rounded-full bg-ink-100 overflow-hidden"
+        >
+          <div className="h-full rounded-full" style={{ width: `${pct}%`, background: color }} />
+        </div>
+        <span className="text-[11px] tabular-nums text-ink-500 font-medium">{pct}%</span>
       </div>
-      <span className="text-[11px] tabular-nums text-ink-500 font-medium">{pct}%</span>
-    </div>
+      {hover &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            style={{ position: 'absolute', left: pos.x, top: pos.y, zIndex: 9999 }}
+            className="bg-white border border-[var(--bd-border)] rounded-[10px] bd-shadow-lg px-2.5 py-1.5 pointer-events-none animate-[fadeUp_.12s_ease-out]"
+          >
+            <div className="flex items-center gap-2 text-[12px] min-w-[120px]">
+              <span className="text-ink-500 flex-1">{label}</span>
+              <span className="font-semibold tabular-nums text-ink-900">{pct}%</span>
+            </div>
+          </div>,
+          document.body,
+        )}
+    </>
   );
 }
 
@@ -266,58 +734,23 @@ interface RecommendedAction {
 }
 
 /**
- * Turns a signalstack `actionable_tags` entry into a chip. Tags follow
- * the `missing_<required_field>` shape (e.g. `missing_contact_phone`),
- * which we surface as "Add Contact Phone". Unknown tag shapes are
- * title-cased verbatim so new server-side tags still render readably.
+ * Fixed operator actions surfaced for every participant row. Stubs for
+ * now — each chip flashes a transient confirmation on click; wire each
+ * label to its real handler (callback trigger, operator notify) when
+ * those endpoints land.
  */
-function tagToAction(tag: string): RecommendedAction {
-  if (tag.startsWith('missing_')) {
-    const field = tag
-      .slice('missing_'.length)
-      .split('_')
-      .filter(Boolean)
-      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-      .join(' ');
-    return { label: `Add ${field}`, tone: 'warm', icon: <I.alert size={12} /> };
-  }
-  const label = tag
-    .split('_')
-    .filter(Boolean)
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(' ');
-  return { label, tone: 'cool', icon: <I.spark size={12} /> };
+function recommendedActions(): RecommendedAction[] {
+  return [
+    { label: 'Trigger Callback', tone: 'cool', icon: <I.send size={12} /> },
+    { label: 'Notify', tone: 'mute', icon: <I.bell size={12} /> },
+  ];
 }
 
 /**
- * Recommended-action chips for a row. Prefers signalstack's
- * server-computed `actionableTags`; when none are present, falls back
- * to a small client-side heuristic on status + profile completeness so
- * the column is never empty.
+ * Recommended-action chip. Stub interaction: clicking flips the chip to a
+ * transient "{label} triggered" confirmation for 2s, then reverts. Replace
+ * the timeout stub with the real per-action handler once endpoints exist.
  */
-function recommendedActions(row: ParticipantBase, kind: RowKind): RecommendedAction[] {
-  const tags = row.actionableTags ?? [];
-  if (tags.length > 0) {
-    return tags.slice(0, 2).map(tagToAction);
-  }
-  const out: RecommendedAction[] = [];
-  if (row.status === 'at-risk')
-    out.push({ label: 'Re-engage', tone: 'warm', icon: <I.send size={12} /> });
-  if (row.status === 'inactive')
-    out.push({ label: 'Send nudge', tone: 'mute', icon: <I.bell size={12} /> });
-  if (!row.profile.verified)
-    out.push({ label: 'Verify', tone: 'cool', icon: <I.shield size={12} /> });
-  if (row.profile.complete < 70)
-    out.push({ label: 'Complete profile', tone: 'soft', icon: <I.spark size={12} /> });
-  if (kind === 'provider' && row.status === 'active')
-    out.push({ label: 'Suggest match', tone: 'soft', icon: <I.trending size={12} /> });
-  if (kind === 'seeker' && (row.applied.shortlisted ?? 0) >= 5)
-    out.push({ label: 'Coach interview', tone: 'soft', icon: <I.message size={12} /> });
-  if (out.length === 0)
-    out.push({ label: 'View profile', tone: 'mute', icon: <I.external size={12} /> });
-  return out.slice(0, 2);
-}
-
 function ActionChip({
   label,
   tone = 'soft',
@@ -327,9 +760,26 @@ function ActionChip({
   tone?: ChipTone;
   icon?: ReactNode;
 }) {
+  const [triggered, setTriggered] = useState(false);
+  const onClick = () => {
+    setTriggered(true);
+    window.setTimeout(() => setTriggered(false), 2000);
+  };
+  if (triggered) {
+    return (
+      <span
+        aria-live="polite"
+        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11.5px] font-semibold bg-emerald-50 text-emerald-700"
+      >
+        <I.check size={12} />
+        {label} triggered
+      </span>
+    );
+  }
   return (
     <button
       type="button"
+      onClick={onClick}
       className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11.5px] font-semibold transition-colors ${CHIP_TONES[tone]}`}
     >
       {icon}
@@ -339,6 +789,30 @@ function ActionChip({
 }
 
 type StatusFilter = string; // 'all' | any key signalstack returns in rollup.by_status
+
+/**
+ * Lifecycle dropdown values. `'all'` is the no-filter sentinel; the other
+ * four map 1:1 to {@link LifecycleFilter} on the items endpoint.
+ */
+type LifecycleFilterValue = 'all' | LifecycleFilter;
+
+// Lifecycle states the aggregator surfaces today: `draft` (profile incomplete,
+// <100%) and `live` (100%). When signals introduces a new status, add it here,
+// add a matching <option> in the dropdown, and an i18n `filters.lifecycle_<x>`
+// key — the filter logic itself is status-agnostic (generic equality).
+const LIFECYCLE_FILTER_VALUES: LifecycleFilterValue[] = ['all', 'draft', 'live'];
+
+/**
+ * Parse `?lifecycle=` from a search-params bag, validating against the
+ * known enum. Unknown values resolve to `'all'` so a stale URL does not
+ * blank the filter dropdown.
+ */
+function parseLifecycleParam(raw: string | null): LifecycleFilterValue {
+  if (!raw) return 'all';
+  return (LIFECYCLE_FILTER_VALUES as readonly string[]).includes(raw)
+    ? (raw as LifecycleFilterValue)
+    : 'all';
+}
 
 interface StatusOption {
   value: StatusFilter;
@@ -377,7 +851,7 @@ function buildStatusOptions(
  * Looks up a bucket label from the config-sourced map, falling back to
  * an optional translated fallback supplier, then the raw key. Always returns a string.
  *
- * @param labels - Config-sourced bucket label map (may be from `dashboardBuckets.by_action_status`).
+ * @param labels - Config-sourced bucket label map (e.g. `dashboardBuckets.by_initiated_action_status` / `by_received_action_status`).
  * @param key - Bucket key (e.g. `'create'`, `'accept'`).
  * @param getFallback - Optional function that returns the localised fallback label for the key.
  * @returns The resolved label string.
@@ -390,8 +864,157 @@ function getBucketLabel(
   return labels[key] ?? getFallback?.(key) ?? key;
 }
 
+/**
+ * Builds the four funnel parts (create/accept/reject/cancel) for one direction
+ * of a row's action counts, labelling each from the direction's config map.
+ *
+ * @param stats - The directional counts for the row.
+ * @param labels - Config-sourced bucket labels for this direction.
+ * @param fallback - Localised fallback label supplier.
+ */
+function buildActionParts(
+  stats: DirectionalStats,
+  labels: Record<string, string>,
+  fallback: (k: string) => string,
+): Array<{ v: number; color: string; label: string; short: string }> {
+  const part = (key: keyof DirectionalStats, color: string) => ({
+    v: stats[key],
+    color,
+    label: getBucketLabel(labels, key, fallback),
+    short: getBucketLabel(labels, key, fallback),
+  });
+  return [
+    part('create', 'var(--bd-funnel-requested)'),
+    part('accept', 'var(--bd-funnel-connected)'),
+    part('reject', 'var(--bd-funnel-declined)'),
+    part('cancel', 'var(--bd-funnel-cancelled)'),
+  ];
+}
+
+/**
+ * Localised default tile groups, used when network.json omits
+ * `dashboard_tiles.profile` / `dashboard_tiles.user`. Built per-tab so
+ * `{entityPlural}` reflects the active domain's plural label.
+ */
+function useDefaultTiles(entityPlural: string): {
+  profile: DashboardTileDef[];
+  user: DashboardTileDef[];
+} {
+  const t = useTranslations('dashboard');
+  return useMemo(
+    () => ({
+      profile: [
+        { field: 'total_items', label: t('ministat.totalItems', { entityPlural }) },
+        { field: 'complete_profiles', label: t('ministat.completeProfiles') },
+        { field: 'has_applications', label: t('ministat.withApplications', { entityPlural }) },
+      ],
+      user: [
+        { field: 'total_users', label: t('ministat.totalUsers') },
+        { field: 'avg_items_per_user', label: t('ministat.avgProfilesPerUser') },
+        { field: 'avg_actions_per_user', label: t('ministat.avgActionsPerUser') },
+      ],
+    }),
+    [t, entityPlural],
+  );
+}
+
+/**
+ * Action bar shown above the table while rows are selected. Renders one
+ * button per {@link BulkAction} descriptor — the bar is action-agnostic, so
+ * future bulk operations plug in by extending `DASHBOARD_BULK_ACTIONS`.
+ */
+function BulkActionBar({
+  selectedRows,
+  domain,
+  onClear,
+}: {
+  selectedRows: ParticipantBase[];
+  domain: string;
+  onClear: () => void;
+}) {
+  const t = useTranslations('dashboard');
+  const [runningId, setRunningId] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
+  const noticeTimer = useRef<number | null>(null);
+
+  useEffect(
+    () => () => {
+      if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
+    },
+    [],
+  );
+
+  const runAction = async (action: BulkAction) => {
+    if (runningId) return;
+    setRunningId(action.id);
+    setNotice(null);
+    try {
+      await action.run(selectedRows, { domain });
+      setNotice({ kind: 'success', text: t('bulk.success', { count: selectedRows.length }) });
+    } catch (err) {
+      setNotice({
+        kind: 'error',
+        text: err instanceof Error ? err.message : t('bulk.failed'),
+      });
+    } finally {
+      setRunningId(null);
+      if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
+      noticeTimer.current = window.setTimeout(() => setNotice(null), 4000);
+    }
+  };
+
+  return (
+    <div className="px-5 py-2.5 flex items-center gap-3 border-b border-[var(--bd-border)] bg-[var(--bd-primary-50)]">
+      <span className="text-[12.5px] font-semibold text-primary-600 whitespace-nowrap">
+        {t('bulk.selected', { count: selectedRows.length })}
+      </span>
+      <div className="flex items-center gap-2">
+        {DASHBOARD_BULK_ACTIONS.map((a) => {
+          const Ic = I[a.icon];
+          return (
+            <Button
+              key={a.id}
+              kind="ghost"
+              icon={<Ic size={13} />}
+              onClick={() => void runAction(a)}
+              disabled={runningId !== null}
+              className="whitespace-nowrap px-3 py-1.5 text-[12.5px]"
+            >
+              {runningId === a.id ? t('bulk.running') : t(a.labelKey)}
+            </Button>
+          );
+        })}
+      </div>
+      {notice && (
+        <span
+          aria-live="polite"
+          className={`text-[12px] font-medium truncate ${
+            notice.kind === 'success' ? 'text-emerald-700' : 'text-rose-600'
+          }`}
+        >
+          {notice.text}
+        </span>
+      )}
+      <button
+        type="button"
+        onClick={onClear}
+        className="ml-auto text-[12px] font-semibold text-ink-500 hover:text-ink-700 whitespace-nowrap"
+      >
+        {t('bulk.clear')}
+      </button>
+    </div>
+  );
+}
+
 interface ParticipantTableProps<R extends ParticipantBase> {
   kind: RowKind;
+  /**
+   * Signalstack domain id this table shows, from the live network config
+   * (e.g. `seeker`, or orange_dot's `tourist`). Feeds the bulk-action
+   * context; when omitted, falls back to the legacy seeker/provider
+   * mapping derived from `kind`.
+   */
+  domain?: string | undefined;
   rows: R[];
   /**
    * Total count from signalstack `total_matching` — required to compute
@@ -416,14 +1039,27 @@ interface ParticipantTableProps<R extends ParticipantBase> {
    */
   statusOptions?: StatusOption[] | undefined;
   /**
-   * Action-status bucket labels sourced from `dashboardBuckets.by_action_status`
-   * in the aggregator config. Falls back to localised `t('buckets.*')` when absent.
+   * Action-status bucket labels for the INITIATED column, sourced from
+   * `dashboardBuckets.by_initiated_action_status`. Falls back to localised
+   * `t('buckets.*')` when absent.
    */
-  bucketLabels?: Record<string, string> | undefined;
+  initiatedLabels?: Record<string, string> | undefined;
+  /**
+   * Action-status bucket labels for the RECEIVED column, sourced from
+   * `dashboardBuckets.by_received_action_status`. Falls back to localised
+   * `t('buckets.*')` when absent.
+   */
+  receivedLabels?: Record<string, string> | undefined;
+  /**
+   * Active lifecycle dropdown value. `'all'` hides the URL param.
+   */
+  lifecycleFilter?: LifecycleFilterValue | undefined;
+  onLifecycleFilterChange?: ((next: LifecycleFilterValue) => void) | undefined;
 }
 
 function ParticipantTable<R extends ParticipantBase>({
   kind,
+  domain,
   rows,
   total,
   page = 1,
@@ -432,7 +1068,10 @@ function ParticipantTable<R extends ParticipantBase>({
   statusFilter = 'all',
   onStatusFilterChange,
   statusOptions,
-  bucketLabels = {},
+  initiatedLabels = {},
+  receivedLabels = {},
+  lifecycleFilter = 'all',
+  onLifecycleFilterChange,
 }: ParticipantTableProps<R>) {
   const t = useTranslations('dashboard');
   /** Localised fallback for bucket keys when config-sourced labels are absent. */
@@ -449,8 +1088,6 @@ function ParticipantTable<R extends ParticipantBase>({
     { value: 'all', label: t('filters.all_statuses') },
   ];
   const searchId = `bd-search-${kind}`;
-  const [exporting, setExporting] = useState(false);
-  const [exportError, setExportError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [filterOpen, setFilterOpen] = useState(false);
   const filterRef = useRef<HTMLDivElement | null>(null);
@@ -484,23 +1121,60 @@ function ParticipantTable<R extends ParticipantBase>({
 
   const filterActive = statusFilter !== 'all';
 
-  // Map UI kind onto the signalstack domain. `opp` rides on the provider
-  // dataset until signalstack exposes a dedicated opportunity-provider
-  // endpoint (mirrors the read path in dashboardService).
-  const exportDomain: 'seeker' | 'provider' = kind === 'seeker' ? 'seeker' : 'provider';
+  // Domain id for the bulk-action context. Prefer the network-config id the
+  // tab resolved (orange_dot's `tourist`, etc.); the legacy seeker/provider
+  // mapping only backstops callers that pass no domain (the opp demo tab).
+  const bulkDomain: string = domain ?? (kind === 'seeker' ? 'seeker' : 'provider');
 
-  const onExportCsv = async () => {
-    if (exporting) return;
-    setExporting(true);
-    setExportError(null);
-    try {
-      const result = await dashboardService.dashboardExport({ domain: exportDomain });
-      triggerCsvDownload(result);
-    } catch (err) {
-      setExportError(err instanceof Error ? err.message : 'export failed');
-    } finally {
-      setExporting(false);
-    }
+  // Explicit selection mode — the checkbox column only exists while the
+  // operator is in "Select" mode (toolbar toggle). Exiting the mode clears
+  // the selection.
+  const [selectMode, setSelectMode] = useState(false);
+
+  // Bulk selection — snapshots full row data (not just ids) so client-side
+  // actions like CSV export can include rows from pages no longer mounted.
+  // Persists across page changes; resets when a filter changes because the
+  // selection's meaning changed underneath it.
+  const [selected, setSelected] = useState<Map<string, ParticipantBase>>(new Map());
+  useEffect(() => {
+    setSelected(new Map());
+  }, [statusFilter, lifecycleFilter]);
+
+  const toggleSelectMode = () => {
+    setSelectMode((on) => {
+      if (on) setSelected(new Map());
+      return !on;
+    });
+  };
+
+  // Rows without a real profile_item_id carry synthetic `row-<index>` keys
+  // that collide across pages — those rows are not selectable.
+  const isSelectable = (r: ParticipantBase): boolean => !r.id.startsWith('row-');
+  const selectablePageRows = visibleRows.filter(isSelectable);
+  const allPageSelected =
+    selectablePageRows.length > 0 && selectablePageRows.every((r) => selected.has(r.id));
+  const somePageSelected = selectablePageRows.some((r) => selected.has(r.id));
+
+  const toggleRow = (r: ParticipantBase) => {
+    setSelected((prev) => {
+      const next = new Map(prev);
+      if (next.has(r.id)) next.delete(r.id);
+      else next.set(r.id, r);
+      return next;
+    });
+  };
+
+  /** Header checkbox: selects/deselects the current page's selectable rows. */
+  const togglePage = () => {
+    setSelected((prev) => {
+      const next = new Map(prev);
+      if (allPageSelected) {
+        for (const r of selectablePageRows) next.delete(r.id);
+      } else {
+        for (const r of selectablePageRows) next.set(r.id, r);
+      }
+      return next;
+    });
   };
 
   return (
@@ -538,6 +1212,27 @@ function ParticipantTable<R extends ParticipantBase>({
               onChange={(e) => setQuery(e.target.value)}
             />
           </div>
+          {onLifecycleFilterChange ? (
+            <select
+              aria-label={t('filters.lifecycle_label')}
+              className="bd-input w-auto max-w-[150px] text-[12.5px] py-1.5 pr-7"
+              value={lifecycleFilter}
+              onChange={(e) => onLifecycleFilterChange(e.target.value as LifecycleFilterValue)}
+            >
+              <option value="all">{t('filters.lifecycle_all')}</option>
+              <option value="draft">{t('filters.lifecycle_draft')}</option>
+              <option value="live">{t('filters.lifecycle_live')}</option>
+            </select>
+          ) : null}
+          <Button
+            kind={selectMode ? 'primary' : 'ghost'}
+            icon={<I.check size={14} />}
+            onClick={toggleSelectMode}
+            aria-pressed={selectMode}
+            className="whitespace-nowrap px-3 py-1.5 text-[12.5px]"
+          >
+            {selectMode ? t('bulk.cancel') : t('bulk.select')}
+          </Button>
           <div ref={filterRef} className="relative">
             <Button
               kind={filterActive ? 'primary' : 'ghost'}
@@ -545,6 +1240,7 @@ function ParticipantTable<R extends ParticipantBase>({
               onClick={() => setFilterOpen((v) => !v)}
               aria-haspopup="menu"
               aria-expanded={filterOpen}
+              className="whitespace-nowrap px-3 py-1.5 text-[12.5px]"
             >
               {filterActive
                 ? (options.find((o) => o.value === statusFilter)?.label ?? 'Filtered')
@@ -585,21 +1281,22 @@ function ParticipantTable<R extends ParticipantBase>({
               </div>
             )}
           </div>
-          <Button
-            kind="ghost"
-            icon={<I.download size={14} />}
-            onClick={onExportCsv}
-            disabled={exporting}
-            title={exportError ?? t('aria.export_csv')}
-            aria-label={t('aria.export_csv')}
-          >
-            {exporting ? t('buttons.exporting') : t('buttons.exportCsv')}
-          </Button>
         </div>
       </div>
 
+      {selected.size > 0 && (
+        <BulkActionBar
+          selectedRows={[...selected.values()]}
+          domain={bulkDomain}
+          onClear={() => setSelected(new Map())}
+        />
+      )}
+
       <div className="overflow-auto scroll-x" style={{ maxHeight: 520 }}>
-        <table className="bd-table" style={{ minWidth: kind === 'provider' ? 1180 : 1080 }}>
+        <table
+          className="bd-table"
+          style={{ minWidth: (kind === 'provider' ? 1500 : 1400) + (selectMode ? 44 : 0) }}
+        >
           <thead
             style={{
               position: 'sticky',
@@ -609,10 +1306,35 @@ function ParticipantTable<R extends ParticipantBase>({
             }}
           >
             <tr>
+              {selectMode && (
+                <th
+                  style={{
+                    position: 'sticky',
+                    left: 0,
+                    zIndex: 5,
+                    background: 'var(--bd-table-head-bg)',
+                    width: 44,
+                    minWidth: 44,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    className="w-4 h-4 cursor-pointer align-middle"
+                    style={{ accentColor: 'var(--bd-primary-600)' }}
+                    ref={(el) => {
+                      if (el) el.indeterminate = somePageSelected && !allPageSelected;
+                    }}
+                    checked={allPageSelected}
+                    onChange={togglePage}
+                    disabled={selectablePageRows.length === 0}
+                    aria-label={t('aria.select_all_page')}
+                  />
+                </th>
+              )}
               <th
                 style={{
                   position: 'sticky',
-                  left: 0,
+                  left: selectMode ? 44 : 0,
                   zIndex: 5,
                   background: 'var(--bd-table-head-bg)',
                   minWidth: 240,
@@ -622,7 +1344,8 @@ function ParticipantTable<R extends ParticipantBase>({
               </th>
               <th>{t('table.joined')}</th>
               <th>{t('table.profileStatus')}</th>
-              <th>{bucketLabels['create'] ?? t('table.applied')}</th>
+              <th>{t('table.initiated')}</th>
+              <th>{t('table.received')}</th>
               <th>{t('table.status')}</th>
               <th>{t('table.recommendedAction')}</th>
             </tr>
@@ -631,10 +1354,33 @@ function ParticipantTable<R extends ParticipantBase>({
             {visibleRows.map((r) => {
               return (
                 <tr key={r.id} className="fade-up">
+                  {selectMode && (
+                    <td
+                      style={{
+                        position: 'sticky',
+                        left: 0,
+                        background: 'inherit',
+                        backgroundColor: 'var(--bd-card)',
+                        zIndex: 1,
+                        width: 44,
+                      }}
+                    >
+                      {isSelectable(r) && (
+                        <input
+                          type="checkbox"
+                          className="w-4 h-4 cursor-pointer align-middle"
+                          style={{ accentColor: 'var(--bd-primary-600)' }}
+                          checked={selected.has(r.id)}
+                          onChange={() => toggleRow(r)}
+                          aria-label={t('aria.select_row', { name: r.name })}
+                        />
+                      )}
+                    </td>
+                  )}
                   <td
                     style={{
                       position: 'sticky',
-                      left: 0,
+                      left: selectMode ? 44 : 0,
                       background: 'inherit',
                       backgroundColor: 'var(--bd-card)',
                       zIndex: 1,
@@ -662,37 +1408,35 @@ function ParticipantTable<R extends ParticipantBase>({
                     <div className="text-[11px] text-ink-400 mt-0.5">last seen {r.last}</div>
                   </td>
                   <td>
-                    <ProgressTiny pct={r.profile.complete} />
+                    <ProgressTiny
+                      pct={r.profile.complete}
+                      title={
+                        r.lifecycle_status === 'live'
+                          ? t('filters.lifecycle_live')
+                          : t('filters.lifecycle_draft')
+                      }
+                    />
                   </td>
                   <td>
                     <FunnelCell
-                      total={r.applied.total}
-                      parts={[
-                        {
-                          v: r.applied.pending,
-                          color: 'var(--bd-funnel-requested)',
-                          label: getBucketLabel(bucketLabels, 'create', getBucketFallback),
-                          short: getBucketLabel(bucketLabels, 'create', getBucketFallback),
-                        },
-                        {
-                          v: r.applied.accepted ?? 0,
-                          color: 'var(--bd-funnel-connected)',
-                          label: getBucketLabel(bucketLabels, 'accept', getBucketFallback),
-                          short: getBucketLabel(bucketLabels, 'accept', getBucketFallback),
-                        },
-                        {
-                          v: r.applied.rejected,
-                          color: 'var(--bd-funnel-declined)',
-                          label: getBucketLabel(bucketLabels, 'reject', getBucketFallback),
-                          short: getBucketLabel(bucketLabels, 'reject', getBucketFallback),
-                        },
-                        {
-                          v: r.applied.cancelled ?? 0,
-                          color: 'var(--bd-funnel-cancelled)',
-                          label: getBucketLabel(bucketLabels, 'cancel', getBucketFallback),
-                          short: getBucketLabel(bucketLabels, 'cancel', getBucketFallback),
-                        },
-                      ]}
+                      total={
+                        r.initiated.create +
+                        r.initiated.accept +
+                        r.initiated.reject +
+                        r.initiated.cancel
+                      }
+                      parts={buildActionParts(r.initiated, initiatedLabels, getBucketFallback)}
+                    />
+                  </td>
+                  <td>
+                    <FunnelCell
+                      total={
+                        r.received.create +
+                        r.received.accept +
+                        r.received.reject +
+                        r.received.cancel
+                      }
+                      parts={buildActionParts(r.received, receivedLabels, getBucketFallback)}
                     />
                   </td>
                   <td>
@@ -700,7 +1444,7 @@ function ParticipantTable<R extends ParticipantBase>({
                   </td>
                   <td>
                     <div className="flex items-center gap-1.5">
-                      {recommendedActions(r, kind).map((a, i) => (
+                      {recommendedActions().map((a, i) => (
                         <ActionChip key={i} {...a} />
                       ))}
                     </div>
@@ -869,6 +1613,49 @@ function ErrorCard() {
 
 const PAGE_SIZE = 25;
 
+/**
+ * URL-backed lifecycle filter state. Reads `?lifecycle=` on every render
+ * via `useSearchParams` and updates the URL through `router.replace` (so
+ * the filter participates in browser history but doesn't push a new
+ * navigation entry per click).
+ *
+ * Returns the parsed value + a setter that mirrors changes back to the
+ * URL. `'all'` removes the param entirely so default views read clean.
+ */
+function useLifecycleUrlFilter(): [LifecycleFilterValue, (next: LifecycleFilterValue) => void] {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const value = parseLifecycleParam(searchParams.get('lifecycle'));
+  const setValue = (next: LifecycleFilterValue) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (next === 'all') params.delete('lifecycle');
+    else params.set('lifecycle', next);
+    const qs = params.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  };
+  return [value, setValue];
+}
+
+/**
+ * Narrows the rendered table rows to the selected lifecycle. The table is fed
+ * by the legacy dashboard rollup (not lifecycle-aware), so the dropdown filters
+ * the already-merged rows here. `'all'` (and any non-draft/live value) is a
+ * no-op; `'draft'` / `'live'` match `lifecycle_status` with the back-compat
+ * default `'live'` for unmatched rows.
+ */
+function filterRowsByLifecycle<R extends { lifecycle_status?: LifecycleStatus }>(
+  rows: R[],
+  filter: LifecycleFilterValue,
+): R[] {
+  if (filter === 'all') return rows;
+  // Generic equality match so any lifecycle status — including ones added in
+  // future — filters correctly without touching this function. Unmatched rows
+  // default to `'live'` (back-compat with signals deployments that omit the
+  // field).
+  return rows.filter((r) => (r.lifecycle_status ?? 'live') === filter);
+}
+
 function SeekersTab() {
   const t = useTranslations('dashboard');
   const locale = useLocale();
@@ -889,9 +1676,14 @@ function SeekersTab() {
   const seekerDomainId = cfgRaw?.domains?.[0]?.id;
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [lifecycleFilter, setLifecycleFilter] = useLifecycleUrlFilter();
   const handleStatusFilterChange = (next: StatusFilter) => {
     setPage(1);
     setStatusFilter(next);
+  };
+  const handleLifecycleFilterChange = (next: LifecycleFilterValue) => {
+    setPage(1);
+    setLifecycleFilter(next);
   };
   const filterActive = statusFilter !== 'all';
   const {
@@ -912,11 +1704,12 @@ function SeekersTab() {
   const rollup = slice?.rollup;
   const { data: cfg } = useAggregatorConfig();
   const seekerCfg = cfg?.domains?.find((d) => d.id === seekerDomainId);
-  const seekerTileLabels = seekerCfg?.dashboardTiles ?? {};
   const seekerPlural = seekerCfg?.plural_label ?? t('tabs.seekers');
-  // by_action_status bucket labels — wired to the funnel cells in the
-  // participant table's action-count columns.
-  const bucketLabels = cfg?.dashboardBuckets?.by_action_status ?? {};
+  const defaultTiles = useDefaultTiles(seekerPlural);
+  // Directional bucket labels — wired to the funnel cells in the participant
+  // table's Initiated / Received action-count columns.
+  const initiatedLabels = cfg?.dashboardBuckets?.by_initiated_action_status ?? {};
+  const receivedLabels = cfg?.dashboardBuckets?.by_received_action_status ?? {};
   const statusLabels = cfg?.dashboardBuckets?.by_status ?? {};
   const statusRules = indexStatusRules(seekerCfg?.status_rules);
   const total = rollup?.total_items;
@@ -940,12 +1733,13 @@ function SeekersTab() {
   const active = byStatus['active'] ?? byStatus['new'];
   const atRisk = byStatus['at_risk'];
   const inactive = byStatus['inactive'];
-  const completeProfiles = rollup?.complete_profiles;
-  const hasApplications = rollup?.has_applications;
-  const newThisWeek = byStatus['new'];
   const rows = useMemo(
-    () => (slice?.items ?? []).map((p) => toSeekerRow(p, locale)),
+    () => (slice?.items ?? []).map((p, i) => toSeekerRow(p, locale, i)),
     [slice?.items, locale],
+  );
+  const filteredRows = useMemo(
+    () => filterRowsByLifecycle(rows, lifecycleFilter),
+    [rows, lifecycleFilter],
   );
 
   // Refresh handler: hits the BFF with refresh=true to force signalstack to
@@ -983,36 +1777,17 @@ function SeekersTab() {
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex items-center justify-between">
-        <span className="text-[13px] font-semibold text-ink-700">{seekerPlural}</span>
-        <div className="flex items-center gap-2">
-          <Button
-            kind="ghost"
-            icon={
-              <I.refresh
-                size={14}
-                className={refreshing ? 'animate-spin' : undefined}
-                aria-hidden="true"
-              />
-            }
-            onClick={() => {
-              void handleRefresh();
-            }}
-            disabled={refreshing}
-            aria-label={t('aria.refresh')}
-            title={t('aria.refresh')}
-          >
-            {refreshing ? t('buttons.refreshing') : t('buttons.refresh')}
-          </Button>
-          {refreshError ? (
-            <span className="ml-2 max-w-[220px] truncate text-xs text-red-600" title={refreshError}>
-              {t('state.refreshFailed')}
-            </span>
-          ) : lastRefreshedAt !== null && Date.now() - lastRefreshedAt < 5000 ? (
-            <span className="text-xs text-ink-400">{t('state.refreshedJustNow')}</span>
-          ) : null}
-        </div>
-      </div>
+      <SummaryBar
+        icon="users"
+        label={seekerPlural}
+        total={total}
+        refreshing={refreshing}
+        refreshError={refreshError}
+        lastRefreshedAt={lastRefreshedAt}
+        onRefresh={() => {
+          void handleRefresh();
+        }}
+      />
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <StatCard
           tone="new"
@@ -1050,31 +1825,37 @@ function SeekersTab() {
         />
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <MiniStat
-          label={
-            seekerTileLabels.total_items ?? t('ministat.totalItems', { entityPlural: seekerPlural })
-          }
-          value={fmtCount(total)}
-        />
-        <MiniStat
-          label={seekerTileLabels.complete_profiles ?? t('ministat.completeProfiles')}
-          value={fmtCount(completeProfiles)}
-        />
-        <MiniStat
-          label={
-            seekerTileLabels.has_applications ??
-            t('ministat.withApplications', { entityPlural: seekerPlural })
-          }
-          value={fmtCount(hasApplications)}
-        />
-        <MiniStat
-          label={statusLabels['new'] ?? t('ministat.newParticipants')}
-          value={fmtCount(newThisWeek)}
-          delta={t('ministat.delta_this_week')}
-          deltaTone="flat"
-        />
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        {/* Profile-level tiles */}
+        <MetricGroup title={seekerCfg?.dashboardTiles?.profile_title ?? t('groups.profiles')}>
+          {resolveTiles(seekerCfg?.dashboardTiles?.profile, defaultTiles.profile, rollup).map(
+            (tile) => (
+              <MiniStat
+                key={`p-${tile.field}`}
+                icon={TILE_ICONS[tile.field]}
+                label={tile.label}
+                value={fmtCount(tile.value)}
+                sub={tileSub(tile.field, t, seekerPlural, rollup)}
+              />
+            ),
+          )}
+        </MetricGroup>
+
+        {/* User-level tiles */}
+        <MetricGroup title={seekerCfg?.dashboardTiles?.user_title ?? t('groups.users')}>
+          {resolveTiles(seekerCfg?.dashboardTiles?.user, defaultTiles.user, rollup).map((tile) => (
+            <MiniStat
+              key={`u-${tile.field}`}
+              icon={TILE_ICONS[tile.field]}
+              label={tile.label}
+              value={fmtCount(tile.value)}
+              sub={tileSub(tile.field, t, seekerPlural, rollup)}
+            />
+          ))}
+        </MetricGroup>
       </div>
+
+      <OnboardingMetrics />
 
       {isLoading ? (
         <LoadingCard />
@@ -1083,7 +1864,7 @@ function SeekersTab() {
       ) : (
         <ParticipantTable
           kind="seeker"
-          rows={rows}
+          rows={filteredRows}
           total={slice?.total_matching ?? total}
           page={page}
           pageSize={PAGE_SIZE}
@@ -1091,7 +1872,11 @@ function SeekersTab() {
           statusFilter={statusFilter}
           onStatusFilterChange={handleStatusFilterChange}
           statusOptions={statusOptions}
-          bucketLabels={bucketLabels}
+          initiatedLabels={initiatedLabels}
+          receivedLabels={receivedLabels}
+          lifecycleFilter={lifecycleFilter}
+          onLifecycleFilterChange={handleLifecycleFilterChange}
+          domain={seekerDomainId}
         />
       )}
     </div>
@@ -1105,7 +1890,10 @@ function SeekersTab() {
  */
 function fmtCount(n: number | null | undefined): string {
   if (n === undefined || n === null) return '—';
-  return String(n);
+  // Integers render clean; fractional values (e.g. avg_items_per_user) are
+  // capped at 2 decimals with trailing zeros dropped (1.1666… → "1.17").
+  // Locale left to the runtime so separators follow the user's language.
+  return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
 
 /**
@@ -1116,21 +1904,26 @@ function fmtCount(n: number | null | undefined): string {
  * — `name`, `city`, and the role/exp profile fields are NOT in this
  * response. They live in the per-user item detail endpoint, which the
  * table does not yet call. Missing fields render as em-dashes; the
- * `complete` profile bar uses `profile_completion_pct` directly so the
- * progress indicator stays meaningful.
+ * `complete` profile bar uses `profile_completion_pct` from the rollup.
  */
-function toSeekerRow(participant: Record<string, unknown>, locale: string): Seeker {
-  const userId =
-    typeof participant.owner_user_id === 'string'
-      ? participant.owner_user_id
-      : typeof participant.user_id === 'string'
-        ? participant.user_id
-        : '';
+function toSeekerRow(participant: Record<string, unknown>, locale: string, index: number): Seeker {
+  // Row key: profile_item_id (one row per profile), else the array index.
+  // user_id is not unique per row (a user may own many profiles), so it is no
+  // longer used as the key — kept only as an optional passthrough upstream.
+  const profileItemId =
+    typeof participant.profile_item_id === 'string' ? participant.profile_item_id : '';
   const status = mapSeekerStatus(
     typeof participant.profile_status === 'string' ? participant.profile_status : null,
   );
   const completion =
     typeof participant.profile_completion_pct === 'number' ? participant.profile_completion_pct : 0;
+  // Lifecycle is derived from completion %: `live` iff the profile is 100%
+  // complete, `draft` otherwise. signals no longer exposes a per-item
+  // completion/lifecycle on the responses we read, so the rollup's
+  // `profile_completion_pct` is the source of truth.
+  const lifecycleFields: Pick<Seeker, 'lifecycle_status'> = {
+    lifecycle_status: completion >= 100 ? 'live' : 'draft',
+  };
   const created =
     typeof participant.profile_created_at === 'string' ? participant.profile_created_at : '';
   const updated =
@@ -1139,8 +1932,12 @@ function toSeekerRow(participant: Record<string, unknown>, locale: string): Seek
       : '';
   const name =
     typeof participant.name === 'string' && participant.name.trim() ? participant.name : '—';
+  const initiated = mapDirectional(participant.initiated);
+  const received = mapDirectional(participant.received);
   return {
-    id: userId,
+    // `row-` prefix keeps synthetic keys from colliding with a genuine
+    // numeric profile_item_id on the same page.
+    id: profileItemId || `row-${index}`,
     name,
     city: '—',
     joined: created
@@ -1152,22 +1949,30 @@ function toSeekerRow(participant: Record<string, unknown>, locale: string): Seek
       : '—',
     avatar: avatarInitials(name),
     profile: { title: '—', exp: '—', verified: false, complete: completion },
+    initiated,
+    received,
+    // Combined (initiated + received) view, kept for non-table consumers.
     applied: {
       total:
-        numberOr(participant.count_create, 0) +
-        numberOr(participant.count_accept, 0) +
-        numberOr(participant.count_reject, 0) +
-        numberOr(participant.count_cancel, 0),
-      accepted: numberOr(participant.count_accept, 0),
-      rejected: numberOr(participant.count_reject, 0),
-      pending: numberOr(participant.count_create, 0),
-      cancelled: numberOr(participant.count_cancel, 0),
+        initiated.create +
+        initiated.accept +
+        initiated.reject +
+        initiated.cancel +
+        received.create +
+        received.accept +
+        received.reject +
+        received.cancel,
+      accepted: initiated.accept + received.accept,
+      rejected: initiated.reject + received.reject,
+      pending: initiated.create + received.create,
+      cancelled: initiated.cancel + received.cancel,
     },
     status,
     last: updated ? formatRelative(updated) : '—',
     actionableTags: Array.isArray(participant.actionable_tags)
       ? (participant.actionable_tags as unknown[]).filter((t): t is string => typeof t === 'string')
       : [],
+    ...lifecycleFields,
   };
 }
 
@@ -1175,10 +1980,6 @@ function mapSeekerStatus(raw: string | null): ParticipantStatus {
   if (raw === 'at_risk') return 'at-risk';
   if (raw === 'inactive') return 'inactive';
   return 'active';
-}
-
-function numberOr(v: unknown, fallback: number): number {
-  return typeof v === 'number' ? v : fallback;
 }
 
 function avatarInitials(name: string): string {
@@ -1212,7 +2013,8 @@ function ProvidersTab() {
   const locale = useLocale();
   // Mirror SeekersTab: live counts come from the signalstack dashboard
   // rollup. Provider domain reuses the same canonical rollup shape
-  // (total_items, by_status, by_action_status, complete_profiles, …)
+  // (total_items, by_status, by_initiated_action_status,
+  //  by_received_action_status, complete_profiles, …)
   // so the cards map field-for-field; only the labels differ.
   //
   // Domain id from cfg so networks declaring non-default ids (e.g.
@@ -1222,9 +2024,14 @@ function ProvidersTab() {
   const providerDomainId = cfgRaw?.domains?.[1]?.id;
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [lifecycleFilter, setLifecycleFilter] = useLifecycleUrlFilter();
   const handleStatusFilterChange = (next: StatusFilter) => {
     setPage(1);
     setStatusFilter(next);
+  };
+  const handleLifecycleFilterChange = (next: LifecycleFilterValue) => {
+    setPage(1);
+    setLifecycleFilter(next);
   };
   const filterActive = statusFilter !== 'all';
   const {
@@ -1243,11 +2050,12 @@ function ProvidersTab() {
   );
   const { data: cfg } = useAggregatorConfig();
   const providerCfg = cfg?.domains?.find((d) => d.id === providerDomainId);
-  const providerTileLabels = providerCfg?.dashboardTiles ?? {};
   const providerPlural = providerCfg?.plural_label ?? t('tabs.providers');
-  // by_action_status bucket labels — wired to the funnel cells in the
-  // participant table's action-count columns.
-  const bucketLabels = cfg?.dashboardBuckets?.by_action_status ?? {};
+  const defaultTiles = useDefaultTiles(providerPlural);
+  // Directional bucket labels — wired to the funnel cells in the participant
+  // table's Initiated / Received action-count columns.
+  const initiatedLabels = cfg?.dashboardBuckets?.by_initiated_action_status ?? {};
+  const receivedLabels = cfg?.dashboardBuckets?.by_received_action_status ?? {};
   const statusLabels = cfg?.dashboardBuckets?.by_status ?? {};
   const statusRules = indexStatusRules(providerCfg?.status_rules);
   const slice = providerDomainId ? dashboard?.by_domain[providerDomainId] : undefined;
@@ -1257,11 +2065,13 @@ function ProvidersTab() {
   const active = byStatus['active'] ?? byStatus['new'];
   const atRisk = byStatus['at_risk'];
   const inactive = byStatus['inactive'];
-  const verified = rollup?.complete_profiles;
-  const hasApplications = rollup?.has_applications;
   const rows = useMemo(
-    () => (slice?.items ?? []).map((p) => toProviderRow(p, locale)),
+    () => (slice?.items ?? []).map((p, i) => toProviderRow(p, locale, i)),
     [slice?.items, locale],
+  );
+  const filteredRows = useMemo(
+    () => filterRowsByLifecycle(rows, lifecycleFilter),
+    [rows, lifecycleFilter],
   );
   const [cachedByStatus, setCachedByStatus] = useState<Record<string, number> | undefined>();
   useEffect(() => {
@@ -1309,36 +2119,17 @@ function ProvidersTab() {
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex items-center justify-between">
-        <span className="text-[13px] font-semibold text-ink-700">{providerPlural}</span>
-        <div className="flex items-center gap-2">
-          <Button
-            kind="ghost"
-            icon={
-              <I.refresh
-                size={14}
-                className={refreshing ? 'animate-spin' : undefined}
-                aria-hidden="true"
-              />
-            }
-            onClick={() => {
-              void handleRefresh();
-            }}
-            disabled={refreshing}
-            aria-label={t('aria.refresh')}
-            title={t('aria.refresh')}
-          >
-            {refreshing ? t('buttons.refreshing') : t('buttons.refresh')}
-          </Button>
-          {refreshError ? (
-            <span className="ml-2 max-w-[220px] truncate text-xs text-red-600" title={refreshError}>
-              {t('state.refreshFailed')}
-            </span>
-          ) : lastRefreshedAt !== null && Date.now() - lastRefreshedAt < 5000 ? (
-            <span className="text-xs text-ink-400">{t('state.refreshedJustNow')}</span>
-          ) : null}
-        </div>
-      </div>
+      <SummaryBar
+        icon="briefcase"
+        label={providerPlural}
+        total={total}
+        refreshing={refreshing}
+        refreshError={refreshError}
+        lastRefreshedAt={lastRefreshedAt}
+        onRefresh={() => {
+          void handleRefresh();
+        }}
+      />
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <StatCard
           tone="new"
@@ -1372,26 +2163,39 @@ function ProvidersTab() {
         />
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-        <MiniStat
-          label={
-            providerTileLabels.total_items ??
-            t('ministat.totalItems', { entityPlural: providerPlural })
-          }
-          value={fmtCount(total)}
-        />
-        <MiniStat
-          label={providerTileLabels.complete_profiles ?? t('ministat.completeProfiles')}
-          value={fmtCount(verified)}
-        />
-        <MiniStat
-          label={
-            providerTileLabels.has_applications ??
-            t('ministat.withApplications', { entityPlural: providerPlural })
-          }
-          value={fmtCount(hasApplications)}
-        />
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        {/* Profile-level tiles */}
+        <MetricGroup title={providerCfg?.dashboardTiles?.profile_title ?? t('groups.profiles')}>
+          {resolveTiles(providerCfg?.dashboardTiles?.profile, defaultTiles.profile, rollup).map(
+            (tile) => (
+              <MiniStat
+                key={`p-${tile.field}`}
+                icon={TILE_ICONS[tile.field]}
+                label={tile.label}
+                value={fmtCount(tile.value)}
+                sub={tileSub(tile.field, t, providerPlural, rollup)}
+              />
+            ),
+          )}
+        </MetricGroup>
+
+        {/* User-level tiles */}
+        <MetricGroup title={providerCfg?.dashboardTiles?.user_title ?? t('groups.users')}>
+          {resolveTiles(providerCfg?.dashboardTiles?.user, defaultTiles.user, rollup).map(
+            (tile) => (
+              <MiniStat
+                key={`u-${tile.field}`}
+                icon={TILE_ICONS[tile.field]}
+                label={tile.label}
+                value={fmtCount(tile.value)}
+                sub={tileSub(tile.field, t, providerPlural, rollup)}
+              />
+            ),
+          )}
+        </MetricGroup>
       </div>
+
+      <OnboardingMetrics />
 
       {isLoading ? (
         <LoadingCard />
@@ -1400,7 +2204,7 @@ function ProvidersTab() {
       ) : (
         <ParticipantTable<Provider>
           kind="provider"
-          rows={rows}
+          rows={filteredRows}
           total={slice?.total_matching ?? total}
           page={page}
           pageSize={PAGE_SIZE}
@@ -1408,15 +2212,23 @@ function ProvidersTab() {
           statusFilter={statusFilter}
           onStatusFilterChange={handleStatusFilterChange}
           statusOptions={statusOptions}
-          bucketLabels={bucketLabels}
+          initiatedLabels={initiatedLabels}
+          receivedLabels={receivedLabels}
+          lifecycleFilter={lifecycleFilter}
+          onLifecycleFilterChange={handleLifecycleFilterChange}
+          domain={providerDomainId}
         />
       )}
     </div>
   );
 }
 
-function toProviderRow(participant: Record<string, unknown>, locale: string): Provider {
-  const seeker = toSeekerRow(participant, locale);
+function toProviderRow(
+  participant: Record<string, unknown>,
+  locale: string,
+  index: number,
+): Provider {
+  const seeker = toSeekerRow(participant, locale, index);
   return { ...seeker, role: '—' };
 }
 
@@ -1592,17 +2404,11 @@ function DashboardContent({ aggregatorType }: { aggregatorType: string }) {
         }
       />
 
-      {tabItems.length > 1 ? (
+      {/* Single-domain aggregators render no tab strip — the summary bar
+          inside each tab already carries the domain label + live total
+          (design: redundant pill removed). */}
+      {tabItems.length > 1 && (
         <SegmentedTabs<Tab> value={tab} onChange={setTab} items={tabItems} className="mb-6" />
-      ) : (
-        // Single-domain aggregator: the lone tab carries no navigation
-        // value, so render it as a static label chip instead of a
-        // clickable button.
-        <div className="seg mb-6">
-          <span className="px-4 py-2 rounded-[9px] text-[13.5px] font-medium bg-[var(--bd-card)] text-[var(--bd-primary-600)] inline-flex items-center gap-2 shadow-[0_1px_2px_rgba(11,16,32,0.06)] cursor-default select-none">
-            {tabItems[0]?.label}
-          </span>
-        </div>
       )}
 
       {tab === 'seekers' && <SeekersTab />}

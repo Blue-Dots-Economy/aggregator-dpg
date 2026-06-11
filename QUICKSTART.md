@@ -4,9 +4,10 @@
 
 ```bash
 git clone <repo-url> aggregator-dpg && cd aggregator-dpg
-cp <shared-env-file> .env            # use the .env shared by team (or `make setup`)
-sed -i '' 's/^ADMIN_EMAILS=.*/ADMIN_EMAILS=you@yourorg.com/' .env   # set your admin email
-make up
+pnpm install
+pnpm stack:setup                     # bootstraps .env + host entries (or: make setup)
+# open .env and set: ADMIN_EMAILS=you@yourorg.com
+pnpm stack:up                        # boots the full stack (or: make up)
 open http://localhost:3100
 ```
 
@@ -34,7 +35,7 @@ URLs after setup:
 | `make`, `openssl`, `sudo` | any                                      |
 | Node.js + pnpm            | only if rebuilding web image after edits |
 
-Mac/Linux. Windows: WSL2.
+**Supported hosts:** macOS, Linux, and **native Windows** (Docker Desktop — no WSL2 required). See the Windows note in §3.
 
 ---
 
@@ -87,6 +88,27 @@ make logs                            # all services
 docker compose logs -f keycloak      # one service
 ```
 
+### Windows note
+
+`make` is not required on Windows — use the pnpm scripts, which run the same cross-platform `scripts/stack.mjs`:
+
+```powershell
+pnpm install
+pnpm stack:setup     # creates .env; PRINTS the two host lines to add (see below)
+pnpm stack:up        # boots the stack
+```
+
+The one manual step on Windows: `pnpm stack:setup` cannot edit the hosts file for you (it needs Administrator). It prints two lines like:
+
+```
+127.0.0.1 keycloak
+127.0.0.1 minio
+```
+
+Open `C:\Windows\System32\drivers\etc\hosts` in Notepad **run as Administrator**, paste those two lines, save, then run `pnpm stack:up`. Re-running `pnpm stack:setup` is safe — it never duplicates entries.
+
+Keycloak OTP-plugin rebuilds (`make kc-plugin` / `make rebuild-keycloak`) and the Helm targets remain Unix/WSL-only; the prebuilt OTP JAR is committed, so a normal Windows run does not need them.
+
 ---
 
 ## 4. Smoke test
@@ -125,7 +147,7 @@ make rebuild-web
 | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `make up` fails: `port already in use`             | Stop local Postgres/Redis or change host port in `docker-compose.yml`.                                                                                                    |
 | `keycloak` container restarts                      | Bad `KC_BOOTSTRAP_ADMIN_PASSWORD` or stale volume. `make reset` then `make up`.                                                                                           |
-| Browser can't reach <http://keycloak:8080>         | `/etc/hosts` missing entry. Re-run `make hosts`.                                                                                                                          |
+| Browser can't reach <http://keycloak:8080>         | Hosts entry missing. Re-run `make setup` (or `pnpm stack:setup`); on Windows, re-paste the printed lines into `C:\Windows\System32\drivers\etc\hosts` as Administrator.   |
 | `403 MISSING_AGGREGATOR_ID` on profile             | Realm mappers missing — re-import realm. Verify `infra/keycloak/realms/aggregator-realm.json` has `aggregator_id` + `phone_number` mappers on `aggregator-portal` client. |
 | Login: "user does not exist" with registered email | KC user has empty email — re-register or edit user in KC admin.                                                                                                           |
 | Approval link "Already approved" first click       | Leftover user state. Delete user in KC admin or pick different aggregator id.                                                                                             |

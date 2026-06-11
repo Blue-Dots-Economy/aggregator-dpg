@@ -8,7 +8,6 @@ import { Topbar } from '../../../components/shell/Topbar';
 import { I, type IconName } from '../../../icons';
 import { useRecentBulkUploads, useRegistrationLinks } from '../../../hooks/useOnboarding';
 import { useProfileRaw } from '../../../hooks/useProfile';
-import { StatStrip } from './_components/StatStrip';
 import { RecentUploadsBody } from './_components/CSVUpload';
 import { YourLinksBody } from './_components/RegistrationLinksSection';
 
@@ -32,7 +31,8 @@ export default function OnboardingPage() {
           </button>
         }
       />
-      <StatStrip />
+      {/* Overall totals (Total registered / Verified / Failed) now live on
+          the dashboard's aggregator-wide Onboarding section (#388). */}
       <BulkUploadCard />
       <RegistrationLinkCard />
     </div>

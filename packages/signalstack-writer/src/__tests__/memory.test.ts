@@ -326,7 +326,9 @@ describe('InMemorySignalStackWriter.fetchDashboard — canonical empty shape', (
       complete_profiles: 0,
       has_applications: 0,
       by_status: { new: 0, active: 0, at_risk: 0, inactive: 0 },
-      by_action_status: { create: 0, accept: 0, reject: 0, cancel: 0 },
+      by_initiated_action_status: { create: 0, accept: 0, reject: 0, cancel: 0 },
+      by_received_action_status: { create: 0, accept: 0, reject: 0, cancel: 0 },
+      total_users: 0,
       avg_items_per_user: 0,
       avg_actions_per_user: 0,
       mode_wise_counts: {},
@@ -365,13 +367,17 @@ describe('SignalStackWriterFake.seed — pinned dashboard', () => {
             complete_profiles: 7,
             has_applications: 4,
             by_status: { new: 2, active: 6, at_risk: 1, inactive: 1 },
-            by_action_status: { create: 10, accept: 8, reject: 2, cancel: 0 },
+            by_initiated_action_status: { create: 10, accept: 8, reject: 2, cancel: 0 },
+            by_received_action_status: { create: 0, accept: 9, reject: 1, cancel: 0 },
+            total_users: 5,
             avg_items_per_user: 2.0,
             avg_actions_per_user: 4.0,
             mode_wise_counts: { bulk: 3, link: 7 },
           },
           items: [
             {
+              profile_item_id: 'p-priya',
+              user_id: 'u-priya',
               name: 'Priya',
               item_network: 'blue_dot',
               item_domain: 'seeker',
@@ -382,14 +388,10 @@ describe('SignalStackWriterFake.seed — pinned dashboard', () => {
               profile_created_at: '2026-03-01T00:00:00Z',
               profile_last_updated_at: '2026-03-02T00:00:00Z',
               age_days: 10,
-              count_create: 1,
-              count_accept: 0,
-              count_reject: 0,
-              count_cancel: 0,
-              last_create_at: '2026-03-01T00:00:00Z',
-              last_accept_at: null,
-              last_reject_at: null,
-              last_cancel_at: null,
+              initiated: { create: 1, accept: 0, reject: 0, cancel: 0 },
+              received: { create: 0, accept: 0, reject: 0, cancel: 0 },
+              last_initiated_at: { create: '2026-03-01T00:00:00Z' },
+              last_received_at: {},
               actionable_tags: ['incomplete_profile'],
             },
           ],
@@ -418,7 +420,19 @@ describe('SignalStackWriterFake.seed — pinned dashboard', () => {
     expect(slice.rollup.complete_profiles).toBe(7);
     expect(slice.rollup.has_applications).toBe(4);
     expect(slice.rollup.by_status).toEqual({ new: 2, active: 6, at_risk: 1, inactive: 1 });
-    expect(slice.rollup.by_action_status).toEqual({ create: 10, accept: 8, reject: 2, cancel: 0 });
+    expect(slice.rollup.by_initiated_action_status).toEqual({
+      create: 10,
+      accept: 8,
+      reject: 2,
+      cancel: 0,
+    });
+    expect(slice.rollup.by_received_action_status).toEqual({
+      create: 0,
+      accept: 9,
+      reject: 1,
+      cancel: 0,
+    });
+    expect(slice.rollup.total_users).toBe(5);
     expect(slice.rollup.mode_wise_counts).toEqual({ bulk: 3, link: 7 });
     expect(slice.items).toHaveLength(1);
     expect((slice.items[0] as Record<string, unknown>)['name']).toBe('Priya');

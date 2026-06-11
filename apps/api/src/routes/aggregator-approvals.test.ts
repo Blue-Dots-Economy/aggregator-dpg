@@ -227,6 +227,12 @@ describe('admin approval routes', () => {
       async exportDashboardCsv() {
         return err(new UpstreamError('not used', { code: 'X' }));
       }
+      async probeUser() {
+        return err(new UpstreamError('not used', { code: 'X' }));
+      }
+      async getItem() {
+        return err(new UpstreamError('not used', { code: 'X' }));
+      }
     }
     _setSignalStackWriter(new FailingUpsertWriter());
 
@@ -334,6 +340,12 @@ describe('admin approval routes', () => {
       async exportDashboardCsv() {
         return err(new UpstreamError('not used', { code: 'X' }));
       }
+      async probeUser() {
+        return err(new UpstreamError('not used', { code: 'X' }));
+      }
+      async getItem() {
+        return err(new UpstreamError('not used', { code: 'X' }));
+      }
     }
     _setSignalStackWriter(new FailingUpsertWriter());
     const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
@@ -412,6 +424,12 @@ describe('admin approval routes', () => {
         return err(new UpstreamError('not used', { code: 'X' }));
       }
       async exportDashboardCsv() {
+        return err(new UpstreamError('not used', { code: 'X' }));
+      }
+      async probeUser() {
+        return err(new UpstreamError('not used', { code: 'X' }));
+      }
+      async getItem() {
         return err(new UpstreamError('not used', { code: 'X' }));
       }
     })();

@@ -21,7 +21,8 @@ import type {
   BrandPalette,
   BrandTypography,
   DashboardBuckets,
-  DashboardTileLabels,
+  DashboardTiles,
+  RegistrationMode,
   StatusRule,
 } from '@aggregator-dpg/network-config/interface';
 import { getNetworkConfig } from '../services/network-config.js';
@@ -61,10 +62,15 @@ interface PublicAggregatorConfig {
     label: string;
     plural_label: string;
     item_type: string;
-    dashboardTiles?: DashboardTileLabels;
+    dashboardTiles?: DashboardTiles;
     status_rules?: StatusRule[];
   }>;
   dashboardBuckets?: DashboardBuckets;
+  /**
+   * Per-link registration modes declared by the network. The web admin form
+   * renders its mode dropdown from these keys (label + optional public hint).
+   */
+  registration_modes: Record<string, RegistrationMode>;
 }
 
 export async function registerAggregatorConfigRoutes(app: FastifyInstance): Promise<void> {
@@ -112,6 +118,7 @@ export async function registerAggregatorConfigRoutes(app: FastifyInstance): Prom
         };
       }),
       ...(cfg.dashboardBuckets ? { dashboardBuckets: cfg.dashboardBuckets } : {}),
+      registration_modes: cfg.aggregator.registration_modes ?? {},
     };
     return reply.header('Cache-Control', 'public, max-age=60').send(payload);
   });
