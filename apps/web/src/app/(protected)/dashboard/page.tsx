@@ -332,19 +332,47 @@ function OnboardingStatCard({
 }
 
 /**
- * Icon + bar colour per onboarding entry source (`onboarding_source` enum).
- * Unknown future sources fall back to a neutral entry rather than breaking.
+ * Display registry for onboarding entry sources (the API's
+ * `onboarding_source` enum). The joins-by-mode card renders whatever
+ * sources the `/v1/onboarding/by-source` response carries, in order —
+ * nothing else in the component is source-specific.
+ *
+ * Adding a new registration mode (e.g. `voice`, `whatsapp`) is therefore:
+ *   1. backend: extend the `onboarding_source` enum + write rollup rows;
+ *   2. here: ONE registry entry (icon, colour, label key);
+ *   3. i18n: `dashboard.onboardingGroup.mode_<source>` in en/hi/kn.
+ * A source missing from the registry still renders safely — title-cased
+ * label and a colour cycled from {@link ONBOARDING_FALLBACK_COLORS} — so
+ * a backend enum landing before the UI entry never blanks the dashboard.
  */
-const ONBOARDING_MODE_META: Record<string, { icon: IconName; color: string }> = {
-  bulk: { icon: 'upload', color: '#10B981' },
-  link: { icon: 'link', color: 'var(--bd-primary-600)' },
-  qr: { icon: 'qr', color: '#F59E0B' },
+const ONBOARDING_MODES: Record<string, { icon: IconName; color: string; labelKey: string }> = {
+  bulk: { icon: 'upload', color: '#10B981', labelKey: 'onboardingGroup.mode_bulk' },
+  link: { icon: 'link', color: 'var(--bd-primary-600)', labelKey: 'onboardingGroup.mode_link' },
+  qr: { icon: 'qr', color: '#F59E0B', labelKey: 'onboardingGroup.mode_qr' },
 };
 
-const ONBOARDING_MODE_FALLBACK: { icon: IconName; color: string } = {
-  icon: 'spark',
-  color: '#8B91A3',
-};
+/** Distinct colours for unregistered sources so two unknowns stay tellable apart in the share bar. */
+const ONBOARDING_FALLBACK_COLORS = ['#8B91A3', '#0EA5E9', '#EC4899', '#8B5CF6'];
+
+/**
+ * Resolves the display meta for one entry source, falling back to a
+ * neutral icon + cycled colour (and `null` labelKey → title-cased source).
+ *
+ * @param source - The `onboarding_source` value from the API.
+ * @param index - The slice's position, used to cycle fallback colours.
+ */
+function onboardingModeMeta(
+  source: string,
+  index: number,
+): { icon: IconName; color: string; labelKey: string | null } {
+  return (
+    ONBOARDING_MODES[source] ?? {
+      icon: 'spark',
+      color: ONBOARDING_FALLBACK_COLORS[index % ONBOARDING_FALLBACK_COLORS.length]!,
+      labelKey: null,
+    }
+  );
+}
 
 /**
  * Aggregator-wide onboarding metrics section (design: Onboarding group,
@@ -462,21 +490,20 @@ function OnboardingMetrics() {
                 </div>
               </div>
               <div className="flex h-3 rounded-full overflow-hidden bg-ink-100 mt-3.5 mb-4 gap-0.5">
-                {slices.map((s) => (
+                {slices.map((s, i) => (
                   <div
                     key={s.source}
                     className="rounded-full"
                     style={{
                       width: pct(s.passed),
-                      background: (ONBOARDING_MODE_META[s.source] ?? ONBOARDING_MODE_FALLBACK)
-                        .color,
+                      background: onboardingModeMeta(s.source, i).color,
                     }}
                   />
                 ))}
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                {slices.map((s) => {
-                  const meta = ONBOARDING_MODE_META[s.source] ?? ONBOARDING_MODE_FALLBACK;
+                {slices.map((s, i) => {
+                  const meta = onboardingModeMeta(s.source, i);
                   const Ic = I[meta.icon];
                   return (
                     <div key={s.source} className="flex items-center gap-3 min-w-0">
@@ -488,9 +515,7 @@ function OnboardingMetrics() {
                       </span>
                       <div className="min-w-0">
                         <div className="text-[12.5px] font-semibold text-ink-500 whitespace-nowrap">
-                          {ONBOARDING_MODE_META[s.source]
-                            ? t(`onboardingGroup.mode_${s.source}`)
-                            : statusLabel(s.source)}
+                          {meta.labelKey ? t(meta.labelKey) : statusLabel(s.source)}
                         </div>
                         <div className="flex items-baseline gap-2 mt-0.5">
                           <span className="font-display font-bold text-[20px] text-ink-900 tabular-nums leading-none">
