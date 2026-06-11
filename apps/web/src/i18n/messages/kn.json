@@ -129,7 +129,21 @@
       "delta_this_week": "ಈ ವಾರ",
       "totalUsers": "ಒಟ್ಟು ಬಳಕೆದಾರರು",
       "avgProfilesPerUser": "ಪ್ರತಿ ಬಳಕೆದಾರರಿಗೆ ಸರಾಸರಿ ಪ್ರೊಫೈಲ್‌ಗಳು",
-      "avgActionsPerUser": "ಪ್ರತಿ ಬಳಕೆದಾರರಿಗೆ ಸರಾಸರಿ ಕ್ರಿಯೆಗಳು"
+      "avgActionsPerUser": "ಪ್ರತಿ ಬಳಕೆದಾರರಿಗೆ ಸರಾಸರಿ ಕ್ರಿಯೆಗಳು",
+      "sub_total": "ಎಲ್ಲಾ {entityPlural} ದಾಖಲೆಗಳು",
+      "sub_complete": "ಎಲ್ಲಾ ಪ್ರೊಫೈಲ್‌ಗಳ {pct}%",
+      "sub_applications": "ಅರ್ಜಿಗಳಿರುವ ಪ್ರೊಫೈಲ್‌ಗಳು",
+      "sub_avgItems": "ಪ್ರತಿ ಬಳಕೆದಾರ ನಿರ್ವಹಿಸುವ ಪ್ರೊಫೈಲ್‌ಗಳು",
+      "sub_avgActions": "ದಾಖಲಾದ ಚಟುವಟಿಕೆಗಳು",
+      "sub_totalUsers": "ವಿಶಿಷ್ಟ ಖಾತೆದಾರರು"
+    },
+    "summary": {
+      "total": "ಒಟ್ಟು {count}",
+      "hint": "ನಿಮ್ಮ ನೆಟ್‌ವರ್ಕ್‌ನಾದ್ಯಂತ ಜೀವನಚಕ್ರ ಮತ್ತು ಪ್ರೊಫೈಲ್ ಸ್ಥಿತಿ"
+    },
+    "groups": {
+      "profiles": "ಪ್ರೊಫೈಲ್‌ಗಳು",
+      "users": "ಬಳಕೆದಾರರು"
     },
     "tiles": {
       "lifecycle": {
@@ -223,13 +237,8 @@
         "col_failed": "ವಿಫಲ",
         "col_skipped": "ಬಿಟ್ಟುಬಿಡಲಾಗಿದೆ",
         "col_reason": "ಕಾರಣ / ದೋಷಗಳು",
-        "col_actions": "ಕ್ರಮಗಳು",
         "all_rows_passed": "ಎಲ್ಲಾ ಸಾಲುಗಳು ಉತ್ತೀರ್ಣ",
-        "signing": "ಸಹಿ ಮಾಡುತ್ತಿದೆ…",
-        "triggered": "{action} ಪ್ರಚೋದಿಸಲಾಗಿದೆ",
-        "trigger_callback": "ಕಾಲ್‌ಬ್ಯಾಕ್ ಪ್ರಚೋದಿಸಿ",
-        "retry": "ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ",
-        "notify": "ಸೂಚಿಸಿ"
+        "signing": "ಸಹಿ ಮಾಡುತ್ತಿದೆ…"
       }
     },
     "create_link": {
