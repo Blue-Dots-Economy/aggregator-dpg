@@ -13,13 +13,10 @@ import { Topbar } from '../../../components/shell/Topbar';
 import { I, type IconName } from '../../../icons';
 import { useOppProviders, useDashboard } from '../../../hooks/useDashboard';
 import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
-import {
-  dashboardService,
-  triggerCsvDownload,
-  type LifecycleFilter,
-} from '../../../services/dashboard.service';
+import { dashboardService, type LifecycleFilter } from '../../../services/dashboard.service';
 import { mapDirectional } from '../../../services/row-mapping';
 import { resolveTiles } from '../../../services/tiles';
+import { DASHBOARD_BULK_ACTIONS, type BulkAction } from '../../../services/bulk-actions';
 import type { DashboardTileDef } from '../../../hooks/useAggregatorConfig';
 import { useProfileRaw } from '../../../hooks/useProfile';
 import { useThemeMode } from '../../../lib/theme-mode';
@@ -669,6 +666,94 @@ function useDefaultTiles(entityPlural: string): {
   );
 }
 
+/**
+ * Action bar shown above the table while rows are selected. Renders one
+ * button per {@link BulkAction} descriptor — the bar is action-agnostic, so
+ * future bulk operations plug in by extending `DASHBOARD_BULK_ACTIONS`.
+ */
+function BulkActionBar({
+  selectedRows,
+  domain,
+  onClear,
+}: {
+  selectedRows: ParticipantBase[];
+  domain: string;
+  onClear: () => void;
+}) {
+  const t = useTranslations('dashboard');
+  const [runningId, setRunningId] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
+  const noticeTimer = useRef<number | null>(null);
+
+  useEffect(
+    () => () => {
+      if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
+    },
+    [],
+  );
+
+  const runAction = async (action: BulkAction) => {
+    if (runningId) return;
+    setRunningId(action.id);
+    setNotice(null);
+    try {
+      await action.run(selectedRows, { domain });
+      setNotice({ kind: 'success', text: t('bulk.success', { count: selectedRows.length }) });
+    } catch (err) {
+      setNotice({
+        kind: 'error',
+        text: err instanceof Error ? err.message : t('bulk.failed'),
+      });
+    } finally {
+      setRunningId(null);
+      if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
+      noticeTimer.current = window.setTimeout(() => setNotice(null), 4000);
+    }
+  };
+
+  return (
+    <div className="px-5 py-2.5 flex items-center gap-3 border-b border-[var(--bd-border)] bg-[var(--bd-primary-50)]">
+      <span className="text-[12.5px] font-semibold text-primary-600 whitespace-nowrap">
+        {t('bulk.selected', { count: selectedRows.length })}
+      </span>
+      <div className="flex items-center gap-2">
+        {DASHBOARD_BULK_ACTIONS.map((a) => {
+          const Ic = I[a.icon];
+          return (
+            <Button
+              key={a.id}
+              kind="ghost"
+              icon={<Ic size={13} />}
+              onClick={() => void runAction(a)}
+              disabled={runningId !== null}
+              className="whitespace-nowrap px-3 py-1.5 text-[12.5px]"
+            >
+              {runningId === a.id ? t('bulk.running') : t(a.labelKey)}
+            </Button>
+          );
+        })}
+      </div>
+      {notice && (
+        <span
+          aria-live="polite"
+          className={`text-[12px] font-medium truncate ${
+            notice.kind === 'success' ? 'text-emerald-700' : 'text-rose-600'
+          }`}
+        >
+          {notice.text}
+        </span>
+      )}
+      <button
+        type="button"
+        onClick={onClear}
+        className="ml-auto text-[12px] font-semibold text-ink-500 hover:text-ink-700 whitespace-nowrap"
+      >
+        {t('bulk.clear')}
+      </button>
+    </div>
+  );
+}
+
 interface ParticipantTableProps<R extends ParticipantBase> {
   kind: RowKind;
   rows: R[];
@@ -743,8 +828,6 @@ function ParticipantTable<R extends ParticipantBase>({
     { value: 'all', label: t('filters.all_statuses') },
   ];
   const searchId = `bd-search-${kind}`;
-  const [exporting, setExporting] = useState(false);
-  const [exportError, setExportError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [filterOpen, setFilterOpen] = useState(false);
   const filterRef = useRef<HTMLDivElement | null>(null);
@@ -778,23 +861,60 @@ function ParticipantTable<R extends ParticipantBase>({
 
   const filterActive = statusFilter !== 'all';
 
-  // Map UI kind onto the signalstack domain. `opp` rides on the provider
-  // dataset until signalstack exposes a dedicated opportunity-provider
-  // endpoint (mirrors the read path in dashboardService).
+  // Map UI kind onto the signalstack domain for bulk-action context. `opp`
+  // rides on the provider dataset until signalstack exposes a dedicated
+  // opportunity-provider endpoint (mirrors the read path in dashboardService).
   const exportDomain: 'seeker' | 'provider' = kind === 'seeker' ? 'seeker' : 'provider';
 
-  const onExportCsv = async () => {
-    if (exporting) return;
-    setExporting(true);
-    setExportError(null);
-    try {
-      const result = await dashboardService.dashboardExport({ domain: exportDomain });
-      triggerCsvDownload(result);
-    } catch (err) {
-      setExportError(err instanceof Error ? err.message : 'export failed');
-    } finally {
-      setExporting(false);
-    }
+  // Explicit selection mode — the checkbox column only exists while the
+  // operator is in "Select" mode (toolbar toggle). Exiting the mode clears
+  // the selection.
+  const [selectMode, setSelectMode] = useState(false);
+
+  // Bulk selection — snapshots full row data (not just ids) so client-side
+  // actions like CSV export can include rows from pages no longer mounted.
+  // Persists across page changes; resets when a filter changes because the
+  // selection's meaning changed underneath it.
+  const [selected, setSelected] = useState<Map<string, ParticipantBase>>(new Map());
+  useEffect(() => {
+    setSelected(new Map());
+  }, [statusFilter, lifecycleFilter]);
+
+  const toggleSelectMode = () => {
+    setSelectMode((on) => {
+      if (on) setSelected(new Map());
+      return !on;
+    });
+  };
+
+  // Rows without a real profile_item_id carry synthetic `row-<index>` keys
+  // that collide across pages — those rows are not selectable.
+  const isSelectable = (r: ParticipantBase): boolean => !r.id.startsWith('row-');
+  const selectablePageRows = visibleRows.filter(isSelectable);
+  const allPageSelected =
+    selectablePageRows.length > 0 && selectablePageRows.every((r) => selected.has(r.id));
+  const somePageSelected = selectablePageRows.some((r) => selected.has(r.id));
+
+  const toggleRow = (r: ParticipantBase) => {
+    setSelected((prev) => {
+      const next = new Map(prev);
+      if (next.has(r.id)) next.delete(r.id);
+      else next.set(r.id, r);
+      return next;
+    });
+  };
+
+  /** Header checkbox: selects/deselects the current page's selectable rows. */
+  const togglePage = () => {
+    setSelected((prev) => {
+      const next = new Map(prev);
+      if (allPageSelected) {
+        for (const r of selectablePageRows) next.delete(r.id);
+      } else {
+        for (const r of selectablePageRows) next.set(r.id, r);
+      }
+      return next;
+    });
   };
 
   return (
@@ -844,6 +964,15 @@ function ParticipantTable<R extends ParticipantBase>({
               <option value="live">{t('filters.lifecycle_live')}</option>
             </select>
           ) : null}
+          <Button
+            kind={selectMode ? 'primary' : 'ghost'}
+            icon={<I.check size={14} />}
+            onClick={toggleSelectMode}
+            aria-pressed={selectMode}
+            className="whitespace-nowrap px-3 py-1.5 text-[12.5px]"
+          >
+            {selectMode ? t('bulk.cancel') : t('bulk.select')}
+          </Button>
           <div ref={filterRef} className="relative">
             <Button
               kind={filterActive ? 'primary' : 'ghost'}
@@ -892,22 +1021,22 @@ function ParticipantTable<R extends ParticipantBase>({
               </div>
             )}
           </div>
-          <Button
-            kind="ghost"
-            icon={<I.download size={14} />}
-            onClick={onExportCsv}
-            disabled={exporting}
-            title={exportError ?? t('aria.export_csv')}
-            aria-label={t('aria.export_csv')}
-            className="whitespace-nowrap px-3 py-1.5 text-[12.5px]"
-          >
-            {exporting ? t('buttons.exporting') : t('buttons.exportCsv')}
-          </Button>
         </div>
       </div>
 
+      {selected.size > 0 && (
+        <BulkActionBar
+          selectedRows={[...selected.values()]}
+          domain={exportDomain}
+          onClear={() => setSelected(new Map())}
+        />
+      )}
+
       <div className="overflow-auto scroll-x" style={{ maxHeight: 520 }}>
-        <table className="bd-table" style={{ minWidth: kind === 'provider' ? 1500 : 1400 }}>
+        <table
+          className="bd-table"
+          style={{ minWidth: (kind === 'provider' ? 1500 : 1400) + (selectMode ? 44 : 0) }}
+        >
           <thead
             style={{
               position: 'sticky',
@@ -917,10 +1046,35 @@ function ParticipantTable<R extends ParticipantBase>({
             }}
           >
             <tr>
+              {selectMode && (
+                <th
+                  style={{
+                    position: 'sticky',
+                    left: 0,
+                    zIndex: 5,
+                    background: 'var(--bd-table-head-bg)',
+                    width: 44,
+                    minWidth: 44,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    className="w-4 h-4 cursor-pointer align-middle"
+                    style={{ accentColor: 'var(--bd-primary-600)' }}
+                    ref={(el) => {
+                      if (el) el.indeterminate = somePageSelected && !allPageSelected;
+                    }}
+                    checked={allPageSelected}
+                    onChange={togglePage}
+                    disabled={selectablePageRows.length === 0}
+                    aria-label={t('aria.select_all_page')}
+                  />
+                </th>
+              )}
               <th
                 style={{
                   position: 'sticky',
-                  left: 0,
+                  left: selectMode ? 44 : 0,
                   zIndex: 5,
                   background: 'var(--bd-table-head-bg)',
                   minWidth: 240,
@@ -940,10 +1094,33 @@ function ParticipantTable<R extends ParticipantBase>({
             {visibleRows.map((r) => {
               return (
                 <tr key={r.id} className="fade-up">
+                  {selectMode && (
+                    <td
+                      style={{
+                        position: 'sticky',
+                        left: 0,
+                        background: 'inherit',
+                        backgroundColor: 'var(--bd-card)',
+                        zIndex: 1,
+                        width: 44,
+                      }}
+                    >
+                      {isSelectable(r) && (
+                        <input
+                          type="checkbox"
+                          className="w-4 h-4 cursor-pointer align-middle"
+                          style={{ accentColor: 'var(--bd-primary-600)' }}
+                          checked={selected.has(r.id)}
+                          onChange={() => toggleRow(r)}
+                          aria-label={t('aria.select_row', { name: r.name })}
+                        />
+                      )}
+                    </td>
+                  )}
                   <td
                     style={{
                       position: 'sticky',
-                      left: 0,
+                      left: selectMode ? 44 : 0,
                       background: 'inherit',
                       backgroundColor: 'var(--bd-card)',
                       zIndex: 1,

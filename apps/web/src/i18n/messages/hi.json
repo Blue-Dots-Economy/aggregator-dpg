@@ -94,7 +94,20 @@
       "export_csv": "CSV के रूप में निर्यात करें",
       "prev_page": "पिछला पृष्ठ",
       "next_page": "अगला पृष्ठ",
-      "refresh": "डैशबोर्ड रिफ्रेश करें"
+      "refresh": "डैशबोर्ड रिफ्रेश करें",
+      "select_row": "{name} चुनें",
+      "select_all_page": "इस पृष्ठ की सभी पंक्तियाँ चुनें"
+    },
+    "bulk": {
+      "select": "चुनें",
+      "cancel": "रद्द करें",
+      "selected": "{count} चयनित",
+      "clear": "चयन हटाएँ",
+      "exportSelected": "चयनित CSV निर्यात करें",
+      "triggerCallback": "कॉलबैक ट्रिगर करें",
+      "running": "प्रक्रिया जारी…",
+      "success": "{count} संसाधित",
+      "failed": "कार्रवाई विफल"
     },
     "tabs": {
       "seekers": "आवेदक",

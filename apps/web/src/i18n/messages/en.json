@@ -94,7 +94,20 @@
       "export_csv": "Export as CSV",
       "prev_page": "Previous page",
       "next_page": "Next page",
-      "refresh": "Refresh dashboard"
+      "refresh": "Refresh dashboard",
+      "select_row": "Select {name}",
+      "select_all_page": "Select all rows on this page"
+    },
+    "bulk": {
+      "select": "Select",
+      "cancel": "Cancel",
+      "selected": "{count} selected",
+      "clear": "Clear selection",
+      "exportSelected": "Export selected CSV",
+      "triggerCallback": "Trigger callback",
+      "running": "Working…",
+      "success": "{count} processed",
+      "failed": "Action failed"
     },
     "tabs": {
       "seekers": "Seekers",
