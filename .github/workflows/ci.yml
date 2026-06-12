@@ -5,7 +5,7 @@ on:
     branches:
       - main
       - develop
-      - feat/orange-dot
+      - fix/schema-header-issue
 
     tags:
       - 'web-v*.*.*'
