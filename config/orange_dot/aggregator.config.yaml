@@ -19,7 +19,7 @@ aggregator:
         name: name
         phone: phone_number
       practitioner:
-        name: name
+        name: product_name
         phone: contact_phone
 
   brand:
