@@ -31,12 +31,22 @@ const ConfigSchema = z.object({
   /**
    * Serve the OpenAPI spec + Scalar reference UI at /api/reference. The API
    * is internet-reachable, so the docs surface (including admin route paths)
-   * is enumerable when enabled — defaults ON for dev convenience; set to
-   * 'false' in production unless the reference should be public.
+   * is enumerable when enabled — defaults ON for dev convenience. This flag
+   * is force-disabled under NODE_ENV=production (see {@link apiReferenceEnabled})
+   * so a prod deploy never serves an enumerable route map by accident; opt back
+   * in for prod only via API_REFERENCE_FORCE.
    */
   API_REFERENCE_ENABLED: z
     .enum(['true', 'false'])
     .default('true')
+    .transform((v) => v === 'true'),
+  /**
+   * Escape hatch to serve the docs surface even under NODE_ENV=production.
+   * Off by default — must be explicitly set to expose the reference in prod.
+   */
+  API_REFERENCE_FORCE: z
+    .enum(['true', 'false'])
+    .default('false')
     .transform((v) => v === 'true'),
   /** Public origin of the API service; used to assemble admin email links. */
   PUBLIC_API_URL: z.string().default('http://localhost:4000'),
@@ -142,6 +152,16 @@ export const config: Config = ConfigSchema.parse(process.env);
 export const corsOrigins: string[] = config.CORS_ORIGINS.split(',')
   .map((s) => s.trim())
   .filter(Boolean);
+
+/**
+ * Effective docs-surface switch used to gate the OpenAPI spec + Scalar UI.
+ *
+ * Secure-by-default on a public API: even when `API_REFERENCE_ENABLED` is on,
+ * the enumerable route map is force-disabled under `NODE_ENV=production` unless
+ * `API_REFERENCE_FORCE` is also set. Dev/staging keep it on for convenience.
+ */
+export const apiReferenceEnabled: boolean =
+  config.API_REFERENCE_ENABLED && (config.NODE_ENV !== 'production' || config.API_REFERENCE_FORCE);
 
 /**
  * Comma-separated ADMIN_EMAILS env value parsed into a clean list.

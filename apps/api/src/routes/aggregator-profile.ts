@@ -96,20 +96,25 @@ const ProfileIdentitySchema = z
   })
   .passthrough();
 
+// PII response sub-objects are declared with the canonical entity schemas
+// (the same ones the writes are validated against) rather than empty
+// `z.object({}).passthrough()`. This (a) field-whitelists the serialized
+// PII so undeclared keys can never leak, and (b) renders the real shapes in
+// the Scalar reference instead of empty objects.
 const ProfileCommonResponseShape = {
   aggregator_id: z.string(),
   org_slug: z.string(),
   actor_type: z.string(),
   type: z.string().nullable(),
   url: z.string().nullable(),
-  contact: z.object({}).passthrough(),
-  locations: z.array(z.object({}).passthrough()),
-  consent: z.object({}).passthrough(),
+  contact: BecknContactSchema,
+  locations: z.array(BecknLocationSchema),
+  consent: ConsentRecordSchema,
   status: z.string(),
   contact_name: z.string().nullable(),
-  personas: z.array(z.object({}).passthrough()),
-  services: z.array(z.object({}).passthrough()),
-  verified_certificate: z.array(z.object({}).passthrough()),
+  personas: z.array(PersonaRefSchema),
+  services: z.array(ServiceRefSchema),
+  verified_certificate: z.array(PublicKeyEntrySchema),
   profile_completed_at: z.string().nullable(),
   is_complete: z.boolean(),
   updated_at: z.string(),

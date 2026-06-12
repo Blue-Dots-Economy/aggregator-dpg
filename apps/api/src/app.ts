@@ -19,7 +19,7 @@ import {
   serializerCompiler,
   validatorCompiler,
 } from 'fastify-type-provider-zod';
-import { config, corsOrigins } from './config.js';
+import { config, corsOrigins, apiReferenceEnabled } from './config.js';
 import { registerHealthRoutes } from './routes/health.js';
 import { registerAggregatorRegistrationRoutes } from './routes/aggregator-registrations.js';
 import { registerAggregatorApprovalRoutes } from './routes/aggregator-approvals.js';
@@ -97,11 +97,13 @@ export async function buildApp(): Promise<FastifyInstance> {
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
 
-  // Docs surface is env-gated: the API is internet-reachable, so the spec
-  // (which enumerates admin route paths) only serves when explicitly
+  // Docs surface is env-gated and secure-by-default: the API is
+  // internet-reachable, so the spec (which enumerates admin route paths) is
+  // force-disabled under NODE_ENV=production (unless API_REFERENCE_FORCE).
+  // Both the 3.5MB Scalar bundle and the swagger plugin register only when
   // enabled. Route-level zod validation/serialization is unaffected — the
   // compilers above run regardless.
-  if (config.API_REFERENCE_ENABLED) {
+  if (apiReferenceEnabled) {
     await app.register(fastifySwagger, {
       openapi: {
         info: {
