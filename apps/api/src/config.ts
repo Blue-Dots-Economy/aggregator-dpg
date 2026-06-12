@@ -28,6 +28,16 @@ const ConfigSchema = z.object({
     .enum(['true', 'false'])
     .default('true')
     .transform((v) => v === 'true'),
+  /**
+   * Serve the OpenAPI spec + Scalar reference UI at /api/reference. The API
+   * is internet-reachable, so the docs surface (including admin route paths)
+   * is enumerable when enabled — defaults ON for dev convenience; set to
+   * 'false' in production unless the reference should be public.
+   */
+  API_REFERENCE_ENABLED: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
   /** Public origin of the API service; used to assemble admin email links. */
   PUBLIC_API_URL: z.string().default('http://localhost:4000'),
   /** Public origin of the portal (BFF web app); used in welcome emails. */

@@ -26,6 +26,7 @@ import type {
   RegistrationMode,
   StatusRule,
 } from '@aggregator-dpg/network-config/interface';
+import { errorResponses } from '../errors/openapi.js';
 import { getNetworkConfig } from '../services/network-config.js';
 
 /**
@@ -76,11 +77,13 @@ interface PublicAggregatorConfig {
 
 const AggregatorConfigResponseSchema = z
   .object({
-    aggregator: z.object({
-      name: z.string(),
-      legal_name: z.string().optional(),
-      contact_email: z.string().optional(),
-    }),
+    aggregator: z
+      .object({
+        name: z.string(),
+        legal_name: z.string().optional(),
+        contact_email: z.string().optional(),
+      })
+      .passthrough(),
     brand: z
       .object({
         short_name: z.string(),
@@ -94,10 +97,12 @@ const AggregatorConfigResponseSchema = z
         favicon_url: z.string().optional(),
       })
       .passthrough(),
-    network: z.object({
-      id: z.string(),
-      display_name: z.string().optional(),
-    }),
+    network: z
+      .object({
+        id: z.string(),
+        display_name: z.string().optional(),
+      })
+      .passthrough(),
     domains: z.array(
       z
         .object({
@@ -131,7 +136,7 @@ export async function registerAggregatorConfigRoutes(app: FastifyInstance): Prom
         summary: 'Public brand + network config',
         description:
           'Brand palette/logo + per-domain labels (tab name, plural, tiles, status_rules) + dashboard bucket labels. Web BFF reads this at boot to theme the portal and render the dashboard config-driven.',
-        response: { 200: AggregatorConfigResponseSchema },
+        response: { 200: AggregatorConfigResponseSchema, ...errorResponses(500, 503) },
       },
     },
     async (_req, reply) => {

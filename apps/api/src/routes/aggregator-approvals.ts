@@ -152,9 +152,8 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
         tags: ['aggregator-approvals'],
         summary: 'Approve or reject a pending aggregator',
         description:
-          'Records the admin decision (approve/reject) for the registration id. On approve, enables the disabled Keycloak user and confirms the signalstack push. All handler responses (200 result page, 400 invalid token, 404 unknown aggregator, 503 backing service down) are text/html pages, so no JSON response schema is declared; a body that fails schema validation returns the standard JSON error envelope (400).',
+          'Records the admin decision (approve/reject) for the registration id. On approve, enables the disabled Keycloak user and confirms the signalstack push. This is a browser form flow: every response (200 result page, 400 invalid token/body, 404 unknown aggregator, 503 backing service down) is a text/html page, so neither a body schema nor JSON response schemas are declared — the handler validates the form body itself (token, decision approve|reject, optional reason) and renders an HTML error page on failure. Body shape: { token: string, decision: "approve" | "reject", reason?: string }.',
         params: ApprovalParamsSchema,
-        body: DecisionBodySchema,
       },
     },
     async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {

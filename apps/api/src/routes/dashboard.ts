@@ -19,6 +19,7 @@
 
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { errorResponses } from '../errors/openapi.js';
 import { authenticate, requireApproved, type AuthContext } from '../services/auth/access-token.js';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
 import { getNetworkConfig } from '../services/network-config.js';
@@ -123,7 +124,7 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
         description:
           'Returns every signalstack profile tagged with the caller aggregator_id, scoped to the requested domain, with lifecycle tile counts. Used by /blue-dots to render the participant table.',
         querystring: ItemsQuerySchema,
-        response: { 200: PassthroughResponse },
+        response: { 200: PassthroughResponse, ...errorResponses(400, 401, 403, 500, 503) },
       },
     },
     async (req, reply) => {
@@ -300,7 +301,7 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
         description:
           "Proxies signalstack's pre-computed dashboard payload (rollup + paginated participants + cursor + metadata) for the caller aggregator. by_domain[<id>] contains seeker/provider slices; refresh=true bypasses the TTL cache.",
         querystring: DashboardQuerySchema,
-        response: { 200: PassthroughResponse },
+        response: { 200: PassthroughResponse, ...errorResponses(400, 401, 403, 500, 503) },
       },
     },
     async (req, reply) => {
@@ -390,6 +391,8 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
         description:
           'Returns a CSV (text/csv) of the dashboard items for the caller aggregator. Filters by optional status. Body is the CSV text, with Content-Disposition: attachment.',
         querystring: DashboardExportQuerySchema,
+        // 200 carries no schema — the reply is a text/csv attachment.
+        response: { ...errorResponses(400, 401, 403, 500, 503) },
       },
     },
     async (req, reply) => {
