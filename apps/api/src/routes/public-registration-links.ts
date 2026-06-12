@@ -28,7 +28,11 @@ import { getNetworkConfig } from '../services/network-config.js';
 import { resolveSubmissionShape, publicHintI18nKey } from '../services/registration-mode/index.js';
 import { getSchemaLoader } from '../services/schema-loader/index.js';
 import { normalisePhone } from '../services/phone.js';
-import { resolveLifecycle } from '../services/onboarding/lifecycle.js';
+import {
+  LIFECYCLE_STATUSES,
+  resolveLifecycle,
+  type LifecycleStatus,
+} from '../services/onboarding/lifecycle.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
 import { getDb } from '../db/client.js';
 import { linkSubmissions } from '../db/schema.js';
@@ -105,7 +109,7 @@ const SubmitAcceptedResponseSchema = z
     submission_id: z.string().optional(),
     registration_mode: z.string(),
     submission_shape: z.string(),
-    lifecycle_status: z.enum(['draft', 'live', 'paused']).nullable(),
+    lifecycle_status: z.enum(LIFECYCLE_STATUSES).nullable(),
     owned_elsewhere: z.boolean(),
   })
   .passthrough();
@@ -485,7 +489,7 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       // surface them without re-reading the signals response. `null` is the
       // honest default: signals is disabled (no push) OR the submit was
       // account_only — neither produces a lifecycle classification.
-      let lifecycleStatusOut: 'draft' | 'live' | 'paused' | null = null;
+      let lifecycleStatusOut: LifecycleStatus | null = null;
       let ownedElsewhere = false;
       const writer = getParticipantsWriter();
       const txResult = await getDb().transaction(async (tx) => {

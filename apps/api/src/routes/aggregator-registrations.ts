@@ -94,13 +94,10 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
         });
       }
 
-      const parseResult = RegistrationPayloadSchema.safeParse(req.body);
-      if (!parseResult.success) {
-        throw httpError('SCHEMA_VALIDATION', {
-          detail: 'Request body failed shape validation.',
-          fields: { issues: parseResult.error.issues },
-        });
-      }
+      // `schema.body` already validated against `RegistrationPayloadSchema`
+      // (the zod validator compiler replaces `req.body` with the parse
+      // output), so the typed body can be consumed directly here.
+      const body = req.body as z.infer<typeof RegistrationPayloadSchema>;
 
       // JSON Schema is the authoritative contract — keeps the form rules in
       // `config/` rather than code.
@@ -111,8 +108,6 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
           fields: { issues: validate.errors ?? [] },
         });
       }
-
-      const body = parseResult.data;
       const phoneResult = normalisePhone(body.contact.phone);
       if (!phoneResult.ok) {
         throw httpError('INVALID_PHONE', {

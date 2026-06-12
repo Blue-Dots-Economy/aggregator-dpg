@@ -110,6 +110,17 @@ export async function buildApp(): Promise<FastifyInstance> {
             'Aggregator BFF for the Blue Dots / Purple Dots networks — handles aggregator registration, brand + network config, public participant onboarding (link + bulk), and the dashboard rollup proxy to signalstack.',
           version: '1.0.0',
         },
+        components: {
+          securitySchemes: {
+            bearerAuth: {
+              type: 'http',
+              scheme: 'bearer',
+              bearerFormat: 'JWT',
+              description:
+                'Keycloak-issued access token (aggregator-portal / aggregator-api client).',
+            },
+          },
+        },
         tags: [
           { name: 'health', description: 'Liveness + readiness probes.' },
           {

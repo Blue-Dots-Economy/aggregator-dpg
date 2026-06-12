@@ -112,8 +112,6 @@ const DashboardExportQuerySchema = z.object({
   refresh: z.coerce.boolean().optional().default(false),
 });
 
-const PassthroughResponse = z.object({}).passthrough();
-
 export async function registerDashboardRoutes(app: FastifyInstance): Promise<void> {
   app.get(
     '/v1/dashboard/items',
@@ -122,9 +120,11 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
         tags: ['dashboard'],
         summary: 'List participants for the caller aggregator (paginated)',
         description:
-          'Returns every signalstack profile tagged with the caller aggregator_id, scoped to the requested domain, with lifecycle tile counts. Used by /blue-dots to render the participant table.',
+          'Returns every signalstack profile tagged with the caller aggregator_id, scoped to the requested domain, with lifecycle tile counts. Used by /blue-dots to render the participant table. The 200 payload is proxied verbatim from signalstack, so no response schema is pinned (avoids a deep zod re-parse of large item lists on every reply).',
+        security: [{ bearerAuth: [] }],
         querystring: ItemsQuerySchema,
-        response: { 200: PassthroughResponse, ...errorResponses(400, 401, 403, 500, 503) },
+        // 200 carries no schema on purpose — see description.
+        response: { ...errorResponses(400, 401, 403, 500, 503) },
       },
     },
     async (req, reply) => {
@@ -135,14 +135,8 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
       });
       const start = Date.now();
 
-      const parsed = ItemsQuerySchema.safeParse(req.query);
-      if (!parsed.success) {
-        throw httpError('SCHEMA_VALIDATION', {
-          detail: 'Invalid query parameters.',
-          fields: { issues: parsed.error.issues },
-        });
-      }
-      const { domain, limit, offset, lifecycle } = parsed.data;
+      // Validated (and defaulted) by the route's `querystring` zod schema.
+      const { domain, limit, offset, lifecycle } = req.query as z.infer<typeof ItemsQuerySchema>;
 
       const networkCfg = await getNetworkConfig();
       const domainCfg = networkCfg.domains[domain];
@@ -299,9 +293,11 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
         tags: ['dashboard'],
         summary: 'Aggregator dashboard rollup + items',
         description:
-          "Proxies signalstack's pre-computed dashboard payload (rollup + paginated participants + cursor + metadata) for the caller aggregator. by_domain[<id>] contains seeker/provider slices; refresh=true bypasses the TTL cache.",
+          "Proxies signalstack's pre-computed dashboard payload (rollup + paginated participants + cursor + metadata) for the caller aggregator. by_domain[<id>] contains seeker/provider slices; refresh=true bypasses the TTL cache. The 200 payload is proxied verbatim from signalstack, so no response schema is pinned (avoids a deep zod re-parse of the rollup on every reply).",
+        security: [{ bearerAuth: [] }],
         querystring: DashboardQuerySchema,
-        response: { 200: PassthroughResponse, ...errorResponses(400, 401, 403, 500, 503) },
+        // 200 carries no schema on purpose — see description.
+        response: { ...errorResponses(400, 401, 403, 500, 503) },
       },
     },
     async (req, reply) => {
@@ -312,16 +308,11 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
       });
       const start = Date.now();
 
-      const parsed = DashboardQuerySchema.safeParse(req.query);
-      if (!parsed.success) {
-        throw httpError('SCHEMA_VALIDATION', {
-          detail: 'Invalid query parameters.',
-          fields: { issues: parsed.error.issues },
-        });
-      }
-      const { page, limit, status, refresh } = parsed.data;
+      // Validated (and defaulted) by the route's `querystring` zod schema.
+      const query = req.query as z.infer<typeof DashboardQuerySchema>;
+      const { page, limit, status, refresh } = query;
       const networkCfg = await getNetworkConfig();
-      const domain = parsed.data.domain ?? networkCfg.domainIds[0]!;
+      const domain = query.domain ?? networkCfg.domainIds[0]!;
       if (!networkCfg.domains[domain]) {
         throw httpError('SCHEMA_VALIDATION', {
           detail: `unknown domain '${domain}' — valid: ${networkCfg.domainIds.join(', ')}`,
@@ -390,6 +381,7 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
         summary: 'CSV export of dashboard items',
         description:
           'Returns a CSV (text/csv) of the dashboard items for the caller aggregator. Filters by optional status. Body is the CSV text, with Content-Disposition: attachment.',
+        security: [{ bearerAuth: [] }],
         querystring: DashboardExportQuerySchema,
         // 200 carries no schema — the reply is a text/csv attachment.
         response: { ...errorResponses(400, 401, 403, 500, 503) },
@@ -403,16 +395,11 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
       });
       const start = Date.now();
 
-      const parsed = DashboardExportQuerySchema.safeParse(req.query);
-      if (!parsed.success) {
-        throw httpError('SCHEMA_VALIDATION', {
-          detail: 'Invalid query parameters.',
-          fields: { issues: parsed.error.issues },
-        });
-      }
-      const { status, refresh } = parsed.data;
+      // Validated (and defaulted) by the route's `querystring` zod schema.
+      const query = req.query as z.infer<typeof DashboardExportQuerySchema>;
+      const { status, refresh } = query;
       const networkCfg = await getNetworkConfig();
-      const domain = parsed.data.domain ?? networkCfg.domainIds[0]!;
+      const domain = query.domain ?? networkCfg.domainIds[0]!;
       if (!networkCfg.domains[domain]) {
         throw httpError('SCHEMA_VALIDATION', {
           detail: `unknown domain '${domain}' — valid: ${networkCfg.domainIds.join(', ')}`,

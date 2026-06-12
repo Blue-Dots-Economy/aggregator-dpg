@@ -141,22 +141,6 @@ const ListQuerySchema = z.object({
   offset: z.coerce.number().int().min(0).default(0),
 });
 
-/**
- * Wire-format variant of {@link CreateLinkBodySchema} for the route's OpenAPI
- * `body` block. Identical shape minus the `expires_at` string→Date transform:
- * fastify mutates `req.body` with the parsed output, and a transformed Date
- * would make the handler's own `safeParse` (which expects the wire string)
- * fail. Keep both schemas' fields in sync.
- */
-const CreateLinkOpenApiBodySchema = CreateLinkBodySchema.extend({
-  expires_at: z.string().datetime({ offset: true }).nullish(),
-});
-
-/** Wire-format variant of {@link UpdateLinkBodySchema} — see note above. */
-const UpdateLinkOpenApiBodySchema = UpdateLinkBodySchema.extend({
-  expires_at: z.string().datetime({ offset: true }).nullish(),
-});
-
 /** Path params for routes addressing a single registration link. */
 const LinkParamsSchema = z.object({
   id: z.string().min(1).describe('Registration link id (UUID).'),
@@ -207,7 +191,8 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
         summary: 'Create a shareable registration link',
         description:
           'Creates a QR / shareable registration link for the caller aggregator, scoped to a domain (seeker/provider). `domain` and `registration_mode` are validated against the active network config at request time. Drafts are metadata-only; status=live also mints the QR + public URL.',
-        body: CreateLinkOpenApiBodySchema,
+        security: [{ bearerAuth: [] }],
+        body: CreateLinkBodySchema,
         response: {
           201: LinkResponseSchema,
           ...errorResponses(400, 401, 403, 500, 503),
@@ -223,14 +208,9 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
       });
       const start = Date.now();
 
-      const parsed = CreateLinkBodySchema.safeParse(req.body ?? {});
-      if (!parsed.success) {
-        throw httpError('SCHEMA_VALIDATION', {
-          detail: 'Request body failed shape validation.',
-          fields: { issues: parsed.error.issues },
-        });
-      }
-      const body = parsed.data;
+      // Body is already validated + transformed by the route schema —
+      // `expires_at` arrives as a Date|null and defaults are applied.
+      const body = req.body as z.infer<typeof CreateLinkBodySchema>;
       const networkCfg = await getNetworkConfig();
       if (!networkCfg.domainIds.includes(body.domain)) {
         throw httpError('SCHEMA_VALIDATION', {
@@ -396,6 +376,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
         tags: ['registration-links'],
         summary: "List the caller aggregator's registration links",
         description: 'Paginated list (newest first) of registration links with status + counters.',
+        security: [{ bearerAuth: [] }],
         querystring: ListQuerySchema,
         response: {
           200: ListLinksResponseSchema,
@@ -412,14 +393,8 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
       });
       const start = Date.now();
 
-      const parsed = ListQuerySchema.safeParse(req.query ?? {});
-      if (!parsed.success) {
-        throw httpError('SCHEMA_VALIDATION', {
-          detail: 'Query parameters failed validation.',
-          fields: { issues: parsed.error.issues },
-        });
-      }
-      const { status, limit, offset } = parsed.data;
+      // Query is already validated + coerced by the route schema (defaults applied).
+      const { status, limit, offset } = req.query as z.infer<typeof ListQuerySchema>;
 
       const orgSlug = await resolveOrgSlug(auth.aggregatorId);
       const result = await getRegistrationLinksStore().list(auth.aggregatorId, {
@@ -467,8 +442,9 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
         summary: 'Update a registration link',
         description:
           'Partial update of mutable draft-link fields (slug, context, expiry). Only draft links can be edited; `registration_mode` and `domain` are immutable and unknown keys are rejected with 400.',
+        security: [{ bearerAuth: [] }],
         params: LinkParamsSchema,
-        body: UpdateLinkOpenApiBodySchema,
+        body: UpdateLinkBodySchema,
         response: {
           200: LinkResponseSchema,
           ...errorResponses(400, 401, 403, 409, 503),
@@ -477,11 +453,10 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
     },
     async (req, reply) => {
       const auth = await requireAuth(req);
-      const params = req.params as { id?: string };
-      const linkId = params.id;
-      if (!linkId) {
-        throw httpError('SCHEMA_VALIDATION', { detail: 'link_id is required.' });
-      }
+      // Params + body are already validated by the route schemas — the
+      // `.strict()` Update schema rejects unknown keys (incl. registration_mode)
+      // before the handler runs, and `expires_at` arrives as Date|null|undefined.
+      const { id: linkId } = req.params as z.infer<typeof LinkParamsSchema>;
       const log = req.log.child({
         operation: 'registrationLinks.update',
         actor: auth.userId,
@@ -489,14 +464,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
       });
       const start = Date.now();
 
-      const parsed = UpdateLinkBodySchema.safeParse(req.body ?? {});
-      if (!parsed.success) {
-        throw httpError('SCHEMA_VALIDATION', {
-          detail: 'Request body failed shape validation.',
-          fields: { issues: parsed.error.issues },
-        });
-      }
-      const body = parsed.data;
+      const body = req.body as z.infer<typeof UpdateLinkBodySchema>;
 
       const store = getRegistrationLinksStore();
       const found = await store.findById(linkId, auth.aggregatorId);
@@ -591,6 +559,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
         tags: ['registration-links'],
         summary: 'Read a registration link',
         description: 'Full link row including counters + status.',
+        security: [{ bearerAuth: [] }],
         params: LinkParamsSchema,
         response: {
           200: LinkResponseSchema,
@@ -600,11 +569,8 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
     },
     async (req, reply) => {
       const auth = await requireAuth(req);
-      const params = req.params as { id?: string };
-      const linkId = params.id;
-      if (!linkId) {
-        throw httpError('SCHEMA_VALIDATION', { detail: 'link_id is required.' });
-      }
+      // Params are already validated by the route schema (id: non-empty string).
+      const { id: linkId } = req.params as z.infer<typeof LinkParamsSchema>;
 
       const result = await getRegistrationLinksStore().findById(linkId, auth.aggregatorId);
       if (!result.ok) {
@@ -627,6 +593,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
         summary: 'Activate a registration link',
         description:
           'Flips the link status to live so the public form accepts submissions; mints the QR PNG + public URL. Idempotent when already live; retired links cannot be reactivated (409).',
+        security: [{ bearerAuth: [] }],
         params: LinkParamsSchema,
         response: {
           200: LinkResponseSchema,
@@ -636,11 +603,8 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
     },
     async (req, reply) => {
       const auth = await requireAuth(req);
-      const params = req.params as { id?: string };
-      const linkId = params.id;
-      if (!linkId) {
-        throw httpError('SCHEMA_VALIDATION', { detail: 'link_id is required.' });
-      }
+      // Params are already validated by the route schema (id: non-empty string).
+      const { id: linkId } = req.params as z.infer<typeof LinkParamsSchema>;
       const log = req.log.child({
         operation: 'registrationLinks.activate',
         actor: auth.userId,
@@ -727,6 +691,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
         summary: 'Deactivate a registration link',
         description:
           'Flips status to retired — the public form returns 410 for further submissions. Idempotent when already retired.',
+        security: [{ bearerAuth: [] }],
         params: LinkParamsSchema,
         response: {
           200: LinkResponseSchema,
@@ -736,11 +701,8 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
     },
     async (req, reply) => {
       const auth = await requireAuth(req);
-      const params = req.params as { id?: string };
-      const linkId = params.id;
-      if (!linkId) {
-        throw httpError('SCHEMA_VALIDATION', { detail: 'link_id is required.' });
-      }
+      // Params are already validated by the route schema (id: non-empty string).
+      const { id: linkId } = req.params as z.infer<typeof LinkParamsSchema>;
       const log = req.log.child({
         operation: 'registrationLinks.deactivate',
         actor: auth.userId,

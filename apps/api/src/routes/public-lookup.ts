@@ -113,14 +113,9 @@ export async function registerPublicLookupRoute(app: FastifyInstance): Promise<v
         });
       }
 
-      const parsed = QuerySchema.safeParse(req.query);
-      if (!parsed.success) {
-        throw httpError('SCHEMA_VALIDATION', {
-          detail: 'Either email or phone_number is required, plus network and domain.',
-          fields: { issues: parsed.error.issues },
-        });
-      }
-      const q = parsed.data;
+      // Validated by the route's `querystring` zod schema, including the
+      // either-email-or-phone refine (refinements run in route validation).
+      const q = req.query as z.infer<typeof QuerySchema>;
 
       // Resolve the aggregator's signalstack org id by slug. Absent slug or
       // missing signalstack_org_id both surface as 404 — the lookup

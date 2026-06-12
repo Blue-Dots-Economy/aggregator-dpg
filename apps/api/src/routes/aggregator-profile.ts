@@ -140,6 +140,7 @@ export async function registerAggregatorProfileRoutes(app: FastifyInstance): Pro
         summary: 'Read the caller aggregator profile',
         description:
           'Returns the full aggregator row + brand + contact + status for the aggregator bound to the Bearer token claim.',
+        security: [{ bearerAuth: [] }],
         response: {
           200: ProfileReadResponseSchema,
           ...errorResponses(401, 403, 404, 503),
@@ -229,6 +230,7 @@ export async function registerAggregatorProfileRoutes(app: FastifyInstance): Pro
         summary: 'Update the caller aggregator profile',
         description:
           'Partial update of profile fields (contact, locations, etc) for the caller aggregator. Validates the patch against profile.v1.json. Re-syncs to signalstack on success.',
+        security: [{ bearerAuth: [] }],
         body: ProfileUpdateBodySchema,
         response: {
           200: ProfileUpdateResponseSchema,
@@ -241,14 +243,10 @@ export async function registerAggregatorProfileRoutes(app: FastifyInstance): Pro
       const log = req.log.child({ operation: 'aggregator-profile.update', actor: auth.userId });
       const start = Date.now();
 
-      const parsed = ProfileUpdateBodySchema.safeParse(req.body);
-      if (!parsed.success) {
-        throw httpError('SCHEMA_VALIDATION', {
-          detail: 'Request body failed shape validation.',
-          fields: { issues: parsed.error.issues },
-        });
-      }
-      const body = parsed.data;
+      // `schema.body` already validated against `ProfileUpdateBodySchema`
+      // (the zod validator compiler replaces `req.body` with the parse
+      // output), so the typed body can be consumed directly here.
+      const body = req.body as z.infer<typeof ProfileUpdateBodySchema>;
 
       const aggregatorStore = getAggregatorStore();
       const profileStore = getAggregatorProfileStore();

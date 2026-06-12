@@ -6,6 +6,7 @@
  */
 
 import { z } from 'zod';
+import type { ErrorEnvelope } from './serialize.js';
 
 /**
  * Zod mirror of {@link import('./serialize.js').ErrorEnvelope}. Passthrough
@@ -26,6 +27,24 @@ export const ErrorEnvelopeSchema = z
       .passthrough(),
   })
   .passthrough();
+
+/**
+ * Compile-time anchor: if the schema's inferred output drifts from the real
+ * {@link ErrorEnvelope} wire type produced by the error handler (missing
+ * field, wrong type, required field made optional), this fails to typecheck.
+ *
+ * Passthrough widens the output beyond the exact type, and zod infers
+ * optionals as `T | undefined` (rejected verbatim under
+ * `exactOptionalPropertyTypes`), so the guard widens the target's property
+ * types with `| undefined` instead of using a direct `z.ZodType` assignment.
+ */
+type _Expect<T extends true> = T;
+type _WidenOptional<T> = { [K in keyof T]: T[K] | undefined };
+type _ErrorEnvelopeSchemaMatchesType = _Expect<
+  z.infer<typeof ErrorEnvelopeSchema> extends { error: _WidenOptional<ErrorEnvelope['error']> }
+    ? true
+    : false
+>;
 
 /**
  * Builds a `{ <status>: ErrorEnvelopeSchema }` map for the given HTTP

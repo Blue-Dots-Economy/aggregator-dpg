@@ -40,10 +40,6 @@ import { getDb } from '../db/client.js';
 import { onboarding } from '../db/schema.js';
 import { getRedis } from '../services/redis/index.js';
 
-interface CreateBody {
-  participant_type?: unknown;
-}
-
 /**
  * Loads the network config and returns the set of valid participant
  * types for the active network (e.g. ['seeker','provider'] for blue/purple,
@@ -84,10 +80,21 @@ const BulkUploadParamsSchema = z.object({
   id: z.string().min(1).describe('Bulk-upload job id (UUID).'),
 });
 
-/** Pagination query for the bulk-uploads list. */
+/**
+ * Pagination query for the bulk-uploads list. Bounds are enforced here so the
+ * handler consumes the already-validated values: `limit` must be 1-100
+ * (default 20) and `offset` must be ≥ 0 (default 0); out-of-range values are
+ * rejected with 400 SCHEMA_VALIDATION by the route schema.
+ */
 const ListBulkUploadsQuerySchema = z.object({
-  limit: z.coerce.number().int().optional().describe('Page size (1-100, default 20).'),
-  offset: z.coerce.number().int().optional().describe('Rows to skip (default 0).'),
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(100)
+    .default(20)
+    .describe('Page size (1-100, default 20).'),
+  offset: z.coerce.number().int().min(0).default(0).describe('Rows to skip (≥ 0, default 0).'),
 });
 
 /** Wire shape of a bulk-upload job row (see {@link toResponse}). */
@@ -162,6 +169,7 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
         summary: 'Download CSV template for a domain',
         description:
           "Returns a CSV template (text/csv) with the header row + sample row for the requested ?participant_type= (seeker/provider). Array-typed fields use the network's csv_array_delimiter. Responds with a text/csv attachment on 200 (no JSON body).",
+        security: [{ bearerAuth: [] }],
         querystring: TemplateQuerySchema,
         response: {
           ...errorResponses(400, 401, 403, 500),
@@ -211,6 +219,7 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
         summary: 'Create a new bulk-upload job',
         description:
           'Reserves a pending bulk-upload job for the caller aggregator and returns a pre-signed S3 PUT URL. The browser uploads CSV bytes directly to S3, then calls /start. `participant_type` is validated against the active network config at request time.',
+        security: [{ bearerAuth: [] }],
         body: CreateBulkUploadBodySchema,
         response: {
           201: CreateBulkUploadResponseSchema,
@@ -223,9 +232,11 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
       const log = req.log.child({ operation: 'bulkUploads.create', actor: auth.userId });
       const start = Date.now();
 
-      const body = (req.body ?? {}) as CreateBody;
-      const participantType =
-        typeof body.participant_type === 'string' ? body.participant_type : '';
+      // Shape is already validated by the route schema; the value itself is
+      // network-config driven, so membership is checked against live config here.
+      const { participant_type: participantType } = req.body as z.infer<
+        typeof CreateBulkUploadBodySchema
+      >;
       const validTypes = await getValidParticipantTypes();
       if (!validTypes.has(participantType)) {
         throw httpError('SCHEMA_VALIDATION', {
@@ -233,7 +244,7 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
           fields: { participant_type: 'invalid' },
         });
       }
-      enforceAggregatorType(auth, participantType as string);
+      enforceAggregatorType(auth, participantType);
 
       // Pin the active schema version at create time. v1 is the only published
       // version today; this becomes a registry lookup once schema versioning ships.
@@ -243,7 +254,7 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
       const store = getBulkUploadsStore();
       const created = await store.create({
         aggregatorId: auth.aggregatorId,
-        participantType: participantType as string,
+        participantType,
         // Temporary placeholder; replaced after sign call below. We need the
         // row id to compute the deterministic key, so create-then-update.
         s3Key: 'pending',
@@ -306,6 +317,7 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
         summary: 'Start processing a pending bulk-upload job',
         description:
           'Transitions a pending job to running; the worker onboards each valid row to signalstack. Idempotent on already-running/completed jobs.',
+        security: [{ bearerAuth: [] }],
         params: BulkUploadParamsSchema,
         response: {
           200: BulkUploadResponseSchema,
@@ -315,11 +327,8 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
     },
     async (req, reply) => {
       const auth = await requireAuth(req);
-      const params = req.params as { id?: string };
-      const uploadId = params.id;
-      if (!uploadId) {
-        throw httpError('SCHEMA_VALIDATION', { detail: 'upload_id is required.' });
-      }
+      // Params are already validated by the route schema (id: non-empty string).
+      const { id: uploadId } = req.params as z.infer<typeof BulkUploadParamsSchema>;
       const log = req.log.child({
         operation: 'bulkUploads.start',
         actor: auth.userId,
@@ -428,6 +437,7 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
         tags: ['bulk-uploads'],
         summary: 'List bulk-upload jobs',
         description: 'Paginated list of bulk-upload jobs (newest first) for the caller aggregator.',
+        security: [{ bearerAuth: [] }],
         querystring: ListBulkUploadsQuerySchema,
         response: {
           200: ListBulkUploadsResponseSchema,
@@ -437,9 +447,8 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
     },
     async (req, reply) => {
       const auth = await requireAuth(req);
-      const query = req.query as { limit?: string; offset?: string };
-      const limit = Math.max(1, Math.min(100, Number.parseInt(query.limit ?? '20', 10) || 20));
-      const offset = Math.max(0, Number.parseInt(query.offset ?? '0', 10) || 0);
+      // Query is already validated + coerced by the route schema (bounds + defaults).
+      const { limit, offset } = req.query as z.infer<typeof ListBulkUploadsQuerySchema>;
 
       const store = getBulkUploadsStore();
       const result = await store.list(auth.aggregatorId, { limit, offset });
@@ -466,6 +475,7 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
         summary: 'Read a bulk-upload job',
         description:
           'Returns the full job row including status, per-row counters, and error summary.',
+        security: [{ bearerAuth: [] }],
         params: BulkUploadParamsSchema,
         response: {
           200: BulkUploadResponseSchema,
@@ -475,11 +485,8 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
     },
     async (req, reply) => {
       const auth = await requireAuth(req);
-      const params = req.params as { id?: string };
-      const uploadId = params.id;
-      if (!uploadId) {
-        throw httpError('SCHEMA_VALIDATION', { detail: 'upload_id is required.' });
-      }
+      // Params are already validated by the route schema (id: non-empty string).
+      const { id: uploadId } = req.params as z.infer<typeof BulkUploadParamsSchema>;
 
       const store = getBulkUploadsStore();
       const found = await store.findById(uploadId, auth.aggregatorId);
@@ -503,6 +510,7 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
         summary: 'Download per-row error CSV',
         description:
           'Returns a JSON payload carrying a short-lived pre-signed S3 GET URL for the errors.csv report (rows that failed validation/onboarding with reason + offending fields), plus the final counters. Only available once the upload is completed and at least one row failed.',
+        security: [{ bearerAuth: [] }],
         params: BulkUploadParamsSchema,
         response: {
           200: ErrorsCsvResponseSchema,
@@ -512,11 +520,8 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
     },
     async (req, reply) => {
       const auth = await requireAuth(req);
-      const params = req.params as { id?: string };
-      const uploadId = params.id;
-      if (!uploadId) {
-        throw httpError('SCHEMA_VALIDATION', { detail: 'upload_id is required.' });
-      }
+      // Params are already validated by the route schema (id: non-empty string).
+      const { id: uploadId } = req.params as z.infer<typeof BulkUploadParamsSchema>;
       const log = req.log.child({
         operation: 'bulkUploads.errorsCsv',
         actor: auth.userId,

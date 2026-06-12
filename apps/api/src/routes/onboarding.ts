@@ -55,6 +55,7 @@ export async function registerOnboardingRoutes(app: FastifyInstance): Promise<vo
         summary: 'Aggregated onboarding totals',
         description:
           'Sum of total / passed / failed / skipped onboarding attempts for the caller aggregator, optionally constrained by ?from=&to= ISO dates.',
+        security: [{ bearerAuth: [] }],
         querystring: RangeQuerySchema,
         response: {
           200: OnboardingSummaryResponseSchema,
@@ -64,7 +65,7 @@ export async function registerOnboardingRoutes(app: FastifyInstance): Promise<vo
     },
     async (req, reply) => {
       const auth = await requireAuth(req);
-      const range = parseRange(req);
+      const range = parseRange(req.query as z.infer<typeof RangeQuerySchema>);
       const conditions = [eq(onboarding.aggregatorId, auth.aggregatorId)];
       if (range.from) conditions.push(gte(onboarding.periodStart, range.from));
       if (range.to) conditions.push(lte(onboarding.periodEnd, range.to));
@@ -97,6 +98,7 @@ export async function registerOnboardingRoutes(app: FastifyInstance): Promise<vo
         summary: 'Onboarding totals grouped by source',
         description:
           'Per-source breakdown of onboarding counters for the caller aggregator (e.g. by_link / by_bulk_upload), optionally date-bounded by ?from=&to=.',
+        security: [{ bearerAuth: [] }],
         querystring: RangeQuerySchema,
         response: {
           200: OnboardingBySourceResponseSchema,
@@ -106,7 +108,7 @@ export async function registerOnboardingRoutes(app: FastifyInstance): Promise<vo
     },
     async (req, reply) => {
       const auth = await requireAuth(req);
-      const range = parseRange(req);
+      const range = parseRange(req.query as z.infer<typeof RangeQuerySchema>);
       const conditions = [eq(onboarding.aggregatorId, auth.aggregatorId)];
       if (range.from) conditions.push(gte(onboarding.periodStart, range.from));
       if (range.to) conditions.push(lte(onboarding.periodEnd, range.to));
@@ -133,17 +135,19 @@ export async function registerOnboardingRoutes(app: FastifyInstance): Promise<vo
   );
 }
 
-function parseRange(req: FastifyRequest): { from?: Date; to?: Date } {
-  const parsed = RangeQuerySchema.safeParse(req.query ?? {});
-  if (!parsed.success) {
-    throw httpError('SCHEMA_VALIDATION', {
-      detail: 'Query parameters failed validation.',
-      fields: { issues: parsed.error.issues },
-    });
-  }
+/**
+ * Converts the route-validated `?from=&to=` query into Date bounds.
+ *
+ * The route's `querystring: RangeQuerySchema` already validated and replaced
+ * `req.query`, so this only coerces the ISO strings to Dates.
+ *
+ * @param query - The zod-validated range query from `req.query`.
+ * @returns Optional from/to Date bounds.
+ */
+function parseRange(query: z.infer<typeof RangeQuerySchema>): { from?: Date; to?: Date } {
   const out: { from?: Date; to?: Date } = {};
-  if (parsed.data.from) out.from = new Date(parsed.data.from);
-  if (parsed.data.to) out.to = new Date(parsed.data.to);
+  if (query.from) out.from = new Date(query.from);
+  if (query.to) out.to = new Date(query.to);
   return out;
 }
 
