@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - develop
+      - fix/schema-header-issue
 
     tags:
       - 'web-v*.*.*'
