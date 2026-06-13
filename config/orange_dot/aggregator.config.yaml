@@ -21,6 +21,7 @@ aggregator:
       practitioner:
         name: product_name
         phone: contact_phone
+        email: email
 
   brand:
     short_name: OneTAC
