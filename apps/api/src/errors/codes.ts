@@ -204,6 +204,23 @@ export const ERR = {
     hint: 'Decision row exists. Single-use token replayed.',
   },
 
+  // ── Verification flow (applicant email/phone verify) ───────────────────
+  VERIFICATION_TOKEN_INVALID: {
+    code: 'VERIFICATION_TOKEN_INVALID',
+    status: 400,
+    title: 'Invalid verification link',
+    detail: 'This verification link is malformed or has been tampered with.',
+    hint: 'JWT verification failed for audience=aggregator-applicant. Check signing key.',
+  },
+  VERIFICATION_TOKEN_EXPIRED: {
+    code: 'VERIFICATION_TOKEN_EXPIRED',
+    status: 410,
+    title: 'Verification link expired',
+    detail:
+      'This verification link has expired. Please re-submit your registration to receive a new link.',
+    hint: `JWT exp in past. TTL is from REGISTRATION_VERIFICATION_TTL_MINUTES (default 60 min).`,
+  },
+
   // ── Generic resource ────────────────────────────────────────────────────
   NOT_FOUND: {
     code: 'NOT_FOUND',

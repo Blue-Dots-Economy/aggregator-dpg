@@ -1,48 +1,42 @@
 /**
- * Admin approval endpoints.
+ * Admin approval endpoints — FSM-based registration flow.
  *
- * URL shape mirrors the spec under `4.3.2 Endpoints by Actor & Action`:
+ * URL shape:
  *
  *   GET  /admin/v1/aggregator-registrations/read/:id?token=...&intent=approve|reject
- *     Renders an HTML confirmation page that tells the admin which action
- *     they're about to take. If `aggregators.status` is already terminal
- *     (`active` after approve / `inactive` after reject) — i.e. a previous
- *     click ran to completion — it instead renders an "already decided"
- *     page so duplicate clicks never resend emails.
+ *     Renders an HTML confirmation page. `id` is a `registrationId`. If the
+ *     registration is already in a terminal or post-verified state the page
+ *     shows "already decided".
  *
  *   POST /admin/v1/aggregator-registrations/decision/:id
  *     Body: { token, decision: 'approve' | 'reject', reason? }
- *     Verifies the JWT, re-checks `aggregators.status` (single-use guard),
- *     applies the action:
- *       approve → store.updateStatus(id, 'active') + idp.enableUser
- *                 + idp.setUserDecision(kcId, 'approved')
- *       reject  → store.updateStatus(id, 'inactive')
- *                 + idp.setUserDecision(kcId, 'rejected')
- *     Sends the applicant a notification email and returns a result page.
- *
- * Source of truth for the decision is the DB column `aggregators.status`.
- * Keycloak mirrors the decision via the `decision_made` user attribute so
- * the auth middleware can gate login at JWT-verify time without an extra
- * DB hit.
+ *     Verifies the registration-approval JWT, compare-and-sets
+ *     `verified → approved|rejected`, then kicks best-effort provisioning
+ *     (graduated aggregator row, KC user, SS org, applicant emails).
+ *     The reconciler guarantees convergence if any inline step fails.
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { config } from '../config.js';
-import { verifyApprovalToken } from '../services/approval-token.js';
+import { verifyRegistrationApprovalToken } from '../services/approval-token.js';
+import { getRegistrationStore } from '../services/registration-store/index.js';
+import type { Registration } from '../services/registration-store/index.js';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
+import { getAggregatorProfileStore } from '../services/aggregator-profile-store/index.js';
 import { getIdpAdmin } from '../services/idp-admin/index.js';
 import { getMailer } from '../services/mailer/index.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
-import { getNetworkConfig } from '../services/network-config.js';
 import {
-  renderApplicantApproved,
-  renderApplicantRejected,
-} from '../services/email-templates/index.js';
+  ensureGraduated,
+  ensureKeycloakUser,
+  ensureKeycloakUserDisabled,
+  ensureSignalstackOrg,
+  ensureWelcomeSent,
+  ensureRejectionSent,
+} from '../services/registration-provisioning/index.js';
 import { renderConfirmPage, renderResultPage } from '../views/approval-pages.js';
-import type { Aggregator } from '../services/aggregator-store/index.js';
-import { KC_ATTR } from '../services/idp-admin/index.js';
-import type { IdpUser } from '../services/idp-admin/index.js';
+import { logger } from '../logger.js';
 
 const DecisionBodySchema = z.object({
   token: z.string().min(1),
@@ -51,6 +45,12 @@ const DecisionBodySchema = z.object({
 });
 
 export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Promise<void> {
+  /**
+   * Renders the admin confirmation page for an approve/reject action.
+   *
+   * `id` is the `registrationId`. The token is a registration-approval JWT
+   * with sub=registrationId and intent=approve|reject.
+   */
   app.get(
     '/admin/v1/aggregator-registrations/read/:id',
     async (
@@ -60,7 +60,7 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
       }>,
       reply: FastifyReply,
     ) => {
-      const aggregatorId = req.params.id;
+      const registrationId = req.params.id;
       const { token, intent } = req.query;
 
       if (!token) {
@@ -75,7 +75,7 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
         );
       }
 
-      const verified = await verifyApprovalToken(token);
+      const verified = await verifyRegistrationApprovalToken(token);
       if (!verified.ok) {
         return sendHtml(
           reply,
@@ -87,23 +87,47 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
           }),
         );
       }
-      if (verified.aggregatorId !== aggregatorId) {
+      if (verified.registrationId !== registrationId) {
         return sendHtml(
           reply,
           400,
           renderResultPage({
             status: 'error',
             title: 'Invalid link',
-            message: 'Token does not match the requested aggregator.',
+            message: 'Token does not match the requested registration.',
           }),
         );
       }
+
       const effectiveIntent = isIntent(intent) ? intent : verified.intent;
 
-      const lookup = await loadAggregatorAndUser(aggregatorId);
-      if (!lookup.ok) return sendHtml(reply, lookup.status, lookup.html);
+      const store = getRegistrationStore();
+      const regResult = await store.findById(registrationId);
+      if (!regResult.ok) {
+        return sendHtml(
+          reply,
+          503,
+          renderResultPage({
+            status: 'error',
+            title: 'Service unavailable',
+            message: 'Could not load registration record.',
+          }),
+        );
+      }
+      if (!regResult.value) {
+        return sendHtml(
+          reply,
+          404,
+          renderResultPage({
+            status: 'error',
+            title: 'Not found',
+            message: 'Registration not found.',
+          }),
+        );
+      }
 
-      const prior = decisionFromStatus(lookup.aggregator.status);
+      const reg = regResult.value;
+      const prior = priorDecision(reg.state);
       if (prior) {
         return sendHtml(reply, 200, renderResultPage(alreadyDecidedView(prior)));
       }
@@ -112,28 +136,31 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
         reply,
         200,
         renderConfirmPage({
-          aggregatorId,
+          aggregatorId: registrationId,
           intent: effectiveIntent,
           token,
-          applicantEmail: lookup.kcUser.email,
-          association: lookup.aggregator.name,
-          // For aggregator actors `type` is null. Surface `actor_type`
-          // instead so the admin page always shows something meaningful.
-          aggregatorType: lookup.aggregator.type ?? lookup.aggregator.actorType,
-          postUrl: `${config.PUBLIC_API_URL}/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
+          applicantEmail: reg.contactEmail,
+          association: reg.orgName,
+          aggregatorType: reg.orgType ?? 'aggregator',
+          postUrl: `${config.PUBLIC_API_URL}/admin/v1/aggregator-registrations/decision/${registrationId}`,
         }),
       );
     },
   );
 
+  /**
+   * Processes the admin approve/reject decision.
+   *
+   * Performs a compare-and-set `verified → approved|rejected` then fires
+   * best-effort provisioning. All external effects are idempotent so the
+   * admin can re-click the link if needed.
+   */
   app.post(
     '/admin/v1/aggregator-registrations/decision/:id',
     async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
-      const aggregatorId = req.params.id;
-      const log = req.log.child({
-        operation: 'aggregator-approval.decide',
-        aggregator_id: aggregatorId,
-      });
+      const registrationId = req.params.id;
+      const start = Date.now();
+
       const parsed = DecisionBodySchema.safeParse(req.body);
       if (!parsed.success) {
         return sendHtml(
@@ -147,7 +174,7 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
         );
       }
 
-      const verified = await verifyApprovalToken(parsed.data.token);
+      const verified = await verifyRegistrationApprovalToken(parsed.data.token);
       if (!verified.ok) {
         return sendHtml(
           reply,
@@ -159,329 +186,222 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
           }),
         );
       }
-      if (verified.aggregatorId !== aggregatorId) {
+      if (verified.registrationId !== registrationId) {
         return sendHtml(
           reply,
           400,
           renderResultPage({
             status: 'error',
             title: 'Invalid link',
-            message: 'Token does not match the requested aggregator.',
+            message: 'Token does not match the requested registration.',
           }),
         );
       }
 
-      const lookup = await loadAggregatorAndUser(aggregatorId);
-      if (!lookup.ok) return sendHtml(reply, lookup.status, lookup.html);
-
-      // Single-use guard: DB status is the source of truth. Anything other
-      // than `pending` means this aggregator has already been decided.
-      const prior = decisionFromStatus(lookup.aggregator.status);
-      if (prior) {
-        return sendHtml(reply, 200, renderResultPage(alreadyDecidedView(prior)));
-      }
-
-      const store = getAggregatorStore();
-      const idp = getIdpAdmin();
-      const mailer = getMailer();
-
-      if (parsed.data.decision === 'approve') {
-        // 1. Signalstack first — approval is a hard-gated registration step.
-        //    Until the upsert succeeds we leave `aggregators.status` at
-        //    `pending` and the KC user disabled, so the applicant cannot log
-        //    in. Re-clicking the approval link retries cleanly because the
-        //    single-use guard at line ~178 reads DB status (still pending)
-        //    and the upsert is idempotent on `external_id` (aggregatorId).
-        //
-        //    When signalstack is unconfigured (getSignalStackWriter() returns
-        //    null), we skip this step — local/dev stacks without a
-        //    signalstack peer continue to function.
-        const signalstack = getSignalStackWriter();
-        let signalstackOrgId: string | null = null;
-        if (signalstack) {
-          const upsertStart = Date.now();
-          // Signalstack's dashboard endpoint fails with NO_DOMAINS_CONFIGURED
-          // when the org's metadata.domains is empty, so always send a
-          // non-empty list. Use the aggregator's chosen participant focus
-          // (`aggregators.type`) when it matches a domain declared by the
-          // active network; otherwise fall back to the FULL domain list
-          // from the live network config (so orange_dot legacy rows pick
-          // up `['tourist','practitioner']` instead of a stale
-          // `['seeker','provider']`).
-          const networkCfg = await getNetworkConfig();
-          const t = lookup.aggregator.type;
-          const aggregatorDomains: string[] =
-            t && networkCfg.domainIds.includes(t) ? [t] : networkCfg.domainIds;
-          const upsertResult = await signalstack.upsertAggregator({
-            external_id: aggregatorId,
-            name: lookup.aggregator.name,
-            slug: lookup.aggregator.orgSlug,
-            domains: aggregatorDomains,
-          });
-          if (!upsertResult.success) {
-            log.error(
-              {
-                status: 'failure',
-                sub_operation: 'signalstack.upsertAggregator',
-                code: upsertResult.error.code,
-                cause: upsertResult.error.message,
-                latency_ms: Date.now() - upsertStart,
-              },
-              'signalstack aggregator upsert failed — approval aborted, admin can retry',
-            );
-            return sendHtml(
-              reply,
-              503,
-              renderResultPage({
-                status: 'error',
-                title: 'Action failed',
-                message:
-                  'Could not register the aggregator with the signalstack network. The application is still pending — open this approval link again once the signalstack service is reachable.',
-              }),
-            );
-          }
-          signalstackOrgId = upsertResult.value.org_id;
-          log.info(
-            {
-              status: 'success',
-              sub_operation: 'signalstack.upsertAggregator',
-              signalstack_org_id: signalstackOrgId,
-              domains: aggregatorDomains,
-              aggregator_type: lookup.aggregator.type,
-              latency_ms: Date.now() - upsertStart,
-            },
-            'aggregator registered in signalstack',
-          );
-        }
-
-        // 2. KC enableUser — must succeed for the applicant to authenticate.
-        //    Idempotent set-state call; safe to retry on next click. Note:
-        //    the approval token TTL (DEFAULT_TTL_SEC=1h in
-        //    services/approval-token.ts) caps the retry window. If a
-        //    signalstack/IDP outage exceeds the TTL, the admin must
-        //    request a fresh approval email.
-        const enableStart = Date.now();
-        const enable = await idp.enableUser(lookup.kcUser.id);
-        if (!enable.ok) {
-          log.error(
-            {
-              status: 'failure',
-              sub_operation: 'idp.enableUser',
-              code: enable.error.code,
-              cause: enable.error.message,
-              latency_ms: Date.now() - enableStart,
-            },
-            'failed to enable KC user during approval — admin can retry',
-          );
-          return sendHtml(
-            reply,
-            503,
-            renderResultPage({
-              status: 'error',
-              title: 'Action failed',
-              message: 'Identity service unavailable. Please try again shortly.',
-            }),
-          );
-        }
-
-        // 3. KC decision stamp — soft-fail. The drift-reconciliation worker
-        //    repairs the attribute on its next pass; auth-gate stays open
-        //    via the enabled flag set above.
-        const stampStart = Date.now();
-        const stamp = await idp.setUserDecision(lookup.kcUser.id, 'approved');
-        if (!stamp.ok) {
-          log.warn(
-            {
-              status: 'failure',
-              sub_operation: 'idp.setUserDecision.approved',
-              code: stamp.error.code,
-              cause: stamp.error.message,
-              latency_ms: Date.now() - stampStart,
-            },
-            'failed to stamp decision_made=approved on KC user (auth-gate stays open via enabled flag)',
-          );
-        }
-
-        // 4. Stamp signalstack_org_id on KC attr + DB column. Soft-fail —
-        //    the login-time backfill repairs whichever leg lags because the
-        //    upstream upsert is idempotent on external_id.
-        if (signalstackOrgId) {
-          const stampOrgStart = Date.now();
-          const [attrWrite, dbWrite] = await Promise.all([
-            idp.setAttributes(lookup.kcUser.id, { signalstack_org_id: signalstackOrgId }),
-            store.updateSignalstackOrgId(aggregatorId, signalstackOrgId, 'admin'),
-          ]);
-          if (!attrWrite.ok) {
-            log.warn(
-              {
-                status: 'failure',
-                sub_operation: 'idp.setAttributes.signalstack_org_id',
-                code: attrWrite.error.code,
-                cause: attrWrite.error.message,
-                latency_ms: Date.now() - stampOrgStart,
-              },
-              'failed to stamp signalstack_org_id on KC user — login fallback will retry',
-            );
-          }
-          if (!dbWrite.ok) {
-            log.warn(
-              {
-                status: 'failure',
-                sub_operation: 'store.updateSignalstackOrgId',
-                code: dbWrite.error.code,
-                cause: dbWrite.error.message,
-                latency_ms: Date.now() - stampOrgStart,
-              },
-              'failed to persist signalstack_org_id on aggregators row — login fallback will retry',
-            );
-          }
-        }
-
-        // 5. DB status → active is the atomic commit point. Once flipped,
-        //    the single-use guard treats the approval as decided. Earlier
-        //    steps are idempotent so a failure here leaves status=pending
-        //    and admin can re-click the link to retry without side effects.
-        const dbUpdateStart = Date.now();
-        const dbUpdate = await store.updateStatus(aggregatorId, 'active', 'admin');
-        if (!dbUpdate.ok) {
-          log.error(
-            {
-              status: 'failure',
-              sub_operation: 'store.updateStatus.active',
-              code: dbUpdate.error.code,
-              cause: dbUpdate.error.message,
-              latency_ms: Date.now() - dbUpdateStart,
-            },
-            'failed to flip aggregator status to active — admin can retry',
-          );
-          return sendHtml(
-            reply,
-            503,
-            renderResultPage({
-              status: 'error',
-              title: 'Action failed',
-              message: 'Database unavailable. Please try again shortly.',
-            }),
-          );
-        }
-
-        const approvedMail = renderApplicantApproved({
-          contactName: applicantNameOf(lookup),
-          association: lookup.aggregator.name,
-          identifier: lookup.aggregator.contact.email,
-          signInUrl: `${config.PUBLIC_PORTAL_URL}/login`,
-        });
-        const sendResult = await mailer.send({
-          to: lookup.aggregator.contact.email,
-          subject: approvedMail.subject,
-          html: approvedMail.html,
-          text: approvedMail.text,
-        });
-        if (!sendResult.ok) {
-          log.error(
-            {
-              status: 'failure',
-              sub_operation: 'mailer.send.approved',
-              code: sendResult.error.code,
-              cause: sendResult.error.message,
-            },
-            'approved-email delivery failed',
-          );
-        }
-        log.info(
-          { status: 'success', decision: 'approve', new_status: 'active' },
-          'aggregator approved',
-        );
-        return sendHtml(
-          reply,
-          200,
-          renderResultPage({
-            status: 'success',
-            title: 'Application approved',
-            message: `${lookup.aggregator.contact.email} can now sign in to the portal.`,
-          }),
-        );
-      }
-
-      // Reject path — DB status → 'inactive', KC user stays disabled.
-      // Rejection reason is logged for audit but not persisted (no column
-      // yet; revisit when an aggregator_decision_audit table lands).
-      const dbUpdate = await store.updateStatus(aggregatorId, 'inactive', 'admin');
-      if (!dbUpdate.ok) {
-        log.error(
-          {
-            status: 'failure',
-            sub_operation: 'store.updateStatus.inactive',
-            code: dbUpdate.error.code,
-            cause: dbUpdate.error.message,
-          },
-          'failed to flip aggregator status to inactive',
-        );
+      const store = getRegistrationStore();
+      const regResult = await store.findById(registrationId);
+      if (!regResult.ok) {
         return sendHtml(
           reply,
           503,
           renderResultPage({
             status: 'error',
-            title: 'Action failed',
-            message: 'Database unavailable. Please try again shortly.',
+            title: 'Service unavailable',
+            message: 'Could not load registration record.',
+          }),
+        );
+      }
+      if (!regResult.value) {
+        return sendHtml(
+          reply,
+          404,
+          renderResultPage({
+            status: 'error',
+            title: 'Not found',
+            message: 'Registration not found.',
           }),
         );
       }
 
-      const stamp = await idp.setUserDecision(lookup.kcUser.id, 'rejected');
-      if (!stamp.ok) {
-        log.warn(
-          {
-            status: 'failure',
-            sub_operation: 'idp.setUserDecision.rejected',
-            code: stamp.error.code,
-            cause: stamp.error.message,
-          },
-          'failed to stamp decision_made=rejected on KC user (drift-sync will repair)',
+      const reg = regResult.value;
+
+      // Single-use guard: if already decided (post-verified), show result page.
+      const prior = priorDecision(reg.state);
+      if (prior) {
+        return sendHtml(reply, 200, renderResultPage(alreadyDecidedView(prior)));
+      }
+
+      if (reg.state !== 'verified') {
+        return sendHtml(
+          reply,
+          409,
+          renderResultPage({
+            status: 'error',
+            title: 'Action not available',
+            message: `Registration is in state '${reg.state}'. Only verified registrations can be approved or rejected.`,
+          }),
         );
       }
 
-      const rejectedMail = renderApplicantRejected({
-        contactName: applicantNameOf(lookup),
-        association: lookup.aggregator.name,
-        reason: parsed.data.reason,
-      });
-      const sendResult = await mailer.send({
-        to: lookup.aggregator.contact.email,
-        subject: rejectedMail.subject,
-        html: rejectedMail.html,
-        text: rejectedMail.text,
-      });
-      if (!sendResult.ok) {
-        log.error(
-          {
-            status: 'failure',
-            sub_operation: 'mailer.send.rejected',
-            code: sendResult.error.code,
-            cause: sendResult.error.message,
-          },
-          'rejected-email delivery failed',
-        );
+      if (parsed.data.decision === 'approve') {
+        return handleApprove(reg, store, start, reply);
       }
-      log.info(
-        {
-          status: 'success',
-          decision: 'reject',
-          new_status: 'inactive',
-          reason: parsed.data.reason ?? null,
-        },
-        'aggregator rejected',
-      );
-      return sendHtml(
-        reply,
-        200,
-        renderResultPage({
-          status: 'success',
-          title: 'Application rejected',
-          message: `${lookup.aggregator.contact.email} has been notified.`,
-        }),
-      );
+      return handleReject(reg, parsed.data.reason, store, start, reply);
     },
+  );
+}
+
+async function handleApprove(
+  reg: Registration,
+  store: ReturnType<typeof getRegistrationStore>,
+  start: number,
+  reply: FastifyReply,
+): Promise<FastifyReply> {
+  const log = logger.child({ operation: 'aggregator-approval.approve', registration_id: reg.id });
+  // Compare-and-set verified → approved.
+  const transResult = await store.transition(reg.id, 'verified', 'approved', {}, reg.version, {
+    actor: 'admin',
+    reason: 'approval',
+  });
+
+  if (!transResult.ok) {
+    if (transResult.error.code === 'STALE_TRANSITION') {
+      // Concurrent decision won — treat as "already decided".
+      return sendHtml(reply, 200, renderResultPage(alreadyDecidedView({ decision: 'approved' })));
+    }
+    return sendHtml(
+      reply,
+      503,
+      renderResultPage({
+        status: 'error',
+        title: 'Service unavailable',
+        message: 'Could not record decision. Please try again.',
+      }),
+    );
+  }
+
+  const approvedReg = transResult.value;
+
+  // Best-effort inline provisioning. Each executor is idempotent; the
+  // reconciler guarantees convergence if any step fails here.
+  void (async () => {
+    const registrationId = reg.id;
+    try {
+      const deps = {
+        store,
+        aggregatorStore: getAggregatorStore(),
+        aggregatorProfileStore: getAggregatorProfileStore(),
+      };
+      await ensureGraduated(approvedReg, deps);
+
+      // Re-read for fresh aggregatorId after graduation.
+      const freshResult = await store.findById(registrationId);
+      const freshReg = freshResult.ok && freshResult.value ? freshResult.value : approvedReg;
+
+      await ensureKeycloakUser(freshReg, { store, idpAdmin: getIdpAdmin() });
+
+      const ssWriter = getSignalStackWriter();
+      if (ssWriter) {
+        await ensureSignalstackOrg(freshReg, {
+          store,
+          signalStackWriter: ssWriter,
+          aggregatorStore: getAggregatorStore(),
+        });
+      }
+
+      await ensureWelcomeSent(freshReg, {
+        store,
+        mailer: getMailer(),
+        portalUrl: config.PUBLIC_PORTAL_URL,
+      });
+    } catch (err) {
+      logger.warn({
+        operation: 'aggregator-approval.approve.inline_provision',
+        status: 'failure',
+        registration_id: registrationId,
+        error: err instanceof Error ? err.message : 'unknown',
+      });
+    }
+  })();
+
+  log.info(
+    { status: 'success', decision: 'approve', latency_ms: Date.now() - start },
+    'registration approved',
+  );
+  return sendHtml(
+    reply,
+    200,
+    renderResultPage({
+      status: 'success',
+      title: 'Application approved',
+      message: `${reg.contactEmail} will receive a welcome email once provisioning completes.`,
+    }),
+  );
+}
+
+async function handleReject(
+  reg: Registration,
+  reason: string | undefined,
+  store: ReturnType<typeof getRegistrationStore>,
+  start: number,
+  reply: FastifyReply,
+): Promise<FastifyReply> {
+  const log = logger.child({ operation: 'aggregator-approval.reject', registration_id: reg.id });
+  // Compare-and-set verified → rejected.
+  const transResult = await store.transition(reg.id, 'verified', 'rejected', {}, reg.version, {
+    actor: 'admin',
+    reason: reason ?? 'rejection',
+  });
+
+  if (!transResult.ok) {
+    if (transResult.error.code === 'STALE_TRANSITION') {
+      return sendHtml(reply, 200, renderResultPage(alreadyDecidedView({ decision: 'rejected' })));
+    }
+    return sendHtml(
+      reply,
+      503,
+      renderResultPage({
+        status: 'error',
+        title: 'Service unavailable',
+        message: 'Could not record decision. Please try again.',
+      }),
+    );
+  }
+
+  const rejectedReg = transResult.value;
+
+  // Best-effort inline provisioning.
+  void (async () => {
+    const registrationId = reg.id;
+    try {
+      await ensureKeycloakUserDisabled(rejectedReg, { store, idpAdmin: getIdpAdmin() });
+      await ensureRejectionSent(rejectedReg, {
+        store,
+        mailer: getMailer(),
+        ...(reason !== undefined ? { reason } : {}),
+      });
+    } catch (err) {
+      logger.warn({
+        operation: 'aggregator-approval.reject.inline_provision',
+        status: 'failure',
+        registration_id: registrationId,
+        error: err instanceof Error ? err.message : 'unknown',
+      });
+    }
+  })();
+
+  log.info(
+    { status: 'success', decision: 'reject', latency_ms: Date.now() - start },
+    'registration rejected',
+  );
+  return sendHtml(
+    reply,
+    200,
+    renderResultPage({
+      status: 'success',
+      title: 'Application rejected',
+      message: `${reg.contactEmail} will be notified.`,
+    }),
   );
 }
 
@@ -489,22 +409,16 @@ interface PriorDecision {
   decision: 'approved' | 'rejected';
 }
 
-/**
- * Maps `aggregators.status` to a prior-decision marker. Returning `null`
- * means the row is still in `pending` and the admin click should proceed.
- *
- * `retired` is treated as a prior approval (the aggregator was once active
- * and was later retired) so the approve button doesn't reactivate a retired
- * account behind the admin's back.
- */
-function decisionFromStatus(status: Aggregator['status']): PriorDecision | null {
-  switch (status) {
+function priorDecision(state: Registration['state']): PriorDecision | null {
+  switch (state) {
+    case 'approved':
     case 'active':
-    case 'retired':
       return { decision: 'approved' };
-    case 'inactive':
+    case 'rejected':
+    case 'abandoned':
       return { decision: 'rejected' };
-    case 'pending':
+    case 'verified':
+    case 'submitted':
     default:
       return null;
   }
@@ -519,71 +433,14 @@ function alreadyDecidedView(prior: PriorDecision): {
     return {
       status: 'info',
       title: 'Already approved',
-      message: 'This application has already been approved. No further action is required.',
+      message: 'This application has already been approved.',
     };
   }
   return {
     status: 'info',
     title: 'Already rejected',
-    message: 'This application has already been rejected. No further action is required.',
+    message: 'This application has already been rejected.',
   };
-}
-
-type LookupOk = { ok: true; aggregator: Aggregator; kcUser: IdpUser };
-type LookupErr = { ok: false; status: number; html: string };
-
-async function loadAggregatorAndUser(aggregatorId: string): Promise<LookupOk | LookupErr> {
-  const store = getAggregatorStore();
-  const idp = getIdpAdmin();
-
-  const stored = await store.findById(aggregatorId);
-  if (!stored.ok) {
-    return {
-      ok: false,
-      status: 503,
-      html: renderResultPage({
-        status: 'error',
-        title: 'Service unavailable',
-        message: 'Could not load aggregator record.',
-      }),
-    };
-  }
-  if (!stored.value) {
-    return {
-      ok: false,
-      status: 404,
-      html: renderResultPage({
-        status: 'error',
-        title: 'Not found',
-        message: 'Aggregator not found.',
-      }),
-    };
-  }
-
-  const kc = await idp.findByAttribute(KC_ATTR.AGGREGATOR_ID, aggregatorId);
-  if (!kc.ok) {
-    return {
-      ok: false,
-      status: 503,
-      html: renderResultPage({
-        status: 'error',
-        title: 'Identity service unavailable',
-        message: 'Could not load identity record.',
-      }),
-    };
-  }
-  if (!kc.value) {
-    return {
-      ok: false,
-      status: 404,
-      html: renderResultPage({
-        status: 'error',
-        title: 'Not found',
-        message: 'Identity record missing.',
-      }),
-    };
-  }
-  return { ok: true, aggregator: stored.value, kcUser: kc.value };
 }
 
 function isIntent(v: unknown): v is 'approve' | 'reject' {
@@ -593,27 +450,13 @@ function isIntent(v: unknown): v is 'approve' | 'reject' {
 function tokenErrorMessage(code: 'EXPIRED' | 'INVALID' | 'MALFORMED'): string {
   switch (code) {
     case 'EXPIRED':
-      return 'This approval link has expired. Ask the applicant to resubmit.';
+      return 'This approval link has expired. Please contact the applicant to request a new verification.';
     case 'INVALID':
       return 'Approval link signature is invalid.';
     case 'MALFORMED':
     default:
       return 'Approval link is malformed.';
   }
-}
-
-/**
- * Display name preference: Beckn contact.name → KC firstName+lastName →
- * email. Aggregator's `contact.name` is filled at registration; KC names
- * only appear after the applicant completes the Update Profile flow.
- */
-function applicantNameOf(lookup: LookupOk): string {
-  const contactName = lookup.aggregator.contact.name;
-  if (contactName) return contactName;
-  const parts = [lookup.kcUser.firstName, lookup.kcUser.lastName].filter((p): p is string =>
-    Boolean(p),
-  );
-  return parts.length > 0 ? parts.join(' ') : lookup.kcUser.email;
 }
 
 function sendHtml(reply: FastifyReply, status: number, html: string): FastifyReply {

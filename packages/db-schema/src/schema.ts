@@ -403,6 +403,108 @@ export const onboarding = pgTable(
   }),
 );
 
+// ─── registrations (FSM-driven aggregator onboarding) ───────────────────────
+
+export const registrationStateEnum = pgEnum('registration_state', [
+  'submitted',
+  'verified',
+  'approved',
+  'rejected',
+  'active',
+  'abandoned',
+]);
+
+export const registrationActorEnum = pgEnum('registration_actor', [
+  'applicant',
+  'admin',
+  'reconciler',
+  'system',
+]);
+
+export const registrations = pgTable(
+  'registrations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    /** Client-supplied deduplication key; SHA-256 fingerprint when omitted. */
+    idempotencyKey: text('idempotency_key').notNull().unique(),
+    state: registrationStateEnum('state').notNull().default('submitted'),
+
+    // ── Contact ──────────────────────────────────────────────────────────
+    contactEmail: text('contact_email').notNull(),
+    contactPhone: text('contact_phone').notNull(),
+
+    // ── Organisation fields (captured at submit) ─────────────────────────
+    orgName: text('org_name').notNull(),
+    orgType: text('org_type').notNull(),
+    orgUrl: text('org_url'),
+    orgLocations: jsonb('org_locations').$type<Record<string, unknown>[]>().notNull().default([]),
+    /** Full registration payload (jsonb) for downstream provisioning. */
+    profileDraft: jsonb('profile_draft').$type<Record<string, unknown>>().notNull().default({}),
+
+    // ── Consent ──────────────────────────────────────────────────────────
+    consent: jsonb('consent').$type<Record<string, unknown>>().notNull(),
+
+    // ── Provisioning pointers (set after approval) ───────────────────────
+    /** Keycloak user id — set after KC user is created at approval. */
+    idpUserId: text('idp_user_id'),
+    /** Signalstack org id — set after upsertAggregator. */
+    signalstackOrgId: text('signalstack_org_id'),
+    /** FK to aggregators — set after the registration graduates. */
+    aggregatorId: uuid('aggregator_id').references(() => aggregators.id, {
+      onDelete: 'set null',
+    }),
+
+    // ── Timestamps for projection tracking ──────────────────────────────
+    verificationSentAt: timestamp('verification_sent_at', { withTimezone: true }),
+    verifiedAt: timestamp('verified_at', { withTimezone: true }),
+    adminNotifiedAt: timestamp('admin_notified_at', { withTimezone: true }),
+    approvalLinkIssuedAt: timestamp('approval_link_issued_at', { withTimezone: true }),
+
+    /** Per-projection done/failed flags. Keys: verification, admin_notify, kc_user, ss_org, graduated, welcome, rejection. */
+    provisionState: jsonb('provision_state')
+      .$type<Record<string, 'done' | 'failed' | 'pending'>>()
+      .notNull()
+      .default({}),
+
+    // ── Optimistic concurrency ───────────────────────────────────────────
+    /** Incremented on every state transition; compare-and-set guard. */
+    version: integer('version').notNull().default(0),
+
+    // ── Meta ─────────────────────────────────────────────────────────────
+    /** Set true while a reconciler tick holds this row to prevent concurrent repair. */
+    reconcilerClaimedAt: timestamp('reconciler_claimed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    idempotencyKeyUnique: uniqueIndex('registrations_idempotency_key_unique').on(
+      table.idempotencyKey,
+    ),
+    // Non-terminal uniqueness: email/phone are free once the registration is
+    // rejected or abandoned, so rejected applicants can re-register.
+    // Partial unique indexes are created in the migration SQL (Drizzle does
+    // not support WHERE clauses on uniqueIndex directly).
+    stateIdx: index('registrations_state_idx').on(table.state),
+    emailIdx: index('registrations_contact_email_idx').on(table.contactEmail),
+    phoneIdx: index('registrations_contact_phone_idx').on(table.contactPhone),
+    createdAtIdx: index('registrations_created_at_idx').on(table.createdAt),
+  }),
+);
+
+// ─── registration_transitions (audit log) ───────────────────────────────────
+
+export const registrationTransitions = pgTable('registration_transitions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  registrationId: uuid('registration_id')
+    .notNull()
+    .references(() => registrations.id, { onDelete: 'cascade' }),
+  fromState: registrationStateEnum('from_state').notNull(),
+  toState: registrationStateEnum('to_state').notNull(),
+  actor: registrationActorEnum('actor').notNull(),
+  reason: text('reason'),
+  at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 // ─── Inferred row types ──────────────────────────────────────────────────────
 
 export type AggregatorRow = typeof aggregators.$inferSelect;
@@ -419,3 +521,7 @@ export type LinkSubmissionRow = typeof linkSubmissions.$inferSelect;
 export type NewLinkSubmissionRow = typeof linkSubmissions.$inferInsert;
 export type OnboardingRow = typeof onboarding.$inferSelect;
 export type NewOnboardingRow = typeof onboarding.$inferInsert;
+export type RegistrationRow = typeof registrations.$inferSelect;
+export type NewRegistrationRow = typeof registrations.$inferInsert;
+export type RegistrationTransitionRow = typeof registrationTransitions.$inferSelect;
+export type NewRegistrationTransitionRow = typeof registrationTransitions.$inferInsert;

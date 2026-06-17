@@ -13,6 +13,29 @@ import { setApprovalBrand } from './views/approval-pages.js';
 import { setEmailBrand } from './services/email-templates/shared.js';
 
 async function main(): Promise<void> {
+  // Boot guards: fail fast before accepting connections so per-request 500s
+  // never mask misconfiguration.
+  const approvalSecret = process.env.APPROVAL_TOKEN_SECRET ?? '';
+  if (approvalSecret.length < 32) {
+    logger.error(
+      {
+        operation: 'boot.guard',
+        key: 'APPROVAL_TOKEN_SECRET',
+        required_min: 32,
+        actual: approvalSecret.length,
+      },
+      'APPROVAL_TOKEN_SECRET must be at least 32 chars; refusing to start',
+    );
+    process.exit(1);
+  }
+  if (config.SIGNALSTACK_BASE_URL && !config.SIGNALSTACK_ACTING_ORG_ID) {
+    logger.error(
+      { operation: 'boot.guard', key: 'SIGNALSTACK_ACTING_ORG_ID' },
+      'SIGNALSTACK_ACTING_ORG_ID is required when SIGNALSTACK_BASE_URL is set',
+    );
+    process.exit(1);
+  }
+
   if (config.RUN_MIGRATIONS_ON_BOOT) {
     try {
       await runMigrations();

@@ -123,6 +123,29 @@ const ConfigSchema = z.object({
   SIGNALSTACK_ITEM_NETWORK: z.string().default('blue_dot'),
   /** Per-request timeout for signalstack onboard calls. */
   SIGNALSTACK_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
+
+  // ─── Registration FSM ───────────────────────────────────────────────────
+  /**
+   * T1 — hours after submission before an UNVERIFIED registration is
+   * abandoned and its PII purged. Default 72 h.
+   */
+  REGISTRATION_UNVERIFIED_TTL_HOURS: z.coerce.number().int().positive().default(72),
+  /**
+   * T2 — hours after verification before a VERIFIED or APPROVED registration
+   * that has not completed all provisioning steps is considered stuck and the
+   * reconciler escalates. Default 168 h (7 days).
+   */
+  REGISTRATION_STUCK_TTL_HOURS: z.coerce.number().int().positive().default(168),
+  /**
+   * How long (minutes) a verification link / OTP remains valid before it
+   * expires and the applicant must request a resend. Default 60 min.
+   */
+  REGISTRATION_VERIFICATION_TTL_MINUTES: z.coerce.number().int().positive().default(60),
+  /**
+   * Minimum time (minutes) between resend attempts for verification or
+   * admin-notification emails. Prevents resend spam. Default 60 min.
+   */
+  REGISTRATION_RESEND_COOLDOWN_MINUTES: z.coerce.number().int().positive().default(60),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

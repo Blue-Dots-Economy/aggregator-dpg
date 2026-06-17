@@ -1,12 +1,11 @@
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
-import { AggregatorStoreFake, _setAggregatorStore } from '../services/aggregator-store/index.js';
 import {
-  AggregatorProfileStoreFake,
-  _setAggregatorProfileStore,
-} from '../services/aggregator-profile-store/index.js';
-import { IdpAdminFake, _setIdpAdmin } from '../services/idp-admin/index.js';
+  RegistrationStoreFake,
+  _setRegistrationStore,
+  buildRegistration,
+} from '../services/registration-store/index.js';
 import { FakeMailer, _setMailer } from '../services/mailer/index.js';
 import { _resetTokenKey } from '../services/approval-token.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
@@ -16,27 +15,20 @@ const AUTH_HEADER = { authorization: `Bearer ${SERVICE_BEARER}` };
 
 describe('POST /v1/aggregator-registrations/create', () => {
   let app: FastifyInstance;
-  let aggregatorStore: AggregatorStoreFake;
-  let profileStore: AggregatorProfileStoreFake;
-  let idp: IdpAdminFake;
+  let registrationStore: RegistrationStoreFake;
   let mailer: FakeMailer;
 
   beforeEach(async () => {
     _resetTokenKey();
     _resetJwks();
     process.env.APPROVAL_TOKEN_SECRET = 'k'.repeat(48);
-    process.env.ADMIN_EMAILS = 'reviewer@bluedots.local';
     process.env.KEYCLOAK_URL = 'http://kc.local';
     process.env.KEYCLOAK_REALM = 'aggregator';
 
-    aggregatorStore = new AggregatorStoreFake();
-    profileStore = new AggregatorProfileStoreFake();
-    idp = new IdpAdminFake();
+    registrationStore = new RegistrationStoreFake();
     mailer = new FakeMailer();
 
-    _setAggregatorStore(aggregatorStore);
-    _setAggregatorProfileStore(profileStore);
-    _setIdpAdmin(idp);
+    _setRegistrationStore(registrationStore);
     _setMailer(mailer);
     _setAccessTokenVerifier(async (token) => {
       if (token === SERVICE_BEARER) {
@@ -50,9 +42,7 @@ describe('POST /v1/aggregator-registrations/create', () => {
 
   afterAll(async () => {
     await app?.close();
-    _setAggregatorStore(null);
-    _setAggregatorProfileStore(null);
-    _setIdpAdmin(null);
+    _setRegistrationStore(null);
     _setMailer(null);
     _setAccessTokenVerifier(null);
   });
@@ -72,57 +62,97 @@ describe('POST /v1/aggregator-registrations/create', () => {
     },
   };
 
-  it('creates an aggregator + disabled KC user on valid payload', async () => {
+  it('returns 202 and sends a verification email on valid payload', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/aggregator-registrations/create',
       headers: AUTH_HEADER,
       payload: validBody,
     });
-    expect(res.statusCode).toBe(201);
-    const body = res.json() as {
-      aggregator_id: string;
-      org_slug: string;
-      message: string;
-    };
-    expect(body.aggregator_id).toMatch(/^[0-9a-f-]{36}$/);
-    expect(body.org_slug).toMatch(/^trrain-[0-9a-f]{4}$/);
-    expect(body.message).toContain('Registration submitted');
 
-    const stored = await aggregatorStore.findById(body.aggregator_id);
-    if (stored.ok) expect(stored.value?.orgSlug).toBe(body.org_slug);
+    expect(res.statusCode).toBe(202);
+    const body = res.json() as { message: string };
+    expect(body.message).toContain('verify');
 
-    const profile = await profileStore.findByAggregatorId(body.aggregator_id);
-    if (profile.ok) {
-      expect(profile.value?.aggregatorId).toBe(body.aggregator_id);
-      expect(profile.value?.contactName).toBeNull();
-      expect(profile.value?.personas).toEqual([]);
-      expect(profile.value?.services).toEqual([]);
-      expect(profile.value?.verifiedCertificate).toEqual([]);
-      expect(profile.value?.profileCompletedAt).toBeNull();
-    }
+    // A verification email should have been dispatched best-effort.
+    expect(mailer.outbox).toHaveLength(1);
+    expect(mailer.outbox[0]!.to).toBe('asha@trrain.org');
+    expect(mailer.outbox[0]!.subject).toContain('Verify');
 
-    const kcUser = await idp.findByEmail(validBody.contact.email);
-    if (kcUser.ok && kcUser.value) {
-      expect(kcUser.value.enabled).toBe(false);
-      expect(kcUser.value.attributes?.aggregator_id?.[0]).toBe(body.aggregator_id);
-      expect(kcUser.value.attributes?.aggregator_type?.[0]).toBe(validBody.type);
-      expect(kcUser.value.attributes?.phoneNumber?.[0]).toBe(validBody.contact.phone);
-      expect(kcUser.value.attributes?.decision_made?.[0]).toBe('pending');
-      // Removed attributes per the new flow:
-      expect(kcUser.value.attributes?.org_slug).toBeUndefined();
-      expect(kcUser.value.attributes?.association).toBeUndefined();
-    }
+    // A registrations row should exist.
+    const rows = await registrationStore.listNonTerminal();
+    expect(rows.ok && rows.value).toHaveLength(1);
+    expect(rows.ok && rows.value[0]?.state).toBe('submitted');
+    expect(rows.ok && rows.value[0]?.contactEmail).toBe('asha@trrain.org');
+  });
 
-    const sent = mailer.outbox;
-    expect(sent.length).toBe(1);
-    const first = sent[0];
-    if (!first) throw new Error('no mail captured');
-    expect(first.to).toEqual(['reviewer@bluedots.local']);
-    expect(first.subject).toContain('TRRAIN');
-    expect(first.html).toContain('intent=approve');
-    expect(first.html).toContain('intent=reject');
-    expect(first.html).toContain('/admin/v1/aggregator-registrations/read/');
+  it('replays 202 on second identical submit (idempotent)', async () => {
+    // First submit creates the row.
+    await app.inject({
+      method: 'POST',
+      url: '/v1/aggregator-registrations/create',
+      headers: AUTH_HEADER,
+      payload: validBody,
+    });
+
+    // Second submit with the same data should replay without creating a second row.
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/aggregator-registrations/create',
+      headers: AUTH_HEADER,
+      payload: validBody,
+    });
+
+    expect(res.statusCode).toBe(202);
+    const rows = await registrationStore.listNonTerminal();
+    expect(rows.ok && rows.value).toHaveLength(1);
+    // No second email should be sent (idempotency replay, cooldown not elapsed).
+    expect(mailer.outbox).toHaveLength(1);
+  });
+
+  it('returns 202 silently when email is already taken (no existence oracle)', async () => {
+    // Seed an existing row with the same email but a different idempotency key.
+    registrationStore.seed([
+      buildRegistration({
+        id: 'existing-reg-001',
+        idempotencyKey: 'different-key',
+        contactEmail: 'asha@trrain.org',
+        contactPhone: '+919999999999',
+      }),
+    ]);
+
+    // Submit with same email but different phone (different fingerprint → new
+    // key → hits DUPLICATE_EMAIL inside store.create).
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/aggregator-registrations/create',
+      headers: AUTH_HEADER,
+      payload: {
+        ...validBody,
+        contact: { ...validBody.contact, phone: '+919111111111' },
+      },
+    });
+
+    // Must be 202 — no existence oracle.
+    expect(res.statusCode).toBe(202);
+    // No email to the applicant (we don't send to a different row's address).
+    expect(mailer.outbox).toHaveLength(0);
+  });
+
+  it('returns 202 even when verification email send fails (best-effort)', async () => {
+    mailer.failOnce({ code: 'TRANSPORT_FAILED', message: 'smtp down' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/aggregator-registrations/create',
+      headers: AUTH_HEADER,
+      payload: validBody,
+    });
+
+    // The row was created; the email failure must not surface as a 5xx.
+    expect(res.statusCode).toBe(202);
+    const rows = await registrationStore.listNonTerminal();
+    expect(rows.ok && rows.value).toHaveLength(1);
   });
 
   it('returns 401 when Bearer is missing', async () => {
@@ -144,7 +174,7 @@ describe('POST /v1/aggregator-registrations/create', () => {
     expect(res.statusCode).toBe(401);
   });
 
-  it('rejects payload missing required fields', async () => {
+  it('returns 400 when required fields are missing', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/aggregator-registrations/create',
@@ -154,11 +184,10 @@ describe('POST /v1/aggregator-registrations/create', () => {
     expect(res.statusCode).toBe(400);
     const body = res.json() as { error: { code: string; title: string; requestId: string } };
     expect(body.error.code).toBe('SCHEMA_VALIDATION');
-    expect(body.error.title).toBeTruthy();
     expect(body.error.requestId).toMatch(/^req-/);
   });
 
-  it('rejects malformed email', async () => {
+  it('returns 400 for a malformed email', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/aggregator-registrations/create',
@@ -168,69 +197,33 @@ describe('POST /v1/aggregator-registrations/create', () => {
     expect(res.statusCode).toBe(400);
   });
 
-  it('returns 409 when the email already exists in Keycloak', async () => {
-    await idp.createUser({ email: validBody.contact.email });
+  it('returns 400 for an invalid phone number', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/aggregator-registrations/create',
+      headers: AUTH_HEADER,
+      payload: { ...validBody, contact: { ...validBody.contact, phone: 'not-a-phone' } },
+    });
+    // 400 regardless of whether Zod/JSON schema or normalisePhone rejects first.
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('returns 503 when the registration store is unavailable', async () => {
+    // Monkey-patch findByIdempotencyKey to simulate DB failure.
+    const origFind = registrationStore.findByIdempotencyKey.bind(registrationStore);
+    registrationStore.findByIdempotencyKey = async () => ({
+      ok: false as const,
+      error: { code: 'DB_UNAVAILABLE' as const, message: 'postgres down' },
+    });
+
     const res = await app.inject({
       method: 'POST',
       url: '/v1/aggregator-registrations/create',
       headers: AUTH_HEADER,
       payload: validBody,
     });
-    expect(res.statusCode).toBe(409);
-    const body = res.json() as { error: { code: string; title: string; detail: string } };
-    expect(body.error.code).toBe('USER_EXISTS');
-    expect(body.error.title).toBe('Email already registered');
-    expect(body.error.detail).toContain('already exists');
-  });
 
-  it('returns 409 when the phone is already used by another user', async () => {
-    await idp.createUser({
-      email: 'someone-else@trrain.org',
-      phone: '+919876543210',
-      attributes: { aggregator_id: 'other-agg' },
-    });
-    const res = await app.inject({
-      method: 'POST',
-      url: '/v1/aggregator-registrations/create',
-      headers: AUTH_HEADER,
-      payload: {
-        ...validBody,
-        contact: { ...validBody.contact, email: 'asha2@trrain.org' },
-      },
-    });
-    expect(res.statusCode).toBe(409);
-    const body = res.json() as { error: { code: string; title: string; requestId: string } };
-    expect(body.error.code).toBe('PHONE_EXISTS');
-    expect(body.error.title).toBe('Phone already registered');
-    expect(body.error.requestId).toMatch(/^req-/);
-  });
-
-  it('rolls back the aggregator row when KC createUser fails', async () => {
-    // Monkey-patch createUser to fail while leaving findByEmail untouched.
-    const originalCreate = idp.createUser.bind(idp);
-    idp.createUser = async () => ({
-      ok: false as const,
-      error: { code: 'IDP_UNAVAILABLE' as const, message: 'kc down' },
-    });
-
-    const res = await app.inject({
-      method: 'POST',
-      url: '/v1/aggregator-registrations/create',
-      headers: AUTH_HEADER,
-      payload: {
-        ...validBody,
-        contact: { ...validBody.contact, email: 'asha2@trrain.org' },
-      },
-    });
     expect(res.statusCode).toBe(503);
-
-    // No aggregator row should remain — the route rolls it back when KC
-    // creation fails.
-    const allByPrefix = await Promise.all(
-      ['trrain-0001', 'trrain-0002', 'trrain-0003'].map((s) => aggregatorStore.findBySlug(s)),
-    );
-    for (const r of allByPrefix) if (r.ok) expect(r.value).toBeNull();
-
-    idp.createUser = originalCreate;
+    registrationStore.findByIdempotencyKey = origFind;
   });
 });

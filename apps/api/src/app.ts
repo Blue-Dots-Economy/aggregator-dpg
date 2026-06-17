@@ -16,6 +16,7 @@ import sensible from '@fastify/sensible';
 import { config, corsOrigins } from './config.js';
 import { registerHealthRoutes } from './routes/health.js';
 import { registerAggregatorRegistrationRoutes } from './routes/aggregator-registrations.js';
+import { registerAggregatorRegistrationVerifyRoutes } from './routes/aggregator-registration-verify.js';
 import { registerAggregatorApprovalRoutes } from './routes/aggregator-approvals.js';
 import { registerAggregatorProfileRoutes } from './routes/aggregator-profile.js';
 import { registerBulkUploadsRoutes } from './routes/bulk-uploads.js';
@@ -25,6 +26,7 @@ import { registerPublicLookupRoute } from './routes/public-lookup.js';
 import { registerOnboardingRoutes } from './routes/onboarding.js';
 import { registerDashboardRoutes } from './routes/dashboard.js';
 import { registerAggregatorConfigRoutes } from './routes/aggregator-config.js';
+import { registerAggregatorRegistrationsAdminRoutes } from './routes/aggregator-registrations-admin.js';
 import { ERR } from './errors/codes.js';
 import { HttpError } from './errors/http-error.js';
 import { coerceToHttpError, toEnvelope, toLogPayload } from './errors/serialize.js';
@@ -108,6 +110,7 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   await registerHealthRoutes(app);
   await registerAggregatorRegistrationRoutes(app);
+  await registerAggregatorRegistrationVerifyRoutes(app);
   await registerAggregatorApprovalRoutes(app);
   await registerAggregatorProfileRoutes(app);
   await registerBulkUploadsRoutes(app);
@@ -117,6 +120,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await registerOnboardingRoutes(app);
   await registerDashboardRoutes(app);
   await registerAggregatorConfigRoutes(app);
+  await registerAggregatorRegistrationsAdminRoutes(app);
 
   app.setErrorHandler((rawErr, req, reply) => {
     // Fastify schema validation error — promote to a typed HttpError so the

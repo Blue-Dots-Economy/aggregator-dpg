@@ -123,3 +123,170 @@ export async function verifyApprovalToken(token: string): Promise<VerifyResult> 
 export function _resetTokenKey(): void {
   cachedKey = null;
 }
+
+// ─── Applicant verification token ────────────────────────────────────────────
+
+const VERIFICATION_AUDIENCE = 'aggregator-applicant';
+
+export interface MintVerificationInput {
+  registrationId: string;
+  /** Lifetime in seconds. Defaults to `REGISTRATION_VERIFICATION_TTL_MINUTES * 60`. */
+  ttlSec?: number;
+}
+
+/**
+ * Issues a signed verification token bound to a registration row.
+ *
+ * Sent to the applicant's email/phone at submit time so they can prove
+ * ownership before the registration advances to `verified`.
+ *
+ * @param input - Registration id and optional TTL.
+ * @returns Token string and absolute expiry timestamp.
+ */
+export async function mintVerificationToken(input: MintVerificationInput): Promise<MintResult> {
+  const ttl = input.ttlSec ?? DEFAULT_TTL_SEC;
+  const expiresAt = new Date(Date.now() + ttl * 1000);
+  const token = await new SignJWT({ intent: 'verify' })
+    .setProtectedHeader({ alg: ALG })
+    .setSubject(input.registrationId)
+    .setIssuer(ISSUER)
+    .setAudience(VERIFICATION_AUDIENCE)
+    .setIssuedAt()
+    .setExpirationTime(Math.floor(expiresAt.getTime() / 1000))
+    .sign(getKey());
+  return { token, expiresAt };
+}
+
+export interface VerificationOk {
+  ok: true;
+  registrationId: string;
+}
+
+export type VerificationResult = VerificationOk | VerifyErr;
+
+/**
+ * Verifies an applicant verification token.
+ *
+ * @param token - Raw JWT string from the verification email link.
+ * @returns Registration id on success; structured error on failure.
+ */
+export async function verifyVerificationToken(token: string): Promise<VerificationResult> {
+  if (!token || typeof token !== 'string' || !token.includes('.')) {
+    return { ok: false, error: { code: 'MALFORMED', message: 'token is not a JWT' } };
+  }
+  try {
+    const { payload } = await jwtVerify(token, getKey(), {
+      issuer: ISSUER,
+      audience: VERIFICATION_AUDIENCE,
+      algorithms: [ALG],
+    });
+    if (!payload.sub) {
+      return { ok: false, error: { code: 'INVALID', message: 'missing sub claim' } };
+    }
+    if (payload.intent !== 'verify') {
+      return { ok: false, error: { code: 'INVALID', message: 'bad intent claim' } };
+    }
+    return { ok: true, registrationId: payload.sub };
+  } catch (err) {
+    if (err instanceof joseErrors.JWTExpired) {
+      return { ok: false, error: { code: 'EXPIRED', message: 'token expired' } };
+    }
+    if (err instanceof joseErrors.JWTInvalid || err instanceof joseErrors.JWSInvalid) {
+      return { ok: false, error: { code: 'MALFORMED', message: (err as Error).message } };
+    }
+    if (err instanceof joseErrors.JWSSignatureVerificationFailed) {
+      return { ok: false, error: { code: 'INVALID', message: 'signature failed' } };
+    }
+    return {
+      ok: false,
+      error: { code: 'INVALID', message: err instanceof Error ? err.message : 'verify failed' },
+    };
+  }
+}
+
+// ─── Registration approval token (new FSM flow) ───────────────────────────────
+
+export interface MintRegistrationApprovalInput {
+  registrationId: string;
+  intent: 'approve' | 'reject';
+  /** Lifetime in seconds. Default 1h. */
+  ttlSec?: number;
+}
+
+export interface RegistrationApprovalOk {
+  ok: true;
+  registrationId: string;
+  intent: 'approve' | 'reject';
+}
+
+export type RegistrationApprovalResult = RegistrationApprovalOk | VerifyErr;
+
+/**
+ * Issues a signed approval token bound to a registration row + intent.
+ *
+ * Used in the new FSM registration flow (Part 6). Uses the same audience
+ * as the legacy `mintApprovalToken` so the admin email link format is
+ * compatible, but the `sub` carries the `registrationId` (not an
+ * `aggregatorId`) so the approve/reject route can look up the FSM row.
+ *
+ * @param input - Registration id, intent, optional TTL.
+ * @returns Token string and absolute expiry timestamp.
+ */
+export async function mintRegistrationApprovalToken(
+  input: MintRegistrationApprovalInput,
+): Promise<MintResult> {
+  const ttl = input.ttlSec ?? DEFAULT_TTL_SEC;
+  const expiresAt = new Date(Date.now() + ttl * 1000);
+  const token = await new SignJWT({ intent: input.intent })
+    .setProtectedHeader({ alg: ALG })
+    .setSubject(input.registrationId)
+    .setIssuer(ISSUER)
+    .setAudience(AUDIENCE)
+    .setIssuedAt()
+    .setExpirationTime(Math.floor(expiresAt.getTime() / 1000))
+    .sign(getKey());
+  return { token, expiresAt };
+}
+
+/**
+ * Verifies a registration approval token.
+ *
+ * @param token - Raw JWT string from the admin email link.
+ * @returns Registration id + intent on success; structured error on failure.
+ */
+export async function verifyRegistrationApprovalToken(
+  token: string,
+): Promise<RegistrationApprovalResult> {
+  if (!token || typeof token !== 'string' || !token.includes('.')) {
+    return { ok: false, error: { code: 'MALFORMED', message: 'token is not a JWT' } };
+  }
+  try {
+    const { payload } = await jwtVerify(token, getKey(), {
+      issuer: ISSUER,
+      audience: AUDIENCE,
+      algorithms: [ALG],
+    });
+    if (!payload.sub) {
+      return { ok: false, error: { code: 'INVALID', message: 'missing sub claim' } };
+    }
+    const intent = payload.intent;
+    if (intent !== 'approve' && intent !== 'reject') {
+      return { ok: false, error: { code: 'INVALID', message: 'bad intent claim' } };
+    }
+    return { ok: true, registrationId: payload.sub, intent };
+  } catch (err) {
+    if (err instanceof joseErrors.JWTExpired) {
+      return { ok: false, error: { code: 'EXPIRED', message: 'token expired' } };
+    }
+    if (err instanceof joseErrors.JWTInvalid || err instanceof joseErrors.JWSInvalid) {
+      return { ok: false, error: { code: 'MALFORMED', message: (err as Error).message } };
+    }
+    if (err instanceof joseErrors.JWSSignatureVerificationFailed) {
+      return { ok: false, error: { code: 'INVALID', message: 'signature failed' } };
+    }
+    return {
+      ok: false,
+      error: { code: 'INVALID', message: err instanceof Error ? err.message : 'verify failed' },
+    };
+  }
+}
