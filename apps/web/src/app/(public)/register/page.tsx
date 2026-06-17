@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { getSession } from '../../../lib/server-session';
 import { RegisterView } from './RegisterView';
+import { getServerAggregatorConfig } from '../../../lib/aggregator-config-server';
 import type { RJSFSchema } from '@rjsf/utils';
 
 export const metadata: Metadata = {
@@ -51,14 +52,10 @@ async function patchTypeFromNetwork(
   schema: RJSFSchema,
   uiSchema: Record<string, unknown>,
 ): Promise<void> {
-  const apiBase = process.env.API_BASE_URL ?? 'http://localhost:4000';
   try {
-    const res = await fetch(`${apiBase}/v1/aggregator-config`, { cache: 'no-store' });
-    if (!res.ok) return;
-    const cfg = (await res.json()) as {
-      domains?: Array<{ id: string; label?: string; plural_label?: string }>;
-    };
-    const domains = cfg?.domains ?? [];
+    const cfg = await getServerAggregatorConfig();
+    if (!cfg) return;
+    const domains = cfg.domains ?? [];
     if (domains.length === 0) return;
 
     // 1. Schema — replace enum + add oneOf so the JSON Schema itself

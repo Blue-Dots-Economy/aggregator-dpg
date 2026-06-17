@@ -16,6 +16,7 @@ import { type NextRequest, NextResponse } from 'next/server';
 import { serviceUnavailableResponse } from '../../../lib/bff-errors';
 
 export const runtime = 'nodejs';
+export const revalidate = 300;
 
 /**
  * No session required — every value the upstream returns is

@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
+import { getServerAggregatorConfig } from '@/lib/aggregator-config-server';
 import { Providers } from '../lib/providers';
 import './globals.css';
 import { NextIntlClientProvider } from 'next-intl';
@@ -15,12 +16,8 @@ import { getLocale, getMessages, getTranslations } from 'next-intl/server';
  */
 export async function generateMetadata(): Promise<Metadata> {
   try {
-    const base = process.env.API_BASE_URL ?? 'http://localhost:4000';
-    const res = await fetch(`${base}/v1/aggregator-config`, { cache: 'no-store' });
-    if (!res.ok) throw new Error(`${res.status}`);
-    const cfg = (await res.json()) as {
-      brand: { long_name: string; tagline?: string };
-    };
+    const cfg = await getServerAggregatorConfig();
+    if (!cfg) throw new Error('unavailable');
     return {
       title: `${cfg.brand.long_name}`,
       description:
