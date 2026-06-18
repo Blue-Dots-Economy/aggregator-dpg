@@ -3,13 +3,15 @@
  *
  * Process-local Maps. Suitable for unit tests. Mirrors Postgres adapter
  * semantics: idempotency-key dedup, partial uniqueness on non-terminal
- * email/phone, compare-and-set transition, provision_state patching.
+ * email/phone, compare-and-set transition, provision_state patching,
+ * no-downgrade markProjection, compare-and-clear claim release.
  */
 
 import { randomUUID } from 'node:crypto';
 import {
   RegistrationStoreBase,
   type CreateRegistrationInput,
+  type MarkProjectionOpts,
   type ProvisionKey,
   type ProvisionStatus,
   type Registration,
@@ -72,7 +74,10 @@ export class InMemoryRegistrationStore extends RegistrationStoreBase {
       verifiedAt: null,
       adminNotifiedAt: null,
       approvalLinkIssuedAt: null,
+      welcomeSentAt: null,
+      rejectionSentAt: null,
       provisionState: {},
+      provisionAttempts: {},
       version: 0,
       reconcilerClaimedAt: null,
       createdAt: now,
@@ -141,6 +146,10 @@ export class InMemoryRegistrationStore extends RegistrationStoreBase {
         'approvalLinkIssuedAt' in patch
           ? (patch.approvalLinkIssuedAt ?? null)
           : existing.approvalLinkIssuedAt,
+      welcomeSentAt:
+        'welcomeSentAt' in patch ? (patch.welcomeSentAt ?? null) : existing.welcomeSentAt,
+      rejectionSentAt:
+        'rejectionSentAt' in patch ? (patch.rejectionSentAt ?? null) : existing.rejectionSentAt,
       reconcilerClaimedAt:
         'reconcilerClaimedAt' in patch
           ? (patch.reconcilerClaimedAt ?? null)
@@ -173,12 +182,76 @@ export class InMemoryRegistrationStore extends RegistrationStoreBase {
     id: string,
     key: ProvisionKey,
     status: ProvisionStatus,
+    opts?: MarkProjectionOpts,
   ): Promise<StoreResult<void>> {
+    const row = this.byId.get(id);
+    if (!row) return err('NOT_FOUND', id);
+
+    // No-downgrade: never overwrite a 'done' step with a non-done status.
+    const currentStatus = row.provisionState[key];
+    const nextStatus = currentStatus === 'done' && status !== 'done' ? currentStatus : status;
+
+    let nextAttempts = row.provisionAttempts;
+    if (opts?.bumpAttempt) {
+      const current = row.provisionAttempts[key] ?? { attempts: 0, last_attempt_at: '' };
+      nextAttempts = {
+        ...row.provisionAttempts,
+        [key]: {
+          attempts: current.attempts + 1,
+          last_attempt_at: new Date().toISOString(),
+        },
+      };
+    }
+
+    this.byId.set(id, {
+      ...row,
+      provisionState: { ...row.provisionState, [key]: nextStatus },
+      provisionAttempts: nextAttempts,
+      updatedAt: new Date(),
+    });
+    return { ok: true, value: undefined };
+  }
+
+  async setIdpUserId(id: string, userId: string): Promise<StoreResult<void>> {
+    const row = this.byId.get(id);
+    if (!row) return err('NOT_FOUND', id);
+    this.byId.set(id, { ...row, idpUserId: userId, updatedAt: new Date() });
+    return { ok: true, value: undefined };
+  }
+
+  async claimRow(id: string, claimedAt: Date, expiry: Date): Promise<StoreResult<boolean>> {
+    const row = this.byId.get(id);
+    if (!row) return { ok: true, value: false };
+
+    const current = row.reconcilerClaimedAt;
+    // Win if: no existing claim OR the existing claim is stale (before expiry).
+    if (current !== null && current >= expiry) {
+      return { ok: true, value: false };
+    }
+
+    this.byId.set(id, { ...row, reconcilerClaimedAt: claimedAt, updatedAt: new Date() });
+    return { ok: true, value: true };
+  }
+
+  async releaseClaim(id: string, claimedAt: Date): Promise<StoreResult<void>> {
+    const row = this.byId.get(id);
+    if (!row) return { ok: true, value: undefined };
+    // Compare-and-clear: only clear if we own the exact claim.
+    if (row.reconcilerClaimedAt?.getTime() === claimedAt.getTime()) {
+      this.byId.set(id, { ...row, reconcilerClaimedAt: null, updatedAt: new Date() });
+    }
+    return { ok: true, value: undefined };
+  }
+
+  async purgePii(id: string): Promise<StoreResult<void>> {
     const row = this.byId.get(id);
     if (!row) return err('NOT_FOUND', id);
     this.byId.set(id, {
       ...row,
-      provisionState: { ...row.provisionState, [key]: status },
+      contactEmail: `purged-${id}@redacted.invalid`,
+      contactPhone: '',
+      profileDraft: {},
+      provisionState: { ...row.provisionState, purged: 'done' },
       updatedAt: new Date(),
     });
     return { ok: true, value: undefined };

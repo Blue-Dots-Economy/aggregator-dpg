@@ -7,13 +7,15 @@
  * so the caller knows to treat it as a no-op.
  */
 
-import { and, desc, eq, inArray, not, or, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, lt, not, or, sql } from 'drizzle-orm';
 import { logger } from '../../logger.js';
 import { registrations, registrationTransitions } from '../../db/schema.js';
 import { getDb } from '../../db/client.js';
 import {
   RegistrationStoreBase,
   type CreateRegistrationInput,
+  type MarkProjectionOpts,
+  type ProvisionAttemptEntry,
   type ProvisionKey,
   type ProvisionStatus,
   type Registration,
@@ -134,6 +136,8 @@ export class PostgresRegistrationStore extends RegistrationStoreBase {
         if ('adminNotifiedAt' in patch) updates['adminNotifiedAt'] = patch.adminNotifiedAt ?? null;
         if ('approvalLinkIssuedAt' in patch)
           updates['approvalLinkIssuedAt'] = patch.approvalLinkIssuedAt ?? null;
+        if ('welcomeSentAt' in patch) updates['welcomeSentAt'] = patch.welcomeSentAt ?? null;
+        if ('rejectionSentAt' in patch) updates['rejectionSentAt'] = patch.rejectionSentAt ?? null;
         if ('reconcilerClaimedAt' in patch)
           updates['reconcilerClaimedAt'] = patch.reconcilerClaimedAt ?? null;
         if ('provisionState' in patch) updates['provisionState'] = patch.provisionState ?? {};
@@ -212,22 +216,19 @@ export class PostgresRegistrationStore extends RegistrationStoreBase {
 
   async listFlaggedForReconcile(): Promise<StoreResult<Registration[]>> {
     try {
-      // Non-terminal rows where provision_state contains at least one 'failed' entry.
+      // Non-terminal rows where provision_state has at least one 'failed' entry.
+      // Uses jsonb_each_text for a key-agnostic check that automatically covers
+      // all current and future ProvisionKey values without hardcoded lists.
       const rows = await getDb()
         .select()
         .from(registrations)
         .where(
           and(
             not(inArray(registrations.state, TERMINAL_STATES)),
-            or(
-              sql`${registrations.provisionState} @> '{"verification":"failed"}'::jsonb`,
-              sql`${registrations.provisionState} @> '{"admin_notify":"failed"}'::jsonb`,
-              sql`${registrations.provisionState} @> '{"kc_user":"failed"}'::jsonb`,
-              sql`${registrations.provisionState} @> '{"ss_org":"failed"}'::jsonb`,
-              sql`${registrations.provisionState} @> '{"graduated":"failed"}'::jsonb`,
-              sql`${registrations.provisionState} @> '{"welcome":"failed"}'::jsonb`,
-              sql`${registrations.provisionState} @> '{"rejection":"failed"}'::jsonb`,
-            ),
+            sql`EXISTS (
+              SELECT 1 FROM jsonb_each_text(${registrations.provisionState}) AS kv
+              WHERE kv.value = 'failed'
+            )`,
           ),
         )
         .orderBy(registrations.createdAt);
@@ -241,17 +242,38 @@ export class PostgresRegistrationStore extends RegistrationStoreBase {
     id: string,
     key: ProvisionKey,
     status: ProvisionStatus,
+    opts?: MarkProjectionOpts,
   ): Promise<StoreResult<void>> {
     const start = Date.now();
     try {
+      const setFields: Record<string, unknown> = {
+        // No-downgrade guard: never overwrite a 'done' step with any other status.
+        provisionState: sql`CASE WHEN ${registrations.provisionState}->>${key} = 'done'
+          THEN ${registrations.provisionState}
+          ELSE ${registrations.provisionState} || ${JSON.stringify({ [key]: status })}::jsonb
+        END`,
+        updatedAt: new Date(),
+      };
+
+      if (opts?.bumpAttempt) {
+        // Increment attempts and stamp last_attempt_at in a single jsonb_set call.
+        setFields['provisionAttempts'] = sql`jsonb_set(
+          ${registrations.provisionAttempts},
+          ARRAY[${key}::text],
+          jsonb_build_object(
+            'attempts', COALESCE((${registrations.provisionAttempts}->${key}->>'attempts')::int, 0) + 1,
+            'last_attempt_at', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+          ),
+          true
+        )`;
+      }
+
       const rows = await getDb()
         .update(registrations)
-        .set({
-          provisionState: sql`${registrations.provisionState} || ${JSON.stringify({ [key]: status })}::jsonb`,
-          updatedAt: new Date(),
-        })
+        .set(setFields)
         .where(eq(registrations.id, id))
         .returning({ id: registrations.id });
+
       if (rows.length === 0) {
         return { ok: false, error: { code: 'NOT_FOUND', message: id } };
       }
@@ -261,11 +283,117 @@ export class PostgresRegistrationStore extends RegistrationStoreBase {
         registration_id: id,
         key,
         provision_status: status,
+        bump_attempt: opts?.bumpAttempt ?? false,
         latency_ms: Date.now() - start,
       });
       return { ok: true, value: undefined };
     } catch (err: unknown) {
       return mapWriteError('registrationStore.markProjection', err, start);
+    }
+  }
+
+  async setIdpUserId(id: string, userId: string): Promise<StoreResult<void>> {
+    const start = Date.now();
+    try {
+      const rows = await getDb()
+        .update(registrations)
+        .set({ idpUserId: userId, updatedAt: new Date() })
+        .where(eq(registrations.id, id))
+        .returning({ id: registrations.id });
+      if (rows.length === 0) {
+        return { ok: false, error: { code: 'NOT_FOUND', message: id } };
+      }
+      logger.info({
+        operation: 'registrationStore.setIdpUserId',
+        status: 'success',
+        registration_id: id,
+        latency_ms: Date.now() - start,
+      });
+      return { ok: true, value: undefined };
+    } catch (err: unknown) {
+      return mapWriteError('registrationStore.setIdpUserId', err, start);
+    }
+  }
+
+  async claimRow(id: string, claimedAt: Date, expiry: Date): Promise<StoreResult<boolean>> {
+    const start = Date.now();
+    try {
+      // Win the claim if: no existing claim OR the existing claim is stale (before expiry).
+      const rows = await getDb()
+        .update(registrations)
+        .set({ reconcilerClaimedAt: claimedAt, updatedAt: new Date() })
+        .where(
+          and(
+            eq(registrations.id, id),
+            or(
+              isNull(registrations.reconcilerClaimedAt),
+              lt(registrations.reconcilerClaimedAt, expiry),
+            ),
+          ),
+        )
+        .returning({ id: registrations.id });
+      const won = rows.length > 0;
+      logger.info({
+        operation: 'registrationStore.claimRow',
+        status: won ? 'success' : 'skipped',
+        registration_id: id,
+        latency_ms: Date.now() - start,
+      });
+      return { ok: true, value: won };
+    } catch (err: unknown) {
+      return mapWriteError('registrationStore.claimRow', err, start);
+    }
+  }
+
+  async releaseClaim(id: string, claimedAt: Date): Promise<StoreResult<void>> {
+    const start = Date.now();
+    try {
+      // Compare-and-clear: only clear if we still own the claim.
+      await getDb()
+        .update(registrations)
+        .set({ reconcilerClaimedAt: null, updatedAt: new Date() })
+        .where(and(eq(registrations.id, id), eq(registrations.reconcilerClaimedAt, claimedAt)));
+      logger.info({
+        operation: 'registrationStore.releaseClaim',
+        status: 'success',
+        registration_id: id,
+        latency_ms: Date.now() - start,
+      });
+      return { ok: true, value: undefined };
+    } catch (err: unknown) {
+      return mapWriteError('registrationStore.releaseClaim', err, start);
+    }
+  }
+
+  async purgePii(id: string): Promise<StoreResult<void>> {
+    const start = Date.now();
+    try {
+      // Redact all PII to sentinels in one UPDATE.  All three columns are NOT NULL
+      // so we write non-null sentinels rather than NULL.  The 'purged' projection
+      // is stamped atomically so re-runs guard correctly on provisionState.purged.
+      const rows = await getDb()
+        .update(registrations)
+        .set({
+          contactEmail: `purged-${id}@redacted.invalid`,
+          contactPhone: '',
+          profileDraft: {},
+          provisionState: sql`${registrations.provisionState} || '{"purged":"done"}'::jsonb`,
+          updatedAt: new Date(),
+        })
+        .where(eq(registrations.id, id))
+        .returning({ id: registrations.id });
+      if (rows.length === 0) {
+        return { ok: false, error: { code: 'NOT_FOUND', message: id } };
+      }
+      logger.info({
+        operation: 'registrationStore.purgePii',
+        status: 'success',
+        registration_id: id,
+        latency_ms: Date.now() - start,
+      });
+      return { ok: true, value: undefined };
+    } catch (err: unknown) {
+      return mapWriteError('registrationStore.purgePii', err, start);
     }
   }
 
@@ -368,7 +496,11 @@ function toDomain(row: typeof registrations.$inferSelect): Registration {
     verifiedAt: row.verifiedAt,
     adminNotifiedAt: row.adminNotifiedAt,
     approvalLinkIssuedAt: row.approvalLinkIssuedAt,
+    welcomeSentAt: row.welcomeSentAt,
+    rejectionSentAt: row.rejectionSentAt,
     provisionState: (row.provisionState as Partial<Record<ProvisionKey, ProvisionStatus>>) ?? {},
+    provisionAttempts:
+      (row.provisionAttempts as Partial<Record<ProvisionKey, ProvisionAttemptEntry>>) ?? {},
     version: row.version,
     reconcilerClaimedAt: row.reconcilerClaimedAt,
     createdAt: row.createdAt,

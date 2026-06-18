@@ -23,12 +23,21 @@ export type ProvisionKey =
   | 'verification'
   | 'admin_notify'
   | 'kc_user'
+  | 'kc_disabled'
   | 'ss_org'
   | 'graduated'
   | 'welcome'
-  | 'rejection';
+  | 'rejection'
+  | 'purged';
 
-export type ProvisionStatus = 'done' | 'failed' | 'pending';
+export type ProvisionStatus = 'done' | 'failed' | 'pending' | 'dead';
+
+/** Per-step attempt record stored in `provision_attempts`. */
+export interface ProvisionAttemptEntry {
+  attempts: number;
+  /** ISO-8601 timestamp of the most recent attempt. */
+  last_attempt_at: string;
+}
 
 export interface Registration {
   id: string;
@@ -54,8 +63,12 @@ export interface Registration {
   verifiedAt: Date | null;
   adminNotifiedAt: Date | null;
   approvalLinkIssuedAt: Date | null;
+  welcomeSentAt: Date | null;
+  rejectionSentAt: Date | null;
 
   provisionState: Partial<Record<ProvisionKey, ProvisionStatus>>;
+  /** Per-step attempt counters for backoff and dead-letter tracking. */
+  provisionAttempts: Partial<Record<ProvisionKey, ProvisionAttemptEntry>>;
 
   /** Optimistic-lock counter. Incremented on every transition. */
   version: number;
@@ -91,6 +104,10 @@ export interface TransitionPatch {
   adminNotifiedAt?: Date | null;
   /** Pass `null` to reset. */
   approvalLinkIssuedAt?: Date | null;
+  /** Pass `null` to reset. */
+  welcomeSentAt?: Date | null;
+  /** Pass `null` to reset. */
+  rejectionSentAt?: Date | null;
   reconcilerClaimedAt?: Date | null;
   /** Replaces the entire provisionState map. Pass `{}` to clear all steps. */
   provisionState?: Partial<Record<ProvisionKey, ProvisionStatus>>;
@@ -99,6 +116,12 @@ export interface TransitionPatch {
 export interface TransitionMeta {
   actor: RegistrationActor;
   reason?: string;
+}
+
+/** Options for `markProjection`. */
+export interface MarkProjectionOpts {
+  /** When true, increments the attempt counter and stamps `last_attempt_at`. */
+  bumpAttempt?: boolean;
 }
 
 export type RegistrationStoreError =
@@ -198,15 +221,68 @@ export abstract class RegistrationStoreBase {
   /**
    * Updates a single key inside `provision_state` without touching version.
    *
+   * Never downgrades a `done` step to any other status. When `opts.bumpAttempt`
+   * is true, increments the attempt counter in `provision_attempts` and stamps
+   * `last_attempt_at`.
+   *
    * @param id - Registration UUID.
    * @param key - Provision step key.
    * @param status - New status for the step.
+   * @param opts - Optional behaviour flags.
    */
   abstract markProjection(
     id: string,
     key: ProvisionKey,
     status: ProvisionStatus,
+    opts?: MarkProjectionOpts,
   ): Promise<StoreResult<void>>;
+
+  /**
+   * Persists the Keycloak user id immediately after the user is created.
+   *
+   * Called before `enableUser` / `setAttributes` so that a crash between
+   * creation and marking `kc_user='done'` does not orphan the KC user.
+   *
+   * @param id - Registration UUID.
+   * @param userId - Keycloak user UUID.
+   */
+  abstract setIdpUserId(id: string, userId: string): Promise<StoreResult<void>>;
+
+  /**
+   * Atomically claims a row for reconciliation if the current claim is absent or stale.
+   *
+   * Returns `true` when the claim was won (caller should proceed), `false` when
+   * another caller holds a live claim (caller should skip).
+   *
+   * @param id - Registration UUID.
+   * @param claimedAt - Timestamp to write as the new claim stamp.
+   * @param expiry - Claims older than this are considered stale and overridable.
+   */
+  abstract claimRow(id: string, claimedAt: Date, expiry: Date): Promise<StoreResult<boolean>>;
+
+  /**
+   * Releases a reconciler claim using compare-and-clear semantics.
+   *
+   * Only clears `reconciler_claimed_at` when it still holds the exact
+   * timestamp written by this caller's `claimRow` call. A no-op if the
+   * claim was already cleared or replaced.
+   *
+   * @param id - Registration UUID.
+   * @param claimedAt - The exact timestamp this caller wrote when claiming.
+   */
+  abstract releaseClaim(id: string, claimedAt: Date): Promise<StoreResult<void>>;
+
+  /**
+   * Redacts PII fields to sentinels and marks the `purged` provision key.
+   *
+   * Writes `contact_email = "purged-<id>@redacted.invalid"`,
+   * `contact_phone = ""`, `profile_draft = {}`, and sets
+   * `provision_state.purged = "done"` in a single atomic UPDATE.
+   * All three contact fields are NOT NULL — sentinels satisfy the constraint.
+   *
+   * @param id - Registration UUID.
+   */
+  abstract purgePii(id: string): Promise<StoreResult<void>>;
 
   /**
    * Finds the most recent abandoned registration matching a contact field.

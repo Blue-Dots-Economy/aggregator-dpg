@@ -6,7 +6,13 @@
  */
 
 import { InMemoryRegistrationStore } from './memory.js';
-import type { Registration, CreateRegistrationInput, RegistrationState } from './interface.js';
+import type {
+  ProvisionAttemptEntry,
+  ProvisionKey,
+  Registration,
+  CreateRegistrationInput,
+  RegistrationState,
+} from './interface.js';
 
 export class RegistrationStoreFake extends InMemoryRegistrationStore {
   /**
@@ -44,6 +50,41 @@ export class RegistrationStoreFake extends InMemoryRegistrationStore {
       });
     }
   }
+
+  /**
+   * Seeds `provision_attempts` entries for rows already in the store.
+   *
+   * Used by crash-injection tests that need a row to appear as if N prior
+   * attempts have already been made for a given provision step.
+   *
+   * @param id - Registration UUID (must be already seeded).
+   * @param attempts - Map of provision key → attempt entry to merge in.
+   */
+  seedProvisionAttempts(
+    id: string,
+    attempts: Partial<Record<ProvisionKey, ProvisionAttemptEntry>>,
+  ): void {
+    const row = this.byId.get(id);
+    if (!row) throw new Error(`seedProvisionAttempts: row ${id} not found`);
+    this.byId.set(id, {
+      ...row,
+      provisionAttempts: { ...row.provisionAttempts, ...attempts },
+    });
+  }
+
+  /**
+   * Seeds the reconciler claim stamp for a row already in the store.
+   *
+   * Used by concurrency tests that need to simulate a live or stale claim.
+   *
+   * @param id - Registration UUID (must be already seeded).
+   * @param claimedAt - Timestamp to write as the claim stamp (null to clear).
+   */
+  seedClaim(id: string, claimedAt: Date | null): void {
+    const row = this.byId.get(id);
+    if (!row) throw new Error(`seedClaim: row ${id} not found`);
+    this.byId.set(id, { ...row, reconcilerClaimedAt: claimedAt });
+  }
 }
 
 /**
@@ -77,7 +118,10 @@ export function buildRegistration(overrides: Partial<Registration> = {}): Regist
     verifiedAt: null,
     adminNotifiedAt: null,
     approvalLinkIssuedAt: null,
+    welcomeSentAt: null,
+    rejectionSentAt: null,
     provisionState: {},
+    provisionAttempts: {},
     version: 0,
     reconcilerClaimedAt: null,
     createdAt,

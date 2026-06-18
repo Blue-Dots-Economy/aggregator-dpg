@@ -166,6 +166,29 @@ const ConfigSchema = z.object({
    * admin-notification emails. Prevents resend spam. Default 60 min.
    */
   REGISTRATION_RESEND_COOLDOWN_MINUTES: z.coerce.number().int().positive().default(60),
+  /**
+   * Maximum number of attempts per provision step before it is dead-lettered.
+   * Once a step reaches this count it is marked `dead` and skipped by future
+   * reconcile ticks until an admin resets it via `reconcile/by-contact?reset=true`.
+   */
+  REGISTRATION_MAX_PROVISION_ATTEMPTS: z.coerce.number().int().positive().default(5),
+  /**
+   * Base delay (seconds) for exponential backoff between provision attempts.
+   * Delay = base × 2^(attempts-1). Default 60 s → 60, 120, 240, 480, 960 s.
+   */
+  REGISTRATION_PROVISION_BACKOFF_BASE_SEC: z.coerce.number().int().positive().default(60),
+  /**
+   * TTL (hours) for the admin approval token minted in the approval notification
+   * email. Overrides the legacy 1 h default to allow human review time.
+   * Default 168 h (7 days).
+   */
+  REGISTRATION_APPROVAL_TTL_HOURS: z.coerce.number().int().positive().default(168),
+  /**
+   * Minimum time (minutes) between welcome or rejection email resend attempts.
+   * Mirrors REGISTRATION_RESEND_COOLDOWN_MINUTES but scoped to post-approval
+   * emails so they can be tuned independently. Default 60 min.
+   */
+  REGISTRATION_WELCOME_RESEND_COOLDOWN_MINUTES: z.coerce.number().int().positive().default(60),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

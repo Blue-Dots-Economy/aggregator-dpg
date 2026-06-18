@@ -148,6 +148,12 @@ export const aggregators = pgTable(
     // extra KC round-trip. NULL until the admin-approval flow (or the
     // login-time backfill) records it.
     signalstackOrgId: text('signalstack_org_id'),
+
+    // FK back to the registration row that created this aggregator. Used as
+    // the idempotency key for graduation: ON CONFLICT (source_registration_id)
+    // DO NOTHING prevents a partial-success retry from creating a second row.
+    // NULL for aggregators created before the FSM was introduced.
+    sourceRegistrationId: uuid('source_registration_id'),
   },
   (table) => ({
     // Auth-path lookups: phone/email are the credential identifiers a user
@@ -460,18 +466,31 @@ export const registrations = pgTable(
     adminNotifiedAt: timestamp('admin_notified_at', { withTimezone: true }),
     approvalLinkIssuedAt: timestamp('approval_link_issued_at', { withTimezone: true }),
 
-    /** Per-projection done/failed flags. Keys: verification, admin_notify, kc_user, ss_org, graduated, welcome, rejection. */
+    /** Per-projection done/failed/dead flags. Keys: verification, admin_notify, kc_user, kc_disabled, ss_org, graduated, welcome, rejection, purged. */
     provisionState: jsonb('provision_state')
-      .$type<Record<string, 'done' | 'failed' | 'pending'>>()
+      .$type<Record<string, 'done' | 'failed' | 'pending' | 'dead'>>()
       .notNull()
       .default({}),
+
+    // Per-step attempt counters for backoff / dead-letter logic.
+    // Shape: { "<key>": { "attempts": n, "last_attempt_at": "<iso>" } }
+    provisionAttempts: jsonb('provision_attempts')
+      .$type<Record<string, { attempts: number; last_attempt_at: string }>>()
+      .notNull()
+      .default({}),
+
+    // ── Sent-guard timestamps ────────────────────────────────────────────
+    /** Stamped when the welcome email is dispatched. Guards against double-send on retry. */
+    welcomeSentAt: timestamp('welcome_sent_at', { withTimezone: true }),
+    /** Stamped when the rejection email is dispatched. Guards against double-send on retry. */
+    rejectionSentAt: timestamp('rejection_sent_at', { withTimezone: true }),
 
     // ── Optimistic concurrency ───────────────────────────────────────────
     /** Incremented on every state transition; compare-and-set guard. */
     version: integer('version').notNull().default(0),
 
     // ── Meta ─────────────────────────────────────────────────────────────
-    /** Set true while a reconciler tick holds this row to prevent concurrent repair. */
+    /** Set while a reconciler tick holds this row to prevent concurrent repair. */
     reconcilerClaimedAt: timestamp('reconciler_claimed_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
