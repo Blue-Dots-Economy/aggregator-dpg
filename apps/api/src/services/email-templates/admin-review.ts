@@ -27,7 +27,16 @@ export function renderAdminReview(v: AdminReviewVars): {
   text: string;
 } {
   const subject = `Action required: aggregator registration from ${v.association}`;
-  const submitted = v.submittedAt.toUTCString();
+  // Render the submission time in IST (the server clock is UTC) so the admin
+  // reads it in the network's local timezone, matching the approval pages.
+  const submitted = `${v.submittedAt.toLocaleString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })} IST`;
   const stateRow = v.state
     ? `<tr><td style="padding:6px 0;color:#475069;width:140px;">State</td><td style="padding:6px 0;color:#0b1020;">${escapeHtml(v.state)}</td></tr>`
     : '';

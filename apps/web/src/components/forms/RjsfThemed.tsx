@@ -15,10 +15,12 @@ import type {
   RJSFSchema,
   GenericObjectType,
 } from '@rjsf/utils';
-import { useEffect, useRef, useState, type ChangeEvent } from 'react';
+import type { IChangeEvent } from '@rjsf/core';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { useTranslations } from 'next-intl';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/Select';
 import { MultiSelect } from '../ui/MultiSelect';
+import { resolveVisibleSchema, stripShowIf } from '../../lib/show-if';
 
 function TextWidget(props: WidgetProps) {
   const {
@@ -405,6 +407,13 @@ export function RjsfThemedForm<T extends GenericObjectType = GenericObjectType>(
   showErrorList = false,
   liveValidate = false,
   noHtml5Validate = true,
+  // `x-show-if` requires omitting hidden/pruned values so they never validate
+  // or submit. Default both on; a caller may still override explicitly.
+  omitExtraData = true,
+  liveOmit = true,
+  schema,
+  formData,
+  onChange,
   ...props
 }: RjsfThemedFormProps<T>) {
   // Customised validator with Ajv's 2020 build. The default RJSF validator
@@ -418,13 +427,44 @@ export function RjsfThemedForm<T extends GenericObjectType = GenericObjectType>(
       ? C
       : never,
   }) as unknown as ValidatorType<T, RJSFSchema, GenericObjectType>;
+
+  // Apply `x-show-if`: prune fields whose control value doesn't match, clearing
+  // their data. The pruned schema and cleared values feed RJSF directly so
+  // hidden fields never render, validate, or submit.
+  const currentData = (formData ?? {}) as Record<string, unknown>;
+  const resolved = resolveVisibleSchema(schema as RJSFSchema, currentData);
+  const hiddenKey = resolved.hidden.join('|');
+
+  // Memoise the rendered schema on (schema identity, visible-set signature) so
+  // its object identity is stable while the visible set is unchanged — otherwise
+  // RJSF rebuilds fields on every keystroke and text inputs lose focus. Strip
+  // `x-show-if` so Ajv never sees the custom keyword.
+  // Keyed on (schema identity, visible-set signature): resolved.schema depends
+  // only on those two, so recomputing with the latest `currentData` yields the
+  // same pruned shape while keeping a stable identity across keystrokes.
+  const renderSchema = useMemo(
+    () => stripShowIf(resolveVisibleSchema(schema as RJSFSchema, currentData).schema),
+    [schema, hiddenKey],
+  );
+
   return (
     <div className={className}>
       <Form<T>
         showErrorList={showErrorList}
         liveValidate={liveValidate}
         noHtml5Validate={noHtml5Validate}
+        omitExtraData={omitExtraData}
+        liveOmit={liveOmit}
         {...props}
+        schema={renderSchema as RJSFSchema}
+        formData={resolved.formData as T}
+        onChange={(e: IChangeEvent<T>, id?: string) => {
+          // Re-run the evaluator on the new values so hidden fields are cleared
+          // before the change bubbles to the parent's controlled state.
+          const next = (e.formData ?? {}) as Record<string, unknown>;
+          const cleared = resolveVisibleSchema(schema as RJSFSchema, next).formData;
+          onChange?.({ ...e, formData: cleared as T }, id);
+        }}
         validator={validator}
         widgets={widgets}
         templates={{

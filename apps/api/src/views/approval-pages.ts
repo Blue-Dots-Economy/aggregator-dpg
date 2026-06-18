@@ -383,6 +383,9 @@ export function renderResultPage(v: ResultPageVars): string {
   const iconSvg = resultIconSvg(v.status);
   const portalUrl = brand.portal_url;
   const decidedAt = new Date().toLocaleString('en-IN', {
+    // Render in IST regardless of the server's clock (the API container runs in
+    // UTC); without this the timestamp showed UTC despite the en-IN locale.
+    timeZone: 'Asia/Kolkata',
     day: '2-digit',
     month: 'short',
     year: 'numeric',
