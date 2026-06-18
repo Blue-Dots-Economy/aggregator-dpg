@@ -20,6 +20,7 @@
  */
 
 import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { z } from 'zod';
 import { and, eq, inArray } from 'drizzle-orm';
 import { requireApproved, type AuthContext } from '../services/auth/access-token.js';
 import { getBulkUploadsStore } from '../services/bulk-uploads-store/index.js';
@@ -30,17 +31,15 @@ import {
   signErrorsCsvDownloadUrl,
 } from '../services/object-storage/index.js';
 import { httpError } from '../errors/http-error.js';
+import { errorResponses } from '../errors/openapi.js';
 import { getSchemaLoader } from '../services/schema-loader/index.js';
 import { buildCsvTemplate } from '../services/csv-template/index.js';
+import { readBulkSample } from '../services/csv-template/bulk-sample.js';
 import { getNetworkConfig } from '../services/network-config.js';
 import { config } from '../config.js';
 import { getDb } from '../db/client.js';
 import { onboarding } from '../db/schema.js';
 import { getRedis } from '../services/redis/index.js';
-
-interface CreateBody {
-  participant_type?: unknown;
-}
 
 /**
  * Loads the network config and returns the set of valid participant
@@ -52,354 +51,570 @@ async function getValidParticipantTypes(): Promise<Set<string>> {
   return new Set(cfg.domainIds);
 }
 
+/**
+ * Query shape for the CSV template download. Valid `participant_type` values
+ * are network-config driven (e.g. seeker/provider), so the schema stays an
+ * open string and the handler validates against the live config.
+ */
+const TemplateQuerySchema = z.object({
+  participant_type: z
+    .string()
+    .optional()
+    .describe('Participant domain id declared by the active network (e.g. seeker, provider).'),
+});
+
+/**
+ * Body for creating a bulk-upload job. `participant_type` is validated
+ * against the active network config at request time.
+ */
+const CreateBulkUploadBodySchema = z
+  .object({
+    participant_type: z
+      .string()
+      .min(1)
+      .describe('Participant domain id declared by the active network (e.g. seeker, provider).'),
+  })
+  .passthrough();
+
+/** Path params for routes addressing a single bulk-upload job. */
+const BulkUploadParamsSchema = z.object({
+  id: z.string().min(1).describe('Bulk-upload job id (UUID).'),
+});
+
+/**
+ * Pagination query for the bulk-uploads list. Bounds are enforced here so the
+ * handler consumes the already-validated values: `limit` must be 1-100
+ * (default 20) and `offset` must be ≥ 0 (default 0); out-of-range values are
+ * rejected with 400 SCHEMA_VALIDATION by the route schema.
+ */
+const ListBulkUploadsQuerySchema = z.object({
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(100)
+    .default(20)
+    .describe('Page size (1-100, default 20).'),
+  offset: z.coerce.number().int().min(0).default(0).describe('Rows to skip (≥ 0, default 0).'),
+});
+
+/** Wire shape of a bulk-upload job row (see {@link toResponse}). */
+const BulkUploadResponseSchema = z
+  .object({
+    upload_id: z.string(),
+    status: z.string(),
+    status_reason: z.string().nullable(),
+    participant_type: z.string(),
+    total_rows: z.number().nullable(),
+    passed: z.number(),
+    failed: z.number(),
+    skipped: z.number(),
+    errors_csv_s3_key: z.string().nullable(),
+    schema_id: z.string(),
+    schema_version: z.string(),
+    created_at: z.string(),
+    completed_at: z.string().nullable(),
+  })
+  .passthrough();
+
+/** 201 payload for POST /v1/bulk-uploads — pre-signed S3 PUT reservation. */
+const CreateBulkUploadResponseSchema = z
+  .object({
+    upload_id: z.string(),
+    upload_url: z.string(),
+    s3_key: z.string(),
+    expires_at: z.string(),
+    content_type: z.string(),
+    max_bytes: z.number(),
+    schema_id: z.string(),
+    schema_version: z.string(),
+    status: z.string(),
+  })
+  .passthrough();
+
+/** 200 payload for the paginated bulk-uploads list. */
+const ListBulkUploadsResponseSchema = z
+  .object({
+    items: z.array(BulkUploadResponseSchema),
+    total: z.number(),
+    limit: z.number(),
+    offset: z.number(),
+  })
+  .passthrough();
+
+/** 200 payload for the errors.csv signed-download endpoint. */
+const ErrorsCsvResponseSchema = z
+  .object({
+    upload_id: z.string(),
+    url: z.string(),
+    s3_key: z.string(),
+    expires_at: z.string(),
+    content_type: z.string(),
+    counts: z
+      .object({
+        total_rows: z.number().nullable(),
+        passed: z.number(),
+        failed: z.number(),
+        skipped: z.number(),
+      })
+      .passthrough(),
+  })
+  .passthrough();
+
 export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<void> {
-  app.get('/v1/bulk-uploads/template', async (req, reply) => {
-    const auth = await requireAuth(req);
-    const query = req.query as { participant_type?: string };
-    const participantType = query.participant_type;
-    const validTypes = await getValidParticipantTypes();
-    if (!participantType || !validTypes.has(participantType)) {
-      throw httpError('SCHEMA_VALIDATION', {
-        detail: `participant_type must be one of: ${[...validTypes].join(', ')}.`,
-        fields: { participant_type: 'invalid' },
+  app.get(
+    '/v1/bulk-uploads/template',
+    {
+      schema: {
+        tags: ['bulk-uploads'],
+        summary: 'Download CSV template for a domain',
+        description:
+          "Returns a CSV template (text/csv) with the header row + sample row for the requested ?participant_type= (seeker/provider). Array-typed fields use the network's csv_array_delimiter. Responds with a text/csv attachment on 200 (no JSON body).",
+        security: [{ bearerAuth: [] }],
+        querystring: TemplateQuerySchema,
+        response: {
+          ...errorResponses(400, 401, 403, 500),
+        },
+      },
+    },
+    async (req, reply) => {
+      const auth = await requireAuth(req);
+      const query = req.query as { participant_type?: string };
+      const participantType = query.participant_type;
+      const validTypes = await getValidParticipantTypes();
+      if (!participantType || !validTypes.has(participantType)) {
+        throw httpError('SCHEMA_VALIDATION', {
+          detail: `participant_type must be one of: ${[...validTypes].join(', ')}.`,
+          fields: { participant_type: 'invalid' },
+        });
+      }
+      enforceAggregatorType(auth, participantType as string);
+
+      // Prefer a curated, data-complete sample CSV shipped with the active
+      // network config (config/<network>/bulk-samples/<type>.csv) — real, valid
+      // rows an operator can edit in place beat a synthesised one-row template.
+      // Fall back to the schema-generated template when none is shipped.
+      const sample = await readBulkSample(participantType as string);
+      if (sample !== null) {
+        void auth; // authenticated for audit; curated sample is static content
+        return reply
+          .header('Content-Type', 'text/csv; charset=utf-8')
+          .header('Content-Disposition', `attachment; filename="${participantType}-template.csv"`)
+          .send(sample);
+      }
+
+      const schemaResult = await getSchemaLoader().getSchema({
+        id: `participant-${participantType}`,
+        version: 'v1',
       });
-    }
-    enforceAggregatorType(auth, participantType as string);
-
-    const schemaResult = await getSchemaLoader().getSchema({
-      id: `participant-${participantType}`,
-      version: 'v1',
-    });
-    if (!schemaResult.success) {
-      throw httpError('INTERNAL', {
-        detail: 'Participant schema unavailable.',
-        cause: new Error(schemaResult.error.message),
+      if (!schemaResult.success) {
+        throw httpError('INTERNAL', {
+          detail: 'Participant schema unavailable.',
+          cause: new Error(schemaResult.error.message),
+        });
+      }
+      const cfg = await getNetworkConfig();
+      const csv = buildCsvTemplate(schemaResult.value, {
+        arrayDelimiter: cfg.aggregator.network.csv_array_delimiter,
       });
-    }
-    const cfg = await getNetworkConfig();
-    const csv = buildCsvTemplate(schemaResult.value, {
-      arrayDelimiter: cfg.aggregator.network.csv_array_delimiter,
-    });
-    void auth; // authenticated for audit; csv content is schema-derived only
-    return reply
-      .header('Content-Type', 'text/csv; charset=utf-8')
-      .header('Content-Disposition', `attachment; filename="${participantType}-template.csv"`)
-      .send(csv);
-  });
+      void auth; // authenticated for audit; csv content is schema-derived only
+      return reply
+        .header('Content-Type', 'text/csv; charset=utf-8')
+        .header('Content-Disposition', `attachment; filename="${participantType}-template.csv"`)
+        .send(csv);
+    },
+  );
 
-  app.post('/v1/bulk-uploads', async (req, reply) => {
-    const auth = await requireAuth(req);
-    const log = req.log.child({ operation: 'bulkUploads.create', actor: auth.userId });
-    const start = Date.now();
+  app.post(
+    '/v1/bulk-uploads',
+    {
+      schema: {
+        tags: ['bulk-uploads'],
+        summary: 'Create a new bulk-upload job',
+        description:
+          'Reserves a pending bulk-upload job for the caller aggregator and returns a pre-signed S3 PUT URL. The browser uploads CSV bytes directly to S3, then calls /start. `participant_type` is validated against the active network config at request time.',
+        security: [{ bearerAuth: [] }],
+        body: CreateBulkUploadBodySchema,
+        response: {
+          201: CreateBulkUploadResponseSchema,
+          ...errorResponses(400, 401, 403, 503),
+        },
+      },
+    },
+    async (req, reply) => {
+      const auth = await requireAuth(req);
+      const log = req.log.child({ operation: 'bulkUploads.create', actor: auth.userId });
+      const start = Date.now();
 
-    const body = (req.body ?? {}) as CreateBody;
-    const participantType = typeof body.participant_type === 'string' ? body.participant_type : '';
-    const validTypes = await getValidParticipantTypes();
-    if (!validTypes.has(participantType)) {
-      throw httpError('SCHEMA_VALIDATION', {
-        detail: `participant_type must be one of: ${[...validTypes].join(', ')}.`,
-        fields: { participant_type: 'invalid' },
-      });
-    }
-    enforceAggregatorType(auth, participantType as string);
+      // Shape is already validated by the route schema; the value itself is
+      // network-config driven, so membership is checked against live config here.
+      const { participant_type: participantType } = req.body as z.infer<
+        typeof CreateBulkUploadBodySchema
+      >;
+      const validTypes = await getValidParticipantTypes();
+      if (!validTypes.has(participantType)) {
+        throw httpError('SCHEMA_VALIDATION', {
+          detail: `participant_type must be one of: ${[...validTypes].join(', ')}.`,
+          fields: { participant_type: 'invalid' },
+        });
+      }
+      enforceAggregatorType(auth, participantType);
 
-    // Pin the active schema version at create time. v1 is the only published
-    // version today; this becomes a registry lookup once schema versioning ships.
-    const schemaId = `participant-${participantType}`;
-    const schemaVersion = 'v1';
+      // Pin the active schema version at create time. v1 is the only published
+      // version today; this becomes a registry lookup once schema versioning ships.
+      const schemaId = `participant-${participantType}`;
+      const schemaVersion = 'v1';
 
-    const store = getBulkUploadsStore();
-    const created = await store.create({
-      aggregatorId: auth.aggregatorId,
-      participantType: participantType as string,
-      // Temporary placeholder; replaced after sign call below. We need the
-      // row id to compute the deterministic key, so create-then-update.
-      s3Key: 'pending',
-      schemaId,
-      schemaVersion,
-      uploadedBy: auth.userId,
-    });
-    if (!created.ok) {
-      log.error({
-        status: 'failure',
-        error: created.error.code,
-        latency_ms: Date.now() - start,
-      });
-      throw httpError('DB_UNAVAILABLE', { cause: new Error(created.error.message) });
-    }
-
-    const uploadId = created.value.id;
-    const signed = await signBulkUploadUrl({
-      uploadId,
-      aggregatorId: auth.aggregatorId,
-    });
-
-    // Persist the real key now that we know it. The store doesn't yet expose
-    // an updateKey method; reach in via Drizzle directly. (Slice 8 cleanup
-    // can move this into the store interface.)
-    const { getDb } = await import('../db/client.js');
-    const { bulkUploads } = await import('../db/schema.js');
-    const { eq } = await import('drizzle-orm');
-    await getDb()
-      .update(bulkUploads)
-      .set({ s3Key: signed.key, updatedAt: new Date() })
-      .where(eq(bulkUploads.id, uploadId));
-
-    log.info({
-      status: 'success',
-      latency_ms: Date.now() - start,
-      upload_id: uploadId,
-      aggregator_id: auth.aggregatorId,
-    });
-
-    return reply.code(201).send({
-      upload_id: uploadId,
-      upload_url: signed.url,
-      s3_key: signed.key,
-      expires_at: signed.expiresAt,
-      content_type: signed.contentType,
-      max_bytes: signed.maxBytes,
-      schema_id: schemaId,
-      schema_version: schemaVersion,
-      status: 'pending',
-    });
-  });
-
-  app.post('/v1/bulk-uploads/:id/start', async (req, reply) => {
-    const auth = await requireAuth(req);
-    const params = req.params as { id?: string };
-    const uploadId = params.id;
-    if (!uploadId) {
-      throw httpError('SCHEMA_VALIDATION', { detail: 'upload_id is required.' });
-    }
-    const log = req.log.child({
-      operation: 'bulkUploads.start',
-      actor: auth.userId,
-      upload_id: uploadId,
-    });
-    const start = Date.now();
-
-    const store = getBulkUploadsStore();
-    const found = await store.findById(uploadId, auth.aggregatorId);
-    if (!found.ok) {
-      throw httpError('DB_UNAVAILABLE', { cause: new Error(found.error.message) });
-    }
-    if (!found.value) {
-      // 403 to prevent cross-aggregator enumeration.
-      throw httpError('FORBIDDEN', { detail: 'Upload not accessible.' });
-    }
-
-    const upload = found.value;
-    // Idempotent re-call: already past 'uploaded' → just return current.
-    if (upload.status !== 'pending' && upload.status !== 'uploaded') {
-      log.warn({
-        status: 'skipped',
-        reason: 'invalid_transition',
-        current_status: upload.status,
-        latency_ms: Date.now() - start,
-      });
-      return reply.send(toResponse(upload));
-    }
-
-    const head = await headObject(upload.s3Key);
-    if (!head) {
-      log.warn({
-        status: 'failure',
-        reason: 's3_object_missing',
-        s3_key: upload.s3Key,
-        latency_ms: Date.now() - start,
-      });
-      throw httpError('SCHEMA_VALIDATION', {
-        detail: 'CSV upload not found in object storage. Complete the PUT and retry.',
-      });
-    }
-    if (head.contentLength === 0) {
-      throw httpError('SCHEMA_VALIDATION', { detail: 'Uploaded CSV is empty.' });
-    }
-    if (head.contentLength > config.BULK_UPLOAD_MAX_BYTES) {
-      // Belt + braces alongside the signed PUT — S3 PUT signing alone does not
-      // bind a max size on the GetObject side, and the worker downloads the
-      // whole object into memory. Reject before enqueueing.
-      log.warn({
-        status: 'failure',
-        reason: 'object_too_large',
-        s3_key: upload.s3Key,
-        content_length: head.contentLength,
-        max_bytes: config.BULK_UPLOAD_MAX_BYTES,
-      });
-      throw httpError('SCHEMA_VALIDATION', {
-        detail: `Uploaded CSV is too large (${head.contentLength} bytes; max ${config.BULK_UPLOAD_MAX_BYTES}).`,
-      });
-    }
-
-    // Aggregators are allowed to re-upload the same CSV bytes — the
-    // partial UNIQUE on (aggregator_id, s3_etag) was dropped in
-    // migration 0011. Any non-OK result here is a real DB / state
-    // error, not a duplicate.
-    const marked = await store.markUploaded(uploadId, auth.aggregatorId, head.etag);
-    if (!marked.ok) {
-      throw httpError('DB_UNAVAILABLE', { cause: new Error(marked.error.message) });
-    }
-
-    try {
-      await enqueueBulkFileProcess({
-        uploadId: marked.value.id,
+      const store = getBulkUploadsStore();
+      const created = await store.create({
         aggregatorId: auth.aggregatorId,
-        s3Key: marked.value.s3Key,
-        participantType: marked.value.participantType,
-        schemaId: marked.value.schemaId,
-        schemaVersion: marked.value.schemaVersion,
+        participantType,
+        // Temporary placeholder; replaced after sign call below. We need the
+        // row id to compute the deterministic key, so create-then-update.
+        s3Key: 'pending',
+        schemaId,
+        schemaVersion,
+        uploadedBy: auth.userId,
       });
-    } catch (err) {
-      // Enqueue failed but the row is already in 'uploaded' status. The
-      // stuck-job watchdog will surface this if no worker picks it up.
-      log.error({
-        status: 'failure',
-        sub_operation: 'enqueue.bulk-file-process',
-        error: (err as Error).message,
+      if (!created.ok) {
+        log.error({
+          status: 'failure',
+          error: created.error.code,
+          latency_ms: Date.now() - start,
+        });
+        throw httpError('DB_UNAVAILABLE', { cause: new Error(created.error.message) });
+      }
+
+      const uploadId = created.value.id;
+      const signed = await signBulkUploadUrl({
+        uploadId,
+        aggregatorId: auth.aggregatorId,
       });
-      throw httpError('INTERNAL', { cause: err });
-    }
 
-    log.info({
-      status: 'success',
-      latency_ms: Date.now() - start,
-      etag: head.etag,
-      content_length: head.contentLength,
-      next_status: marked.value.status,
-    });
+      // Persist the real key now that we know it. The store doesn't yet expose
+      // an updateKey method; reach in via Drizzle directly. (Slice 8 cleanup
+      // can move this into the store interface.)
+      const { getDb } = await import('../db/client.js');
+      const { bulkUploads } = await import('../db/schema.js');
+      const { eq } = await import('drizzle-orm');
+      await getDb()
+        .update(bulkUploads)
+        .set({ s3Key: signed.key, updatedAt: new Date() })
+        .where(eq(bulkUploads.id, uploadId));
 
-    return reply.send(toResponse(marked.value));
-  });
-
-  app.get('/v1/bulk-uploads', async (req, reply) => {
-    const auth = await requireAuth(req);
-    const query = req.query as { limit?: string; offset?: string };
-    const limit = Math.max(1, Math.min(100, Number.parseInt(query.limit ?? '20', 10) || 20));
-    const offset = Math.max(0, Number.parseInt(query.offset ?? '0', 10) || 0);
-
-    const store = getBulkUploadsStore();
-    const result = await store.list(auth.aggregatorId, { limit, offset });
-    if (!result.ok) {
-      throw httpError('DB_UNAVAILABLE', { cause: new Error(result.error.message) });
-    }
-    const countsBatch = await loadCountsBatch(result.value.rows);
-    return reply.send({
-      items: result.value.rows.map((row) =>
-        toResponse(row, countsBatch.get(row.id) ?? ZERO_COUNTS),
-      ),
-      total: result.value.total,
-      limit,
-      offset,
-    });
-  });
-
-  app.get('/v1/bulk-uploads/:id', async (req, reply) => {
-    const auth = await requireAuth(req);
-    const params = req.params as { id?: string };
-    const uploadId = params.id;
-    if (!uploadId) {
-      throw httpError('SCHEMA_VALIDATION', { detail: 'upload_id is required.' });
-    }
-
-    const store = getBulkUploadsStore();
-    const found = await store.findById(uploadId, auth.aggregatorId);
-    if (!found.ok) {
-      throw httpError('DB_UNAVAILABLE', { cause: new Error(found.error.message) });
-    }
-    if (!found.value) {
-      throw httpError('FORBIDDEN', { detail: 'Upload not accessible.' });
-    }
-
-    const counts = await loadCounts(found.value.id, found.value.status);
-    return reply.send(toResponse(found.value, counts));
-  });
-
-  app.get('/v1/bulk-uploads/:id/errors.csv', async (req, reply) => {
-    const auth = await requireAuth(req);
-    const params = req.params as { id?: string };
-    const uploadId = params.id;
-    if (!uploadId) {
-      throw httpError('SCHEMA_VALIDATION', { detail: 'upload_id is required.' });
-    }
-    const log = req.log.child({
-      operation: 'bulkUploads.errorsCsv',
-      actor: auth.userId,
-      upload_id: uploadId,
-    });
-    const start = Date.now();
-
-    const store = getBulkUploadsStore();
-    const found = await store.findById(uploadId, auth.aggregatorId);
-    if (!found.ok) {
-      throw httpError('DB_UNAVAILABLE', { cause: new Error(found.error.message) });
-    }
-    if (!found.value) {
-      // 403 to prevent cross-aggregator enumeration.
-      throw httpError('FORBIDDEN', { detail: 'Upload not accessible.' });
-    }
-    const upload = found.value;
-
-    if (upload.status !== 'completed') {
       log.info({
-        status: 'skipped',
-        reason: 'not_completed',
-        current_status: upload.status,
+        status: 'success',
         latency_ms: Date.now() - start,
+        upload_id: uploadId,
+        aggregator_id: auth.aggregatorId,
       });
-      throw httpError('BULK_UPLOAD_NOT_READY', {
-        detail: `Upload is in status '${upload.status}'. The errors report is generated only after finalisation.`,
+
+      return reply.code(201).send({
+        upload_id: uploadId,
+        upload_url: signed.url,
+        s3_key: signed.key,
+        expires_at: signed.expiresAt,
+        content_type: signed.contentType,
+        max_bytes: signed.maxBytes,
+        schema_id: schemaId,
+        schema_version: schemaVersion,
+        status: 'pending',
       });
-    }
-    if (!upload.errorsCsvS3Key) {
-      // The Finaliser only writes errors.csv when `failed > 0`. A null key
-      // on a completed run = clean upload (every row passed). Communicate
-      // that to the UI so it can hide the "Download errors" button instead
-      // of rendering it as a broken link.
+    },
+  );
+
+  app.post(
+    '/v1/bulk-uploads/:id/start',
+    {
+      schema: {
+        tags: ['bulk-uploads'],
+        summary: 'Start processing a pending bulk-upload job',
+        description:
+          'Transitions a pending job to running; the worker onboards each valid row to signalstack. Idempotent on already-running/completed jobs.',
+        security: [{ bearerAuth: [] }],
+        params: BulkUploadParamsSchema,
+        response: {
+          200: BulkUploadResponseSchema,
+          ...errorResponses(400, 401, 403, 500, 503),
+        },
+      },
+    },
+    async (req, reply) => {
+      const auth = await requireAuth(req);
+      // Params are already validated by the route schema (id: non-empty string).
+      const { id: uploadId } = req.params as z.infer<typeof BulkUploadParamsSchema>;
+      const log = req.log.child({
+        operation: 'bulkUploads.start',
+        actor: auth.userId,
+        upload_id: uploadId,
+      });
+      const start = Date.now();
+
+      const store = getBulkUploadsStore();
+      const found = await store.findById(uploadId, auth.aggregatorId);
+      if (!found.ok) {
+        throw httpError('DB_UNAVAILABLE', { cause: new Error(found.error.message) });
+      }
+      if (!found.value) {
+        // 403 to prevent cross-aggregator enumeration.
+        throw httpError('FORBIDDEN', { detail: 'Upload not accessible.' });
+      }
+
+      const upload = found.value;
+      // Idempotent re-call: already past 'uploaded' → just return current.
+      if (upload.status !== 'pending' && upload.status !== 'uploaded') {
+        log.warn({
+          status: 'skipped',
+          reason: 'invalid_transition',
+          current_status: upload.status,
+          latency_ms: Date.now() - start,
+        });
+        return reply.send(toResponse(upload));
+      }
+
+      const head = await headObject(upload.s3Key);
+      if (!head) {
+        log.warn({
+          status: 'failure',
+          reason: 's3_object_missing',
+          s3_key: upload.s3Key,
+          latency_ms: Date.now() - start,
+        });
+        throw httpError('SCHEMA_VALIDATION', {
+          detail: 'CSV upload not found in object storage. Complete the PUT and retry.',
+        });
+      }
+      if (head.contentLength === 0) {
+        throw httpError('SCHEMA_VALIDATION', { detail: 'Uploaded CSV is empty.' });
+      }
+      if (head.contentLength > config.BULK_UPLOAD_MAX_BYTES) {
+        // Belt + braces alongside the signed PUT — S3 PUT signing alone does not
+        // bind a max size on the GetObject side, and the worker downloads the
+        // whole object into memory. Reject before enqueueing.
+        log.warn({
+          status: 'failure',
+          reason: 'object_too_large',
+          s3_key: upload.s3Key,
+          content_length: head.contentLength,
+          max_bytes: config.BULK_UPLOAD_MAX_BYTES,
+        });
+        throw httpError('SCHEMA_VALIDATION', {
+          detail: `Uploaded CSV is too large (${head.contentLength} bytes; max ${config.BULK_UPLOAD_MAX_BYTES}).`,
+        });
+      }
+
+      // Aggregators are allowed to re-upload the same CSV bytes — the
+      // partial UNIQUE on (aggregator_id, s3_etag) was dropped in
+      // migration 0011. Any non-OK result here is a real DB / state
+      // error, not a duplicate.
+      const marked = await store.markUploaded(uploadId, auth.aggregatorId, head.etag);
+      if (!marked.ok) {
+        throw httpError('DB_UNAVAILABLE', { cause: new Error(marked.error.message) });
+      }
+
+      try {
+        await enqueueBulkFileProcess({
+          uploadId: marked.value.id,
+          aggregatorId: auth.aggregatorId,
+          s3Key: marked.value.s3Key,
+          participantType: marked.value.participantType,
+          schemaId: marked.value.schemaId,
+          schemaVersion: marked.value.schemaVersion,
+        });
+      } catch (err) {
+        // Enqueue failed but the row is already in 'uploaded' status. The
+        // stuck-job watchdog will surface this if no worker picks it up.
+        log.error({
+          status: 'failure',
+          sub_operation: 'enqueue.bulk-file-process',
+          error: (err as Error).message,
+        });
+        throw httpError('INTERNAL', { cause: err });
+      }
+
       log.info({
-        status: 'skipped',
-        reason: 'no_errors_to_report',
+        status: 'success',
+        latency_ms: Date.now() - start,
+        etag: head.etag,
+        content_length: head.contentLength,
+        next_status: marked.value.status,
       });
-      throw httpError('NOT_FOUND', {
-        detail: 'No errors to download — all rows in this upload passed.',
+
+      return reply.send(toResponse(marked.value));
+    },
+  );
+
+  app.get(
+    '/v1/bulk-uploads',
+    {
+      schema: {
+        tags: ['bulk-uploads'],
+        summary: 'List bulk-upload jobs',
+        description: 'Paginated list of bulk-upload jobs (newest first) for the caller aggregator.',
+        security: [{ bearerAuth: [] }],
+        querystring: ListBulkUploadsQuerySchema,
+        response: {
+          200: ListBulkUploadsResponseSchema,
+          ...errorResponses(400, 401, 403, 503),
+        },
+      },
+    },
+    async (req, reply) => {
+      const auth = await requireAuth(req);
+      // Query is already validated + coerced by the route schema (bounds + defaults).
+      const { limit, offset } = req.query as z.infer<typeof ListBulkUploadsQuerySchema>;
+
+      const store = getBulkUploadsStore();
+      const result = await store.list(auth.aggregatorId, { limit, offset });
+      if (!result.ok) {
+        throw httpError('DB_UNAVAILABLE', { cause: new Error(result.error.message) });
+      }
+      const countsBatch = await loadCountsBatch(result.value.rows);
+      return reply.send({
+        items: result.value.rows.map((row) =>
+          toResponse(row, countsBatch.get(row.id) ?? ZERO_COUNTS),
+        ),
+        total: result.value.total,
+        limit,
+        offset,
       });
-    }
-    // Hardened: only sign keys that match the canonical errors.csv layout.
-    // Even though the worker writes a deterministic key, this guards against
-    // any future path (or DB tamper) signing a GET URL for an arbitrary object.
-    const expectedKey = `bulk-uploads/${upload.id}/errors.csv`;
-    if (upload.errorsCsvS3Key !== expectedKey) {
-      log.error({
-        status: 'failure',
-        reason: 'errors_csv_key_invalid',
+    },
+  );
+
+  app.get(
+    '/v1/bulk-uploads/:id',
+    {
+      schema: {
+        tags: ['bulk-uploads'],
+        summary: 'Read a bulk-upload job',
+        description:
+          'Returns the full job row including status, per-row counters, and error summary.',
+        security: [{ bearerAuth: [] }],
+        params: BulkUploadParamsSchema,
+        response: {
+          200: BulkUploadResponseSchema,
+          ...errorResponses(400, 401, 403, 503),
+        },
+      },
+    },
+    async (req, reply) => {
+      const auth = await requireAuth(req);
+      // Params are already validated by the route schema (id: non-empty string).
+      const { id: uploadId } = req.params as z.infer<typeof BulkUploadParamsSchema>;
+
+      const store = getBulkUploadsStore();
+      const found = await store.findById(uploadId, auth.aggregatorId);
+      if (!found.ok) {
+        throw httpError('DB_UNAVAILABLE', { cause: new Error(found.error.message) });
+      }
+      if (!found.value) {
+        throw httpError('FORBIDDEN', { detail: 'Upload not accessible.' });
+      }
+
+      const counts = await loadCounts(found.value.id, found.value.status);
+      return reply.send(toResponse(found.value, counts));
+    },
+  );
+
+  app.get(
+    '/v1/bulk-uploads/:id/errors.csv',
+    {
+      schema: {
+        tags: ['bulk-uploads'],
+        summary: 'Download per-row error CSV',
+        description:
+          'Returns a JSON payload carrying a short-lived pre-signed S3 GET URL for the errors.csv report (rows that failed validation/onboarding with reason + offending fields), plus the final counters. Only available once the upload is completed and at least one row failed.',
+        security: [{ bearerAuth: [] }],
+        params: BulkUploadParamsSchema,
+        response: {
+          200: ErrorsCsvResponseSchema,
+          ...errorResponses(400, 401, 403, 404, 410, 503),
+        },
+      },
+    },
+    async (req, reply) => {
+      const auth = await requireAuth(req);
+      // Params are already validated by the route schema (id: non-empty string).
+      const { id: uploadId } = req.params as z.infer<typeof BulkUploadParamsSchema>;
+      const log = req.log.child({
+        operation: 'bulkUploads.errorsCsv',
+        actor: auth.userId,
+        upload_id: uploadId,
+      });
+      const start = Date.now();
+
+      const store = getBulkUploadsStore();
+      const found = await store.findById(uploadId, auth.aggregatorId);
+      if (!found.ok) {
+        throw httpError('DB_UNAVAILABLE', { cause: new Error(found.error.message) });
+      }
+      if (!found.value) {
+        // 403 to prevent cross-aggregator enumeration.
+        throw httpError('FORBIDDEN', { detail: 'Upload not accessible.' });
+      }
+      const upload = found.value;
+
+      if (upload.status !== 'completed') {
+        log.info({
+          status: 'skipped',
+          reason: 'not_completed',
+          current_status: upload.status,
+          latency_ms: Date.now() - start,
+        });
+        throw httpError('BULK_UPLOAD_NOT_READY', {
+          detail: `Upload is in status '${upload.status}'. The errors report is generated only after finalisation.`,
+        });
+      }
+      if (!upload.errorsCsvS3Key) {
+        // The Finaliser only writes errors.csv when `failed > 0`. A null key
+        // on a completed run = clean upload (every row passed). Communicate
+        // that to the UI so it can hide the "Download errors" button instead
+        // of rendering it as a broken link.
+        log.info({
+          status: 'skipped',
+          reason: 'no_errors_to_report',
+        });
+        throw httpError('NOT_FOUND', {
+          detail: 'No errors to download — all rows in this upload passed.',
+        });
+      }
+      // Hardened: only sign keys that match the canonical errors.csv layout.
+      // Even though the worker writes a deterministic key, this guards against
+      // any future path (or DB tamper) signing a GET URL for an arbitrary object.
+      const expectedKey = `bulk-uploads/${upload.id}/errors.csv`;
+      if (upload.errorsCsvS3Key !== expectedKey) {
+        log.error({
+          status: 'failure',
+          reason: 'errors_csv_key_invalid',
+          s3_key: upload.errorsCsvS3Key,
+        });
+        throw httpError('NOT_FOUND', { detail: 'Errors report not available for this upload.' });
+      }
+
+      const signed = await signErrorsCsvDownloadUrl(upload.errorsCsvS3Key);
+
+      log.info({
+        status: 'success',
+        latency_ms: Date.now() - start,
         s3_key: upload.errorsCsvS3Key,
       });
-      throw httpError('NOT_FOUND', { detail: 'Errors report not available for this upload.' });
-    }
 
-    const signed = await signErrorsCsvDownloadUrl(upload.errorsCsvS3Key);
-
-    log.info({
-      status: 'success',
-      latency_ms: Date.now() - start,
-      s3_key: upload.errorsCsvS3Key,
-    });
-
-    const counts = await loadCounts(upload.id, upload.status);
-    return reply.send({
-      upload_id: upload.id,
-      url: signed.url,
-      s3_key: signed.key,
-      expires_at: signed.expiresAt,
-      content_type: 'text/csv',
-      counts: {
-        total_rows: counts.totalRows,
-        passed: counts.passed,
-        failed: counts.failed,
-        skipped: counts.skipped,
-      },
-    });
-  });
+      const counts = await loadCounts(upload.id, upload.status);
+      return reply.send({
+        upload_id: upload.id,
+        url: signed.url,
+        s3_key: signed.key,
+        expires_at: signed.expiresAt,
+        content_type: 'text/csv',
+        counts: {
+          total_rows: counts.totalRows,
+          passed: counts.passed,
+          failed: counts.failed,
+          skipped: counts.skipped,
+        },
+      });
+    },
+  );
 }
 
 interface BulkUploadResponseShape {
