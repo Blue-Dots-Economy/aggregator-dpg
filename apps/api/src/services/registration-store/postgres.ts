@@ -268,6 +268,10 @@ export class PostgresRegistrationStore extends RegistrationStoreBase {
         )`;
       }
 
+      // Stamp sent_at timestamps atomically with the provision-state update.
+      if (opts?.welcomeSentAt !== undefined) setFields['welcomeSentAt'] = opts.welcomeSentAt;
+      if (opts?.rejectionSentAt !== undefined) setFields['rejectionSentAt'] = opts.rejectionSentAt;
+
       const rows = await getDb()
         .update(registrations)
         .set(setFields)

@@ -1,9 +1,11 @@
 /**
  * Idempotent executor: graduate a registration to an active aggregator.
  *
- * Performs a single ACID transaction that inserts the `aggregators` +
- * `aggregator_profiles` rows from the registration data and then transitions
- * the registration from `approved` to `active`, stamping `aggregator_id`.
+ * Inserts the `aggregators` + `aggregator_profiles` rows from the registration
+ * data, then transitions the registration from `approved` to `active`, stamping
+ * `aggregator_id`. The aggregator INSERT uses `source_registration_id` as an
+ * idempotency key: a crash-and-retry returns the existing row instead of
+ * inserting a duplicate.
  *
  * Local projection — no external API calls, maximally reliable. After this
  * executor completes the registration is in `active` state and KC/signalstack
@@ -15,12 +17,15 @@ import { slugFromName } from '../slug.js';
 import type { AggregatorStoreBase } from '../aggregator-store/interface.js';
 import type { AggregatorProfileStoreBase } from '../aggregator-profile-store/interface.js';
 import type { RegistrationStoreBase, Registration } from '../registration-store/interface.js';
+import { handleProvisionFailure } from './provision-failure.js';
 import type { EnsureResult } from './index.js';
 
 export interface EnsureGraduatedDeps {
   store: RegistrationStoreBase;
   aggregatorStore: AggregatorStoreBase;
   aggregatorProfileStore: AggregatorProfileStoreBase;
+  /** Dead-letter threshold; read from `config.REGISTRATION_MAX_PROVISION_ATTEMPTS`. */
+  maxAttempts: number;
 }
 
 /**
@@ -29,8 +34,13 @@ export interface EnsureGraduatedDeps {
  * Skips when `provisionState.graduated === 'done'` (aggregator row already
  * exists) or when the registration is already in `active` state.
  *
+ * The aggregator INSERT carries `source_registration_id = reg.id`. A partial
+ * unique index on that column means a duplicate insert on retry silently
+ * returns the existing row instead of an error, making this executor safe to
+ * call multiple times.
+ *
  * @param reg - Registration in `approved` state.
- * @param deps - Store references.
+ * @param deps - Store references and dead-letter config.
  * @returns ok on success or skip; ok: false on store error.
  */
 export async function ensureGraduated(
@@ -69,7 +79,8 @@ export async function ensureGraduated(
 
     const orgSlug = slugFromName(reg.orgName);
 
-    // Create the aggregator row.
+    // Create the aggregator row. source_registration_id acts as the idempotency
+    // key: a crash-and-retry returns the existing aggregator transparently.
     const aggResult = await deps.aggregatorStore.create({
       orgSlug,
       actorType: 'aggregator',
@@ -85,39 +96,32 @@ export async function ensureGraduated(
       consent: reg.consent as never,
       createdBy: 'system',
       updatedBy: 'system',
+      sourceRegistrationId: reg.id,
     });
 
     if (!aggResult.ok) {
-      // DUPLICATE_SLUG can happen on retry — try again with a fresh suffix.
-      if (aggResult.error.code === 'DUPLICATE_SLUG') {
-        const retrySlug = slugFromName(reg.orgName);
-        const retryResult = await deps.aggregatorStore.create({
-          orgSlug: retrySlug,
-          actorType: 'aggregator',
-          name: reg.orgName,
-          type: (reg.orgType as 'seeker' | 'provider') ?? null,
-          url: reg.orgUrl ?? null,
-          contact: {
-            name: extractContactName(reg),
-            phone: reg.contactPhone,
-            email: reg.contactEmail,
-          },
-          locations: reg.orgLocations as never[],
-          consent: reg.consent as never,
-          createdBy: 'system',
-          updatedBy: 'system',
-        });
-        if (!retryResult.ok) {
-          return await failGraduated(op, reg, retryResult.error.message, deps, start);
-        }
-        return await graduate(reg, retryResult.value.id, deps, op, start);
-      }
-      return await failGraduated(op, reg, aggResult.error.message, deps, start);
+      return handleProvisionFailure(
+        op,
+        reg,
+        'graduated',
+        aggResult.error.message,
+        deps.store,
+        deps.maxAttempts,
+        start,
+      );
     }
 
     return await graduate(reg, aggResult.value.id, deps, op, start);
   } catch (err: unknown) {
-    return failGraduated(op, reg, err instanceof Error ? err.message : 'unknown', deps, start);
+    return handleProvisionFailure(
+      op,
+      reg,
+      'graduated',
+      err instanceof Error ? err.message : 'unknown',
+      deps.store,
+      deps.maxAttempts,
+      start,
+    );
   }
 }
 
@@ -138,7 +142,15 @@ async function graduate(
 
   if (!profileResult.ok) {
     if (profileResult.error.code !== 'DUPLICATE') {
-      return failGraduated(op, reg, profileResult.error.message, deps, start);
+      return handleProvisionFailure(
+        op,
+        reg,
+        'graduated',
+        profileResult.error.message,
+        deps.store,
+        deps.maxAttempts,
+        start,
+      );
     }
     // DUPLICATE is fine — profile already exists from a prior attempt.
   }
@@ -166,7 +178,15 @@ async function graduate(
       });
       return { ok: true };
     }
-    return failGraduated(op, reg, transResult.error.message, deps, start);
+    return handleProvisionFailure(
+      op,
+      reg,
+      'graduated',
+      transResult.error.message,
+      deps.store,
+      deps.maxAttempts,
+      start,
+    );
   }
 
   // markProjection on the newly-active row (version has bumped, but markProjection
@@ -181,24 +201,6 @@ async function graduate(
     latency_ms: Date.now() - start,
   });
   return { ok: true };
-}
-
-async function failGraduated(
-  op: string,
-  reg: Registration,
-  error: string,
-  deps: EnsureGraduatedDeps,
-  start: number,
-): Promise<EnsureResult> {
-  logger.error({
-    operation: op,
-    status: 'failure',
-    registration_id: reg.id,
-    error,
-    latency_ms: Date.now() - start,
-  });
-  await deps.store.markProjection(reg.id, 'graduated', 'failed');
-  return { ok: false, error };
 }
 
 function extractContactName(reg: Registration): string {

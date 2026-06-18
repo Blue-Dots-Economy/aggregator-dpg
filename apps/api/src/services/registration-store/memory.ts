@@ -207,6 +207,8 @@ export class InMemoryRegistrationStore extends RegistrationStoreBase {
       ...row,
       provisionState: { ...row.provisionState, [key]: nextStatus },
       provisionAttempts: nextAttempts,
+      ...(opts?.welcomeSentAt !== undefined ? { welcomeSentAt: opts.welcomeSentAt } : {}),
+      ...(opts?.rejectionSentAt !== undefined ? { rejectionSentAt: opts.rejectionSentAt } : {}),
       updatedAt: new Date(),
     });
     return { ok: true, value: undefined };

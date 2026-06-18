@@ -22,6 +22,8 @@
 
 export type EnsureResult = { ok: true } | { ok: false; error: string };
 
+export { handleProvisionFailure } from './provision-failure.js';
+
 export {
   ensureVerificationSent,
   type EnsureVerificationSentDeps,

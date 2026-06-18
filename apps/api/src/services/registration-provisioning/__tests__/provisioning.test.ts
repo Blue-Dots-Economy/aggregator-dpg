@@ -156,7 +156,7 @@ describe('ensureAdminNotified', () => {
 // ─── ensureKeycloakUser ───────────────────────────────────────────────────────
 
 describe('ensureKeycloakUser', () => {
-  const deps = () => ({ store, idpAdmin });
+  const deps = () => ({ store, idpAdmin, maxAttempts: 5 });
 
   it('creates KC user and marks done', async () => {
     const reg = buildRegistration({ state: 'approved', aggregatorId: 'agg-1' });
@@ -224,7 +224,7 @@ describe('ensureKeycloakUser', () => {
 // ─── ensureKeycloakUserDisabled ───────────────────────────────────────────────
 
 describe('ensureKeycloakUserDisabled', () => {
-  const deps = () => ({ store, idpAdmin });
+  const deps = () => ({ store, idpAdmin, maxAttempts: 5 });
 
   it('disables an existing KC user', async () => {
     const created = await idpAdmin.createUser({
@@ -241,7 +241,7 @@ describe('ensureKeycloakUserDisabled', () => {
 
     expect(result.ok).toBe(true);
     const loaded = await store.findById(reg.id);
-    expect(loaded.ok && loaded.value?.provisionState.kc_user).toBe('done');
+    expect(loaded.ok && loaded.value?.provisionState.kc_disabled).toBe('done');
 
     const kcUser = await idpAdmin.findById(userId);
     expect(kcUser.ok).toBe(true);
@@ -257,7 +257,7 @@ describe('ensureKeycloakUserDisabled', () => {
 
     expect(result.ok).toBe(true);
     const loaded = await store.findById(reg.id);
-    expect(loaded.ok && loaded.value?.provisionState.kc_user).toBe('done');
+    expect(loaded.ok && loaded.value?.provisionState.kc_disabled).toBe('done');
   });
 });
 
@@ -268,6 +268,7 @@ describe('ensureGraduated', () => {
     store,
     aggregatorStore: aggStore,
     aggregatorProfileStore: aggProfileStore,
+    maxAttempts: 5,
   });
 
   it('creates aggregator row and transitions to active', async () => {
@@ -332,7 +333,13 @@ describe('ensureGraduated', () => {
 // ─── ensureWelcomeSent ────────────────────────────────────────────────────────
 
 describe('ensureWelcomeSent', () => {
-  const deps = () => ({ store, mailer, portalUrl: 'http://portal.test' });
+  const deps = () => ({
+    store,
+    mailer,
+    portalUrl: 'http://portal.test',
+    maxAttempts: 5,
+    cooldownMinutes: 60,
+  });
 
   it('sends welcome email', async () => {
     const reg = buildRegistration({ state: 'active' });
@@ -360,7 +367,13 @@ describe('ensureWelcomeSent', () => {
 // ─── ensureRejectionSent ──────────────────────────────────────────────────────
 
 describe('ensureRejectionSent', () => {
-  const deps = () => ({ store, mailer, reason: 'Does not meet criteria.' });
+  const deps = () => ({
+    store,
+    mailer,
+    reason: 'Does not meet criteria.',
+    maxAttempts: 5,
+    cooldownMinutes: 60,
+  });
 
   it('sends rejection email with reason', async () => {
     const reg = buildRegistration({ state: 'rejected' });
@@ -399,7 +412,7 @@ describe('ensurePurged', () => {
     const reg = buildRegistration({ state: 'abandoned', idpUserId: userId });
     store.seed([reg]);
 
-    const result = await ensurePurged(reg, { store, idpAdmin });
+    const result = await ensurePurged(reg, { store, idpAdmin, maxAttempts: 5 });
 
     expect(result.ok).toBe(true);
     const kcUser = await idpAdmin.findById(userId);
@@ -410,7 +423,7 @@ describe('ensurePurged', () => {
     const reg = buildRegistration({ state: 'abandoned', idpUserId: 'kc-user-1' });
     store.seed([reg]);
 
-    const result = await ensurePurged(reg, { store, idpAdmin: null });
+    const result = await ensurePurged(reg, { store, idpAdmin: null, maxAttempts: 5 });
     expect(result.ok).toBe(true);
   });
 
@@ -418,7 +431,7 @@ describe('ensurePurged', () => {
     const reg = buildRegistration({ state: 'abandoned', idpUserId: 'nonexistent-user' });
     store.seed([reg]);
 
-    const result = await ensurePurged(reg, { store, idpAdmin });
+    const result = await ensurePurged(reg, { store, idpAdmin, maxAttempts: 5 });
     expect(result.ok).toBe(true);
   });
 });

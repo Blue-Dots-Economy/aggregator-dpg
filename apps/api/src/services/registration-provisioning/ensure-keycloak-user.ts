@@ -2,7 +2,8 @@
  * Idempotent executor: ensure the Keycloak identity is in the desired state.
  *
  * For `approved`/`active` registrations: find-or-create the KC user by email,
- * enable them, and set `decision_made = 'approved'` and `aggregator_id`.
+ * persist the userId immediately, enable them, and set `decision_made =
+ * 'approved'` and `aggregator_id`.
  *
  * For `rejected` registrations: find the user and disable them with
  * `decision_made = 'rejected'`.
@@ -15,22 +16,25 @@ import { logger } from '../../logger.js';
 import { KC_ATTR } from '../idp-admin/attributes.js';
 import type { IdpAdminAdapter } from '../idp-admin/interface.js';
 import type { RegistrationStoreBase, Registration } from '../registration-store/interface.js';
+import { handleProvisionFailure } from './provision-failure.js';
 import type { EnsureResult } from './index.js';
 
 export interface EnsureKeycloakUserDeps {
   store: RegistrationStoreBase;
   idpAdmin: IdpAdminAdapter;
+  /** Dead-letter threshold; read from `config.REGISTRATION_MAX_PROVISION_ATTEMPTS`. */
+  maxAttempts: number;
 }
 
 /**
  * Ensures the KC user matches the desired state for an approved registration.
  *
- * Find-or-creates the user by email, enables them, sets `decision_made =
- * 'approved'`, and links their `aggregator_id` attribute to the graduated
- * aggregator row. Idempotent: calling twice is safe.
+ * Find-or-creates the user by email, persists the Keycloak userId to the DB
+ * immediately (before any subsequent IDP calls), enables them, and sets
+ * `decision_made = 'approved'` plus `aggregator_id`. Idempotent.
  *
  * @param reg - Registration in `approved` or `active` state.
- * @param deps - IdP admin adapter and store.
+ * @param deps - IdP admin adapter, store, and dead-letter config.
  * @returns ok on success or skip; ok: false on IDP error.
  */
 export async function ensureKeycloakUser(
@@ -57,7 +61,15 @@ export async function ensureKeycloakUser(
     if (!userId) {
       const findResult = await deps.idpAdmin.findByEmail(reg.contactEmail);
       if (!findResult.ok) {
-        return fail(op, reg.id, findResult.error.message, deps, start);
+        return handleProvisionFailure(
+          op,
+          reg,
+          'kc_user',
+          findResult.error.message,
+          deps.store,
+          deps.maxAttempts,
+          start,
+        );
       }
 
       if (findResult.value) {
@@ -78,15 +90,46 @@ export async function ensureKeycloakUser(
             // Concurrent create — re-fetch
             const reFind = await deps.idpAdmin.findByEmail(reg.contactEmail);
             if (!reFind.ok || !reFind.value) {
-              return fail(op, reg.id, 'concurrent create then not found', deps, start);
+              return handleProvisionFailure(
+                op,
+                reg,
+                'kc_user',
+                'concurrent create then not found',
+                deps.store,
+                deps.maxAttempts,
+                start,
+              );
             }
             userId = reFind.value.id;
           } else {
-            return fail(op, reg.id, createResult.error.message, deps, start);
+            return handleProvisionFailure(
+              op,
+              reg,
+              'kc_user',
+              createResult.error.message,
+              deps.store,
+              deps.maxAttempts,
+              start,
+            );
           }
         } else {
           userId = createResult.value.id;
         }
+      }
+
+      // Persist the userId immediately so a crash between here and markProjection
+      // does not orphan the KC user — on retry we will find it via idpUserId.
+      const persistResult = await deps.store.setIdpUserId(reg.id, userId);
+      if (!persistResult.ok) {
+        return handleProvisionFailure(
+          op,
+          reg,
+          'kc_user',
+          persistResult.error.message,
+          deps.store,
+          deps.maxAttempts,
+          start,
+        );
       }
     }
 
@@ -101,12 +144,28 @@ export async function ensureKeycloakUser(
 
     const setAttrResult = await deps.idpAdmin.setAttributes(userId, attrs);
     if (!setAttrResult.ok) {
-      return fail(op, reg.id, setAttrResult.error.message, deps, start);
+      return handleProvisionFailure(
+        op,
+        reg,
+        'kc_user',
+        setAttrResult.error.message,
+        deps.store,
+        deps.maxAttempts,
+        start,
+      );
     }
 
     const enableResult = await deps.idpAdmin.enableUser(userId);
     if (!enableResult.ok) {
-      return fail(op, reg.id, enableResult.error.message, deps, start);
+      return handleProvisionFailure(
+        op,
+        reg,
+        'kc_user',
+        enableResult.error.message,
+        deps.store,
+        deps.maxAttempts,
+        start,
+      );
     }
 
     await deps.store.markProjection(reg.id, 'kc_user', 'done');
@@ -119,7 +178,15 @@ export async function ensureKeycloakUser(
     });
     return { ok: true };
   } catch (err: unknown) {
-    return fail(op, reg.id, err instanceof Error ? err.message : 'unknown', deps, start);
+    return handleProvisionFailure(
+      op,
+      reg,
+      'kc_user',
+      err instanceof Error ? err.message : 'unknown',
+      deps.store,
+      deps.maxAttempts,
+      start,
+    );
   }
 }
 
@@ -127,10 +194,11 @@ export async function ensureKeycloakUser(
  * Ensures the KC user is disabled with `decision_made = 'rejected'`.
  *
  * Skips when no KC user exists (no user was ever created — this is fine for
- * registrations rejected before provisioning started) or when already done.
+ * registrations rejected before provisioning started) or when `kc_disabled`
+ * is already `done`.
  *
  * @param reg - Registration in `rejected` state.
- * @param deps - IdP admin adapter and store.
+ * @param deps - IdP admin adapter, store, and dead-letter config.
  */
 export async function ensureKeycloakUserDisabled(
   reg: Registration,
@@ -139,7 +207,7 @@ export async function ensureKeycloakUserDisabled(
   const op = 'provisioning.ensureKeycloakUserDisabled';
   const start = Date.now();
 
-  if (reg.provisionState.kc_user === 'done') {
+  if (reg.provisionState.kc_disabled === 'done') {
     logger.debug({
       operation: op,
       status: 'skipped',
@@ -153,17 +221,25 @@ export async function ensureKeycloakUserDisabled(
     const userId = reg.idpUserId;
     if (!userId) {
       // No KC user was ever created (rejection before provisioning). Mark done.
-      await deps.store.markProjection(reg.id, 'kc_user', 'done');
+      await deps.store.markProjection(reg.id, 'kc_disabled', 'done');
       return { ok: true };
     }
 
     const findResult = await deps.idpAdmin.findById(userId);
     if (!findResult.ok) {
-      return fail(op, reg.id, findResult.error.message, deps, start);
+      return handleProvisionFailure(
+        op,
+        reg,
+        'kc_disabled',
+        findResult.error.message,
+        deps.store,
+        deps.maxAttempts,
+        start,
+      );
     }
     if (!findResult.value) {
       // User already deleted — that's fine.
-      await deps.store.markProjection(reg.id, 'kc_user', 'done');
+      await deps.store.markProjection(reg.id, 'kc_disabled', 'done');
       return { ok: true };
     }
 
@@ -171,15 +247,31 @@ export async function ensureKeycloakUserDisabled(
       [KC_ATTR.DECISION_MADE]: 'rejected',
     });
     if (!setAttrResult.ok) {
-      return fail(op, reg.id, setAttrResult.error.message, deps, start);
+      return handleProvisionFailure(
+        op,
+        reg,
+        'kc_disabled',
+        setAttrResult.error.message,
+        deps.store,
+        deps.maxAttempts,
+        start,
+      );
     }
 
     const disableResult = await deps.idpAdmin.disableUser(userId);
     if (!disableResult.ok) {
-      return fail(op, reg.id, disableResult.error.message, deps, start);
+      return handleProvisionFailure(
+        op,
+        reg,
+        'kc_disabled',
+        disableResult.error.message,
+        deps.store,
+        deps.maxAttempts,
+        start,
+      );
     }
 
-    await deps.store.markProjection(reg.id, 'kc_user', 'done');
+    await deps.store.markProjection(reg.id, 'kc_disabled', 'done');
     logger.info({
       operation: op,
       status: 'success',
@@ -188,24 +280,14 @@ export async function ensureKeycloakUserDisabled(
     });
     return { ok: true };
   } catch (err: unknown) {
-    return fail(op, reg.id, err instanceof Error ? err.message : 'unknown', deps, start);
+    return handleProvisionFailure(
+      op,
+      reg,
+      'kc_disabled',
+      err instanceof Error ? err.message : 'unknown',
+      deps.store,
+      deps.maxAttempts,
+      start,
+    );
   }
-}
-
-async function fail(
-  op: string,
-  registrationId: string,
-  error: string,
-  deps: EnsureKeycloakUserDeps,
-  start: number,
-): Promise<EnsureResult> {
-  logger.error({
-    operation: op,
-    status: 'failure',
-    registration_id: registrationId,
-    error,
-    latency_ms: Date.now() - start,
-  });
-  await deps.store.markProjection(registrationId, 'kc_user', 'failed');
-  return { ok: false, error };
 }

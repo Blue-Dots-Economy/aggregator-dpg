@@ -25,6 +25,7 @@ export class AggregatorStoreFake extends InMemoryAggregatorStore {
     this.bySlug.clear();
     this.byPhone.clear();
     this.byEmail.clear();
+    this.bySourceRegistrationId.clear();
   }
 }
 
@@ -62,6 +63,7 @@ export function buildAggregator(overrides: Partial<Aggregator> = {}): Aggregator
     createdAt,
     updatedAt: createdAt,
     signalstackOrgId: null,
+    sourceRegistrationId: null,
     ...overrides,
   };
 }

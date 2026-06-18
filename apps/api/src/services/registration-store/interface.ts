@@ -122,6 +122,17 @@ export interface TransitionMeta {
 export interface MarkProjectionOpts {
   /** When true, increments the attempt counter and stamps `last_attempt_at`. */
   bumpAttempt?: boolean;
+  /**
+   * When provided, writes `welcome_sent_at` atomically alongside the
+   * provision-state update. Prevents a crash between send and mark-done from
+   * leaving the timestamp unset.
+   */
+  welcomeSentAt?: Date;
+  /**
+   * When provided, writes `rejection_sent_at` atomically alongside the
+   * provision-state update.
+   */
+  rejectionSentAt?: Date;
 }
 
 export type RegistrationStoreError =

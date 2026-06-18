@@ -24,10 +24,20 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
   protected readonly bySlug = new Map<string, string>();
   protected readonly byPhone = new Map<string, string>();
   protected readonly byEmail = new Map<string, string>();
+  protected readonly bySourceRegistrationId = new Map<string, string>();
 
   async create(input: CreateAggregatorInput): Promise<StoreResult<Aggregator>> {
     const invariant = checkInvariant(input.actorType, input.type);
     if (invariant) return { ok: false, error: invariant };
+
+    // Graduation idempotency: return the existing row when source_registration_id
+    // is already indexed (mirrors the postgres partial-unique ON CONFLICT path).
+    if (input.sourceRegistrationId) {
+      const existingId = this.bySourceRegistrationId.get(input.sourceRegistrationId);
+      if (existingId) {
+        return { ok: true, value: this.byId.get(existingId)! };
+      }
+    }
 
     if (this.bySlug.has(input.orgSlug)) {
       return errResult('DUPLICATE_SLUG', `slug already exists: ${input.orgSlug}`);
@@ -60,6 +70,7 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
       createdAt: now,
       updatedAt: now,
       signalstackOrgId: null,
+      sourceRegistrationId: input.sourceRegistrationId ?? null,
     };
     this.indexInsert(row);
     return { ok: true, value: row };
@@ -181,6 +192,9 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
     this.bySlug.set(row.orgSlug, row.id);
     this.byPhone.set(row.contactPhone, row.id);
     this.byEmail.set(row.contactEmail, row.id);
+    if (row.sourceRegistrationId) {
+      this.bySourceRegistrationId.set(row.sourceRegistrationId, row.id);
+    }
   }
 
   protected indexReplace(prev: Aggregator, next: Aggregator): void {

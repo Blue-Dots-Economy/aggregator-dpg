@@ -315,10 +315,13 @@ async function handleApprove(
   void (async () => {
     const registrationId = reg.id;
     try {
+      const maxAttempts = config.REGISTRATION_MAX_PROVISION_ATTEMPTS;
+      const cooldownMinutes = config.REGISTRATION_WELCOME_RESEND_COOLDOWN_MINUTES;
       const deps = {
         store,
         aggregatorStore: getAggregatorStore(),
         aggregatorProfileStore: getAggregatorProfileStore(),
+        maxAttempts,
       };
       await ensureGraduated(approvedReg, deps);
 
@@ -326,7 +329,7 @@ async function handleApprove(
       const freshResult = await store.findById(registrationId);
       const freshReg = freshResult.ok && freshResult.value ? freshResult.value : approvedReg;
 
-      await ensureKeycloakUser(freshReg, { store, idpAdmin: getIdpAdmin() });
+      await ensureKeycloakUser(freshReg, { store, idpAdmin: getIdpAdmin(), maxAttempts });
 
       const ssWriter = getSignalStackWriter();
       if (ssWriter) {
@@ -341,6 +344,8 @@ async function handleApprove(
         store,
         mailer: getMailer(),
         portalUrl: config.PUBLIC_PORTAL_URL,
+        maxAttempts,
+        cooldownMinutes,
       });
     } catch (err) {
       logger.warn({
@@ -402,10 +407,18 @@ async function handleReject(
   void (async () => {
     const registrationId = reg.id;
     try {
-      await ensureKeycloakUserDisabled(rejectedReg, { store, idpAdmin: getIdpAdmin() });
+      const maxAttempts = config.REGISTRATION_MAX_PROVISION_ATTEMPTS;
+      const cooldownMinutes = config.REGISTRATION_WELCOME_RESEND_COOLDOWN_MINUTES;
+      await ensureKeycloakUserDisabled(rejectedReg, {
+        store,
+        idpAdmin: getIdpAdmin(),
+        maxAttempts,
+      });
       await ensureRejectionSent(rejectedReg, {
         store,
         mailer: getMailer(),
+        maxAttempts,
+        cooldownMinutes,
         ...(reason !== undefined ? { reason } : {}),
       });
     } catch (err) {

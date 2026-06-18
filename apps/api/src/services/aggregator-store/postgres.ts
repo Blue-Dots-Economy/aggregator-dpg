@@ -42,6 +42,7 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
           consent: input.consent,
           createdBy: input.createdBy,
           updatedBy: input.updatedBy,
+          sourceRegistrationId: input.sourceRegistrationId ?? null,
         })
         .returning();
       const row = rows[0];
@@ -56,6 +57,30 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
       });
       return { ok: true, value: toDomain(row) };
     } catch (err: unknown) {
+      // Graduation idempotency: if the partial unique index on source_registration_id
+      // fires, the aggregator row already exists from a prior attempt — return it.
+      const constraint = (err as { constraint?: string }).constraint ?? '';
+      if (
+        (err as { code?: string }).code === PG_UNIQUE_VIOLATION &&
+        constraint.includes('source_registration_id') &&
+        input.sourceRegistrationId
+      ) {
+        const [existing] = await getDb()
+          .select()
+          .from(aggregators)
+          .where(eq(aggregators.sourceRegistrationId, input.sourceRegistrationId))
+          .limit(1);
+        if (existing) {
+          logger.info({
+            operation: 'aggregatorStore.create',
+            status: 'success',
+            latency_ms: Date.now() - start,
+            aggregator_id: existing.id,
+            idempotent: true,
+          });
+          return { ok: true, value: toDomain(existing) };
+        }
+      }
       return this.mapWriteError('aggregatorStore.create', err, input.orgSlug, start);
     }
   }
@@ -291,5 +316,6 @@ function toDomain(row: typeof aggregators.$inferSelect): Aggregator {
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     signalstackOrgId: row.signalstackOrgId,
+    sourceRegistrationId: row.sourceRegistrationId,
   };
 }

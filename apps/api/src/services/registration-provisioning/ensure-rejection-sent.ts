@@ -1,13 +1,16 @@
 /**
  * Idempotent executor: send the rejection email to the applicant.
  *
- * Skips when `provisionState.rejection === 'done'`.
+ * Skips when `provisionState.rejection === 'done'`. Applies a cooldown guard
+ * against `rejectionSentAt` to avoid hammering the mailer on rapid retries.
+ * Stamps `rejection_sent_at` atomically with the `done` provision mark.
  */
 
 import { logger } from '../../logger.js';
 import { renderApplicantRejected } from '../email-templates/index.js';
 import type { RegistrationStoreBase, Registration } from '../registration-store/interface.js';
 import type { MailerAdapter } from '../mailer/interface.js';
+import { handleProvisionFailure } from './provision-failure.js';
 import type { EnsureResult } from './index.js';
 
 export interface EnsureRejectionSentDeps {
@@ -15,13 +18,21 @@ export interface EnsureRejectionSentDeps {
   mailer: MailerAdapter;
   /** Optional rejection reason surfaced to the applicant. */
   reason?: string;
+  /** Dead-letter threshold; read from `config.REGISTRATION_MAX_PROVISION_ATTEMPTS`. */
+  maxAttempts: number;
+  /** Minimum minutes between sends; read from `config.REGISTRATION_WELCOME_RESEND_COOLDOWN_MINUTES`. */
+  cooldownMinutes: number;
 }
 
 /**
  * Ensures the rejection email has been sent to the applicant.
  *
+ * Skips silently when within the cooldown window (prevents hammering the mailer
+ * on rapid reconciler retries). Stamps `rejection_sent_at` and marks
+ * `provisionState.rejection = 'done'` atomically in the same store write.
+ *
  * @param reg - Registration in `rejected` state.
- * @param deps - Mailer + store + optional reason.
+ * @param deps - Mailer, store, optional reason, and retry config.
  * @returns ok on success or skip; ok: false on send failure.
  */
 export async function ensureRejectionSent(
@@ -41,6 +52,20 @@ export async function ensureRejectionSent(
     return { ok: true };
   }
 
+  // Cooldown guard: skip if already sent within the configured window.
+  if (reg.rejectionSentAt) {
+    const cooldownMs = deps.cooldownMinutes * 60 * 1000;
+    if (Date.now() - reg.rejectionSentAt.getTime() < cooldownMs) {
+      logger.debug({
+        operation: op,
+        status: 'skipped',
+        registration_id: reg.id,
+        reason: 'cooldown',
+      });
+      return { ok: true };
+    }
+  }
+
   try {
     const contactName = extractContactName(reg);
     const { subject, html, text } = renderApplicantRejected({
@@ -52,19 +77,19 @@ export async function ensureRejectionSent(
     const mailResult = await deps.mailer.send({ to: reg.contactEmail, subject, html, text });
 
     if (!mailResult.ok) {
-      logger.error({
-        operation: op,
-        status: 'failure',
-        registration_id: reg.id,
-        error: mailResult.error.message,
-        error_type: mailResult.error.code,
-        latency_ms: Date.now() - start,
-      });
-      await deps.store.markProjection(reg.id, 'rejection', 'failed');
-      return { ok: false, error: mailResult.error.message };
+      return handleProvisionFailure(
+        op,
+        reg,
+        'rejection',
+        mailResult.error.message,
+        deps.store,
+        deps.maxAttempts,
+        start,
+      );
     }
 
-    await deps.store.markProjection(reg.id, 'rejection', 'done');
+    // Stamp rejection_sent_at atomically with the done mark.
+    await deps.store.markProjection(reg.id, 'rejection', 'done', { rejectionSentAt: new Date() });
     logger.info({
       operation: op,
       status: 'success',
@@ -73,16 +98,15 @@ export async function ensureRejectionSent(
     });
     return { ok: true };
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'unknown';
-    logger.error({
-      operation: op,
-      status: 'failure',
-      registration_id: reg.id,
-      error: message,
-      latency_ms: Date.now() - start,
-    });
-    await deps.store.markProjection(reg.id, 'rejection', 'failed');
-    return { ok: false, error: message };
+    return handleProvisionFailure(
+      op,
+      reg,
+      'rejection',
+      err instanceof Error ? err.message : 'unknown',
+      deps.store,
+      deps.maxAttempts,
+      start,
+    );
   }
 }
 

@@ -379,15 +379,23 @@ async function fireReopenProvisioning(
     const aggregatorProfileStore = getAggregatorProfileStore();
     const idpAdmin = getIdpAdmin();
     const signalStackWriter = getSignalStackWriter();
+    const maxAttempts = config.REGISTRATION_MAX_PROVISION_ATTEMPTS;
+    const cooldownMinutes = config.REGISTRATION_WELCOME_RESEND_COOLDOWN_MINUTES;
 
-    await ensureGraduated(reg, { store, aggregatorStore, aggregatorProfileStore });
+    await ensureGraduated(reg, { store, aggregatorStore, aggregatorProfileStore, maxAttempts });
     // Re-read after graduation so subsequent steps see the updated aggregatorId.
     const fresh = await store.findById(reg.id);
     const graduated = fresh.ok && fresh.value ? fresh.value : reg;
-    await ensureKeycloakUser(graduated, { store, idpAdmin });
+    await ensureKeycloakUser(graduated, { store, idpAdmin, maxAttempts });
     if (signalStackWriter) {
       await ensureSignalstackOrg(graduated, { store, aggregatorStore, signalStackWriter });
     }
-    await ensureWelcomeSent(graduated, { store, mailer, portalUrl: config.PUBLIC_PORTAL_URL });
+    await ensureWelcomeSent(graduated, {
+      store,
+      mailer,
+      portalUrl: config.PUBLIC_PORTAL_URL,
+      maxAttempts,
+      cooldownMinutes,
+    });
   }
 }

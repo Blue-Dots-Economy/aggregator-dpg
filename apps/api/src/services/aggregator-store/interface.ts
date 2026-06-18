@@ -44,6 +44,14 @@ export interface Aggregator {
    * source the per-call `x-acting-org-id` header.
    */
   signalstackOrgId: string | null;
+  /**
+   * FK back to the registration row that created this aggregator.
+   *
+   * Used as the idempotency key for graduation: the partial unique index on
+   * this column prevents a crash-and-retry from inserting a second aggregator
+   * for the same registration. NULL for aggregators created before the FSM.
+   */
+  sourceRegistrationId: string | null;
 }
 
 export interface CreateAggregatorInput {
@@ -57,6 +65,12 @@ export interface CreateAggregatorInput {
   consent: ConsentRecord;
   createdBy: string;
   updatedBy: string;
+  /**
+   * Registration UUID that triggered graduation. When set, a partial unique
+   * index conflict returns the existing aggregator instead of an error, making
+   * the create operation idempotent across crash-and-retry.
+   */
+  sourceRegistrationId?: string | null;
 }
 
 /**
