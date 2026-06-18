@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { InMemoryRegistrationStore } from '../memory.js';
-import { buildCreateRegistrationInput } from '../testing.js';
+import { RegistrationStoreFake, buildCreateRegistrationInput } from '../testing.js';
 
 let store: InMemoryRegistrationStore;
 
@@ -301,5 +301,150 @@ describe('listFlaggedForReconcile', () => {
     if (!flagged.ok) return;
     expect(flagged.value).toHaveLength(1);
     expect(flagged.value[0]!.id).toBe(r2.value.id);
+  });
+});
+
+describe('transition — nullable reset + provisionState override', () => {
+  it('resets timestamp fields when null is passed in patch', async () => {
+    const created = await store.create(buildCreateRegistrationInput());
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    const { id, version } = created.value;
+
+    // First set verificationSentAt.
+    await store.transition(
+      id,
+      'submitted',
+      'submitted',
+      { verificationSentAt: new Date('2026-01-01T00:00:00Z') },
+      version,
+      { actor: 'system' },
+    );
+
+    // Now re-open: reset back to null.
+    const reset = await store.transition(
+      id,
+      'submitted',
+      'submitted',
+      { verificationSentAt: null },
+      version + 1,
+      { actor: 'system' },
+    );
+    expect(reset.ok).toBe(true);
+    if (!reset.ok) return;
+    expect(reset.value.verificationSentAt).toBeNull();
+  });
+
+  it('replaces provisionState entirely when patch includes provisionState', async () => {
+    const created = await store.create(buildCreateRegistrationInput());
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    const { id, version } = created.value;
+
+    // Mark a step done first.
+    await store.markProjection(id, 'verification', 'done');
+
+    // Re-open: provisionState: {} should wipe it.
+    const reset = await store.transition(
+      id,
+      'submitted',
+      'submitted',
+      { provisionState: {} },
+      version,
+      { actor: 'system' },
+    );
+    expect(reset.ok).toBe(true);
+    if (!reset.ok) return;
+    expect(reset.value.provisionState).toEqual({});
+  });
+});
+
+describe('findAbandonedByContact', () => {
+  it('returns null when no abandoned row exists for the email', async () => {
+    const created = await store.create(buildCreateRegistrationInput());
+    expect(created.ok).toBe(true);
+    const result = await store.findAbandonedByContact('email', 'applicant@example.com');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value).toBeNull();
+  });
+
+  it('returns the abandoned row matching the email', async () => {
+    const created = await store.create(buildCreateRegistrationInput());
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+
+    await store.transition(created.value.id, 'submitted', 'abandoned', {}, 0, {
+      actor: 'reconciler',
+    });
+
+    const result = await store.findAbandonedByContact('email', 'applicant@example.com');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value?.id).toBe(created.value.id);
+    expect(result.value?.state).toBe('abandoned');
+  });
+
+  it('does not return a non-abandoned row for the same email', async () => {
+    await store.create(buildCreateRegistrationInput());
+    const result = await store.findAbandonedByContact('email', 'applicant@example.com');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value).toBeNull();
+  });
+});
+
+describe('getPreAbandonmentState', () => {
+  it('returns null when no transitions exist', async () => {
+    const created = await store.create(buildCreateRegistrationInput());
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    const result = await store.getPreAbandonmentState(created.value.id);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value).toBeNull();
+  });
+
+  it('returns the fromState recorded when the row was abandoned', async () => {
+    const fake = new RegistrationStoreFake();
+    const created = await fake.create(buildCreateRegistrationInput());
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+
+    await fake.transition(created.value.id, 'submitted', 'verified', {}, 0, { actor: 'applicant' });
+    await fake.transition(created.value.id, 'verified', 'abandoned', {}, 1, {
+      actor: 'reconciler',
+    });
+
+    const result = await fake.getPreAbandonmentState(created.value.id);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value).toBe('verified');
+  });
+
+  it('returns the most recent pre-abandonment state when abandoned multiple times', async () => {
+    const fake = new RegistrationStoreFake();
+    const created = await fake.create(buildCreateRegistrationInput());
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+
+    // First abandonment: from submitted.
+    await fake.transition(created.value.id, 'submitted', 'abandoned', {}, 0, {
+      actor: 'reconciler',
+    });
+    // Re-open to submitted.
+    await fake.transition(created.value.id, 'abandoned', 'submitted', {}, 1, { actor: 'admin' });
+    // Advance to verified.
+    await fake.transition(created.value.id, 'submitted', 'verified', {}, 2, { actor: 'applicant' });
+    // Second abandonment: from verified.
+    await fake.transition(created.value.id, 'verified', 'abandoned', {}, 3, {
+      actor: 'reconciler',
+    });
+
+    const result = await fake.getPreAbandonmentState(created.value.id);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Should return 'verified' — the most recent abandonment.
+    expect(result.value).toBe('verified');
   });
 });

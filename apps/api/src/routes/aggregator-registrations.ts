@@ -19,6 +19,7 @@
 
 import { createHash } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { z } from 'zod';
 import { RegistrationPayloadSchema } from '@aggregator-dpg/shared-primitives/aggregator';
 import { config } from '../config.js';
 import { getRegistrationValidator } from '../services/registration-validator.js';
@@ -130,6 +131,13 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
         });
       }
       if (existing.value !== null) {
+        // Re-open: if the applicant re-submits an identical form after their
+        // registration was abandoned (TTL expired), treat it as a re-open rather
+        // than a silent replay. This transitions the row back to `submitted`,
+        // clears all provision timestamps, and resends the verification email.
+        if (existing.value.state === 'abandoned') {
+          return reopenAsApplicant(existing.value, reply, log, start);
+        }
         log.info({
           status: 'idempotency_replay',
           registration_id: existing.value.id,
@@ -241,6 +249,82 @@ function stampConsent(
     given_at: now.toISOString(),
     valid_till: validTill.toISOString(),
   };
+}
+
+/**
+ * Re-opens an abandoned registration on behalf of the applicant.
+ *
+ * Transitions `abandoned → submitted`, clears all provision timestamps and
+ * provision_state entries so the verification email is sent fresh. A
+ * STALE_TRANSITION result means a concurrent request already re-opened the
+ * row — both cases return 202 to the applicant.
+ *
+ * @param reg - The abandoned registration found via idempotency key.
+ * @param reply - Fastify reply for the current request.
+ * @param log - Request-scoped logger.
+ * @param start - Request start timestamp for latency logging.
+ */
+async function reopenAsApplicant(
+  reg: { id: string; version: number },
+  reply: FastifyReply,
+  log: FastifyRequest['log'],
+  start: number,
+): Promise<ReturnType<FastifyReply['send']>> {
+  const store = getRegistrationStore();
+  const result = await store.transition(
+    reg.id,
+    'abandoned',
+    'submitted',
+    {
+      verificationSentAt: null,
+      verifiedAt: null,
+      adminNotifiedAt: null,
+      approvalLinkIssuedAt: null,
+      provisionState: {},
+      reconcilerClaimedAt: null,
+    },
+    reg.version,
+    { actor: 'applicant', reason: 'applicant_reopened' },
+  );
+
+  if (!result.ok) {
+    if (result.error.code === 'STALE_TRANSITION') {
+      log.info({ status: 'reopen_stale_concurrent', registration_id: reg.id });
+      return reply.status(202).send(SUBMIT_RESPONSE);
+    }
+    logger.warn({
+      operation: 'aggregator-registration.reopen',
+      status: 'transition_failed',
+      registration_id: reg.id,
+      error: result.error.message,
+    });
+    return reply.status(202).send(SUBMIT_RESPONSE);
+  }
+
+  // Best-effort: send fresh verification email.
+  try {
+    await ensureVerificationSent(result.value, {
+      store,
+      mailer: getMailer(),
+      portalUrl: config.PUBLIC_PORTAL_URL,
+      cooldownMinutes: config.REGISTRATION_RESEND_COOLDOWN_MINUTES,
+      ttlMinutes: config.REGISTRATION_VERIFICATION_TTL_MINUTES,
+    });
+  } catch (err) {
+    logger.warn({
+      operation: 'aggregator-registration.reopen',
+      status: 'verification_send_failed',
+      registration_id: result.value.id,
+      error: err instanceof Error ? err.message : 'unknown',
+    });
+  }
+
+  log.info({
+    status: 'applicant_reopened',
+    registration_id: result.value.id,
+    latency_ms: Date.now() - start,
+  });
+  return reply.status(202).send(SUBMIT_RESPONSE);
 }
 
 /**

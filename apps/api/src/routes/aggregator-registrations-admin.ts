@@ -19,6 +19,27 @@ import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import { getDb, schema } from '../db/client.js';
 import { runRegistrationReconcile, reconcileByContact } from '../jobs/registration-reconcile.js';
+import { getRegistrationStore } from '../services/registration-store/index.js';
+import { getAggregatorStore } from '../services/aggregator-store/index.js';
+import { getAggregatorProfileStore } from '../services/aggregator-profile-store/index.js';
+import { getIdpAdmin } from '../services/idp-admin/index.js';
+import { getMailer } from '../services/mailer/index.js';
+import { getSignalStackWriter } from '../services/signalstack.js';
+import { config, adminEmails } from '../config.js';
+import {
+  ensureVerificationSent,
+  ensureAdminNotified,
+  ensureGraduated,
+  ensureKeycloakUser,
+  ensureSignalstackOrg,
+  ensureWelcomeSent,
+} from '../services/registration-provisioning/index.js';
+import type {
+  Registration,
+  RegistrationState,
+  TransitionPatch,
+} from '../services/registration-store/interface.js';
+import { logger } from '../logger.js';
 import { HttpError } from '../errors/http-error.js';
 import { ERR } from '../errors/codes.js';
 
@@ -32,8 +53,6 @@ const VALID_STATES = [
   'rejected',
   'abandoned',
 ] as const;
-
-type RegistrationState = (typeof VALID_STATES)[number];
 
 const ListQuerySchema = z.object({
   state: z.enum(VALID_STATES).optional(),
@@ -202,4 +221,173 @@ export async function registerAggregatorRegistrationsAdminRoutes(
       });
     },
   );
+
+  // ── POST /admin/v1/aggregator/registration/reopen/:id ────────────────────
+  app.post<{ Params: { id: string }; Body: { reason?: string } }>(
+    '/admin/v1/aggregator/registration/reopen/:id',
+    async (req, reply) => {
+      const store = getRegistrationStore();
+      const { id } = req.params;
+
+      const findResult = await store.findById(id);
+      if (!findResult.ok) {
+        throw new HttpError(ERR.DB_UNAVAILABLE, { detail: findResult.error.message });
+      }
+      if (!findResult.value) {
+        throw new HttpError(ERR.NOT_FOUND, { detail: `Registration ${id} not found.` });
+      }
+
+      const reg = findResult.value;
+      if (reg.state !== 'abandoned') {
+        throw new HttpError(ERR.CONFLICT, {
+          detail: `Registration is in state '${reg.state}', not 'abandoned'. Only abandoned registrations can be re-opened.`,
+          fields: { current_state: reg.state },
+        });
+      }
+
+      // Determine target state from the transition history.
+      const preStateResult = await store.getPreAbandonmentState(id);
+      const targetState =
+        preStateResult.ok && preStateResult.value ? preStateResult.value : 'submitted';
+
+      const resetPatch = buildReopenPatch(targetState);
+      const transResult = await store.transition(
+        id,
+        'abandoned',
+        targetState,
+        resetPatch,
+        reg.version,
+        {
+          actor: 'admin',
+          reason: (req.body?.reason ?? 'admin_reopened') || 'admin_reopened',
+        },
+      );
+
+      if (!transResult.ok) {
+        if (transResult.error.code === 'STALE_TRANSITION') {
+          // Concurrent re-open — re-read and return current state.
+          const fresh = await store.findById(id);
+          return reply.send({
+            reopened: true,
+            targetState,
+            registration:
+              fresh.ok && fresh.value
+                ? toAdminView(fresh.value as Parameters<typeof toAdminView>[0])
+                : null,
+          });
+        }
+        throw new HttpError(ERR.DB_UNAVAILABLE, { detail: transResult.error.message });
+      }
+
+      // Best-effort inline provisioning based on target state.
+      void fireReopenProvisioning(transResult.value, targetState).catch((err: unknown) => {
+        logger.warn({
+          operation: 'admin.reopen.provisioning',
+          status: 'failed',
+          registration_id: id,
+          target_state: targetState,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+
+      logger.info({
+        operation: 'admin.reopen',
+        status: 'success',
+        registration_id: id,
+        target_state: targetState,
+        actor: 'admin',
+      });
+
+      return reply.send({ reopened: true, targetState });
+    },
+  );
+}
+
+// ─── Re-open helpers ──────────────────────────────────────────────────────────
+
+/**
+ * Builds the transition patch for a re-open based on the target state.
+ *
+ * - Back to `submitted`: full reset — the applicant must re-verify.
+ * - Back to `verified`: preserve verification-done, reset admin-notify timestamps
+ *   so the admin notification is resent.
+ * - Back to `approved`: only clear the reconciler claim; provision_state is
+ *   preserved so the reconciler retries only incomplete steps.
+ *
+ * @param targetState - State to re-open to.
+ */
+function buildReopenPatch(targetState: RegistrationState): TransitionPatch {
+  if (targetState === 'submitted') {
+    return {
+      verificationSentAt: null,
+      verifiedAt: null,
+      adminNotifiedAt: null,
+      approvalLinkIssuedAt: null,
+      provisionState: {},
+      reconcilerClaimedAt: null,
+    };
+  }
+  if (targetState === 'verified') {
+    return {
+      adminNotifiedAt: null,
+      approvalLinkIssuedAt: null,
+      provisionState: { verification: 'done' },
+      reconcilerClaimedAt: null,
+    };
+  }
+  // approved — keep provision_state; only release the reconciler claim.
+  return { reconcilerClaimedAt: null };
+}
+
+/**
+ * Fires provisioning steps inline after an admin re-open.
+ *
+ * @param reg - The freshly re-opened registration.
+ * @param targetState - The state the registration was re-opened to.
+ */
+async function fireReopenProvisioning(
+  reg: Registration,
+  targetState: RegistrationState,
+): Promise<void> {
+  const store = getRegistrationStore();
+  const mailer = getMailer();
+
+  if (targetState === 'submitted') {
+    await ensureVerificationSent(reg, {
+      store,
+      mailer,
+      portalUrl: config.PUBLIC_PORTAL_URL,
+      cooldownMinutes: config.REGISTRATION_RESEND_COOLDOWN_MINUTES,
+      ttlMinutes: config.REGISTRATION_VERIFICATION_TTL_MINUTES,
+    });
+    return;
+  }
+
+  if (targetState === 'verified') {
+    await ensureAdminNotified(reg, {
+      store,
+      mailer,
+      adminEmails,
+      apiUrl: config.PUBLIC_API_URL,
+      cooldownMinutes: config.REGISTRATION_RESEND_COOLDOWN_MINUTES,
+    });
+    return;
+  }
+
+  if (targetState === 'approved') {
+    const aggregatorStore = getAggregatorStore();
+    const aggregatorProfileStore = getAggregatorProfileStore();
+    const idpAdmin = getIdpAdmin();
+    const signalStackWriter = getSignalStackWriter();
+
+    await ensureGraduated(reg, { store, aggregatorStore, aggregatorProfileStore });
+    // Re-read after graduation so subsequent steps see the updated aggregatorId.
+    const fresh = await store.findById(reg.id);
+    const graduated = fresh.ok && fresh.value ? fresh.value : reg;
+    await ensureKeycloakUser(graduated, { store, idpAdmin });
+    if (signalStackWriter) {
+      await ensureSignalstackOrg(graduated, { store, aggregatorStore, signalStackWriter });
+    }
+    await ensureWelcomeSent(graduated, { store, mailer, portalUrl: config.PUBLIC_PORTAL_URL });
+  }
 }

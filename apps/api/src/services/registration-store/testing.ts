@@ -6,7 +6,7 @@
  */
 
 import { InMemoryRegistrationStore } from './memory.js';
-import type { Registration, CreateRegistrationInput } from './interface.js';
+import type { Registration, CreateRegistrationInput, RegistrationState } from './interface.js';
 
 export class RegistrationStoreFake extends InMemoryRegistrationStore {
   /**
@@ -18,6 +18,30 @@ export class RegistrationStoreFake extends InMemoryRegistrationStore {
     for (const r of rows) {
       this.byId.set(r.id, r);
       this.byIdempotencyKey.set(r.idempotencyKey, r.id);
+    }
+  }
+
+  /**
+   * Seeds the transition log with pre-built records for testing
+   * `getPreAbandonmentState` and other transition-history queries.
+   *
+   * @param entries - Transition records to append.
+   */
+  seedTransitions(
+    entries: Array<{
+      registrationId: string;
+      fromState: RegistrationState;
+      toState: RegistrationState;
+      at?: Date;
+    }>,
+  ): void {
+    for (const e of entries) {
+      this.transitions.push({
+        registrationId: e.registrationId,
+        fromState: e.fromState,
+        toState: e.toState,
+        at: e.at ?? new Date(),
+      });
     }
   }
 }

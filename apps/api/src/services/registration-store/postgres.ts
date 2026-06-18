@@ -7,7 +7,7 @@
  * so the caller knows to treat it as a no-op.
  */
 
-import { and, eq, inArray, not, or, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, not, or, sql } from 'drizzle-orm';
 import { logger } from '../../logger.js';
 import { registrations, registrationTransitions } from '../../db/schema.js';
 import { getDb } from '../../db/client.js';
@@ -127,14 +127,16 @@ export class PostgresRegistrationStore extends RegistrationStoreBase {
         if (patch.signalstackOrgId !== undefined)
           updates['signalstackOrgId'] = patch.signalstackOrgId;
         if (patch.aggregatorId !== undefined) updates['aggregatorId'] = patch.aggregatorId;
-        if (patch.verificationSentAt !== undefined)
-          updates['verificationSentAt'] = patch.verificationSentAt;
-        if (patch.verifiedAt !== undefined) updates['verifiedAt'] = patch.verifiedAt;
-        if (patch.adminNotifiedAt !== undefined) updates['adminNotifiedAt'] = patch.adminNotifiedAt;
-        if (patch.approvalLinkIssuedAt !== undefined)
-          updates['approvalLinkIssuedAt'] = patch.approvalLinkIssuedAt;
+        // Timestamps accept null to allow re-open resets.
+        if ('verificationSentAt' in patch)
+          updates['verificationSentAt'] = patch.verificationSentAt ?? null;
+        if ('verifiedAt' in patch) updates['verifiedAt'] = patch.verifiedAt ?? null;
+        if ('adminNotifiedAt' in patch) updates['adminNotifiedAt'] = patch.adminNotifiedAt ?? null;
+        if ('approvalLinkIssuedAt' in patch)
+          updates['approvalLinkIssuedAt'] = patch.approvalLinkIssuedAt ?? null;
         if ('reconcilerClaimedAt' in patch)
           updates['reconcilerClaimedAt'] = patch.reconcilerClaimedAt ?? null;
+        if ('provisionState' in patch) updates['provisionState'] = patch.provisionState ?? {};
 
         const rows = await tx
           .update(registrations)
@@ -264,6 +266,44 @@ export class PostgresRegistrationStore extends RegistrationStoreBase {
       return { ok: true, value: undefined };
     } catch (err: unknown) {
       return mapWriteError('registrationStore.markProjection', err, start);
+    }
+  }
+
+  async findAbandonedByContact(
+    field: 'email' | 'phone',
+    value: string,
+  ): Promise<StoreResult<Registration | null>> {
+    try {
+      const col = field === 'email' ? registrations.contactEmail : registrations.contactPhone;
+      const normalised = field === 'email' ? value.toLowerCase() : value;
+      const [row] = await getDb()
+        .select()
+        .from(registrations)
+        .where(and(eq(col, normalised), eq(registrations.state, 'abandoned')))
+        .orderBy(desc(registrations.updatedAt))
+        .limit(1);
+      return { ok: true, value: row ? toDomain(row) : null };
+    } catch (err: unknown) {
+      return mapReadError('registrationStore.findAbandonedByContact', err);
+    }
+  }
+
+  async getPreAbandonmentState(id: string): Promise<StoreResult<RegistrationState | null>> {
+    try {
+      const [row] = await getDb()
+        .select({ fromState: registrationTransitions.fromState })
+        .from(registrationTransitions)
+        .where(
+          and(
+            eq(registrationTransitions.registrationId, id),
+            eq(registrationTransitions.toState, 'abandoned'),
+          ),
+        )
+        .orderBy(desc(registrationTransitions.at))
+        .limit(1);
+      return { ok: true, value: (row?.fromState as RegistrationState) ?? null };
+    } catch (err: unknown) {
+      return mapReadError('registrationStore.getPreAbandonmentState', err);
     }
   }
 }

@@ -23,9 +23,17 @@ import {
 // may still need to retry failed projections (KC user, ss org, welcome email).
 const TERMINAL_STATES: RegistrationState[] = ['rejected', 'abandoned'];
 
+interface TransitionRecord {
+  registrationId: string;
+  fromState: RegistrationState;
+  toState: RegistrationState;
+  at: Date;
+}
+
 export class InMemoryRegistrationStore extends RegistrationStoreBase {
   protected readonly byId = new Map<string, Registration>();
   protected readonly byIdempotencyKey = new Map<string, string>();
+  protected readonly transitions: TransitionRecord[] = [];
 
   async create(input: CreateRegistrationInput): Promise<StoreResult<Registration>> {
     if (this.byIdempotencyKey.has(input.idempotencyKey)) {
@@ -121,17 +129,28 @@ export class InMemoryRegistrationStore extends RegistrationStoreBase {
       idpUserId: patch.idpUserId ?? existing.idpUserId,
       signalstackOrgId: patch.signalstackOrgId ?? existing.signalstackOrgId,
       aggregatorId: patch.aggregatorId ?? existing.aggregatorId,
-      verificationSentAt: patch.verificationSentAt ?? existing.verificationSentAt,
-      verifiedAt: patch.verifiedAt ?? existing.verifiedAt,
-      adminNotifiedAt: patch.adminNotifiedAt ?? existing.adminNotifiedAt,
-      approvalLinkIssuedAt: patch.approvalLinkIssuedAt ?? existing.approvalLinkIssuedAt,
+      // Use 'in patch' so explicit null resets the field.
+      verificationSentAt:
+        'verificationSentAt' in patch
+          ? (patch.verificationSentAt ?? null)
+          : existing.verificationSentAt,
+      verifiedAt: 'verifiedAt' in patch ? (patch.verifiedAt ?? null) : existing.verifiedAt,
+      adminNotifiedAt:
+        'adminNotifiedAt' in patch ? (patch.adminNotifiedAt ?? null) : existing.adminNotifiedAt,
+      approvalLinkIssuedAt:
+        'approvalLinkIssuedAt' in patch
+          ? (patch.approvalLinkIssuedAt ?? null)
+          : existing.approvalLinkIssuedAt,
       reconcilerClaimedAt:
         'reconcilerClaimedAt' in patch
           ? (patch.reconcilerClaimedAt ?? null)
           : existing.reconcilerClaimedAt,
+      provisionState:
+        'provisionState' in patch ? (patch.provisionState ?? {}) : existing.provisionState,
       updatedAt: now,
     };
     this.byId.set(id, next);
+    this.transitions.push({ registrationId: id, fromState, toState, at: now });
     return { ok: true, value: next };
   }
 
@@ -165,10 +184,41 @@ export class InMemoryRegistrationStore extends RegistrationStoreBase {
     return { ok: true, value: undefined };
   }
 
+  async findAbandonedByContact(
+    field: 'email' | 'phone',
+    value: string,
+  ): Promise<StoreResult<Registration | null>> {
+    const normalised = field === 'email' ? value.toLowerCase() : value;
+    let latest: Registration | null = null;
+    for (const row of this.byId.values()) {
+      if (row.state !== 'abandoned') continue;
+      const match =
+        field === 'email' ? row.contactEmail === normalised : row.contactPhone === normalised;
+      if (!match) continue;
+      if (!latest || row.updatedAt > latest.updatedAt) latest = row;
+    }
+    return { ok: true, value: latest };
+  }
+
+  async getPreAbandonmentState(id: string): Promise<StoreResult<RegistrationState | null>> {
+    // Walk the transitions array in reverse insertion order to find the most
+    // recent transition that targeted 'abandoned'. Reverse order acts as a
+    // tiebreaker when multiple transitions share the same timestamp (common in
+    // tests where all transitions fire within the same millisecond).
+    for (let i = this.transitions.length - 1; i >= 0; i--) {
+      const t = this.transitions[i]!;
+      if (t.registrationId === id && t.toState === 'abandoned') {
+        return { ok: true, value: t.fromState };
+      }
+    }
+    return { ok: true, value: null };
+  }
+
   /** Reset all state between tests. */
   reset(): void {
     this.byId.clear();
     this.byIdempotencyKey.clear();
+    this.transitions.length = 0;
   }
 }
 

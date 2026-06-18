@@ -55,7 +55,7 @@ export interface ReconcileOutcome {
 type RegistrationRow = typeof schema.registrations.$inferSelect;
 
 // States the reconciler cares about (all non-terminal).
-const RECONCILABLE_STATES = ['submitted', 'verified', 'approved', 'active', 'rejected'] as const;
+const RECONCILABLE_STATES = ['submitted', 'verified', 'approved', 'active'] as const;
 
 // Claim TTL — how long a claimed row is locked. If a reconcile tick takes
 // longer than this, another tick can reclaim the row. Fixed at 10 min.

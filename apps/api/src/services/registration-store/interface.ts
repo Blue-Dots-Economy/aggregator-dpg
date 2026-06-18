@@ -83,11 +83,17 @@ export interface TransitionPatch {
   idpUserId?: string;
   signalstackOrgId?: string;
   aggregatorId?: string;
-  verificationSentAt?: Date;
-  verifiedAt?: Date;
-  adminNotifiedAt?: Date;
-  approvalLinkIssuedAt?: Date;
+  /** Pass `null` to reset (e.g. when re-opening an abandoned registration). */
+  verificationSentAt?: Date | null;
+  /** Pass `null` to reset. */
+  verifiedAt?: Date | null;
+  /** Pass `null` to reset. */
+  adminNotifiedAt?: Date | null;
+  /** Pass `null` to reset. */
+  approvalLinkIssuedAt?: Date | null;
   reconcilerClaimedAt?: Date | null;
+  /** Replaces the entire provisionState map. Pass `{}` to clear all steps. */
+  provisionState?: Partial<Record<ProvisionKey, ProvisionStatus>>;
 }
 
 export interface TransitionMeta {
@@ -201,4 +207,31 @@ export abstract class RegistrationStoreBase {
     key: ProvisionKey,
     status: ProvisionStatus,
   ): Promise<StoreResult<void>>;
+
+  /**
+   * Finds the most recent abandoned registration matching a contact field.
+   *
+   * Unlike `findByContact`, this method searches only among `abandoned` rows.
+   * Used by the admin re-open endpoint to locate a registration by email/phone.
+   *
+   * @param field - Which contact field to match on.
+   * @param value - The normalised contact value.
+   * @returns The most recently updated abandoned row, or null; DB_UNAVAILABLE on error.
+   */
+  abstract findAbandonedByContact(
+    field: 'email' | 'phone',
+    value: string,
+  ): Promise<StoreResult<Registration | null>>;
+
+  /**
+   * Returns the FSM state the registration was in immediately before abandonment.
+   *
+   * Queries `registration_transitions` for the most recent row where
+   * `to_state = 'abandoned'` and returns its `from_state`. Returns null when no
+   * such transition exists (e.g. the row was seeded directly in `abandoned`).
+   *
+   * @param id - Registration UUID.
+   * @returns The pre-abandonment state, or null; DB_UNAVAILABLE on error.
+   */
+  abstract getPreAbandonmentState(id: string): Promise<StoreResult<RegistrationState | null>>;
 }
