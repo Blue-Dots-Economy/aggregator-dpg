@@ -34,6 +34,7 @@ import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 import { getSchemaLoader } from '../services/schema-loader/index.js';
 import { buildCsvTemplate } from '../services/csv-template/index.js';
+import { readBulkSample } from '../services/csv-template/bulk-sample.js';
 import { getNetworkConfig } from '../services/network-config.js';
 import { config } from '../config.js';
 import { getDb } from '../db/client.js';
@@ -188,6 +189,19 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
         });
       }
       enforceAggregatorType(auth, participantType as string);
+
+      // Prefer a curated, data-complete sample CSV shipped with the active
+      // network config (config/<network>/bulk-samples/<type>.csv) — real, valid
+      // rows an operator can edit in place beat a synthesised one-row template.
+      // Fall back to the schema-generated template when none is shipped.
+      const sample = await readBulkSample(participantType as string);
+      if (sample !== null) {
+        void auth; // authenticated for audit; curated sample is static content
+        return reply
+          .header('Content-Type', 'text/csv; charset=utf-8')
+          .header('Content-Disposition', `attachment; filename="${participantType}-template.csv"`)
+          .send(sample);
+      }
 
       const schemaResult = await getSchemaLoader().getSchema({
         id: `participant-${participantType}`,
