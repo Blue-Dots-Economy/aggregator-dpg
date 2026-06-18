@@ -44,6 +44,15 @@ const DecisionBodySchema = z.object({
   reason: z.string().max(2000).optional(),
 });
 
+const ApprovalParamsSchema = z.object({
+  id: z.string(),
+});
+
+const ReadQuerySchema = z.object({
+  token: z.string().optional(),
+  intent: z.string().optional(),
+});
+
 export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Promise<void> {
   /**
    * Renders the admin confirmation page for an approve/reject action.
@@ -53,6 +62,16 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
    */
   app.get(
     '/admin/v1/aggregator-registrations/read/:id',
+    {
+      schema: {
+        tags: ['aggregator-approvals'],
+        summary: 'Render the admin approve/reject page',
+        description:
+          'HTML page reached from the admin notification email. Verifies the signed token and renders the approval form for the given aggregator registration id. All responses (200, 400 invalid/missing token, 404 unknown aggregator, 503 backing service down) are text/html pages, so no JSON response schema is declared.',
+        params: ApprovalParamsSchema,
+        querystring: ReadQuerySchema,
+      },
+    },
     async (
       req: FastifyRequest<{
         Params: { id: string };
@@ -157,6 +176,15 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
    */
   app.post(
     '/admin/v1/aggregator-registrations/decision/:id',
+    {
+      schema: {
+        tags: ['aggregator-approvals'],
+        summary: 'Approve or reject a pending aggregator',
+        description:
+          'Records the admin decision (approve/reject) for the registration id. On approve, enables the disabled Keycloak user and confirms the signalstack push. This is a browser form flow: every response (200 result page, 400 invalid token/body, 404 unknown aggregator, 503 backing service down) is a text/html page, so neither a body schema nor JSON response schemas are declared — the handler validates the form body itself (token, decision approve|reject, optional reason) and renders an HTML error page on failure. Body shape: { token: string, decision: "approve" | "reject", reason?: string }.',
+        params: ApprovalParamsSchema,
+      },
+    },
     async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
       const registrationId = req.params.id;
       const start = Date.now();

@@ -30,14 +30,37 @@ import { authenticateAny } from '../services/auth/access-token.js';
 import { consume } from '../services/rate-limiter/index.js';
 import { httpError } from '../errors/http-error.js';
 import { logger } from '../logger.js';
+import { errorResponses } from '../errors/openapi.js';
 
 const SUBMIT_RESPONSE = {
   message: 'Registration received. Check your email to verify your address.',
 };
 
+const RegistrationCreatedResponseSchema = z
+  .object({
+    aggregator_id: z.string(),
+    org_slug: z.string(),
+    status: z.string(),
+    message: z.string(),
+  })
+  .passthrough();
+
 export async function registerAggregatorRegistrationRoutes(app: FastifyInstance): Promise<void> {
   app.post(
     '/v1/aggregator-registrations/create',
+    {
+      schema: {
+        tags: ['aggregator-registrations'],
+        summary: 'Submit a new aggregator registration',
+        description:
+          'Validates submission against config/schemas/aggregator/registration.v1.json, creates a disabled user (login enabled on admin approval), and pushes the org to signalstack. Reached via a non-aggregator Bearer token from Keycloak.',
+        body: RegistrationPayloadSchema,
+        response: {
+          201: RegistrationCreatedResponseSchema,
+          ...errorResponses(400, 401, 409, 500, 503),
+        },
+      },
+    },
     async (req: FastifyRequest, reply: FastifyReply) => {
       const log = req.log.child({ operation: 'aggregator-registration.submit' });
       const start = Date.now();
@@ -53,13 +76,10 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
         });
       }
 
-      const parseResult = RegistrationPayloadSchema.safeParse(req.body);
-      if (!parseResult.success) {
-        throw httpError('SCHEMA_VALIDATION', {
-          detail: 'Request body failed shape validation.',
-          fields: { issues: parseResult.error.issues },
-        });
-      }
+      // `schema.body` already validated against `RegistrationPayloadSchema`
+      // (the zod validator compiler replaces `req.body` with the parse
+      // output), so the typed body can be consumed directly here.
+      const body = req.body as z.infer<typeof RegistrationPayloadSchema>;
 
       // JSON Schema is the authoritative contract — keeps the form rules in
       // `config/` rather than code.
@@ -70,8 +90,6 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
           fields: { issues: validate.errors ?? [] },
         });
       }
-
-      const body = parseResult.data;
       const phoneResult = normalisePhone(body.contact.phone);
       if (!phoneResult.ok) {
         throw httpError('INVALID_PHONE', {

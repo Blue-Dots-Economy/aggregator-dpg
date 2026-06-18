@@ -10,15 +10,24 @@
  */
 
 /**
+ * Canonical tuple of lifecycle states a signals item can be in.
+ *
+ * Single source of truth for the literal list — use it to build Zod enums
+ * (`z.enum(LIFECYCLE_STATUSES)`) or membership checks instead of
+ * re-declaring `['draft', 'live', 'paused']` locally.
+ */
+export const LIFECYCLE_STATUSES = ['draft', 'live', 'paused'] as const;
+
+/**
  * The set of lifecycle states a signals item can be in.
  *
  * Mirrors the `lifecycle_status` column shipped by signals-stack. Kept as a
  * string literal union (not a Zod schema) because the helper must be cheap
  * to call from any hot read path.
  */
-export type LifecycleStatus = 'draft' | 'live' | 'paused';
+export type LifecycleStatus = (typeof LIFECYCLE_STATUSES)[number];
 
-const VALID = new Set<LifecycleStatus>(['draft', 'live', 'paused']);
+const VALID = new Set<LifecycleStatus>(LIFECYCLE_STATUSES);
 
 /**
  * Resolves the lifecycle for a signals item, applying the back-compat rule.
