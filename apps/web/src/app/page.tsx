@@ -1,17 +1,7 @@
-'use client';
+import { redirect } from 'next/navigation';
+import { getSession } from '../lib/server-session';
 
-import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import { useAuth } from '../lib/auth-context';
-
-export default function HomePage() {
-  const router = useRouter();
-  const { isAuthenticated, isHydrated } = useAuth();
-
-  useEffect(() => {
-    if (!isHydrated) return;
-    router.replace(isAuthenticated ? '/blue-dots' : '/login');
-  }, [isHydrated, isAuthenticated, router]);
-
-  return null;
+export default async function HomePage() {
+  const session = await getSession();
+  redirect(session ? '/dashboard' : '/login');
 }

@@ -4,14 +4,17 @@ on:
   push:
     branches:
       - main
-      - 'v0.*'
+      - develop
+
     tags:
       - 'web-v*.*.*'
       - 'api-v*.*.*'
+      - 'worker-v*.*.*'
   pull_request:
     branches:
       - main
-      - 'v0.*'
+      - develop
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -73,7 +76,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        app: [api, web]
+        app: [api, web, worker]
 
     steps:
       - uses: actions/checkout@v4

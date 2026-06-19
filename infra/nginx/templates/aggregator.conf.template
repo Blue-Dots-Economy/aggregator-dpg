@@ -1,0 +1,126 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# aggregator-dpg edge proxy — server blocks (port 80 + 443).
+#
+# Rendered at boot by jonasal/nginx-certbot (nginx official image envsubst):
+#   /etc/nginx/templates/aggregator.conf.template
+#     → envsubst (NGINX_ENVSUBST_FILTER=^PUBLIC_HOST$)
+#     → /etc/nginx/conf.d/aggregator.conf
+#
+# Only ${PUBLIC_HOST} is substituted. All $-prefixed nginx variables
+# ($host, $scheme, $remote_addr, $http_upgrade, $connection_upgrade,
+#  $proxy_add_x_forwarded_for, $request_uri, $server_port, $body_bytes_sent)
+# pass through verbatim.
+#
+# Path map:
+#   /                → web         (Next.js, owns /api/auth/* for OIDC handshake)
+#   /backend/        → api         (prefix stripped)
+#   /auth/           → keycloak    (KC_HTTP_RELATIVE_PATH=/auth — prefix preserved)
+#   /mail/           → mailhog UI
+#
+# Object storage is AWS S3 (regional endpoint, IAM-role credentials on the
+# VM). The api/worker services talk to S3 directly; the browser uses
+# presigned URLs issued by the api. No /minio/ or /s3/ proxy on the edge.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ─── Port 80: ACME HTTP-01 challenge + 301 redirect to HTTPS ────────────
+# jonasal/nginx-certbot serves /.well-known/acme-challenge/ from
+# /var/www/letsencrypt automatically. We just need to leave path
+# accessible via http and force everything else to https.
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${PUBLIC_HOST};
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/letsencrypt;
+    }
+
+    location = /healthz {
+        access_log off;
+        add_header Content-Type text/plain;
+        return 200 "ok\n";
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# ─── Port 443: TLS termination + all app routes ────────────────────────
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name ${PUBLIC_HOST};
+
+    ssl_certificate     /etc/letsencrypt/live/${PUBLIC_HOST}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${PUBLIC_HOST}/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+
+    # Health probe for any external load balancer in front of this proxy.
+    location = /healthz {
+        access_log off;
+        add_header Content-Type text/plain;
+        return 200 "ok\n";
+    }
+
+    # ─── /backend/ → api (strip prefix) ─────────────────────────────────
+    # Trailing slash on proxy_pass URI strips the matched location prefix
+    # before forwarding upstream. So `/backend/health/ready` → `/health/ready`.
+    location /backend/ {
+        proxy_pass http://api_upstream/;
+
+        proxy_set_header Host               $host;
+        proxy_set_header X-Real-IP          $remote_addr;
+        proxy_set_header X-Forwarded-For    $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto  $scheme;
+        proxy_set_header X-Forwarded-Host   $host;
+        proxy_set_header X-Forwarded-Prefix /backend;
+
+        proxy_read_timeout  300s;
+        proxy_send_timeout  300s;
+    }
+
+    # ─── /auth/ → keycloak (preserve prefix) ────────────────────────────
+    # No trailing slash on proxy_pass → request URI passed through verbatim.
+    # Keycloak listens at /auth/* because KC_HTTP_RELATIVE_PATH=/auth is set.
+    # Auth flows produce large cookies / JWTs → bigger proxy buffers.
+    location /auth/ {
+        proxy_pass http://keycloak_upstream;
+
+        proxy_set_header Host               $host;
+        proxy_set_header X-Real-IP          $remote_addr;
+        proxy_set_header X-Forwarded-For    $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto  $scheme;
+        proxy_set_header X-Forwarded-Host   $host;
+        proxy_set_header X-Forwarded-Port   $server_port;
+
+        # Auth header / token sizes can be large — bump upstream buffers.
+        proxy_buffer_size           32k;
+        proxy_buffers               8 32k;
+        proxy_busy_buffers_size     64k;
+
+        proxy_read_timeout  120s;
+        proxy_send_timeout  120s;
+    }
+
+    # ─── / → web (Next.js BFF, default route) ───────────────────────────
+    # Catch-all: must come last. Owns /api/auth/* (OIDC handshake routes).
+    location / {
+        proxy_pass http://web_upstream;
+
+        proxy_set_header Host               $host;
+        proxy_set_header X-Real-IP          $remote_addr;
+        proxy_set_header X-Forwarded-For    $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto  $scheme;
+        proxy_set_header X-Forwarded-Host   $host;
+
+        # Next.js streaming / SSE / HMR.
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade            $http_upgrade;
+        proxy_set_header Connection         $connection_upgrade;
+
+        proxy_read_timeout  120s;
+    }
+}

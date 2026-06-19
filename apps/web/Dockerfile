@@ -29,6 +29,13 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
 # ── builder ───────────────────────────────────────────────────────────────────
 FROM installer AS builder
 ENV NEXT_TELEMETRY_DISABLED=1
+# NEXT_PUBLIC_* vars are inlined into the client bundle at build time by Next.js.
+# Declare them as ARGs so they can be forwarded from `docker build --build-arg`
+# or from docker-compose `build.args`, then promote to ENV so `next build` sees them.
+ARG NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+ARG NEXT_PUBLIC_ENABLED_LANGUAGES=en,kn,hi
+ENV NEXT_PUBLIC_ENABLED_LANGUAGES=$NEXT_PUBLIC_ENABLED_LANGUAGES
 COPY . .
 RUN pnpm --filter @aggregator-dpg/web build
 
@@ -60,6 +67,14 @@ WORKDIR /app
 COPY --from=builder --chown=appuser:appgroup /app/apps/web/.next/standalone ./
 COPY --from=builder --chown=appuser:appgroup /app/apps/web/.next/static     ./apps/web/.next/static
 COPY --from=builder --chown=appuser:appgroup /app/apps/web/public           ./apps/web/public
+# Participant JSON Schemas are loaded at runtime by the public /r/[slug]
+# page. Next's output-file tracer doesn't pick them up because they're
+# read via dynamic `path.resolve(...)`, so copy them explicitly. Copying
+# the whole `config/` tree pulls in both the shared aggregator schemas
+# (`config/schemas/aggregator/`) and every per-network folder (e.g.
+# `config/blue_dot/schemas/participant/`); the active network is picked
+# via `SCHEMA_ROOT_DIR` at runtime.
+COPY --from=builder --chown=appuser:appgroup /app/config                    ./config
 
 USER appuser
 EXPOSE 3000

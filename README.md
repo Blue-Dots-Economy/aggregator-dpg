@@ -5,6 +5,8 @@
 **Scope:** MVP (V1 beta)
 **Last updated:** 2026-04-21
 
+> **Setting up locally?** See [`SETUP.md`](SETUP.md) for the end-to-end quickstart (prereqs → docker compose → KC mappers → run apps → smoke test).
+
 ---
 
 ## 1. Purpose and Scope
@@ -13,17 +15,17 @@ This document translates the Aggregator Product Note (Draft 2) into an engineeri
 
 **In scope for MVP** — the JTBDs marked `MVP = Yes` in the PRD:
 
-| ID | Job |
-|----|-----|
-| AG-0 | Register as an Aggregator (external approval flow) |
-| AG-0b | Access the participant dashboard after login |
-| AG-0c | Update organisational profile |
-| AG-1 | Onboard participants via links/QR and track who joined |
-| AG-1a | Track conversion per onboarding mode |
-| AG-1b | Act on flagged incomplete profiles |
-| AG-1c | Bulk-onboard participants |
-| AG-2 | See connection activity per participant; prioritise follow-up |
-| AG-6 | Share an aggregated summary with Ecosystem Manager / funder |
+| ID    | Job                                                           |
+| ----- | ------------------------------------------------------------- |
+| AG-0  | Register as an Aggregator (external approval flow)            |
+| AG-0b | Access the participant dashboard after login                  |
+| AG-0c | Update organisational profile                                 |
+| AG-1  | Onboard participants via links/QR and track who joined        |
+| AG-1a | Track conversion per onboarding mode                          |
+| AG-1b | Act on flagged incomplete profiles                            |
+| AG-1c | Bulk-onboard participants                                     |
+| AG-2  | See connection activity per participant; prioritise follow-up |
+| AG-6  | Share an aggregated summary with Ecosystem Manager / funder   |
 
 **Out of scope for MVP** (tracked for later phases): AG-0a (self-service registration status tracking inside the app), AG-3/AG-4 (in-app connection notifications and direct outreach), AG-5 (Aggregator-of-Aggregators view), AG-7/AG-8 (natural-language queries and ad-hoc report generation), and the eight items in the PRD's Future Scope list (write-back of profile contact changes, unstructured bulk upload, credential issuance on bulk create, voice-call onboarding, lifecycle management, RBAC tiers).
 
@@ -39,11 +41,11 @@ This document translates the Aggregator Product Note (Draft 2) into an engineeri
 
 ### 2.2 External systems
 
-| System | Role | API reference |
-|--------|------|----------------|
-| Signals Stack (UBI backend) | Source of truth for orgs, members, seeker profiles, registration-mode attribution | https://ubi-backend.onest.dhiway.net/api/reference/ |
-| Jobs Stack | Source of truth for job postings and applications (provider-side + seeker applications) | https://jobs-demo.onest.dhiway.net/api/v1/reference/ |
-| Ecosystem Manager platform | Future consumer of the Signal Processing Service | — |
+| System                      | Role                                                                                    | API reference                                        |
+| --------------------------- | --------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| Signals Stack (UBI backend) | Source of truth for orgs, members, seeker profiles, registration-mode attribution       | https://ubi-backend.onest.dhiway.net/api/reference/  |
+| Jobs Stack                  | Source of truth for job postings and applications (provider-side + seeker applications) | https://jobs-demo.onest.dhiway.net/api/v1/reference/ |
+| Ecosystem Manager platform  | Future consumer of the Signal Processing Service                                        | —                                                    |
 
 Per the PRD: **the Aggregator platform has no write access to the Signals Stack in MVP.** All transactional writes (registrations, applications) originate upstream. The Aggregator app is a read-and-display surface plus outbound orchestration (generating onboarding links, running bulk uploads that hit upstream APIs, exporting reports).
 
@@ -76,23 +78,24 @@ The **Signal Processing Service** is an independent computation layer. All deriv
 
 ### 3.1 Entities (logical)
 
-| Entity | Source | Key fields used by Aggregator |
-|--------|--------|-------------------------------|
-| `aggregator_org` | Signals Stack `organisation` (filtered to aggregator type) | `organisation_id`, `name`, aggregator type, address, contact admin, verified flag |
-| `member` | Signals Stack `member` | `user_id`, `organisation_id` (links seeker to aggregator), `registration_source_mode` |
-| `profile` (seeker) | Signals Stack `profile` | `profile_id`, `user_id`, `metadata`, `created_at` |
-| `organisation` (provider) | Signals Stack `organisation` (filtered to provider type) | `organisation_id`, `name`, `registration_source_mode` |
-| `job_posting` | Jobs Stack | `organization_id`, `created_at`, `metadata.positions` |
-| `job_application` | Jobs Stack | `user_id`, `application_status` (open / shortlisted / rejected), `updated_at` |
-| `aggregator_schema_form` | Aggregator DB | Schema-driven profile form (Who I Am / What I Have / What I Want) |
-| `onboarding_link` | Aggregator DB | `link_id`, `aggregator_id`, `mode` (link/qr), `target_role` (seeker/provider), `created_at`, `join_count` |
-| `bulk_upload_batch` | Aggregator DB | `batch_id`, `aggregator_id`, `filename`, `total`, `succeeded`, `flagged`, `created_at` |
+| Entity                    | Source                                                     | Key fields used by Aggregator                                                                             |
+| ------------------------- | ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `aggregator_org`          | Signals Stack `organisation` (filtered to aggregator type) | `organisation_id`, `name`, aggregator type, address, contact admin, verified flag                         |
+| `member`                  | Signals Stack `member`                                     | `user_id`, `organisation_id` (links seeker to aggregator), `registration_source_mode`                     |
+| `profile` (seeker)        | Signals Stack `profile`                                    | `profile_id`, `user_id`, `metadata`, `created_at`                                                         |
+| `organisation` (provider) | Signals Stack `organisation` (filtered to provider type)   | `organisation_id`, `name`, `registration_source_mode`                                                     |
+| `job_posting`             | Jobs Stack                                                 | `organization_id`, `created_at`, `metadata.positions`                                                     |
+| `job_application`         | Jobs Stack                                                 | `user_id`, `application_status` (open / shortlisted / rejected), `updated_at`                             |
+| `aggregator_schema_form`  | Aggregator DB                                              | Schema-driven profile form (Who I Am / What I Have / What I Want)                                         |
+| `onboarding_link`         | Aggregator DB                                              | `link_id`, `aggregator_id`, `mode` (link/qr), `target_role` (seeker/provider), `created_at`, `join_count` |
+| `bulk_upload_batch`       | Aggregator DB                                              | `batch_id`, `aggregator_id`, `filename`, `total`, `succeeded`, `flagged`, `created_at`                    |
 
 ### 3.2 Derived signals (computed in Signal Processing Service)
 
 Per PRD Flow 3 and the field mapping tables:
 
 **Per-participant (seeker):**
+
 - `profile_age` = `today − profile.created_at`
 - `last_applied_age` = `today − MAX(job_application.updated_at WHERE application_status IN (shortlisted, rejected))` per `user_id`
 - `profile_completion_pct` = filled required fields ÷ total required fields (averaged across all `profile_id`s per `user_id`)
@@ -105,12 +108,14 @@ Per PRD Flow 3 and the field mapping tables:
   - Inactive: `profile_age > 7 AND (last_applied_age > 90 OR 0)`
 
 **Per-participant (provider):**
+
 - `job_post_age`, `shortlisted_age`, `rejected_age` per `organization_id`
 - `openings` = Σ `job_posting.metadata.positions`
 - `shortlisted_count`, `rejected_count` across all jobs per `organization_id`
 - `provider_status` ∈ {New, Satisfied, Active, At Risk, Inactive} per the compound rules in the PRD (§ "My Blue Dots" bullets).
 
 **Per-aggregator:**
+
 - Total seekers (unique `user_id`s under the aggregator)
 - Average profile completion across user_ids
 - Seekers with ≥ 1 application, and average applications per seeker
@@ -138,7 +143,7 @@ Four areas, matching PRD § 4:
 ### 4.2 Profile
 
 - Dynamic form rendered from the Aggregator profile schema. Edit-in-place; save writes to the Aggregator DB. A "Verified" badge is shown when the upstream org carries the verified flag.
-- **MVP constraint:** updates to org contact details (email/phone) do *not* write back to the Signals Stack org entry. This is deferred to Future Scope item 2.
+- **MVP constraint:** updates to org contact details (email/phone) do _not_ write back to the Signals Stack org entry. This is deferred to Future Scope item 2.
 
 ### 4.3 Onboard
 
@@ -171,24 +176,24 @@ Node.js + TypeScript, Express or Fastify. Stateless, deployed behind the platfor
 
 #### Endpoint sketch (REST, all JSON)
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| POST | `/v1/auth/otp/request` | Request OTP to email/phone |
-| POST | `/v1/auth/otp/verify` | Exchange OTP for session JWT |
-| POST | `/v1/registration-requests` | Submit new-aggregator request (pre-login) |
-| GET | `/v1/me` | Current aggregator org + verified flag |
-| GET | `/v1/profile/schema` | Current profile schema (versioned) |
-| GET/PATCH | `/v1/profile` | Read/update aggregator profile |
-| GET | `/v1/onboard/summary` | Registered / verified / discoverable counts |
-| POST | `/v1/onboard/links` | Create onboarding link (returns URL + QR payload) |
-| GET | `/v1/onboard/links` | List links with join counts per mode |
-| POST | `/v1/onboard/bulk-uploads` | Multipart CSV upload; returns batch id |
-| GET | `/v1/onboard/bulk-uploads/:id` | Batch status + per-row outcomes |
-| GET | `/v1/onboard/flagged-profiles` | Incomplete/flagged profile list |
-| GET | `/v1/blue-dots/summary` | Aggregate status + participation metrics |
-| GET | `/v1/blue-dots/participants` | Paginated participant list with filters & search |
-| GET | `/v1/blue-dots/participants/:id` | Participant detail |
-| GET | `/v1/blue-dots/export` | CSV export of current filter |
+| Method    | Path                             | Purpose                                           |
+| --------- | -------------------------------- | ------------------------------------------------- |
+| POST      | `/v1/auth/otp/request`           | Request OTP to email/phone                        |
+| POST      | `/v1/auth/otp/verify`            | Exchange OTP for session JWT                      |
+| POST      | `/v1/registration-requests`      | Submit new-aggregator request (pre-login)         |
+| GET       | `/v1/me`                         | Current aggregator org + verified flag            |
+| GET       | `/v1/profile/schema`             | Current profile schema (versioned)                |
+| GET/PATCH | `/v1/profile`                    | Read/update aggregator profile                    |
+| GET       | `/v1/onboard/summary`            | Registered / verified / discoverable counts       |
+| POST      | `/v1/onboard/links`              | Create onboarding link (returns URL + QR payload) |
+| GET       | `/v1/onboard/links`              | List links with join counts per mode              |
+| POST      | `/v1/onboard/bulk-uploads`       | Multipart CSV upload; returns batch id            |
+| GET       | `/v1/onboard/bulk-uploads/:id`   | Batch status + per-row outcomes                   |
+| GET       | `/v1/onboard/flagged-profiles`   | Incomplete/flagged profile list                   |
+| GET       | `/v1/blue-dots/summary`          | Aggregate status + participation metrics          |
+| GET       | `/v1/blue-dots/participants`     | Paginated participant list with filters & search  |
+| GET       | `/v1/blue-dots/participants/:id` | Participant detail                                |
+| GET       | `/v1/blue-dots/export`           | CSV export of current filter                      |
 
 Every listing endpoint accepts `aggregator_id` implicitly from the session and applies it as a hard filter at query time.
 
@@ -210,12 +215,12 @@ MVP recommendation: **Option A with a 5–15 minute refresh cadence.** The PRD's
 
 #### Endpoint sketch
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| GET | `/v1/aggregators/:id/onboard-summary` | Totals by mode, flagged counts |
-| GET | `/v1/aggregators/:id/participants` | Rows with all computed columns; supports pagination, filter, search |
-| GET | `/v1/aggregators/:id/participants/:userId` | Detail row |
-| GET | `/v1/aggregators/:id/blue-dots-summary` | Status-bucket counts + participation metrics |
+| Method | Path                                       | Purpose                                                             |
+| ------ | ------------------------------------------ | ------------------------------------------------------------------- |
+| GET    | `/v1/aggregators/:id/onboard-summary`      | Totals by mode, flagged counts                                      |
+| GET    | `/v1/aggregators/:id/participants`         | Rows with all computed columns; supports pagination, filter, search |
+| GET    | `/v1/aggregators/:id/participants/:userId` | Detail row                                                          |
+| GET    | `/v1/aggregators/:id/blue-dots-summary`    | Status-bucket counts + participation metrics                        |
 
 ### 5.3 Aggregator DB
 
@@ -306,7 +311,7 @@ Two open items from the PRD:
 
 Engineering controls required regardless of how these resolve:
 
-- The Signal Processing Service must expose aggregated computations *without* returning raw PII where not needed (e.g., summary endpoints).
+- The Signal Processing Service must expose aggregated computations _without_ returning raw PII where not needed (e.g., summary endpoints).
 - The participant-detail endpoint — which does return PII — must be gated by a separate policy check and fully audit-logged (who, when, which participant, which fields).
 - Export jobs must log the filter and the viewer.
 - Retention: configurable, with a default that errs short until legal finalises.
@@ -319,13 +324,13 @@ Engineering controls required regardless of how these resolve:
 
 ### 7.5 Performance targets (proposed; confirm with stakeholders)
 
-| Surface | Target |
-|---------|--------|
+| Surface                                         | Target                                                 |
+| ----------------------------------------------- | ------------------------------------------------------ |
 | Dashboard load (Blue Dots summary + first page) | < 2.0 s at p95 for aggregators with ≤ 10k participants |
-| Participant list page (50 rows) | < 800 ms at p95 |
-| Bulk upload of 1,000 rows | < 60 s end-to-end; async above that |
-| Export of 10k rows | < 30 s synchronous; async above |
-| Signal Processing Service freshness | ≤ 15 minutes |
+| Participant list page (50 rows)                 | < 800 ms at p95                                        |
+| Bulk upload of 1,000 rows                       | < 60 s end-to-end; async above that                    |
+| Export of 10k rows                              | < 30 s synchronous; async above                        |
+| Signal Processing Service freshness             | ≤ 15 minutes                                           |
 
 ### 7.6 Security
 
@@ -339,6 +344,32 @@ Engineering controls required regardless of how these resolve:
 
 - Content in English for MVP; copy externalised via i18n so Hindi and regional languages can be added without code changes (consistent with the PRD examples spanning PwD / Farming / Welfare / MSME use cases).
 - UI meets WCAG 2.1 AA — keyboard-navigable, screen-reader labels on all form fields in the dynamic profile form, contrast ≥ 4.5:1.
+
+#### i18n implementation (`apps/web`)
+
+**Library:** [next-intl](https://next-intl-docs.vercel.app/). Locale selection is cookie-based (`NEXT_LOCALE` cookie); no locale-prefixed URLs (e.g. `/en/dashboard`).
+
+**Message catalogs:** `apps/web/src/i18n/messages/<code>.json` — one file per locale. `en.json` is the canonical source of truth. `kn.json` and `hi.json` must mirror the full key tree; a parity test in the web package enforces this.
+
+**Runtime language switcher:** controlled by the `NEXT_PUBLIC_ENABLED_LANGUAGES` env var (comma-separated locale codes, e.g. `en,kn,hi`). Only codes listed here appear in the UI switcher; `en` is always included as the fallback. If the var is unset all supported locales are shown.
+
+**Adding a new language:**
+
+1. Add `apps/web/src/i18n/messages/<code>.json` with every key present in `en.json`.
+2. Add the locale code to `SUPPORTED_LOCALES` and a display name to `LOCALE_NAMES` in `apps/web/src/i18n/config.ts`.
+3. Include the code in `NEXT_PUBLIC_ENABLED_LANGUAGES` in your `.env` (dev) or as a Docker build arg (prod — see Docker section below).
+
+**Scope:** UI chrome only (navigation, labels, headings, status text). RJSF form field labels, API response strings, and transactional emails are **not** localised.
+
+**Docker / production note:** `NEXT_PUBLIC_ENABLED_LANGUAGES` is baked into the client bundle at `next build` time, not at runtime. When building the `web` Docker image you must pass it as a build arg:
+
+```bash
+docker build \
+  --build-arg NEXT_PUBLIC_ENABLED_LANGUAGES=en,kn,hi \
+  -f apps/web/Dockerfile .
+```
+
+With `docker compose` the value flows automatically from `.env` via the `build.args` entry in `docker-compose.yml`; override it in `.env` before running `make up` or `docker compose up -d --build`.
 
 ---
 
@@ -365,30 +396,35 @@ Engineering controls required regardless of how these resolve:
 ## 9. Phased delivery
 
 ### Phase 0 — Foundations (1–2 weeks)
+
 - Repository scaffolding (monorepo or split).
 - Aggregator DB schema and migrations.
 - Auth skeleton (OTP request/verify, JWT).
 - CI/CD, observability baseline.
 
 ### Phase 1 — Registration & Profile (2 weeks)
+
 - AG-0 registration request + email to admin.
 - Login + session.
 - AG-0c schema-driven profile view/edit.
 - Verified flag surfacing.
 
 ### Phase 2 — Onboarding (2–3 weeks)
+
 - Link & QR generation and listing (AG-1).
 - Per-link/mode counts (AG-1a) — dependent on Signals Stack attribution.
 - Bulk upload (AG-1c) with per-row outcomes.
 - Flagged profiles list and intent logging (AG-1b).
 
 ### Phase 3 — My Blue Dots (3 weeks)
+
 - Signal Processing Service MVP (Option A materialisation).
 - Summary cards (AG-0b).
 - Participant list, search, filter, detail (AG-2).
 - CSV export (AG-6).
 
 ### Phase 4 — Hardening (1–2 weeks)
+
 - Performance against targets in § 7.5.
 - DPDP controls per final legal guidance.
 - Accessibility audit and fixes.
@@ -418,12 +454,14 @@ The PRD's "Field Mapping between Job Stack & Aggregator" table (pages 20–22) i
 Reproduced verbatim for engineering convenience.
 
 **Seeker status:**
+
 - New — `profile_age ≤ 7`, regardless of `last_applied_age`
 - Active — `last_applied_age ≤ 30`
 - At Risk — `profile_age > 7` AND `31 ≤ last_applied_age ≤ 90`
 - Inactive — `profile_age > 7` AND (`last_applied_age > 90` OR `last_applied_age = 0`)
 
 **Provider status:**
+
 - New — `job_post_age ≤ 7`
 - Satisfied — `applications > 0` AND `(shortlisted + rejected) ≥ openings`
 - Active — `applications > 0` AND `min(shortlisted_age, rejected_age) ≤ 30`

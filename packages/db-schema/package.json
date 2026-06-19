@@ -1,0 +1,33 @@
+{
+  "name": "@aggregator-dpg/db-schema",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./schema": {
+      "import": "./dist/schema.js",
+      "types": "./dist/schema.d.ts"
+    },
+    "./types": {
+      "import": "./dist/schema-types.js",
+      "types": "./dist/schema-types.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@aggregator-dpg/shared-primitives": "workspace:*",
+    "drizzle-orm": "^0.36.4"
+  },
+  "devDependencies": {
+    "@aggregator-dpg/tsconfig": "workspace:*",
+    "@types/node": "^22.0.0",
+    "@vitest/coverage-v8": "^3.2.0",
+    "typescript": "^6.0.3",
+    "vitest": "^3.2.0"
+  }
+}

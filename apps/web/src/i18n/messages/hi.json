@@ -1,0 +1,481 @@
+{
+  "language": {
+    "label": "भाषा"
+  },
+  "theme": {
+    "switch_to_light": "लाइट थीम पर स्विच करें",
+    "switch_to_dark": "डार्क थीम पर स्विच करें",
+    "toggle_aria": "थीम टॉगल करें"
+  },
+  "form": {
+    "select_placeholder": "चुनें…",
+    "comma_separated": "अल्पविराम से अलग किए गए मान",
+    "select_options": "विकल्प चुनें…"
+  },
+  "status_pill": {
+    "active": "सक्रिय",
+    "at_risk": "जोखिम में",
+    "inactive": "निष्क्रिय",
+    "satisfied": "संतुष्ट",
+    "complete": "पूर्ण",
+    "incomplete": "अपूर्ण"
+  },
+  "Lifecycle": {
+    "draft": "ड्राफ्ट",
+    "live": "सक्रिय",
+    "paused": "रोका गया",
+    "account_only": "केवल खाता"
+  },
+  "metadata": {
+    "title": "एग्रीगेटर पोर्टल",
+    "description": "सिग्नलस्टैक-समर्थित प्रतिभागी नेटवर्क के लिए एग्रीगेटर पोर्टल।"
+  },
+  "common": {
+    "back": "वापस",
+    "cancel": "रद्द करें",
+    "continue": "जारी रखें",
+    "loading": "लोड हो रहा है…"
+  },
+  "register": {
+    "heading_tagline": "हमें अपने संगठन के बारे में बताएं।",
+    "success_heading": "आवेदन प्राप्त हो गया",
+    "success_ref_id": "संदर्भ आईडी:",
+    "success_approval": "{brand} टीम आपके आवेदन की समीक्षा करेगी। स्वीकृति के बाद, आपके द्वारा पंजीकृत ईमेल या मोबाइल का उपयोग करके {brand} SSO के माध्यम से साइन इन करें।",
+    "submit": "आवेदन जमा करें",
+    "submitting": "जमा किया जा रहा है…",
+    "footer_note": "आपके आवेदन की समीक्षा {brand} टीम द्वारा की जाएगी। स्वीकृति के बाद आपको एक ईमेल मिलेगा, फिर {brand} SSO के माध्यम से साइन इन करें।",
+    "validation_error_title": "कृपया हाइलाइट किए गए फ़ील्ड ठीक करें"
+  },
+  "dashboard": {
+    "buckets": {
+      "created": "बनाया गया",
+      "accepted": "स्वीकृत",
+      "rejected": "अस्वीकृत",
+      "cancelled": "रद्द किया गया"
+    },
+    "statuses": {
+      "new": "नया",
+      "active": "सक्रिय",
+      "at_risk": "जोखिम में",
+      "inactive": "निष्क्रिय"
+    },
+    "hints": {
+      "new": "हाल ही में जुड़े",
+      "active": "हाल ही में सक्रिय",
+      "at_risk": "धीमे पड़ रहे हैं",
+      "inactive": "कोई हालिया गतिविधि नहीं"
+    },
+    "table": {
+      "participant": "प्रतिभागी",
+      "participants": "प्रतिभागी",
+      "opportunityProviders": "अवसर प्रदाता",
+      "provider": "प्रदाता",
+      "joined": "जुड़ने की तारीख",
+      "profileStatus": "प्रोफ़ाइल स्थिति",
+      "lifecycle": "जीवनचक्र",
+      "status": "स्थिति",
+      "recommendedAction": "अनुशंसित कार्रवाई",
+      "applied": "आवेदन किया",
+      "initiated": "शुरू किया",
+      "received": "प्राप्त",
+      "count": "{total} में से {shown}"
+    },
+    "filters": {
+      "all_statuses": "सभी स्थितियाँ",
+      "lifecycle_label": "जीवनचक्र",
+      "lifecycle_all": "सभी जीवनचक्र",
+      "lifecycle_draft": "ड्राफ्ट",
+      "lifecycle_live": "सक्रिय",
+      "lifecycle_paused": "रोका गया",
+      "lifecycle_account_only": "केवल खाता"
+    },
+    "aria": {
+      "search_participants": "प्रतिभागियों को खोजें",
+      "export_csv": "CSV के रूप में निर्यात करें",
+      "prev_page": "पिछला पृष्ठ",
+      "next_page": "अगला पृष्ठ",
+      "refresh": "डैशबोर्ड रिफ्रेश करें",
+      "select_row": "{name} चुनें",
+      "select_all_page": "इस पृष्ठ की सभी पंक्तियाँ चुनें"
+    },
+    "bulk": {
+      "select": "चुनें",
+      "cancel": "रद्द करें",
+      "selected": "{count} चयनित",
+      "clear": "चयन हटाएँ",
+      "exportSelected": "चयनित CSV निर्यात करें",
+      "triggerCallback": "कॉलबैक ट्रिगर करें",
+      "running": "प्रक्रिया जारी…",
+      "success": "{count} संसाधित",
+      "failed": "कार्रवाई विफल"
+    },
+    "tabs": {
+      "seekers": "आवेदक",
+      "providers": "प्रदाता"
+    },
+    "search": {
+      "seekerPlaceholder": "नाम, आईडी, प्रोफ़ाइल खोजें…",
+      "providerPlaceholder": "संगठन, भूमिका, आईडी खोजें…"
+    },
+    "pagination": {
+      "showing": "{total} में से {from}–{to} दिखाए जा रहे हैं",
+      "matching": "इस पृष्ठ पर {rowsOnPage} में से {shown} मेल खा रहे हैं"
+    },
+    "buttons": {
+      "exportCsv": "CSV निर्यात करें",
+      "exporting": "निर्यात हो रहा है…",
+      "refresh": "रिफ्रेश करें",
+      "refreshing": "रिफ्रेश हो रहा है…",
+      "addParticipants": "प्रतिभागी जोड़ें"
+    },
+    "state": {
+      "loading": "लोड हो रहा है…",
+      "failedToLoad": "लोड करने में विफल। कृपया पुनः प्रयास करें।",
+      "refreshedJustNow": "अभी रिफ्रेश हुआ",
+      "refreshFailed": "रिफ्रेश विफल"
+    },
+    "ministat": {
+      "completeProfiles": "पूर्ण प्रोफ़ाइलें",
+      "totalItems": "कुल {entityPlural}",
+      "withApplications": "आवेदन वाले {entityPlural}",
+      "newParticipants": "नए प्रतिभागी",
+      "delta_this_week": "इस सप्ताह",
+      "totalUsers": "कुल उपयोगकर्ता",
+      "avgProfilesPerUser": "प्रति उपयोगकर्ता औसत प्रोफ़ाइलें",
+      "avgActionsPerUser": "प्रति उपयोगकर्ता औसत क्रियाएँ",
+      "sub_total": "सभी {entityPlural} रिकॉर्ड",
+      "sub_complete": "सभी प्रोफ़ाइलों का {pct}%",
+      "sub_applications": "आवेदन वाली प्रोफ़ाइलें",
+      "sub_avgItems": "प्रति उपयोगकर्ता प्रबंधित प्रोफ़ाइलें",
+      "sub_avgActions": "दर्ज की गई गतिविधियाँ",
+      "sub_totalUsers": "अद्वितीय खाता धारक"
+    },
+    "summary": {
+      "total": "कुल {count}",
+      "hint": "आपके नेटवर्क में जीवनचक्र और प्रोफ़ाइल स्थिति"
+    },
+    "groups": {
+      "profiles": "प्रोफ़ाइलें",
+      "users": "उपयोगकर्ता"
+    },
+    "onboardingGroup": {
+      "title": "ऑनबोर्डिंग",
+      "helper": "आपके पूरे नेटवर्क में समेकित",
+      "view": "ऑनबोर्डिंग देखें",
+      "total": "कुल सबमिशन",
+      "total_sub": "सभी प्रवेश माध्यम",
+      "passed": "सत्यापित और ऑनबोर्ड",
+      "passed_sub": "सत्यापन उत्तीर्ण",
+      "failed": "विफल सत्यापन",
+      "failed_sub": "ध्यान आवश्यक",
+      "skipped": "छोड़ा गया",
+      "skipped_sub": "डुप्लिकेट अनदेखा",
+      "byMode": "प्रवेश माध्यम अनुसार जॉइन",
+      "joins": "{count} सत्यापित जॉइन",
+      "mode_bulk": "CSV अपलोड",
+      "mode_link": "पंजीकरण लिंक",
+      "mode_qr": "QR कोड",
+      "error_title": "ऑनबोर्डिंग सारांश लोड नहीं हो सका",
+      "error_body": "सारांश सेवा ने प्रतिक्रिया नहीं दी। आपके अन्य मेट्रिक्स अप्रभावित हैं।",
+      "retry": "पुनः प्रयास"
+    },
+    "tiles": {
+      "lifecycle": {
+        "draft": "ड्राफ्ट प्रोफ़ाइलें",
+        "live": "सक्रिय प्रोफ़ाइलें",
+        "paused": "रोकी गई प्रोफ़ाइलें",
+        "account_only": "केवल खाता वाले उपयोगकर्ता"
+      }
+    },
+    "opp": {
+      "activeProgramsLabel": "सक्रिय कार्यक्रम",
+      "activeProgramsHint": "अभी चल रहे समूह",
+      "onboardedLabel": "ऑनबोर्ड किए गए",
+      "onboardedHint": "नियुक्तियाँ दे रहे हैं",
+      "atRiskLabel": "जोखिम में",
+      "atRiskHint": "कम समूह पूर्णता",
+      "inactiveLabel": "निष्क्रिय",
+      "inactiveHint": "कोई निष्क्रिय नहीं",
+      "totalPrograms": "कुल कार्यक्रम",
+      "activeCohorts": "सक्रिय समूह",
+      "traineesEngaged": "प्रशिक्षु संलग्न",
+      "placementRate": "नियुक्ति दर"
+    }
+  },
+  "nav": {
+    "my": "मेरा {brand}",
+    "onboarding": "ऑनबोर्डिंग",
+    "profile": "प्रोफ़ाइल",
+    "overview": "अवलोकन",
+    "portal_label": "एग्रीगेटर पोर्टल",
+    "sign_out": "साइन आउट",
+    "aggregator_sublabel": "एग्रीगेटर · कर्नाटक"
+  },
+  "onboarding": {
+    "title": "ऑनबोर्डिंग",
+    "subtitle": "CSV, लिंक, या QR के माध्यम से अपने नेटवर्क में प्रतिभागियों को जोड़ें।",
+    "refresh": "रिफ्रेश करें",
+    "bulk_upload": {
+      "title": "बल्क अपलोड",
+      "subtitle": "मौजूदा रोस्टर के लिए CSV आयात। बड़े बैच के लिए सबसे तेज़ तरीका।",
+      "no_uploads_yet": "अभी तक कोई अपलोड नहीं",
+      "loading": "लोड हो रहा है…",
+      "last_upload": "अंतिम अपलोड {when}",
+      "cta": "बल्क अपलोड पर जाएं",
+      "metrics": {
+        "files_uploaded": "अपलोड की गई फ़ाइलें",
+        "rows": "पंक्तियाँ",
+        "passed": "उत्तीर्ण",
+        "failed": "विफल"
+      }
+    },
+    "links": {
+      "title": "लिंक के माध्यम से पंजीकरण",
+      "subtitle": "एक सार्वजनिक लिंक / QR साझा करें। प्रतिभागी उसके माध्यम से स्वयं पंजीकरण करते हैं।",
+      "no_links_yet": "अभी तक कोई लिंक नहीं",
+      "loading": "लोड हो रहा है…",
+      "last_link": "अंतिम लिंक {when}",
+      "cta": "नया लिंक बनाएं",
+      "metrics": {
+        "links": "लिंक",
+        "active": "सक्रिय",
+        "registrations": "पंजीकरण",
+        "verified": "सत्यापित"
+      }
+    },
+    "stats": {
+      "total_registered": "कुल पंजीकृत",
+      "verified_onboarded": "सत्यापित और ऑनबोर्ड",
+      "failed_validations": "विफल सत्यापन"
+    },
+    "csv": {
+      "title": "प्रतिभागियों को जोड़ें",
+      "subtitle": "CSV के माध्यम से बल्क अपलोड — मौजूदा रोस्टर आयात करने का सबसे तेज़ तरीका।",
+      "download_template": "टेम्पलेट डाउनलोड करें",
+      "drag_prompt": "अपना CSV यहाँ खींचें या",
+      "browse": "ब्राउज़ करने के लिए क्लिक करें",
+      "hint": "केवल .csv · UTF-8 एन्कोडेड · {type}s के रूप में अपलोड",
+      "upload_button": "अपलोड करें",
+      "uploading": "अपलोड हो रहा है…",
+      "security_note": "सभी अपलोड को आयात से पहले स्कैन और सत्यापित किया जाता है।",
+      "remove_file": "फ़ाइल हटाएं",
+      "recent": {
+        "title": "हालिया अपलोड",
+        "shown_count": "{count} दिखाए गए",
+        "no_uploads": "अभी तक कोई अपलोड नहीं।",
+        "col_uploaded": "अपलोड किया गया",
+        "col_type": "प्रकार",
+        "col_status": "स्थिति",
+        "col_total": "कुल",
+        "col_passed": "उत्तीर्ण",
+        "col_failed": "विफल",
+        "col_skipped": "छोड़े गए",
+        "col_reason": "कारण / त्रुटियाँ",
+        "all_rows_passed": "सभी पंक्तियाँ उत्तीर्ण",
+        "signing": "हस्ताक्षर हो रहा है…"
+      }
+    },
+    "create_link": {
+      "title": "पंजीकरण लिंक साझा करें",
+      "new_badge": "नया",
+      "field_org_name": "अपने संगठन का नाम दर्ज करें",
+      "field_state": "आवृत्ति (राज्य का नाम)",
+      "field_event": "कार्यक्रम",
+      "field_event_date": "कार्यक्रम की तारीख",
+      "field_event_location": "कार्यक्रम का स्थान",
+      "field_district": "जिला",
+      "field_domain": "डोमेन",
+      "field_registration_mode": "अभियान प्रकार",
+      "field_tags": "टैग (वैकल्पिक)",
+      "placeholder_state": "राज्य",
+      "placeholder_event": "अभियान या कार्यक्रम का नाम",
+      "placeholder_location": "शहर या स्थान",
+      "placeholder_district": "जिला",
+      "placeholder_tags": "अल्पविराम से अलग, जैसे priority, dharwad-drive",
+      "creating": "बनाया जा रहा है…",
+      "create_button": "लिंक बनाएं",
+      "qr_label": "QR कोड",
+      "qr_placeholder": "शुरू करने के लिए एक लिंक बनाएं। ड्राफ्ट लाइव होने पर QR दिखेगा।",
+      "error_required": "राज्य, जिला और कार्यक्रम आवश्यक हैं।",
+      "link_created": "पंजीकरण लिंक बनाया गया"
+    },
+    "your_links": {
+      "title": "आपके पंजीकरण लिंक",
+      "loading": "लिंक लोड हो रहे हैं…",
+      "empty": "अभी तक कोई {type} लिंक नहीं। ऊपर एक बनाएं।",
+      "active_count": "{count} सक्रिय",
+      "type_pill": "{type} लिंक"
+    },
+    "link_card": {
+      "copy_link": "लिंक कॉपी करें",
+      "copied": "कॉपी हो गया!",
+      "copy_title": "लिंक कॉपी करें",
+      "view_qr": "QR देखें",
+      "open_link": "लिंक खोलें",
+      "draft_notice": "लाइव करने के बाद सार्वजनिक URL + QR दिखेगा।",
+      "registrations": "पंजीकरण",
+      "verified": "सत्यापित",
+      "created_prefix": "बनाया गया",
+      "expires_prefix": "समाप्त होता है",
+      "edit": "संपादित करें",
+      "make_live": "लाइव करें",
+      "going_live": "लाइव हो रहा है…",
+      "deactivate": "निष्क्रिय करें",
+      "retiring": "निवृत्त किया जा रहा है…",
+      "active": "सक्रिय",
+      "cancel": "रद्द करें",
+      "save_draft": "ड्राफ्ट सहेजें",
+      "saving": "सहेजा जा रहा है…",
+      "error_required": "राज्य, जिला और कार्यक्रम आवश्यक हैं।"
+    },
+    "bulk_uploads_page": {
+      "title": "बल्क अपलोड",
+      "subtitle": "CSV फ़ाइल से प्रतिभागियों को आयात करें।",
+      "back": "ऑनबोर्डिंग पर वापस जाएं"
+    },
+    "links_page": {
+      "title": "पंजीकरण लिंक",
+      "subtitle": "सार्वजनिक पंजीकरण लिंक बनाएं, साझा करें और प्रबंधित करें।",
+      "back": "ऑनबोर्डिंग पर वापस जाएं"
+    }
+  },
+  "profile": {
+    "view": {
+      "topbar_title": "एग्रीगेटर प्रोफ़ाइल",
+      "topbar_subtitle": "अपनी एग्रीगेटर पहचान और सेटिंग्स प्रबंधित करें।",
+      "toast_saved": "प्रोफ़ाइल सहेजी गई",
+      "error_load_title": "प्रोफ़ाइल लोड नहीं हो सकी",
+      "error_load_detail": "एग्रीगेटर प्रोफ़ाइल लाने में त्रुटि हुई। कृपया थोड़ी देर बाद पुनः प्रयास करें।",
+      "badge_aggregator": "एग्रीगेटर",
+      "badge_verified": "सत्यापित",
+      "badge_active": "सक्रिय",
+      "meta_registered": "पंजीकृत",
+      "meta_coordinator": "समन्वयक",
+      "btn_edit": "संपादित करें",
+      "btn_review_history": "इतिहास देखें",
+      "section_contact": "संपर्क जानकारी",
+      "section_details": "एग्रीगेटर विवरण",
+      "section_personas": "समर्थित व्यक्तित्व",
+      "section_services": "समर्थित सेवाएं",
+      "section_network": "नेटवर्क स्नैपशॉट",
+      "section_consent": "सहमति और अनुपालन",
+      "kv_name": "नाम",
+      "kv_mobile": "मोबाइल",
+      "kv_email": "ईमेल",
+      "kv_contact_mode": "पसंदीदा संपर्क माध्यम",
+      "kv_contact_mode_value": "पहले मुझसे संपर्क करें",
+      "kv_address": "संगठन का पता",
+      "kv_geographies": "सेवित भौगोलिक क्षेत्र",
+      "stat_active_seekers": "सक्रिय आवेदक",
+      "stat_open_roles": "खुले पद",
+      "stat_hires_3mo": "नियुक्तियाँ (3 माह)",
+      "stat_match_rate": "मिलान दर",
+      "consent_profile_creation": "पारिस्थितिकी तंत्र में प्रोफ़ाइल निर्माण एवं प्रतिनिधित्व",
+      "consent_sharing": "संबंधित पक्षों के साथ जानकारी साझा करना",
+      "consent_notifications": "अवसर अधिसूचनाएं और नज प्राप्त करें",
+      "consent_analytics": "पारिस्थितिकी तंत्र सुधार के लिए अज्ञात विश्लेषण",
+      "consent_marketing": "भागीदार संगठनों से विपणन संचार",
+      "consent_retention": "ब्लू डॉट्स नीति v2.3 के अनुसार डेटा प्रतिधारण",
+      "consent_last_reviewed": "अंतिम सहमति समीक्षा",
+      "consent_next_review": "अगली समीक्षा {date} को निर्धारित है।"
+    },
+    "edit": {
+      "heading": "प्रोफ़ाइल संपादित करें",
+      "tagline": "अपना संगठन, संपर्क और व्यक्तित्व अपडेट करें। स्लग + स्थिति केवल पढ़ने योग्य है।",
+      "loading": "प्रोफ़ाइल लोड हो रही है…",
+      "error_load_title": "प्रोफ़ाइल लोड नहीं हो सकी",
+      "btn_cancel": "रद्द करें",
+      "btn_save": "परिवर्तन सहेजें",
+      "btn_saving": "सहेजा जा रहा है…",
+      "save_failed": "सहेजने में विफल। कृपया पुनः प्रयास करें।"
+    },
+    "complete": {
+      "topbar_title": "अपनी प्रोफ़ाइल पूरी करें",
+      "topbar_subtitle": "अपने संगठन के बारे में कुछ विवरण दें ताकि हम आपको सही अवसरों से जोड़ सकें।",
+      "loading": "प्रोफ़ाइल लोड हो रही है…",
+      "btn_save": "प्रोफ़ाइल सहेजें",
+      "btn_saving": "सहेजा जा रहा है…",
+      "status_saved": "सहेजा गया"
+    },
+    "public_reg": {
+      "domain_seeker": "आवेदक पंजीकरण",
+      "domain_provider": "प्रदाता पंजीकरण",
+      "done_passed_title": "पंजीकरण प्राप्त हुआ",
+      "done_skipped_title": "पहले से पंजीकृत",
+      "done_passed_body": "धन्यवाद — आपका विवरण दर्ज कर लिया गया है। एग्रीगेटर जल्द ही आपसे संपर्क करेगा।",
+      "done_skipped_body": "यह मोबाइल नंबर (या ईमेल) इस एग्रीगेटर के साथ पहले से पंजीकृत है — दोबारा पंजीकरण की आवश्यकता नहीं।",
+      "done_ref_prefix": "संदर्भ:",
+      "btn_register_another": "दूसरे को पंजीकृत करें",
+      "btn_submit": "पंजीकरण जमा करें",
+      "btn_submitting": "जमा किया जा रहा है…",
+      "privacy_note": "आपका विवरण केवल उस एग्रीगेटर के साथ साझा किया जाता है जिसने यह लिंक जारी किया है।",
+      "powered_by": "द्वारा संचालित",
+      "validation_error_title": "फ़ॉर्म सत्यापन विफल",
+      "validation_required": "कृपया सभी आवश्यक फ़ील्ड भरें।",
+      "validation_more": "(और {count} अधिक)",
+      "error_network_title": "नेटवर्क त्रुटि",
+      "error_network_detail": "सर्वर तक नहीं पहुंचा जा सका।",
+      "error_submission_title": "जमा करना विफल",
+      "error_server_detail": "सर्वर ने HTTP {status} लौटाया।",
+      "lookup": {
+        "owned_elsewhere_title": "संपर्क पहले से पंजीकृत",
+        "owned_elsewhere_body": "यह ईमेल या मोबाइल किसी अन्य संगठन के साथ पहले से पंजीकृत है। कृपया अलग संपर्क का उपयोग करें या उस संगठन के माध्यम से साइन इन करें।",
+        "owned_elsewhere_cta": "अलग संपर्क का उपयोग करें",
+        "resume_title": "आपकी एक प्रोफ़ाइल अधूरी है",
+        "resume_body": "हमें इस संपर्क के लिए एक अधूरी प्रोफ़ाइल मिली। क्या आप वहीं से जारी रखना चाहेंगे?",
+        "resume_cta": "प्रोफ़ाइल जारी रखें",
+        "resume_continue_new": "नई प्रविष्टि के साथ जारी रखें"
+      },
+      "account_only": {
+        "title": "त्वरित साइन-अप",
+        "helper": "अपना नाम और एक संपर्क नंबर या ईमेल दें। आप अपनी प्रोफ़ाइल बाद में पूरी कर सकते हैं।",
+        "contact_label": "एक फ़ोन या ईमेल दें (कम से कम एक आवश्यक)",
+        "name_label": "नाम",
+        "phone_label": "फ़ोन",
+        "email_label": "ईमेल",
+        "consent_terms_label": "मैं नियमों को स्वीकार करता/करती हूँ",
+        "consent_privacy_label": "मैं गोपनीयता नीति को स्वीकार करता/करती हूँ",
+        "submit_label": "जमा करें"
+      }
+    }
+  },
+  "registration_mode": {
+    "field_label": "अभियान प्रकार",
+    "voice": {
+      "label": "वॉयस अभियान",
+      "hint": "प्रोफ़ाइल पूरी करने के लिए आपको इस नंबर पर एक कॉल आएगी।"
+    },
+    "form": {
+      "label": "फ़ॉर्म भरना",
+      "hint": "प्रतिभागी ऑनलाइन पूरी प्रोफ़ाइल भरते हैं। आंशिक सबमिशन स्वीकार किए जाते हैं।"
+    }
+  },
+  "auth": {
+    "welcome_heading": "वापसी पर स्वागत है।",
+    "welcome_sub": "शुरू करने के लिए साइन इन करें या अपना संगठन पंजीकृत करें।",
+    "existing_title": "मौजूदा उपयोगकर्ता — साइन इन करें",
+    "existing_sub": "{brand} SSO के ज़रिए ईमेल या मोबाइल से जारी रखें",
+    "register_title": "सदस्य बनें",
+    "register_sub": "{brand} के साथ अपना संगठन पंजीकृत करें",
+    "review_notice": "नए पंजीकरणों की समीक्षा {brand} टीम द्वारा की जाती है।",
+    "session_expired": "आपका सत्र समाप्त हो गया। जारी रखने के लिए फिर से साइन इन करें।",
+    "signin_failed": "साइन इन विफल रहा: {reason}। कृपया पुनः प्रयास करें।",
+    "footer_prefix": "जारी रखने पर आप सहमत होते हैं",
+    "footer_and": "और",
+    "privacy": "गोपनीयता नीति",
+    "terms": "नियम एवं शर्तें",
+    "errors": {
+      "invalid_flow_cookie": "सत्र हैंडशेक समाप्त हो गया",
+      "missing_code_or_state": "अधूरा कॉलबैक",
+      "oidc_error_temporarily_unavailable": "साइन इन सत्र पूरा होने से पहले समाप्त हो गया",
+      "oidc_error_login_required": "जारी रखने के लिए साइन इन आवश्यक है",
+      "oidc_error_access_denied": "साइन इन रद्द कर दिया गया",
+      "oidc_error_invalid_request": "साइन इन अनुरोध अमान्य था",
+      "oidc_error_server_error": "पहचान प्रदाता अस्थायी रूप से अनुपलब्ध है",
+      "exchange_token_exchange_failed": "टोकन एक्सचेंज विफल रहा",
+      "exchange_state_mismatch": "सुरक्षा जाँच विफल (स्थिति मेल नहीं खाई)",
+      "exchange_token_verify_failed": "सुरक्षा जाँच विफल (टोकन सत्यापन)",
+      "unknown": "अप्रत्याशित साइन इन त्रुटि"
+    }
+  }
+}

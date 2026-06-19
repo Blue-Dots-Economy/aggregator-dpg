@@ -19,6 +19,14 @@
     "./dto": {
       "import": "./dist/dto/index.js",
       "types": "./dist/dto/index.d.ts"
+    },
+    "./beckn": {
+      "import": "./dist/beckn/index.js",
+      "types": "./dist/beckn/index.d.ts"
+    },
+    "./aggregator": {
+      "import": "./dist/aggregator/index.js",
+      "types": "./dist/aggregator/index.d.ts"
     }
   },
   "scripts": {

@@ -1,0 +1,481 @@
+{
+  "language": {
+    "label": "Language"
+  },
+  "theme": {
+    "switch_to_light": "Switch to light theme",
+    "switch_to_dark": "Switch to dark theme",
+    "toggle_aria": "Toggle theme"
+  },
+  "form": {
+    "select_placeholder": "Select…",
+    "comma_separated": "Comma-separated values",
+    "select_options": "Select options…"
+  },
+  "status_pill": {
+    "active": "Active",
+    "at_risk": "At Risk",
+    "inactive": "Inactive",
+    "satisfied": "Satisfied",
+    "complete": "Complete",
+    "incomplete": "Incomplete"
+  },
+  "Lifecycle": {
+    "draft": "Draft",
+    "live": "Live",
+    "paused": "Paused",
+    "account_only": "Account only"
+  },
+  "metadata": {
+    "title": "Aggregator Portal",
+    "description": "Aggregator portal for signalstack-backed participant networks."
+  },
+  "common": {
+    "back": "Back",
+    "cancel": "Cancel",
+    "continue": "Continue",
+    "loading": "Loading…"
+  },
+  "register": {
+    "heading_tagline": "Tell us about your organisation.",
+    "success_heading": "Application received",
+    "success_ref_id": "Reference ID:",
+    "success_approval": "The {brand} team will review your application. Once approved, sign in via {brand} SSO using the email or mobile you registered.",
+    "submit": "Submit application",
+    "submitting": "Submitting…",
+    "footer_note": "Your application will be reviewed by the {brand} team. You'll receive an email once approved, then sign in via {brand} SSO.",
+    "validation_error_title": "Please fix the highlighted fields"
+  },
+  "dashboard": {
+    "buckets": {
+      "created": "Created",
+      "accepted": "Accepted",
+      "rejected": "Rejected",
+      "cancelled": "Cancelled"
+    },
+    "statuses": {
+      "new": "New",
+      "active": "Active",
+      "at_risk": "At Risk",
+      "inactive": "Inactive"
+    },
+    "hints": {
+      "new": "Recently joined",
+      "active": "Recently active",
+      "at_risk": "Slowing down",
+      "inactive": "No recent activity"
+    },
+    "table": {
+      "participant": "Participant",
+      "participants": "Participants",
+      "opportunityProviders": "Opportunity Providers",
+      "provider": "Provider",
+      "joined": "Joined",
+      "profileStatus": "Profile Status",
+      "lifecycle": "Lifecycle",
+      "status": "Status",
+      "recommendedAction": "Recommended Action",
+      "applied": "Applied",
+      "initiated": "Initiated",
+      "received": "Received",
+      "count": "{shown} of {total}"
+    },
+    "filters": {
+      "all_statuses": "All statuses",
+      "lifecycle_label": "Lifecycle",
+      "lifecycle_all": "All lifecycles",
+      "lifecycle_draft": "Draft",
+      "lifecycle_live": "Live",
+      "lifecycle_paused": "Paused",
+      "lifecycle_account_only": "Account only"
+    },
+    "aria": {
+      "search_participants": "Search participants",
+      "export_csv": "Export as CSV",
+      "prev_page": "Previous page",
+      "next_page": "Next page",
+      "refresh": "Refresh dashboard",
+      "select_row": "Select {name}",
+      "select_all_page": "Select all rows on this page"
+    },
+    "bulk": {
+      "select": "Select",
+      "cancel": "Cancel",
+      "selected": "{count} selected",
+      "clear": "Clear selection",
+      "exportSelected": "Export selected CSV",
+      "triggerCallback": "Trigger callback",
+      "running": "Working…",
+      "success": "{count} processed",
+      "failed": "Action failed"
+    },
+    "tabs": {
+      "seekers": "Seekers",
+      "providers": "Providers"
+    },
+    "search": {
+      "seekerPlaceholder": "Search name, ID, profile…",
+      "providerPlaceholder": "Search org, role, ID…"
+    },
+    "pagination": {
+      "showing": "Showing {from}–{to} of {total}",
+      "matching": "Matching {shown} of {rowsOnPage} on this page"
+    },
+    "buttons": {
+      "exportCsv": "Export CSV",
+      "exporting": "Exporting…",
+      "refresh": "Refresh",
+      "refreshing": "Refreshing…",
+      "addParticipants": "Add Participants"
+    },
+    "state": {
+      "loading": "Loading…",
+      "failedToLoad": "Failed to load. Please try again.",
+      "refreshedJustNow": "Refreshed just now",
+      "refreshFailed": "Refresh failed"
+    },
+    "ministat": {
+      "completeProfiles": "Complete Profiles",
+      "totalItems": "Total {entityPlural}",
+      "withApplications": "{entityPlural} with Applications",
+      "newParticipants": "New Participants",
+      "delta_this_week": "this week",
+      "totalUsers": "Total Users",
+      "avgProfilesPerUser": "Avg Profiles per User",
+      "avgActionsPerUser": "Avg Actions per User",
+      "sub_total": "All {entityPlural} records",
+      "sub_complete": "{pct}% of all profiles",
+      "sub_applications": "Profiles with submissions",
+      "sub_avgItems": "Profiles managed each",
+      "sub_avgActions": "Recorded interactions",
+      "sub_totalUsers": "Unique account holders"
+    },
+    "summary": {
+      "total": "{count} total",
+      "hint": "Lifecycle and profile health across your network"
+    },
+    "groups": {
+      "profiles": "Profiles",
+      "users": "Users"
+    },
+    "onboardingGroup": {
+      "title": "Onboarding",
+      "helper": "Rolled up across your network",
+      "view": "View onboarding",
+      "total": "Total submissions",
+      "total_sub": "All entry modes",
+      "passed": "Verified & onboarded",
+      "passed_sub": "Cleared validation",
+      "failed": "Failed validations",
+      "failed_sub": "Need attention",
+      "skipped": "Skipped",
+      "skipped_sub": "Duplicates ignored",
+      "byMode": "Joins by entry mode",
+      "joins": "{count} verified joins",
+      "mode_bulk": "CSV upload",
+      "mode_link": "Registration link",
+      "mode_qr": "QR code",
+      "error_title": "Couldn’t load onboarding summary",
+      "error_body": "The summary service didn’t respond. Your other metrics are unaffected.",
+      "retry": "Retry"
+    },
+    "tiles": {
+      "lifecycle": {
+        "draft": "Draft profiles",
+        "live": "Live profiles",
+        "paused": "Paused profiles",
+        "account_only": "Account-only users"
+      }
+    },
+    "opp": {
+      "activeProgramsLabel": "Active programs",
+      "activeProgramsHint": "Cohorts running now",
+      "onboardedLabel": "Onboarded",
+      "onboardedHint": "Producing placements",
+      "atRiskLabel": "At Risk",
+      "atRiskHint": "Low cohort completion",
+      "inactiveLabel": "Inactive",
+      "inactiveHint": "None dormant",
+      "totalPrograms": "Total Programs",
+      "activeCohorts": "Active Cohorts",
+      "traineesEngaged": "Trainees Engaged",
+      "placementRate": "Placement Rate"
+    }
+  },
+  "nav": {
+    "my": "My {brand}",
+    "onboarding": "Onboarding",
+    "profile": "Profile",
+    "overview": "Overview",
+    "portal_label": "Aggregator Portal",
+    "sign_out": "Sign Out",
+    "aggregator_sublabel": "Aggregator · Karnataka"
+  },
+  "onboarding": {
+    "title": "Onboarding",
+    "subtitle": "Add participants to your network — by CSV, link, or QR.",
+    "refresh": "Refresh",
+    "bulk_upload": {
+      "title": "Bulk Upload",
+      "subtitle": "CSV import for existing rosters. Fastest path for large batches.",
+      "no_uploads_yet": "No uploads yet",
+      "loading": "Loading…",
+      "last_upload": "Last upload {when}",
+      "cta": "Go to Bulk Upload",
+      "metrics": {
+        "files_uploaded": "Files Uploaded",
+        "rows": "Rows",
+        "passed": "Passed",
+        "failed": "Failed"
+      }
+    },
+    "links": {
+      "title": "Registration via Link",
+      "subtitle": "Share a public link / QR. Participants self-register through it.",
+      "no_links_yet": "No links yet",
+      "loading": "Loading…",
+      "last_link": "Last link {when}",
+      "cta": "Create new link",
+      "metrics": {
+        "links": "Links",
+        "active": "Active",
+        "registrations": "Registrations",
+        "verified": "Verified"
+      }
+    },
+    "stats": {
+      "total_registered": "Total registered",
+      "verified_onboarded": "Verified & onboarded",
+      "failed_validations": "Failed validations"
+    },
+    "csv": {
+      "title": "Add participants",
+      "subtitle": "Bulk upload via CSV — fastest way to import existing rosters.",
+      "download_template": "Download template",
+      "drag_prompt": "Drag your CSV here or",
+      "browse": "click to browse",
+      "hint": ".csv only · UTF-8 encoded · uploaded as {type}s",
+      "upload_button": "Upload",
+      "uploading": "Uploading…",
+      "security_note": "All uploads are scanned and validated before import.",
+      "remove_file": "Remove file",
+      "recent": {
+        "title": "Recent uploads",
+        "shown_count": "{count} shown",
+        "no_uploads": "No uploads yet.",
+        "col_uploaded": "Uploaded",
+        "col_type": "Type",
+        "col_status": "Status",
+        "col_total": "Total",
+        "col_passed": "Passed",
+        "col_failed": "Failed",
+        "col_skipped": "Skipped",
+        "col_reason": "Reason / errors",
+        "all_rows_passed": "All rows passed",
+        "signing": "Signing…"
+      }
+    },
+    "create_link": {
+      "title": "Share a registration link",
+      "new_badge": "New",
+      "field_org_name": "Enter your Organisation Name",
+      "field_state": "Instance (State Name)",
+      "field_event": "Event",
+      "field_event_date": "Event Date",
+      "field_event_location": "Event Location",
+      "field_district": "District",
+      "field_domain": "Domain",
+      "field_registration_mode": "Campaign type",
+      "field_tags": "Tags (optional)",
+      "placeholder_state": "State",
+      "placeholder_event": "Campaign or event name",
+      "placeholder_location": "City or venue",
+      "placeholder_district": "District",
+      "placeholder_tags": "Comma-separated, e.g. priority, dharwad-drive",
+      "creating": "Creating…",
+      "create_button": "Create link",
+      "qr_label": "QR Code",
+      "qr_placeholder": "Create a link to start. QR appears once the draft is made live.",
+      "error_required": "State, District, and Event are required.",
+      "link_created": "Registration link created"
+    },
+    "your_links": {
+      "title": "Your Registration Links",
+      "loading": "Loading links…",
+      "empty": "No {type} links yet. Create one above.",
+      "active_count": "{count} active",
+      "type_pill": "{type} links"
+    },
+    "link_card": {
+      "copy_link": "Copy link",
+      "copied": "Copied!",
+      "copy_title": "Copy link",
+      "view_qr": "View QR",
+      "open_link": "Open link",
+      "draft_notice": "Public URL + QR appear after Make Live.",
+      "registrations": "registrations",
+      "verified": "verified",
+      "created_prefix": "Created",
+      "expires_prefix": "Expires",
+      "edit": "Edit",
+      "make_live": "Make Live",
+      "going_live": "Going live…",
+      "deactivate": "Deactivate",
+      "retiring": "Retiring…",
+      "active": "Active",
+      "cancel": "Cancel",
+      "save_draft": "Save Draft",
+      "saving": "Saving…",
+      "error_required": "State, District, and Event are required."
+    },
+    "bulk_uploads_page": {
+      "title": "Bulk Upload",
+      "subtitle": "Import participants from a CSV file.",
+      "back": "Back to Onboarding"
+    },
+    "links_page": {
+      "title": "Registration Links",
+      "subtitle": "Generate, share, and manage public registration links.",
+      "back": "Back to Onboarding"
+    }
+  },
+  "profile": {
+    "view": {
+      "topbar_title": "Aggregator Profile",
+      "topbar_subtitle": "Manage your aggregator identity and settings.",
+      "toast_saved": "Profile saved",
+      "error_load_title": "Could not load profile",
+      "error_load_detail": "We hit an error fetching the aggregator profile. Please try again shortly.",
+      "badge_aggregator": "Aggregator",
+      "badge_verified": "Verified",
+      "badge_active": "Active",
+      "meta_registered": "Registered",
+      "meta_coordinator": "Coordinator",
+      "btn_edit": "Edit",
+      "btn_review_history": "Review history",
+      "section_contact": "Contact Information",
+      "section_details": "Aggregator Details",
+      "section_personas": "Personas Supported",
+      "section_services": "Services Supported",
+      "section_network": "Network Snapshot",
+      "section_consent": "Consent & Compliance",
+      "kv_name": "Name",
+      "kv_mobile": "Mobile",
+      "kv_email": "Email",
+      "kv_contact_mode": "Preferred Contact Mode",
+      "kv_contact_mode_value": "Contact me first",
+      "kv_address": "Organisation Address",
+      "kv_geographies": "Geographies Served",
+      "stat_active_seekers": "Active Seekers",
+      "stat_open_roles": "Open Roles",
+      "stat_hires_3mo": "Hires (3 mo)",
+      "stat_match_rate": "Match Rate",
+      "consent_profile_creation": "Profile creation & representation in the ecosystem",
+      "consent_sharing": "Sharing information with relevant parties",
+      "consent_notifications": "Receive opportunity notifications & nudges",
+      "consent_analytics": "Anonymous analytics for ecosystem improvement",
+      "consent_marketing": "Marketing communication from partner orgs",
+      "consent_retention": "Data retention per Blue Dots policy v2.3",
+      "consent_last_reviewed": "Last consent reviewed",
+      "consent_next_review": "Next review due {date}."
+    },
+    "edit": {
+      "heading": "Edit Profile",
+      "tagline": "Update your organisation, contact and personas. Slug + status are read-only.",
+      "loading": "Loading profile…",
+      "error_load_title": "Could not load profile",
+      "btn_cancel": "Cancel",
+      "btn_save": "Save changes",
+      "btn_saving": "Saving…",
+      "save_failed": "Save failed. Please try again."
+    },
+    "complete": {
+      "topbar_title": "Complete your profile",
+      "topbar_subtitle": "A few details about your organisation so we can match you with the right opportunities.",
+      "loading": "Loading profile…",
+      "btn_save": "Save profile",
+      "btn_saving": "Saving…",
+      "status_saved": "Saved"
+    },
+    "public_reg": {
+      "domain_seeker": "Seeker registration",
+      "domain_provider": "Provider registration",
+      "done_passed_title": "Registration received",
+      "done_skipped_title": "Already registered",
+      "done_passed_body": "Thanks — your details have been recorded. You will hear back from the aggregator soon.",
+      "done_skipped_body": "This mobile number (or email) is already registered with this aggregator — no need to register again.",
+      "done_ref_prefix": "Ref:",
+      "btn_register_another": "Register another",
+      "btn_submit": "Submit registration",
+      "btn_submitting": "Submitting…",
+      "privacy_note": "Your details are shared only with the aggregator who issued this link.",
+      "powered_by": "Powered by",
+      "validation_error_title": "Form validation failed",
+      "validation_required": "Please fill all required fields.",
+      "validation_more": "(and {count} more)",
+      "error_network_title": "Network error",
+      "error_network_detail": "Could not reach the server.",
+      "error_submission_title": "Submission failed",
+      "error_server_detail": "Server returned HTTP {status}.",
+      "lookup": {
+        "owned_elsewhere_title": "Contact already registered",
+        "owned_elsewhere_body": "This email or mobile is already registered with another organisation. Please use a different contact or sign in through that organisation.",
+        "owned_elsewhere_cta": "Use a different contact",
+        "resume_title": "You have a profile in progress",
+        "resume_body": "We found an unfinished profile for this contact. Resume where you left off?",
+        "resume_cta": "Resume profile",
+        "resume_continue_new": "Continue with a new submission"
+      },
+      "account_only": {
+        "title": "Quick sign-up",
+        "helper": "Provide your name and a contact number or email. You can complete your profile later.",
+        "contact_label": "Provide a phone OR an email (at least one required)",
+        "name_label": "Name",
+        "phone_label": "Phone",
+        "email_label": "Email",
+        "consent_terms_label": "I accept the terms",
+        "consent_privacy_label": "I accept the privacy policy",
+        "submit_label": "Submit"
+      }
+    }
+  },
+  "registration_mode": {
+    "field_label": "Campaign type",
+    "voice": {
+      "label": "Voice Campaign",
+      "hint": "You'll receive a call on this number to complete your profile."
+    },
+    "form": {
+      "label": "Form Filling",
+      "hint": "Participants fill the full profile online. Partial submissions are accepted."
+    }
+  },
+  "auth": {
+    "welcome_heading": "Welcome back.",
+    "welcome_sub": "Sign in or register your organisation to get started.",
+    "existing_title": "Existing user — Sign in",
+    "existing_sub": "Continue with email or mobile via {brand} SSO",
+    "register_title": "Become a member",
+    "register_sub": "Register your organisation with {brand}",
+    "review_notice": "New registrations are reviewed by the {brand} team.",
+    "session_expired": "Your session expired. Sign in again to continue.",
+    "signin_failed": "Sign-in failed: {reason}. Please try again.",
+    "footer_prefix": "By continuing you agree to the",
+    "footer_and": "and",
+    "privacy": "Privacy Policy",
+    "terms": "Terms",
+    "errors": {
+      "invalid_flow_cookie": "session handshake expired",
+      "missing_code_or_state": "incomplete callback",
+      "oidc_error_temporarily_unavailable": "sign-in session expired before completing",
+      "oidc_error_login_required": "sign-in is required to continue",
+      "oidc_error_access_denied": "sign-in was cancelled",
+      "oidc_error_invalid_request": "sign-in request was invalid",
+      "oidc_error_server_error": "identity provider is temporarily unavailable",
+      "exchange_token_exchange_failed": "token exchange failed",
+      "exchange_state_mismatch": "security check failed (state mismatch)",
+      "exchange_token_verify_failed": "security check failed (token verification)",
+      "unknown": "unexpected sign-in error"
+    }
+  }
+}

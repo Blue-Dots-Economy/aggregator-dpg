@@ -1,0 +1,104 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1777540942489,
+      "tag": "0000_init",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1778231005625,
+      "tag": "0001_married_kang",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1778231661967,
+      "tag": "0002_amusing_ben_parker",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1778232795283,
+      "tag": "0003_chief_sleeper",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1778246000000,
+      "tag": "0004_participant_unique_includes_type",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1778500000000,
+      "tag": "0005_aggregator_profile",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1778600000000,
+      "tag": "0006_aggregator_allow_type_on_aggregator",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1778700000000,
+      "tag": "0007_bulk_uploads_etag_partial_unique",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1778800000000,
+      "tag": "0008_registration_link_slug_per_aggregator",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1778900000000,
+      "tag": "0009_drop_bulk_uploads_counters",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1779000000000,
+      "tag": "0010_aggregator_signalstack_org_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1779100000000,
+      "tag": "0011_drop_participant_aggregator_type_enums",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1779200000000,
+      "tag": "0012_drop_bulk_uploads_etag_unique",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1779300000000,
+      "tag": "0013_registration_mode",
+      "breakpoints": true
+    }
+  ]
+}

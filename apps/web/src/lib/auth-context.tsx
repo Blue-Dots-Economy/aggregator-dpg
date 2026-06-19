@@ -1,71 +1,63 @@
 'use client';
 
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-  type ReactNode,
-} from 'react';
+/**
+ * Client-side auth context.
+ *
+ * Hydrated from a server-side `getSession()` snapshot via the `initialUser`
+ * prop on the protected layout. The browser never sees access tokens — only
+ * the public claims surfaced here.
+ *
+ * `signOut()` redirects to the BFF logout endpoint, which destroys the Redis
+ * session, clears the cookie, and bounces through Keycloak's end-session.
+ */
+
+import { createContext, useCallback, useContext, useMemo, type ReactNode } from 'react';
 import type { User } from '../types';
-import { authService } from '../services/auth.service';
 
 interface AuthContextValue {
   user: User | null;
   isAuthenticated: boolean;
   isHydrated: boolean;
-  signIn: (input: { org: string; password: string }) => Promise<void>;
   signOut: () => Promise<void>;
 }
 
-const STORAGE_KEY = 'bd-portal-user';
-
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [isHydrated, setIsHydrated] = useState(false);
+export interface AuthProviderProps {
+  children: ReactNode;
+  initialUser?: User | null;
+}
 
-  useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        setUser(JSON.parse(raw) as User);
-      }
-    } catch {
-      // ignore corrupt storage
-    }
-    setIsHydrated(true);
-  }, []);
-
-  const signIn = useCallback(async (input: { org: string; password: string }) => {
-    const u = await authService.login(input);
-    setUser(u);
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(u));
-  }, []);
-
+/**
+ * Provides the active user to client components. Consumes a session snapshot
+ * passed from the server layout — does not fetch on its own.
+ *
+ * @param props - `children` plus an optional `initialUser` from the server.
+ */
+export function AuthProvider({ children, initialUser = null }: AuthProviderProps) {
   const signOut = useCallback(async () => {
-    await authService.logout();
-    setUser(null);
-    window.localStorage.removeItem(STORAGE_KEY);
+    window.location.href = '/api/auth/logout';
   }, []);
 
   const value = useMemo<AuthContextValue>(
     () => ({
-      user,
-      isAuthenticated: user !== null,
-      isHydrated,
-      signIn,
+      user: initialUser,
+      isAuthenticated: initialUser !== null,
+      isHydrated: true,
       signOut,
     }),
-    [user, isHydrated, signIn, signOut],
+    [initialUser, signOut],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
+/**
+ * Reads the active session in client components.
+ *
+ * @returns The current `user` plus auth-state booleans and `signOut`.
+ * @throws If called outside an `AuthProvider`.
+ */
 export function useAuth(): AuthContextValue {
   const ctx = useContext(AuthContext);
   if (!ctx) {

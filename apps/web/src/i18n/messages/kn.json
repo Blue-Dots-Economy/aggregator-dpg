@@ -1,0 +1,481 @@
+{
+  "language": {
+    "label": "ಭಾಷೆ"
+  },
+  "theme": {
+    "switch_to_light": "ಬೆಳಕಿನ ಥೀಮ್‌ಗೆ ಬದಲಿಸಿ",
+    "switch_to_dark": "ಗಾಢ ಥೀಮ್‌ಗೆ ಬದಲಿಸಿ",
+    "toggle_aria": "ಥೀಮ್ ಬದಲಿಸಿ"
+  },
+  "form": {
+    "select_placeholder": "ಆಯ್ಕೆಮಾಡಿ…",
+    "comma_separated": "ಅಲ್ಪವಿರಾಮದಿಂದ ಬೇರ್ಪಡಿಸಿದ ಮೌಲ್ಯಗಳು",
+    "select_options": "ಆಯ್ಕೆಗಳನ್ನು ಆರಿಸಿ…"
+  },
+  "status_pill": {
+    "active": "ಸಕ್ರಿಯ",
+    "at_risk": "ಅಪಾಯದಲ್ಲಿ",
+    "inactive": "ನಿಷ್ಕ್ರಿಯ",
+    "satisfied": "ತೃಪ್ತ",
+    "complete": "ಪೂರ್ಣ",
+    "incomplete": "ಅಪೂರ್ಣ"
+  },
+  "Lifecycle": {
+    "draft": "ಕರಡು",
+    "live": "ಸಕ್ರಿಯ",
+    "paused": "ತಡೆಹಿಡಿಯಲಾಗಿದೆ",
+    "account_only": "ಖಾತೆ ಮಾತ್ರ"
+  },
+  "metadata": {
+    "title": "ಅಗ್ರಿಗೇಟರ್ ಪೋರ್ಟಲ್",
+    "description": "ಸಿಗ್ನಲ್‌ಸ್ಟ್ಯಾಕ್ ಆಧಾರಿತ ಭಾಗವಹಿಸುವ ನೆಟ್‌ವರ್ಕ್‌ಗಳಿಗಾಗಿ ಅಗ್ರಿಗೇಟರ್ ಪೋರ್ಟಲ್."
+  },
+  "common": {
+    "back": "ಹಿಂದೆ",
+    "cancel": "ರದ್ದುಮಾಡಿ",
+    "continue": "ಮುಂದುವರಿಸಿ",
+    "loading": "ಲೋಡ್ ಆಗುತ್ತಿದೆ…"
+  },
+  "register": {
+    "heading_tagline": "ನಿಮ್ಮ ಸಂಸ್ಥೆಯ ಬಗ್ಗೆ ನಮಗೆ ತಿಳಿಸಿ.",
+    "success_heading": "ಅರ್ಜಿ ಸ್ವೀಕರಿಸಲಾಗಿದೆ",
+    "success_ref_id": "ಉಲ್ಲೇಖ ಐಡಿ:",
+    "success_approval": "{brand} ತಂಡವು ನಿಮ್ಮ ಅರ್ಜಿಯನ್ನು ಪರಿಶೀಲಿಸುತ್ತದೆ. ಅನುಮೋದನೆಯ ನಂತರ, ನೀವು ನೋಂದಾಯಿಸಿದ ಇಮೇಲ್ ಅಥವಾ ಮೊಬೈಲ್ ಬಳಸಿ {brand} SSO ಮೂಲಕ ಸೈನ್ ಇನ್ ಮಾಡಿ.",
+    "submit": "ಅರ್ಜಿ ಸಲ್ಲಿಸಿ",
+    "submitting": "ಸಲ್ಲಿಸಲಾಗುತ್ತಿದೆ…",
+    "footer_note": "ನಿಮ್ಮ ಅರ್ಜಿಯನ್ನು {brand} ತಂಡವು ಪರಿಶೀಲಿಸುತ್ತದೆ. ಅನುಮೋದನೆಯಾದ ನಂತರ ನೀವು ಇಮೇಲ್ ಸ್ವೀಕರಿಸುತ್ತೀರಿ, ನಂತರ {brand} SSO ಮೂಲಕ ಸೈನ್ ಇನ್ ಮಾಡಿ.",
+    "validation_error_title": "ದಯವಿಟ್ಟು ಗುರುತಿಸಲಾದ ಕ್ಷೇತ್ರಗಳನ್ನು ಸರಿಪಡಿಸಿ"
+  },
+  "dashboard": {
+    "buckets": {
+      "created": "ರಚಿಸಲಾಗಿದೆ",
+      "accepted": "ಸ್ವೀಕರಿಸಲಾಗಿದೆ",
+      "rejected": "ತಿರಸ್ಕರಿಸಲಾಗಿದೆ",
+      "cancelled": "ರದ್ದುಮಾಡಲಾಗಿದೆ"
+    },
+    "statuses": {
+      "new": "ಹೊಸ",
+      "active": "ಸಕ್ರಿಯ",
+      "at_risk": "ಅಪಾಯದಲ್ಲಿ",
+      "inactive": "ನಿಷ್ಕ್ರಿಯ"
+    },
+    "hints": {
+      "new": "ಇತ್ತೀಚೆಗೆ ಸೇರಿದ್ದಾರೆ",
+      "active": "ಇತ್ತೀಚೆಗೆ ಸಕ್ರಿಯರಾಗಿದ್ದಾರೆ",
+      "at_risk": "ನಿಧಾನಗೊಳ್ಳುತ್ತಿದ್ದಾರೆ",
+      "inactive": "ಇತ್ತೀಚಿನ ಚಟುವಟಿಕೆ ಇಲ್ಲ"
+    },
+    "table": {
+      "participant": "ಭಾಗವಹಿಸುವವರು",
+      "participants": "ಭಾಗವಹಿಸುವವರು",
+      "opportunityProviders": "ಅವಕಾಶ ಪೂರೈಕೆದಾರರು",
+      "provider": "ಪೂರೈಕೆದಾರ",
+      "joined": "ಸೇರಿದ ದಿನಾಂಕ",
+      "profileStatus": "ಪ್ರೊಫೈಲ್ ಸ್ಥಿತಿ",
+      "lifecycle": "ಜೀವನಚಕ್ರ",
+      "status": "ಸ್ಥಿತಿ",
+      "recommendedAction": "ಶಿಫಾರಸ್ಸು ಮಾಡಿದ ಕ್ರಮ",
+      "applied": "ಅರ್ಜಿ ಸಲ್ಲಿಸಿದ",
+      "initiated": "ಪ್ರಾರಂಭಿಸಿದ",
+      "received": "ಸ್ವೀಕರಿಸಿದ",
+      "count": "{total} ರಲ್ಲಿ {shown}"
+    },
+    "filters": {
+      "all_statuses": "ಎಲ್ಲಾ ಸ್ಥಿತಿಗಳು",
+      "lifecycle_label": "ಜೀವನಚಕ್ರ",
+      "lifecycle_all": "ಎಲ್ಲಾ ಜೀವನಚಕ್ರಗಳು",
+      "lifecycle_draft": "ಕರಡು",
+      "lifecycle_live": "ಸಕ್ರಿಯ",
+      "lifecycle_paused": "ತಡೆಹಿಡಿಯಲಾಗಿದೆ",
+      "lifecycle_account_only": "ಖಾತೆ ಮಾತ್ರ"
+    },
+    "aria": {
+      "search_participants": "ಭಾಗವಹಿಸುವವರನ್ನು ಹುಡುಕಿ",
+      "export_csv": "CSV ಆಗಿ ರಫ್ತು ಮಾಡಿ",
+      "prev_page": "ಹಿಂದಿನ ಪುಟ",
+      "next_page": "ಮುಂದಿನ ಪುಟ",
+      "refresh": "ಡ್ಯಾಶ್‌ಬೋರ್ಡ್ ರಿಫ್ರೆಶ್ ಮಾಡಿ",
+      "select_row": "{name} ಆಯ್ಕೆಮಾಡಿ",
+      "select_all_page": "ಈ ಪುಟದ ಎಲ್ಲಾ ಸಾಲುಗಳನ್ನು ಆಯ್ಕೆಮಾಡಿ"
+    },
+    "bulk": {
+      "select": "ಆಯ್ಕೆಮಾಡಿ",
+      "cancel": "ರದ್ದುಮಾಡಿ",
+      "selected": "{count} ಆಯ್ಕೆಯಾಗಿದೆ",
+      "clear": "ಆಯ್ಕೆ ತೆರವುಗೊಳಿಸಿ",
+      "exportSelected": "ಆಯ್ದ CSV ರಫ್ತು ಮಾಡಿ",
+      "triggerCallback": "ಕಾಲ್‌ಬ್ಯಾಕ್ ಪ್ರಚೋದಿಸಿ",
+      "running": "ಪ್ರಕ್ರಿಯೆ ನಡೆಯುತ್ತಿದೆ…",
+      "success": "{count} ಸಂಸ್ಕರಿಸಲಾಗಿದೆ",
+      "failed": "ಕ್ರಿಯೆ ವಿಫಲವಾಗಿದೆ"
+    },
+    "tabs": {
+      "seekers": "ಅರ್ಜಿದಾರರು",
+      "providers": "ಪೂರೈಕೆದಾರರು"
+    },
+    "search": {
+      "seekerPlaceholder": "ಹೆಸರು, ಐಡಿ, ಪ್ರೊಫೈಲ್ ಹುಡುಕಿ…",
+      "providerPlaceholder": "ಸಂಸ್ಥೆ, ಪಾತ್ರ, ಐಡಿ ಹುಡುಕಿ…"
+    },
+    "pagination": {
+      "showing": "{total} ರಲ್ಲಿ {from}–{to} ತೋರಿಸಲಾಗುತ್ತಿದೆ",
+      "matching": "ಈ ಪುಟದಲ್ಲಿ {rowsOnPage} ರಲ್ಲಿ {shown} ಹೊಂದಾಣಿಕೆ"
+    },
+    "buttons": {
+      "exportCsv": "CSV ರಫ್ತು ಮಾಡಿ",
+      "exporting": "ರಫ್ತು ಆಗುತ್ತಿದೆ…",
+      "refresh": "ರಿಫ್ರೆಶ್",
+      "refreshing": "ರಿಫ್ರೆಶ್ ಆಗುತ್ತಿದೆ…",
+      "addParticipants": "ಭಾಗವಹಿಸುವವರನ್ನು ಸೇರಿಸಿ"
+    },
+    "state": {
+      "loading": "ಲೋಡ್ ಆಗುತ್ತಿದೆ…",
+      "failedToLoad": "ಲೋಡ್ ಮಾಡಲು ವಿಫಲವಾಗಿದೆ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
+      "refreshedJustNow": "ಇದೀಗ ರಿಫ್ರೆಶ್ ಆಗಿದೆ",
+      "refreshFailed": "ರಿಫ್ರೆಶ್ ವಿಫಲವಾಗಿದೆ"
+    },
+    "ministat": {
+      "completeProfiles": "ಪೂರ್ಣ ಪ್ರೊಫೈಲ್‌ಗಳು",
+      "totalItems": "ಒಟ್ಟು {entityPlural}",
+      "withApplications": "ಅರ್ಜಿಗಳೊಂದಿಗೆ {entityPlural}",
+      "newParticipants": "ಹೊಸ ಭಾಗವಹಿಸುವವರು",
+      "delta_this_week": "ಈ ವಾರ",
+      "totalUsers": "ಒಟ್ಟು ಬಳಕೆದಾರರು",
+      "avgProfilesPerUser": "ಪ್ರತಿ ಬಳಕೆದಾರರಿಗೆ ಸರಾಸರಿ ಪ್ರೊಫೈಲ್‌ಗಳು",
+      "avgActionsPerUser": "ಪ್ರತಿ ಬಳಕೆದಾರರಿಗೆ ಸರಾಸರಿ ಕ್ರಿಯೆಗಳು",
+      "sub_total": "ಎಲ್ಲಾ {entityPlural} ದಾಖಲೆಗಳು",
+      "sub_complete": "ಎಲ್ಲಾ ಪ್ರೊಫೈಲ್‌ಗಳ {pct}%",
+      "sub_applications": "ಅರ್ಜಿಗಳಿರುವ ಪ್ರೊಫೈಲ್‌ಗಳು",
+      "sub_avgItems": "ಪ್ರತಿ ಬಳಕೆದಾರ ನಿರ್ವಹಿಸುವ ಪ್ರೊಫೈಲ್‌ಗಳು",
+      "sub_avgActions": "ದಾಖಲಾದ ಚಟುವಟಿಕೆಗಳು",
+      "sub_totalUsers": "ವಿಶಿಷ್ಟ ಖಾತೆದಾರರು"
+    },
+    "summary": {
+      "total": "ಒಟ್ಟು {count}",
+      "hint": "ನಿಮ್ಮ ನೆಟ್‌ವರ್ಕ್‌ನಾದ್ಯಂತ ಜೀವನಚಕ್ರ ಮತ್ತು ಪ್ರೊಫೈಲ್ ಸ್ಥಿತಿ"
+    },
+    "groups": {
+      "profiles": "ಪ್ರೊಫೈಲ್‌ಗಳು",
+      "users": "ಬಳಕೆದಾರರು"
+    },
+    "onboardingGroup": {
+      "title": "ಆನ್‌ಬೋರ್ಡಿಂಗ್",
+      "helper": "ನಿಮ್ಮ ನೆಟ್‌ವರ್ಕ್‌ನಾದ್ಯಂತ ಸಮಗ್ರ",
+      "view": "ಆನ್‌ಬೋರ್ಡಿಂಗ್ ನೋಡಿ",
+      "total": "ಒಟ್ಟು ಸಲ್ಲಿಕೆಗಳು",
+      "total_sub": "ಎಲ್ಲಾ ಪ್ರವೇಶ ವಿಧಾನಗಳು",
+      "passed": "ಪರಿಶೀಲಿಸಿ ಸೇರಿಸಲಾಗಿದೆ",
+      "passed_sub": "ಮೌಲ್ಯೀಕರಣ ಉತ್ತೀರ್ಣ",
+      "failed": "ವಿಫಲ ಮೌಲ್ಯೀಕರಣಗಳು",
+      "failed_sub": "ಗಮನ ಅಗತ್ಯ",
+      "skipped": "ಬಿಟ್ಟುಬಿಡಲಾಗಿದೆ",
+      "skipped_sub": "ನಕಲುಗಳನ್ನು ನಿರ್ಲಕ್ಷಿಸಲಾಗಿದೆ",
+      "byMode": "ಪ್ರವೇಶ ವಿಧಾನದ ಪ್ರಕಾರ ಜೋಡಣೆ",
+      "joins": "{count} ಪರಿಶೀಲಿತ ಜೋಡಣೆಗಳು",
+      "mode_bulk": "CSV ಅಪ್‌ಲೋಡ್",
+      "mode_link": "ನೋಂದಣಿ ಲಿಂಕ್",
+      "mode_qr": "QR ಕೋಡ್",
+      "error_title": "ಆನ್‌ಬೋರ್ಡಿಂಗ್ ಸಾರಾಂಶ ಲೋಡ್ ಆಗಲಿಲ್ಲ",
+      "error_body": "ಸಾರಾಂಶ ಸೇವೆ ಪ್ರತಿಕ್ರಿಯಿಸಲಿಲ್ಲ. ನಿಮ್ಮ ಇತರ ಮೆಟ್ರಿಕ್‌ಗಳು ಪರಿಣಾಮ ಬೀರಿಲ್ಲ.",
+      "retry": "ಮರುಪ್ರಯತ್ನಿಸಿ"
+    },
+    "tiles": {
+      "lifecycle": {
+        "draft": "ಕರಡು ಪ್ರೊಫೈಲ್‌ಗಳು",
+        "live": "ಸಕ್ರಿಯ ಪ್ರೊಫೈಲ್‌ಗಳು",
+        "paused": "ತಡೆಹಿಡಿದ ಪ್ರೊಫೈಲ್‌ಗಳು",
+        "account_only": "ಖಾತೆ-ಮಾತ್ರ ಬಳಕೆದಾರರು"
+      }
+    },
+    "opp": {
+      "activeProgramsLabel": "ಸಕ್ರಿಯ ಕಾರ್ಯಕ್ರಮಗಳು",
+      "activeProgramsHint": "ಈಗ ನಡೆಯುತ್ತಿರುವ ತಂಡಗಳು",
+      "onboardedLabel": "ಆನ್‌ಬೋರ್ಡ್ ಆಗಿದ್ದಾರೆ",
+      "onboardedHint": "ನಿಯೋಜನೆ ನೀಡುತ್ತಿದ್ದಾರೆ",
+      "atRiskLabel": "ಅಪಾಯದಲ್ಲಿ",
+      "atRiskHint": "ಕಡಿಮೆ ತಂಡ ಪೂರ್ಣಗೊಳಿಸುವಿಕೆ",
+      "inactiveLabel": "ನಿಷ್ಕ್ರಿಯ",
+      "inactiveHint": "ಯಾವುದೂ ಚಾಲ್ತಿಯಲ್ಲಿಲ್ಲ",
+      "totalPrograms": "ಒಟ್ಟು ಕಾರ್ಯಕ್ರಮಗಳು",
+      "activeCohorts": "ಸಕ್ರಿಯ ತಂಡಗಳು",
+      "traineesEngaged": "ತರಬೇತಿ ಪಡೆಯುತ್ತಿರುವವರು",
+      "placementRate": "ನಿಯೋಜನೆ ದರ"
+    }
+  },
+  "nav": {
+    "my": "ನನ್ನ {brand}",
+    "onboarding": "ಆನ್‌ಬೋರ್ಡಿಂಗ್",
+    "profile": "ಪ್ರೊಫೈಲ್",
+    "overview": "ಅವಲೋಕನ",
+    "portal_label": "ಅಗ್ರಿಗೇಟರ್ ಪೋರ್ಟಲ್",
+    "sign_out": "ಸೈನ್ ಔಟ್",
+    "aggregator_sublabel": "ಅಗ್ರಿಗೇಟರ್ · ಕರ್ನಾಟಕ"
+  },
+  "onboarding": {
+    "title": "ಆನ್‌ಬೋರ್ಡಿಂಗ್",
+    "subtitle": "CSV, ಲಿಂಕ್, ಅಥವಾ QR ಮೂಲಕ ನಿಮ್ಮ ನೆಟ್‌ವರ್ಕ್‌ಗೆ ಭಾಗವಹಿಸುವವರನ್ನು ಸೇರಿಸಿ.",
+    "refresh": "ರಿಫ್ರೆಶ್",
+    "bulk_upload": {
+      "title": "ಬಲ್ಕ್ ಅಪ್‌ಲೋಡ್",
+      "subtitle": "ಅಸ್ತಿತ್ವದಲ್ಲಿರುವ ಪಟ್ಟಿಗಳಿಗಾಗಿ CSV ಆಮದು. ದೊಡ್ಡ ಬ್ಯಾಚ್‌ಗಳಿಗೆ ಅತ್ಯಂತ ವೇಗದ ಮಾರ್ಗ.",
+      "no_uploads_yet": "ಇನ್ನೂ ಅಪ್‌ಲೋಡ್‌ಗಳಿಲ್ಲ",
+      "loading": "ಲೋಡ್ ಆಗುತ್ತಿದೆ…",
+      "last_upload": "ಕೊನೆಯ ಅಪ್‌ಲೋಡ್ {when}",
+      "cta": "ಬಲ್ಕ್ ಅಪ್‌ಲೋಡ್‌ಗೆ ಹೋಗಿ",
+      "metrics": {
+        "files_uploaded": "ಅಪ್‌ಲೋಡ್ ಆದ ಫೈಲ್‌ಗಳು",
+        "rows": "ಸಾಲುಗಳು",
+        "passed": "ಉತ್ತೀರ್ಣ",
+        "failed": "ವಿಫಲ"
+      }
+    },
+    "links": {
+      "title": "ಲಿಂಕ್ ಮೂಲಕ ನೋಂದಣಿ",
+      "subtitle": "ಸಾರ್ವಜನಿಕ ಲಿಂಕ್ / QR ಹಂಚಿಕೊಳ್ಳಿ. ಭಾಗವಹಿಸುವವರು ಅದರ ಮೂಲಕ ಸ್ವಯಂ ನೋಂದಾಯಿಸುತ್ತಾರೆ.",
+      "no_links_yet": "ಇನ್ನೂ ಲಿಂಕ್‌ಗಳಿಲ್ಲ",
+      "loading": "ಲೋಡ್ ಆಗುತ್ತಿದೆ…",
+      "last_link": "ಕೊನೆಯ ಲಿಂಕ್ {when}",
+      "cta": "ಹೊಸ ಲಿಂಕ್ ರಚಿಸಿ",
+      "metrics": {
+        "links": "ಲಿಂಕ್‌ಗಳು",
+        "active": "ಸಕ್ರಿಯ",
+        "registrations": "ನೋಂದಣಿಗಳು",
+        "verified": "ಪರಿಶೀಲಿಸಲಾಗಿದೆ"
+      }
+    },
+    "stats": {
+      "total_registered": "ಒಟ್ಟು ನೋಂದಾಯಿತ",
+      "verified_onboarded": "ಪರಿಶೀಲಿಸಿ ಆನ್‌ಬೋರ್ಡ್ ಮಾಡಲಾಗಿದೆ",
+      "failed_validations": "ವಿಫಲ ಮೌಲ್ಯೀಕರಣಗಳು"
+    },
+    "csv": {
+      "title": "ಭಾಗವಹಿಸುವವರನ್ನು ಸೇರಿಸಿ",
+      "subtitle": "CSV ಮೂಲಕ ಬಲ್ಕ್ ಅಪ್‌ಲೋಡ್ — ಅಸ್ತಿತ್ವದಲ್ಲಿರುವ ಪಟ್ಟಿಗಳನ್ನು ಆಮದು ಮಾಡಲು ತ್ವರಿತ ಮಾರ್ಗ.",
+      "download_template": "ಟೆಂಪ್ಲೇಟ್ ಡೌನ್‌ಲೋಡ್ ಮಾಡಿ",
+      "drag_prompt": "ನಿಮ್ಮ CSV ಅನ್ನು ಇಲ್ಲಿ ಎಳೆಯಿರಿ ಅಥವಾ",
+      "browse": "ಬ್ರೌಸ್ ಮಾಡಲು ಕ್ಲಿಕ್ ಮಾಡಿ",
+      "hint": "ಕೇವಲ .csv · UTF-8 ಎನ್ಕೋಡ್ ಆಗಿರಬೇಕು · {type}s ಆಗಿ ಅಪ್‌ಲೋಡ್",
+      "upload_button": "ಅಪ್‌ಲೋಡ್",
+      "uploading": "ಅಪ್‌ಲೋಡ್ ಆಗುತ್ತಿದೆ…",
+      "security_note": "ಎಲ್ಲಾ ಅಪ್‌ಲೋಡ್‌ಗಳನ್ನು ಆಮದಿಗೂ ಮೊದಲು ಸ್ಕ್ಯಾನ್ ಮಾಡಿ ಮೌಲ್ಯೀಕರಿಸಲಾಗುತ್ತದೆ.",
+      "remove_file": "ಫೈಲ್ ತೆಗೆದುಹಾಕಿ",
+      "recent": {
+        "title": "ಇತ್ತೀಚಿನ ಅಪ್‌ಲೋಡ್‌ಗಳು",
+        "shown_count": "{count} ತೋರಿಸಲಾಗಿದೆ",
+        "no_uploads": "ಇನ್ನೂ ಅಪ್‌ಲೋಡ್‌ಗಳಿಲ್ಲ.",
+        "col_uploaded": "ಅಪ್‌ಲೋಡ್ ಆದದ್ದು",
+        "col_type": "ವಿಧ",
+        "col_status": "ಸ್ಥಿತಿ",
+        "col_total": "ಒಟ್ಟು",
+        "col_passed": "ಉತ್ತೀರ್ಣ",
+        "col_failed": "ವಿಫಲ",
+        "col_skipped": "ಬಿಟ್ಟುಬಿಡಲಾಗಿದೆ",
+        "col_reason": "ಕಾರಣ / ದೋಷಗಳು",
+        "all_rows_passed": "ಎಲ್ಲಾ ಸಾಲುಗಳು ಉತ್ತೀರ್ಣ",
+        "signing": "ಸಹಿ ಮಾಡುತ್ತಿದೆ…"
+      }
+    },
+    "create_link": {
+      "title": "ನೋಂದಣಿ ಲಿಂಕ್ ಹಂಚಿಕೊಳ್ಳಿ",
+      "new_badge": "ಹೊಸ",
+      "field_org_name": "ನಿಮ್ಮ ಸಂಸ್ಥೆಯ ಹೆಸರನ್ನು ನಮೂದಿಸಿ",
+      "field_state": "ಆವೃತ್ತಿ (ರಾಜ್ಯದ ಹೆಸರು)",
+      "field_event": "ಕಾರ್ಯಕ್ರಮ",
+      "field_event_date": "ಕಾರ್ಯಕ್ರಮದ ದಿನಾಂಕ",
+      "field_event_location": "ಕಾರ್ಯಕ್ರಮದ ಸ್ಥಳ",
+      "field_district": "ಜಿಲ್ಲೆ",
+      "field_domain": "ಡೊಮೇನ್",
+      "field_registration_mode": "ಅಭಿಯಾನ ಪ್ರಕಾರ",
+      "field_tags": "ಟ್ಯಾಗ್‌ಗಳು (ಐಚ್ಛಿಕ)",
+      "placeholder_state": "ರಾಜ್ಯ",
+      "placeholder_event": "ಅಭಿಯಾನ ಅಥವಾ ಕಾರ್ಯಕ್ರಮದ ಹೆಸರು",
+      "placeholder_location": "ನಗರ ಅಥವಾ ಸ್ಥಳ",
+      "placeholder_district": "ಜಿಲ್ಲೆ",
+      "placeholder_tags": "ಅಲ್ಪವಿರಾಮದಿಂದ ಬೇರ್ಪಡಿಸಿ, ಉದಾ. priority, dharwad-drive",
+      "creating": "ರಚಿಸಲಾಗುತ್ತಿದೆ…",
+      "create_button": "ಲಿಂಕ್ ರಚಿಸಿ",
+      "qr_label": "QR ಕೋಡ್",
+      "qr_placeholder": "ಪ್ರಾರಂಭಿಸಲು ಲಿಂಕ್ ರಚಿಸಿ. ಡ್ರಾಫ್ಟ್ ಲೈವ್ ಆದ ನಂತರ QR ಗೋಚರಿಸುತ್ತದೆ.",
+      "error_required": "ರಾಜ್ಯ, ಜಿಲ್ಲೆ, ಮತ್ತು ಕಾರ್ಯಕ್ರಮ ಅಗತ್ಯವಿದೆ.",
+      "link_created": "ನೋಂದಣಿ ಲಿಂಕ್ ರಚಿಸಲಾಗಿದೆ"
+    },
+    "your_links": {
+      "title": "ನಿಮ್ಮ ನೋಂದಣಿ ಲಿಂಕ್‌ಗಳು",
+      "loading": "ಲಿಂಕ್‌ಗಳು ಲೋಡ್ ಆಗುತ್ತಿವೆ…",
+      "empty": "ಇನ್ನೂ {type} ಲಿಂಕ್‌ಗಳಿಲ್ಲ. ಮೇಲೆ ಒಂದನ್ನು ರಚಿಸಿ.",
+      "active_count": "{count} ಸಕ್ರಿಯ",
+      "type_pill": "{type} ಲಿಂಕ್‌ಗಳು"
+    },
+    "link_card": {
+      "copy_link": "ಲಿಂಕ್ ನಕಲಿಸಿ",
+      "copied": "ನಕಲಿಸಲಾಗಿದೆ!",
+      "copy_title": "ಲಿಂಕ್ ನಕಲಿಸಿ",
+      "view_qr": "QR ನೋಡಿ",
+      "open_link": "ಲಿಂಕ್ ತೆರೆಯಿರಿ",
+      "draft_notice": "ಲೈವ್ ಮಾಡಿದ ನಂತರ ಸಾರ್ವಜನಿಕ URL + QR ಗೋಚರಿಸುತ್ತದೆ.",
+      "registrations": "ನೋಂದಣಿಗಳು",
+      "verified": "ಪರಿಶೀಲಿಸಲಾಗಿದೆ",
+      "created_prefix": "ರಚಿಸಲಾಗಿದೆ",
+      "expires_prefix": "ಅವಧಿ ಮುಗಿಯುತ್ತದೆ",
+      "edit": "ಸಂಪಾದಿಸಿ",
+      "make_live": "ಲೈವ್ ಮಾಡಿ",
+      "going_live": "ಲೈವ್ ಆಗುತ್ತಿದೆ…",
+      "deactivate": "ನಿಷ್ಕ್ರಿಯಗೊಳಿಸಿ",
+      "retiring": "ನಿವೃತ್ತಿ ಮಾಡಲಾಗುತ್ತಿದೆ…",
+      "active": "ಸಕ್ರಿಯ",
+      "cancel": "ರದ್ದುಮಾಡಿ",
+      "save_draft": "ಡ್ರಾಫ್ಟ್ ಉಳಿಸಿ",
+      "saving": "ಉಳಿಸಲಾಗುತ್ತಿದೆ…",
+      "error_required": "ರಾಜ್ಯ, ಜಿಲ್ಲೆ, ಮತ್ತು ಕಾರ್ಯಕ್ರಮ ಅಗತ್ಯವಿದೆ."
+    },
+    "bulk_uploads_page": {
+      "title": "ಬಲ್ಕ್ ಅಪ್‌ಲೋಡ್",
+      "subtitle": "CSV ಫೈಲ್‌ನಿಂದ ಭಾಗವಹಿಸುವವರನ್ನು ಆಮದು ಮಾಡಿ.",
+      "back": "ಆನ್‌ಬೋರ್ಡಿಂಗ್‌ಗೆ ಹಿಂತಿರುಗಿ"
+    },
+    "links_page": {
+      "title": "ನೋಂದಣಿ ಲಿಂಕ್‌ಗಳು",
+      "subtitle": "ಸಾರ್ವಜನಿಕ ನೋಂದಣಿ ಲಿಂಕ್‌ಗಳನ್ನು ರಚಿಸಿ, ಹಂಚಿಕೊಳ್ಳಿ ಮತ್ತು ನಿರ್ವಹಿಸಿ.",
+      "back": "ಆನ್‌ಬೋರ್ಡಿಂಗ್‌ಗೆ ಹಿಂತಿರುಗಿ"
+    }
+  },
+  "profile": {
+    "view": {
+      "topbar_title": "ಅಗ್ರಿಗೇಟರ್ ಪ್ರೊಫೈಲ್",
+      "topbar_subtitle": "ನಿಮ್ಮ ಅಗ್ರಿಗೇಟರ್ ಗುರುತು ಮತ್ತು ಸೆಟ್ಟಿಂಗ್‌ಗಳನ್ನು ನಿರ್ವಹಿಸಿ.",
+      "toast_saved": "ಪ್ರೊಫೈಲ್ ಉಳಿಸಲಾಗಿದೆ",
+      "error_load_title": "ಪ್ರೊಫೈಲ್ ಲೋಡ್ ಮಾಡಲಾಗಲಿಲ್ಲ",
+      "error_load_detail": "ಅಗ್ರಿಗೇಟರ್ ಪ್ರೊಫೈಲ್ ತೆಗೆದುಕೊಳ್ಳಲು ದೋಷ ಸಂಭವಿಸಿದೆ. ಸ್ವಲ್ಪ ಸಮಯದ ನಂತರ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
+      "badge_aggregator": "ಅಗ್ರಿಗೇಟರ್",
+      "badge_verified": "ಪರಿಶೀಲಿಸಲಾಗಿದೆ",
+      "badge_active": "ಸಕ್ರಿಯ",
+      "meta_registered": "ನೋಂದಾಯಿಸಲಾಗಿದೆ",
+      "meta_coordinator": "ಸಮನ್ವಯಕ",
+      "btn_edit": "ಸಂಪಾದಿಸಿ",
+      "btn_review_history": "ಇತಿಹಾಸ ವಿಮರ್ಶಿಸಿ",
+      "section_contact": "ಸಂಪರ್ಕ ಮಾಹಿತಿ",
+      "section_details": "ಅಗ್ರಿಗೇಟರ್ ವಿವರಗಳು",
+      "section_personas": "ಬೆಂಬಲಿತ ವ್ಯಕ್ತಿತ್ವಗಳು",
+      "section_services": "ಬೆಂಬಲಿತ ಸೇವೆಗಳು",
+      "section_network": "ನೆಟ್‌ವರ್ಕ್ ಸ್ನ್ಯಾಪ್‌ಶಾಟ್",
+      "section_consent": "ಒಪ್ಪಿಗೆ ಮತ್ತು ಅನುಸರಣೆ",
+      "kv_name": "ಹೆಸರು",
+      "kv_mobile": "ಮೊಬೈಲ್",
+      "kv_email": "ಇಮೇಲ್",
+      "kv_contact_mode": "ಆದ್ಯತೆಯ ಸಂಪರ್ಕ ವಿಧಾನ",
+      "kv_contact_mode_value": "ಮೊದಲು ನನ್ನನ್ನು ಸಂಪರ್ಕಿಸಿ",
+      "kv_address": "ಸಂಸ್ಥೆಯ ವಿಳಾಸ",
+      "kv_geographies": "ಸೇವೆ ಮಾಡಿದ ಭೂಪ್ರದೇಶಗಳು",
+      "stat_active_seekers": "ಸಕ್ರಿಯ ಅರ್ಜಿದಾರರು",
+      "stat_open_roles": "ತೆರೆದ ಹುದ್ದೆಗಳು",
+      "stat_hires_3mo": "ನೇಮಕ (3 ತಿಂಗಳು)",
+      "stat_match_rate": "ಹೊಂದಾಣಿಕೆ ದರ",
+      "consent_profile_creation": "ಪರಿಸರ ವ್ಯವಸ್ಥೆಯಲ್ಲಿ ಪ್ರೊಫೈಲ್ ರಚನೆ ಮತ್ತು ಪ್ರಾತಿನಿಧ್ಯ",
+      "consent_sharing": "ಸಂಬಂಧಿತ ಪಕ್ಷಗಳೊಂದಿಗೆ ಮಾಹಿತಿ ಹಂಚಿಕೊಳ್ಳುವುದು",
+      "consent_notifications": "ಅವಕಾಶ ಅಧಿಸೂಚನೆಗಳು ಮತ್ತು ನಡ್ಜ್‌ಗಳನ್ನು ಸ್ವೀಕರಿಸಿ",
+      "consent_analytics": "ಪರಿಸರ ವ್ಯವಸ್ಥೆ ಸುಧಾರಣೆಗಾಗಿ ಅನಾಮಧೇಯ ವಿಶ್ಲೇಷಣೆ",
+      "consent_marketing": "ಪಾಲುದಾರ ಸಂಸ್ಥೆಗಳಿಂದ ಮಾರ್ಕೆಟಿಂಗ್ ಸಂವಹನ",
+      "consent_retention": "ಬ್ಲೂ ಡಾಟ್ಸ್ ನೀತಿ v2.3 ಪ್ರಕಾರ ಡೇಟಾ ಧಾರಣ",
+      "consent_last_reviewed": "ಕೊನೆಯ ಒಪ್ಪಿಗೆ ವಿಮರ್ಶಿಸಲಾಗಿದೆ",
+      "consent_next_review": "ಮುಂದಿನ ವಿಮರ್ಶೆ {date} ರಂದು ನಿಗದಿಪಡಿಸಲಾಗಿದೆ."
+    },
+    "edit": {
+      "heading": "ಪ್ರೊಫೈಲ್ ಸಂಪಾದಿಸಿ",
+      "tagline": "ನಿಮ್ಮ ಸಂಸ್ಥೆ, ಸಂಪರ್ಕ ಮತ್ತು ವ್ಯಕ್ತಿತ್ವಗಳನ್ನು ನವೀಕರಿಸಿ. ಸ್ಲಗ್ + ಸ್ಥಿತಿ ಓದಲು ಮಾತ್ರ.",
+      "loading": "ಪ್ರೊಫೈಲ್ ಲೋಡ್ ಆಗುತ್ತಿದೆ…",
+      "error_load_title": "ಪ್ರೊಫೈಲ್ ಲೋಡ್ ಮಾಡಲಾಗಲಿಲ್ಲ",
+      "btn_cancel": "ರದ್ದುಮಾಡಿ",
+      "btn_save": "ಬದಲಾವಣೆಗಳನ್ನು ಉಳಿಸಿ",
+      "btn_saving": "ಉಳಿಸಲಾಗುತ್ತಿದೆ…",
+      "save_failed": "ಉಳಿಸಲು ವಿಫಲವಾಯಿತು. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ."
+    },
+    "complete": {
+      "topbar_title": "ನಿಮ್ಮ ಪ್ರೊಫೈಲ್ ಪೂರ್ಣಗೊಳಿಸಿ",
+      "topbar_subtitle": "ನಿಮ್ಮ ಸಂಸ್ಥೆಯ ಕೆಲವು ವಿವರಗಳನ್ನು ನೀಡಿ ಇದರಿಂದ ನಾವು ನಿಮಗೆ ಸರಿಯಾದ ಅವಕಾಶಗಳನ್ನು ಹೊಂದಿಸಬಹುದು.",
+      "loading": "ಪ್ರೊಫೈಲ್ ಲೋಡ್ ಆಗುತ್ತಿದೆ…",
+      "btn_save": "ಪ್ರೊಫೈಲ್ ಉಳಿಸಿ",
+      "btn_saving": "ಉಳಿಸಲಾಗುತ್ತಿದೆ…",
+      "status_saved": "ಉಳಿಸಲಾಗಿದೆ"
+    },
+    "public_reg": {
+      "domain_seeker": "ಅರ್ಜಿದಾರ ನೋಂದಣಿ",
+      "domain_provider": "ಪೂರೈಕೆದಾರ ನೋಂದಣಿ",
+      "done_passed_title": "ನೋಂದಣಿ ಸ್ವೀಕರಿಸಲಾಗಿದೆ",
+      "done_skipped_title": "ಈಗಾಗಲೇ ನೋಂದಾಯಿಸಲಾಗಿದೆ",
+      "done_passed_body": "ಧನ್ಯವಾದಗಳು — ನಿಮ್ಮ ವಿವರಗಳನ್ನು ದಾಖಲಿಸಲಾಗಿದೆ. ಅಗ್ರಿಗೇಟರ್ ಶೀಘ್ರದಲ್ಲೇ ನಿಮ್ಮನ್ನು ಸಂಪರ್ಕಿಸುತ್ತಾರೆ.",
+      "done_skipped_body": "ಈ ಮೊಬೈಲ್ ಸಂಖ್ಯೆ (ಅಥವಾ ಇಮೇಲ್) ಈ ಅಗ್ರಿಗೇಟರ್‌ನೊಂದಿಗೆ ಈಗಾಗಲೇ ನೋಂದಾಯಿಸಲಾಗಿದೆ — ಮತ್ತೆ ನೋಂದಾಯಿಸುವ ಅಗತ್ಯವಿಲ್ಲ.",
+      "done_ref_prefix": "ಉಲ್ಲೇಖ:",
+      "btn_register_another": "ಮತ್ತೊಬ್ಬರನ್ನು ನೋಂದಾಯಿಸಿ",
+      "btn_submit": "ನೋಂದಣಿ ಸಲ್ಲಿಸಿ",
+      "btn_submitting": "ಸಲ್ಲಿಸಲಾಗುತ್ತಿದೆ…",
+      "privacy_note": "ನಿಮ್ಮ ವಿವರಗಳನ್ನು ಈ ಲಿಂಕ್ ನೀಡಿದ ಅಗ್ರಿಗೇಟರ್‌ಗೆ ಮಾತ್ರ ಹಂಚಿಕೊಳ್ಳಲಾಗುತ್ತದೆ.",
+      "powered_by": "ಇದರ ಮೂಲಕ ಚಾಲಿತ",
+      "validation_error_title": "ಫಾರ್ಮ್ ಮೌಲ್ಯೀಕರಣ ವಿಫಲವಾಗಿದೆ",
+      "validation_required": "ದಯವಿಟ್ಟು ಎಲ್ಲಾ ಅಗತ್ಯ ಕ್ಷೇತ್ರಗಳನ್ನು ತುಂಬಿಸಿ.",
+      "validation_more": "(ಮತ್ತು {count} ಹೆಚ್ಚು)",
+      "error_network_title": "ನೆಟ್‌ವರ್ಕ್ ದೋಷ",
+      "error_network_detail": "ಸರ್ವರ್ ತಲುಪಲಾಗಲಿಲ್ಲ.",
+      "error_submission_title": "ಸಲ್ಲಿಕೆ ವಿಫಲವಾಗಿದೆ",
+      "error_server_detail": "ಸರ್ವರ್ HTTP {status} ಹಿಂದಿರುಗಿಸಿದೆ.",
+      "lookup": {
+        "owned_elsewhere_title": "ಸಂಪರ್ಕ ಈಗಾಗಲೇ ನೋಂದಾಯಿಸಲಾಗಿದೆ",
+        "owned_elsewhere_body": "ಈ ಇಮೇಲ್ ಅಥವಾ ಮೊಬೈಲ್ ಬೇರೊಂದು ಸಂಸ್ಥೆಯೊಂದಿಗೆ ಈಗಾಗಲೇ ನೋಂದಾಯಿಸಲಾಗಿದೆ. ದಯವಿಟ್ಟು ಬೇರೆ ಸಂಪರ್ಕ ಬಳಸಿ ಅಥವಾ ಆ ಸಂಸ್ಥೆಯ ಮೂಲಕ ಸೈನ್ ಇನ್ ಮಾಡಿ.",
+        "owned_elsewhere_cta": "ಬೇರೆ ಸಂಪರ್ಕ ಬಳಸಿ",
+        "resume_title": "ನಿಮ್ಮ ಪ್ರೊಫೈಲ್ ಪ್ರಗತಿಯಲ್ಲಿದೆ",
+        "resume_body": "ಈ ಸಂಪರ್ಕಕ್ಕಾಗಿ ಅಪೂರ್ಣ ಪ್ರೊಫೈಲ್ ಕಂಡುಬಂದಿದೆ. ಬಿಟ್ಟ ಸ್ಥಳದಿಂದ ಮುಂದುವರಿಸಬೇಕೆ?",
+        "resume_cta": "ಪ್ರೊಫೈಲ್ ಮುಂದುವರಿಸಿ",
+        "resume_continue_new": "ಹೊಸ ಸಲ್ಲಿಕೆಯೊಂದಿಗೆ ಮುಂದುವರಿಸಿ"
+      },
+      "account_only": {
+        "title": "ತ್ವರಿತ ಸೈನ್-ಅಪ್",
+        "helper": "ನಿಮ್ಮ ಹೆಸರು ಮತ್ತು ಒಂದು ಸಂಪರ್ಕ ಸಂಖ್ಯೆ ಅಥವಾ ಇಮೇಲ್ ನೀಡಿ. ನಿಮ್ಮ ಪ್ರೊಫೈಲ್ ಅನ್ನು ನೀವು ನಂತರ ಪೂರ್ಣಗೊಳಿಸಬಹುದು.",
+        "contact_label": "ಫೋನ್ ಅಥವಾ ಇಮೇಲ್ ನೀಡಿ (ಕನಿಷ್ಠ ಒಂದು ಅಗತ್ಯವಿದೆ)",
+        "name_label": "ಹೆಸರು",
+        "phone_label": "ಫೋನ್",
+        "email_label": "ಇಮೇಲ್",
+        "consent_terms_label": "ನಾನು ನಿಯಮಗಳನ್ನು ಒಪ್ಪುತ್ತೇನೆ",
+        "consent_privacy_label": "ನಾನು ಗೌಪ್ಯತಾ ನೀತಿಯನ್ನು ಒಪ್ಪುತ್ತೇನೆ",
+        "submit_label": "ಸಲ್ಲಿಸಿ"
+      }
+    }
+  },
+  "registration_mode": {
+    "field_label": "ಅಭಿಯಾನ ಪ್ರಕಾರ",
+    "voice": {
+      "label": "ವಾಯ್ಸ್ ಅಭಿಯಾನ",
+      "hint": "ನಿಮ್ಮ ಪ್ರೊಫೈಲ್ ಪೂರ್ಣಗೊಳಿಸಲು ಈ ಸಂಖ್ಯೆಗೆ ನಿಮಗೆ ಕರೆ ಬರುತ್ತದೆ."
+    },
+    "form": {
+      "label": "ಫಾರ್ಮ್ ಭರ್ತಿ",
+      "hint": "ಭಾಗವಹಿಸುವವರು ಆನ್‌ಲೈನ್‌ನಲ್ಲಿ ಪೂರ್ಣ ಪ್ರೊಫೈಲ್ ಭರ್ತಿ ಮಾಡುತ್ತಾರೆ. ಭಾಗಶಃ ಸಲ್ಲಿಕೆಗಳನ್ನು ಸ್ವೀಕರಿಸಲಾಗುತ್ತದೆ."
+    }
+  },
+  "auth": {
+    "welcome_heading": "ಮರಳಿ ಸ್ವಾಗತ.",
+    "welcome_sub": "ಪ್ರಾರಂಭಿಸಲು ಸೈನ್ ಇನ್ ಮಾಡಿ ಅಥವಾ ನಿಮ್ಮ ಸಂಸ್ಥೆಯನ್ನು ನೋಂದಾಯಿಸಿ.",
+    "existing_title": "ಅಸ್ತಿತ್ವದಲ್ಲಿರುವ ಬಳಕೆದಾರ — ಸೈನ್ ಇನ್",
+    "existing_sub": "{brand} SSO ಮೂಲಕ ಇಮೇಲ್ ಅಥವಾ ಮೊಬೈಲ್‌ನಿಂದ ಮುಂದುವರಿಯಿರಿ",
+    "register_title": "ಸದಸ್ಯರಾಗಿ",
+    "register_sub": "{brand} ಜೊತೆ ನಿಮ್ಮ ಸಂಸ್ಥೆಯನ್ನು ನೋಂದಾಯಿಸಿ",
+    "review_notice": "ಹೊಸ ನೋಂದಣಿಗಳನ್ನು {brand} ತಂಡದಿಂದ ಪರಿಶೀಲಿಸಲಾಗುತ್ತದೆ.",
+    "session_expired": "ನಿಮ್ಮ ಸೆಷನ್ ಅವಧಿ ಮುಗಿದಿದೆ. ಮುಂದುವರಿಯಲು ಮತ್ತೆ ಸೈನ್ ಇನ್ ಮಾಡಿ.",
+    "signin_failed": "ಸೈನ್ ಇನ್ ವಿಫಲವಾಗಿದೆ: {reason}. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
+    "footer_prefix": "ಮುಂದುವರಿಯುವ ಮೂಲಕ ನೀವು ಒಪ್ಪಿಕೊಳ್ಳುತ್ತೀರಿ",
+    "footer_and": "ಮತ್ತು",
+    "privacy": "ಗೌಪ್ಯತಾ ನೀತಿ",
+    "terms": "ನಿಯಮಗಳು",
+    "errors": {
+      "invalid_flow_cookie": "ಸೆಷನ್ ಹ್ಯಾಂಡ್‌ಶೇಕ್ ಅವಧಿ ಮೀರಿದೆ",
+      "missing_code_or_state": "ಅಪೂರ್ಣ ಕಾಲ್‌ಬ್ಯಾಕ್",
+      "oidc_error_temporarily_unavailable": "ಸೈನ್ ಇನ್ ಸೆಷನ್ ಪೂರ್ಣಗೊಳ್ಳುವ ಮೊದಲು ಅವಧಿ ಮೀರಿದೆ",
+      "oidc_error_login_required": "ಮುಂದುವರಿಯಲು ಸೈನ್ ಇನ್ ಅಗತ್ಯವಿದೆ",
+      "oidc_error_access_denied": "ಸೈನ್ ಇನ್ ರದ್ದುಮಾಡಲಾಗಿದೆ",
+      "oidc_error_invalid_request": "ಸೈನ್ ಇನ್ ವಿನಂತಿ ಅಮಾನ್ಯವಾಗಿದೆ",
+      "oidc_error_server_error": "ಗುರುತಿನ ಪೂರೈಕೆದಾರ ತಾತ್ಕಾಲಿಕವಾಗಿ ಲಭ್ಯವಿಲ್ಲ",
+      "exchange_token_exchange_failed": "ಟೋಕನ್ ವಿನಿಮಯ ವಿಫಲವಾಗಿದೆ",
+      "exchange_state_mismatch": "ಭದ್ರತಾ ಪರಿಶೀಲನೆ ವಿಫಲವಾಗಿದೆ (ಸ್ಥಿತಿ ಹೊಂದಾಣಿಕೆಯಾಗಿಲ್ಲ)",
+      "exchange_token_verify_failed": "ಭದ್ರತಾ ಪರಿಶೀಲನೆ ವಿಫಲವಾಗಿದೆ (ಟೋಕನ್ ಪರಿಶೀಲನೆ)",
+      "unknown": "ಅನಿರೀಕ್ಷಿತ ಸೈನ್ ಇನ್ ದೋಷ"
+    }
+  }
+}
