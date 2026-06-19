@@ -1,536 +1,776 @@
 # Aggregator Registration Design
 
-**Audience:** Developers and product team members who need to understand how a new aggregator organisation applies to join the Blue Dots network, from first form submission through account activation.
+**Audience:** Product team, developers, and operators who need to understand how a new aggregator organisation joins the Blue Dots network — from first form submission through account activation.
 
 ---
 
 ## Contents
 
-1. [What this document covers](#1-what-this-document-covers)
-2. [Problems the new design solves](#2-problems-the-new-design-solves)
-3. [Functional flow — end to end](#3-functional-flow--end-to-end)
-4. [State machine (FSM)](#4-state-machine-fsm)
-5. [Data model](#5-data-model)
-6. [Approval token mechanism](#6-approval-token-mechanism)
-7. [Inline provisioning and the reconciler](#7-inline-provisioning-and-the-reconciler)
-8. [Provisioning steps reference](#8-provisioning-steps-reference)
-9. [API reference](#9-api-reference)
-10. [Configuration reference](#10-configuration-reference)
-11. [Key design decisions](#11-key-design-decisions)
+1. [Introduction](#1-introduction)
+2. [Background & Problem Statement](#2-background--problem-statement)
+3. [Key Design Problems](#3-key-design-problems)
+4. [Design](#4-design)
+5. [Data Model](#5-data-model)
+6. [API Spec](#6-api-spec)
+7. [Summary](#7-summary)
 
 ---
 
-## 1. What this document covers
+## 1. Introduction
 
-An **aggregator** is an organisation that onboards participants (job-seekers or service providers) into the Blue Dots network. Before an aggregator can use the portal to manage participants, the organisation must apply and be approved.
+This document describes the design of the **aggregator registration subsystem** in the Blue Dots platform.
 
-The registration subsystem handles the full lifecycle:
+An **aggregator** is an organisation that brings job-seekers or service providers onto the Blue Dots network. Before an aggregator can start working, it must apply, be reviewed by an admin, and have its accounts automatically set up across several systems. This entire journey — from the applicant filling a form to the organisation going live — is what the registration subsystem manages.
 
-- Form submission by the applicant
-- Email verification to confirm the contact address
-- Admin review and approve/reject decision
-- Account provisioning (Keycloak user, Signals-DPG organisation, welcome notification)
-- Convergence guarantee if any provisioning step fails mid-way
+The design covers:
 
----
-
-## 2. Problems the new design solves
-
-### 2.1 No lost registrations on partial failures
-
-**Old approach:** Submit → immediately create Keycloak user + call external APIs inline → if any step failed, the registration was silently incomplete with no way to retry.
-
-**New approach:** Registration is a durable database row. Every external step (email send, Keycloak call, Signals-DPG push) is idempotent and tracked in `provision_state`. The reconciler can re-run any failed step without risk of duplication.
-
-### 2.2 No duplicate-submission attacks
-
-**Old approach:** Submitting the same form twice created two rows and two Keycloak users.
-
-**New approach:** The submit endpoint computes a deterministic SHA-256 fingerprint from `email + phone + orgName`. A second identical submission finds the existing row and replays the `202 Accepted` without creating any new records.
-
-### 2.3 No existence oracle
-
-**Old approach:** A 409 Conflict on a duplicate email revealed whether that email was already registered — a privacy leak.
-
-**New approach:** All submit outcomes (new, replay, duplicate email/phone) return a uniform `202 Accepted`. The applicant is told "check your email" regardless. The form cannot be used to probe which email addresses are in the system.
-
-### 2.4 No concurrent-write corruption
-
-**Old approach:** Concurrent requests on the same registration row could overwrite each other's state without detection.
-
-**New approach:** Every state transition uses optimistic locking (`version` counter + compare-and-set). A stale write returns `STALE_TRANSITION`; callers treat this as a no-op (the concurrent writer already made the correct change).
-
-### 2.5 Full audit trail
-
-Every state transition — who triggered it, from which state to which state, and why — is recorded in the `registration_transitions` table. Admins can see the complete history of any application.
-
-### 2.6 Idempotent admin actions
-
-**Old approach:** An admin clicking an approval link twice could trigger double-provisioning.
-
-**New approach:** Approval/rejection is guarded by compare-and-set. The second click detects that the state is already `approved` or `rejected` and renders an "already decided" page.
+- How applications are submitted, deduplicated, and stored safely
+- How admins review and decide on applications without needing a login
+- How accounts are automatically created across the identity provider (Keycloak by default), Signals-DPG (network), and the portal database
+- How the system recovers if any automated step fails partway through
+- How abandoned applications are closed out, with personal data retained for audit/re-open and secured by encryption at rest (planned)
 
 ---
 
-## 3. Functional flow — end to end
+## 2. Background & Problem Statement
+
+### Background
+
+Blue Dots is a platform for the blue collar workforce, operating as a Digital Public Good (DPG). Aggregators — NGOs, staffing agencies, training institutes — join the network to onboard workers and employers. Each aggregator must be approved before it gains access.
+
+Before the current design, the onboarding process was fragile: a form submission immediately triggered a series of calls to external systems (Keycloak, Signals-DPG). If any call failed mid-way, the registration was silently stuck with no automated recovery.
+
+### Problem Statement
+
+The registration flow must solve five real problems, explained in plain terms:
+
+**Problem 1 — Partial failures leave applications stuck.**
+If the system creates an identity account but then the network goes down before the next step, the applicant ends up in limbo — account half-created, no way to fix it automatically.
+
+**Problem 2 — Submitting the same form twice creates duplicates.**
+Without deduplication, an impatient applicant clicking Submit twice would create two identical applications and two user accounts.
+
+**Problem 3 — Email addresses can be probed.**
+If the system returns different responses for "email already registered" vs "new email", anyone can silently discover whether an email address is in the database — a privacy risk.
+
+**Problem 4 — Concurrent actions corrupt data.**
+Two admins acting on the same application at the same moment, or two automated workers retrying the same step, can race and produce inconsistent state.
+
+**Problem 5 — Personal data must be protected at rest.**
+Abandoned and completed applications retain the applicant's personal data (name, phone, email) so the records can be audited or re-opened. Rather than purging that data, the platform will protect PII through field-level encoding/encryption at rest (planned for a later stage). This keeps records intact for legitimate recovery while addressing the security concern.
+
+---
+
+## 3. Key Design Problems
+
+The following ordered list identifies the core problems the design must solve:
+
+| #   | Problem Area               | Core Challenge                                                                                                                            |
+| --- | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| P1  | **Durability**             | Every step of onboarding must be recoverable — a crash at any point should not require manual intervention                                |
+| P2  | **Idempotency**            | Retrying any step (email send, account creation, org registration) must never cause duplicates                                            |
+| P3  | **Privacy**                | The submit endpoint must not leak whether an email or phone is already registered                                                         |
+| P4  | **Concurrency safety**     | Two workers or two admin clicks must never corrupt the application's state                                                                |
+| P5  | **Dead-letter protection** | Steps that fail repeatedly should stop retrying automatically; they must not retry forever                                                |
+| P6  | **PII protection**         | Personal data is retained (not purged) for audit/re-open; it will be secured via field-level encoding/encryption at rest in a later stage |
+| P7  | **Admin UX**               | Admins should be able to approve or decline from their email inbox, without logging into a dashboard                                      |
+| P8  | **Re-openability**         | Stuck or timed-out applications should be recoverable by an admin without re-submitting from scratch                                      |
+
+---
+
+## 4. Design
+
+### 4.1 Core principle: write first, act second
+
+Every action in the registration flow follows the same pattern:
+
+1. **Write the state change to the database** in a single atomic operation.
+2. **Then attempt the side effects** (send emails, create accounts, push to Signals-DPG).
+
+This means the database is always consistent, even if every external call fails. A separate repair process (the reconciler) looks at the database, sees which steps are incomplete, and retries only those steps.
+
+### 4.2 Application lifecycle — state machine
+
+An application moves through a fixed set of states driven by a defined set of actions. States describe **where the application is**; actions describe **what an actor does** to move it forward.
+
+#### Entry and exit
+
+- **Entry:** An applicant submits (or re-submits) the registration form. This always creates or re-opens a `submitted` row.
+- **Exit (success):** `active` — all accounts set up; the aggregator can log in.
+- **Exit (failure):** `abandoned` — permanently closed; data retained (see §4.5). Reached when a TTL expires or when an application has been declined more than `REGISTRATION_MAX_DECLINE_COUNT` times.
+
+#### Actions
+
+| Action         | Actor      | What it does                                              |
+| -------------- | ---------- | --------------------------------------------------------- |
+| `submit`       | Applicant  | Submits the form for the first time                       |
+| `re-submit`    | Applicant  | Re-submits an identical form after a decline              |
+| `verify-email` | Applicant  | Clicks the verification link in the email                 |
+| `approve`      | Admin      | Clicks Approve in the admin notification email            |
+| `decline`      | Admin      | Clicks Decline in the admin notification email            |
+| `expire`       | Reconciler | Abandons the application when a TTL threshold is exceeded |
+
+#### States
+
+| State          | Meaning                                                      |
+| -------------- | ------------------------------------------------------------ |
+| `submitted`    | Form received; verification email sent to applicant          |
+| `verified`     | Email confirmed; awaiting admin decision                     |
+| `provisioning` | Admin approved; accounts being set up across systems         |
+| `active`       | All setup complete; aggregator can log in **[SUCCESS exit]** |
+| `declined`     | Admin declined; applicant may re-submit                      |
+| `abandoned`    | Permanently closed; data retained **[FAILURE exit]**         |
+
+#### Transition diagram
 
 ```
-Applicant                API (BFF)               Admin email          Reconciler
-─────────                ─────────               ───────────          ──────────
- Fill form
-     │
-     ▼
-POST /v1/aggregator-registrations/create
-     │  ── validate, deduplicate, rate-limit ──▶
-     │  ◀── 202 Accepted (always) ──────────────
-     │
-     │  (best-effort inline)
-     │  API sends verification email ──────────────────────────────▶ applicant inbox
-     │                                                                   │
-     │                                                               Click link
-     │                                                                   │
-     ◀─────── GET /register/verify?id=...&token=... ────────────────────
-     │
-POST /v1/aggregator-registrations/:id/verify?token=...
-     │  ── verify JWT, CAS submitted→verified ──▶
-     │  ◀── 200 {verified: true} ───────────────
-     │
-     │  (best-effort inline)
-     │  API sends admin notification ───────────────────────────────▶ admin inbox
-     │                                                                   │
-     │                                                               Click [Approve] or [Reject]
-     │                                                                   │
-     ▼                                                                   ▼
-GET /admin/v1/aggregator-registrations/read/:id?token=...&intent=approve
-     │  ── render confirmation HTML page ──────────────────────────▶ admin browser
-     │                                                                   │
-     │                                                               Click Confirm
-     │                                                                   │
-POST /admin/v1/aggregator-registrations/decision/:id
-     │  ── verify JWT, CAS verified→approved/rejected ──▶
-     │  ◀── HTML result page ───────────────────────────
-     │
-     │  (best-effort inline, fire-and-forget)
-     │  ensureGraduated  → creates aggregators row, transitions approved→active
-     │  ensureKeycloakUser → creates KC user
-     │  ensureSignalstackOrg → upserts org in Signals-DPG
-     │  ensureWelcomeSent → emails applicant
-     │     (or for rejection: ensureRejectionSent)
-     │
-     │  If any inline step fails ─────────────────────────────────▶ Reconciler retries on next tick
+  Entry: submit / re-submit action
+              │
+              ▼
+       ┌────────────┐
+       │ submitted  │◄──── re-submit (after decline)
+       └────────────┘
+          │        │
+  verify-email    expire action
+  action          (72 h unverified TTL, via reconciler)
+          │        │
+          ▼        │
+       ┌────────┐  │
+       │verified│──┤ expire action (168 h stuck TTL, via reconciler)
+       └────────┘  │         │
+       │        │  │         │
+   approve    decline        │     ┌──────────────────────────────┐
+   action     action         └────►│         abandoned             │
+       │        │                  │  (terminal —                  │
+       │        ▼                  │   data retained)              │
+       │   ┌─────────┐             │     EXIT: FAILURE             │
+       │   │ declined│─decline × N─►    (also via expire action)   │
+       │   └─────────┘             └──────────────────────────────┘
+       │        │                                ▲
+       │   re-submit action                      │
+       │   (back to submitted)                   │
+       │                                         │
+       ▼                        expire action    │
+  ┌──────────────┐              (168 h stuck TTL)│
+  │ provisioning │──────────────────────────────►┘
+  └──────────────┘
+       │
+  graduation steps complete
+       │
+       ▼
+  ┌────────┐
+  │ active │   EXIT: SUCCESS
+  └────────┘
 ```
 
-### What the applicant sees
+**TTL rules:**
 
-1. Fill and submit the registration form.
-2. Receive a verification email — click the link within the TTL window (default 60 min).
-3. Wait for admin review (typically within a few business days).
-4. Receive a welcome email with portal login instructions once approved.
+- `submitted` rows: abandoned after `REGISTRATION_UNVERIFIED_TTL_HOURS` (default 72 h)
+- `verified` and `provisioning` rows: abandoned after `REGISTRATION_STUCK_TTL_HOURS` (default 168 h)
+- Both TTLs are checked and applied by the reconciler on each run — they do not trigger automatically.
 
-### What the admin sees
+**Note on `declined`:** A declined application is **not** terminal. The applicant may re-submit the identical form, which re-opens the registration to `submitted`. After `REGISTRATION_MAX_DECLINE_COUNT` total declines (accumulated across all re-submits on the same row), the next decline transitions directly to `abandoned`.
 
-1. Receive a notification email listing organisation name, contact details, and two links: **Approve** and **Reject**.
-2. Click a link → browser opens a confirmation page showing the application details.
-3. Click the confirm button on that page → decision is recorded and provisioning begins.
-4. No login required — the email link carries a signed JWT that authorises the single action.
+**Note on decline_count accumulation:** `decline_count` is stored on the registration row and is never reset when an applicant re-submits. This is intentional — it prevents an applicant from cycling through decline → re-submit indefinitely. The total number of declines across all re-submission attempts counts toward the limit.
+
+### 4.3 End-to-end functional flow
+
+```
+Applicant             Portal / API              Admin email            Reconciler
+─────────             ────────────              ───────────            ──────────
+
+1. Fill form
+   └─► POST /v1/aggregator/registration/create
+       ├─ Deduplicate (SHA-256 fingerprint)
+       ├─ Insert registration row (submitted)
+       └─ 202 Accepted ──────────────────────────────────────────────────────────►
+           │
+           └─ [inline] Send verification email ──────────────────────────────────►
+                                                                      applicant inbox
+                                                                           │
+2. Click verify link ◄──────────────────────────────────────────────────────────┘
+   └─► GET /v1/aggregator/registration/verify?id=...&token=...
+       ├─ Validate JWT
+       ├─ submitted → verified (CAS)
+       └─ [inline] Send admin notification ────────────────────────────► admin inbox
+                                                                           │
+3. Admin clicks Approve or Decline ◄───────────────────────────────────────────┘
+   └─► GET /admin/v1/aggregator/registration/read/:id?token=...&intent=approve
+       └─ Show confirmation page with application details + note text area
+           │   (note required for decline, optional for approve; max 500 chars)
+           │
+   └─► POST /admin/v1/aggregator/registration/decision/:id
+       ├─ Validate JWT
+       ├─ Validate note (required for decline)
+       ├─ verified → provisioning / declined (CAS)
+       ├─ Store admin note in registration row; emit OTel state-transition event
+       └─ [inline] Run provisioning steps (best-effort, if approved):
+           ├─ ensureGraduated       → create aggregators row (status=pending) + mint aggregator_id
+           ├─ ensureIdpUser         → find-or-create IdP user; enable; set aggregator_id
+           ├─ ensureSignalstackOrg  → register org in Signals-DPG
+           ├─ ensureWelcomeSent     → email applicant with login link + any admin note
+           └─ ensureActivated       → when all above done: provisioning → active; aggregators.status → active
+              (or ensureIdpUserDisabled + ensureDeclineSent with admin note for decline)
+
+4. If any inline step failed ──────────────────────────────────────────────────►
+   Reconciler retries only the failed steps on next tick
+```
+
+### 4.4 Deduplication and idempotency
+
+**Submit deduplication:** On every form submit, the API computes a deterministic fingerprint from `email + phone + orgName` (SHA-256). A second identical submission finds the existing row and returns a response based on the current state — no new record is created.
+
+**Response by current state:**
+
+| Existing row state | Response                                                                                  |
+| ------------------ | ----------------------------------------------------------------------------------------- |
+| `submitted`        | `202 Accepted` — verification email already sent; applicant should check inbox            |
+| `verified`         | `202 Accepted` — application is under admin review; no action needed                      |
+| `provisioning`     | `202 Accepted` — accounts are being set up; applicant will receive a welcome email        |
+| `active`           | `200 OK { "status": "already_active" }` — the organisation is already live on the network |
+| `declined`         | Re-opens to `submitted`; sends a new verification email (same as applicant re-submit)     |
+| `abandoned`        | Re-opens to `submitted`; sends a new verification email                                   |
+
+**Silent 202 for probe prevention:** For all states except `active`, the response is `202 Accepted`. This prevents the form from being used to discover whether an email is in the system. The `active` state response breaks this pattern intentionally — the applicant clearly already knows their organisation is registered.
+
+**Re-submit refreshes the payload:** When a `declined` or `abandoned` row is re-opened by re-submit, the `profile_draft`, the org fields, **and the `consent` block** are updated from the new submission — the most recent consent (with fresh `given_at`/`valid_till`) governs. The fingerprint fields (`email`, `phone`, `orgName`) are unchanged by definition; changing any of them produces a new row instead of re-opening this one.
+
+**Provisioning step idempotency:** Every `ensure-*` step checks whether it has already completed (`provisionState[step] === 'done'`) before doing any work. Running a completed step is a safe no-op.
+
+**Aggregator creation idempotency:** The `aggregators` table stores a `source_registration_id` column. If graduation is retried, the INSERT recognises the existing row and returns it instead of creating a duplicate.
+
+**Verification link expiry:** If an applicant's verification link expires (60-minute JWT TTL), they receive a `TOKEN_EXPIRED` error on click. There is no self-service re-send endpoint — this is a deliberate design choice to avoid an abuse-prone public endpoint. The reconciler automatically re-sends the verification email on its next run, subject to the `REGISTRATION_VERIFICATION_RESEND_COOLDOWN_MINUTES` cooldown. Applicants who receive an expired link should wait and check their inbox again, or contact support.
+
+### 4.5 Provisioning steps
+
+After an admin approves an application, the system must set up accounts in three places. Each step is independent and tracked separately.
+
+**For approval:**
+
+```
+ensureGraduated
+  └─ Create aggregators row (source_registration_id = idempotency key)
+  └─ aggregators.status = 'pending' (NOT active yet)
+  └─ Mint aggregator_id and persist on the registration row (consumed by ensureIdpUser)
+  └─ Does NOT transition state — the row stays in provisioning
+
+ensureIdpUser
+  └─ Find or create IdP user by email
+  └─ Persist idp_user_id immediately (crash-safe)
+  └─ Enable user; set decision_made = 'approved'; set aggregator_id
+
+ensureSignalstackOrg
+  └─ Upsert org in Signals-DPG; store returned ss_org_id
+
+ensureWelcomeSent
+  └─ Send welcome email with portal login link
+  └─ Include admin note verbatim in email body if provided
+  └─ Stamp welcome_sent_at atomically with provision mark
+
+ensureActivated
+  └─ Guard: idp_user, ss_org, welcome all 'done' (else no-op until they are)
+  └─ provisioning → active transition (CAS)
+  └─ Flip aggregators.status 'pending' → 'active' atomically with the transition
+```
+
+**Why `ensureActivated` is a separate, last step:** `ensureGraduated` must run first because it mints the `aggregator_id` that `ensureIdpUser` writes to the identity profile — but it deliberately does **not** flip the registration to `active`. If it did, the row would become terminal (reconciler skips `active` rows, §4.7) and any later failure in `ensureIdpUser`, `ensureSignalstackOrg`, or `ensureWelcomeSent` could never be retried. Instead, `ensureActivated` performs the `provisioning → active` transition only once all three of those steps are `done`, so a partial failure keeps the row in `provisioning` where the reconciler will repair it.
+
+**For decline:**
+
+```
+ensureIdpUserDisabled
+  └─ Find IdP user; set decision_made = 'declined'; disable account
+
+ensureDeclineSent
+  └─ Send decline email to applicant
+  └─ Include admin note verbatim in email body so the applicant knows what to fix
+```
+
+**For abandoned applications:**
+
+No data is purged. When an application is abandoned, its row is retained as-is — contact details and profile draft stay in place — so it can be audited or re-opened later. The only side effect is to disable the identity account if one was ever created:
+
+```
+ensureIdpUserDisabled   (only when idp_user_id is set — i.e. abandoned from provisioning)
+  └─ Disable IdP user; set decision_made = 'abandoned'
+  └─ IdP user is NOT deleted
+  └─ The Signals-DPG org and the pending aggregators row are left untouched (retained)
+```
+
+For abandonment from `submitted` or `verified`, no IdP account exists yet, so this step is an immediate no-op.
+
+> **PII protection (planned):** Rather than deleting personal data on abandonment, the platform will protect PII through **field-level encoding/encryption at rest** in a later stage. This addresses the data-security concern while keeping records intact for legitimate recovery and audit. Until then, the `registrations` table is protected by the existing infrastructure-level access controls.
+
+### 4.6 Dead-letter protection
+
+Each provisioning step tracks how many times it has been attempted. After `REGISTRATION_MAX_PROVISION_ATTEMPTS` failures (default: 5), the step is marked `dead`. **The first time a step on a given registration reaches `dead`, the reconciler performs a one-time auto-reopen:** it resets that step (`attempts → 0`, state → `pending`) and sets `auto_reopened = true`, giving the step one more full retry cycle. This recovers from transient outages that outlast the initial attempt budget. If the step dead-letters a **second** time (`auto_reopened` already set), it stays `dead` and the row proceeds toward TTL abandonment. An operator can still reset a dead step manually via the reopen endpoint.
+
+This auto-reopen also covers `ensureActivated`'s gating steps: a transiently-failed `idp_user`, `ss_org`, or `welcome` gets a second cycle before the approved row risks TTL abandonment, so a single transient outage cannot silently drop an admin's approval.
+
+```
+provisionState[key]:  pending → failed → failed → ... → dead → (auto-reopen once) → pending → ... → dead (final)
+provisionAttempts[key]: { attempts: N, last_attempt_at: "2026-06-19T...", auto_reopened: false }
+```
+
+### 4.7 Reconciler — repair without a scheduler
+
+The reconciler is an on-demand repair process. There is no built-in background scheduler — it runs when triggered by an admin API call. This keeps infrastructure costs low (no always-on worker process needed).
+
+Operators are responsible for calling the reconcile API on a regular cadence using whatever external scheduler they already operate (cron job, CI pipeline, APM alert, or manual trigger). The `REGISTRATION_UNVERIFIED_TTL_HOURS` and `REGISTRATION_STUCK_TTL_HOURS` thresholds are checked by the reconciler at each run — they do not trigger anything automatically.
+
+**Recommended cadence:** Triggering once every few hours is sufficient for most deployments, given the default TTLs of 72 h (unverified) and 168 h (stuck). The reconciler claim TTL (10 minutes) sets the minimum safe interval between concurrent runs — two simultaneous calls cannot both claim the same row.
+
+**Reconcilable states:** The reconciler processes all rows in `submitted`, `verified`, `provisioning`, and `declined` states that have incomplete or failed provision steps. `active` is skipped entirely. `abandoned` rows are skipped for state purposes, but the reconciler still completes an incomplete `idp_disabled` step on them — the identity account of an abandoned applicant must end up disabled even if the inline disable failed. `declined` rows are reconciled because their provision steps (`idp_disabled`, `decline_sent`) can fail — an applicant must always receive their decline notification.
+
+When triggered, the reconciler:
+
+1. Claims all reconcilable rows with incomplete provision steps (atomic claim with TTL)
+2. Retries each incomplete step using the same `ensure-*` functions
+3. Applies TTL rules: abandons `submitted` rows past `REGISTRATION_UNVERIFIED_TTL_HOURS`; abandons `verified` or `provisioning` rows past `REGISTRATION_STUCK_TTL_HOURS`
+4. Releases claims when done
+
+Claim locking prevents two concurrent reconciler runs from stepping on each other. A claim expires after 10 minutes — a crashed run cannot permanently block rows.
+
+### 4.8 Admin token-based approval (no login required)
+
+Admins receive an email with two clickable links: Approve and Decline. Each link carries its **own** signed JWT with an embedded `intent` claim (`approve` or `decline`) — the two links are not interchangeable, so a single token authorises exactly one action.
+
+```
+Admin email link structure:
+  GET /admin/v1/aggregator/registration/read/:id?token=<JWT>&intent=approve
+       │
+       └─ Renders confirmation page (HTML)
+           │   Shows application details + a text area for a note
+           │   (note required for decline, optional for approve; max 500 chars)
+           │
+           └─ Admin fills in note (if declining) and clicks "Confirm"
+               │
+               POST /admin/v1/aggregator/registration/decision/:id
+               { token, decision: "approve"|"decline", note: "<admin note>" }
+```
+
+The decision endpoint re-checks the current state before acting. Clicking an already-acted link shows an "already decided" page — no duplicate action possible.
+
+**Intent enforcement:** The endpoint compares the JWT's embedded `intent` claim against the `decision` field in the request body. A mismatch (e.g. an `approve`-scoped token submitted with `decision: "decline"`) is rejected with `403 INTENT_MISMATCH` and changes nothing. The `intent` query param on the read URL is presentation-only — the JWT claim is authoritative, so tampering with the URL param cannot escalate to a different action.
+
+**Admin note flow:** The note the admin enters is:
+
+1. Emitted as an OpenTelemetry state-transition event carrying the full decision context (from/to state, actor, reason, note) — the observability backend is the source of truth for audit history.
+2. Written into `registrations.latest_admin_note` for fast in-process access (most recent note only; no join needed).
+3. Included verbatim in the decline email so the applicant understands exactly what to correct before re-submitting.
+4. Included in the approval welcome email if the admin provided one (e.g. activation instructions or conditions).
+5. Returned in `GET /admin/v1/aggregator/registration/:id` via `latest_admin_note` on the registration object; full note history is available in the observability backend.
+
+**Security model:** The API gateway (Kong/Keycloak) enforces **service-level authentication** on all `/admin/**` routes — typically an API key that restricts access to known internal callers. The gateway does **not** require an end-user Keycloak session. The signed JWT embedded in the email link is the admin's per-action authorisation — clicking the link is sufficient; no separate login is needed. This keeps the approval flow as simple as possible for admins who may not have a portal account.
+
+> **Future enhancement:** As the admin dashboard functionality is built out, the gateway policy for `/admin/**` routes will be upgraded to require user-level authentication (Keycloak session). The JWT-in-link mechanism will remain as the per-action check. This document will be updated when that change is introduced.
+
+**Multi-admin safety:** `NETWORK_FACILITATOR_ADMIN_EMAILS` can list several addresses — all notified admins receive the same email. If two admins click Approve simultaneously, only the first request succeeds; the second hits the optimistic-lock version check and is served an "already decided" page. Listing multiple admin emails is safe.
+
+### 4.9 Re-opening abandoned applications
+
+Abandoned applications can be re-opened by an admin. The re-open handler reads `registrations.previous_state` — a column updated to the `fromState` on every FSM transition — to determine what state the application was in before abandonment. It then restores the registration to that state, resetting only the appropriate fields.
+
+| `previous_state` value | Re-opens to    | What is reset                                                                                                          |
+| ---------------------- | -------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `submitted`            | `submitted`    | All timestamps and provision steps cleared; re-sends verification email                                                |
+| `verified`             | `verified`     | Admin notification and approval fields cleared; re-notifies admin                                                      |
+| `provisioning`         | `provisioning` | Only the reconciler claim cleared; existing provision steps preserved; reconciler picks up remaining steps on next run |
+
+### 4.10 Identity provider flexibility
+
+The system integrates with an identity provider (IdP) for user account management. **Keycloak is the default implementation**, but the design explicitly supports swapping it out without touching any business logic.
+
+All identity operations — create user, enable/disable user, find by email, set user attributes — go through an abstract `IdpAdminAdapter` class. Keycloak is the concrete implementation today, but any IdP that supports the same capabilities (FusionAuth, Authentik, Auth0, or a custom internal service) can be plugged in by implementing the same adapter.
+
+```
+IdpAdminAdapter (abstract)        ← all business logic depends on this
+      │
+      ├── KeycloakAdminAdapter    ← default; used in production today
+      ├── FusionAuthAdminAdapter  ← (future) swap without changing provisioning logic
+      └── AuthenticAdapter        ← (future) another option
+```
+
+**Operations the adapter must support:**
+
+| Operation       | Used when                                                                                |
+| --------------- | ---------------------------------------------------------------------------------------- |
+| `createUser`    | Applicant's account is provisioned on approval                                           |
+| `findByEmail`   | Idempotency check — does this applicant already have an account?                         |
+| `findById`      | Used by reconciler when `idp_user_id` is already stored                                  |
+| `enableUser`    | Account enabled after admin approves                                                     |
+| `disableUser`   | Account disabled after admin declines                                                    |
+| `deleteUser`    | Reserved — account teardown; not invoked in MVP now that abandonment retains the account |
+| `setAttributes` | Aggregator ID and decision result written to the user profile                            |
+
+To replace Keycloak: implement `IdpAdminAdapter` for the target IdP, inject it via configuration, and deploy. No provisioning logic changes.
 
 ---
 
-## 4. State machine (FSM)
-
-```
-                     ┌─────────────────────────────────┐
-                     │           submitted               │  ← created on form submit
-                     └─────────────────────────────────┘
-                           │                      │
-              applicant clicks               unverified TTL
-              verification link              exceeded (72 h)
-                           │                      │
-                           ▼                      ▼
-                     ┌──────────┐         ┌────────────┐
-                     │ verified │         │ abandoned  │  ← terminal
-                     └──────────┘         └────────────┘
-                     │          │
-              admin clicks   admin clicks
-              Approve         Reject
-                     │          │
-                     ▼          ▼
-              ┌──────────┐  ┌──────────┐
-              │ approved │  │ rejected │  ← terminal (rejected)
-              └──────────┘  └──────────┘
-                     │
-           stuck TTL exceeded (168 h)    OR    graduation succeeds
-                     │                                  │
-                     ▼                                  ▼
-              ┌────────────┐                    ┌────────────┐
-              │ abandoned  │                    │   active   │  ← terminal (operational)
-              └────────────┘                    └────────────┘
-```
-
-### State descriptions
-
-| State       | Who sets it                      | Description                                                |
-| ----------- | -------------------------------- | ---------------------------------------------------------- |
-| `submitted` | API on form submit               | Application received; waiting for email verification.      |
-| `verified`  | Applicant via verification link  | Email confirmed; waiting for admin decision.               |
-| `approved`  | Admin via approval email         | Admin approved; provisioning in progress.                  |
-| `active`    | Reconciler / inline provisioning | Aggregator row created; account fully operational.         |
-| `rejected`  | Admin via approval email         | Application not approved; rejection email sent.            |
-| `abandoned` | Reconciler on TTL expiry         | Unverified for 72 h, or stuck verified/approved for 168 h. |
-
-### Terminal states
-
-`active`, `rejected`, and `abandoned` are terminal — no further transitions occur. When a registration is `rejected` or `abandoned`, the unique constraint on `contact_email` and `contact_phone` is released so the same applicant can re-register.
-
-### Actors
-
-| Actor        | Role                                                             |
-| ------------ | ---------------------------------------------------------------- |
-| `applicant`  | Submits the form; clicks the verification link                   |
-| `admin`      | Makes approve/reject decision via email link                     |
-| `reconciler` | Background process that retries failed steps; handles TTL expiry |
-| `system`     | Internal operations (graduation, provisioning)                   |
-
----
-
-## 5. Data model
+## 5. Data Model
 
 ### `registrations` table
 
-The single source of truth for an application's lifecycle.
+The primary record for an application. Every state change is atomic and recorded here.
 
-| Column                  | Type          | Description                                                  |
-| ----------------------- | ------------- | ------------------------------------------------------------ | ----- | ---------------------------------- |
-| `id`                    | UUID          | Primary key                                                  |
-| `idempotency_key`       | text (unique) | SHA-256 of `email                                            | phone | orgName` — prevents duplicate rows |
-| `state`                 | enum          | FSM state (`submitted` → `verified` → `approved` → `active`) |
-| `contact_email`         | text          | Applicant email (lowercased)                                 |
-| `contact_phone`         | text          | E.164 normalised phone number                                |
-| `org_name`              | text          | Organisation name                                            |
-| `org_type`              | text          | Type (e.g. `aggregator`)                                     |
-| `org_url`               | text          | Optional website                                             |
-| `org_locations`         | jsonb         | Operational locations                                        |
-| `profile_draft`         | jsonb         | Full form payload for downstream provisioning                |
-| `consent`               | jsonb         | Server-stamped consent record with `given_at` / `valid_till` |
-| `idp_user_id`           | text          | Keycloak user ID — set after KC account created              |
-| `signalstack_org_id`    | text          | Signals-DPG org ID — set after upsert                        |
-| `aggregator_id`         | UUID (FK)     | Links to `aggregators` row — set at graduation               |
-| `verification_sent_at`  | timestamp     | Last time verification email was sent                        |
-| `verified_at`           | timestamp     | When applicant clicked the verification link                 |
-| `admin_notified_at`     | timestamp     | Last time admin notification was sent                        |
-| `provision_state`       | jsonb         | Per-step `done` / `failed` flags (see below)                 |
-| `version`               | integer       | Optimistic-lock counter; incremented on every transition     |
-| `reconciler_claimed_at` | timestamp     | Lock held by an active reconciler tick                       |
+| Column                    | Type          | Description                                                                                                                                                                                                                |
+| ------------------------- | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                      | UUID          | Primary key                                                                                                                                                                                                                |
+| `idempotency_key`         | text (unique) | SHA-256 of `email + phone + orgName` — prevents duplicate rows on re-submit                                                                                                                                                |
+| `state`                   | enum          | FSM state: `submitted`, `verified`, `provisioning`, `active`, `declined`, `abandoned`                                                                                                                                      |
+| `contact_email`           | text          | Applicant email (lowercased, normalised)                                                                                                                                                                                   |
+| `contact_phone`           | text          | E.164 normalised phone number                                                                                                                                                                                              |
+| `org_name`                | text          | Organisation name                                                                                                                                                                                                          |
+| `org_type`                | text          | Participant type for the network (e.g. `seeker`, `provider`)                                                                                                                                                               |
+| `org_url`                 | text          | Optional website                                                                                                                                                                                                           |
+| `org_locations`           | jsonb         | Operational locations                                                                                                                                                                                                      |
+| `profile_draft`           | jsonb         | Full form payload carried through to provisioning                                                                                                                                                                          |
+| `consent`                 | jsonb         | Consent record with `given_at` and `valid_till`; refreshed from the latest submission on re-submit                                                                                                                         |
+| `idp_user_id`             | text          | Identity provider user ID — written immediately on account creation                                                                                                                                                        |
+| `signalstack_org_id`      | text          | Signals-DPG org ID — written after org upsert                                                                                                                                                                              |
+| `aggregator_id`           | UUID          | FK to `aggregators` — written at graduation                                                                                                                                                                                |
+| `verification_sent_at`    | timestamp     | When the last verification email was sent                                                                                                                                                                                  |
+| `verified_at`             | timestamp     | When the applicant clicked the verification link                                                                                                                                                                           |
+| `admin_notified_at`       | timestamp     | When the admin notification was last sent                                                                                                                                                                                  |
+| `approval_link_issued_at` | timestamp     | When the approval JWT was last minted                                                                                                                                                                                      |
+| `welcome_sent_at`         | timestamp     | When the welcome email was sent (used for cooldown guard)                                                                                                                                                                  |
+| `decline_sent_at`         | timestamp     | When the decline email was sent (used for cooldown guard)                                                                                                                                                                  |
+| `decline_count`           | integer       | Total number of times the application has been declined — never reset on re-submit                                                                                                                                         |
+| `previous_state`          | enum          | The FSM state the registration was in before its most recent transition — updated on every `store.transition()` call; used by the re-open flow to restore pre-abandonment state without querying the observability backend |
+| `latest_admin_note`       | text          | Most recent admin note (approve or decline); nullable; written on every admin decision for fast in-process access                                                                                                          |
+| `provision_state`         | jsonb         | Per-step status flags (see below)                                                                                                                                                                                          |
+| `provision_attempts`      | jsonb         | Per-step attempt counters and timestamps (for dead-letter tracking)                                                                                                                                                        |
+| `version`                 | integer       | Optimistic-lock counter — incremented on every state transition                                                                                                                                                            |
+| `reconciler_claimed_at`   | timestamp     | Set while the reconciler holds this row; prevents concurrent repair                                                                                                                                                        |
+| `created_at`              | timestamp     | Row creation time                                                                                                                                                                                                          |
+| `updated_at`              | timestamp     | Last modification time                                                                                                                                                                                                     |
+
+**PII protection (planned):** Personal data is **not** purged on abandonment — `contact_email`, `contact_phone`, and `profile_draft` are retained for audit and re-open. The data-security concern will be addressed by field-level encoding/encryption at rest in a later stage; for MVP the columns remain in plaintext, protected by infrastructure-level access controls. This plaintext-at-rest posture is an **accepted interim risk** for MVP and is tracked as planned work.
 
 ### `provision_state` keys
 
-This JSONB column tracks the completion of each provisioning side-effect independently. Each key is either `'done'` or `'failed'`.
+Each key in this JSONB column tracks one side-effect step. Values: `done`, `failed`, `pending`, `dead`.
 
-| Key            | Step                                               | Triggered by                                  |
-| -------------- | -------------------------------------------------- | --------------------------------------------- |
-| `verification` | Verification email sent to applicant               | Submit (inline) or reconciler                 |
-| `admin_notify` | Admin notification email with approve/reject links | Verify (inline) or reconciler                 |
-| `graduated`    | `aggregators` row created; `approved → active`     | Approval (inline) or reconciler               |
-| `kc_user`      | Keycloak user account created                      | Approval (inline) — not retried by reconciler |
-| `ss_org`       | Signals-DPG org upsert                             | Approval (inline) or reconciler               |
-| `welcome`      | Welcome email sent to applicant                    | Approval (inline) or reconciler               |
-| `rejection`    | Rejection email sent to applicant                  | Rejection (inline) or reconciler              |
+| Key            | Step                                                                       | Notes                                                                      |
+| -------------- | -------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `verification` | Verification email sent to applicant                                       | Inline on submit; reconciler retries                                       |
+| `admin_notify` | Admin notification email sent                                              | Inline after verify; reconciler retries                                    |
+| `graduated`    | `aggregators` row created (status `pending`); `aggregator_id` minted       | Idempotency via `source_registration_id`; does **not** transition state    |
+| `idp_user`     | Identity provider user created, enabled, attributes set                    | `idp_user_id` persisted before mark-done                                   |
+| `idp_disabled` | Identity provider user disabled for **declined or abandoned** applications | Independent from `idp_user`; on abandon, runs only if `idp_user_id` is set |
+| `ss_org`       | Signals-DPG org upserted                                                   | Reconciler retries                                                         |
+| `welcome`      | Welcome email sent; `welcome_sent_at` stamped                              | Cooldown guard prevents rapid resend                                       |
+| `activated`    | `provisioning → active`; `aggregators.status → active`                     | Gated on `idp_user`, `ss_org`, `welcome` all `done`                        |
+| `decline_sent` | Decline email sent; `decline_sent_at` stamped                              | Cooldown guard prevents rapid resend                                       |
 
-### `registration_transitions` table
+**Key naming note:** The keys `idp_user` and `idp_disabled` use abstract IdP naming. Although Keycloak is today's implementation, these key names are stable and will not change when the IdP is replaced.
 
-Immutable audit log — one row per state change.
+**Dead-letter:** A step reaching `dead` is auto-reopened once (reset to `pending`, `auto_reopened = true`) for one more retry cycle; a second `dead` is final. The per-step counters are in `provision_attempts[key] = { attempts: N, last_attempt_at: "ISO", auto_reopened: bool }`.
 
-| Column            | Type      | Description                                                   |
-| ----------------- | --------- | ------------------------------------------------------------- |
-| `registration_id` | UUID (FK) | Parent registration                                           |
-| `from_state`      | enum      | Previous state                                                |
-| `to_state`        | enum      | New state                                                     |
-| `actor`           | enum      | Who triggered it                                              |
-| `reason`          | text      | Human-readable reason (e.g. `email_verification`, `approval`) |
-| `at`              | timestamp | When the transition occurred                                  |
+### Observability — state transition events
+
+There is no `registration_transitions` database table. Every FSM state change is emitted as an **OpenTelemetry event** by `store.transition()`. The operator's observability backend (Grafana Tempo, Jaeger, Honeycomb, or equivalent) is the authoritative source for the full transition history.
+
+Each event carries:
+
+| OTel attribute            | Description                                         |
+| ------------------------- | --------------------------------------------------- |
+| `event.name`              | `registration.state_transition`                     |
+| `registration.id`         | UUID of the registration                            |
+| `registration.from_state` | Previous FSM state                                  |
+| `registration.to_state`   | New FSM state                                       |
+| `registration.actor`      | `applicant`, `admin`, `reconciler`, or `system`     |
+| `registration.reason`     | Machine-readable slug from the canonical list below |
+| `registration.admin_note` | Admin note if provided; omitted otherwise           |
+| `registration.org_name`   | Organisation name (for correlation; not PII)        |
+| `registration.version`    | Optimistic-lock version after the transition        |
+
+**Canonical `reason` slugs:** the state-transition `reason` is drawn from this fixed set — the single source of truth, so code and tests use these exact values:
+
+| Slug                    | Transition                                                 |
+| ----------------------- | ---------------------------------------------------------- |
+| `submitted_new`         | (none) → `submitted` — first submission                    |
+| `applicant_reopened`    | `declined`/`abandoned` → `submitted` — applicant re-submit |
+| `admin_reopened`        | `abandoned` → prior state — admin reopen endpoint          |
+| `email_verification`    | `submitted` → `verified`                                   |
+| `approval`              | `verified` → `provisioning`                                |
+| `admin_declined`        | `verified` → `declined`                                    |
+| `decline_limit_reached` | `verified` → `abandoned` — Nth decline                     |
+| `ttl_expired`           | any → `abandoned` — reconciler TTL                         |
+| `provision_complete`    | `provisioning` → `active` — `ensureActivated`              |
+
+Non-transition operational events (e.g. a step auto-reopen, §4.6) are emitted under their own `event.name` and are not part of this state-transition slug set.
+
+**Why OTel instead of a transitions table:** Audit queries, dashboards, and alerting are served by the observability backend without adding a write-heavy append-only table to the primary Postgres instance. The only transition-derived field the application itself needs at runtime is `previous_state` (for the re-open flow), which is kept directly on the `registrations` row.
 
 ### `aggregators` table
 
-The live aggregator identity record — created at graduation (the `approved → active` transition).
+The live aggregator identity record, created at graduation.
 
-Linked from `registrations.aggregator_id` after graduation.
+| Key column               | Description                                                                                                                                                              |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `id`                     | UUID primary key                                                                                                                                                         |
+| `org_slug`               | Unique URL-safe identifier derived from org name                                                                                                                         |
+| `source_registration_id` | FK back to `registrations` — the idempotency key for graduation retries                                                                                                  |
+| `name`                   | Organisation display name                                                                                                                                                |
+| `contact`                | Beckn-shaped contact block                                                                                                                                               |
+| `status`                 | Lifecycle status: `pending` (set at graduation while provisioning completes), `active` (set by `ensureActivated` once all approval steps succeed), `inactive`, `retired` |
 
----
-
-## 6. Approval token mechanism
-
-All email links carry a signed JWT. No database lookup is needed to authorise an action — the token is self-contained.
-
-### Verification token (applicant → API)
-
-Sent in the verification email. Carries:
-
-- `sub`: registration ID
-- `intent`: `"verify"`
-- `aud`: `"aggregator-applicant"`
-- Expiry: configurable (default 60 min)
-
-The verify endpoint checks the signature, confirms `sub` matches the URL path parameter, then does a CAS `submitted → verified`.
-
-### Approval token (admin → API)
-
-Two tokens per notification email — one for approve, one for reject. Each carries:
-
-- `sub`: registration ID
-- `intent`: `"approve"` or `"reject"`
-- `aud`: `"aggregator-admin"`
-- Expiry: 7 days (so the admin has time to act)
-
-Both tokens are signed with the same secret (`APPROVAL_TOKEN_SECRET`) using HS256. The decision endpoint re-checks the current FSM state before acting, so a replayed or expired token never produces a duplicate effect.
-
-### Idempotency of the admin link
-
-The confirmation page renders an "already decided" view if the registration is already in `approved`, `active`, `rejected`, or `abandoned`. The admin can click their email links multiple times safely.
+**`status` lifecycle:** `ensureGraduated` creates the `aggregators` row with `status = 'pending'`. The row is flipped to `active` only by `ensureActivated`, atomically with the registration's `provisioning → active` transition, once `idp_user`, `ss_org`, and `welcome` are all `done`. This guarantees an aggregator is never advertised as live while its identity account or Signals-DPG org is still being set up.
 
 ---
 
-## 7. Inline provisioning and the reconciler
+## 6. API Spec
 
-### Design principle: write first, side-effect second
+### Public endpoints
 
-When the API receives a submit or a decision, it first writes the state change to the database in a single atomic operation. Only then does it attempt the side-effects (emails, Keycloak calls, Signals-DPG pushes).
+These are called by the web portal's service account (no aggregator session required).
 
-This means **the row is always consistent even if all the external calls fail**. The reconciler can look at the row, see which steps haven't completed (via `provision_state`), and retry them.
+#### `POST /v1/aggregator/registration/create`
 
-### Inline vs. reconciler
-
-| Path                     | How it runs                                                                                                                                                                         |
-| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Inline (best-effort)** | The API fires off provisioning steps immediately after committing the state change. These are best-effort — a failure is logged as a warning but the HTTP response is already sent. |
-| **Reconciler**           | On-demand repair pass triggered by an admin API call. Claims all non-terminal rows atomically, retries all incomplete steps, releases claims.                                       |
-
-The inline path exists for latency (most applications succeed immediately and the applicant/admin gets fast feedback). The reconciler exists for correctness (failures are never permanent).
-
-### Claim locking
-
-When the reconciler starts processing a row, it sets `reconciler_claimed_at = now()`. This prevents two concurrent reconciler ticks from processing the same row simultaneously. Claims expire after 10 minutes — a crashed reconciler tick will not permanently lock rows.
-
-### TTL abandonment
-
-The reconciler also handles timeout cases:
-
-- **Unverified TTL (72 h):** A `submitted` row that has not progressed to `verified` within 72 hours is moved to `abandoned`. The applicant never clicked their verification link.
-- **Stuck TTL (168 h):** A `verified` or `approved` row that has not progressed within 168 hours (7 days) is moved to `abandoned`. This catches cases where provisioning repeatedly fails and no human intervened.
-
-### Keycloak user creation
-
-`kc_user` is the one step the reconciler does **not** retry automatically. Creating a Keycloak user requires a synchronous exchange with Keycloak and carries risk of partial state if retried without care. If this step fails, the reconciler logs a warning with `kc_user_not_created_needs_admin`. An operator must trigger a manual repair via the admin portal or the `reconcile/by-contact` endpoint.
-
-### Triggering the reconciler
-
-The reconciler runs **on demand only** — it has no automatic scheduler in the current implementation. Operators trigger it via:
+Submit a new application.
 
 ```
-POST /admin/v1/aggregator/registration/reconcile
-```
-
-or repair a single application by contact:
-
-```
-POST /admin/v1/aggregator/registration/reconcile/by-contact
-{ "email": "contact@example.org" }
-```
-
-> **Note for operators:** Until a scheduled heartbeat is added, registrations with failed provisioning steps will remain stuck until an operator manually triggers reconciliation. The improvement plan tracks adding a BullMQ repeatable job as a P0 item.
-
----
-
-## 8. Provisioning steps reference
-
-Each step is implemented as an `ensure-*` function in `apps/api/src/services/registration-provisioning/`. All steps are idempotent — running a step that has already succeeded is a safe no-op.
-
-### `ensureVerificationSent`
-
-- **Triggered:** After form submit.
-- **What it does:** Mints a verification JWT, builds the verify URL (`/register/verify?id=...&token=...`), sends the email.
-- **Guard:** Skips if `provision_state.verification === 'done'`; respects a resend cooldown (default 60 min).
-
-### `ensureAdminNotified`
-
-- **Triggered:** After email verification.
-- **What it does:** Mints two approval JWTs (approve + reject), builds the admin HTML email with both links, sends to all configured `ADMIN_EMAILS`.
-- **Guard:** Skips if `provision_state.admin_notify === 'done'`; respects resend cooldown.
-
-### `ensureGraduated`
-
-- **Triggered:** After admin approval.
-- **What it does:** Inserts a row into `aggregators` (the live identity table), inserts a matching `aggregator_profile` row, and performs a CAS `approved → active` transition writing the new `aggregator_id`.
-- **Slug generation:** `orgName` is slugified + a 4-character random hex suffix to avoid conflicts.
-- **Guard:** Skips if `provision_state.graduated === 'done'`.
-
-### `ensureKeycloakUser`
-
-- **Triggered:** After approval (and graduation).
-- **What it does:** Creates a Keycloak user in the `aggregator` realm with `aggregator_id` and `phone_number` user attributes. Sets a temporary password and flags `required_actions: [UPDATE_PASSWORD]`.
-- **Guard:** Skips if `provision_state.kc_user === 'done'`. Not retried by reconciler — requires manual intervention on failure.
-
-### `ensureSignalstackOrg`
-
-- **Triggered:** After graduation (needs the `aggregator_id` FK).
-- **What it does:** Calls `signalStackWriter.upsertAggregator` to register the organisation in Signals-DPG. Stores the returned `ss_org_id` on both the registration row and the aggregators row.
-- **Guard:** Skips if `provision_state.ss_org === 'done'`.
-
-### `ensureWelcomeSent`
-
-- **Triggered:** After approval provisioning completes.
-- **What it does:** Sends a welcome email to the applicant with a link to the portal.
-- **Guard:** Skips if `provision_state.welcome === 'done'`.
-
-### `ensureRejectionSent`
-
-- **Triggered:** After admin rejection.
-- **What it does:** Sends a rejection notification to the applicant.
-- **Guard:** Skips if `provision_state.rejection === 'done'`.
-
-### `ensureKeycloakUserDisabled`
-
-- **Triggered:** After admin rejection.
-- **What it does:** Disables the Keycloak user (if one was created) to prevent any issued tokens from working.
-
----
-
-## 9. API reference
-
-All endpoints live in `apps/api` (Fastify on port 4000).
-
-### Public endpoints (accessible by the web portal's service account)
-
-#### `POST /v1/aggregator-registrations/create`
-
-Submit a new registration application.
-
-**Auth:** Service-account bearer token (Keycloak `client_credentials` from `aggregator-bff`).
-
-**Request body:**
-
-```json
+Request body:
 {
   "name": "My NGO",
-  "type": "aggregator",
-  "url": "https://myngo.org",
+  "type": "seeker",                  // optional — participant role
+  "url": "https://myngo.org",        // optional
   "contact": {
     "email": "contact@myngo.org",
     "phone": "+919876543210"
   },
-  "locations": [...],
+  "locations": [...],                // Beckn location array
   "consent": {
     "version": "1.0",
-    "given_at": "...",
-    "valid_till": "..."
+    "given_at": "2026-06-01T10:00:00Z",
+    "valid_till": "2027-06-01T10:00:00Z"
   }
+}
+
+Responses:
+  202 Accepted           — new submission, or duplicate while in submitted/verified/provisioning/declined/abandoned state
+  200 { "status": "already_active" } — duplicate submission for an already-active organisation
+```
+
+Rate-limited per email:IP. Duplicate submissions are handled per the state table in Section 4.4.
+
+---
+
+#### `GET /v1/aggregator/registration/status/:registrationId`
+
+Allows an applicant to check their registration state and view the reason for a decline. The `registrationId` was included in the submission acknowledgement email.
+
+The UUID serves as a lightweight capability token — it is unguessable (~122 bits of entropy) and grants read-only access to that registration's public status only. No auth header is required. This endpoint is intentionally **not** application-rate-limited; it relies on the UUID's entropy plus infrastructure-level protections (WAF/CDN/gateway) rather than an in-app limiter.
+
+```
+Response:
+{
+  "state": "submitted" | "verified" | "provisioning" | "active" | "declined" | "abandoned",
+  "admin_note": "string | null",   // populated after an approve or decline decision
+  "can_resubmit": true | false,    // true when state = "declined" and decline_count < REGISTRATION_MAX_DECLINE_COUNT
+  "decline_count": N               // how many times declined so far
 }
 ```
 
-**Response:** Always `202 Accepted` — for new, duplicate, or idempotency-replay submissions.
-
-**Rate limit:** Per `email:IP` combination — configurable via `PUBLIC_SUBMIT_RATE_WINDOW_SECONDS` / `PUBLIC_SUBMIT_RATE_MAX_PER_WINDOW`.
+The portal displays this response when an applicant visits their registration status page, giving them full visibility without contacting support.
 
 ---
 
-#### `POST /v1/aggregator-registrations/:id/verify`
+#### `GET /v1/aggregator/registration/verify?id=:registrationId&token=:jwt`
 
-Verify the applicant's email address. Called when the applicant clicks the link in their verification email.
+Verify the applicant's email. Called when the applicant clicks the link in their verification email.
 
-**Query parameter:** `token` — signed verification JWT.
+```
+Response: 200 { "verified": true }   (idempotent — safe to call again)
+          400 { "error": "TOKEN_EXPIRED" | "TOKEN_INVALID" }
+```
 
-**Response:** `200 { verified: true }` on success. Idempotent — returns 200 if already verified.
+If the token has expired, the applicant should wait for the reconciler to send a new verification email (within `REGISTRATION_VERIFICATION_RESEND_COOLDOWN_MINUTES`). There is no self-service re-send endpoint.
 
 ---
 
-### Admin endpoints (protected by gateway path policy on `/admin/**`)
+### Admin endpoints
 
-> The application itself does not check admin credentials. An API gateway (Kong, Keycloak token exchange, etc.) must enforce authentication for all requests matching `/admin/**`. See `apps/api/src/routes/aggregator-registrations-admin.ts` for the rationale.
+All `/admin/**` routes require authentication enforced by the API gateway. The gateway enforces service-level authentication (API key). The signed JWT in the email link provides the per-action admin authorisation — no separate user login is required. Route path prefix `/admin/v1/aggregator/registration` is intentional — the `/admin/` prefix makes gateway policy enforcement straightforward (one prefix rule covers all admin routes).
 
-#### `GET /admin/v1/aggregator-registrations/read/:id?token=...&intent=approve|reject`
+#### `GET /admin/v1/aggregator/registration/read/:id?token=:jwt&intent=approve|decline`
 
-Renders an HTML confirmation page for an approve or reject action. The `token` is the approval JWT from the admin notification email. Shows "already decided" if the registration is past the decision point.
+Renders an HTML confirmation page for the admin. The token is from the admin notification email. Shows "already decided" if the application is past the decision point.
 
-#### `POST /admin/v1/aggregator-registrations/decision/:id`
+The confirmation page includes:
 
-Records an approve or reject decision and fires provisioning.
+- A summary of the application details
+- A text area for the admin to enter a note (required for decline, optional for approve)
+- Character limit indicator (max 500 chars)
 
-**Body:** `{ token, decision: "approve" | "reject", reason? }`
+---
 
-**Response:** HTML result page.
+#### `POST /admin/v1/aggregator/registration/decision/:id`
+
+Record an approve or decline decision and start provisioning.
+
+```
+Request body:
+{
+  "token": "<approval JWT from email>",
+  "decision": "approve" | "decline",
+  "note": "..."                      // required for decline, optional for approve; max 500 chars
+}
+
+Validation:
+  - the JWT's embedded `intent` claim must match `decision`; returns 403 { "error": "INTENT_MISMATCH" } otherwise
+  - `note` is required when decision = "decline" (trimmed); returns 400 { "error": "NOTE_REQUIRED" } if absent or whitespace-only
+  - `note` max length 500 chars after trimming; returns 400 { "error": "NOTE_TOO_LONG" } if exceeded
+
+Response: HTML result page (success, already-decided, or error)
+```
+
+The `note` is written into `registrations.latest_admin_note` and emitted as an OTel state-transition event. It is delivered verbatim to the applicant in the decline email (or welcome email for approve). The full note history is available in the observability backend.
 
 ---
 
 #### `GET /admin/v1/aggregator/registration`
 
-Lists registrations with pagination and optional state filter.
+List applications with filters.
 
-**Query params:** `state`, `page`, `limit`, `sort` (`created_at` | `updated_at`), `order` (`asc` | `desc`).
+```
+Query params:
+  state   — filter by FSM state
+  page    — page number (default 1)
+  limit   — rows per page (default 20)
+  sort    — created_at | updated_at
+  order   — asc | desc
+
+Response: { items: [...], total: N, page: N, limit: N }
+```
+
+---
 
 #### `GET /admin/v1/aggregator/registration/:id`
 
-Returns a single registration with its full transition history.
+Fetch a single application.
+
+```
+Response:
+{
+  "registration": {
+    ...
+    "latest_admin_note": "string | null",  // most recent admin note (approve or decline)
+    "previous_state": "string | null"      // state before the most recent transition
+  }
+}
+```
+
+Full transition history (all state changes with actor, reason, and note) is available in the observability backend via the `registration.id` attribute on `registration.state_transition` events.
+
+---
 
 #### `POST /admin/v1/aggregator/registration/reconcile`
 
-Runs a full reconciler tick over all non-terminal registrations. Returns a `ReconcileOutcome` with per-category counts.
+Trigger a full repair pass over all reconcilable applications (`submitted`, `verified`, `provisioning`, `declined`). Returns counts of what was fixed, abandoned, or still failing.
+
+**TTL enforcement happens here:** This endpoint checks `REGISTRATION_UNVERIFIED_TTL_HOURS` and `REGISTRATION_STUCK_TTL_HOURS` and abandons rows that have exceeded their limits. Operators should call this endpoint on a regular cadence — every few hours is sufficient for most deployments.
+
+```
+Response: {
+  examined: N,
+  repaired: N,      // provision steps successfully retried this run
+  welcomed: N,
+  declined: N,
+  abandoned: N,
+  warnings: N       // dead steps or unexpected conditions logged but not retried
+}
+```
+
+---
 
 #### `POST /admin/v1/aggregator/registration/reconcile/by-contact`
 
-Runs the reconciler for a single registration identified by email or phone. Useful for manually repairing a stuck application.
+Trigger repair for a single application identified by email or phone. Useful for manually unblocking a stuck application.
 
-**Body:** `{ email?: string, phone?: string }` — provide one.
+```
+Request body:
+  { "email": "contact@example.org" }   // one of email or phone; if both provided, email takes precedence
+  OR
+  { "phone": "+919876543210" }
 
----
-
-## 10. Configuration reference
-
-All values are environment variables read by `apps/api/src/config.ts`.
-
-| Variable                                | Default                 | Description                                                                |
-| --------------------------------------- | ----------------------- | -------------------------------------------------------------------------- |
-| `APPROVAL_TOKEN_SECRET`                 | —                       | **Required.** HS256 signing secret for all JWTs. Must be ≥ 32 characters.  |
-| `ADMIN_EMAILS`                          | `""`                    | Comma-separated list of admin email addresses for review notifications.    |
-| `PUBLIC_API_URL`                        | `http://localhost:4000` | Base URL of the API — used to build admin email links.                     |
-| `PUBLIC_PORTAL_URL`                     | `http://localhost:3000` | Base URL of the web portal — used to build verification and welcome links. |
-| `REGISTRATION_VERIFICATION_TTL_MINUTES` | `60`                    | Verification email link validity.                                          |
-| `REGISTRATION_RESEND_COOLDOWN_MINUTES`  | `60`                    | Minimum gap between repeated email sends (all types).                      |
-| `REGISTRATION_UNVERIFIED_TTL_HOURS`     | `72`                    | Hours before an unverified `submitted` row is abandoned.                   |
-| `REGISTRATION_STUCK_TTL_HOURS`          | `168`                   | Hours before a stuck `verified` or `approved` row is abandoned.            |
-| `PUBLIC_SUBMIT_RATE_WINDOW_SECONDS`     | —                       | Rate-limit window for the submit endpoint.                                 |
-| `PUBLIC_SUBMIT_RATE_MAX_PER_WINDOW`     | —                       | Max submissions per email:IP pair within the window.                       |
+Response: same shape as full reconcile + the registration row
+```
 
 ---
 
-## 11. Key design decisions
+#### `POST /admin/v1/aggregator/registration/reopen/:id`
 
-### Single atomic write on submit
+Re-open an abandoned application to its pre-abandonment state. After reopening a `provisioning`-state application, the operator should trigger the reconciler to pick up any remaining provision steps.
 
-The submit endpoint does exactly one database write: `INSERT INTO registrations`. There are no external calls in the write path. This keeps the endpoint latency low, eliminates partial-failure states at submit time, and makes the row the single source of truth regardless of what happens next.
+```
+Request body:
+  { "reason": "Reopening by admin request" }   // optional
 
-### Uniform 202 on submit
+Response: {
+  "reopened": true,
+  "targetState": "submitted" | "verified" | "provisioning"
+}
 
-Returning the same status code for new, duplicate, idempotency-replay, and duplicate-contact cases ensures the endpoint cannot be used to probe the database. An attacker cannot determine whether a given email is already registered by observing the HTTP response code or timing.
+Error responses:
+  404 — registration not found
+  409 { "error": "NOT_ABANDONED" } — registration is not in the abandoned state
+```
 
-### Compare-and-set on every transition
+---
 
-The `version` column acts as an optimistic lock. Any state change reads the current version, includes it in the `WHERE` clause of the update, and fails with `STALE_TRANSITION` if the row was modified concurrently. Callers treat a stale transition as a success (the concurrent writer already made the correct change). This eliminates the need for advisory DB locks and keeps the code correct under concurrent load.
+### Configuration
 
-### Token-based admin flow (no login required)
+| Variable                                            | Default                 | Description                                                                                                |
+| --------------------------------------------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `NETWORK_FACILITATOR_ADMIN_EMAILS`                  | `""`                    | Comma-separated email addresses of network facilitator admins who receive application review notifications |
+| `PUBLIC_API_URL`                                    | `http://localhost:4000` | Base URL of the API — used to build email links                                                            |
+| `PUBLIC_PORTAL_URL`                                 | `http://localhost:3000` | Portal base URL — used in welcome emails                                                                   |
+| `REGISTRATION_UNVERIFIED_TTL_HOURS`                 | `72`                    | Hours before an unverified (`submitted`) application is abandoned by the reconciler                        |
+| `REGISTRATION_STUCK_TTL_HOURS`                      | `168`                   | Hours before a stuck `verified` or `provisioning` application is abandoned by the reconciler               |
+| `REGISTRATION_VERIFICATION_LINK_TTL_MINUTES`        | `60`                    | Validity window for the email verification link sent to the applicant                                      |
+| `REGISTRATION_VERIFICATION_RESEND_COOLDOWN_MINUTES` | `60`                    | Minimum gap between repeated verification email sends to the same applicant                                |
+| `REGISTRATION_ADMIN_APPROVAL_TOKEN_TTL_HOURS`       | `168`                   | Validity window for the approve/decline JWT embedded in the admin notification email                       |
+| `REGISTRATION_MAX_DECLINE_COUNT`                    | `3`                     | Total declines (across all re-submits) before the next decline transitions the application to `abandoned`  |
+| `REGISTRATION_WELCOME_RESEND_COOLDOWN_MINUTES`      | `60`                    | Minimum gap between repeated welcome or decline email sends                                                |
+| `REGISTRATION_MAX_PROVISION_ATTEMPTS`               | `5`                     | Failures before a provisioning step is dead-lettered and stops being retried                               |
+| `REGISTRATION_PROVISION_BACKOFF_BASE_SECONDS`       | `60`                    | Base interval for retry backoff; doubles each attempt (e.g. 60 s, 120 s, 240 s, ...)                       |
+| `PUBLIC_SUBMIT_RATE_WINDOW_SECONDS`                 | `60`                    | Rate-limit window duration for the submit endpoint                                                         |
+| `PUBLIC_SUBMIT_RATE_MAX_PER_WINDOW`                 | `20`                    | Max submissions per email:IP pair within one rate-limit window                                             |
 
-Admins receive clickable links directly in their email. The links carry a signed JWT that authorises exactly one action on one registration. This avoids the friction of requiring admins to log into a separate dashboard for the common case. A gateway enforces route-level auth on `/admin/**` for any API calls that require session context.
+**TTL note:** TTL thresholds do not trigger automatically. They are evaluated each time the reconciler runs. An application is only abandoned when the reconciler is invoked AND the row has exceeded its threshold. Operators must schedule regular reconcile calls externally.
 
-### `provision_state` as a per-step tracker
+**Config constraint:** Keep `REGISTRATION_ADMIN_APPROVAL_TOKEN_TTL_HOURS` ≤ `REGISTRATION_STUCK_TTL_HOURS`. If the admin token TTL is longer than the stuck TTL, admins may click a link for a row that has already been abandoned by the reconciler. The decision endpoint handles this gracefully (shows an "already decided" page), but the UX is confusing. The safest configuration is to keep them equal (both 168 h by default).
 
-Externalising side-effect completion into a JSONB column means any step can fail independently without rolling back others. The reconciler only retries the specific steps that are not marked `done`. This is simpler than a saga coordinator and sufficient for the current scale.
+---
 
-### Inline provisioning as an optimisation
+## 7. Summary
 
-The API fires provisioning steps immediately after committing the state change. This is a latency optimisation — in the happy path the applicant gets their verification email within seconds and the admin gets their notification immediately. The reconciler is the correctness guarantee, not the primary execution path.
+The aggregator registration subsystem manages the full lifecycle of an aggregator application — from form submission through account activation.
 
-### Keycloak user creation is not auto-retried
+**Key design choices:**
 
-Creating a KC user carries risk of partial state (user created in KC but not linked back to the row). The reconciler currently logs KC failures as warnings requiring manual intervention. This is a deliberate conservative choice for MVP; automatic retry with proper idempotency checking is tracked in the improvement plan.
+- **Database as the source of truth:** Every action writes to the database first. Side effects (emails, account creation) happen after and are always recoverable.
 
-### Admin path prefix for gateway policy
+- **Idempotent everything:** Re-running any step — whether from a retry, a concurrent call, or an operator action — produces the same result. No duplicates, no partial states.
 
-All admin endpoints sit under `/admin/v1/`. This convention lets a single API gateway rule (e.g. `path_prefix: /admin`) apply authentication policy without enumerating individual routes. The application trusts that only authenticated admin traffic reaches these handlers.
+- **Silent 202 on submit:** All submit outcomes return `202 Accepted` to prevent email probing, with one exception: if the organisation is already `active`, the response is `200 { "status": "already_active" }` to give the applicant a useful signal.
+
+- **Optimistic locking:** Every state transition uses a version counter to detect and reject concurrent writes safely.
+
+- **Per-step tracking:** Each provisioning side-effect is tracked independently. A failure in one step does not block others.
+
+- **Dead-letter protection:** Steps that fail repeatedly (more than `REGISTRATION_MAX_PROVISION_ATTEMPTS` times) are automatically stopped. An operator can reset them explicitly.
+
+- **PII protection:** Personal data is retained on abandonment (not purged); it will be secured via field-level encoding/encryption at rest in a later stage.
+
+- **Admin UX without login:** Admins approve or decline from their email inbox. The gateway enforces service-level auth; the signed JWT in the link is the admin's per-action authorisation. No user login required.
+
+- **Pluggable identity provider:** All identity operations go through an `IdpAdminAdapter` abstraction. Keycloak is the default; any compatible IdP can be substituted by implementing the adapter.
+
+- **No scheduler:** The reconciler runs on demand via an admin API call. Operators schedule it externally. This keeps infrastructure cost low — no always-on background process is required. Triggering every few hours is sufficient.
+
+- **Re-openability:** Abandoned applications can be re-opened by an admin to any prior state, with the reconciler picking up and completing remaining steps automatically on the next reconcile trigger.
+
+- **Decline count accumulates:** Total declines across all re-submission attempts count toward `REGISTRATION_MAX_DECLINE_COUNT`. Re-submitting does not reset the counter — this prevents indefinite cycling.
