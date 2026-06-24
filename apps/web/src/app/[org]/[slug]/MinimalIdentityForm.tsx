@@ -15,6 +15,7 @@
 
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
+import { SubmitBlockers } from '../../../components/ui/SubmitBlockers';
 
 export interface MinimalIdentityPayload {
   /** Name field. Key is the network's `identity.name` selector. */
@@ -49,18 +50,20 @@ export interface MinimalIdentityFormProps {
    * the link's registration mode. `null` / undefined renders nothing.
    */
   hintI18nKey?: string | null;
+  /**
+   * Voice-mode capture: a phone number is mandatory and the email input is
+   * hidden (the link's purpose is a call-back, so email is not collected).
+   * When false (default), the classic "name + (phone OR email)" rule applies.
+   */
+  requirePhone?: boolean;
 }
 
 export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Element {
   const t = useTranslations('profile.public_reg.account_only');
-  // Root-scoped translator for the registration mode's public hint key,
-  // which is a top-level message key supplied by network config.
-  const tRoot = useTranslations();
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
-  const [consentTerms, setConsentTerms] = useState(false);
-  const [consentPrivacy, setConsentPrivacy] = useState(false);
+  const [consentCall, setConsentCall] = useState(false);
   // Local double-submit guard. The parent runs an async probe before its own
   // `submitting` state flips, so this form can stay mounted for one render
   // after the click — a fast double-tap would otherwise fire two pipelines.
@@ -69,12 +72,41 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
   const nameKey = props.identity.name;
   const phoneKey = props.identity.phone;
   const emailKey = props.identity.email;
+  const requirePhone = !!props.requirePhone;
+  // Email is always shown when the domain declares it. In voice mode phone is
+  // mandatory and email is optional; otherwise phone OR email is required.
+  const showEmail = !!emailKey;
 
-  // Identity invariant per the design: name AND (phone OR email).
+  // Identity invariant: name AND (voice → valid phone; otherwise valid phone
+  // OR valid email). Format is checked here so a half-typed value (e.g. a
+  // 4-digit mobile) blocks submit — and the blocker list says why.
   const hasName = name.trim().length > 0;
   const hasPhone = !!phoneKey && phone.trim().length > 0;
-  const hasEmail = !!emailKey && email.trim().length > 0;
-  const valid = hasName && (hasPhone || hasEmail) && consentTerms && consentPrivacy;
+  const hasEmail = showEmail && email.trim().length > 0;
+  const phoneFormatOk = phone.replace(/\D/g, '').length >= 10;
+  const emailFormatOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+  const phoneValid = hasPhone && phoneFormatOk;
+  const emailValid = hasEmail && emailFormatOk;
+  // An entered email must be valid even when it's optional (voice mode).
+  const emailOk = !hasEmail || emailFormatOk;
+  const contactValid = requirePhone ? phoneValid : phoneValid || emailValid;
+  const valid = hasName && contactValid && emailOk && consentCall;
+
+  // Option B: the submit stays disabled until valid, but we surface exactly
+  // what is blocking so the user is never left guessing.
+  const blockers: string[] = [];
+  if (!hasName) blockers.push(t('blockers.name'));
+  if (requirePhone) {
+    if (!hasPhone) blockers.push(t('blockers.phone_required'));
+    else if (!phoneFormatOk) blockers.push(t('blockers.phone_invalid'));
+    if (hasEmail && !emailFormatOk) blockers.push(t('blockers.email_invalid'));
+  } else if (!hasPhone && !hasEmail) {
+    blockers.push(t('blockers.contact_required'));
+  } else {
+    if (hasPhone && !phoneFormatOk) blockers.push(t('blockers.phone_invalid'));
+    if (hasEmail && !emailFormatOk) blockers.push(t('blockers.email_invalid'));
+  }
+  if (!consentCall) blockers.push(t('blockers.consent_call'));
 
   return (
     <div className="rounded-[18px] bg-white border border-[var(--bd-border)] overflow-hidden shadow-[0_1px_0_rgba(11,16,32,0.02),0_20px_60px_-30px_rgba(11,16,32,0.18)]">
@@ -97,6 +129,9 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
             [nameKey]: name.trim(),
             consent_terms: true,
             consent_privacy: true,
+            // NOTE: consent_call is a UI-only gate for now — the account_only
+            // submit endpoint rejects unknown fields (REGISTRATION_MODE_MISMATCH),
+            // so it is not sent until the backend whitelists it (#435).
           };
           if (phoneKey && hasPhone) payload[phoneKey] = phone.trim();
           if (emailKey && hasEmail) payload[emailKey] = email.trim();
@@ -121,13 +156,18 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
           />
         </label>
 
-        {(phoneKey || emailKey) && (
+        {(phoneKey || showEmail) && (
           <div>
-            <div className="text-[12px] text-ink-500 mb-2">{t('contact_label')}</div>
+            {!requirePhone && (
+              <div className="text-[12px] text-ink-500 mb-2">{t('contact_label')}</div>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {phoneKey && (
                 <label className="block">
-                  <span className="bd-label">{t('phone_label')}</span>
+                  <span className="bd-label">
+                    {t('phone_label')}
+                    {requirePhone && <span className="text-rose-500 ml-0.5">*</span>}
+                  </span>
                   <input
                     className="bd-input"
                     type="tel"
@@ -136,10 +176,11 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
                     onChange={(e) => setPhone(e.target.value)}
                     autoComplete="tel"
                     placeholder="+91..."
+                    required={requirePhone}
                   />
                 </label>
               )}
-              {emailKey && (
+              {showEmail && (
                 <label className="block">
                   <span className="bd-label">{t('email_label')}</span>
                   <input
@@ -161,24 +202,16 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
           <label className="flex items-start gap-2.5 text-[13px] text-ink-900 cursor-pointer">
             <input
               type="checkbox"
-              name="consent_terms"
-              checked={consentTerms}
-              onChange={(e) => setConsentTerms(e.target.checked)}
+              name="consent_call"
+              checked={consentCall}
+              onChange={(e) => setConsentCall(e.target.checked)}
               className="mt-0.5 h-4 w-4 rounded border-[var(--bd-border)] accent-[var(--bd-primary-600)]"
             />
-            <span>{t('consent_terms_label')}</span>
-          </label>
-          <label className="flex items-start gap-2.5 text-[13px] text-ink-900 cursor-pointer">
-            <input
-              type="checkbox"
-              name="consent_privacy"
-              checked={consentPrivacy}
-              onChange={(e) => setConsentPrivacy(e.target.checked)}
-              className="mt-0.5 h-4 w-4 rounded border-[var(--bd-border)] accent-[var(--bd-primary-600)]"
-            />
-            <span>{t('consent_privacy_label')}</span>
+            <span>{t('consent_call_label')}</span>
           </label>
         </div>
+
+        {!valid && <SubmitBlockers reasons={blockers} heading={t('blockers.heading')} />}
 
         <div className="flex justify-end pt-2">
           <button
@@ -190,10 +223,6 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
             {t('submit_label')}
           </button>
         </div>
-
-        {props.hintI18nKey ? (
-          <p className="mt-1 text-[12.5px] italic text-ink-500">{tRoot(props.hintI18nKey)}</p>
-        ) : null}
       </form>
     </div>
   );

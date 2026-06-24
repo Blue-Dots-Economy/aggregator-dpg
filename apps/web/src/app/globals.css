@@ -266,6 +266,11 @@ body {
 
 .bd-input {
   width: 100%;
+  /* box-sizing + min-width:0 stop native date/number inputs from overflowing
+     their grid/flex cell via their intrinsic min content width. */
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
   background: var(--bd-bg);
   border: 1px solid var(--bd-border);
   border-radius: 10px;

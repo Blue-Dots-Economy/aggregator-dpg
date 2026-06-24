@@ -285,7 +285,7 @@
       "title": "Share a registration link",
       "new_badge": "New",
       "field_org_name": "Enter your Organisation Name",
-      "field_state": "Instance (State Name)",
+      "field_state": "State",
       "field_event": "Event",
       "field_event_date": "Event Date",
       "field_event_location": "Event Location",
@@ -303,7 +303,15 @@
       "qr_label": "QR Code",
       "qr_placeholder": "Create a link to start. QR appears once the draft is made live.",
       "error_required": "State, District, and Event are required.",
-      "link_created": "Registration link created"
+      "link_created": "Registration link created",
+      "blockers": {
+        "heading": "To create the link:",
+        "state": "Enter the State.",
+        "district": "Enter the District.",
+        "lever_event": "Enter the Event.",
+        "domain": "Domain is not set.",
+        "registration_mode": "Select a form type."
+      }
     },
     "your_links": {
       "title": "Your Registration Links",
@@ -427,6 +435,9 @@
         "owned_elsewhere_title": "Contact already registered",
         "owned_elsewhere_body": "This email or mobile is already registered with another organisation. Please use a different contact or sign in through that organisation.",
         "owned_elsewhere_cta": "Use a different contact",
+        "already_registered_title": "Already registered",
+        "already_registered_body": "This email or mobile is already registered with this organisation. To change your details, sign in or contact the aggregator.",
+        "already_registered_cta": "Use a different contact",
         "resume_title": "You have a profile in progress",
         "resume_body": "We found an unfinished profile for this contact. Resume where you left off?",
         "resume_cta": "Resume profile",
@@ -436,12 +447,25 @@
         "title": "Quick sign-up",
         "helper": "Provide your name and a contact number or email. You can complete your profile later.",
         "contact_label": "Provide a phone OR an email (at least one required)",
+        "contact_label_voice": "Phone is required. Email is optional.",
         "name_label": "Name",
         "phone_label": "Phone",
         "email_label": "Email",
         "consent_terms_label": "I accept the terms",
         "consent_privacy_label": "I accept the privacy policy",
-        "submit_label": "Submit"
+        "consent_call_label": "I permit the aggregator to trigger the call on my behalf.",
+        "submit_label": "Submit",
+        "blockers": {
+          "heading": "To submit:",
+          "name": "Enter your name.",
+          "phone_required": "Enter your mobile number.",
+          "phone_invalid": "Enter a valid mobile number (at least 10 digits).",
+          "email_invalid": "Enter a valid email address.",
+          "contact_required": "Enter a mobile number or email.",
+          "consent_terms": "Accept the terms.",
+          "consent_privacy": "Accept the privacy policy.",
+          "consent_call": "Accept the call-on-my-behalf consent."
+        }
       }
     }
   },
