@@ -9,6 +9,10 @@ import { Dropzone } from '../../../../components/ui/Dropzone';
 import { I } from '../../../../icons';
 import { useBulkUpload, useRecentBulkUploads } from '../../../../hooks/useOnboarding';
 import { useProfileRaw } from '../../../../hooks/useProfile';
+import {
+  useAggregatorConfig,
+  DEFAULT_AGGREGATOR_CONFIG,
+} from '../../../../hooks/useAggregatorConfig';
 import type { BulkUploadStatus } from '../../../../services/onboarding.service';
 import { onboardingService } from '../../../../services/onboarding.service';
 
@@ -16,12 +20,16 @@ export function CSVUpload() {
   const t = useTranslations('onboarding');
   const router = useRouter();
   const rawProfile = useProfileRaw();
+  const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
   // Aggregator registered participant focus, mirrored from the
-  // `aggregator_type` KC claim. While the profile is still loading we
-  // tentatively default to 'seeker' — the upload submit path is gated by
-  // the API anyway, so a transient mismatch in the picker is harmless.
-  const aggregatorType: 'seeker' | 'provider' = rawProfile.data?.type ?? 'seeker';
-  const [participantType, setParticipantType] = useState<'seeker' | 'provider'>(aggregatorType);
+  // `aggregator_type` KC claim. Falls back to the network's first declared
+  // domain (networks.json order) while the profile loads — the upload submit
+  // path is gated by the API anyway, so a transient mismatch is harmless.
+  const aggregatorType: string = rawProfile.data?.type ?? cfg.domains[0]?.id ?? '';
+  // Plural label for the scoped domain, sourced from network config.
+  const aggregatorTypeLabel =
+    cfg.domains.find((d) => d.id === aggregatorType)?.plural_label ?? aggregatorType;
+  const [participantType, setParticipantType] = useState<string>(aggregatorType);
   useEffect(() => {
     if (rawProfile.data?.type) setParticipantType(rawProfile.data.type);
   }, [rawProfile.data?.type]);
@@ -125,16 +133,11 @@ export function CSVUpload() {
            */}
           <div
             className="flex items-center bg-ink-50 border border-[var(--bd-border)] rounded-[10px] p-0.5"
-            aria-label={`Participant type: ${aggregatorType ?? ''}`}
+            aria-label={`Participant type: ${aggregatorTypeLabel}`}
           >
-            {aggregatorType === 'seeker' && (
-              <div className="px-3 py-1.5 rounded-[8px] text-[12.5px] font-semibold bg-white text-amber-700 bd-shadow select-none">
-                Seekers
-              </div>
-            )}
-            {aggregatorType === 'provider' && (
+            {aggregatorTypeLabel && (
               <div className="px-3 py-1.5 rounded-[8px] text-[12.5px] font-semibold bg-white text-primary-600 bd-shadow select-none">
-                Providers
+                {aggregatorTypeLabel}
               </div>
             )}
           </div>

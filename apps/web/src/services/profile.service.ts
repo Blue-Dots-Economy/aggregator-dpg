@@ -73,7 +73,10 @@ export interface ProfileApiResponse {
   org_slug: string;
   org_name: string;
   actor_type: 'aggregator' | 'seeker' | 'provider';
-  type: 'seeker' | 'provider' | null;
+  // Domain id the aggregator is scoped to. Comes from the network config
+  // (networks.json domains), so not limited to seeker/provider — e.g.
+  // orange_dot exposes tourist / practitioner.
+  type: string | null;
   url: string | null;
   contact: BecknContact;
   locations: BecknLocation[];

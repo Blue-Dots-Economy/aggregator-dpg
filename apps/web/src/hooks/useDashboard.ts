@@ -1,6 +1,6 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import {
   dashboardService,
   type DashboardQuery,
@@ -89,5 +89,10 @@ export function useDashboard(query?: DashboardQuery) {
     queryFn: () => dashboardService.dashboard(query),
     enabled: Boolean(domain),
     staleTime: 0,
+    // Keep the previous page's data rendered while the next page loads, so
+    // `isLoading` stays false on pagination. Without this the LoadingCard swap
+    // unmounts ParticipantTable on every page change, discarding the
+    // cross-page bulk selection (and flashing a spinner each flip).
+    placeholderData: keepPreviousData,
   });
 }
