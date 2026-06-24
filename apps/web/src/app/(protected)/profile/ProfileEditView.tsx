@@ -233,6 +233,8 @@ export function ProfileEditView({ onDone, onSaved }: ProfileEditViewProps): JSX.
   const edit = useEditProfile();
   const [formData, setFormData] = useState<EditFormState>(EMPTY);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // Gates the save button: disabled until every visible required field is valid.
+  const [canSubmit, setCanSubmit] = useState(false);
 
   useEffect(() => {
     if (raw.data) setFormData(rawToForm(raw.data as unknown as RawProfile));
@@ -290,6 +292,7 @@ export function ProfileEditView({ onDone, onSaved }: ProfileEditViewProps): JSX.
           uiSchema={editUiSchema}
           formData={formData}
           onChange={(e) => setFormData(e.formData as EditFormState)}
+          onValidityChange={setCanSubmit}
           onSubmit={handleSubmit}
           showErrorList={false}
           focusOnFirstError
@@ -299,7 +302,11 @@ export function ProfileEditView({ onDone, onSaved }: ProfileEditViewProps): JSX.
             <Button kind="ghost" onClick={onDone} disabled={edit.isPending}>
               {t('btn_cancel')}
             </Button>
-            <Button type="submit" icon={<I.check size={14} />} disabled={edit.isPending}>
+            <Button
+              type="submit"
+              icon={<I.check size={14} />}
+              disabled={edit.isPending || !canSubmit}
+            >
               {edit.isPending ? t('btn_saving') : t('btn_save')}
             </Button>
           </div>

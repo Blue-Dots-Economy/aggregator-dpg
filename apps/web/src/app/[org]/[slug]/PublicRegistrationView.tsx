@@ -126,6 +126,9 @@ export function PublicRegistrationView({
   // RJSF's `liveValidate` paints every required field red on first
   // mount — unfriendly UX for a public-form first impression.
   const [showValidation, setShowValidation] = useState(false);
+  // Schema-validity of the visible form, driven by RjsfThemedForm. Gates the
+  // submit button — disabled until every visible required field is valid.
+  const [canSubmit, setCanSubmit] = useState(false);
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
   const brandShort = cfg.brand.short_name;
   const brandLogo = cfg.brand.logo?.default;
@@ -694,6 +697,7 @@ export function PublicRegistrationView({
                   uiSchema={mergedUiSchema as unknown as UiSchema<Record<string, unknown>>}
                   formData={formData}
                   onChange={(e) => setFormData(e.formData as Record<string, unknown>)}
+                  onValidityChange={setCanSubmit}
                   onSubmit={handleSubmit}
                   // Only live-validate after the user has typed once OR
                   // attempted submit. Avoids the cold-start "every required
@@ -716,15 +720,15 @@ export function PublicRegistrationView({
                   <div className="mt-4 flex flex-col gap-3">
                     <button
                       type="submit"
-                      disabled={state.status === 'submitting'}
+                      disabled={state.status === 'submitting' || !canSubmit}
                       style={
-                        state.status === 'submitting'
+                        state.status === 'submitting' || !canSubmit
                           ? undefined
                           : { backgroundColor: cfg.brand.primary_color }
                       }
                       className={`w-full py-3 rounded-[12px] font-display font-bold text-[15px] text-white transition-all
                     ${
-                      state.status === 'submitting'
+                      state.status === 'submitting' || !canSubmit
                         ? 'bg-[var(--bd-primary-100)] text-[var(--bd-primary-600)] cursor-not-allowed'
                         : 'hover:opacity-90 bd-shadow-lg'
                     }`}
