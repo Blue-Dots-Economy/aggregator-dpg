@@ -140,6 +140,7 @@ export default async function PublicRegistrationPage({ params }: PageProps) {
       identity={resolved.identity}
       submissionShape={submissionShape}
       publicHintI18nKey={hintKey}
+      registrationMode={resolved.registration_mode ?? null}
     />
   );
 }
