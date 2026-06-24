@@ -18,6 +18,9 @@
 
     function syncHidden() {
         hidden.value = readValue();
+        // Gate the submit button: enabled only once all 6 digits are present.
+        // Runs on every value change (input/backspace/paste) and on init.
+        if (submitBtn) submitBtn.disabled = hidden.value.length !== 6;
     }
 
     function focusNextEmpty(fromIndex) {

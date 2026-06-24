@@ -699,7 +699,12 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
             <Button kind="ghost" onClick={() => setEditing(false)} disabled={update.isPending}>
               {t('link_card.cancel')}
             </Button>
-            <Button onClick={onSaveEdit} disabled={update.isPending}>
+            <Button
+              onClick={onSaveEdit}
+              disabled={
+                update.isPending || !editForm.state || !editForm.district || !editForm.lever_event
+              }
+            >
               {update.isPending ? t('link_card.saving') : t('link_card.save_draft')}
             </Button>
           </div>
@@ -717,7 +722,10 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
 export function YourLinksBody() {
   const t = useTranslations('onboarding');
   const rawProfile = useProfileRaw();
-  const aggregatorType: 'seeker' | 'provider' = rawProfile.data?.type ?? 'seeker';
+  const { data: cfg } = useAggregatorConfig();
+  // Domain id the aggregator is scoped to; falls back to the network's first
+  // declared domain (networks.json order) until the profile loads.
+  const aggregatorType: string = rawProfile.data?.type ?? cfg?.domains[0]?.id ?? '';
   // The aggregator only ever has links of its registered type — no tab
   // switcher needed. Filter is pinned via `aggregatorType`.
   const { data, isLoading, error } = useRegistrationLinks(aggregatorType);

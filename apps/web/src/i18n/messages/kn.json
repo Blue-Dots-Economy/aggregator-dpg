@@ -68,6 +68,7 @@
     "table": {
       "participant": "ಭಾಗವಹಿಸುವವರು",
       "participants": "ಭಾಗವಹಿಸುವವರು",
+      "activitySuffix": "ಚಟುವಟಿಕೆ ಮತ್ತು ಸ್ಥಿತಿ",
       "opportunityProviders": "ಅವಕಾಶ ಪೂರೈಕೆದಾರರು",
       "provider": "ಪೂರೈಕೆದಾರ",
       "joined": "ಸೇರಿದ ದಿನಾಂಕ",
@@ -104,10 +105,15 @@
       "selected": "{count} ಆಯ್ಕೆಯಾಗಿದೆ",
       "clear": "ಆಯ್ಕೆ ತೆರವುಗೊಳಿಸಿ",
       "exportSelected": "ಆಯ್ದ CSV ರಫ್ತು ಮಾಡಿ",
-      "triggerCallback": "ಕಾಲ್‌ಬ್ಯಾಕ್ ಪ್ರಚೋದಿಸಿ",
+      "triggerCallback": "ಧ್ವನಿ ಕರೆ ಪ್ರಚೋದಿಸಿ",
       "running": "ಪ್ರಕ್ರಿಯೆ ನಡೆಯುತ್ತಿದೆ…",
       "success": "{count} ಸಂಸ್ಕರಿಸಲಾಗಿದೆ",
-      "failed": "ಕ್ರಿಯೆ ವಿಫಲವಾಗಿದೆ"
+      "failed": "ಕ್ರಿಯೆ ವಿಫಲವಾಗಿದೆ",
+      "allPageSelected": "ಈ ಪುಟದ ಎಲ್ಲಾ {count} ಆಯ್ಕೆಯಾಗಿವೆ.",
+      "selectAllMatching": "ಹೊಂದುವ ಎಲ್ಲಾ {count} ಆಯ್ಕೆಮಾಡಿ",
+      "selectingAll": "ಆಯ್ಕೆ ಮಾಡಲಾಗುತ್ತಿದೆ…",
+      "allMatchingSelected": "ಹೊಂದುವ ಎಲ್ಲಾ {count} ಆಯ್ಕೆಯಾಗಿವೆ.",
+      "clearSelection": "ಆಯ್ಕೆ ತೆರವುಗೊಳಿಸಿ"
     },
     "tabs": {
       "seekers": "ಅರ್ಜಿದಾರರು",

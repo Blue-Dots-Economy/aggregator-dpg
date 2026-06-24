@@ -175,6 +175,8 @@ export function RegisterView({ schema, uiSchema }: RegisterViewProps): JSX.Eleme
     };
   });
   const [state, setState] = useState<SubmitState>({ status: 'idle' });
+  // Gates the submit button: disabled until every visible required field is valid.
+  const [canSubmit, setCanSubmit] = useState(false);
   const errorRef = useRef<HTMLDivElement>(null);
 
   // On any submit failure (server error or client validation), pull the
@@ -357,6 +359,7 @@ export function RegisterView({ schema, uiSchema }: RegisterViewProps): JSX.Eleme
                 uiSchema={uiSchema as unknown as UiSchema<Record<string, unknown>>}
                 formData={formData}
                 onChange={(e) => setFormData(e.formData as Record<string, unknown>)}
+                onValidityChange={setCanSubmit}
                 onSubmit={handleSubmit}
                 onError={(errs) => {
                   // Convert raw Ajv errors into human-readable lines using
@@ -386,10 +389,10 @@ export function RegisterView({ schema, uiSchema }: RegisterViewProps): JSX.Eleme
                 <div className="mt-4 flex flex-col gap-3">
                   <button
                     type="submit"
-                    disabled={state.status === 'submitting'}
+                    disabled={state.status === 'submitting' || !canSubmit}
                     className={`w-full py-3 rounded-[12px] font-display font-bold text-[15px] text-white transition-all
                       ${
-                        state.status === 'submitting'
+                        state.status === 'submitting' || !canSubmit
                           ? 'bg-[var(--bd-primary-100)] text-[var(--bd-primary-600)] cursor-not-allowed'
                           : 'bg-[var(--bd-primary)] hover:bg-[var(--bd-primary-600)] bd-shadow-lg'
                       }`}

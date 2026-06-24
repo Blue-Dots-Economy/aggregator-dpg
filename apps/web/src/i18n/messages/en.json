@@ -68,6 +68,7 @@
     "table": {
       "participant": "Participant",
       "participants": "Participants",
+      "activitySuffix": "Activity & Status",
       "opportunityProviders": "Opportunity Providers",
       "provider": "Provider",
       "joined": "Joined",
@@ -104,10 +105,15 @@
       "selected": "{count} selected",
       "clear": "Clear selection",
       "exportSelected": "Export selected CSV",
-      "triggerCallback": "Trigger callback",
+      "triggerCallback": "Trigger Voice Call",
       "running": "Working…",
       "success": "{count} processed",
-      "failed": "Action failed"
+      "failed": "Action failed",
+      "allPageSelected": "All {count} on this page are selected.",
+      "selectAllMatching": "Select all {count} matching",
+      "selectingAll": "Selecting…",
+      "allMatchingSelected": "All {count} matching are selected.",
+      "clearSelection": "Clear selection"
     },
     "tabs": {
       "seekers": "Seekers",
