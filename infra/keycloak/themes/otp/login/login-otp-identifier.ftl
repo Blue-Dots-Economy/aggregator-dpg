@@ -74,6 +74,8 @@
                 var state = detect(input.value);
                 field.setAttribute('data-state', state);
                 if (clearBtn) clearBtn.hidden = !input.value;
+                // Gate Continue: enabled only for a complete, valid email or phone.
+                submitBtn.disabled = !(state === 'email' || state === 'phone');
                 if (!hint) return;
                 if (state === 'email' || state === 'phone' || state === 'empty') {
                     hint.textContent = '';

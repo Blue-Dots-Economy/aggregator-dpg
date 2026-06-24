@@ -360,7 +360,10 @@ export function CreateLinkSection() {
             />
           </Field>
           <div className="md:col-span-2 flex items-center justify-end gap-2 mt-2 flex-wrap">
-            <Button onClick={onCreate} disabled={create.isPending}>
+            <Button
+              onClick={onCreate}
+              disabled={create.isPending || !form.state || !form.district || !form.lever_event}
+            >
               {create.isPending ? t('create_link.creating') : t('create_link.create_button')}
             </Button>
           </div>
@@ -674,7 +677,12 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
             <Button kind="ghost" onClick={() => setEditing(false)} disabled={update.isPending}>
               {t('link_card.cancel')}
             </Button>
-            <Button onClick={onSaveEdit} disabled={update.isPending}>
+            <Button
+              onClick={onSaveEdit}
+              disabled={
+                update.isPending || !editForm.state || !editForm.district || !editForm.lever_event
+              }
+            >
               {update.isPending ? t('link_card.saving') : t('link_card.save_draft')}
             </Button>
           </div>
