@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mintApprovalToken, verifyApprovalToken, _resetTokenKey } from './approval-token.js';
+import {
+  mintApprovalToken,
+  verifyApprovalToken,
+  formatApprovalTtl,
+  _resetTokenKey,
+} from './approval-token.js';
 
 describe('approval-token', () => {
   beforeEach(() => {
@@ -90,5 +95,31 @@ describe('approval-token', () => {
         intent: 'approve',
       }),
     ).rejects.toThrow(/APPROVAL_TOKEN_SECRET/);
+  });
+});
+
+describe('formatApprovalTtl', () => {
+  it.each([
+    [7 * 24 * 60 * 60, '7 days'],
+    [24 * 60 * 60, '1 day'],
+    [2 * 24 * 60 * 60, '2 days'],
+    [60 * 60, '1 hour'],
+    [2 * 60 * 60, '2 hours'],
+    [30 * 60, '30 minutes'],
+    [60, '1 minute'],
+    [45, '45 seconds'],
+  ])('formats %d seconds as "%s"', (secs, expected) => {
+    expect(formatApprovalTtl(secs)).toBe(expected);
+  });
+
+  it('picks the largest whole unit that divides the lifetime', () => {
+    expect(formatApprovalTtl(5400)).toBe('90 minutes'); // not a whole hour
+    expect(formatApprovalTtl(3661)).toBe('3661 seconds'); // no whole-minute fit
+  });
+
+  it('returns a safe phrase for non-positive or invalid input', () => {
+    expect(formatApprovalTtl(0)).toBe('a limited time');
+    expect(formatApprovalTtl(-5)).toBe('a limited time');
+    expect(formatApprovalTtl(Number.NaN)).toBe('a limited time');
   });
 });
