@@ -1,5 +1,6 @@
 .PHONY: help setup dev up down logs ps reset psql redis-cli mc kc rebuild-web rebuild-keycloak kc-plugin kc-logs \
-        helm-sync-files helm-deps helm-lint helm-template helm-package helm-install-dev helm-uninstall keycloak-image
+        helm-sync-files helm-deps helm-lint helm-template helm-package helm-install-dev helm-uninstall keycloak-image \
+        check-brand
 
 # ─── Helm chart settings ────────────────────────────────────────────────
 HELM_CHART_DIR    ?= helm/aggregator-dpg
@@ -15,8 +16,22 @@ setup: ## One-shot: bootstrap .env + add keycloak/minio host entries (delegates 
 
 dev: up ## Alias for `up`. Brings the full local stack up.
 
-up: ## Start all foundations + apps in the background.
+up: check-brand ## Start all foundations + apps in the background.
 	pnpm stack:up
+
+check-brand: ## Verify AGGREGATOR_BRAND folder exists when the var is set.
+	@net="$${AGGREGATOR_NETWORK:-blue_dot}"; \
+	if [ -n "$$AGGREGATOR_BRAND" ]; then \
+	  dir="config/$$net/$$AGGREGATOR_BRAND"; \
+	  if [ ! -d "$$dir" ]; then \
+	    echo "ERROR: AGGREGATOR_BRAND=$$AGGREGATOR_BRAND set but $$dir not found." >&2; \
+	    echo "       Create the brand folder or unset AGGREGATOR_BRAND for the standard $$net." >&2; \
+	    exit 1; \
+	  fi; \
+	  echo "brand ok: $$dir"; \
+	else \
+	  echo "no brand set — using standard config/$$net"; \
+	fi
 
 down: ## Stop and remove all containers (data volumes preserved).
 	pnpm stack:down
