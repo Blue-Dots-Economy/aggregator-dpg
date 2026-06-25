@@ -19,6 +19,12 @@ export interface AdminReviewVars {
   approveUrl: string;
   rejectUrl: string;
   submittedAt: Date;
+  /**
+   * Human-readable link lifetime (e.g. "7 days"), derived from the
+   * configured approval-token TTL via `formatApprovalTtl`. Must match the
+   * wording on the confirmation page.
+   */
+  expiresInText: string;
 }
 
 export function renderAdminReview(v: AdminReviewVars): {
@@ -70,7 +76,7 @@ ${aboutBlock}
 
 <p style="margin:22px 0 0;font-size:12px;color:#7c84a6;line-height:1.5;">
   Each link opens a confirmation page. Decisions are final once confirmed.
-  The link is single-use and expires in 7 days.
+  The link is single-use and expires in ${escapeHtml(v.expiresInText)}.
 </p>
 `;
 
@@ -87,7 +93,7 @@ ${v.about ? `\nAbout:\n${v.about}\n` : ''}
 Approve: ${v.approveUrl}
 Reject:  ${v.rejectUrl}
 
-Each link opens a confirmation page. Single-use, expires in 7 days.
+Each link opens a confirmation page. Single-use, expires in ${v.expiresInText}.
 `;
 
   return { subject, html: renderShell({ preheader: subject, bodyHtml: body }), text };

@@ -17,6 +17,7 @@ describe('admin-review template', () => {
       approveUrl: 'http://localhost:4000/admin/v1/.../approve?token=A',
       rejectUrl: 'http://localhost:4000/admin/v1/.../reject?token=R',
       submittedAt: new Date('2026-04-30T10:00:00Z'),
+      expiresInText: '7 days',
     });
     expect(out.subject).toContain('TRRAIN');
     expect(out.html).toContain('Asha Rao');
@@ -24,6 +25,7 @@ describe('admin-review template', () => {
     expect(out.html).toContain('Karnataka');
     expect(out.html).toContain('approve?token=A');
     expect(out.html).toContain('reject?token=R');
+    expect(out.html).toContain('expires in 7 days');
     expect(out.text).toContain('asha@trrain.org');
   });
 
@@ -38,6 +40,7 @@ describe('admin-review template', () => {
       approveUrl: 'http://x',
       rejectUrl: 'http://y',
       submittedAt: new Date(),
+      expiresInText: '7 days',
     });
     expect(out.html).not.toContain('<script>alert');
     expect(out.html).toContain('&lt;script&gt;');

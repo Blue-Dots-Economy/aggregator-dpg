@@ -106,6 +106,19 @@ const ConfigSchema = z.object({
   /** Pre-signed GET URL TTL for QR PNG downloads (seconds). */
   QR_DOWNLOAD_URL_TTL_SECONDS: z.coerce.number().int().positive().default(900),
 
+  // ─── Approval links ───────────────────────────────────────────────────────
+  /**
+   * Lifetime of the admin approval/rejection links emailed on a new
+   * aggregator registration (seconds). Drives BOTH the signed-token expiry
+   * and the human-readable "expires in …" wording on the admin email and the
+   * confirmation page, so the two can never drift. Default: 7 days.
+   */
+  APPROVAL_TOKEN_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(7 * 24 * 60 * 60),
+
   // ─── Schema loader ──────────────────────────────────────────────────────
   /** Absolute or relative path to `config/schemas/`. Used by link-submit Ajv. */
   SCHEMA_ROOT_DIR: z.string().default('./config/schemas'),
