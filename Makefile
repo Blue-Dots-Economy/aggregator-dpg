@@ -20,11 +20,13 @@ up: check-brand ## Start all foundations + apps in the background.
 	pnpm stack:up
 
 check-brand: ## Verify AGGREGATOR_BRAND folder exists when the var is set.
-	@net="$${AGGREGATOR_NETWORK:-blue_dot}"; \
-	if [ -n "$$AGGREGATOR_BRAND" ]; then \
-	  dir="config/$$net/$$AGGREGATOR_BRAND"; \
+	@net="$${AGGREGATOR_NETWORK:-$$(grep -E '^AGGREGATOR_NETWORK=' .env 2>/dev/null | tail -1 | cut -d= -f2-)}"; \
+	net="$${net:-blue_dot}"; \
+	brand="$${AGGREGATOR_BRAND:-$$(grep -E '^AGGREGATOR_BRAND=' .env 2>/dev/null | tail -1 | cut -d= -f2-)}"; \
+	if [ -n "$$brand" ]; then \
+	  dir="config/$$net/$$brand"; \
 	  if [ ! -d "$$dir" ]; then \
-	    echo "ERROR: AGGREGATOR_BRAND=$$AGGREGATOR_BRAND set but $$dir not found." >&2; \
+	    echo "ERROR: AGGREGATOR_BRAND=$$brand set but $$dir not found." >&2; \
 	    echo "       Create the brand folder or unset AGGREGATOR_BRAND for the standard $$net." >&2; \
 	    exit 1; \
 	  fi; \

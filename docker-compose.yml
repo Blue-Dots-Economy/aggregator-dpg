@@ -383,7 +383,7 @@ services:
       QR_DOWNLOAD_URL_TTL_SECONDS: ${QR_DOWNLOAD_URL_TTL_SECONDS:-900}
       PUBLIC_LINK_BASE_URL: ${PUBLIC_LINK_BASE_URL:-${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}}
       # Per-network deployment: SCHEMA_ROOT_DIR + AGGREGATOR_CONFIG_PATH
-      # point at one of `config/<network>/` (e.g. `blue_dot`, `purple_dot`).
+      # point at `config/<network>/` or `config/<network>/<brand>/` when AGGREGATOR_BRAND is set.
       # `SIGNALSTACK_ITEM_NETWORK` below must match the network id the
       # selected config resolves to.
       SCHEMA_ROOT_DIR: /app/config/${AGGREGATOR_NETWORK:-blue_dot}${AGGREGATOR_BRAND:+/${AGGREGATOR_BRAND}}/schemas
@@ -449,7 +449,7 @@ services:
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
       # ─── Schemas (participant validators) ──────────────────────────
       # Per-network deployment: SCHEMA_ROOT_DIR + AGGREGATOR_CONFIG_PATH
-      # point at one of `config/<network>/` (e.g. `blue_dot`, `purple_dot`).
+      # point at `config/<network>/` or `config/<network>/<brand>/` when AGGREGATOR_BRAND is set.
       # `SIGNALSTACK_ITEM_NETWORK` below must match the network id the
       # selected config resolves to.
       SCHEMA_ROOT_DIR: /app/config/${AGGREGATOR_NETWORK:-blue_dot}${AGGREGATOR_BRAND:+/${AGGREGATOR_BRAND}}/schemas
