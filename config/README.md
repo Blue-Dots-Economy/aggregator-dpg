@@ -47,13 +47,22 @@ Two environment variables in `.env` control which config folder is active.
 | `AGGREGATOR_NETWORK` | Yes      | `blue_dot` | Base network. Drives `SIGNALSTACK_ITEM_NETWORK` and `network.source` upstream. |
 | `AGGREGATOR_BRAND`   | No       | `upsdm`    | Brand skin. When set, appends `/<brand>` to all config/Keycloak/schema paths.  |
 
-Docker Compose resolves the active config root with:
+The api, worker, and web apps **derive** `AGGREGATOR_CONFIG_PATH` and `SCHEMA_ROOT_DIR` at
+runtime from these two vars — no need to set the full paths in `.env`. The derivation rule is:
 
 ```
-config/${AGGREGATOR_NETWORK:-blue_dot}${AGGREGATOR_BRAND:+/${AGGREGATOR_BRAND}}
+dir = CONFIG_ROOT/<AGGREGATOR_NETWORK>[/<AGGREGATOR_BRAND>]
+AGGREGATOR_CONFIG_PATH → ${dir}/aggregator.config.yaml
+SCHEMA_ROOT_DIR        → ${dir}/schemas
 ```
 
-So:
+`AGGREGATOR_CONFIG_PATH` and `SCHEMA_ROOT_DIR` are still accepted as explicit overrides
+(backwards-compatible) when you need to point at a non-standard location.
+
+Docker Compose also mirrors this logic in the `environment:` blocks, passing
+`AGGREGATOR_NETWORK`, `AGGREGATOR_BRAND`, and `CONFIG_ROOT=/app/config` to each service.
+
+The effective config root is:
 
 - `AGGREGATOR_NETWORK=blue_dot` (no brand) → `config/blue_dot/`
 - `AGGREGATOR_NETWORK=blue_dot AGGREGATOR_BRAND=upsdm` → `config/blue_dot/upsdm/`
