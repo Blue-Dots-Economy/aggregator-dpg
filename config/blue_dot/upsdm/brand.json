@@ -1,22 +1,24 @@
 {
   "brand": {
-    "name": "orange dots AI",
-    "wordmark": "orange dots AI",
+    "name": "blue dots AI",
+    "wordmark": "blue dots AI",
     "seededBy": "EkStep Foundation",
     "strapline": "Seeded by EkStep Foundation"
   },
   "logo": {
-    "default": "/brand/orange-dot/logo.png",
-    "light": "/brand/orange-dot/logo-light.png",
-    "withStraplineLight": "/brand/orange-dot/logo-with-strapline-light.png"
+    "default": "/brand/upsdm/logo.png",
+    "light": "/brand/upsdm/logo-light.png",
+    "withStrapline": "/brand/upsdm/logo-with-strapline.png",
+    "withStraplineLight": "/brand/upsdm/logo-with-strapline-light.png",
+    "onBrand": "/brand/upsdm/logo-on-brand.png"
   },
   "colours": {
     "primary": [
       { "name": "Charcoal", "hex": "#333333" },
       { "name": "Off White", "hex": "#f4f4f4" },
-      { "name": "Orange 500", "hex": "#ff7a00" },
-      { "name": "Orange 400", "hex": "#ff9a3d" },
-      { "name": "Orange 700", "hex": "#c45a00" }
+      { "name": "Blue 500", "hex": "#0074ff" },
+      { "name": "Blue 300", "hex": "#57abff" },
+      { "name": "Blue 100", "hex": "#a4daff" }
     ],
     "secondary": [
       { "name": "Teal", "hex": "#00bfa6" },
@@ -37,10 +39,10 @@
       { "name": "Pale Mint", "hex": "#e6fff5" }
     ],
     "gradients": [
-      { "name": "Sunset", "from": "#ff6b6b", "to": "#ffb86b" },
-      { "name": "Amber", "from": "#ff7a00", "to": "#ffd166" },
       { "name": "Sky", "from": "#0074ff", "to": "#a4daff" },
       { "name": "Aqua", "from": "#00bfa6", "to": "#6ee7c1" },
+      { "name": "Purple", "from": "#7c5cff", "to": "#b8a7ff" },
+      { "name": "Sunset", "from": "#ff6b6b", "to": "#ffb86b" },
       { "name": "Frost", "from": "#e6f0ff", "to": "#ffffff" }
     ]
   },
