@@ -1,13 +1,16 @@
 name: Keycloak Theme
 
 # Builds one brand-specific Keycloak theme image per run. Manual-only —
-# pick the network via the `network` dropdown in the Actions tab.
+# pick the network via the `network` dropdown in the Actions tab, and
+# optionally a `brand` sub-folder (e.g. upsdm, onetac).
 #
-# Brand strings come from config/<network>/keycloak.env, fed verbatim as
-# docker build-args (themes.Dockerfile bakes them into theme.properties).
-# Tags are network-prefixed: <network>-<branch>, <network>-sha-xxxxxxx, and
-# <network>-latest on the default branch.
+# Brand strings come from config/<network>[/<brand>]/keycloak.env, fed
+# verbatim as docker build-args (themes.Dockerfile bakes them into
+# theme.properties; BRAND_LOGO_SLUG selects which baked logo slug renders).
+# Tags are slug-prefixed where slug = <network> or <network>-<brand>:
+# <slug>-<branch>, <slug>-sha-xxxxxxx, and <slug>-latest on the default branch.
 #
+# Mirrors infra/keycloak/build-theme-image.sh.
 # Server image lives in keycloak-image-build.yaml.
 
 on:
@@ -22,9 +25,14 @@ on:
           - blue_dot
           - orange_dot
           - purple_dot
+      brand:
+        description: 'Brand sub-folder under the network (e.g. upsdm, onetac). Leave empty for the standard network.'
+        required: false
+        type: string
+        default: ''
 
 concurrency:
-  group: keycloak-theme-${{ github.ref }}-${{ inputs.network }}
+  group: keycloak-theme-${{ github.ref }}-${{ inputs.network }}-${{ inputs.brand }}
   cancel-in-progress: true
 
 env:
@@ -32,7 +40,7 @@ env:
 
 jobs:
   theme:
-    name: Docker / keycloak-theme (${{ inputs.network }})
+    name: Docker / keycloak-theme (${{ inputs.network }}${{ inputs.brand && format('/{0}', inputs.brand) || '' }})
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -52,18 +60,38 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Resolve the keycloak.env path and the image slug. With a brand,
+      # read config/<network>/<brand>/keycloak.env and tag <network>-<brand>;
+      # without, fall back to config/<network>/keycloak.env and tag <network>.
+      # Fails loudly if the env file is missing so a bad input can't silently
+      # produce a default-branded image.
+      - name: Resolve config + slug
+        id: resolve
+        run: |
+          NET="${{ inputs.network }}"
+          BRAND="${{ inputs.brand }}"
+          if [ -n "$BRAND" ]; then
+            ENV_FILE="config/$NET/$BRAND/keycloak.env"
+            SLUG="$NET-$BRAND"
+          else
+            ENV_FILE="config/$NET/keycloak.env"
+            SLUG="$NET"
+          fi
+          if [ ! -f "$ENV_FILE" ]; then
+            echo "::error::missing $ENV_FILE for network='$NET' brand='$BRAND'"
+            exit 1
+          fi
+          echo "env_file=$ENV_FILE" >> "$GITHUB_OUTPUT"
+          echo "slug=$SLUG" >> "$GITHUB_OUTPUT"
+
       # Mirror build-theme-image.sh: every non-comment, non-blank KEY=value
-      # line in the network's keycloak.env becomes a build-arg, plus NETWORK.
-      # Fails loudly if the env file is missing so a bad network input can't
-      # silently produce a default-branded image.
+      # line in the resolved keycloak.env becomes a build-arg, plus NETWORK
+      # (the BASE network — the logo slug comes from BRAND_LOGO_SLUG in the
+      # env file, not from NETWORK).
       - name: Collect brand build-args
         id: brandargs
         run: |
-          ENV_FILE="config/${{ inputs.network }}/keycloak.env"
-          if [ ! -f "$ENV_FILE" ]; then
-            echo "::error::missing $ENV_FILE for network '${{ inputs.network }}'"
-            exit 1
-          fi
+          ENV_FILE="${{ steps.resolve.outputs.env_file }}"
           {
             echo 'args<<__ARGS_EOF__'
             grep -vE '^[[:space:]]*#|^[[:space:]]*$' "$ENV_FILE"
@@ -77,13 +105,13 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ github.repository }}/keycloak-theme
           flavor: |
-            prefix=${{ inputs.network }}-,onlatest=true
+            prefix=${{ steps.resolve.outputs.slug }}-,onlatest=true
           tags: |
             type=ref,event=branch
             type=sha,prefix=sha-
             type=raw,value=latest,enable={{is_default_branch}}
           labels: |
-            org.opencontainers.image.title=aggregator-dpg-keycloak-theme-${{ inputs.network }}
+            org.opencontainers.image.title=aggregator-dpg-keycloak-theme-${{ steps.resolve.outputs.slug }}
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.licenses=UNLICENSED
 
@@ -98,17 +126,17 @@ jobs:
           build-args: ${{ steps.brandargs.outputs.args }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=keycloak-theme-${{ inputs.network }}
-          cache-to: type=gha,mode=max,scope=keycloak-theme-${{ inputs.network }}
+          cache-from: type=gha,scope=keycloak-theme-${{ steps.resolve.outputs.slug }}
+          cache-to: type=gha,mode=max,scope=keycloak-theme-${{ steps.resolve.outputs.slug }}
           provenance: true
           sbom: true
 
       - name: Image digest
         run: |
-          echo "Pushed ${REGISTRY}/${REPO}/keycloak-theme (${NETWORK})@${DIGEST}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Pushed ${REGISTRY}/${REPO}/keycloak-theme (${SLUG})@${DIGEST}" >> "$GITHUB_STEP_SUMMARY"
           echo "Tags: ${TAGS}" >> "$GITHUB_STEP_SUMMARY"
         env:
           REPO: ${{ github.repository }}
-          NETWORK: ${{ inputs.network }}
+          SLUG: ${{ steps.resolve.outputs.slug }}
           DIGEST: ${{ steps.build.outputs.digest }}
           TAGS: ${{ steps.meta.outputs.tags }}
