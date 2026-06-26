@@ -406,8 +406,10 @@ services:
     extra_hosts:
       - "${PUBLIC_HOST:-localhost}:host-gateway"
     volumes:
-      - ./config/schemas:/app/config/schemas:ro
-      - ./config/aggregator.config.yaml:/app/config/aggregator.config.yaml:ro
+      # Mount the whole config tree (read-only) so per-network/brand subfolders
+      # (e.g. config/blue_dot/upsdm) are available without rebaking the image.
+      # Active paths are picked by AGGREGATOR_NETWORK/AGGREGATOR_BRAND env.
+      - ./config:/app/config:ro
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:4000/health/ready || exit 1"]
       interval: 10s
@@ -466,8 +468,10 @@ services:
       SIGNALSTACK_ITEM_NETWORK: ${AGGREGATOR_NETWORK:-blue_dot}
       SIGNALSTACK_TIMEOUT_MS: ${SIGNALSTACK_TIMEOUT_MS:-10000}
     volumes:
-      - ./config/schemas:/app/config/schemas:ro
-      - ./config/aggregator.config.yaml:/app/config/aggregator.config.yaml:ro
+      # Mount the whole config tree (read-only) so per-network/brand subfolders
+      # (e.g. config/blue_dot/upsdm) are available without rebaking the image.
+      # Active paths are picked by AGGREGATOR_NETWORK/AGGREGATOR_BRAND env.
+      - ./config:/app/config:ro
     depends_on:
       postgres:
         condition: service_healthy
