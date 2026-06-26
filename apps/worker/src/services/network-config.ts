@@ -15,9 +15,8 @@
 import path from 'node:path';
 import { FileNetworkConfigLoader } from '@aggregator-dpg/network-config/loader';
 import type { ResolvedNetworkConfig } from '@aggregator-dpg/network-config/interface';
+import { resolveConfigPath } from '@aggregator-dpg/network-config/paths';
 import { logger } from '../logger.js';
-
-const DEFAULT_CONFIG_PATH = '/app/config/aggregator.config.yaml';
 
 let cached: ResolvedNetworkConfig | null = null;
 let inflight: Promise<ResolvedNetworkConfig> | null = null;
@@ -26,7 +25,7 @@ export async function getNetworkConfig(): Promise<ResolvedNetworkConfig> {
   if (cached) return cached;
   if (inflight) return inflight;
   inflight = (async () => {
-    const configPath = process.env.AGGREGATOR_CONFIG_PATH ?? DEFAULT_CONFIG_PATH;
+    const configPath = resolveConfigPath();
     const cacheDir =
       process.env.NETWORK_CONFIG_CACHE_DIR ?? path.join(path.dirname(configPath), '.cache');
     const loader = new FileNetworkConfigLoader({ configPath, cacheDir });
