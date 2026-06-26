@@ -10,6 +10,7 @@ import { BlueDotsLogo } from '../../../components/ui/BlueDotsLogo';
 import { I } from '../../../icons';
 import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
 import { MinimalIdentityForm, type MinimalIdentityPayload } from './MinimalIdentityForm';
+import { LanguageSwitcher } from '../../../components/shell/LanguageSwitcher';
 
 export interface PublicRegistrationViewProps {
   org: string;
@@ -41,6 +42,11 @@ export interface PublicRegistrationViewProps {
    * voice-call notice for an account_only link). `null` = no hint.
    */
   publicHintI18nKey: string | null;
+  /**
+   * Per-link registration mode key (e.g. `voice`, `form`). Voice links make
+   * the phone number mandatory and drop the email field on the minimal form.
+   */
+  registrationMode?: string | null;
 }
 
 type SubmitState =
@@ -56,6 +62,10 @@ type SubmitState =
 type LookupOutcome =
   | { kind: 'allow' }
   | { kind: 'owned_elsewhere' }
+  // Already fully registered with THIS aggregator (live item). Re-submitting
+  // would fail upstream with a cryptic INVALID_ITEM_STATE — short-circuit with
+  // a clear message instead.
+  | { kind: 'already_registered' }
   | {
       kind: 'resume';
       itemId: string;
@@ -105,6 +115,7 @@ export function PublicRegistrationView({
   identity,
   submissionShape,
   publicHintI18nKey,
+  registrationMode,
 }: PublicRegistrationViewProps): JSX.Element {
   const t = useTranslations('profile.public_reg');
   const [formData, setFormData] = useState<Record<string, unknown>>({});
@@ -126,6 +137,9 @@ export function PublicRegistrationView({
   // RJSF's `liveValidate` paints every required field red on first
   // mount — unfriendly UX for a public-form first impression.
   const [showValidation, setShowValidation] = useState(false);
+  // Schema-validity of the visible form, driven by RjsfThemedForm. Gates the
+  // submit button — disabled until every visible required field is valid.
+  const [canSubmit, setCanSubmit] = useState(false);
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
   const brandShort = cfg.brand.short_name;
   const brandLogo = cfg.brand.logo?.default;
@@ -352,6 +366,12 @@ export function PublicRegistrationView({
     const body = (await res.json().catch(() => ({}))) as LookupResponse;
     if (body.owned_elsewhere) return { kind: 'owned_elsewhere' };
     const primary = body.lifecycle_summary?.primary_item;
+    // Already registered with THIS aggregator and the profile is live → nothing
+    // to add. Surface a clear "already registered" message rather than letting
+    // the submit hit signalstack and fail with INVALID_ITEM_STATE.
+    if (primary && primary.lifecycle_status === 'live') {
+      return { kind: 'already_registered' };
+    }
     if (
       primary &&
       (primary.lifecycle_status === 'draft' || primary.lifecycle_status === 'paused')
@@ -478,6 +498,9 @@ export function PublicRegistrationView({
         }}
       >
         <div className="max-w-[640px] mx-auto px-4 sm:px-6 lg:px-10 py-8 sm:py-12">
+          <div className="flex justify-end mb-3">
+            <LanguageSwitcher />
+          </div>
           {/* This branch only renders while state is 'idle', so the parent
               has no in-flight signal to pass — the form's own internal submit
               guard prevents the double-tap during the async probe. */}
@@ -486,6 +509,7 @@ export function PublicRegistrationView({
             onSubmit={handleMinimalSubmit}
             brandColor={heroGradient}
             hintI18nKey={publicHintI18nKey}
+            requirePhone={registrationMode === 'voice'}
           />
         </div>
       </div>
@@ -501,7 +525,7 @@ export function PublicRegistrationView({
       }}
     >
       <div className="max-w-[760px] mx-auto px-4 sm:px-6 lg:px-10 py-8 sm:py-12">
-        <header className="flex items-center mb-6">
+        <header className="flex items-center justify-between gap-4 mb-6">
           {brandLogo ? (
             <Image
               src={brandLogo}
@@ -519,6 +543,7 @@ export function PublicRegistrationView({
               </div>
             </div>
           )}
+          <LanguageSwitcher />
         </header>
 
         <div className="rounded-[18px] bg-white border border-[var(--bd-border)] overflow-hidden shadow-[0_1px_0_rgba(11,16,32,0.02),0_20px_60px_-30px_rgba(11,16,32,0.18)]">
@@ -631,6 +656,40 @@ export function PublicRegistrationView({
                   </div>
                 ) : null}
 
+                {lookup?.kind === 'already_registered' ? (
+                  <div
+                    role="alert"
+                    data-testid="lookup-already-registered"
+                    className="mb-5 rounded-[10px] border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-800"
+                  >
+                    <div className="font-semibold">{t('lookup.already_registered_title')}</div>
+                    <div className="mt-1 text-amber-700">{t('lookup.already_registered_body')}</div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLookup(null);
+                        setFormData((prev) => {
+                          const next = { ...prev };
+                          for (const key of [
+                            identity?.email,
+                            identity?.phone,
+                            'email',
+                            'phone',
+                            'phone_number',
+                            'mobile',
+                          ]) {
+                            if (key) delete next[key];
+                          }
+                          return next;
+                        });
+                      }}
+                      className="mt-3 text-[12px] font-semibold underline text-amber-900 hover:text-amber-700"
+                    >
+                      {t('lookup.already_registered_cta')}
+                    </button>
+                  </div>
+                ) : null}
+
                 {lookup?.kind === 'resume' ? (
                   <div
                     role="alert"
@@ -689,55 +748,64 @@ export function PublicRegistrationView({
                   </div>
                 ) : null}
 
-                <RjsfThemedForm
-                  schema={formSchema}
-                  uiSchema={mergedUiSchema as unknown as UiSchema<Record<string, unknown>>}
-                  formData={formData}
-                  onChange={(e) => setFormData(e.formData as Record<string, unknown>)}
-                  onSubmit={handleSubmit}
-                  // Only live-validate after the user has typed once OR
-                  // attempted submit. Avoids the cold-start "every required
-                  // field is red" look on first load.
-                  liveValidate={showValidation}
-                  showErrorList={showValidation ? 'top' : false}
-                  focusOnFirstError
-                  noHtml5Validate
-                  onError={(errors) => {
-                    setShowValidation(true);
-                    const first = errors?.[0]?.message ?? t('validation_required');
-                    setState({
-                      status: 'error',
-                      title: t('validation_error_title'),
-                      detail: `${first}${errors.length > 1 ? ` ${t('validation_more', { count: errors.length - 1 })}` : ''}`,
-                      code: 'VALIDATION',
-                    });
-                  }}
-                >
-                  <div className="mt-4 flex flex-col gap-3">
-                    <button
-                      type="submit"
-                      disabled={state.status === 'submitting'}
-                      style={
-                        state.status === 'submitting'
-                          ? undefined
-                          : { backgroundColor: cfg.brand.primary_color }
-                      }
-                      className={`w-full py-3 rounded-[12px] font-display font-bold text-[15px] text-white transition-all
+                {/* Account-only links capture identity via MinimalIdentityForm
+                    (the idle early-return). In the owned_elsewhere / resume /
+                    error states we only show the banner above — never the RJSF
+                    profile form or its submit button. */}
+                {!isAccountOnly && (
+                  <RjsfThemedForm
+                    schema={formSchema}
+                    uiSchema={mergedUiSchema as unknown as UiSchema<Record<string, unknown>>}
+                    formData={formData}
+                    onChange={(e) => setFormData(e.formData as Record<string, unknown>)}
+                    onValidityChange={setCanSubmit}
+                    onSubmit={handleSubmit}
+                    // Only live-validate after the user has typed once OR
+                    // attempted submit. Avoids the cold-start "every required
+                    // field is red" look on first load.
+                    liveValidate={showValidation}
+                    showErrorList={showValidation ? 'top' : false}
+                    focusOnFirstError
+                    noHtml5Validate
+                    onError={(errors) => {
+                      setShowValidation(true);
+                      const first = errors?.[0]?.message ?? t('validation_required');
+                      setState({
+                        status: 'error',
+                        title: t('validation_error_title'),
+                        detail: `${first}${errors.length > 1 ? ` ${t('validation_more', { count: errors.length - 1 })}` : ''}`,
+                        code: 'VALIDATION',
+                      });
+                    }}
+                  >
+                    <div className="mt-4 flex flex-col gap-3">
+                      <button
+                        type="submit"
+                        disabled={state.status === 'submitting' || !canSubmit}
+                        style={
+                          state.status === 'submitting' || !canSubmit
+                            ? undefined
+                            : { backgroundColor: cfg.brand.primary_color }
+                        }
+                        className={`w-full py-3 rounded-[12px] font-display font-bold text-[15px] text-white transition-all
                     ${
-                      state.status === 'submitting'
+                      state.status === 'submitting' || !canSubmit
                         ? 'bg-[var(--bd-primary-100)] text-[var(--bd-primary-600)] cursor-not-allowed'
                         : 'hover:opacity-90 bd-shadow-lg'
                     }`}
-                    >
-                      {state.status === 'submitting' ? t('btn_submitting') : t('btn_submit')}
-                    </button>
-                  </div>
-                </RjsfThemedForm>
+                      >
+                        {state.status === 'submitting' ? t('btn_submitting') : t('btn_submit')}
+                      </button>
+                    </div>
+                  </RjsfThemedForm>
+                )}
 
-                <div className="mt-5 text-[12px] text-ink-400 flex items-start gap-2">
-                  <I.shield size={13} className="mt-0.5 shrink-0" />
-                  {t('privacy_note')}
-                </div>
+                {!isAccountOnly && (
+                  <div className="mt-5 text-[12px] text-ink-400 flex items-start gap-2">
+                    <I.shield size={13} className="mt-0.5 shrink-0" />
+                    {t('privacy_note')}
+                  </div>
+                )}
               </>
             )}
           </div>

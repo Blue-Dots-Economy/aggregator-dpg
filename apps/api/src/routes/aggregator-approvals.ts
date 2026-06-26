@@ -29,7 +29,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { config } from '../config.js';
-import { verifyApprovalToken } from '../services/approval-token.js';
+import { verifyApprovalToken, formatApprovalTtl } from '../services/approval-token.js';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
 import { getIdpAdmin } from '../services/idp-admin/index.js';
 import { getMailer } from '../services/mailer/index.js';
@@ -140,6 +140,7 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
           // instead so the admin page always shows something meaningful.
           aggregatorType: lookup.aggregator.type ?? lookup.aggregator.actorType,
           postUrl: `${config.PUBLIC_API_URL}/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
+          expiresInText: formatApprovalTtl(config.APPROVAL_TOKEN_TTL_SECONDS),
         }),
       );
     },

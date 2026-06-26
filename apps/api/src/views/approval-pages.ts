@@ -281,6 +281,12 @@ export interface ConfirmPageVars {
   association: string;
   aggregatorType: string;
   postUrl: string;
+  /**
+   * Human-readable link lifetime (e.g. "7 days"), derived from the
+   * configured approval-token TTL via `formatApprovalTtl`. Must match the
+   * wording in the admin review email.
+   */
+  expiresInText: string;
   brand?: PageBrand;
 }
 
@@ -344,7 +350,7 @@ export function renderConfirmPage(v: ConfirmPageVars): string {
       </div>
     </div>
     <p class="footer-note">
-      This decision is final once submitted. Approval links are single-use and expire after one hour.
+      This decision is final once submitted. Approval links are single-use and expire in ${escape(v.expiresInText)}.
     </p>
     ${
       !isApprove

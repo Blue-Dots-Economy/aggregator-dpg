@@ -8,8 +8,10 @@ import { Topbar } from '../../../components/shell/Topbar';
 import { I, type IconName } from '../../../icons';
 import { useRecentBulkUploads, useRegistrationLinks } from '../../../hooks/useOnboarding';
 import { useProfileRaw } from '../../../hooks/useProfile';
+import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
 import { RecentUploadsBody } from './_components/CSVUpload';
 import { YourLinksBody } from './_components/RegistrationLinksSection';
+import { OnboardingMetrics } from './_components/OnboardingMetrics';
 
 export default function OnboardingPage() {
   const t = useTranslations('onboarding');
@@ -31,8 +33,9 @@ export default function OnboardingPage() {
           </button>
         }
       />
-      {/* Overall totals (Total registered / Verified / Failed) now live on
-          the dashboard's aggregator-wide Onboarding section (#388). */}
+      {/* Onboarding summary + joins-by-entry-mode at the top of the page,
+          above the per-flow cards. */}
+      <OnboardingMetrics />
       <BulkUploadCard />
       <RegistrationLinkCard />
     </div>
@@ -98,7 +101,10 @@ function RegistrationLinkCard() {
   const t = useTranslations('onboarding');
   const router = useRouter();
   const rawProfile = useProfileRaw();
-  const aggregatorType: 'seeker' | 'provider' = rawProfile.data?.type ?? 'seeker';
+  const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
+  // Default to the network's first declared domain (networks.json order)
+  // until the profile's scoped type loads.
+  const aggregatorType: string = rawProfile.data?.type ?? cfg.domains[0]?.id ?? '';
   const links = useRegistrationLinks(aggregatorType);
   const metrics = useMemo(() => {
     const items = links.data ?? [];

@@ -65,6 +65,39 @@ export async function mintApprovalToken(input: MintInput): Promise<MintResult> {
   return { token, expiresAt };
 }
 
+/**
+ * Renders a token lifetime as a human phrase for the admin email and
+ * confirmation page (e.g. `604800` → "7 days", `3600` → "1 hour",
+ * `172800` → "2 days"). Both surfaces call this with the same configured
+ * TTL so the wording is always consistent with the real expiry.
+ *
+ * Picks the largest whole unit that divides the lifetime: `604800` → "7 days",
+ * `5400` → "90 minutes", `3661` → "3661 seconds" (no whole-minute fit).
+ *
+ * @param ttlSec - Lifetime in seconds (typically `APPROVAL_TOKEN_TTL_SECONDS`).
+ * @returns A pluralised "N unit" phrase; "a limited time" for sub-second,
+ *   non-positive, or non-finite input.
+ */
+export function formatApprovalTtl(ttlSec: number): string {
+  if (!Number.isFinite(ttlSec) || ttlSec < 1) return 'a limited time';
+  const whole = Math.floor(ttlSec);
+  const units: ReadonlyArray<{ secs: number; one: string; many: string }> = [
+    { secs: 86_400, one: 'day', many: 'days' },
+    { secs: 3_600, one: 'hour', many: 'hours' },
+    { secs: 60, one: 'minute', many: 'minutes' },
+    { secs: 1, one: 'second', many: 'seconds' },
+  ];
+  for (const u of units) {
+    if (whole >= u.secs && whole % u.secs === 0) {
+      const n = whole / u.secs;
+      return `${n} ${n === 1 ? u.one : u.many}`;
+    }
+  }
+  // Unreachable: the 1-second unit divides every integer ≥ 1. Mirrors that
+  // branch so the function is total for the type-checker.
+  return `${whole} seconds`;
+}
+
 export interface VerifyOk {
   ok: true;
   aggregatorId: string;

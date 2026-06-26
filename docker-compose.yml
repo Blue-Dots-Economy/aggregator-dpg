@@ -185,7 +185,7 @@ services:
     # `${env.VAR:default}`; render-realm.sh substitutes `BRAND_LONG_NAME`
     # into the realm JSON's `displayName`.
     env_file:
-      - ./config/${AGGREGATOR_NETWORK:-blue_dot}/keycloak.env
+      - ./config/${AGGREGATOR_NETWORK:-blue_dot}${AGGREGATOR_BRAND:+/${AGGREGATOR_BRAND}}/keycloak.env
     # No host port mapping — exposed only via nginx at /auth/.
     volumes:
       - ./infra/keycloak/realms:/opt/keycloak/data/import-template:ro
@@ -306,7 +306,7 @@ services:
       NODE_TLS_REJECT_UNAUTHORIZED: ${NODE_TLS_REJECT_UNAUTHORIZED:-0}
       # Web reads participant schemas at runtime from the active network's
       # config folder. Mirrors the api/worker SCHEMA_ROOT_DIR wiring.
-      SCHEMA_ROOT_DIR: /app/config/${AGGREGATOR_NETWORK:-blue_dot}/schemas
+      SCHEMA_ROOT_DIR: /app/config/${AGGREGATOR_NETWORK:-blue_dot}${AGGREGATOR_BRAND:+/${AGGREGATOR_BRAND}}/schemas
     # No host port mapping — exposed only via nginx at /.
     # Resolve PUBLIC_HOST (the VM's public IP) to the docker host gateway so
     # the BFF's back-channel OIDC discovery + token exchange reaches nginx via
@@ -383,11 +383,11 @@ services:
       QR_DOWNLOAD_URL_TTL_SECONDS: ${QR_DOWNLOAD_URL_TTL_SECONDS:-900}
       PUBLIC_LINK_BASE_URL: ${PUBLIC_LINK_BASE_URL:-${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}}
       # Per-network deployment: SCHEMA_ROOT_DIR + AGGREGATOR_CONFIG_PATH
-      # point at one of `config/<network>/` (e.g. `blue_dot`, `purple_dot`).
+      # point at `config/<network>/` or `config/<network>/<brand>/` when AGGREGATOR_BRAND is set.
       # `SIGNALSTACK_ITEM_NETWORK` below must match the network id the
       # selected config resolves to.
-      SCHEMA_ROOT_DIR: /app/config/${AGGREGATOR_NETWORK:-blue_dot}/schemas
-      AGGREGATOR_CONFIG_PATH: /app/config/${AGGREGATOR_NETWORK:-blue_dot}/aggregator.config.yaml
+      SCHEMA_ROOT_DIR: /app/config/${AGGREGATOR_NETWORK:-blue_dot}${AGGREGATOR_BRAND:+/${AGGREGATOR_BRAND}}/schemas
+      AGGREGATOR_CONFIG_PATH: /app/config/${AGGREGATOR_NETWORK:-blue_dot}${AGGREGATOR_BRAND:+/${AGGREGATOR_BRAND}}/aggregator.config.yaml
       # ── Outward push to signalstack (onboard) and read (blue-dots) ───
       SIGNALSTACK_BASE_URL: ${SIGNALSTACK_BASE_URL:-}
       SIGNALSTACK_ADMIN_KEY: ${SIGNALSTACK_ADMIN_KEY:-}
@@ -406,8 +406,10 @@ services:
     extra_hosts:
       - "${PUBLIC_HOST:-localhost}:host-gateway"
     volumes:
-      - ./config/schemas:/app/config/schemas:ro
-      - ./config/aggregator.config.yaml:/app/config/aggregator.config.yaml:ro
+      # Mount the whole config tree (read-only) so per-network/brand subfolders
+      # (e.g. config/blue_dot/upsdm) are available without rebaking the image.
+      # Active paths are picked by AGGREGATOR_NETWORK/AGGREGATOR_BRAND env.
+      - ./config:/app/config:ro
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:4000/health/ready || exit 1"]
       interval: 10s
@@ -449,11 +451,11 @@ services:
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
       # ─── Schemas (participant validators) ──────────────────────────
       # Per-network deployment: SCHEMA_ROOT_DIR + AGGREGATOR_CONFIG_PATH
-      # point at one of `config/<network>/` (e.g. `blue_dot`, `purple_dot`).
+      # point at `config/<network>/` or `config/<network>/<brand>/` when AGGREGATOR_BRAND is set.
       # `SIGNALSTACK_ITEM_NETWORK` below must match the network id the
       # selected config resolves to.
-      SCHEMA_ROOT_DIR: /app/config/${AGGREGATOR_NETWORK:-blue_dot}/schemas
-      AGGREGATOR_CONFIG_PATH: /app/config/${AGGREGATOR_NETWORK:-blue_dot}/aggregator.config.yaml
+      SCHEMA_ROOT_DIR: /app/config/${AGGREGATOR_NETWORK:-blue_dot}${AGGREGATOR_BRAND:+/${AGGREGATOR_BRAND}}/schemas
+      AGGREGATOR_CONFIG_PATH: /app/config/${AGGREGATOR_NETWORK:-blue_dot}${AGGREGATOR_BRAND:+/${AGGREGATOR_BRAND}}/aggregator.config.yaml
       # ─── File processor row caps ───────────────────────────────────
       BULK_MAX_ROWS: ${BULK_MAX_ROWS:-10000}
       BULK_MAX_ROW_BYTES: ${BULK_MAX_ROW_BYTES:-65536}
@@ -466,8 +468,10 @@ services:
       SIGNALSTACK_ITEM_NETWORK: ${AGGREGATOR_NETWORK:-blue_dot}
       SIGNALSTACK_TIMEOUT_MS: ${SIGNALSTACK_TIMEOUT_MS:-10000}
     volumes:
-      - ./config/schemas:/app/config/schemas:ro
-      - ./config/aggregator.config.yaml:/app/config/aggregator.config.yaml:ro
+      # Mount the whole config tree (read-only) so per-network/brand subfolders
+      # (e.g. config/blue_dot/upsdm) are available without rebaking the image.
+      # Active paths are picked by AGGREGATOR_NETWORK/AGGREGATOR_BRAND env.
+      - ./config:/app/config:ro
     depends_on:
       postgres:
         condition: service_healthy

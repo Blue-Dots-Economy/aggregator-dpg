@@ -39,7 +39,7 @@ import { getAggregatorStore } from '../services/aggregator-store/index.js';
 import { getAggregatorProfileStore } from '../services/aggregator-profile-store/index.js';
 import { getIdpAdmin } from '../services/idp-admin/index.js';
 import { getMailer } from '../services/mailer/index.js';
-import { mintApprovalToken } from '../services/approval-token.js';
+import { mintApprovalToken, formatApprovalTtl } from '../services/approval-token.js';
 import { renderAdminReview } from '../services/email-templates/index.js';
 import { normalisePhone } from '../services/phone.js';
 import { slugFromName } from '../services/slug.js';
@@ -260,8 +260,9 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
       let approveToken: string;
       let rejectToken: string;
       try {
-        approveToken = (await mintApprovalToken({ aggregatorId, intent: 'approve' })).token;
-        rejectToken = (await mintApprovalToken({ aggregatorId, intent: 'reject' })).token;
+        const ttlSec = config.APPROVAL_TOKEN_TTL_SECONDS;
+        approveToken = (await mintApprovalToken({ aggregatorId, intent: 'approve', ttlSec })).token;
+        rejectToken = (await mintApprovalToken({ aggregatorId, intent: 'reject', ttlSec })).token;
       } catch (err) {
         // KC user remains disabled + orphaned-but-known. Don't roll back —
         // the admin can still trigger an action manually.
@@ -280,6 +281,7 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
         approveUrl: `${decisionBase}?token=${encodeURIComponent(approveToken)}&intent=approve`,
         rejectUrl: `${decisionBase}?token=${encodeURIComponent(rejectToken)}&intent=reject`,
         submittedAt: new Date(),
+        expiresInText: formatApprovalTtl(config.APPROVAL_TOKEN_TTL_SECONDS),
       });
       const mailResult = await mailer.send({
         to: recipients,
