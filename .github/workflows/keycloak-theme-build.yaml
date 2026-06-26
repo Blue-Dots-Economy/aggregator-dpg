@@ -26,10 +26,14 @@ on:
           - orange_dot
           - purple_dot
       brand:
-        description: 'Brand sub-folder under the network (e.g. upsdm, onetac). Leave empty for the standard network.'
-        required: false
-        type: string
-        default: ''
+        description: 'Brand sub-folder under the network. Pick "none" for the standard network. Add new brands to this list as folders are created.'
+        required: true
+        type: choice
+        default: none
+        options:
+          - none
+          - upsdm
+          - onetac
 
 concurrency:
   group: keycloak-theme-${{ github.ref }}-${{ inputs.network }}-${{ inputs.brand }}
@@ -40,7 +44,7 @@ env:
 
 jobs:
   theme:
-    name: Docker / keycloak-theme (${{ inputs.network }}${{ inputs.brand && format('/{0}', inputs.brand) || '' }})
+    name: Docker / keycloak-theme (${{ inputs.network }}${{ inputs.brand != 'none' && format('/{0}', inputs.brand) || '' }})
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -70,7 +74,7 @@ jobs:
         run: |
           NET="${{ inputs.network }}"
           BRAND="${{ inputs.brand }}"
-          if [ -n "$BRAND" ]; then
+          if [ -n "$BRAND" ] && [ "$BRAND" != "none" ]; then
             ENV_FILE="config/$NET/$BRAND/keycloak.env"
             SLUG="$NET-$BRAND"
           else
@@ -78,7 +82,7 @@ jobs:
             SLUG="$NET"
           fi
           if [ ! -f "$ENV_FILE" ]; then
-            echo "::error::missing $ENV_FILE for network='$NET' brand='$BRAND'"
+            echo "::error::missing $ENV_FILE for network='$NET' brand='$BRAND' (is this brand valid for this network?)"
             exit 1
           fi
           echo "env_file=$ENV_FILE" >> "$GITHUB_OUTPUT"
