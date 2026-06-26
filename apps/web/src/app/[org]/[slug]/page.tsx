@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import type { RJSFSchema } from '@rjsf/utils';
-import { resolveSchemaRoot } from '../../../lib/config-paths.js';
+import { resolveSchemaRoot } from '@/lib/config-paths';
 import { PublicRegistrationView } from './PublicRegistrationView';
 
 export const metadata: Metadata = {
