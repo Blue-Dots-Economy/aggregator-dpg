@@ -38,7 +38,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const upstream = await callApi('/v1/dashboard/export/profiles', {
       method: 'POST',
       headers: { 'content-type': 'application/json', accept: 'text/csv' },
-      body: JSON.stringify(body),
+      // callApi JSON.stringifies opts.body itself — pass the parsed object,
+      // not a pre-stringified string, or the API receives a double-encoded
+      // JSON string and Zod rejects it ("expected object, received string").
+      body,
     });
     const ct = upstream.headers.get('content-type') ?? '';
     // Non-2xx responses come back as JSON error envelopes — surface them
