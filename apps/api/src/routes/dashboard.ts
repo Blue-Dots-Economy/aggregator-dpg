@@ -24,7 +24,11 @@ import { authenticate, requireApproved, type AuthContext } from '../services/aut
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
 import { getNetworkConfig } from '../services/network-config.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
-import type { SignalStackProfile } from '@aggregator-dpg/signalstack-writer/interface';
+import type {
+  SignalStackDecryptedProfileRow,
+  SignalStackProfile,
+} from '@aggregator-dpg/signalstack-writer/interface';
+import { buildDecryptedProfilesCsv } from '../services/profile-csv.js';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import { resolveLifecycle } from '../services/onboarding/lifecycle.js';
 import { config } from '../config.js';
@@ -110,6 +114,11 @@ const DashboardExportQuerySchema = z.object({
     .regex(/^[a-z0-9_]+$/i, 'status must be alphanumeric + underscore')
     .optional(),
   refresh: z.coerce.boolean().optional().default(false),
+});
+
+const ExportProfilesBodySchema = z.object({
+  item_ids: z.array(z.string().min(1)).min(1),
+  domain: z.string().min(1).optional(),
 });
 
 export async function registerDashboardRoutes(app: FastifyInstance): Promise<void> {
@@ -452,6 +461,83 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
           `attachment; filename="${result.value.filename.replace(/"/g, '')}"`,
         )
         .send(result.value.csv);
+    },
+  );
+
+  app.post(
+    '/v1/dashboard/export/profiles',
+    {
+      schema: {
+        tags: ['dashboard'],
+        summary: 'CSV export of DECRYPTED profile data for selected items',
+        description:
+          'Returns a CSV (text/csv) of decrypted profile data for the given item_ids, scoped to the caller aggregator. The signalstack admin key never leaves the server.',
+        security: [{ bearerAuth: [] }],
+        body: ExportProfilesBodySchema,
+        response: { ...errorResponses(400, 401, 403, 500, 503) },
+      },
+    },
+    async (req, reply) => {
+      const auth = await requireApprovedAuth(req);
+      const log = req.log.child({
+        operation: 'dashboard.export.profiles',
+        aggregator_id: auth.aggregatorId,
+      });
+      const start = Date.now();
+
+      const { item_ids, domain: requestedDomain } = req.body as z.infer<
+        typeof ExportProfilesBodySchema
+      >;
+      const networkCfg = await getNetworkConfig();
+      const domain = requestedDomain ?? networkCfg.domainIds[0]!;
+      if (!networkCfg.domains[domain]) {
+        throw httpError('SCHEMA_VALIDATION', {
+          detail: `unknown domain '${domain}' — valid: ${networkCfg.domainIds.join(', ')}`,
+        });
+      }
+
+      const ss = getSignalStackWriter();
+      if (!ss) {
+        log.warn({ status: 'failure', sub: 'signalstack.disabled' });
+        throw httpError('INTERNAL', {
+          detail: 'Signalstack is not configured for this environment.',
+        });
+      }
+
+      const actingOrgId = await resolveActingOrgId(auth, log);
+      const result = await ss.fetchDecryptedProfiles({ actingOrgId, itemIds: item_ids });
+      if (!result.success) {
+        log.error({
+          status: 'failure',
+          sub: 'signalstack.profiles.decrypt',
+          error: result.error.message,
+          code: result.error.code,
+        });
+        throw httpError('INTERNAL', {
+          detail: `Signalstack profile decrypt failed: ${result.error.code}`,
+          cause: result.error,
+        });
+      }
+
+      const rows: SignalStackDecryptedProfileRow[] = result.value.profiles;
+      const csv = buildDecryptedProfilesCsv(rows);
+      const filename = `profiles-${domain}-${new Date().toISOString().slice(0, 10)}.csv`;
+
+      // Do NOT log item_state values (PII). Counts only.
+      log.info({
+        status: 'success',
+        latency_ms: Date.now() - start,
+        domain,
+        requested: item_ids.length,
+        returned: rows.length,
+        skipped: result.value.skipped.length,
+        bytes: csv.length,
+      });
+
+      return reply
+        .header('Content-Type', 'text/csv; charset=utf-8')
+        .header('Content-Disposition', `attachment; filename="${filename.replace(/"/g, '')}"`)
+        .send(csv);
     },
   );
 }

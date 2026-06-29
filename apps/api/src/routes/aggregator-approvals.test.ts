@@ -227,6 +227,9 @@ describe('admin approval routes', () => {
       async exportDashboardCsv() {
         return err(new UpstreamError('not used', { code: 'X' }));
       }
+      async fetchDecryptedProfiles() {
+        return err(new UpstreamError('not used', { code: 'X' }));
+      }
       async probeUser() {
         return err(new UpstreamError('not used', { code: 'X' }));
       }
@@ -340,6 +343,9 @@ describe('admin approval routes', () => {
       async exportDashboardCsv() {
         return err(new UpstreamError('not used', { code: 'X' }));
       }
+      async fetchDecryptedProfiles() {
+        return err(new UpstreamError('not used', { code: 'X' }));
+      }
       async probeUser() {
         return err(new UpstreamError('not used', { code: 'X' }));
       }
@@ -424,6 +430,9 @@ describe('admin approval routes', () => {
         return err(new UpstreamError('not used', { code: 'X' }));
       }
       async exportDashboardCsv() {
+        return err(new UpstreamError('not used', { code: 'X' }));
+      }
+      async fetchDecryptedProfiles() {
         return err(new UpstreamError('not used', { code: 'X' }));
       }
       async probeUser() {
