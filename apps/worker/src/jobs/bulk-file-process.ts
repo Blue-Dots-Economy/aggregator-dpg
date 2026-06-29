@@ -1,20 +1,21 @@
 /**
  * Bulk File Processor — file-level checks before per-row work begins.
  *
- * Per onboarding-implementation.md §3.2:
- *   1. Download CSV from S3.
- *   2. Reject non-UTF-8 (BOM check).
- *   3. Parse header, validate against the active JSON Schema for the
- *      participant_type. Reject on missing required cols / unknown cols.
- *   4. Count rows; reject 0-row, > BULK_MAX_ROWS, or any row > 64KB.
- *   5. Update bulk_uploads.status = 'row_processing', set total_rows.
- *   6. Enqueue per-row jobs into the bulk-row-process queue (slice 11).
+ *   1. Fetch the active JSON Schema for the participant_type.
+ *   2. Stream-parse the S3 object (`streamCsvParse`): UTF-8 decode → header
+ *      validation → per-row caps, incrementally and without buffering the whole
+ *      file. The parser yields to the event loop between chunks.
+ *   3. On success, transition bulk_uploads.status = 'row_processing', stash the
+ *      header + reconstructed line for the Finaliser, and enqueue per-row jobs.
+ *   4. Publish total_rows + reader_done to Redis only AFTER every row job is
+ *      enqueued (so the Finaliser is not triggered prematurely).
  *
- * Failure path: bulk_uploads.status = 'file_failed' + status_reason set.
- * No row jobs enqueued.
+ * Atomicity: streamCsvParse returns no rows on any validation failure, so a
+ * rejected file enqueues nothing and lands in status='file_failed' with a
+ * status_reason — never partially onboarded.
  *
- * Idempotency: Lua-free at this stage. Replays re-download + re-parse;
- * status is guarded so a row_processing or completed upload short-circuits.
+ * Idempotency: replays re-fetch + re-parse; the status guard short-circuits a
+ * row_processing or terminal upload.
  */
 
 import { eq } from 'drizzle-orm';

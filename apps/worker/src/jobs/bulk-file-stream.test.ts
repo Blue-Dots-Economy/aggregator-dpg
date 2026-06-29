@@ -169,6 +169,33 @@ describe('reconstructCsvLine — Finaliser :lines contract', () => {
     const cells = (Papa.parse<string[]>(line, { header: false }).data[0] ?? []) as string[];
     expect(cells).toEqual(['', 'two', '']);
   });
+
+  it('appends surplus cells from a ragged row (PapaParse __parsed_extra)', () => {
+    const headers = ['a', 'b'];
+    const line = reconstructCsvLine(headers, { a: 'x', b: 'y', __parsed_extra: ['z1', 'z2'] });
+    const cells = (Papa.parse<string[]>(line, { header: false }).data[0] ?? []) as string[];
+    expect(cells).toEqual(['x', 'y', 'z1', 'z2']);
+  });
+});
+
+describe('streamCsvParse — ragged rows', () => {
+  it('keeps surplus columns in rawLine but excludes PapaParse internals from payload', async () => {
+    // Header has 2 cols; the data row has 3 → the 3rd lands in __parsed_extra.
+    const res = await streamCsvParse('name,email\nAsha,a@x.io,SURPLUS', {
+      required: ['name', 'email'],
+      allowed: new Set(['name', 'email']),
+      maxRows: 10,
+      maxRowBytes: 64 * 1024,
+    });
+    expect(res.status).toBe('ok');
+    if (res.status !== 'ok') return;
+    // payload is schema-keyed strings only — no __parsed_extra leak.
+    expect(res.rows[0]!.payload).toEqual({ name: 'Asha', email: 'a@x.io' });
+    // rawLine preserves the surplus column for the errors.csv report.
+    const cells = (Papa.parse<string[]>(res.rows[0]!.rawLine, { header: false }).data[0] ??
+      []) as string[];
+    expect(cells).toEqual(['Asha', 'a@x.io', 'SURPLUS']);
+  });
 });
 
 describe('streamCsvParse — rawLine on returned rows', () => {

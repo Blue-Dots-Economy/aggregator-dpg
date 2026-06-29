@@ -9,12 +9,22 @@ import { config } from './config.js';
 
 let cachedClient: S3Client | null = null;
 
+/** Bound the TCP-connect phase so a black-holed endpoint fails fast. */
+const S3_CONNECTION_TIMEOUT_MS = 5_000;
+/** Total attempts per request (1 initial + retries) using the SDK's backoff. */
+const S3_MAX_ATTEMPTS = 3;
+
 function getClient(): S3Client {
   if (cachedClient) return cachedClient;
   cachedClient = new S3Client({
     region: config.S3_REGION,
     ...(config.S3_ENDPOINT ? { endpoint: config.S3_ENDPOINT } : {}),
     forcePathStyle: config.S3_FORCE_PATH_STYLE,
+    // Explicit retry + connect timeout per error-handling.md. Only the connect
+    // phase is bounded — not a request/body timeout — so a large streaming
+    // GetObject download is never aborted mid-stream.
+    maxAttempts: S3_MAX_ATTEMPTS,
+    requestHandler: { connectionTimeout: S3_CONNECTION_TIMEOUT_MS },
     ...(config.S3_ACCESS_KEY_ID && config.S3_SECRET_ACCESS_KEY
       ? {
           credentials: {

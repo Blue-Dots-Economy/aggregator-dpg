@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { parseWorkerRoles, WORKER_ROLES } from './worker-roles.js';
+import { parseWorkerRoles, missingRoles, WORKER_ROLES } from './worker-roles.js';
 
 describe('parseWorkerRoles', () => {
   it('defaults to ALL roles when unset', () => {
@@ -36,5 +36,15 @@ describe('parseWorkerRoles', () => {
 
   it('throws on an unknown role (fail fast at boot)', () => {
     expect(() => parseWorkerRoles('file,bogus')).toThrowError(/unknown worker role/i);
+  });
+});
+
+describe('missingRoles', () => {
+  it('returns no missing roles when running all', () => {
+    expect(missingRoles(parseWorkerRoles('all'))).toEqual([]);
+  });
+
+  it('reports the complement for a partial role set', () => {
+    expect(missingRoles(parseWorkerRoles('file,row'))).toEqual(['finalise', 'cron']);
   });
 });

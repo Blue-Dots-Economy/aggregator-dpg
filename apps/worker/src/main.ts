@@ -27,7 +27,7 @@ import { rollupLinkMetrics } from './jobs/link-metrics-rollup.js';
 import { runWatchdog } from './jobs/cron-watchdog.js';
 import { getRedis, closeRedis } from './services/redis.js';
 import { closeQueues } from './services/bulk-queue.js';
-import { parseWorkerRoles } from './worker-roles.js';
+import { parseWorkerRoles, missingRoles } from './worker-roles.js';
 
 async function main(): Promise<void> {
   const connection = getRedis();
@@ -134,6 +134,22 @@ async function main(): Promise<void> {
     });
     w.on('failed', (job, err) => {
       logger.error({ operation: `worker.${name}.failed`, job_id: job?.id, error: err.message });
+    });
+  }
+
+  // Fleet-completeness sanity check: a process running a strict subset of roles
+  // is valid only if the complement runs in another deployment. Warn so a
+  // single-pod misconfiguration doesn't silently strand uploads (no consumer
+  // for finalise, or no cron watchdog to fail stuck uploads out).
+  const uncovered = missingRoles(roles);
+  if (uncovered.length > 0) {
+    logger.warn({
+      operation: 'worker.boot',
+      status: 'partial_roles',
+      roles: [...roles],
+      not_running_here: uncovered,
+      message:
+        'This process runs a subset of worker roles. Ensure another deployment runs the rest — the union across the fleet MUST cover file+row+finalise+cron, and cron must run in exactly one place.',
     });
   }
 

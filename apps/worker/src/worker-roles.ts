@@ -46,3 +46,21 @@ export function parseWorkerRoles(value?: string): Set<WorkerRole> {
   }
   return roles.size === 0 ? new Set(WORKER_ROLES) : roles;
 }
+
+/**
+ * Reports roles this process does NOT run, for an operator sanity check at boot.
+ *
+ * The pipeline only completes if the union of roles across the whole worker
+ * fleet covers every role: the file processor enqueues row jobs, the row
+ * processor enqueues the finaliser, and `cron` runs the watchdog that fails
+ * stranded uploads out. A deployment running a strict subset is valid ONLY if
+ * the complement runs elsewhere — this helper lets the entrypoint warn so a
+ * single-pod misconfiguration (e.g. `file,row` with no `finalise`/`cron`)
+ * doesn't silently strand uploads in `row_processing` forever.
+ *
+ * @param roles - Roles this process runs.
+ * @returns The roles not covered here (empty when running all).
+ */
+export function missingRoles(roles: ReadonlySet<WorkerRole>): WorkerRole[] {
+  return WORKER_ROLES.filter((r) => !roles.has(r));
+}

@@ -118,17 +118,32 @@ export function createUtf8DecodeStream(): Transform {
   });
 }
 
+/** PapaParse key holding cells of a ragged row wider than the header. */
+const PARSED_EXTRA = '__parsed_extra';
+
+/** Coerces a parsed cell to its string form (`null`/`undefined` → ''). */
+function stringifyCell(value: unknown): string {
+  return value === undefined || value === null ? '' : String(value);
+}
+
 /**
  * Re-serialises a parsed row as a single CSV line in header-column order,
- * filling missing keys with empty strings. Values are quoted/escaped by
- * PapaParse so the line re-parses (positionally) to the same cells.
+ * filling missing keys with empty strings. Surplus cells from a ragged row
+ * wider than the header (PapaParse's `__parsed_extra`) are appended so the
+ * errors.csv report keeps every original column, matching the previous
+ * whole-file behaviour. Values are quoted/escaped by PapaParse so the line
+ * re-parses (positionally) to the same cells.
  *
  * @param headers - Column names in the order they appeared in the header row.
- * @param payload - Parsed row keyed by header name.
+ * @param payload - Parsed row keyed by header name (may carry `__parsed_extra`).
  * @returns One CSV-encoded line (no trailing newline).
  */
-export function reconstructCsvLine(headers: string[], payload: Record<string, string>): string {
-  const cells = headers.map((h) => payload[h] ?? '');
+export function reconstructCsvLine(headers: string[], payload: Record<string, unknown>): string {
+  const cells = headers.map((h) => stringifyCell(payload[h]));
+  const extra = payload[PARSED_EXTRA];
+  if (Array.isArray(extra)) {
+    for (const cell of extra) cells.push(stringifyCell(cell));
+  }
   return Papa.unparse([cells], { header: false });
 }
 
@@ -186,13 +201,15 @@ export async function streamCsvParse(
       byteSrc,
       createUtf8DecodeStream(),
       parseStream,
-      async (parsed: AsyncIterable<Record<string, string>>) => {
+      async (parsed: AsyncIterable<Record<string, unknown>>) => {
         for await (const row of parsed) {
           if (!headerChecked) {
             headerChecked = true;
             const headerFailure = validateHeaders();
             if (headerFailure) throw new ParseFailure(headerFailure.reason, headerFailure.detail);
           }
+          // rawLine (for errors.csv) keeps any surplus cells; payload carries
+          // only the schema-keyed string fields, never PapaParse internals.
           const rawLine = reconstructCsvLine(headers, row);
           if (Buffer.byteLength(rawLine, 'utf8') > options.maxRowBytes) {
             throw new ParseFailure('row_size_exceeded');
@@ -200,7 +217,12 @@ export async function streamCsvParse(
           if (rows.length + 1 > options.maxRows) {
             throw new ParseFailure('row_cap_exceeded', String(rows.length + 1));
           }
-          rows.push({ rowIndex: rows.length, payload: row, rawLine });
+          const payload: Record<string, string> = {};
+          for (const h of headers) {
+            const value = row[h];
+            if (typeof value === 'string') payload[h] = value;
+          }
+          rows.push({ rowIndex: rows.length, payload, rawLine });
         }
       },
     );
