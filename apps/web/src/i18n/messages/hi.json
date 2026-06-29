@@ -105,6 +105,7 @@
       "selected": "{count} चयनित",
       "clear": "चयन हटाएँ",
       "exportSelected": "चयनित CSV निर्यात करें",
+      "exportProfileData": "प्रोफ़ाइल डेटा निर्यात करें",
       "triggerCallback": "वॉइस कॉल ट्रिगर करें",
       "running": "प्रक्रिया जारी…",
       "success": "{count} संसाधित",

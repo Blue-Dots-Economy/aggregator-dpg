@@ -105,6 +105,7 @@
       "selected": "{count} ಆಯ್ಕೆಯಾಗಿದೆ",
       "clear": "ಆಯ್ಕೆ ತೆರವುಗೊಳಿಸಿ",
       "exportSelected": "ಆಯ್ದ CSV ರಫ್ತು ಮಾಡಿ",
+      "exportProfileData": "ಪ್ರೊಫೈಲ್ ಡೇಟಾ ರಫ್ತು ಮಾಡಿ",
       "triggerCallback": "ಧ್ವನಿ ಕರೆ ಪ್ರಚೋದಿಸಿ",
       "running": "ಪ್ರಕ್ರಿಯೆ ನಡೆಯುತ್ತಿದೆ…",
       "success": "{count} ಸಂಸ್ಕರಿಸಲಾಗಿದೆ",

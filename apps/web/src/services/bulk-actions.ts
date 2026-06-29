@@ -65,6 +65,21 @@ export const DASHBOARD_BULK_ACTIONS: BulkAction[] = [
     },
   },
   {
+    id: 'export_profile_data',
+    labelKey: 'bulk.exportProfileData',
+    icon: 'download',
+    kind: 'server',
+    run: async (rows, ctx) => {
+      const itemIds = rows.map((r) => r.id).filter((id) => !id.startsWith('row-'));
+      if (itemIds.length === 0) return;
+      const { blob, filename } = await dashboardService.dashboardExportProfiles({
+        domain: ctx.domain,
+        itemIds,
+      });
+      triggerCsvDownload({ blob, filename });
+    },
+  },
+  {
     id: 'trigger_callback',
     labelKey: 'bulk.triggerCallback',
     icon: 'phone',
