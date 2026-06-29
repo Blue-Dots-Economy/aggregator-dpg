@@ -43,7 +43,7 @@ function renderCell(value: unknown): string {
 export function buildDecryptedProfilesCsv(rows: SignalStackDecryptedProfileRow[]): string {
   const keys = new Set<string>();
   for (const r of rows) {
-    for (const k of Object.keys(r.item_state)) keys.add(k);
+    for (const k of Object.keys(r.item_state ?? {})) keys.add(k);
   }
   const priority = PRIORITY_KEYS.filter((k) => keys.has(k));
   const rest = [...keys]
@@ -56,7 +56,7 @@ export function buildDecryptedProfilesCsv(rows: SignalStackDecryptedProfileRow[]
   for (const r of rows) {
     const cells = [
       csvField(r.item_id),
-      ...stateCols.map((c) => csvField(renderCell(r.item_state[c]))),
+      ...stateCols.map((c) => csvField(renderCell((r.item_state ?? {})[c]))),
     ];
     lines.push(cells.join(','));
   }
