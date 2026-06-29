@@ -17,33 +17,36 @@
  * status is guarded so a row_processing or completed upload short-circuits.
  */
 
-import Papa from 'papaparse';
 import { eq } from 'drizzle-orm';
 import type { BulkFileProcessJob } from '@aggregator-dpg/queue';
 import { schema, getDb } from '../db.js';
-import { downloadCsvAsString } from '../object-storage.js';
+import { getCsvStream } from '../object-storage.js';
 import { config } from '../config.js';
 import { logger } from '../logger.js';
 import { getSchemaLoader } from '../services/schema-loader.js';
 import { getRedis } from '../services/redis.js';
 import { enqueueRowProcessBulk } from '../services/bulk-queue.js';
+import { streamCsvParse, type FileFailureReason } from './bulk-file-stream.js';
 
-const BOM = '﻿';
+export type { FileFailureReason };
 
-export type FileFailureReason =
-  | 'encoding_unsupported'
-  | 'header_mismatch'
-  | 'empty_csv'
-  | 'row_cap_exceeded'
-  | 'row_size_exceeded'
-  | 'schema_unavailable'
-  | 'system_error';
+/** Rows enqueued per BullMQ `addBulk` batch + Redis `:lines` write. */
+const ENQUEUE_CHUNK = 1000;
 
 interface ProcessOutcome {
   status: 'enqueued' | 'failed';
   totalRows?: number;
   reason?: FileFailureReason;
   detail?: string;
+}
+
+/** Human-readable `status_reason` for a file-level failure, mirroring the
+ * previous whole-file implementation's strings. */
+function failureReason(reason: FileFailureReason, detail?: string): string {
+  if (detail && (reason === 'header_mismatch' || reason === 'row_cap_exceeded')) {
+    return `${reason}: ${detail}`;
+  }
+  return reason;
 }
 
 export async function processBulkFile(job: BulkFileProcessJob): Promise<ProcessOutcome> {
@@ -79,28 +82,7 @@ export async function processBulkFile(job: BulkFileProcessJob): Promise<ProcessO
 
   await markStatus(job.uploadId, 'file_validating', null);
 
-  // 1. Download.
-  let body: string;
-  try {
-    body = await downloadCsvAsString(job.s3Key);
-  } catch (err) {
-    log.error({ status: 'failure', sub: 's3.get', error: (err as Error).message });
-    await markStatus(job.uploadId, 'file_failed', 'system_error');
-    return { status: 'failed', reason: 'system_error' };
-  }
-
-  // 2. Encoding check (BOM = UTF-8/16/32 marker; we only accept plain UTF-8).
-  if (body.startsWith(BOM)) {
-    body = body.slice(1); // strip UTF-8 BOM (acceptable; some Excel exports include it)
-  }
-  // A reliable non-UTF-8 signal: replacement chars (U+FFFD) emitted by toString('utf8').
-  if (body.includes('�')) {
-    log.warn({ status: 'failure', reason: 'encoding_unsupported' });
-    await markStatus(job.uploadId, 'file_failed', 'encoding_unsupported');
-    return { status: 'failed', reason: 'encoding_unsupported' };
-  }
-
-  // 3. Schema fetch — validator + schema in one round-trip (loader caches both).
+  // 1. Schema fetch — validator + schema in one round-trip (loader caches both).
   const loader = getSchemaLoader();
   const ref = { id: job.schemaId, version: job.schemaVersion };
   const [validatorResult, schemaResult] = await Promise.all([
@@ -118,55 +100,42 @@ export async function processBulkFile(job: BulkFileProcessJob): Promise<ProcessO
     return { status: 'failed', reason: 'schema_unavailable' };
   }
 
-  // 4. Parse.
-  const parsed = Papa.parse<Record<string, string>>(body, {
-    header: true,
-    skipEmptyLines: 'greedy',
-    transformHeader: (h) => h.trim(),
+  // 2. Stream-parse the S3 body. The parser consumes the object incrementally
+  // (UTF-8 decode → header validation → per-row caps) without buffering the
+  // whole file or blocking the event loop. No rows are returned on failure, so
+  // a rejected file onboards nothing (atomicity preserved).
+  let stream;
+  try {
+    stream = await getCsvStream(job.s3Key);
+  } catch (err) {
+    log.error({ status: 'failure', sub: 's3.get', error: (err as Error).message });
+    await markStatus(job.uploadId, 'file_failed', 'system_error');
+    return { status: 'failed', reason: 'system_error' };
+  }
+
+  const required = extractRequiredFields(schemaResult.value);
+  const allowed = new Set(extractAllProperties(schemaResult.value));
+  const parsed = await streamCsvParse(stream, {
+    required,
+    allowed,
+    maxRows: config.BULK_MAX_ROWS,
+    maxRowBytes: config.BULK_MAX_ROW_BYTES,
   });
 
-  // Header validation.
-  const required = extractRequiredFields(schemaResult.value);
-  const allowedSet = new Set(extractAllProperties(schemaResult.value));
-  const headers = parsed.meta.fields ?? [];
-  const headerSet = new Set(headers);
-  const missing = required.filter((f) => !headerSet.has(f));
-  if (missing.length > 0) {
-    log.warn({ status: 'failure', reason: 'header_mismatch', missing });
-    await markStatus(job.uploadId, 'file_failed', `header_mismatch: missing ${missing.join(',')}`);
-    return { status: 'failed', reason: 'header_mismatch', detail: `missing: ${missing.join(',')}` };
-  }
-  const unknown = headers.filter((h) => !allowedSet.has(h));
-  if (unknown.length > 0) {
-    log.warn({ status: 'failure', reason: 'header_mismatch', unknown });
-    await markStatus(job.uploadId, 'file_failed', `header_mismatch: unknown ${unknown.join(',')}`);
-    return { status: 'failed', reason: 'header_mismatch', detail: `unknown: ${unknown.join(',')}` };
+  if (parsed.status === 'failed') {
+    log.warn({ status: 'failure', reason: parsed.reason, detail: parsed.detail });
+    await markStatus(job.uploadId, 'file_failed', failureReason(parsed.reason, parsed.detail));
+    return {
+      status: 'failed',
+      reason: parsed.reason,
+      ...(parsed.detail !== undefined ? { detail: parsed.detail } : {}),
+    };
   }
 
-  // Row count + size checks.
-  const rows = parsed.data;
-  if (rows.length === 0) {
-    log.warn({ status: 'failure', reason: 'empty_csv' });
-    await markStatus(job.uploadId, 'file_failed', 'empty_csv');
-    return { status: 'failed', reason: 'empty_csv' };
-  }
-  if (rows.length > config.BULK_MAX_ROWS) {
-    log.warn({ status: 'failure', reason: 'row_cap_exceeded', rows: rows.length });
-    await markStatus(job.uploadId, 'file_failed', `row_cap_exceeded: ${rows.length}`);
-    return { status: 'failed', reason: 'row_cap_exceeded' };
-  }
-  // Row-size cap: re-tokenise the body by newlines to measure per-line bytes.
-  const lines = body.split('\n');
-  for (const line of lines) {
-    if (Buffer.byteLength(line, 'utf8') > config.BULK_MAX_ROW_BYTES) {
-      log.warn({ status: 'failure', reason: 'row_size_exceeded' });
-      await markStatus(job.uploadId, 'file_failed', 'row_size_exceeded');
-      return { status: 'failed', reason: 'row_size_exceeded' };
-    }
-  }
+  const { headers, rows } = parsed;
 
-  // 5. Transition to row_processing. The total row count moves into Redis
-  // (see step 6 below) instead of the dropped `bulk_uploads.total_rows`
+  // 3. Transition to row_processing. The total row count moves into Redis
+  // (see step 4 below) instead of the dropped `bulk_uploads.total_rows`
   // column — keeps `bulk_uploads` as pure lifecycle state.
   await getDb()
     .update(schema.bulkUploads)
@@ -177,7 +146,7 @@ export async function processBulkFile(job: BulkFileProcessJob): Promise<ProcessO
     })
     .where(eq(schema.bulkUploads.id, job.uploadId));
 
-  // 6. Enqueue per-row jobs FIRST, then set total + reader_done in Redis.
+  // 4. Enqueue per-row jobs FIRST, then set total + reader_done in Redis.
   // Order matters: setting total before all jobs are enqueued risks the Row
   // Processor seeing `processed == total` early and triggering Finaliser
   // prematurely.
@@ -193,32 +162,24 @@ export async function processBulkFile(job: BulkFileProcessJob): Promise<ProcessO
     JSON.stringify(headers),
   );
 
-  // Precompute data lines (one walk over `lines`) so we don't re-scan per row.
-  const dataLines: string[] = [];
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i] ?? '';
-    if (line.trim() === '') continue;
-    dataLines.push(line);
-  }
-
-  const ENQUEUE_CHUNK = 1000;
   for (let off = 0; off < rows.length; off += ENQUEUE_CHUNK) {
     const slice = rows.slice(off, off + ENQUEUE_CHUNK);
-    const payloads = slice.map((row, j) => ({
+    const payloads = slice.map((r) => ({
       uploadId: job.uploadId,
       aggregatorId: job.aggregatorId,
-      rowIndex: off + j,
+      rowIndex: r.rowIndex,
       schemaId: job.schemaId,
       schemaVersion: job.schemaVersion,
       participantType: job.participantType,
-      payload: row,
+      payload: r.payload,
     }));
 
-    // Persist raw CSV lines under bu:{id}:lines so the Finaliser can
-    // reconstruct errors.csv without the row payload carrying rawRow.
+    // Persist reconstructed CSV lines under bu:{id}:lines so the Finaliser can
+    // rebuild errors.csv. The line round-trips through positional re-parse, so
+    // the Finaliser's `parseRawRow` recovers the original cells.
     const linesArgs: string[] = [];
-    for (const p of payloads) {
-      linesArgs.push(String(p.rowIndex), dataLines[p.rowIndex] ?? '');
+    for (const r of slice) {
+      linesArgs.push(String(r.rowIndex), r.rawLine);
     }
     if (linesArgs.length > 0) {
       await redis.hset(`${ns}:lines`, ...linesArgs);
