@@ -9,7 +9,11 @@
  */
 
 import { InMemorySignalStackWriter } from './memory.js';
-import type { SignalStackDashboardPage, SignalStackOnboardParticipantInput } from './interface.js';
+import type {
+  SignalStackDashboardPage,
+  SignalStackDecryptedProfileRow,
+  SignalStackOnboardParticipantInput,
+} from './interface.js';
 
 export { InMemorySignalStackWriter };
 
@@ -199,6 +203,29 @@ export function buildOnboardInput(
     domain: 'seeker',
     item_type: 'profile_1.0',
     profile: {},
+    ...overrides,
+  };
+}
+
+/**
+ * Builds a decrypted profile row for tests of consumers that shape CSV/JSON
+ * from {@link SignalStackDecryptedProfiles}.
+ *
+ * @param overrides - Partial override map; any field set here replaces the
+ *   default in the returned row.
+ * @returns A complete `SignalStackDecryptedProfileRow` ready for assertions.
+ */
+export function buildDecryptedProfileRow(
+  overrides: Partial<SignalStackDecryptedProfileRow> = {},
+): SignalStackDecryptedProfileRow {
+  return {
+    item_id: 'item-1',
+    item_network: 'blue_dot',
+    item_domain: 'seeker',
+    item_type: 'profile_1.0',
+    item_state: { name: 'Default Name', phone: '+910000000000' },
+    created_at: '2026-01-01T00:00:00.000Z',
+    updated_at: '2026-01-01T00:00:00.000Z',
     ...overrides,
   };
 }

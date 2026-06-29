@@ -499,3 +499,71 @@ describe('SignalStackWriterFake.seed — pinned csv export', () => {
     expect(result.error.code).toBe('SIGNALSTACK_INPUT_INVALID');
   });
 });
+
+describe('InMemorySignalStackWriter.fetchDecryptedProfiles', () => {
+  let writer: InMemorySignalStackWriter;
+
+  beforeEach(() => {
+    writer = new InMemorySignalStackWriter();
+  });
+
+  it('returns the seeded item_state for its own items, skips the rest', async () => {
+    const onboarded = await writer.onboard({
+      actingOrgId: 'org-1',
+      name: 'Velu',
+      phoneNumber: '+919876801011',
+      terms_accepted: true,
+      privacy_accepted: true,
+      channel: 'link',
+      source_id: 'link-1',
+      network: 'blue_dot',
+      domain: 'seeker',
+      item_type: 'profile_1.0',
+      profile: { name: 'Velu Murugan', phone: '+919876801011' },
+    });
+    expect(onboarded.success).toBe(true);
+    if (!onboarded.success) return;
+    const itemId = onboarded.value.profile_item_id;
+
+    const result = await writer.fetchDecryptedProfiles({
+      actingOrgId: 'org-1',
+      itemIds: [itemId, 'missing-item'],
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.profiles).toHaveLength(1);
+    expect(result.value.profiles[0]!.item_id).toBe(itemId);
+    expect(result.value.profiles[0]!.item_state.name).toBe('Velu Murugan');
+    expect(result.value.skipped).toEqual(['missing-item']);
+  });
+
+  it('skips items owned by a different acting org', async () => {
+    const onboarded = await writer.onboard({
+      actingOrgId: 'org-1',
+      name: 'Velu',
+      phoneNumber: '+919876801011',
+      terms_accepted: true,
+      privacy_accepted: true,
+      channel: 'link',
+      source_id: 'link-1',
+      network: 'blue_dot',
+      domain: 'seeker',
+      item_type: 'profile_1.0',
+      profile: { name: 'Velu Murugan' },
+    });
+    if (!onboarded.success) return;
+    const itemId = onboarded.value.profile_item_id;
+
+    const result = await writer.fetchDecryptedProfiles({ actingOrgId: 'org-2', itemIds: [itemId] });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.profiles).toEqual([]);
+    expect(result.value.skipped).toEqual([itemId]);
+  });
+
+  it('returns ValidationError on empty itemIds', async () => {
+    const result = await writer.fetchDecryptedProfiles({ actingOrgId: 'org-1', itemIds: [] });
+    expect(result.success).toBe(false);
+  });
+});

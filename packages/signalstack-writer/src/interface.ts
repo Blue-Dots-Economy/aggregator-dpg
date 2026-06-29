@@ -334,6 +334,41 @@ export interface SignalStackDashboardExport {
 }
 
 /**
+ * Input for a decrypted-profile fetch against signalstack's
+ * `POST /api/v1/admin/participant/decrypt`. `actingOrgId` is the aggregator's
+ * own signalstack org id, sent as the per-call `x-acting-org-id` header so
+ * signalstack scopes decryption to items this aggregator onboarded.
+ */
+export interface SignalStackFetchDecryptedProfilesQuery {
+  actingOrgId: string;
+  itemIds: string[];
+}
+
+/**
+ * One decrypted profile row. `item_state` is the full cleartext profile
+ * (private fields decrypted). signalstack never returns item_private_state.
+ */
+export interface SignalStackDecryptedProfileRow {
+  item_id: string;
+  item_network: string;
+  item_domain: string;
+  item_type: string;
+  item_state: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Result of a decrypted-profile fetch. `skipped` holds requested item_ids
+ * that were not returned (not found, or not onboarded by the acting org).
+ * Invariant: profiles.length + skipped.length === distinct requested ids.
+ */
+export interface SignalStackDecryptedProfiles {
+  profiles: SignalStackDecryptedProfileRow[];
+  skipped: string[];
+}
+
+/**
  * Input for an identity-only probe against signalstack's `/admin/participant`
  * endpoint with `submit_mode: 'account_only'`.
  *
@@ -483,6 +518,18 @@ export abstract class SignalStackWriterBase {
   abstract exportDashboardCsv(
     query: SignalStackDashboardExportQuery,
   ): Promise<Result<SignalStackDashboardExport, BaseError>>;
+
+  /**
+   * Fetch DECRYPTED profile data for the given item_ids from signalstack.
+   * Server-to-server only — the admin api-key never reaches a browser.
+   *
+   * @param query - actingOrgId (the aggregator's signalstack org) + itemIds.
+   * @returns ok(SignalStackDecryptedProfiles) on 2xx; err(BaseError) on
+   *          validation/transport/upstream failure.
+   */
+  abstract fetchDecryptedProfiles(
+    query: SignalStackFetchDecryptedProfilesQuery,
+  ): Promise<Result<SignalStackDecryptedProfiles, BaseError>>;
 
   /**
    * Identity probe — wraps signals' `/admin/participant` with
