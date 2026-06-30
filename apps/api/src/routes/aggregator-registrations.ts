@@ -324,6 +324,7 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
             applicantName: body.name,
             applicantEmail: contact.email,
             applicantPhone: phoneE164,
+            ...(await resolveOwnerRouting(parentOrgId ?? existing.parentOrgId)),
           },
           log,
         );
@@ -458,6 +459,7 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
           applicantName: body.name,
           applicantEmail: contact.email,
           applicantPhone: phoneE164,
+          ...(await resolveOwnerRouting(parentOrgId)),
         },
         log,
       );
@@ -612,6 +614,24 @@ function splitName(fullName: string): { firstName: string; lastName: string } {
  */
 export function isReclaimable(status: AggregatorStatus): boolean {
   return status === 'pending' || status === 'inactive';
+}
+
+/**
+ * Resolves the approval-email routing for a coordinator. When the coordinator
+ * belongs to an org, the approve/reject tokens carry the `org` claim and the
+ * review email routes to the org owner (spec §6.2 / §9); otherwise (flat flow)
+ * it returns empty extras so the email goes to the network-admin list.
+ *
+ * @param parentOrgId - The coordinator's parent org id, or null for flat.
+ * @returns `{ org?, recipientEmail? }` extras for `sendAdminReviewEmail`.
+ */
+async function resolveOwnerRouting(
+  parentOrgId: string | null,
+): Promise<{ org?: string; recipientEmail?: string }> {
+  if (!parentOrgId) return {};
+  const org = await getAggregatorOrgStore().findById(parentOrgId);
+  const ownerEmail = org.ok && org.value ? org.value.ownerEmail : undefined;
+  return { org: parentOrgId, ...(ownerEmail ? { recipientEmail: ownerEmail } : {}) };
 }
 
 // Re-export so existing tests that import { z } from this module still resolve.

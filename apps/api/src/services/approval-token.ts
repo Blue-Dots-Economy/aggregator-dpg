@@ -38,6 +38,13 @@ export interface MintInput {
   intent: 'approve' | 'reject';
   /** Lifetime in seconds. Default 1h. */
   ttlSec?: number;
+  /**
+   * Parent org id this token is minted for (spec §9 / A1). When set, the
+   * coordinator decision handler binds the decision to a matching
+   * `aggregators.parent_org_id`, so an owner's link can only decide their own
+   * org's coordinators. Omitted for flat coordinators and org tokens.
+   */
+  org?: string;
 }
 
 export interface MintResult {
@@ -54,7 +61,10 @@ export interface MintResult {
 export async function mintApprovalToken(input: MintInput): Promise<MintResult> {
   const ttl = input.ttlSec ?? DEFAULT_TTL_SEC;
   const expiresAt = new Date(Date.now() + ttl * 1000);
-  const token = await new SignJWT({ intent: input.intent })
+  const token = await new SignJWT({
+    intent: input.intent,
+    ...(input.org ? { org: input.org } : {}),
+  })
     .setProtectedHeader({ alg: ALG })
     .setSubject(input.aggregatorId)
     .setIssuer(ISSUER)
@@ -102,6 +112,8 @@ export interface VerifyOk {
   ok: true;
   aggregatorId: string;
   intent: 'approve' | 'reject';
+  /** Parent org id claim, when the token was minted with one (spec §9 / A1). */
+  org?: string;
 }
 
 export interface VerifyErr {
@@ -144,7 +156,8 @@ export async function verifyApprovalToken(
     if (intent !== 'approve' && intent !== 'reject') {
       return { ok: false, error: { code: 'INVALID', message: 'bad intent claim' } };
     }
-    return { ok: true, aggregatorId: payload.sub, intent };
+    const org = typeof payload.org === 'string' ? payload.org : undefined;
+    return { ok: true, aggregatorId: payload.sub, intent, ...(org ? { org } : {}) };
   } catch (err) {
     if (err instanceof joseErrors.JWTExpired) {
       if (opts.allowExpired) {
@@ -157,7 +170,8 @@ export async function verifyApprovalToken(
         if (!payload.sub || (intent !== 'approve' && intent !== 'reject')) {
           return { ok: false, error: { code: 'INVALID', message: 'bad claims in expired token' } };
         }
-        return { ok: true, aggregatorId: payload.sub, intent };
+        const org = typeof payload.org === 'string' ? payload.org : undefined;
+        return { ok: true, aggregatorId: payload.sub, intent, ...(org ? { org } : {}) };
       }
       return { ok: false, error: { code: 'EXPIRED', message: 'token expired' } };
     }

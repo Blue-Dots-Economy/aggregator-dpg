@@ -20,6 +20,17 @@ export interface AdminReviewNotifyInput {
   applicantName: string;
   applicantEmail: string;
   applicantPhone: string;
+  /**
+   * Parent org id (spec §9). When set, it is minted into the approve/reject
+   * tokens as the `org` claim so the decision handler can bind the decision to
+   * the coordinator's `parent_org_id`.
+   */
+  org?: string;
+  /**
+   * Recipient override. When set (the org owner's email for a coordinator under
+   * an org), the review email routes here instead of the network-admin list.
+   */
+  recipientEmail?: string;
 }
 
 /**
@@ -61,10 +72,20 @@ export async function sendAdminReviewEmail(
   try {
     const ttlSec = config.APPROVAL_TOKEN_TTL_SECONDS;
     approveToken = (
-      await mintApprovalToken({ aggregatorId: input.aggregatorId, intent: 'approve', ttlSec })
+      await mintApprovalToken({
+        aggregatorId: input.aggregatorId,
+        intent: 'approve',
+        ttlSec,
+        ...(input.org ? { org: input.org } : {}),
+      })
     ).token;
     rejectToken = (
-      await mintApprovalToken({ aggregatorId: input.aggregatorId, intent: 'reject', ttlSec })
+      await mintApprovalToken({
+        aggregatorId: input.aggregatorId,
+        intent: 'reject',
+        ttlSec,
+        ...(input.org ? { org: input.org } : {}),
+      })
     ).token;
   } catch (err) {
     throw httpError('TOKEN_MINT_FAILED', { cause: err });
@@ -85,7 +106,7 @@ export async function sendAdminReviewEmail(
   });
 
   const mailResult = await getMailer().send({
-    to: parseAdminEmails(),
+    to: input.recipientEmail ? [input.recipientEmail] : parseAdminEmails(),
     subject: reviewMail.subject,
     html: reviewMail.html,
     text: reviewMail.text,

@@ -142,6 +142,30 @@ describe('verifyApprovalToken allowExpired', () => {
   });
 });
 
+describe('verifyApprovalToken org claim', () => {
+  beforeEach(() => {
+    _resetTokenKey();
+    process.env.APPROVAL_TOKEN_SECRET = 'k'.repeat(48);
+  });
+
+  it('round-trips an org claim', async () => {
+    const { token } = await mintApprovalToken({
+      aggregatorId: 'agg-1',
+      intent: 'approve',
+      org: 'org-1',
+    });
+    const v = await verifyApprovalToken(token);
+    expect(v.ok).toBe(true);
+    if (v.ok) expect(v.org).toBe('org-1');
+  });
+
+  it('omits org when not minted', async () => {
+    const { token } = await mintApprovalToken({ aggregatorId: 'agg-1', intent: 'approve' });
+    const v = await verifyApprovalToken(token);
+    if (v.ok) expect(v.org).toBeUndefined();
+  });
+});
+
 describe('formatApprovalTtl', () => {
   it.each([
     [7 * 24 * 60 * 60, '7 days'],

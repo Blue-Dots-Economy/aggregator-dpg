@@ -11,6 +11,11 @@ import {
   _setAggregatorProfileStore,
   AggregatorProfileStoreFake,
 } from '../services/aggregator-profile-store/index.js';
+import {
+  AggregatorOrgStoreFake,
+  buildAggregatorOrg,
+  _setAggregatorOrgStore,
+} from '../services/aggregator-org-store/index.js';
 import { IdpAdminFake, _setIdpAdmin } from '../services/idp-admin/index.js';
 import { FakeMailer, _setMailer } from '../services/mailer/index.js';
 import { _resetTokenKey, mintApprovalToken } from '../services/approval-token.js';
@@ -30,6 +35,7 @@ describe('admin approval routes', () => {
   let idp: IdpAdminFake;
   let mailer: FakeMailer;
   let signalstack: SignalStackWriterFake;
+  let orgStore: AggregatorOrgStoreFake;
   let kcUserId: string;
 
   beforeEach(async () => {
@@ -79,6 +85,9 @@ describe('admin approval routes', () => {
     signalstack = new SignalStackWriterFake();
     _setSignalStackWriter(signalstack);
 
+    orgStore = new AggregatorOrgStoreFake();
+    _setAggregatorOrgStore(orgStore);
+
     // Approval flow now reads cfg.domainIds from the network config —
     // pin a blue_dot-shaped config so the legacy `['seeker','provider']`
     // assertions in this file still hold.
@@ -95,6 +104,7 @@ describe('admin approval routes', () => {
     _setMailer(null);
     _setSignalStackWriter(null);
     _setNetworkConfig(null);
+    _setAggregatorOrgStore(null);
   });
 
   it('GET /read/:id renders the confirmation page when no decision yet', async () => {
@@ -662,5 +672,42 @@ describe('admin approval routes', () => {
     });
     expect(res.statusCode).toBe(400);
     expect(res.body).toContain(`/admin/v1/aggregator-registrations/resend/${id}`);
+  });
+
+  it('rejects a coordinator decision when the token org claim mismatches parent_org_id', async () => {
+    // The seeded coordinator belongs to org-B; the token is minted for org-A.
+    await aggregatorStore.update(aggregatorId, { parentOrgId: 'org-B', updatedBy: 'test' });
+    const { token } = await mintApprovalToken({
+      aggregatorId,
+      intent: 'approve',
+      org: 'org-A',
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
+      payload: { token, decision: 'approve' },
+    });
+    expect(res.statusCode).toBe(400);
+    // The coordinator must still be pending (decision aborted).
+    const stored = await aggregatorStore.findById(aggregatorId);
+    expect(stored.ok && stored.value?.status).toBe('pending');
+  });
+
+  it('allows the decision when the token org claim matches parent_org_id', async () => {
+    await aggregatorStore.update(aggregatorId, { parentOrgId: 'org-A', updatedBy: 'test' });
+    orgStore.seed([buildAggregatorOrg({ id: 'org-A', slug: 'a', status: 'active' })]);
+    const { token } = await mintApprovalToken({
+      aggregatorId,
+      intent: 'approve',
+      org: 'org-A',
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
+      payload: { token, decision: 'approve' },
+    });
+    expect(res.statusCode).toBe(200);
+    const stored = await aggregatorStore.findById(aggregatorId);
+    expect(stored.ok && stored.value?.status).toBe('active');
   });
 });

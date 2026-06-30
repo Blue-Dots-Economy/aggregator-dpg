@@ -28,7 +28,9 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { config } from '../config.js';
+import { config, orgHierarchyEnabled } from '../config.js';
+import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js';
+import { ERR } from '../errors/codes.js';
 import { verifyApprovalToken, formatApprovalTtl } from '../services/approval-token.js';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
 import { getIdpAdmin } from '../services/idp-admin/index.js';
@@ -219,6 +221,41 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
       const prior = decisionFromStatus(lookup.aggregator.status);
       if (prior) {
         return sendHtml(reply, 200, renderResultPage(alreadyDecidedView(prior)));
+      }
+
+      // Org-bound coordinator: the token must carry the matching `org` claim so
+      // an owner's link can only decide their own org's coordinators (spec §9 /
+      // A1). Enforced whenever the record has a parent_org_id — it is a security
+      // invariant on the record, independent of the runtime flag.
+      const parentOrgId = lookup.aggregator.parentOrgId;
+      if (parentOrgId && verified.org !== parentOrgId) {
+        return sendHtml(
+          reply,
+          400,
+          renderResultPage({
+            status: 'error',
+            title: 'Invalid link',
+            message: 'Token does not match this organisation.',
+          }),
+        );
+      }
+
+      // Re-validate the target org is still active before provisioning (spec
+      // §6.2): a row can be rejected/retired between submit and approval. Only
+      // when the hierarchy is enabled and the coordinator is org-bound.
+      if (orgHierarchyEnabled() && parentOrgId) {
+        const org = await getAggregatorOrgStore().findById(parentOrgId);
+        if (!org.ok || !org.value || org.value.status !== 'active') {
+          return sendHtml(
+            reply,
+            200,
+            renderResultPage({
+              status: 'error',
+              title: ERR.TARGET_ORG_INACTIVE.title,
+              message: ERR.TARGET_ORG_INACTIVE.detail,
+            }),
+          );
+        }
       }
 
       const store = getAggregatorStore();
