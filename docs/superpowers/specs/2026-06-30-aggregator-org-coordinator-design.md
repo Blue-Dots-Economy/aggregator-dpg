@@ -21,6 +21,8 @@
 9. [Data scoping (now and future)](#9-data-scoping-now-and-future)
 10. [Out of scope / deferred](#10-out-of-scope--deferred)
 11. [Open items](#11-open-items)
+12. [Migration & rollout](#12-migration--rollout)
+13. [Testing](#13-testing)
 
 ---
 
@@ -82,35 +84,37 @@ A participant account is attributed to the coordinator's signalstack org via the
 
 ### `aggregator_orgs` (NEW) — the parent org
 
-| Column                     | Type        | Description                                                                                                                         |
-| -------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `id`                       | uuid pk     | Parent-org id                                                                                                                       |
-| `name`                     | text        | Org display name                                                                                                                    |
-| `slug`                     | text unique | URL-safe identifier                                                                                                                 |
-| `owner_email`              | text        | Org owner contact (approval emails go here)                                                                                         |
-| `owner_kc_sub`             | text        | Keycloak user id of the org owner (set on approval)                                                                                 |
-| `keycloak_group_id`        | text        | The org's Keycloak group (set on approval)                                                                                          |
-| `status`                   | enum        | `pending` (created by `ensureGraduatedOrg`) \| `active` (flipped by `ensureActivated`) \| `rejected` — mirrors `aggregators.status` |
-| `approved_by`              | text        | Network-admin identity that approved                                                                                                |
-| `source_registration_id`   | uuid        | FK to `registrations` — idempotency key for graduation retries                                                                      |
-| `created_at`, `updated_at` | timestamp   |                                                                                                                                     |
+| Column                     | Type        | Description                                                                                                                                               |
+| -------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                       | uuid pk     | Parent-org id                                                                                                                                             |
+| `name`                     | text        | Org display name                                                                                                                                          |
+| `slug`                     | text unique | URL-safe identifier. Generated from `name`; on collision append a numeric suffix and retry — same approach as the existing `aggregators` slug generation. |
+| `owner_email`              | text        | Org owner contact (approval emails go here)                                                                                                               |
+| `owner_kc_sub`             | text        | Keycloak user id of the org owner (set on approval)                                                                                                       |
+| `keycloak_group_id`        | text        | The org's Keycloak group (set on approval)                                                                                                                |
+| `status`                   | enum        | `pending` (created by `ensureGraduatedOrg`) \| `active` (flipped by `ensureActivated`) \| `rejected` — mirrors `aggregators.status`                       |
+| `approved_by`              | text        | Network-admin identity that approved                                                                                                                      |
+| `source_registration_id`   | uuid        | FK to `registrations` — idempotency key for graduation retries                                                                                            |
+| `created_at`, `updated_at` | timestamp   |                                                                                                                                                           |
 
 Kept **separate** from `aggregators` on purpose: an org is a tenant/grouping with no signalstack org and no data-scoping role. Putting it in `aggregators` would let an org id leak into `session.aggregator_id` scoping — a security footgun. Separation makes that impossible and keeps the future org rollup a simple FK join.
 
 ### `aggregators` (existing = coordinator) — additions
 
-| Column          | Type                             | Description                                                                                                                  |
-| --------------- | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `parent_org_id` | uuid null → `aggregator_orgs.id` | The org this coordinator belongs to. `null` = orphan (legacy aggregators, or none selected). Set by `ensureGroupMembership`. |
+| Column          | Type                             | Description                                                                                                                                                                      |
+| --------------- | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `parent_org_id` | uuid null → `aggregator_orgs.id` | The org this coordinator belongs to. `null` = orphan — **legacy aggregators only**; a new coordinator registration must select an org (§6, §G2). Set by `ensureGroupMembership`. |
 
 Single nullable column because a coordinator joins **one** org for now (see §11). Everything else on `aggregators` is unchanged; coordinators keep their own `signalstackOrgId`.
 
+**Org selection is mandatory for new coordinators** (`target_org_id` required). `parent_org_id = null` is reserved for pre-existing legacy aggregators (§11.2), never produced by a new registration. **Bootstrap order:** the first org must be admin-approved and `active` before any coordinator can register — the coordinator form's org dropdown is empty until then.
+
 ### `registrations` (existing engine) — additions
 
-| Column          | Type                             | Description                                                                 |
-| --------------- | -------------------------------- | --------------------------------------------------------------------------- |
-| `kind`          | enum                             | `'org'` \| `'coordinator'` — selects the provisioning step-set and approver |
-| `target_org_id` | uuid null → `aggregator_orgs.id` | Coordinator only — the org the applicant chose (must be `approved`/active)  |
+| Column          | Type                             | Description                                                                                                                                        |
+| --------------- | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kind`          | enum                             | `'org'` \| `'coordinator'` — selects the provisioning step-set and approver                                                                        |
+| `target_org_id` | uuid null → `aggregator_orgs.id` | Coordinator only — the org the applicant chose. Required for `kind='coordinator'`. Must be `active` **at submit AND re-checked at approval** (§6). |
 
 `provision_state` keys differ by `kind` (§7). No other registration columns change.
 
@@ -162,21 +166,25 @@ Applicant (coordinator)         API / engine                 Org owner
 
 The coordinator's submit form gains an org selector listing **active** `aggregator_orgs`. The approval JWT for a coordinator request is minted to the **org owner's** email (resolved from `aggregator_orgs.owner_email` via `target_org_id`), not the network admin.
 
+**Re-validate the org at approval (not just at submit).** An org can be rejected/retired between submit and approval. Before provisioning a coordinator, re-check `target_org_id` is still `active`. If it is not, the request transitions to `declined` with reason `TARGET_ORG_INACTIVE` and the applicant is notified — provisioning never starts against a dead org. (The org owner's approval link itself becomes inert once the org is inactive, since it resolves through `target_org_id`.)
+
+**Reject path.** Either approver can decline (`intent=reject` in the same token mechanism): network admin for `kind='org'`, org owner for `kind='coordinator'`. A decline moves the registration to `declined` and emails the applicant. No KC user is enabled, no signalstack org or `aggregators`/`aggregator_orgs` row is graduated.
+
 ---
 
 ## 7. Provisioning steps (per kind)
 
-| Step                    | org | coordinator | Notes                                        |
-| ----------------------- | --- | ----------- | -------------------------------------------- |
-| `ensureGraduated`       | —   | ✅          | creates `aggregators` row (status quo)       |
-| `ensureGraduatedOrg`    | ✅  | —           | creates `aggregator_orgs` row                |
-| `ensureOrgOwnerUser`    | ✅  | —           | KC user + `org_owner` role                   |
-| `ensureIdpUser`         | —   | ✅          | KC user + `coordinator` role                 |
-| `ensureGroupCreate`     | ✅  | —           | create KC group; store `keycloak_group_id`   |
-| `ensureSignalstackOrg`  | —   | ✅          | coordinator's own signalstack org            |
-| `ensureGroupMembership` | —   | ✅          | add to org's KC group + set `parent_org_id`  |
-| `ensureWelcome`         | ✅  | ✅          |                                              |
-| `ensureActivated`       | ✅  | ✅          | gated on the kind's other steps being `done` |
+| Step                    | org | coordinator | Notes                                                                                                                                                                                                                                              |
+| ----------------------- | --- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ensureGraduated`       | —   | ✅          | creates `aggregators` row (status quo)                                                                                                                                                                                                             |
+| `ensureGraduatedOrg`    | ✅  | —           | creates `aggregator_orgs` row                                                                                                                                                                                                                      |
+| `ensureOrgOwnerUser`    | ✅  | —           | KC user + `org_owner` role                                                                                                                                                                                                                         |
+| `ensureIdpUser`         | —   | ✅          | KC user + `coordinator` role                                                                                                                                                                                                                       |
+| `ensureGroupCreate`     | ✅  | —           | create KC group; store `keycloak_group_id`; **add the org owner to the group** so the owner is a member of its own org                                                                                                                             |
+| `ensureSignalstackOrg`  | —   | ✅          | coordinator's own signalstack org. `domains` on the upsert = all network domains (a coordinator has no single domain — see §2); the participant's `item_domain` carries the real seeker/provider split                                             |
+| `ensureGroupMembership` | —   | ✅          | add to org's KC group + set `parent_org_id`. Idempotent across **both** stores: re-running re-asserts KC membership (no-op if present) and re-writes `parent_org_id`; a half-done step (one store written, the other not) is fully healed on retry |
+| `ensureWelcome`         | ✅  | ✅          |                                                                                                                                                                                                                                                    |
+| `ensureActivated`       | ✅  | ✅          | gated on the kind's other steps being `done`                                                                                                                                                                                                       |
 
 **Cross-flow dependency:** `ensureGroupMembership` (coordinator) requires the org's `keycloak_group_id` to already exist. This is guaranteed because a coordinator may only select an **`active`** org (§6), and an org reaches `active` only after `ensureGroupCreate` has run. The step reads `keycloak_group_id` from the `aggregator_orgs` row referenced by `target_org_id`; if it is somehow absent, the step fails and the reconciler retries (it does not silently skip).
 
@@ -190,6 +198,7 @@ The reconciler, dead-letter, auto-reopen, and OTel behaviour are unchanged — t
 - **Group:** one Keycloak **group per org** (created by `ensureGroupCreate`); members are the org owner and its coordinators.
 - **Coordinator login:** OIDC code flow → token claims `aggregator_id` (the coordinator's own SS-org-backed aggregator) + `role=coordinator` → `session.aggregator_id` = that coordinator. With single-org membership there is no org switcher.
 - **org_owner login:** deferred. `ensureOrgOwnerUser` creates the Keycloak user with the `org_owner` role, but the **portal does not expose an org-owner console** yet — there is no org dashboard route and the owner is not granted the portal client's login flow for it. The owner acts only via token email links (approving coordinators); the `/admin/**` gateway policy stays service-auth + per-action JWT (as in the existing design). Enabling org login later = adding the org dashboard + the role-gated read in §9, with no data migration.
+- **Approval-token binding:** a coordinator approval JWT carries `sub = registration_id` **and** the `target_org_id` it was minted for. The decision handler verifies the registration's `target_org_id` matches the token's org claim, so an org owner's link can only decide **their own** org's coordinators — a leaked/forwarded token cannot approve a coordinator that selected a different org. (Network-admin org tokens carry no org claim.)
 - **IdP adapter:** extend `IdpAdminAdapter` with `addToGroup(userId, groupId)` and `assignRole(userId, role)`. Keycloak is the concrete impl; the abstraction is unchanged otherwise.
 
 ---
@@ -227,4 +236,35 @@ A plain FK join over `parent_org_id` → union of the child coordinators' signal
 
 1. **Multi-org coordinator.** Default: **single org now** → `parent_org_id` is one nullable column. Supporting a coordinator in multiple orgs later means replacing `parent_org_id` with a `coordinator_org_memberships(aggregator_id, aggregator_org_id, role)` table and adding an org switcher at login. Deferred.
 2. **Existing aggregators.** Default: they **become coordinators** by assigning the `coordinator` role and leaving `parent_org_id = null` (orphan coordinators). They keep working untouched; no forced migration. An org can "claim" them later.
-3. **Org owner who also onboards.** An `org_owner` has no signalstack org, so cannot onboard. If an org owner needs to onboard, they also register as a coordinator under their org. Acceptable for now; revisit if common.
+3. **Org owner who also onboards.** An `org_owner` has no signalstack org, so cannot onboard. The naive workaround — "also register as a coordinator with the same email" — **does not work**: the engine enforces unique email/phone, so a second registration with the owner's email is rejected at submit. Correct approach when needed: grant the **existing owner KC user** the `coordinator` role and graduate an `aggregators` row + signalstack org for it (one identity, two roles), rather than a second registration. Deferred — not built now; flagged so the uniqueness constraint isn't hit by surprise.
+4. **Self-registration abuse surface.** Coordinator self-registration emails the org owner unsolicited. Add per-IP / per-email rate-limiting on submit, and (later) let an org owner block or report an applicant, so an owner can't be spammed with approval emails.
+
+---
+
+## 12. Migration & rollout
+
+New schema is additive — no data rewrite. Deploy in order:
+
+1. **Migration (additive):** create `aggregator_orgs`; add `aggregators.parent_org_id` (nullable, FK); add `registrations.kind` and `registrations.target_org_id`.
+2. **`kind` backfill + default:** `kind` is `NOT NULL`. Backfill all existing `registrations` rows to `'coordinator'` (today's aggregator = coordinator, §2) and set the column **default** `'coordinator'` so in-flight rows mid-deploy are valid. `target_org_id` stays null on legacy rows.
+3. **Existing aggregators:** untouched — `parent_org_id = null` (orphan coordinators, §11.2). Grant the `coordinator` role lazily (at next login or via a one-off backfill); not required for them to keep working.
+4. **Ship logic** (kind-aware step-sets, org dropdown, approver routing) only after the columns exist and are backfilled.
+5. **Rollback:** the new columns/tables are inert to the old code path (old code never reads `kind`/`parent_org_id`), so a logic rollback is safe without dropping schema.
+
+No signalstack migration (§5). No forced re-parenting of existing aggregators.
+
+---
+
+## 13. Testing
+
+Engine-level behaviour (FSM, reconciler, dead-letter, dedup) is already covered by the base registration suite; these tests cover the **delta**:
+
+- **Step-set selection by `kind`** — `kind='org'` runs the org steps and **no** `ensureSignalstackOrg`/`ensureGraduated`; `kind='coordinator'` runs the aggregator path **plus** `ensureGroupMembership`.
+- **Approver routing** — org request → token to `ADMIN_EMAILS`; coordinator request → token to the selected org's `owner_email` (resolved via `target_org_id`).
+- **Token binding (§8)** — a coordinator token minted for org A cannot approve a coordinator whose `target_org_id` is org B (`INTENT`/org-mismatch rejection).
+- **Org inactive at approval (§6, G3)** — org rejected/retired after submit → coordinator approval declines with `TARGET_ORG_INACTIVE`, no provisioning runs.
+- **Uniqueness collision (§11.3, G4)** — registering a coordinator with an existing org owner's email is rejected at submit.
+- **Bootstrap (§G2)** — coordinator submit with an empty/`pending` org dropdown is rejected (org must be `active`); first org must be admin-approved first.
+- **Owner group membership (§7, G5)** — after org approval, the owner KC user is a member of the org group.
+- **`ensureGroupMembership` idempotency (§7)** — re-running after a half-done step (KC joined but `parent_org_id` unset, and vice versa) converges; reconciler heals.
+- **Per-coordinator isolation (§9)** — coordinator 1 cannot read coordinator 2's data; `session.aggregator_id` scoping holds with `parent_org_id` set.
