@@ -82,18 +82,18 @@ A participant account is attributed to the coordinator's signalstack org via the
 
 ### `aggregator_orgs` (NEW) — the parent org
 
-| Column                     | Type        | Description                                                    |
-| -------------------------- | ----------- | -------------------------------------------------------------- |
-| `id`                       | uuid pk     | Parent-org id                                                  |
-| `name`                     | text        | Org display name                                               |
-| `slug`                     | text unique | URL-safe identifier                                            |
-| `owner_email`              | text        | Org owner contact (approval emails go here)                    |
-| `owner_kc_sub`             | text        | Keycloak user id of the org owner (set on approval)            |
-| `keycloak_group_id`        | text        | The org's Keycloak group (set on approval)                     |
-| `status`                   | enum        | `pending` \| `approved` \| `rejected`                          |
-| `approved_by`              | text        | Network-admin identity that approved                           |
-| `source_registration_id`   | uuid        | FK to `registrations` — idempotency key for graduation retries |
-| `created_at`, `updated_at` | timestamp   |                                                                |
+| Column                     | Type        | Description                                                                                                                         |
+| -------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                       | uuid pk     | Parent-org id                                                                                                                       |
+| `name`                     | text        | Org display name                                                                                                                    |
+| `slug`                     | text unique | URL-safe identifier                                                                                                                 |
+| `owner_email`              | text        | Org owner contact (approval emails go here)                                                                                         |
+| `owner_kc_sub`             | text        | Keycloak user id of the org owner (set on approval)                                                                                 |
+| `keycloak_group_id`        | text        | The org's Keycloak group (set on approval)                                                                                          |
+| `status`                   | enum        | `pending` (created by `ensureGraduatedOrg`) \| `active` (flipped by `ensureActivated`) \| `rejected` — mirrors `aggregators.status` |
+| `approved_by`              | text        | Network-admin identity that approved                                                                                                |
+| `source_registration_id`   | uuid        | FK to `registrations` — idempotency key for graduation retries                                                                      |
+| `created_at`, `updated_at` | timestamp   |                                                                                                                                     |
 
 Kept **separate** from `aggregators` on purpose: an org is a tenant/grouping with no signalstack org and no data-scoping role. Putting it in `aggregators` would let an org id leak into `session.aggregator_id` scoping — a security footgun. Separation makes that impossible and keeps the future org rollup a simple FK join.
 
@@ -133,14 +133,14 @@ Applicant (org)                 API / engine                 Network admin
 2. Verify email   ───► verified
                         admin notification (token link) ────► NETWORK ADMIN
 3. Approve (token) ───► provisioning
-                        ensureOrgOwnerUser  (Keycloak user + org_owner role)
-                        ensureGroupCreate   (Keycloak group → keycloak_group_id)
-                        ensureGraduatedOrg  (aggregator_orgs row, status pending→active)
+                        ensureGraduatedOrg  (create aggregator_orgs row, status = pending)
+                        ensureOrgOwnerUser  (Keycloak user + org_owner role; write owner_kc_sub)
+                        ensureGroupCreate   (Keycloak group; write keycloak_group_id)
                         ensureWelcome
-                        ensureActivated     → active
+                        ensureActivated     (gate: above all done → status active)
 ```
 
-No `ensureSignalstackOrg`, no `aggregators` row. The org owner can be emailed a welcome, but **console login is deferred** — the owner acts only via token links for now.
+**`ensureGraduatedOrg` runs first** so the `aggregator_orgs` row exists before `ensureOrgOwnerUser` and `ensureGroupCreate` write `owner_kc_sub` / `keycloak_group_id` onto it (same "graduate first" rationale as the base design's `ensureGraduated`). It creates the row as `pending`; only `ensureActivated` flips it to `active`, so a partial failure leaves the row repairable. No `ensureSignalstackOrg`, no `aggregators` row. The org owner gets a welcome email, but **console login is deferred** — the owner acts only via token links for now.
 
 ### Coordinator (`kind='coordinator'`)
 
@@ -178,6 +178,8 @@ The coordinator's submit form gains an org selector listing **active** `aggregat
 | `ensureWelcome`         | ✅  | ✅          |                                              |
 | `ensureActivated`       | ✅  | ✅          | gated on the kind's other steps being `done` |
 
+**Cross-flow dependency:** `ensureGroupMembership` (coordinator) requires the org's `keycloak_group_id` to already exist. This is guaranteed because a coordinator may only select an **`active`** org (§6), and an org reaches `active` only after `ensureGroupCreate` has run. The step reads `keycloak_group_id` from the `aggregator_orgs` row referenced by `target_org_id`; if it is somehow absent, the step fails and the reconciler retries (it does not silently skip).
+
 The reconciler, dead-letter, auto-reopen, and OTel behaviour are unchanged — they operate over whichever step-set the row's `kind` defines.
 
 ---
@@ -187,7 +189,7 @@ The reconciler, dead-letter, auto-reopen, and OTel behaviour are unchanged — t
 - **Roles:** `org_owner`, `coordinator` (Keycloak realm/client roles).
 - **Group:** one Keycloak **group per org** (created by `ensureGroupCreate`); members are the org owner and its coordinators.
 - **Coordinator login:** OIDC code flow → token claims `aggregator_id` (the coordinator's own SS-org-backed aggregator) + `role=coordinator` → `session.aggregator_id` = that coordinator. With single-org membership there is no org switcher.
-- **org_owner login:** deferred. The owner approves coordinators only via token email links; the `/admin/**` gateway policy stays service-auth + per-action JWT (as in the existing design).
+- **org_owner login:** deferred. `ensureOrgOwnerUser` creates the Keycloak user with the `org_owner` role, but the **portal does not expose an org-owner console** yet — there is no org dashboard route and the owner is not granted the portal client's login flow for it. The owner acts only via token email links (approving coordinators); the `/admin/**` gateway policy stays service-auth + per-action JWT (as in the existing design). Enabling org login later = adding the org dashboard + the role-gated read in §9, with no data migration.
 - **IdP adapter:** extend `IdpAdminAdapter` with `addToGroup(userId, groupId)` and `assignRole(userId, role)`. Keycloak is the concrete impl; the abstraction is unchanged otherwise.
 
 ---
