@@ -40,7 +40,7 @@ Constraints that shaped the design:
 
 ## 2. Key reframe
 
-**Today's "aggregator" = our "coordinator".** An aggregator is an entity that gets its own signalstack organisation, can log in, and onboards participants. That is exactly what a coordinator is. So the existing registration engine _is_ the coordinator flow; we reuse it and add a lighter parent-org concept above it.
+**Today's "aggregator" = "coordinator".** An aggregator is an entity that gets its own signalstack organisation, can log in, and onboards participants. That is exactly what a coordinator is. So the existing registration engine _is_ the coordinator flow; we reuse it and add a lighter parent-org concept above it.
 
 **Domain (seeker/provider) is not an operator attribute.** It lives on the participant's item (`item_domain`) in signalstack. Neither the org nor the coordinator "has" a domain — a coordinator onboards both. This removes any need to store a domain on the org/coordinator.
 
