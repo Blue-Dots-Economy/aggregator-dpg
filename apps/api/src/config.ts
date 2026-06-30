@@ -119,6 +119,16 @@ const ConfigSchema = z.object({
     .positive()
     .default(7 * 24 * 60 * 60),
 
+  /**
+   * Extra grace beyond the approval-token TTL before a still-pending
+   * registration is eligible for cleanup. Default 24h.
+   */
+  REGISTRATION_PENDING_GRACE_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(24 * 60 * 60 * 1000),
+
   // ─── Schema loader ──────────────────────────────────────────────────────
   /** Absolute or relative path to `config/schemas/`. Used by link-submit Ajv. */
   SCHEMA_ROOT_DIR: z.string().default('./config/schemas'),
