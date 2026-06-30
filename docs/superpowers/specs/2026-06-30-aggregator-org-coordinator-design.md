@@ -48,12 +48,12 @@ Constraints that shaped the design:
 
 ## 3. Identity layers
 
-| Layer             | What it is                                                                                                         | Signalstack org?                                  | Logs in?           | Approved by     |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------- | ------------------ | --------------- |
-| **Network admin** | Platform operator (existing)                                                                                       | —                                                 | existing           | —               |
-| **Parent org**    | Keycloak **group** (+ org-owner KC user) — **no database row**; org metadata lives as group attributes             | **No**                                            | Not yet (deferred) | Network admin   |
-| **Coordinator**   | Keycloak user (`coordinator` role) in the org's group; **= an `aggregators` row** with its **own** signalstack org | **Yes** (status quo)                              | Yes                | The org's owner |
-| **Participant**   | Signalstack `user` account + item (`created_by = account`)                                                         | Lives **under the coordinator's** signalstack org | n/a                | n/a             |
+| Layer             | What it is                                                                                                         | Signalstack org?                                  | Logs in?              | Approved by     |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------- | --------------------- | --------------- |
+| **Network admin** | Platform operator (existing)                                                                                       | —                                                 | No (token links only) | —               |
+| **Parent org**    | Keycloak **group** (+ org-owner KC user) — **no database row**; org metadata lives as group attributes             | **No**                                            | Not yet (deferred)    | Network admin   |
+| **Coordinator**   | Keycloak user (`coordinator` role) in the org's group; **= an `aggregators` row** with its **own** signalstack org | **Yes** (status quo)                              | Yes                   | The org's owner |
+| **Participant**   | Signalstack `user` account + item (`created_by = account`)                                                         | Lives **under the coordinator's** signalstack org | n/a                   | n/a             |
 
 A participant account is attributed to the coordinator's signalstack org via the existing `user.onboarded_by_org_id`. No new attribution field is required (see §9).
 
