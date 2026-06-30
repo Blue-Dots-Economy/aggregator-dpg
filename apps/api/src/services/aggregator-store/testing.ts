@@ -77,6 +77,7 @@ export function buildAggregator(overrides: Partial<Aggregator> = {}): Aggregator
     createdAt,
     updatedAt: createdAt,
     signalstackOrgId: null,
+    parentOrgId: null,
     ...overrides,
   };
 }

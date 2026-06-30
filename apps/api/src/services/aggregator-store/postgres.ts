@@ -42,6 +42,7 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
           consent: input.consent,
           createdBy: input.createdBy,
           updatedBy: input.updatedBy,
+          parentOrgId: input.parentOrgId ?? null,
         })
         .returning();
       const row = rows[0];
@@ -108,6 +109,18 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
     }
   }
 
+  async findByParentOrgId(orgId: string): Promise<StoreResult<Aggregator[]>> {
+    try {
+      const rows = await getDb()
+        .select()
+        .from(aggregators)
+        .where(eq(aggregators.parentOrgId, orgId));
+      return { ok: true, value: rows.map(toDomain) };
+    } catch (err: unknown) {
+      return this.mapReadError('aggregatorStore.findByParentOrgId', err);
+    }
+  }
+
   async list(filter: ListAggregatorsFilter): Promise<StoreResult<ListAggregatorsPage>> {
     const limit = Math.max(1, Math.min(1000, filter.limit ?? 50));
     const offset = Math.max(0, filter.offset ?? 0);
@@ -148,6 +161,7 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
     if (patch.locations !== undefined) updates['locations'] = patch.locations;
     if (patch.consent !== undefined) updates['consent'] = patch.consent;
     if (patch.status !== undefined) updates['status'] = patch.status;
+    if (patch.parentOrgId !== undefined) updates['parentOrgId'] = patch.parentOrgId;
 
     try {
       const rows = await getDb()
@@ -291,5 +305,6 @@ function toDomain(row: typeof aggregators.$inferSelect): Aggregator {
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     signalstackOrgId: row.signalstackOrgId,
+    parentOrgId: row.parentOrgId,
   };
 }

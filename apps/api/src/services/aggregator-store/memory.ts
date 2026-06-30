@@ -60,6 +60,7 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
       createdAt: now,
       updatedAt: now,
       signalstackOrgId: null,
+      parentOrgId: input.parentOrgId ?? null,
     };
     this.indexInsert(row);
     return { ok: true, value: row };
@@ -82,6 +83,13 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
   async findByContactEmail(email: string): Promise<StoreResult<Aggregator | null>> {
     const id = this.byEmail.get(email.toLowerCase());
     return { ok: true, value: id ? (this.byId.get(id) ?? null) : null };
+  }
+
+  async findByParentOrgId(orgId: string): Promise<StoreResult<Aggregator[]>> {
+    return {
+      ok: true,
+      value: [...this.byId.values()].filter((r) => r.parentOrgId === orgId),
+    };
   }
 
   async list(filter: ListAggregatorsFilter): Promise<StoreResult<ListAggregatorsPage>> {
@@ -132,6 +140,7 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
       locations: patch.locations ?? existing.locations,
       consent: patch.consent ?? existing.consent,
       status: patch.status ?? existing.status,
+      parentOrgId: patch.parentOrgId !== undefined ? patch.parentOrgId : existing.parentOrgId,
       updatedBy: patch.updatedBy,
       updatedAt: new Date(),
     };
