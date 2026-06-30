@@ -48,6 +48,17 @@ const ConfigSchema = z.object({
     .enum(['true', 'false'])
     .default('false')
     .transform((v) => v === 'true'),
+  /**
+   * Enables the parent-org → coordinator hierarchy for this instance
+   * (spec §2). OFF (default) = today's flat registration/approval flow,
+   * unchanged: no org tab, no org dropdown, no `aggregator_orgs` rows,
+   * `aggregators.parent_org_id` stays null. Read once at startup; flipping
+   * requires a restart. Two instances of the same network can differ.
+   */
+  ORG_HIERARCHY_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
   /** Public origin of the API service; used to assemble admin email links. */
   PUBLIC_API_URL: z.string().default('http://localhost:4000'),
   /** Public origin of the portal (BFF web app); used in welcome emails. */
