@@ -11,7 +11,7 @@
 ## Contents
 
 1. [Goal](#1-goal)
-2. [Feature flag — org hierarchy on/off per dot](#2-feature-flag--org-hierarchy-onoff-per-dot)
+2. [Feature flag — org hierarchy on/off per instance](#2-feature-flag--org-hierarchy-onoff-per-instance)
 3. [Key reframe](#3-key-reframe)
 4. [Identity layers](#4-identity-layers)
 5. [Data model](#5-data-model)
@@ -36,19 +36,19 @@ Constraints that shaped the design:
 - Minimise change. Today's aggregators already work; do not rework them. Build on the current flow, not the `agg-registration-v2` engine.
 - Do not change the signalstack schema.
 - Preserve the `session.aggregator_id` scoping invariant (it is the core security boundary).
-- **The hierarchy is optional per deployment** — some dots want org→coordinator, some want today's flat aggregator. A flag decides (§2).
+- **The hierarchy is optional per instance** — some instances want org→coordinator, some want today's flat aggregator. A flag decides (§2).
 
 ---
 
-## 2. Feature flag — org hierarchy on/off per dot
+## 2. Feature flag — org hierarchy on/off per instance
 
-The whole org/coordinator layer is gated by a single startup flag, since some networks want it and some don't.
+The whole org/coordinator layer is gated by a single startup flag, since some instances want it and some don't.
 
-- **Flag:** `ORG_HIERARCHY_ENABLED` (boolean env var, in `packages/config` / `config.ts`, **default `false`**). aggregator-dpg deploys **one instance per network** (`AGGREGATOR_NETWORK`), so a per-deployment env flag is exactly "per dot". Read once at startup (configuration-discipline rule); flipping it needs a restart.
+- **Flag:** `ORG_HIERARCHY_ENABLED` (boolean env var, in `packages/config` / `config.ts`, **default `false`**). It is read **per running instance** from that instance's environment, so each deployment decides independently — two instances of the same network can differ. Read once at startup (configuration-discipline rule); flipping it needs a restart.
 
 - **OFF (default) — today's behaviour, unchanged:**
   - Single flat registration form → one `aggregators` row → **network-admin** approval → active. No org tab, no org dropdown, no Keycloak groups, no coordinator concept. `parent_kc_group_id` stays `null`.
-  - 100% backward compatible: existing dots that don't set the flag see zero behavioural change.
+  - 100% backward compatible: existing instances that don't set the flag see zero behavioural change.
 
 - **ON:**
   - Two registration entry points (Org tab + Coordinator tab), org dropdown, org-owner approval routing, Keycloak groups, `coordinator.parent_kc_group_id` populated.
@@ -257,9 +257,9 @@ A plain filter on `parent_kc_group_id` → union of the child coordinators' sign
 Additive and small — **no `aggregator_orgs` table, no `registrations` table**.
 
 1. **Migration (additive):** add `aggregators.parent_kc_group_id` (text, nullable). That's the only schema change.
-2. **Flag default off:** ship `ORG_HIERARCHY_ENABLED=false` everywhere first. With the flag off the new column is unused and behaviour is identical to today, so the migration is safe to deploy to every dot immediately.
+2. **Flag default off:** ship `ORG_HIERARCHY_ENABLED=false` everywhere first. With the flag off the new column is unused and behaviour is identical to today, so the migration is safe to deploy to every instance immediately.
 3. **The §7 recovery fix** ships independently of the flag (it fixes the flat flow too) — deploy it first/standalone.
-4. **Enable per dot:** flip `ORG_HIERARCHY_ENABLED=true` only on dots that want the hierarchy, then admin-approve the first org (bootstrap) before coordinators can register.
+4. **Enable per instance:** flip `ORG_HIERARCHY_ENABLED=true` only on instances that want the hierarchy, then admin-approve the first org (bootstrap) before coordinators can register.
 5. **Rollback:** turning the flag off reverts to flat behaviour; the column stays inert. KC groups created while on become harmless orphans. No schema drop needed.
 
 No signalstack migration. No forced re-parenting of existing aggregators.
