@@ -165,6 +165,36 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
           throw httpError('PHONE_EXISTS', { fields: { phone: phoneE164 } });
         }
 
+        // Reuse the existing (still-disabled) KC user; refresh its attributes
+        // and reset the decision gate to pending. Recreate it only if drift
+        // left the DB row without a matching KC user.
+        const kcExisting = await idp.findByEmail(contact.email);
+        if (!kcExisting.ok) {
+          throw httpError('IDP_UNAVAILABLE', {
+            cause: kcExisting.error,
+            fields: { sub_operation: 'idp.findByEmail', reclaim: true },
+          });
+        }
+        if (kcExisting.value !== null) {
+          const kcId = kcExisting.value.id;
+
+          // Guard: the applicant may be changing their phone to one already
+          // held by a DIFFERENT KC user. The OTP authenticator resolves login
+          // by the `phoneNumber` attribute, so a duplicate would route login
+          // to the wrong account. Check before the DB update so a rejected
+          // submission leaves the existing record unmodified.
+          const kcPhone = await idp.findByAttribute(KC_ATTR.PHONE_NUMBER, phoneE164);
+          if (!kcPhone.ok) {
+            throw httpError('IDP_UNAVAILABLE', {
+              cause: kcPhone.error,
+              fields: { sub_operation: 'idp.findByAttribute.phoneNumber', reclaim: true },
+            });
+          }
+          if (kcPhone.value !== null && kcPhone.value.id !== kcId) {
+            throw httpError('PHONE_EXISTS', { fields: { phone: phoneE164 } });
+          }
+        }
+
         const updated = await aggregatorStore.update(existing.id, {
           name: body.name,
           type: body.type,
@@ -182,24 +212,32 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
           });
         }
 
-        // Reuse the existing (still-disabled) KC user; refresh its attributes
-        // and reset the decision gate to pending. Recreate it only if drift
-        // left the DB row without a matching KC user.
-        const kcExisting = await idp.findByEmail(contact.email);
-        if (!kcExisting.ok) {
-          throw httpError('IDP_UNAVAILABLE', {
-            cause: kcExisting.error,
-            fields: { sub_operation: 'idp.findByEmail', reclaim: true },
-          });
-        }
         if (kcExisting.value !== null) {
           const kcId = kcExisting.value.id;
-          await idp.setAttributes(kcId, {
+          const setAttrResult = await idp.setAttributes(kcId, {
             [KC_ATTR.AGGREGATOR_TYPE]: body.type,
             [KC_ATTR.PHONE_NUMBER]: phoneE164,
           });
-          await idp.setUserDecision(kcId, 'pending');
-          await idp.disableUser(kcId);
+          if (!setAttrResult.ok) {
+            throw httpError('IDP_UNAVAILABLE', {
+              cause: setAttrResult.error,
+              fields: { sub_operation: 'idp.setAttributes', reclaim: true },
+            });
+          }
+          const setDecisionResult = await idp.setUserDecision(kcId, 'pending');
+          if (!setDecisionResult.ok) {
+            throw httpError('IDP_UNAVAILABLE', {
+              cause: setDecisionResult.error,
+              fields: { sub_operation: 'idp.setUserDecision', reclaim: true },
+            });
+          }
+          const disableResult = await idp.disableUser(kcId);
+          if (!disableResult.ok) {
+            throw httpError('IDP_UNAVAILABLE', {
+              cause: disableResult.error,
+              fields: { sub_operation: 'idp.disableUser', reclaim: true },
+            });
+          }
         } else {
           const { firstName, lastName } = splitName(contact.name);
           const recreated = await idp.createUser({

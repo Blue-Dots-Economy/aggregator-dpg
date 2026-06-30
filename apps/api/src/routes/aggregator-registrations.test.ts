@@ -342,4 +342,53 @@ describe('POST /v1/aggregator-registrations/create', () => {
     expect(res.statusCode).toBe(409);
     expect((res.json() as { error: { code: string } }).error.code).toBe('PHONE_EXISTS');
   });
+
+  it('rejects reclaim when the new phone is already held by a different KC user', async () => {
+    const id = await seedPending(); // asha@trrain.org, phone +919876543210
+
+    // Seed a DIFFERENT KC user that holds the target phone.
+    await idp.createUser({
+      email: 'other@x.org',
+      phone: '+911234567890',
+      attributes: { aggregator_id: 'other-agg', phoneNumber: '+911234567890' },
+    });
+
+    // Resubmit for email A but with the phone belonging to the other KC user.
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/aggregator-registrations/create',
+      headers: AUTH_HEADER,
+      payload: {
+        ...validBody,
+        contact: { ...validBody.contact, phone: '+911234567890' },
+      },
+    });
+    expect(res.statusCode).toBe(409);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('PHONE_EXISTS');
+
+    // The reclaimed row must NOT have been mutated to the new phone.
+    const stored = await aggregatorStore.findById(id);
+    if (stored.ok && stored.value) {
+      expect(stored.value.contact.phone).toBe('+919876543210');
+    }
+  });
+
+  it('returns 503 when a KC write fails during reclaim', async () => {
+    await seedPending();
+    const originalSetDecision = idp.setUserDecision.bind(idp);
+    idp.setUserDecision = async () => ({
+      ok: false as const,
+      error: { code: 'IDP_UNAVAILABLE' as const, message: 'kc down' },
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/aggregator-registrations/create',
+      headers: AUTH_HEADER,
+      payload: validBody,
+    });
+    expect(res.statusCode).toBe(503);
+
+    idp.setUserDecision = originalSetDecision;
+  });
 });
