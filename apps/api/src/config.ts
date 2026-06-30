@@ -188,6 +188,22 @@ export const corsOrigins: string[] = config.CORS_ORIGINS.split(',')
   .filter(Boolean);
 
 /**
+ * Whether the org→coordinator hierarchy is enabled for this instance.
+ *
+ * Read from the live environment at **call time** rather than from the frozen
+ * `config` snapshot. It is consumed only on the startup path (route
+ * registration inside `buildApp()`), so this still honours "read once at
+ * startup" (configuration-discipline) while remaining deterministic under
+ * Vitest's hoisted-import evaluation order, where a test sets the env var
+ * before `buildApp()` runs but after `config` was first parsed.
+ *
+ * @returns `true` when `ORG_HIERARCHY_ENABLED` is the literal string `"true"`.
+ */
+export function orgHierarchyEnabled(): boolean {
+  return process.env.ORG_HIERARCHY_ENABLED === 'true';
+}
+
+/**
  * Effective docs-surface switch used to gate the OpenAPI spec + Scalar UI.
  *
  * Secure-by-default on a public API: even when `API_REFERENCE_ENABLED` is on,
