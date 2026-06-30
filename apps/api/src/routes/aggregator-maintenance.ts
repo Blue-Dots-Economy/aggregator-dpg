@@ -60,17 +60,43 @@ export async function registerAggregatorMaintenanceRoutes(app: FastifyInstance):
         });
       }
 
+      if (page.value.rows.length === 1000) {
+        log.warn(
+          { scanned: 1000 },
+          'stale-pending cleanup hit the 1000-row cap — more stale rows may remain for the next pass',
+        );
+      }
+
       const stale = page.value.rows.filter((r) => r.updatedAt < cutoff);
       const prunedIds: string[] = [];
       for (const row of stale) {
         // Delete the KC user first so a partial failure leaves the DB row
         // (re-tried next pass) rather than an orphaned KC user.
+        const kcStart = Date.now();
         const kc = await idp.findByEmail(row.contactEmail);
-        if (kc.ok && kc.value) {
+        if (!kc.ok) {
+          log.warn(
+            {
+              status: 'skipped',
+              aggregator_id: row.id,
+              code: kc.error.code,
+              latency_ms: Date.now() - kcStart,
+            },
+            'skipped stale-pending prune — KC user lookup failed',
+          );
+          continue;
+        }
+        if (kc.value) {
+          const delStart = Date.now();
           const del = await idp.deleteUser(kc.value.id);
           if (!del.ok) {
             log.warn(
-              { status: 'skipped', aggregator_id: row.id, code: del.error.code },
+              {
+                status: 'skipped',
+                aggregator_id: row.id,
+                code: del.error.code,
+                latency_ms: Date.now() - delStart,
+              },
               'skipped stale-pending prune — KC user delete failed',
             );
             continue;

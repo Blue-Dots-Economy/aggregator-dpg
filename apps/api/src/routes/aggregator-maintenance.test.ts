@@ -131,4 +131,49 @@ describe('POST /admin/v1/aggregator-registrations/cleanup-stale', () => {
     expect(body.scanned).toBe(1);
     expect(body.pruned).toBe(0);
   });
+
+  it('skips (does not prune) a stale row when KC findByEmail fails', async () => {
+    // Stale pending row — old enough to be pruned.
+    const stale = buildAggregator({
+      id: '44444444-4444-4444-4444-444444444444',
+      orgSlug: 'stale-dddd',
+      contact: { name: 'LookupFail', phone: '+919000000004', email: 'lookup-fail@x.org' },
+      contactPhone: '+919000000004',
+      contactEmail: 'lookup-fail@x.org',
+      status: 'pending',
+      updatedAt: new Date('2020-01-01T00:00:00Z'),
+    });
+    aggregatorStore.seed([stale]);
+    // No KC user created for this email — the fake will return ok:true,null.
+    // We monkey-patch findByEmail to return an IDP error for this specific email,
+    // simulating Keycloak being unreachable during the lookup.
+    const originalFindByEmail = idp.findByEmail.bind(idp);
+    idp.findByEmail = async (email: string) => {
+      if (email === 'lookup-fail@x.org') {
+        return {
+          ok: false as const,
+          error: { code: 'IDP_UNAVAILABLE' as const, message: 'kc down' },
+        };
+      }
+      return originalFindByEmail(email);
+    };
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/admin/v1/aggregator-registrations/cleanup-stale',
+      headers: AUTH_HEADER,
+    });
+
+    // Restore original method.
+    idp.findByEmail = originalFindByEmail;
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { scanned: number; pruned: number; prunedIds: string[] };
+    // The row must NOT have been deleted — unknown KC state means skip, not prune.
+    expect(body.pruned).toBe(0);
+    expect(body.prunedIds).not.toContain(stale.id);
+    // DB row still present — re-tryable on next pass.
+    const row = await aggregatorStore.findById(stale.id);
+    if (row.ok) expect(row.value).not.toBeNull();
+  });
 });
