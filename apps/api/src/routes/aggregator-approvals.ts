@@ -40,6 +40,7 @@ import {
   renderApplicantRejected,
 } from '../services/email-templates/index.js';
 import { renderConfirmPage, renderResultPage } from '../views/approval-pages.js';
+import { sendAdminReviewEmail } from '../services/registration-notify.js';
 import type { Aggregator } from '../services/aggregator-store/index.js';
 import { KC_ATTR } from '../services/idp-admin/index.js';
 import type { IdpUser } from '../services/idp-admin/index.js';
@@ -96,13 +97,23 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
 
       const verified = await verifyApprovalToken(token);
       if (!verified.ok) {
+        const isExpired = verified.error.code === 'EXPIRED';
         return sendHtml(
           reply,
           400,
           renderResultPage({
             status: 'error',
-            title: 'Invalid link',
+            title: isExpired ? 'Link expired' : 'Invalid link',
             message: tokenErrorMessage(verified.error.code),
+            ...(isExpired
+              ? {
+                  action: {
+                    url: `${config.PUBLIC_API_URL}/admin/v1/aggregator-registrations/resend/${aggregatorId}`,
+                    token,
+                    label: 'Resend approval link',
+                  },
+                }
+              : {}),
           }),
         );
       }
@@ -512,6 +523,78 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
       );
     },
   );
+
+  app.post(
+    '/admin/v1/aggregator-registrations/resend/:id',
+    {
+      schema: {
+        tags: ['aggregator-approvals'],
+        summary: 'Resend a fresh approval link for a pending registration',
+        description:
+          'Re-mints the approve/reject token pair and re-emails the reviewers for a still-pending registration. Accepts an expired-but-signature-valid token as proof the caller held a legitimate link. Returns an HTML result page.',
+        params: ApprovalParamsSchema,
+      },
+    },
+    async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+      const log = req.log.child({ operation: 'aggregator-registration.resend' });
+      const aggregatorId = req.params.id;
+      const body = (req.body ?? {}) as { token?: string };
+      const token = typeof body.token === 'string' ? body.token : '';
+
+      const verified = await verifyApprovalToken(token, { allowExpired: true });
+      if (!verified.ok) {
+        return sendHtml(
+          reply,
+          400,
+          renderResultPage({
+            status: 'error',
+            title: 'Invalid link',
+            message: tokenErrorMessage(verified.error.code),
+          }),
+        );
+      }
+      if (verified.aggregatorId !== aggregatorId) {
+        return sendHtml(
+          reply,
+          400,
+          renderResultPage({
+            status: 'error',
+            title: 'Invalid link',
+            message: 'Token does not match the requested aggregator.',
+          }),
+        );
+      }
+
+      const lookup = await loadAggregatorAndUser(aggregatorId);
+      if (!lookup.ok) return sendHtml(reply, lookup.status, lookup.html);
+
+      const prior = decisionFromStatus(lookup.aggregator.status);
+      if (prior) {
+        return sendHtml(reply, 200, renderResultPage(alreadyDecidedView(prior)));
+      }
+
+      await sendAdminReviewEmail(
+        {
+          aggregatorId,
+          applicantName: lookup.aggregator.name,
+          applicantEmail: lookup.aggregator.contact.email,
+          applicantPhone: lookup.aggregator.contactPhone,
+        },
+        log,
+      );
+
+      log.info({ status: 'success', aggregator_id: aggregatorId }, 'approval link resent');
+      return sendHtml(
+        reply,
+        200,
+        renderResultPage({
+          status: 'success',
+          title: 'Approval link sent',
+          message: 'A fresh approval link has been emailed to the reviewers.',
+        }),
+      );
+    },
+  );
 }
 
 interface PriorDecision {
@@ -622,7 +705,7 @@ function isIntent(v: unknown): v is 'approve' | 'reject' {
 function tokenErrorMessage(code: 'EXPIRED' | 'INVALID' | 'MALFORMED'): string {
   switch (code) {
     case 'EXPIRED':
-      return 'This approval link has expired. Ask the applicant to resubmit.';
+      return 'This approval link has expired. Use the button below to email a fresh link to the reviewers.';
     case 'INVALID':
       return 'Approval link signature is invalid.';
     case 'MALFORMED':

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import type { FastifyInstance } from 'fastify';
+import { SignJWT } from 'jose';
 import { buildApp } from '../app.js';
 import {
   AggregatorStoreFake,
@@ -560,5 +561,106 @@ describe('admin approval routes', () => {
       payload: { token: '', decision: 'maybe' },
     });
     expect(res.statusCode).toBe(400);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Resend helpers
+  // ---------------------------------------------------------------------------
+
+  let resendIdCounter = 0;
+
+  /** Seeds a fresh pending aggregator + disabled KC user and returns its id. */
+  async function seedPendingAggregator(): Promise<{ id: string }> {
+    resendIdCounter++;
+    const id = `aaaaaaaa-bbbb-cccc-dddd-${String(resendIdCounter).padStart(12, '0')}`;
+    aggregatorStore.seed([
+      buildAggregator({
+        id,
+        orgSlug: `resend-org-${resendIdCounter}`,
+        actorType: 'aggregator',
+        type: null,
+        name: 'Resend Org',
+        contact: { name: 'Test User', phone: '+919000000001', email: 'resend@test.local' },
+        contactPhone: '+919000000001',
+        status: 'pending',
+      }),
+    ]);
+    const created = await idp.createUser({
+      email: 'resend@test.local',
+      firstName: 'Test',
+      lastName: 'User',
+      enabled: false,
+      attributes: { aggregator_id: id, decision_made: 'pending' },
+    });
+    if (!created.ok) throw new Error('seed KC user failed');
+    return { id };
+  }
+
+  /**
+   * Mints an approve token with iat/exp in the past (expired but valid signature)
+   * for the given aggregatorId. Mirrors the pattern used in approval-token.test.ts.
+   */
+  async function mintExpiredApproveToken(aggregatorId: string): Promise<string> {
+    const key = new TextEncoder().encode(process.env.APPROVAL_TOKEN_SECRET);
+    return new SignJWT({ intent: 'approve' })
+      .setProtectedHeader({ alg: 'HS256' })
+      .setSubject(aggregatorId)
+      .setIssuer('aggregator-api')
+      .setAudience('aggregator-admin')
+      .setIssuedAt(Math.floor(Date.now() / 1000) - 7200)
+      .setExpirationTime(Math.floor(Date.now() / 1000) - 3600)
+      .sign(key);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Resend route tests
+  // ---------------------------------------------------------------------------
+
+  it('resend re-mints and re-emails for a pending record (expired token accepted)', async () => {
+    const { id } = await seedPendingAggregator();
+    const expired = await mintExpiredApproveToken(id);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/resend/${id}`,
+      payload: { token: expired },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toContain('text/html');
+    expect(mailer.outbox.length).toBeGreaterThanOrEqual(1);
+    expect(mailer.outbox.at(-1)?.html).toContain('intent=approve');
+  });
+
+  it('resend rejects a malformed token with 400', async () => {
+    const { id } = await seedPendingAggregator();
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/resend/${id}`,
+      payload: { token: 'not-a-jwt' },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('resend shows already-decided for an active record', async () => {
+    const { id } = await seedPendingAggregator();
+    await aggregatorStore.updateStatus(id, 'active', 'admin');
+    const expired = await mintExpiredApproveToken(id);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/resend/${id}`,
+      payload: { token: expired },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain('already');
+  });
+
+  it('expired approval link page offers a resend button', async () => {
+    const { id } = await seedPendingAggregator();
+    const expired = await mintExpiredApproveToken(id);
+    const res = await app.inject({
+      method: 'GET',
+      url: `/admin/v1/aggregator-registrations/read/${id}?token=${encodeURIComponent(expired)}&intent=approve`,
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toContain(`/admin/v1/aggregator-registrations/resend/${id}`);
   });
 });
