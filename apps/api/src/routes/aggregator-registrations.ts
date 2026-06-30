@@ -33,14 +33,12 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { RegistrationPayloadSchema } from '@aggregator-dpg/shared-primitives/aggregator';
 import type { BecknContact } from '@aggregator-dpg/shared-primitives/aggregator';
-import { config } from '../config.js';
 import { getRegistrationValidator } from '../services/registration-validator.js';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
 import { getAggregatorProfileStore } from '../services/aggregator-profile-store/index.js';
 import { getIdpAdmin } from '../services/idp-admin/index.js';
-import { getMailer } from '../services/mailer/index.js';
-import { mintApprovalToken, formatApprovalTtl } from '../services/approval-token.js';
-import { renderAdminReview } from '../services/email-templates/index.js';
+import { sendAdminReviewEmail } from '../services/registration-notify.js';
+import type { AggregatorStatus } from '@aggregator-dpg/shared-primitives/aggregator';
 import { normalisePhone } from '../services/phone.js';
 import { slugFromName } from '../services/slug.js';
 import { authenticateAny } from '../services/auth/access-token.js';
@@ -127,7 +125,14 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
       const aggregatorStore = getAggregatorStore();
       const profileStore = getAggregatorProfileStore();
       const idp = getIdpAdmin();
-      const mailer = getMailer();
+
+      // Server-stamp the consent timestamp so the recorded value reflects
+      // when the API actually accepted the registration, not whatever the
+      // client clock reported. `valid_till` stays caller-supplied but is
+      // clamped to a hard ceiling so a misbehaving form can not store a
+      // 1000-year consent window. Computed early so it is in scope for both
+      // the reclaim path and the new-registration path below.
+      const serverConsent = stampConsent(body.consent);
 
       // Pre-check email + phone uniqueness in both stores. The DB
       // generated-column UNIQUEs (contact_phone / contact_email) and Keycloak
@@ -141,7 +146,110 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
         });
       }
       if (dbEmail.value !== null) {
-        throw httpError('USER_EXISTS', { fields: { email: contact.email } });
+        const existing = dbEmail.value;
+        if (!isReclaimable(existing.status)) {
+          throw httpError('USER_EXISTS', { fields: { email: contact.email } });
+        }
+        // Reclaim path: same applicant resubmitting against a pending/rejected
+        // record (e.g. after the approval link expired). Refresh the row +
+        // KC user in place and re-mint a fresh approval link.
+        const dbPhone = await aggregatorStore.findByContactPhone(phoneE164);
+        if (!dbPhone.ok) {
+          throw httpError('DB_UNAVAILABLE', {
+            cause: new Error(dbPhone.error.message),
+            fields: { sub_operation: 'aggregatorStore.findByContactPhone' },
+          });
+        }
+        if (dbPhone.value !== null && dbPhone.value.id !== existing.id) {
+          // The new phone belongs to a different record — genuine conflict.
+          throw httpError('PHONE_EXISTS', { fields: { phone: phoneE164 } });
+        }
+
+        const updated = await aggregatorStore.update(existing.id, {
+          name: body.name,
+          type: body.type,
+          url: body.url ?? null,
+          contact,
+          locations: body.locations,
+          consent: serverConsent,
+          status: 'pending',
+          updatedBy: 'self',
+        });
+        if (!updated.ok) {
+          throw httpError('DB_UNAVAILABLE', {
+            cause: new Error(updated.error.message),
+            fields: { sub_operation: 'aggregatorStore.update', reclaim: true },
+          });
+        }
+
+        // Reuse the existing (still-disabled) KC user; refresh its attributes
+        // and reset the decision gate to pending. Recreate it only if drift
+        // left the DB row without a matching KC user.
+        const kcExisting = await idp.findByEmail(contact.email);
+        if (!kcExisting.ok) {
+          throw httpError('IDP_UNAVAILABLE', {
+            cause: kcExisting.error,
+            fields: { sub_operation: 'idp.findByEmail', reclaim: true },
+          });
+        }
+        if (kcExisting.value !== null) {
+          const kcId = kcExisting.value.id;
+          await idp.setAttributes(kcId, {
+            [KC_ATTR.AGGREGATOR_TYPE]: body.type,
+            [KC_ATTR.PHONE_NUMBER]: phoneE164,
+          });
+          await idp.setUserDecision(kcId, 'pending');
+          await idp.disableUser(kcId);
+        } else {
+          const { firstName, lastName } = splitName(contact.name);
+          const recreated = await idp.createUser({
+            email: contact.email,
+            username: contact.email,
+            phone: phoneE164,
+            enabled: false,
+            firstName,
+            lastName,
+            attributes: {
+              [KC_ATTR.AGGREGATOR_ID]: existing.id,
+              [KC_ATTR.AGGREGATOR_TYPE]: body.type,
+              [KC_ATTR.PHONE_NUMBER]: phoneE164,
+              [KC_ATTR.DECISION_MADE]: 'pending',
+            },
+          });
+          if (!recreated.ok) {
+            throw httpError('IDP_UNAVAILABLE', {
+              cause: recreated.error,
+              fields: { sub_operation: 'idp.createUser', reclaim: true },
+            });
+          }
+        }
+
+        await sendAdminReviewEmail(
+          {
+            aggregatorId: existing.id,
+            applicantName: body.name,
+            applicantEmail: contact.email,
+            applicantPhone: phoneE164,
+          },
+          log,
+        );
+
+        log.info(
+          {
+            status: 'success',
+            latency_ms: Date.now() - start,
+            aggregator_id: existing.id,
+            reclaim: true,
+          },
+          'aggregator registration resubmitted (reclaimed pending record)',
+        );
+
+        return reply.status(200).send({
+          aggregator_id: existing.id,
+          org_slug: existing.orgSlug,
+          status: 'pending',
+          message: 'Registration re-submitted. A fresh approval link has been sent for review.',
+        });
       }
 
       const dbPhone = await aggregatorStore.findByContactPhone(phoneE164);
@@ -183,12 +291,6 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
         throw httpError('PHONE_EXISTS', { fields: { phone: phoneE164 } });
       }
 
-      // Server-stamp the consent timestamp so the recorded value reflects
-      // when the API actually accepted the registration, not whatever the
-      // client clock reported. `valid_till` stays caller-supplied but is
-      // clamped to a hard ceiling so a misbehaving form can not store a
-      // 1000-year consent window.
-      const serverConsent = stampConsent(body.consent);
       const aggregator = await createAggregatorWithSlug(aggregatorStore, body.name, {
         type: body.type,
         url: body.url ?? null,
@@ -255,52 +357,15 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
         });
       }
 
-      // Mint approval JWTs (separate token per intent so the URL itself is
-      // self-describing — admin's email client previews show distinct links).
-      let approveToken: string;
-      let rejectToken: string;
-      try {
-        const ttlSec = config.APPROVAL_TOKEN_TTL_SECONDS;
-        approveToken = (await mintApprovalToken({ aggregatorId, intent: 'approve', ttlSec })).token;
-        rejectToken = (await mintApprovalToken({ aggregatorId, intent: 'reject', ttlSec })).token;
-      } catch (err) {
-        // KC user remains disabled + orphaned-but-known. Don't roll back —
-        // the admin can still trigger an action manually.
-        throw httpError('TOKEN_MINT_FAILED', { cause: err });
-      }
-
-      const recipients = parseAdminEmails();
-      const decisionBase = `${config.PUBLIC_API_URL}/admin/v1/aggregator-registrations/read/${aggregatorId}`;
-      const reviewMail = renderAdminReview({
-        registrationId: aggregatorId,
-        applicantName: body.name,
-        applicantEmail: contact.email,
-        applicantPhone: phoneE164,
-        association: body.name,
-        aggregatorType: 'aggregator',
-        approveUrl: `${decisionBase}?token=${encodeURIComponent(approveToken)}&intent=approve`,
-        rejectUrl: `${decisionBase}?token=${encodeURIComponent(rejectToken)}&intent=reject`,
-        submittedAt: new Date(),
-        expiresInText: formatApprovalTtl(config.APPROVAL_TOKEN_TTL_SECONDS),
-      });
-      const mailResult = await mailer.send({
-        to: recipients,
-        subject: reviewMail.subject,
-        html: reviewMail.html,
-        text: reviewMail.text,
-      });
-      if (!mailResult.ok) {
-        // Email failure is logged but not surfaced as a 5xx — the row is
-        // still authoritative and admins can resend.
-        log.warn(
-          {
-            sub_operation: 'mailer.send',
-            code: mailResult.error.code,
-            cause: mailResult.error.message,
-          },
-          'admin review email delivery failed — registration still recorded',
-        );
-      }
+      await sendAdminReviewEmail(
+        {
+          aggregatorId,
+          applicantName: body.name,
+          applicantEmail: contact.email,
+          applicantPhone: phoneE164,
+        },
+        log,
+      );
 
       log.info(
         {
@@ -440,32 +505,16 @@ function splitName(fullName: string): { firstName: string; lastName: string } {
 }
 
 /**
- * Parse the comma-separated ADMIN_EMAILS env value into a clean array.
- * Resilient to ConfigMap / Helm quirks that often slip through:
+ * Whether an existing registration in this status may be reclaimed by a
+ * resubmission. `pending` (awaiting a decision) and `inactive` (rejected)
+ * records belong to the same applicant and are refreshed in place; `active`
+ * and `retired` are live identities and must keep returning a duplicate error.
  *
- *   • Wrapping single or double quotes left in by `| quote` filters.
- *   • Stray spaces / newlines / tabs around commas and entries.
- *   • Empty or whitespace-only entries.
- *
- * Format ops provide (same pattern as `cc_email` in sibling projects):
- *
- *   ADMIN_EMAILS: "a@example.com,b@example.com,c@example.com"
- *
- * Returns the parsed list, or a safe default when the env is unset.
+ * @param status - The matched aggregator's lifecycle status.
+ * @returns `true` when a resubmit should refresh rather than 409.
  */
-function parseAdminEmails(): string[] {
-  let raw = (process.env.ADMIN_EMAILS ?? '').trim();
-  if (
-    raw.length >= 2 &&
-    ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'")))
-  ) {
-    raw = raw.slice(1, -1).trim();
-  }
-  const list = raw
-    .split(/[,\n]/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-  return list.length > 0 ? list : ['admin@bluedots.local'];
+export function isReclaimable(status: AggregatorStatus): boolean {
+  return status === 'pending' || status === 'inactive';
 }
 
 // Re-export so existing tests that import { z } from this module still resolve.

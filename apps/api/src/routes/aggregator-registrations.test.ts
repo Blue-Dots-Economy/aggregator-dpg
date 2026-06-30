@@ -233,4 +233,113 @@ describe('POST /v1/aggregator-registrations/create', () => {
 
     idp.createUser = originalCreate;
   });
+
+  async function seedPending(overrides?: { status?: 'pending' | 'inactive' | 'active' }) {
+    const created = await aggregatorStore.create({
+      orgSlug: 'trrain-aaaa',
+      actorType: 'aggregator',
+      name: 'TRRAIN',
+      type: 'seeker',
+      url: null,
+      contact: {
+        name: 'Asha Kumari',
+        phone: '+919876543210',
+        email: 'asha@trrain.org',
+      },
+      locations: [],
+      consent: validBody.consent,
+      createdBy: 'self',
+      updatedBy: 'self',
+    });
+    if (!created.ok) throw new Error('seed failed');
+    const id = created.value.id;
+    if (overrides?.status && overrides.status !== 'pending') {
+      await aggregatorStore.updateStatus(id, overrides.status, 'admin');
+    }
+    await idp.createUser({
+      email: 'asha@trrain.org',
+      phone: '+919876543210',
+      enabled: false,
+      attributes: {
+        aggregator_id: id,
+        aggregator_type: 'seeker',
+        phoneNumber: '+919876543210',
+        decision_made: overrides?.status === 'inactive' ? 'rejected' : 'pending',
+      },
+    });
+    return id;
+  }
+
+  it('refreshes a pending registration on resubmit instead of 409', async () => {
+    const id = await seedPending();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/aggregator-registrations/create',
+      headers: AUTH_HEADER,
+      payload: validBody,
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { aggregator_id: string; status: string };
+    expect(body.aggregator_id).toBe(id);
+    expect(body.status).toBe('pending');
+    // A fresh admin-review email was re-sent.
+    expect(mailer.outbox.length).toBe(1);
+    expect(mailer.outbox[0]?.html).toContain('intent=approve');
+  });
+
+  it('reactivates a rejected (inactive) registration on resubmit', async () => {
+    const id = await seedPending({ status: 'inactive' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/aggregator-registrations/create',
+      headers: AUTH_HEADER,
+      payload: validBody,
+    });
+    expect(res.statusCode).toBe(200);
+    const stored = await aggregatorStore.findById(id);
+    if (stored.ok) expect(stored.value?.status).toBe('pending');
+    const kc = await idp.findByEmail(validBody.contact.email);
+    if (kc.ok && kc.value) {
+      expect(kc.value.enabled).toBe(false);
+      expect(kc.value.attributes?.decision_made?.[0]).toBe('pending');
+    }
+  });
+
+  it('still returns 409 when the email belongs to an active aggregator', async () => {
+    await seedPending({ status: 'active' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/aggregator-registrations/create',
+      headers: AUTH_HEADER,
+      payload: validBody,
+    });
+    expect(res.statusCode).toBe(409);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('USER_EXISTS');
+  });
+
+  it('rejects reclaim when the new phone is taken by a different record', async () => {
+    await seedPending(); // asha@trrain.org / +919876543210, pending
+    // A different ACTIVE aggregator already owns the phone the resubmit carries.
+    const other = await aggregatorStore.create({
+      orgSlug: 'other-bbbb',
+      actorType: 'aggregator',
+      name: 'Other',
+      type: 'seeker',
+      url: null,
+      contact: { name: 'X', phone: '+911111111111', email: 'x@other.org' },
+      locations: [],
+      consent: validBody.consent,
+      createdBy: 'self',
+      updatedBy: 'self',
+    });
+    if (other.ok) await aggregatorStore.updateStatus(other.value.id, 'active', 'admin');
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/aggregator-registrations/create',
+      headers: AUTH_HEADER,
+      payload: { ...validBody, contact: { ...validBody.contact, phone: '+911111111111' } },
+    });
+    expect(res.statusCode).toBe(409);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('PHONE_EXISTS');
+  });
 });
