@@ -26,6 +26,21 @@ export class AggregatorStoreFake extends InMemoryAggregatorStore {
     this.byPhone.clear();
     this.byEmail.clear();
   }
+
+  /**
+   * Test-only helper: overwrite the `updatedAt` timestamp on an existing row.
+   *
+   * Use this to back-date a row for stale-pending cleanup tests without going
+   * through the public `update()` API (which stamps `updatedAt` to `now`).
+   *
+   * @param id - Aggregator UUID to back-date.
+   * @param date - The timestamp to set on `updatedAt`.
+   */
+  __setUpdatedAt(id: string, date: Date): void {
+    const row = this.byId.get(id);
+    if (!row) throw new Error(`AggregatorStoreFake.__setUpdatedAt: id not found: ${id}`);
+    this.byId.set(id, { ...row, updatedAt: date });
+  }
 }
 
 const DEFAULT_CONTACT: BecknContact = {
