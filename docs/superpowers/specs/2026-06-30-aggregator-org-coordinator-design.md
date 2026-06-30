@@ -1,8 +1,11 @@
 # Aggregator Org + Coordinator Design
 
+> **⚠️ SUPERSEDED (2026-06-30) by [`2026-06-30-aggregator-org-coordinator-design-v2.md`](./2026-06-30-aggregator-org-coordinator-design-v2.md).**
+> v2 incorporates review findings: a thin `aggregator_orgs` DB table as the org system-of-record (KC group demoted to an authz mirror), `aggregators.parent_org_id` (FK) as the **single** source of truth for the org→coordinator link (coordinator KC-group membership dropped from v1), an atomic status CAS for the approval single-use guard, SQL-based org dropdown/owner lookup, coordinator-submit rate limiting, and clearer error/terminology handling. This v1 is retained for history; **build from v2.**
+
 **Audience:** Product team and developers extending the aggregator registration subsystem to support a parent **organisation** that owns multiple **coordinators**.
 
-**Status:** Design (approved for spec; implementation plan to follow).
+**Status:** Superseded by v2 (see banner above). Original status: Design (approved for spec; implementation plan to follow).
 
 **Relationship to existing work:** This design extends the **current production aggregator registration flow** (DB `aggregators` row + Keycloak user + signalstack org, signed-token approval, status `pending → active`/`inactive`). It does **not** depend on the `agg-registration-v2` engine — none of that engine's machinery (FSM, reconciler, dead-letter, dedup fingerprint, OpenTelemetry framework, `registrations` table) is used. The one robustness improvement we carry is the **expired-link / re-registration recovery** fix (§7).
 
