@@ -36,8 +36,11 @@ import type { BecknContact } from '@aggregator-dpg/shared-primitives/aggregator'
 import { getRegistrationValidator } from '../services/registration-validator.js';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
 import { getAggregatorProfileStore } from '../services/aggregator-profile-store/index.js';
+import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js';
 import { getIdpAdmin } from '../services/idp-admin/index.js';
 import { sendAdminReviewEmail } from '../services/registration-notify.js';
+import { orgHierarchyEnabled } from '../config.js';
+import { checkSubmitRate } from '../services/submit-rate.js';
 import type { AggregatorStatus } from '@aggregator-dpg/shared-primitives/aggregator';
 import { normalisePhone } from '../services/phone.js';
 import { slugFromName } from '../services/slug.js';
@@ -48,6 +51,14 @@ import { errorResponses } from '../errors/openapi.js';
 import type { ErrorCode } from '../errors/codes.js';
 
 const SLUG_RETRIES = 3;
+
+// The coordinator submit accepts an optional `org_id` when the org hierarchy
+// is enabled. `RegistrationPayloadSchema` is strict (rejects unknown keys), so
+// the route body schema must explicitly permit it; the handler validates its
+// presence/shape against the flag + the org store.
+const CoordinatorRegistrationBodySchema = RegistrationPayloadSchema.extend({
+  org_id: z.string().optional(),
+});
 
 const RegistrationCreatedResponseSchema = z
   .object({
@@ -67,7 +78,7 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
         summary: 'Submit a new aggregator registration',
         description:
           'Validates submission against config/schemas/aggregator/registration.v1.json, creates a disabled user (login enabled on admin approval), and pushes the org to signalstack. Reached via a non-aggregator Bearer token from Keycloak.',
-        body: RegistrationPayloadSchema,
+        body: CoordinatorRegistrationBodySchema,
         response: {
           201: RegistrationCreatedResponseSchema,
           ...errorResponses(400, 401, 409, 500, 503),
@@ -97,10 +108,15 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
       // output), so the typed body can be consumed directly here.
       const body = req.body as z.infer<typeof RegistrationPayloadSchema>;
 
+      // `org_id` is an org-hierarchy field outside the form's JSON Schema
+      // contract; strip it before Ajv so the schema in `config/` stays the
+      // single authority for the form shape.
+      const { org_id: _orgIdField, ...formBody } = req.body as Record<string, unknown>;
+
       // JSON Schema is the authoritative contract — keeps the form rules in
       // `config/` rather than code.
       const validate = await getRegistrationValidator();
-      if (!validate(req.body)) {
+      if (!validate(formBody)) {
         throw httpError('SCHEMA_VALIDATION', {
           detail: 'Payload failed JSON Schema validation.',
           fields: { issues: validate.errors ?? [] },
@@ -133,6 +149,45 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
       // 1000-year consent window. Computed early so it is in scope for both
       // the reclaim path and the new-registration path below.
       const serverConsent = stampConsent(body.consent);
+
+      // Org-hierarchy gate (spec §6.2). When enabled, a coordinator must select
+      // an *active* org; the link lives in `aggregators.parent_org_id`.
+      let parentOrgId: string | null = null;
+      if (orgHierarchyEnabled()) {
+        // Rate limit per (ip, email) (spec A6).
+        const rl = await checkSubmitRate(`${req.ip}|${contact.email}`);
+        if (!rl.allowed) {
+          void reply.header('Retry-After', String(rl.retryAfterSeconds));
+          throw httpError('RATE_LIMITED', {
+            detail: `Retry in ${rl.retryAfterSeconds}s.`,
+            fields: { retry_after_seconds: rl.retryAfterSeconds },
+          });
+        }
+        const reqOrgId = (req.body as { org_id?: string }).org_id;
+        if (!reqOrgId) {
+          throw httpError('SCHEMA_VALIDATION', {
+            detail: 'org_id is required when the organisation hierarchy is enabled.',
+          });
+        }
+        const orgStore = getAggregatorOrgStore();
+        const org = await orgStore.findById(reqOrgId);
+        if (!org.ok) {
+          throw httpError('DB_UNAVAILABLE', {
+            cause: new Error(org.error.message),
+            fields: { sub_operation: 'orgStore.findById' },
+          });
+        }
+        // Covers bootstrap (no active org) and an org that went inactive/rejected.
+        if (!org.value || org.value.status !== 'active') {
+          throw httpError('TARGET_ORG_INACTIVE');
+        }
+        // Owner-also-coordinator (spec A4): a distinct, machine-readable error.
+        const ownerMatch = await orgStore.findByOwnerEmail(contact.email);
+        if (ownerMatch.ok && ownerMatch.value) {
+          throw httpError('OWNER_ALREADY_REGISTERED', { fields: { email: contact.email } });
+        }
+        parentOrgId = reqOrgId;
+      }
 
       // Pre-check email + phone uniqueness in both stores. The DB
       // generated-column UNIQUEs (contact_phone / contact_email) and Keycloak
@@ -204,6 +259,7 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
           consent: serverConsent,
           status: 'pending',
           updatedBy: 'self',
+          ...(parentOrgId !== null ? { parentOrgId } : {}),
         });
         if (!updated.ok) {
           throw httpError('DB_UNAVAILABLE', {
@@ -335,6 +391,7 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
         contact,
         locations: body.locations,
         consent: serverConsent,
+        parentOrgId,
       });
       if (!aggregator.ok) {
         const code = mapStoreCreateError(aggregator.error.code);
@@ -441,6 +498,7 @@ async function createAggregatorWithSlug(
     contact: BecknContact;
     locations: ReturnType<typeof RegistrationPayloadSchema.parse>['locations'];
     consent: ReturnType<typeof RegistrationPayloadSchema.parse>['consent'];
+    parentOrgId: string | null;
   },
 ): ReturnType<typeof store.create> {
   let last: Awaited<ReturnType<typeof store.create>> | null = null;
@@ -457,6 +515,7 @@ async function createAggregatorWithSlug(
       consent: extras.consent,
       createdBy: 'self',
       updatedBy: 'self',
+      parentOrgId: extras.parentOrgId,
     });
     if (last.ok) return last;
     if (last.error.code !== 'DUPLICATE_SLUG') return last;
