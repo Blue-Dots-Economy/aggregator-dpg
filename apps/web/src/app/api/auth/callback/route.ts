@@ -21,6 +21,7 @@ import {
   verifyFlowState,
 } from '@/lib/cookies';
 import { logger, pickRequestId } from '@/lib/logger';
+import { tokenAggregatorId } from '@/lib/jwt';
 
 export const runtime = 'nodejs';
 
@@ -99,7 +100,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // the network admin do not. Block anyone without it at the door so an org
   // owner who is a valid KC user cannot land in the (data-less, broken)
   // coordinator portal. Org-owner console login is a separate, future feature.
-  if (!hasAggregatorId(tokens.accessToken)) {
+  if (!tokenAggregatorId(tokens.accessToken)) {
     log.warn(
       {
         code: 'NO_AGGREGATOR_ID',
@@ -149,29 +150,4 @@ function mustEnv(name: string): string {
   const v = process.env[name];
   if (!v) throw new Error(`${name} must be set`);
   return v;
-}
-
-/**
- * Reports whether a JWT access token carries a non-empty `aggregator_id`
- * claim — the marker of a coordinator identity (mapped from the KC user
- * attribute). Decodes the payload without verifying the signature: the token
- * was just minted by Keycloak over the trusted back-channel exchange, so this
- * is a claim read, not a trust boundary. A malformed token returns `false`.
- *
- * @param accessToken - The raw JWT access token from the token exchange.
- * @returns `true` when a non-empty `aggregator_id` claim is present.
- */
-function hasAggregatorId(accessToken: string): boolean {
-  const parts = accessToken.split('.');
-  if (parts.length < 2) return false;
-  try {
-    const payload = JSON.parse(Buffer.from(parts[1]!, 'base64url').toString('utf8')) as Record<
-      string,
-      unknown
-    >;
-    const claim = payload['aggregator_id'];
-    return typeof claim === 'string' && claim.length > 0;
-  } catch {
-    return false;
-  }
 }
