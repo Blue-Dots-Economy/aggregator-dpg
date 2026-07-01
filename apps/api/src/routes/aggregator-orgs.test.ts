@@ -18,6 +18,9 @@ import { IdpAdminFake, _setIdpAdmin } from '../services/idp-admin/index.js';
 import { FakeMailer, _setMailer } from '../services/mailer/index.js';
 import { _resetTokenKey } from '../services/approval-token.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
+import { ConsentLedgerFake } from '@aggregator-dpg/consent-ledger/testing';
+import { _setConsentLedger } from '../services/consent-ledger/index.js';
+import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 
 const SERVICE_BEARER = 'service-token';
 const AUTH_HEADER = { authorization: `Bearer ${SERVICE_BEARER}` };
@@ -27,6 +30,7 @@ describe('aggregator-orgs routes', () => {
   let orgStore: AggregatorOrgStoreFake;
   let idp: IdpAdminFake;
   let mailer: FakeMailer;
+  let consentLedger: ConsentLedgerFake;
 
   beforeEach(async () => {
     _resetTokenKey();
@@ -39,10 +43,12 @@ describe('aggregator-orgs routes', () => {
     orgStore = new AggregatorOrgStoreFake();
     idp = new IdpAdminFake();
     mailer = new FakeMailer();
+    consentLedger = new ConsentLedgerFake();
 
     _setAggregatorOrgStore(orgStore);
     _setIdpAdmin(idp);
     _setMailer(mailer);
+    _setConsentLedger(consentLedger);
     _setAccessTokenVerifier(async (token) => {
       if (token === SERVICE_BEARER) {
         return { sub: 'service-account-aggregator-bff', azp: 'aggregator-bff' };
@@ -58,6 +64,7 @@ describe('aggregator-orgs routes', () => {
     _setAggregatorOrgStore(null);
     _setIdpAdmin(null);
     _setMailer(null);
+    _setConsentLedger(null);
     _setAccessTokenVerifier(null);
   });
 
@@ -92,6 +99,52 @@ describe('aggregator-orgs routes', () => {
     // A review email went to the network admin.
     expect(mailer.outbox.length).toBe(1);
     expect(mailer.outbox[0]?.to).toContain('reviewer@bluedots.local');
+
+    // Consent ledger should have one row for the org
+    const ledgerRows = consentLedger.list();
+    expect(ledgerRows).toHaveLength(1);
+    const consentRow = ledgerRows[0];
+    expect(consentRow?.subjectType).toBe('org');
+    expect(consentRow?.subjectId).toBe(body.org_id);
+    expect(consentRow?.termsVersion).toBeGreaterThanOrEqual(1);
+    expect(consentRow?.privacyVersion).toBeGreaterThanOrEqual(1);
+    expect(consentRow?.source).toBe('registration');
+  });
+
+  it('records org consent in the ledger on successful registration', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: orgBody,
+    });
+    expect(res.statusCode).toBe(201);
+    const { org_id } = res.json() as { org_id: string };
+
+    const ledgerRows = consentLedger.list();
+    expect(ledgerRows).toHaveLength(1);
+    expect(ledgerRows[0]?.subjectType).toBe('org');
+    expect(ledgerRows[0]?.subjectId).toBe(org_id);
+  });
+
+  it('does not fail org registration when the consent ledger write fails', async () => {
+    // Make the ledger always return an error
+    consentLedger.recordRegistrationConsent = async () => ({
+      success: false as const,
+      error: Object.assign(new Error('ledger down'), {
+        name: 'UpstreamError',
+        code: 'CONSENT_INSERT_FAILED',
+      }) as BaseError,
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: { ...orgBody, owner: { ...orgBody.owner, email: 'ledger-fail@enable.org' } },
+    });
+    // Registration must still succeed despite the ledger error
+    expect(res.statusCode).toBe(201);
   });
 
   it('GET /v1/orgs lists only active orgs', async () => {

@@ -53,6 +53,12 @@ importers:
 
   apps/api:
     dependencies:
+      '@aggregator-dpg/config-loader':
+        specifier: workspace:*
+        version: link:../../packages/config-loader
+      '@aggregator-dpg/consent-ledger':
+        specifier: workspace:*
+        version: link:../../packages/consent-ledger
       '@aggregator-dpg/db-schema':
         specifier: workspace:*
         version: link:../../packages/db-schema

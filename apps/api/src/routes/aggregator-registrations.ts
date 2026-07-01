@@ -39,8 +39,11 @@ import { getAggregatorProfileStore } from '../services/aggregator-profile-store/
 import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js';
 import { getIdpAdmin } from '../services/idp-admin/index.js';
 import { sendAdminReviewEmail } from '../services/registration-notify.js';
-import { orgHierarchyEnabled } from '../config.js';
+import { orgHierarchyEnabled, config } from '../config.js';
 import { checkSubmitRate } from '../services/submit-rate.js';
+import { loadConsentConfig } from '@aggregator-dpg/config-loader/fs';
+import { getConsentLedger } from '../services/consent-ledger/index.js';
+import type { AggregatorStatus } from '@aggregator-dpg/shared-primitives/aggregator';
 import { normalisePhone } from '../services/phone.js';
 import { splitName } from '../services/name.js';
 import { slugFromName } from '../services/slug.js';
@@ -350,6 +353,15 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
         });
       }
 
+      // Record registration consent in the append-only ledger. This is
+      // log-and-continue: a ledger write failure must not block registration.
+      await recordAggregatorConsent({
+        aggregatorId,
+        network: config.SIGNALSTACK_ITEM_NETWORK,
+        brand: undefined,
+        log,
+      });
+
       await sendAdminReviewEmail(
         {
           aggregatorId,
@@ -380,6 +392,73 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
       });
     },
   );
+}
+
+/**
+ * Loads the consent config for the given network/brand and records an
+ * aggregator registration-consent row in the append-only ledger.
+ *
+ * This is intentionally log-and-continue: any error (config read failure or
+ * ledger write failure) is logged at `warn` level and the function resolves
+ * without throwing so that the caller's registration flow is never blocked.
+ *
+ * @param aggregatorId - The newly-created `aggregators.id`.
+ * @param network - Signal Stack network identifier (e.g. `blue_dot`).
+ * @param brand - Optional per-brand variant; undefined for the network default.
+ * @param log - Request-scoped child logger.
+ */
+async function recordAggregatorConsent({
+  aggregatorId,
+  network,
+  brand,
+  log,
+}: {
+  aggregatorId: string;
+  network: string;
+  brand: string | undefined;
+  log: ReturnType<FastifyRequest['log']['child']>;
+}): Promise<void> {
+  let termsVersion: number;
+  let privacyVersion: number;
+
+  try {
+    const consentCfg = await loadConsentConfig(network, brand);
+    termsVersion = consentCfg.audiences.aggregator.documents.terms.current_version;
+    privacyVersion = consentCfg.audiences.aggregator.documents.privacy.current_version;
+  } catch (e) {
+    log.warn(
+      {
+        operation: 'consentLedger.recordAggregatorConsent',
+        status: 'skipped',
+        error: e instanceof Error ? e.message : String(e),
+        aggregator_id: aggregatorId,
+      },
+      'consent config load failed — ledger write skipped',
+    );
+    return;
+  }
+
+  const result = await getConsentLedger().recordRegistrationConsent({
+    subjectType: 'aggregator',
+    subjectId: aggregatorId,
+    network,
+    brand: brand ?? null,
+    termsVersion,
+    privacyVersion,
+  });
+
+  if (!result.success) {
+    log.warn(
+      {
+        operation: 'consentLedger.recordAggregatorConsent',
+        status: 'failure',
+        error: result.error.message,
+        error_type: result.error.name,
+        aggregator_id: aggregatorId,
+      },
+      'consent ledger write failed — registration continues',
+    );
+  }
 }
 
 /**

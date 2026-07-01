@@ -19,7 +19,7 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { orgHierarchyEnabled } from '../config.js';
+import { orgHierarchyEnabled, config } from '../config.js';
 import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js';
 import { getIdpAdmin, KC_ATTR } from '../services/idp-admin/index.js';
 import { sendOrgReviewEmail } from '../services/org-registration-notify.js';
@@ -30,6 +30,8 @@ import { slugFromName } from '../services/slug.js';
 import { authenticateAny } from '../services/auth/access-token.js';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
+import { loadConsentConfig } from '@aggregator-dpg/config-loader/fs';
+import { getConsentLedger } from '../services/consent-ledger/index.js';
 
 const OrgCreateBodySchema = z.object({
   display_name: z.string().min(1).max(200),
@@ -238,6 +240,15 @@ export async function registerAggregatorOrgRoutes(app: FastifyInstance): Promise
         });
       }
 
+      // Record registration consent in the append-only ledger. This is
+      // log-and-continue: a ledger write failure must not block registration.
+      await recordOrgConsent({
+        orgId: org.id,
+        network: config.SIGNALSTACK_ITEM_NETWORK,
+        brand: undefined,
+        log,
+      });
+
       await sendOrgReviewEmail(
         {
           orgId: org.id,
@@ -299,4 +310,71 @@ export async function registerAggregatorOrgRoutes(app: FastifyInstance): Promise
       });
     },
   );
+}
+
+/**
+ * Loads the consent config for the given network/brand and records an org
+ * registration-consent row in the append-only ledger.
+ *
+ * This is intentionally log-and-continue: any error (config read failure or
+ * ledger write failure) is logged at `warn` level and the function resolves
+ * without throwing so that the caller's registration flow is never blocked.
+ *
+ * @param orgId - The newly-created `aggregator_orgs.id`.
+ * @param network - Signal Stack network identifier (e.g. `blue_dot`).
+ * @param brand - Optional per-brand variant; undefined for the network default.
+ * @param log - Request-scoped child logger.
+ */
+async function recordOrgConsent({
+  orgId,
+  network,
+  brand,
+  log,
+}: {
+  orgId: string;
+  network: string;
+  brand: string | undefined;
+  log: ReturnType<FastifyRequest['log']['child']>;
+}): Promise<void> {
+  let termsVersion: number;
+  let privacyVersion: number;
+
+  try {
+    const consentCfg = await loadConsentConfig(network, brand);
+    termsVersion = consentCfg.audiences.org.documents.terms.current_version;
+    privacyVersion = consentCfg.audiences.org.documents.privacy.current_version;
+  } catch (e) {
+    log.warn(
+      {
+        operation: 'consentLedger.recordOrgConsent',
+        status: 'skipped',
+        error: e instanceof Error ? e.message : String(e),
+        org_id: orgId,
+      },
+      'consent config load failed — ledger write skipped',
+    );
+    return;
+  }
+
+  const result = await getConsentLedger().recordRegistrationConsent({
+    subjectType: 'org',
+    subjectId: orgId,
+    network,
+    brand: brand ?? null,
+    termsVersion,
+    privacyVersion,
+  });
+
+  if (!result.success) {
+    log.warn(
+      {
+        operation: 'consentLedger.recordOrgConsent',
+        status: 'failure',
+        error: result.error.message,
+        error_type: result.error.name,
+        org_id: orgId,
+      },
+      'consent ledger write failed — registration continues',
+    );
+  }
 }

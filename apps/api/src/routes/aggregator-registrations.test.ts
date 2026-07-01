@@ -10,6 +10,9 @@ import { IdpAdminFake, _setIdpAdmin } from '../services/idp-admin/index.js';
 import { FakeMailer, _setMailer } from '../services/mailer/index.js';
 import { _resetTokenKey } from '../services/approval-token.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
+import { ConsentLedgerFake } from '@aggregator-dpg/consent-ledger/testing';
+import { _setConsentLedger } from '../services/consent-ledger/index.js';
+import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 
 const SERVICE_BEARER = 'service-token';
 const AUTH_HEADER = { authorization: `Bearer ${SERVICE_BEARER}` };
@@ -20,6 +23,7 @@ describe('POST /v1/aggregator-registrations/create', () => {
   let profileStore: AggregatorProfileStoreFake;
   let idp: IdpAdminFake;
   let mailer: FakeMailer;
+  let consentLedger: ConsentLedgerFake;
 
   beforeEach(async () => {
     _resetTokenKey();
@@ -33,11 +37,13 @@ describe('POST /v1/aggregator-registrations/create', () => {
     profileStore = new AggregatorProfileStoreFake();
     idp = new IdpAdminFake();
     mailer = new FakeMailer();
+    consentLedger = new ConsentLedgerFake();
 
     _setAggregatorStore(aggregatorStore);
     _setAggregatorProfileStore(profileStore);
     _setIdpAdmin(idp);
     _setMailer(mailer);
+    _setConsentLedger(consentLedger);
     _setAccessTokenVerifier(async (token) => {
       if (token === SERVICE_BEARER) {
         return { sub: 'service-account-aggregator-bff', azp: 'aggregator-bff' };
@@ -54,6 +60,7 @@ describe('POST /v1/aggregator-registrations/create', () => {
     _setAggregatorProfileStore(null);
     _setIdpAdmin(null);
     _setMailer(null);
+    _setConsentLedger(null);
     _setAccessTokenVerifier(null);
   });
 
@@ -123,6 +130,52 @@ describe('POST /v1/aggregator-registrations/create', () => {
     expect(first.html).toContain('intent=approve');
     expect(first.html).toContain('intent=reject');
     expect(first.html).toContain('/admin/v1/aggregator-registrations/read/');
+
+    // Consent ledger should have one row for the aggregator
+    const ledgerRows = consentLedger.list();
+    expect(ledgerRows).toHaveLength(1);
+    const consentRow = ledgerRows[0];
+    expect(consentRow?.subjectType).toBe('aggregator');
+    expect(consentRow?.subjectId).toBe(body.aggregator_id);
+    expect(consentRow?.termsVersion).toBeGreaterThanOrEqual(1);
+    expect(consentRow?.privacyVersion).toBeGreaterThanOrEqual(1);
+    expect(consentRow?.source).toBe('registration');
+  });
+
+  it('records aggregator consent in the ledger on successful registration', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/aggregator-registrations/create',
+      headers: AUTH_HEADER,
+      payload: validBody,
+    });
+    expect(res.statusCode).toBe(201);
+    const { aggregator_id } = res.json() as { aggregator_id: string };
+
+    const ledgerRows = consentLedger.list();
+    expect(ledgerRows).toHaveLength(1);
+    expect(ledgerRows[0]?.subjectType).toBe('aggregator');
+    expect(ledgerRows[0]?.subjectId).toBe(aggregator_id);
+  });
+
+  it('does not fail registration when the consent ledger write fails', async () => {
+    // Make the ledger always return an error
+    consentLedger.recordRegistrationConsent = async () => ({
+      success: false as const,
+      error: Object.assign(new Error('ledger down'), {
+        name: 'UpstreamError',
+        code: 'CONSENT_INSERT_FAILED',
+      }) as BaseError,
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/aggregator-registrations/create',
+      headers: AUTH_HEADER,
+      payload: { ...validBody, contact: { ...validBody.contact, email: 'ledger-fail@trrain.org' } },
+    });
+    // Registration must still succeed despite the ledger error
+    expect(res.statusCode).toBe(201);
   });
 
   it('returns 401 when Bearer is missing', async () => {
