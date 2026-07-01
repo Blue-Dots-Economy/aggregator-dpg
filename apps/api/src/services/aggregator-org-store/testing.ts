@@ -39,6 +39,7 @@ export function buildAggregatorOrg(overrides: Partial<AggregatorOrg> = {}): Aggr
     displayName: 'Test Org',
     state: null,
     ownerEmail: 'owner@test.local',
+    ownerPhone: null,
     ownerKcSub: null,
     kcGroupId: null,
     status: 'pending',

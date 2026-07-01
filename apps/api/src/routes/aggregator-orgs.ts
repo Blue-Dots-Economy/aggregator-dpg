@@ -105,13 +105,66 @@ export async function registerAggregatorOrgRoutes(app: FastifyInstance): Promise
 
       const orgStore = getAggregatorOrgStore();
       const idp = getIdpAdmin();
+      const ownerEmail = body.owner.email.toLowerCase();
+
+      // §7 reclaim: a resubmit by the same owner against a still-recoverable
+      // org (pending, or rejected == inactive) refreshes that row and re-mints
+      // the network-admin review link, instead of erroring on the existing KC
+      // owner user. An *active* org for this owner is a genuine duplicate.
+      const existing = await orgStore.findByOwnerEmail(ownerEmail);
+      if (!existing.ok) {
+        throw httpError('DB_UNAVAILABLE', {
+          cause: new Error(existing.error.message),
+          fields: { sub_operation: 'orgStore.findByOwnerEmail' },
+        });
+      }
+      if (existing.value) {
+        const prior = existing.value;
+        if (prior.status === 'active') {
+          throw httpError('OWNER_ALREADY_REGISTERED', { fields: { email: body.owner.email } });
+        }
+        // Reclaim: refresh submitted details + flip back to pending. The
+        // mirrored KC group + disabled owner user are reused in place.
+        const refreshed = await orgStore.update(prior.id, {
+          displayName: body.display_name,
+          state: body.state ?? null,
+          ownerPhone: phoneE164,
+          status: 'pending',
+        });
+        if (!refreshed.ok) {
+          throw httpError('DB_UNAVAILABLE', {
+            cause: new Error(refreshed.error.message),
+            fields: { sub_operation: 'orgStore.update.reclaim' },
+          });
+        }
+        await sendOrgReviewEmail(
+          {
+            orgId: prior.id,
+            displayName: body.display_name,
+            ownerEmail: prior.ownerEmail,
+            ownerPhone: phoneE164,
+          },
+          log,
+        );
+        log.info(
+          { status: 'success', latency_ms: Date.now() - start, org_id: prior.id, reclaim: true },
+          'org registration resubmitted (reclaimed record)',
+        );
+        return reply.status(200).send({
+          org_id: prior.id,
+          slug: prior.slug,
+          status: 'pending',
+          message: 'Organisation re-submitted. A fresh approval link has been sent for review.',
+        });
+      }
 
       const slug = slugFromName(body.display_name);
       const created = await orgStore.create({
         slug,
         displayName: body.display_name,
         state: body.state ?? null,
-        ownerEmail: body.owner.email.toLowerCase(),
+        ownerEmail: ownerEmail,
+        ownerPhone: phoneE164,
       });
       if (!created.ok) {
         if (created.error.code === 'DUPLICATE_SLUG') {

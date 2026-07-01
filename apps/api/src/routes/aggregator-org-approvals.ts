@@ -25,6 +25,7 @@ import type { AggregatorOrg } from '../services/aggregator-org-store/index.js';
 import { getIdpAdmin } from '../services/idp-admin/index.js';
 import { verifyApprovalToken, formatApprovalTtl } from '../services/approval-token.js';
 import { renderConfirmPage, renderResultPage } from '../views/approval-pages.js';
+import { sendOrgReviewEmail } from '../services/org-registration-notify.js';
 
 const OrgDecisionBodySchema = z.object({
   token: z.string().min(1),
@@ -83,13 +84,25 @@ export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance):
 
       const verified = await verifyApprovalToken(token);
       if (!verified.ok) {
+        const isExpired = verified.error.code === 'EXPIRED';
         return sendHtml(
           reply,
           400,
           renderResultPage({
             status: 'error',
-            title: verified.error.code === 'EXPIRED' ? 'Link expired' : 'Invalid link',
+            title: isExpired ? 'Link expired' : 'Invalid link',
             message: orgTokenErrorMessage(verified.error.code),
+            // On expiry, offer to re-mint + re-send the review link to the
+            // network admin (§7). Uses the expired-but-signed token as proof.
+            ...(isExpired
+              ? {
+                  action: {
+                    url: `${config.PUBLIC_API_URL}/admin/v1/orgs/resend/${orgId}`,
+                    token,
+                    label: 'Resend approval link',
+                  },
+                }
+              : {}),
           }),
         );
       }
@@ -317,6 +330,97 @@ export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance):
           status: 'success',
           title: 'Organisation approved',
           message: 'The organisation is now live. Coordinators can register under it.',
+        }),
+      );
+    },
+  );
+
+  app.post(
+    '/admin/v1/orgs/resend/:id',
+    {
+      schema: {
+        tags: ['aggregator-orgs'],
+        summary: 'Resend a fresh org review link to the network admin',
+        description:
+          'Re-mints the approve/reject token pair and re-emails the network admin for a still-pending org (§7). Accepts an expired-but-signature-valid token as proof the caller held a legitimate link. Returns an HTML result page. Only registered when ORG_HIERARCHY_ENABLED=true.',
+        params: OrgApprovalParamsSchema,
+      },
+    },
+    async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+      const log = req.log.child({ operation: 'org-registration.resend' });
+      const orgId = req.params.id;
+      const body = (req.body ?? {}) as { token?: string };
+      const token = typeof body.token === 'string' ? body.token : '';
+
+      const verified = await verifyApprovalToken(token, { allowExpired: true });
+      if (!verified.ok) {
+        return sendHtml(
+          reply,
+          400,
+          renderResultPage({
+            status: 'error',
+            title: 'Invalid link',
+            message: orgTokenErrorMessage(verified.error.code),
+          }),
+        );
+      }
+      if (verified.aggregatorId !== orgId) {
+        return sendHtml(
+          reply,
+          400,
+          renderResultPage({
+            status: 'error',
+            title: 'Invalid link',
+            message: 'Token does not match the requested organisation.',
+          }),
+        );
+      }
+
+      const lookup = await getAggregatorOrgStore().findById(orgId);
+      if (!lookup.ok) {
+        return sendHtml(
+          reply,
+          503,
+          renderResultPage({
+            status: 'error',
+            title: 'Service unavailable',
+            message: 'Could not load the organisation record.',
+          }),
+        );
+      }
+      if (!lookup.value) {
+        return sendHtml(
+          reply,
+          404,
+          renderResultPage({
+            status: 'error',
+            title: 'Not found',
+            message: 'Organisation not found.',
+          }),
+        );
+      }
+
+      const prior = orgDecidedView(lookup.value.status);
+      if (prior) return sendHtml(reply, 200, renderResultPage(prior));
+
+      await sendOrgReviewEmail(
+        {
+          orgId,
+          displayName: lookup.value.displayName,
+          ownerEmail: lookup.value.ownerEmail,
+          ownerPhone: lookup.value.ownerPhone ?? '',
+        },
+        log,
+      );
+
+      log.info({ status: 'success', org_id: orgId }, 'org approval link resent');
+      return sendHtml(
+        reply,
+        200,
+        renderResultPage({
+          status: 'success',
+          title: 'Approval link sent',
+          message: 'A fresh approval link has been emailed to the reviewers.',
         }),
       );
     },

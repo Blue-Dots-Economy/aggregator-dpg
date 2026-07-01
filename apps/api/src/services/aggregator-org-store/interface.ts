@@ -15,6 +15,7 @@ export interface AggregatorOrg {
   displayName: string;
   state: string | null;
   ownerEmail: string;
+  ownerPhone: string | null;
   ownerKcSub: string | null;
   kcGroupId: string | null;
   status: AggregatorStatus;
@@ -27,6 +28,7 @@ export interface CreateOrgInput {
   displayName: string;
   state?: string | null;
   ownerEmail: string;
+  ownerPhone?: string | null;
   ownerKcSub?: string | null;
   kcGroupId?: string | null;
 }
@@ -34,6 +36,7 @@ export interface CreateOrgInput {
 export interface UpdateOrgPatch {
   displayName?: string;
   state?: string | null;
+  ownerPhone?: string | null;
   ownerKcSub?: string | null;
   kcGroupId?: string | null;
   status?: AggregatorStatus;
@@ -56,7 +59,22 @@ export abstract class AggregatorOrgStoreBase {
   abstract findBySlug(slug: string): Promise<OrgStoreResult<AggregatorOrg | null>>;
   abstract findByOwnerEmail(email: string): Promise<OrgStoreResult<AggregatorOrg | null>>;
   abstract listActive(): Promise<OrgStoreResult<AggregatorOrg[]>>;
+  /**
+   * Lists all `pending` orgs. Drives the §7 stale-pending cleanup, which prunes
+   * rows whose approval link is well past its TTL + grace.
+   *
+   * @returns All rows with `status='pending'` (may be empty).
+   */
+  abstract listPending(): Promise<OrgStoreResult<AggregatorOrg[]>>;
   abstract update(id: string, patch: UpdateOrgPatch): Promise<OrgStoreResult<AggregatorOrg>>;
+  /**
+   * Hard-deletes an org row by id. Used by the §7 stale-pending cleanup after
+   * its mirrored KC group + owner user have been removed.
+   *
+   * @param id - The org id to delete.
+   * @returns `ok` with `void`; `NOT_FOUND` is treated as success (idempotent).
+   */
+  abstract deleteById(id: string): Promise<OrgStoreResult<void>>;
   /**
    * Atomic compare-and-set pending→active. Returns the updated row, or `null`
    * inside `ok` when the row was not `pending` (the single-use guard lost the

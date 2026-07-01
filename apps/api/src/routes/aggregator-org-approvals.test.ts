@@ -134,4 +134,60 @@ describe('aggregator-org-approvals routes', () => {
     expect(res.statusCode).toBe(200);
     expect(res.body).toContain('Wonder Org');
   });
+
+  it('GET read page with an expired token shows a resend action (§7)', async () => {
+    const orgId = '00000000-0000-0000-0000-0000000000a5';
+    orgStore.seed([buildAggregatorOrg({ id: orgId, slug: 'ex', status: 'pending' })]);
+    const { token } = await mintApprovalToken({
+      aggregatorId: orgId,
+      intent: 'approve',
+      ttlSec: -1,
+    });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/admin/v1/orgs/read/${orgId}?token=${encodeURIComponent(token)}&intent=approve`,
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toContain('Link expired');
+    expect(res.body).toContain('Resend approval link');
+    expect(res.body).toContain(`/admin/v1/orgs/resend/${orgId}`);
+  });
+
+  it('POST resend re-sends the review email for a pending org using an expired token', async () => {
+    const orgId = '00000000-0000-0000-0000-0000000000a6';
+    orgStore.seed([
+      buildAggregatorOrg({ id: orgId, slug: 'rs', ownerEmail: 'o@x.org', status: 'pending' }),
+    ]);
+    const { token } = await mintApprovalToken({
+      aggregatorId: orgId,
+      intent: 'approve',
+      ttlSec: -1,
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/orgs/resend/${orgId}`,
+      payload: { token },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain('Approval link sent');
+    expect(mailer.outbox.length).toBe(1);
+  });
+
+  it('POST resend on an already-approved org is a no-op', async () => {
+    const orgId = '00000000-0000-0000-0000-0000000000a7';
+    orgStore.seed([buildAggregatorOrg({ id: orgId, slug: 'done', status: 'active' })]);
+    const { token } = await mintApprovalToken({
+      aggregatorId: orgId,
+      intent: 'approve',
+      ttlSec: -1,
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/orgs/resend/${orgId}`,
+      payload: { token },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain('Already approved');
+    expect(mailer.outbox.length).toBe(0);
+  });
 });

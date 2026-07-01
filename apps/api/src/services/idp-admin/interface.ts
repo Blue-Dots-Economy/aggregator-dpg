@@ -103,6 +103,15 @@ export abstract class IdpAdminAdapter {
   ): Promise<IdpResult<{ id: string }>>;
 
   /**
+   * Deletes a group by id. Used by the §7 stale-pending cleanup to remove the
+   * mirrored org group when pruning an abandoned org registration.
+   *
+   * @param groupId - Group id returned by {@link createGroup}.
+   * @returns `ok` with `void`; a 404 is treated as success (idempotent).
+   */
+  abstract deleteGroup(groupId: string): Promise<IdpResult<void>>;
+
+  /**
    * Adds a user to a group.
    *
    * @param userId - Keycloak user id.

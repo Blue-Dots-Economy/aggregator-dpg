@@ -33,6 +33,7 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
       displayName: input.displayName,
       state: input.state ?? null,
       ownerEmail: input.ownerEmail.toLowerCase(),
+      ownerPhone: input.ownerPhone ?? null,
       ownerKcSub: input.ownerKcSub ?? null,
       kcGroupId: input.kcGroupId ?? null,
       status: 'pending',
@@ -66,6 +67,18 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
     return { ok: true, value: rows };
   }
 
+  async listPending(): Promise<OrgStoreResult<AggregatorOrg[]>> {
+    const rows = [...this.byId.values()]
+      .filter((o) => o.status === 'pending')
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+    return { ok: true, value: rows };
+  }
+
+  async deleteById(id: string): Promise<OrgStoreResult<void>> {
+    this.byId.delete(id);
+    return { ok: true, value: undefined };
+  }
+
   async update(id: string, patch: UpdateOrgPatch): Promise<OrgStoreResult<AggregatorOrg>> {
     const existing = this.byId.get(id);
     if (!existing) return err('NOT_FOUND', id);
@@ -73,6 +86,7 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
       ...existing,
       displayName: patch.displayName ?? existing.displayName,
       state: patch.state !== undefined ? patch.state : existing.state,
+      ownerPhone: patch.ownerPhone !== undefined ? patch.ownerPhone : existing.ownerPhone,
       ownerKcSub: patch.ownerKcSub !== undefined ? patch.ownerKcSub : existing.ownerKcSub,
       kcGroupId: patch.kcGroupId !== undefined ? patch.kcGroupId : existing.kcGroupId,
       status: patch.status ?? existing.status,

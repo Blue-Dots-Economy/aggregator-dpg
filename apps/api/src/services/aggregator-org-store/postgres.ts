@@ -30,6 +30,7 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
           displayName: input.displayName,
           state: input.state ?? null,
           ownerEmail: input.ownerEmail.toLowerCase(),
+          ownerPhone: input.ownerPhone ?? null,
           ownerKcSub: input.ownerKcSub ?? null,
           kcGroupId: input.kcGroupId ?? null,
         })
@@ -65,6 +66,18 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
     }
   }
 
+  async listPending(): Promise<OrgStoreResult<AggregatorOrg[]>> {
+    try {
+      const rows = await getDb()
+        .select()
+        .from(aggregatorOrgs)
+        .where(eq(aggregatorOrgs.status, 'pending'));
+      return { ok: true, value: rows.map(toDomain) };
+    } catch (e) {
+      return errResult('DB_UNAVAILABLE', (e as Error).message);
+    }
+  }
+
   async update(id: string, patch: UpdateOrgPatch): Promise<OrgStoreResult<AggregatorOrg>> {
     try {
       const [row] = await getDb()
@@ -74,6 +87,15 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
         .returning();
       if (!row) return errResult('NOT_FOUND', id);
       return { ok: true, value: toDomain(row) };
+    } catch (e) {
+      return errResult('DB_UNAVAILABLE', (e as Error).message);
+    }
+  }
+
+  async deleteById(id: string): Promise<OrgStoreResult<void>> {
+    try {
+      await getDb().delete(aggregatorOrgs).where(eq(aggregatorOrgs.id, id));
+      return { ok: true, value: undefined };
     } catch (e) {
       return errResult('DB_UNAVAILABLE', (e as Error).message);
     }
@@ -120,6 +142,7 @@ function toDomain(row: typeof aggregatorOrgs.$inferSelect): AggregatorOrg {
     displayName: row.displayName,
     state: row.state,
     ownerEmail: row.ownerEmail,
+    ownerPhone: row.ownerPhone,
     ownerKcSub: row.ownerKcSub,
     kcGroupId: row.kcGroupId,
     status: row.status,

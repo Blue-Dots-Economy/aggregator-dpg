@@ -194,6 +194,16 @@ export class IdpAdminFake extends IdpAdminAdapter {
     return { ok: true, value: { id } };
   }
 
+  async deleteGroup(groupId: string): Promise<IdpResult<void>> {
+    if (this.failNext) {
+      const e = this.failNext;
+      this.failNext = null;
+      return { ok: false, error: e };
+    }
+    this.groups.delete(groupId);
+    return { ok: true, value: undefined };
+  }
+
   async addUserToGroup(userId: string, groupId: string): Promise<IdpResult<void>> {
     if (this.failNext) {
       const e = this.failNext;

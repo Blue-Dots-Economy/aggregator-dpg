@@ -361,6 +361,26 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
     return { ok: true, value: { id: groupId } };
   }
 
+  async deleteGroup(groupId: string): Promise<IdpResult<void>> {
+    const tokenResult = await this.getToken();
+    if (!tokenResult.ok) return tokenResult;
+
+    const url = `${this.opts.baseUrl}/admin/realms/${this.opts.realm}/groups/${groupId}`;
+    const res = await this.safeFetch(url, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${tokenResult.value}` },
+    });
+    if (!res.ok) return res;
+    // 404 → already gone; treat as success (idempotent).
+    if (!res.value.ok && res.value.status !== 404) {
+      return {
+        ok: false,
+        error: { code: 'IDP_UNAVAILABLE', message: `deleteGroup HTTP ${res.value.status}` },
+      };
+    }
+    return { ok: true, value: undefined };
+  }
+
   async addUserToGroup(userId: string, groupId: string): Promise<IdpResult<void>> {
     const tokenResult = await this.getToken();
     if (!tokenResult.ok) return tokenResult;

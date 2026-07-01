@@ -106,6 +106,51 @@ describe('aggregator-orgs routes', () => {
     expect(body.orgs[0]?.display_name).toBe('A');
   });
 
+  it('reclaims a pending org on resubmit by the same owner (§7)', async () => {
+    orgStore.seed([
+      buildAggregatorOrg({
+        id: 'o-reclaim',
+        slug: 'enable-india-abcd',
+        displayName: 'Old Name',
+        ownerEmail: 'ravi@enable.org',
+        status: 'pending',
+      }),
+    ]);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: orgBody,
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { org_id: string; status: string };
+    expect(body.org_id).toBe('o-reclaim');
+    expect(body.status).toBe('pending');
+    // Row refreshed in place (name updated), not duplicated; token re-sent.
+    const stored = await orgStore.findById('o-reclaim');
+    expect(stored.ok && stored.value?.displayName).toBe('Enable India');
+    expect(mailer.outbox.length).toBe(1);
+  });
+
+  it('rejects a resubmit against an ACTIVE org owner with OWNER_ALREADY_REGISTERED', async () => {
+    orgStore.seed([
+      buildAggregatorOrg({
+        id: 'o-active-owner',
+        slug: 'enable-india-live',
+        ownerEmail: 'ravi@enable.org',
+        status: 'active',
+      }),
+    ]);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: orgBody,
+    });
+    const body = res.json() as { error?: { code?: string } };
+    expect(body.error?.code).toBe('OWNER_ALREADY_REGISTERED');
+  });
+
   it('maps a DUPLICATE_SLUG store error to ORG_SLUG_TAKEN (409)', async () => {
     // A store stub that always reports a slug collision on create.
     class DupSlugStore extends AggregatorOrgStoreBase {
@@ -123,6 +168,12 @@ describe('aggregator-orgs routes', () => {
       }
       async listActive(): Promise<OrgStoreResult<AggregatorOrg[]>> {
         return { ok: true, value: [] };
+      }
+      async listPending(): Promise<OrgStoreResult<AggregatorOrg[]>> {
+        return { ok: true, value: [] };
+      }
+      async deleteById(): Promise<OrgStoreResult<void>> {
+        return { ok: true, value: undefined };
       }
       async update(): Promise<OrgStoreResult<AggregatorOrg>> {
         return { ok: false, error: { code: 'NOT_FOUND', message: 'x' } };

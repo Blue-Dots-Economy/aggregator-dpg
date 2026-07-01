@@ -9,15 +9,23 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { config } from '../config.js';
+import { config, orgHierarchyEnabled } from '../config.js';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
+import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js';
 import { getIdpAdmin } from '../services/idp-admin/index.js';
 import { authenticateAny } from '../services/auth/access-token.js';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 
 const CleanupResponseSchema = z
-  .object({ scanned: z.number(), pruned: z.number(), prunedIds: z.array(z.string()) })
+  .object({
+    scanned: z.number(),
+    pruned: z.number(),
+    prunedIds: z.array(z.string()),
+    orgsScanned: z.number(),
+    orgsPruned: z.number(),
+    orgsPrunedIds: z.array(z.string()),
+  })
   .passthrough();
 
 /**
@@ -113,13 +121,82 @@ export async function registerAggregatorMaintenanceRoutes(app: FastifyInstance):
         prunedIds.push(row.id);
       }
 
+      // Prune stale pending orgs too (§7). Same cutoff. Delete the mirrored KC
+      // group + disabled owner user before the DB row so a partial failure
+      // leaves the row for the next pass rather than orphaning KC objects.
+      // Only runs when the hierarchy is on (the table is empty otherwise).
+      const orgStore = getAggregatorOrgStore();
+      let orgsScanned = 0;
+      const orgsPrunedIds: string[] = [];
+      if (orgHierarchyEnabled()) {
+        const orgPage = await orgStore.listPending();
+        if (!orgPage.ok) {
+          throw httpError('DB_UNAVAILABLE', {
+            cause: new Error(orgPage.error.message),
+            fields: { sub_operation: 'orgStore.listPending' },
+          });
+        }
+        orgsScanned = orgPage.value.length;
+        const staleOrgs = orgPage.value.filter((o) => o.updatedAt < cutoff);
+        for (const org of staleOrgs) {
+          const kc = await idp.findByEmail(org.ownerEmail);
+          if (!kc.ok) {
+            log.warn(
+              { status: 'skipped', org_id: org.id, code: kc.error.code },
+              'skipped stale-org prune — KC owner lookup failed',
+            );
+            continue;
+          }
+          if (kc.value) {
+            const del = await idp.deleteUser(kc.value.id);
+            if (!del.ok) {
+              log.warn(
+                { status: 'skipped', org_id: org.id, code: del.error.code },
+                'skipped stale-org prune — KC owner delete failed',
+              );
+              continue;
+            }
+          }
+          if (org.kcGroupId) {
+            const delGroup = await idp.deleteGroup(org.kcGroupId);
+            if (!delGroup.ok) {
+              log.warn(
+                { status: 'skipped', org_id: org.id, code: delGroup.error.code },
+                'skipped stale-org prune — KC group delete failed',
+              );
+              continue;
+            }
+          }
+          const deletedOrg = await orgStore.deleteById(org.id);
+          if (!deletedOrg.ok) {
+            log.warn(
+              { status: 'skipped', org_id: org.id, code: deletedOrg.error.code },
+              'skipped stale-org prune — DB delete failed',
+            );
+            continue;
+          }
+          orgsPrunedIds.push(org.id);
+        }
+      }
+
       log.info(
-        { status: 'success', scanned: page.value.rows.length, pruned: prunedIds.length },
+        {
+          status: 'success',
+          scanned: page.value.rows.length,
+          pruned: prunedIds.length,
+          orgsScanned,
+          orgsPruned: orgsPrunedIds.length,
+        },
         'stale-pending cleanup complete',
       );
-      return reply
-        .status(200)
-        .send({ scanned: page.value.rows.length, pruned: prunedIds.length, prunedIds });
+      return reply.status(200).send({
+        scanned: page.value.rows.length,
+        pruned: prunedIds.length,
+        prunedIds,
+        orgsScanned,
+        orgsPruned: orgsPrunedIds.length,
+        orgsPrunedIds,
+      });
     },
   );
 }

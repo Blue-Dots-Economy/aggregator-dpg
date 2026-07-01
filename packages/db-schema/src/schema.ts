@@ -182,6 +182,7 @@ export const aggregatorOrgs = pgTable(
     displayName: text('display_name').notNull(),
     state: text('state'),
     ownerEmail: text('owner_email').notNull(),
+    ownerPhone: text('owner_phone'),
     ownerKcSub: text('owner_kc_sub'),
     kcGroupId: text('kc_group_id'),
     status: aggregatorStatusEnum('status').notNull().default('pending'),
