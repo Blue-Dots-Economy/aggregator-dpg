@@ -135,11 +135,9 @@ describe('aggregator-org-approvals routes', () => {
     expect(res.body).toContain('Wonder Org');
   });
 
-  it('GET read page with an expired token re-arms inline: shows the confirm page (§7)', async () => {
+  it('GET read page with an expired token offers inline regenerate (§7)', async () => {
     const orgId = '00000000-0000-0000-0000-0000000000a5';
-    orgStore.seed([
-      buildAggregatorOrg({ id: orgId, slug: 'ex', displayName: 'Expired Org', status: 'pending' }),
-    ]);
+    orgStore.seed([buildAggregatorOrg({ id: orgId, slug: 'ex', status: 'pending' })]);
     const { token } = await mintApprovalToken({
       aggregatorId: orgId,
       intent: 'approve',
@@ -149,18 +147,18 @@ describe('aggregator-org-approvals routes', () => {
       method: 'GET',
       url: `/admin/v1/orgs/read/${orgId}?token=${encodeURIComponent(token)}&intent=approve`,
     });
-    // No self-email round-trip: the expired-but-signed link lands the admin
-    // straight on the confirm page with a freshly-minted decision token.
-    expect(res.statusCode).toBe(200);
-    expect(res.body).toContain('Expired Org');
-    expect(res.body).toContain(`/admin/v1/orgs/decision/${orgId}`);
-    expect(res.body).not.toContain('Link expired');
+    // Expired link → an explicit "regenerate" step (no self-email), which posts
+    // the expired-but-signed token to the renew endpoint.
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toContain('Link expired');
+    expect(res.body).toContain('Regenerate &amp; review');
+    expect(res.body).toContain(`/admin/v1/orgs/renew/${orgId}`);
   });
 
-  it('POST resend re-sends the review email for a pending org using an expired token', async () => {
+  it('POST renew re-arms an expired token and shows the confirm page inline', async () => {
     const orgId = '00000000-0000-0000-0000-0000000000a6';
     orgStore.seed([
-      buildAggregatorOrg({ id: orgId, slug: 'rs', ownerEmail: 'o@x.org', status: 'pending' }),
+      buildAggregatorOrg({ id: orgId, slug: 'rs', displayName: 'Renew Org', status: 'pending' }),
     ]);
     const { token } = await mintApprovalToken({
       aggregatorId: orgId,
@@ -169,15 +167,17 @@ describe('aggregator-org-approvals routes', () => {
     });
     const res = await app.inject({
       method: 'POST',
-      url: `/admin/v1/orgs/resend/${orgId}`,
+      url: `/admin/v1/orgs/renew/${orgId}`,
       payload: { token },
     });
+    // Lands on the confirm page (approve/reject) with a fresh token; no email.
     expect(res.statusCode).toBe(200);
-    expect(res.body).toContain('Approval link sent');
-    expect(mailer.outbox.length).toBe(1);
+    expect(res.body).toContain('Renew Org');
+    expect(res.body).toContain(`/admin/v1/orgs/decision/${orgId}`);
+    expect(mailer.outbox.length).toBe(0);
   });
 
-  it('POST resend on an already-approved org is a no-op', async () => {
+  it('POST renew on an already-approved org is a no-op', async () => {
     const orgId = '00000000-0000-0000-0000-0000000000a7';
     orgStore.seed([buildAggregatorOrg({ id: orgId, slug: 'done', status: 'active' })]);
     const { token } = await mintApprovalToken({
@@ -187,11 +187,10 @@ describe('aggregator-org-approvals routes', () => {
     });
     const res = await app.inject({
       method: 'POST',
-      url: `/admin/v1/orgs/resend/${orgId}`,
+      url: `/admin/v1/orgs/renew/${orgId}`,
       payload: { token },
     });
     expect(res.statusCode).toBe(200);
     expect(res.body).toContain('Already approved');
-    expect(mailer.outbox.length).toBe(0);
   });
 });

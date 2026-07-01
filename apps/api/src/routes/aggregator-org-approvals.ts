@@ -28,7 +28,6 @@ import type { AggregatorOrg } from '../services/aggregator-org-store/index.js';
 import { getIdpAdmin } from '../services/idp-admin/index.js';
 import { formatApprovalTtl } from '../services/approval-token.js';
 import { renderConfirmPage, renderResultPage } from '../views/approval-pages.js';
-import { sendOrgReviewEmail } from '../services/org-registration-notify.js';
 import { mintApprovalTokenPair } from '../services/registration-notify.js';
 import {
   sendHtml,
@@ -90,10 +89,34 @@ export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance):
 
       if (!token) return sendPage(reply, missingTokenPage());
 
-      // Accept an expired-but-signature-valid token as proof the network admin
-      // held a legitimate link. Truly invalid/malformed tokens still fail.
-      const verified = await verifyTokenForId(token, orgId, ORG_NOUN, { allowExpired: true });
-      if (!verified.ok) return sendPage(reply, verified.page);
+      // Strict verify first (rejects expired). A valid link → straight to the
+      // confirm page.
+      const verified = await verifyTokenForId(token, orgId, ORG_NOUN);
+      if (!verified.ok) {
+        // If it's merely expired (signature valid, id matches), offer inline
+        // regeneration — the admin clicks once to mint a fresh link and land on
+        // the confirm page, no self-email round-trip (§7). Otherwise (invalid /
+        // malformed / wrong id) show the original error page.
+        const lenient = await verifyTokenForId(token, orgId, ORG_NOUN, { allowExpired: true });
+        if (lenient.ok) {
+          return sendHtml(
+            reply,
+            400,
+            renderResultPage({
+              status: 'error',
+              title: 'Link expired',
+              message:
+                'This approval link has expired. Click below to regenerate a fresh link and continue to the review.',
+              action: {
+                url: `${config.PUBLIC_API_URL}/admin/v1/orgs/renew/${orgId}`,
+                token,
+                label: 'Regenerate & review',
+              },
+            }),
+          );
+        }
+        return sendPage(reply, verified.page);
+      }
 
       const lookup = await getAggregatorOrgStore().findById(orgId);
       if (!lookup.ok) return sendPage(reply, orgUnavailablePage());
@@ -103,17 +126,13 @@ export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance):
       if (prior) return sendHtml(reply, 200, renderResultPage(prior));
 
       const effectiveIntent = intent === 'reject' ? 'reject' : 'approve';
-      // Re-arm the decision link inline: mint a fresh token so the approve/reject
-      // POST always validates, even if the emailed link had expired. This lets
-      // the admin (already on this page) act without a self-email round-trip (§7).
-      const { approveToken, rejectToken } = await mintApprovalTokenPair(orgId);
       return sendHtml(
         reply,
         200,
         renderConfirmPage({
           aggregatorId: orgId,
           intent: effectiveIntent,
-          token: effectiveIntent === 'reject' ? rejectToken : approveToken,
+          token,
           applicantEmail: lookup.value.ownerEmail,
           association: lookup.value.displayName,
           aggregatorType: 'organisation',
@@ -252,18 +271,17 @@ export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance):
   );
 
   app.post(
-    '/admin/v1/orgs/resend/:id',
+    '/admin/v1/orgs/renew/:id',
     {
       schema: {
         tags: ['aggregator-orgs'],
-        summary: 'Resend a fresh org review link to the network admin',
+        summary: 'Regenerate an expired org review link and show the confirm page',
         description:
-          'Re-mints the approve/reject token pair and re-emails the network admin for a still-pending org (§7). Accepts an expired-but-signature-valid token as proof the caller held a legitimate link. Returns an HTML result page. Only registered when ORG_HIERARCHY_ENABLED=true.',
+          'Reached from the "Regenerate & review" button on the expired-link page. Accepts an expired-but-signature-valid token as proof the admin held a legitimate link, mints a fresh decision token, and renders the approve/reject confirm page inline (no email). Only registered when ORG_HIERARCHY_ENABLED=true.',
         params: OrgApprovalParamsSchema,
       },
     },
     async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
-      const log = req.log.child({ operation: 'org-registration.resend' });
       const orgId = req.params.id;
       const body = (req.body ?? {}) as { token?: string };
 
@@ -279,24 +297,22 @@ export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance):
       const prior = orgDecidedView(lookup.value.status);
       if (prior) return sendHtml(reply, 200, renderResultPage(prior));
 
-      await sendOrgReviewEmail(
-        {
-          orgId,
-          displayName: lookup.value.displayName,
-          ownerEmail: lookup.value.ownerEmail,
-          ownerPhone: lookup.value.ownerPhone ?? '',
-        },
-        log,
-      );
-
-      log.info({ status: 'success', org_id: orgId }, 'org approval link resent');
+      // Mint a fresh token pair so the approve/reject POST validates, then land
+      // the admin on the confirm page directly.
+      const { approveToken, rejectToken } = await mintApprovalTokenPair(orgId);
+      const effectiveIntent = verified.intent === 'reject' ? 'reject' : 'approve';
       return sendHtml(
         reply,
         200,
-        renderResultPage({
-          status: 'success',
-          title: 'Approval link sent',
-          message: 'A fresh approval link has been emailed to the reviewers.',
+        renderConfirmPage({
+          aggregatorId: orgId,
+          intent: effectiveIntent,
+          token: effectiveIntent === 'reject' ? rejectToken : approveToken,
+          applicantEmail: lookup.value.ownerEmail,
+          association: lookup.value.displayName,
+          aggregatorType: 'organisation',
+          postUrl: `${config.PUBLIC_API_URL}/admin/v1/orgs/decision/${orgId}`,
+          expiresInText: formatApprovalTtl(config.APPROVAL_TOKEN_TTL_SECONDS),
         }),
       );
     },
