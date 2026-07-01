@@ -109,6 +109,9 @@ export function RegisterView({
   const orgs = orgsQuery.data?.orgs ?? [];
   const noOrgsYet =
     orgHierarchyEnabled && orgsQuery.isSuccess && !orgsQuery.isError && orgs.length === 0;
+  // With the hierarchy on, the coordinator no longer types an "Organisation
+  // Name" — the record inherits the selected org's display name.
+  const selectedOrgName = orgs.find((o) => o.id === orgId)?.display_name ?? '';
 
   useEffect(() => {
     if (state.status === 'error' && errorRef.current) {
@@ -116,6 +119,14 @@ export function RegisterView({
       errorRef.current.focus();
     }
   }, [state]);
+
+  // Keep the (hidden) required `name` in sync with the chosen org so the form's
+  // validity gate passes without the coordinator typing an organisation name.
+  useEffect(() => {
+    if (!orgHierarchyEnabled) return;
+    const next = selectedOrgName || undefined;
+    setFormData((prev) => (prev['name'] === next ? prev : { ...prev, name: next }));
+  }, [orgHierarchyEnabled, selectedOrgName]);
 
   // Page heading: keep today's schema-title heading when the flag is off (no
   // behaviour change); use a neutral, tab-agnostic heading when tabs show.
@@ -131,6 +142,17 @@ export function RegisterView({
     return clone;
   }, [schema]);
 
+  // Flag-on coordinator flow: hide the free-text "Organisation Name" (`name`)
+  // field — it's auto-filled from the selected org. Flag-off keeps it visible
+  // so the single flat form is unchanged.
+  const coordinatorUiSchema = useMemo<Record<string, unknown>>(() => {
+    if (!orgHierarchyEnabled) return uiSchema;
+    return {
+      ...uiSchema,
+      name: { ...((uiSchema['name'] as Record<string, unknown>) ?? {}), 'ui:widget': 'hidden' },
+    };
+  }, [uiSchema, orgHierarchyEnabled]);
+
   const handleSubmit = async (
     e: IChangeEvent<Record<string, unknown>>,
     _event: FormEvent<HTMLFormElement>,
@@ -145,9 +167,11 @@ export function RegisterView({
       ),
     };
     // The API strips `org_id` before RJSF validation and stores it on
-    // `aggregators.parent_org_id`. Only sent when the hierarchy is on.
+    // `aggregators.parent_org_id`. Only sent when the hierarchy is on. The
+    // coordinator's `name` is the selected org's name (the field is hidden).
     if (orgHierarchyEnabled && orgId) {
       payload['org_id'] = orgId;
+      payload['name'] = selectedOrgName;
     }
     try {
       const res = await fetch('/api/aggregator/register', {
@@ -277,7 +301,7 @@ export function RegisterView({
 
             <RjsfThemedForm
               schema={formSchema}
-              uiSchema={uiSchema as unknown as UiSchema<Record<string, unknown>>}
+              uiSchema={coordinatorUiSchema as unknown as UiSchema<Record<string, unknown>>}
               formData={formData}
               onChange={(e) => setFormData(e.formData as Record<string, unknown>)}
               onValidityChange={setCanSubmit}

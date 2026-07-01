@@ -178,6 +178,8 @@ describe('RegisterView org hierarchy', () => {
     await waitFor(() => expect(calls.length).toBeGreaterThan(0));
     const submitCall = calls.find((c) => c.url.includes('/api/aggregator/register'));
     expect(submitCall).toBeDefined();
-    expect(JSON.parse(submitCall!.body)).toMatchObject({ org_id: 'o1' });
+    // org_id forwarded, and name inherits the selected org's display name
+    // (the free-text Organisation Name field is hidden in the coordinator flow).
+    expect(JSON.parse(submitCall!.body)).toMatchObject({ org_id: 'o1', name: 'Enable India' });
   });
 });
