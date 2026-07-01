@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { resolveConfigDir, resolveConfigPath, resolveSchemaRoot } from '../paths.js';
+import {
+  resolveConfigDir,
+  resolveConfigPath,
+  resolveSchemaRoot,
+  resolveActiveNetwork,
+} from '../paths.js';
 
 describe('resolveConfigDir', () => {
   it('uses defaults when no env vars are set', () => {
@@ -104,5 +109,58 @@ describe('resolveSchemaRoot', () => {
     expect(resolveSchemaRoot({ CONFIG_ROOT: '/data/config', AGGREGATOR_NETWORK: 'blue_dot' })).toBe(
       '/data/config/blue_dot/schemas',
     );
+  });
+});
+
+describe('resolveActiveNetwork', () => {
+  it('returns default network blue_dot when no env vars are set', () => {
+    const result = resolveActiveNetwork({});
+    expect(result.network).toBe('blue_dot');
+    expect(result.brand).toBeUndefined();
+  });
+
+  it('returns the configured AGGREGATOR_NETWORK', () => {
+    const result = resolveActiveNetwork({ AGGREGATOR_NETWORK: 'orange_dot' });
+    expect(result.network).toBe('orange_dot');
+    expect(result.brand).toBeUndefined();
+  });
+
+  it('returns brand when AGGREGATOR_BRAND is set', () => {
+    const result = resolveActiveNetwork({
+      AGGREGATOR_NETWORK: 'blue_dot',
+      AGGREGATOR_BRAND: 'upsdm',
+    });
+    expect(result.network).toBe('blue_dot');
+    expect(result.brand).toBe('upsdm');
+  });
+
+  it('trims whitespace from network and brand', () => {
+    const result = resolveActiveNetwork({
+      AGGREGATOR_NETWORK: '  blue_dot  ',
+      AGGREGATOR_BRAND: '  onetac  ',
+    });
+    expect(result.network).toBe('blue_dot');
+    expect(result.brand).toBe('onetac');
+  });
+
+  it('treats empty AGGREGATOR_BRAND as absent (undefined)', () => {
+    const result = resolveActiveNetwork({ AGGREGATOR_NETWORK: 'blue_dot', AGGREGATOR_BRAND: '' });
+    expect(result.brand).toBeUndefined();
+  });
+
+  it('treats whitespace-only AGGREGATOR_BRAND as absent (undefined)', () => {
+    const result = resolveActiveNetwork({
+      AGGREGATOR_NETWORK: 'blue_dot',
+      AGGREGATOR_BRAND: '   ',
+    });
+    expect(result.brand).toBeUndefined();
+  });
+
+  it('network default matches the single-sourced default in resolveConfigDir', () => {
+    // Both helpers should use the same default so a deployment with no env vars
+    // records consent for the same network/brand the web layer would display.
+    const { network } = resolveActiveNetwork({});
+    const dir = resolveConfigDir({});
+    expect(dir).toContain(network);
   });
 });

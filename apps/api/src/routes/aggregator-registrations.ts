@@ -39,10 +39,11 @@ import { getAggregatorProfileStore } from '../services/aggregator-profile-store/
 import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js';
 import { getIdpAdmin } from '../services/idp-admin/index.js';
 import { sendAdminReviewEmail } from '../services/registration-notify.js';
-import { orgHierarchyEnabled, config } from '../config.js';
+import { orgHierarchyEnabled } from '../config.js';
 import { checkSubmitRate } from '../services/submit-rate.js';
 import { loadConsentConfig } from '@aggregator-dpg/config-loader/fs';
 import { getConsentLedger } from '../services/consent-ledger/index.js';
+import { resolveActiveNetwork } from '@aggregator-dpg/network-config/paths';
 import type { AggregatorStatus } from '@aggregator-dpg/shared-primitives/aggregator';
 import { normalisePhone } from '../services/phone.js';
 import { splitName } from '../services/name.js';
@@ -239,6 +240,7 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
           'pending registration re-submitted — review link re-sent (no field change)',
         );
 
+        // v1 records consent only on fresh registration, not on reclaim (deliberate).
         return reply.status(200).send({
           aggregator_id: existing.id,
           org_slug: existing.orgSlug,
@@ -355,10 +357,15 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
 
       // Record registration consent in the append-only ledger. This is
       // log-and-continue: a ledger write failure must not block registration.
+      // Use resolveActiveNetwork() so the recorded network/brand matches the
+      // AGGREGATOR_NETWORK/AGGREGATOR_BRAND env vars that drive which consent
+      // content the web layer displays — preventing a mismatch between the
+      // version shown and the version recorded.
+      const { network: activeNetwork, brand: activeBrand } = resolveActiveNetwork();
       await recordAggregatorConsent({
         aggregatorId,
-        network: config.SIGNALSTACK_ITEM_NETWORK,
-        brand: undefined,
+        network: activeNetwork,
+        brand: activeBrand,
         log,
       });
 

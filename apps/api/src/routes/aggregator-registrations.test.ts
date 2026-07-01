@@ -140,6 +140,10 @@ describe('POST /v1/aggregator-registrations/create', () => {
     expect(consentRow?.termsVersion).toBeGreaterThanOrEqual(1);
     expect(consentRow?.privacyVersion).toBeGreaterThanOrEqual(1);
     expect(consentRow?.source).toBe('registration');
+    // network/brand must come from AGGREGATOR_NETWORK/AGGREGATOR_BRAND (not a
+    // different config var) so the recorded version matches what the web layer displayed.
+    expect(consentRow?.network).toBe('blue_dot'); // default when AGGREGATOR_NETWORK unset
+    expect(consentRow?.brand).toBeNull(); // default when AGGREGATOR_BRAND unset
   });
 
   it('records aggregator consent in the ledger on successful registration', async () => {
@@ -156,6 +160,30 @@ describe('POST /v1/aggregator-registrations/create', () => {
     expect(ledgerRows).toHaveLength(1);
     expect(ledgerRows[0]?.subjectType).toBe('aggregator');
     expect(ledgerRows[0]?.subjectId).toBe(aggregator_id);
+  });
+
+  it('records the resolved AGGREGATOR_NETWORK and AGGREGATOR_BRAND in the consent ledger', async () => {
+    process.env.AGGREGATOR_NETWORK = 'orange_dot';
+    process.env.AGGREGATOR_BRAND = 'onetac';
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/aggregator-registrations/create',
+        headers: AUTH_HEADER,
+        payload: {
+          ...validBody,
+          contact: { ...validBody.contact, email: 'brand@test.org', phone: '+919999999999' },
+        },
+      });
+      expect(res.statusCode).toBe(201);
+      const ledgerRows = consentLedger.list();
+      expect(ledgerRows).toHaveLength(1);
+      expect(ledgerRows[0]?.network).toBe('orange_dot');
+      expect(ledgerRows[0]?.brand).toBe('onetac');
+    } finally {
+      delete process.env.AGGREGATOR_NETWORK;
+      delete process.env.AGGREGATOR_BRAND;
+    }
   });
 
   it('does not fail registration when the consent ledger write fails', async () => {

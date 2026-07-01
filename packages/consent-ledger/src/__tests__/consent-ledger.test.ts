@@ -13,6 +13,8 @@ import { InMemoryConsentLedger } from '../memory.js';
 import { ConsentLedgerFake, buildConsentRecord } from '../testing.js';
 import { RecordConsentInputSchema, ConsentRecordSchema } from '../interface.js';
 import type { RecordConsentInput } from '../interface.js';
+import { PostgresConsentLedger } from '../postgres.js';
+import { ValidationError } from '@aggregator-dpg/shared-primitives/errors';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -243,5 +245,67 @@ describe('buildConsentRecord', () => {
     const r1 = buildConsentRecord();
     const r2 = buildConsentRecord();
     expect(r1).toEqual(r2);
+  });
+});
+
+// ─── PostgresConsentLedger — boundary validation (FIX-4) ─────────────────────
+
+describe('PostgresConsentLedger.recordRegistrationConsent — input validation', () => {
+  // We use a minimal stub DB that asserts it is never reached when input is
+  // invalid; if validation passes the stub throws so the test knows the DB
+  // path would have been entered. This avoids a real DB connection while still
+  // exercising the validation boundary independently of the in-memory impl.
+  function makeNeverCalledDb() {
+    return {
+      insert: () => {
+        throw new Error('DB should not be called on invalid input');
+      },
+    } as unknown as ConstructorParameters<typeof PostgresConsentLedger>[0];
+  }
+
+  it('returns err(ValidationError) for an invalid subjectId without calling the DB', async () => {
+    const ledger = new PostgresConsentLedger(makeNeverCalledDb());
+    const result = await ledger.recordRegistrationConsent({
+      subjectType: 'aggregator',
+      subjectId: 'not-a-uuid', // invalid
+      network: 'blue_dot',
+      brand: null,
+      termsVersion: 1,
+      privacyVersion: 1,
+    });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error).toBeInstanceOf(ValidationError);
+    expect(result.error.code).toBe('CONSENT_INPUT_INVALID');
+  });
+
+  it('returns err(ValidationError) for a termsVersion below 1 without calling the DB', async () => {
+    const ledger = new PostgresConsentLedger(makeNeverCalledDb());
+    const result = await ledger.recordRegistrationConsent({
+      subjectType: 'org',
+      subjectId: '22222222-2222-2222-2222-222222222222',
+      network: 'blue_dot',
+      brand: null,
+      termsVersion: 0, // invalid — must be ≥ 1
+      privacyVersion: 1,
+    });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error).toBeInstanceOf(ValidationError);
+  });
+
+  it('returns err(ValidationError) for an empty network string without calling the DB', async () => {
+    const ledger = new PostgresConsentLedger(makeNeverCalledDb());
+    const result = await ledger.recordRegistrationConsent({
+      subjectType: 'aggregator',
+      subjectId: '33333333-3333-3333-3333-333333333333',
+      network: '', // invalid — must be min(1)
+      brand: null,
+      termsVersion: 1,
+      privacyVersion: 1,
+    });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error).toBeInstanceOf(ValidationError);
   });
 });

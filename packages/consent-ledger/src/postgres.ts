@@ -14,12 +14,21 @@
 
 import type { PgDatabase } from 'drizzle-orm/pg-core';
 import { aggregatorConsentRecord } from '@aggregator-dpg/db-schema/schema';
-import { UpstreamError, DomainError } from '@aggregator-dpg/shared-primitives/errors';
+import {
+  UpstreamError,
+  DomainError,
+  ValidationError,
+} from '@aggregator-dpg/shared-primitives/errors';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import { err, ok } from '@aggregator-dpg/shared-primitives/result';
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
 
-import { ConsentLedgerBase, type ConsentRecord, type RecordConsentInput } from './interface.js';
+import {
+  ConsentLedgerBase,
+  RecordConsentInputSchema,
+  type ConsentRecord,
+  type RecordConsentInput,
+} from './interface.js';
 import { logger } from './logger.js';
 
 // Drizzle is generic over its schema map; we only need a "queryable" handle.
@@ -60,18 +69,42 @@ export class PostgresConsentLedger extends ConsentLedgerBase {
     const start = Date.now();
     const operation = 'consentLedger.recordRegistrationConsent';
 
+    // Validate the input at the ledger boundary so a caller that bypasses
+    // the route-level schema (e.g. a direct service call) cannot insert a
+    // malformed row. Return err rather than throwing — boundary rule.
+    const parsed = RecordConsentInputSchema.safeParse(input);
+    if (!parsed.success) {
+      const message = parsed.error.issues
+        .map((i) => `${i.path.join('.')}: ${i.message}`)
+        .join('; ');
+      logger.error({
+        operation,
+        status: 'failure',
+        error: message,
+        error_type: 'ValidationError',
+        latency_ms: Date.now() - start,
+      });
+      return err(
+        new ValidationError(`Invalid RecordConsentInput: ${message}`, {
+          code: 'CONSENT_INPUT_INVALID',
+          details: { issues: parsed.error.issues },
+        }),
+      );
+    }
+    const validInput = parsed.data;
+
     try {
       const now = new Date();
 
       const inserted = await this.db
         .insert(aggregatorConsentRecord)
         .values({
-          subjectType: input.subjectType,
-          subjectId: input.subjectId,
-          termsVersion: input.termsVersion,
-          privacyVersion: input.privacyVersion,
-          network: input.network,
-          brand: input.brand ?? null,
+          subjectType: validInput.subjectType,
+          subjectId: validInput.subjectId,
+          termsVersion: validInput.termsVersion,
+          privacyVersion: validInput.privacyVersion,
+          network: validInput.network,
+          brand: validInput.brand ?? null,
           source: 'registration',
           acceptedAt: now,
         })
@@ -97,8 +130,8 @@ export class PostgresConsentLedger extends ConsentLedgerBase {
         operation,
         status: 'success',
         latency_ms: Date.now() - start,
-        subject_type: input.subjectType,
-        network: input.network,
+        subject_type: validInput.subjectType,
+        network: validInput.network,
       });
 
       const record: ConsentRecord = {

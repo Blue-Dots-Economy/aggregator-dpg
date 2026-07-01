@@ -194,4 +194,62 @@ describe('loadConsentConfig', () => {
       ConfigError,
     );
   });
+
+  it('merges a partial brand override (single audience only) onto the full network config', async () => {
+    // Network file has both audiences with version 1 content
+    writeConsentFile(tmpDir, 'blue_dot');
+
+    // Brand file supplies ONLY the aggregator audience — org audience is absent.
+    // This must merge cleanly rather than throwing a validation error on the
+    // brand file itself (FIX-3: brand files are partial overrides, not full configs).
+    const partialBrandContent = {
+      audiences: {
+        aggregator: {
+          documents: {
+            terms: {
+              current_version: 1,
+              versions: [
+                {
+                  version: 1,
+                  title: 'UPSDM Terms of Service',
+                  content: '## UPSDM-specific terms v1',
+                  effective_from: '2026-07-01',
+                },
+              ],
+            },
+            privacy: {
+              current_version: 1,
+              versions: [
+                {
+                  version: 1,
+                  title: 'UPSDM Privacy Policy',
+                  content: '## UPSDM-specific privacy v1',
+                  effective_from: '2026-07-01',
+                },
+              ],
+            },
+          },
+        },
+      },
+    };
+
+    const dir = join(tmpDir, 'config', 'blue_dot', 'upsdm', 'schemas', 'aggregator');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'consent.json'), JSON.stringify(partialBrandContent), 'utf8');
+
+    const config = await loadConsentConfig('blue_dot', 'upsdm', tmpDir);
+
+    // Brand aggregator content overrides the network
+    expect(config.audiences.aggregator.documents.terms.title).toBeUndefined(); // title is on versions
+    expect(config.audiences.aggregator.documents.terms.versions[0]?.title).toBe(
+      'UPSDM Terms of Service',
+    );
+    expect(config.audiences.aggregator.documents.terms.versions[0]?.content).toBe(
+      '## UPSDM-specific terms v1',
+    );
+
+    // Org audience came from the network file and is untouched
+    expect(config.audiences.org.documents.terms.current_version).toBe(1);
+    expect(config.audiences.org.documents.terms.versions[0]?.content).toBe('## Terms v1');
+  });
 });

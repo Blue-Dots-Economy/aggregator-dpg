@@ -86,27 +86,6 @@ async function findRepoRoot(startDir: string): Promise<string> {
 }
 
 /**
- * Deep-merges two AggregatorConsentConfig objects, with `override` taking
- * precedence over `base`. The merge is per-audience / per-document, so an
- * override file that only contains one audience will not affect the other.
- *
- * @param base - The network-level (or default) consent config.
- * @param override - The brand-level consent config to merge on top.
- * @returns A new merged AggregatorConsentConfig.
- */
-function mergeConsentConfigs(
-  base: AggregatorConsentConfig,
-  override: AggregatorConsentConfig,
-): AggregatorConsentConfig {
-  // Perform a structural deep merge, then re-validate the result.
-  const merged = deepMerge(
-    JSON.parse(JSON.stringify(base)) as Record<string, unknown>,
-    JSON.parse(JSON.stringify(override)) as Record<string, unknown>,
-  );
-  return parseAggregatorConsentConfig(merged);
-}
-
-/**
  * Loads and validates the consent configuration for the given network and
  * optional brand.
  *
@@ -159,12 +138,20 @@ export async function loadConsentConfig(
   let config = parseAggregatorConsentConfig(baseRaw);
 
   // If a brand is specified, look for a brand-level override and merge it.
+  // The brand file is treated as a *partial* override (the docstring for
+  // mergeConsentConfigs states that partial brand overrides are supported).
+  // Validating the brand file as a full config before the merge would reject
+  // single-audience brand files; instead we deep-merge the raw unknown value
+  // onto the validated base and validate the merged result once.
   if (brand !== undefined) {
     const brandPath = join(configDir, network, brand, CONSENT_SUFFIX);
     if (await fileExists(brandPath)) {
       const brandRaw = await readJson(brandPath);
-      const brandConfig = parseAggregatorConsentConfig(brandRaw);
-      config = mergeConsentConfigs(config, brandConfig);
+      const merged = deepMerge(
+        JSON.parse(JSON.stringify(config)) as Record<string, unknown>,
+        JSON.parse(JSON.stringify(brandRaw)) as Record<string, unknown>,
+      );
+      config = parseAggregatorConsentConfig(merged);
     }
   }
 

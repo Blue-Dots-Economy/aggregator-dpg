@@ -109,6 +109,10 @@ describe('aggregator-orgs routes', () => {
     expect(consentRow?.termsVersion).toBeGreaterThanOrEqual(1);
     expect(consentRow?.privacyVersion).toBeGreaterThanOrEqual(1);
     expect(consentRow?.source).toBe('registration');
+    // network/brand must come from AGGREGATOR_NETWORK/AGGREGATOR_BRAND so the
+    // recorded version matches what the web layer displayed.
+    expect(consentRow?.network).toBe('blue_dot'); // default when AGGREGATOR_NETWORK unset
+    expect(consentRow?.brand).toBeNull(); // default when AGGREGATOR_BRAND unset
   });
 
   it('records org consent in the ledger on successful registration', async () => {
@@ -157,6 +161,16 @@ describe('aggregator-orgs routes', () => {
     const body = res.json() as { orgs: { id: string; slug: string; display_name: string }[] };
     expect(body.orgs.map((o) => o.slug)).toEqual(['a']);
     expect(body.orgs[0]?.display_name).toBe('A');
+  });
+
+  it('rejects org registration when consent.value is false (400/validation)', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: { ...orgBody, consent: { ...orgBody.consent, value: false } },
+    });
+    expect(res.statusCode).toBe(400);
   });
 
   it('re-mints the review link for a pending org on resubmit — no field overwrite (§7)', async () => {

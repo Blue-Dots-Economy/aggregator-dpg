@@ -19,7 +19,7 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { orgHierarchyEnabled, config } from '../config.js';
+import { orgHierarchyEnabled } from '../config.js';
 import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js';
 import { getIdpAdmin, KC_ATTR } from '../services/idp-admin/index.js';
 import { sendOrgReviewEmail } from '../services/org-registration-notify.js';
@@ -32,6 +32,7 @@ import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 import { loadConsentConfig } from '@aggregator-dpg/config-loader/fs';
 import { getConsentLedger } from '../services/consent-ledger/index.js';
+import { resolveActiveNetwork } from '@aggregator-dpg/network-config/paths';
 
 const OrgCreateBodySchema = z.object({
   display_name: z.string().min(1).max(200),
@@ -42,7 +43,7 @@ const OrgCreateBodySchema = z.object({
     phone: z.string().min(1),
   }),
   consent: z.object({
-    value: z.boolean(),
+    value: z.literal(true),
     given_at: z.string(),
     valid_till: z.string(),
   }),
@@ -156,6 +157,7 @@ export async function registerAggregatorOrgRoutes(app: FastifyInstance): Promise
           { status: 'success', latency_ms: Date.now() - start, org_id: prior.id, reclaim: true },
           'pending org re-submitted — review link re-sent (no field change)',
         );
+        // v1 records consent only on fresh registration, not on reclaim (deliberate).
         return reply.status(200).send({
           org_id: prior.id,
           slug: prior.slug,
@@ -242,10 +244,15 @@ export async function registerAggregatorOrgRoutes(app: FastifyInstance): Promise
 
       // Record registration consent in the append-only ledger. This is
       // log-and-continue: a ledger write failure must not block registration.
+      // Use resolveActiveNetwork() so the recorded network/brand matches the
+      // AGGREGATOR_NETWORK/AGGREGATOR_BRAND env vars that drive which consent
+      // content the web layer displays — preventing a mismatch between the
+      // version shown and the version recorded.
+      const { network: activeNetwork, brand: activeBrand } = resolveActiveNetwork();
       await recordOrgConsent({
         orgId: org.id,
-        network: config.SIGNALSTACK_ITEM_NETWORK,
-        brand: undefined,
+        network: activeNetwork,
+        brand: activeBrand,
         log,
       });
 
