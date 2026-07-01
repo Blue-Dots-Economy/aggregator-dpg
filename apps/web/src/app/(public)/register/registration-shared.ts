@@ -147,6 +147,21 @@ export function parseError(
   };
 }
 
+/**
+ * Returns a copy of an RJSF schema with `title`/`description` stripped — the
+ * register page owns the heading and the schema description is an API-contract
+ * note, not form UI copy. Shared by the coordinator + org forms.
+ *
+ * @param schema - The loaded JSON Schema.
+ * @returns A shallow clone without `title`/`description`.
+ */
+export function stripFormChrome(schema: RJSFSchema): RJSFSchema {
+  const clone: RJSFSchema = { ...schema };
+  delete (clone as { title?: string }).title;
+  delete (clone as { description?: string }).description;
+  return clone;
+}
+
 /** Result of {@link submitRegistration}: parsed success body or display error. */
 export type SubmitResult =
   | { ok: true; body: Record<string, unknown> }

@@ -7,15 +7,93 @@
  * out-of-band scheduler (cron/worker) using a service-account Bearer token.
  */
 
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { FastifyBaseLogger, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { config, orgHierarchyEnabled } from '../config.js';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
 import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js';
 import { getIdpAdmin } from '../services/idp-admin/index.js';
+import type { IdpAdminAdapter } from '../services/idp-admin/index.js';
 import { authenticateAny } from '../services/auth/access-token.js';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
+
+/** Minimal Result shape the prune helper needs from a store/idp delete. */
+type DeleteResult = { ok: true } | { ok: false; error: { code: string } };
+
+/** Describes one entity's stale-prune: how to read it + how to delete its parts. */
+interface PruneSpec<T> {
+  /** Stale rows to prune (already filtered by cutoff). */
+  rows: T[];
+  /** Owner/contact email → the KC user to delete. */
+  emailOf: (row: T) => string;
+  /** Row id (for logs + the DB delete). */
+  idOf: (row: T) => string;
+  /** Optional KC cleanup after the user delete (e.g. the org's mirrored group). */
+  afterUserDelete?: (row: T) => Promise<DeleteResult> | null;
+  /** Deletes the DB row. */
+  deleteRow: (row: T) => Promise<DeleteResult>;
+  /** Log id field name (`aggregator_id` | `org_id`). */
+  logIdField: 'aggregator_id' | 'org_id';
+  /** Log message kind (`stale-pending` | `stale-org`). */
+  kind: string;
+}
+
+/**
+ * Deletes each stale row's KC user (+ any extra KC objects) then its DB row,
+ * skipping (with a warning) any row whose KC/DB call fails so the next pass
+ * retries it rather than orphaning objects. Shared by the coordinator and org
+ * cleanup loops.
+ *
+ * @returns The ids that were fully pruned.
+ */
+async function pruneStale<T>(
+  spec: PruneSpec<T>,
+  idp: IdpAdminAdapter,
+  log: FastifyBaseLogger,
+): Promise<string[]> {
+  const prunedIds: string[] = [];
+  for (const row of spec.rows) {
+    const id = spec.idOf(row);
+    const warn = (code: string, step: string): void =>
+      log.warn(
+        { status: 'skipped', [spec.logIdField]: id, code },
+        `skipped ${spec.kind} prune — ${step}`,
+      );
+
+    // Delete the KC user first so a partial failure leaves the DB row for the
+    // next pass rather than an orphaned KC user.
+    const kc = await idp.findByEmail(spec.emailOf(row));
+    if (!kc.ok) {
+      warn(kc.error.code, 'KC user lookup failed');
+      continue;
+    }
+    if (kc.value) {
+      const del = await idp.deleteUser(kc.value.id);
+      if (!del.ok) {
+        warn(del.error.code, 'KC user delete failed');
+        continue;
+      }
+    }
+
+    const extra = spec.afterUserDelete?.(row);
+    if (extra) {
+      const extraRes = await extra;
+      if (!extraRes.ok) {
+        warn(extraRes.error.code, 'KC group delete failed');
+        continue;
+      }
+    }
+
+    const deleted = await spec.deleteRow(row);
+    if (!deleted.ok) {
+      warn(deleted.error.code, 'DB delete failed');
+      continue;
+    }
+    prunedIds.push(id);
+  }
+  return prunedIds;
+}
 
 const CleanupResponseSchema = z
   .object({
@@ -76,58 +154,25 @@ export async function registerAggregatorMaintenanceRoutes(app: FastifyInstance):
       }
 
       const stale = page.value.rows.filter((r) => r.updatedAt < cutoff);
-      const prunedIds: string[] = [];
-      for (const row of stale) {
-        // Delete the KC user first so a partial failure leaves the DB row
-        // (re-tried next pass) rather than an orphaned KC user.
-        const kcStart = Date.now();
-        const kc = await idp.findByEmail(row.contactEmail);
-        if (!kc.ok) {
-          log.warn(
-            {
-              status: 'skipped',
-              aggregator_id: row.id,
-              code: kc.error.code,
-              latency_ms: Date.now() - kcStart,
-            },
-            'skipped stale-pending prune — KC user lookup failed',
-          );
-          continue;
-        }
-        if (kc.value) {
-          const delStart = Date.now();
-          const del = await idp.deleteUser(kc.value.id);
-          if (!del.ok) {
-            log.warn(
-              {
-                status: 'skipped',
-                aggregator_id: row.id,
-                code: del.error.code,
-                latency_ms: Date.now() - delStart,
-              },
-              'skipped stale-pending prune — KC user delete failed',
-            );
-            continue;
-          }
-        }
-        const deleted = await store.deleteById(row.id);
-        if (!deleted.ok) {
-          log.warn(
-            { status: 'skipped', aggregator_id: row.id, code: deleted.error.code },
-            'skipped stale-pending prune — DB delete failed',
-          );
-          continue;
-        }
-        prunedIds.push(row.id);
-      }
+      const prunedIds = await pruneStale(
+        {
+          rows: stale,
+          emailOf: (r) => r.contactEmail,
+          idOf: (r) => r.id,
+          deleteRow: (r) => store.deleteById(r.id),
+          logIdField: 'aggregator_id',
+          kind: 'stale-pending',
+        },
+        idp,
+        log,
+      );
 
-      // Prune stale pending orgs too (§7). Same cutoff. Delete the mirrored KC
-      // group + disabled owner user before the DB row so a partial failure
-      // leaves the row for the next pass rather than orphaning KC objects.
-      // Only runs when the hierarchy is on (the table is empty otherwise).
+      // Prune stale pending orgs too (§7). Same cutoff + row/KC-user/DB-row
+      // sequence, plus the mirrored KC group. Only runs when the hierarchy is
+      // on (the table is empty otherwise).
       const orgStore = getAggregatorOrgStore();
       let orgsScanned = 0;
-      const orgsPrunedIds: string[] = [];
+      let orgsPrunedIds: string[] = [];
       if (orgHierarchyEnabled()) {
         const orgPage = await orgStore.listPending();
         if (!orgPage.ok) {
@@ -137,46 +182,19 @@ export async function registerAggregatorMaintenanceRoutes(app: FastifyInstance):
           });
         }
         orgsScanned = orgPage.value.length;
-        const staleOrgs = orgPage.value.filter((o) => o.updatedAt < cutoff);
-        for (const org of staleOrgs) {
-          const kc = await idp.findByEmail(org.ownerEmail);
-          if (!kc.ok) {
-            log.warn(
-              { status: 'skipped', org_id: org.id, code: kc.error.code },
-              'skipped stale-org prune — KC owner lookup failed',
-            );
-            continue;
-          }
-          if (kc.value) {
-            const del = await idp.deleteUser(kc.value.id);
-            if (!del.ok) {
-              log.warn(
-                { status: 'skipped', org_id: org.id, code: del.error.code },
-                'skipped stale-org prune — KC owner delete failed',
-              );
-              continue;
-            }
-          }
-          if (org.kcGroupId) {
-            const delGroup = await idp.deleteGroup(org.kcGroupId);
-            if (!delGroup.ok) {
-              log.warn(
-                { status: 'skipped', org_id: org.id, code: delGroup.error.code },
-                'skipped stale-org prune — KC group delete failed',
-              );
-              continue;
-            }
-          }
-          const deletedOrg = await orgStore.deleteById(org.id);
-          if (!deletedOrg.ok) {
-            log.warn(
-              { status: 'skipped', org_id: org.id, code: deletedOrg.error.code },
-              'skipped stale-org prune — DB delete failed',
-            );
-            continue;
-          }
-          orgsPrunedIds.push(org.id);
-        }
+        orgsPrunedIds = await pruneStale(
+          {
+            rows: orgPage.value.filter((o) => o.updatedAt < cutoff),
+            emailOf: (o) => o.ownerEmail,
+            idOf: (o) => o.id,
+            afterUserDelete: (o) => (o.kcGroupId ? idp.deleteGroup(o.kcGroupId) : null),
+            deleteRow: (o) => orgStore.deleteById(o.id),
+            logIdField: 'org_id',
+            kind: 'stale-org',
+          },
+          idp,
+          log,
+        );
       }
 
       log.info(

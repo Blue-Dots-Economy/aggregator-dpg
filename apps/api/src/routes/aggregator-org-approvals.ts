@@ -11,6 +11,9 @@
  *       the mirrored group, then atomic CAS `aggregator_orgs` pending→active
  *       (the single-use commit). reject → atomic CAS pending→inactive.
  *
+ *   POST /admin/v1/orgs/resend/:id   body { token }
+ *     Re-mints + re-emails the review link for a still-pending org (§7).
+ *
  * The org token carries no `org` claim — the **network admin** is the approver
  * (spec §9). Provisioning is an ordered, idempotent sequence: the owner-enable
  * hard-gate runs before the status CAS so a failure leaves the org pending and
@@ -23,10 +26,18 @@ import { config, orgHierarchyEnabled } from '../config.js';
 import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js';
 import type { AggregatorOrg } from '../services/aggregator-org-store/index.js';
 import { getIdpAdmin } from '../services/idp-admin/index.js';
-import { verifyApprovalToken, formatApprovalTtl } from '../services/approval-token.js';
+import { formatApprovalTtl } from '../services/approval-token.js';
 import { renderConfirmPage, renderResultPage } from '../views/approval-pages.js';
 import { sendOrgReviewEmail } from '../services/org-registration-notify.js';
-import { sendHtml, tokenErrorMessage } from './approval-shared.js';
+import {
+  sendHtml,
+  sendPage,
+  missingTokenPage,
+  notFoundPage,
+  serviceUnavailablePage,
+  verifyTokenForId,
+  type HtmlPage,
+} from './approval-shared.js';
 
 const OrgDecisionBodySchema = z.object({
   token: z.string().min(1),
@@ -39,6 +50,11 @@ const OrgReadQuerySchema = z.object({
   token: z.string().optional(),
   intent: z.string().optional(),
 });
+
+const ORG_NOUN = 'organisation';
+const orgNotFoundPage = (): HtmlPage => notFoundPage('Not found', 'Organisation not found.');
+const orgUnavailablePage = (): HtmlPage =>
+  serviceUnavailablePage('Service unavailable', 'Could not load the organisation record.');
 
 /**
  * Registers the org approval routes. No-op (routes absent) when the org
@@ -71,77 +87,16 @@ export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance):
       const orgId = req.params.id;
       const { token, intent } = req.query;
 
-      if (!token) {
-        return sendHtml(
-          reply,
-          400,
-          renderResultPage({
-            status: 'error',
-            title: 'Missing token',
-            message: 'This link is missing the approval token.',
-          }),
-        );
-      }
+      if (!token) return sendPage(reply, missingTokenPage());
 
-      const verified = await verifyApprovalToken(token);
-      if (!verified.ok) {
-        const isExpired = verified.error.code === 'EXPIRED';
-        return sendHtml(
-          reply,
-          400,
-          renderResultPage({
-            status: 'error',
-            title: isExpired ? 'Link expired' : 'Invalid link',
-            message: tokenErrorMessage(verified.error.code),
-            // On expiry, offer to re-mint + re-send the review link to the
-            // network admin (§7). Uses the expired-but-signed token as proof.
-            ...(isExpired
-              ? {
-                  action: {
-                    url: `${config.PUBLIC_API_URL}/admin/v1/orgs/resend/${orgId}`,
-                    token,
-                    label: 'Resend approval link',
-                  },
-                }
-              : {}),
-          }),
-        );
-      }
-      if (verified.aggregatorId !== orgId) {
-        return sendHtml(
-          reply,
-          400,
-          renderResultPage({
-            status: 'error',
-            title: 'Invalid link',
-            message: 'Token does not match the requested organisation.',
-          }),
-        );
-      }
+      const verified = await verifyTokenForId(token, orgId, ORG_NOUN, {
+        resendUrl: `${config.PUBLIC_API_URL}/admin/v1/orgs/resend/${orgId}`,
+      });
+      if (!verified.ok) return sendPage(reply, verified.page);
 
       const lookup = await getAggregatorOrgStore().findById(orgId);
-      if (!lookup.ok) {
-        return sendHtml(
-          reply,
-          503,
-          renderResultPage({
-            status: 'error',
-            title: 'Service unavailable',
-            message: 'Could not load the organisation record.',
-          }),
-        );
-      }
-      if (!lookup.value) {
-        return sendHtml(
-          reply,
-          404,
-          renderResultPage({
-            status: 'error',
-            title: 'Not found',
-            message: 'Organisation not found.',
-          }),
-        );
-      }
+      if (!lookup.ok) return sendPage(reply, orgUnavailablePage());
+      if (!lookup.value) return sendPage(reply, orgNotFoundPage());
 
       const prior = orgDecidedView(lookup.value.status);
       if (prior) return sendHtml(reply, 200, renderResultPage(prior));
@@ -192,56 +147,15 @@ export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance):
         );
       }
 
-      const verified = await verifyApprovalToken(parsed.data.token);
-      if (!verified.ok) {
-        return sendHtml(
-          reply,
-          400,
-          renderResultPage({
-            status: 'error',
-            title: 'Invalid link',
-            message: tokenErrorMessage(verified.error.code),
-          }),
-        );
-      }
-      if (verified.aggregatorId !== orgId) {
-        return sendHtml(
-          reply,
-          400,
-          renderResultPage({
-            status: 'error',
-            title: 'Invalid link',
-            message: 'Token does not match the requested organisation.',
-          }),
-        );
-      }
+      const verified = await verifyTokenForId(parsed.data.token, orgId, ORG_NOUN);
+      if (!verified.ok) return sendPage(reply, verified.page);
 
       const orgStore = getAggregatorOrgStore();
       const idp = getIdpAdmin();
 
       const lookup = await orgStore.findById(orgId);
-      if (!lookup.ok) {
-        return sendHtml(
-          reply,
-          503,
-          renderResultPage({
-            status: 'error',
-            title: 'Service unavailable',
-            message: 'Could not load the organisation record.',
-          }),
-        );
-      }
-      if (!lookup.value) {
-        return sendHtml(
-          reply,
-          404,
-          renderResultPage({
-            status: 'error',
-            title: 'Not found',
-            message: 'Organisation not found.',
-          }),
-        );
-      }
+      if (!lookup.ok) return sendPage(reply, orgUnavailablePage());
+      if (!lookup.value) return sendPage(reply, orgNotFoundPage());
 
       // Single-use guard: anything other than pending is already decided.
       const prior = orgDecidedView(lookup.value.status);
@@ -272,14 +186,12 @@ export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance):
             { status: 'failure', sub_operation: 'idp.enableUser', code: enabled.error.code },
             'failed to enable org owner — approval aborted, link still works',
           );
-          return sendHtml(
+          return sendPage(
             reply,
-            503,
-            renderResultPage({
-              status: 'error',
-              title: 'Action failed',
-              message: 'Identity service unavailable. Please try again shortly.',
-            }),
+            serviceUnavailablePage(
+              'Action failed',
+              'Identity service unavailable. Please try again shortly.',
+            ),
           );
         }
       }
@@ -288,14 +200,12 @@ export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance):
       // returns null → render already-decided.
       const cas = await orgStore.approve(orgId);
       if (!cas.ok) {
-        return sendHtml(
+        return sendPage(
           reply,
-          503,
-          renderResultPage({
-            status: 'error',
-            title: 'Action failed',
-            message: 'Database unavailable. Please try again shortly.',
-          }),
+          serviceUnavailablePage(
+            'Action failed',
+            'Database unavailable. Please try again shortly.',
+          ),
         );
       }
       if (cas.value === null) {
@@ -351,55 +261,15 @@ export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance):
       const log = req.log.child({ operation: 'org-registration.resend' });
       const orgId = req.params.id;
       const body = (req.body ?? {}) as { token?: string };
-      const token = typeof body.token === 'string' ? body.token : '';
 
-      const verified = await verifyApprovalToken(token, { allowExpired: true });
-      if (!verified.ok) {
-        return sendHtml(
-          reply,
-          400,
-          renderResultPage({
-            status: 'error',
-            title: 'Invalid link',
-            message: tokenErrorMessage(verified.error.code),
-          }),
-        );
-      }
-      if (verified.aggregatorId !== orgId) {
-        return sendHtml(
-          reply,
-          400,
-          renderResultPage({
-            status: 'error',
-            title: 'Invalid link',
-            message: 'Token does not match the requested organisation.',
-          }),
-        );
-      }
+      const verified = await verifyTokenForId(body.token ?? '', orgId, ORG_NOUN, {
+        allowExpired: true,
+      });
+      if (!verified.ok) return sendPage(reply, verified.page);
 
       const lookup = await getAggregatorOrgStore().findById(orgId);
-      if (!lookup.ok) {
-        return sendHtml(
-          reply,
-          503,
-          renderResultPage({
-            status: 'error',
-            title: 'Service unavailable',
-            message: 'Could not load the organisation record.',
-          }),
-        );
-      }
-      if (!lookup.value) {
-        return sendHtml(
-          reply,
-          404,
-          renderResultPage({
-            status: 'error',
-            title: 'Not found',
-            message: 'Organisation not found.',
-          }),
-        );
-      }
+      if (!lookup.ok) return sendPage(reply, orgUnavailablePage());
+      if (!lookup.value) return sendPage(reply, orgNotFoundPage());
 
       const prior = orgDecidedView(lookup.value.status);
       if (prior) return sendHtml(reply, 200, renderResultPage(prior));
@@ -452,18 +322,3 @@ function orgDecidedView(status: AggregatorOrg['status']): ResultView | null {
     message: 'This organisation has already been rejected. No further action is required.',
   };
 }
-
-/**
- * User-facing copy for an org approval-token failure.
- *
- * @param code - The verify failure code.
- * @returns A sentence shown on the org result page.
- */
-/**
- * Sends an HTML response with the given status.
- *
- * @param reply - Fastify reply.
- * @param status - HTTP status code.
- * @param html - Rendered HTML body.
- * @returns The reply for chaining.
- */

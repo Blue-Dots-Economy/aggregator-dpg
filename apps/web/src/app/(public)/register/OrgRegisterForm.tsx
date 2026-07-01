@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useMemo, useState, type FormEvent } from 'react';
 import type { RJSFSchema, UiSchema } from '@rjsf/utils';
 import type { IChangeEvent } from '@rjsf/core';
 import { useTranslations } from 'next-intl';
@@ -8,10 +8,15 @@ import { RjsfThemedForm } from '../../../components/forms/RjsfThemed';
 import {
   humaniseValidationErrors,
   stampConsent,
+  stripFormChrome,
   submitRegistration,
-  type SubmitState,
 } from './registration-shared';
-import { RegistrationErrorBanner, RegistrationSuccessPanel } from './registration-ui';
+import {
+  RegistrationErrorBanner,
+  RegistrationSubmitButton,
+  RegistrationSuccessPanel,
+  useRegistrationFormState,
+} from './registration-ui';
 
 export interface OrgRegisterFormProps {
   /** Org-registration JSON Schema loaded by the server component. */
@@ -31,28 +36,12 @@ export interface OrgRegisterFormProps {
  */
 export function OrgRegisterForm({ schema, uiSchema }: OrgRegisterFormProps): JSX.Element {
   const t = useTranslations('register');
+  const { state, setState, canSubmit, setCanSubmit, errorRef } = useRegistrationFormState();
   const [formData, setFormData] = useState<Record<string, unknown>>(() => ({
     consent: stampConsent(undefined),
   }));
-  const [state, setState] = useState<SubmitState>({ status: 'idle' });
-  const [canSubmit, setCanSubmit] = useState(false);
-  const errorRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (state.status === 'error' && errorRef.current) {
-      errorRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      errorRef.current.focus();
-    }
-  }, [state]);
-
-  // Drop the schema title/description from the rendered form — the page owns
-  // the heading and the description is an API-contract note, not UI copy.
-  const formSchema = useMemo<RJSFSchema>(() => {
-    const clone: RJSFSchema = { ...schema };
-    delete (clone as { title?: string }).title;
-    delete (clone as { description?: string }).description;
-    return clone;
-  }, [schema]);
+  const formSchema = useMemo(() => stripFormChrome(schema), [schema]);
 
   const handleSubmit = async (
     e: IChangeEvent<Record<string, unknown>>,
@@ -68,11 +57,11 @@ export function OrgRegisterForm({ schema, uiSchema }: OrgRegisterFormProps): JSX
       ),
     };
     const result = await submitRegistration('/api/org/register', payload);
-    if (result.ok) {
-      setState({ status: 'done', refId: String(result.body['slug'] ?? '') });
-    } else {
-      setState({ status: 'error', ...result.error });
-    }
+    setState(
+      result.ok
+        ? { status: 'done', refId: String(result.body['slug'] ?? '') }
+        : { status: 'error', ...result.error },
+    );
   };
 
   if (state.status === 'done') {
@@ -112,20 +101,12 @@ export function OrgRegisterForm({ schema, uiSchema }: OrgRegisterFormProps): JSX
         focusOnFirstError
         noHtml5Validate
       >
-        <div className="mt-4 flex flex-col gap-3">
-          <button
-            type="submit"
-            disabled={state.status === 'submitting' || !canSubmit}
-            className={`w-full py-3 rounded-[12px] font-display font-bold text-[15px] text-white transition-all
-              ${
-                state.status === 'submitting' || !canSubmit
-                  ? 'bg-[var(--bd-primary-100)] text-[var(--bd-primary-600)] cursor-not-allowed'
-                  : 'bg-[var(--bd-primary)] hover:bg-[var(--bd-primary-600)] bd-shadow-lg'
-              }`}
-          >
-            {state.status === 'submitting' ? t('submitting') : t('org_submit')}
-          </button>
-        </div>
+        <RegistrationSubmitButton
+          submitting={state.status === 'submitting'}
+          canSubmit={canSubmit}
+          label={t('org_submit')}
+          submittingLabel={t('submitting')}
+        />
       </RjsfThemedForm>
     </div>
   );

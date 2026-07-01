@@ -12,8 +12,80 @@
  */
 
 import Link from 'next/link';
-import type { RefObject } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import { I } from '../../../icons';
+import type { SubmitState } from './registration-shared';
+
+/** Local form lifecycle shared by the coordinator + org registration forms. */
+export interface RegistrationFormState {
+  state: SubmitState;
+  setState: (s: SubmitState) => void;
+  canSubmit: boolean;
+  setCanSubmit: (v: boolean) => void;
+  errorRef: RefObject<HTMLDivElement>;
+}
+
+/**
+ * Holds the submit lifecycle both registration forms share: the `SubmitState`,
+ * the validity gate, and an error ref that is scrolled + focused on failure.
+ *
+ * @returns The form state handles.
+ */
+export function useRegistrationFormState(): RegistrationFormState {
+  const [state, setState] = useState<SubmitState>({ status: 'idle' });
+  const [canSubmit, setCanSubmit] = useState(false);
+  const errorRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (state.status === 'error' && errorRef.current) {
+      errorRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      errorRef.current.focus();
+    }
+  }, [state]);
+  return { state, setState, canSubmit, setCanSubmit, errorRef };
+}
+
+export interface RegistrationSubmitButtonProps {
+  /** True while a submit is in flight. */
+  submitting: boolean;
+  /** True when the form is valid + otherwise submittable. */
+  canSubmit: boolean;
+  /** Idle button label. */
+  label: string;
+  /** In-flight button label. */
+  submittingLabel: string;
+}
+
+/**
+ * The primary submit button shared by both registration forms — same size,
+ * brand colours, and disabled styling.
+ *
+ * @param props - Submitting/validity flags + labels.
+ * @returns The submit button element.
+ */
+export function RegistrationSubmitButton({
+  submitting,
+  canSubmit,
+  label,
+  submittingLabel,
+}: RegistrationSubmitButtonProps): JSX.Element {
+  const disabled = submitting || !canSubmit;
+  return (
+    <div className="mt-4 flex flex-col gap-3">
+      <button
+        type="submit"
+        disabled={disabled}
+        className={`w-full py-3 rounded-[12px] font-display font-bold text-[15px] text-white transition-all
+          ${
+            disabled
+              ? 'bg-[var(--bd-primary-100)] text-[var(--bd-primary-600)] cursor-not-allowed'
+              : 'bg-[var(--bd-primary)] hover:bg-[var(--bd-primary-600)] bd-shadow-lg'
+          }`}
+      >
+        {submitting ? submittingLabel : label}
+      </button>
+    </div>
+  );
+}
 
 export interface RegistrationErrorBannerProps {
   /** Banner heading (error title). */

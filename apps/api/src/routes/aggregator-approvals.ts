@@ -31,7 +31,7 @@ import { z } from 'zod';
 import { config, orgHierarchyEnabled } from '../config.js';
 import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js';
 import { ERR } from '../errors/codes.js';
-import { verifyApprovalToken, formatApprovalTtl } from '../services/approval-token.js';
+import { formatApprovalTtl } from '../services/approval-token.js';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
 import { getIdpAdmin } from '../services/idp-admin/index.js';
 import { getMailer } from '../services/mailer/index.js';
@@ -43,7 +43,7 @@ import {
 } from '../services/email-templates/index.js';
 import { renderConfirmPage, renderResultPage } from '../views/approval-pages.js';
 import { sendAdminReviewEmail } from '../services/registration-notify.js';
-import { sendHtml, tokenErrorMessage } from './approval-shared.js';
+import { sendHtml, sendPage, missingTokenPage, verifyTokenForId } from './approval-shared.js';
 import type { Aggregator } from '../services/aggregator-store/index.js';
 import { KC_ATTR } from '../services/idp-admin/index.js';
 import type { IdpUser } from '../services/idp-admin/index.js';
@@ -86,51 +86,12 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
       const aggregatorId = req.params.id;
       const { token, intent } = req.query;
 
-      if (!token) {
-        return sendHtml(
-          reply,
-          400,
-          renderResultPage({
-            status: 'error',
-            title: 'Missing token',
-            message: 'This link is missing the approval token.',
-          }),
-        );
-      }
+      if (!token) return sendPage(reply, missingTokenPage());
 
-      const verified = await verifyApprovalToken(token);
-      if (!verified.ok) {
-        const isExpired = verified.error.code === 'EXPIRED';
-        return sendHtml(
-          reply,
-          400,
-          renderResultPage({
-            status: 'error',
-            title: isExpired ? 'Link expired' : 'Invalid link',
-            message: tokenErrorMessage(verified.error.code),
-            ...(isExpired
-              ? {
-                  action: {
-                    url: `${config.PUBLIC_API_URL}/admin/v1/aggregator-registrations/resend/${aggregatorId}`,
-                    token,
-                    label: 'Resend approval link',
-                  },
-                }
-              : {}),
-          }),
-        );
-      }
-      if (verified.aggregatorId !== aggregatorId) {
-        return sendHtml(
-          reply,
-          400,
-          renderResultPage({
-            status: 'error',
-            title: 'Invalid link',
-            message: 'Token does not match the requested aggregator.',
-          }),
-        );
-      }
+      const verified = await verifyTokenForId(token, aggregatorId, 'aggregator', {
+        resendUrl: `${config.PUBLIC_API_URL}/admin/v1/aggregator-registrations/resend/${aggregatorId}`,
+      });
+      if (!verified.ok) return sendPage(reply, verified.page);
       const effectiveIntent = isIntent(intent) ? intent : verified.intent;
 
       const lookup = await loadAggregatorAndUser(aggregatorId);
@@ -190,29 +151,8 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
         );
       }
 
-      const verified = await verifyApprovalToken(parsed.data.token);
-      if (!verified.ok) {
-        return sendHtml(
-          reply,
-          400,
-          renderResultPage({
-            status: 'error',
-            title: 'Invalid link',
-            message: tokenErrorMessage(verified.error.code),
-          }),
-        );
-      }
-      if (verified.aggregatorId !== aggregatorId) {
-        return sendHtml(
-          reply,
-          400,
-          renderResultPage({
-            status: 'error',
-            title: 'Invalid link',
-            message: 'Token does not match the requested aggregator.',
-          }),
-        );
-      }
+      const verified = await verifyTokenForId(parsed.data.token, aggregatorId, 'aggregator');
+      if (!verified.ok) return sendPage(reply, verified.page);
 
       const lookup = await loadAggregatorAndUser(aggregatorId);
       if (!lookup.ok) return sendHtml(reply, lookup.status, lookup.html);
@@ -579,29 +519,10 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
       const body = (req.body ?? {}) as { token?: string };
       const token = typeof body.token === 'string' ? body.token : '';
 
-      const verified = await verifyApprovalToken(token, { allowExpired: true });
-      if (!verified.ok) {
-        return sendHtml(
-          reply,
-          400,
-          renderResultPage({
-            status: 'error',
-            title: 'Invalid link',
-            message: tokenErrorMessage(verified.error.code),
-          }),
-        );
-      }
-      if (verified.aggregatorId !== aggregatorId) {
-        return sendHtml(
-          reply,
-          400,
-          renderResultPage({
-            status: 'error',
-            title: 'Invalid link',
-            message: 'Token does not match the requested aggregator.',
-          }),
-        );
-      }
+      const verified = await verifyTokenForId(token, aggregatorId, 'aggregator', {
+        allowExpired: true,
+      });
+      if (!verified.ok) return sendPage(reply, verified.page);
 
       const lookup = await loadAggregatorAndUser(aggregatorId);
       if (!lookup.ok) return sendHtml(reply, lookup.status, lookup.html);
