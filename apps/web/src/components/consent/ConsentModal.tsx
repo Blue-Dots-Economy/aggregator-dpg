@@ -94,15 +94,23 @@ export function ConsentModal({
         aria-modal="true"
         aria-label={activeDoc.title}
       >
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-100">
-          <h2 className="font-display font-bold text-[18px] text-ink-900 leading-tight">
-            {activeDoc.title}
-          </h2>
+        {/* Header — generic title + description; the doc-specific heading comes
+            from the Markdown content's own `##` heading, so it is not echoed
+            here (matches the Signals-DPG consent modal). */}
+        <div className="flex items-start justify-between gap-4 px-6 pt-5 pb-4 border-b border-slate-100">
+          <div className="min-w-0">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-[var(--bd-primary)]">
+              {t('consent.modal_eyebrow')}
+            </p>
+            <h2 className="font-display font-bold text-[18px] text-ink-900 leading-tight mt-0.5">
+              {t('consent.modal_title')}
+            </h2>
+            <p className="text-[13px] text-ink-500 mt-1">{t('consent.modal_desc')}</p>
+          </div>
           <button
             ref={closeButtonRef}
             type="button"
-            className="ml-4 shrink-0 rounded-[8px] px-3 py-1.5 text-[13px] font-semibold text-ink-500 hover:text-ink-900 hover:bg-slate-100 transition-colors"
+            className="shrink-0 rounded-[8px] px-3 py-1.5 text-[13px] font-semibold text-ink-500 hover:text-ink-900 hover:bg-slate-100 transition-colors"
             onClick={() => onOpenChange(false)}
           >
             {t('consent.modal_close')}

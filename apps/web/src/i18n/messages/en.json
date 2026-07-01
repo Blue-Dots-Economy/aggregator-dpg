@@ -63,6 +63,9 @@
       "terms_link": "Terms of Service",
       "and": " and ",
       "privacy_link": "Privacy Policy",
+      "modal_eyebrow": "Before you register",
+      "modal_title": "Terms & Privacy",
+      "modal_desc": "Please review the terms of service and privacy policy below.",
       "modal_close": "Close"
     }
   },
