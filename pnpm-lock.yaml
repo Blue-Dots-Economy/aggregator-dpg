@@ -416,6 +416,40 @@ importers:
         specifier: ^3.2.0
         version: 3.2.4(@types/node@22.19.17)(jiti@2.6.1)(jsdom@25.0.1)(tsx@4.21.0)(yaml@2.8.3)
 
+  packages/consent-ledger:
+    dependencies:
+      '@aggregator-dpg/db-schema':
+        specifier: workspace:*
+        version: link:../db-schema
+      '@aggregator-dpg/shared-primitives':
+        specifier: workspace:*
+        version: link:../shared-primitives
+      drizzle-orm:
+        specifier: ^0.36.4
+        version: 0.36.4(@types/pg@8.20.0)(@types/react@18.3.28)(pg@8.20.0)(react@18.3.1)
+      pino:
+        specifier: ^9.5.0
+        version: 9.14.0
+      zod:
+        specifier: ^3.24.0
+        version: 3.25.76
+    devDependencies:
+      '@aggregator-dpg/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.17
+      '@vitest/coverage-v8':
+        specifier: ^3.2.0
+        version: 3.2.4(vitest@3.2.4(@types/node@22.19.17)(jiti@2.6.1)(jsdom@25.0.1)(tsx@4.21.0)(yaml@2.8.3))
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^3.2.0
+        version: 3.2.4(@types/node@22.19.17)(jiti@2.6.1)(jsdom@25.0.1)(tsx@4.21.0)(yaml@2.8.3)
+
   packages/db-schema:
     dependencies:
       '@aggregator-dpg/shared-primitives':
