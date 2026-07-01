@@ -46,7 +46,7 @@ describe('aggregator-org-approvals routes', () => {
     _setMailer(null);
   });
 
-  it('approve flips org to active via atomic CAS and enables the owner', async () => {
+  it('approve flips org to active + assigns role but keeps the owner disabled', async () => {
     const orgId = '00000000-0000-0000-0000-0000000000a1';
     const owner = await idp.createUser({
       email: 'owner@x.org',
@@ -74,7 +74,9 @@ describe('aggregator-org-approvals routes', () => {
     const stored = await orgStore.findById(orgId);
     expect(stored.ok && stored.value?.status).toBe('active');
     const kc = await idp.findById(owner.value.id);
-    expect(kc.ok && kc.value?.enabled).toBe(true);
+    // Owner stays disabled — org-owner console login is deferred, and an enabled
+    // owner would clear Keycloak's OTP step. Role is still assigned for later.
+    expect(kc.ok && kc.value?.enabled).toBe(false);
     expect(idp.rolesOf(owner.value.id)).toContain('org_owner');
   });
 

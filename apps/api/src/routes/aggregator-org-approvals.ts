@@ -199,26 +199,11 @@ export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance):
         );
       }
 
-      // Approve. Hard-gate: enable the owner BEFORE the status CAS so a failed
-      // enable leaves the org pending and the link re-clickable (enable is
-      // idempotent). The owner KC user is created at submit (spec §6.1).
+      // Approve. The org owner KC user stays DISABLED: org-owner console login
+      // is deferred (spec §9), and an enabled owner would pass Keycloak's OTP
+      // step. Enable them only when the org console ships. The role + group are
+      // still assigned below so that future flip is a no-op.
       const ownerKcSub = lookup.value.ownerKcSub;
-      if (ownerKcSub) {
-        const enabled = await idp.enableUser(ownerKcSub);
-        if (!enabled.ok) {
-          log.error(
-            { status: 'failure', sub_operation: 'idp.enableUser', code: enabled.error.code },
-            'failed to enable org owner — approval aborted, link still works',
-          );
-          return sendPage(
-            reply,
-            serviceUnavailablePage(
-              'Action failed',
-              'Identity service unavailable. Please try again shortly.',
-            ),
-          );
-        }
-      }
 
       // Atomic CAS commit. If a concurrent click already flipped it, the CAS
       // returns null → render already-decided.
