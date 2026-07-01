@@ -86,6 +86,13 @@ export function LoginView({ returnTo, error }: LoginViewProps): JSX.Element {
               >
                 {t('session_expired')}
               </div>
+            ) : error === 'org_no_portal' ? (
+              <div
+                role="alert"
+                className="mb-5 rounded-[10px] border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-800"
+              >
+                {t('org_no_portal')}
+              </div>
             ) : (
               <div
                 role="alert"
