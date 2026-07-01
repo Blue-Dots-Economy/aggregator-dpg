@@ -57,7 +57,14 @@
     "org_submit": "Submit organisation",
     "org_success_heading": "Organisation submitted",
     "org_success_slug": "Organisation reference:",
-    "org_success_review": "Our team will review your organisation. You'll be notified once it's approved, after which coordinators can register under it."
+    "org_success_review": "Our team will review your organisation. You'll be notified once it's approved, after which coordinators can register under it.",
+    "consent": {
+      "accept_prefix": "I have read and accept the ",
+      "terms_link": "Terms of Service",
+      "and": " and ",
+      "privacy_link": "Privacy Policy",
+      "modal_close": "Close"
+    }
   },
   "dashboard": {
     "buckets": {

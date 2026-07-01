@@ -27,7 +27,7 @@
     "ui:layout": "stack",
     "ui:order": ["value", "given_at", "valid_till"],
     "value": {
-      "ui:widget": "checkbox"
+      "ui:widget": "ConsentCheckbox"
     },
     "given_at": {
       "ui:widget": "hidden",

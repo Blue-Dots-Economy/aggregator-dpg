@@ -5,6 +5,9 @@ import path from 'node:path';
 import { getSession } from '../../../lib/server-session';
 import { RegisterView } from './RegisterView';
 import type { RJSFSchema } from '@rjsf/utils';
+import { loadConsentConfig } from '@aggregator-dpg/config-loader/fs';
+import { logger } from '../../../lib/logger';
+import type { ConsentDocContent } from '../../../components/consent/consent-types';
 
 export const metadata: Metadata = {
   title: 'Register as Aggregator',
@@ -41,16 +44,75 @@ export default async function RegisterPage() {
   // config is missing the org schema degrades gracefully to the coordinator-only
   // form rather than 500-ing the register page.
   const orgHierarchyEnabled = (process.env.ORG_HIERARCHY_ENABLED ?? '').trim() === 'true';
-  const org = orgHierarchyEnabled ? await loadOrgSchema() : null;
+  const [org, consentContent] = await Promise.all([
+    orgHierarchyEnabled ? loadOrgSchema() : Promise.resolve(null),
+    loadConsentContent(),
+  ]);
 
   return (
     <RegisterView
       schema={schema}
       uiSchema={uiSchema}
       orgHierarchyEnabled={orgHierarchyEnabled}
+      aggregatorConsentContent={consentContent?.aggregator ?? null}
+      orgConsentContent={consentContent?.org ?? null}
       {...(org ? { orgSchema: org.schema, orgUiSchema: org.uiSchema } : {})}
     />
   );
+}
+
+/**
+ * Loads the versioned consent document content for both `aggregator` and `org`
+ * audiences from the network/brand config tree.
+ *
+ * Resolves the active network and optional brand from env vars
+ * (`AGGREGATOR_NETWORK`, `AGGREGATOR_BRAND`), calls `loadConsentConfig`, and
+ * extracts the `current_version` document for each audience's terms and
+ * privacy fields.
+ *
+ * @returns An object with `aggregator` and `org` {@link ConsentDocContent}, or
+ *   `null` if the config file is absent or invalid (caller passes `null` to
+ *   both forms — they degrade to plain text labels).
+ */
+async function loadConsentContent(): Promise<{
+  aggregator: ConsentDocContent;
+  org: ConsentDocContent;
+} | null> {
+  const network = process.env.AGGREGATOR_NETWORK?.trim() || 'blue_dot';
+  const brand = process.env.AGGREGATOR_BRAND?.trim() || undefined;
+  try {
+    const cfg = await loadConsentConfig(network, brand);
+
+    const pickDoc = (doc: {
+      current_version: number;
+      versions: Array<{ version: number; title: string; content: string; effective_from: string }>;
+    }): { version: number; title: string; content: string } => {
+      const found = doc.versions.find((v) => v.version === doc.current_version);
+      if (!found) throw new Error(`current_version ${doc.current_version} not found in versions`);
+      return { version: found.version, title: found.title, content: found.content };
+    };
+
+    return {
+      aggregator: {
+        terms: pickDoc(cfg.audiences.aggregator.documents.terms),
+        privacy: pickDoc(cfg.audiences.aggregator.documents.privacy),
+      },
+      org: {
+        terms: pickDoc(cfg.audiences.org.documents.terms),
+        privacy: pickDoc(cfg.audiences.org.documents.privacy),
+      },
+    };
+  } catch (err) {
+    logger.warn({
+      operation: 'loadConsentContent',
+      status: 'failure',
+      error: err instanceof Error ? err.message : String(err),
+      error_type: err instanceof Error ? err.constructor.name : 'Unknown',
+      network,
+      brand,
+    });
+    return null;
+  }
 }
 
 /**
