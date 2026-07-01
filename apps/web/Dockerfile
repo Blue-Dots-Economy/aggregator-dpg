@@ -21,8 +21,13 @@ RUN corepack enable
 FROM base AS installer
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-COPY apps/web/package.json               apps/web/package.json
-COPY packages/tsconfig/package.json      packages/tsconfig/package.json
+COPY apps/web/package.json                    apps/web/package.json
+COPY packages/tsconfig/package.json           packages/tsconfig/package.json
+# web's server components read consent config via @aggregator-dpg/config-loader,
+# which pulls in @aggregator-dpg/shared-primitives. Their package.json files must
+# be present so pnpm installs their deps (e.g. zod) into the web subgraph.
+COPY packages/config-loader/package.json      packages/config-loader/package.json
+COPY packages/shared-primitives/package.json  packages/shared-primitives/package.json
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm install --frozen-lockfile --filter @aggregator-dpg/web...
 
