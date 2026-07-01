@@ -95,6 +95,8 @@ export interface ReviewEmailInput {
   recipients: string[];
   /** Optional `org` token claim (coordinator-under-org flow). */
   org?: string;
+  /** What was registered — drives the email subject/heading (default `aggregator`). */
+  entityLabel?: string;
   /** Structured-log operation label for the delivery-failure warning. */
   logOperation: string;
 }
@@ -119,7 +121,7 @@ export async function sendReviewEmail(
     applicantEmail: input.applicantEmail,
     applicantPhone: input.applicantPhone,
     association: input.applicantName,
-    aggregatorType: 'aggregator',
+    ...(input.entityLabel ? { entityLabel: input.entityLabel } : {}),
     approveUrl: `${base}?token=${encodeURIComponent(approveToken)}&intent=approve`,
     rejectUrl: `${base}?token=${encodeURIComponent(rejectToken)}&intent=reject`,
     submittedAt: new Date(),

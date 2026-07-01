@@ -39,6 +39,7 @@ export async function sendOrgReviewEmail(
       applicantEmail: input.ownerEmail,
       applicantPhone: input.ownerPhone,
       recipients: parseAdminEmails(),
+      entityLabel: 'organisation',
       logOperation: 'org-registration-notify.sendOrgReviewEmail',
     },
     log,
