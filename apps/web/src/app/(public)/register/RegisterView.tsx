@@ -389,34 +389,27 @@ export function RegisterView({
             <div
               role="tablist"
               aria-label={t('page_title')}
-              className="mt-6 inline-flex rounded-[12px] border border-ink-100 bg-white p-1"
+              className="mt-6 grid grid-cols-2 gap-1 w-full max-w-[520px] rounded-[14px] border border-[#e2e8f0] bg-[#eef2f7] p-1"
             >
-              <button
-                type="button"
-                role="tab"
-                aria-selected={tab === 'coordinator'}
-                onClick={() => setTab('coordinator')}
-                className={`px-4 py-2 rounded-[9px] text-[13.5px] font-semibold transition-colors ${
-                  tab === 'coordinator'
-                    ? 'bg-[var(--bd-primary)] text-white'
-                    : 'text-ink-500 hover:text-ink-900'
-                }`}
-              >
-                {t('tab_coordinator')}
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={tab === 'org'}
-                onClick={() => setTab('org')}
-                className={`px-4 py-2 rounded-[9px] text-[13.5px] font-semibold transition-colors ${
-                  tab === 'org'
-                    ? 'bg-[var(--bd-primary)] text-white'
-                    : 'text-ink-500 hover:text-ink-900'
-                }`}
-              >
-                {t('tab_org')}
-              </button>
+              {(['coordinator', 'org'] as const).map((key) => {
+                const active = tab === key;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => setTab(key)}
+                    className={`rounded-[11px] px-3 py-[13px] text-center text-[15px] font-semibold tracking-[-0.1px] whitespace-nowrap cursor-pointer transition-[background,color,box-shadow] duration-200 ${
+                      active
+                        ? 'bg-[var(--bd-primary)] text-white shadow-[0_4px_12px_color-mix(in_srgb,var(--bd-primary)_28%,transparent)]'
+                        : 'bg-transparent text-slate-500 hover:text-ink-900'
+                    }`}
+                  >
+                    {key === 'coordinator' ? t('tab_coordinator') : t('tab_org')}
+                  </button>
+                );
+              })}
             </div>
           ) : null}
 
