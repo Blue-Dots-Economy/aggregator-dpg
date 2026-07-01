@@ -22,6 +22,7 @@ import { interpolateConfig } from '../interpolate.js';
 import { validateConfig } from '../validate.js';
 import { startWatcher } from './watcher.js';
 export { resolveEnv } from '../env.js';
+export { loadConsentConfig } from './consent-loader.js';
 
 /**
  * Resolves a dotted path into a nested object.
