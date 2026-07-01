@@ -23,10 +23,11 @@ import { jsonFetch } from '../../../services/http';
 import { OrgRegisterForm } from './OrgRegisterForm';
 import {
   humaniseValidationErrors,
-  parseError,
   stampConsent,
+  submitRegistration,
   type SubmitState,
 } from './registration-shared';
+import { RegistrationErrorBanner, RegistrationSuccessPanel } from './registration-ui';
 
 export interface RegisterViewProps {
   schema: RJSFSchema;
@@ -37,12 +38,6 @@ export interface RegisterViewProps {
   orgSchema?: RJSFSchema;
   /** Org-registration UI schema — present only when the flag is on. */
   orgUiSchema?: Record<string, unknown>;
-}
-
-interface RegistrationResponse {
-  aggregator_id: string;
-  org_slug?: string;
-  message?: string;
 }
 
 /** One active-org option for the coordinator dropdown (`GET /api/orgs`). */
@@ -173,77 +168,31 @@ export function RegisterView({
       payload['org_id'] = orgId;
       payload['name'] = selectedOrgName;
     }
-    try {
-      const res = await fetch('/api/aggregator/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const reqId = res.headers.get('x-request-id') ?? '';
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        setState({ status: 'error', ...parseError(body, res.status, reqId) });
-        return;
-      }
-      const body = (await res.json()) as RegistrationResponse;
-      setState({ status: 'done', refId: body.aggregator_id });
-    } catch (err) {
-      setState({
-        status: 'error',
-        title: 'Network error',
-        detail: err instanceof Error ? err.message : 'Could not reach the server.',
-        code: 'NETWORK_ERROR',
-        requestId: '',
-      });
+    const result = await submitRegistration('/api/aggregator/register', payload);
+    if (result.ok) {
+      setState({ status: 'done', refId: String(result.body['aggregator_id'] ?? '') });
+    } else {
+      setState({ status: 'error', ...result.error });
     }
   };
 
   const coordinatorContent =
     state.status === 'done' ? (
-      <div className="mt-8 rounded-[14px] border border-emerald-200 bg-emerald-50 p-6">
-        <div className="font-display font-bold text-[18px] text-emerald-800">
-          {t('success_heading')}
-        </div>
-        <p className="text-[14px] text-emerald-700 mt-2">
-          {t('success_ref_id')} <code className="font-mono text-[12.5px]">{state.refId}</code>
-        </p>
-        <p className="text-[14px] text-emerald-700 mt-3">{t('success_approval', { brand })}</p>
-        <Link
-          href="/login"
-          className="mt-5 inline-flex items-center gap-2 text-[13.5px] text-primary-600 font-semibold hover:underline"
-        >
-          <I.arrowL size={15} /> Back to sign in
-        </Link>
-      </div>
+      <RegistrationSuccessPanel
+        heading={t('success_heading')}
+        refLabel={t('success_ref_id')}
+        refId={state.refId}
+        message={t('success_approval', { brand })}
+      />
     ) : (
       <div className="mt-7">
         {state.status === 'error' ? (
-          <div
-            ref={errorRef}
-            role="alert"
-            tabIndex={-1}
-            className="mb-5 rounded-[10px] border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-700 scroll-mt-6 outline-none"
-          >
-            <div className="font-semibold">{state.title}</div>
-            {state.detail ? (
-              <ul className="mt-1.5 text-red-600 list-disc list-inside space-y-0.5">
-                {state.detail
-                  .split('\n')
-                  .filter(Boolean)
-                  .map((line, i) => (
-                    <li key={i}>{line}</li>
-                  ))}
-              </ul>
-            ) : null}
-            {state.code === 'CLIENT_VALIDATION' && state.requestId ? (
-              <details className="mt-2 text-[11px] text-red-500/80">
-                <summary className="cursor-pointer">Show raw validation errors</summary>
-                <pre className="mt-1 whitespace-pre-wrap font-mono text-[11px] bg-red-100/40 rounded p-2 max-h-[200px] overflow-auto">
-                  {state.requestId}
-                </pre>
-              </details>
-            ) : null}
-          </div>
+          <RegistrationErrorBanner
+            title={state.title}
+            detail={state.detail}
+            errorRef={errorRef}
+            {...(state.code === 'CLIENT_VALIDATION' ? { rawErrors: state.requestId } : {})}
+          />
         ) : null}
 
         {noOrgsYet ? (

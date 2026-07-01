@@ -43,6 +43,7 @@ import { orgHierarchyEnabled } from '../config.js';
 import { checkSubmitRate } from '../services/submit-rate.js';
 import type { AggregatorStatus } from '@aggregator-dpg/shared-primitives/aggregator';
 import { normalisePhone } from '../services/phone.js';
+import { splitName } from '../services/name.js';
 import { slugFromName } from '../services/slug.js';
 import { authenticateAny } from '../services/auth/access-token.js';
 import { KC_ATTR } from '../services/idp-admin/index.js';
@@ -584,23 +585,6 @@ function mapStoreCreateError(
     default:
       return 'DB_UNAVAILABLE';
   }
-}
-
-/**
- * Split a single-line contact name into Keycloak's first / last fields.
- * Everything before the first whitespace is the first name; everything after
- * is the last name. Single-token inputs (e.g. "Asha") produce an empty last
- * name — Keycloak accepts that.
- */
-function splitName(fullName: string): { firstName: string; lastName: string } {
-  const trimmed = fullName.trim();
-  if (!trimmed) return { firstName: '', lastName: '' };
-  const firstSpace = trimmed.search(/\s+/);
-  if (firstSpace === -1) return { firstName: trimmed, lastName: '' };
-  return {
-    firstName: trimmed.slice(0, firstSpace),
-    lastName: trimmed.slice(firstSpace).trim(),
-  };
 }
 
 /**

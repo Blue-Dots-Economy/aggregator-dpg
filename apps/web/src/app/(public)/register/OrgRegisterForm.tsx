@@ -1,32 +1,23 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import Link from 'next/link';
 import type { RJSFSchema, UiSchema } from '@rjsf/utils';
 import type { IChangeEvent } from '@rjsf/core';
 import { useTranslations } from 'next-intl';
 import { RjsfThemedForm } from '../../../components/forms/RjsfThemed';
-import { I } from '../../../icons';
 import {
   humaniseValidationErrors,
-  parseError,
   stampConsent,
+  submitRegistration,
   type SubmitState,
 } from './registration-shared';
+import { RegistrationErrorBanner, RegistrationSuccessPanel } from './registration-ui';
 
 export interface OrgRegisterFormProps {
   /** Org-registration JSON Schema loaded by the server component. */
   schema: RJSFSchema;
   /** RJSF UI schema for the org form. */
   uiSchema: Record<string, unknown>;
-}
-
-/** Success payload from `POST /api/org/register` → `/v1/orgs/create`. */
-interface OrgCreatedResponse {
-  org_id: string;
-  slug: string;
-  status: string;
-  message?: string;
 }
 
 /**
@@ -76,72 +67,29 @@ export function OrgRegisterForm({ schema, uiSchema }: OrgRegisterFormProps): JSX
           | undefined,
       ),
     };
-    try {
-      const res = await fetch('/api/org/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const reqId = res.headers.get('x-request-id') ?? '';
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        setState({ status: 'error', ...parseError(body, res.status, reqId) });
-        return;
-      }
-      const body = (await res.json()) as OrgCreatedResponse;
-      setState({ status: 'done', refId: body.slug });
-    } catch (err) {
-      setState({
-        status: 'error',
-        title: 'Network error',
-        detail: err instanceof Error ? err.message : 'Could not reach the server.',
-        code: 'NETWORK_ERROR',
-        requestId: '',
-      });
+    const result = await submitRegistration('/api/org/register', payload);
+    if (result.ok) {
+      setState({ status: 'done', refId: String(result.body['slug'] ?? '') });
+    } else {
+      setState({ status: 'error', ...result.error });
     }
   };
 
   if (state.status === 'done') {
     return (
-      <div className="mt-8 rounded-[14px] border border-emerald-200 bg-emerald-50 p-6">
-        <div className="font-display font-bold text-[18px] text-emerald-800">
-          {t('org_success_heading')}
-        </div>
-        <p className="text-[14px] text-emerald-700 mt-2">
-          {t('org_success_slug')} <code className="font-mono text-[12.5px]">{state.refId}</code>
-        </p>
-        <p className="text-[14px] text-emerald-700 mt-3">{t('org_success_review')}</p>
-        <Link
-          href="/login"
-          className="mt-5 inline-flex items-center gap-2 text-[13.5px] text-primary-600 font-semibold hover:underline"
-        >
-          <I.arrowL size={15} /> Back to sign in
-        </Link>
-      </div>
+      <RegistrationSuccessPanel
+        heading={t('org_success_heading')}
+        refLabel={t('org_success_slug')}
+        refId={state.refId}
+        message={t('org_success_review')}
+      />
     );
   }
 
   return (
     <div className="mt-7">
       {state.status === 'error' ? (
-        <div
-          ref={errorRef}
-          role="alert"
-          tabIndex={-1}
-          className="mb-5 rounded-[10px] border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-700 scroll-mt-6 outline-none"
-        >
-          <div className="font-semibold">{state.title}</div>
-          {state.detail ? (
-            <ul className="mt-1.5 text-red-600 list-disc list-inside space-y-0.5">
-              {state.detail
-                .split('\n')
-                .filter(Boolean)
-                .map((line, i) => (
-                  <li key={i}>{line}</li>
-                ))}
-            </ul>
-          ) : null}
-        </div>
+        <RegistrationErrorBanner title={state.title} detail={state.detail} errorRef={errorRef} />
       ) : null}
 
       <RjsfThemedForm
@@ -152,11 +100,10 @@ export function OrgRegisterForm({ schema, uiSchema }: OrgRegisterFormProps): JSX
         onValidityChange={setCanSubmit}
         onSubmit={handleSubmit}
         onError={(errs) => {
-          const lines = humaniseValidationErrors(errs, formSchema);
           setState({
             status: 'error',
             title: t('validation_error_title'),
-            detail: lines.join('\n'),
+            detail: humaniseValidationErrors(errs, formSchema).join('\n'),
             code: 'CLIENT_VALIDATION',
             requestId: JSON.stringify(errs, null, 2),
           });

@@ -43,6 +43,7 @@ import {
 } from '../services/email-templates/index.js';
 import { renderConfirmPage, renderResultPage } from '../views/approval-pages.js';
 import { sendAdminReviewEmail } from '../services/registration-notify.js';
+import { sendHtml, tokenErrorMessage } from './approval-shared.js';
 import type { Aggregator } from '../services/aggregator-store/index.js';
 import { KC_ATTR } from '../services/idp-admin/index.js';
 import type { IdpUser } from '../services/idp-admin/index.js';
@@ -739,18 +740,6 @@ function isIntent(v: unknown): v is 'approve' | 'reject' {
   return v === 'approve' || v === 'reject';
 }
 
-function tokenErrorMessage(code: 'EXPIRED' | 'INVALID' | 'MALFORMED'): string {
-  switch (code) {
-    case 'EXPIRED':
-      return 'This approval link has expired. Use the button below to email a fresh link to the reviewers.';
-    case 'INVALID':
-      return 'Approval link signature is invalid.';
-    case 'MALFORMED':
-    default:
-      return 'Approval link is malformed.';
-  }
-}
-
 /**
  * Display name preference: Beckn contact.name → KC firstName+lastName →
  * email. Aggregator's `contact.name` is filled at registration; KC names
@@ -763,8 +752,4 @@ function applicantNameOf(lookup: LookupOk): string {
     Boolean(p),
   );
   return parts.length > 0 ? parts.join(' ') : lookup.kcUser.email;
-}
-
-function sendHtml(reply: FastifyReply, status: number, html: string): FastifyReply {
-  return reply.status(status).type('text/html; charset=utf-8').send(html);
 }

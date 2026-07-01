@@ -26,6 +26,7 @@ import { getIdpAdmin } from '../services/idp-admin/index.js';
 import { verifyApprovalToken, formatApprovalTtl } from '../services/approval-token.js';
 import { renderConfirmPage, renderResultPage } from '../views/approval-pages.js';
 import { sendOrgReviewEmail } from '../services/org-registration-notify.js';
+import { sendHtml, tokenErrorMessage } from './approval-shared.js';
 
 const OrgDecisionBodySchema = z.object({
   token: z.string().min(1),
@@ -91,7 +92,7 @@ export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance):
           renderResultPage({
             status: 'error',
             title: isExpired ? 'Link expired' : 'Invalid link',
-            message: orgTokenErrorMessage(verified.error.code),
+            message: tokenErrorMessage(verified.error.code),
             // On expiry, offer to re-mint + re-send the review link to the
             // network admin (§7). Uses the expired-but-signed token as proof.
             ...(isExpired
@@ -199,7 +200,7 @@ export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance):
           renderResultPage({
             status: 'error',
             title: 'Invalid link',
-            message: orgTokenErrorMessage(verified.error.code),
+            message: tokenErrorMessage(verified.error.code),
           }),
         );
       }
@@ -360,7 +361,7 @@ export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance):
           renderResultPage({
             status: 'error',
             title: 'Invalid link',
-            message: orgTokenErrorMessage(verified.error.code),
+            message: tokenErrorMessage(verified.error.code),
           }),
         );
       }
@@ -458,18 +459,6 @@ function orgDecidedView(status: AggregatorOrg['status']): ResultView | null {
  * @param code - The verify failure code.
  * @returns A sentence shown on the org result page.
  */
-function orgTokenErrorMessage(code: 'EXPIRED' | 'INVALID' | 'MALFORMED'): string {
-  switch (code) {
-    case 'EXPIRED':
-      return 'This approval link has expired. Ask the network admin to resend it.';
-    case 'INVALID':
-      return 'Approval link signature is invalid.';
-    case 'MALFORMED':
-    default:
-      return 'Approval link is malformed.';
-  }
-}
-
 /**
  * Sends an HTML response with the given status.
  *
@@ -478,6 +467,3 @@ function orgTokenErrorMessage(code: 'EXPIRED' | 'INVALID' | 'MALFORMED'): string
  * @param html - Rendered HTML body.
  * @returns The reply for chaining.
  */
-function sendHtml(reply: FastifyReply, status: number, html: string): FastifyReply {
-  return reply.status(status).type('text/html; charset=utf-8').send(html);
-}

@@ -24,6 +24,7 @@ import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js
 import { getIdpAdmin, KC_ATTR } from '../services/idp-admin/index.js';
 import { sendOrgReviewEmail } from '../services/org-registration-notify.js';
 import { normalisePhone } from '../services/phone.js';
+import { splitName } from '../services/name.js';
 import { slugFromName } from '../services/slug.js';
 import { authenticateAny } from '../services/auth/access-token.js';
 import { httpError } from '../errors/http-error.js';
@@ -292,23 +293,4 @@ export async function registerAggregatorOrgRoutes(app: FastifyInstance): Promise
       });
     },
   );
-}
-
-/**
- * Splits a single-line contact name into Keycloak's first / last fields.
- * Everything before the first whitespace is the first name; the remainder is
- * the last name. Single-token inputs produce an empty last name.
- *
- * @param fullName - The owner's full name from the form.
- * @returns First and last name parts.
- */
-function splitName(fullName: string): { firstName: string; lastName: string } {
-  const trimmed = fullName.trim();
-  if (!trimmed) return { firstName: '', lastName: '' };
-  const firstSpace = trimmed.search(/\s+/);
-  if (firstSpace === -1) return { firstName: trimmed, lastName: '' };
-  return {
-    firstName: trimmed.slice(0, firstSpace),
-    lastName: trimmed.slice(firstSpace).trim(),
-  };
 }

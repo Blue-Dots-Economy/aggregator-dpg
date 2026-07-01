@@ -147,6 +147,50 @@ export function parseError(
   };
 }
 
+/** Result of {@link submitRegistration}: parsed success body or display error. */
+export type SubmitResult =
+  | { ok: true; body: Record<string, unknown> }
+  | { ok: false; error: { title: string; detail: string; code: string; requestId: string } };
+
+/**
+ * POSTs a registration payload to a BFF endpoint and normalises the outcome.
+ * Shared by the coordinator and org forms so the fetch → parse → error-envelope
+ * handling lives in one place; the caller maps the success body to its own
+ * reference id (aggregator_id vs slug).
+ *
+ * @param endpoint - BFF route, e.g. `/api/aggregator/register`.
+ * @param payload - JSON body to send.
+ * @returns A discriminated success/error result (never throws).
+ */
+export async function submitRegistration(
+  endpoint: string,
+  payload: unknown,
+): Promise<SubmitResult> {
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const reqId = res.headers.get('x-request-id') ?? '';
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      return { ok: false, error: parseError(body, res.status, reqId) };
+    }
+    return { ok: true, body: (await res.json()) as Record<string, unknown> };
+  } catch (err) {
+    return {
+      ok: false,
+      error: {
+        title: 'Network error',
+        detail: err instanceof Error ? err.message : 'Could not reach the server.',
+        code: 'NETWORK_ERROR',
+        requestId: '',
+      },
+    };
+  }
+}
+
 /**
  * Builds a consent object with `given_at` now and `valid_till` one year out,
  * merged over any existing consent fields on the form data.
