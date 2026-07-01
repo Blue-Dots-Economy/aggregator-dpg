@@ -81,6 +81,10 @@ describe('aggregator-orgs routes', () => {
     const stored = await orgStore.findById(body.org_id);
     expect(stored.ok && stored.value?.status).toBe('pending');
     expect(stored.ok && stored.value?.kcGroupId).toBeTruthy();
+    // Mirrored group carries the human org name as an attribute (name is slug-based).
+    const groupId = stored.ok ? stored.value?.kcGroupId : undefined;
+    const group = groupId ? idp.getGroup(groupId) : undefined;
+    expect(group?.attributes?.['display_name']).toBe('Enable India');
     expect(stored.ok && stored.value?.ownerKcSub).toBeTruthy();
     // Owner KC user created disabled.
     const owner = await idp.findByEmail('ravi@enable.org');

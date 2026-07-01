@@ -331,6 +331,33 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
         error: { code: 'IDP_UNAVAILABLE', message: 'no Location header on group create' },
       };
     }
+
+    // Keycloak's `POST /groups` ignores the `attributes` field on creation, so
+    // attributes must be persisted with a follow-up `PUT /groups/{id}`. Without
+    // this the group carries no `org_id` / `display_name`.
+    if (Object.keys(kcAttributes).length > 0) {
+      const putUrl = `${this.opts.baseUrl}/admin/realms/${this.opts.realm}/groups/${groupId}`;
+      const putRes = await this.safeFetch(putUrl, {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${tokenResult.value}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ name, attributes: kcAttributes }),
+      });
+      if (!putRes.ok) return putRes;
+      if (!putRes.value.ok) {
+        const text = await putRes.value.text().catch(() => '');
+        return {
+          ok: false,
+          error: {
+            code: 'IDP_UNAVAILABLE',
+            message: `createGroup set-attributes HTTP ${putRes.value.status}: ${text.slice(0, 200)}`,
+          },
+        };
+      }
+    }
+
     return { ok: true, value: { id: groupId } };
   }
 

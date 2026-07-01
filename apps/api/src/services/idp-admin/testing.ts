@@ -52,6 +52,13 @@ export class IdpAdminFake extends IdpAdminAdapter {
     return [...(this.roles.get(userId) ?? [])];
   }
 
+  /** Test inspector — a created group by id (name + attributes), or undefined. */
+  getGroup(
+    groupId: string,
+  ): { id: string; name: string; attributes?: Record<string, string | string[]> } | undefined {
+    return this.groups.get(groupId);
+  }
+
   async createUser(input: CreateUserInput): Promise<IdpResult<IdpUser>> {
     if (this.failNext) {
       const e = this.failNext;

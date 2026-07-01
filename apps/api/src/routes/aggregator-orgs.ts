@@ -126,7 +126,12 @@ export async function registerAggregatorOrgRoutes(app: FastifyInstance): Promise
 
       // Mirrored KC group (authz mirror — spec §9). Roll the org back to
       // inactive on failure so a half-provisioned org never appears active.
-      const group = await idp.createGroup(`org-${slug}`, { org_id: org.id });
+      // The group name is slug-based (unique + stable); the human org name is
+      // carried as a `display_name` attribute so it is visible in Keycloak.
+      const group = await idp.createGroup(`org-${slug}`, {
+        org_id: org.id,
+        display_name: body.display_name,
+      });
       if (!group.ok) {
         await orgStore.update(org.id, { status: 'inactive' });
         throw httpError('IDP_UNAVAILABLE', {
