@@ -12,6 +12,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
+import { X } from 'lucide-react';
 import { MarkdownContent } from '../forms/MarkdownContent';
 import type { ConsentDocContent } from './consent-types';
 
@@ -90,7 +91,7 @@ export function ConsentModal({
       {/* Dialog panel — sizing/layout mirrors the Signals-DPG consent modal
           (max-w-2xl, max-h-[90vh], flex column, no inner padding on the shell). */}
       <div
-        className="relative z-10 w-full max-w-2xl max-h-[90vh] flex flex-col rounded-2xl bg-white shadow-2xl overflow-hidden"
+        className="relative z-10 w-full max-w-lg max-h-[90vh] flex flex-col rounded-2xl bg-white shadow-2xl overflow-hidden"
         role="dialog"
         aria-modal="true"
         aria-label={activeDoc.title}
@@ -111,10 +112,11 @@ export function ConsentModal({
           <button
             ref={closeButtonRef}
             type="button"
-            className="shrink-0 rounded-lg px-3 py-1.5 text-[13px] font-semibold text-ink-500 hover:text-ink-900 hover:bg-slate-100 transition-colors"
+            aria-label={t('consent.modal_close')}
+            className="shrink-0 rounded-lg p-1.5 text-ink-500 hover:text-ink-900 hover:bg-slate-100 transition-colors"
             onClick={() => onOpenChange(false)}
           >
-            {t('consent.modal_close')}
+            <X className="h-5 w-5" aria-hidden="true" />
           </button>
         </div>
 
@@ -122,7 +124,7 @@ export function ConsentModal({
         <div className="flex flex-col flex-1 overflow-hidden px-6 pb-6 gap-4">
           {/* Pill tab bar — gray track, white active pill (shadcn-style). */}
           <div className="flex w-full shrink-0 h-11 p-1 gap-1 rounded-lg bg-slate-100">
-            {(['terms', 'privacy'] as const).map((tab) => {
+            {(['privacy', 'terms'] as const).map((tab) => {
               const label = tab === 'terms' ? content.terms.title : content.privacy.title;
               const isActive = activeTab === tab;
               return (
