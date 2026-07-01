@@ -2,151 +2,178 @@
 
 **Date:** 2026-07-02
 **Status:** Design — pending user review before the implementation plan
-**Branch:** `feat/registration-consent` (based on `feature`)
-**Related:** mirrors the Signals-DPG consent work (`Signals-DPG` branch `feat/consent-management-v1`), scoped down to aggregator registration only.
+**Branch:** `feat/registration-consent` (rebased onto `feat/aggregator-org-coordinator`)
+**Related:** mirrors the Signals-DPG consent work (`Signals-DPG` branch `feat/consent-management-v1`), scoped down to aggregator registration; reconciled with the org-coordinator restructure.
 
 ---
 
 ## 1. Goal
 
-Upgrade the aggregator operator **registration** consent from a static, unversioned checkbox into a proper, **versioned, readable, recorded** consent — while staying deliberately minimal:
+Upgrade the aggregator **registration** consent from a static, unversioned checkbox into a proper, **versioned, readable, recorded** consent — while staying deliberately minimal:
 
-- On the registration form, keep the existing required checkbox but make **"terms"** and **"privacy policy"** in its label **clickable links** that open a **view-only popup** (two tabs: Privacy Policy / Terms of Service, rendered from Markdown). **No auto-popup** — the popup opens only when a link is clicked; the checkbox remains the acceptance.
-- Author real, **versioned** Terms + Privacy content (per network, with optional per-brand override), mirroring Signals' `consent.json`.
-- Record the accepted **document versions + timestamp** in a new **append-only consent table** (system of record), keyed to the aggregator, alongside the existing `aggregators.consent` JSONB snapshot.
+- On the registration forms, keep the existing required checkbox but make **"terms"** and **"privacy policy"** in its label **clickable links** that open a **view-only popup** (two tabs: Privacy Policy / Terms of Service, Markdown). **No auto-popup** — the popup opens only on link click; the checkbox is the acceptance.
+- Author real, **versioned** operator-facing Terms + Privacy content (per network, with per-brand override), mirroring Signals' `consent.json`.
+- Record the accepted **document versions + timestamp** in a new **append-only consent table** (system of record), keyed to the registering **subject** — an **org** or a **coordinator/aggregator** — alongside the existing `aggregators.consent` JSONB snapshot.
 
 Versions are stored now so the system is **version-ready for the future**, but no version-based re-prompting or login-time consent is built in this iteration.
 
 ## 2. Scope
 
-**In scope**
+**In scope — BOTH registration forms** (post org-coordinator restructure):
 
-- Aggregator **operator registration** form (`config/schemas/aggregator/registration.v1.json`, rendered by `apps/web/.../register/RegisterView.tsx`): clickable T&P links + view popup.
-- Versioned consent content config (Terms + Privacy) + a new consent table + recording at registration.
+- **Org registration** — `config/schemas/aggregator/org-registration.v1.json` → `apps/web/.../register/OrgRegisterForm.tsx` → `POST /api/org/register` → `aggregator-orgs.ts` (subject: `aggregator_orgs.id`).
+- **Coordinator/aggregator registration** — `config/schemas/aggregator/registration.v1.json` → `RegisterView.tsx` (coordinator content) → `POST /api/aggregator/register` → `aggregator-registrations.ts` (subject: `aggregators.id`).
+- For both: clickable T&P links + view popup, versioned consent config, and ledger recording.
 
-**Out of scope (explicit non-goals)**
+**Out of scope (non-goals)**
 
-- **No consent at signin/login.** Aggregator operator login is Keycloak SSO (redirect) — no consent step is added there. (Earlier idea of a pre-OTP/login gate is dropped; the aggregator has no local OTP step anyway.)
-- **No re-consent / version-change prompting.** Versions are recorded, not enforced.
-- **No per-action / per-profile consent** (aggregator has none of those flows).
-- **No participant public-registration / bulk changes** — those participants consent in Signals; only the operator registration form is touched.
+- **No consent at signin/login.** Operator login is Keycloak SSO (redirect); no consent step there.
+- **No re-consent / version-change prompting.** Versions recorded, not enforced.
+- **No per-action / per-profile consent.**
+- **No participant public-registration / bulk changes** — those participants consent in Signals.
 
-## 3. Current state (verified)
+## 3. Current state (verified, on the rebased branch)
 
-- **Login = Keycloak SSO redirect** (`apps/web/src/app/api/auth/login/route.ts` → `/api/auth/login` → Keycloak). No local email/phone+OTP form. → confirms no login-time gate.
-- **Registration form** is RJSF-driven from `config/schemas/aggregator/registration.v1.json` + `registration.v1.ui.json`, loaded on the server in `apps/web/src/app/(public)/register/page.tsx` (`readFile(...)`, then passed to `RegisterView`). The consent field:
-  ```jsonc
-  "consent": {
-    "type": "object", "title": "Terms & Privacy Consent",
-    "required": ["value"],
-    "properties": {
-      "value": { "type": "boolean", "title": "I have read and accept the terms and privacy policy" },
-      "given_at": { "type": "string", "format": "date-time" },
-      "valid_till": { "type": "string", "format": "date-time" }
-    }
-  }
-  ```
-  The label is **static text with no links**. `value` must be `true` to submit (`RegistrationConsentSchema` uses `value: z.literal(true)`).
-- **Recording today:** on submit, `RegisterView` POSTs to `/api/aggregator/register`; `apps/api/src/routes/aggregator-registrations.ts` server-stamps consent (`stampConsent`) and stores it as a **JSONB snapshot** on `aggregators.consent` (`{ value, given_at, valid_till }`) — **no separate table, no version**.
-- **DB:** Drizzle (`packages/db-schema/src/schema.ts`); migrations via `pnpm --filter @aggregator-dpg/api db:generate` + `db:migrate`. `ConsentRecord` type lives in `packages/shared-primitives/src/aggregator/index.ts`.
-- **No Terms/Privacy document content exists** anywhere today (only the static checkbox label).
-- **Identity key:** the operator/aggregator is `aggregators.id` (uuid), created at registration (status `pending`), mirrored to Keycloak as the `aggregator_id` attribute.
-- **API:** Fastify + Zod; **Web:** Next.js (App Router) + RJSF.
+- **Two registration flows**, gated by `ORG_HIERARCHY_ENABLED`, rendered by `apps/web/src/app/(public)/register/RegisterView.tsx` (tab switch, ~lines 412–444): an **Org** tab (`OrgRegisterForm`) and the **Coordinator** content (classic aggregator form, now with a parent-org selector).
+- **Both forms carry the same consent field** `{ value: boolean, given_at, valid_till }`:
+  - `config/schemas/aggregator/registration.v1.json` (consent block) + `.ui.json` (`consent.value` → checkbox widget; `given_at`/`valid_till` hidden).
+  - `config/schemas/aggregator/org-registration.v1.json` (identical consent block) + `.ui.json`.
+  - The label is **static text with no links**; `value` must be `true` to submit.
+- **Shared client logic** in `apps/web/src/app/(public)/register/registration-shared.ts` (`stampConsent(existing)` sets `given_at`/`valid_till` client-side; both forms call it). A natural home for a shared consent-links widget/helper.
+- **Recording today:**
+  - **Coordinator/aggregator** (`apps/api/src/routes/aggregator-registrations.ts`): server-stamps consent (`stampConsent`, ~line 151, max 1-year validity) and stores it as a **JSONB snapshot on `aggregators.consent`**. No version, no table.
+  - **Org** (`apps/api/src/routes/aggregator-orgs.ts`): the request body includes `consent`, but the create path (`orgStore.create({...})`) **does not pass consent** — it is parsed then **discarded**. `aggregator_orgs` has **no consent column**. → a real gap this work fixes.
+- **DB** (Drizzle, `packages/db-schema/src/schema.ts`): `aggregators` (has `consent` JSONB + new `parentOrgId` → `aggregator_orgs.id`) and the new **`aggregator_orgs`** table (`id`, `slug`, `displayName`, `ownerEmail`, `ownerPhone`, `ownerKcSub`, `kcGroupId`, `status`, timestamps) — **no consent column**. Migrations via `pnpm --filter @aggregator-dpg/api db:generate` + `db:migrate`.
+- **No Terms/Privacy document content exists** today (only the static checkbox label).
+- **Register page schema loading** (`register/page.tsx`): reads `registration.v1.json`/`.ui.json` and (optionally) `org-registration.v1.json`/`.ui.json` from `config/schemas/aggregator/` via `readFile` + `resolveSchemaPath`, passes to `RegisterView`. Same pattern will serve the consent content.
+- **API:** Fastify + Zod; repo rules apply (abstract-class service contracts, `Result<T,BaseError>` across boundaries, structured logging via `@aggregator-dpg/observability`, config via `config-loader`, tests with in-memory fakes ≥70%).
 
-## 4. Content — versioned consent config (mirror Signals)
+## 4. Content — versioned, per-audience consent config (mirror Signals)
 
-Add a per-network consent config (Terms + Privacy only) with **version history**, matching Signals' `consent.json` shape.
+Per-network consent config with **version history**, matching Signals' `consent.json`, but with a **per-audience dimension** — org and coordinator/aggregator consent content may differ, so each audience has its own Terms + Privacy documents (independently versioned).
 
-**Location:** `config/<network>/consent.json` (co-located with the per-network schema dir the schema-loader already uses, e.g. `config/<network>/schemas/`), **with a per-brand override** merged over the network default (a brand may ship brand-specific consent content — decision: per-brand supported). Resolution mirrors how the registration schema/brand is resolved for the register page.
+**Location:** `config/<network>/consent.json` (co-located with the per-network schema dir, e.g. `config/<network>/schemas/`) with a **per-brand override** merged over the network default. Resolution mirrors `resolveSchemaPath`.
 
 ```jsonc
 {
-  "documents": {
-    "terms": {
-      "current_version": 1,
-      "versions": [
-        {
-          "version": 1,
-          "title": "Terms of Service",
-          "content": "<sanitized markdown>",
-          "effective_from": "2026-07-01",
+  "audiences": {
+    "org": {
+      "documents": {
+        "terms": {
+          "current_version": 1,
+          "versions": [
+            {
+              "version": 1,
+              "title": "Terms of Service",
+              "content": "<org markdown>",
+              "effective_from": "2026-07-01",
+            },
+          ],
         },
-      ],
+        "privacy": {
+          "current_version": 1,
+          "versions": [
+            {
+              "version": 1,
+              "title": "Privacy Policy",
+              "content": "<org markdown>",
+              "effective_from": "2026-07-01",
+            },
+          ],
+        },
+      },
     },
-    "privacy": {
-      "current_version": 1,
-      "versions": [
-        {
-          "version": 1,
-          "title": "Privacy Policy",
-          "content": "<sanitized markdown>",
-          "effective_from": "2026-07-01",
+    "aggregator": {
+      "documents": {
+        "terms": {
+          "current_version": 1,
+          "versions": [
+            {
+              "version": 1,
+              "title": "Terms of Service",
+              "content": "<coordinator markdown>",
+              "effective_from": "2026-07-01",
+            },
+          ],
         },
-      ],
+        "privacy": {
+          "current_version": 1,
+          "versions": [
+            {
+              "version": 1,
+              "title": "Privacy Policy",
+              "content": "<coordinator markdown>",
+              "effective_from": "2026-07-01",
+            },
+          ],
+        },
+      },
     },
   },
 }
 ```
 
-- **Version history is retained** (append-only `versions[]` per document); `current_version` selects what the popup renders and what version is recorded. Same rules as Signals §4.1 (never edit past versions; append + bump `current_version`).
-- Only `terms` + `privacy` (no `profile_creation` / `actions` — aggregator has none).
-- Validated by a Zod schema (see §6). Content authored per network (e.g. `purple_dot`, `blue_dot`, `orange_dot`, `yellow_dot`) with aggregator-appropriate wording.
+- **Two audiences** keyed to the ledger `subject_type` (§5): `org` (org-registration form) and `aggregator` (coordinator/aggregator form, a.k.a. "coordinator"). Each has its own `terms` + `privacy`, so content **and versions differ per audience**.
+- Append-only `versions[]` per document; `current_version` selects what the popup renders + what version is recorded. Same rules as Signals §4.1.
+- Only `terms` + `privacy` per audience. Validated by a Zod schema (§6).
+- **Content is authored fresh, operator/org-facing.** Org content addresses the **organization** registering (org-level data, ownership, responsibilities for its coordinators); coordinator/aggregator content addresses the **coordinator/aggregator** onboarding under an org. Distinct from Signals' participant-facing content.
+- **Serving:** `register/page.tsx` reads the resolved `consent.json` and passes each audience's merged content (current version's `title`+`content` per doc) to `RegisterView` — the **org** content to `OrgRegisterForm`, the **aggregator** content to the coordinator form. No new API endpoint.
 
-**Serving:** the register **server component** (`register/page.tsx`) reads the resolved `consent.json` (same `readFile` pattern as the registration schema, resolved for the active network/brand) and passes the merged config to `RegisterView` as a prop. No new API/BFF endpoint is required (mirrors how the registration schema is already provided). The popup renders `documents.<doc>.versions.find(v => v.version === current_version)` as Markdown.
+## 5. Data model — new consent table (append-only, subject-polymorphic)
 
-## 5. Data model — new consent table (append-only)
-
-A new table, the **system of record** for aggregator consent, alongside the existing `aggregators.consent` JSONB (kept for back-compat).
-
-**Design decision — one row per acceptance (not one per document).** The operator ticks a single checkbox covering both Terms + Privacy — it's one acceptance event. So we record **one row per registration acceptance**, carrying **both** document versions in their own columns (rather than a `consent_category` + single `document_version`, which would force two rows for one click). This still keeps the ledger **version-ready per document**: if Terms later bumps to v2 while Privacy stays v1, a row can hold `terms_version: 2, privacy_version: 1`.
+One table, the **system of record** for aggregator-side registration consent, keyed by a **subject** so it serves both the org and the coordinator/aggregator flows. One row per registration acceptance (single checkbox → one row; both document versions in their own columns).
 
 **`aggregator_consent_record`** (Drizzle, `packages/db-schema/src/schema.ts`):
 
-| column            | type                               | notes                                                            |
-| ----------------- | ---------------------------------- | ---------------------------------------------------------------- |
-| `id`              | uuid PK default random             |                                                                  |
-| `aggregator_id`   | uuid NOT NULL                      | the operator/aggregator (`aggregators.id`)                       |
-| `terms_version`   | integer NOT NULL                   | Terms version accepted (= `documents.terms.current_version`)     |
-| `privacy_version` | integer NOT NULL                   | Privacy version accepted (= `documents.privacy.current_version`) |
-| `network`         | text NOT NULL                      | the network the aggregator registered under                      |
-| `brand`           | text NULL                          | brand variant if applicable                                      |
-| `source`          | text NOT NULL                      | `registration` (only source in v1)                               |
-| `accepted_at`     | timestamptz NOT NULL               | consent event time (server-stamped)                              |
-| `created_at`      | timestamptz NOT NULL default now() |                                                                  |
+| column            | type                               | notes                                                        |
+| ----------------- | ---------------------------------- | ------------------------------------------------------------ |
+| `id`              | uuid PK default random             |                                                              |
+| `subject_type`    | text NOT NULL                      | `org` \| `aggregator` — which flow captured it               |
+| `subject_id`      | uuid NOT NULL                      | `aggregator_orgs.id` (org) or `aggregators.id` (coordinator) |
+| `terms_version`   | integer NOT NULL                   | Terms version accepted (= config `current_version`)          |
+| `privacy_version` | integer NOT NULL                   | Privacy version accepted                                     |
+| `network`         | text NOT NULL                      | network the registration is under                            |
+| `brand`           | text NULL                          | brand variant if applicable                                  |
+| `source`          | text NOT NULL                      | `registration` (only source in v1)                           |
+| `accepted_at`     | timestamptz NOT NULL               | server-stamped consent time                                  |
+| `created_at`      | timestamptz NOT NULL default now() |                                                              |
 
-- **Append-only** — **one row per registration acceptance** (both versions in that row). In v1 both are `1`.
-- No FK enforced beyond app-level (follow the repo's existing FK conventions for `aggregators`).
-- Index on `(aggregator_id)`.
-- The existing `aggregators.consent` JSONB continues to be written by `stampConsent` (unchanged) — the new table adds the versioned ledger.
+- **Append-only** — one row per registration acceptance (both versions in the row; both `1` in v1).
+- No cross-table FK on `subject_id` (polymorphic; app-level integrity — the route already created/owns the subject row). Index on `(subject_type, subject_id)`.
+- `aggregators.consent` JSONB stays (coordinator flow, back-compat). The org flow gets its consent **recorded here** (fixing today's discard) — no consent column added to `aggregator_orgs`.
 
 ## 6. Backend changes
 
-- **No client-sent versions, no version validation (v1 decision).** The registration payload's `consent` stays `{ value, given_at, valid_till }` — unchanged. The client does **not** send versions. At registration the **server** loads the resolved consent config for the network/brand and records the **current** version of each document (both `1` in v1). Nothing to validate because there is only v1. (When real versioning arrives, the server keeps being the source of the recorded version.)
-- **Consent config Zod schema** (new, in a config/shared package): `AggregatorConsentConfigSchema` validating the §4 shape (per-document `current_version` ∈ `versions`, unique version ints) + `parseAggregatorConsentConfig`. Follows the repo's interface conventions (`<Entity>Schema`, `z.infer` type).
-- **Register route** (`apps/api/src/routes/aggregator-registrations.ts`): after `createAggregatorWithSlug(...)` returns the `aggregator` (has `id`), and since `body.consent.value === true` is already enforced, load the consent config for the request's network/brand, and insert **one** `aggregator_consent_record` row: `{ aggregator_id, terms_version: documents.terms.current_version, privacy_version: documents.privacy.current_version, network, brand, source: 'registration', accepted_at: <server-stamped time> }`. Wrap the insert in try/catch **log-and-continue** (never fail registration on a ledger-write error; the JSONB snapshot still records acceptance). Keep `stampConsent` → `aggregators.consent` unchanged. Follow repo rules: return `Result`/typed errors across service boundaries, structured logging via `@aggregator-dpg/observability`.
+- **No client-sent versions, no version validation (v1).** The registration payloads keep `consent: { value, given_at, valid_till }` (unchanged). At registration the **server** loads the resolved consent config for the network/brand and records the **current** version of each document **from the matching audience** — the org route uses `audiences.org`, the coordinator/aggregator route uses `audiences.aggregator` (both `1` in v1). Nothing to validate (only v1).
+- **Consent config Zod schema** (new, in a config/shared package following repo interface rules): `AggregatorConsentConfigSchema` (per-document `current_version` ∈ `versions`, unique version ints) + parser; typed via `z.infer`.
+- **Consent-ledger writer** (new service, repo pattern: abstract base + postgres + memory + testing): `recordRegistrationConsent({ subjectType, subjectId, network, brand, termsVersion, privacyVersion })` inserting one `aggregator_consent_record` row; returns `Result<…, BaseError>`; structured logging.
+- **Coordinator/aggregator route** (`aggregator-registrations.ts`): after the aggregator row is created (`aggregators.id`), record consent (subject_type `aggregator`, versions from the loaded config). Keep `stampConsent` → `aggregators.consent` JSONB unchanged.
+- **Org route** (`aggregator-orgs.ts`): after `orgStore.create(...)` returns the org (`aggregator_orgs.id`), record consent (subject_type `org`) — **fixing the current discard**. (Consent stays out of `aggregator_orgs` columns; it lives in the ledger.)
+- Both: recording is **log-and-continue** (never fail registration on a ledger-write error); boundaries return `Result`/typed errors; no bare `console.log`.
 
 ## 7. Web changes
 
-- **`register/page.tsx`** (server): read the resolved `consent.json` for the active network/brand (same `readFile`/resolve pattern as the registration schema) and pass a `consentContent` prop (the current version's `title`+`content` for each doc) to `RegisterView`.
-- **Custom consent field/widget** for the RJSF `consent.value` field: render the label as **"I have read and accept the [Terms of Service] and [Privacy Policy]"** where the two are buttons that open a **view-only popup**. Keep the checkbox (required, `value` must be true). Implement via a custom RJSF **widget** registered through the UI schema (`registration.v1.ui.json` → `consent.value.ui:widget`) or a custom field template — whichever fits the repo's RJSF setup.
-- **Consent viewer popup** (new component, e.g. `apps/web/.../consent/ConsentModal`): a **read-only** dialog with two tabs (Privacy Policy / Terms of Service), each rendering the doc's current-version `title` + Markdown `content`. Sanitized Markdown (no raw HTML). Dismissible (it's read-only, not a gate). **No auto-open** — opened only by the link clicks.
-- **Submit payload unchanged** — the client keeps sending `consent: { value, given_at, valid_till }`; versions are recorded server-side from the config (§6).
-- **i18n:** the link labels + popup chrome (title/tab labels) use the aggregator's existing i18n mechanism; the document **content stays in English** (from config), matching the Signals decision.
+- **`register/page.tsx`** (server): read the resolved `consent.json` for the active network/brand and pass the **per-audience** content down to `RegisterView` — the `aggregator` audience's current-version `title`+`content` to the coordinator content, and the `org` audience's to `OrgRegisterForm`.
+- **Shared consent field/widget** (in/near `registration-shared.ts`): render the consent label as **"I have read and accept the [Terms of Service] and [Privacy Policy]"** with the two as buttons opening the view popup; keep the required checkbox. Implement as a custom RJSF **widget** registered via each form's `.ui.json` (`consent.value.ui:widget`) or a shared field template — **used by both forms** (single implementation).
+- **Consent viewer popup** (new shared component, e.g. `apps/web/.../consent/ConsentModal`): read-only dialog, two tabs (Privacy Policy / Terms of Service), current-version `title` + **sanitized Markdown** content (no raw HTML). Dismissible; **no auto-open**.
+- **Submit payloads unchanged** — versions recorded server-side from config (§6).
+- **i18n:** link labels + popup chrome use the aggregator's existing i18n (`apps/web/src/i18n/messages/{en,hi,kn}.json`); document **content stays English** (from config), matching Signals.
 
 ## 8. Migration & compatibility
 
-- Additive: new `aggregator_consent_record` table via `db:generate` + `db:migrate`; **no existing table altered**. `aggregators.consent` JSONB is untouched. Registration request/response shapes are unchanged.
-- No backfill — existing aggregators simply have no ledger rows (acceptable; their JSONB snapshot remains). New registrations write one ledger row.
+- Additive: new `aggregator_consent_record` table via `db:generate` + `db:migrate`; **no existing table altered** (org route change is additive recording, not a schema change to `aggregator_orgs`). Request/response shapes unchanged. `aggregators.consent` JSONB untouched.
+- No backfill — existing orgs/aggregators have no ledger rows; new registrations write one row each.
 
 ## 9. Testing
 
-- **DB/API:** register with consent (`value: true`) → aggregator created + **one `aggregator_consent_record` row** with `terms_version`/`privacy_version` = the config's current versions + `source: registration`; JSONB snapshot still written; a ledger-write failure does not fail registration.
-- **Config:** `AggregatorConsentConfigSchema` validation (current_version ∈ versions; unique versions); per-network + per-brand resolution/merge.
-- **Web:** the consent field renders clickable Terms/Privacy links; clicking opens the read-only popup on the right tab with Markdown content; checkbox still required to enable Submit.
-- Per repo rules: unit tests use in-memory fakes (no real DB/network); integration tests are `*.integration.test.ts`; ≥70% line coverage.
+- **DB/API:** org registration → org created + **one `aggregator_consent_record`** row (`subject_type: org`, versions from config, `source: registration`) — verifying the previously-discarded org consent is now recorded; coordinator/aggregator registration → one row (`subject_type: aggregator`) + JSONB snapshot still written; ledger-write failure does not fail registration.
+- **Config:** `AggregatorConsentConfigSchema` validation; per-network + per-brand resolution/merge.
+- **Web:** both forms render clickable Terms/Privacy links; clicking opens the read-only popup on the right tab with Markdown; checkbox still required to submit.
+- Repo rules: unit tests use `./testing` in-memory fakes (no real DB/network); integration tests `*.integration.test.ts`; ≥70% coverage; the new ledger service ships `interface` + `postgres` + `memory` + `testing`.
 
-## 10. Resolved decisions (previously open)
+## 10. Resolved decisions
 
-1. **Per-brand override → yes.** Per-network default + per-brand override (a brand may ship brand-specific consent content). Config shape supports both.
-2. **No version validation in v1.** There is only v1, so the client sends no versions and the server records the config's `current_version` (=1) for each document. Real versioning + validation is a later iteration; the table is already version-ready (per-document version columns).
-3. **Content authoring — PENDING your answer:** author fresh, **operator/aggregator-facing** Terms + Privacy content (organization applying to become an aggregator; how the operator org's data is handled; aggregator responsibilities), OR reuse the Signals **participant-facing** content. (Recommendation: author fresh operator-facing content.)
+1. **Scope → both forms.** Org registration + coordinator/aggregator registration both get the links-popup + versioned ledger recording. The ledger is subject-polymorphic (`subject_type` + `subject_id`). This also fixes the org route silently discarding consent.
+2. **Per-brand override → yes** (per-network default + per-brand).
+3. **No version validation in v1.** Client sends no versions; server records config `current_version` (=1). Table is version-ready (per-document version columns).
+4. **Content → fresh operator/org-facing, per audience.** Separate Terms + Privacy content (and versions) for the `org` audience vs the `aggregator` (coordinator) audience — they may differ — within each network/brand's `consent.json` under `audiences.{org,aggregator}`. Authored in the plan.
