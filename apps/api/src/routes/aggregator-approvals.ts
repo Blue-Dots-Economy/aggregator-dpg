@@ -42,7 +42,7 @@ import {
   renderApplicantRejected,
 } from '../services/email-templates/index.js';
 import { renderConfirmPage, renderResultPage } from '../views/approval-pages.js';
-import { sendAdminReviewEmail } from '../services/registration-notify.js';
+import { mintApprovalTokenPair } from '../services/registration-notify.js';
 import { sendHtml, sendPage, missingTokenPage, verifyTokenForId } from './approval-shared.js';
 import type { Aggregator } from '../services/aggregator-store/index.js';
 import { KC_ATTR } from '../services/idp-admin/index.js';
@@ -88,10 +88,33 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
 
       if (!token) return sendPage(reply, missingTokenPage());
 
-      const verified = await verifyTokenForId(token, aggregatorId, 'aggregator', {
-        resendUrl: `${config.PUBLIC_API_URL}/admin/v1/aggregator-registrations/resend/${aggregatorId}`,
-      });
-      if (!verified.ok) return sendPage(reply, verified.page);
+      // Strict verify first (rejects expired). A merely-expired link offers an
+      // inline "Regenerate & review" step (no self-email to the reviewer);
+      // invalid/malformed still error.
+      const verified = await verifyTokenForId(token, aggregatorId, 'aggregator');
+      if (!verified.ok) {
+        const lenient = await verifyTokenForId(token, aggregatorId, 'aggregator', {
+          allowExpired: true,
+        });
+        if (lenient.ok) {
+          return sendHtml(
+            reply,
+            400,
+            renderResultPage({
+              status: 'error',
+              title: 'Link expired',
+              message:
+                'This approval link has expired. Click below to regenerate a fresh link and continue to the review.',
+              action: {
+                url: `${config.PUBLIC_API_URL}/admin/v1/aggregator-registrations/renew/${aggregatorId}`,
+                token,
+                label: 'Regenerate & review',
+              },
+            }),
+          );
+        }
+        return sendPage(reply, verified.page);
+      }
       const effectiveIntent = isIntent(intent) ? intent : verified.intent;
 
       const lookup = await loadAggregatorAndUser(aggregatorId);
@@ -503,18 +526,17 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
   );
 
   app.post(
-    '/admin/v1/aggregator-registrations/resend/:id',
+    '/admin/v1/aggregator-registrations/renew/:id',
     {
       schema: {
         tags: ['aggregator-approvals'],
-        summary: 'Resend a fresh approval link for a pending registration',
+        summary: 'Regenerate an expired approval link and show the confirm page',
         description:
-          'Re-mints the approve/reject token pair and re-emails the reviewers for a still-pending registration. Accepts an expired-but-signature-valid token as proof the caller held a legitimate link. Returns an HTML result page.',
+          'Reached from the "Regenerate & review" button on the expired-link page. Accepts an expired-but-signature-valid token as proof the reviewer held a legitimate link, mints a fresh decision token (preserving the org binding), and renders the approve/reject confirm page inline — no email.',
         params: ApprovalParamsSchema,
       },
     },
     async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
-      const log = req.log.child({ operation: 'aggregator-registration.resend' });
       const aggregatorId = req.params.id;
       const body = (req.body ?? {}) as { token?: string };
       const token = typeof body.token === 'string' ? body.token : '';
@@ -532,24 +554,23 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
         return sendHtml(reply, 200, renderResultPage(alreadyDecidedView(prior)));
       }
 
-      await sendAdminReviewEmail(
-        {
-          aggregatorId,
-          applicantName: lookup.aggregator.name,
-          applicantEmail: lookup.aggregator.contact.email,
-          applicantPhone: lookup.aggregator.contactPhone,
-        },
-        log,
-      );
-
-      log.info({ status: 'success', aggregator_id: aggregatorId }, 'approval link resent');
+      // Mint a fresh token pair, preserving the original org binding (so the
+      // decision handler's parent_org_id check still passes), and land the
+      // reviewer on the confirm page directly.
+      const { approveToken, rejectToken } = await mintApprovalTokenPair(aggregatorId, verified.org);
+      const effectiveIntent = verified.intent === 'reject' ? 'reject' : 'approve';
       return sendHtml(
         reply,
         200,
-        renderResultPage({
-          status: 'success',
-          title: 'Approval link sent',
-          message: 'A fresh approval link has been emailed to the reviewers.',
+        renderConfirmPage({
+          aggregatorId,
+          intent: effectiveIntent,
+          token: effectiveIntent === 'reject' ? rejectToken : approveToken,
+          applicantEmail: lookup.kcUser.email,
+          association: lookup.aggregator.name,
+          aggregatorType: lookup.aggregator.type ?? lookup.aggregator.actorType,
+          postUrl: `${config.PUBLIC_API_URL}/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
+          expiresInText: formatApprovalTtl(config.APPROVAL_TOKEN_TTL_SECONDS),
         }),
       );
     },

@@ -623,47 +623,47 @@ describe('admin approval routes', () => {
   }
 
   // ---------------------------------------------------------------------------
-  // Resend route tests
+  // Renew (inline regenerate) route tests
   // ---------------------------------------------------------------------------
 
-  it('resend re-mints and re-emails for a pending record (expired token accepted)', async () => {
+  it('renew re-arms an expired token and shows the confirm page inline (no email)', async () => {
     const { id } = await seedPendingAggregator();
     const expired = await mintExpiredApproveToken(id);
     const res = await app.inject({
       method: 'POST',
-      url: `/admin/v1/aggregator-registrations/resend/${id}`,
+      url: `/admin/v1/aggregator-registrations/renew/${id}`,
       payload: { token: expired },
     });
     expect(res.statusCode).toBe(200);
     expect(res.headers['content-type']).toContain('text/html');
-    expect(mailer.outbox.length).toBeGreaterThanOrEqual(1);
-    expect(mailer.outbox.at(-1)?.html).toContain('intent=approve');
+    expect(res.body).toContain(`/admin/v1/aggregator-registrations/decision/${id}`);
+    expect(mailer.outbox.length).toBe(0);
   });
 
-  it('resend rejects a malformed token with 400', async () => {
+  it('renew rejects a malformed token with 400', async () => {
     const { id } = await seedPendingAggregator();
     const res = await app.inject({
       method: 'POST',
-      url: `/admin/v1/aggregator-registrations/resend/${id}`,
+      url: `/admin/v1/aggregator-registrations/renew/${id}`,
       payload: { token: 'not-a-jwt' },
     });
     expect(res.statusCode).toBe(400);
   });
 
-  it('resend shows already-decided for an active record', async () => {
+  it('renew shows already-decided for an active record', async () => {
     const { id } = await seedPendingAggregator();
     await aggregatorStore.updateStatus(id, 'active', 'admin');
     const expired = await mintExpiredApproveToken(id);
     const res = await app.inject({
       method: 'POST',
-      url: `/admin/v1/aggregator-registrations/resend/${id}`,
+      url: `/admin/v1/aggregator-registrations/renew/${id}`,
       payload: { token: expired },
     });
     expect(res.statusCode).toBe(200);
     expect(res.body).toContain('already');
   });
 
-  it('expired approval link page offers a resend button', async () => {
+  it('expired approval link page offers an inline regenerate step (no email)', async () => {
     const { id } = await seedPendingAggregator();
     const expired = await mintExpiredApproveToken(id);
     const res = await app.inject({
@@ -671,7 +671,10 @@ describe('admin approval routes', () => {
       url: `/admin/v1/aggregator-registrations/read/${id}?token=${encodeURIComponent(expired)}&intent=approve`,
     });
     expect(res.statusCode).toBe(400);
-    expect(res.body).toContain(`/admin/v1/aggregator-registrations/resend/${id}`);
+    expect(res.body).toContain('Link expired');
+    expect(res.body).toContain('Regenerate &amp; review');
+    expect(res.body).toContain(`/admin/v1/aggregator-registrations/renew/${id}`);
+    expect(mailer.outbox.length).toBe(0);
   });
 
   it('rejects a coordinator decision when the token org claim mismatches parent_org_id', async () => {
