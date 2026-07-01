@@ -179,7 +179,12 @@ export async function registerAggregatorOrgRoutes(app: FastifyInstance): Promise
       }
 
       await sendOrgReviewEmail(
-        { orgId: org.id, displayName: body.display_name, ownerEmail: body.owner.email },
+        {
+          orgId: org.id,
+          displayName: body.display_name,
+          ownerEmail: body.owner.email,
+          ownerPhone: phoneE164,
+        },
         log,
       );
 

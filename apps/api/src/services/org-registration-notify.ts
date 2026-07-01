@@ -20,6 +20,8 @@ export interface OrgReviewNotifyInput {
   orgId: string;
   displayName: string;
   ownerEmail: string;
+  /** Org owner's phone (E.164) — shown in the review email's Phone row. */
+  ownerPhone: string;
 }
 
 /**
@@ -51,7 +53,7 @@ export async function sendOrgReviewEmail(
     registrationId: input.orgId,
     applicantName: input.displayName,
     applicantEmail: input.ownerEmail,
-    applicantPhone: '',
+    applicantPhone: input.ownerPhone,
     association: input.displayName,
     // The shared template's `aggregatorType` field has no 'org' member; use
     // 'aggregator' (cosmetic — the org-review email's Type row only). Locked

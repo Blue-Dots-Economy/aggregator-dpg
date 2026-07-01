@@ -30,7 +30,6 @@ interface EditFormState {
   contact_name: string;
   contact_phone: string;
   contact_email: string;
-  contact_alternate_phone: string;
   // profile side
   profile_contact_name: string;
   personas: string; // "id:Name, id2:Name2"
@@ -49,7 +48,6 @@ const EMPTY: EditFormState = {
   contact_name: '',
   contact_phone: '',
   contact_email: '',
-  contact_alternate_phone: '',
   profile_contact_name: '',
   personas: '',
   services: '',
@@ -78,7 +76,6 @@ const editSchema: RJSFSchema = {
       pattern: '^(\\+?\\d{10,15}|\\d{10})$',
     },
     contact_email: { type: 'string', title: 'Email', format: 'email' },
-    contact_alternate_phone: { type: 'string', title: 'Alternate Phone' },
     profile_contact_name: {
       type: 'string',
       title: 'Primary Contact Label',
@@ -110,7 +107,6 @@ const editUiSchema: UiSchema = {
     'contact_name',
     'contact_phone',
     'contact_email',
-    'contact_alternate_phone',
     'profile_contact_name',
     'personas',
     'services',
@@ -124,7 +120,6 @@ const editUiSchema: UiSchema = {
   url: { 'ui:placeholder': 'https://yourorg.in' },
   contact_phone: { 'ui:placeholder': '+91 98765 43210' },
   contact_email: { 'ui:placeholder': 'admin@yourorg.in' },
-  contact_alternate_phone: { 'ui:placeholder': 'Optional' },
   personas: { 'ui:placeholder': 'persona-iti-seeker:ITI Seeker, persona-pwd-seeker:PwD Seeker' },
   services: { 'ui:placeholder': 'service-bluedots-job:BlueDots Job Posting' },
   loc_street: { 'ui:placeholder': 'Building / street' },
@@ -162,7 +157,6 @@ function rawToForm(raw: RawProfile): EditFormState {
     contact_name: raw.contact?.name ?? '',
     contact_phone: raw.contact?.phone ?? '',
     contact_email: raw.contact?.email ?? '',
-    contact_alternate_phone: raw.contact?.alternatePhone ?? '',
     profile_contact_name: raw.contact_name ?? '',
     personas: (raw.personas ?? []).map((p) => `${p.id}:${p.name}`).join(', '),
     services: (raw.services ?? []).map((s) => `${s.id}:${s.name}`).join(', '),
@@ -195,7 +189,6 @@ function formToPayload(f: EditFormState): ProfileEditPayload {
       name: f.contact_name,
       phone: f.contact_phone,
       email: f.contact_email,
-      ...(f.contact_alternate_phone ? { alternatePhone: f.contact_alternate_phone } : {}),
     },
   };
   const hasAddressFields =
