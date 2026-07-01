@@ -87,63 +87,67 @@ export function ConsentModal({
         onClick={() => onOpenChange(false)}
         tabIndex={-1}
       />
-      {/* Dialog panel */}
+      {/* Dialog panel — sizing/layout mirrors the Signals-DPG consent modal
+          (max-w-2xl, max-h-[90vh], flex column, no inner padding on the shell). */}
       <div
-        className="relative z-10 w-full max-w-2xl max-h-[80vh] flex flex-col rounded-[16px] bg-white shadow-2xl overflow-hidden"
+        className="relative z-10 w-full max-w-2xl max-h-[90vh] flex flex-col rounded-2xl bg-white shadow-2xl overflow-hidden"
         role="dialog"
         aria-modal="true"
         aria-label={activeDoc.title}
       >
-        {/* Header — generic title + description; the doc-specific heading comes
-            from the Markdown content's own `##` heading, so it is not echoed
-            here (matches the Signals-DPG consent modal). */}
-        <div className="flex items-start justify-between gap-4 px-6 pt-5 pb-4 border-b border-slate-100">
+        {/* Header — generic eyebrow + title + description; the doc-specific
+            heading comes from the Markdown content's own `##` heading, so it is
+            not echoed here (matches the Signals-DPG consent modal). */}
+        <div className="flex items-start justify-between gap-4 px-6 pt-6 pb-4 shrink-0">
           <div className="min-w-0">
             <p className="text-[11px] font-bold uppercase tracking-wide text-[var(--bd-primary)]">
               {t('consent.modal_eyebrow')}
             </p>
-            <h2 className="font-display font-bold text-[18px] text-ink-900 leading-tight mt-0.5">
+            <h2 className="font-display font-bold text-xl text-ink-900 leading-tight mt-0.5">
               {t('consent.modal_title')}
             </h2>
-            <p className="text-[13px] text-ink-500 mt-1">{t('consent.modal_desc')}</p>
+            <p className="text-sm text-ink-500 mt-1">{t('consent.modal_desc')}</p>
           </div>
           <button
             ref={closeButtonRef}
             type="button"
-            className="shrink-0 rounded-[8px] px-3 py-1.5 text-[13px] font-semibold text-ink-500 hover:text-ink-900 hover:bg-slate-100 transition-colors"
+            className="shrink-0 rounded-lg px-3 py-1.5 text-[13px] font-semibold text-ink-500 hover:text-ink-900 hover:bg-slate-100 transition-colors"
             onClick={() => onOpenChange(false)}
           >
             {t('consent.modal_close')}
           </button>
         </div>
 
-        {/* Tabs */}
-        <div className="flex gap-1 px-6 pt-3 pb-0 border-b border-slate-100 bg-white">
-          {(['terms', 'privacy'] as const).map((tab) => {
-            const label = tab === 'terms' ? content.terms.title : content.privacy.title;
-            const isActive = activeTab === tab;
-            return (
-              <button
-                key={tab}
-                type="button"
-                role="tab"
-                aria-selected={isActive}
-                onClick={() => setActiveTab(tab)}
-                className={`px-4 py-2 mb-[-1px] text-[13.5px] font-semibold rounded-t-[6px] border-b-2 transition-colors cursor-pointer ${
-                  isActive
-                    ? 'border-[var(--bd-primary)] text-[var(--bd-primary)]'
-                    : 'border-transparent text-ink-500 hover:text-ink-800'
-                }`}
-              >
-                {label}
-              </button>
-            );
-          })}
-        </div>
+        {/* Tabs + scrollable content region */}
+        <div className="flex flex-col flex-1 overflow-hidden px-6 pb-6 gap-4">
+          {/* Pill tab bar — gray track, white active pill (shadcn-style). */}
+          <div className="flex w-full shrink-0 h-11 p-1 gap-1 rounded-lg bg-slate-100">
+            {(['terms', 'privacy'] as const).map((tab) => {
+              const label = tab === 'terms' ? content.terms.title : content.privacy.title;
+              const isActive = activeTab === tab;
+              return (
+                <button
+                  key={tab}
+                  type="button"
+                  role="tab"
+                  aria-selected={isActive}
+                  onClick={() => setActiveTab(tab)}
+                  className={`flex-1 flex items-center justify-center rounded-md text-[13.5px] font-semibold transition-colors cursor-pointer ${
+                    isActive
+                      ? 'bg-white text-[var(--bd-primary)] shadow-sm'
+                      : 'text-ink-500 hover:text-ink-800'
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
 
-        {/* Content — scrollable */}
-        <div className="flex-1 overflow-y-auto px-6 py-5">
-          <MarkdownContent content={activeDoc.content} />
+          {/* Content — scrollable */}
+          <div className="flex-1 overflow-y-auto pr-1">
+            <MarkdownContent content={activeDoc.content} />
+          </div>
         </div>
       </div>
     </div>
