@@ -35,7 +35,48 @@ export default async function RegisterPage() {
 
   await patchTypeFromNetwork(schema, uiSchema);
 
-  return <RegisterView schema={schema} uiSchema={uiSchema} />;
+  // Org hierarchy is a per-instance deploy flag — read the same env var the API
+  // reads, server-side (this route is `force-dynamic`). When on, also load the
+  // org-registration schema so the org tab can render. A flag-on instance whose
+  // config is missing the org schema degrades gracefully to the coordinator-only
+  // form rather than 500-ing the register page.
+  const orgHierarchyEnabled = (process.env.ORG_HIERARCHY_ENABLED ?? '').trim() === 'true';
+  const org = orgHierarchyEnabled ? await loadOrgSchema() : null;
+
+  return (
+    <RegisterView
+      schema={schema}
+      uiSchema={uiSchema}
+      orgHierarchyEnabled={orgHierarchyEnabled}
+      {...(org ? { orgSchema: org.schema, orgUiSchema: org.uiSchema } : {})}
+    />
+  );
+}
+
+/**
+ * Loads the org-registration JSON Schema + UI schema for the org tab.
+ *
+ * @returns The parsed org schema pair, or `null` if the files are absent or
+ *   unreadable (a flag-on instance without the schema falls back to the
+ *   coordinator-only form).
+ */
+async function loadOrgSchema(): Promise<{
+  schema: RJSFSchema;
+  uiSchema: Record<string, unknown>;
+} | null> {
+  try {
+    const [rawSchema, rawUi] = await Promise.all([
+      readFile(resolveSchemaPath('org-registration.v1.json'), 'utf8'),
+      readFile(resolveSchemaPath('org-registration.v1.ui.json'), 'utf8'),
+    ]);
+    return {
+      schema: JSON.parse(rawSchema) as RJSFSchema,
+      uiSchema: JSON.parse(rawUi) as Record<string, unknown>,
+    };
+  } catch {
+    // Best-effort: absent org schema → coordinator-only form.
+    return null;
+  }
 }
 
 /**

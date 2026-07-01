@@ -1,0 +1,41 @@
+{
+  "ui:layout": "stack",
+  "ui:order": ["display_name", "state", "owner", "consent"],
+  "display_name": {
+    "ui:placeholder": "e.g. Enable India",
+    "ui:autofocus": true
+  },
+  "state": {
+    "ui:placeholder": "e.g. Karnataka"
+  },
+  "owner": {
+    "ui:layout": "grid",
+    "ui:order": ["name", "phone", "email"],
+    "name": {
+      "ui:placeholder": "Full name of the organisation owner"
+    },
+    "phone": {
+      "ui:placeholder": "+91 98765 43210",
+      "ui:options": { "inputType": "tel" }
+    },
+    "email": {
+      "ui:placeholder": "owner@yourorg.org",
+      "ui:options": { "inputType": "email" }
+    }
+  },
+  "consent": {
+    "ui:layout": "stack",
+    "ui:order": ["value", "given_at", "valid_till"],
+    "value": {
+      "ui:widget": "checkbox"
+    },
+    "given_at": {
+      "ui:widget": "hidden",
+      "ui:options": { "label": false }
+    },
+    "valid_till": {
+      "ui:widget": "hidden",
+      "ui:options": { "label": false }
+    }
+  }
+}

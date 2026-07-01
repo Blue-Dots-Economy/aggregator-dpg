@@ -3,25 +3,41 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
+import { useQuery } from '@tanstack/react-query';
 import type { RJSFSchema, UiSchema } from '@rjsf/utils';
 import type { IChangeEvent } from '@rjsf/core';
 import { RjsfThemedForm } from '../../../components/forms/RjsfThemed';
 import { BlueDotsLogo } from '../../../components/ui/BlueDotsLogo';
 import { BrandPanel } from '../../../components/login/BrandPanel';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../../../components/ui/Select';
 import { I } from '../../../icons';
 import { useTranslations } from 'next-intl';
 import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
+import { jsonFetch } from '../../../services/http';
+import { OrgRegisterForm } from './OrgRegisterForm';
+import {
+  humaniseValidationErrors,
+  parseError,
+  stampConsent,
+  type SubmitState,
+} from './registration-shared';
 
 export interface RegisterViewProps {
   schema: RJSFSchema;
   uiSchema: Record<string, unknown>;
+  /** True when `ORG_HIERARCHY_ENABLED` is on — shows org tab + org selector. */
+  orgHierarchyEnabled?: boolean;
+  /** Org-registration JSON Schema — present only when the flag is on. */
+  orgSchema?: RJSFSchema;
+  /** Org-registration UI schema — present only when the flag is on. */
+  orgUiSchema?: Record<string, unknown>;
 }
-
-type SubmitState =
-  | { status: 'idle' }
-  | { status: 'submitting' }
-  | { status: 'done'; aggregatorId: string }
-  | { status: 'error'; title: string; detail: string; code: string; requestId: string };
 
 interface RegistrationResponse {
   aggregator_id: string;
@@ -29,160 +45,71 @@ interface RegistrationResponse {
   message?: string;
 }
 
-interface ApiErrorEnvelope {
-  error?: {
-    code?: string;
-    title?: string;
-    detail?: string;
-    requestId?: string;
-  };
+/** One active-org option for the coordinator dropdown (`GET /api/orgs`). */
+interface OrgOption {
+  id: string;
+  slug: string;
+  display_name: string;
 }
 
-interface AjvLikeError {
-  name?: string;
-  property?: string;
-  message?: string;
-  params?: Record<string, unknown>;
-  schemaPath?: string;
-}
-
-function titleCase(s: string): string {
-  return s
-    .replace(/[_-]+/g, ' ')
-    .replace(/\.([a-z])/gi, ' $1')
-    .replace(/([A-Z])/g, ' $1')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .split(' ')
-    .map((w) => (w ? w[0]!.toUpperCase() + w.slice(1) : ''))
-    .join(' ');
-}
+type RegisterTab = 'coordinator' | 'org';
 
 /**
- * Walk a JSON Schema along a dotted path and return the leaf node's `title`
- * if it has one. Falls back to undefined so the caller can pick a sensible
- * substitute (e.g. last path segment, missingProperty).
+ * Renders the public registration surface.
+ *
+ * With the org hierarchy off, this is exactly today's single coordinator form.
+ * With it on, it shows two tabs — "Register Organisation" and "Register as
+ * Coordinator" — where the coordinator form gains a required organisation
+ * selector (spec §6.2) populated from the active-org list.
+ *
+ * @param props - Coordinator schema/UI schema, the org-hierarchy flag, and
+ *   (when the flag is on) the org schema/UI schema.
+ * @returns The registration page body.
  */
-function lookupTitle(schema: RJSFSchema, dottedPath: string): string | undefined {
-  if (!dottedPath) return undefined;
-  const segs = dottedPath.split('.').filter(Boolean);
-  let cur: unknown = schema;
-  for (const seg of segs) {
-    if (cur && typeof cur === 'object' && 'properties' in cur) {
-      const props = (cur as { properties?: Record<string, unknown> }).properties;
-      const next = props?.[seg];
-      if (!next) return undefined;
-      cur = next;
-    } else {
-      return undefined;
-    }
-  }
-  if (cur && typeof cur === 'object' && 'title' in cur) {
-    return (cur as { title?: string }).title;
-  }
-  return undefined;
-}
-
-/**
- * Convert Ajv-shaped validation errors into user-facing sentences like
- * "Aggregator Type is required" — keyed off the schema `title` for each
- * field. Falls back to a title-cased version of the field key.
- */
-function humaniseValidationErrors(errs: AjvLikeError[], schema: RJSFSchema): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const e of errs) {
-    const propPath = (e.property ?? '').replace(/^\./, '');
-    const missing = (e.params?.['missingProperty'] as string | undefined) ?? undefined;
-    const fullPath = missing ? [propPath, missing].filter(Boolean).join('.') : propPath;
-    const titleFromSchema = lookupTitle(schema, fullPath);
-    const fallbackKey = missing || fullPath.split('.').pop() || '';
-    const resolvedLabel =
-      (titleFromSchema && titleFromSchema.trim()) || (fallbackKey && titleCase(fallbackKey)) || '';
-    const isRequired = e.name === 'required' || /required/i.test(e.message ?? '');
-    const rawMessage = (e.message ?? '').trim();
-    // When Ajv can't pin a single property (e.g. anyOf / oneOf branches all
-    // failed), fall back to the schemaPath so the user sees at least *which*
-    // constraint blew up — beats a vacuous "Form: is invalid".
-    let line: string;
-    if (resolvedLabel) {
-      line = isRequired
-        ? `${resolvedLabel} is required`
-        : `${resolvedLabel}: ${rawMessage || 'is invalid'}`;
-    } else if (rawMessage) {
-      // No path but we have a message — show the message standalone.
-      line = rawMessage;
-    } else {
-      // Last resort: surface the schemaPath so we have *some* signal.
-      const where = (e.schemaPath ?? '').replace(/^#?\/?/, '');
-      line = where ? `Validation failed at ${where}` : 'One or more fields failed validation.';
-    }
-    if (!seen.has(line)) {
-      seen.add(line);
-      out.push(line);
-    }
-  }
-  return out.length > 0 ? out : ['One or more fields failed validation.'];
-}
-
-function parseError(
-  body: unknown,
-  fallbackStatus: number,
-  fallbackReqId: string,
-): {
-  title: string;
-  detail: string;
-  code: string;
-  requestId: string;
-} {
-  const env = body as ApiErrorEnvelope;
-  return {
-    title: env?.error?.title ?? 'Submission failed',
-    detail: env?.error?.detail ?? `The server returned HTTP ${fallbackStatus}.`,
-    code: env?.error?.code ?? 'UNKNOWN',
-    requestId: env?.error?.requestId ?? fallbackReqId,
-  };
-}
-
-/**
- * Renders the aggregator registration form via RJSF using the JSON Schema +
- * UI schema loaded by the server component. POSTs the validated payload to
- * the BFF, which proxies to the API.
- */
-export function RegisterView({ schema, uiSchema }: RegisterViewProps): JSX.Element {
+export function RegisterView({
+  schema,
+  uiSchema,
+  orgHierarchyEnabled = false,
+  orgSchema,
+  orgUiSchema,
+}: RegisterViewProps): JSX.Element {
   const t = useTranslations('register');
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
   const brand = cfg.brand.short_name;
-  // Controlled form data. The initial value seeds the location card +
-  // consent timestamps; onChange keeps our state in sync with RJSF so that
-  // a re-render triggered by `state` updates (e.g. showing an error alert)
-  // doesn't wipe what the user already typed.
-  const [formData, setFormData] = useState<Record<string, unknown>>(() => {
-    const now = new Date();
-    const oneYear = new Date(now);
-    oneYear.setFullYear(oneYear.getFullYear() + 1);
-    return {
-      locations: [
-        {
-          geo: { type: 'Point', coordinates: [0, 0] },
-          address: { addressCountry: 'IN' },
-        },
-      ],
-      consent: {
-        given_at: now.toISOString(),
-        valid_till: oneYear.toISOString(),
+
+  // The org tab only exists when the flag is on AND the server actually loaded
+  // the org schema (defensive: a flag-on network missing the schema file falls
+  // back to the coordinator-only form rather than crashing).
+  const showTabs = orgHierarchyEnabled && Boolean(orgSchema && orgUiSchema);
+  const [tab, setTab] = useState<RegisterTab>('coordinator');
+
+  const [formData, setFormData] = useState<Record<string, unknown>>(() => ({
+    locations: [
+      {
+        geo: { type: 'Point', coordinates: [0, 0] },
+        address: { addressCountry: 'IN' },
       },
-    };
-  });
+    ],
+    consent: stampConsent(undefined),
+  }));
   const [state, setState] = useState<SubmitState>({ status: 'idle' });
-  // Gates the submit button: disabled until every visible required field is valid.
   const [canSubmit, setCanSubmit] = useState(false);
+  // Coordinator's selected parent org (spec §6.2). Empty until picked.
+  const [orgId, setOrgId] = useState<string>('');
   const errorRef = useRef<HTMLDivElement>(null);
 
-  // On any submit failure (server error or client validation), pull the
-  // error banner into view + focus it. The submit button sits far below
-  // the banner, so without this a first-time user clicks submit and sees
-  // nothing change — the reason is off-screen above the fold.
+  // Fetch the active-org list only when the hierarchy is on. `enabled` keeps
+  // the flag-off path free of any org network call.
+  const orgsQuery = useQuery({
+    queryKey: ['active-orgs'],
+    queryFn: () => jsonFetch<{ orgs: OrgOption[] }>('/api/orgs'),
+    enabled: orgHierarchyEnabled,
+    staleTime: 30_000,
+  });
+  const orgs = orgsQuery.data?.orgs ?? [];
+  const noOrgsYet =
+    orgHierarchyEnabled && orgsQuery.isSuccess && !orgsQuery.isError && orgs.length === 0;
+
   useEffect(() => {
     if (state.status === 'error' && errorRef.current) {
       errorRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -190,10 +117,11 @@ export function RegisterView({ schema, uiSchema }: RegisterViewProps): JSX.Eleme
     }
   }, [state]);
 
-  // Page header uses the schema title plus a short user-facing tagline. The
-  // schema's `description` field is intentionally technical (it documents
-  // the API contract) and is hidden from the form UI.
-  const headingTitle = (schema.title as string | undefined) ?? 'Aggregator Registration';
+  // Page heading: keep today's schema-title heading when the flag is off (no
+  // behaviour change); use a neutral, tab-agnostic heading when tabs show.
+  const headingTitle = showTabs
+    ? t('page_title')
+    : ((schema.title as string | undefined) ?? 'Aggregator Registration');
   const headingTagline = t('heading_tagline');
 
   const formSchema = useMemo<RJSFSchema>(() => {
@@ -208,19 +136,19 @@ export function RegisterView({ schema, uiSchema }: RegisterViewProps): JSX.Eleme
     _event: FormEvent<HTMLFormElement>,
   ): Promise<void> => {
     setState({ status: 'submitting' });
-    // Refresh consent timestamps at submit so they reflect the actual moment
-    // the user clicked, not page-load time.
-    const now = new Date();
-    const oneYear = new Date(now);
-    oneYear.setFullYear(oneYear.getFullYear() + 1);
-    const payload = {
+    const payload: Record<string, unknown> = {
       ...(e.formData ?? {}),
-      consent: {
-        ...((e.formData as Record<string, unknown> | undefined)?.consent ?? {}),
-        given_at: now.toISOString(),
-        valid_till: oneYear.toISOString(),
-      },
+      consent: stampConsent(
+        (e.formData as Record<string, unknown> | undefined)?.consent as
+          | Record<string, unknown>
+          | undefined,
+      ),
     };
+    // The API strips `org_id` before RJSF validation and stores it on
+    // `aggregators.parent_org_id`. Only sent when the hierarchy is on.
+    if (orgHierarchyEnabled && orgId) {
+      payload['org_id'] = orgId;
+    }
     try {
       const res = await fetch('/api/aggregator/register', {
         method: 'POST',
@@ -234,7 +162,7 @@ export function RegisterView({ schema, uiSchema }: RegisterViewProps): JSX.Eleme
         return;
       }
       const body = (await res.json()) as RegistrationResponse;
-      setState({ status: 'done', aggregatorId: body.aggregator_id });
+      setState({ status: 'done', refId: body.aggregator_id });
     } catch (err) {
       setState({
         status: 'error',
@@ -245,6 +173,159 @@ export function RegisterView({ schema, uiSchema }: RegisterViewProps): JSX.Eleme
       });
     }
   };
+
+  const coordinatorContent =
+    state.status === 'done' ? (
+      <div className="mt-8 rounded-[14px] border border-emerald-200 bg-emerald-50 p-6">
+        <div className="font-display font-bold text-[18px] text-emerald-800">
+          {t('success_heading')}
+        </div>
+        <p className="text-[14px] text-emerald-700 mt-2">
+          {t('success_ref_id')} <code className="font-mono text-[12.5px]">{state.refId}</code>
+        </p>
+        <p className="text-[14px] text-emerald-700 mt-3">{t('success_approval', { brand })}</p>
+        <Link
+          href="/login"
+          className="mt-5 inline-flex items-center gap-2 text-[13.5px] text-primary-600 font-semibold hover:underline"
+        >
+          <I.arrowL size={15} /> Back to sign in
+        </Link>
+      </div>
+    ) : (
+      <div className="mt-7">
+        {state.status === 'error' ? (
+          <div
+            ref={errorRef}
+            role="alert"
+            tabIndex={-1}
+            className="mb-5 rounded-[10px] border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-700 scroll-mt-6 outline-none"
+          >
+            <div className="font-semibold">{state.title}</div>
+            {state.detail ? (
+              <ul className="mt-1.5 text-red-600 list-disc list-inside space-y-0.5">
+                {state.detail
+                  .split('\n')
+                  .filter(Boolean)
+                  .map((line, i) => (
+                    <li key={i}>{line}</li>
+                  ))}
+              </ul>
+            ) : null}
+            {state.code === 'CLIENT_VALIDATION' && state.requestId ? (
+              <details className="mt-2 text-[11px] text-red-500/80">
+                <summary className="cursor-pointer">Show raw validation errors</summary>
+                <pre className="mt-1 whitespace-pre-wrap font-mono text-[11px] bg-red-100/40 rounded p-2 max-h-[200px] overflow-auto">
+                  {state.requestId}
+                </pre>
+              </details>
+            ) : null}
+          </div>
+        ) : null}
+
+        {noOrgsYet ? (
+          <div
+            role="status"
+            className="rounded-[12px] border border-amber-200 bg-amber-50 px-4 py-5 text-[13.5px] text-amber-800"
+          >
+            {t('coordinator_no_orgs')}
+          </div>
+        ) : (
+          <>
+            {orgHierarchyEnabled ? (
+              <div className="form-group mb-4">
+                <label className="bd-label" htmlFor="coordinator-org">
+                  {t('org_selector_label')}
+                  <span className="text-rose-500"> *</span>
+                </label>
+                {orgsQuery.isError ? (
+                  <div className="text-[13px] text-red-600 flex items-center gap-2">
+                    {t('org_selector_error')}
+                    <button
+                      type="button"
+                      onClick={() => orgsQuery.refetch()}
+                      className="text-primary-600 font-semibold hover:underline"
+                    >
+                      {t('org_selector_retry')}
+                    </button>
+                  </div>
+                ) : (
+                  <Select
+                    {...(orgId ? { value: orgId } : {})}
+                    onValueChange={setOrgId}
+                    disabled={orgsQuery.isLoading}
+                  >
+                    <SelectTrigger id="coordinator-org" aria-required>
+                      <SelectValue
+                        placeholder={
+                          orgsQuery.isLoading
+                            ? t('org_selector_loading')
+                            : t('org_selector_placeholder')
+                        }
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {orgs.map((o) => (
+                        <SelectItem key={o.id} value={o.id}>
+                          {o.display_name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+            ) : null}
+
+            <RjsfThemedForm
+              schema={formSchema}
+              uiSchema={uiSchema as unknown as UiSchema<Record<string, unknown>>}
+              formData={formData}
+              onChange={(e) => setFormData(e.formData as Record<string, unknown>)}
+              onValidityChange={setCanSubmit}
+              onSubmit={handleSubmit}
+              onError={(errs) => {
+                const lines = humaniseValidationErrors(errs, formSchema);
+                const rawDump = JSON.stringify(errs, null, 2);
+                setState({
+                  status: 'error',
+                  title: t('validation_error_title'),
+                  detail: lines.join('\n'),
+                  code: 'CLIENT_VALIDATION',
+                  requestId: rawDump,
+                });
+                if (typeof window !== 'undefined') {
+                  console.error('[register] validation errors', errs);
+                }
+              }}
+              showErrorList={false}
+              focusOnFirstError
+              noHtml5Validate
+            >
+              <div className="mt-4 flex flex-col gap-3">
+                <button
+                  type="submit"
+                  disabled={
+                    state.status === 'submitting' || !canSubmit || (orgHierarchyEnabled && !orgId)
+                  }
+                  className={`w-full py-3 rounded-[12px] font-display font-bold text-[15px] text-white transition-all
+                    ${
+                      state.status === 'submitting' || !canSubmit || (orgHierarchyEnabled && !orgId)
+                        ? 'bg-[var(--bd-primary-100)] text-[var(--bd-primary-600)] cursor-not-allowed'
+                        : 'bg-[var(--bd-primary)] hover:bg-[var(--bd-primary-600)] bd-shadow-lg'
+                    }`}
+                >
+                  {state.status === 'submitting' ? t('submitting') : t('submit')}
+                </button>
+              </div>
+            </RjsfThemedForm>
+
+            <div className="mt-5 text-[12px] text-ink-400 flex items-start gap-2">
+              <span className="w-1 h-1 rounded-full bg-ink-300 mt-1.5 shrink-0" />
+              {t('footer_note', { brand })}
+            </div>
+          </>
+        )}
+      </div>
+    );
 
   return (
     <div className="h-screen w-full flex overflow-hidden">
@@ -304,109 +385,45 @@ export function RegisterView({ schema, uiSchema }: RegisterViewProps): JSX.Eleme
           </h1>
           <p className="text-[14px] text-ink-500 mt-2">{headingTagline}</p>
 
-          {state.status === 'done' ? (
-            <div className="mt-8 rounded-[14px] border border-emerald-200 bg-emerald-50 p-6">
-              <div className="font-display font-bold text-[18px] text-emerald-800">
-                {t('success_heading')}
-              </div>
-              <p className="text-[14px] text-emerald-700 mt-2">
-                {t('success_ref_id')}{' '}
-                <code className="font-mono text-[12.5px]">{state.aggregatorId}</code>
-              </p>
-              <p className="text-[14px] text-emerald-700 mt-3">
-                {t('success_approval', { brand })}
-              </p>
-              <Link
-                href="/login"
-                className="mt-5 inline-flex items-center gap-2 text-[13.5px] text-primary-600 font-semibold hover:underline"
+          {showTabs ? (
+            <div
+              role="tablist"
+              aria-label={t('page_title')}
+              className="mt-6 inline-flex rounded-[12px] border border-ink-100 bg-white p-1"
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tab === 'coordinator'}
+                onClick={() => setTab('coordinator')}
+                className={`px-4 py-2 rounded-[9px] text-[13.5px] font-semibold transition-colors ${
+                  tab === 'coordinator'
+                    ? 'bg-[var(--bd-primary)] text-white'
+                    : 'text-ink-500 hover:text-ink-900'
+                }`}
               >
-                <I.arrowL size={15} /> Back to sign in
-              </Link>
+                {t('tab_coordinator')}
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tab === 'org'}
+                onClick={() => setTab('org')}
+                className={`px-4 py-2 rounded-[9px] text-[13.5px] font-semibold transition-colors ${
+                  tab === 'org'
+                    ? 'bg-[var(--bd-primary)] text-white'
+                    : 'text-ink-500 hover:text-ink-900'
+                }`}
+              >
+                {t('tab_org')}
+              </button>
             </div>
+          ) : null}
+
+          {showTabs && tab === 'org' && orgSchema && orgUiSchema ? (
+            <OrgRegisterForm schema={orgSchema} uiSchema={orgUiSchema} />
           ) : (
-            <div className="mt-7">
-              {state.status === 'error' ? (
-                <div
-                  ref={errorRef}
-                  role="alert"
-                  tabIndex={-1}
-                  className="mb-5 rounded-[10px] border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-700 scroll-mt-6 outline-none"
-                >
-                  <div className="font-semibold">{state.title}</div>
-                  {state.detail ? (
-                    <ul className="mt-1.5 text-red-600 list-disc list-inside space-y-0.5">
-                      {state.detail
-                        .split('\n')
-                        .filter(Boolean)
-                        .map((line, i) => (
-                          <li key={i}>{line}</li>
-                        ))}
-                    </ul>
-                  ) : null}
-                  {state.code === 'CLIENT_VALIDATION' && state.requestId ? (
-                    <details className="mt-2 text-[11px] text-red-500/80">
-                      <summary className="cursor-pointer">Show raw validation errors</summary>
-                      <pre className="mt-1 whitespace-pre-wrap font-mono text-[11px] bg-red-100/40 rounded p-2 max-h-[200px] overflow-auto">
-                        {state.requestId}
-                      </pre>
-                    </details>
-                  ) : null}
-                </div>
-              ) : null}
-
-              <RjsfThemedForm
-                schema={formSchema}
-                uiSchema={uiSchema as unknown as UiSchema<Record<string, unknown>>}
-                formData={formData}
-                onChange={(e) => setFormData(e.formData as Record<string, unknown>)}
-                onValidityChange={setCanSubmit}
-                onSubmit={handleSubmit}
-                onError={(errs) => {
-                  // Convert raw Ajv errors into human-readable lines using
-                  // schema titles. Drop dotted paths like ".contact.phone" in
-                  // favour of "Phone is required".
-                  const lines = humaniseValidationErrors(errs, formSchema);
-                  // Stash a JSON dump of the raw Ajv errors into the detail
-                  // payload so when humanise can't resolve a label, the user
-                  // can copy-paste the underlying object from the alert
-                  // without opening DevTools.
-                  const rawDump = JSON.stringify(errs, null, 2);
-                  setState({
-                    status: 'error',
-                    title: t('validation_error_title'),
-                    detail: lines.join('\n'),
-                    code: 'CLIENT_VALIDATION',
-                    requestId: rawDump,
-                  });
-                  if (typeof window !== 'undefined') {
-                    console.error('[register] validation errors', errs);
-                  }
-                }}
-                showErrorList={false}
-                focusOnFirstError
-                noHtml5Validate
-              >
-                <div className="mt-4 flex flex-col gap-3">
-                  <button
-                    type="submit"
-                    disabled={state.status === 'submitting' || !canSubmit}
-                    className={`w-full py-3 rounded-[12px] font-display font-bold text-[15px] text-white transition-all
-                      ${
-                        state.status === 'submitting' || !canSubmit
-                          ? 'bg-[var(--bd-primary-100)] text-[var(--bd-primary-600)] cursor-not-allowed'
-                          : 'bg-[var(--bd-primary)] hover:bg-[var(--bd-primary-600)] bd-shadow-lg'
-                      }`}
-                  >
-                    {state.status === 'submitting' ? t('submitting') : t('submit')}
-                  </button>
-                </div>
-              </RjsfThemedForm>
-
-              <div className="mt-5 text-[12px] text-ink-400 flex items-start gap-2">
-                <span className="w-1 h-1 rounded-full bg-ink-300 mt-1.5 shrink-0" />
-                {t('footer_note', { brand })}
-              </div>
-            </div>
+            coordinatorContent
           )}
         </div>
       </div>
