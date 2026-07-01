@@ -2,6 +2,16 @@
 
 <!-- What does this PR do and why? -->
 
+## Release Notes
+
+<!--
+User-facing changes in this release — delete this comment and list them, e.g.:
+- Added the CSV export button to the dashboard
+- Fixed OTP expiry on the login screen
+
+If this PR has NO user-facing changes, add the `no-release-notes` label instead.
+-->
+
 ## Type of change
 
 - [ ] Feature
@@ -15,6 +25,7 @@
 - [ ] `pnpm -w typecheck` passes
 - [ ] `pnpm -w test` passes
 - [ ] `pnpm dep-check` passes (no import boundary violations)
+- [ ] Updated `README.md` / `CLAUDE.md` if setup or behavior changed (else add the `no-doc-update` label)
 
 ### If this PR adds or modifies `src/interface.ts` — [interface conventions](../.claude/rules/interfaces.md)
 
