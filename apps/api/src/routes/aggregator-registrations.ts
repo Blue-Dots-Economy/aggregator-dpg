@@ -41,7 +41,6 @@ import { getIdpAdmin } from '../services/idp-admin/index.js';
 import { sendAdminReviewEmail } from '../services/registration-notify.js';
 import { orgHierarchyEnabled } from '../config.js';
 import { checkSubmitRate } from '../services/submit-rate.js';
-import type { AggregatorStatus } from '@aggregator-dpg/shared-primitives/aggregator';
 import { normalisePhone } from '../services/phone.js';
 import { splitName } from '../services/name.js';
 import { slugFromName } from '../services/slug.js';
@@ -203,129 +202,26 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
       }
       if (dbEmail.value !== null) {
         const existing = dbEmail.value;
-        if (!isReclaimable(existing.status)) {
+        // Recovery is limited to a still-PENDING record AND only re-sends the
+        // review link — it never writes the resubmitted name/phone/type/consent.
+        // The public submit carries no proof of identity (anonymous BFF service
+        // token), so overwriting on an email match alone would let anyone hijack
+        // a pending record (swap in their own OTP phone, re-route the link).
+        // Re-mint uses the STORED values and the link goes to the reviewer, not
+        // the caller — so a resubmit by a stranger changes nothing and leaks
+        // nothing to them. Active/rejected records → 409 (recover via re-register
+        // after the stale-prune job clears them).
+        if (existing.status !== 'pending') {
           throw httpError('USER_EXISTS', { fields: { email: contact.email } });
-        }
-        // Reclaim path: same applicant resubmitting against a pending/rejected
-        // record (e.g. after the approval link expired). Refresh the row +
-        // KC user in place and re-mint a fresh approval link.
-        const dbPhone = await aggregatorStore.findByContactPhone(phoneE164);
-        if (!dbPhone.ok) {
-          throw httpError('DB_UNAVAILABLE', {
-            cause: new Error(dbPhone.error.message),
-            fields: { sub_operation: 'aggregatorStore.findByContactPhone' },
-          });
-        }
-        if (dbPhone.value !== null && dbPhone.value.id !== existing.id) {
-          // The new phone belongs to a different record — genuine conflict.
-          throw httpError('PHONE_EXISTS', { fields: { phone: phoneE164 } });
-        }
-
-        // Reuse the existing (still-disabled) KC user; refresh its attributes
-        // and reset the decision gate to pending. Recreate it only if drift
-        // left the DB row without a matching KC user.
-        const kcExisting = await idp.findByEmail(contact.email);
-        if (!kcExisting.ok) {
-          throw httpError('IDP_UNAVAILABLE', {
-            cause: kcExisting.error,
-            fields: { sub_operation: 'idp.findByEmail', reclaim: true },
-          });
-        }
-        if (kcExisting.value !== null) {
-          const kcId = kcExisting.value.id;
-
-          // Guard: the applicant may be changing their phone to one already
-          // held by a DIFFERENT KC user. The OTP authenticator resolves login
-          // by the `phoneNumber` attribute, so a duplicate would route login
-          // to the wrong account. Check before the DB update so a rejected
-          // submission leaves the existing record unmodified.
-          const kcPhone = await idp.findByAttribute(KC_ATTR.PHONE_NUMBER, phoneE164);
-          if (!kcPhone.ok) {
-            throw httpError('IDP_UNAVAILABLE', {
-              cause: kcPhone.error,
-              fields: { sub_operation: 'idp.findByAttribute.phoneNumber', reclaim: true },
-            });
-          }
-          if (kcPhone.value !== null && kcPhone.value.id !== kcId) {
-            throw httpError('PHONE_EXISTS', { fields: { phone: phoneE164 } });
-          }
-        }
-
-        const updated = await aggregatorStore.update(existing.id, {
-          name: body.name,
-          type: body.type,
-          url: body.url ?? null,
-          contact,
-          locations: body.locations,
-          consent: serverConsent,
-          status: 'pending',
-          updatedBy: 'self',
-          ...(parentOrgId !== null ? { parentOrgId } : {}),
-        });
-        if (!updated.ok) {
-          throw httpError('DB_UNAVAILABLE', {
-            cause: new Error(updated.error.message),
-            fields: { sub_operation: 'aggregatorStore.update', reclaim: true },
-          });
-        }
-
-        if (kcExisting.value !== null) {
-          const kcId = kcExisting.value.id;
-          const setAttrResult = await idp.setAttributes(kcId, {
-            [KC_ATTR.AGGREGATOR_TYPE]: body.type,
-            [KC_ATTR.PHONE_NUMBER]: phoneE164,
-          });
-          if (!setAttrResult.ok) {
-            throw httpError('IDP_UNAVAILABLE', {
-              cause: setAttrResult.error,
-              fields: { sub_operation: 'idp.setAttributes', reclaim: true },
-            });
-          }
-          const setDecisionResult = await idp.setUserDecision(kcId, 'pending');
-          if (!setDecisionResult.ok) {
-            throw httpError('IDP_UNAVAILABLE', {
-              cause: setDecisionResult.error,
-              fields: { sub_operation: 'idp.setUserDecision', reclaim: true },
-            });
-          }
-          const disableResult = await idp.disableUser(kcId);
-          if (!disableResult.ok) {
-            throw httpError('IDP_UNAVAILABLE', {
-              cause: disableResult.error,
-              fields: { sub_operation: 'idp.disableUser', reclaim: true },
-            });
-          }
-        } else {
-          const { firstName, lastName } = splitName(contact.name);
-          const recreated = await idp.createUser({
-            email: contact.email,
-            username: contact.email,
-            phone: phoneE164,
-            enabled: false,
-            firstName,
-            lastName,
-            attributes: {
-              [KC_ATTR.AGGREGATOR_ID]: existing.id,
-              [KC_ATTR.AGGREGATOR_TYPE]: body.type,
-              [KC_ATTR.PHONE_NUMBER]: phoneE164,
-              [KC_ATTR.DECISION_MADE]: 'pending',
-            },
-          });
-          if (!recreated.ok) {
-            throw httpError('IDP_UNAVAILABLE', {
-              cause: recreated.error,
-              fields: { sub_operation: 'idp.createUser', reclaim: true },
-            });
-          }
         }
 
         await sendAdminReviewEmail(
           {
             aggregatorId: existing.id,
-            applicantName: body.name,
-            applicantEmail: contact.email,
-            applicantPhone: phoneE164,
-            ...(await resolveOwnerRouting(parentOrgId ?? existing.parentOrgId)),
+            applicantName: existing.name,
+            applicantEmail: existing.contact.email,
+            applicantPhone: existing.contactPhone,
+            ...(await resolveOwnerRouting(existing.parentOrgId)),
           },
           log,
         );
@@ -337,7 +233,7 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
             aggregator_id: existing.id,
             reclaim: true,
           },
-          'aggregator registration resubmitted (reclaimed pending record)',
+          'pending registration re-submitted — review link re-sent (no field change)',
         );
 
         return reply.status(200).send({
@@ -588,18 +484,6 @@ function mapStoreCreateError(
 }
 
 /**
- * Whether an existing registration in this status may be reclaimed by a
- * resubmission. `pending` (awaiting a decision) and `inactive` (rejected)
- * records belong to the same applicant and are refreshed in place; `active`
- * and `retired` are live identities and must keep returning a duplicate error.
- *
- * @param status - The matched aggregator's lifecycle status.
- * @returns `true` when a resubmit should refresh rather than 409.
- */
-export function isReclaimable(status: AggregatorStatus): boolean {
-  return status === 'pending' || status === 'inactive';
-}
-
 /**
  * Resolves the approval-email routing for a coordinator. When the coordinator
  * belongs to an org, the approve/reject tokens carry the `org` claim and the

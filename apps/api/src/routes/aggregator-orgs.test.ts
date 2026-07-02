@@ -106,7 +106,7 @@ describe('aggregator-orgs routes', () => {
     expect(body.orgs[0]?.display_name).toBe('A');
   });
 
-  it('reclaims a pending org on resubmit by the same owner (§7)', async () => {
+  it('re-mints the review link for a pending org on resubmit — no field overwrite (§7)', async () => {
     orgStore.seed([
       buildAggregatorOrg({
         id: 'o-reclaim',
@@ -120,15 +120,15 @@ describe('aggregator-orgs routes', () => {
       method: 'POST',
       url: '/v1/orgs/create',
       headers: AUTH_HEADER,
-      payload: orgBody,
+      payload: orgBody, // display_name 'Enable India' — must be IGNORED
     });
     expect(res.statusCode).toBe(200);
     const body = res.json() as { org_id: string; status: string };
     expect(body.org_id).toBe('o-reclaim');
     expect(body.status).toBe('pending');
-    // Row refreshed in place (name updated), not duplicated; token re-sent.
+    // On-file record is NOT overwritten (no takeover); link re-sent.
     const stored = await orgStore.findById('o-reclaim');
-    expect(stored.ok && stored.value?.displayName).toBe('Enable India');
+    expect(stored.ok && stored.value?.displayName).toBe('Old Name');
     expect(mailer.outbox.length).toBe(1);
   });
 

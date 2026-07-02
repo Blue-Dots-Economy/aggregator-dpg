@@ -133,35 +133,26 @@ export async function registerAggregatorOrgRoutes(app: FastifyInstance): Promise
       }
       if (existing.value) {
         const prior = existing.value;
-        if (prior.status === 'active') {
+        // Recovery is limited to a still-PENDING org AND only re-sends the review
+        // link — never writes the resubmitted display_name/state/phone. The
+        // submit is anonymous, so overwriting on an owner-email match alone would
+        // let anyone hijack a pending org. Re-mint uses the STORED values and the
+        // link goes to the network admin. Active/rejected → 409.
+        if (prior.status !== 'pending') {
           throw httpError('OWNER_ALREADY_REGISTERED', { fields: { email: body.owner.email } });
-        }
-        // Reclaim: refresh submitted details + flip back to pending. The
-        // mirrored KC group + disabled owner user are reused in place.
-        const refreshed = await orgStore.update(prior.id, {
-          displayName: body.display_name,
-          state: body.state ?? null,
-          ownerPhone: phoneE164,
-          status: 'pending',
-        });
-        if (!refreshed.ok) {
-          throw httpError('DB_UNAVAILABLE', {
-            cause: new Error(refreshed.error.message),
-            fields: { sub_operation: 'orgStore.update.reclaim' },
-          });
         }
         await sendOrgReviewEmail(
           {
             orgId: prior.id,
-            displayName: body.display_name,
+            displayName: prior.displayName,
             ownerEmail: prior.ownerEmail,
-            ownerPhone: phoneE164,
+            ownerPhone: prior.ownerPhone ?? '',
           },
           log,
         );
         log.info(
           { status: 'success', latency_ms: Date.now() - start, org_id: prior.id, reclaim: true },
-          'org registration resubmitted (reclaimed record)',
+          'pending org re-submitted — review link re-sent (no field change)',
         );
         return reply.status(200).send({
           org_id: prior.id,

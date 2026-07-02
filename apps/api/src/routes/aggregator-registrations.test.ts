@@ -287,7 +287,7 @@ describe('POST /v1/aggregator-registrations/create', () => {
     expect(mailer.outbox[0]?.html).toContain('intent=approve');
   });
 
-  it('reactivates a rejected (inactive) registration on resubmit', async () => {
+  it('returns 409 for a rejected (inactive) registration on resubmit (recover via prune)', async () => {
     const id = await seedPending({ status: 'inactive' });
     const res = await app.inject({
       method: 'POST',
@@ -295,14 +295,12 @@ describe('POST /v1/aggregator-registrations/create', () => {
       headers: AUTH_HEADER,
       payload: validBody,
     });
-    expect(res.statusCode).toBe(200);
+    // Rejected records are not reclaimable — re-registration only after the
+    // stale-prune job clears the old row.
+    expect(res.statusCode).toBe(409);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('USER_EXISTS');
     const stored = await aggregatorStore.findById(id);
-    if (stored.ok) expect(stored.value?.status).toBe('pending');
-    const kc = await idp.findByEmail(validBody.contact.email);
-    if (kc.ok && kc.value) {
-      expect(kc.value.enabled).toBe(false);
-      expect(kc.value.attributes?.decision_made?.[0]).toBe('pending');
-    }
+    if (stored.ok) expect(stored.value?.status).toBe('inactive');
   });
 
   it('still returns 409 when the email belongs to an active aggregator', async () => {
@@ -317,78 +315,32 @@ describe('POST /v1/aggregator-registrations/create', () => {
     expect((res.json() as { error: { code: string } }).error.code).toBe('USER_EXISTS');
   });
 
-  it('rejects reclaim when the new phone is taken by a different record', async () => {
-    await seedPending(); // asha@trrain.org / +919876543210, pending
-    // A different ACTIVE aggregator already owns the phone the resubmit carries.
-    const other = await aggregatorStore.create({
-      orgSlug: 'other-bbbb',
-      actorType: 'aggregator',
-      name: 'Other',
-      type: 'seeker',
-      url: null,
-      contact: { name: 'X', phone: '+911111111111', email: 'x@other.org' },
-      locations: [],
-      consent: validBody.consent,
-      createdBy: 'self',
-      updatedBy: 'self',
-    });
-    if (other.ok) await aggregatorStore.updateStatus(other.value.id, 'active', 'admin');
-    const res = await app.inject({
-      method: 'POST',
-      url: '/v1/aggregator-registrations/create',
-      headers: AUTH_HEADER,
-      payload: { ...validBody, contact: { ...validBody.contact, phone: '+911111111111' } },
-    });
-    expect(res.statusCode).toBe(409);
-    expect((res.json() as { error: { code: string } }).error.code).toBe('PHONE_EXISTS');
-  });
-
-  it('rejects reclaim when the new phone is already held by a different KC user', async () => {
-    const id = await seedPending(); // asha@trrain.org, phone +919876543210
-
-    // Seed a DIFFERENT KC user that holds the target phone.
-    await idp.createUser({
-      email: 'other@x.org',
-      phone: '+911234567890',
-      attributes: { aggregator_id: 'other-agg', phoneNumber: '+911234567890' },
-    });
-
-    // Resubmit for email A but with the phone belonging to the other KC user.
+  it('re-mint on a pending record does NOT overwrite the on-file identity (no takeover)', async () => {
+    const id = await seedPending(); // asha@trrain.org / +919876543210, pending
+    // A stranger resubmits the victim's email with their OWN phone + name.
     const res = await app.inject({
       method: 'POST',
       url: '/v1/aggregator-registrations/create',
       headers: AUTH_HEADER,
       payload: {
         ...validBody,
-        contact: { ...validBody.contact, phone: '+911234567890' },
+        name: 'Attacker Org',
+        contact: { ...validBody.contact, name: 'Attacker', phone: '+919999999999' },
       },
     });
-    expect(res.statusCode).toBe(409);
-    expect((res.json() as { error: { code: string } }).error.code).toBe('PHONE_EXISTS');
-
-    // The reclaimed row must NOT have been mutated to the new phone.
+    expect(res.statusCode).toBe(200);
+    // The on-file record is unchanged — the submitted phone/name are ignored.
     const stored = await aggregatorStore.findById(id);
     if (stored.ok && stored.value) {
       expect(stored.value.contact.phone).toBe('+919876543210');
+      expect(stored.value.name).toBe('TRRAIN');
     }
-  });
-
-  it('returns 503 when a KC write fails during reclaim', async () => {
-    await seedPending();
-    const originalSetDecision = idp.setUserDecision.bind(idp);
-    idp.setUserDecision = async () => ({
-      ok: false as const,
-      error: { code: 'IDP_UNAVAILABLE' as const, message: 'kc down' },
-    });
-
-    const res = await app.inject({
-      method: 'POST',
-      url: '/v1/aggregator-registrations/create',
-      headers: AUTH_HEADER,
-      payload: validBody,
-    });
-    expect(res.statusCode).toBe(503);
-
-    idp.setUserDecision = originalSetDecision;
+    // KC OTP identity (phoneNumber) is unchanged too.
+    const kc = await idp.findByEmail('asha@trrain.org');
+    if (kc.ok && kc.value) {
+      expect(kc.value.attributes?.phoneNumber?.[0]).toBe('+919876543210');
+    }
+    // The review link was re-sent (to the reviewer, not the caller).
+    expect(mailer.outbox.length).toBe(1);
   });
 });
