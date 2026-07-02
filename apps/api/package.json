@@ -19,6 +19,8 @@
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
+    "@aggregator-dpg/config-loader": "workspace:*",
+    "@aggregator-dpg/consent-ledger": "workspace:*",
     "@aggregator-dpg/db-schema": "workspace:*",
     "@aggregator-dpg/network-config": "workspace:*",
     "@aggregator-dpg/participants-writer": "workspace:*",

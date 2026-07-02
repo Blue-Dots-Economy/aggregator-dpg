@@ -407,6 +407,64 @@ export const linkSubmissions = pgTable(
   }),
 );
 
+// ─── aggregator_consent_record ───────────────────────────────────────────────
+// Append-only ledger of registration consent acceptances, keyed by a
+// subject_type + subject_id so one table serves both org and coordinator
+// registration flows. One row per acceptance; both document versions stored
+// in-row (terms_version + privacy_version) so re-consent or version audits
+// only need this table. No FK on subject_id — polymorphic at app level.
+
+export const aggregatorConsentRecord = pgTable(
+  'aggregator_consent_record',
+  {
+    /** Surrogate primary key; generated randomly by Postgres. */
+    id: uuid('id').primaryKey().defaultRandom(),
+
+    /**
+     * Discriminator for the subject: `'org'` = `aggregator_orgs.id`;
+     * `'aggregator'` = `aggregators.id` (coordinator/aggregator flow).
+     */
+    subjectType: text('subject_type').notNull(),
+
+    /**
+     * The id of the subject row that accepted the terms.
+     * No cross-table FK (polymorphic); app-layer integrity is sufficient
+     * because the route already owns the subject row at write time.
+     */
+    subjectId: uuid('subject_id').notNull(),
+
+    /** Version of the Terms of Service document accepted (= config `current_version`). */
+    termsVersion: integer('terms_version').notNull(),
+
+    /** Version of the Privacy Policy document accepted (= config `current_version`). */
+    privacyVersion: integer('privacy_version').notNull(),
+
+    /** Signal Stack network identifier the registration is under (e.g. `blue_dot`). */
+    network: text('network').notNull(),
+
+    /** Per-brand variant, or NULL when the registration is under the network default. */
+    brand: text('brand'),
+
+    /**
+     * How consent was captured — `'registration'` in v1 (future: `'re-consent'`).
+     */
+    source: text('source').notNull(),
+
+    /** Server-stamped moment the registrant checked the consent checkbox. */
+    acceptedAt: timestamp('accepted_at', { withTimezone: true }).notNull(),
+
+    /** Row-creation timestamp; set automatically by Postgres on INSERT. */
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    // Ledger lookup: all consent records for a given subject (org or aggregator).
+    subjectIdx: index('aggregator_consent_record_subject_idx').on(
+      table.subjectType,
+      table.subjectId,
+    ),
+  }),
+);
+
 // ─── onboarding (unified metrics rollup) ─────────────────────────────────────
 
 export const onboarding = pgTable(
@@ -468,3 +526,14 @@ export type LinkSubmissionRow = typeof linkSubmissions.$inferSelect;
 export type NewLinkSubmissionRow = typeof linkSubmissions.$inferInsert;
 export type OnboardingRow = typeof onboarding.$inferSelect;
 export type NewOnboardingRow = typeof onboarding.$inferInsert;
+
+/**
+ * Inferred select type for a single `aggregator_consent_record` row.
+ *
+ * Used by the consent-ledger service and any query helper that reads
+ * from the table — import from `@aggregator-dpg/db-schema`.
+ */
+export type AggregatorConsentRecord = typeof aggregatorConsentRecord.$inferSelect;
+
+/** Inferred insert type for `aggregator_consent_record` (all required fields; `id` and `created_at` have DB defaults). */
+export type NewAggregatorConsentRecord = typeof aggregatorConsentRecord.$inferInsert;

@@ -11,6 +11,7 @@ import { useTranslations } from 'next-intl';
 import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
 import { CoordinatorRegisterForm } from './CoordinatorRegisterForm';
 import { OrgRegisterForm } from './OrgRegisterForm';
+import type { ConsentDocContent } from '../../../components/consent/consent-types';
 
 export interface RegisterViewProps {
   schema: RJSFSchema;
@@ -21,6 +22,19 @@ export interface RegisterViewProps {
   orgSchema?: RJSFSchema;
   /** Org-registration UI schema — present only when the flag is on. */
   orgUiSchema?: Record<string, unknown>;
+  /**
+   * Versioned Terms/Privacy content for the coordinator (aggregator) form.
+   * Passed as `formContext.consentContent` to the RJSF form so the
+   * {@link ConsentCheckboxWidget} can render clickable links.
+   * `null` when `loadConsentConfig` failed — widget degrades to plain text.
+   */
+  aggregatorConsentContent?: ConsentDocContent | null;
+  /**
+   * Versioned Terms/Privacy content for the org registration form.
+   * Forwarded to {@link OrgRegisterForm} as `consentContent`.
+   * `null` when `loadConsentConfig` failed — widget degrades to plain text.
+   */
+  orgConsentContent?: ConsentDocContent | null;
 }
 
 type RegisterTab = 'coordinator' | 'org';
@@ -43,6 +57,8 @@ export function RegisterView({
   orgHierarchyEnabled = false,
   orgSchema,
   orgUiSchema,
+  aggregatorConsentContent,
+  orgConsentContent,
 }: RegisterViewProps): JSX.Element {
   const t = useTranslations('register');
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
@@ -146,12 +162,17 @@ export function RegisterView({
           ) : null}
 
           {showTabs && tab === 'org' && orgSchema && orgUiSchema ? (
-            <OrgRegisterForm schema={orgSchema} uiSchema={orgUiSchema} />
+            <OrgRegisterForm
+              schema={orgSchema}
+              uiSchema={orgUiSchema}
+              {...(orgConsentContent ? { consentContent: orgConsentContent } : {})}
+            />
           ) : (
             <CoordinatorRegisterForm
               schema={schema}
               uiSchema={uiSchema}
               orgHierarchyEnabled={orgHierarchyEnabled}
+              {...(aggregatorConsentContent ? { consentContent: aggregatorConsentContent } : {})}
             />
           )}
         </div>

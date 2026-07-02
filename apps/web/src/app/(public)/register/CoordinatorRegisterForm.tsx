@@ -27,6 +27,7 @@ import {
   RegistrationSuccessPanel,
   useRegistrationFormState,
 } from './registration-ui';
+import type { ConsentDocContent } from '../../../components/consent/consent-types';
 
 export interface CoordinatorRegisterFormProps {
   /** Coordinator registration JSON Schema. */
@@ -35,6 +36,13 @@ export interface CoordinatorRegisterFormProps {
   uiSchema: Record<string, unknown>;
   /** True when the org hierarchy is on — shows the required org selector. */
   orgHierarchyEnabled: boolean;
+  /**
+   * Versioned Terms/Privacy content for the aggregator (coordinator) audience.
+   * Passed as `formContext.consentContent` to the RJSF form so the
+   * {@link ConsentCheckboxWidget} can render clickable links. Omit (or pass
+   * `undefined`) when `loadConsentConfig` failed — widget degrades to plain text.
+   */
+  consentContent?: ConsentDocContent;
 }
 
 /** One active-org option for the coordinator dropdown (`GET /api/orgs`). */
@@ -58,6 +66,7 @@ export function CoordinatorRegisterForm({
   schema,
   uiSchema,
   orgHierarchyEnabled,
+  consentContent,
 }: CoordinatorRegisterFormProps): JSX.Element {
   const t = useTranslations('register');
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
@@ -211,6 +220,7 @@ export function CoordinatorRegisterForm({
             schema={formSchema}
             uiSchema={formUiSchema as unknown as UiSchema<Record<string, unknown>>}
             formData={formData}
+            formContext={{ consentContent }}
             onChange={(e) => setFormData(e.formData as Record<string, unknown>)}
             onValidityChange={setCanSubmit}
             onSubmit={handleSubmit}

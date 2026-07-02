@@ -106,18 +106,6 @@ export function LoginView({ returnTo, error }: LoginViewProps): JSX.Element {
           <div className="fade-up">
             <Welcome onSignIn={goSignIn} onRegister={goRegister} brand={brand} t={t} />
           </div>
-
-          <div className="mt-8 text-[12px] text-ink-400">
-            {t('footer_prefix')}{' '}
-            <button type="button" className="text-primary-600 hover:underline">
-              {t('privacy')}
-            </button>{' '}
-            {t('footer_and')}{' '}
-            <button type="button" className="text-primary-600 hover:underline">
-              {t('terms')}
-            </button>
-            .
-          </div>
         </div>
       </div>
     </div>

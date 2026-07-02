@@ -17,12 +17,21 @@ import {
   RegistrationSuccessPanel,
   useRegistrationFormState,
 } from './registration-ui';
+import type { ConsentDocContent } from '../../../components/consent/consent-types';
 
 export interface OrgRegisterFormProps {
   /** Org-registration JSON Schema loaded by the server component. */
   schema: RJSFSchema;
   /** RJSF UI schema for the org form. */
   uiSchema: Record<string, unknown>;
+  /**
+   * Versioned Terms/Privacy content for the org audience.
+   * Passed as `formContext.consentContent` to the RJSF form so the
+   * {@link ConsentCheckboxWidget} can render clickable links.
+   * Omit (or pass `undefined`) when `loadConsentConfig` failed — widget
+   * degrades gracefully to plain text labels.
+   */
+  consentContent?: ConsentDocContent;
 }
 
 /**
@@ -34,7 +43,11 @@ export interface OrgRegisterFormProps {
  * @param props - The org JSON Schema + UI schema.
  * @returns The org registration content block (form, success, or error state).
  */
-export function OrgRegisterForm({ schema, uiSchema }: OrgRegisterFormProps): JSX.Element {
+export function OrgRegisterForm({
+  schema,
+  uiSchema,
+  consentContent,
+}: OrgRegisterFormProps): JSX.Element {
   const t = useTranslations('register');
   const { state, setState, canSubmit, setCanSubmit, errorRef } = useRegistrationFormState();
   const [formData, setFormData] = useState<Record<string, unknown>>(() => ({
@@ -85,6 +98,7 @@ export function OrgRegisterForm({ schema, uiSchema }: OrgRegisterFormProps): JSX
         schema={formSchema}
         uiSchema={uiSchema as unknown as UiSchema<Record<string, unknown>>}
         formData={formData}
+        formContext={{ consentContent }}
         onChange={(e) => setFormData(e.formData as Record<string, unknown>)}
         onValidityChange={setCanSubmit}
         onSubmit={handleSubmit}

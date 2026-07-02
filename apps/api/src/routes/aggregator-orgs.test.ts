@@ -18,6 +18,9 @@ import { IdpAdminFake, _setIdpAdmin } from '../services/idp-admin/index.js';
 import { FakeMailer, _setMailer } from '../services/mailer/index.js';
 import { _resetTokenKey } from '../services/approval-token.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
+import { ConsentLedgerFake } from '@aggregator-dpg/consent-ledger/testing';
+import { _setConsentLedger } from '../services/consent-ledger/index.js';
+import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 
 const SERVICE_BEARER = 'service-token';
 const AUTH_HEADER = { authorization: `Bearer ${SERVICE_BEARER}` };
@@ -27,6 +30,7 @@ describe('aggregator-orgs routes', () => {
   let orgStore: AggregatorOrgStoreFake;
   let idp: IdpAdminFake;
   let mailer: FakeMailer;
+  let consentLedger: ConsentLedgerFake;
 
   beforeEach(async () => {
     _resetTokenKey();
@@ -39,10 +43,12 @@ describe('aggregator-orgs routes', () => {
     orgStore = new AggregatorOrgStoreFake();
     idp = new IdpAdminFake();
     mailer = new FakeMailer();
+    consentLedger = new ConsentLedgerFake();
 
     _setAggregatorOrgStore(orgStore);
     _setIdpAdmin(idp);
     _setMailer(mailer);
+    _setConsentLedger(consentLedger);
     _setAccessTokenVerifier(async (token) => {
       if (token === SERVICE_BEARER) {
         return { sub: 'service-account-aggregator-bff', azp: 'aggregator-bff' };
@@ -58,6 +64,7 @@ describe('aggregator-orgs routes', () => {
     _setAggregatorOrgStore(null);
     _setIdpAdmin(null);
     _setMailer(null);
+    _setConsentLedger(null);
     _setAccessTokenVerifier(null);
   });
 
@@ -92,6 +99,59 @@ describe('aggregator-orgs routes', () => {
     // A review email went to the network admin.
     expect(mailer.outbox.length).toBe(1);
     expect(mailer.outbox[0]?.to).toContain('reviewer@bluedots.local');
+
+    // Consent ledger should have one row for the org
+    const ledgerRows = consentLedger.list();
+    expect(ledgerRows).toHaveLength(1);
+    const consentRow = ledgerRows[0];
+    expect(consentRow?.subjectType).toBe('org');
+    expect(consentRow?.subjectId).toBe(body.org_id);
+    expect(consentRow?.termsVersion).toBeGreaterThanOrEqual(1);
+    expect(consentRow?.privacyVersion).toBeGreaterThanOrEqual(1);
+    expect(consentRow?.source).toBe('registration');
+    // network/brand must come from AGGREGATOR_NETWORK/AGGREGATOR_BRAND so the
+    // recorded version matches what the web layer displayed.
+    expect(consentRow?.network).toBe('blue_dot'); // default when AGGREGATOR_NETWORK unset
+    expect(consentRow?.brand).toBeNull(); // default when AGGREGATOR_BRAND unset
+  });
+
+  it('records org consent in the ledger on successful registration', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: orgBody,
+    });
+    expect(res.statusCode).toBe(201);
+    const { org_id } = res.json() as { org_id: string };
+
+    const ledgerRows = consentLedger.list();
+    expect(ledgerRows).toHaveLength(1);
+    expect(ledgerRows[0]?.subjectType).toBe('org');
+    expect(ledgerRows[0]?.subjectId).toBe(org_id);
+  });
+
+  it('fails org registration (fail-closed) when the consent ledger write fails', async () => {
+    // Make the ledger always return an error
+    consentLedger.recordRegistrationConsent = async () => ({
+      success: false as const,
+      error: Object.assign(new Error('ledger down'), {
+        name: 'UpstreamError',
+        code: 'CONSENT_INSERT_FAILED',
+      }) as BaseError,
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: { ...orgBody, owner: { ...orgBody.owner, email: 'ledger-fail@enable.org' } },
+    });
+    // Fail-closed: the org path has no fallback, so a consent-write failure
+    // rolls the registration back rather than returning 201.
+    expect(res.statusCode).toBe(500);
+    const body = res.json() as { error: { code: string } };
+    expect(body.error.code).toBe('CONSENT_WRITE_FAILED');
   });
 
   it('GET /v1/orgs lists only active orgs', async () => {
@@ -104,6 +164,16 @@ describe('aggregator-orgs routes', () => {
     const body = res.json() as { orgs: { id: string; slug: string; display_name: string }[] };
     expect(body.orgs.map((o) => o.slug)).toEqual(['a']);
     expect(body.orgs[0]?.display_name).toBe('A');
+  });
+
+  it('rejects org registration when consent.value is false (400/validation)', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: { ...orgBody, consent: { ...orgBody.consent, value: false } },
+    });
+    expect(res.statusCode).toBe(400);
   });
 
   it('re-mints the review link for a pending org on resubmit — no field overwrite (§7)', async () => {

@@ -21,6 +21,7 @@ import { useTranslations } from 'next-intl';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/Select';
 import { MultiSelect } from '../ui/MultiSelect';
 import { resolveVisibleSchema, stripShowIf } from '../../lib/show-if';
+import { ConsentCheckboxWidget } from './ConsentCheckboxWidget';
 
 function TextWidget(props: WidgetProps) {
   const {
@@ -384,6 +385,7 @@ const widgets: RegistryWidgetsType = {
   CheckboxWidget,
   CheckboxesWidget,
   CommaSeparatedArrayWidget,
+  ConsentCheckbox: ConsentCheckboxWidget,
   // Email + URL fields render TextWidget but pin the native HTML
   // `type` so mobile keyboards default to the email / URL layout and
   // the browser surfaces native autofill hints.

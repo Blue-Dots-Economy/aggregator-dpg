@@ -97,9 +97,10 @@ export const ConsentRecordSchema = z
 export type ConsentRecord = z.infer<typeof ConsentRecordSchema>;
 
 /**
- * Registration-time consent shape — `value` must be literal `true`. Mirrors
- * the JSON Schema `const: true` in `registration.v1.json` so that signup
- * cannot complete without ticking the T&C checkbox.
+ * Registration-time consent shape — `value` must be literal `true`. The JSON
+ * Schema in `registration.v1.json` uses `"type": "boolean"` (browser checkbox
+ * constraint); this Zod schema adds the server-side affirmative guard so that
+ * a direct API caller cannot submit `value: false`.
  */
 export const RegistrationConsentSchema = ConsentRecordSchema.extend({
   value: z.literal(true),
