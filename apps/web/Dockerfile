@@ -42,7 +42,11 @@ ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 ARG NEXT_PUBLIC_ENABLED_LANGUAGES=en,kn,hi
 ENV NEXT_PUBLIC_ENABLED_LANGUAGES=$NEXT_PUBLIC_ENABLED_LANGUAGES
 COPY . .
-RUN pnpm --filter @aggregator-dpg/web build
+# Build web AND its workspace dependencies in topological order
+# (shared-primitives → config-loader → web). Without the trailing `...`,
+# only `next build` runs and the workspace packages' `dist/` is absent, so
+# imports like `@aggregator-dpg/config-loader/fs` fail to resolve.
+RUN pnpm --filter @aggregator-dpg/web... build
 
 # ── runner ────────────────────────────────────────────────────────────────────
 FROM node:24-alpine AS runner
