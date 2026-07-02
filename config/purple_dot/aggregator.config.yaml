@@ -37,9 +37,9 @@ aggregator:
 
   domain_labels:
     seeker:
-      singular: Beneficiary
-      plural: Beneficiaries
-      tab_label: Beneficiaries
+      singular: Seeker
+      plural: Seekers
+      tab_label: Seekers
     provider:
       singular: Service Provider
       plural: Service Providers
