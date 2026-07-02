@@ -28,8 +28,10 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { config } from '../config.js';
-import { verifyApprovalToken, formatApprovalTtl } from '../services/approval-token.js';
+import { config, orgHierarchyEnabled } from '../config.js';
+import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js';
+import { ERR } from '../errors/codes.js';
+import { formatApprovalTtl } from '../services/approval-token.js';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
 import { getIdpAdmin } from '../services/idp-admin/index.js';
 import { getMailer } from '../services/mailer/index.js';
@@ -40,6 +42,8 @@ import {
   renderApplicantRejected,
 } from '../services/email-templates/index.js';
 import { renderConfirmPage, renderResultPage } from '../views/approval-pages.js';
+import { mintApprovalTokenPair } from '../services/registration-notify.js';
+import { sendHtml, sendPage, missingTokenPage, verifyTokenForId } from './approval-shared.js';
 import type { Aggregator } from '../services/aggregator-store/index.js';
 import { KC_ATTR } from '../services/idp-admin/index.js';
 import type { IdpUser } from '../services/idp-admin/index.js';
@@ -82,40 +86,34 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
       const aggregatorId = req.params.id;
       const { token, intent } = req.query;
 
-      if (!token) {
-        return sendHtml(
-          reply,
-          400,
-          renderResultPage({
-            status: 'error',
-            title: 'Missing token',
-            message: 'This link is missing the approval token.',
-          }),
-        );
-      }
+      if (!token) return sendPage(reply, missingTokenPage());
 
-      const verified = await verifyApprovalToken(token);
+      // Strict verify first (rejects expired). A merely-expired link offers an
+      // inline "Regenerate & review" step (no self-email to the reviewer);
+      // invalid/malformed still error.
+      const verified = await verifyTokenForId(token, aggregatorId, 'aggregator');
       if (!verified.ok) {
-        return sendHtml(
-          reply,
-          400,
-          renderResultPage({
-            status: 'error',
-            title: 'Invalid link',
-            message: tokenErrorMessage(verified.error.code),
-          }),
-        );
-      }
-      if (verified.aggregatorId !== aggregatorId) {
-        return sendHtml(
-          reply,
-          400,
-          renderResultPage({
-            status: 'error',
-            title: 'Invalid link',
-            message: 'Token does not match the requested aggregator.',
-          }),
-        );
+        const lenient = await verifyTokenForId(token, aggregatorId, 'aggregator', {
+          allowExpired: true,
+        });
+        if (lenient.ok) {
+          return sendHtml(
+            reply,
+            400,
+            renderResultPage({
+              status: 'error',
+              title: 'Link expired',
+              message:
+                'This approval link has expired. Click below to regenerate a fresh link and continue to the review.',
+              action: {
+                url: `${config.PUBLIC_API_URL}/admin/v1/aggregator-registrations/renew/${aggregatorId}`,
+                token,
+                label: 'Regenerate & review',
+              },
+            }),
+          );
+        }
+        return sendPage(reply, verified.page);
       }
       const effectiveIntent = isIntent(intent) ? intent : verified.intent;
 
@@ -176,29 +174,8 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
         );
       }
 
-      const verified = await verifyApprovalToken(parsed.data.token);
-      if (!verified.ok) {
-        return sendHtml(
-          reply,
-          400,
-          renderResultPage({
-            status: 'error',
-            title: 'Invalid link',
-            message: tokenErrorMessage(verified.error.code),
-          }),
-        );
-      }
-      if (verified.aggregatorId !== aggregatorId) {
-        return sendHtml(
-          reply,
-          400,
-          renderResultPage({
-            status: 'error',
-            title: 'Invalid link',
-            message: 'Token does not match the requested aggregator.',
-          }),
-        );
-      }
+      const verified = await verifyTokenForId(parsed.data.token, aggregatorId, 'aggregator');
+      if (!verified.ok) return sendPage(reply, verified.page);
 
       const lookup = await loadAggregatorAndUser(aggregatorId);
       if (!lookup.ok) return sendHtml(reply, lookup.status, lookup.html);
@@ -208,6 +185,41 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
       const prior = decisionFromStatus(lookup.aggregator.status);
       if (prior) {
         return sendHtml(reply, 200, renderResultPage(alreadyDecidedView(prior)));
+      }
+
+      // Org-bound coordinator: the token must carry the matching `org` claim so
+      // an owner's link can only decide their own org's coordinators (spec §9 /
+      // A1). Enforced whenever the record has a parent_org_id — it is a security
+      // invariant on the record, independent of the runtime flag.
+      const parentOrgId = lookup.aggregator.parentOrgId;
+      if (parentOrgId && verified.org !== parentOrgId) {
+        return sendHtml(
+          reply,
+          400,
+          renderResultPage({
+            status: 'error',
+            title: 'Invalid link',
+            message: 'Token does not match this organisation.',
+          }),
+        );
+      }
+
+      // Re-validate the target org is still active before provisioning (spec
+      // §6.2): a row can be rejected/retired between submit and approval. Only
+      // when the hierarchy is enabled and the coordinator is org-bound.
+      if (orgHierarchyEnabled() && parentOrgId) {
+        const org = await getAggregatorOrgStore().findById(parentOrgId);
+        if (!org.ok || !org.value || org.value.status !== 'active') {
+          return sendHtml(
+            reply,
+            200,
+            renderResultPage({
+              status: 'error',
+              title: ERR.TARGET_ORG_INACTIVE.title,
+              message: ERR.TARGET_ORG_INACTIVE.detail,
+            }),
+          );
+        }
       }
 
       const store = getAggregatorStore();
@@ -366,17 +378,19 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
           }
         }
 
-        // 5. DB status → active is the atomic commit point. Once flipped,
-        //    the single-use guard treats the approval as decided. Earlier
-        //    steps are idempotent so a failure here leaves status=pending
-        //    and admin can re-click the link to retry without side effects.
+        // 5. Atomic compare-and-set pending→active — the single commit point.
+        //    A concurrent click (double-submit / prefetch) that already
+        //    committed makes this return null, so only the winner runs the
+        //    side effects below (notably the applicant email — no duplicate).
+        //    Earlier steps are idempotent, so a failure here leaves
+        //    status=pending and the admin can re-click to retry.
         const dbUpdateStart = Date.now();
-        const dbUpdate = await store.updateStatus(aggregatorId, 'active', 'admin');
+        const dbUpdate = await store.approveFromPending(aggregatorId, 'admin');
         if (!dbUpdate.ok) {
           log.error(
             {
               status: 'failure',
-              sub_operation: 'store.updateStatus.active',
+              sub_operation: 'store.approveFromPending',
               code: dbUpdate.error.code,
               cause: dbUpdate.error.message,
               latency_ms: Date.now() - dbUpdateStart,
@@ -391,6 +405,15 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
               title: 'Action failed',
               message: 'Database unavailable. Please try again shortly.',
             }),
+          );
+        }
+        if (dbUpdate.value === null) {
+          // A concurrent approval already committed — render already-decided,
+          // skip the applicant email so it goes out exactly once.
+          return sendHtml(
+            reply,
+            200,
+            renderResultPage(alreadyDecidedView({ decision: 'approved' })),
           );
         }
 
@@ -512,6 +535,57 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
       );
     },
   );
+
+  app.post(
+    '/admin/v1/aggregator-registrations/renew/:id',
+    {
+      schema: {
+        tags: ['aggregator-approvals'],
+        summary: 'Regenerate an expired approval link and show the confirm page',
+        description:
+          'Reached from the "Regenerate & review" button on the expired-link page. Accepts an expired-but-signature-valid token as proof the reviewer held a legitimate link, mints a fresh decision token (preserving the org binding), and renders the approve/reject confirm page inline — no email.',
+        params: ApprovalParamsSchema,
+      },
+    },
+    async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+      const aggregatorId = req.params.id;
+      const body = (req.body ?? {}) as { token?: string };
+      const token = typeof body.token === 'string' ? body.token : '';
+
+      const verified = await verifyTokenForId(token, aggregatorId, 'aggregator', {
+        allowExpired: true,
+      });
+      if (!verified.ok) return sendPage(reply, verified.page);
+
+      const lookup = await loadAggregatorAndUser(aggregatorId);
+      if (!lookup.ok) return sendHtml(reply, lookup.status, lookup.html);
+
+      const prior = decisionFromStatus(lookup.aggregator.status);
+      if (prior) {
+        return sendHtml(reply, 200, renderResultPage(alreadyDecidedView(prior)));
+      }
+
+      // Mint a fresh token pair, preserving the original org binding (so the
+      // decision handler's parent_org_id check still passes), and land the
+      // reviewer on the confirm page directly.
+      const { approveToken, rejectToken } = await mintApprovalTokenPair(aggregatorId, verified.org);
+      const effectiveIntent = verified.intent === 'reject' ? 'reject' : 'approve';
+      return sendHtml(
+        reply,
+        200,
+        renderConfirmPage({
+          aggregatorId,
+          intent: effectiveIntent,
+          token: effectiveIntent === 'reject' ? rejectToken : approveToken,
+          applicantEmail: lookup.kcUser.email,
+          association: lookup.aggregator.name,
+          aggregatorType: lookup.aggregator.type ?? lookup.aggregator.actorType,
+          postUrl: `${config.PUBLIC_API_URL}/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
+          expiresInText: formatApprovalTtl(config.APPROVAL_TOKEN_TTL_SECONDS),
+        }),
+      );
+    },
+  );
 }
 
 interface PriorDecision {
@@ -619,18 +693,6 @@ function isIntent(v: unknown): v is 'approve' | 'reject' {
   return v === 'approve' || v === 'reject';
 }
 
-function tokenErrorMessage(code: 'EXPIRED' | 'INVALID' | 'MALFORMED'): string {
-  switch (code) {
-    case 'EXPIRED':
-      return 'This approval link has expired. Ask the applicant to resubmit.';
-    case 'INVALID':
-      return 'Approval link signature is invalid.';
-    case 'MALFORMED':
-    default:
-      return 'Approval link is malformed.';
-  }
-}
-
 /**
  * Display name preference: Beckn contact.name → KC firstName+lastName →
  * email. Aggregator's `contact.name` is filled at registration; KC names
@@ -643,8 +705,4 @@ function applicantNameOf(lookup: LookupOk): string {
     Boolean(p),
   );
   return parts.length > 0 ? parts.join(' ') : lookup.kcUser.email;
-}
-
-function sendHtml(reply: FastifyReply, status: number, html: string): FastifyReply {
-  return reply.status(status).type('text/html; charset=utf-8').send(html);
 }

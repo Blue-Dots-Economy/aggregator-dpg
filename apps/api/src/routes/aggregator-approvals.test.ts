@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import type { FastifyInstance } from 'fastify';
+import { SignJWT } from 'jose';
 import { buildApp } from '../app.js';
 import {
   AggregatorStoreFake,
@@ -10,6 +11,11 @@ import {
   _setAggregatorProfileStore,
   AggregatorProfileStoreFake,
 } from '../services/aggregator-profile-store/index.js';
+import {
+  AggregatorOrgStoreFake,
+  buildAggregatorOrg,
+  _setAggregatorOrgStore,
+} from '../services/aggregator-org-store/index.js';
 import { IdpAdminFake, _setIdpAdmin } from '../services/idp-admin/index.js';
 import { FakeMailer, _setMailer } from '../services/mailer/index.js';
 import { _resetTokenKey, mintApprovalToken } from '../services/approval-token.js';
@@ -29,6 +35,7 @@ describe('admin approval routes', () => {
   let idp: IdpAdminFake;
   let mailer: FakeMailer;
   let signalstack: SignalStackWriterFake;
+  let orgStore: AggregatorOrgStoreFake;
   let kcUserId: string;
 
   beforeEach(async () => {
@@ -78,6 +85,9 @@ describe('admin approval routes', () => {
     signalstack = new SignalStackWriterFake();
     _setSignalStackWriter(signalstack);
 
+    orgStore = new AggregatorOrgStoreFake();
+    _setAggregatorOrgStore(orgStore);
+
     // Approval flow now reads cfg.domainIds from the network config —
     // pin a blue_dot-shaped config so the legacy `['seeker','provider']`
     // assertions in this file still hold.
@@ -94,6 +104,7 @@ describe('admin approval routes', () => {
     _setMailer(null);
     _setSignalStackWriter(null);
     _setNetworkConfig(null);
+    _setAggregatorOrgStore(null);
   });
 
   it('GET /read/:id renders the confirmation page when no decision yet', async () => {
@@ -199,6 +210,27 @@ describe('admin approval routes', () => {
     if (!m) throw new Error('no mail captured');
     expect(m.to).toBe('asha@trrain.org');
     expect(m.subject).toContain('approved');
+  });
+
+  it('POST /decision/:id approve is single-use via CAS — a second click sends no duplicate email', async () => {
+    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+    const first = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
+      payload: { token, decision: 'approve' },
+    });
+    expect(first.statusCode).toBe(200);
+    expect(first.body).toContain('Application approved');
+
+    const second = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
+      payload: { token, decision: 'approve' },
+    });
+    expect(second.statusCode).toBe(200);
+    expect(second.body).toContain('Already approved');
+    // Applicant "approved" email went out exactly once.
+    expect(mailer.outbox).toHaveLength(1);
   });
 
   it('POST /decision/:id approve aborts with 503 when signalstack upsert fails — DB stays pending, KC user stays disabled', async () => {
@@ -569,5 +601,146 @@ describe('admin approval routes', () => {
       payload: { token: '', decision: 'maybe' },
     });
     expect(res.statusCode).toBe(400);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Resend helpers
+  // ---------------------------------------------------------------------------
+
+  let resendIdCounter = 0;
+
+  /** Seeds a fresh pending aggregator + disabled KC user and returns its id. */
+  async function seedPendingAggregator(): Promise<{ id: string }> {
+    resendIdCounter++;
+    const id = `aaaaaaaa-bbbb-cccc-dddd-${String(resendIdCounter).padStart(12, '0')}`;
+    aggregatorStore.seed([
+      buildAggregator({
+        id,
+        orgSlug: `resend-org-${resendIdCounter}`,
+        actorType: 'aggregator',
+        type: null,
+        name: 'Resend Org',
+        contact: { name: 'Test User', phone: '+919000000001', email: 'resend@test.local' },
+        contactPhone: '+919000000001',
+        status: 'pending',
+      }),
+    ]);
+    const created = await idp.createUser({
+      email: 'resend@test.local',
+      firstName: 'Test',
+      lastName: 'User',
+      enabled: false,
+      attributes: { aggregator_id: id, decision_made: 'pending' },
+    });
+    if (!created.ok) throw new Error('seed KC user failed');
+    return { id };
+  }
+
+  /**
+   * Mints an approve token with iat/exp in the past (expired but valid signature)
+   * for the given aggregatorId. Mirrors the pattern used in approval-token.test.ts.
+   */
+  async function mintExpiredApproveToken(aggregatorId: string): Promise<string> {
+    const key = new TextEncoder().encode(process.env.APPROVAL_TOKEN_SECRET);
+    return new SignJWT({ intent: 'approve' })
+      .setProtectedHeader({ alg: 'HS256' })
+      .setSubject(aggregatorId)
+      .setIssuer('aggregator-api')
+      .setAudience('aggregator-admin')
+      .setIssuedAt(Math.floor(Date.now() / 1000) - 7200)
+      .setExpirationTime(Math.floor(Date.now() / 1000) - 3600)
+      .sign(key);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Renew (inline regenerate) route tests
+  // ---------------------------------------------------------------------------
+
+  it('renew re-arms an expired token and shows the confirm page inline (no email)', async () => {
+    const { id } = await seedPendingAggregator();
+    const expired = await mintExpiredApproveToken(id);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/renew/${id}`,
+      payload: { token: expired },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toContain('text/html');
+    expect(res.body).toContain(`/admin/v1/aggregator-registrations/decision/${id}`);
+    expect(mailer.outbox.length).toBe(0);
+  });
+
+  it('renew rejects a malformed token with 400', async () => {
+    const { id } = await seedPendingAggregator();
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/renew/${id}`,
+      payload: { token: 'not-a-jwt' },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('renew shows already-decided for an active record', async () => {
+    const { id } = await seedPendingAggregator();
+    await aggregatorStore.updateStatus(id, 'active', 'admin');
+    const expired = await mintExpiredApproveToken(id);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/renew/${id}`,
+      payload: { token: expired },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain('already');
+  });
+
+  it('expired approval link page offers an inline regenerate step (no email)', async () => {
+    const { id } = await seedPendingAggregator();
+    const expired = await mintExpiredApproveToken(id);
+    const res = await app.inject({
+      method: 'GET',
+      url: `/admin/v1/aggregator-registrations/read/${id}?token=${encodeURIComponent(expired)}&intent=approve`,
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toContain('Link expired');
+    expect(res.body).toContain('Regenerate &amp; review');
+    expect(res.body).toContain(`/admin/v1/aggregator-registrations/renew/${id}`);
+    expect(mailer.outbox.length).toBe(0);
+  });
+
+  it('rejects a coordinator decision when the token org claim mismatches parent_org_id', async () => {
+    // The seeded coordinator belongs to org-B; the token is minted for org-A.
+    await aggregatorStore.update(aggregatorId, { parentOrgId: 'org-B', updatedBy: 'test' });
+    const { token } = await mintApprovalToken({
+      aggregatorId,
+      intent: 'approve',
+      org: 'org-A',
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
+      payload: { token, decision: 'approve' },
+    });
+    expect(res.statusCode).toBe(400);
+    // The coordinator must still be pending (decision aborted).
+    const stored = await aggregatorStore.findById(aggregatorId);
+    expect(stored.ok && stored.value?.status).toBe('pending');
+  });
+
+  it('allows the decision when the token org claim matches parent_org_id', async () => {
+    await aggregatorStore.update(aggregatorId, { parentOrgId: 'org-A', updatedBy: 'test' });
+    orgStore.seed([buildAggregatorOrg({ id: 'org-A', slug: 'a', status: 'active' })]);
+    const { token } = await mintApprovalToken({
+      aggregatorId,
+      intent: 'approve',
+      org: 'org-A',
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
+      payload: { token, decision: 'approve' },
+    });
+    expect(res.statusCode).toBe(200);
+    const stored = await aggregatorStore.findById(aggregatorId);
+    expect(stored.ok && stored.value?.status).toBe('active');
   });
 });

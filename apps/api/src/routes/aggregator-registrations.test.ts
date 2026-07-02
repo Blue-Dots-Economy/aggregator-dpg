@@ -233,4 +233,114 @@ describe('POST /v1/aggregator-registrations/create', () => {
 
     idp.createUser = originalCreate;
   });
+
+  async function seedPending(overrides?: { status?: 'pending' | 'inactive' | 'active' }) {
+    const created = await aggregatorStore.create({
+      orgSlug: 'trrain-aaaa',
+      actorType: 'aggregator',
+      name: 'TRRAIN',
+      type: 'seeker',
+      url: null,
+      contact: {
+        name: 'Asha Kumari',
+        phone: '+919876543210',
+        email: 'asha@trrain.org',
+      },
+      locations: [],
+      consent: validBody.consent,
+      createdBy: 'self',
+      updatedBy: 'self',
+    });
+    if (!created.ok) throw new Error('seed failed');
+    const id = created.value.id;
+    if (overrides?.status && overrides.status !== 'pending') {
+      await aggregatorStore.updateStatus(id, overrides.status, 'admin');
+    }
+    await idp.createUser({
+      email: 'asha@trrain.org',
+      phone: '+919876543210',
+      enabled: false,
+      attributes: {
+        aggregator_id: id,
+        aggregator_type: 'seeker',
+        phoneNumber: '+919876543210',
+        decision_made: overrides?.status === 'inactive' ? 'rejected' : 'pending',
+      },
+    });
+    return id;
+  }
+
+  it('refreshes a pending registration on resubmit instead of 409', async () => {
+    const id = await seedPending();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/aggregator-registrations/create',
+      headers: AUTH_HEADER,
+      payload: validBody,
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { aggregator_id: string; status: string };
+    expect(body.aggregator_id).toBe(id);
+    expect(body.status).toBe('pending');
+    // A fresh admin-review email was re-sent.
+    expect(mailer.outbox.length).toBe(1);
+    expect(mailer.outbox[0]?.html).toContain('intent=approve');
+  });
+
+  it('returns 409 for a rejected (inactive) registration on resubmit (recover via prune)', async () => {
+    const id = await seedPending({ status: 'inactive' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/aggregator-registrations/create',
+      headers: AUTH_HEADER,
+      payload: validBody,
+    });
+    // Rejected records are not reclaimable — re-registration only after the
+    // stale-prune job clears the old row.
+    expect(res.statusCode).toBe(409);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('USER_EXISTS');
+    const stored = await aggregatorStore.findById(id);
+    if (stored.ok) expect(stored.value?.status).toBe('inactive');
+  });
+
+  it('still returns 409 when the email belongs to an active aggregator', async () => {
+    await seedPending({ status: 'active' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/aggregator-registrations/create',
+      headers: AUTH_HEADER,
+      payload: validBody,
+    });
+    expect(res.statusCode).toBe(409);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('USER_EXISTS');
+  });
+
+  it('re-mint on a pending record does NOT overwrite the on-file identity (no takeover)', async () => {
+    const id = await seedPending(); // asha@trrain.org / +919876543210, pending
+    // A stranger resubmits the victim's email with their OWN phone + name.
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/aggregator-registrations/create',
+      headers: AUTH_HEADER,
+      payload: {
+        ...validBody,
+        name: 'Attacker Org',
+        contact: { ...validBody.contact, name: 'Attacker', phone: '+919999999999' },
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    // The on-file record is unchanged — the submitted phone/name are ignored.
+    const stored = await aggregatorStore.findById(id);
+    if (stored.ok && stored.value) {
+      expect(stored.value.contact.phone).toBe('+919876543210');
+      expect(stored.value.name).toBe('TRRAIN');
+    }
+    // KC OTP identity (phoneNumber) is unchanged too.
+    const kc = await idp.findByEmail('asha@trrain.org');
+    if (kc.ok && kc.value) {
+      expect(kc.value.attributes?.phoneNumber?.[0]).toBe('+919876543210');
+    }
+    // The review link was re-sent (to the reviewer, not the caller).
+    expect(mailer.outbox.length).toBe(1);
+  });
 });

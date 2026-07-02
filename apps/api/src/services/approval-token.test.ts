@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { SignJWT } from 'jose';
 import {
   mintApprovalToken,
   verifyApprovalToken,
@@ -95,6 +96,73 @@ describe('approval-token', () => {
         intent: 'approve',
       }),
     ).rejects.toThrow(/APPROVAL_TOKEN_SECRET/);
+  });
+});
+
+describe('verifyApprovalToken allowExpired', () => {
+  beforeEach(() => {
+    _resetTokenKey();
+    process.env.APPROVAL_TOKEN_SECRET = 'k'.repeat(48);
+  });
+
+  async function mintExpired(): Promise<string> {
+    const key = new TextEncoder().encode(process.env.APPROVAL_TOKEN_SECRET);
+    return new SignJWT({ intent: 'approve' })
+      .setProtectedHeader({ alg: 'HS256' })
+      .setSubject('agg-1')
+      .setIssuer('aggregator-api')
+      .setAudience('aggregator-admin')
+      .setIssuedAt(Math.floor(Date.now() / 1000) - 7200)
+      .setExpirationTime(Math.floor(Date.now() / 1000) - 3600)
+      .sign(key);
+  }
+
+  it('rejects an expired token by default', async () => {
+    const t = await mintExpired();
+    const r = await verifyApprovalToken(t);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.code).toBe('EXPIRED');
+  });
+
+  it('accepts an expired token when allowExpired is set', async () => {
+    const t = await mintExpired();
+    const r = await verifyApprovalToken(t, { allowExpired: true });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.aggregatorId).toBe('agg-1');
+      expect(r.intent).toBe('approve');
+    }
+  });
+
+  it('still rejects a tampered token even with allowExpired', async () => {
+    const t = (await mintApprovalToken({ aggregatorId: 'agg-2', intent: 'approve' })).token;
+    const tampered = t.slice(0, -3) + 'aaa';
+    const r = await verifyApprovalToken(tampered, { allowExpired: true });
+    expect(r.ok).toBe(false);
+  });
+});
+
+describe('verifyApprovalToken org claim', () => {
+  beforeEach(() => {
+    _resetTokenKey();
+    process.env.APPROVAL_TOKEN_SECRET = 'k'.repeat(48);
+  });
+
+  it('round-trips an org claim', async () => {
+    const { token } = await mintApprovalToken({
+      aggregatorId: 'agg-1',
+      intent: 'approve',
+      org: 'org-1',
+    });
+    const v = await verifyApprovalToken(token);
+    expect(v.ok).toBe(true);
+    if (v.ok) expect(v.org).toBe('org-1');
+  });
+
+  it('omits org when not minted', async () => {
+    const { token } = await mintApprovalToken({ aggregatorId: 'agg-1', intent: 'approve' });
+    const v = await verifyApprovalToken(token);
+    if (v.ok) expect(v.org).toBeUndefined();
   });
 });
 

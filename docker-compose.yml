@@ -240,6 +240,9 @@ services:
       # matches whatever the BFF (web service) is configured with.
       OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
       PORTAL_CLIENT_ID: ${OIDC_CLIENT_ID:-aggregator-portal}
+      # API confidential client whose service account creates the org KC group
+      # + assigns org_owner (needs realm-management:manage-realm).
+      API_CLIENT_ID: ${KEYCLOAK_ADMIN_CLIENT_ID:-aggregator-api}
     volumes:
       - ./infra/keycloak/init:/init:ro
     entrypoint: ["sh", "-c", "apk add --no-cache curl jq > /dev/null && sh /init/apply-user-profile.sh"]

@@ -373,6 +373,12 @@ export interface ResultPageVars {
   status: 'success' | 'error' | 'info';
   title: string;
   message: string;
+  /**
+   * Optional secondary action rendered as a POST form button (e.g. the
+   * "resend approval link" affordance on the expired-link page). Posts a
+   * single hidden `token` field to `url`.
+   */
+  action?: { url: string; token: string; label: string };
   brand?: PageBrand;
 }
 
@@ -412,6 +418,14 @@ export function renderResultPage(v: ResultPageVars): string {
             Open ${escape(brand.short_name)} Portal
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 5l7 7-7 7"/></svg>
           </a>
+          ${
+            v.action
+              ? `<form method="POST" action="${escape(v.action.url)}" style="margin:0;display:inline;">
+                   <input type="hidden" name="token" value="${escape(v.action.token)}" />
+                   <button type="submit" class="btn-secondary">${escape(v.action.label)}</button>
+                 </form>`
+              : ''
+          }
         </div>
         <div class="result-meta">${escape(decidedAt)}</div>
       </div>

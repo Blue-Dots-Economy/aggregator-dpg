@@ -205,7 +205,7 @@
     {
       "clientId": "aggregator-api",
       "name": "Aggregator API (service account)",
-      "description": "Confidential client used by apps/api for Keycloak admin operations (create user on registration approval, etc.). Service account holds only realm-management:manage-users.",
+      "description": "Confidential client used by apps/api for Keycloak admin operations (create user on registration approval, org group create + org_owner role assign, etc.). Service account holds realm-management: manage-users (user CRUD + role mapping) and manage-realm (group create/manage for the org hierarchy).",
       "enabled": true,
       "publicClient": false,
       "secret": "aggregator-api-dev-secret-change-me",
@@ -225,8 +225,18 @@
       "enabled": true,
       "serviceAccountClientId": "aggregator-api",
       "clientRoles": {
-        "realm-management": ["view-users", "manage-users", "query-users"]
+        "realm-management": ["view-users", "manage-users", "query-users", "manage-realm"]
       }
     }
-  ]
+  ],
+  "roles": {
+    "realm": [
+      {
+        "name": "org_owner",
+        "description": "Parent-org owner (org hierarchy). Assigned to the org-owner user at org approval; gates org-scoped capabilities. Present even when ORG_HIERARCHY_ENABLED=false so the role exists before the flow is switched on.",
+        "composite": false,
+        "clientRole": false
+      }
+    ]
+  }
 }

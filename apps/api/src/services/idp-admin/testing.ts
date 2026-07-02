@@ -14,6 +14,12 @@ import { KC_ATTR } from './attributes.js';
 
 export class IdpAdminFake extends IdpAdminAdapter {
   private users = new Map<string, IdpUser & { attributes: Record<string, string[]> }>();
+  private groups = new Map<
+    string,
+    { id: string; name: string; attributes?: Record<string, string | string[]> }
+  >();
+  private memberships = new Map<string, Set<string>>(); // userId -> groupIds
+  private roles = new Map<string, Set<string>>(); // userId -> realm roles
   private failNext: {
     code: 'AUTH_FAILED' | 'IDP_UNAVAILABLE' | 'BAD_REQUEST';
     message: string;
@@ -27,10 +33,30 @@ export class IdpAdminFake extends IdpAdminAdapter {
     this.failNext = error;
   }
 
-  /** Test helper — wipes the user table. */
+  /** Test helper — wipes the user table + group/role state. */
   _reset(): void {
     this.users.clear();
+    this.groups.clear();
+    this.memberships.clear();
+    this.roles.clear();
     this.failNext = null;
+  }
+
+  /** Test inspector — group ids a user belongs to. */
+  groupsOf(userId: string): string[] {
+    return [...(this.memberships.get(userId) ?? [])];
+  }
+
+  /** Test inspector — realm roles assigned to a user. */
+  rolesOf(userId: string): string[] {
+    return [...(this.roles.get(userId) ?? [])];
+  }
+
+  /** Test inspector — a created group by id (name + attributes), or undefined. */
+  getGroup(
+    groupId: string,
+  ): { id: string; name: string; attributes?: Record<string, string | string[]> } | undefined {
+    return this.groups.get(groupId);
   }
 
   async createUser(input: CreateUserInput): Promise<IdpResult<IdpUser>> {
@@ -151,6 +177,63 @@ export class IdpAdminFake extends IdpAdminAdapter {
       return { ok: false, error: { code: 'USER_NOT_FOUND', message: userId } };
     }
     u.enabled = enabled;
+    return { ok: true, value: undefined };
+  }
+
+  async createGroup(
+    name: string,
+    attributes?: Record<string, string | string[]>,
+  ): Promise<IdpResult<{ id: string }>> {
+    if (this.failNext) {
+      const e = this.failNext;
+      this.failNext = null;
+      return { ok: false, error: e };
+    }
+    const id = `grp-${this.groups.size + 1}`;
+    this.groups.set(id, { id, name, ...(attributes ? { attributes } : {}) });
+    return { ok: true, value: { id } };
+  }
+
+  async deleteGroup(groupId: string): Promise<IdpResult<void>> {
+    if (this.failNext) {
+      const e = this.failNext;
+      this.failNext = null;
+      return { ok: false, error: e };
+    }
+    this.groups.delete(groupId);
+    return { ok: true, value: undefined };
+  }
+
+  async addUserToGroup(userId: string, groupId: string): Promise<IdpResult<void>> {
+    if (this.failNext) {
+      const e = this.failNext;
+      this.failNext = null;
+      return { ok: false, error: e };
+    }
+    if (!this.users.has(userId)) {
+      return { ok: false, error: { code: 'USER_NOT_FOUND', message: userId } };
+    }
+    if (!this.groups.has(groupId)) {
+      return { ok: false, error: { code: 'BAD_REQUEST', message: `no such group: ${groupId}` } };
+    }
+    const set = this.memberships.get(userId) ?? new Set<string>();
+    set.add(groupId);
+    this.memberships.set(userId, set);
+    return { ok: true, value: undefined };
+  }
+
+  async assignRealmRole(userId: string, role: string): Promise<IdpResult<void>> {
+    if (this.failNext) {
+      const e = this.failNext;
+      this.failNext = null;
+      return { ok: false, error: e };
+    }
+    if (!this.users.has(userId)) {
+      return { ok: false, error: { code: 'USER_NOT_FOUND', message: userId } };
+    }
+    const set = this.roles.get(userId) ?? new Set<string>();
+    set.add(role);
+    this.roles.set(userId, set);
     return { ok: true, value: undefined };
   }
 }

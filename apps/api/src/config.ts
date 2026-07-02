@@ -48,6 +48,17 @@ const ConfigSchema = z.object({
     .enum(['true', 'false'])
     .default('false')
     .transform((v) => v === 'true'),
+  /**
+   * Enables the parent-org → coordinator hierarchy for this instance
+   * (spec §2). OFF (default) = today's flat registration/approval flow,
+   * unchanged: no org tab, no org dropdown, no `aggregator_orgs` rows,
+   * `aggregators.parent_org_id` stays null. Read once at startup; flipping
+   * requires a restart. Two instances of the same network can differ.
+   */
+  ORG_HIERARCHY_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
   /** Public origin of the API service; used to assemble admin email links. */
   PUBLIC_API_URL: z.string().default('http://localhost:4000'),
   /** Public origin of the portal (BFF web app); used in welcome emails. */
@@ -119,6 +130,16 @@ const ConfigSchema = z.object({
     .positive()
     .default(7 * 24 * 60 * 60),
 
+  /**
+   * Extra grace beyond the approval-token TTL before a still-pending
+   * registration is eligible for cleanup. Default 24h.
+   */
+  REGISTRATION_PENDING_GRACE_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(24 * 60 * 60 * 1000),
+
   // ─── Schema loader ──────────────────────────────────────────────────────
   /** Absolute or relative path to `config/schemas/`. Used by link-submit Ajv. */
   SCHEMA_ROOT_DIR: z.string().default('./config/schemas'),
@@ -165,6 +186,22 @@ export const config: Config = ConfigSchema.parse(process.env);
 export const corsOrigins: string[] = config.CORS_ORIGINS.split(',')
   .map((s) => s.trim())
   .filter(Boolean);
+
+/**
+ * Whether the org→coordinator hierarchy is enabled for this instance.
+ *
+ * Read from the live environment at **call time** rather than from the frozen
+ * `config` snapshot. It is consumed only on the startup path (route
+ * registration inside `buildApp()`), so this still honours "read once at
+ * startup" (configuration-discipline) while remaining deterministic under
+ * Vitest's hoisted-import evaluation order, where a test sets the env var
+ * before `buildApp()` runs but after `config` was first parsed.
+ *
+ * @returns `true` when `ORG_HIERARCHY_ENABLED` is the literal string `"true"`.
+ */
+export function orgHierarchyEnabled(): boolean {
+  return process.env.ORG_HIERARCHY_ENABLED === 'true';
+}
 
 /**
  * Effective docs-surface switch used to gate the OpenAPI spec + Scalar UI.
