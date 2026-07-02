@@ -198,6 +198,12 @@ export const aggregatorOrgs = pgTable(
     slugActiveUnique: uniqueIndex('aggregator_orgs_slug_active_unique')
       .on(table.slug)
       .where(sql`status IN ('pending','active')`),
+    // Org display name is unique (case-insensitive) over non-terminal rows —
+    // same partial-unique semantics as the slug, so a rejected/retired org
+    // never blocks reusing its name.
+    displayNameActiveUnique: uniqueIndex('aggregator_orgs_display_name_active_unique')
+      .on(sql`lower(${table.displayName})`)
+      .where(sql`status IN ('pending','active')`),
   }),
 );
 

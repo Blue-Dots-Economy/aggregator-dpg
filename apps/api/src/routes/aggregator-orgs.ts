@@ -171,6 +171,9 @@ export async function registerAggregatorOrgRoutes(app: FastifyInstance): Promise
         ownerPhone: phoneE164,
       });
       if (!created.ok) {
+        if (created.error.code === 'DUPLICATE_NAME') {
+          throw httpError('ORG_NAME_TAKEN', { fields: { display_name: body.display_name } });
+        }
         if (created.error.code === 'DUPLICATE_SLUG') {
           throw httpError('ORG_SLUG_TAKEN', { fields: { slug } });
         }

@@ -153,6 +153,9 @@ function toDomain(row: typeof aggregatorOrgs.$inferSelect): AggregatorOrg {
 
 function mapInsertError(e: unknown): OrgStoreResult<never> {
   const msg = (e as Error).message ?? '';
+  if (msg.includes('aggregator_orgs_display_name_active_unique')) {
+    return errResult('DUPLICATE_NAME', 'organisation name already in use');
+  }
   if (msg.includes('aggregator_orgs_slug_active_unique')) {
     return errResult('DUPLICATE_SLUG', 'slug already in use');
   }

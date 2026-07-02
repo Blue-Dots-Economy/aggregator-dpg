@@ -235,6 +235,14 @@ export const ERR = {
       'An organisation with a matching name is already registered or pending. Try a different name.',
     hint: 'aggregator_orgs partial-unique slug collision over non-terminal rows (spec A9).',
   },
+  ORG_NAME_TAKEN: {
+    code: 'ORG_NAME_TAKEN',
+    status: 409,
+    title: 'Organisation name unavailable',
+    detail:
+      'An organisation with this name is already registered or pending. Please choose a different name.',
+    hint: 'aggregator_orgs partial-unique display_name (case-insensitive) collision over non-terminal rows.',
+  },
   TARGET_ORG_INACTIVE: {
     code: 'TARGET_ORG_INACTIVE',
     status: 409,

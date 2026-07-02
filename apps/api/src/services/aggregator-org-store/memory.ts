@@ -26,6 +26,12 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
       (o) => o.slug === input.slug && NON_TERMINAL.has(o.status),
     );
     if (slugTaken) return err('DUPLICATE_SLUG', `slug already in use: ${input.slug}`);
+    // Case-insensitive display-name uniqueness over non-terminal rows.
+    const nameKey = input.displayName.trim().toLowerCase();
+    const nameTaken = [...this.byId.values()].some(
+      (o) => o.displayName.trim().toLowerCase() === nameKey && NON_TERMINAL.has(o.status),
+    );
+    if (nameTaken) return err('DUPLICATE_NAME', `organisation name already in use`);
     const now = new Date();
     const row: AggregatorOrg = {
       id: randomUUID(),

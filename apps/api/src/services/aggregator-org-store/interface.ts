@@ -45,6 +45,7 @@ export interface UpdateOrgPatch {
 export type OrgStoreError =
   | { code: 'NOT_FOUND'; message: string }
   | { code: 'DUPLICATE_SLUG'; message: string }
+  | { code: 'DUPLICATE_NAME'; message: string }
   | { code: 'DB_UNAVAILABLE'; message: string };
 
 export type OrgStoreResult<T> = { ok: true; value: T } | { ok: false; error: OrgStoreError };

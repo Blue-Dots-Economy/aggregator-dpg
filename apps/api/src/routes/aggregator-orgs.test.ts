@@ -151,6 +151,28 @@ describe('aggregator-orgs routes', () => {
     expect(body.error?.code).toBe('OWNER_ALREADY_REGISTERED');
   });
 
+  it('rejects a second org with a case-insensitively matching name (ORG_NAME_TAKEN, 409)', async () => {
+    // An existing active org already owns the name — a different owner submits
+    // the same display_name (different case) and must be blocked.
+    orgStore.seed([
+      buildAggregatorOrg({
+        id: 'o-name-owner',
+        slug: 'enable-india-live',
+        displayName: 'Enable India',
+        ownerEmail: 'someone-else@enable.org',
+        status: 'active',
+      }),
+    ]);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: { ...orgBody, display_name: 'enable india' },
+    });
+    expect(res.statusCode).toBe(409);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('ORG_NAME_TAKEN');
+  });
+
   it('maps a DUPLICATE_SLUG store error to ORG_SLUG_TAKEN (409)', async () => {
     // A store stub that always reports a slug collision on create.
     class DupSlugStore extends AggregatorOrgStoreBase {
