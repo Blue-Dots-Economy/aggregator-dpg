@@ -12,7 +12,7 @@ import { z } from 'zod';
 import { config, orgHierarchyEnabled } from '../config.js';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
 import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js';
-import { getIdpAdmin } from '../services/idp-admin/index.js';
+import { getIdpAdmin, KC_ATTR } from '../services/idp-admin/index.js';
 import type { IdpAdminAdapter } from '../services/idp-admin/index.js';
 import { authenticateAny } from '../services/auth/access-token.js';
 import { httpError } from '../errors/http-error.js';
@@ -20,13 +20,21 @@ import { errorResponses } from '../errors/openapi.js';
 
 /** Minimal Result shape the prune helper needs from a store/idp delete. */
 type DeleteResult = { ok: true } | { ok: false; error: { code: string } };
+/** Minimal Result shape for resolving the KC user (id or null) to delete. */
+type UserLookupResult =
+  | { ok: true; value: { id: string } | null }
+  | { ok: false; error: { code: string } };
 
 /** Describes one entity's stale-prune: how to read it + how to delete its parts. */
 interface PruneSpec<T> {
   /** Stale rows to prune (already filtered by cutoff). */
   rows: T[];
-  /** Owner/contact email → the KC user to delete. */
-  emailOf: (row: T) => string;
+  /**
+   * Resolves the KC user to delete from the row's *stored* linkage (coordinator
+   * `aggregator_id` attribute / org `ownerKcSub`) — not by email, which can
+   * drift or be shared across the two tables and hit the wrong user.
+   */
+  resolveUser: (row: T) => Promise<UserLookupResult>;
   /** Row id (for logs + the DB delete). */
   idOf: (row: T) => string;
   /** Optional KC cleanup after the user delete (e.g. the org's mirrored group). */
@@ -62,8 +70,9 @@ async function pruneStale<T>(
       );
 
     // Delete the KC user first so a partial failure leaves the DB row for the
-    // next pass rather than an orphaned KC user.
-    const kc = await idp.findByEmail(spec.emailOf(row));
+    // next pass rather than an orphaned KC user. Resolved from the stored
+    // linkage (not email) so drift/shared-email can't hit the wrong user.
+    const kc = await spec.resolveUser(row);
     if (!kc.ok) {
       warn(kc.error.code, 'KC user lookup failed');
       continue;
@@ -130,6 +139,15 @@ export async function registerAggregatorMaintenanceRoutes(app: FastifyInstance):
       if (!auth.ok) {
         throw httpError('UNAUTHORIZED', { detail: auth.error.message });
       }
+      // Destructive op — restrict to a service-account token (the scheduler),
+      // not any authenticated end user. Keycloak service accounts have a
+      // `service-account-<client>` subject; human tokens carry a UUID subject.
+      if (!auth.context.subject.startsWith('service-account-')) {
+        throw httpError('FORBIDDEN', {
+          detail: 'cleanup-stale requires a service-account token',
+          fields: { subject: auth.context.subject },
+        });
+      }
 
       const store = getAggregatorStore();
       const idp = getIdpAdmin();
@@ -138,7 +156,14 @@ export async function registerAggregatorMaintenanceRoutes(app: FastifyInstance):
         (config.APPROVAL_TOKEN_TTL_SECONDS * 1000 + config.REGISTRATION_PENDING_GRACE_MS);
       const cutoff = new Date(cutoffMs);
 
-      const page = await store.list({ status: 'pending', limit: 1000, offset: 0 });
+      // Filter by age in SQL so the row cap counts genuinely-stale rows (a page
+      // of fresh pending rows can't mask real stale ones).
+      const page = await store.list({
+        status: 'pending',
+        updatedBefore: cutoff,
+        limit: 1000,
+        offset: 0,
+      });
       if (!page.ok) {
         throw httpError('DB_UNAVAILABLE', {
           cause: new Error(page.error.message),
@@ -149,15 +174,15 @@ export async function registerAggregatorMaintenanceRoutes(app: FastifyInstance):
       if (page.value.rows.length === 1000) {
         log.warn(
           { scanned: 1000 },
-          'stale-pending cleanup hit the 1000-row cap — more stale rows may remain for the next pass',
+          'stale-pending cleanup hit the 1000-row cap — more stale rows remain for the next pass',
         );
       }
 
-      const stale = page.value.rows.filter((r) => r.updatedAt < cutoff);
       const prunedIds = await pruneStale(
         {
-          rows: stale,
-          emailOf: (r) => r.contactEmail,
+          rows: page.value.rows,
+          // Key the KC user on the stored `aggregator_id` attribute, not email.
+          resolveUser: (r) => idp.findByAttribute(KC_ATTR.AGGREGATOR_ID, r.id),
           idOf: (r) => r.id,
           deleteRow: (r) => store.deleteById(r.id),
           logIdField: 'aggregator_id',
@@ -174,7 +199,7 @@ export async function registerAggregatorMaintenanceRoutes(app: FastifyInstance):
       let orgsScanned = 0;
       let orgsPrunedIds: string[] = [];
       if (orgHierarchyEnabled()) {
-        const orgPage = await orgStore.listPending();
+        const orgPage = await orgStore.listPending(cutoff);
         if (!orgPage.ok) {
           throw httpError('DB_UNAVAILABLE', {
             cause: new Error(orgPage.error.message),
@@ -184,8 +209,12 @@ export async function registerAggregatorMaintenanceRoutes(app: FastifyInstance):
         orgsScanned = orgPage.value.length;
         orgsPrunedIds = await pruneStale(
           {
-            rows: orgPage.value.filter((o) => o.updatedAt < cutoff),
-            emailOf: (o) => o.ownerEmail,
+            rows: orgPage.value,
+            // Key the KC owner user on the stored `ownerKcSub`, not email.
+            resolveUser: (o) =>
+              o.ownerKcSub
+                ? idp.findById(o.ownerKcSub)
+                : Promise.resolve({ ok: true as const, value: null }),
             idOf: (o) => o.id,
             afterUserDelete: (o) => (o.kcGroupId ? idp.deleteGroup(o.kcGroupId) : null),
             deleteRow: (o) => orgStore.deleteById(o.id),

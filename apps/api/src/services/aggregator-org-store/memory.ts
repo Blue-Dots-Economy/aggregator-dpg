@@ -67,9 +67,11 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
     return { ok: true, value: rows };
   }
 
-  async listPending(): Promise<OrgStoreResult<AggregatorOrg[]>> {
+  async listPending(updatedBefore?: Date): Promise<OrgStoreResult<AggregatorOrg[]>> {
+    const before = updatedBefore?.getTime();
     const rows = [...this.byId.values()]
       .filter((o) => o.status === 'pending')
+      .filter((o) => before === undefined || o.updatedAt.getTime() < before)
       .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
     return { ok: true, value: rows };
   }

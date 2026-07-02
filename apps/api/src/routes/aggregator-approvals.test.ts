@@ -212,6 +212,27 @@ describe('admin approval routes', () => {
     expect(m.subject).toContain('approved');
   });
 
+  it('POST /decision/:id approve is single-use via CAS — a second click sends no duplicate email', async () => {
+    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+    const first = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
+      payload: { token, decision: 'approve' },
+    });
+    expect(first.statusCode).toBe(200);
+    expect(first.body).toContain('Application approved');
+
+    const second = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
+      payload: { token, decision: 'approve' },
+    });
+    expect(second.statusCode).toBe(200);
+    expect(second.body).toContain('Already approved');
+    // Applicant "approved" email went out exactly once.
+    expect(mailer.outbox).toHaveLength(1);
+  });
+
   it('POST /decision/:id approve aborts with 503 when signalstack upsert fails — DB stays pending, KC user stays disabled', async () => {
     // Hard-gate policy: signalstack upsert is step 1 of approval. If it
     // fails, the route returns 503 without touching DB status or KC user

@@ -90,6 +90,12 @@ export interface ListAggregatorsFilter {
   offset?: number;
   status?: AggregatorStatus;
   actorType?: ActorType;
+  /**
+   * Only rows last updated strictly before this instant. Lets the stale-pending
+   * cleanup filter by age in SQL, so the row cap counts stale rows (not fresh
+   * ones masking them).
+   */
+  updatedBefore?: Date;
 }
 
 export interface ListAggregatorsPage {
@@ -134,6 +140,21 @@ export abstract class AggregatorStoreBase {
     status: AggregatorStatus,
     updatedBy: string,
   ): Promise<StoreResult<Aggregator>>;
+  /**
+   * Atomic compare-and-set `pending`→`active`. Returns the updated row, or
+   * `null` inside `ok` when the row was not `pending` (a concurrent approval
+   * already committed). Lets the approval handler gate side effects (the
+   * applicant email) on the single winner and avoids the read-then-write
+   * TOCTOU of {@link updateStatus}.
+   *
+   * @param id - Aggregator UUID.
+   * @param updatedBy - Audit actor.
+   * @returns The updated row, or `null` when the row was not pending.
+   */
+  abstract approveFromPending(
+    id: string,
+    updatedBy: string,
+  ): Promise<StoreResult<Aggregator | null>>;
   /**
    * Stamps the signalstack organisation id on an aggregator row.
    *

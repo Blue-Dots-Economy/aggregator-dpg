@@ -60,12 +60,14 @@ export abstract class AggregatorOrgStoreBase {
   abstract findByOwnerEmail(email: string): Promise<OrgStoreResult<AggregatorOrg | null>>;
   abstract listActive(): Promise<OrgStoreResult<AggregatorOrg[]>>;
   /**
-   * Lists all `pending` orgs. Drives the §7 stale-pending cleanup, which prunes
-   * rows whose approval link is well past its TTL + grace.
+   * Lists `pending` orgs, optionally only those last updated before `updatedBefore`.
+   * Drives the §7 stale-pending cleanup; the age filter keeps the row cap
+   * counting genuinely-stale rows rather than fresh ones masking them.
    *
-   * @returns All rows with `status='pending'` (may be empty).
+   * @param updatedBefore - When set, only rows with `updated_at < updatedBefore`.
+   * @returns Matching `pending` rows (may be empty).
    */
-  abstract listPending(): Promise<OrgStoreResult<AggregatorOrg[]>>;
+  abstract listPending(updatedBefore?: Date): Promise<OrgStoreResult<AggregatorOrg[]>>;
   abstract update(id: string, patch: UpdateOrgPatch): Promise<OrgStoreResult<AggregatorOrg>>;
   /**
    * Hard-deletes an org row by id. Used by the §7 stale-pending cleanup after

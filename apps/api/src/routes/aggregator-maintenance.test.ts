@@ -79,7 +79,12 @@ describe('POST /admin/v1/aggregator-registrations/cleanup-stale', () => {
       updatedAt: new Date('2020-01-01T00:00:00Z'),
     });
     aggregatorStore.seed([fresh, stale]);
-    await idp.createUser({ email: 'stale@x.org', enabled: false });
+    // KC user is keyed by the stored aggregator_id attribute (not email).
+    await idp.createUser({
+      email: 'stale@x.org',
+      enabled: false,
+      attributes: { aggregator_id: stale.id },
+    });
 
     const res = await app.inject({
       method: 'POST',
@@ -128,11 +133,33 @@ describe('POST /admin/v1/aggregator-registrations/cleanup-stale', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = res.json() as { scanned: number; pruned: number };
-    expect(body.scanned).toBe(1);
+    // scanned counts only stale rows now (age-filtered in SQL); the fresh row
+    // is excluded, so nothing is scanned or pruned.
+    expect(body.scanned).toBe(0);
     expect(body.pruned).toBe(0);
   });
 
-  it('skips (does not prune) a stale row when KC findByEmail fails', async () => {
+  it('rejects a non-service-account (end-user) token with 403', async () => {
+    // A plain user token verifies but must not be able to trigger deletion.
+    const USER_BEARER = 'user-token';
+    _setAccessTokenVerifier(async (token) => {
+      if (token === USER_BEARER) {
+        return { sub: '9c1e2f00-user-uuid', aggregator_id: 'agg-1' };
+      }
+      if (token === SERVICE_BEARER) {
+        return { sub: 'service-account-aggregator-bff', azp: 'aggregator-bff' };
+      }
+      throw new Error('invalid token');
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/admin/v1/aggregator-registrations/cleanup-stale',
+      headers: { authorization: `Bearer ${USER_BEARER}` },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it('skips (does not prune) a stale row when the KC user lookup fails', async () => {
     // Stale pending row — old enough to be pruned.
     const stale = buildAggregator({
       id: '44444444-4444-4444-4444-444444444444',
@@ -144,18 +171,17 @@ describe('POST /admin/v1/aggregator-registrations/cleanup-stale', () => {
       updatedAt: new Date('2020-01-01T00:00:00Z'),
     });
     aggregatorStore.seed([stale]);
-    // No KC user created for this email — the fake will return ok:true,null.
-    // We monkey-patch findByEmail to return an IDP error for this specific email,
-    // simulating Keycloak being unreachable during the lookup.
-    const originalFindByEmail = idp.findByEmail.bind(idp);
-    idp.findByEmail = async (email: string) => {
-      if (email === 'lookup-fail@x.org') {
+    // Prune resolves the KC user by the stored aggregator_id attribute; patch
+    // findByAttribute to error, simulating Keycloak unreachable during lookup.
+    const originalFindByAttribute = idp.findByAttribute.bind(idp);
+    idp.findByAttribute = async (name: string, value: string) => {
+      if (value === stale.id) {
         return {
           ok: false as const,
           error: { code: 'IDP_UNAVAILABLE' as const, message: 'kc down' },
         };
       }
-      return originalFindByEmail(email);
+      return originalFindByAttribute(name, value);
     };
 
     const res = await app.inject({
@@ -165,7 +191,7 @@ describe('POST /admin/v1/aggregator-registrations/cleanup-stale', () => {
     });
 
     // Restore original method.
-    idp.findByEmail = originalFindByEmail;
+    idp.findByAttribute = originalFindByAttribute;
 
     expect(res.statusCode).toBe(200);
     const body = res.json() as { scanned: number; pruned: number; prunedIds: string[] };

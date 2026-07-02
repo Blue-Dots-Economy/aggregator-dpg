@@ -25,6 +25,7 @@ import { getIdpAdmin, KC_ATTR } from '../services/idp-admin/index.js';
 import { sendOrgReviewEmail } from '../services/org-registration-notify.js';
 import { normalisePhone } from '../services/phone.js';
 import { splitName } from '../services/name.js';
+import { checkSubmitRate } from '../services/submit-rate.js';
 import { slugFromName } from '../services/slug.js';
 import { authenticateAny } from '../services/auth/access-token.js';
 import { httpError } from '../errors/http-error.js';
@@ -107,6 +108,17 @@ export async function registerAggregatorOrgRoutes(app: FastifyInstance): Promise
       const orgStore = getAggregatorOrgStore();
       const idp = getIdpAdmin();
       const ownerEmail = body.owner.email.toLowerCase();
+
+      // Rate limit per (ip, owner email) — org create does KC group + user +
+      // email per hit, so throttle it like the coordinator submit.
+      const rl = await checkSubmitRate(`${req.ip}|${ownerEmail}`);
+      if (!rl.allowed) {
+        void reply.header('Retry-After', String(rl.retryAfterSeconds));
+        throw httpError('RATE_LIMITED', {
+          detail: `Retry in ${rl.retryAfterSeconds}s.`,
+          fields: { retry_after_seconds: rl.retryAfterSeconds },
+        });
+      }
 
       // §7 reclaim: a resubmit by the same owner against a still-recoverable
       // org (pending, or rejected == inactive) refreshes that row and re-mints

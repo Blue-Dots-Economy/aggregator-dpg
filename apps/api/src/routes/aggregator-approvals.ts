@@ -378,17 +378,19 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
           }
         }
 
-        // 5. DB status → active is the atomic commit point. Once flipped,
-        //    the single-use guard treats the approval as decided. Earlier
-        //    steps are idempotent so a failure here leaves status=pending
-        //    and admin can re-click the link to retry without side effects.
+        // 5. Atomic compare-and-set pending→active — the single commit point.
+        //    A concurrent click (double-submit / prefetch) that already
+        //    committed makes this return null, so only the winner runs the
+        //    side effects below (notably the applicant email — no duplicate).
+        //    Earlier steps are idempotent, so a failure here leaves
+        //    status=pending and the admin can re-click to retry.
         const dbUpdateStart = Date.now();
-        const dbUpdate = await store.updateStatus(aggregatorId, 'active', 'admin');
+        const dbUpdate = await store.approveFromPending(aggregatorId, 'admin');
         if (!dbUpdate.ok) {
           log.error(
             {
               status: 'failure',
-              sub_operation: 'store.updateStatus.active',
+              sub_operation: 'store.approveFromPending',
               code: dbUpdate.error.code,
               cause: dbUpdate.error.message,
               latency_ms: Date.now() - dbUpdateStart,
@@ -403,6 +405,15 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
               title: 'Action failed',
               message: 'Database unavailable. Please try again shortly.',
             }),
+          );
+        }
+        if (dbUpdate.value === null) {
+          // A concurrent approval already committed — render already-decided,
+          // skip the applicant email so it goes out exactly once.
+          return sendHtml(
+            reply,
+            200,
+            renderResultPage(alreadyDecidedView({ decision: 'approved' })),
           );
         }
 

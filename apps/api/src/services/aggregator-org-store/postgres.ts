@@ -8,7 +8,7 @@
  * authoritative for the owner identity.
  */
 
-import { and, eq, type SQL } from 'drizzle-orm';
+import { and, eq, lt, type SQL } from 'drizzle-orm';
 import { aggregatorOrgs } from '../../db/schema.js';
 import { getDb } from '../../db/client.js';
 import {
@@ -66,12 +66,12 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
     }
   }
 
-  async listPending(): Promise<OrgStoreResult<AggregatorOrg[]>> {
+  async listPending(updatedBefore?: Date): Promise<OrgStoreResult<AggregatorOrg[]>> {
     try {
-      const rows = await getDb()
-        .select()
-        .from(aggregatorOrgs)
-        .where(eq(aggregatorOrgs.status, 'pending'));
+      const where = updatedBefore
+        ? and(eq(aggregatorOrgs.status, 'pending'), lt(aggregatorOrgs.updatedAt, updatedBefore))
+        : eq(aggregatorOrgs.status, 'pending');
+      const rows = await getDb().select().from(aggregatorOrgs).where(where);
       return { ok: true, value: rows.map(toDomain) };
     } catch (e) {
       return errResult('DB_UNAVAILABLE', (e as Error).message);

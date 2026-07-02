@@ -6,7 +6,7 @@
  * pg error fields.
  */
 
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, lt, sql } from 'drizzle-orm';
 import { logger } from '../../logger.js';
 import { aggregators } from '../../db/schema.js';
 import { getDb } from '../../db/client.js';
@@ -128,6 +128,7 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
       const conds = [];
       if (filter.status) conds.push(eq(aggregators.status, filter.status));
       if (filter.actorType) conds.push(eq(aggregators.actorType, filter.actorType));
+      if (filter.updatedBefore) conds.push(lt(aggregators.updatedAt, filter.updatedBefore));
       const where = conds.length > 0 ? and(...conds) : undefined;
 
       const rows = await getDb()
@@ -183,6 +184,20 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
     updatedBy: string,
   ): Promise<StoreResult<Aggregator>> {
     return this.update(id, { status, updatedBy });
+  }
+
+  async approveFromPending(id: string, updatedBy: string): Promise<StoreResult<Aggregator | null>> {
+    try {
+      const rows = await getDb()
+        .update(aggregators)
+        .set({ status: 'active', updatedBy, updatedAt: new Date() })
+        .where(and(eq(aggregators.id, id), eq(aggregators.status, 'pending')))
+        .returning();
+      // No row → not pending (a concurrent approval already committed).
+      return { ok: true, value: rows[0] ? toDomain(rows[0]) : null };
+    } catch (err: unknown) {
+      return this.mapWriteError('aggregatorStore.approveFromPending', err, id, Date.now());
+    }
   }
 
   async updateSignalstackOrgId(

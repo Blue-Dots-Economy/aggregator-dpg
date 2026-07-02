@@ -98,6 +98,10 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
     let rows = [...this.byId.values()];
     if (filter.status) rows = rows.filter((r) => r.status === filter.status);
     if (filter.actorType) rows = rows.filter((r) => r.actorType === filter.actorType);
+    if (filter.updatedBefore) {
+      const before = filter.updatedBefore.getTime();
+      rows = rows.filter((r) => r.updatedAt.getTime() < before);
+    }
     rows.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
     return {
       ok: true,
@@ -154,6 +158,13 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
     updatedBy: string,
   ): Promise<StoreResult<Aggregator>> {
     return this.update(id, { status, updatedBy });
+  }
+
+  async approveFromPending(id: string, updatedBy: string): Promise<StoreResult<Aggregator | null>> {
+    const existing = this.byId.get(id);
+    // Only pending → active; anything else means already decided.
+    if (!existing || existing.status !== 'pending') return { ok: true, value: null };
+    return this.update(id, { status: 'active', updatedBy });
   }
 
   async updateSignalstackOrgId(
