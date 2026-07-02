@@ -48,8 +48,8 @@ export interface BulkAction {
  * The default bulk actions shipped with the dashboard:
  * 1. `export_selected_csv` — client-side CSV of the selected rows only
  *    (decoupled from the signalstack-owned full export).
- * 2. `trigger_callback` — 202-stub POST to `/api/dashboard/actions`; real
- *    delivery lands when the callback service exists.
+ * 2. `export_profile_data` — server-side CSV export of full profile data
+ *    for the selected real items.
  */
 export const DASHBOARD_BULK_ACTIONS: BulkAction[] = [
   {
@@ -77,19 +77,6 @@ export const DASHBOARD_BULK_ACTIONS: BulkAction[] = [
         itemIds,
       });
       triggerCsvDownload({ blob, filename });
-    },
-  },
-  {
-    id: 'trigger_callback',
-    labelKey: 'bulk.triggerCallback',
-    icon: 'phone',
-    kind: 'server',
-    run: async (rows, ctx) => {
-      await dashboardService.dashboardBulkAction({
-        action: 'trigger_callback',
-        domain: ctx.domain,
-        ids: rows.map((r) => r.id),
-      });
     },
   },
 ];
