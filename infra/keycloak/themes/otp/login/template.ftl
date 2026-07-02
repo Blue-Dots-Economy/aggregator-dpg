@@ -101,12 +101,6 @@
                         <button type="submit" class="bd-link-btn">${msg("doTryAnotherWay")}</button>
                     </form>
                 </#if>
-
-                <p class="bd-terms">
-                    By continuing you agree to the
-                    <a href="#" class="bd-link">Privacy Policy</a> and
-                    <a href="#" class="bd-link">Terms</a>.
-                </p>
             </div>
         </main>
     </div>

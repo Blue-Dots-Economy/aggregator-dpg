@@ -514,10 +514,6 @@
     "session_expired": "Your session expired. Sign in again to continue.",
     "org_no_portal": "Organisation accounts can't sign in to the portal yet. Organisation owners manage approvals through the links emailed to them. Only coordinators can sign in here.",
     "signin_failed": "Sign-in failed: {reason}. Please try again.",
-    "footer_prefix": "By continuing you agree to the",
-    "footer_and": "and",
-    "privacy": "Privacy Policy",
-    "terms": "Terms",
     "errors": {
       "invalid_flow_cookie": "session handshake expired",
       "missing_code_or_state": "incomplete callback",
