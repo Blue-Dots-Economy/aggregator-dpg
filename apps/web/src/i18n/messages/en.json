@@ -129,7 +129,6 @@
       "clear": "Clear selection",
       "exportSelected": "Export selected CSV",
       "exportProfileData": "Export profile data",
-      "triggerCallback": "Trigger Voice Call",
       "running": "Working…",
       "success": "{count} processed",
       "failed": "Action failed",
