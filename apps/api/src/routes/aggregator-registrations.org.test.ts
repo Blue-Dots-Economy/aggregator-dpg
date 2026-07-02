@@ -20,6 +20,8 @@ import { FakeMailer, _setMailer } from '../services/mailer/index.js';
 import { _resetTokenKey } from '../services/approval-token.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
 import { _setSubmitRateChecker } from '../services/submit-rate.js';
+import { ConsentLedgerFake } from '@aggregator-dpg/consent-ledger/testing';
+import { _setConsentLedger } from '../services/consent-ledger/index.js';
 
 const SERVICE_BEARER = 'service-token';
 const AUTH_HEADER = { authorization: `Bearer ${SERVICE_BEARER}` };
@@ -57,6 +59,7 @@ describe('coordinator submit with ORG_HIERARCHY_ENABLED', () => {
     _setAggregatorOrgStore(orgStore);
     _setIdpAdmin(idp);
     _setMailer(mailer);
+    _setConsentLedger(new ConsentLedgerFake());
     _setAccessTokenVerifier(async (token) => {
       if (token === SERVICE_BEARER) {
         return { sub: 'service-account-aggregator-bff', azp: 'aggregator-bff' };
@@ -76,6 +79,7 @@ describe('coordinator submit with ORG_HIERARCHY_ENABLED', () => {
     _setMailer(null);
     _setAccessTokenVerifier(null);
     _setSubmitRateChecker(null);
+    _setConsentLedger(null);
   });
 
   it('rejects coordinator submit when no active org exists (bootstrap)', async () => {

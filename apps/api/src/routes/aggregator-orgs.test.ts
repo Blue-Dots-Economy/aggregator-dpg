@@ -131,7 +131,7 @@ describe('aggregator-orgs routes', () => {
     expect(ledgerRows[0]?.subjectId).toBe(org_id);
   });
 
-  it('does not fail org registration when the consent ledger write fails', async () => {
+  it('fails org registration (fail-closed) when the consent ledger write fails', async () => {
     // Make the ledger always return an error
     consentLedger.recordRegistrationConsent = async () => ({
       success: false as const,
@@ -147,8 +147,11 @@ describe('aggregator-orgs routes', () => {
       headers: AUTH_HEADER,
       payload: { ...orgBody, owner: { ...orgBody.owner, email: 'ledger-fail@enable.org' } },
     });
-    // Registration must still succeed despite the ledger error
-    expect(res.statusCode).toBe(201);
+    // Fail-closed: the org path has no fallback, so a consent-write failure
+    // rolls the registration back rather than returning 201.
+    expect(res.statusCode).toBe(500);
+    const body = res.json() as { error: { code: string } };
+    expect(body.error.code).toBe('CONSENT_WRITE_FAILED');
   });
 
   it('GET /v1/orgs lists only active orgs', async () => {

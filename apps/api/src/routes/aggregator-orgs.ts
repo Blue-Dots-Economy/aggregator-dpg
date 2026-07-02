@@ -188,6 +188,25 @@ export async function registerAggregatorOrgRoutes(app: FastifyInstance): Promise
       }
       const org = created.value;
 
+      // Record registration consent BEFORE provisioning Keycloak, so a
+      // consent-write failure rolls back cleanly (just the org row, no external
+      // side effects). Fail-closed: never leave an org without a consent
+      // record. Network/brand come from resolveActiveNetwork() so the recorded
+      // version matches the content the web layer displayed.
+      const { network: activeNetwork, brand: activeBrand } = resolveActiveNetwork();
+      const consentRecorded = await recordOrgConsent({
+        orgId: org.id,
+        network: activeNetwork,
+        brand: activeBrand,
+        log,
+      });
+      if (!consentRecorded) {
+        await orgStore.deleteById(org.id);
+        throw httpError('CONSENT_WRITE_FAILED', {
+          fields: { sub_operation: 'recordOrgConsent', rolled_back: true },
+        });
+      }
+
       // Mirrored KC group (authz mirror — spec §9). Roll the org back to
       // inactive on failure so a half-provisioned org never appears active.
       // The group name is slug-based (unique + stable); the human org name is
@@ -241,20 +260,6 @@ export async function registerAggregatorOrgRoutes(app: FastifyInstance): Promise
           fields: { sub_operation: 'orgStore.update.stamp' },
         });
       }
-
-      // Record registration consent in the append-only ledger. This is
-      // log-and-continue: a ledger write failure must not block registration.
-      // Use resolveActiveNetwork() so the recorded network/brand matches the
-      // AGGREGATOR_NETWORK/AGGREGATOR_BRAND env vars that drive which consent
-      // content the web layer displays — preventing a mismatch between the
-      // version shown and the version recorded.
-      const { network: activeNetwork, brand: activeBrand } = resolveActiveNetwork();
-      await recordOrgConsent({
-        orgId: org.id,
-        network: activeNetwork,
-        brand: activeBrand,
-        log,
-      });
 
       await sendOrgReviewEmail(
         {
@@ -323,14 +328,16 @@ export async function registerAggregatorOrgRoutes(app: FastifyInstance): Promise
  * Loads the consent config for the given network/brand and records an org
  * registration-consent row in the append-only ledger.
  *
- * This is intentionally log-and-continue: any error (config read failure or
- * ledger write failure) is logged at `warn` level and the function resolves
- * without throwing so that the caller's registration flow is never blocked.
+ * Fail-closed: returns `false` if the consent config cannot be read or the
+ * ledger write fails, so the caller can roll the registration back rather than
+ * leave an org with no consent record. Failures are logged at `error` with the
+ * network + both versions so a missed write is reconstructable.
  *
  * @param orgId - The newly-created `aggregator_orgs.id`.
  * @param network - Signal Stack network identifier (e.g. `blue_dot`).
  * @param brand - Optional per-brand variant; undefined for the network default.
  * @param log - Request-scoped child logger.
+ * @returns `true` when the consent row was written, `false` otherwise.
  */
 async function recordOrgConsent({
   orgId,
@@ -342,7 +349,7 @@ async function recordOrgConsent({
   network: string;
   brand: string | undefined;
   log: ReturnType<FastifyRequest['log']['child']>;
-}): Promise<void> {
+}): Promise<boolean> {
   let termsVersion: number;
   let privacyVersion: number;
 
@@ -351,16 +358,18 @@ async function recordOrgConsent({
     termsVersion = consentCfg.audiences.org.documents.terms.current_version;
     privacyVersion = consentCfg.audiences.org.documents.privacy.current_version;
   } catch (e) {
-    log.warn(
+    log.error(
       {
         operation: 'consentLedger.recordOrgConsent',
-        status: 'skipped',
+        status: 'failure',
         error: e instanceof Error ? e.message : String(e),
         org_id: orgId,
+        network,
+        brand: brand ?? null,
       },
-      'consent config load failed — ledger write skipped',
+      'consent config load failed — registration rolled back',
     );
-    return;
+    return false;
   }
 
   const result = await getConsentLedger().recordRegistrationConsent({
@@ -373,15 +382,22 @@ async function recordOrgConsent({
   });
 
   if (!result.success) {
-    log.warn(
+    log.error(
       {
         operation: 'consentLedger.recordOrgConsent',
         status: 'failure',
         error: result.error.message,
         error_type: result.error.name,
         org_id: orgId,
+        network,
+        brand: brand ?? null,
+        terms_version: termsVersion,
+        privacy_version: privacyVersion,
       },
-      'consent ledger write failed — registration continues',
+      'consent ledger write failed — registration rolled back',
     );
+    return false;
   }
+
+  return true;
 }

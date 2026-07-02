@@ -32,6 +32,14 @@ export const ERR = {
     detail: 'The server hit an unexpected error. Please try again.',
     hint: 'Unhandled exception reached the global error handler. Check stack.',
   },
+  CONSENT_WRITE_FAILED: {
+    code: 'CONSENT_WRITE_FAILED',
+    status: 500,
+    title: 'Could not record consent',
+    detail:
+      'Your consent could not be recorded, so the registration was not completed. Please try again.',
+    hint: 'The consent-ledger write failed and the registration was rolled back (fail-closed). Check consent config + DB.',
+  },
   SCHEMA_VALIDATION: {
     code: 'SCHEMA_VALIDATION',
     status: 400,

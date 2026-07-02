@@ -186,7 +186,7 @@ describe('POST /v1/aggregator-registrations/create', () => {
     }
   });
 
-  it('does not fail registration when the consent ledger write fails', async () => {
+  it('fails registration (fail-closed) when the consent ledger write fails', async () => {
     // Make the ledger always return an error
     consentLedger.recordRegistrationConsent = async () => ({
       success: false as const,
@@ -202,8 +202,10 @@ describe('POST /v1/aggregator-registrations/create', () => {
       headers: AUTH_HEADER,
       payload: { ...validBody, contact: { ...validBody.contact, email: 'ledger-fail@trrain.org' } },
     });
-    // Registration must still succeed despite the ledger error
-    expect(res.statusCode).toBe(201);
+    // Fail-closed: no consent recorded → the registration is rolled back, not 201.
+    expect(res.statusCode).toBe(500);
+    const body = res.json() as { error: { code: string } };
+    expect(body.error.code).toBe('CONSENT_WRITE_FAILED');
   });
 
   it('returns 401 when Bearer is missing', async () => {
