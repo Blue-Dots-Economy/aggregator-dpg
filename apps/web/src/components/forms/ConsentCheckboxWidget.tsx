@@ -53,25 +53,25 @@ export function ConsentCheckboxWidget(props: WidgetProps): JSX.Element {
       <button
         type="button"
         className="text-primary-600 underline hover:text-primary-700 cursor-pointer"
-        onClick={() => openTab('terms')}
+        onClick={() => openTab('privacy')}
       >
-        {t('consent.terms_link')}
+        {t('consent.privacy_link')}
       </button>
       {t('consent.and')}
       <button
         type="button"
         className="text-primary-600 underline hover:text-primary-700 cursor-pointer"
-        onClick={() => openTab('privacy')}
+        onClick={() => openTab('terms')}
       >
-        {t('consent.privacy_link')}
+        {t('consent.terms_link')}
       </button>
     </span>
   ) : (
     <span className="text-[13.5px] text-ink-700 leading-relaxed">
       {t('consent.accept_prefix')}
-      {t('consent.terms_link')}
-      {t('consent.and')}
       {t('consent.privacy_link')}
+      {t('consent.and')}
+      {t('consent.terms_link')}
     </span>
   );
 
