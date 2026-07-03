@@ -1,11 +1,26 @@
 # Aggregator DPG — Technical Specification
 
-**Status:** Draft v0.1
+**Status:** Draft v0.1 (product spec) — implementation has moved ahead of parts of this document; see **Implementation status** below.
 **Source PRD:** `docs/Aggregator Product Note.pdf` (Draft 2)
 **Scope:** MVP (V1 beta)
-**Last updated:** 2026-04-21
+**Last updated:** 2026-07-03
 
 > **Setting up locally?** See [`SETUP.md`](SETUP.md) for the end-to-end quickstart (prereqs → docker compose → KC mappers → run apps → smoke test).
+>
+> **Working in the code?** [`CLAUDE.md`](CLAUDE.md) is the authoritative operational reference (apps, packages, commands, env, architecture). This README is the original PRD-derived spec and is kept for product context.
+
+---
+
+## Implementation status
+
+This document was written before build and remains the product-intent spec. Where the code now differs, the code (and `CLAUDE.md` / `SETUP.md`) is authoritative. Key deltas as of 2026-07-03:
+
+- **Stack** — the API/BFF is **Fastify** (not "Express or Fastify"); the portal is **Next.js 15 (App Router)**; a **BullMQ worker** runs bulk-upload processing; storage is **Postgres + Drizzle** + S3 + Redis. It is a **pnpm + Turbo** monorepo (`apps/api`, `apps/web`, `apps/worker`, `packages/*`).
+- **Identity & auth** — authentication is **Keycloak** (realm `aggregator`, OIDC Authorization-Code + PKCE) with a custom **email/phone OTP** authenticator SPI, not a bespoke local JWT service. Portal sessions are Redis-backed signed cookies. `aggregator_id` is still asserted server-side on every request and never trusted from the client.
+- **Registration & approval** — approval is an **in-app, token-based email flow** (signed approval-token link → approver page → atomic compare-and-set on the row → Keycloak user enable + role assignment), with expired-link regeneration, resubmit-reclaim of a pending/rejected registration, and a service-auth endpoint that prunes stale pending registrations. It is no longer a purely manual/external process (§4.1 / §6.1).
+- **Org → coordinator hierarchy** — an optional parent-organisation → coordinator hierarchy sits behind the per-instance **`ORG_HIERARCHY_ENABLED`** flag (default off = the flat flow described here). When on, a parent org registers/approves separately (system-of-record `aggregator_orgs` table + mirrored Keycloak group + `org_owner` realm role), and each coordinator is bound to an active org (`aggregators.parent_org_id`).
+- **Consent** — registration now **captures consent** (§7.3): a required consent checkbox + read-only Terms/Privacy popup on both registration forms, with document text managed as versioned config-as-code (`config/**/consent.json`, per `org` / `aggregator` audience) and every acceptance written to an append-only `aggregator_consent_record` ledger (fail-closed — no subject is provisioned without a consent row).
+- **Not yet built** — the standalone **Signal Processing Service** (§2.3, §5.2) is not implemented; derived/dashboard metrics are served by the API reading upstream. Treat §5.2 and the two-service diagram as target architecture, not current state.
 
 ---
 
@@ -167,7 +182,7 @@ For AG-6 (reporting), the summary view itself is the report in MVP; the export f
 
 ### 5.1 Aggregator API (BFF)
 
-Node.js + TypeScript, Express or Fastify. Stateless, deployed behind the platform's ingress. Responsibilities:
+Node.js + TypeScript, **Fastify** (as built). Stateless, deployed behind the platform's ingress. Responsibilities:
 
 - Session and OTP (integrates with existing Signals Stack auth if available; otherwise issues JWTs locally against email/phone verified via OTP provider).
 - Orchestrates reads from Signal Processing Service + Signals Stack + Jobs Stack and shapes them for the UI.
@@ -299,10 +314,12 @@ Diagrams in the PRD (Flows 1–4) are authoritative. Implementation notes:
 
 ### 7.2 Authorisation
 
-- MVP has a single role: `aggregator_admin`. All four areas accessible.
-- RBAC tiers (coordinator / admin / super-admin) are explicitly Future Scope item 8.
+- MVP has a single portal role: the aggregator/coordinator admin. All four areas accessible.
+- A parent-org tier now exists behind `ORG_HIERARCHY_ENABLED` (see **Implementation status**): an `org_owner` Keycloak realm role approves the coordinators bound to that org. Broader RBAC tiers (admin / super-admin) remain Future Scope item 8.
 
-### 7.3 DPDP and consent (open items)
+### 7.3 DPDP and consent
+
+> **Implemented:** registration now captures consent. Both registration forms carry a required consent checkbox plus a read-only Terms/Privacy popup; the document text is versioned config-as-code (`config/**/consent.json`, per `org` / `aggregator` audience) and every acceptance is written to an append-only `aggregator_consent_record` ledger (subject, network/brand, terms/privacy version, timestamp). The write is fail-closed — a subject is never provisioned without a consent record. The two items below remain open policy questions.
 
 Two open items from the PRD:
 
