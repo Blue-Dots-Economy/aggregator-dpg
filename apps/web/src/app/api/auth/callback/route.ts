@@ -21,6 +21,7 @@ import {
   verifyFlowState,
 } from '@/lib/cookies';
 import { logger, pickRequestId } from '@/lib/logger';
+import { tokenAggregatorId } from '@/lib/jwt';
 
 export const runtime = 'nodejs';
 
@@ -93,6 +94,24 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 
   const { tokens, claims } = exchanged.value;
+
+  // Portal access is coordinator-only. A coordinator's token carries an
+  // `aggregator_id` claim (mapped from the KC user attribute); org owners and
+  // the network admin do not. Block anyone without it at the door so an org
+  // owner who is a valid KC user cannot land in the (data-less, broken)
+  // coordinator portal. Org-owner console login is a separate, future feature.
+  if (!tokenAggregatorId(tokens.accessToken)) {
+    log.warn(
+      {
+        code: 'NO_AGGREGATOR_ID',
+        sub: claims.sub,
+        hint: 'Authenticated KC user has no aggregator_id claim (org owner / network admin). Portal is coordinator-only.',
+      },
+      'blocking non-coordinator portal login',
+    );
+    return failure(req, 'org_no_portal');
+  }
+
   const now = Date.now();
   const sessionData: SessionData = {
     sub: claims.sub,

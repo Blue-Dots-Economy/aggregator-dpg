@@ -533,3 +533,125 @@ describe('GET /v1/dashboard', () => {
     expect(spy).toHaveBeenCalledWith(expect.objectContaining({ refresh: false }));
   });
 });
+
+describe('POST /v1/dashboard/export/profiles', () => {
+  let app: FastifyInstance;
+  let writer: SignalStackWriterFake;
+  let aggregatorStore: AggregatorStoreFake;
+  let idp: IdpAdminFake;
+
+  beforeEach(async () => {
+    _resetJwks();
+    process.env.KEYCLOAK_URL = 'http://kc.local';
+    process.env.KEYCLOAK_REALM = 'aggregator';
+    process.env.SIGNALSTACK_BASE_URL = 'http://stub-signalstack';
+    process.env.SIGNALSTACK_ADMIN_KEY = 'stub-key';
+    process.env.SIGNALSTACK_ACTING_ORG_ID = 'org_platform';
+    _setNetworkConfig(buildBlueDotConfig());
+
+    idp = new IdpAdminFake();
+    await idp.createUser({
+      email: 'kc-1@x.com',
+      enabled: true,
+      attributes: { aggregator_id: AGG_A, decision_made: 'approved' },
+    });
+    _setIdpAdmin(idp);
+
+    aggregatorStore = new AggregatorStoreFake();
+    aggregatorStore.seed([
+      buildAggregator({
+        id: AGG_A,
+        orgSlug: 'agg-a',
+        name: 'Agg A',
+        status: 'active',
+        signalstackOrgId: ORG_A,
+      }),
+    ]);
+    _setAggregatorStore(aggregatorStore);
+
+    writer = new SignalStackWriterFake();
+    _setSignalStackWriter(writer);
+
+    _setAccessTokenVerifier(async (token) => {
+      if (token === 'agg-a-approved-with-org') {
+        return {
+          sub: 'kc-1',
+          email: 'a@x.com',
+          aggregator_id: AGG_A,
+          decision_made: 'approved',
+          signalstack_org_id: ORG_A,
+        };
+      }
+      if (token === 'agg-a-pending') {
+        return {
+          sub: 'kc-1',
+          email: 'a@x.com',
+          aggregator_id: AGG_A,
+          decision_made: 'pending',
+        };
+      }
+      throw new Error('invalid token');
+    });
+
+    app = await buildApp();
+  });
+
+  afterAll(async () => {
+    await app?.close();
+    _setSignalStackWriter(null);
+    _setAggregatorStore(null);
+    _setIdpAdmin(null);
+    _setAccessTokenVerifier(null);
+    _setNetworkConfig(null);
+  });
+
+  it('returns CSV of decrypted profiles for selected item_ids', async () => {
+    // Seed a profile under ORG_A (the aggregator's signalstack org) via onboard()
+    // so acting_org_id is set correctly for fetchDecryptedProfiles org-scoped match.
+    const onboarded = await writer.onboard({
+      actingOrgId: ORG_A,
+      name: 'Velu',
+      phoneNumber: '+919876801011',
+      terms_accepted: true,
+      privacy_accepted: true,
+      channel: 'link',
+      source_id: 'link-1',
+      network: 'blue_dot',
+      domain: 'seeker',
+      item_type: 'profile_1.0',
+      profile: { name: 'Velu Murugan', phone: '+919876801011' },
+    });
+    if (!onboarded.success) throw new Error('seed failed');
+    const itemId = onboarded.value.profile_item_id;
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/dashboard/export/profiles',
+      headers: {
+        authorization: 'Bearer agg-a-approved-with-org',
+        'content-type': 'application/json',
+      },
+      payload: { item_ids: [itemId], domain: 'seeker' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toContain('text/csv');
+    expect(res.headers['content-disposition']).toContain('attachment; filename="profiles-seeker-');
+    const csv = res.body;
+    expect(csv.split('\r\n')[0]).toBe('item_id,name,phone');
+    expect(csv).toContain('Velu Murugan');
+  });
+
+  it('rejects an empty item_ids array with 400', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/dashboard/export/profiles',
+      headers: {
+        authorization: 'Bearer agg-a-approved-with-org',
+        'content-type': 'application/json',
+      },
+      payload: { item_ids: [], domain: 'seeker' },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+});

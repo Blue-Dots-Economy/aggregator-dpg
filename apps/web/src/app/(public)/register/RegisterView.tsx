@@ -1,250 +1,79 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
-import type { RJSFSchema, UiSchema } from '@rjsf/utils';
-import type { IChangeEvent } from '@rjsf/core';
-import { RjsfThemedForm } from '../../../components/forms/RjsfThemed';
+import type { RJSFSchema } from '@rjsf/utils';
 import { BlueDotsLogo } from '../../../components/ui/BlueDotsLogo';
 import { BrandPanel } from '../../../components/login/BrandPanel';
 import { I } from '../../../icons';
 import { useTranslations } from 'next-intl';
 import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
+import { CoordinatorRegisterForm } from './CoordinatorRegisterForm';
+import { OrgRegisterForm } from './OrgRegisterForm';
+import type { ConsentDocContent } from '../../../components/consent/consent-types';
 
 export interface RegisterViewProps {
   schema: RJSFSchema;
   uiSchema: Record<string, unknown>;
+  /** True when `ORG_HIERARCHY_ENABLED` is on — shows org tab + org selector. */
+  orgHierarchyEnabled?: boolean;
+  /** Org-registration JSON Schema — present only when the flag is on. */
+  orgSchema?: RJSFSchema;
+  /** Org-registration UI schema — present only when the flag is on. */
+  orgUiSchema?: Record<string, unknown>;
+  /**
+   * Versioned Terms/Privacy content for the coordinator (aggregator) form.
+   * Passed as `formContext.consentContent` to the RJSF form so the
+   * {@link ConsentCheckboxWidget} can render clickable links.
+   * `null` when `loadConsentConfig` failed — widget degrades to plain text.
+   */
+  aggregatorConsentContent?: ConsentDocContent | null;
+  /**
+   * Versioned Terms/Privacy content for the org registration form.
+   * Forwarded to {@link OrgRegisterForm} as `consentContent`.
+   * `null` when `loadConsentConfig` failed — widget degrades to plain text.
+   */
+  orgConsentContent?: ConsentDocContent | null;
 }
 
-type SubmitState =
-  | { status: 'idle' }
-  | { status: 'submitting' }
-  | { status: 'done'; aggregatorId: string }
-  | { status: 'error'; title: string; detail: string; code: string; requestId: string };
-
-interface RegistrationResponse {
-  aggregator_id: string;
-  org_slug?: string;
-  message?: string;
-}
-
-interface ApiErrorEnvelope {
-  error?: {
-    code?: string;
-    title?: string;
-    detail?: string;
-    requestId?: string;
-  };
-}
-
-interface AjvLikeError {
-  name?: string;
-  property?: string;
-  message?: string;
-  params?: Record<string, unknown>;
-  schemaPath?: string;
-}
-
-function titleCase(s: string): string {
-  return s
-    .replace(/[_-]+/g, ' ')
-    .replace(/\.([a-z])/gi, ' $1')
-    .replace(/([A-Z])/g, ' $1')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .split(' ')
-    .map((w) => (w ? w[0]!.toUpperCase() + w.slice(1) : ''))
-    .join(' ');
-}
+type RegisterTab = 'coordinator' | 'org';
 
 /**
- * Walk a JSON Schema along a dotted path and return the leaf node's `title`
- * if it has one. Falls back to undefined so the caller can pick a sensible
- * substitute (e.g. last path segment, missingProperty).
+ * Registration page shell: brand panel, header, heading, and (flag-on) the
+ * Organisation / Coordinator tab switch. Delegates each tab's form to
+ * `CoordinatorRegisterForm` / `OrgRegisterForm`.
+ *
+ * With the org hierarchy off, it renders only the coordinator form — no tabs,
+ * no org calls — identical to today.
+ *
+ * @param props - Coordinator schema/UI schema, the org-hierarchy flag, and
+ *   (when on) the org schema/UI schema.
+ * @returns The registration page body.
  */
-function lookupTitle(schema: RJSFSchema, dottedPath: string): string | undefined {
-  if (!dottedPath) return undefined;
-  const segs = dottedPath.split('.').filter(Boolean);
-  let cur: unknown = schema;
-  for (const seg of segs) {
-    if (cur && typeof cur === 'object' && 'properties' in cur) {
-      const props = (cur as { properties?: Record<string, unknown> }).properties;
-      const next = props?.[seg];
-      if (!next) return undefined;
-      cur = next;
-    } else {
-      return undefined;
-    }
-  }
-  if (cur && typeof cur === 'object' && 'title' in cur) {
-    return (cur as { title?: string }).title;
-  }
-  return undefined;
-}
-
-/**
- * Convert Ajv-shaped validation errors into user-facing sentences like
- * "Aggregator Type is required" — keyed off the schema `title` for each
- * field. Falls back to a title-cased version of the field key.
- */
-function humaniseValidationErrors(errs: AjvLikeError[], schema: RJSFSchema): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const e of errs) {
-    const propPath = (e.property ?? '').replace(/^\./, '');
-    const missing = (e.params?.['missingProperty'] as string | undefined) ?? undefined;
-    const fullPath = missing ? [propPath, missing].filter(Boolean).join('.') : propPath;
-    const titleFromSchema = lookupTitle(schema, fullPath);
-    const fallbackKey = missing || fullPath.split('.').pop() || '';
-    const resolvedLabel =
-      (titleFromSchema && titleFromSchema.trim()) || (fallbackKey && titleCase(fallbackKey)) || '';
-    const isRequired = e.name === 'required' || /required/i.test(e.message ?? '');
-    const rawMessage = (e.message ?? '').trim();
-    // When Ajv can't pin a single property (e.g. anyOf / oneOf branches all
-    // failed), fall back to the schemaPath so the user sees at least *which*
-    // constraint blew up — beats a vacuous "Form: is invalid".
-    let line: string;
-    if (resolvedLabel) {
-      line = isRequired
-        ? `${resolvedLabel} is required`
-        : `${resolvedLabel}: ${rawMessage || 'is invalid'}`;
-    } else if (rawMessage) {
-      // No path but we have a message — show the message standalone.
-      line = rawMessage;
-    } else {
-      // Last resort: surface the schemaPath so we have *some* signal.
-      const where = (e.schemaPath ?? '').replace(/^#?\/?/, '');
-      line = where ? `Validation failed at ${where}` : 'One or more fields failed validation.';
-    }
-    if (!seen.has(line)) {
-      seen.add(line);
-      out.push(line);
-    }
-  }
-  return out.length > 0 ? out : ['One or more fields failed validation.'];
-}
-
-function parseError(
-  body: unknown,
-  fallbackStatus: number,
-  fallbackReqId: string,
-): {
-  title: string;
-  detail: string;
-  code: string;
-  requestId: string;
-} {
-  const env = body as ApiErrorEnvelope;
-  return {
-    title: env?.error?.title ?? 'Submission failed',
-    detail: env?.error?.detail ?? `The server returned HTTP ${fallbackStatus}.`,
-    code: env?.error?.code ?? 'UNKNOWN',
-    requestId: env?.error?.requestId ?? fallbackReqId,
-  };
-}
-
-/**
- * Renders the aggregator registration form via RJSF using the JSON Schema +
- * UI schema loaded by the server component. POSTs the validated payload to
- * the BFF, which proxies to the API.
- */
-export function RegisterView({ schema, uiSchema }: RegisterViewProps): JSX.Element {
+export function RegisterView({
+  schema,
+  uiSchema,
+  orgHierarchyEnabled = false,
+  orgSchema,
+  orgUiSchema,
+  aggregatorConsentContent,
+  orgConsentContent,
+}: RegisterViewProps): JSX.Element {
   const t = useTranslations('register');
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
   const brand = cfg.brand.short_name;
-  // Controlled form data. The initial value seeds the location card +
-  // consent timestamps; onChange keeps our state in sync with RJSF so that
-  // a re-render triggered by `state` updates (e.g. showing an error alert)
-  // doesn't wipe what the user already typed.
-  const [formData, setFormData] = useState<Record<string, unknown>>(() => {
-    const now = new Date();
-    const oneYear = new Date(now);
-    oneYear.setFullYear(oneYear.getFullYear() + 1);
-    return {
-      locations: [
-        {
-          geo: { type: 'Point', coordinates: [0, 0] },
-          address: { addressCountry: 'IN' },
-        },
-      ],
-      consent: {
-        given_at: now.toISOString(),
-        valid_till: oneYear.toISOString(),
-      },
-    };
-  });
-  const [state, setState] = useState<SubmitState>({ status: 'idle' });
-  // Gates the submit button: disabled until every visible required field is valid.
-  const [canSubmit, setCanSubmit] = useState(false);
-  const errorRef = useRef<HTMLDivElement>(null);
 
-  // On any submit failure (server error or client validation), pull the
-  // error banner into view + focus it. The submit button sits far below
-  // the banner, so without this a first-time user clicks submit and sees
-  // nothing change — the reason is off-screen above the fold.
-  useEffect(() => {
-    if (state.status === 'error' && errorRef.current) {
-      errorRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      errorRef.current.focus();
-    }
-  }, [state]);
+  // The org tab exists only when the flag is on AND the server loaded the org
+  // schema (defensive: a flag-on network missing the schema file falls back to
+  // the coordinator-only form rather than crashing).
+  const showTabs = orgHierarchyEnabled && Boolean(orgSchema && orgUiSchema);
+  const [tab, setTab] = useState<RegisterTab>('coordinator');
 
-  // Page header uses the schema title plus a short user-facing tagline. The
-  // schema's `description` field is intentionally technical (it documents
-  // the API contract) and is hidden from the form UI.
-  const headingTitle = (schema.title as string | undefined) ?? 'Aggregator Registration';
-  const headingTagline = t('heading_tagline');
-
-  const formSchema = useMemo<RJSFSchema>(() => {
-    const clone: RJSFSchema = { ...schema };
-    delete (clone as { title?: string }).title;
-    delete (clone as { description?: string }).description;
-    return clone;
-  }, [schema]);
-
-  const handleSubmit = async (
-    e: IChangeEvent<Record<string, unknown>>,
-    _event: FormEvent<HTMLFormElement>,
-  ): Promise<void> => {
-    setState({ status: 'submitting' });
-    // Refresh consent timestamps at submit so they reflect the actual moment
-    // the user clicked, not page-load time.
-    const now = new Date();
-    const oneYear = new Date(now);
-    oneYear.setFullYear(oneYear.getFullYear() + 1);
-    const payload = {
-      ...(e.formData ?? {}),
-      consent: {
-        ...((e.formData as Record<string, unknown> | undefined)?.consent ?? {}),
-        given_at: now.toISOString(),
-        valid_till: oneYear.toISOString(),
-      },
-    };
-    try {
-      const res = await fetch('/api/aggregator/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const reqId = res.headers.get('x-request-id') ?? '';
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        setState({ status: 'error', ...parseError(body, res.status, reqId) });
-        return;
-      }
-      const body = (await res.json()) as RegistrationResponse;
-      setState({ status: 'done', aggregatorId: body.aggregator_id });
-    } catch (err) {
-      setState({
-        status: 'error',
-        title: 'Network error',
-        detail: err instanceof Error ? err.message : 'Could not reach the server.',
-        code: 'NETWORK_ERROR',
-        requestId: '',
-      });
-    }
-  };
+  // Neutral heading when tabs show; keep today's schema-title heading otherwise.
+  const headingTitle = showTabs
+    ? t('page_title')
+    : ((schema.title as string | undefined) ?? 'Aggregator Registration');
 
   return (
     <div className="h-screen w-full flex overflow-hidden">
@@ -302,111 +131,49 @@ export function RegisterView({ schema, uiSchema }: RegisterViewProps): JSX.Eleme
           <h1 className="font-display font-bold text-[28px] text-ink-900 tracking-tight leading-tight mt-3">
             {headingTitle}
           </h1>
-          <p className="text-[14px] text-ink-500 mt-2">{headingTagline}</p>
+          <p className="text-[14px] text-ink-500 mt-2">{t('heading_tagline')}</p>
 
-          {state.status === 'done' ? (
-            <div className="mt-8 rounded-[14px] border border-emerald-200 bg-emerald-50 p-6">
-              <div className="font-display font-bold text-[18px] text-emerald-800">
-                {t('success_heading')}
-              </div>
-              <p className="text-[14px] text-emerald-700 mt-2">
-                {t('success_ref_id')}{' '}
-                <code className="font-mono text-[12.5px]">{state.aggregatorId}</code>
-              </p>
-              <p className="text-[14px] text-emerald-700 mt-3">
-                {t('success_approval', { brand })}
-              </p>
-              <Link
-                href="/login"
-                className="mt-5 inline-flex items-center gap-2 text-[13.5px] text-primary-600 font-semibold hover:underline"
-              >
-                <I.arrowL size={15} /> Back to sign in
-              </Link>
-            </div>
-          ) : (
-            <div className="mt-7">
-              {state.status === 'error' ? (
-                <div
-                  ref={errorRef}
-                  role="alert"
-                  tabIndex={-1}
-                  className="mb-5 rounded-[10px] border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-700 scroll-mt-6 outline-none"
-                >
-                  <div className="font-semibold">{state.title}</div>
-                  {state.detail ? (
-                    <ul className="mt-1.5 text-red-600 list-disc list-inside space-y-0.5">
-                      {state.detail
-                        .split('\n')
-                        .filter(Boolean)
-                        .map((line, i) => (
-                          <li key={i}>{line}</li>
-                        ))}
-                    </ul>
-                  ) : null}
-                  {state.code === 'CLIENT_VALIDATION' && state.requestId ? (
-                    <details className="mt-2 text-[11px] text-red-500/80">
-                      <summary className="cursor-pointer">Show raw validation errors</summary>
-                      <pre className="mt-1 whitespace-pre-wrap font-mono text-[11px] bg-red-100/40 rounded p-2 max-h-[200px] overflow-auto">
-                        {state.requestId}
-                      </pre>
-                    </details>
-                  ) : null}
-                </div>
-              ) : null}
-
-              <RjsfThemedForm
-                schema={formSchema}
-                uiSchema={uiSchema as unknown as UiSchema<Record<string, unknown>>}
-                formData={formData}
-                onChange={(e) => setFormData(e.formData as Record<string, unknown>)}
-                onValidityChange={setCanSubmit}
-                onSubmit={handleSubmit}
-                onError={(errs) => {
-                  // Convert raw Ajv errors into human-readable lines using
-                  // schema titles. Drop dotted paths like ".contact.phone" in
-                  // favour of "Phone is required".
-                  const lines = humaniseValidationErrors(errs, formSchema);
-                  // Stash a JSON dump of the raw Ajv errors into the detail
-                  // payload so when humanise can't resolve a label, the user
-                  // can copy-paste the underlying object from the alert
-                  // without opening DevTools.
-                  const rawDump = JSON.stringify(errs, null, 2);
-                  setState({
-                    status: 'error',
-                    title: t('validation_error_title'),
-                    detail: lines.join('\n'),
-                    code: 'CLIENT_VALIDATION',
-                    requestId: rawDump,
-                  });
-                  if (typeof window !== 'undefined') {
-                    console.error('[register] validation errors', errs);
-                  }
-                }}
-                showErrorList={false}
-                focusOnFirstError
-                noHtml5Validate
-              >
-                <div className="mt-4 flex flex-col gap-3">
+          {showTabs ? (
+            <div
+              role="tablist"
+              aria-label={t('page_title')}
+              className="mt-6 grid grid-cols-2 gap-1 w-full max-w-[520px] rounded-[14px] border border-[#e2e8f0] bg-[#eef2f7] p-1"
+            >
+              {(['coordinator', 'org'] as const).map((key) => {
+                const active = tab === key;
+                return (
                   <button
-                    type="submit"
-                    disabled={state.status === 'submitting' || !canSubmit}
-                    className={`w-full py-3 rounded-[12px] font-display font-bold text-[15px] text-white transition-all
-                      ${
-                        state.status === 'submitting' || !canSubmit
-                          ? 'bg-[var(--bd-primary-100)] text-[var(--bd-primary-600)] cursor-not-allowed'
-                          : 'bg-[var(--bd-primary)] hover:bg-[var(--bd-primary-600)] bd-shadow-lg'
-                      }`}
+                    key={key}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => setTab(key)}
+                    className={`rounded-[11px] px-3 py-[13px] text-center text-[15px] font-semibold tracking-[-0.1px] whitespace-nowrap cursor-pointer transition-[background,color,box-shadow] duration-200 ${
+                      active
+                        ? 'bg-[var(--bd-primary)] text-white shadow-[0_4px_12px_color-mix(in_srgb,var(--bd-primary)_28%,transparent)]'
+                        : 'bg-transparent text-slate-500 hover:text-ink-900'
+                    }`}
                   >
-                    {state.status === 'submitting' ? t('submitting') : t('submit')}
+                    {key === 'coordinator' ? t('tab_coordinator') : t('tab_org')}
                   </button>
-                </div>
-              </RjsfThemedForm>
-
-              <div className="mt-5 text-[12px] text-ink-400 flex items-start gap-2">
-                <span className="w-1 h-1 rounded-full bg-ink-300 mt-1.5 shrink-0" />
-                {t('footer_note', { brand })}
-              </div>
+                );
+              })}
             </div>
+          ) : null}
+
+          {showTabs && tab === 'org' && orgSchema && orgUiSchema ? (
+            <OrgRegisterForm
+              schema={orgSchema}
+              uiSchema={orgUiSchema}
+              {...(orgConsentContent ? { consentContent: orgConsentContent } : {})}
+            />
+          ) : (
+            <CoordinatorRegisterForm
+              schema={schema}
+              uiSchema={uiSchema}
+              orgHierarchyEnabled={orgHierarchyEnabled}
+              {...(aggregatorConsentContent ? { consentContent: aggregatorConsentContent } : {})}
+            />
           )}
         </div>
       </div>

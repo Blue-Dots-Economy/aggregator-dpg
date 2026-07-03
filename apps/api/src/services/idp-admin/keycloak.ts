@@ -289,6 +289,166 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
     return this.setAttributes(userId, { [KC_ATTR.DECISION_MADE]: decision });
   }
 
+  async createGroup(
+    name: string,
+    attributes?: Record<string, string | string[]>,
+  ): Promise<IdpResult<{ id: string }>> {
+    const tokenResult = await this.getToken();
+    if (!tokenResult.ok) return tokenResult;
+
+    // Keycloak group attributes are always string[]; coerce scalars.
+    const kcAttributes: Record<string, string[]> = {};
+    for (const [k, v] of Object.entries(attributes ?? {})) {
+      kcAttributes[k] = Array.isArray(v) ? v : [v];
+    }
+
+    const url = `${this.opts.baseUrl}/admin/realms/${this.opts.realm}/groups`;
+    const res = await this.safeFetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${tokenResult.value}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ name, attributes: kcAttributes }),
+    });
+    if (!res.ok) return res;
+    if (res.value.status !== 201) {
+      const text = await res.value.text().catch(() => '');
+      return {
+        ok: false,
+        error: {
+          code: res.value.status === 409 ? 'BAD_REQUEST' : 'IDP_UNAVAILABLE',
+          message: `createGroup HTTP ${res.value.status}: ${text.slice(0, 200)}`,
+        },
+      };
+    }
+    // Keycloak returns the new group's URL in the Location header.
+    const location = res.value.headers.get('location');
+    const groupId = location?.split('/').pop();
+    if (!groupId) {
+      return {
+        ok: false,
+        error: { code: 'IDP_UNAVAILABLE', message: 'no Location header on group create' },
+      };
+    }
+
+    // Keycloak's `POST /groups` ignores the `attributes` field on creation, so
+    // attributes must be persisted with a follow-up `PUT /groups/{id}`. Without
+    // this the group carries no `org_id` / `display_name`.
+    if (Object.keys(kcAttributes).length > 0) {
+      const putUrl = `${this.opts.baseUrl}/admin/realms/${this.opts.realm}/groups/${groupId}`;
+      const putRes = await this.safeFetch(putUrl, {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${tokenResult.value}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ name, attributes: kcAttributes }),
+      });
+      if (!putRes.ok) return putRes;
+      if (!putRes.value.ok) {
+        const text = await putRes.value.text().catch(() => '');
+        return {
+          ok: false,
+          error: {
+            code: 'IDP_UNAVAILABLE',
+            message: `createGroup set-attributes HTTP ${putRes.value.status}: ${text.slice(0, 200)}`,
+          },
+        };
+      }
+    }
+
+    return { ok: true, value: { id: groupId } };
+  }
+
+  async deleteGroup(groupId: string): Promise<IdpResult<void>> {
+    const tokenResult = await this.getToken();
+    if (!tokenResult.ok) return tokenResult;
+
+    const url = `${this.opts.baseUrl}/admin/realms/${this.opts.realm}/groups/${groupId}`;
+    const res = await this.safeFetch(url, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${tokenResult.value}` },
+    });
+    if (!res.ok) return res;
+    // 404 → already gone; treat as success (idempotent).
+    if (!res.value.ok && res.value.status !== 404) {
+      return {
+        ok: false,
+        error: { code: 'IDP_UNAVAILABLE', message: `deleteGroup HTTP ${res.value.status}` },
+      };
+    }
+    return { ok: true, value: undefined };
+  }
+
+  async addUserToGroup(userId: string, groupId: string): Promise<IdpResult<void>> {
+    const tokenResult = await this.getToken();
+    if (!tokenResult.ok) return tokenResult;
+
+    const url = `${this.opts.baseUrl}/admin/realms/${this.opts.realm}/users/${userId}/groups/${groupId}`;
+    const res = await this.safeFetch(url, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${tokenResult.value}` },
+    });
+    if (!res.ok) return res;
+    if (res.value.status === 404) {
+      return { ok: false, error: { code: 'USER_NOT_FOUND', message: `${userId}/${groupId}` } };
+    }
+    if (!res.value.ok) {
+      return {
+        ok: false,
+        error: { code: 'IDP_UNAVAILABLE', message: `addUserToGroup HTTP ${res.value.status}` },
+      };
+    }
+    return { ok: true, value: undefined };
+  }
+
+  async assignRealmRole(userId: string, role: string): Promise<IdpResult<void>> {
+    const tokenResult = await this.getToken();
+    if (!tokenResult.ok) return tokenResult;
+
+    // Resolve the realm-role representation first — the role-mappings endpoint
+    // requires the full {id,name} object, not just the role name.
+    const roleRes = await this.safeFetch(
+      `${this.opts.baseUrl}/admin/realms/${this.opts.realm}/roles/${encodeURIComponent(role)}`,
+      { headers: { Authorization: `Bearer ${tokenResult.value}` } },
+    );
+    if (!roleRes.ok) return roleRes;
+    if (!roleRes.value.ok) {
+      return {
+        ok: false,
+        error: {
+          code: roleRes.value.status === 404 ? 'BAD_REQUEST' : 'IDP_UNAVAILABLE',
+          message: `assignRealmRole role lookup HTTP ${roleRes.value.status}`,
+        },
+      };
+    }
+    const roleRep = (await roleRes.value.json()) as { id: string; name: string };
+
+    const mapRes = await this.safeFetch(
+      `${this.opts.baseUrl}/admin/realms/${this.opts.realm}/users/${userId}/role-mappings/realm`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${tokenResult.value}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify([{ id: roleRep.id, name: roleRep.name }]),
+      },
+    );
+    if (!mapRes.ok) return mapRes;
+    if (mapRes.value.status === 404) {
+      return { ok: false, error: { code: 'USER_NOT_FOUND', message: userId } };
+    }
+    if (!mapRes.value.ok) {
+      return {
+        ok: false,
+        error: { code: 'IDP_UNAVAILABLE', message: `assignRealmRole HTTP ${mapRes.value.status}` },
+      };
+    }
+    return { ok: true, value: undefined };
+  }
+
   // ─── private ───────────────────────────────────────────────────────────────
 
   private async setEnabled(userId: string, enabled: boolean): Promise<IdpResult<void>> {

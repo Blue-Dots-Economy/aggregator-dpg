@@ -70,3 +70,30 @@ export function resolveConfigPath(env: ConfigPathEnv = process.env): string {
 export function resolveSchemaRoot(env: ConfigPathEnv = process.env): string {
   return env.SCHEMA_ROOT_DIR?.trim() || path.join(resolveConfigDir(env), 'schemas');
 }
+
+/**
+ * Resolves the active network and optional brand identifiers from env vars.
+ *
+ * These are the two high-level selectors used by both the web layer (to
+ * determine which consent content to display) and the API layer (to determine
+ * which consent version to record in the ledger). Using this helper in both
+ * places guarantees the displayed content and the recorded version always
+ * match the same config file.
+ *
+ * Defaults: `AGGREGATOR_NETWORK=blue_dot` (single-sourced from
+ * {@link resolveConfigDir}). Empty/whitespace `AGGREGATOR_BRAND` is treated
+ * as absent (`undefined`) — the same rule applied by `resolveConfigDir`.
+ *
+ * @param env - Env-var bag; defaults to `process.env`.
+ * @returns `{ network, brand? }` — `brand` is `undefined` when not set.
+ */
+export function resolveActiveNetwork(env: ConfigPathEnv = process.env): {
+  network: string;
+  brand?: string;
+} {
+  const network = env.AGGREGATOR_NETWORK?.trim() || 'blue_dot';
+  const brandRaw = env.AGGREGATOR_BRAND?.trim();
+  const result: { network: string; brand?: string } = { network };
+  if (brandRaw) result.brand = brandRaw;
+  return result;
+}

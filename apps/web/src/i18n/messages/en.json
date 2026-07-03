@@ -44,7 +44,30 @@
     "submit": "Submit application",
     "submitting": "Submitting…",
     "footer_note": "Your application will be reviewed by the {brand} team. You'll receive an email once approved, then sign in via {brand} SSO.",
-    "validation_error_title": "Please fix the highlighted fields"
+    "validation_error_title": "Please fix the highlighted fields",
+    "page_title": "Register",
+    "tab_coordinator": "Register as Coordinator",
+    "tab_org": "Register Organisation",
+    "org_selector_label": "Organisation",
+    "org_selector_placeholder": "Select your organisation",
+    "org_selector_loading": "Loading organisations…",
+    "org_selector_error": "Couldn't load organisations.",
+    "org_selector_retry": "Retry",
+    "coordinator_no_orgs": "No organisations are live yet. An organisation must be registered and approved before coordinators can join.",
+    "org_submit": "Submit organisation",
+    "org_success_heading": "Organisation submitted",
+    "org_success_slug": "Organisation reference:",
+    "org_success_review": "Our team will review your organisation. You'll be notified once it's approved, after which coordinators can register under it.",
+    "consent": {
+      "accept_prefix": "I have read and accept the ",
+      "terms_link": "Terms of Service",
+      "and": " and ",
+      "privacy_link": "Privacy Policy",
+      "modal_eyebrow": "Before you register",
+      "modal_title": "Terms & Privacy",
+      "modal_desc": "Please review the terms of service and privacy policy below.",
+      "modal_close": "Close"
+    }
   },
   "dashboard": {
     "buckets": {
@@ -105,7 +128,7 @@
       "selected": "{count} selected",
       "clear": "Clear selection",
       "exportSelected": "Export selected CSV",
-      "triggerCallback": "Trigger Voice Call",
+      "exportProfileData": "Export profile data",
       "running": "Working…",
       "success": "{count} processed",
       "failed": "Action failed",
@@ -489,11 +512,8 @@
     "register_sub": "Register your organisation with {brand}",
     "review_notice": "New registrations are reviewed by the {brand} team.",
     "session_expired": "Your session expired. Sign in again to continue.",
+    "org_no_portal": "Organisation accounts can't sign in to the portal yet. Organisation owners manage approvals through the links emailed to them. Only coordinators can sign in here.",
     "signin_failed": "Sign-in failed: {reason}. Please try again.",
-    "footer_prefix": "By continuing you agree to the",
-    "footer_and": "and",
-    "privacy": "Privacy Policy",
-    "terms": "Terms",
     "errors": {
       "invalid_flow_cookie": "session handshake expired",
       "missing_code_or_state": "incomplete callback",

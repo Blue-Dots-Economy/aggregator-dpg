@@ -110,8 +110,8 @@ export function buildPurpleDotConfig(
 ): ResolvedNetworkConfig {
   const seekerDomain: ResolvedDomain = {
     id: 'seeker',
-    label: 'Beneficiaries',
-    pluralLabel: 'Beneficiaries',
+    label: 'Seekers',
+    pluralLabel: 'Seekers',
     itemType: 'profile_1.0',
     schema: {},
     identity: { name: 'beneficiary_name', phone: 'mobile_number', email: 'email' },

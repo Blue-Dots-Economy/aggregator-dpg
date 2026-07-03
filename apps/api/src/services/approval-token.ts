@@ -14,7 +14,7 @@
  * the same service.
  */
 
-import { SignJWT, jwtVerify, errors as joseErrors } from 'jose';
+import { SignJWT, jwtVerify, decodeJwt, errors as joseErrors } from 'jose';
 
 const ALG = 'HS256';
 const ISSUER = 'aggregator-api';
@@ -38,6 +38,13 @@ export interface MintInput {
   intent: 'approve' | 'reject';
   /** Lifetime in seconds. Default 1h. */
   ttlSec?: number;
+  /**
+   * Parent org id this token is minted for (spec §9 / A1). When set, the
+   * coordinator decision handler binds the decision to a matching
+   * `aggregators.parent_org_id`, so an owner's link can only decide their own
+   * org's coordinators. Omitted for flat coordinators and org tokens.
+   */
+  org?: string;
 }
 
 export interface MintResult {
@@ -54,7 +61,10 @@ export interface MintResult {
 export async function mintApprovalToken(input: MintInput): Promise<MintResult> {
   const ttl = input.ttlSec ?? DEFAULT_TTL_SEC;
   const expiresAt = new Date(Date.now() + ttl * 1000);
-  const token = await new SignJWT({ intent: input.intent })
+  const token = await new SignJWT({
+    intent: input.intent,
+    ...(input.org ? { org: input.org } : {}),
+  })
     .setProtectedHeader({ alg: ALG })
     .setSubject(input.aggregatorId)
     .setIssuer(ISSUER)
@@ -102,6 +112,8 @@ export interface VerifyOk {
   ok: true;
   aggregatorId: string;
   intent: 'approve' | 'reject';
+  /** Parent org id claim, when the token was minted with one (spec §9 / A1). */
+  org?: string;
 }
 
 export interface VerifyErr {
@@ -114,10 +126,20 @@ export type VerifyResult = VerifyOk | VerifyErr;
 /**
  * Verifies a token's signature and required claims.
  *
+ * When `opts.allowExpired` is true, an expired-but-signature-valid token is
+ * accepted and its claims are returned. This is used exclusively by the resend
+ * path to recover the aggregator id from a stale link without re-issuing a
+ * new token until the admin explicitly requests one. Signature, issuer, and
+ * audience failures still produce an error regardless of this option.
+ *
  * @param token - Raw JWT string from the admin email link.
+ * @param opts - Optional settings; set `allowExpired: true` for the resend path.
  * @returns Parsed aggregator id + intent on success; structured error on failure.
  */
-export async function verifyApprovalToken(token: string): Promise<VerifyResult> {
+export async function verifyApprovalToken(
+  token: string,
+  opts: { allowExpired?: boolean } = {},
+): Promise<VerifyResult> {
   if (!token || typeof token !== 'string' || !token.includes('.')) {
     return { ok: false, error: { code: 'MALFORMED', message: 'token is not a JWT' } };
   }
@@ -134,9 +156,23 @@ export async function verifyApprovalToken(token: string): Promise<VerifyResult> 
     if (intent !== 'approve' && intent !== 'reject') {
       return { ok: false, error: { code: 'INVALID', message: 'bad intent claim' } };
     }
-    return { ok: true, aggregatorId: payload.sub, intent };
+    const org = typeof payload.org === 'string' ? payload.org : undefined;
+    return { ok: true, aggregatorId: payload.sub, intent, ...(org ? { org } : {}) };
   } catch (err) {
     if (err instanceof joseErrors.JWTExpired) {
+      if (opts.allowExpired) {
+        // jose validates the JWS signature BEFORE the `exp` claim, so a
+        // JWTExpired throw guarantees the signature was genuine. Decoding the
+        // (unverified) payload here is therefore safe — used only by the
+        // resend path to recover the aggregator id from a stale link.
+        const payload = decodeJwt(token);
+        const intent = payload.intent;
+        if (!payload.sub || (intent !== 'approve' && intent !== 'reject')) {
+          return { ok: false, error: { code: 'INVALID', message: 'bad claims in expired token' } };
+        }
+        const org = typeof payload.org === 'string' ? payload.org : undefined;
+        return { ok: true, aggregatorId: payload.sub, intent, ...(org ? { org } : {}) };
+      }
       return { ok: false, error: { code: 'EXPIRED', message: 'token expired' } };
     }
     if (err instanceof joseErrors.JWTInvalid || err instanceof joseErrors.JWSInvalid) {

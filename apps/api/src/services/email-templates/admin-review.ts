@@ -12,7 +12,11 @@ export interface AdminReviewVars {
   applicantEmail: string;
   applicantPhone: string;
   association: string;
-  aggregatorType: 'aggregator' | 'seeker' | 'provider' | 'both';
+  /**
+   * What was registered — drives the subject, heading, and Type row. Use
+   * `organisation` for the org flow, `aggregator` (default) for coordinators.
+   */
+  entityLabel?: string;
   state?: string | undefined;
   about?: string | undefined;
   /** Pre-built deep links — already include the signed token + intent. */
@@ -32,7 +36,8 @@ export function renderAdminReview(v: AdminReviewVars): {
   html: string;
   text: string;
 } {
-  const subject = `Action required: aggregator registration from ${v.association}`;
+  const label = v.entityLabel ?? 'aggregator';
+  const subject = `Action required: ${label} registration from ${v.association}`;
   // Render the submission time in IST (the server clock is UTC) so the admin
   // reads it in the network's local timezone, matching the approval pages.
   const submitted = `${v.submittedAt.toLocaleString('en-IN', {
@@ -51,14 +56,14 @@ export function renderAdminReview(v: AdminReviewVars): {
     : '';
 
   const body = `
-<h1 style="font-size:20px;font-weight:700;letter-spacing:-0.01em;margin:0 0 8px;color:#0b1020;">New aggregator registration</h1>
+<h1 style="font-size:20px;font-weight:700;letter-spacing:-0.01em;margin:0 0 8px;color:#0b1020;text-transform:capitalize;">New ${escapeHtml(label)} registration</h1>
 <p style="margin:0 0 18px;font-size:14px;color:#475069;line-height:1.5;">
-  ${escapeHtml(v.association)} has submitted an aggregator registration. Review and approve or reject below.
+  ${escapeHtml(v.association)} has submitted an ${escapeHtml(label)} registration. Review and approve or reject below.
 </p>
 
 <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="font-size:13.5px;">
   <tr><td style="padding:6px 0;color:#475069;width:140px;">Association</td><td style="padding:6px 0;color:#0b1020;">${escapeHtml(v.association)}</td></tr>
-  <tr><td style="padding:6px 0;color:#475069;">Type</td><td style="padding:6px 0;color:#0b1020;text-transform:capitalize;">${escapeHtml(v.aggregatorType)}</td></tr>
+  <tr><td style="padding:6px 0;color:#475069;">Type</td><td style="padding:6px 0;color:#0b1020;text-transform:capitalize;">${escapeHtml(label)}</td></tr>
   <tr><td style="padding:6px 0;color:#475069;">Contact</td><td style="padding:6px 0;color:#0b1020;">${escapeHtml(v.applicantName)}</td></tr>
   <tr><td style="padding:6px 0;color:#475069;">Email</td><td style="padding:6px 0;color:#0b1020;">${escapeHtml(v.applicantEmail)}</td></tr>
   <tr><td style="padding:6px 0;color:#475069;">Phone</td><td style="padding:6px 0;color:#0b1020;">${escapeHtml(v.applicantPhone)}</td></tr>
@@ -80,10 +85,10 @@ ${aboutBlock}
 </p>
 `;
 
-  const text = `New aggregator registration
+  const text = `New ${label} registration
 
 Association: ${v.association}
-Type:        ${v.aggregatorType}
+Type:        ${label}
 Contact:     ${v.applicantName}
 Email:       ${v.applicantEmail}
 Phone:       ${v.applicantPhone}

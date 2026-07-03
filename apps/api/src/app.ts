@@ -22,6 +22,9 @@ import {
 import { config, corsOrigins, apiReferenceEnabled } from './config.js';
 import { registerHealthRoutes } from './routes/health.js';
 import { registerAggregatorRegistrationRoutes } from './routes/aggregator-registrations.js';
+import { registerAggregatorMaintenanceRoutes } from './routes/aggregator-maintenance.js';
+import { registerAggregatorOrgRoutes } from './routes/aggregator-orgs.js';
+import { registerAggregatorOrgApprovalRoutes } from './routes/aggregator-org-approvals.js';
 import { registerAggregatorApprovalRoutes } from './routes/aggregator-approvals.js';
 import { registerAggregatorProfileRoutes } from './routes/aggregator-profile.js';
 import { registerBulkUploadsRoutes } from './routes/bulk-uploads.js';
@@ -184,6 +187,9 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   await registerHealthRoutes(app);
   await registerAggregatorRegistrationRoutes(app);
+  await registerAggregatorMaintenanceRoutes(app);
+  await registerAggregatorOrgRoutes(app);
+  await registerAggregatorOrgApprovalRoutes(app);
   await registerAggregatorApprovalRoutes(app);
   await registerAggregatorProfileRoutes(app);
   await registerBulkUploadsRoutes(app);

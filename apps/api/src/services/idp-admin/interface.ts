@@ -88,4 +88,42 @@ export abstract class IdpAdminAdapter {
     userId: string,
     decision: 'pending' | 'approved' | 'rejected',
   ): Promise<IdpResult<void>>;
+
+  /**
+   * Creates a Keycloak group (the org's authz mirror — spec §9). In v1 the
+   * group holds only the org owner; coordinators are NOT members (spec A1).
+   *
+   * @param name - Group name (e.g. `org-<slug>`).
+   * @param attributes - Optional group attributes (e.g. `{ org_id }`).
+   * @returns The created group's id.
+   */
+  abstract createGroup(
+    name: string,
+    attributes?: Record<string, string | string[]>,
+  ): Promise<IdpResult<{ id: string }>>;
+
+  /**
+   * Deletes a group by id. Used by the §7 stale-pending cleanup to remove the
+   * mirrored org group when pruning an abandoned org registration.
+   *
+   * @param groupId - Group id returned by {@link createGroup}.
+   * @returns `ok` with `void`; a 404 is treated as success (idempotent).
+   */
+  abstract deleteGroup(groupId: string): Promise<IdpResult<void>>;
+
+  /**
+   * Adds a user to a group.
+   *
+   * @param userId - Keycloak user id.
+   * @param groupId - Group id returned by {@link createGroup}.
+   */
+  abstract addUserToGroup(userId: string, groupId: string): Promise<IdpResult<void>>;
+
+  /**
+   * Assigns a realm role (e.g. `org_owner`, `coordinator`) to a user.
+   *
+   * @param userId - Keycloak user id.
+   * @param role - Realm role name.
+   */
+  abstract assignRealmRole(userId: string, role: string): Promise<IdpResult<void>>;
 }
