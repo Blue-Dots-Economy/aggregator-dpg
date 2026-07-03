@@ -12,7 +12,6 @@ import { SegmentedTabs, type SegmentedTab } from '../../../components/ui/Segment
 import { Topbar } from '../../../components/shell/Topbar';
 import { I, type IconName } from '../../../icons';
 import { useOppProviders, useDashboard } from '../../../hooks/useDashboard';
-import { useOnboardingSummary, useOnboardingBySource } from '../../../hooks/useOnboarding';
 import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
 import { dashboardService, type LifecycleFilter } from '../../../services/dashboard.service';
 import { mapDirectional } from '../../../services/row-mapping';
@@ -287,257 +286,6 @@ function MetricGroup({ title, children }: { title: string; children: ReactNode }
   );
 }
 
-/** Tone classes per onboarding outcome card (design: colored chip + value). */
-const ONBOARDING_TONES = {
-  total: {
-    chip: 'bg-[var(--bd-primary-50)] text-[var(--bd-primary-600)]',
-    value: 'text-ink-900',
-  },
-  passed: { chip: 'bg-emerald-50 text-emerald-600', value: 'text-emerald-700' },
-  failed: { chip: 'bg-rose-50 text-rose-600', value: 'text-rose-600' },
-  skipped: { chip: 'bg-ink-100 text-ink-500', value: 'text-ink-400' },
-} as const;
-
-type OnboardingTone = keyof typeof ONBOARDING_TONES;
-
-function OnboardingStatCard({
-  tone,
-  icon,
-  label,
-  value,
-  sub,
-}: {
-  tone: OnboardingTone;
-  icon: IconName;
-  label: string;
-  value: string;
-  sub: string;
-}) {
-  const t = ONBOARDING_TONES[tone];
-  const Ic = I[icon];
-  return (
-    <div className="bd-card p-4 flex flex-col gap-2.5">
-      <div className={`w-8 h-8 rounded-[9px] flex items-center justify-center ${t.chip}`}>
-        <Ic size={16} />
-      </div>
-      <div className="text-[13px] text-ink-500 font-semibold">{label}</div>
-      <div
-        className={`font-display font-bold text-[26px] leading-none tracking-tight -mt-0.5 ${t.value}`}
-      >
-        {value}
-      </div>
-      <div className="text-[12px] text-ink-400 font-medium -mt-1">{sub}</div>
-    </div>
-  );
-}
-
-/**
- * Display registry for onboarding entry sources (the API's
- * `onboarding_source` enum). The joins-by-mode card renders whatever
- * sources the `/v1/onboarding/by-source` response carries, in order —
- * nothing else in the component is source-specific.
- *
- * Adding a new registration mode (e.g. `voice`, `whatsapp`) is therefore:
- *   1. backend: extend the `onboarding_source` enum + write rollup rows;
- *   2. here: ONE registry entry (icon, colour, label key);
- *   3. i18n: `dashboard.onboardingGroup.mode_<source>` in en/hi/kn.
- * A source missing from the registry still renders safely — title-cased
- * label and a colour cycled from {@link ONBOARDING_FALLBACK_COLORS} — so
- * a backend enum landing before the UI entry never blanks the dashboard.
- */
-const ONBOARDING_MODES: Record<string, { icon: IconName; color: string; labelKey: string }> = {
-  bulk: { icon: 'upload', color: '#10B981', labelKey: 'onboardingGroup.mode_bulk' },
-  link: { icon: 'link', color: 'var(--bd-primary-600)', labelKey: 'onboardingGroup.mode_link' },
-  qr: { icon: 'qr', color: '#F59E0B', labelKey: 'onboardingGroup.mode_qr' },
-};
-
-/** Distinct colours for unregistered sources so two unknowns stay tellable apart in the share bar. */
-const ONBOARDING_FALLBACK_COLORS = ['#8B91A3', '#0EA5E9', '#EC4899', '#8B5CF6'];
-
-/**
- * Resolves the display meta for one entry source, falling back to a
- * neutral icon + cycled colour (and `null` labelKey → title-cased source).
- *
- * @param source - The `onboarding_source` value from the API.
- * @param index - The slice's position, used to cycle fallback colours.
- */
-function onboardingModeMeta(
-  source: string,
-  index: number,
-): { icon: IconName; color: string; labelKey: string | null } {
-  return (
-    ONBOARDING_MODES[source] ?? {
-      icon: 'spark',
-      color: ONBOARDING_FALLBACK_COLORS[index % ONBOARDING_FALLBACK_COLORS.length]!,
-      labelKey: null,
-    }
-  );
-}
-
-/**
- * Aggregator-wide onboarding metrics section (design: Onboarding group,
- * variant A — metric cards + joins-by-mode share bar).
- *
- * Renders below the per-domain Profiles/Users groups on every tab. Data
- * comes from the aggregator's own rollup (`/v1/onboarding/summary` +
- * `/v1/onboarding/by-source`), NOT signalstack — the header pill and
- * helper line make the aggregator-wide scope explicit. React Query
- * dedupes the fetches across tabs.
- */
-function OnboardingMetrics() {
-  const t = useTranslations('dashboard');
-  const router = useRouter();
-  const summary = useOnboardingSummary();
-  const bySource = useOnboardingBySource();
-
-  const slices = bySource.data?.by_source ?? [];
-  const totalJoins = slices.reduce((acc, s) => acc + s.passed, 0);
-  const pct = (n: number): string =>
-    totalJoins > 0 ? `${Math.round((n / totalJoins) * 1000) / 10}%` : '0%';
-
-  return (
-    <section>
-      <div className="flex items-center justify-between gap-4 flex-wrap mb-1">
-        <span className="text-[11.5px] font-bold uppercase tracking-[.09em] text-ink-400">
-          {t('onboardingGroup.title')}
-        </span>
-        <button
-          type="button"
-          onClick={() => router.push('/onboarding')}
-          className="inline-flex items-center gap-1.5 text-[13px] font-bold text-[var(--bd-primary-600)]"
-        >
-          {t('onboardingGroup.view')}
-          <I.arrowR size={14} />
-        </button>
-      </div>
-      <div className="text-[13px] text-ink-400 font-medium mb-3.5">
-        {t('onboardingGroup.helper')}
-      </div>
-
-      {summary.isError ? (
-        <div className="bd-card p-5 flex items-center gap-4 flex-wrap border-rose-200 bg-rose-50/50">
-          <div className="w-10 h-10 rounded-[11px] bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
-            <I.alert size={19} />
-          </div>
-          <div className="flex-1 min-w-[200px]">
-            <div className="text-[14.5px] font-bold text-ink-900">
-              {t('onboardingGroup.error_title')}
-            </div>
-            <div className="text-[13px] text-ink-500 mt-0.5">{t('onboardingGroup.error_body')}</div>
-          </div>
-          <Button
-            kind="ghost"
-            icon={<I.refresh size={14} />}
-            onClick={() => {
-              void summary.refetch();
-              void bySource.refetch();
-            }}
-          >
-            {t('onboardingGroup.retry')}
-          </Button>
-        </div>
-      ) : summary.isLoading ? (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {Array.from({ length: 4 }, (_, i) => (
-            <div key={i} className="bd-card p-4 animate-pulse">
-              <div className="w-8 h-8 rounded-[9px] bg-ink-100" />
-              <div className="h-3 w-2/3 rounded-md bg-ink-100 mt-3.5" />
-              <div className="h-6 w-2/5 rounded-md bg-ink-100 mt-3" />
-            </div>
-          ))}
-        </div>
-      ) : (
-        <>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <OnboardingStatCard
-              tone="total"
-              icon="users"
-              label={t('onboardingGroup.total')}
-              value={fmtCount(summary.data?.total)}
-              sub={t('onboardingGroup.total_sub')}
-            />
-            <OnboardingStatCard
-              tone="passed"
-              icon="shield"
-              label={t('onboardingGroup.passed')}
-              value={fmtCount(summary.data?.passed)}
-              sub={t('onboardingGroup.passed_sub')}
-            />
-            <OnboardingStatCard
-              tone="failed"
-              icon="alert"
-              label={t('onboardingGroup.failed')}
-              value={fmtCount(summary.data?.failed)}
-              sub={t('onboardingGroup.failed_sub')}
-            />
-            <OnboardingStatCard
-              tone="skipped"
-              icon="pause"
-              label={t('onboardingGroup.skipped')}
-              value={fmtCount(summary.data?.skipped)}
-              sub={t('onboardingGroup.skipped_sub')}
-            />
-          </div>
-
-          {slices.length > 0 && (
-            <div className="bd-card p-5 mt-4">
-              <div className="flex items-center justify-between gap-3">
-                <div className="text-[14px] font-bold text-ink-700">
-                  {t('onboardingGroup.byMode')}
-                </div>
-                <div className="text-[12.5px] text-ink-400 tabular-nums">
-                  {t('onboardingGroup.joins', { count: totalJoins })}
-                </div>
-              </div>
-              <div className="flex h-3 rounded-full overflow-hidden bg-ink-100 mt-3.5 mb-4 gap-0.5">
-                {slices.map((s, i) => (
-                  <div
-                    key={s.source}
-                    className="rounded-full"
-                    style={{
-                      width: pct(s.passed),
-                      background: onboardingModeMeta(s.source, i).color,
-                    }}
-                  />
-                ))}
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                {slices.map((s, i) => {
-                  const meta = onboardingModeMeta(s.source, i);
-                  const Ic = I[meta.icon];
-                  return (
-                    <div key={s.source} className="flex items-center gap-3 min-w-0">
-                      <span
-                        className="w-9 h-9 rounded-[10px] flex items-center justify-center shrink-0 bg-ink-50"
-                        style={{ color: meta.color }}
-                      >
-                        <Ic size={17} />
-                      </span>
-                      <div className="min-w-0">
-                        <div className="text-[12.5px] font-semibold text-ink-500 whitespace-nowrap">
-                          {meta.labelKey ? t(meta.labelKey) : statusLabel(s.source)}
-                        </div>
-                        <div className="flex items-baseline gap-2 mt-0.5">
-                          <span className="font-display font-bold text-[20px] text-ink-900 tabular-nums leading-none">
-                            {s.passed}
-                          </span>
-                          <span className="text-[12px] text-ink-400 tabular-nums">
-                            {pct(s.passed)}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </>
-      )}
-    </section>
-  );
-}
-
 /**
  * Icon per known rollup tile field. Config-defined tiles with unknown
  * fields render without an icon rather than guessing one.
@@ -717,76 +465,6 @@ function ProgressTiny({ pct, title }: { pct: number; title?: string }) {
 }
 
 type RowKind = 'seeker' | 'provider' | 'opp';
-
-type ChipTone = 'soft' | 'warm' | 'cool' | 'mute';
-
-const CHIP_TONES: Record<ChipTone, string> = {
-  soft: 'bg-[var(--bd-primary-50)] text-primary-600 hover:bg-[var(--bd-primary-100)]',
-  warm: 'bg-amber-50 text-amber-800 hover:bg-amber-100',
-  cool: 'bg-sky-50 text-sky-800 hover:bg-sky-100',
-  mute: 'bg-ink-100 text-ink-600 hover:bg-ink-200',
-};
-
-interface RecommendedAction {
-  label: string;
-  tone: ChipTone;
-  icon: ReactNode;
-}
-
-/**
- * Fixed operator actions surfaced for every participant row. Stubs for
- * now — each chip flashes a transient confirmation on click; wire each
- * label to its real handler (callback trigger, operator notify) when
- * those endpoints land.
- */
-function recommendedActions(): RecommendedAction[] {
-  return [
-    { label: 'Trigger Callback', tone: 'cool', icon: <I.send size={12} /> },
-    { label: 'Notify', tone: 'mute', icon: <I.bell size={12} /> },
-  ];
-}
-
-/**
- * Recommended-action chip. Stub interaction: clicking flips the chip to a
- * transient "{label} triggered" confirmation for 2s, then reverts. Replace
- * the timeout stub with the real per-action handler once endpoints exist.
- */
-function ActionChip({
-  label,
-  tone = 'soft',
-  icon,
-}: {
-  label: string;
-  tone?: ChipTone;
-  icon?: ReactNode;
-}) {
-  const [triggered, setTriggered] = useState(false);
-  const onClick = () => {
-    setTriggered(true);
-    window.setTimeout(() => setTriggered(false), 2000);
-  };
-  if (triggered) {
-    return (
-      <span
-        aria-live="polite"
-        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11.5px] font-semibold bg-emerald-50 text-emerald-700"
-      >
-        <I.check size={12} />
-        {label} triggered
-      </span>
-    );
-  }
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11.5px] font-semibold transition-colors ${CHIP_TONES[tone]}`}
-    >
-      {icon}
-      {label}
-    </button>
-  );
-}
 
 type StatusFilter = string; // 'all' | any key signalstack returns in rollup.by_status
 
@@ -1055,6 +733,14 @@ interface ParticipantTableProps<R extends ParticipantBase> {
    */
   lifecycleFilter?: LifecycleFilterValue | undefined;
   onLifecycleFilterChange?: ((next: LifecycleFilterValue) => void) | undefined;
+  /**
+   * Fetches every row matching the current server-side filter (all pages) so
+   * the operator can select the whole result set, not just the visible page.
+   * One batched call (`limit = total_matching`). Omit to disable the
+   * "Select all N matching" banner — the header checkbox then only selects
+   * the current page.
+   */
+  onSelectAllMatching?: (() => Promise<R[]>) | undefined;
 }
 
 function ParticipantTable<R extends ParticipantBase>({
@@ -1072,8 +758,16 @@ function ParticipantTable<R extends ParticipantBase>({
   receivedLabels = {},
   lifecycleFilter = 'all',
   onLifecycleFilterChange,
+  onSelectAllMatching,
 }: ParticipantTableProps<R>) {
   const t = useTranslations('dashboard');
+  const { data: tableCfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
+  // Heading entity label comes from the active dot's network config (singular
+  // `label`: "Seeker"/"Provider" on blue/purple, "Tourist"/… on other dots),
+  // so the "<Entity> Activity & Status" heading stays dot-based, not hardcoded.
+  const headingEntity =
+    tableCfg.domains?.find((d) => d.id === domain)?.label ??
+    (kind === 'provider' ? t('table.provider') : t('table.participant'));
   /** Localised fallback for bucket keys when config-sourced labels are absent. */
   const getBucketFallback = (key: string): string => {
     const map: Record<string, string> = {
@@ -1126,26 +820,23 @@ function ParticipantTable<R extends ParticipantBase>({
   // mapping only backstops callers that pass no domain (the opp demo tab).
   const bulkDomain: string = domain ?? (kind === 'seeker' ? 'seeker' : 'provider');
 
-  // Explicit selection mode — the checkbox column only exists while the
-  // operator is in "Select" mode (toolbar toggle). Exiting the mode clears
-  // the selection.
-  const [selectMode, setSelectMode] = useState(false);
-
-  // Bulk selection — snapshots full row data (not just ids) so client-side
-  // actions like CSV export can include rows from pages no longer mounted.
-  // Persists across page changes; resets when a filter changes because the
-  // selection's meaning changed underneath it.
+  // Bulk selection — Gmail-style: the checkbox column is always present, so
+  // operators select rows directly without a separate "Select" mode. Snapshots
+  // full row data (not just ids) so client-side actions like CSV export can
+  // include rows from pages no longer mounted. Persists across page changes;
+  // resets when a filter changes because the selection's meaning changed
+  // underneath it.
   const [selected, setSelected] = useState<Map<string, ParticipantBase>>(new Map());
+  // True once the operator has expanded the selection to every matching row
+  // across all pages (via the "Select all N matching" banner). Drives the
+  // banner copy and is cleared by any change that narrows the meaning.
+  const [selectedAllMatching, setSelectedAllMatching] = useState(false);
+  // In-flight guard while the fetch-all-matching call runs.
+  const [selectingAll, setSelectingAll] = useState(false);
   useEffect(() => {
     setSelected(new Map());
+    setSelectedAllMatching(false);
   }, [statusFilter, lifecycleFilter]);
-
-  const toggleSelectMode = () => {
-    setSelectMode((on) => {
-      if (on) setSelected(new Map());
-      return !on;
-    });
-  };
 
   // Rows without a real profile_item_id carry synthetic `row-<index>` keys
   // that collide across pages — those rows are not selectable.
@@ -1153,9 +844,11 @@ function ParticipantTable<R extends ParticipantBase>({
   const selectablePageRows = visibleRows.filter(isSelectable);
   const allPageSelected =
     selectablePageRows.length > 0 && selectablePageRows.every((r) => selected.has(r.id));
-  const somePageSelected = selectablePageRows.some((r) => selected.has(r.id));
 
   const toggleRow = (r: ParticipantBase) => {
+    // Any individual edit drops the "all matching" mode — the selection is no
+    // longer the full result set.
+    setSelectedAllMatching(false);
     setSelected((prev) => {
       const next = new Map(prev);
       if (next.has(r.id)) next.delete(r.id);
@@ -1164,28 +857,66 @@ function ParticipantTable<R extends ParticipantBase>({
     });
   };
 
-  /** Header checkbox: selects/deselects the current page's selectable rows. */
+  /**
+   * Header checkbox (Gmail-style master toggle):
+   *   - any rows selected (this page or another) → discard the whole selection;
+   *   - nothing selected → select all selectable rows on the current page.
+   */
   const togglePage = () => {
+    setSelectedAllMatching(false);
+    if (selected.size > 0) {
+      setSelected(new Map());
+      return;
+    }
     setSelected((prev) => {
       const next = new Map(prev);
-      if (allPageSelected) {
-        for (const r of selectablePageRows) next.delete(r.id);
-      } else {
-        for (const r of selectablePageRows) next.set(r.id, r);
-      }
+      for (const r of selectablePageRows) next.set(r.id, r);
       return next;
     });
   };
+
+  const clearSelection = () => {
+    setSelectedAllMatching(false);
+    setSelected(new Map());
+  };
+
+  /**
+   * Expands the selection to every row matching the current filter by fetching
+   * all pages in one batched call, then selecting all selectable rows.
+   */
+  const selectAllMatching = async () => {
+    if (!onSelectAllMatching || selectingAll) return;
+    setSelectingAll(true);
+    try {
+      const allRows = await onSelectAllMatching();
+      setSelected(() => {
+        const next = new Map<string, ParticipantBase>();
+        for (const r of allRows) if (isSelectable(r)) next.set(r.id, r);
+        return next;
+      });
+      setSelectedAllMatching(true);
+    } finally {
+      setSelectingAll(false);
+    }
+  };
+
+  // Show the "select all N matching" prompt when the whole current page is
+  // selected, more matching rows exist beyond this page, and the parent
+  // supports fetching them — mirrors Gmail's page-vs-all-conversations banner.
+  const showSelectAllMatching =
+    !!onSelectAllMatching &&
+    allPageSelected &&
+    !selectedAllMatching &&
+    typeof total === 'number' &&
+    total > selectablePageRows.length;
 
   return (
     <div className="bd-card bd-shadow overflow-hidden">
       <div className="px-5 py-4 flex items-center gap-3 border-b border-[var(--bd-border)]">
         <div className="font-display font-bold text-[15px] text-ink-900">
-          {kind === 'seeker'
-            ? t('table.participants')
-            : kind === 'opp'
-              ? t('table.opportunityProviders')
-              : t('tabs.providers')}
+          {kind === 'opp'
+            ? t('table.opportunityProviders')
+            : `${headingEntity} ${t('table.activitySuffix')}`}
         </div>
         <span className="text-[12px] text-ink-400">
           {t('table.count', { shown: visibleRows.length, total: total ?? rows.length })}
@@ -1203,7 +934,7 @@ function ParticipantTable<R extends ParticipantBase>({
             <input
               id={searchId}
               aria-label={t('aria.search_participants')}
-              className="bd-input w-[320px] text-[13px] py-1.5"
+              className="bd-input w-[360px] shrink-0 text-[13px] py-1.5"
               style={{ paddingLeft: 36 }}
               placeholder={
                 kind === 'seeker' ? t('search.seekerPlaceholder') : t('search.providerPlaceholder')
@@ -1224,15 +955,6 @@ function ParticipantTable<R extends ParticipantBase>({
               <option value="live">{t('filters.lifecycle_live')}</option>
             </select>
           ) : null}
-          <Button
-            kind={selectMode ? 'primary' : 'ghost'}
-            icon={<I.check size={14} />}
-            onClick={toggleSelectMode}
-            aria-pressed={selectMode}
-            className="whitespace-nowrap px-3 py-1.5 text-[12.5px]"
-          >
-            {selectMode ? t('bulk.cancel') : t('bulk.select')}
-          </Button>
           <div ref={filterRef} className="relative">
             <Button
               kind={filterActive ? 'primary' : 'ghost'}
@@ -1288,15 +1010,45 @@ function ParticipantTable<R extends ParticipantBase>({
         <BulkActionBar
           selectedRows={[...selected.values()]}
           domain={bulkDomain}
-          onClear={() => setSelected(new Map())}
+          onClear={clearSelection}
         />
       )}
 
+      {/* Gmail-style: the header checkbox only selects the current page; this
+          banner lets the operator expand to every matching row across pages. */}
+      {(showSelectAllMatching || selectedAllMatching) && (
+        <div className="px-5 py-2 flex items-center justify-center gap-2 border-b border-[var(--bd-border)] bg-[var(--bd-primary-50)] text-[12.5px] text-ink-600">
+          {selectedAllMatching ? (
+            <>
+              <span>{t('bulk.allMatchingSelected', { count: selected.size })}</span>
+              <button
+                type="button"
+                onClick={clearSelection}
+                className="font-semibold text-primary-600 hover:underline"
+              >
+                {t('bulk.clearSelection')}
+              </button>
+            </>
+          ) : (
+            <>
+              <span>{t('bulk.allPageSelected', { count: selectablePageRows.length })}</span>
+              <button
+                type="button"
+                onClick={() => void selectAllMatching()}
+                disabled={selectingAll}
+                className="font-semibold text-primary-600 hover:underline disabled:opacity-50"
+              >
+                {selectingAll
+                  ? t('bulk.selectingAll')
+                  : t('bulk.selectAllMatching', { count: total ?? 0 })}
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
       <div className="overflow-auto scroll-x" style={{ maxHeight: 520 }}>
-        <table
-          className="bd-table"
-          style={{ minWidth: (kind === 'provider' ? 1500 : 1400) + (selectMode ? 44 : 0) }}
-        >
+        <table className="bd-table" style={{ minWidth: (kind === 'provider' ? 1500 : 1400) + 44 }}>
           <thead
             style={{
               position: 'sticky',
@@ -1306,35 +1058,37 @@ function ParticipantTable<R extends ParticipantBase>({
             }}
           >
             <tr>
-              {selectMode && (
-                <th
-                  style={{
-                    position: 'sticky',
-                    left: 0,
-                    zIndex: 5,
-                    background: 'var(--bd-table-head-bg)',
-                    width: 44,
-                    minWidth: 44,
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    className="w-4 h-4 cursor-pointer align-middle"
-                    style={{ accentColor: 'var(--bd-primary-600)' }}
-                    ref={(el) => {
-                      if (el) el.indeterminate = somePageSelected && !allPageSelected;
-                    }}
-                    checked={allPageSelected}
-                    onChange={togglePage}
-                    disabled={selectablePageRows.length === 0}
-                    aria-label={t('aria.select_all_page')}
-                  />
-                </th>
-              )}
               <th
                 style={{
                   position: 'sticky',
-                  left: selectMode ? 44 : 0,
+                  left: 0,
+                  zIndex: 5,
+                  background: 'var(--bd-table-head-bg)',
+                  width: 44,
+                  minWidth: 44,
+                }}
+              >
+                <input
+                  type="checkbox"
+                  className="w-4 h-4 cursor-pointer align-middle"
+                  style={{ accentColor: 'var(--bd-primary-600)' }}
+                  ref={(el) => {
+                    // Minus (indeterminate) whenever a selection exists but the
+                    // current page isn't fully selected — covers selections held
+                    // on other pages too, so the box always signals "click to
+                    // discard".
+                    if (el) el.indeterminate = selected.size > 0 && !allPageSelected;
+                  }}
+                  checked={allPageSelected}
+                  onChange={togglePage}
+                  disabled={selectablePageRows.length === 0 && selected.size === 0}
+                  aria-label={t('aria.select_all_page')}
+                />
+              </th>
+              <th
+                style={{
+                  position: 'sticky',
+                  left: 44,
                   zIndex: 5,
                   background: 'var(--bd-table-head-bg)',
                   minWidth: 240,
@@ -1347,40 +1101,36 @@ function ParticipantTable<R extends ParticipantBase>({
               <th>{t('table.initiated')}</th>
               <th>{t('table.received')}</th>
               <th>{t('table.status')}</th>
-              <th>{t('table.recommendedAction')}</th>
             </tr>
           </thead>
           <tbody>
             {visibleRows.map((r) => {
               return (
                 <tr key={r.id} className="fade-up">
-                  {selectMode && (
-                    <td
-                      style={{
-                        position: 'sticky',
-                        left: 0,
-                        background: 'inherit',
-                        backgroundColor: 'var(--bd-card)',
-                        zIndex: 1,
-                        width: 44,
-                      }}
-                    >
-                      {isSelectable(r) && (
-                        <input
-                          type="checkbox"
-                          className="w-4 h-4 cursor-pointer align-middle"
-                          style={{ accentColor: 'var(--bd-primary-600)' }}
-                          checked={selected.has(r.id)}
-                          onChange={() => toggleRow(r)}
-                          aria-label={t('aria.select_row', { name: r.name })}
-                        />
-                      )}
-                    </td>
-                  )}
                   <td
                     style={{
                       position: 'sticky',
-                      left: selectMode ? 44 : 0,
+                      left: 0,
+                      background: 'inherit',
+                      backgroundColor: 'var(--bd-card)',
+                      zIndex: 1,
+                      width: 44,
+                    }}
+                  >
+                    {isSelectable(r) && (
+                      <input
+                        type="checkbox"
+                        className="bd-check w-4 h-4 align-middle"
+                        checked={selected.has(r.id)}
+                        onChange={() => toggleRow(r)}
+                        aria-label={t('aria.select_row', { name: r.name })}
+                      />
+                    )}
+                  </td>
+                  <td
+                    style={{
+                      position: 'sticky',
+                      left: 44,
                       background: 'inherit',
                       backgroundColor: 'var(--bd-card)',
                       zIndex: 1,
@@ -1441,13 +1191,6 @@ function ParticipantTable<R extends ParticipantBase>({
                   </td>
                   <td>
                     <StatusPill status={r.status} />
-                  </td>
-                  <td>
-                    <div className="flex items-center gap-1.5">
-                      {recommendedActions().map((a, i) => (
-                        <ActionChip key={i} {...a} />
-                      ))}
-                    </div>
                   </td>
                 </tr>
               );
@@ -1742,6 +1485,22 @@ function SeekersTab() {
     [rows, lifecycleFilter],
   );
 
+  // Fetch every matching seeker (all pages) in one batched call so the table's
+  // "Select all N matching" banner can select the whole result set.
+  const fetchAllSeekers = async () => {
+    if (!seekerDomainId) return [];
+    const res = await dashboardService.dashboard({
+      domain: seekerDomainId,
+      page: 1,
+      limit: slice?.total_matching ?? total ?? PAGE_SIZE,
+      ...(filterActive ? { status: statusFilter } : {}),
+    });
+    const all = (res.by_domain[seekerDomainId]?.items ?? []).map((p, i) =>
+      toSeekerRow(p, locale, i),
+    );
+    return filterRowsByLifecycle(all, lifecycleFilter);
+  };
+
   // Refresh handler: hits the BFF with refresh=true to force signalstack to
   // recompute the rollup synchronously, then invalidates the React Query
   // cache so the next normal render picks up the freshly stored values.
@@ -1855,8 +1614,6 @@ function SeekersTab() {
         </MetricGroup>
       </div>
 
-      <OnboardingMetrics />
-
       {isLoading ? (
         <LoadingCard />
       ) : isError ? (
@@ -1877,6 +1634,7 @@ function SeekersTab() {
           lifecycleFilter={lifecycleFilter}
           onLifecycleFilterChange={handleLifecycleFilterChange}
           domain={seekerDomainId}
+          onSelectAllMatching={fetchAllSeekers}
         />
       )}
     </div>
@@ -2073,6 +1831,21 @@ function ProvidersTab() {
     () => filterRowsByLifecycle(rows, lifecycleFilter),
     [rows, lifecycleFilter],
   );
+  // Fetch every matching provider (all pages) for the "Select all N matching"
+  // banner — one batched call scoped to the active filter.
+  const fetchAllProviders = async () => {
+    if (!providerDomainId) return [];
+    const res = await dashboardService.dashboard({
+      domain: providerDomainId,
+      page: 1,
+      limit: slice?.total_matching ?? total ?? PAGE_SIZE,
+      ...(filterActive ? { status: statusFilter } : {}),
+    });
+    const all = (res.by_domain[providerDomainId]?.items ?? []).map((p, i) =>
+      toProviderRow(p, locale, i),
+    );
+    return filterRowsByLifecycle(all, lifecycleFilter);
+  };
   const [cachedByStatus, setCachedByStatus] = useState<Record<string, number> | undefined>();
   useEffect(() => {
     if (!filterActive && rollup?.by_status) {
@@ -2195,8 +1968,6 @@ function ProvidersTab() {
         </MetricGroup>
       </div>
 
-      <OnboardingMetrics />
-
       {isLoading ? (
         <LoadingCard />
       ) : isError ? (
@@ -2217,6 +1988,7 @@ function ProvidersTab() {
           lifecycleFilter={lifecycleFilter}
           onLifecycleFilterChange={handleLifecycleFilterChange}
           domain={providerDomainId}
+          onSelectAllMatching={fetchAllProviders}
         />
       )}
     </div>
@@ -2353,7 +2125,7 @@ function DashboardLoadingFrame() {
   return (
     <div className="fade-up">
       <Topbar
-        title={`My ${cfg.network.display_name ?? cfg.brand.short_name}`}
+        title={`My ${cfg.brand.short_name}`}
         subtitle={cfg.brand.tagline ?? 'Track every participant in your network — at a glance.'}
       />
       <div className="text-center text-[13px] text-ink-400 py-12">{t('state.loading')}</div>
@@ -2393,7 +2165,7 @@ function DashboardContent({ aggregatorType }: { aggregatorType: string }) {
   return (
     <div className="fade-up">
       <Topbar
-        title={`My ${cfg.network.display_name ?? cfg.brand.short_name}`}
+        title={`My ${cfg.brand.short_name}`}
         subtitle={cfg.brand.tagline ?? 'Track every participant in your network — at a glance.'}
         right={
           <div className="flex items-center gap-2">

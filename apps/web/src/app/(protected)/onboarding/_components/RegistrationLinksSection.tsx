@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { useTranslations, useFormatter } from 'next-intl';
 import { Button } from '../../../../components/ui/Button';
+import { SubmitBlockers } from '../../../../components/ui/SubmitBlockers';
 import { I } from '../../../../icons';
 import {
   useActivateLink,
@@ -168,6 +169,20 @@ export function CreateLinkSection() {
   // Label rendered in the read-only Domain field. Pulls from the live
   // network config so orange's `tourist` shows "Tourists" not "Provider".
   const domainLabel = domainCfg?.plural_label ?? domainCfg?.label ?? aggregatorType;
+  // Field caption lists every configured domain, e.g. "Seekers / Providers".
+  // The value below is the one this aggregator is scoped to.
+  const domainsCaption =
+    (cfg?.domains ?? []).map((d) => d.plural_label ?? d.label ?? d.id).join(' / ') ||
+    t('create_link.field_domain');
+
+  // Unmet required fields, surfaced under the (disabled) create button so the
+  // user is never left guessing why submit won't fire.
+  const createBlockers: string[] = [];
+  if (!form.state) createBlockers.push(t('create_link.blockers.state'));
+  if (!form.district) createBlockers.push(t('create_link.blockers.district'));
+  if (!form.lever_event) createBlockers.push(t('create_link.blockers.lever_event'));
+  if (!form.domain) createBlockers.push(t('create_link.blockers.domain'));
+  if (!form.registration_mode) createBlockers.push(t('create_link.blockers.registration_mode'));
 
   // Pin the link domain to the aggregator's registered type — the API
   // rejects mismatches with AGGREGATOR_TYPE_MISMATCH, so the UI never lets
@@ -321,7 +336,7 @@ export function CreateLinkSection() {
               placeholder={t('create_link.placeholder_district')}
             />
           </Field>
-          <Field label={t('create_link.field_domain')} required>
+          <Field label={domainsCaption} required>
             {/*
              * Pinned to the aggregator's registered type — single-type
              * enforcement is what the API expects. Rendered read-only so
@@ -359,8 +374,18 @@ export function CreateLinkSection() {
               placeholder={t('create_link.placeholder_tags')}
             />
           </Field>
+          {/* Option B: keep the create button gated, but list what's still
+              missing so a disabled button always explains itself. */}
+          {createBlockers.length > 0 && (
+            <div className="md:col-span-2">
+              <SubmitBlockers
+                reasons={createBlockers}
+                heading={t('create_link.blockers.heading')}
+              />
+            </div>
+          )}
           <div className="md:col-span-2 flex items-center justify-end gap-2 mt-2 flex-wrap">
-            <Button onClick={onCreate} disabled={create.isPending}>
+            <Button onClick={onCreate} disabled={create.isPending || createBlockers.length > 0}>
               {create.isPending ? t('create_link.creating') : t('create_link.create_button')}
             </Button>
           </div>
@@ -674,7 +699,12 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
             <Button kind="ghost" onClick={() => setEditing(false)} disabled={update.isPending}>
               {t('link_card.cancel')}
             </Button>
-            <Button onClick={onSaveEdit} disabled={update.isPending}>
+            <Button
+              onClick={onSaveEdit}
+              disabled={
+                update.isPending || !editForm.state || !editForm.district || !editForm.lever_event
+              }
+            >
               {update.isPending ? t('link_card.saving') : t('link_card.save_draft')}
             </Button>
           </div>
@@ -692,7 +722,10 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
 export function YourLinksBody() {
   const t = useTranslations('onboarding');
   const rawProfile = useProfileRaw();
-  const aggregatorType: 'seeker' | 'provider' = rawProfile.data?.type ?? 'seeker';
+  const { data: cfg } = useAggregatorConfig();
+  // Domain id the aggregator is scoped to; falls back to the network's first
+  // declared domain (networks.json order) until the profile loads.
+  const aggregatorType: string = rawProfile.data?.type ?? cfg?.domains[0]?.id ?? '';
   // The aggregator only ever has links of its registered type — no tab
   // switcher needed. Filter is pinned via `aggregatorType`.
   const { data, isLoading, error } = useRegistrationLinks(aggregatorType);

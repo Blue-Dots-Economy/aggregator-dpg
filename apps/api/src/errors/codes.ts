@@ -32,6 +32,14 @@ export const ERR = {
     detail: 'The server hit an unexpected error. Please try again.',
     hint: 'Unhandled exception reached the global error handler. Check stack.',
   },
+  CONSENT_WRITE_FAILED: {
+    code: 'CONSENT_WRITE_FAILED',
+    status: 500,
+    title: 'Could not record consent',
+    detail:
+      'Your consent could not be recorded, so the registration was not completed. Please try again.',
+    hint: 'The consent-ledger write failed and the registration was rolled back (fail-closed). Check consent config + DB.',
+  },
   SCHEMA_VALIDATION: {
     code: 'SCHEMA_VALIDATION',
     status: 400,
@@ -218,6 +226,38 @@ export const ERR = {
     title: 'Action not allowed',
     detail: 'The requested action conflicts with the current resource state.',
     hint: 'State-machine transition disallowed (e.g. retired → live).',
+  },
+  OWNER_ALREADY_REGISTERED: {
+    code: 'OWNER_ALREADY_REGISTERED',
+    status: 409,
+    title: 'Already an organisation owner',
+    detail:
+      'This email or phone already belongs to an organisation owner. Request coordinator access from your organisation instead of registering again.',
+    hint: 'Coordinator submit matched an aggregator_orgs.owner_email (spec A4). Owner→coordinator graduation is deferred.',
+  },
+  ORG_SLUG_TAKEN: {
+    code: 'ORG_SLUG_TAKEN',
+    status: 409,
+    title: 'Organisation name unavailable',
+    detail:
+      'An organisation with a matching name is already registered or pending. Try a different name.',
+    hint: 'aggregator_orgs partial-unique slug collision over non-terminal rows (spec A9).',
+  },
+  ORG_NAME_TAKEN: {
+    code: 'ORG_NAME_TAKEN',
+    status: 409,
+    title: 'Organisation name unavailable',
+    detail:
+      'An organisation with this name is already registered or pending. Please choose a different name.',
+    hint: 'aggregator_orgs partial-unique display_name (case-insensitive) collision over non-terminal rows.',
+  },
+  TARGET_ORG_INACTIVE: {
+    code: 'TARGET_ORG_INACTIVE',
+    status: 409,
+    title: 'Organisation unavailable',
+    detail:
+      'The selected organisation is not accepting coordinators. Contact the organisation owner.',
+    hint: 'Coordinator submit/approval against an org whose status != active (spec §6.2 re-validate).',
   },
 
   // ── Bulk uploads ────────────────────────────────────────────────────────

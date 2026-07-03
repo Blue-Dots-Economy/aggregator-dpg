@@ -32,6 +32,8 @@ export function ProfileCompleteView({ schema, uiSchema }: ProfileCompleteViewPro
   const [formData, setFormData] = useState<Record<string, unknown>>({});
   const [consent, setConsent] = useState<Record<string, unknown>>({});
   const [state, setState] = useState<SubmitState>({ status: 'loading' });
+  // Gates the submit button: disabled until every visible required field is valid.
+  const [canSubmit, setCanSubmit] = useState(false);
 
   const formSchema = useMemo<RJSFSchema>(() => {
     const clone: RJSFSchema = { ...schema };
@@ -112,6 +114,7 @@ export function ProfileCompleteView({ schema, uiSchema }: ProfileCompleteViewPro
               uiSchema={uiSchema}
               formData={formData}
               onChange={(e) => setFormData((e.formData ?? {}) as Record<string, unknown>)}
+              onValidityChange={setCanSubmit}
               onSubmit={handleSubmit}
             >
               <div className="flex items-center justify-between border-t border-[var(--bd-border)] mt-6 pt-5">
@@ -129,7 +132,7 @@ export function ProfileCompleteView({ schema, uiSchema }: ProfileCompleteViewPro
                   <Button
                     type="submit"
                     icon={<I.check size={14} />}
-                    disabled={state.status === 'submitting'}
+                    disabled={state.status === 'submitting' || !canSubmit}
                   >
                     {state.status === 'submitting' ? t('btn_saving') : t('btn_save')}
                   </Button>

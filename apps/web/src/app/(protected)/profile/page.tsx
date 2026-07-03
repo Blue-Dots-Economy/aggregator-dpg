@@ -11,33 +11,6 @@ import type { AggregatorProfile } from '../../../types';
 import { I } from '../../../icons';
 import { ProfileEditView } from './ProfileEditView';
 
-type DeltaTone = 'up' | 'down' | 'flat';
-
-interface MiniStatProps {
-  label: string;
-  value: string;
-  delta?: string;
-  deltaTone?: DeltaTone;
-}
-
-function MiniStat({ label, value, delta, deltaTone = 'up' }: MiniStatProps) {
-  const toneClass =
-    deltaTone === 'up'
-      ? 'text-emerald-600'
-      : deltaTone === 'down'
-        ? 'text-rose-600'
-        : 'text-ink-400';
-  return (
-    <div className="rounded-[12px] border border-[var(--bd-border)] bg-white px-4 py-3">
-      <div className="text-[11.5px] text-ink-400 font-medium">{label}</div>
-      <div className="mt-1 flex items-baseline gap-2">
-        <div className="font-display font-bold text-[20px] text-ink-900 leading-none">{value}</div>
-        {delta && <div className={`text-[11.5px] font-semibold ${toneClass}`}>{delta}</div>}
-      </div>
-    </div>
-  );
-}
-
 interface SectionProps {
   title: string;
   children: ReactNode;
@@ -75,22 +48,6 @@ function KV({ label, value, mono }: KVProps) {
           <span className="text-ink-300">—</span>
         )}
       </div>
-    </div>
-  );
-}
-
-interface ConsentRowProps {
-  checked?: boolean;
-  children: ReactNode;
-}
-
-function ConsentRow({ checked = true, children }: ConsentRowProps) {
-  return (
-    <div className="flex items-start gap-3 py-2.5">
-      <span className={`tick mt-0.5 ${!checked ? '!bg-ink-100 !text-ink-300' : ''}`}>
-        {checked ? <I.check size={11} /> : <I.x size={11} />}
-      </span>
-      <div className="text-[13.5px] text-ink-700 leading-relaxed">{children}</div>
     </div>
   );
 }
@@ -133,12 +90,6 @@ function ActiveProfile({ data, isLoading, isError, onEdit }: ActiveProfileProps)
   const address = data?.address ?? '2nd Floor, Trade Centre, Bandra-Kurla Complex, Mumbai 400051';
   const geographies = data?.geographies ?? 'Karnataka, Maharashtra, Tamil Nadu, Telangana';
   const sectors = data?.sectors ?? 'Retail · F&B · Customer Service · Logistics';
-  const activeSeekers = data?.network.activeSeekers ?? 58;
-  const openRoles = data?.network.openRoles ?? 77;
-  const hires3mo = data?.network.hires3mo ?? 142;
-  const matchRate = data?.network.matchRate ?? '34%';
-  const consent = data?.consent;
-  const consentLastReviewed = consent?.lastReviewed ?? '02 Apr 2026';
 
   const initials = org
     .split(/\s+/)
@@ -243,66 +194,6 @@ function ActiveProfile({ data, isLoading, isError, onEdit }: ActiveProfileProps)
           ) : (
             <span className="text-ink-300">—</span>
           )}
-        </div>
-      </Section>
-
-      <Section title={t('section_network')}>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <MiniStat
-            label={t('stat_active_seekers')}
-            value={String(activeSeekers)}
-            delta="+12"
-            deltaTone="up"
-          />
-          <MiniStat
-            label={t('stat_open_roles')}
-            value={String(openRoles)}
-            delta="+18"
-            deltaTone="up"
-          />
-          <MiniStat
-            label={t('stat_hires_3mo')}
-            value={String(hires3mo)}
-            delta="↑ 22%"
-            deltaTone="up"
-          />
-          <MiniStat
-            label={t('stat_match_rate')}
-            value={matchRate}
-            delta="vs 28% avg"
-            deltaTone="up"
-          />
-        </div>
-      </Section>
-
-      <Section
-        title={t('section_consent')}
-        right={
-          <button
-            type="button"
-            className="text-[12px] font-semibold text-primary-600 hover:underline"
-          >
-            {t('btn_review_history')}
-          </button>
-        }
-      >
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-10">
-          <ConsentRow checked={consent?.profileCreation ?? true}>
-            {t('consent_profile_creation')}
-          </ConsentRow>
-          <ConsentRow checked={consent?.sharing ?? true}>{t('consent_sharing')}</ConsentRow>
-          <ConsentRow checked={consent?.notifications ?? true}>
-            {t('consent_notifications')}
-          </ConsentRow>
-          <ConsentRow checked={consent?.analytics ?? true}>{t('consent_analytics')}</ConsentRow>
-          <ConsentRow checked={consent?.marketing ?? false}>{t('consent_marketing')}</ConsentRow>
-          <ConsentRow checked={consent?.retention ?? true}>{t('consent_retention')}</ConsentRow>
-        </div>
-        <div className="mt-5 flex items-center gap-2 text-[12px] text-ink-400">
-          <I.shield size={14} className="text-emerald-500" />
-          {t('consent_last_reviewed')}{' '}
-          <strong className="text-ink-700 font-medium ml-1">{consentLastReviewed}</strong>.{' '}
-          {t('consent_next_review', { date: '02 Apr 2027' })}
         </div>
       </Section>
     </div>

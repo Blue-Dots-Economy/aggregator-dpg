@@ -59,6 +59,73 @@ else
 fi
 
 # ────────────────────────────────────────────────────────────
+# 1b) org hierarchy: org_owner realm role + service-account grant
+#
+# realm.json is only consulted on first import, so these are re-applied
+# idempotently here for realms that already exist in postgres. Both are
+# required before ORG_HIERARCHY_ENABLED=true, and harmless when it is off:
+#   - org_owner realm role: assigned to the org-owner user at org approval.
+#   - aggregator-api service account needs realm-management:manage-realm
+#     (in addition to manage-users) to create/manage the org's KC group.
+# Placed before the SMTP early-exit below so they always run.
+# ────────────────────────────────────────────────────────────
+API_CLIENT_ID="${API_CLIENT_ID:-aggregator-api}"
+
+# --- 1b-i. ensure org_owner realm role exists ---
+ROLE_HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
+  "${KC_URL}/admin/realms/${REALM}/roles/org_owner" -H "Authorization: Bearer ${TOKEN}")
+if [ "$ROLE_HTTP" = "200" ]; then
+  echo "[kc-init] realm role 'org_owner' already present — skip"
+else
+  HTTP=$(curl -s -o /tmp/role-resp.json -w "%{http_code}" -X POST \
+    "${KC_URL}/admin/realms/${REALM}/roles" \
+    -H "Authorization: Bearer ${TOKEN}" \
+    -H "Content-Type: application/json" \
+    --data '{"name":"org_owner","description":"Parent-org owner (org hierarchy). Assigned to the org-owner user at org approval."}')
+  if [ "$HTTP" = "201" ]; then
+    echo "[kc-init] realm role 'org_owner' created"
+  else
+    echo "[kc-init] realm role 'org_owner' create FAILED: HTTP ${HTTP}"
+    cat /tmp/role-resp.json || true
+  fi
+fi
+
+# --- 1b-ii. grant realm-management:manage-realm to the API service account ---
+API_UUID=$(curl -fsS "${KC_URL}/admin/realms/${REALM}/clients?clientId=${API_CLIENT_ID}" \
+  -H "Authorization: Bearer ${TOKEN}" | jq -r '.[0].id // empty')
+RM_UUID=$(curl -fsS "${KC_URL}/admin/realms/${REALM}/clients?clientId=realm-management" \
+  -H "Authorization: Bearer ${TOKEN}" | jq -r '.[0].id // empty')
+if [ -z "$API_UUID" ] || [ -z "$RM_UUID" ]; then
+  echo "[kc-init] '${API_CLIENT_ID}' or realm-management client not found — skip manage-realm grant"
+else
+  SA_UID=$(curl -fsS "${KC_URL}/admin/realms/${REALM}/clients/${API_UUID}/service-account-user" \
+    -H "Authorization: Bearer ${TOKEN}" | jq -r '.id // empty')
+  HAS_MR=$(curl -fsS \
+    "${KC_URL}/admin/realms/${REALM}/users/${SA_UID}/role-mappings/clients/${RM_UUID}" \
+    -H "Authorization: Bearer ${TOKEN}" | jq -r '[.[] | select(.name == "manage-realm")] | length')
+  if [ -z "$SA_UID" ]; then
+    echo "[kc-init] service-account user for '${API_CLIENT_ID}' not found — skip manage-realm grant"
+  elif [ "${HAS_MR:-0}" -gt 0 ]; then
+    echo "[kc-init] service account already has realm-management:manage-realm — skip"
+  else
+    MR_ROLE=$(curl -fsS \
+      "${KC_URL}/admin/realms/${REALM}/clients/${RM_UUID}/roles/manage-realm" \
+      -H "Authorization: Bearer ${TOKEN}")
+    HTTP=$(curl -s -o /tmp/mr-resp.json -w "%{http_code}" -X POST \
+      "${KC_URL}/admin/realms/${REALM}/users/${SA_UID}/role-mappings/clients/${RM_UUID}" \
+      -H "Authorization: Bearer ${TOKEN}" \
+      -H "Content-Type: application/json" \
+      --data "[${MR_ROLE}]")
+    if [ "$HTTP" = "204" ] || [ "$HTTP" = "200" ]; then
+      echo "[kc-init] granted realm-management:manage-realm to '${API_CLIENT_ID}' service account"
+    else
+      echo "[kc-init] manage-realm grant FAILED: HTTP ${HTTP}"
+      cat /tmp/mr-resp.json || true
+    fi
+  fi
+fi
+
+# ────────────────────────────────────────────────────────────
 # 2) SMTP server config
 # ────────────────────────────────────────────────────────────
 if [ -z "${SMTP_HOST:-}" ]; then

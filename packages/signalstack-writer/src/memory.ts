@@ -23,6 +23,9 @@ import {
   type SignalStackDashboardExportQuery,
   type SignalStackDashboardPage,
   type SignalStackDashboardQuery,
+  type SignalStackDecryptedProfileRow,
+  type SignalStackDecryptedProfiles,
+  type SignalStackFetchDecryptedProfilesQuery,
   type SignalStackGetItemQuery,
   type SignalStackItemList,
   type SignalStackItemQuery,
@@ -576,6 +579,46 @@ export class InMemorySignalStackWriter extends SignalStackWriterBase {
       csv: pinned,
       filename: `aggregator-dashboard-${sanitised}-${ISO_FIXED.slice(0, 10)}.csv`,
     });
+  }
+
+  override async fetchDecryptedProfiles(
+    query: SignalStackFetchDecryptedProfilesQuery,
+  ): Promise<Result<SignalStackDecryptedProfiles, BaseError>> {
+    if (!query?.actingOrgId) {
+      return err(
+        new ValidationError('actingOrgId is required', { code: 'SIGNALSTACK_INPUT_INVALID' }),
+      );
+    }
+    if (!Array.isArray(query.itemIds) || query.itemIds.length === 0) {
+      return err(
+        new ValidationError('itemIds must be a non-empty array', {
+          code: 'SIGNALSTACK_INPUT_INVALID',
+        }),
+      );
+    }
+
+    const requested = Array.from(new Set(query.itemIds));
+    const profiles: SignalStackDecryptedProfileRow[] = [];
+    const skipped: string[] = [];
+
+    for (const id of requested) {
+      const stored = this.profiles.get(id);
+      if (stored && stored.acting_org_id === query.actingOrgId) {
+        profiles.push({
+          item_id: stored.item_id,
+          item_network: stored.item_network,
+          item_domain: stored.item_domain,
+          item_type: stored.item_type,
+          item_state: stored.item_state,
+          created_at: stored.created_at,
+          updated_at: stored.updated_at,
+        });
+      } else {
+        skipped.push(id);
+      }
+    }
+
+    return ok({ profiles, skipped });
   }
 
   protected findByEmail(email: string): StoredUser | undefined {

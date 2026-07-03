@@ -17,6 +17,7 @@ import type { ReactNode } from 'react';
 import { Sidebar } from '../../components/shell/Sidebar';
 import { AuthProvider } from '../../lib/auth-context';
 import { getSession } from '../../lib/server-session';
+import { tokenAggregatorId } from '../../lib/jwt';
 import type { User } from '../../types';
 
 export default async function ProtectedLayout({ children }: { children: ReactNode }) {
@@ -33,6 +34,15 @@ export default async function ProtectedLayout({ children }: { children: ReactNod
   const now = Date.now();
   if (session.refreshTokenExp && session.refreshTokenExp <= now) {
     redirect(`/api/auth/logout?reason=expired&return=${encodeURIComponent(path)}`);
+  }
+
+  // Portal is coordinator-only. A coordinator's token carries `aggregator_id`;
+  // org owners / network admins do not. Gate every protected page on it so a
+  // non-coordinator can never reach the portal even if a session was minted
+  // (e.g. before the callback gate, or via another path). Sign them out with a
+  // clear message rather than showing a data-less, broken shell.
+  if (!tokenAggregatorId(session.accessToken)) {
+    redirect('/api/auth/logout?reason=org_no_portal');
   }
 
   const user: User = {

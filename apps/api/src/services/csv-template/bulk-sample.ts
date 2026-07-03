@@ -11,9 +11,8 @@
 
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { resolveConfigPath } from '@aggregator-dpg/network-config/paths';
 import { logger } from '../../logger.js';
-
-const DEFAULT_CONFIG_PATH = '/app/config/aggregator.config.yaml';
 
 /**
  * Resolves the on-disk path of the curated sample CSV for a participant type,
@@ -21,13 +20,14 @@ const DEFAULT_CONFIG_PATH = '/app/config/aggregator.config.yaml';
  * `aggregator.config.yaml`, mirroring how `brand.json` is resolved).
  *
  * @param participantType - Validated participant domain id (e.g. `seeker`).
- * @param configPath - Active aggregator config path; defaults to the
- *   `AGGREGATOR_CONFIG_PATH` env value.
+ * @param configPath - Active aggregator config path; defaults to the path
+ *   derived from `AGGREGATOR_NETWORK`/`AGGREGATOR_BRAND` (or the explicit
+ *   `AGGREGATOR_CONFIG_PATH` override if set).
  * @returns Path to the candidate sample CSV.
  */
 export function bulkSamplePath(
   participantType: string,
-  configPath: string = process.env.AGGREGATOR_CONFIG_PATH ?? DEFAULT_CONFIG_PATH,
+  configPath: string = resolveConfigPath(),
 ): string {
   return path.join(path.dirname(configPath), 'bulk-samples', `${participantType}.csv`);
 }

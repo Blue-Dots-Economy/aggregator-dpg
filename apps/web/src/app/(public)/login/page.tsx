@@ -39,9 +39,11 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   const error =
     reason === 'expired'
       ? 'session_expired'
-      : typeof params.error === 'string'
-        ? params.error
-        : null;
+      : reason === 'org_no_portal'
+        ? 'org_no_portal'
+        : typeof params.error === 'string'
+          ? params.error
+          : null;
 
   return <LoginView returnTo={returnTo} error={error} />;
 }

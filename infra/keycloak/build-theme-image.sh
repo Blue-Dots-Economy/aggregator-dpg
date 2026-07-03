@@ -1,22 +1,33 @@
 #!/usr/bin/env bash
-# Build the per-network Keycloak theme init-container image.
+# Build the per-network (and optionally per-brand) Keycloak theme init-container image.
 #
-# Reads brand args from `config/<network>/keycloak.env` so the same
+# Reads brand args from `config/<network>[/<brand>]/keycloak.env` so the same
 # strings that drive the docker-compose stack also bake the k8s image.
-# Outputs `aggregator-kc-theme:<network>-<tag>`.
+# Outputs `aggregator-kc-theme:<network>[-<brand>]-<tag>`.
 #
 # Usage:
-#   ./infra/keycloak/build-theme-image.sh <network> [<image-tag>] [<registry>]
-#   ./infra/keycloak/build-theme-image.sh purple_dot v1 registry.your.co
+#   ./infra/keycloak/build-theme-image.sh <network> [<brand>] [<image-tag>] [<registry>]
+#   ./infra/keycloak/build-theme-image.sh blue_dot               # → aggregator-kc-theme:blue_dot-local
+#   ./infra/keycloak/build-theme-image.sh blue_dot upsdm v1      # → aggregator-kc-theme:blue_dot-upsdm-v1
+#   ./infra/keycloak/build-theme-image.sh purple_dot "" v1 registry.your.co
 #
-# Defaults: network=blue_dot, tag=local, registry= (omit → local docker).
+# Defaults: network=blue_dot, brand= (omit → base network env), tag=local, registry= (omit → local docker).
+# Set DRY_RUN=1 to print the resolved env_file + image tag and exit without building.
 set -euo pipefail
 
 NETWORK="${1:-blue_dot}"
-TAG="${2:-local}"
-REGISTRY="${3:-}"
+BRAND="${2:-}"
+TAG="${3:-local}"
+REGISTRY="${4:-}"
 
-ENV_FILE="config/${NETWORK}/keycloak.env"
+if [[ -n "$BRAND" ]]; then
+  ENV_FILE="config/${NETWORK}/${BRAND}/keycloak.env"
+  IMAGE_NAME="aggregator-kc-theme:${NETWORK}-${BRAND}-${TAG}"
+else
+  ENV_FILE="config/${NETWORK}/keycloak.env"
+  IMAGE_NAME="aggregator-kc-theme:${NETWORK}-${TAG}"
+fi
+
 if [[ ! -f "$ENV_FILE" ]]; then
   echo "missing $ENV_FILE — run from repo root" >&2
   exit 1
@@ -33,25 +44,29 @@ done < "$ENV_FILE"
 
 BUILD_ARGS+=("--build-arg" "NETWORK=${NETWORK}")
 
-IMAGE="aggregator-kc-theme:${NETWORK}-${TAG}"
 if [[ -n "$REGISTRY" ]]; then
-  IMAGE="${REGISTRY}/${IMAGE}"
+  IMAGE_NAME="${REGISTRY}/${IMAGE_NAME}"
 fi
 
-echo "→ building $IMAGE from $ENV_FILE"
+if [[ -n "${DRY_RUN:-}" ]]; then
+  echo "DRY_RUN: env_file=$ENV_FILE image=$IMAGE_NAME"
+  exit 0
+fi
+
+echo "→ building $IMAGE_NAME from $ENV_FILE"
 docker build \
   -f infra/keycloak/themes.Dockerfile \
   "${BUILD_ARGS[@]}" \
-  -t "$IMAGE" \
+  -t "$IMAGE_NAME" \
   .
 
-echo "✓ built $IMAGE"
+echo "✓ built $IMAGE_NAME"
 echo
 echo "Push (optional):"
-echo "  docker push $IMAGE"
+echo "  docker push $IMAGE_NAME"
 echo
 echo "Use as k8s initContainer:"
 echo "  - name: themes-init"
-echo "    image: $IMAGE"
+echo "    image: $IMAGE_NAME"
 echo "    volumeMounts:"
 echo "      - { name: kc-themes, mountPath: /shared }"

@@ -19,6 +19,10 @@
     "./config": {
       "import": "./dist/config.schema.js",
       "types": "./dist/config.schema.d.ts"
+    },
+    "./consent": {
+      "import": "./dist/consent.schema.js",
+      "types": "./dist/consent.schema.d.ts"
     }
   },
   "scripts": {

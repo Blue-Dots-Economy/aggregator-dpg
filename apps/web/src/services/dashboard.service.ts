@@ -229,6 +229,17 @@ export interface DashboardService {
    * a 202 acknowledgement; delivery is asynchronous (stubbed today).
    */
   dashboardBulkAction(input: DashboardBulkActionInput): Promise<DashboardBulkActionResult>;
+  /**
+   * Download decrypted profile data for the selected item ids as a CSV file.
+   *
+   * Posts the item ids and domain to the BFF relay which forwards to the
+   * aggregator API (which holds the signalstack admin key). Returns the
+   * Blob + the upstream filename so the caller can trigger a browser download.
+   */
+  dashboardExportProfiles(input: {
+    domain: string;
+    itemIds: string[];
+  }): Promise<DashboardExportResult>;
 }
 
 interface SignalStackItem {
@@ -352,6 +363,39 @@ class HttpDashboardService implements DashboardService {
     const disposition = res.headers.get('content-disposition') ?? '';
     const filename =
       parseFilenameFromContentDisposition(disposition) ?? defaultExportFilename(query);
+    return { blob, filename };
+  }
+
+  async dashboardExportProfiles(input: {
+    domain: string;
+    itemIds: string[];
+  }): Promise<DashboardExportResult> {
+    if (!input.domain) throw new Error('dashboardExportProfiles requires `domain`');
+    if (!input.itemIds.length)
+      throw new Error('dashboardExportProfiles requires at least one item id');
+    const res = await fetch('/api/dashboard/export/profiles', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'text/csv' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ item_ids: input.itemIds, domain: input.domain }),
+    });
+    if (!res.ok) {
+      // Error envelope is JSON; surface the upstream message so the
+      // caller's toast can show something more useful than "fetch failed".
+      let message = `profile export failed: ${res.status}`;
+      try {
+        const errBody = (await res.json()) as { error?: { detail?: string; message?: string } };
+        const detail = errBody?.error?.detail ?? errBody?.error?.message;
+        if (detail) message = detail;
+      } catch {
+        // non-JSON body — keep the default message.
+      }
+      throw new Error(message);
+    }
+    const blob = await res.blob();
+    const disposition = res.headers.get('content-disposition') ?? '';
+    const filename =
+      parseFilenameFromContentDisposition(disposition) ?? `profiles-${input.domain}.csv`;
     return { blob, filename };
   }
 

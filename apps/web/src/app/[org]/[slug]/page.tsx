@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import type { RJSFSchema } from '@rjsf/utils';
+import { resolveSchemaRoot } from '@/lib/config-paths';
 import { PublicRegistrationView } from './PublicRegistrationView';
 
 export const metadata: Metadata = {
@@ -140,6 +141,7 @@ export default async function PublicRegistrationPage({ params }: PageProps) {
       identity={resolved.identity}
       submissionShape={submissionShape}
       publicHintI18nKey={hintKey}
+      registrationMode={resolved.registration_mode ?? null}
     />
   );
 }
@@ -147,12 +149,12 @@ export default async function PublicRegistrationPage({ params }: PageProps) {
 function resolveParticipantSchemaPath(file: string): string {
   // Walk a small set of plausible roots so the same code works in dev
   // (`pnpm --filter web dev`, cwd = apps/web) and in the docker standalone
-  // build (cwd = /app, config copied via Dockerfile). Honour
-  // `SCHEMA_ROOT_DIR` first so a per-network deployment (e.g.
-  // `/app/config/blue_dot/schemas`) drives the path without web rebuilds.
-  const root = process.env.SCHEMA_ROOT_DIR;
+  // build (cwd = /app, config copied via Dockerfile). Derives the schema
+  // root from AGGREGATOR_NETWORK/AGGREGATOR_BRAND (or explicit SCHEMA_ROOT_DIR
+  // override) via resolveSchemaRoot() so only two brand vars are needed.
+  const root = resolveSchemaRoot();
   const candidates = [
-    ...(root ? [path.resolve(root, 'participant', file)] : []),
+    path.resolve(root, 'participant', file),
     path.resolve(process.cwd(), 'config/schemas/participant', file),
     path.resolve(process.cwd(), '../../config/schemas/participant', file),
     path.resolve(process.cwd(), '../config/schemas/participant', file),

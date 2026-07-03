@@ -60,6 +60,7 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
       createdAt: now,
       updatedAt: now,
       signalstackOrgId: null,
+      parentOrgId: input.parentOrgId ?? null,
     };
     this.indexInsert(row);
     return { ok: true, value: row };
@@ -84,12 +85,23 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
     return { ok: true, value: id ? (this.byId.get(id) ?? null) : null };
   }
 
+  async findByParentOrgId(orgId: string): Promise<StoreResult<Aggregator[]>> {
+    return {
+      ok: true,
+      value: [...this.byId.values()].filter((r) => r.parentOrgId === orgId),
+    };
+  }
+
   async list(filter: ListAggregatorsFilter): Promise<StoreResult<ListAggregatorsPage>> {
     const limit = Math.max(1, Math.min(1000, filter.limit ?? 50));
     const offset = Math.max(0, filter.offset ?? 0);
     let rows = [...this.byId.values()];
     if (filter.status) rows = rows.filter((r) => r.status === filter.status);
     if (filter.actorType) rows = rows.filter((r) => r.actorType === filter.actorType);
+    if (filter.updatedBefore) {
+      const before = filter.updatedBefore.getTime();
+      rows = rows.filter((r) => r.updatedAt.getTime() < before);
+    }
     rows.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
     return {
       ok: true,
@@ -132,6 +144,7 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
       locations: patch.locations ?? existing.locations,
       consent: patch.consent ?? existing.consent,
       status: patch.status ?? existing.status,
+      parentOrgId: patch.parentOrgId !== undefined ? patch.parentOrgId : existing.parentOrgId,
       updatedBy: patch.updatedBy,
       updatedAt: new Date(),
     };
@@ -145,6 +158,13 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
     updatedBy: string,
   ): Promise<StoreResult<Aggregator>> {
     return this.update(id, { status, updatedBy });
+  }
+
+  async approveFromPending(id: string, updatedBy: string): Promise<StoreResult<Aggregator | null>> {
+    const existing = this.byId.get(id);
+    // Only pending → active; anything else means already decided.
+    if (!existing || existing.status !== 'pending') return { ok: true, value: null };
+    return this.update(id, { status: 'active', updatedBy });
   }
 
   async updateSignalstackOrgId(

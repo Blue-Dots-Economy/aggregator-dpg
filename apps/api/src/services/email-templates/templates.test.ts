@@ -11,19 +11,23 @@ describe('admin-review template', () => {
       applicantEmail: 'asha@trrain.org',
       applicantPhone: '+919876543210',
       association: 'TRRAIN',
-      aggregatorType: 'seeker',
       state: 'Karnataka',
       about: 'Skilling NGO based in Hubli',
       approveUrl: 'http://localhost:4000/admin/v1/.../approve?token=A',
       rejectUrl: 'http://localhost:4000/admin/v1/.../reject?token=R',
       submittedAt: new Date('2026-04-30T10:00:00Z'),
+      expiresInText: '7 days',
     });
     expect(out.subject).toContain('TRRAIN');
+    // Defaults to the aggregator (coordinator) wording.
+    expect(out.subject).toContain('aggregator registration');
+    expect(out.html).toContain('New aggregator registration');
     expect(out.html).toContain('Asha Rao');
     expect(out.html).toContain('asha@trrain.org');
     expect(out.html).toContain('Karnataka');
     expect(out.html).toContain('approve?token=A');
     expect(out.html).toContain('reject?token=R');
+    expect(out.html).toContain('expires in 7 days');
     expect(out.text).toContain('asha@trrain.org');
   });
 
@@ -34,14 +38,18 @@ describe('admin-review template', () => {
       applicantEmail: 'a@b.in',
       applicantPhone: '+919876543210',
       association: 'X & Y',
-      aggregatorType: 'provider',
+      entityLabel: 'organisation',
       approveUrl: 'http://x',
       rejectUrl: 'http://y',
       submittedAt: new Date(),
+      expiresInText: '7 days',
     });
     expect(out.html).not.toContain('<script>alert');
     expect(out.html).toContain('&lt;script&gt;');
     expect(out.html).toContain('X &amp; Y');
+    // Org flow wording, not aggregator.
+    expect(out.html).toContain('New organisation registration');
+    expect(out.subject).toContain('organisation registration');
   });
 });
 

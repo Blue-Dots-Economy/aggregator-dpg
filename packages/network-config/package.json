@@ -19,6 +19,10 @@
     "./testing": {
       "import": "./dist/testing.js",
       "types": "./dist/testing.d.ts"
+    },
+    "./paths": {
+      "import": "./dist/paths.js",
+      "types": "./dist/paths.d.ts"
     }
   },
   "scripts": {

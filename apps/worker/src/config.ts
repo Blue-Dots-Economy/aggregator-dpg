@@ -36,6 +36,15 @@ const ConfigSchema = z.object({
     .positive()
     .default(64 * 1024),
 
+  // ─── Worker role selection ──────────────────────────────────────────────
+  /**
+   * Comma-separated subset of consumer roles this process runs:
+   * `file`, `row`, `finalise`, `cron`. Unset / empty / `all` runs everything
+   * (single-process default). Run `file` in its own deployment to isolate the
+   * CPU-sensitive parser from the other consumers.
+   */
+  WORKER_ROLES: z.string().optional(),
+
   // ─── Worker concurrency ─────────────────────────────────────────────────
   BULK_FILE_PROCESS_CONCURRENCY: z.coerce.number().int().positive().default(2),
   BULK_ROW_PROCESS_CONCURRENCY: z.coerce.number().int().positive().default(10),

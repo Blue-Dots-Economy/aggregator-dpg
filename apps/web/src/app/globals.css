@@ -206,6 +206,22 @@ body {
 .bd-table tbody tr:hover { background: var(--bd-table-head-bg); }
 .bd-table tbody tr:last-child td { border-bottom: 0; }
 
+/* Gmail-style row checkbox: faint until the row is hovered, the box is
+   focused/hovered, or it is checked — so the column reads as quiet by
+   default and only the active/selected boxes draw the eye. */
+.bd-check {
+  accent-color: var(--bd-primary-600);
+  cursor: pointer;
+  opacity: 0.35;
+  transition: opacity 0.12s ease;
+}
+.bd-check:hover,
+.bd-check:focus-visible,
+.bd-check:checked,
+.bd-table tbody tr:hover .bd-check {
+  opacity: 1;
+}
+
 .scroll-x::-webkit-scrollbar { height: 10px; }
 .scroll-x::-webkit-scrollbar-track { background: transparent; }
 .scroll-x::-webkit-scrollbar-thumb {
@@ -250,6 +266,11 @@ body {
 
 .bd-input {
   width: 100%;
+  /* box-sizing + min-width:0 stop native date/number inputs from overflowing
+     their grid/flex cell via their intrinsic min content width. */
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
   background: var(--bd-bg);
   border: 1px solid var(--bd-border);
   border-radius: 10px;

@@ -148,6 +148,14 @@ export const aggregators = pgTable(
     // extra KC round-trip. NULL until the admin-approval flow (or the
     // login-time backfill) records it.
     signalstackOrgId: text('signalstack_org_id'),
+
+    // Parent org for the org→coordinator hierarchy (spec §5.2). The SINGLE
+    // authority for the link (no KC group membership for coordinators in v1).
+    // NULL = flat coordinator (flag off) or legacy orphan. Only populated when
+    // ORG_HIERARCHY_ENABLED=true. FK → aggregator_orgs.id.
+    parentOrgId: uuid('parent_org_id').references(
+      (): typeof aggregatorOrgs.id => aggregatorOrgs.id,
+    ),
   },
   (table) => ({
     // Auth-path lookups: phone/email are the credential identifiers a user
@@ -157,6 +165,45 @@ export const aggregators = pgTable(
     // Approval queue + tenant-classification filters.
     statusIdx: index('aggregators_status_idx').on(table.status),
     actorTypeIdx: index('aggregators_actor_type_idx').on(table.actorType),
+  }),
+);
+
+// ─── aggregator_orgs ─────────────────────────────────────────────────────────
+// Thin system-of-record for a parent org (spec §5.1). The KC group is a
+// future-authz mirror; status lives here so the approval single-use guard is
+// an atomic compare-and-set (spec A3). Reuses `aggregator_status` enum
+// (pending | active | inactive == rejected | retired).
+
+export const aggregatorOrgs = pgTable(
+  'aggregator_orgs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    slug: text('slug').notNull(),
+    displayName: text('display_name').notNull(),
+    state: text('state'),
+    ownerEmail: text('owner_email').notNull(),
+    ownerPhone: text('owner_phone'),
+    ownerKcSub: text('owner_kc_sub'),
+    kcGroupId: text('kc_group_id'),
+    status: aggregatorStatusEnum('status').notNull().default('pending'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    // Active-org dropdown + owner lookup are plain SQL (spec A2/A5).
+    statusIdx: index('aggregator_orgs_status_idx').on(table.status),
+    ownerEmailIdx: index('aggregator_orgs_owner_email_idx').on(table.ownerEmail),
+    // Slug uniqueness only over non-terminal rows: a rejected/retired org
+    // never blocks a later slug (spec A9). Partial unique index.
+    slugActiveUnique: uniqueIndex('aggregator_orgs_slug_active_unique')
+      .on(table.slug)
+      .where(sql`status IN ('pending','active')`),
+    // Org display name is unique (case-insensitive) over non-terminal rows —
+    // same partial-unique semantics as the slug, so a rejected/retired org
+    // never blocks reusing its name.
+    displayNameActiveUnique: uniqueIndex('aggregator_orgs_display_name_active_unique')
+      .on(sql`lower(${table.displayName})`)
+      .where(sql`status IN ('pending','active')`),
   }),
 );
 
@@ -360,6 +407,64 @@ export const linkSubmissions = pgTable(
   }),
 );
 
+// ─── aggregator_consent_record ───────────────────────────────────────────────
+// Append-only ledger of registration consent acceptances, keyed by a
+// subject_type + subject_id so one table serves both org and coordinator
+// registration flows. One row per acceptance; both document versions stored
+// in-row (terms_version + privacy_version) so re-consent or version audits
+// only need this table. No FK on subject_id — polymorphic at app level.
+
+export const aggregatorConsentRecord = pgTable(
+  'aggregator_consent_record',
+  {
+    /** Surrogate primary key; generated randomly by Postgres. */
+    id: uuid('id').primaryKey().defaultRandom(),
+
+    /**
+     * Discriminator for the subject: `'org'` = `aggregator_orgs.id`;
+     * `'aggregator'` = `aggregators.id` (coordinator/aggregator flow).
+     */
+    subjectType: text('subject_type').notNull(),
+
+    /**
+     * The id of the subject row that accepted the terms.
+     * No cross-table FK (polymorphic); app-layer integrity is sufficient
+     * because the route already owns the subject row at write time.
+     */
+    subjectId: uuid('subject_id').notNull(),
+
+    /** Version of the Terms of Service document accepted (= config `current_version`). */
+    termsVersion: integer('terms_version').notNull(),
+
+    /** Version of the Privacy Policy document accepted (= config `current_version`). */
+    privacyVersion: integer('privacy_version').notNull(),
+
+    /** Signal Stack network identifier the registration is under (e.g. `blue_dot`). */
+    network: text('network').notNull(),
+
+    /** Per-brand variant, or NULL when the registration is under the network default. */
+    brand: text('brand'),
+
+    /**
+     * How consent was captured — `'registration'` in v1 (future: `'re-consent'`).
+     */
+    source: text('source').notNull(),
+
+    /** Server-stamped moment the registrant checked the consent checkbox. */
+    acceptedAt: timestamp('accepted_at', { withTimezone: true }).notNull(),
+
+    /** Row-creation timestamp; set automatically by Postgres on INSERT. */
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    // Ledger lookup: all consent records for a given subject (org or aggregator).
+    subjectIdx: index('aggregator_consent_record_subject_idx').on(
+      table.subjectType,
+      table.subjectId,
+    ),
+  }),
+);
+
 // ─── onboarding (unified metrics rollup) ─────────────────────────────────────
 
 export const onboarding = pgTable(
@@ -407,6 +512,8 @@ export const onboarding = pgTable(
 
 export type AggregatorRow = typeof aggregators.$inferSelect;
 export type NewAggregatorRow = typeof aggregators.$inferInsert;
+export type AggregatorOrgRow = typeof aggregatorOrgs.$inferSelect;
+export type NewAggregatorOrgRow = typeof aggregatorOrgs.$inferInsert;
 export type AggregatorProfileRow = typeof aggregatorProfile.$inferSelect;
 export type NewAggregatorProfileRow = typeof aggregatorProfile.$inferInsert;
 export type BulkUploadRow = typeof bulkUploads.$inferSelect;
@@ -419,3 +526,14 @@ export type LinkSubmissionRow = typeof linkSubmissions.$inferSelect;
 export type NewLinkSubmissionRow = typeof linkSubmissions.$inferInsert;
 export type OnboardingRow = typeof onboarding.$inferSelect;
 export type NewOnboardingRow = typeof onboarding.$inferInsert;
+
+/**
+ * Inferred select type for a single `aggregator_consent_record` row.
+ *
+ * Used by the consent-ledger service and any query helper that reads
+ * from the table — import from `@aggregator-dpg/db-schema`.
+ */
+export type AggregatorConsentRecord = typeof aggregatorConsentRecord.$inferSelect;
+
+/** Inferred insert type for `aggregator_consent_record` (all required fields; `id` and `created_at` have DB defaults). */
+export type NewAggregatorConsentRecord = typeof aggregatorConsentRecord.$inferInsert;

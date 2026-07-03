@@ -1240,3 +1240,90 @@ describe('HttpSignalStackWriter.getItem', () => {
     expect(result.error.code).toBe('SIGNALSTACK_INPUT_INVALID');
   });
 });
+
+describe('HttpSignalStackWriter.fetchDecryptedProfiles', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+  let writer: HttpSignalStackWriter;
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    writer = new HttpSignalStackWriter({
+      baseUrl: 'http://signalstack.test',
+      apiKey: 'test-key',
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      maxRetries: 0,
+    });
+  });
+
+  it('posts item_ids with the acting-org header and returns profiles + skipped', async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJsonResponse({
+        profiles: [
+          {
+            item_id: 'item-1',
+            item_network: 'blue_dot',
+            item_domain: 'seeker',
+            item_type: 'profile_1.0',
+            item_state: { name: 'Velu Murugan', phone: '+91987' },
+            created_at: '2026-06-26T12:03:04.686Z',
+            updated_at: '2026-06-26T12:03:04.686Z',
+          },
+        ],
+        skipped: ['item-2'],
+      }),
+    );
+
+    const result = await writer.fetchDecryptedProfiles({
+      actingOrgId: 'org-abc',
+      itemIds: ['item-1', 'item-2'],
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.profiles).toHaveLength(1);
+    expect(result.value.profiles[0]!.item_state.name).toBe('Velu Murugan');
+    expect(result.value.skipped).toEqual(['item-2']);
+
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe('http://signalstack.test/api/v1/admin/participant/decrypt');
+    expect((init as RequestInit).method).toBe('POST');
+    const headers = (init as RequestInit).headers as Record<string, string>;
+    expect(headers['x-acting-org-id']).toBe('org-abc');
+    expect(headers['x-api-key']).toBe('test-key');
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({
+      item_ids: ['item-1', 'item-2'],
+    });
+  });
+
+  it('returns ValidationError when actingOrgId is missing', async () => {
+    const result = await writer.fetchDecryptedProfiles({ actingOrgId: '', itemIds: ['item-1'] });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_INPUT_INVALID');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('returns ValidationError when itemIds is empty', async () => {
+    const result = await writer.fetchDecryptedProfiles({ actingOrgId: 'org-abc', itemIds: [] });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_INPUT_INVALID');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('maps a non-2xx response to UpstreamError', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: 'BOOM', message: 'nope' }), {
+        status: 500,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    const result = await writer.fetchDecryptedProfiles({
+      actingOrgId: 'org-abc',
+      itemIds: ['item-1'],
+    });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.name).toBe('UpstreamError');
+  });
+});

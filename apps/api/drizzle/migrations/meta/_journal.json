@@ -99,6 +99,34 @@
       "when": 1779300000000,
       "tag": "0013_registration_mode",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1779400000000,
+      "tag": "0014_aggregator_orgs",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1779500000000,
+      "tag": "0015_aggregator_orgs_owner_phone",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1779600000000,
+      "tag": "0016_aggregator_orgs_name_unique",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1779700000000,
+      "tag": "0017_aggregator_consent_record",
+      "breakpoints": true
     }
   ]
 }

@@ -44,6 +44,13 @@ export interface Aggregator {
    * source the per-call `x-acting-org-id` header.
    */
   signalstackOrgId: string | null;
+  /**
+   * Parent org this coordinator belongs to (spec §5.2). FK → `aggregator_orgs.id`.
+   * The SINGLE authority for the org→coordinator link (spec A1). `null` = flat
+   * coordinator (flag off) or legacy orphan; only populated when the org
+   * hierarchy is enabled.
+   */
+  parentOrgId: string | null;
 }
 
 export interface CreateAggregatorInput {
@@ -57,6 +64,8 @@ export interface CreateAggregatorInput {
   consent: ConsentRecord;
   createdBy: string;
   updatedBy: string;
+  /** Optional parent org id (spec §5.2). Defaults to null when omitted. */
+  parentOrgId?: string | null;
 }
 
 /**
@@ -72,6 +81,7 @@ export interface UpdateAggregatorPatch {
   locations?: BecknLocation[];
   consent?: ConsentRecord;
   status?: AggregatorStatus;
+  parentOrgId?: string | null;
   updatedBy: string;
 }
 
@@ -80,6 +90,12 @@ export interface ListAggregatorsFilter {
   offset?: number;
   status?: AggregatorStatus;
   actorType?: ActorType;
+  /**
+   * Only rows last updated strictly before this instant. Lets the stale-pending
+   * cleanup filter by age in SQL, so the row cap counts stale rows (not fresh
+   * ones masking them).
+   */
+  updatedBefore?: Date;
 }
 
 export interface ListAggregatorsPage {
@@ -108,6 +124,15 @@ export abstract class AggregatorStoreBase {
   abstract findBySlug(orgSlug: string): Promise<StoreResult<Aggregator | null>>;
   abstract findByContactPhone(phone: string): Promise<StoreResult<Aggregator | null>>;
   abstract findByContactEmail(email: string): Promise<StoreResult<Aggregator | null>>;
+  /**
+   * Returns every coordinator (`aggregators` row) whose `parent_org_id`
+   * matches the given org id — the spec §10 org-view query. `parent_org_id`
+   * is the single authority for the org→coordinator link (spec A1).
+   *
+   * @param orgId - `aggregator_orgs.id`.
+   * @returns The org's coordinators (possibly empty); never throws.
+   */
+  abstract findByParentOrgId(orgId: string): Promise<StoreResult<Aggregator[]>>;
   abstract list(filter: ListAggregatorsFilter): Promise<StoreResult<ListAggregatorsPage>>;
   abstract update(id: string, patch: UpdateAggregatorPatch): Promise<StoreResult<Aggregator>>;
   abstract updateStatus(
@@ -115,6 +140,21 @@ export abstract class AggregatorStoreBase {
     status: AggregatorStatus,
     updatedBy: string,
   ): Promise<StoreResult<Aggregator>>;
+  /**
+   * Atomic compare-and-set `pending`→`active`. Returns the updated row, or
+   * `null` inside `ok` when the row was not `pending` (a concurrent approval
+   * already committed). Lets the approval handler gate side effects (the
+   * applicant email) on the single winner and avoids the read-then-write
+   * TOCTOU of {@link updateStatus}.
+   *
+   * @param id - Aggregator UUID.
+   * @param updatedBy - Audit actor.
+   * @returns The updated row, or `null` when the row was not pending.
+   */
+  abstract approveFromPending(
+    id: string,
+    updatedBy: string,
+  ): Promise<StoreResult<Aggregator | null>>;
   /**
    * Stamps the signalstack organisation id on an aggregator row.
    *

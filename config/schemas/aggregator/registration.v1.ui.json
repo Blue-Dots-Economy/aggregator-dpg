@@ -15,10 +15,18 @@
       "geo": {
         "ui:widget": "hidden",
         "ui:title": "",
-        "type": { "ui:widget": "hidden" },
-        "coordinates": { "ui:widget": "hidden" },
-        "geometries": { "ui:widget": "hidden" },
-        "bbox": { "ui:widget": "hidden" }
+        "type": {
+          "ui:widget": "hidden"
+        },
+        "coordinates": {
+          "ui:widget": "hidden"
+        },
+        "geometries": {
+          "ui:widget": "hidden"
+        },
+        "bbox": {
+          "ui:widget": "hidden"
+        }
       },
       "address": {
         "ui:title": "",
@@ -30,11 +38,21 @@
           "postalCode",
           "addressCountry"
         ],
-        "streetAddress": { "ui:placeholder": "Street" },
-        "addressLocality": { "ui:placeholder": "City" },
-        "addressRegion": { "ui:placeholder": "State" },
-        "postalCode": { "ui:placeholder": "PIN" },
-        "addressCountry": { "ui:placeholder": "India" }
+        "streetAddress": {
+          "ui:placeholder": "Street"
+        },
+        "addressLocality": {
+          "ui:placeholder": "City"
+        },
+        "addressRegion": {
+          "ui:placeholder": "State"
+        },
+        "postalCode": {
+          "ui:placeholder": "PIN"
+        },
+        "addressCountry": {
+          "ui:placeholder": "India"
+        }
       }
     }
   },
@@ -49,40 +67,46 @@
   },
   "url": {
     "ui:placeholder": "https://yourorg.in",
-    "ui:options": { "inputType": "url" }
+    "ui:options": {
+      "inputType": "url"
+    }
   },
   "contact": {
     "ui:layout": "grid",
-    "ui:order": ["name", "phone", "email", "alternatePhone"],
+    "ui:order": ["name", "phone", "email"],
     "name": {
       "ui:placeholder": "Full name of the primary contact"
     },
     "phone": {
       "ui:placeholder": "+91 98765 43210",
-      "ui:options": { "inputType": "tel" }
+      "ui:options": {
+        "inputType": "tel"
+      }
     },
     "email": {
       "ui:placeholder": "admin@yourorg.in",
-      "ui:options": { "inputType": "email" }
-    },
-    "alternatePhone": {
-      "ui:placeholder": "Optional",
-      "ui:options": { "inputType": "tel" }
+      "ui:options": {
+        "inputType": "email"
+      }
     }
   },
   "consent": {
     "ui:layout": "stack",
     "ui:order": ["value", "given_at", "valid_till"],
     "value": {
-      "ui:widget": "checkbox"
+      "ui:widget": "ConsentCheckbox"
     },
     "given_at": {
       "ui:widget": "hidden",
-      "ui:options": { "label": false }
+      "ui:options": {
+        "label": false
+      }
     },
     "valid_till": {
       "ui:widget": "hidden",
-      "ui:options": { "label": false }
+      "ui:options": {
+        "label": false
+      }
     }
   }
 }

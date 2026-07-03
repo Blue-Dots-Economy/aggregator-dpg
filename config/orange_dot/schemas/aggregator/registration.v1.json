@@ -39,7 +39,10 @@
             "type": "object",
             "additionalProperties": false,
             "required": ["type", "coordinates"],
-            "default": { "type": "Point", "coordinates": [0, 0] },
+            "default": {
+              "type": "Point",
+              "coordinates": [0, 0]
+            },
             "properties": {
               "type": {
                 "type": "string",
@@ -54,17 +57,32 @@
                 ],
                 "default": "Point"
               },
-              "coordinates": { "type": "array", "default": [0, 0] }
+              "coordinates": {
+                "type": "array",
+                "default": [0, 0]
+              }
             }
           },
           "address": {
             "type": "object",
             "additionalProperties": false,
             "properties": {
-              "streetAddress": { "type": "string", "title": "Street" },
-              "addressLocality": { "type": "string", "title": "City" },
-              "addressRegion": { "type": "string", "title": "State" },
-              "postalCode": { "type": "string", "title": "PIN code" },
+              "streetAddress": {
+                "type": "string",
+                "title": "Street"
+              },
+              "addressLocality": {
+                "type": "string",
+                "title": "City"
+              },
+              "addressRegion": {
+                "type": "string",
+                "title": "State"
+              },
+              "postalCode": {
+                "type": "string",
+                "title": "PIN code"
+              },
               "addressCountry": {
                 "type": "string",
                 "title": "Country",
@@ -100,11 +118,6 @@
           "format": "email",
           "maxLength": 320,
           "examples": ["admin@skillbridge.in"]
-        },
-        "alternatePhone": {
-          "type": "string",
-          "title": "Alternate Phone",
-          "pattern": "^(\\+?\\d{10,15}|\\d{10})$"
         }
       }
     },

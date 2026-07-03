@@ -30,6 +30,8 @@ import {
   type SignalStackDashboardExportQuery,
   type SignalStackDashboardPage,
   type SignalStackDashboardQuery,
+  type SignalStackDecryptedProfiles,
+  type SignalStackFetchDecryptedProfilesQuery,
   type SignalStackGetItemQuery,
   type SignalStackItemList,
   type SignalStackItemQuery,
@@ -742,6 +744,77 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
           aborted
             ? `signalstack dashboard export timed out after ${this.timeoutMs}ms`
             : `signalstack dashboard export transport failure: ${cause.message}`,
+          {
+            cause,
+            code: aborted ? 'SIGNALSTACK_TIMEOUT' : 'SIGNALSTACK_TRANSPORT_FAILED',
+          },
+        ),
+      );
+    }
+  }
+
+  override async fetchDecryptedProfiles(
+    query: SignalStackFetchDecryptedProfilesQuery,
+  ): Promise<Result<SignalStackDecryptedProfiles, BaseError>> {
+    if (!query?.actingOrgId) {
+      return err(
+        new ValidationError('actingOrgId is required for decrypted profile fetch', {
+          code: 'SIGNALSTACK_INPUT_INVALID',
+        }),
+      );
+    }
+    if (!Array.isArray(query.itemIds) || query.itemIds.length === 0) {
+      return err(
+        new ValidationError('itemIds must be a non-empty array', {
+          code: 'SIGNALSTACK_INPUT_INVALID',
+        }),
+      );
+    }
+
+    const url = `${this.baseUrl}/api/v1/admin/participant/decrypt`;
+    const headers = {
+      ...this.headers,
+      'x-acting-org-id': query.actingOrgId,
+    };
+
+    try {
+      const res = await this.requestWithRetry(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ item_ids: query.itemIds }),
+      });
+
+      if (!res.ok) {
+        const bodyText = await safeReadText(res);
+        const upstreamMsg = extractUpstreamMessage(bodyText);
+        const message = upstreamMsg
+          ? `signalstack decrypt returned ${res.status}: ${upstreamMsg}`
+          : `signalstack decrypt returned ${res.status}`;
+        return err(
+          new UpstreamError(message, {
+            code: this.codeForStatus(res.status),
+            details: { status: res.status, body: bodyText },
+          }),
+        );
+      }
+
+      const parsed = (await res.json()) as SignalStackDecryptedProfiles;
+      if (!parsed || !Array.isArray(parsed.profiles) || !Array.isArray(parsed.skipped)) {
+        return err(
+          new UpstreamError('signalstack decrypt returned a malformed body', {
+            code: 'SIGNALSTACK_BAD_RESPONSE',
+          }),
+        );
+      }
+      return ok({ profiles: parsed.profiles, skipped: parsed.skipped });
+    } catch (e) {
+      const cause = e as Error;
+      const aborted = cause.name === 'AbortError';
+      return err(
+        new UpstreamError(
+          aborted
+            ? `signalstack decrypt timed out after ${this.timeoutMs}ms`
+            : `signalstack decrypt transport failure: ${cause.message}`,
           {
             cause,
             code: aborted ? 'SIGNALSTACK_TIMEOUT' : 'SIGNALSTACK_TRANSPORT_FAILED',

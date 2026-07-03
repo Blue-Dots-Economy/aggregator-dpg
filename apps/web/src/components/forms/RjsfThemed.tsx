@@ -21,6 +21,7 @@ import { useTranslations } from 'next-intl';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/Select';
 import { MultiSelect } from '../ui/MultiSelect';
 import { resolveVisibleSchema, stripShowIf } from '../../lib/show-if';
+import { ConsentCheckboxWidget } from './ConsentCheckboxWidget';
 
 function TextWidget(props: WidgetProps) {
   const {
@@ -384,6 +385,7 @@ const widgets: RegistryWidgetsType = {
   CheckboxWidget,
   CheckboxesWidget,
   CommaSeparatedArrayWidget,
+  ConsentCheckbox: ConsentCheckboxWidget,
   // Email + URL fields render TextWidget but pin the native HTML
   // `type` so mobile keyboards default to the email / URL layout and
   // the browser surfaces native autofill hints.
@@ -400,6 +402,13 @@ export interface RjsfThemedFormProps<T extends GenericObjectType = GenericObject
   'validator' | 'widgets' | 'templates'
 > {
   className?: string;
+  /**
+   * Fired whenever schema-validity of the (visible, `x-show-if`-pruned) form
+   * changes. `true` once every visible required field is filled and valid.
+   * Lets callers gate a submit button's `disabled` without re-implementing
+   * validation. Hidden fields are pruned before the check, so they never block.
+   */
+  onValidityChange?: (valid: boolean) => void;
 }
 
 export function RjsfThemedForm<T extends GenericObjectType = GenericObjectType>({
@@ -414,6 +423,7 @@ export function RjsfThemedForm<T extends GenericObjectType = GenericObjectType>(
   schema,
   formData,
   onChange,
+  onValidityChange,
   ...props
 }: RjsfThemedFormProps<T>) {
   // Customised validator with Ajv's 2020 build. The default RJSF validator
@@ -446,6 +456,22 @@ export function RjsfThemedForm<T extends GenericObjectType = GenericObjectType>(
     () => stripShowIf(resolveVisibleSchema(schema as RJSFSchema, currentData).schema),
     [schema, hiddenKey],
   );
+
+  // Schema-validity of the visible (pruned) form. Drives a caller's submit
+  // gate via onValidityChange. Computed against renderSchema + cleared data, so
+  // `x-show-if`-hidden required fields are already excluded and never block.
+  const isValid = validator.isValid(
+    renderSchema as RJSFSchema,
+    resolved.formData as T,
+    renderSchema as RJSFSchema,
+  );
+  // Keep the callback in a ref so the emit effect fires only on validity flips,
+  // not on every parent re-render that passes a fresh inline callback.
+  const validityCb = useRef(onValidityChange);
+  validityCb.current = onValidityChange;
+  useEffect(() => {
+    validityCb.current?.(isValid);
+  }, [isValid]);
 
   return (
     <div className={className}>

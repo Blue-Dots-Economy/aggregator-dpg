@@ -281,6 +281,12 @@ export interface ConfirmPageVars {
   association: string;
   aggregatorType: string;
   postUrl: string;
+  /**
+   * Human-readable link lifetime (e.g. "7 days"), derived from the
+   * configured approval-token TTL via `formatApprovalTtl`. Must match the
+   * wording in the admin review email.
+   */
+  expiresInText: string;
   brand?: PageBrand;
 }
 
@@ -344,7 +350,7 @@ export function renderConfirmPage(v: ConfirmPageVars): string {
       </div>
     </div>
     <p class="footer-note">
-      This decision is final once submitted. Approval links are single-use and expire after one hour.
+      This decision is final once submitted. Approval links are single-use and expire in ${escape(v.expiresInText)}.
     </p>
     ${
       !isApprove
@@ -367,6 +373,12 @@ export interface ResultPageVars {
   status: 'success' | 'error' | 'info';
   title: string;
   message: string;
+  /**
+   * Optional secondary action rendered as a POST form button (e.g. the
+   * "resend approval link" affordance on the expired-link page). Posts a
+   * single hidden `token` field to `url`.
+   */
+  action?: { url: string; token: string; label: string };
   brand?: PageBrand;
 }
 
@@ -406,6 +418,14 @@ export function renderResultPage(v: ResultPageVars): string {
             Open ${escape(brand.short_name)} Portal
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 5l7 7-7 7"/></svg>
           </a>
+          ${
+            v.action
+              ? `<form method="POST" action="${escape(v.action.url)}" style="margin:0;display:inline;">
+                   <input type="hidden" name="token" value="${escape(v.action.token)}" />
+                   <button type="submit" class="btn-secondary">${escape(v.action.label)}</button>
+                 </form>`
+              : ''
+          }
         </div>
         <div class="result-meta">${escape(decidedAt)}</div>
       </div>
