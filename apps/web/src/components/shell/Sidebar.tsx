@@ -29,9 +29,9 @@ interface NavItem {
  */
 function buildNavBase(): Omit<NavItem, 'label'>[] {
   return [
-    { to: '/dashboard', icon: 'users' },
     { to: '/onboarding', icon: 'upload' },
     { to: '/profile', icon: 'user' },
+    { to: '/dashboard', icon: 'users' },
   ];
 }
 
