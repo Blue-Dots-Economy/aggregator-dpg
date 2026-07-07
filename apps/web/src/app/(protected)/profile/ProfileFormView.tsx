@@ -160,7 +160,10 @@ export function ProfileFormView({ schema, uiSchema }: ProfileFormViewProps): JSX
 
       <div className="bd-card bd-shadow overflow-hidden">
         {!requesting && (
-          <div className="px-7 py-4 bg-gradient-to-r from-[var(--bd-tint-primary)] to-[var(--bd-card)] border-b border-[var(--bd-border)] flex items-center justify-end">
+          <div className="px-7 py-4 bg-gradient-to-r from-[var(--bd-tint-primary)] to-[var(--bd-card)] border-b border-[var(--bd-border)] flex items-center justify-between gap-4">
+            <h2 className="font-display font-bold text-[15px] text-ink-900">
+              {t('section_details')}
+            </h2>
             <Button
               kind="ghost"
               icon={<I.edit size={14} />}
