@@ -18,9 +18,10 @@ import type { ProfileApiResponse } from '../../../services/profile.service';
  * stored profile, with every field disabled. The registration-only consent
  * block is hidden (a signup-time legal artifact, not editable profile data) and
  * the form's submit button is suppressed, so the fields can never be edited in
- * place. Changes are instead raised via the "Request an update" panel — a free
- * text box + submit CTA. The admin-approval email flow behind it is not wired
- * up yet, so submitting only shows a "coming soon" acknowledgement.
+ * place. Changes are instead raised via the "Request an update" panel, which
+ * lists each schema-flagged (`x-updatable`) field as a Field / Current / New
+ * row. The admin-approval email flow behind it is not wired up yet, so
+ * submitting only shows a "coming soon" acknowledgement.
  */
 
 export interface ProfileFormViewProps {
@@ -57,20 +58,74 @@ function toFormData(api: ProfileApiResponse): Record<string, unknown> {
   return data;
 }
 
+/** A profile field the aggregator may request to change (schema `x-updatable`). */
+interface UpdatableField {
+  key: string;
+  label: string;
+}
+
+/**
+ * Reads the registration schema for top-level properties flagged
+ * `x-updatable: true` and returns them (with their human labels) in declared
+ * order. The editable set is therefore config-driven — flip the flag in
+ * `registration.v1.json` to add or remove a field, no code change here.
+ *
+ * @param schema - The registration JSON Schema.
+ * @returns The updatable fields, in property order.
+ */
+function collectUpdatableFields(schema: RJSFSchema): UpdatableField[] {
+  const props = (schema.properties ?? {}) as Record<string, Record<string, unknown>>;
+  return Object.entries(props)
+    .filter(([, def]) => def?.['x-updatable'] === true)
+    .map(([key, def]) => ({ key, label: (def['title'] as string | undefined) ?? key }));
+}
+
+/**
+ * Renders the aggregator's current value for an updatable field as one display
+ * line. `locations` flattens to a single-line postal address; other fields
+ * stringify their scalar value.
+ *
+ * @param key - Schema property key.
+ * @param api - The merged profile response (may be undefined while loading).
+ * @returns A display string (empty when unset).
+ */
+function currentValueFor(key: string, api: ProfileApiResponse | undefined): string {
+  if (!api) return '';
+  if (key === 'locations') {
+    const addr = api.locations?.[0]?.address;
+    if (!addr) return '';
+    return [
+      addr.streetAddress,
+      addr.addressLocality,
+      addr.addressRegion,
+      addr.postalCode,
+      addr.addressCountry,
+    ]
+      .filter((p): p is string => Boolean(p && p.length > 0))
+      .join(', ');
+  }
+  const value = (api as unknown as Record<string, unknown>)[key];
+  return value == null ? '' : String(value);
+}
+
 export function ProfileFormView({ schema, uiSchema }: ProfileFormViewProps): JSX.Element {
   const t = useTranslations('profile.view');
   const { data, isLoading, isError } = useProfileRaw();
 
-  // Update-request panel (issue #470 part 3). The UI is present — a text box
-  // plus a submit CTA — but the admin-approval email flow is not wired up yet,
-  // so submitting only surfaces a "coming soon" acknowledgement. No API call.
+  // Update-request panel (issue #470 part 3). The UI is present — one
+  // Field/Current/New row per schema-flagged field plus a submit CTA — but the
+  // admin-approval email flow is not wired up yet, so submitting only surfaces
+  // a "coming soon" acknowledgement. No API call.
   const [requesting, setRequesting] = useState(false);
-  const [requestText, setRequestText] = useState('');
+  const [newValues, setNewValues] = useState<Record<string, string>>({});
   const [requestSent, setRequestSent] = useState(false);
+
+  const updatableFields = useMemo(() => collectUpdatableFields(schema), [schema]);
+  const hasChanges = updatableFields.some((f) => (newValues[f.key] ?? '').trim() !== '');
 
   const closeRequest = (): void => {
     setRequesting(false);
-    setRequestText('');
+    setNewValues({});
     setRequestSent(false);
   };
 
@@ -128,15 +183,40 @@ export function ProfileFormView({ schema, uiSchema }: ProfileFormViewProps): JSX
                 {t('update_request_heading')}
               </h3>
               <p className="text-[12.5px] text-ink-500 mt-1">{t('update_request_desc')}</p>
-              <textarea
-                className="bd-input mt-3 min-h-[110px] resize-y"
-                value={requestText}
-                placeholder={t('update_request_placeholder')}
-                onChange={(e) => {
-                  setRequestText(e.target.value);
-                  if (requestSent) setRequestSent(false);
-                }}
-              />
+
+              {updatableFields.length === 0 ? (
+                <p className="mt-4 text-[13px] text-ink-400">{t('update_request_empty')}</p>
+              ) : (
+                <div className="mt-4 space-y-3">
+                  <div className="hidden md:grid grid-cols-[1fr_1.3fr_1.3fr] gap-3 px-1 text-[10.5px] uppercase tracking-[0.1em] font-semibold text-ink-400">
+                    <span>{t('col_field')}</span>
+                    <span>{t('col_current')}</span>
+                    <span>{t('col_requested')}</span>
+                  </div>
+                  {updatableFields.map((f) => (
+                    <div
+                      key={f.key}
+                      className="grid grid-cols-1 md:grid-cols-[1fr_1.3fr_1.3fr] gap-1.5 md:gap-3 md:items-center"
+                    >
+                      <div className="text-[13.5px] font-medium text-ink-900">{f.label}</div>
+                      <div className="text-[13px] text-ink-500 break-words">
+                        {currentValueFor(f.key, data) || <span className="text-ink-300">—</span>}
+                      </div>
+                      <input
+                        className="bd-input"
+                        value={newValues[f.key] ?? ''}
+                        placeholder={t('new_value_placeholder')}
+                        onChange={(e) => {
+                          const { value } = e.target;
+                          setNewValues((prev) => ({ ...prev, [f.key]: value }));
+                          if (requestSent) setRequestSent(false);
+                        }}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {requestSent && (
                 <div className="mt-3 rounded-[10px] border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-800 flex items-start gap-2">
                   <I.alert size={14} className="mt-0.5 shrink-0" />
@@ -149,7 +229,7 @@ export function ProfileFormView({ schema, uiSchema }: ProfileFormViewProps): JSX
                 </Button>
                 <Button
                   icon={<I.check size={14} />}
-                  disabled={requestText.trim() === '' || requestSent}
+                  disabled={!hasChanges || requestSent}
                   onClick={() => setRequestSent(true)}
                 >
                   {t('btn_submit_request')}
