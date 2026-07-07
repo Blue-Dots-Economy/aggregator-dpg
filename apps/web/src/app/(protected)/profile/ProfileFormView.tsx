@@ -1,9 +1,10 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import type { RJSFSchema, UiSchema } from '@rjsf/utils';
 import { useTranslations } from 'next-intl';
 import { Topbar } from '../../../components/shell/Topbar';
+import { Button } from '../../../components/ui/Button';
 import { RjsfThemedForm } from '../../../components/forms/RjsfThemed';
 import { useProfileRaw } from '../../../hooks/useProfile';
 import { I } from '../../../icons';
@@ -16,7 +17,10 @@ import type { ProfileApiResponse } from '../../../services/profile.service';
  * loaded server-side and passed in — populated with the signed-in aggregator's
  * stored profile, with every field disabled. The registration-only consent
  * block is hidden (a signup-time legal artifact, not editable profile data) and
- * the submit button is suppressed, so the page can never be updated here.
+ * the form's submit button is suppressed, so the fields can never be edited in
+ * place. Changes are instead raised via the "Request an update" panel — a free
+ * text box + submit CTA. The admin-approval email flow behind it is not wired
+ * up yet, so submitting only shows a "coming soon" acknowledgement.
  */
 
 export interface ProfileFormViewProps {
@@ -57,6 +61,19 @@ export function ProfileFormView({ schema, uiSchema }: ProfileFormViewProps): JSX
   const t = useTranslations('profile.view');
   const { data, isLoading, isError } = useProfileRaw();
 
+  // Update-request panel (issue #470 part 3). The UI is present — a text box
+  // plus a submit CTA — but the admin-approval email flow is not wired up yet,
+  // so submitting only surfaces a "coming soon" acknowledgement. No API call.
+  const [requesting, setRequesting] = useState(false);
+  const [requestText, setRequestText] = useState('');
+  const [requestSent, setRequestSent] = useState(false);
+
+  const closeRequest = (): void => {
+    setRequesting(false);
+    setRequestText('');
+    setRequestSent(false);
+  };
+
   // Reuse the registration UI schema, but hide the consent block and suppress
   // the submit button — the profile is display-only.
   const readonlyUiSchema = useMemo<Record<string, unknown>>(
@@ -71,6 +88,15 @@ export function ProfileFormView({ schema, uiSchema }: ProfileFormViewProps): JSX
     [uiSchema],
   );
 
+  // Strip the schema's title + API-contract description — the page owns its
+  // heading (Topbar + read-only note), matching how /register renders.
+  const displaySchema = useMemo<RJSFSchema>(() => {
+    const clone = { ...schema } as RJSFSchema;
+    delete (clone as { title?: string }).title;
+    delete (clone as { description?: string }).description;
+    return clone;
+  }, [schema]);
+
   const formData = useMemo(() => (data ? toFormData(data) : {}), [data]);
 
   return (
@@ -78,10 +104,60 @@ export function ProfileFormView({ schema, uiSchema }: ProfileFormViewProps): JSX
       <Topbar title={t('topbar_title')} subtitle={t('topbar_subtitle')} />
 
       <div className="bd-card bd-shadow overflow-hidden">
-        <div className="px-7 py-4 bg-gradient-to-r from-[var(--bd-tint-primary)] to-[var(--bd-card)] border-b border-[var(--bd-border)] flex items-start gap-2.5">
-          <I.lock size={16} className="text-primary-600 mt-0.5 shrink-0" />
-          <p className="text-[12.5px] text-ink-500 leading-relaxed">{t('readonly_note')}</p>
+        <div className="px-7 py-4 bg-gradient-to-r from-[var(--bd-tint-primary)] to-[var(--bd-card)] border-b border-[var(--bd-border)] flex items-start justify-between gap-4">
+          <div className="flex items-start gap-2.5">
+            <I.lock size={16} className="text-primary-600 mt-0.5 shrink-0" />
+            <p className="text-[12.5px] text-ink-500 leading-relaxed">{t('readonly_note')}</p>
+          </div>
+          {!requesting && (
+            <Button
+              kind="ghost"
+              icon={<I.edit size={14} />}
+              onClick={() => setRequesting(true)}
+              className="shrink-0"
+            >
+              {t('btn_request_update')}
+            </Button>
+          )}
         </div>
+
+        {requesting && (
+          <div className="px-7 pt-6">
+            <div className="rounded-[12px] border border-[var(--bd-border)] bg-[var(--bd-tint-primary)] p-5">
+              <h3 className="font-display font-bold text-[15px] text-ink-900">
+                {t('update_request_heading')}
+              </h3>
+              <p className="text-[12.5px] text-ink-500 mt-1">{t('update_request_desc')}</p>
+              <textarea
+                className="bd-input mt-3 min-h-[110px] resize-y"
+                value={requestText}
+                placeholder={t('update_request_placeholder')}
+                onChange={(e) => {
+                  setRequestText(e.target.value);
+                  if (requestSent) setRequestSent(false);
+                }}
+              />
+              {requestSent && (
+                <div className="mt-3 rounded-[10px] border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-800 flex items-start gap-2">
+                  <I.alert size={14} className="mt-0.5 shrink-0" />
+                  <span>{t('update_request_pending')}</span>
+                </div>
+              )}
+              <div className="mt-4 flex items-center justify-end gap-2">
+                <Button kind="ghost" onClick={closeRequest}>
+                  {t('btn_cancel')}
+                </Button>
+                <Button
+                  icon={<I.check size={14} />}
+                  disabled={requestText.trim() === '' || requestSent}
+                  onClick={() => setRequestSent(true)}
+                >
+                  {t('btn_submit_request')}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="px-7 py-7">
           {isLoading ? (
@@ -95,7 +171,7 @@ export function ProfileFormView({ schema, uiSchema }: ProfileFormViewProps): JSX
             </div>
           ) : (
             <RjsfThemedForm
-              schema={schema}
+              schema={displaySchema}
               uiSchema={readonlyUiSchema as unknown as UiSchema<Record<string, unknown>>}
               formData={formData}
               readonly
