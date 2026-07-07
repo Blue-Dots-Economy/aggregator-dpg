@@ -380,6 +380,8 @@
     "view": {
       "topbar_title": "Aggregator Profile",
       "topbar_subtitle": "Manage your aggregator identity and settings.",
+      "loading": "Loading profile…",
+      "readonly_note": "This is the information captured at registration. It cannot be edited here.",
       "toast_saved": "Profile saved",
       "error_load_title": "Could not load profile",
       "error_load_detail": "We hit an error fetching the aggregator profile. Please try again shortly.",
