@@ -392,7 +392,7 @@
       "update_request_empty": "ಇದೀಗ ಅಪ್‌ಡೇಟ್ ಮಾಡಲು ಯಾವುದೇ ಫೀಲ್ಡ್ ಲಭ್ಯವಿಲ್ಲ.",
       "col_field": "ಫೀಲ್ಡ್",
       "col_current": "ಪ್ರಸ್ತುತ",
-      "col_requested": "ವಿನಂತಿಸಲಾದ",
+      "col_requested": "ಹೊಸ",
       "new_value_placeholder": "ಹೊಸ ಮೌಲ್ಯವನ್ನು ನಮೂದಿಸಿ",
       "toast_saved": "ಪ್ರೊಫೈಲ್ ಉಳಿಸಲಾಗಿದೆ",
       "error_load_title": "ಪ್ರೊಫೈಲ್ ಲೋಡ್ ಮಾಡಲಾಗಲಿಲ್ಲ",

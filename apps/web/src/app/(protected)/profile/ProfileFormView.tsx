@@ -159,12 +159,8 @@ export function ProfileFormView({ schema, uiSchema }: ProfileFormViewProps): JSX
       <Topbar title={t('topbar_title')} subtitle={t('topbar_subtitle')} />
 
       <div className="bd-card bd-shadow overflow-hidden">
-        <div className="px-7 py-4 bg-gradient-to-r from-[var(--bd-tint-primary)] to-[var(--bd-card)] border-b border-[var(--bd-border)] flex items-start justify-between gap-4">
-          <div className="flex items-start gap-2.5">
-            <I.lock size={16} className="text-primary-600 mt-0.5 shrink-0" />
-            <p className="text-[12.5px] text-ink-500 leading-relaxed">{t('readonly_note')}</p>
-          </div>
-          {!requesting && (
+        {!requesting && (
+          <div className="px-7 py-4 bg-gradient-to-r from-[var(--bd-tint-primary)] to-[var(--bd-card)] border-b border-[var(--bd-border)] flex items-center justify-end">
             <Button
               kind="ghost"
               icon={<I.edit size={14} />}
@@ -173,8 +169,8 @@ export function ProfileFormView({ schema, uiSchema }: ProfileFormViewProps): JSX
             >
               {t('btn_request_update')}
             </Button>
-          )}
-        </div>
+          </div>
+        )}
 
         {requesting && (
           <div className="px-7 pt-6">

@@ -392,7 +392,7 @@
       "update_request_empty": "अभी अपडेट के लिए कोई फ़ील्ड उपलब्ध नहीं है।",
       "col_field": "फ़ील्ड",
       "col_current": "वर्तमान",
-      "col_requested": "अनुरोधित",
+      "col_requested": "नया",
       "new_value_placeholder": "नया मान दर्ज करें",
       "toast_saved": "प्रोफ़ाइल सहेजी गई",
       "error_load_title": "प्रोफ़ाइल लोड नहीं हो सकी",

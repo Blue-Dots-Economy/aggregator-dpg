@@ -392,7 +392,7 @@
       "update_request_empty": "No fields are available to update right now.",
       "col_field": "Field",
       "col_current": "Current",
-      "col_requested": "Requested",
+      "col_requested": "New",
       "new_value_placeholder": "Enter the new value",
       "toast_saved": "Profile saved",
       "error_load_title": "Could not load profile",
