@@ -5,17 +5,17 @@ machine. Written for a new engineer who wants working services fast, and for a
 developer who wants hot-reload while writing code.
 
 - **`signals-dpg/`** — the **DPG / "Signals Stack"**: a network-aware backend that
-  publishes, validates, discovers, and interacts with schema-typed *items*
+  publishes, validates, discovers, and interacts with schema-typed _items_
   across instances. Source of truth for orgs, members, and profiles.
 - **`aggregator-dpg/`** — the **Aggregator portal**: a read-and-orchestrate
-  surface (web portal + API + background worker) that sits *downstream* of
+  surface (web portal + API + background worker) that sits _downstream_ of
   signals-dpg and calls it as an upstream service.
 
 They are two independent git repos. This unified tooling
 (`docker-compose.yml`, `.env.example`, and the `infra/` helpers) lives **inside
 the aggregator-dpg repo at `aggregator-dpg/local-setup/`** and builds both DPGs.
 
-> **📁 Required layout.** Because the compose builds *both* repos, it expects
+> **📁 Required layout.** Because the compose builds _both_ repos, it expects
 > them checked out as **siblings** under a common parent directory, and you run
 > everything from `aggregator-dpg/local-setup/`:
 >
@@ -33,10 +33,10 @@ the aggregator-dpg repo at `aggregator-dpg/local-setup/`** and builds both DPGs.
 
 ## 0. Which track are you?
 
-| Track | You want to… | Follow |
-|---|---|---|
-| **A — Docker-only** | Just get everything running to explore/demo the apps. One command. | §1 → §2 → §3 → §5 |
-| **B — Hybrid dev** | Write code with hot-reload; both DPGs run from source. | §1 → §6 (3 steps) → §3 |
+| Track               | You want to…                                                       | Follow                 |
+| ------------------- | ------------------------------------------------------------------ | ---------------------- |
+| **A — Docker-only** | Just get everything running to explore/demo the apps. One command. | §1 → §2 → §3 → §5      |
+| **B — Hybrid dev**  | Write code with hot-reload; both DPGs run from source.             | §1 → §6 (3 steps) → §3 |
 
 Both tracks share the same prerequisites (§1). Track A uses the unified
 `docker-compose.yml` in this `local-setup/` directory. Track B runs each app
@@ -48,7 +48,7 @@ tooling.
 > Resources → Memory) and ideally a 16 GB machine. On an **8 GB machine** (where
 > Docker can only get ~4 GB), Track A will OOM-thrash — a first
 > `docker compose up --build` can take an hour or fail. **Use Track B instead:**
-> Docker then only runs small *prebuilt* backing images (no builds), and the
+> Docker then only runs small _prebuilt_ backing images (no builds), and the
 > Node apps run on the host, so nothing has to fit the whole stack into the
 > Docker VM. See §6.
 >
@@ -76,14 +76,14 @@ tooling.
 
 ### 1.1 Software
 
-| Tool | Version | Needed for | Notes |
-|---|---|---|---|
-| **Docker + Docker Compose** | recent (v2) | both tracks | Docker Desktop on macOS/Windows; engine + compose plugin on Linux |
-| **Node.js** | ≥ 24 (22 works for dev) | Track B; Track A never needs it | CI pins 24 |
-| **pnpm** | 10.x (aggregator) / 11.1.2 (signals) | Track B | `npm i -g pnpm` or `corepack enable pnpm` |
-| **openssl** | any | generating secrets | pre-shipped on macOS/Linux |
-| **git** | any | cloning | — |
-| A REST client (curl / Postman / HTTPie) | — | poking APIs, cross-DPG wiring | optional |
+| Tool                                    | Version                              | Needed for                      | Notes                                                             |
+| --------------------------------------- | ------------------------------------ | ------------------------------- | ----------------------------------------------------------------- |
+| **Docker + Docker Compose**             | recent (v2)                          | both tracks                     | Docker Desktop on macOS/Windows; engine + compose plugin on Linux |
+| **Node.js**                             | ≥ 24 (22 works for dev)              | Track B; Track A never needs it | CI pins 24                                                        |
+| **pnpm**                                | 10.x (aggregator) / 11.1.2 (signals) | Track B                         | `npm i -g pnpm` or `corepack enable pnpm`                         |
+| **openssl**                             | any                                  | generating secrets              | pre-shipped on macOS/Linux                                        |
+| **git**                                 | any                                  | cloning                         | —                                                                 |
+| A REST client (curl / Postman / HTTPie) | —                                    | poking APIs, cross-DPG wiring   | optional                                                          |
 
 You do **not** need a real AWS account, a real SMTP server, or a real SMS
 gateway for local setup — the unified stack substitutes MinIO (for S3), Mailpit
@@ -94,14 +94,14 @@ gateway for local setup — the unified stack substitutes MinIO (for S3), Mailpi
 These are the human/config inputs the apps expect. The unified `.env.example`
 pre-fills everything except the first item.
 
-| Prerequisite | Why it's needed | Local default |
-|---|---|---|
-| **Admin email address** (`ADMIN_EMAILS`) | aggregator-dpg emails new-aggregator **approval requests** here. You approve/reject from this inbox to complete the registration flow. | You must set it. Any address works — the mail is captured by Mailpit, not actually delivered. |
-| **SMTP account** | Sending real approval + OTP email in staging/prod. | Not needed locally (Mailpit catches all). For real email use a Gmail **App Password** (not your login password) or Amazon SES. |
-| **SMS / OTP provider** | Delivering login OTPs by phone in prod (Twilio / AWS SNS / MSG91). | Not needed locally — Keycloak's `log` provider writes the code to `docker compose logs keycloak`; signals-dpg sets `CREATE_TEST_OTP=true`. |
-| **S3 bucket + credentials** | aggregator bulk-uploads, QR PNGs, error CSVs in prod. | Not needed locally — MinIO provides an S3-compatible endpoint and the bucket is auto-created. |
-| **App secrets** (`SESSION_KEY`, `APPROVAL_TOKEN_SECRET`, `SIGNALS_AUTH_SECRET`, `SIGNALS_PII_KEY`) | Signing sessions/approval tokens, encrypting PII. | Pre-filled dev values in `.env.example`. Regenerate for any shared host. |
-| **`127.0.0.1 keycloak` in `/etc/hosts`** | So the browser and the web container resolve the OIDC issuer to the *same* Keycloak (issuer-claim validation). | You add it once (§2). |
+| Prerequisite                                                                                       | Why it's needed                                                                                                                        | Local default                                                                                                                              |
+| -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Admin email address** (`ADMIN_EMAILS`)                                                           | aggregator-dpg emails new-aggregator **approval requests** here. You approve/reject from this inbox to complete the registration flow. | You must set it. Any address works — the mail is captured by Mailpit, not actually delivered.                                              |
+| **SMTP account**                                                                                   | Sending real approval + OTP email in staging/prod.                                                                                     | Not needed locally (Mailpit catches all). For real email use a Gmail **App Password** (not your login password) or Amazon SES.             |
+| **SMS / OTP provider**                                                                             | Delivering login OTPs by phone in prod (Twilio / AWS SNS / MSG91).                                                                     | Not needed locally — Keycloak's `log` provider writes the code to `docker compose logs keycloak`; signals-dpg sets `CREATE_TEST_OTP=true`. |
+| **S3 bucket + credentials**                                                                        | aggregator bulk-uploads, QR PNGs, error CSVs in prod.                                                                                  | Not needed locally — MinIO provides an S3-compatible endpoint and the bucket is auto-created.                                              |
+| **App secrets** (`SESSION_KEY`, `APPROVAL_TOKEN_SECRET`, `SIGNALS_AUTH_SECRET`, `SIGNALS_PII_KEY`) | Signing sessions/approval tokens, encrypting PII.                                                                                      | Pre-filled dev values in `.env.example`. Regenerate for any shared host.                                                                   |
+| **`127.0.0.1 keycloak` in `/etc/hosts`**                                                           | So the browser and the web container resolve the OIDC issuer to the _same_ Keycloak (issuer-claim validation).                         | You add it once (§2).                                                                                                                      |
 
 ### 1.3 Clone both repos
 
@@ -171,18 +171,18 @@ docker compose logs -f aggregator-api      # migrations + upstream calls
 
 ### 2.3 URLs
 
-| Service | URL | Credentials |
-|---|---|---|
-| Aggregator portal | http://localhost:3100 | register in-app |
-| Aggregator API | http://localhost:4000 | — (`/health/live`) |
-| Signals API | http://localhost:2742 | apikey (`/reference` for Swagger) |
-| Signals UI | http://localhost:5173 | — (must be 5173: Signals API CORS allows only 3000/5173/2742) |
-| Keycloak admin | http://localhost:8080/admin | `admin` / `KC_ADMIN_PASSWORD` from `.env` |
-| Mailpit inbox | http://localhost:8025 | — (all outbound email lands here) |
-| MinIO console | http://localhost:9001 | `minioadmin` / `MINIO_ROOT_PASSWORD` |
-| Postgres | localhost:5432 | `dpg` / `POSTGRES_PASSWORD` (one shared server; dbs: `aggregator`, `signals`, `keycloak`) |
-| signals-redis | localhost:5555 | password-protected (`SIGNALS_REDIS_PASSWORD`) |
-| aggregator-redis | localhost:6379 | — |
+| Service           | URL                         | Credentials                                                                               |
+| ----------------- | --------------------------- | ----------------------------------------------------------------------------------------- |
+| Aggregator portal | http://localhost:3100       | register in-app                                                                           |
+| Aggregator API    | http://localhost:4000       | — (`/health/live`)                                                                        |
+| Signals API       | http://localhost:2742       | apikey (`/reference` for Swagger)                                                         |
+| Signals UI        | http://localhost:5173       | — (must be 5173: Signals API CORS allows only 3000/5173/2742)                             |
+| Keycloak admin    | http://localhost:8080/admin | `admin` / `KC_ADMIN_PASSWORD` from `.env`                                                 |
+| Mailpit inbox     | http://localhost:8025       | — (all outbound email lands here)                                                         |
+| MinIO console     | http://localhost:9001       | `minioadmin` / `MINIO_ROOT_PASSWORD`                                                      |
+| Postgres          | localhost:5432              | `dpg` / `POSTGRES_PASSWORD` (one shared server; dbs: `aggregator`, `signals`, `keycloak`) |
+| signals-redis     | localhost:5555              | password-protected (`SIGNALS_REDIS_PASSWORD`)                                             |
+| aggregator-redis  | localhost:6379              | —                                                                                         |
 
 > Ports mirror each project's own guide (`signals-dpg/SETUP.md`,
 > `aggregator-dpg/QUICKSTART.md`) so nothing conflicts conceptually. The one
@@ -291,9 +291,10 @@ Run the **backing services in Docker** and **both DPGs from source** with
 Docker), so this is the right track on a low-memory machine. Edit any source
 file and that process reloads — no rebuilds.
 
-Ports are identical to Track A: signals api `:2742` / ui `:5173`, aggregator api
-`:4000` / portal `:3100`, keycloak `:8080`, postgres `:5432`, aggregator-redis
-`:6379`, signals-redis `:5555`, mailpit `:1025`/`:8025`, minio `:9000`.
+Ports: signals api `:2742` / ui `:5173`, aggregator api `:4000` / portal
+`:3000` (Next's default; Track A publishes the same app on host `:3100`),
+keycloak `:8080`, postgres `:5432`, aggregator-redis `:6379`, signals-redis
+`:5555`, mailpit `:1025`/`:8025`, minio `:9000`.
 
 Do all three steps in order. You'll end with ~5 terminals open (2 for signals,
 2–3 for aggregator).
@@ -319,11 +320,11 @@ Postgres comes up with all three databases (`aggregator`, `signals`,
 `keycloak`) already created. Keep three values from this `.env` handy — you
 reuse them below:
 
-| From `local-setup/.env` | Used in |
-|---|---|
-| `POSTGRES_PASSWORD` | signals + aggregator DB URLs |
-| `SIGNALS_REDIS_PASSWORD` | signals redis URL |
-| `APPROVAL_TOKEN_SECRET`, `SESSION_KEY` | aggregator api / web |
+| From `local-setup/.env`                | Used in                      |
+| -------------------------------------- | ---------------------------- |
+| `POSTGRES_PASSWORD`                    | signals + aggregator DB URLs |
+| `SIGNALS_REDIS_PASSWORD`               | signals redis URL            |
+| `APPROVAL_TOKEN_SECRET`, `SESSION_KEY` | aggregator api / web         |
 
 The two OIDC client secrets are the `.env` defaults (already reconciled into
 Keycloak by `keycloak-init`): `aggregator-api-dev-secret-change-me` and
@@ -393,81 +394,82 @@ pnpm dev:ui                # signals UI  on :5173   (terminal 2)
 ```bash
 cd ../aggregator-dpg
 pnpm install
+pnpm -w build   # REQUIRED: internal @aggregator-dpg/* packages export compiled
+                # dist/ — db:migrate and dev import those, so build once after install
 cp apps/api/.env.example apps/api/.env
 cp apps/web/.env.example apps/web/.env
+cp apps/worker/.env.example apps/worker/.env   # only if you run the worker (terminal 5)
 ```
 
-Set these keys in **`apps/api/.env`** (localhost infra + the Step 2 wiring):
+> If you skip `pnpm -w build`, `db:migrate`/`dev` fail with
+> `ERR_MODULE_NOT_FOUND: Cannot find module '.../@aggregator-dpg/db-schema/dist/schema.js'`
+> — that's an unbuilt workspace package, not a missing dependency. The build is
+> Turbo-cached, so re-running it is instant once nothing changed.
+
+`apps/api/.env.example` already ships a complete, working local template — the
+S3/Redis/schema/mail defaults all point at the localhost infra from Step 1, so
+you only need to **change the values below** (everything else stays as copied).
+The `.env.example` defaults target aggregator-dpg's _standalone_ compose
+(Postgres on `:5433`); the unified stack uses one shared Postgres on `:5432`, so
+`DATABASE_URL` and a couple of others differ:
 
 ```dotenv
-DATABASE_URL=postgres://dpg:<POSTGRES_PASSWORD>@localhost:5432/aggregator
-REDIS_URL=redis://localhost:6379
+# Shared Postgres from Step 1 (note :5432 and user dpg — differ from the default)
+DATABASE_URL=postgres://dpg:<POSTGRES_PASSWORD from local-setup/.env>@localhost:5432/aggregator
+
+# Issuer must be keycloak:8080 (not localhost) — see the note below
 KEYCLOAK_URL=http://keycloak:8080
-KEYCLOAK_REALM=aggregator
-KEYCLOAK_ADMIN_CLIENT_ID=aggregator-api
-KEYCLOAK_ADMIN_CLIENT_SECRET=aggregator-api-dev-secret-change-me
+
+# Your values
 APPROVAL_TOKEN_SECRET=<same as local-setup/.env, >=32 chars>
 ADMIN_EMAILS=you@yourorg.com
-MAIL_PROVIDER=smtp
-SMTP_HOST=localhost
-SMTP_PORT=1025
-SMTP_SECURE=false
-PUBLIC_API_URL=http://localhost:4000
-PUBLIC_PORTAL_URL=http://localhost:3100
-PUBLIC_LINK_BASE_URL=http://localhost:3100
-CORS_ORIGINS=http://localhost:3100
-S3_ENDPOINT=http://localhost:9000
-S3_PUBLIC_ENDPOINT=http://localhost:9000
-S3_REGION=us-east-1
-S3_BUCKET=aggregator-bulk-uploads
-S3_FORCE_PATH_STYLE=true
-S3_ACCESS_KEY_ID=minioadmin
-S3_SECRET_ACCESS_KEY=minioadmin
-SCHEMA_ROOT_DIR=./config/blue_dot/schemas
-AGGREGATOR_CONFIG_PATH=./config/blue_dot/aggregator.config.yaml
-# ↓ signals wiring — the two values captured in Step 2 ↓
+
+# SignalStack wiring — the two values captured in Step 2
 SIGNALSTACK_BASE_URL=http://localhost:2742
 SIGNALSTACK_ADMIN_KEY=sk_signals_....................
 SIGNALSTACK_ACTING_ORG_ID=org_....................
-SIGNALSTACK_ITEM_NETWORK=blue_dot
 ```
 
-Set these keys in **`apps/web/.env`**:
+`apps/web/.env.example` is likewise complete for local dev — the client
+secrets, redirect URI (`:3000`), Redis and API URLs all match this stack. Change
+only these two:
 
 ```dotenv
-API_BASE_URL=http://localhost:4000
-NEXT_PUBLIC_API_URL=http://localhost:4000
+# Issuer must be keycloak:8080 (not localhost) — same reason as the API
 OIDC_ISSUER=http://keycloak:8080/realms/aggregator
-OIDC_CLIENT_ID=aggregator-portal
-OIDC_CLIENT_SECRET=aggregator-portal-dev-secret-change-me
-OIDC_REDIRECT_URI=http://localhost:3100/api/auth/callback
-OIDC_POST_LOGOUT_REDIRECT_URI=http://localhost:3100/
-BFF_SERVICE_CLIENT_ID=aggregator-api
-BFF_SERVICE_CLIENT_SECRET=aggregator-api-dev-secret-change-me
+# Signed-cookie key
 SESSION_KEY=<same as local-setup/.env, >=32 chars>
-COOKIE_SECURE=false
-REDIS_URL=redis://localhost:6379
-PUBLIC_PORTAL_URL=http://localhost:3100
-SCHEMA_ROOT_DIR=./config/blue_dot/schemas
 ```
 
-Migrate and run (the portal **must** be on :3100 — see the note below):
+If you run the worker, change these in **`apps/worker/.env`** (it has no OIDC —
+just DB + the SignalStack push; note there's **no** acting-org here):
+
+```dotenv
+DATABASE_URL=postgres://dpg:<POSTGRES_PASSWORD from local-setup/.env>@localhost:5432/aggregator
+SIGNALSTACK_BASE_URL=http://localhost:2742
+SIGNALSTACK_ADMIN_KEY=sk_signals_....................
+```
+
+Migrate and run:
 
 ```bash
 pnpm --filter @aggregator-dpg/api db:migrate       # apply aggregator migrations
 pnpm --filter @aggregator-dpg/api dev              # API on :4000    (terminal 3)
-PORT=3100 pnpm --filter @aggregator-dpg/web dev    # portal on :3100 (terminal 4)
+pnpm --filter @aggregator-dpg/web dev              # portal on :3000 (terminal 4)
 pnpm --filter @aggregator-dpg/worker dev           # worker (terminal 5, optional)
 ```
 
-Open **http://localhost:3100** and run the smoke test in §3.
+Open **http://localhost:3000** and run the smoke test in §3.
 
-> **Two wiring gotchas, both baked into the values above:**
+> **Wiring gotcha, baked into the values above:**
 >
-> - **Portal on :3100, not Next's default :3000.** The imported Keycloak realm
->   only lists `http://localhost:3100` in its redirect URIs / web origins —
->   logging in from any other port fails the OIDC redirect. That's why the web
->   command sets `PORT=3100`.
+> - **Keep every URL on one port.** The Keycloak realm whitelists **both**
+>   `localhost:3000` and `localhost:3100` (redirect URIs + web origins), so the
+>   portal can run on either — this guide uses Next's default `:3000`. Just make
+>   sure `PUBLIC_PORTAL_URL`, `OIDC_REDIRECT_URI`, `OIDC_POST_LOGOUT_REDIRECT_URI`
+>   and `CORS_ORIGINS` all use the **same** port you actually serve on, or the
+>   OIDC redirect / CORS will fail. (Track A uses `:3100` because the compose
+>   publishes the container's internal `:3000` on host port `:3100`.)
 > - **`keycloak:8080`, not `localhost:8080`, for `OIDC_ISSUER`.** Keycloak
 >   issues tokens with the issuer `http://keycloak:8080/…`; the app must use the
 >   same hostname or the `iss` claim won't validate. The `/etc/hosts` entry from
@@ -502,20 +504,20 @@ Step 2 (`db:push:api` / `db:init:api` / `db:seed:services:api`) and Step 3
 
 ## 8. Troubleshooting
 
-| Symptom | Cause / fix |
-|---|---|
-| `port is already allocated` on `up` | Another local process holds one of the host ports (`5432`, `5555`, `6379`, `8080`, `5173`, `2742`, `3100`, `4000`, `8025`, `9000/9001`). Stop it, or edit the host-port mapping in `docker-compose.yml`. Host-native processes (e.g. a Homebrew Postgres on 5432) are NOT freed by stopping Docker containers. |
-| Browser can't reach `http://keycloak:8080` / login redirect fails | Missing `127.0.0.1 keycloak` in `/etc/hosts` (§2.1). Re-add and retry. |
-| Login redirects to `/login?error=invalid_flow_cookie` | Portal is HTTP but cookies are Secure. The unified compose sets `COOKIE_SECURE=false`; if you changed it, revert and `docker compose up -d aggregator-web`. |
-| `403 MISSING_AGGREGATOR_ID` on the profile endpoint | Keycloak `aggregator_id` mapper missing. The unified realm bakes it in — if you swapped realms, re-import (`down -v` + `up`). |
-| Registration **approval link** won't load / opens on :4000 and 404s ("identity record missing") | Two causes, both fixed in the compose: (a) `aggregator-api` must publish `:4000` (the approve/reject pages are API-rendered HTML linked from the email); (b) Keycloak's `unmanagedAttributePolicy` must be `ENABLED` or the `aggregator_id` user attribute is silently dropped and the lookup 404s. The `keycloak-init` sidecar sets the policy at boot — if it didn't run, `docker compose up keycloak-init`. Users registered *before* the policy was enabled won't have the attribute — re-register (or `down -v` + `up` for a clean slate). |
-| `AGGREGATOR_TYPE_MISSING` on onboarding (bulk upload / links) | Same root cause as above — the `aggregator_type` KC attribute was dropped at registration (policy DISABLED then), so the JWT has no `aggregator_type` claim. Fixed for new registrations by the `keycloak-init` sidecar. For an already-registered user: **sign out and back in** to mint a fresh token (the claim only appears in a new token); if the attribute itself is missing, re-register or `down -v` + `up`. |
-| `signals-api` restarts / "relation does not exist" | `signals-bootstrap` didn't finish. Check `docker compose logs signals-bootstrap`; re-run with `docker compose up -d --force-recreate signals-bootstrap signals-api`. |
-| `signals-bootstrap` fails on `SIGNALS_PII_KEY` | It must be base64 that decodes to exactly 32 bytes: `openssl rand -base64 32`. |
-| aggregator upstream calls 403 `INVALID_API_KEY` | `SIGNALSTACK_ADMIN_KEY` doesn't match a seeded key. Re-read §4 step 1. |
-| No email arrives | It's not actually delivered locally — open Mailpit at http://localhost:8025. |
-| OTP code never emailed | For phone/SMS OTP the `log` provider prints it: `docker compose logs keycloak | grep -i otp`. |
-| First `up --build` is very slow | Normal — five app images build from source. Subsequent ups are cached. |
+| Symptom                                                                                         | Cause / fix                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
+| `port is already allocated` on `up`                                                             | Another local process holds one of the host ports (`5432`, `5555`, `6379`, `8080`, `5173`, `2742`, `3100`, `4000`, `8025`, `9000/9001`). Stop it, or edit the host-port mapping in `docker-compose.yml`. Host-native processes (e.g. a Homebrew Postgres on 5432) are NOT freed by stopping Docker containers.                                                                                                                                                                                                                                  |
+| Browser can't reach `http://keycloak:8080` / login redirect fails                               | Missing `127.0.0.1 keycloak` in `/etc/hosts` (§2.1). Re-add and retry.                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Login redirects to `/login?error=invalid_flow_cookie`                                           | Portal is HTTP but cookies are Secure. The unified compose sets `COOKIE_SECURE=false`; if you changed it, revert and `docker compose up -d aggregator-web`.                                                                                                                                                                                                                                                                                                                                                                                     |
+| `403 MISSING_AGGREGATOR_ID` on the profile endpoint                                             | Keycloak `aggregator_id` mapper missing. The unified realm bakes it in — if you swapped realms, re-import (`down -v` + `up`).                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Registration **approval link** won't load / opens on :4000 and 404s ("identity record missing") | Two causes, both fixed in the compose: (a) `aggregator-api` must publish `:4000` (the approve/reject pages are API-rendered HTML linked from the email); (b) Keycloak's `unmanagedAttributePolicy` must be `ENABLED` or the `aggregator_id` user attribute is silently dropped and the lookup 404s. The `keycloak-init` sidecar sets the policy at boot — if it didn't run, `docker compose up keycloak-init`. Users registered _before_ the policy was enabled won't have the attribute — re-register (or `down -v` + `up` for a clean slate). |
+| `AGGREGATOR_TYPE_MISSING` on onboarding (bulk upload / links)                                   | Same root cause as above — the `aggregator_type` KC attribute was dropped at registration (policy DISABLED then), so the JWT has no `aggregator_type` claim. Fixed for new registrations by the `keycloak-init` sidecar. For an already-registered user: **sign out and back in** to mint a fresh token (the claim only appears in a new token); if the attribute itself is missing, re-register or `down -v` + `up`.                                                                                                                           |
+| `signals-api` restarts / "relation does not exist"                                              | `signals-bootstrap` didn't finish. Check `docker compose logs signals-bootstrap`; re-run with `docker compose up -d --force-recreate signals-bootstrap signals-api`.                                                                                                                                                                                                                                                                                                                                                                            |
+| `signals-bootstrap` fails on `SIGNALS_PII_KEY`                                                  | It must be base64 that decodes to exactly 32 bytes: `openssl rand -base64 32`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| aggregator upstream calls 403 `INVALID_API_KEY`                                                 | `SIGNALSTACK_ADMIN_KEY` doesn't match a seeded key. Re-read §4 step 1.                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| No email arrives                                                                                | It's not actually delivered locally — open Mailpit at http://localhost:8025.                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| OTP code never emailed                                                                          | For phone/SMS OTP the `log` provider prints it: `docker compose logs keycloak                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | grep -i otp`. |
+| First `up --build` is very slow                                                                 | Normal — five app images build from source. Subsequent ups are cached.                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 
 ---
 
