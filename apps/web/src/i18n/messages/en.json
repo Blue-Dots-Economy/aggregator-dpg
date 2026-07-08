@@ -286,6 +286,7 @@
       "hint": ".csv only · UTF-8 encoded · uploaded as {type}s",
       "upload_button": "Upload",
       "uploading": "Uploading…",
+      "success_note": "Accounts will be live once the user logs in on the platform or via the call.",
       "security_note": "All uploads are scanned and validated before import.",
       "remove_file": "Remove file",
       "recent": {

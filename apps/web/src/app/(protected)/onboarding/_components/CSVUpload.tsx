@@ -76,7 +76,7 @@ export function CSVUpload() {
         recent.refetch();
         return;
       }
-      setToast('File uploaded');
+      setToast(t('csv.success_note'));
       recent.refetch();
       // Mirror the link-creation flow: hand the user back to the
       // onboarding home so they can pick the next action. Processing
