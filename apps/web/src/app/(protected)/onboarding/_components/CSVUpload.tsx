@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { createPortal } from 'react-dom';
 import { useTranslations, useFormatter } from 'next-intl';
 import { Button } from '../../../../components/ui/Button';
@@ -61,6 +62,7 @@ export function CSVUpload() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const upload = useBulkUpload();
   const recent = useRecentBulkUploads(10);
+  const router = useRouter();
 
   const acceptFile = (f: File) => {
     if (!/\.csv$/i.test(f.name)) {
@@ -103,6 +105,10 @@ export function CSVUpload() {
       // unmounted the toast before it could be read.)
       setToast(t('csv.success_note'));
       recent.refetch();
+      // Let the success toast be read, then return to the onboarding overview.
+      // A short delay (not an immediate push) avoids unmounting the toast the
+      // instant it appears — the bug the previous "navigate immediately" had.
+      setTimeout(() => router.push('/onboarding'), 2500);
     } catch (err) {
       setUploadError((err as Error).message);
     }
