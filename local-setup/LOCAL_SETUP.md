@@ -59,10 +59,20 @@ tooling.
 > offending service instead of after a long parallel run:
 >
 > ```bash
-> # from aggregator-dpg/local-setup/ — build images one by one, stop on first failure
+> # macOS / Linux / Git Bash / WSL — from aggregator-dpg/local-setup/
+> # build images one by one, stop on first failure
 > for s in signals-bootstrap signals-api signals-ui aggregator-api aggregator-worker aggregator-web; do
 >   docker compose build "$s" || { echo "FAILED at $s"; break; }
 > done
+> ```
+>
+> ```powershell
+> # Windows PowerShell — from aggregator-dpg\local-setup\ (the bash loop above
+> # is NOT valid PowerShell: ||, for..do..done, and $s all differ)
+> foreach ($s in "signals-bootstrap","signals-api","signals-ui","aggregator-api","aggregator-worker","aggregator-web") {
+>   docker compose build $s
+>   if ($LASTEXITCODE -ne 0) { Write-Host "FAILED at $s"; break }
+> }
 > ```
 >
 > Once all images are built, start the stack **without** rebuilding:
