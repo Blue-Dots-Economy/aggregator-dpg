@@ -30,6 +30,7 @@ describe('SupportDialog', () => {
     renderDialog();
     await userEvent.type(screen.getByLabelText(/message/i), '   ');
     await userEvent.click(screen.getByRole('button', { name: /send/i }));
+    expect(await screen.findByText(/please enter a message/i)).toBeTruthy();
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 

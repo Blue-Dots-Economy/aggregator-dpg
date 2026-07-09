@@ -23,7 +23,7 @@ export interface SupportDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-type Status = 'idle' | 'sending' | 'success' | 'unavailable' | 'error';
+type Status = 'idle' | 'sending' | 'success' | 'unavailable' | 'error' | 'invalid';
 
 /**
  * Displays a modal contact-support form and relays submissions to the BFF.
@@ -64,7 +64,7 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.E
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (!message.trim()) {
-      setStatus('error');
+      setStatus('invalid');
       return;
     }
     setStatus('sending');
@@ -142,6 +142,7 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.E
               <textarea
                 id="support-message"
                 value={message}
+                required
                 maxLength={5000}
                 rows={5}
                 onChange={(e) => setMessage(e.target.value)}
@@ -149,6 +150,9 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.E
                 className="w-full rounded-[10px] border border-[var(--bd-border)] px-3 py-2 text-[14px] bg-transparent"
               />
             </div>
+            {status === 'invalid' && (
+              <p className="text-[13px] text-rose-600">{t('validation_message_required')}</p>
+            )}
             {status === 'unavailable' && (
               <p className="text-[13px] text-amber-600">{t('unavailable')}</p>
             )}
