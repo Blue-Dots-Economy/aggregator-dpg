@@ -21,7 +21,7 @@ Add a **Contact support** action to the aggregator coordinator portal's `Sidebar
 | User details in email | name (`preferredUsername`/email), email, phone, user id (`sub`), aggregator id, submitted-at                                                                                                                          |
 | Reply-To              | The submitter's email (falls back to the mailer's default `from`)                                                                                                                                                     |
 | Delivery              | The endpoint **awaits** the send and confirms success (201) / failure (502)                                                                                                                                           |
-| Label / placement     | "Contact support" with a life-buoy icon, in the `Sidebar` near the logout button                                                                                                                                      |
+| Label / placement     | "Contact support" as a labeled row pinned at the bottom of the `Sidebar`, above the org/sign-out card; `message` icon (no life-buoy in the icon set)                                                                  |
 
 ## Background — aggregator stack
 
@@ -64,7 +64,7 @@ Returns `{ enabled: boolean }` = `supportEnabled`. Lets the SSR web layout decid
 
 - **BFF:** `app/api/support/route.ts` — `POST` forwards the request (with the session access token as Bearer) to `apps/api POST /v1/support`, following the existing authenticated BFF proxy pattern; errors returned in the canonical envelope (reuse `bff-errors`). (If the SSR layout fetches config through the BFF, a matching `GET /api/support/config` proxy or a direct server fetch is used.)
 - **Support modal:** `components/support/SupportDialog.tsx` — a client modal following the `ConsentModal` pattern (fixed overlay, ESC dismissal, `useTranslations`), with an optional subject input, a required message textarea, and a submit button styled with the portal's primary button classes. Client validation: message required (non-empty after trim, ≤5000). On submit: `POST /api/support`; success → success toast/notice, close + reset; 503 → "unavailable" message; other errors → generic error.
-- **Sidebar:** render a **Contact support** item (life-buoy icon) near the logout button that opens the modal — only when `supportEnabled` is true. The flag is resolved SSR in `(protected)/layout.tsx` (fetch `GET /v1/support/config` / `GET /api/support/config`) and threaded to the `Sidebar` (via `AuthProvider`/props alongside the existing `user`).
+- **Sidebar:** render a **Contact support** labeled row pinned at the bottom of the sidebar, above the org/sign-out card (using the `message` icon — the icon set has no life-buoy), that opens the modal — only when `supportEnabled` is true. The flag is resolved SSR in `(protected)/layout.tsx` (fetch `GET /v1/support/config` / `GET /api/support/config`) and threaded to the `Sidebar` (via `AuthProvider`/props alongside the existing `user`).
 - **i18n:** add keys to `apps/web/src/i18n/messages/{en,hi,kn}.json` (next-intl) for the menu item, dialog title/labels/placeholders, submit label, required-field validation, and success/unavailable/error messages.
 
 ## Error handling
