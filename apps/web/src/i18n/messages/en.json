@@ -238,7 +238,8 @@
     "overview": "Overview",
     "portal_label": "Aggregator Portal",
     "sign_out": "Sign Out",
-    "aggregator_sublabel": "Aggregator · Karnataka"
+    "aggregator_sublabel": "Aggregator · Karnataka",
+    "contact_support": "Contact support"
   },
   "onboarding": {
     "title": "Onboarding",
@@ -542,5 +543,20 @@
       "exchange_token_verify_failed": "security check failed (token verification)",
       "unknown": "unexpected sign-in error"
     }
+  },
+  "support": {
+    "title": "Contact support",
+    "description": "Tell us what's going on and we'll get back to you.",
+    "label_subject": "Subject (optional)",
+    "placeholder_subject": "Brief summary",
+    "label_message": "Message",
+    "placeholder_message": "Describe your issue or request",
+    "submit": "Send",
+    "cancel": "Cancel",
+    "sending": "Sending…",
+    "validation_message_required": "Please enter a message",
+    "success": "Message sent. Our team will get back to you.",
+    "unavailable": "Support isn't available right now. Please try again later.",
+    "error": "Couldn't send your message. Please try again in a moment."
   }
 }
