@@ -149,43 +149,45 @@ export function Sidebar() {
         </nav>
       </div>
 
-      {supportEnabled && (
-        <div className="px-3 pb-1">
-          <button
-            type="button"
-            onClick={() => setSupportOpen(true)}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-[10px] text-[14px] font-medium text-[var(--bd-fg-muted)] hover:bg-[var(--bd-border-soft)] hover:text-[var(--bd-fg)] transition-all"
-          >
-            <I.message size={18} />
-            <span>{t('contact_support')}</span>
-          </button>
-        </div>
-      )}
+      <div className="mt-auto">
+        {supportEnabled && (
+          <div className="px-3 pb-1">
+            <button
+              type="button"
+              onClick={() => setSupportOpen(true)}
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-[10px] text-[14px] font-medium text-[var(--bd-fg-muted)] hover:bg-[var(--bd-border-soft)] hover:text-[var(--bd-fg)] transition-all"
+            >
+              <I.message size={18} />
+              <span>{t('contact_support')}</span>
+            </button>
+          </div>
+        )}
 
-      <div className="mt-auto p-3 shrink-0">
-        <div className="rounded-[12px] bg-gradient-to-br from-[var(--bd-tint-primary)] to-[var(--bd-card)] border border-[var(--bd-border)] p-3 flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-[var(--bd-brand)] text-white flex items-center justify-center font-display font-bold text-[12px] shrink-0">
-            {orgInitials}
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="text-[13px] font-semibold text-[var(--bd-fg)] truncate">
-              {user?.org ?? 'TRRAIN'}
+        <div className="p-3 shrink-0">
+          <div className="rounded-[12px] bg-gradient-to-br from-[var(--bd-tint-primary)] to-[var(--bd-card)] border border-[var(--bd-border)] p-3 flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-[var(--bd-brand)] text-white flex items-center justify-center font-display font-bold text-[12px] shrink-0">
+              {orgInitials}
             </div>
-            <div className="text-[11px] text-[var(--bd-fg-muted)] truncate">
-              {t('aggregator_sublabel')}
+            <div className="min-w-0 flex-1">
+              <div className="text-[13px] font-semibold text-[var(--bd-fg)] truncate">
+                {user?.org ?? 'TRRAIN'}
+              </div>
+              <div className="text-[11px] text-[var(--bd-fg-muted)] truncate">
+                {t('aggregator_sublabel')}
+              </div>
             </div>
+            <button
+              type="button"
+              onClick={() => {
+                void signOut();
+              }}
+              title={t('sign_out')}
+              aria-label={t('sign_out')}
+              className="w-7 h-7 rounded-md flex items-center justify-center text-[var(--bd-fg-muted)] hover:bg-[var(--bd-border-soft)] hover:text-rose-500 transition-colors shrink-0"
+            >
+              <I.signout size={15} />
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={() => {
-              void signOut();
-            }}
-            title={t('sign_out')}
-            aria-label={t('sign_out')}
-            className="w-7 h-7 rounded-md flex items-center justify-center text-[var(--bd-fg-muted)] hover:bg-[var(--bd-border-soft)] hover:text-rose-500 transition-colors shrink-0"
-          >
-            <I.signout size={15} />
-          </button>
         </div>
       </div>
 

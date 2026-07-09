@@ -12,6 +12,7 @@
  * @module apps/web/src/components/support/SupportDialog
  */
 import { useEffect, useState, type FormEvent } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslations } from 'next-intl';
 import { I } from '../../icons';
 
@@ -39,6 +40,10 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.E
   const [subject, setSubject] = useState('');
   const [message, setMessage] = useState('');
   const [status, setStatus] = useState<Status>('idle');
+  // Portal target only exists on the client; gate render until mounted so
+  // the server pass (and first client paint) doesn't touch `document`.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   // Reset form state each time the dialog closes so re-opening starts fresh.
   useEffect(() => {
@@ -59,7 +64,7 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.E
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onOpenChange]);
 
-  if (!open) return null;
+  if (!open || !mounted) return null;
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -89,9 +94,9 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.E
     }
   };
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4"
       role="dialog"
       aria-modal="true"
       aria-label={t('title')}
@@ -167,6 +172,7 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.E
           </form>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
