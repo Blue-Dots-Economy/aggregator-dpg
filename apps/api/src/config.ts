@@ -65,6 +65,8 @@ const ConfigSchema = z.object({
   PUBLIC_PORTAL_URL: z.string().default('http://localhost:3000'),
   /** Comma-separated list of admin recipient email addresses. */
   ADMIN_EMAILS: z.string().default(''),
+  /** Recipient for contact-support submissions (#120-equivalent). Feature-gated: unset ⇒ endpoint 503, web button hidden. */
+  SUPPORT_EMAIL: z.string().optional(),
 
   // ─── Object storage (bulk uploads + errors.csv) ──────────────────────────
   /**
