@@ -10,6 +10,7 @@ import { BlueDotsLogo } from '../ui/BlueDotsLogo';
 import { useAuth } from '../../lib/auth-context';
 import { useThemeMode } from '../../lib/theme-mode';
 import { SupportDialog } from '../support/SupportDialog';
+import { Button } from '../ui/Button';
 // `mode` is also read here to swap to the light-on-dark logo variant
 // when the user is in dark theme — toggle UI itself lives in Topbar.
 import { useDashboard } from '../../hooks/useDashboard';
@@ -151,15 +152,15 @@ export function Sidebar() {
 
       <div className="mt-auto">
         {supportEnabled && (
-          <div className="px-3 pb-1">
-            <button
-              type="button"
+          <div className="px-3 pb-2">
+            <Button
+              kind="ghost"
+              icon={<I.message size={16} />}
               onClick={() => setSupportOpen(true)}
-              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-[10px] text-[14px] font-medium text-[var(--bd-fg-muted)] hover:bg-[var(--bd-border-soft)] hover:text-[var(--bd-fg)] transition-all"
+              className="w-full justify-start"
             >
-              <I.message size={18} />
-              <span>{t('contact_support')}</span>
-            </button>
+              {t('contact_support')}
+            </Button>
           </div>
         )}
 

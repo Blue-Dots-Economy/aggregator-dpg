@@ -15,6 +15,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslations } from 'next-intl';
 import { I } from '../../icons';
+import { Button } from '../ui/Button';
 
 /** Props for {@link SupportDialog}. */
 export interface SupportDialogProps {
@@ -162,13 +163,14 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.E
               <p className="text-[13px] text-amber-600">{t('unavailable')}</p>
             )}
             {status === 'error' && <p className="text-[13px] text-rose-600">{t('error')}</p>}
-            <button
+            <Button
+              kind="primary"
               type="submit"
               disabled={status === 'sending'}
-              className="w-full rounded-[10px] bg-[var(--bd-brand)] text-white py-2.5 text-[14px] font-semibold disabled:opacity-60"
+              className="w-full justify-center py-2.5 text-[14px] font-semibold"
             >
               {status === 'sending' ? t('sending') : t('submit')}
-            </button>
+            </Button>
           </form>
         )}
       </div>
