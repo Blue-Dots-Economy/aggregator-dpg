@@ -157,8 +157,28 @@ Add-Content C:\Windows\System32\drivers\etc\hosts "127.0.0.1 keycloak"
 ### 2.2 Bring it up
 
 ```bash
-docker compose up -d --build
-docker compose ps           # watch until keycloak + aggregator-api are healthy
+docker compose up -d --build      # build all app images + start everything
+docker compose ps                 # watch until keycloak + aggregator-api are healthy
+```
+
+**Low on memory? Build one image at a time.** `--build` builds all app images
+**in parallel**, which is what spikes memory (see §0). Build them
+**sequentially** first — one at a time, far lower peak memory, and a failure
+stops immediately on the offending service — then start without rebuilding:
+
+```bash
+# macOS / Linux / Git Bash / WSL — from aggregator-dpg/local-setup/
+for s in signals-bootstrap signals-api signals-ui aggregator-api aggregator-worker aggregator-web; do
+  docker compose build "$s" || { echo "FAILED at $s"; break; }
+done
+docker compose up -d              # start; images already built, no --build
+```
+
+```powershell
+# Windows PowerShell — from aggregator-dpg\local-setup\ (the `;` after `$s` is
+# REQUIRED on one line, else `if` is parsed as an argument to docker)
+foreach ($s in "signals-bootstrap","signals-api","signals-ui","aggregator-api","aggregator-worker","aggregator-web") { docker compose build $s; if ($LASTEXITCODE -ne 0) { Write-Host "FAILED at $s"; break } }
+docker compose up -d              # start; images already built, no --build
 ```
 
 First run pulls images and builds five app images (~2–3 GB, several minutes).
