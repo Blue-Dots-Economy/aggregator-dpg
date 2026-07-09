@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -8,6 +9,7 @@ import { I, type IconName } from '../../icons';
 import { BlueDotsLogo } from '../ui/BlueDotsLogo';
 import { useAuth } from '../../lib/auth-context';
 import { useThemeMode } from '../../lib/theme-mode';
+import { SupportDialog } from '../support/SupportDialog';
 // `mode` is also read here to swap to the light-on-dark logo variant
 // when the user is in dark theme — toggle UI itself lives in Topbar.
 import { useDashboard } from '../../hooks/useDashboard';
@@ -38,8 +40,9 @@ function buildNavBase(): Omit<NavItem, 'label'>[] {
 export function Sidebar() {
   const t = useTranslations('nav');
   const pathname = usePathname();
-  const { user, signOut } = useAuth();
+  const { user, signOut, supportEnabled } = useAuth();
   const { mode } = useThemeMode();
+  const [supportOpen, setSupportOpen] = useState(false);
   const orgInitials = (user?.org ?? 'TR').slice(0, 2).toUpperCase();
   // Brand + domain labels come from the aggregator config so the
   // sidebar adapts to whichever signalstack network the deployment is
@@ -146,6 +149,19 @@ export function Sidebar() {
         </nav>
       </div>
 
+      {supportEnabled && (
+        <div className="px-3 pb-1">
+          <button
+            type="button"
+            onClick={() => setSupportOpen(true)}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-[10px] text-[14px] font-medium text-[var(--bd-fg-muted)] hover:bg-[var(--bd-border-soft)] hover:text-[var(--bd-fg)] transition-all"
+          >
+            <I.message size={18} />
+            <span>{t('contact_support')}</span>
+          </button>
+        </div>
+      )}
+
       <div className="mt-auto p-3 shrink-0">
         <div className="rounded-[12px] bg-gradient-to-br from-[var(--bd-tint-primary)] to-[var(--bd-card)] border border-[var(--bd-border)] p-3 flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-lg bg-[var(--bd-brand)] text-white flex items-center justify-center font-display font-bold text-[12px] shrink-0">
@@ -172,6 +188,8 @@ export function Sidebar() {
           </button>
         </div>
       </div>
+
+      <SupportDialog open={supportOpen} onOpenChange={setSupportOpen} />
     </aside>
   );
 }
