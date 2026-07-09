@@ -181,8 +181,10 @@ foreach ($s in "signals-bootstrap","signals-api","signals-ui","aggregator-api","
 docker compose up -d              # start; images already built, no --build
 ```
 
-First run pulls images and builds five app images (~2–3 GB, several minutes).
-The startup order is handled automatically:
+First run pulls images and builds five app images (~2–3 GB) — budget
+**~20 minutes on average** (longer on low-power U-series CPUs, faster on a
+desktop). Cached rebuilds after a code change are far quicker. The startup
+order is handled automatically:
 
 ```
 postgres, redis×2, mailpit, minio ─► minio-init (bucket)
