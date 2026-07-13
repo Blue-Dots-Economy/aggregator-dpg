@@ -24,11 +24,11 @@ import { supportEmail, supportCc, supportPortalLink } from '../config.js';
 
 const SupportRequestSchema = z
   .object({
-    name: z.string().min(1).max(200),
+    name: z.string().trim().min(1).max(200),
     email: z.string().email().max(320).optional(),
     phone: z.string().min(3).max(20).optional(),
     type: z.enum(['complaint', 'support_request']),
-    details: z.string().min(1).max(5000),
+    details: z.string().trim().min(1).max(5000),
     consent: z.literal(true),
   })
   .strict()
@@ -74,7 +74,10 @@ export async function registerSupportRoutes(app: FastifyInstance): Promise<void>
           'Emails the submitted complaint/support request to SUPPORT_EMAIL (and SUPPORT_CC_EMAIL when set), with Reply-To set to the submitter email so support can reply directly. Each submission carries a SUP-YYYYMMDD-XXXXXX reference.',
         security: [{ bearerAuth: [] }],
         body: SupportRequestSchema,
-        response: { 201: z.object({ ok: z.boolean() }), ...errorResponses(400, 401, 502, 503) },
+        response: {
+          201: z.object({ ok: z.boolean(), reference: z.string() }),
+          ...errorResponses(400, 401, 502, 503),
+        },
       },
     },
     async (req, reply) => {
@@ -135,7 +138,7 @@ export async function registerSupportRoutes(app: FastifyInstance): Promise<void>
         aggregator_id: auth.aggregatorId,
         reference,
       });
-      return reply.code(201).send({ ok: true });
+      return reply.code(201).send({ ok: true, reference });
     },
   );
 }

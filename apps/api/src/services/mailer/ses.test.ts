@@ -64,4 +64,23 @@ describe('SesMailer cc handling', () => {
     const input = client.lastInput as { Destination: Record<string, unknown> };
     expect('CcAddresses' in input.Destination).toBe(false);
   });
+
+  it('splits a comma-joined multi-recipient string into individual addresses (H1)', async () => {
+    const { client, mailer } = makeMailer();
+    // How the support config surfaces multiple recipients: a comma-joined
+    // string. SES must receive individual addresses, not one invalid entry.
+    const r = await mailer.send({
+      to: 'a@org.com, b@org.com',
+      cc: 'c@org.com, d@org.com',
+      subject: 's',
+      html: '',
+      text: '',
+    });
+    expect(r.ok).toBe(true);
+    const input = client.lastInput as {
+      Destination: { ToAddresses: string[]; CcAddresses?: string[] };
+    };
+    expect(input.Destination.ToAddresses).toEqual(['a@org.com', 'b@org.com']);
+    expect(input.Destination.CcAddresses).toEqual(['c@org.com', 'd@org.com']);
+  });
 });

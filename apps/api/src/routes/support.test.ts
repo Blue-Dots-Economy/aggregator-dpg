@@ -71,7 +71,9 @@ describe('support routes (SUPPORT_EMAIL configured)', () => {
       payload: validBody({ details: 'It broke' }),
     });
     expect(res.statusCode).toBe(201);
-    expect(res.json()).toEqual({ ok: true });
+    expect(res.json()).toMatchObject({ ok: true });
+    // L1: the generated reference is returned to the caller (parity with signals-dpg).
+    expect((res.json() as { reference: string }).reference).toMatch(/^SUP-\d{8}-[A-Z0-9]{6}$/);
 
     expect(mailer.outbox).toHaveLength(1);
     const sent = mailer.outbox[0]!;
@@ -149,6 +151,17 @@ describe('support routes (SUPPORT_EMAIL configured)', () => {
       url: '/v1/support',
       headers: { authorization: 'Bearer good-token' },
       payload: validBody({ details: '' }),
+    });
+    expect(res.statusCode).toBe(400);
+    expect(mailer.outbox).toHaveLength(0);
+  });
+
+  it('returns 400 for whitespace-only details and does not send anything (M1)', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/support',
+      headers: { authorization: 'Bearer good-token' },
+      payload: validBody({ details: '   ' }),
     });
     expect(res.statusCode).toBe(400);
     expect(mailer.outbox).toHaveLength(0);
