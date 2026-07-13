@@ -34,7 +34,10 @@ export class SesMailer extends MailerAdapter {
     const recipients = Array.isArray(input.to) ? input.to : [input.to];
     const command = new SendEmailCommand({
       FromEmailAddress: input.from ?? this.from,
-      Destination: { ToAddresses: recipients },
+      Destination: {
+        ToAddresses: recipients,
+        ...(input.cc ? { CcAddresses: Array.isArray(input.cc) ? input.cc : [input.cc] } : {}),
+      },
       ...(input.replyTo ? { ReplyToAddresses: [input.replyTo] } : {}),
       ...(this.configurationSetName ? { ConfigurationSetName: this.configurationSetName } : {}),
       Content: {
