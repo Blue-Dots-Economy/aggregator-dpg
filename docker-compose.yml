@@ -357,6 +357,9 @@ services:
       KEYCLOAK_REALM: ${KEYCLOAK_REALM:-aggregator}
       KEYCLOAK_ADMIN_CLIENT_ID: ${KEYCLOAK_ADMIN_CLIENT_ID:-aggregator-api}
       KEYCLOAK_ADMIN_CLIENT_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET:-}
+      # JWT client-scoping (#1.7): azp allow-list (enforced) + optional aud check.
+      KEYCLOAK_ALLOWED_AZP: ${KEYCLOAK_ALLOWED_AZP:-aggregator-portal,aggregator-api,aggregator-bff}
+      KEYCLOAK_EXPECTED_AUDIENCE: ${KEYCLOAK_EXPECTED_AUDIENCE:-}
       # Mailer — `smtp` (default, points at Mailpit in compose) or `ses`
       MAIL_PROVIDER: ${MAIL_PROVIDER:-smtp}
       SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
