@@ -21,6 +21,15 @@ const REDACT_PATHS = [
   '*.refresh_token',
   'body.password',
   'body.token',
+  // Participant PII — email/phone must never reach the log stream. Registration
+  // error paths attach them under `fields`/`body`, participant payloads under
+  // `payload`/`data`; cover the common one- and two-level nestings pino allows.
+  'email',
+  'phone',
+  '*.email',
+  '*.phone',
+  '*.*.email',
+  '*.*.phone',
 ];
 
 export const logger = pino({

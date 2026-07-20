@@ -36,6 +36,16 @@ const ConfigSchema = z.object({
     .positive()
     .default(64 * 1024),
 
+  /**
+   * TTL (seconds) applied to every per-upload Redis key (`bu:{id}:*`, which
+   * includes the raw participant CSV in `:lines` and error rows in `:errors`).
+   * A safety net so participant PII cannot persist indefinitely when an upload
+   * fails or is abandoned before `bulk-finalise` deletes the keys. Must comfortably
+   * exceed the longest expected processing time (the stuck-job watchdog kills
+   * in-flight uploads after 30 min). Default 24h.
+   */
+  BULK_UPLOAD_REDIS_TTL_SECONDS: z.coerce.number().int().positive().default(86_400),
+
   // ─── Worker role selection ──────────────────────────────────────────────
   /**
    * Comma-separated subset of consumer roles this process runs:
