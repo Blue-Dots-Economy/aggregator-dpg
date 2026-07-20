@@ -134,6 +134,12 @@ services:
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD:?KC_BOOTSTRAP_ADMIN_PASSWORD must be set in .env}
+      # Client secrets substituted into the realm import by render-realm.sh so the
+      # checked-in realm JSON carries no real credentials. Fail-hard when unset —
+      # these must equal the values the api/web services read below.
+      AGGREGATOR_API_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET:?KEYCLOAK_ADMIN_CLIENT_SECRET must be set in .env}
+      AGGREGATOR_PORTAL_SECRET: ${OIDC_CLIENT_SECRET:?OIDC_CLIENT_SECRET must be set in .env}
+      AGGREGATOR_BFF_SECRET: ${BFF_SERVICE_CLIENT_SECRET:?BFF_SERVICE_CLIENT_SECRET must be set in .env}
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
       KC_DB_USERNAME: ${POSTGRES_USER:-aggregator}
@@ -290,12 +296,14 @@ services:
       OIDC_POST_LOGOUT_REDIRECT_URI: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}/"
       OIDC_SCOPE: ${OIDC_SCOPE:-openid profile email}
       # ─── BFF service token (anonymous-proxy routes like /api/aggregator/register) ──
-      # The web BFF mints a Keycloak service-account token via the
-      # `aggregator-api` client to authorise upstream calls made on behalf of
-      # an unauthenticated browser. Reuses the same client/secret the api
-      # service already has so .env carries one pair, not two.
-      BFF_SERVICE_CLIENT_ID: ${BFF_SERVICE_CLIENT_ID:-${KEYCLOAK_ADMIN_CLIENT_ID:-aggregator-api}}
-      BFF_SERVICE_CLIENT_SECRET: ${BFF_SERVICE_CLIENT_SECRET:-${KEYCLOAK_ADMIN_CLIENT_SECRET:-}}
+      # The web BFF mints a Keycloak service-account token via the dedicated,
+      # minimal-scope `aggregator-bff` client to authorise upstream calls made on
+      # behalf of an unauthenticated browser. It deliberately does NOT reuse the
+      # `aggregator-api` client: that client holds realm-management (manage-realm
+      # + manage-users), so sharing its secret with the internet-facing BFF would
+      # make a BFF secret leak a full-realm-admin compromise. Fail-hard if unset.
+      BFF_SERVICE_CLIENT_ID: ${BFF_SERVICE_CLIENT_ID:-aggregator-bff}
+      BFF_SERVICE_CLIENT_SECRET: ${BFF_SERVICE_CLIENT_SECRET:?BFF_SERVICE_CLIENT_SECRET must be set in .env}
       # ─── Session ──────────────────────────────────────────────────────
       SESSION_COOKIE_NAME: ${SESSION_COOKIE_NAME:-sid}
       COOKIE_SECURE: ${COOKIE_SECURE:-}
