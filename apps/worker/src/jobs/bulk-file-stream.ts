@@ -162,34 +162,34 @@ export async function streamCsvParse(
   input: Readable | string,
   options: StreamCsvOptions,
 ): Promise<StreamCsvResult> {
-  const headers: string[] = [];
-  // PapaParse calls transformHeader for each column as the header row is
-  // parsed — before any data row — so `headers` is complete by the first row
-  // and also for header-only files (lets header_mismatch win over empty_csv).
-  // NODE_STREAM_INPUT invokes transformHeader more than once per column, so we
-  // assign by index (idempotent) rather than push (which would duplicate).
+  // Parse as raw arrays (`header: false`), NOT PapaParse's header mode. In
+  // `NODE_STREAM_INPUT` + `header: true`, PapaParse re-derives the header on
+  // each internal chunk cycle (once input crosses its ~1 KB boundary) — it
+  // calls the header logic again with *data-row* cells, renames duplicate/blank
+  // names to `_1`, `_2`… and corrupts both the header list and every later
+  // row's keys/values. That produced false `header_mismatch` on big files and,
+  // after a partial fix, `_N` garbage in row payloads. Reading raw arrays and
+  // mapping columns by position is completely immune: the first record is the
+  // header, every later record maps to it by index, regardless of chunking.
   const parseStream = Papa.parse(Papa.NODE_STREAM_INPUT, {
-    header: true,
+    header: false,
     skipEmptyLines: 'greedy',
-    transformHeader: (h: string, index: number) => {
-      const trimmed = h.trim();
-      headers[index] = trimmed;
-      return trimmed;
-    },
   });
 
   const byteSrc = typeof input === 'string' ? Readable.from([Buffer.from(input, 'utf8')]) : input;
 
-  let headerChecked = false;
+  let headers: string[] | null = null;
   const rows: StreamedRow[] = [];
 
-  const validateHeaders = (): { reason: FileFailureReason; detail?: string } | null => {
-    const headerSet = new Set(headers);
+  const validateHeaders = (
+    hdrs: string[],
+  ): { reason: FileFailureReason; detail?: string } | null => {
+    const headerSet = new Set(hdrs);
     const missing = options.required.filter((f) => !headerSet.has(f));
     if (missing.length > 0) {
       return { reason: 'header_mismatch', detail: `missing: ${missing.join(',')}` };
     }
-    const unknown = headers.filter((h) => !options.allowed.has(h));
+    const unknown = hdrs.filter((h) => !options.allowed.has(h));
     if (unknown.length > 0) {
       return { reason: 'header_mismatch', detail: `unknown: ${unknown.join(',')}` };
     }
@@ -201,26 +201,31 @@ export async function streamCsvParse(
       byteSrc,
       createUtf8DecodeStream(),
       parseStream,
-      async (parsed: AsyncIterable<Record<string, unknown>>) => {
-        for await (const row of parsed) {
-          if (!headerChecked) {
-            headerChecked = true;
-            const headerFailure = validateHeaders();
+      async (parsed: AsyncIterable<string[]>) => {
+        for await (const record of parsed) {
+          // First non-empty record is the header row. Validate it and move on —
+          // it is not a data row.
+          if (headers === null) {
+            headers = record.map((h) => String(h ?? '').trim());
+            const headerFailure = validateHeaders(headers);
             if (headerFailure) throw new ParseFailure(headerFailure.reason, headerFailure.detail);
+            continue;
           }
-          // rawLine (for errors.csv) keeps any surplus cells; payload carries
-          // only the schema-keyed string fields, never PapaParse internals.
-          const rawLine = reconstructCsvLine(headers, row);
+          // rawLine (for errors.csv) is the original record verbatim, incl. any
+          // surplus cells — it must round-trip through `Papa.parse(header:false)`.
+          const rawLine = Papa.unparse([record], { header: false });
           if (Buffer.byteLength(rawLine, 'utf8') > options.maxRowBytes) {
             throw new ParseFailure('row_size_exceeded');
           }
           if (rows.length + 1 > options.maxRows) {
             throw new ParseFailure('row_cap_exceeded', String(rows.length + 1));
           }
+          // Map cells to columns by position. Cells beyond the header width are
+          // surplus (kept only in rawLine); payload carries schema-keyed fields.
           const payload: Record<string, string> = {};
-          for (const h of headers) {
-            const value = row[h];
-            if (typeof value === 'string') payload[h] = value;
+          for (let i = 0; i < headers.length; i += 1) {
+            const value = record[i];
+            if (typeof value === 'string') payload[headers[i]!] = value;
           }
           rows.push({ rowIndex: rows.length, payload, rawLine });
         }
@@ -240,13 +245,9 @@ export async function streamCsvParse(
     return { status: 'failed', reason: 'system_error', detail: (err as Error).message };
   }
 
-  // Header-only file: transformHeader ran but no data row triggered the check.
-  // Validate now so a bad header still reports header_mismatch over empty_csv.
-  if (!headerChecked && headers.length > 0) {
-    const headerFailure = validateHeaders();
-    if (headerFailure) return { status: 'failed', ...headerFailure };
-  }
-  if (rows.length === 0) {
+  // No records at all → empty file. (A header-only file has `headers` set but
+  // zero data rows; a bad header already failed above with header_mismatch.)
+  if (headers === null || rows.length === 0) {
     return { status: 'failed', reason: 'empty_csv' };
   }
 
