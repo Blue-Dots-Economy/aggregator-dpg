@@ -19,8 +19,14 @@ name: aggregator-dpg
 #   Web app           : ${PUBLIC_PROTOCOL}://${PUBLIC_HOST}/
 #   API               : ${PUBLIC_PROTOCOL}://${PUBLIC_HOST}/backend/
 #   Keycloak          : ${PUBLIC_PROTOCOL}://${PUBLIC_HOST}/auth/   admin / ${KC_BOOTSTRAP_ADMIN_PASSWORD}
-#   Postgres          : localhost:5433             aggregator / ${POSTGRES_PASSWORD}  (direct, dev-only)
-#   Redis             : localhost:6379                                                (direct, dev-only)
+#
+# Backing services (Postgres/Redis/MinIO) publish NO host ports on this base
+# file — they are reachable only inside the compose network (postgres:5432,
+# redis:6379, minio:9000). For local hybrid dev (apps run outside Docker),
+# `make up` / `pnpm stack:up` layer docker-compose.dev.yml, which binds those
+# ports to 127.0.0.1 only (Postgres 5433, Redis 6379, MinIO 9000/9001) and
+# enables the `storage` profile for MinIO. A bare `docker compose up -d` (the
+# VM path) stays locked down.
 #
 # Object storage is AWS S3 (regional endpoint, IAM-role credentials). The
 # VM's EC2 instance profile must grant s3:GetObject, s3:PutObject,
@@ -39,8 +45,9 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-aggregator}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
       POSTGRES_DB: ${POSTGRES_DB:-aggregator}
-    ports:
-      - "5433:5432"   # host 5433 → container 5432 (avoids clashes with a system Postgres on 5432)
+    # No host port mapping — reachable only as `postgres:5432` inside the
+    # compose network. Host access for `pnpm --filter ... dev` comes from the
+    # loopback-bound port in docker-compose.dev.yml (make up / stack:up layers it).
     volumes:
       - aggregator-postgres-data:/var/lib/postgresql/data
       - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
@@ -55,8 +62,8 @@ services:
     container_name: aggregator-redis
     restart: unless-stopped
     command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
-    ports:
-      - "6379:6379"
+    # No host port mapping — reachable only as `redis:6379` inside the compose
+    # network. Host access for local dev comes from docker-compose.dev.yml.
     volumes:
       - redis-data:/data
     healthcheck:
@@ -79,6 +86,12 @@ services:
     image: minio/minio:RELEASE.2025-04-22T22-12-26Z
     container_name: aggregator-minio
     restart: unless-stopped
+    # Dev/docker-only. Gated behind the `storage` profile so a plain
+    # `docker compose up` on a VM (which uses real AWS S3 via the instance
+    # role) never starts it — no idle container, no exposed :9000/:9001, no
+    # default-credential surface in prod. `make up` / `stack:up` enable the
+    # profile for local development.
+    profiles: ["storage"]
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
@@ -86,9 +99,9 @@ services:
       # MinIO ignores AWS region but the SDK signs requests with whatever
       # S3_REGION the apps configure — keep them aligned to avoid sigv4 grief.
       MINIO_REGION: ${S3_REGION:-us-east-1}
-    ports:
-      - "9000:9000"
-      - "9001:9001"
+    # No host port mapping — reachable as `minio:9000` inside the compose
+    # network. Host access (presigned-URL browser flow + console) comes from
+    # the loopback-bound ports in docker-compose.dev.yml.
     volumes:
       - minio-data:/data
     healthcheck:
@@ -102,6 +115,8 @@ services:
   minio-init:
     image: minio/mc:RELEASE.2025-04-16T18-13-26Z
     container_name: aggregator-minio-init
+    # Same `storage` profile as minio — only runs when local MinIO is enabled.
+    profiles: ["storage"]
     depends_on:
       minio:
         condition: service_healthy
@@ -307,9 +322,15 @@ services:
       # ─── Redis (BFF session store) ────────────────────────────────────
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       LOG_LEVEL: ${LOG_LEVEL:-info}
-      # Dev-only: allow self-signed pebble cert when OIDC discovery hits
-      # https://localhost/auth via the host-gateway. Drop this in prod.
-      NODE_TLS_REJECT_UNAUTHORIZED: ${NODE_TLS_REJECT_UNAUTHORIZED:-0}
+      # TLS certs are VERIFIED by default. For local https OIDC against a
+      # self-signed pebble cert, use the dev overlay (make up / stack:up already
+      # layers it): docker compose -f docker-compose.yml -f docker-compose.dev.yml.
+      # Never set this to 0 in production — apps/*/src/config.ts assertTlsPosture
+      # refuses to boot. For a real internal-CA cert, mount it via NODE_EXTRA_CA_CERTS
+      # instead of disabling verification.
+      NODE_TLS_REJECT_UNAUTHORIZED: ${NODE_TLS_REJECT_UNAUTHORIZED:-1}
+      # Deployment environment; arms the TLS guard on the VM path by default.
+      INSTANCE_ENV: ${INSTANCE_ENV:-production}
       # Brand selectors — the app derives SCHEMA_ROOT_DIR from these two vars.
       # Set AGGREGATOR_BRAND to select a brand subfolder (e.g. upsdm);
       # leave empty for the base network. SCHEMA_ROOT_DIR / AGGREGATOR_CONFIG_PATH
@@ -413,8 +434,11 @@ services:
       SIGNALSTACK_ACTING_ORG_ID: ${SIGNALSTACK_ACTING_ORG_ID:-}
       SIGNALSTACK_ITEM_NETWORK: ${AGGREGATOR_NETWORK:-blue_dot}
       SIGNALSTACK_TIMEOUT_MS: ${SIGNALSTACK_TIMEOUT_MS:-10000}
-      # Dev-only: accept pebble cert on host-gateway calls to Keycloak.
-      NODE_TLS_REJECT_UNAUTHORIZED: ${NODE_TLS_REJECT_UNAUTHORIZED:-0}
+      # TLS certs are VERIFIED by default (see web service note + the config
+      # guard). Never 0 in production; use the dev overlay for a local pebble
+      # cert, or NODE_EXTRA_CA_CERTS for a real internal CA.
+      NODE_TLS_REJECT_UNAUTHORIZED: ${NODE_TLS_REJECT_UNAUTHORIZED:-1}
+      INSTANCE_ENV: ${INSTANCE_ENV:-production}
     # No host port mapping — exposed only via nginx at /backend/.
     # See `extra_hosts` rationale on the web service: api hits Keycloak via
     # the public URL for both admin REST + JWKS, so we short-circuit DNS to
@@ -452,6 +476,10 @@ services:
     environment:
       NODE_ENV: production
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Worker makes outward TLS calls (SIGNALSTACK_BASE_URL); verify certs by
+      # default and arm the config guard on the VM path. See the web/api notes.
+      NODE_TLS_REJECT_UNAUTHORIZED: ${NODE_TLS_REJECT_UNAUTHORIZED:-1}
+      INSTANCE_ENV: ${INSTANCE_ENV:-production}
       DATABASE_URL: postgres://${POSTGRES_USER:-aggregator}:${POSTGRES_PASSWORD:-aggregator-dev}@postgres:5432/${POSTGRES_DB:-aggregator}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       # ─── Object storage (raw CSV download + errors.csv write) ──────
