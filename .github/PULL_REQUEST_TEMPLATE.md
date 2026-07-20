@@ -2,6 +2,14 @@
 
 <!-- What does this PR do and why? -->
 
+## In Plain Terms
+
+<!--
+Explain this change for a non-expert teammate in everyday language — no code, no
+jargon: what was the problem, and what does this PR do about it? One short
+paragraph. Write "N/A" only for a pure chore with no behavioural effect.
+-->
+
 ## Release Notes
 
 <!--
@@ -21,6 +29,7 @@ If this PR has NO user-facing changes, add the `no-release-notes` label instead.
 
 ## Checklist
 
+- [ ] Wrote an **In Plain Terms** summary a non-expert teammate can follow (or `N/A` for a pure chore)
 - [ ] `pnpm -w lint` passes
 - [ ] `pnpm -w typecheck` passes
 - [ ] `pnpm -w test` passes
