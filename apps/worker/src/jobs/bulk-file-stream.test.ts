@@ -227,3 +227,29 @@ describe('createUtf8DecodeStream', () => {
     ).rejects.toThrowError(/encoding/i);
   });
 });
+
+describe('streamCsvParse — large-file header regression', () => {
+  // Regression for the NODE_STREAM_INPUT header-clobber bug: once the input
+  // crosses PapaParse's ~1KB internal chunk boundary, transformHeader is
+  // re-invoked with data-row cells, overwriting the header array — so header
+  // validation compared required columns against *data values* and reported
+  // every required column missing. A small-file test never trips this; the
+  // header must be captured from the first row's keys instead.
+  it('parses a >1KB CSV (250 rows) without a false header_mismatch', async () => {
+    const dataRows = Array.from(
+      { length: 250 },
+      (_, i) => `Name ${i},user${i}@example.io,City ${i}`,
+    );
+    const csv = [HEADER, ...dataRows].join('\n');
+    expect(Buffer.byteLength(csv, 'utf8')).toBeGreaterThan(1024);
+
+    const res = await streamCsvParse(csv, opts());
+
+    expect(res.status).toBe('ok');
+    if (res.status !== 'ok') return;
+    expect(res.headers).toEqual(['name', 'email', 'city']);
+    expect(res.rows).toHaveLength(250);
+    expect(res.rows[0]!.payload).toMatchObject({ name: 'Name 0', email: 'user0@example.io' });
+    expect(res.rows[249]!.payload.name).toBe('Name 249');
+  });
+});
