@@ -45,7 +45,7 @@
     "fastify-type-provider-zod": "^4.0.2",
     "ioredis": "^5.10.1",
     "jose": "^5.9.6",
-    "nodemailer": "^6.9.16",
+    "nodemailer": "^6.10.1",
     "pg": "^8.13.1",
     "pino": "^9.5.0",
     "pino-pretty": "^11.3.0",
