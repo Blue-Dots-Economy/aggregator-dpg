@@ -228,18 +228,18 @@ describe('createUtf8DecodeStream', () => {
   });
 });
 
-describe('streamCsvParse — large-file header regression', () => {
-  // Regression for the NODE_STREAM_INPUT header-clobber bug: once the input
-  // crosses PapaParse's ~1KB internal chunk boundary, transformHeader is
-  // re-invoked with data-row cells, overwriting the header array — so header
-  // validation compared required columns against *data values* and reported
-  // every required column missing. A small-file test never trips this; the
-  // header must be captured from the first row's keys instead.
-  it('parses a >1KB CSV (250 rows) without a false header_mismatch', async () => {
-    const dataRows = Array.from(
-      { length: 250 },
-      (_, i) => `Name ${i},user${i}@example.io,City ${i}`,
-    );
+describe('streamCsvParse — large-file regression (NODE_STREAM_INPUT re-parse)', () => {
+  // Regression for the NODE_STREAM_INPUT bug: once input crosses PapaParse's
+  // ~1KB internal chunk boundary, `header:true` re-derives the header from a
+  // *data row* on the next cycle. Empty cells in that row get renamed to
+  // `_1`, `_2`, … which corrupted BOTH the header list (false header_mismatch)
+  // and every later row's payload (fields set to `_N`). This must use rows with
+  // BLANK cells and a large row count — simple, fully-populated rows never trip
+  // it. The fix parses raw arrays (`header:false`) and maps columns by index.
+  it('parses a >1KB CSV with blank cells (250 rows) with clean headers and payloads', async () => {
+    // `city` left blank on every row — the empties are what triggered the
+    // duplicate-rename → `_N` corruption on the old parser.
+    const dataRows = Array.from({ length: 250 }, (_, i) => `Name ${i},user${i}@example.io,`);
     const csv = [HEADER, ...dataRows].join('\n');
     expect(Buffer.byteLength(csv, 'utf8')).toBeGreaterThan(1024);
 
@@ -249,7 +249,14 @@ describe('streamCsvParse — large-file header regression', () => {
     if (res.status !== 'ok') return;
     expect(res.headers).toEqual(['name', 'email', 'city']);
     expect(res.rows).toHaveLength(250);
-    expect(res.rows[0]!.payload).toMatchObject({ name: 'Name 0', email: 'user0@example.io' });
-    expect(res.rows[249]!.payload.name).toBe('Name 249');
+    // A late row (past the chunk boundary) must map by position, not to `_N`.
+    expect(res.rows[249]!.payload).toMatchObject({ name: 'Name 249', email: 'user249@example.io' });
+    // No payload key or value may be a `_N` rename artifact.
+    for (const row of res.rows) {
+      for (const [k, v] of Object.entries(row.payload)) {
+        expect(k).not.toMatch(/^_\d+$/);
+        expect(String(v)).not.toMatch(/^_\d+$/);
+      }
+    }
   });
 });
