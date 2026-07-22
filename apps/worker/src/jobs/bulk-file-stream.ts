@@ -43,7 +43,8 @@ export interface StreamedRow {
   /** Parsed cell values keyed by trimmed header name. */
   payload: Record<string, string>;
   /**
-   * The row re-serialised as one CSV line in header-column order. The Finaliser
+   * The original record re-serialised verbatim as one CSV line — a ragged row
+   * keeps its own cell count (shorter or wider than the header). The Finaliser
    * stores this under `bu:{id}:lines` and re-parses it positionally to rebuild
    * errors.csv, so it must round-trip through `Papa.parse(header:false)`.
    */
@@ -118,35 +119,6 @@ export function createUtf8DecodeStream(): Transform {
   });
 }
 
-/** PapaParse key holding cells of a ragged row wider than the header. */
-const PARSED_EXTRA = '__parsed_extra';
-
-/** Coerces a parsed cell to its string form (`null`/`undefined` → ''). */
-function stringifyCell(value: unknown): string {
-  return value === undefined || value === null ? '' : String(value);
-}
-
-/**
- * Re-serialises a parsed row as a single CSV line in header-column order,
- * filling missing keys with empty strings. Surplus cells from a ragged row
- * wider than the header (PapaParse's `__parsed_extra`) are appended so the
- * errors.csv report keeps every original column, matching the previous
- * whole-file behaviour. Values are quoted/escaped by PapaParse so the line
- * re-parses (positionally) to the same cells.
- *
- * @param headers - Column names in the order they appeared in the header row.
- * @param payload - Parsed row keyed by header name (may carry `__parsed_extra`).
- * @returns One CSV-encoded line (no trailing newline).
- */
-export function reconstructCsvLine(headers: string[], payload: Record<string, unknown>): string {
-  const cells = headers.map((h) => stringifyCell(payload[h]));
-  const extra = payload[PARSED_EXTRA];
-  if (Array.isArray(extra)) {
-    for (const cell of extra) cells.push(stringifyCell(cell));
-  }
-  return Papa.unparse([cells], { header: false });
-}
-
 /**
  * Streams and validates a CSV, returning its data rows for enqueueing.
  *
@@ -163,14 +135,14 @@ export async function streamCsvParse(
   options: StreamCsvOptions,
 ): Promise<StreamCsvResult> {
   // Parse as raw arrays (`header: false`), NOT PapaParse's header mode. In
-  // `NODE_STREAM_INPUT` + `header: true`, PapaParse re-derives the header on
-  // each internal chunk cycle (once input crosses its ~1 KB boundary) — it
-  // calls the header logic again with *data-row* cells, renames duplicate/blank
-  // names to `_1`, `_2`… and corrupts both the header list and every later
-  // row's keys/values. That produced false `header_mismatch` on big files and,
-  // after a partial fix, `_N` garbage in row payloads. Reading raw arrays and
-  // mapping columns by position is completely immune: the first record is the
-  // header, every later record maps to it by index, regardless of chunking.
+  // `NODE_STREAM_INPUT` + `header: true`, PapaParse re-invokes its header
+  // logic on later internal chunk cycles (once input crosses its ~1 KB
+  // boundary), passing *data-row* cells — which clobbered the derived header
+  // list and produced false `header_mismatch` on big files (#500). Building
+  // row objects through that machinery leaves the payload hostage to the same
+  // re-derivation. Raw arrays sidestep it entirely: the first record is the
+  // header (validated once), every later record maps to it strictly by column
+  // index, regardless of chunking, blank cells, or file size.
   const parseStream = Papa.parse(Papa.NODE_STREAM_INPUT, {
     header: false,
     skipEmptyLines: 'greedy',
