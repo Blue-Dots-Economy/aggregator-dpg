@@ -5,6 +5,9 @@ on:
     branches:
       - main
       - develop
+      # Validate the merged state of the integration branch too — PRs into
+      # feature already run CI, but the post-merge result was unchecked.
+      - feature
 
     tags:
       - 'web-v*.*.*'
