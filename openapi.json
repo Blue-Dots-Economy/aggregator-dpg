@@ -56,7 +56,7 @@
         "tags": [
           "health"
         ],
-        "description": "Returns 200 when the api is ready to accept traffic.",
+        "description": "Returns 200 only when Postgres and Redis are both reachable; 503 otherwise.",
         "responses": {
           "200": {
             "description": "Default Response",
@@ -68,12 +68,51 @@
                     "status": {
                       "type": "string",
                       "enum": [
-                        "ok"
+                        "ready"
                       ]
                     }
                   },
                   "required": [
                     "status"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "not_ready"
+                      ]
+                    },
+                    "checks": {
+                      "type": "object",
+                      "properties": {
+                        "postgres": {
+                          "type": "string"
+                        },
+                        "redis": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "postgres",
+                        "redis"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "checks"
                   ],
                   "additionalProperties": false
                 }
