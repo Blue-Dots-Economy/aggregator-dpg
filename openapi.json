@@ -20,7 +20,9 @@
     "/health/live": {
       "get": {
         "summary": "Liveness probe",
-        "tags": ["health"],
+        "tags": [
+          "health"
+        ],
         "description": "Returns 200 as long as the process is up — used by Docker healthcheck.",
         "responses": {
           "200": {
@@ -32,10 +34,14 @@
                   "properties": {
                     "status": {
                       "type": "string",
-                      "enum": ["ok"]
+                      "enum": [
+                        "ok"
+                      ]
                     }
                   },
-                  "required": ["status"],
+                  "required": [
+                    "status"
+                  ],
                   "additionalProperties": false
                 }
               }
@@ -47,7 +53,9 @@
     "/health/ready": {
       "get": {
         "summary": "Readiness probe",
-        "tags": ["health"],
+        "tags": [
+          "health"
+        ],
         "description": "Returns 200 when the api is ready to accept traffic.",
         "responses": {
           "200": {
@@ -59,10 +67,14 @@
                   "properties": {
                     "status": {
                       "type": "string",
-                      "enum": ["ok"]
+                      "enum": [
+                        "ok"
+                      ]
                     }
                   },
-                  "required": ["status"],
+                  "required": [
+                    "status"
+                  ],
                   "additionalProperties": false
                 }
               }
@@ -74,7 +86,9 @@
     "/v1/aggregator-registrations/create": {
       "post": {
         "summary": "Submit a new aggregator registration",
-        "tags": ["aggregator-registrations"],
+        "tags": [
+          "aggregator-registrations"
+        ],
         "description": "Validates submission against config/schemas/aggregator/registration.v1.json, creates a disabled user (login enabled on admin approval), and pushes the org to signalstack. Reached via a non-aggregator Bearer token from Keycloak.",
         "requestBody": {
           "required": true,
@@ -127,7 +141,11 @@
                         "maxLength": 32
                       }
                     },
-                    "required": ["name", "phone", "email"],
+                    "required": [
+                      "name",
+                      "phone",
+                      "email"
+                    ],
                     "additionalProperties": false
                   },
                   "locations": {
@@ -167,7 +185,9 @@
                               "maxItems": 4
                             }
                           },
-                          "required": ["type"],
+                          "required": [
+                            "type"
+                          ],
                           "additionalProperties": false
                         },
                         "address": {
@@ -195,7 +215,9 @@
                           "additionalProperties": false
                         }
                       },
-                      "required": ["geo"],
+                      "required": [
+                        "geo"
+                      ],
                       "additionalProperties": false
                     },
                     "default": []
@@ -205,7 +227,9 @@
                     "properties": {
                       "value": {
                         "type": "boolean",
-                        "enum": [true]
+                        "enum": [
+                          true
+                        ]
                       },
                       "given_at": {
                         "type": "string",
@@ -216,14 +240,23 @@
                         "format": "date-time"
                       }
                     },
-                    "required": ["value", "given_at", "valid_till"],
+                    "required": [
+                      "value",
+                      "given_at",
+                      "valid_till"
+                    ],
                     "additionalProperties": false
                   },
                   "org_id": {
                     "type": "string"
                   }
                 },
-                "required": ["name", "type", "contact", "consent"],
+                "required": [
+                  "name",
+                  "type",
+                  "contact",
+                  "consent"
+                ],
                 "additionalProperties": false
               }
             }
@@ -250,7 +283,12 @@
                       "type": "string"
                     }
                   },
-                  "required": ["aggregator_id", "org_slug", "status", "message"],
+                  "required": [
+                    "aggregator_id",
+                    "org_slug",
+                    "status",
+                    "message"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -289,11 +327,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -332,11 +378,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -375,11 +429,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -418,11 +480,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -461,11 +531,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -477,7 +555,9 @@
     "/admin/v1/aggregator-registrations/cleanup-stale": {
       "post": {
         "summary": "Prune registrations stuck pending past token expiry + grace",
-        "tags": ["aggregator-registrations"],
+        "tags": [
+          "aggregator-registrations"
+        ],
         "responses": {
           "200": {
             "description": "Default Response",
@@ -557,11 +637,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -600,11 +688,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -643,11 +739,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -659,7 +763,9 @@
     "/admin/v1/aggregator-registrations/read/{id}": {
       "get": {
         "summary": "Render the admin approve/reject page",
-        "tags": ["aggregator-approvals"],
+        "tags": [
+          "aggregator-approvals"
+        ],
         "description": "HTML page reached from the admin notification email. Verifies the signed token and renders the approval form for the given aggregator registration id. All responses (200, 400 invalid/missing token, 404 unknown aggregator, 503 backing service down) are text/html pages, so no JSON response schema is declared.",
         "parameters": [
           {
@@ -697,7 +803,9 @@
     "/admin/v1/aggregator-registrations/decision/{id}": {
       "post": {
         "summary": "Approve or reject a pending aggregator",
-        "tags": ["aggregator-approvals"],
+        "tags": [
+          "aggregator-approvals"
+        ],
         "description": "Records the admin decision (approve/reject) for the registration id. On approve, enables the disabled Keycloak user and confirms the signalstack push. This is a browser form flow: every response (200 result page, 400 invalid token/body, 404 unknown aggregator, 503 backing service down) is a text/html page, so neither a body schema nor JSON response schemas are declared — the handler validates the form body itself (token, decision approve|reject, optional reason) and renders an HTML error page on failure. Body shape: { token: string, decision: \"approve\" | \"reject\", reason?: string }.",
         "parameters": [
           {
@@ -719,7 +827,9 @@
     "/admin/v1/aggregator-registrations/renew/{id}": {
       "post": {
         "summary": "Regenerate an expired approval link and show the confirm page",
-        "tags": ["aggregator-approvals"],
+        "tags": [
+          "aggregator-approvals"
+        ],
         "description": "Reached from the \"Regenerate & review\" button on the expired-link page. Accepts an expired-but-signature-valid token as proof the reviewer held a legitimate link, mints a fresh decision token (preserving the org binding), and renders the approve/reject confirm page inline — no email.",
         "parameters": [
           {
@@ -741,7 +851,9 @@
     "/v1/aggregators/profile/me": {
       "get": {
         "summary": "Read the caller aggregator profile",
-        "tags": ["aggregator-profile"],
+        "tags": [
+          "aggregator-profile"
+        ],
         "description": "Returns the full aggregator row + brand + contact + status for the aggregator bound to the Bearer token claim.",
         "security": [
           {
@@ -803,7 +915,11 @@
                           "maxLength": 32
                         }
                       },
-                      "required": ["name", "phone", "email"],
+                      "required": [
+                        "name",
+                        "phone",
+                        "email"
+                      ],
                       "additionalProperties": false
                     },
                     "locations": {
@@ -843,7 +959,9 @@
                                 "maxItems": 4
                               }
                             },
-                            "required": ["type"],
+                            "required": [
+                              "type"
+                            ],
                             "additionalProperties": false
                           },
                           "address": {
@@ -871,7 +989,9 @@
                             "additionalProperties": false
                           }
                         },
-                        "required": ["geo"],
+                        "required": [
+                          "geo"
+                        ],
                         "additionalProperties": false
                       }
                     },
@@ -890,7 +1010,11 @@
                           "format": "date-time"
                         }
                       },
-                      "required": ["value", "given_at", "valid_till"],
+                      "required": [
+                        "value",
+                        "given_at",
+                        "valid_till"
+                      ],
                       "additionalProperties": false
                     },
                     "status": {
@@ -914,7 +1038,10 @@
                             "minLength": 1
                           }
                         },
-                        "required": ["id", "name"],
+                        "required": [
+                          "id",
+                          "name"
+                        ],
                         "additionalProperties": false
                       }
                     },
@@ -932,7 +1059,10 @@
                             "minLength": 1
                           }
                         },
-                        "required": ["id", "name"],
+                        "required": [
+                          "id",
+                          "name"
+                        ],
                         "additionalProperties": false
                       }
                     },
@@ -962,7 +1092,12 @@
                             "format": "date-time"
                           }
                         },
-                        "required": ["key_id", "public_key", "algorithm", "valid_till"],
+                        "required": [
+                          "key_id",
+                          "public_key",
+                          "algorithm",
+                          "valid_till"
+                        ],
                         "additionalProperties": false
                       }
                     },
@@ -1082,11 +1217,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -1125,11 +1268,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -1168,11 +1319,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -1211,11 +1370,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -1225,7 +1392,9 @@
       },
       "patch": {
         "summary": "Update the caller aggregator profile",
-        "tags": ["aggregator-profile"],
+        "tags": [
+          "aggregator-profile"
+        ],
         "description": "Partial update of profile fields (contact, locations, etc) for the caller aggregator. Validates the patch against profile.v1.json. Re-syncs to signalstack on success.",
         "requestBody": {
           "required": true,
@@ -1278,7 +1447,11 @@
                             "maxLength": 32
                           }
                         },
-                        "required": ["name", "phone", "email"],
+                        "required": [
+                          "name",
+                          "phone",
+                          "email"
+                        ],
                         "additionalProperties": false
                       },
                       "locations": {
@@ -1318,7 +1491,9 @@
                                   "maxItems": 4
                                 }
                               },
-                              "required": ["type"],
+                              "required": [
+                                "type"
+                              ],
                               "additionalProperties": false
                             },
                             "address": {
@@ -1346,7 +1521,9 @@
                               "additionalProperties": false
                             }
                           },
-                          "required": ["geo"],
+                          "required": [
+                            "geo"
+                          ],
                           "additionalProperties": false
                         }
                       },
@@ -1365,7 +1542,11 @@
                             "format": "date-time"
                           }
                         },
-                        "required": ["value", "given_at", "valid_till"],
+                        "required": [
+                          "value",
+                          "given_at",
+                          "valid_till"
+                        ],
                         "additionalProperties": false
                       }
                     },
@@ -1394,7 +1575,10 @@
                               "minLength": 1
                             }
                           },
-                          "required": ["id", "name"],
+                          "required": [
+                            "id",
+                            "name"
+                          ],
                           "additionalProperties": false
                         }
                       },
@@ -1412,7 +1596,10 @@
                               "minLength": 1
                             }
                           },
-                          "required": ["id", "name"],
+                          "required": [
+                            "id",
+                            "name"
+                          ],
                           "additionalProperties": false
                         }
                       },
@@ -1442,7 +1629,12 @@
                               "format": "date-time"
                             }
                           },
-                          "required": ["key_id", "public_key", "algorithm", "valid_till"],
+                          "required": [
+                            "key_id",
+                            "public_key",
+                            "algorithm",
+                            "valid_till"
+                          ],
                           "additionalProperties": false
                         }
                       }
@@ -1515,7 +1707,11 @@
                           "maxLength": 32
                         }
                       },
-                      "required": ["name", "phone", "email"],
+                      "required": [
+                        "name",
+                        "phone",
+                        "email"
+                      ],
                       "additionalProperties": false
                     },
                     "locations": {
@@ -1555,7 +1751,9 @@
                                 "maxItems": 4
                               }
                             },
-                            "required": ["type"],
+                            "required": [
+                              "type"
+                            ],
                             "additionalProperties": false
                           },
                           "address": {
@@ -1583,7 +1781,9 @@
                             "additionalProperties": false
                           }
                         },
-                        "required": ["geo"],
+                        "required": [
+                          "geo"
+                        ],
                         "additionalProperties": false
                       }
                     },
@@ -1602,7 +1802,11 @@
                           "format": "date-time"
                         }
                       },
-                      "required": ["value", "given_at", "valid_till"],
+                      "required": [
+                        "value",
+                        "given_at",
+                        "valid_till"
+                      ],
                       "additionalProperties": false
                     },
                     "status": {
@@ -1626,7 +1830,10 @@
                             "minLength": 1
                           }
                         },
-                        "required": ["id", "name"],
+                        "required": [
+                          "id",
+                          "name"
+                        ],
                         "additionalProperties": false
                       }
                     },
@@ -1644,7 +1851,10 @@
                             "minLength": 1
                           }
                         },
-                        "required": ["id", "name"],
+                        "required": [
+                          "id",
+                          "name"
+                        ],
                         "additionalProperties": false
                       }
                     },
@@ -1674,7 +1884,12 @@
                             "format": "date-time"
                           }
                         },
-                        "required": ["key_id", "public_key", "algorithm", "valid_till"],
+                        "required": [
+                          "key_id",
+                          "public_key",
+                          "algorithm",
+                          "valid_till"
+                        ],
                         "additionalProperties": false
                       }
                     },
@@ -1749,11 +1964,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -1792,11 +2015,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -1835,11 +2066,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -1878,11 +2117,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -1921,11 +2168,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -1964,11 +2219,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -2007,11 +2270,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -2023,7 +2294,9 @@
     "/v1/bulk-uploads/template": {
       "get": {
         "summary": "Download CSV template for a domain",
-        "tags": ["bulk-uploads"],
+        "tags": [
+          "bulk-uploads"
+        ],
         "description": "Returns a CSV template (text/csv) with the header row + sample row for the requested ?participant_type= (seeker/provider). Array-typed fields use the network's csv_array_delimiter. Responds with a text/csv attachment on 200 (no JSON body).",
         "parameters": [
           {
@@ -2075,11 +2348,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -2118,11 +2399,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -2161,11 +2450,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -2204,11 +2501,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -2220,7 +2525,9 @@
     "/v1/bulk-uploads": {
       "post": {
         "summary": "Create a new bulk-upload job",
-        "tags": ["bulk-uploads"],
+        "tags": [
+          "bulk-uploads"
+        ],
         "description": "Reserves a pending bulk-upload job for the caller aggregator and returns a pre-signed S3 PUT URL. The browser uploads CSV bytes directly to S3, then calls /start. `participant_type` is validated against the active network config at request time.",
         "requestBody": {
           "required": true,
@@ -2235,7 +2542,9 @@
                     "description": "Participant domain id declared by the active network (e.g. seeker, provider)."
                   }
                 },
-                "required": ["participant_type"],
+                "required": [
+                  "participant_type"
+                ],
                 "additionalProperties": true
               }
             }
@@ -2331,11 +2640,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -2374,11 +2691,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -2417,11 +2742,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -2460,11 +2793,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -2474,7 +2815,9 @@
       },
       "get": {
         "summary": "List bulk-upload jobs",
-        "tags": ["bulk-uploads"],
+        "tags": [
+          "bulk-uploads"
+        ],
         "description": "Paginated list of bulk-upload jobs (newest first) for the caller aggregator.",
         "parameters": [
           {
@@ -2591,7 +2934,12 @@
                       "type": "number"
                     }
                   },
-                  "required": ["items", "total", "limit", "offset"],
+                  "required": [
+                    "items",
+                    "total",
+                    "limit",
+                    "offset"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -2630,11 +2978,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -2673,11 +3029,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -2716,11 +3080,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -2759,11 +3131,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -2775,7 +3155,9 @@
     "/v1/bulk-uploads/{id}/start": {
       "post": {
         "summary": "Start processing a pending bulk-upload job",
-        "tags": ["bulk-uploads"],
+        "tags": [
+          "bulk-uploads"
+        ],
         "description": "Transitions a pending job to running; the worker onboards each valid row to signalstack. Idempotent on already-running/completed jobs.",
         "parameters": [
           {
@@ -2899,11 +3281,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -2942,11 +3332,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -2985,11 +3383,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -3028,11 +3434,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -3071,11 +3485,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -3087,7 +3509,9 @@
     "/v1/bulk-uploads/{id}": {
       "get": {
         "summary": "Read a bulk-upload job",
-        "tags": ["bulk-uploads"],
+        "tags": [
+          "bulk-uploads"
+        ],
         "description": "Returns the full job row including status, per-row counters, and error summary.",
         "parameters": [
           {
@@ -3211,11 +3635,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -3254,11 +3686,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -3297,11 +3737,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -3340,11 +3788,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -3356,7 +3812,9 @@
     "/v1/bulk-uploads/{id}/errors.csv": {
       "get": {
         "summary": "Download per-row error CSV",
-        "tags": ["bulk-uploads"],
+        "tags": [
+          "bulk-uploads"
+        ],
         "description": "Returns a JSON payload carrying a short-lived pre-signed S3 GET URL for the errors.csv report (rows that failed validation/onboarding with reason + offending fields), plus the final counters. Only available once the upload is completed and at least one row failed.",
         "parameters": [
           {
@@ -3415,7 +3873,12 @@
                           "type": "number"
                         }
                       },
-                      "required": ["total_rows", "passed", "failed", "skipped"],
+                      "required": [
+                        "total_rows",
+                        "passed",
+                        "failed",
+                        "skipped"
+                      ],
                       "additionalProperties": true
                     }
                   },
@@ -3465,11 +3928,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -3508,11 +3979,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -3551,11 +4030,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -3594,11 +4081,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -3637,11 +4132,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -3680,11 +4183,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -3696,7 +4207,9 @@
     "/v1/links/create": {
       "post": {
         "summary": "Create a shareable registration link",
-        "tags": ["registration-links"],
+        "tags": [
+          "registration-links"
+        ],
         "description": "Creates a QR / shareable registration link for the caller aggregator, scoped to a domain (seeker/provider). `domain` and `registration_mode` are validated against the active network config at request time. Drafts are metadata-only; status=live also mints the QR + public URL.",
         "requestBody": {
           "required": true,
@@ -3722,7 +4235,10 @@
                   },
                   "status": {
                     "type": "string",
-                    "enum": ["draft", "live"],
+                    "enum": [
+                      "draft",
+                      "live"
+                    ],
                     "default": "draft"
                   },
                   "registration_mode": {
@@ -3735,7 +4251,9 @@
                     "nullable": true
                   }
                 },
-                "required": ["domain"],
+                "required": [
+                  "domain"
+                ],
                 "additionalProperties": false
               }
             }
@@ -3805,7 +4323,12 @@
                           "type": "number"
                         }
                       },
-                      "required": ["total", "passed", "failed", "skipped"],
+                      "required": [
+                        "total",
+                        "passed",
+                        "failed",
+                        "skipped"
+                      ],
                       "additionalProperties": true
                     },
                     "created_at": {
@@ -3868,11 +4391,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -3911,11 +4442,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -3954,11 +4493,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -3997,11 +4544,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -4040,11 +4595,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -4056,13 +4619,19 @@
     "/v1/links": {
       "get": {
         "summary": "List the caller aggregator's registration links",
-        "tags": ["registration-links"],
+        "tags": [
+          "registration-links"
+        ],
         "description": "Paginated list (newest first) of registration links with status + counters.",
         "parameters": [
           {
             "schema": {
               "type": "string",
-              "enum": ["draft", "live", "retired"]
+              "enum": [
+                "draft",
+                "live",
+                "retired"
+              ]
             },
             "in": "query",
             "name": "status",
@@ -4159,7 +4728,12 @@
                                 "type": "number"
                               }
                             },
-                            "required": ["total", "passed", "failed", "skipped"],
+                            "required": [
+                              "total",
+                              "passed",
+                              "failed",
+                              "skipped"
+                            ],
                             "additionalProperties": true
                           },
                           "created_at": {
@@ -4197,7 +4771,12 @@
                       "type": "number"
                     }
                   },
-                  "required": ["items", "total", "limit", "offset"],
+                  "required": [
+                    "items",
+                    "total",
+                    "limit",
+                    "offset"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -4236,11 +4815,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -4279,11 +4866,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -4322,11 +4917,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -4365,11 +4968,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -4381,7 +4992,9 @@
     "/v1/links/{id}": {
       "patch": {
         "summary": "Update a registration link",
-        "tags": ["registration-links"],
+        "tags": [
+          "registration-links"
+        ],
         "description": "Partial update of mutable draft-link fields (slug, context, expiry). Only draft links can be edited; `registration_mode` and `domain` are immutable and unknown keys are rejected with 400.",
         "requestBody": {
           "required": true,
@@ -4487,7 +5100,12 @@
                           "type": "number"
                         }
                       },
-                      "required": ["total", "passed", "failed", "skipped"],
+                      "required": [
+                        "total",
+                        "passed",
+                        "failed",
+                        "skipped"
+                      ],
                       "additionalProperties": true
                     },
                     "created_at": {
@@ -4550,11 +5168,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -4593,11 +5219,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -4636,11 +5270,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -4679,11 +5321,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -4722,11 +5372,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -4736,7 +5394,9 @@
       },
       "get": {
         "summary": "Read a registration link",
-        "tags": ["registration-links"],
+        "tags": [
+          "registration-links"
+        ],
         "description": "Full link row including counters + status.",
         "parameters": [
           {
@@ -4814,7 +5474,12 @@
                           "type": "number"
                         }
                       },
-                      "required": ["total", "passed", "failed", "skipped"],
+                      "required": [
+                        "total",
+                        "passed",
+                        "failed",
+                        "skipped"
+                      ],
                       "additionalProperties": true
                     },
                     "created_at": {
@@ -4877,11 +5542,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -4920,11 +5593,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -4963,11 +5644,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -5006,11 +5695,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -5022,7 +5719,9 @@
     "/v1/links/{id}/activate": {
       "post": {
         "summary": "Activate a registration link",
-        "tags": ["registration-links"],
+        "tags": [
+          "registration-links"
+        ],
         "description": "Flips the link status to live so the public form accepts submissions; mints the QR PNG + public URL. Idempotent when already live; retired links cannot be reactivated (409).",
         "parameters": [
           {
@@ -5100,7 +5799,12 @@
                           "type": "number"
                         }
                       },
-                      "required": ["total", "passed", "failed", "skipped"],
+                      "required": [
+                        "total",
+                        "passed",
+                        "failed",
+                        "skipped"
+                      ],
                       "additionalProperties": true
                     },
                     "created_at": {
@@ -5163,11 +5867,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -5206,11 +5918,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -5249,11 +5969,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -5292,11 +6020,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -5335,11 +6071,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -5378,11 +6122,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -5394,7 +6146,9 @@
     "/v1/links/{id}/deactivate": {
       "post": {
         "summary": "Deactivate a registration link",
-        "tags": ["registration-links"],
+        "tags": [
+          "registration-links"
+        ],
         "description": "Flips status to retired — the public form returns 410 for further submissions. Idempotent when already retired.",
         "parameters": [
           {
@@ -5472,7 +6226,12 @@
                           "type": "number"
                         }
                       },
-                      "required": ["total", "passed", "failed", "skipped"],
+                      "required": [
+                        "total",
+                        "passed",
+                        "failed",
+                        "skipped"
+                      ],
                       "additionalProperties": true
                     },
                     "created_at": {
@@ -5535,11 +6294,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -5578,11 +6345,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -5621,11 +6396,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -5664,11 +6447,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -5680,7 +6471,9 @@
     "/public/v1/aggregators/{orgSlug}/links/{slug}": {
       "get": {
         "summary": "Resolve a public registration link",
-        "tags": ["public-registration"],
+        "tags": [
+          "public-registration"
+        ],
         "description": "Looks up a live (non-expired, active) registration link by org slug + link slug. Returns the link metadata (domain, context, schema id) that the public registration form needs. 404 for missing/draft slugs, 410 for retired or expired ones.",
         "parameters": [
           {
@@ -5813,11 +6606,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -5856,11 +6657,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -5899,11 +6708,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -5942,11 +6759,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -5958,7 +6783,9 @@
     "/public/v1/aggregators/{orgSlug}/registrations/{slug}": {
       "post": {
         "summary": "Submit a public participant registration",
-        "tags": ["public-registration"],
+        "tags": [
+          "public-registration"
+        ],
         "description": "Public endpoint reached by the QR-link registration form. Validates the submission against the link's domain schema (runtime Ajv — the body shape is dynamic per network/domain), creates the participant + user, and pushes to signalstack. Returns 201 on success, 409 (outcome:'skipped') when the phone/email is already registered with this aggregator, and 429 when the per-link rate limit trips.",
         "requestBody": {
           "required": true,
@@ -6019,7 +6846,11 @@
                     },
                     "lifecycle_status": {
                       "type": "string",
-                      "enum": ["draft", "live", "paused"],
+                      "enum": [
+                        "draft",
+                        "live",
+                        "paused"
+                      ],
                       "nullable": true
                     },
                     "owned_elsewhere": {
@@ -6071,11 +6902,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -6114,11 +6953,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -6146,7 +6993,11 @@
                     },
                     "lifecycle_status": {
                       "type": "string",
-                      "enum": ["draft", "live", "paused"],
+                      "enum": [
+                        "draft",
+                        "live",
+                        "paused"
+                      ],
                       "nullable": true
                     },
                     "owned_elsewhere": {
@@ -6202,11 +7053,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -6245,11 +7104,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -6288,11 +7155,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -6331,11 +7206,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -6374,11 +7257,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -6390,7 +7281,9 @@
     "/public/v1/aggregators/{orgSlug}/lookup": {
       "get": {
         "summary": "Probe an identity before opening the registration form",
-        "tags": ["public-registration"],
+        "tags": [
+          "public-registration"
+        ],
         "description": "Anonymous identity probe used by the public registration form. Classifies the supplied email/phone as new (user_exists=false), an own user with optional lifecycle summary, or owned by another aggregator (owned_elsewhere=true). Requires at least one of email or phone_number, plus the network and domain to scope the signalstack probe.",
         "parameters": [
           {
@@ -6465,19 +7358,32 @@
                             },
                             "lifecycle_status": {
                               "type": "string",
-                              "enum": ["draft", "live", "paused"]
+                              "enum": [
+                                "draft",
+                                "live",
+                                "paused"
+                              ]
                             }
                           },
-                          "required": ["item_id", "lifecycle_status"],
+                          "required": [
+                            "item_id",
+                            "lifecycle_status"
+                          ],
                           "additionalProperties": true
                         }
                       },
-                      "required": ["primary_item"],
+                      "required": [
+                        "primary_item"
+                      ],
                       "additionalProperties": true,
                       "nullable": true
                     }
                   },
-                  "required": ["user_exists", "owned_elsewhere", "lifecycle_summary"],
+                  "required": [
+                    "user_exists",
+                    "owned_elsewhere",
+                    "lifecycle_summary"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -6516,11 +7422,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -6559,11 +7473,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -6602,11 +7524,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -6645,11 +7575,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -6688,11 +7626,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -6704,7 +7650,9 @@
     "/v1/onboarding/summary": {
       "get": {
         "summary": "Aggregated onboarding totals",
-        "tags": ["onboarding"],
+        "tags": [
+          "onboarding"
+        ],
         "description": "Sum of total / passed / failed / skipped onboarding attempts for the caller aggregator, optionally constrained by ?from=&to= ISO dates.",
         "parameters": [
           {
@@ -6810,11 +7758,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -6853,11 +7809,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -6896,11 +7860,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -6912,7 +7884,9 @@
     "/v1/onboarding/by-source": {
       "get": {
         "summary": "Onboarding totals grouped by source",
-        "tags": ["onboarding"],
+        "tags": [
+          "onboarding"
+        ],
         "description": "Per-source breakdown of onboarding counters for the caller aggregator (e.g. by_link / by_bulk_upload), optionally date-bounded by ?from=&to=.",
         "parameters": [
           {
@@ -6979,12 +7953,23 @@
                             "type": "string"
                           }
                         },
-                        "required": ["total", "passed", "failed", "skipped", "source"],
+                        "required": [
+                          "total",
+                          "passed",
+                          "failed",
+                          "skipped",
+                          "source"
+                        ],
                         "additionalProperties": true
                       }
                     }
                   },
-                  "required": ["aggregator_id", "from", "to", "by_source"],
+                  "required": [
+                    "aggregator_id",
+                    "from",
+                    "to",
+                    "by_source"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -7023,11 +8008,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -7066,11 +8059,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -7109,11 +8110,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -7125,7 +8134,9 @@
     "/v1/dashboard/items": {
       "get": {
         "summary": "List participants for the caller aggregator (paginated)",
-        "tags": ["dashboard"],
+        "tags": [
+          "dashboard"
+        ],
         "description": "Returns every signalstack profile tagged with the caller aggregator_id, scoped to the requested domain, with lifecycle tile counts. Used by /blue-dots to render the participant table. The 200 payload is proxied verbatim from signalstack, so no response schema is pinned (avoids a deep zod re-parse of large item lists on every reply).",
         "parameters": [
           {
@@ -7161,7 +8172,12 @@
           {
             "schema": {
               "type": "string",
-              "enum": ["draft", "live", "paused", "account_only"]
+              "enum": [
+                "draft",
+                "live",
+                "paused",
+                "account_only"
+              ]
             },
             "in": "query",
             "name": "lifecycle",
@@ -7207,11 +8223,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -7250,11 +8274,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -7293,11 +8325,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -7336,11 +8376,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -7379,11 +8427,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -7395,7 +8451,9 @@
     "/v1/dashboard": {
       "get": {
         "summary": "Aggregator dashboard rollup + items",
-        "tags": ["dashboard"],
+        "tags": [
+          "dashboard"
+        ],
         "description": "Proxies signalstack's pre-computed dashboard payload (rollup + paginated participants + cursor + metadata) for the caller aggregator. by_domain[<id>] contains seeker/provider slices; refresh=true bypasses the TTL cache. The 200 payload is proxied verbatim from signalstack, so no response schema is pinned (avoids a deep zod re-parse of the rollup on every reply).",
         "parameters": [
           {
@@ -7488,11 +8546,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -7531,11 +8597,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -7574,11 +8648,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -7617,11 +8699,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -7660,11 +8750,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -7676,7 +8774,9 @@
     "/v1/dashboard/export": {
       "get": {
         "summary": "CSV export of dashboard items",
-        "tags": ["dashboard"],
+        "tags": [
+          "dashboard"
+        ],
         "description": "Returns a CSV (text/csv) of the dashboard items for the caller aggregator. Filters by optional status. Body is the CSV text, with Content-Disposition: attachment.",
         "parameters": [
           {
@@ -7748,11 +8848,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -7791,11 +8899,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -7834,11 +8950,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -7877,11 +9001,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -7920,11 +9052,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -7936,7 +9076,9 @@
     "/v1/dashboard/export/profiles": {
       "post": {
         "summary": "CSV export of DECRYPTED profile data for selected items",
-        "tags": ["dashboard"],
+        "tags": [
+          "dashboard"
+        ],
         "description": "Returns a CSV (text/csv) of decrypted profile data for the given item_ids, scoped to the caller aggregator. The signalstack admin key never leaves the server.",
         "requestBody": {
           "required": true,
@@ -7958,7 +9100,9 @@
                     "minLength": 1
                   }
                 },
-                "required": ["item_ids"],
+                "required": [
+                  "item_ids"
+                ],
                 "additionalProperties": false
               }
             }
@@ -8003,11 +9147,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -8046,11 +9198,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -8089,11 +9249,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -8132,11 +9300,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -8175,11 +9351,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -8191,7 +9375,9 @@
     "/v1/aggregator-config": {
       "get": {
         "summary": "Public brand + network config",
-        "tags": ["aggregator-config"],
+        "tags": [
+          "aggregator-config"
+        ],
         "description": "Brand palette/logo + per-domain labels (tab name, plural, tiles, status_rules) + dashboard bucket labels. Web BFF reads this at boot to theme the portal and render the dashboard config-driven.",
         "responses": {
           "200": {
@@ -8214,7 +9400,9 @@
                           "type": "string"
                         }
                       },
-                      "required": ["name"],
+                      "required": [
+                        "name"
+                      ],
                       "additionalProperties": true
                     },
                     "brand": {
@@ -8248,7 +9436,11 @@
                           "type": "string"
                         }
                       },
-                      "required": ["short_name", "long_name", "url_slug"],
+                      "required": [
+                        "short_name",
+                        "long_name",
+                        "url_slug"
+                      ],
                       "additionalProperties": true
                     },
                     "network": {
@@ -8261,7 +9453,9 @@
                           "type": "string"
                         }
                       },
-                      "required": ["id"],
+                      "required": [
+                        "id"
+                      ],
                       "additionalProperties": true
                     },
                     "domains": {
@@ -8282,7 +9476,12 @@
                             "type": "string"
                           }
                         },
-                        "required": ["id", "label", "plural_label", "item_type"],
+                        "required": [
+                          "id",
+                          "label",
+                          "plural_label",
+                          "item_type"
+                        ],
                         "additionalProperties": true
                       }
                     },
@@ -8317,7 +9516,13 @@
                       }
                     }
                   },
-                  "required": ["aggregator", "brand", "network", "domains", "registration_modes"],
+                  "required": [
+                    "aggregator",
+                    "brand",
+                    "network",
+                    "domains",
+                    "registration_modes"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -8356,11 +9561,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -8399,11 +9612,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -8415,7 +9636,9 @@
     "/v1/support/config": {
       "get": {
         "summary": "Whether the contact-support form is enabled",
-        "tags": ["support"],
+        "tags": [
+          "support"
+        ],
         "description": "Reports whether SUPPORT_EMAIL is configured on this instance. The web app hides the \"Contact support\" entry point when false.",
         "security": [
           {
@@ -8434,7 +9657,9 @@
                       "type": "boolean"
                     }
                   },
-                  "required": ["enabled"],
+                  "required": [
+                    "enabled"
+                  ],
                   "additionalProperties": false
                 }
               }
@@ -8473,11 +9698,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -8489,7 +9722,9 @@
     "/v1/support": {
       "post": {
         "summary": "Send a contact-support message",
-        "tags": ["support"],
+        "tags": [
+          "support"
+        ],
         "description": "Emails the submitted complaint/support request to SUPPORT_EMAIL (and SUPPORT_CC_EMAIL when set), with Reply-To set to the submitter email so support can reply directly. Each submission carries a SUP-YYYYMMDD-XXXXXX reference.",
         "requestBody": {
           "required": true,
@@ -8515,7 +9750,10 @@
                   },
                   "type": {
                     "type": "string",
-                    "enum": ["complaint", "support_request"]
+                    "enum": [
+                      "complaint",
+                      "support_request"
+                    ]
                   },
                   "details": {
                     "type": "string",
@@ -8524,10 +9762,17 @@
                   },
                   "consent": {
                     "type": "boolean",
-                    "enum": [true]
+                    "enum": [
+                      true
+                    ]
                   }
                 },
-                "required": ["name", "type", "details", "consent"],
+                "required": [
+                  "name",
+                  "type",
+                  "details",
+                  "consent"
+                ],
                 "additionalProperties": false
               }
             }
@@ -8553,7 +9798,10 @@
                       "type": "string"
                     }
                   },
-                  "required": ["ok", "reference"],
+                  "required": [
+                    "ok",
+                    "reference"
+                  ],
                   "additionalProperties": false
                 }
               }
@@ -8592,11 +9840,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -8635,11 +9891,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -8678,11 +9942,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
@@ -8721,11 +9993,19 @@
                           "type": "string"
                         }
                       },
-                      "required": ["code", "title", "detail", "requestId", "timestamp"],
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
                       "additionalProperties": true
                     }
                   },
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "additionalProperties": true
                 }
               }
