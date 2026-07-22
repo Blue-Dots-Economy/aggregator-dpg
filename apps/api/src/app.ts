@@ -9,6 +9,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { createRequire } from 'node:module';
 import Fastify, { type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import formbody from '@fastify/formbody';
@@ -41,6 +42,7 @@ import { HttpError } from './errors/http-error.js';
 import { coerceToHttpError, toEnvelope, toLogPayload } from './errors/serialize.js';
 
 const REQUEST_ID_HEADER = 'x-request-id';
+const pkg = createRequire(import.meta.url)('../package.json') as { version: string };
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -94,8 +96,9 @@ export async function buildApp(): Promise<FastifyInstance> {
           title: 'Aggregator DPG API',
           description:
             'Aggregator BFF for the Blue Dots / Purple Dots networks — handles aggregator registration, brand + network config, public participant onboarding (link + bulk), and the dashboard rollup proxy to signalstack.',
-          version: '1.0.0',
+          version: pkg.version,
         },
+        servers: [{ url: config.PUBLIC_API_BASE_URL, description: 'Public API' }],
         components: {
           securitySchemes: {
             bearerAuth: {

@@ -93,4 +93,13 @@ describe('OpenAPI spec generation', () => {
       ).toBe(true);
     }
   });
+
+  it('carries package version and a public server URL', async () => {
+    const meta = spec as unknown as {
+      info: { version: string };
+      servers?: Array<{ url: string }>;
+    };
+    expect(meta.info.version).toBe('1.0.0');
+    expect(meta.servers?.[0]?.url).toBeTruthy();
+  });
 });

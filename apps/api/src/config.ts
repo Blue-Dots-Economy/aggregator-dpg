@@ -61,6 +61,11 @@ const ConfigSchema = z.object({
     .default('false')
     .transform((v) => v === 'true'),
   /**
+   * Public base URL advertised as servers[0].url in the OpenAPI spec (served
+   * and dumped). Defaults to the local dev URL; deployments must override.
+   */
+  PUBLIC_API_BASE_URL: z.string().url().default('http://localhost:4000'),
+  /**
    * Enables the parent-org → coordinator hierarchy for this instance
    * (spec §2). OFF (default) = today's flat registration/approval flow,
    * unchanged: no org tab, no org dropdown, no `aggregator_orgs` rows,
