@@ -203,6 +203,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
     const headers = {
       ...this.headers,
       'x-acting-org-id': input.actingOrgId,
+      ...(input.requestId ? { 'x-request-id': input.requestId } : {}),
     };
 
     try {
@@ -370,10 +371,14 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       limit: query.limit ?? 50,
       offset: query.offset ?? 0,
     };
+    const headers = {
+      ...this.headers,
+      ...(query.requestId ? { 'x-request-id': query.requestId } : {}),
+    };
     try {
       const res = await this.requestWithRetry(url, {
         method: 'POST',
-        headers: this.headers,
+        headers,
         body: JSON.stringify(body),
       });
 
@@ -458,6 +463,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
     const headers = {
       ...this.headers,
       'x-acting-org-id': this.actingOrgId,
+      ...(input.requestId ? { 'x-request-id': input.requestId } : {}),
     };
 
     try {
@@ -548,6 +554,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
     const headers = {
       ...this.headers,
       'x-acting-org-id': query.actingOrgId,
+      ...(query.requestId ? { 'x-request-id': query.requestId } : {}),
     };
 
     try {
@@ -705,6 +712,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       ...this.headers,
       'x-acting-org-id': query.actingOrgId,
       accept: 'text/csv',
+      ...(query.requestId ? { 'x-request-id': query.requestId } : {}),
     };
 
     try {
@@ -775,6 +783,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
     const headers = {
       ...this.headers,
       'x-acting-org-id': query.actingOrgId,
+      ...(query.requestId ? { 'x-request-id': query.requestId } : {}),
     };
 
     try {
@@ -885,6 +894,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
     const headers = {
       ...this.headers,
       'x-acting-org-id': input.actingOrgId,
+      ...(input.requestId ? { 'x-request-id': input.requestId } : {}),
     };
 
     try {
@@ -1055,10 +1065,14 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
     const url = `${this.baseUrl}/api/v1/network/item/fetch_local`;
     const body = { item_id: query.item_id, limit: 1, offset: 0 };
 
+    const headers = {
+      ...this.headers,
+      ...(query.requestId ? { 'x-request-id': query.requestId } : {}),
+    };
     try {
       const res = await this.requestWithRetry(url, {
         method: 'POST',
-        headers: this.headers,
+        headers,
         body: JSON.stringify(body),
       });
 

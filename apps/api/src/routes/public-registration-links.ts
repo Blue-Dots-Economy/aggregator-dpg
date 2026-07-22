@@ -549,6 +549,7 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
           const pushPhone = phoneNormalised ?? phoneFromBody;
           const result = await ss.onboard({
             actingOrgId: signalstackOrgId,
+            requestId: req.id,
             name,
             ...(pushPhone ? { phoneNumber: pushPhone } : {}),
             ...(emailNormalised ? { email: emailNormalised } : {}),
