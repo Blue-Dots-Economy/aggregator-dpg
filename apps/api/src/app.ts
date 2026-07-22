@@ -98,7 +98,7 @@ export async function buildApp(): Promise<FastifyInstance> {
             'Aggregator BFF for the Blue Dots / Purple Dots networks — handles aggregator registration, brand + network config, public participant onboarding (link + bulk), and the dashboard rollup proxy to signalstack.',
           version: pkg.version,
         },
-        servers: [{ url: config.PUBLIC_API_BASE_URL, description: 'Public API' }],
+        servers: [{ url: config.PUBLIC_API_URL, description: 'Public API' }],
         components: {
           securitySchemes: {
             bearerAuth: {
