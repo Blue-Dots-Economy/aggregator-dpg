@@ -9,7 +9,9 @@ process.env.API_REFERENCE_ENABLED = 'true';
 process.env.API_REFERENCE_FORCE = 'true';
 // Reuses the repo's existing public-origin env (decision during Task 4 review:
 // no separate PUBLIC_API_BASE_URL — one source of truth).
-process.env.PUBLIC_API_URL ??= 'http://localhost:4000';
+// Generic host by design: deployments are per instance, so the published
+// spec advertises a substitute-your-host URL, not one pilot's domain.
+process.env.PUBLIC_API_URL ??= 'https://aggregator.example.com';
 
 const { buildApp } = await import('../src/app.js');
 const app = await buildApp();

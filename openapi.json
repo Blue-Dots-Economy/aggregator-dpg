@@ -10056,8 +10056,12 @@
   },
   "servers": [
     {
+      "url": "https://aggregator.example.com",
+      "description": "Your deployment's public host (set per instance)"
+    },
+    {
       "url": "http://localhost:4000",
-      "description": "Public API"
+      "description": "Local development"
     }
   ],
   "tags": [

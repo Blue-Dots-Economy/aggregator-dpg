@@ -98,7 +98,18 @@ export async function buildApp(): Promise<FastifyInstance> {
             'Aggregator BFF for the Blue Dots / Purple Dots networks — handles aggregator registration, brand + network config, public participant onboarding (link + bulk), and the dashboard rollup proxy to signalstack.',
           version: pkg.version,
         },
-        servers: [{ url: config.PUBLIC_API_URL, description: 'Public API' }],
+        // Deployments are per instance, so the published spec carries a
+        // substitute-your-host URL (from the dump script's PUBLIC_API_URL)
+        // plus a local-dev entry; deduped when they coincide.
+        servers: [
+          {
+            url: config.PUBLIC_API_URL,
+            description: "Your deployment's public host (set per instance)",
+          },
+          ...(config.PUBLIC_API_URL === 'http://localhost:4000'
+            ? []
+            : [{ url: 'http://localhost:4000', description: 'Local development' }]),
+        ],
         components: {
           securitySchemes: {
             bearerAuth: {
