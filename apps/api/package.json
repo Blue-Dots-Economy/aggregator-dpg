@@ -16,7 +16,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:push": "drizzle-kit push",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "spec:dump": "tsx scripts/dump-openapi.ts"
   },
   "dependencies": {
     "@aggregator-dpg/config-loader": "workspace:*",
