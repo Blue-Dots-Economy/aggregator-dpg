@@ -289,6 +289,7 @@ async function commit(
     job.rowIndex,
     outcome.outcome,
     errorPayload,
+    config.BULK_UPLOAD_REDIS_TTL_SECONDS,
   );
 
   if (result.wasNew === 0) {
