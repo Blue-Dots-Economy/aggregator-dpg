@@ -573,8 +573,14 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
               link_id: link.id,
               participant_id: participantRowId,
             });
+            // Profile cap (signals #349): show the user-facing reason directly
+            // instead of a generic "push rejected" so the form is actionable.
+            const detail =
+              result.error.code === 'SIGNALSTACK_PROFILE_LIMIT_REACHED'
+                ? result.error.message
+                : `Signalstack rejected the participant push (${result.error.code}).`;
             throw httpError('SIGNALSTACK_PUSH_FAILED', {
-              detail: `Signalstack rejected the participant push (${result.error.code}).`,
+              detail,
               fields: { code: result.error.code, message: result.error.message },
               cause: result.error,
             });
