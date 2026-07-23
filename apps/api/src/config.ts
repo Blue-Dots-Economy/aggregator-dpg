@@ -71,7 +71,12 @@ const ConfigSchema = z.object({
     .enum(['true', 'false'])
     .default('false')
     .transform((v) => v === 'true'),
-  /** Public origin of the API service; used to assemble admin email links. */
+  /**
+   * Public origin of the API service; used to assemble admin email links.
+   * Also advertised as `servers[0].url` in the OpenAPI spec (served and
+   * dumped) — deployments must override this so the docs surface points
+   * callers at the right host.
+   */
   PUBLIC_API_URL: z.string().default('http://localhost:4000'),
   /** Public origin of the portal (BFF web app); used in welcome emails. */
   PUBLIC_PORTAL_URL: z.string().default('http://localhost:3000'),

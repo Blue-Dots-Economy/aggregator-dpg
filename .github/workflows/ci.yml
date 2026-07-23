@@ -5,6 +5,9 @@ on:
     branches:
       - main
       - develop
+      # Validate the merged state of the integration branch too — PRs into
+      # feature already run CI, but the post-merge result was unchecked.
+      - feature
 
     tags:
       - 'web-v*.*.*'
@@ -61,6 +64,12 @@ jobs:
 
       - name: Build
         run: pnpm -w build
+
+      - name: OpenAPI spec drift check
+        run: |
+          pnpm --filter @aggregator-dpg/api spec:dump
+          git diff --exit-code openapi.json || {
+            echo "::error::openapi.json is stale — run 'pnpm --filter @aggregator-dpg/api spec:dump' and commit"; exit 1; }
 
       - name: Dep-cruiser — check interface boundaries
         run: pnpm dep-check
