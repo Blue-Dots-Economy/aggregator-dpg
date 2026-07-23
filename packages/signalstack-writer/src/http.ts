@@ -233,10 +233,18 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
           res.status === 409 && upstreamCode === 'PROFILE_LIMIT_REACHED'
             ? 'SIGNALSTACK_PROFILE_LIMIT_REACHED'
             : this.codeForStatus(res.status);
+        // `signalsMessage` is the bare, user-safe sentence (no infra prefixes) —
+        // callers surfacing errors to end users (public forms) should prefer it;
+        // errors.csv/operators keep the prefixed `message`.
+        const signalsMessage = extractUpstreamMessageText(bodyText);
         return err(
           new UpstreamError(message, {
             code,
-            details: { status: res.status, body: bodyText },
+            details: {
+              status: res.status,
+              body: bodyText,
+              ...(signalsMessage ? { signalsMessage } : {}),
+            },
           }),
         );
       }
@@ -1206,6 +1214,24 @@ function extractUpstreamCode(bodyText: string): string | null {
     if (isObject(e) && typeof e['code'] === 'string') return e['code'] as string;
   } catch {
     /* non-JSON body — no machine code */
+  }
+  return null;
+}
+
+/**
+ * The bare human `message` field from a signalstack JSON error body — WITHOUT
+ * the `"<CODE>: "` prefix that {@link extractUpstreamMessage} adds. Suitable for
+ * showing directly to an end user (e.g. a public registration form).
+ */
+function extractUpstreamMessageText(bodyText: string): string | null {
+  if (!bodyText) return null;
+  try {
+    const obj = JSON.parse(bodyText) as Record<string, unknown>;
+    if (typeof obj['message'] === 'string') return obj['message'] as string;
+    const e = obj['error'];
+    if (isObject(e) && typeof e['message'] === 'string') return e['message'] as string;
+  } catch {
+    /* non-JSON body */
   }
   return null;
 }
