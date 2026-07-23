@@ -122,7 +122,19 @@ export class FileNetworkConfigLoader extends NetworkConfigLoaderBase {
       yaml.value.aggregator.network.source = checked.data;
     }
 
-    const network = await this.fetchNetwork(yaml.value.aggregator.network.source);
+    // `source` is optional in the YAML (a deployment may rely solely on the
+    // env override) — but at least one of the two must resolve a URL.
+    const source = yaml.value.aggregator.network.source;
+    if (!source) {
+      return err({
+        code: 'CONFIG_PARSE_FAILED',
+        message:
+          'no network.json source configured — set AGGREGATOR_NETWORK_SOURCE or ' +
+          '`aggregator.network.source` in aggregator.config.yaml',
+      });
+    }
+
+    const network = await this.fetchNetwork(source);
     if (!network.success) return err(network.error);
 
     const resolved = resolveDomains(yaml.value, network.value);
