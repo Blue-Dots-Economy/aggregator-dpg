@@ -436,6 +436,9 @@ services:
       AGGREGATOR_NETWORK: ${AGGREGATOR_NETWORK:-blue_dot}
       AGGREGATOR_BRAND: ${AGGREGATOR_BRAND:-}
       CONFIG_ROOT: /app/config
+      # Deploy-time override for the signalstack network.json URL (#512);
+      # empty = use `aggregator.network.source` from the YAML.
+      AGGREGATOR_NETWORK_SOURCE: ${AGGREGATOR_NETWORK_SOURCE:-}
       # ── Outward push to signalstack (onboard) and read (blue-dots) ───
       SIGNALSTACK_BASE_URL: ${SIGNALSTACK_BASE_URL:-}
       SIGNALSTACK_ADMIN_KEY: ${SIGNALSTACK_ADMIN_KEY:-}
@@ -514,6 +517,9 @@ services:
       AGGREGATOR_NETWORK: ${AGGREGATOR_NETWORK:-blue_dot}
       AGGREGATOR_BRAND: ${AGGREGATOR_BRAND:-}
       CONFIG_ROOT: /app/config
+      # Deploy-time override for the signalstack network.json URL (#512);
+      # empty = use `aggregator.network.source` from the YAML.
+      AGGREGATOR_NETWORK_SOURCE: ${AGGREGATOR_NETWORK_SOURCE:-}
       # ─── File processor row caps ───────────────────────────────────
       BULK_MAX_ROWS: ${BULK_MAX_ROWS:-10000}
       BULK_MAX_ROW_BYTES: ${BULK_MAX_ROW_BYTES:-65536}
