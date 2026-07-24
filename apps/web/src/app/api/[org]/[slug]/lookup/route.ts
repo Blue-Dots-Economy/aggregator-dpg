@@ -18,7 +18,10 @@ import { type NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
 
-const UPSTREAM_TIMEOUT_MS = 10_000;
+import { positiveIntEnv } from '@/lib/env';
+
+/** Per-request timeout for the upstream lookup call (`WEB_UPSTREAM_TIMEOUT_MS`). */
+const UPSTREAM_TIMEOUT_MS = positiveIntEnv('WEB_UPSTREAM_TIMEOUT_MS', 10_000);
 const REQUEST_ID_HEADER = 'x-request-id';
 
 interface BffErrorEnvelope {

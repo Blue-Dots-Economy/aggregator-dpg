@@ -16,7 +16,10 @@ interface CachedToken {
   expiresAt: number;
 }
 
-const REFRESH_LEAD_MS = 30_000;
+import { positiveIntEnv } from './env';
+
+/** Refresh the cached service token this many ms before expiry (`SERVICE_TOKEN_REFRESH_LEAD_MS`). */
+const REFRESH_LEAD_MS = positiveIntEnv('SERVICE_TOKEN_REFRESH_LEAD_MS', 30_000);
 
 let cached: CachedToken | null = null;
 
@@ -53,7 +56,7 @@ export async function getServiceAccessToken(): Promise<string> {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: params.toString(),
-    signal: AbortSignal.timeout(10_000),
+    signal: AbortSignal.timeout(positiveIntEnv('WEB_OIDC_TIMEOUT_MS', 10_000)),
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');

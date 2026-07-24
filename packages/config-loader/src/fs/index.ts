@@ -73,6 +73,13 @@ export class FsConfigService extends ConfigServiceBase {
   private currentEnv: Env | undefined;
   private readonly listeners = new Set<ConfigChangeCallback>();
   private readonly repoRoot: string;
+  /**
+   * Directory holding the `env/<env>.yaml` overrides (the config tree).
+   * `CONFIG_ROOT` (a mounted config tree, e.g. Kubernetes, #512) wins over
+   * the `<repoRoot>/config` derivation; package discovery stays repo-rooted
+   * because `packages/` is code, not config.
+   */
+  private readonly configDir: string;
   /** Populated after load() — keyed by configKey. */
   private registry = new Map<string, RegisteredPackage>();
 
@@ -82,6 +89,7 @@ export class FsConfigService extends ConfigServiceBase {
   constructor(repoRoot: string = process.cwd()) {
     super();
     this.repoRoot = repoRoot;
+    this.configDir = process.env['CONFIG_ROOT']?.trim() || join(repoRoot, 'config');
   }
 
   /**
@@ -126,7 +134,7 @@ export class FsConfigService extends ConfigServiceBase {
     }
 
     // Env YAML deep-merges on top, overriding any defaults.
-    const envFilePath = join(this.repoRoot, 'config', 'env', `${env}.yaml`);
+    const envFilePath = join(this.configDir, 'env', `${env}.yaml`);
     deepMerge(merged, loadYaml(envFilePath));
 
     // Interpolate ${VAR} / ${VAR:-default} placeholders before Zod validation.
@@ -247,7 +255,7 @@ export class FsConfigService extends ConfigServiceBase {
     if (process.env['CONFIG_WATCH'] !== '1') {
       return () => {};
     }
-    const configDir = join(this.repoRoot, 'config');
+    const configDir = this.configDir;
     console.info(`[config-loader] Watching ${configDir} for changes (debounce 300 ms)`);
     return startWatcher(configDir, 300, () => this.reload());
   }

@@ -11,6 +11,7 @@
 
 import 'server-only';
 import { readFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import type { RJSFSchema } from '@rjsf/utils';
 
@@ -21,19 +22,26 @@ export interface AggregatorSchemaPair {
 }
 
 /**
- * Resolves a file under `config/schemas/aggregator/` relative to the running
- * cwd. Works for both `pnpm --filter web dev` (cwd = apps/web) and the
- * production Docker build (cwd = /app/apps/web).
+ * Resolves a file under `config/schemas/aggregator/`. When `CONFIG_ROOT` is
+ * set (e.g. a Kubernetes config mount, #512) it wins; otherwise falls back to
+ * the first cwd-relative candidate that exists. Works for both
+ * `pnpm --filter web dev` (cwd = apps/web) and the production Docker build
+ * (cwd = /app/apps/web).
  *
  * @param file - Bare schema file name, e.g. `registration.v1.json`.
  * @returns Absolute path to the schema file.
  */
 export function resolveAggregatorSchemaPath(file: string): string {
+  const configRoot = process.env.CONFIG_ROOT?.trim();
   const candidates = [
+    ...(configRoot ? [path.resolve(configRoot, 'schemas/aggregator', file)] : []),
     path.resolve(process.cwd(), '../../config/schemas/aggregator', file),
     path.resolve(process.cwd(), '../config/schemas/aggregator', file),
     path.resolve(process.cwd(), 'config/schemas/aggregator', file),
   ];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
   return candidates[0]!;
 }
 

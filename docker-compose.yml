@@ -346,6 +346,11 @@ services:
       AGGREGATOR_NETWORK: ${AGGREGATOR_NETWORK:-blue_dot}
       AGGREGATOR_BRAND: ${AGGREGATOR_BRAND:-}
       CONFIG_ROOT: /app/config
+      # Optional runtime tuning (defaults mirror code — see infra/env.template)
+      WEB_UPSTREAM_TIMEOUT_MS: ${WEB_UPSTREAM_TIMEOUT_MS:-}
+      WEB_OIDC_TIMEOUT_MS: ${WEB_OIDC_TIMEOUT_MS:-}
+      SERVICE_TOKEN_REFRESH_LEAD_MS: ${SERVICE_TOKEN_REFRESH_LEAD_MS:-}
+      SESSION_TOKEN_REFRESH_LEAD_MS: ${SESSION_TOKEN_REFRESH_LEAD_MS:-}
     # No host port mapping — exposed only via nginx at /.
     # Resolve PUBLIC_HOST (the VM's public IP) to the docker host gateway so
     # the BFF's back-channel OIDC discovery + token exchange reaches nginx via
@@ -436,6 +441,12 @@ services:
       AGGREGATOR_NETWORK: ${AGGREGATOR_NETWORK:-blue_dot}
       AGGREGATOR_BRAND: ${AGGREGATOR_BRAND:-}
       CONFIG_ROOT: /app/config
+      # Optional runtime tuning (defaults mirror code — see infra/env.template)
+      KEYCLOAK_HTTP_TIMEOUT_MS: ${KEYCLOAK_HTTP_TIMEOUT_MS:-10000}
+      KEYCLOAK_TOKEN_REFRESH_LEAD_MS: ${KEYCLOAK_TOKEN_REFRESH_LEAD_MS:-30000}
+      CONSENT_MAX_VALIDITY_DAYS: ${CONSENT_MAX_VALIDITY_DAYS:-1825}
+      QUEUE_JOB_ATTEMPTS: ${QUEUE_JOB_ATTEMPTS:-3}
+      QUEUE_BACKOFF_DELAY_MS: ${QUEUE_BACKOFF_DELAY_MS:-1000}
       # ── Outward push to signalstack (onboard) and read (blue-dots) ───
       SIGNALSTACK_BASE_URL: ${SIGNALSTACK_BASE_URL:-}
       SIGNALSTACK_ADMIN_KEY: ${SIGNALSTACK_ADMIN_KEY:-}
@@ -514,6 +525,11 @@ services:
       AGGREGATOR_NETWORK: ${AGGREGATOR_NETWORK:-blue_dot}
       AGGREGATOR_BRAND: ${AGGREGATOR_BRAND:-}
       CONFIG_ROOT: /app/config
+      # Optional runtime tuning (defaults mirror code — see infra/env.template)
+      S3_CONNECT_TIMEOUT_MS: ${S3_CONNECT_TIMEOUT_MS:-5000}
+      S3_MAX_ATTEMPTS: ${S3_MAX_ATTEMPTS:-3}
+      QUEUE_JOB_ATTEMPTS: ${QUEUE_JOB_ATTEMPTS:-3}
+      QUEUE_BACKOFF_DELAY_MS: ${QUEUE_BACKOFF_DELAY_MS:-1000}
       # ─── File processor row caps ───────────────────────────────────
       BULK_MAX_ROWS: ${BULK_MAX_ROWS:-10000}
       BULK_MAX_ROW_BYTES: ${BULK_MAX_ROW_BYTES:-65536}

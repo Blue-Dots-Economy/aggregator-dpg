@@ -7,10 +7,12 @@
  */
 
 import { Issuer, generators, custom, type Client, type IssuerMetadata } from 'openid-client';
+import { positiveIntEnv } from '../env';
 
 // Cap every IdP HTTP call so a hung Keycloak cannot exhaust the Node.js
 // thread pool. Applies to discovery, token exchange, refresh, and userinfo.
-const HTTP_TIMEOUT_MS = 10_000;
+// Tunable per deploy via `WEB_OIDC_TIMEOUT_MS`.
+const HTTP_TIMEOUT_MS = positiveIntEnv('WEB_OIDC_TIMEOUT_MS', 10_000);
 Issuer[custom.http_options] = (_url, options) => ({ ...options, timeout: HTTP_TIMEOUT_MS });
 import {
   IdentityProviderAdapter,

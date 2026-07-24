@@ -27,7 +27,18 @@ export function getIdpAdmin(): IdpAdminAdapter {
       'KEYCLOAK_URL, KEYCLOAK_REALM, KEYCLOAK_ADMIN_CLIENT_ID, KEYCLOAK_ADMIN_CLIENT_SECRET must be set',
     );
   }
-  instance = new KeycloakIdpAdmin({ baseUrl, realm, clientId, clientSecret });
+  instance = new KeycloakIdpAdmin({
+    baseUrl,
+    realm,
+    clientId,
+    clientSecret,
+    ...(process.env.KEYCLOAK_HTTP_TIMEOUT_MS
+      ? { httpTimeoutMs: Number(process.env.KEYCLOAK_HTTP_TIMEOUT_MS) }
+      : {}),
+    ...(process.env.KEYCLOAK_TOKEN_REFRESH_LEAD_MS
+      ? { tokenRefreshLeadMs: Number(process.env.KEYCLOAK_TOKEN_REFRESH_LEAD_MS) }
+      : {}),
+  });
   return instance;
 }
 

@@ -19,8 +19,9 @@ import {
 } from './interface.js';
 import { KC_ATTR } from './attributes.js';
 
-const HTTP_TIMEOUT_MS = 10_000;
-const TOKEN_REFRESH_LEAD_MS = 30_000;
+/** Fallbacks when the factory doesn't pass deployment values (tests). */
+const DEFAULT_HTTP_TIMEOUT_MS = 10_000;
+const DEFAULT_TOKEN_REFRESH_LEAD_MS = 30_000;
 
 export interface KeycloakAdminOptions {
   baseUrl: string; // e.g. http://keycloak:8080
@@ -29,6 +30,10 @@ export interface KeycloakAdminOptions {
   clientSecret: string;
   /** Override fetch (for tests). */
   fetchImpl?: typeof fetch;
+  /** Per-request HTTP timeout (`KEYCLOAK_HTTP_TIMEOUT_MS`). */
+  httpTimeoutMs?: number;
+  /** Refresh the cached token this many ms before expiry (`KEYCLOAK_TOKEN_REFRESH_LEAD_MS`). */
+  tokenRefreshLeadMs?: number;
 }
 
 interface CachedToken {
@@ -39,10 +44,14 @@ interface CachedToken {
 export class KeycloakIdpAdmin extends IdpAdminAdapter {
   private cachedToken: CachedToken | null = null;
   private readonly fetchImpl: typeof fetch;
+  private readonly httpTimeoutMs: number;
+  private readonly tokenRefreshLeadMs: number;
 
   constructor(private readonly opts: KeycloakAdminOptions) {
     super();
     this.fetchImpl = opts.fetchImpl ?? globalThis.fetch;
+    this.httpTimeoutMs = opts.httpTimeoutMs ?? DEFAULT_HTTP_TIMEOUT_MS;
+    this.tokenRefreshLeadMs = opts.tokenRefreshLeadMs ?? DEFAULT_TOKEN_REFRESH_LEAD_MS;
   }
 
   async createUser(input: CreateUserInput): Promise<IdpResult<IdpUser>> {
@@ -499,7 +508,7 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
   }
 
   private async getToken(): Promise<IdpResult<string>> {
-    if (this.cachedToken && Date.now() < this.cachedToken.expiresAt - TOKEN_REFRESH_LEAD_MS) {
+    if (this.cachedToken && Date.now() < this.cachedToken.expiresAt - this.tokenRefreshLeadMs) {
       return { ok: true, value: this.cachedToken.accessToken };
     }
     const params = new URLSearchParams();
@@ -535,7 +544,7 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
     try {
       const res = await this.fetchImpl(url, {
         ...init,
-        signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
+        signal: AbortSignal.timeout(this.httpTimeoutMs),
       });
       return { ok: true, value: res };
     } catch (err) {

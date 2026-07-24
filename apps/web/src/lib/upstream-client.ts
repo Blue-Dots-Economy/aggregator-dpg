@@ -11,8 +11,10 @@ import { getOidcAdapter } from './oidc';
 import { getSessionStore, type SessionData } from './session';
 import { SESSION_COOKIE } from './cookies';
 import { getSession } from './server-session';
+import { positiveIntEnv } from './env';
 
-const REFRESH_BEFORE_EXPIRY_MS = 60_000;
+/** Refresh the session's access token this many ms before expiry (`SESSION_TOKEN_REFRESH_LEAD_MS`). */
+const REFRESH_BEFORE_EXPIRY_MS = positiveIntEnv('SESSION_TOKEN_REFRESH_LEAD_MS', 60_000);
 
 /**
  * Returns a fresh access token for the active session, refreshing if needed.
@@ -75,7 +77,8 @@ export async function callApi(path: string, opts: UpstreamCallOptions = {}): Pro
   }
 
   // Default 15s timeout so a hung upstream cannot block the BFF thread.
-  const signal = opts.signal ?? AbortSignal.timeout(15_000);
+  const signal =
+    opts.signal ?? AbortSignal.timeout(positiveIntEnv('WEB_UPSTREAM_TIMEOUT_MS', 15_000));
   return fetch(base + path, {
     method: opts.method ?? 'GET',
     headers,

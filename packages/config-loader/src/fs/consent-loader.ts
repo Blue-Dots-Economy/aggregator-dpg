@@ -116,7 +116,9 @@ async function findRepoRoot(startDir: string): Promise<string> {
  * @param network - Network identifier (e.g. `"blue_dot"`, `"orange_dot"`).
  * @param brand - Optional sub-brand identifier (e.g. `"onetac"`).
  * @param configRoot - Optional absolute path to the monorepo root. When
- *   omitted the root is discovered automatically from `process.cwd()`.
+ *   omitted, the `CONFIG_ROOT` env var (which points directly at the config
+ *   tree, e.g. a Kubernetes mount) is honoured next; otherwise the root is
+ *   discovered automatically from `process.cwd()` (#512).
  * @returns The validated AggregatorConsentConfig.
  * @throws {ConfigError} If no consent file is found or the content is invalid.
  */
@@ -125,8 +127,10 @@ export async function loadConsentConfig(
   brand?: string,
   configRoot?: string,
 ): Promise<AggregatorConsentConfig> {
-  const repoRoot = configRoot ?? (await findRepoRoot(process.cwd()));
-  const configDir = join(repoRoot, 'config');
+  const envConfigDir = process.env.CONFIG_ROOT?.trim();
+  const configDir = configRoot
+    ? join(configRoot, 'config')
+    : envConfigDir || join(await findRepoRoot(process.cwd()), 'config');
 
   // Build base candidate paths: network-specific → default fallback.
   const networkPath = join(configDir, network, CONSENT_SUFFIX);

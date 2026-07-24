@@ -200,6 +200,16 @@ const ConfigSchema = z.object({
   SIGNALSTACK_ITEM_NETWORK: z.string().default('blue_dot'),
   /** Per-request timeout for signalstack onboard calls. */
   SIGNALSTACK_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
+
+  /** Per-request timeout for Keycloak admin + token HTTP calls. */
+  KEYCLOAK_HTTP_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
+  /** Refresh the cached Keycloak service-account token this many ms before expiry. */
+  KEYCLOAK_TOKEN_REFRESH_LEAD_MS: z.coerce.number().int().positive().default(30_000),
+  /**
+   * Upper bound (days) on how far in the future a registration consent's
+   * `valid_till` may lie. Policy value — varies per deployment/network.
+   */
+  CONSENT_MAX_VALIDITY_DAYS: z.coerce.number().int().positive().default(1825),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

@@ -19,8 +19,10 @@
 import { type NextRequest, NextResponse } from 'next/server';
 import { getServiceAccessToken } from './service-token';
 import { logger, pickRequestId } from './logger';
+import { positiveIntEnv } from './env';
 
-const UPSTREAM_TIMEOUT_MS = 10_000;
+/** Per-request timeout for API-bound proxy calls (`WEB_UPSTREAM_TIMEOUT_MS`). */
+const UPSTREAM_TIMEOUT_MS = positiveIntEnv('WEB_UPSTREAM_TIMEOUT_MS', 10_000);
 const REQUEST_ID_HEADER = 'x-request-id';
 
 /** Canonical error envelope this proxy synthesises for pre-upstream failures. */

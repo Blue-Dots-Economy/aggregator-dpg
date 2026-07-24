@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ConfigError } from '@aggregator-dpg/shared-primitives/errors';
@@ -288,5 +288,39 @@ describe('loadConsentConfig', () => {
     // Org audience came from the network file and is untouched
     expect(config.audiences.org.documents.terms.current_version).toBe(1);
     expect(config.audiences.org.documents.terms.versions[0]?.content).toBe('## Terms v1');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: CONFIG_ROOT env override (#512)
+// ---------------------------------------------------------------------------
+
+describe('loadConsentConfig — CONFIG_ROOT env override', () => {
+  let tmpRoot: string;
+
+  beforeEach(() => {
+    tmpRoot = mkdtempSync(join(tmpdir(), 'consent-configroot-'));
+    delete process.env.CONFIG_ROOT;
+  });
+
+  afterEach(() => {
+    rmSync(tmpRoot, { recursive: true, force: true });
+    delete process.env.CONFIG_ROOT;
+  });
+
+  it('resolves consent.json from CONFIG_ROOT when set (no cwd walk-up)', async () => {
+    // CONFIG_ROOT points directly at the config tree — not at a repo root.
+    writeConsentFile(tmpRoot); // writes under <tmpRoot>/config/...
+    process.env.CONFIG_ROOT = join(tmpRoot, 'config');
+    const config = await loadConsentConfig('blue_dot');
+    expect(config.audiences.org.documents.terms.current_version).toBe(1);
+  });
+
+  it('explicit configRoot param wins over CONFIG_ROOT env', async () => {
+    writeConsentFile(tmpRoot);
+    // Env points at a bogus location; the param must win.
+    process.env.CONFIG_ROOT = join(tmpRoot, 'does-not-exist');
+    const config = await loadConsentConfig('blue_dot', undefined, tmpRoot);
+    expect(config.audiences.org.documents.terms.current_version).toBe(1);
   });
 });

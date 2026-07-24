@@ -116,9 +116,24 @@ export function createRedisConnection(opts: RedisConnectionOptions = {}): Redis 
 
 // ─── Standard job options ────────────────────────────────────────────────────
 
+/**
+ * Reads a positive-integer env var, falling back when unset or invalid.
+ * Queue retry policy varies with deployment load, so it is env-tunable
+ * rather than hardcoded (config-discipline rule).
+ */
+function positiveIntEnv(name: string, fallback: number): number {
+  const parsed = Number(process.env[name]);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 export const DEFAULT_JOB_OPTS = {
-  attempts: 3,
-  backoff: { type: 'exponential' as const, delay: 1000 },
+  /** Total attempts per job (1 initial + retries). `QUEUE_JOB_ATTEMPTS`. */
+  attempts: positiveIntEnv('QUEUE_JOB_ATTEMPTS', 3),
+  /** Exponential backoff base delay in ms. `QUEUE_BACKOFF_DELAY_MS`. */
+  backoff: {
+    type: 'exponential' as const,
+    delay: positiveIntEnv('QUEUE_BACKOFF_DELAY_MS', 1000),
+  },
   removeOnComplete: { age: 3600 },
   removeOnFail: { age: 604800 },
 } as const;

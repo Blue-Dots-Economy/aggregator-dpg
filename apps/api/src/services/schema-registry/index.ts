@@ -182,7 +182,12 @@ function unquote(v: string): string {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function resolveRegistryPath(): string {
+  // CONFIG_ROOT (when set) points at the mounted config tree and wins over
+  // the cwd/__dirname guesses — keeps this reader consistent with the
+  // path-resolution rule in @aggregator-dpg/network-config/paths (#512).
+  const configRoot = process.env.CONFIG_ROOT?.trim();
   const candidates = [
+    ...(configRoot ? [path.resolve(configRoot, 'schema-registry.yaml')] : []),
     path.resolve(__dirname, '../../../../config/schema-registry.yaml'),
     path.resolve(__dirname, '../../../../../config/schema-registry.yaml'),
     path.resolve(process.cwd(), 'config/schema-registry.yaml'),

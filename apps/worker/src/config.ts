@@ -40,6 +40,11 @@ const ConfigSchema = z.object({
   /** Absolute or relative path to `config/schemas/`. */
   SCHEMA_ROOT_DIR: z.string().default('./config/schemas'),
 
+  /** TCP-connect timeout for S3 requests — a black-holed endpoint fails fast. */
+  S3_CONNECT_TIMEOUT_MS: z.coerce.number().int().positive().default(5_000),
+  /** Total S3 attempts per request (1 initial + retries, SDK backoff). */
+  S3_MAX_ATTEMPTS: z.coerce.number().int().positive().default(3),
+
   // ─── File Processor limits ──────────────────────────────────────────────
   BULK_MAX_ROWS: z.coerce.number().int().positive().default(10000),
   BULK_MAX_ROW_BYTES: z.coerce

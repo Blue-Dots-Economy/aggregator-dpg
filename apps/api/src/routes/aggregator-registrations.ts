@@ -39,7 +39,7 @@ import { getAggregatorProfileStore } from '../services/aggregator-profile-store/
 import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js';
 import { getIdpAdmin } from '../services/idp-admin/index.js';
 import { sendAdminReviewEmail } from '../services/registration-notify.js';
-import { orgHierarchyEnabled } from '../config.js';
+import { config, orgHierarchyEnabled } from '../config.js';
 import { checkSubmitRate } from '../services/submit-rate.js';
 import { loadConsentConfig } from '@aggregator-dpg/config-loader/fs';
 import { getConsentLedger } from '../services/consent-ledger/index.js';
@@ -533,10 +533,10 @@ async function createAggregatorWithSlug(
 /**
  * Maximum consent validity window. Hard ceiling so a buggy or hostile
  * client cannot persist a consent record that is effectively permanent.
- * Five years lines up with typical regulatory retention envelopes; tune
- * via config if a deployment needs something different.
+ * The default (1825 days = five years) lines up with typical regulatory
+ * retention envelopes; tune per deployment via `CONSENT_MAX_VALIDITY_DAYS`.
  */
-const MAX_CONSENT_VALIDITY_MS = 5 * 365 * 24 * 60 * 60 * 1000;
+const MAX_CONSENT_VALIDITY_MS = config.CONSENT_MAX_VALIDITY_DAYS * 24 * 60 * 60 * 1000;
 
 /**
  * Server-stamp `given_at` to the current instant and clamp `valid_till` to

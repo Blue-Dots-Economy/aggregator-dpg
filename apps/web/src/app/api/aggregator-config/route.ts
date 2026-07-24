@@ -14,6 +14,7 @@
 
 import { type NextRequest, NextResponse } from 'next/server';
 import { serviceUnavailableResponse } from '../../../lib/bff-errors';
+import { positiveIntEnv } from '@/lib/env';
 
 export const runtime = 'nodejs';
 
@@ -28,7 +29,7 @@ export async function GET(_req: NextRequest): Promise<NextResponse> {
   try {
     const upstream = await fetch(`${base}/v1/aggregator-config`, {
       method: 'GET',
-      signal: AbortSignal.timeout(5000),
+      signal: AbortSignal.timeout(positiveIntEnv('WEB_UPSTREAM_TIMEOUT_MS', 5000)),
     });
     const ct = upstream.headers.get('content-type') ?? '';
     if (ct.includes('application/json')) {
