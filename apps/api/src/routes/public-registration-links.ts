@@ -334,6 +334,25 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       // it.
       const body: Record<string, unknown> = { ...rawBody };
       delete body['partial'];
+
+      // Consent (#522): the registrant must accept terms + privacy on the
+      // form. Both shapes carry `consent_terms` / `consent_privacy` booleans
+      // outside the participant profile schema — capture the decision, then
+      // strip the keys from `body` so they never reach Ajv (a+p) or the
+      // signalstack profile item_state. The captured value drives the onboard
+      // push below, replacing the deployment-wide `presume_consent` flag.
+      const consentGiven = body['consent_terms'] === true && body['consent_privacy'] === true;
+      delete body['consent_terms'];
+      delete body['consent_privacy'];
+      if (!consentGiven) {
+        throw httpError('CONSENT_REQUIRED', {
+          fields: {
+            consent_terms: rawBody['consent_terms'],
+            consent_privacy: rawBody['consent_privacy'],
+          },
+        });
+      }
+
       const submitMode: 'with_item' | 'account_only' =
         submissionShape === 'account_only' ? 'account_only' : 'with_item';
 
@@ -553,8 +572,8 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
             name,
             ...(pushPhone ? { phoneNumber: pushPhone } : {}),
             ...(emailNormalised ? { email: emailNormalised } : {}),
-            terms_accepted: networkCfg.aggregator.onboarding.presume_consent,
-            privacy_accepted: networkCfg.aggregator.onboarding.presume_consent,
+            terms_accepted: consentGiven,
+            privacy_accepted: consentGiven,
             channel: 'link',
             source_id: link.id,
             network: config.SIGNALSTACK_ITEM_NETWORK,

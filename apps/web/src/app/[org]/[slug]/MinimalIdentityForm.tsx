@@ -127,11 +127,12 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
           setSubmitting(true);
           const payload: MinimalIdentityPayload = {
             [nameKey]: name.trim(),
-            consent_terms: true,
-            consent_privacy: true,
-            // NOTE: consent_call is a UI-only gate for now — the account_only
-            // submit endpoint rejects unknown fields (REGISTRATION_MODE_MISMATCH),
-            // so it is not sent until the backend whitelists it (#435).
+            // Drive the transmitted consent from the actual checkbox, not a
+            // hardcoded `true`. Submit is already gated on `consentCall`, but
+            // the backend now validates these server-side (#522) and rejects
+            // with CONSENT_REQUIRED when either is not `true`.
+            consent_terms: consentCall,
+            consent_privacy: consentCall,
           };
           if (phoneKey && hasPhone) payload[phoneKey] = phone.trim();
           if (emailKey && hasEmail) payload[emailKey] = email.trim();

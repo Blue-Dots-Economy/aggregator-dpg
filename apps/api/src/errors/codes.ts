@@ -47,6 +47,13 @@ export const ERR = {
     detail: 'One or more fields failed validation.',
     hint: 'Zod or Ajv rejected the request body. See response.error.fields for offending paths.',
   },
+  CONSENT_REQUIRED: {
+    code: 'CONSENT_REQUIRED',
+    status: 400,
+    title: 'Consent required',
+    detail: 'You must accept the terms and privacy policy to continue.',
+    hint: 'The registration submit did not carry consent_terms=true and consent_privacy=true. The form must send both as booleans.',
+  },
   BAD_JSON: {
     code: 'BAD_JSON',
     status: 400,

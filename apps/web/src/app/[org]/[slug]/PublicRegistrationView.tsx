@@ -140,6 +140,11 @@ export function PublicRegistrationView({
   // Schema-validity of the visible form, driven by RjsfThemedForm. Gates the
   // submit button — disabled until every visible required field is valid.
   const [canSubmit, setCanSubmit] = useState(false);
+  // Terms + privacy consent for the account_and_profile shape (#522). The
+  // account_only shape captures consent in MinimalIdentityForm instead.
+  // Required — gates the submit button and is sent as consent_terms /
+  // consent_privacy, which the API validates server-side (CONSENT_REQUIRED).
+  const [consentAccepted, setConsentAccepted] = useState(false);
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
   const brandShort = cfg.brand.short_name;
   const brandLogo = cfg.brand.logo?.default;
@@ -430,7 +435,14 @@ export function PublicRegistrationView({
           // Full profile submit. The server resolves the link's
           // registration_mode shape and silently accepts partial profiles
           // (missing required fields → signals classifies the item `draft`).
-          body: JSON.stringify(values),
+          // consent_terms/consent_privacy carry the registrant's accepted
+          // consent (#522); the API validates + records it, then strips the
+          // keys before the participant profile is built.
+          body: JSON.stringify({
+            ...values,
+            consent_terms: consentAccepted,
+            consent_privacy: consentAccepted,
+          }),
         },
       );
       // 409 with outcome=skipped is a dedup hit, not a failure: this
@@ -779,17 +791,27 @@ export function PublicRegistrationView({
                     }}
                   >
                     <div className="mt-4 flex flex-col gap-3">
+                      <label className="flex items-start gap-2.5 text-[14px] text-[var(--bd-fg)] cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={consentAccepted}
+                          onChange={(e) => setConsentAccepted(e.target.checked)}
+                          className="mt-0.5 h-4 w-4 shrink-0"
+                          aria-required
+                        />
+                        <span>{t('consent_label')}</span>
+                      </label>
                       <button
                         type="submit"
-                        disabled={state.status === 'submitting' || !canSubmit}
+                        disabled={state.status === 'submitting' || !canSubmit || !consentAccepted}
                         style={
-                          state.status === 'submitting' || !canSubmit
+                          state.status === 'submitting' || !canSubmit || !consentAccepted
                             ? undefined
                             : { backgroundColor: cfg.brand.primary_color }
                         }
                         className={`w-full py-3 rounded-[12px] font-display font-bold text-[15px] text-white transition-all
                     ${
-                      state.status === 'submitting' || !canSubmit
+                      state.status === 'submitting' || !canSubmit || !consentAccepted
                         ? 'bg-[var(--bd-primary-100)] text-[var(--bd-primary-600)] cursor-not-allowed'
                         : 'hover:opacity-90 bd-shadow-lg'
                     }`}

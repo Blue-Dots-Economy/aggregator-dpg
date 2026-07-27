@@ -461,6 +461,8 @@
       "btn_register_another": "Register another",
       "btn_submit": "Submit registration",
       "btn_submitting": "Submitting…",
+      "consent_label": "I have read and accept the terms and privacy policy.",
+      "consent_required": "Please accept the terms and privacy policy to continue.",
       "privacy_note": "Your details are shared only with the aggregator who issued this link.",
       "powered_by": "Powered by",
       "validation_error_title": "Form validation failed",

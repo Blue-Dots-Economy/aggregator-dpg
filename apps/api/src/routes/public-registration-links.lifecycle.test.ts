@@ -192,6 +192,9 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — lifecycle
     name: 'Asha Kumari',
     phone: '+919876543210',
     email: 'asha@example.com',
+    // Consent is now required on every registration-link submit (#522).
+    consent_terms: true,
+    consent_privacy: true,
   };
 
   it('returns lifecycle_status="live" on default classification', async () => {
@@ -239,6 +242,8 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — lifecycle
         phone: '+919876500000',
         email: 'partial@example.com',
         partial: true,
+        consent_terms: true,
+        consent_privacy: true,
       },
     });
     expect(r.statusCode).toBe(201);
@@ -269,5 +274,16 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — lifecycle
     expect(body.outcome).toBe('skipped');
     expect(body.owned_elsewhere).toBe(true);
     expect(body.lifecycle_status).toBeNull();
+  });
+
+  it('rejects a submit with 400 CONSENT_REQUIRED when consent is not given (#522)', async () => {
+    const { consent_terms: _t, consent_privacy: _p, ...noConsent } = basePayload;
+    const r = await app.inject({
+      method: 'POST',
+      url: `/public/v1/aggregators/${ORG_SLUG}/registrations/${LINK_SLUG}`,
+      payload: { ...noConsent, phone: '+919876500042', email: 'noconsent@example.com' },
+    });
+    expect(r.statusCode).toBe(400);
+    expect((r.json() as { error?: { code?: string } }).error?.code).toBe('CONSENT_REQUIRED');
   });
 });
