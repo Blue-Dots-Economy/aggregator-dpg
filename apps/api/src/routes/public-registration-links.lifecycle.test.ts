@@ -276,6 +276,23 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — lifecycle
     expect(body.lifecycle_status).toBeNull();
   });
 
+  it('maps a Signals U18_NOT_ALLOWED push to 400 U18_REGISTRATION_REDIRECT (#522 §4.4)', async () => {
+    const r = await app.inject({
+      method: 'POST',
+      url: `/public/v1/aggregators/${ORG_SLUG}/registrations/${LINK_SLUG}`,
+      payload: {
+        ...basePayload,
+        phone: '+919876500015',
+        email: 'minor@example.com',
+        age: 15,
+      },
+    });
+    expect(r.statusCode).toBe(400);
+    expect((r.json() as { error?: { code?: string } }).error?.code).toBe(
+      'U18_REGISTRATION_REDIRECT',
+    );
+  });
+
   it('rejects a submit with 400 CONSENT_REQUIRED when consent is not given (#522)', async () => {
     const { consent_terms: _t, consent_privacy: _p, ...noConsent } = basePayload;
     const r = await app.inject({

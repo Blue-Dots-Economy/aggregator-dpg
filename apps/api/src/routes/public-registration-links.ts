@@ -626,6 +626,16 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
             const signalsMessage = (
               result.error.details as { signalsMessage?: unknown } | undefined
             )?.signalsMessage;
+            // Belt-and-braces (§4.4): the form gates minors client-side, but a
+            // bypassed client that pushes an under-18 gets Signals'
+            // `U18_NOT_ALLOWED`. Map it to the finish-in-the-app response
+            // instead of a generic push failure.
+            if (result.error.message.includes('U18_NOT_ALLOWED')) {
+              throw httpError('U18_REGISTRATION_REDIRECT', {
+                fields: { code: result.error.code, message: result.error.message },
+                cause: result.error,
+              });
+            }
             const detail =
               result.error.code === 'SIGNALSTACK_PROFILE_LIMIT_REACHED' &&
               typeof signalsMessage === 'string'

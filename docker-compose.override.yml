@@ -1,0 +1,26 @@
+# Local-only override (NOT committed). Force-empties AGGREGATOR_CONFIG_PATH so
+# the app derives the path from CONFIG_ROOT + AGGREGATOR_NETWORK inside the
+# container, instead of dotenv loading the stale HOST path baked into
+# /app/.env. Mirrors the fix already on the network-source branch (#513).
+# NODE_TLS_REJECT_UNAUTHORIZED=0 + INSTANCE_ENV=development mirror
+# docker-compose.dev.yml: the local self-signed "Local Debug CA" is not in the
+# containers' trust store (and its 30-day cert had expired), so the web BFF's
+# back-channel OIDC call to nginx failed with CERT_HAS_EXPIRED → login 500.
+# Relaxing verification for local containers is the repo's intended local path
+# (the prod compose defaults INSTANCE_ENV=production, which refuses reject=0).
+services:
+  api:
+    environment:
+      AGGREGATOR_CONFIG_PATH: ''
+      NODE_TLS_REJECT_UNAUTHORIZED: '0'
+      INSTANCE_ENV: development
+  web:
+    environment:
+      AGGREGATOR_CONFIG_PATH: ''
+      NODE_TLS_REJECT_UNAUTHORIZED: '0'
+      INSTANCE_ENV: development
+  worker:
+    environment:
+      AGGREGATOR_CONFIG_PATH: ''
+      NODE_TLS_REJECT_UNAUTHORIZED: '0'
+      INSTANCE_ENV: development

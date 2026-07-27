@@ -145,6 +145,18 @@ export function PublicRegistrationView({
   // Required — gates the submit button and is sent as consent_terms /
   // consent_privacy, which the API validates server-side (CONSENT_REQUIRED).
   const [consentAccepted, setConsentAccepted] = useState(false);
+  // U18 gate (§4.4): Signals hard-rejects an under-18 onboard
+  // (`U18_NOT_ALLOWED`), so a minor is routed to finish in the Signalstack app
+  // and never submits/consents here. `age` is a participant-schema field on
+  // this shape. Fail-closed at the boundary: age <= 18 is a minor.
+  const ageValueRaw = formData['age'];
+  const ageValue =
+    typeof ageValueRaw === 'number'
+      ? ageValueRaw
+      : typeof ageValueRaw === 'string' && ageValueRaw.trim() !== ''
+        ? Number(ageValueRaw)
+        : NaN;
+  const isMinor = Number.isFinite(ageValue) && ageValue <= 18;
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
   const brandShort = cfg.brand.short_name;
   const brandLogo = cfg.brand.logo?.default;
@@ -791,33 +803,44 @@ export function PublicRegistrationView({
                     }}
                   >
                     <div className="mt-4 flex flex-col gap-3">
-                      <label className="flex items-start gap-2.5 text-[14px] text-[var(--bd-fg)] cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={consentAccepted}
-                          onChange={(e) => setConsentAccepted(e.target.checked)}
-                          className="mt-0.5 h-4 w-4 shrink-0"
-                          aria-required
-                        />
-                        <span>{t('consent_label')}</span>
-                      </label>
-                      <button
-                        type="submit"
-                        disabled={state.status === 'submitting' || !canSubmit || !consentAccepted}
-                        style={
-                          state.status === 'submitting' || !canSubmit || !consentAccepted
-                            ? undefined
-                            : { backgroundColor: cfg.brand.primary_color }
-                        }
-                        className={`w-full py-3 rounded-[12px] font-display font-bold text-[15px] text-white transition-all
+                      {isMinor ? (
+                        // Minor: no consent, no submit — finish in the Signalstack app.
+                        <div className="rounded-[12px] border border-[var(--bd-border)] bg-[var(--bd-primary-50)] px-4 py-3.5 text-[14px] text-[var(--bd-fg)]">
+                          {t('u18_notice')}
+                        </div>
+                      ) : (
+                        <>
+                          <label className="flex items-start gap-2.5 text-[14px] text-[var(--bd-fg)] cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={consentAccepted}
+                              onChange={(e) => setConsentAccepted(e.target.checked)}
+                              className="mt-0.5 h-4 w-4 shrink-0"
+                              aria-required
+                            />
+                            <span>{t('consent_label')}</span>
+                          </label>
+                          <button
+                            type="submit"
+                            disabled={
+                              state.status === 'submitting' || !canSubmit || !consentAccepted
+                            }
+                            style={
+                              state.status === 'submitting' || !canSubmit || !consentAccepted
+                                ? undefined
+                                : { backgroundColor: cfg.brand.primary_color }
+                            }
+                            className={`w-full py-3 rounded-[12px] font-display font-bold text-[15px] text-white transition-all
                     ${
                       state.status === 'submitting' || !canSubmit || !consentAccepted
                         ? 'bg-[var(--bd-primary-100)] text-[var(--bd-primary-600)] cursor-not-allowed'
                         : 'hover:opacity-90 bd-shadow-lg'
                     }`}
-                      >
-                        {state.status === 'submitting' ? t('btn_submitting') : t('btn_submit')}
-                      </button>
+                          >
+                            {state.status === 'submitting' ? t('btn_submitting') : t('btn_submit')}
+                          </button>
+                        </>
+                      )}
                     </div>
                   </RjsfThemedForm>
                 )}

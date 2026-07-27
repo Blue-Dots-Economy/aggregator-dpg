@@ -95,7 +95,12 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
   // the push (`AGE_REQUIRED`) otherwise. Collected as a whole number here.
   const ageNum = Number(age.trim());
   const ageValid = /^\d{1,3}$/.test(age.trim()) && ageNum >= 1 && ageNum <= 120;
-  const valid = hasName && contactValid && emailOk && ageValid && consentCall;
+  // U18 gate (§4.4): a minor cannot establish consent on this form. Signals
+  // hard-rejects an under-18 onboard (`U18_NOT_ALLOWED`), so the minor is
+  // routed to finish in the Signalstack app rather than submitting here.
+  // Fail-closed at the boundary: age <= 18 is a minor.
+  const isMinor = ageValid && ageNum <= 18;
+  const valid = hasName && contactValid && emailOk && ageValid && !isMinor && consentCall;
 
   // Option B: the submit stays disabled until valid, but we surface exactly
   // what is blocking so the user is never left guessing.
@@ -226,31 +231,40 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
           </div>
         )}
 
-        <div className="flex flex-col gap-2.5 pt-1">
-          <label className="flex items-start gap-2.5 text-[13px] text-ink-900 cursor-pointer">
-            <input
-              type="checkbox"
-              name="consent_call"
-              checked={consentCall}
-              onChange={(e) => setConsentCall(e.target.checked)}
-              className="mt-0.5 h-4 w-4 rounded border-[var(--bd-border)] accent-[var(--bd-primary-600)]"
-            />
-            <span>{t('consent_call_label')}</span>
-          </label>
-        </div>
+        {isMinor ? (
+          // Minor: no consent, no submit — finish in the Signalstack app.
+          <div className="rounded-[10px] border border-[var(--bd-border)] bg-[var(--bd-primary-50)] px-4 py-3.5 text-[13.5px] text-ink-900">
+            {t('u18_notice')}
+          </div>
+        ) : (
+          <>
+            <div className="flex flex-col gap-2.5 pt-1">
+              <label className="flex items-start gap-2.5 text-[13px] text-ink-900 cursor-pointer">
+                <input
+                  type="checkbox"
+                  name="consent_call"
+                  checked={consentCall}
+                  onChange={(e) => setConsentCall(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-[var(--bd-border)] accent-[var(--bd-primary-600)]"
+                />
+                <span>{t('consent_call_label')}</span>
+              </label>
+            </div>
 
-        {!valid && <SubmitBlockers reasons={blockers} heading={t('blockers.heading')} />}
+            {!valid && <SubmitBlockers reasons={blockers} heading={t('blockers.heading')} />}
 
-        <div className="flex justify-end pt-2">
-          <button
-            type="submit"
-            disabled={!valid || submitting || props.busy}
-            style={{ background: props.brandColor ?? undefined }}
-            className="inline-flex items-center justify-center rounded-[10px] px-5 py-2.5 text-[14px] font-semibold text-white bg-[var(--bd-primary-600)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition"
-          >
-            {t('submit_label')}
-          </button>
-        </div>
+            <div className="flex justify-end pt-2">
+              <button
+                type="submit"
+                disabled={!valid || submitting || props.busy}
+                style={{ background: props.brandColor ?? undefined }}
+                className="inline-flex items-center justify-center rounded-[10px] px-5 py-2.5 text-[14px] font-semibold text-white bg-[var(--bd-primary-600)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >
+                {t('submit_label')}
+              </button>
+            </div>
+          </>
+        )}
       </form>
     </div>
   );
