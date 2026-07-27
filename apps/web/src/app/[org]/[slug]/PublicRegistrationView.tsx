@@ -147,10 +147,10 @@ export function PublicRegistrationView({
   const [consentAccepted, setConsentAccepted] = useState(false);
   const [consentProfile, setConsentProfile] = useState(false);
   // Year of birth → derived age (§4.4 snapshot: no birthdate stored). Drives
-  // the U18 gate and the compliance `age`, independent of the profile's own
-  // `age` schema field. Signals hard-rejects an under-18 onboard
-  // (`U18_NOT_ALLOWED`), so a minor is routed to finish in the Signalstack app
-  // and never submits/consents here. Fail-closed at the boundary: age <= 18.
+  // the U18 branch and the compliance `age`, independent of the profile's own
+  // `age` schema field. A minor still submits, but without consent — the API
+  // omits age + compliance so Signals creates the account, and terms are
+  // accepted later in the Signalstack app. Fail-closed at the boundary: <= 18.
   const [yearOfBirth, setYearOfBirth] = useState('');
   const currentYear = new Date().getFullYear();
   const yobNum = Number(yearOfBirth.trim());
