@@ -573,8 +573,20 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
               link_id: link.id,
               participant_id: participantRowId,
             });
+            // Profile cap (signals #349): show the bare user-facing sentence
+            // (no `signalstack onboard returned 409: PROFILE_LIMIT_REACHED:`
+            // infra prefixes) directly on the public form. Falls back to the
+            // generic string for any other push failure.
+            const signalsMessage = (
+              result.error.details as { signalsMessage?: unknown } | undefined
+            )?.signalsMessage;
+            const detail =
+              result.error.code === 'SIGNALSTACK_PROFILE_LIMIT_REACHED' &&
+              typeof signalsMessage === 'string'
+                ? signalsMessage
+                : `Signalstack rejected the participant push (${result.error.code}).`;
             throw httpError('SIGNALSTACK_PUSH_FAILED', {
-              detail: `Signalstack rejected the participant push (${result.error.code}).`,
+              detail,
               fields: { code: result.error.code, message: result.error.message },
               cause: result.error,
             });
