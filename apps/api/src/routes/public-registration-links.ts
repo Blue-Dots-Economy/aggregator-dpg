@@ -279,6 +279,9 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
         const allowed = new Set<string>([
           'consent_terms',
           'consent_privacy',
+          // Age is required with consent on guardian-gated domains (§4.4);
+          // the account_only form collects it as a standalone field.
+          'age',
           ...[
             linkDomainCfgEarly.identity.name,
             linkDomainCfgEarly.identity.phone,
@@ -352,6 +355,20 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
           },
         });
       }
+
+      // Age accompanies consent on guardian-gated domains — Signals rejects a
+      // compliance push with `AGE_REQUIRED` otherwise (#522 §4.4). It arrives
+      // as `age` on the body: a schema field on the account_and_profile shape,
+      // or the standalone age input on account_only. Coerce a numeric string
+      // (form inputs post strings) and forward it; leave the item_state copy
+      // intact for account_and_profile.
+      const ageRaw = body['age'];
+      const ageNum =
+        typeof ageRaw === 'number'
+          ? ageRaw
+          : typeof ageRaw === 'string' && ageRaw.trim() !== '' && Number.isFinite(Number(ageRaw))
+            ? Number(ageRaw)
+            : undefined;
 
       const submitMode: 'with_item' | 'account_only' =
         submissionShape === 'account_only' ? 'account_only' : 'with_item';
@@ -582,6 +599,8 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
               { key: 'user_privacy', value: true },
               ...(submitMode === 'account_only' ? [] : [{ key: 'profile_creation', value: true }]),
             ],
+            // Required by Signals alongside compliance on guardian-gated domains.
+            ...(ageNum !== undefined ? { age: ageNum } : {}),
             channel: 'link',
             source_id: link.id,
             network: config.SIGNALSTACK_ITEM_NETWORK,

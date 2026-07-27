@@ -63,6 +63,7 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
+  const [age, setAge] = useState('');
   const [consentCall, setConsentCall] = useState(false);
   // Local double-submit guard. The parent runs an async probe before its own
   // `submitting` state flips, so this form can stay mounted for one render
@@ -90,7 +91,11 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
   // An entered email must be valid even when it's optional (voice mode).
   const emailOk = !hasEmail || emailFormatOk;
   const contactValid = requirePhone ? phoneValid : phoneValid || emailValid;
-  const valid = hasName && contactValid && emailOk && consentCall;
+  // Age is required with consent on guardian-gated domains; Signals rejects
+  // the push (`AGE_REQUIRED`) otherwise. Collected as a whole number here.
+  const ageNum = Number(age.trim());
+  const ageValid = /^\d{1,3}$/.test(age.trim()) && ageNum >= 1 && ageNum <= 120;
+  const valid = hasName && contactValid && emailOk && ageValid && consentCall;
 
   // Option B: the submit stays disabled until valid, but we surface exactly
   // what is blocking so the user is never left guessing.
@@ -106,6 +111,7 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
     if (hasPhone && !phoneFormatOk) blockers.push(t('blockers.phone_invalid'));
     if (hasEmail && !emailFormatOk) blockers.push(t('blockers.email_invalid'));
   }
+  if (!ageValid) blockers.push(t('blockers.age'));
   if (!consentCall) blockers.push(t('blockers.consent_call'));
 
   return (
@@ -127,6 +133,9 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
           setSubmitting(true);
           const payload: MinimalIdentityPayload = {
             [nameKey]: name.trim(),
+            // Required with consent on guardian-gated domains (§4.4). Sent as a
+            // string; the API coerces and forwards it as the top-level `age`.
+            age: age.trim(),
             // Drive the transmitted consent from the actual checkbox, not a
             // hardcoded `true`. Submit is already gated on `consentCall`, but
             // the backend now validates these server-side (#522) and rejects
@@ -154,6 +163,24 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
             onChange={(e) => setName(e.target.value)}
             required
             autoComplete="name"
+          />
+        </label>
+
+        <label className="block">
+          <span className="bd-label">
+            {t('age_label')}
+            <span className="text-rose-500 ml-0.5">*</span>
+          </span>
+          <input
+            className="bd-input"
+            type="number"
+            name="age"
+            inputMode="numeric"
+            min={1}
+            max={120}
+            value={age}
+            onChange={(e) => setAge(e.target.value)}
+            required
           />
         </label>
 
