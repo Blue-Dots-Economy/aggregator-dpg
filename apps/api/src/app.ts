@@ -20,6 +20,7 @@ import {
   validatorCompiler,
 } from 'fastify-type-provider-zod';
 import { config, corsOrigins, apiReferenceEnabled } from './config.js';
+import { loggerOptions } from './logger.js';
 import { registerHealthRoutes } from './routes/health.js';
 import { registerAggregatorRegistrationRoutes } from './routes/aggregator-registrations.js';
 import { registerAggregatorMaintenanceRoutes } from './routes/aggregator-maintenance.js';
@@ -43,34 +44,13 @@ const REQUEST_ID_HEADER = 'x-request-id';
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
-    logger: {
-      level: config.LOG_LEVEL,
-      base: { service: 'aggregator-api', env: config.NODE_ENV },
-      redact: {
-        paths: [
-          'req.headers.authorization',
-          'req.headers.cookie',
-          '*.password',
-          '*.token',
-          '*.access_token',
-          '*.refresh_token',
-        ],
-        censor: '[REDACTED]',
-      },
-      ...(config.NODE_ENV === 'development'
-        ? {
-            transport: {
-              target: 'pino-pretty',
-              options: {
-                colorize: true,
-                translateTime: 'SYS:HH:MM:ss.l',
-                singleLine: false,
-                ignore: 'pid,hostname,service,env',
-              },
-            },
-          }
-        : {}),
-    },
+    // Build the request logger from the shared options (single source of truth
+    // for level, base fields, and — critically — the PII/secret `redact`
+    // paths). A prior inline copy here drifted from `logger.ts` and omitted the
+    // email/phone redactions, so request-scoped `req.log` leaked participant
+    // PII. Sharing `loggerOptions` keeps request logging and the rest of the
+    // API on one redaction policy.
+    logger: loggerOptions,
     // Trust only the upstream proxies named in `TRUST_PROXY`. Blanket
     // `true` would let any caller forge `X-Forwarded-For` and bypass the
     // public rate limiter, which is keyed off `req.ip`. The default trusts

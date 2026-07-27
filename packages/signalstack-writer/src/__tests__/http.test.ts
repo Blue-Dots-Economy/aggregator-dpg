@@ -1327,3 +1327,68 @@ describe('HttpSignalStackWriter.fetchDecryptedProfiles', () => {
     expect(result.error.name).toBe('UpstreamError');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Correlation id (x-request-id) forwarding — PLAN 2.4
+// ---------------------------------------------------------------------------
+
+describe('HttpSignalStackWriter correlation-id forwarding', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+  let writer: HttpSignalStackWriter;
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    writer = new HttpSignalStackWriter({
+      baseUrl: 'http://signalstack.test',
+      apiKey: 'test-key',
+      actingOrgId: 'org-default',
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      maxRetries: 0,
+    });
+  });
+
+  /** Reads the headers object of the Nth captured fetch call. */
+  function headersOf(callIndex = 0): Record<string, string> {
+    return (fetchMock.mock.calls[callIndex]?.[1]?.headers ?? {}) as Record<string, string>;
+  }
+
+  it('forwards x-request-id when requestId is set on the input', async () => {
+    fetchMock.mockResolvedValueOnce(okJsonResponse(ONBOARD_RESPONSE));
+    await writer.onboard({
+      actingOrgId: 'org-abc',
+      requestId: 'trace-xyz-1',
+      name: 'Asha',
+      phoneNumber: '+919876543210',
+      terms_accepted: true,
+      privacy_accepted: true,
+      channel: 'link',
+      source_id: 'link-1',
+      network: 'blue_dot',
+      domain: 'seeker',
+      item_type: 'profile_1.0',
+      profile: { occupation: 'carpenter' },
+    });
+    expect(headersOf()['x-request-id']).toBe('trace-xyz-1');
+    // The existing headers are still present.
+    expect(headersOf()['x-acting-org-id']).toBe('org-abc');
+    expect(headersOf()['x-api-key']).toBe('test-key');
+  });
+
+  it('omits x-request-id when requestId is absent', async () => {
+    fetchMock.mockResolvedValueOnce(okJsonResponse(ONBOARD_RESPONSE));
+    await writer.onboard({
+      actingOrgId: 'org-abc',
+      name: 'Asha',
+      phoneNumber: '+919876543210',
+      terms_accepted: true,
+      privacy_accepted: true,
+      channel: 'link',
+      source_id: 'link-1',
+      network: 'blue_dot',
+      domain: 'seeker',
+      item_type: 'profile_1.0',
+      profile: { occupation: 'carpenter' },
+    });
+    expect('x-request-id' in headersOf()).toBe(false);
+  });
+});
