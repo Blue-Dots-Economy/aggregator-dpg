@@ -343,33 +343,23 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       const submitMode: 'with_item' | 'account_only' =
         submissionShape === 'account_only' ? 'account_only' : 'with_item';
 
-      // Consent (#522 §3.1/§3.2): captured as booleans outside the participant
-      // profile schema, then stripped from `body` so they never reach Ajv (a+p)
-      // or the signalstack item_state. `consent_profile` (profile_creation) is
-      // a distinct point required only on the with_item shape — there is no
-      // profile to consent to on account_only. Drives the compliance push,
-      // replacing the deployment-wide `presume_consent` flag.
+      // Consent booleans are captured outside the participant profile schema,
+      // then stripped from `body` so they never reach Ajv (a+p) or the
+      // signalstack item_state. `consent_profile` (profile_creation) is a
+      // distinct point on the with_item shape. See the minor branch below —
+      // consent is required for adults only.
       const termsOk = body['consent_terms'] === true;
       const privacyOk = body['consent_privacy'] === true;
       const profileConsentOk = body['consent_profile'] === true;
       delete body['consent_terms'];
       delete body['consent_privacy'];
       delete body['consent_profile'];
-      const missingConsent: string[] = [];
-      if (!termsOk) missingConsent.push('user_terms');
-      if (!privacyOk) missingConsent.push('user_privacy');
-      if (submitMode === 'with_item' && !profileConsentOk) missingConsent.push('profile_creation');
-      if (missingConsent.length > 0) {
-        throw httpError('CONSENT_REQUIRED', { fields: { missing: missingConsent } });
-      }
 
-      // Age accompanies consent on guardian-gated domains — Signals rejects a
-      // compliance push with `AGE_REQUIRED` otherwise (#522 §4.4). Prefer the
-      // dedicated `year_of_birth` field (snapshot model, no birthdate stored):
-      // it is authoritative for the compliance age and the U18 determination,
-      // and is stripped from `body` so it never reaches Ajv / item_state (the
-      // profile keeps its own `age` schema field). Falls back to `age` on the
-      // body when year_of_birth is absent.
+      // Year of birth (snapshot model, no birthdate stored) → derived age.
+      // Stripped from `body` so it never reaches Ajv / item_state; the a+p
+      // profile keeps its own `age` schema field (which does NOT trigger the
+      // U18 gate — only the top-level `age` does). Falls back to body `age`
+      // for older clients.
       const yobRaw = body['year_of_birth'];
       delete body['year_of_birth'];
       const coerceNum = (v: unknown): number | undefined =>
@@ -379,7 +369,35 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
             ? Number(v)
             : undefined;
       const yob = coerceNum(yobRaw);
-      const ageNum = yob !== undefined ? new Date().getUTCFullYear() - yob : coerceNum(body['age']);
+      const derivedAge =
+        yob !== undefined ? new Date().getUTCFullYear() - yob : coerceNum(body['age']);
+
+      // U18 (§4.4): a minor cannot establish consent here — they accept terms
+      // in the Signals app after signing in. Signals rejects any onboard that
+      // carries a top-level `age < 18` (`U18_NOT_ALLOWED`) but creates the user
+      // when NEITHER age NOR compliance is sent. So for a minor we submit
+      // WITHOUT age and WITHOUT compliance (no consent required); for an adult
+      // we require consent and forward both. Age is unknown ⇒ treat as adult
+      // (form always collects year of birth).
+      const isMinor = derivedAge !== undefined && derivedAge <= 18;
+      if (!isMinor) {
+        const missingConsent: string[] = [];
+        if (!termsOk) missingConsent.push('user_terms');
+        if (!privacyOk) missingConsent.push('user_privacy');
+        if (submitMode === 'with_item' && !profileConsentOk)
+          missingConsent.push('profile_creation');
+        if (missingConsent.length > 0) {
+          throw httpError('CONSENT_REQUIRED', { fields: { missing: missingConsent } });
+        }
+      }
+      const ageNum = isMinor ? undefined : derivedAge;
+      const compliance = isMinor
+        ? undefined
+        : [
+            { key: 'user_terms', value: true },
+            { key: 'user_privacy', value: true },
+            ...(submitMode === 'account_only' ? [] : [{ key: 'profile_creation', value: true }]),
+          ];
 
       // Identity selectors come from the resolved network config so the
       // route stays generic across signalstack networks. The sniffer
@@ -597,17 +615,11 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
             name,
             ...(pushPhone ? { phoneNumber: pushPhone } : {}),
             ...(emailNormalised ? { email: emailNormalised } : {}),
-            // Record consent via the `compliance` array (the live Signals
-            // mechanism) — never the deprecated terms/privacy flags. Validated
-            // `consentGiven` above guarantees these are accepted. The with_item
-            // shape also records `profile_creation` so the created profile is
-            // not stranded as `draft` awaiting a Signals-UI re-consent.
-            compliance: [
-              { key: 'user_terms', value: true },
-              { key: 'user_privacy', value: true },
-              ...(submitMode === 'account_only' ? [] : [{ key: 'profile_creation', value: true }]),
-            ],
-            // Required by Signals alongside compliance on guardian-gated domains.
+            // Adult: record consent via the `compliance` array (the live Signals
+            // mechanism, never the deprecated flags) + forward age. Minor: both
+            // omitted so Signals creates the user without consent (§4.4) — they
+            // accept terms in the Signals app after signing in.
+            ...(compliance ? { compliance } : {}),
             ...(ageNum !== undefined ? { age: ageNum } : {}),
             channel: 'link',
             source_id: link.id,

@@ -826,7 +826,9 @@ export function PublicRegistrationView({
                         </select>
                       </label>
                       {isMinor ? (
-                        // Minor: no consent, no submit — finish in the Signalstack app.
+                        // Minor: no consent here — Signals creates the account
+                        // without it; terms are accepted in the Signalstack app
+                        // after signing in. Submit still proceeds.
                         <div className="rounded-[12px] border border-[var(--bd-border)] bg-[var(--bd-primary-50)] px-4 py-3.5 text-[14px] text-[var(--bd-fg)]">
                           {t('u18_notice')}
                         </div>
@@ -852,35 +854,34 @@ export function PublicRegistrationView({
                             />
                             <span>{t('consent_profile_label')}</span>
                           </label>
-                          {(() => {
-                            const blocked =
-                              state.status === 'submitting' ||
-                              !canSubmit ||
-                              !consentAccepted ||
-                              !consentProfile ||
-                              !yobValid;
-                            return (
-                              <button
-                                type="submit"
-                                disabled={blocked}
-                                style={
-                                  blocked ? undefined : { backgroundColor: cfg.brand.primary_color }
-                                }
-                                className={`w-full py-3 rounded-[12px] font-display font-bold text-[15px] text-white transition-all
+                        </>
+                      )}
+                      {(() => {
+                        // Adults must accept both consents; a minor submits
+                        // without consent (age + compliance omitted server-side).
+                        const blocked =
+                          state.status === 'submitting' ||
+                          !canSubmit ||
+                          !yobValid ||
+                          (!isMinor && (!consentAccepted || !consentProfile));
+                        return (
+                          <button
+                            type="submit"
+                            disabled={blocked}
+                            style={
+                              blocked ? undefined : { backgroundColor: cfg.brand.primary_color }
+                            }
+                            className={`w-full py-3 rounded-[12px] font-display font-bold text-[15px] text-white transition-all
                     ${
                       blocked
                         ? 'bg-[var(--bd-primary-100)] text-[var(--bd-primary-600)] cursor-not-allowed'
                         : 'hover:opacity-90 bd-shadow-lg'
                     }`}
-                              >
-                                {state.status === 'submitting'
-                                  ? t('btn_submitting')
-                                  : t('btn_submit')}
-                              </button>
-                            );
-                          })()}
-                        </>
-                      )}
+                          >
+                            {state.status === 'submitting' ? t('btn_submitting') : t('btn_submit')}
+                          </button>
+                        );
+                      })()}
                     </div>
                   </RjsfThemedForm>
                 )}

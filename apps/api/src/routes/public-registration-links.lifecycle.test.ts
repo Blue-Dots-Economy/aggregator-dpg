@@ -282,22 +282,23 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — lifecycle
     expect(body.lifecycle_status).toBeNull();
   });
 
-  it('maps a Signals U18_NOT_ALLOWED push to 400 U18_REGISTRATION_REDIRECT (#522 §4.4)', async () => {
+  it('creates a minor without consent — age + compliance omitted (#522 §4.4)', async () => {
+    // A minor's year of birth → derived age <= 18. The API must NOT send a
+    // top-level age or a compliance block (which would trip Signals'
+    // U18_NOT_ALLOWED); Signals then creates the account with no consent. No
+    // consent fields are sent here either, proving they are not required.
     const r = await app.inject({
       method: 'POST',
       url: `/public/v1/aggregators/${ORG_SLUG}/registrations/${LINK_SLUG}`,
       payload: {
-        ...basePayload,
+        name: 'Minor User',
         phone: '+919876500015',
         email: 'minor@example.com',
-        // A minor's year of birth → derived age <= 18 → Signals U18_NOT_ALLOWED.
         year_of_birth: 2015,
       },
     });
-    expect(r.statusCode).toBe(400);
-    expect((r.json() as { error?: { code?: string } }).error?.code).toBe(
-      'U18_REGISTRATION_REDIRECT',
-    );
+    expect(r.statusCode).toBe(201);
+    expect((r.json() as { outcome: string }).outcome).toBe('passed');
   });
 
   it('rejects a submit with 400 CONSENT_REQUIRED when consent is not given (#522)', async () => {
