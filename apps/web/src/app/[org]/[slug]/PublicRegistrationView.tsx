@@ -144,19 +144,24 @@ export function PublicRegistrationView({
   // account_only shape captures consent in MinimalIdentityForm instead.
   // Required — gates the submit button and is sent as consent_terms /
   // consent_privacy, which the API validates server-side (CONSENT_REQUIRED).
+  // Terms + privacy consent, and a distinct profile-creation consent
+  // (§3.1 — three points on this shape). Both gate the submit button and are
+  // sent as consent_terms / consent_privacy / consent_profile, validated
+  // server-side (CONSENT_REQUIRED).
   const [consentAccepted, setConsentAccepted] = useState(false);
-  // U18 gate (§4.4): Signals hard-rejects an under-18 onboard
+  const [consentProfile, setConsentProfile] = useState(false);
+  // Year of birth → derived age (§4.4 snapshot: no birthdate stored). Drives
+  // the U18 gate and the compliance `age`, independent of the profile's own
+  // `age` schema field. Signals hard-rejects an under-18 onboard
   // (`U18_NOT_ALLOWED`), so a minor is routed to finish in the Signalstack app
-  // and never submits/consents here. `age` is a participant-schema field on
-  // this shape. Fail-closed at the boundary: age <= 18 is a minor.
-  const ageValueRaw = formData['age'];
-  const ageValue =
-    typeof ageValueRaw === 'number'
-      ? ageValueRaw
-      : typeof ageValueRaw === 'string' && ageValueRaw.trim() !== ''
-        ? Number(ageValueRaw)
-        : NaN;
-  const isMinor = Number.isFinite(ageValue) && ageValue <= 18;
+  // and never submits/consents here. Fail-closed at the boundary: age <= 18.
+  const [yearOfBirth, setYearOfBirth] = useState('');
+  const currentYear = new Date().getFullYear();
+  const yobNum = Number(yearOfBirth.trim());
+  const yobValid =
+    /^\d{4}$/.test(yearOfBirth.trim()) && yobNum >= currentYear - 120 && yobNum <= currentYear;
+  const derivedAge = yobValid ? currentYear - yobNum : NaN;
+  const isMinor = yobValid && derivedAge <= 18;
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
   const brandShort = cfg.brand.short_name;
   const brandLogo = cfg.brand.logo?.default;
@@ -454,6 +459,8 @@ export function PublicRegistrationView({
             ...values,
             consent_terms: consentAccepted,
             consent_privacy: consentAccepted,
+            consent_profile: consentProfile,
+            year_of_birth: yearOfBirth.trim(),
           }),
         },
       );
@@ -803,6 +810,23 @@ export function PublicRegistrationView({
                     }}
                   >
                     <div className="mt-4 flex flex-col gap-3">
+                      <label className="block">
+                        <span className="text-[14px] font-medium text-[var(--bd-fg)]">
+                          {t('year_of_birth_label')}
+                          <span className="text-rose-500 ml-0.5">*</span>
+                        </span>
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          min={currentYear - 120}
+                          max={currentYear}
+                          placeholder={String(currentYear - 25)}
+                          value={yearOfBirth}
+                          onChange={(e) => setYearOfBirth(e.target.value)}
+                          className="mt-1 w-full rounded-[10px] border border-[var(--bd-border)] px-3 py-2 text-[14px]"
+                          required
+                        />
+                      </label>
                       {isMinor ? (
                         // Minor: no consent, no submit — finish in the Signalstack app.
                         <div className="rounded-[12px] border border-[var(--bd-border)] bg-[var(--bd-primary-50)] px-4 py-3.5 text-[14px] text-[var(--bd-fg)]">
@@ -820,25 +844,43 @@ export function PublicRegistrationView({
                             />
                             <span>{t('consent_label')}</span>
                           </label>
-                          <button
-                            type="submit"
-                            disabled={
-                              state.status === 'submitting' || !canSubmit || !consentAccepted
-                            }
-                            style={
-                              state.status === 'submitting' || !canSubmit || !consentAccepted
-                                ? undefined
-                                : { backgroundColor: cfg.brand.primary_color }
-                            }
-                            className={`w-full py-3 rounded-[12px] font-display font-bold text-[15px] text-white transition-all
+                          <label className="flex items-start gap-2.5 text-[14px] text-[var(--bd-fg)] cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={consentProfile}
+                              onChange={(e) => setConsentProfile(e.target.checked)}
+                              className="mt-0.5 h-4 w-4 shrink-0"
+                              aria-required
+                            />
+                            <span>{t('consent_profile_label')}</span>
+                          </label>
+                          {(() => {
+                            const blocked =
+                              state.status === 'submitting' ||
+                              !canSubmit ||
+                              !consentAccepted ||
+                              !consentProfile ||
+                              !yobValid;
+                            return (
+                              <button
+                                type="submit"
+                                disabled={blocked}
+                                style={
+                                  blocked ? undefined : { backgroundColor: cfg.brand.primary_color }
+                                }
+                                className={`w-full py-3 rounded-[12px] font-display font-bold text-[15px] text-white transition-all
                     ${
-                      state.status === 'submitting' || !canSubmit || !consentAccepted
+                      blocked
                         ? 'bg-[var(--bd-primary-100)] text-[var(--bd-primary-600)] cursor-not-allowed'
                         : 'hover:opacity-90 bd-shadow-lg'
                     }`}
-                          >
-                            {state.status === 'submitting' ? t('btn_submitting') : t('btn_submit')}
-                          </button>
+                              >
+                                {state.status === 'submitting'
+                                  ? t('btn_submitting')
+                                  : t('btn_submit')}
+                              </button>
+                            );
+                          })()}
                         </>
                       )}
                     </div>

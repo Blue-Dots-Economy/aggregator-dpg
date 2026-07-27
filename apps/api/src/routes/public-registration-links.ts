@@ -279,9 +279,11 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
         const allowed = new Set<string>([
           'consent_terms',
           'consent_privacy',
-          // Age is required with consent on guardian-gated domains (§4.4);
-          // the account_only form collects it as a standalone field.
+          // Age/year-of-birth required with consent on guardian-gated domains
+          // (§4.4); the account_only form collects year_of_birth (age kept for
+          // backward compatibility with older clients).
           'age',
+          'year_of_birth',
           ...[
             linkDomainCfgEarly.identity.name,
             linkDomainCfgEarly.identity.phone,
@@ -338,40 +340,46 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       const body: Record<string, unknown> = { ...rawBody };
       delete body['partial'];
 
-      // Consent (#522): the registrant must accept terms + privacy on the
-      // form. Both shapes carry `consent_terms` / `consent_privacy` booleans
-      // outside the participant profile schema — capture the decision, then
-      // strip the keys from `body` so they never reach Ajv (a+p) or the
-      // signalstack profile item_state. The captured value drives the onboard
-      // push below, replacing the deployment-wide `presume_consent` flag.
-      const consentGiven = body['consent_terms'] === true && body['consent_privacy'] === true;
+      const submitMode: 'with_item' | 'account_only' =
+        submissionShape === 'account_only' ? 'account_only' : 'with_item';
+
+      // Consent (#522 §3.1/§3.2): captured as booleans outside the participant
+      // profile schema, then stripped from `body` so they never reach Ajv (a+p)
+      // or the signalstack item_state. `consent_profile` (profile_creation) is
+      // a distinct point required only on the with_item shape — there is no
+      // profile to consent to on account_only. Drives the compliance push,
+      // replacing the deployment-wide `presume_consent` flag.
+      const termsOk = body['consent_terms'] === true;
+      const privacyOk = body['consent_privacy'] === true;
+      const profileConsentOk = body['consent_profile'] === true;
       delete body['consent_terms'];
       delete body['consent_privacy'];
-      if (!consentGiven) {
-        throw httpError('CONSENT_REQUIRED', {
-          fields: {
-            consent_terms: rawBody['consent_terms'],
-            consent_privacy: rawBody['consent_privacy'],
-          },
-        });
+      delete body['consent_profile'];
+      const missingConsent: string[] = [];
+      if (!termsOk) missingConsent.push('user_terms');
+      if (!privacyOk) missingConsent.push('user_privacy');
+      if (submitMode === 'with_item' && !profileConsentOk) missingConsent.push('profile_creation');
+      if (missingConsent.length > 0) {
+        throw httpError('CONSENT_REQUIRED', { fields: { missing: missingConsent } });
       }
 
       // Age accompanies consent on guardian-gated domains — Signals rejects a
-      // compliance push with `AGE_REQUIRED` otherwise (#522 §4.4). It arrives
-      // as `age` on the body: a schema field on the account_and_profile shape,
-      // or the standalone age input on account_only. Coerce a numeric string
-      // (form inputs post strings) and forward it; leave the item_state copy
-      // intact for account_and_profile.
-      const ageRaw = body['age'];
-      const ageNum =
-        typeof ageRaw === 'number'
-          ? ageRaw
-          : typeof ageRaw === 'string' && ageRaw.trim() !== '' && Number.isFinite(Number(ageRaw))
-            ? Number(ageRaw)
+      // compliance push with `AGE_REQUIRED` otherwise (#522 §4.4). Prefer the
+      // dedicated `year_of_birth` field (snapshot model, no birthdate stored):
+      // it is authoritative for the compliance age and the U18 determination,
+      // and is stripped from `body` so it never reaches Ajv / item_state (the
+      // profile keeps its own `age` schema field). Falls back to `age` on the
+      // body when year_of_birth is absent.
+      const yobRaw = body['year_of_birth'];
+      delete body['year_of_birth'];
+      const coerceNum = (v: unknown): number | undefined =>
+        typeof v === 'number'
+          ? v
+          : typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v))
+            ? Number(v)
             : undefined;
-
-      const submitMode: 'with_item' | 'account_only' =
-        submissionShape === 'account_only' ? 'account_only' : 'with_item';
+      const yob = coerceNum(yobRaw);
+      const ageNum = yob !== undefined ? new Date().getUTCFullYear() - yob : coerceNum(body['age']);
 
       // Identity selectors come from the resolved network config so the
       // route stays generic across signalstack networks. The sniffer

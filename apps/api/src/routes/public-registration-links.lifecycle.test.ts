@@ -192,9 +192,13 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — lifecycle
     name: 'Asha Kumari',
     phone: '+919876543210',
     email: 'asha@example.com',
-    // Consent is now required on every registration-link submit (#522).
+    // Consent is now required on every registration-link submit (#522). The
+    // account_and_profile shape additionally requires profile-creation consent
+    // and a year of birth (age is derived + sent with the compliance push).
     consent_terms: true,
     consent_privacy: true,
+    consent_profile: true,
+    year_of_birth: 1990,
   };
 
   it('returns lifecycle_status="live" on default classification', async () => {
@@ -244,6 +248,8 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — lifecycle
         partial: true,
         consent_terms: true,
         consent_privacy: true,
+        consent_profile: true,
+        year_of_birth: 1990,
       },
     });
     expect(r.statusCode).toBe(201);
@@ -284,7 +290,8 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — lifecycle
         ...basePayload,
         phone: '+919876500015',
         email: 'minor@example.com',
-        age: 15,
+        // A minor's year of birth → derived age <= 18 → Signals U18_NOT_ALLOWED.
+        year_of_birth: 2015,
       },
     });
     expect(r.statusCode).toBe(400);
