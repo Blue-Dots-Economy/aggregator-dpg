@@ -140,10 +140,6 @@ export function PublicRegistrationView({
   // Schema-validity of the visible form, driven by RjsfThemedForm. Gates the
   // submit button — disabled until every visible required field is valid.
   const [canSubmit, setCanSubmit] = useState(false);
-  // Terms + privacy consent for the account_and_profile shape (#522). The
-  // account_only shape captures consent in MinimalIdentityForm instead.
-  // Required — gates the submit button and is sent as consent_terms /
-  // consent_privacy, which the API validates server-side (CONSENT_REQUIRED).
   // Terms + privacy consent, and a distinct profile-creation consent
   // (§3.1 — three points on this shape). Both gate the submit button and are
   // sent as consent_terms / consent_privacy / consent_profile, validated
