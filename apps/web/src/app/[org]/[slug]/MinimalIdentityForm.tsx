@@ -180,18 +180,20 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
             {t('year_of_birth_label')}
             <span className="text-rose-500 ml-0.5">*</span>
           </span>
-          <input
+          <select
             className="bd-input"
-            type="number"
             name="year_of_birth"
-            inputMode="numeric"
-            min={currentYear - 120}
-            max={currentYear}
-            placeholder={String(currentYear - 25)}
             value={yearOfBirth}
             onChange={(e) => setYearOfBirth(e.target.value)}
             required
-          />
+          >
+            <option value="">{t('year_of_birth_placeholder')}</option>
+            {Array.from({ length: 101 }, (_, i) => currentYear - i).map((y) => (
+              <option key={y} value={String(y)}>
+                {y}
+              </option>
+            ))}
+          </select>
         </label>
 
         {(phoneKey || showEmail) && (

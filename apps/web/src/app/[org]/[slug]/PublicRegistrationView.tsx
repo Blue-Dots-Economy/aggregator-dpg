@@ -811,17 +811,19 @@ export function PublicRegistrationView({
                           {t('year_of_birth_label')}
                           <span className="text-rose-500 ml-0.5">*</span>
                         </span>
-                        <input
-                          type="number"
-                          inputMode="numeric"
-                          min={currentYear - 120}
-                          max={currentYear}
-                          placeholder={String(currentYear - 25)}
+                        <select
                           value={yearOfBirth}
                           onChange={(e) => setYearOfBirth(e.target.value)}
                           className="mt-1 w-full rounded-[10px] border border-[var(--bd-border)] px-3 py-2 text-[14px]"
                           required
-                        />
+                        >
+                          <option value="">{t('year_of_birth_placeholder')}</option>
+                          {Array.from({ length: 101 }, (_, i) => currentYear - i).map((y) => (
+                            <option key={y} value={String(y)}>
+                              {y}
+                            </option>
+                          ))}
+                        </select>
                       </label>
                       {isMinor ? (
                         // Minor: no consent, no submit — finish in the Signalstack app.
