@@ -572,8 +572,16 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
             name,
             ...(pushPhone ? { phoneNumber: pushPhone } : {}),
             ...(emailNormalised ? { email: emailNormalised } : {}),
-            terms_accepted: consentGiven,
-            privacy_accepted: consentGiven,
+            // Record consent via the `compliance` array (the live Signals
+            // mechanism) — never the deprecated terms/privacy flags. Validated
+            // `consentGiven` above guarantees these are accepted. The with_item
+            // shape also records `profile_creation` so the created profile is
+            // not stranded as `draft` awaiting a Signals-UI re-consent.
+            compliance: [
+              { key: 'user_terms', value: true },
+              { key: 'user_privacy', value: true },
+              ...(submitMode === 'account_only' ? [] : [{ key: 'profile_creation', value: true }]),
+            ],
             channel: 'link',
             source_id: link.id,
             network: config.SIGNALSTACK_ITEM_NETWORK,
