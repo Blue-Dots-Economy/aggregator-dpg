@@ -11,7 +11,11 @@ process.env.API_REFERENCE_FORCE = 'true';
 // no separate PUBLIC_API_BASE_URL — one source of truth).
 // Generic host by design: deployments are per instance, so the published
 // spec advertises a substitute-your-host URL, not one pilot's domain.
-process.env.PUBLIC_API_URL ??= 'https://aggregator.example.com';
+// Hard-set (not `??=`): the committed spec must be deterministic regardless
+// of whatever PUBLIC_API_URL happens to be exported in the invoking shell/CI
+// environment. To change the published URL, edit this line and regenerate
+// (`pnpm --filter @aggregator-dpg/api spec:dump`), then commit openapi.json.
+process.env.PUBLIC_API_URL = 'https://aggregator.example.com';
 
 const { buildApp } = await import('../src/app.js');
 const app = await buildApp();
