@@ -348,7 +348,7 @@ type SignalStackPushResult =
   | { success: true }
   | { success: false; code: string; message: string; ownedElsewhere?: boolean };
 
-async function pushToSignalStack(
+export async function pushToSignalStack(
   job: BulkRowProcessJob,
   participantId: string,
   phone: string | null,
