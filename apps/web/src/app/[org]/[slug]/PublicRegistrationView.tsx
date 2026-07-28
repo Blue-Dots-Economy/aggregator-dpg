@@ -893,7 +893,21 @@ export function PublicRegistrationView({
                               className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer"
                               aria-required
                             />
-                            <span>{t('consent_profile_label')}</span>
+                            <span>
+                              {t('consent_profile_label')}
+                              {consentContent && (
+                                <>
+                                  {' '}
+                                  <button
+                                    type="button"
+                                    className="underline text-[var(--bd-primary-600)]"
+                                    onClick={() => setConsentModal({ open: true, tab: 'terms' })}
+                                  >
+                                    {t('consent_docs_link')}
+                                  </button>
+                                </>
+                              )}
+                            </span>
                           </div>
                         </>
                       )}
