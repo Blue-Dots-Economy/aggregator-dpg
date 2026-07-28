@@ -12,7 +12,7 @@ import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/u
 import { MinimalIdentityForm, type MinimalIdentityPayload } from './MinimalIdentityForm';
 import { LanguageSwitcher } from '../../../components/shell/LanguageSwitcher';
 import { ConsentModal, type ConsentTab } from '../../../components/consent/ConsentModal';
-import type { ConsentDocContent } from '../../../components/consent/consent-types';
+import type { ParticipantConsent } from '../../../components/consent/consent-types';
 
 export interface PublicRegistrationViewProps {
   org: string;
@@ -50,11 +50,11 @@ export interface PublicRegistrationViewProps {
    */
   registrationMode?: string | null;
   /**
-   * Participant Terms/Privacy copy for the consent modal (§4.1). `null` when
-   * unavailable — the consent checkbox then renders a plain label with no
-   * modal link.
+   * Participant consent copy for the modals (§4.1): Terms/Privacy documents +
+   * the distinct profile-creation statement. `null` when unavailable — the
+   * consent checkboxes then render plain labels with no modal links.
    */
-  consentContent?: ConsentDocContent | null;
+  consentContent?: ParticipantConsent | null;
 }
 
 type SubmitState =
@@ -132,6 +132,9 @@ export function PublicRegistrationView({
     open: false,
     tab: 'terms',
   });
+  // Profile-creation consent has its OWN statement (a separate consent point),
+  // shown in its own lightweight modal — not the Terms/Privacy one.
+  const [profileConsentModal, setProfileConsentModal] = useState(false);
   const [formData, setFormData] = useState<Record<string, unknown>>({});
   const [state, setState] = useState<SubmitState>({ status: 'idle' });
   /**
@@ -895,15 +898,15 @@ export function PublicRegistrationView({
                             />
                             <span>
                               {t('consent_profile_label')}
-                              {consentContent && (
+                              {consentContent?.profileCreation && (
                                 <>
                                   {' '}
                                   <button
                                     type="button"
                                     className="underline text-[var(--bd-primary-600)]"
-                                    onClick={() => setConsentModal({ open: true, tab: 'terms' })}
+                                    onClick={() => setProfileConsentModal(true)}
                                   >
-                                    {t('consent_docs_link')}
+                                    {t('consent_profile_link')}
                                   </button>
                                 </>
                               )}
@@ -966,6 +969,32 @@ export function PublicRegistrationView({
           initialTab={consentModal.tab}
           content={consentContent}
         />
+      )}
+      {consentContent?.profileCreation && profileConsentModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="max-w-md w-full rounded-[14px] bg-white p-6 shadow-xl">
+            <h2 className="font-display font-bold text-[16px] text-[var(--bd-fg)]">
+              {t('consent_profile_modal_title')}
+            </h2>
+            <p className="mt-3 text-[14px] text-ink-700">
+              {consentContent.profileCreation.statement}
+            </p>
+            <div className="mt-5 flex justify-end">
+              <button
+                type="button"
+                className="rounded-[10px] px-4 py-2 text-[14px] font-semibold text-white"
+                style={{ backgroundColor: cfg.brand.primary_color }}
+                onClick={() => setProfileConsentModal(false)}
+              >
+                {t('consent_profile_modal_close')}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
