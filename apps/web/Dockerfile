@@ -11,7 +11,7 @@
 #   3. builder    — `next build` produces .next/standalone
 #   4. runner     — minimal runtime, runs as non-root nextjs user on :3000
 
-FROM node:24-alpine AS base
+FROM node:26-alpine AS base
 ENV PNPM_HOME="/pnpm" \
     PATH="$PNPM_HOME:$PATH" \
     CI=true
@@ -49,7 +49,7 @@ COPY . .
 RUN pnpm --filter @aggregator-dpg/web... build
 
 # ── runner ────────────────────────────────────────────────────────────────────
-FROM node:24-alpine AS runner
+FROM node:26-alpine AS runner
 
 ARG VCS_REF=unknown
 ARG BUILD_DATE=unknown

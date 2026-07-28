@@ -4,7 +4,7 @@
 # entrypoint. Builds the worker package + its workspace deps, then prunes to a
 # production image.
 
-FROM node:24-alpine AS base
+FROM node:26-alpine AS base
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
 RUN corepack enable
@@ -29,7 +29,7 @@ FROM builder AS deployer
 RUN pnpm deploy --filter @aggregator-dpg/worker --prod --legacy /standalone
 
 # ── runner: minimal runtime ──────────────────────────────────────────────────
-FROM node:24-alpine AS runner
+FROM node:26-alpine AS runner
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 WORKDIR /app
 COPY --from=deployer --chown=appuser:appgroup /standalone .
