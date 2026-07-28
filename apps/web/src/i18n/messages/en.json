@@ -289,6 +289,7 @@
       "uploading": "Uploading…",
       "success_note": "Accounts will be live once the user logs in on the platform or via the call.",
       "security_note": "All uploads are scanned and validated before import.",
+      "attestation_fallback": "I confirm I have permission from the individuals in this file to submit their details.",
       "remove_file": "Remove file",
       "recent": {
         "title": "Recent uploads",
