@@ -859,7 +859,7 @@ export function PublicRegistrationView({
                           {t('u18_notice')}
                         </div>
                       ) : (
-                        <>
+                        <div className="flex flex-col gap-3 rounded-[12px] border border-[var(--bd-border)] px-4 py-3.5">
                           <div className="flex items-start gap-2.5 text-[14px] text-[var(--bd-fg)]">
                             <input
                               id="consent-terms-privacy"
@@ -912,7 +912,7 @@ export function PublicRegistrationView({
                               )}
                             </span>
                           </div>
-                        </>
+                        </div>
                       )}
                       {(() => {
                         // Adults must accept both consents; a minor submits
