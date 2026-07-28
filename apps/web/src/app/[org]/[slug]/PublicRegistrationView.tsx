@@ -157,12 +157,11 @@ export function PublicRegistrationView({
   // Schema-validity of the visible form, driven by RjsfThemedForm. Gates the
   // submit button — disabled until every visible required field is valid.
   const [canSubmit, setCanSubmit] = useState(false);
-  // Terms + privacy consent, and a distinct profile-creation consent
-  // (§3.1 — three points on this shape). Both gate the submit button and are
-  // sent as consent_terms / consent_privacy / consent_profile, validated
-  // server-side (CONSENT_REQUIRED).
+  // Single consent acceptance covering terms + privacy + profile-creation
+  // (§3.1's three points). Gates the submit button and is sent as
+  // consent_terms / consent_privacy / consent_profile (all true on accept),
+  // validated server-side (CONSENT_REQUIRED).
   const [consentAccepted, setConsentAccepted] = useState(false);
-  const [consentProfile, setConsentProfile] = useState(false);
   // Year of birth → derived age (§4.4 snapshot: no birthdate stored). Drives
   // the U18 branch and the compliance `age`, independent of the profile's own
   // `age` schema field. A minor still submits, but without consent — the API
@@ -472,7 +471,7 @@ export function PublicRegistrationView({
             ...values,
             consent_terms: consentAccepted,
             consent_privacy: consentAccepted,
-            consent_profile: consentProfile,
+            consent_profile: consentAccepted,
             year_of_birth: yearOfBirth.trim(),
           }),
         },
@@ -859,59 +858,44 @@ export function PublicRegistrationView({
                           {t('u18_notice')}
                         </div>
                       ) : (
-                        <div className="flex flex-col gap-3 rounded-[12px] border border-[var(--bd-border)] px-4 py-3.5">
-                          <div className="flex items-start gap-2.5 text-[14px] text-[var(--bd-fg)]">
-                            <input
-                              id="consent-terms-privacy"
-                              type="checkbox"
-                              checked={consentAccepted}
-                              onChange={(e) => setConsentAccepted(e.target.checked)}
-                              className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer"
-                              aria-required
-                            />
-                            <span>
-                              {consentContent ? (
-                                <>
-                                  {t('consent_accept_prefix')}
-                                  <button
-                                    type="button"
-                                    className="underline text-[var(--bd-primary-600)]"
-                                    onClick={() => setConsentModal({ open: true, tab: 'terms' })}
-                                  >
-                                    {t('consent_docs_link')}
-                                  </button>
-                                  .
-                                </>
-                              ) : (
-                                t('consent_label')
-                              )}
-                            </span>
-                          </div>
-                          <div className="flex items-start gap-2.5 text-[14px] text-[var(--bd-fg)]">
-                            <input
-                              id="consent-profile"
-                              type="checkbox"
-                              checked={consentProfile}
-                              onChange={(e) => setConsentProfile(e.target.checked)}
-                              className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer"
-                              aria-required
-                            />
-                            <span>
-                              {t('consent_profile_label')}
-                              {consentContent?.profileCreation && (
-                                <>
-                                  {' '}
-                                  <button
-                                    type="button"
-                                    className="underline text-[var(--bd-primary-600)]"
-                                    onClick={() => setProfileConsentModal(true)}
-                                  >
-                                    {t('consent_profile_link')}
-                                  </button>
-                                </>
-                              )}
-                            </span>
-                          </div>
+                        <div className="flex items-start gap-2.5 rounded-[12px] border border-[var(--bd-border)] px-4 py-3.5 text-[14px] text-[var(--bd-fg)]">
+                          <input
+                            id="consent-all"
+                            type="checkbox"
+                            checked={consentAccepted}
+                            onChange={(e) => setConsentAccepted(e.target.checked)}
+                            className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer"
+                            aria-required
+                          />
+                          <span>
+                            {consentContent ? (
+                              <>
+                                {t('consent_accept_prefix')}
+                                <button
+                                  type="button"
+                                  className="underline text-[var(--bd-primary-600)]"
+                                  onClick={() => setConsentModal({ open: true, tab: 'terms' })}
+                                >
+                                  {t('consent_docs_link')}
+                                </button>
+                                {t('consent_profile_conjunction')}
+                                {consentContent.profileCreation && (
+                                  <>
+                                    {' '}
+                                    <button
+                                      type="button"
+                                      className="underline text-[var(--bd-primary-600)]"
+                                      onClick={() => setProfileConsentModal(true)}
+                                    >
+                                      {t('consent_profile_link')}
+                                    </button>
+                                  </>
+                                )}
+                              </>
+                            ) : (
+                              t('consent_label')
+                            )}
+                          </span>
                         </div>
                       )}
                       {(() => {
@@ -921,7 +905,7 @@ export function PublicRegistrationView({
                           state.status === 'submitting' ||
                           !canSubmit ||
                           !yobValid ||
-                          (!isMinor && (!consentAccepted || !consentProfile));
+                          (!isMinor && !consentAccepted);
                         return (
                           <button
                             type="submit"
