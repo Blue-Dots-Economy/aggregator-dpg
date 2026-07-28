@@ -3198,6 +3198,23 @@
           "bulk-uploads"
         ],
         "description": "Transitions a pending job to running; the worker onboards each valid row to signalstack. Idempotent on already-running/completed jobs.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "attestation": {
+                    "type": "boolean",
+                    "description": "Operator attestation of authority to upload."
+                  }
+                },
+                "additionalProperties": true
+              }
+            }
+          }
+        },
         "parameters": [
           {
             "schema": {
