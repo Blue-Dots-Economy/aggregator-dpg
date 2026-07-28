@@ -59,6 +59,8 @@ export interface SignalStackProfile {
  * NOT the platform-wide acting org id used by aggregator upsert.
  */
 export interface SignalStackOnboardParticipantInput {
+  /** Correlation id (the x-request-id header) forwarded to Signals for tracing. */
+  requestId?: string;
   /** Signalstack organisation id the participant is being linked under. */
   actingOrgId: string;
   /** Display name of the participant; falls back to participant UUID upstream. */
@@ -136,6 +138,8 @@ export interface SignalStackOnboardParticipantResult {
  * rest are pagination + optional refinement.
  */
 export interface SignalStackItemQuery {
+  /** Correlation id (the x-request-id header) forwarded to Signals for tracing. */
+  requestId?: string;
   aggregator_id: string;
   item_network: string;
   item_domain: string;
@@ -178,6 +182,8 @@ export interface SignalStackItemList {
  * one, so the writer is safe to re-fire from a login-time fallback.
  */
 export interface SignalStackUpsertAggregatorInput {
+  /** Correlation id (the x-request-id header) forwarded to Signals for tracing. */
+  requestId?: string;
   external_id: string;
   name: string;
   slug: string;
@@ -221,6 +227,8 @@ export interface SignalStackAggregator {
  * when upstream support lands.
  */
 export interface SignalStackDashboardQuery {
+  /** Correlation id (the x-request-id header) forwarded to Signals for tracing. */
+  requestId?: string;
   actingOrgId: string;
   page?: number;
   limit?: number;
@@ -313,6 +321,8 @@ export interface SignalStackDashboardPage {
  * impl currently drops it.
  */
 export interface SignalStackDashboardExportQuery {
+  /** Correlation id (the x-request-id header) forwarded to Signals for tracing. */
+  requestId?: string;
   actingOrgId: string;
   status?: string;
   domain?: string;
@@ -340,6 +350,8 @@ export interface SignalStackDashboardExport {
  * signalstack scopes decryption to items this aggregator onboarded.
  */
 export interface SignalStackFetchDecryptedProfilesQuery {
+  /** Correlation id (the x-request-id header) forwarded to Signals for tracing. */
+  requestId?: string;
   actingOrgId: string;
   itemIds: string[];
 }
@@ -382,6 +394,8 @@ export interface SignalStackDecryptedProfiles {
  * signalstack scopes the lifecycle answer to the calling aggregator's view.
  */
 export interface SignalStackProbeUserInput {
+  /** Correlation id (the x-request-id header) forwarded to Signals for tracing. */
+  requestId?: string;
   /** Signalstack organisation id the probe is performed under. */
   actingOrgId: string;
   /** Email address — at least one of email / phoneNumber is required. */
@@ -427,6 +441,8 @@ export interface SignalStackProbeUserResult {
  * does not receive a stale prompt.
  */
 export interface SignalStackGetItemQuery {
+  /** Correlation id (the x-request-id header) forwarded to Signals for tracing. */
+  requestId?: string;
   /** Signalstack item id minted by a prior `onboard()` call. */
   item_id: string;
 }
