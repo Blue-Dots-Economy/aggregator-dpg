@@ -55,14 +55,14 @@
   },
   "devDependencies": {
     "@aggregator-dpg/tsconfig": "workspace:*",
-    "@types/node": "^22.10.5",
+    "@types/node": "^26.1.2",
     "@types/nodemailer": "^6.4.17",
     "@types/pg": "^8.11.10",
     "@types/qrcode": "^1.5.5",
-    "@vitest/coverage-v8": "^2.1.8",
-    "drizzle-kit": "^0.28.1",
-    "tsx": "^4.19.2",
-    "typescript": "^6.0.3",
-    "vitest": "^2.1.8"
+    "@vitest/coverage-v8": "^4.1.10",
+    "drizzle-kit": "^0.31.10",
+    "tsx": "^4.23.1",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
   }
 }
