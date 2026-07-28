@@ -11,6 +11,8 @@ import { I } from '../../../icons';
 import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
 import { MinimalIdentityForm, type MinimalIdentityPayload } from './MinimalIdentityForm';
 import { LanguageSwitcher } from '../../../components/shell/LanguageSwitcher';
+import { ConsentModal, type ConsentTab } from '../../../components/consent/ConsentModal';
+import type { ConsentDocContent } from '../../../components/consent/consent-types';
 
 export interface PublicRegistrationViewProps {
   org: string;
@@ -47,6 +49,12 @@ export interface PublicRegistrationViewProps {
    * the phone number mandatory and drop the email field on the minimal form.
    */
   registrationMode?: string | null;
+  /**
+   * Participant Terms/Privacy copy for the consent modal (§4.1). `null` when
+   * unavailable — the consent checkbox then renders a plain label with no
+   * modal link.
+   */
+  consentContent?: ConsentDocContent | null;
 }
 
 type SubmitState =
@@ -116,8 +124,14 @@ export function PublicRegistrationView({
   submissionShape,
   publicHintI18nKey,
   registrationMode,
+  consentContent = null,
 }: PublicRegistrationViewProps): JSX.Element {
   const t = useTranslations('profile.public_reg');
+  // Terms/Privacy modal for the participant consent copy (§4.1).
+  const [consentModal, setConsentModal] = useState<{ open: boolean; tab: ConsentTab }>({
+    open: false,
+    tab: 'terms',
+  });
   const [formData, setFormData] = useState<Record<string, unknown>>({});
   const [state, setState] = useState<SubmitState>({ status: 'idle' });
   /**
@@ -537,8 +551,17 @@ export function PublicRegistrationView({
             brandColor={heroGradient}
             hintI18nKey={publicHintI18nKey}
             requirePhone={registrationMode === 'voice'}
+            consentContent={consentContent}
           />
         </div>
+        {consentContent && (
+          <ConsentModal
+            open={consentModal.open}
+            onOpenChange={(open) => setConsentModal((s) => ({ ...s, open }))}
+            initialTab={consentModal.tab}
+            content={consentContent}
+          />
+        )}
       </div>
     );
   }
@@ -842,7 +865,29 @@ export function PublicRegistrationView({
                               className="mt-0.5 h-4 w-4 shrink-0"
                               aria-required
                             />
-                            <span>{t('consent_label')}</span>
+                            {consentContent ? (
+                              <span>
+                                {t('consent_accept_prefix')}
+                                <button
+                                  type="button"
+                                  className="underline text-[var(--bd-primary-600)]"
+                                  onClick={() => setConsentModal({ open: true, tab: 'terms' })}
+                                >
+                                  {t('consent_terms_link')}
+                                </button>
+                                {t('consent_and')}
+                                <button
+                                  type="button"
+                                  className="underline text-[var(--bd-primary-600)]"
+                                  onClick={() => setConsentModal({ open: true, tab: 'privacy' })}
+                                >
+                                  {t('consent_privacy_link')}
+                                </button>
+                                .
+                              </span>
+                            ) : (
+                              <span>{t('consent_label')}</span>
+                            )}
                           </label>
                           <label className="flex items-start gap-2.5 text-[14px] text-[var(--bd-fg)] cursor-pointer">
                             <input
@@ -904,6 +949,14 @@ export function PublicRegistrationView({
           </span>
         </p>
       </div>
+      {consentContent && (
+        <ConsentModal
+          open={consentModal.open}
+          onOpenChange={(open) => setConsentModal((s) => ({ ...s, open }))}
+          initialTab={consentModal.tab}
+          content={consentContent}
+        />
+      )}
     </div>
   );
 }

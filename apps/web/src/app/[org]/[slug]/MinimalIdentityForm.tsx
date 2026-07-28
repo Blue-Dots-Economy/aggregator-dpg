@@ -16,6 +16,8 @@
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { SubmitBlockers } from '../../../components/ui/SubmitBlockers';
+import { ConsentModal, type ConsentTab } from '../../../components/consent/ConsentModal';
+import type { ConsentDocContent } from '../../../components/consent/consent-types';
 
 export interface MinimalIdentityPayload {
   /** Name field. Key is the network's `identity.name` selector. */
@@ -56,6 +58,11 @@ export interface MinimalIdentityFormProps {
    * When false (default), the classic "name + (phone OR email)" rule applies.
    */
   requirePhone?: boolean;
+  /**
+   * Participant Terms/Privacy copy for the consent modal (§4.1). `null` ⇒ the
+   * consent line renders without a "view terms" link.
+   */
+  consentContent?: ConsentDocContent | null;
 }
 
 export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Element {
@@ -65,6 +72,11 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
   const [email, setEmail] = useState('');
   const [yearOfBirth, setYearOfBirth] = useState('');
   const [consentCall, setConsentCall] = useState(false);
+  const consentContent = props.consentContent ?? null;
+  const [consentModal, setConsentModal] = useState<{ open: boolean; tab: ConsentTab }>({
+    open: false,
+    tab: 'terms',
+  });
   // Local double-submit guard. The parent runs an async probe before its own
   // `submitting` state flips, so this form can stay mounted for one render
   // after the click — a fast double-tap would otherwise fire two pipelines.
@@ -256,6 +268,27 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
               />
               <span>{t('consent_call_label')}</span>
             </label>
+            {consentContent && (
+              <p className="text-[12px] text-ink-500">
+                {t('consent_accept_prefix')}
+                <button
+                  type="button"
+                  className="underline text-[var(--bd-primary-600)]"
+                  onClick={() => setConsentModal({ open: true, tab: 'terms' })}
+                >
+                  {t('consent_terms_link')}
+                </button>
+                {t('consent_and')}
+                <button
+                  type="button"
+                  className="underline text-[var(--bd-primary-600)]"
+                  onClick={() => setConsentModal({ open: true, tab: 'privacy' })}
+                >
+                  {t('consent_privacy_link')}
+                </button>
+                .
+              </p>
+            )}
           </div>
         )}
 
@@ -272,6 +305,14 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
           </button>
         </div>
       </form>
+      {consentContent && (
+        <ConsentModal
+          open={consentModal.open}
+          onOpenChange={(open) => setConsentModal((s) => ({ ...s, open }))}
+          initialTab={consentModal.tab}
+          content={consentContent}
+        />
+      )}
     </div>
   );
 }
