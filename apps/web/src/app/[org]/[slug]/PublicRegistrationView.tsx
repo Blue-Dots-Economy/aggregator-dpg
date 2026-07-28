@@ -927,13 +927,6 @@ export function PublicRegistrationView({
                     </div>
                   </RjsfThemedForm>
                 )}
-
-                {!isAccountOnly && (
-                  <div className="mt-5 text-[12px] text-ink-400 flex items-start gap-2">
-                    <I.shield size={13} className="mt-0.5 shrink-0" />
-                    {t('privacy_note')}
-                  </div>
-                )}
               </>
             )}
           </div>
