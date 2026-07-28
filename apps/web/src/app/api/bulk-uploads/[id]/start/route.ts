@@ -17,11 +17,12 @@ export async function POST(
   try {
     // Forward the JSON body (carries the operator `attestation` flag) to the
     // API, which validates + records it before enqueueing (#522 Task 1).
-    const body = await req.text();
+    // Pass a parsed object — callApi JSON.stringifies it (passing a string
+    // would double-encode and the API would see a string, not an object).
+    const body = (await req.json().catch(() => ({}))) as unknown;
     const upstream = await callApi(`/v1/bulk-uploads/${encodeURIComponent(id)}/start`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: body || '{}',
+      body: body ?? {},
     });
     return await passthrough(upstream);
   } catch (err) {
