@@ -276,15 +276,7 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
                   className="underline text-[var(--bd-primary-600)]"
                   onClick={() => setConsentModal({ open: true, tab: 'terms' })}
                 >
-                  {t('consent_terms_link')}
-                </button>
-                {t('consent_and')}
-                <button
-                  type="button"
-                  className="underline text-[var(--bd-primary-600)]"
-                  onClick={() => setConsentModal({ open: true, tab: 'privacy' })}
-                >
-                  {t('consent_privacy_link')}
+                  {t('consent_docs_link')}
                 </button>
                 .
               </p>

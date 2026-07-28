@@ -857,48 +857,44 @@ export function PublicRegistrationView({
                         </div>
                       ) : (
                         <>
-                          <label className="flex items-start gap-2.5 text-[14px] text-[var(--bd-fg)] cursor-pointer">
+                          <div className="flex items-start gap-2.5 text-[14px] text-[var(--bd-fg)]">
                             <input
+                              id="consent-terms-privacy"
                               type="checkbox"
                               checked={consentAccepted}
                               onChange={(e) => setConsentAccepted(e.target.checked)}
-                              className="mt-0.5 h-4 w-4 shrink-0"
+                              className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer"
                               aria-required
                             />
-                            {consentContent ? (
-                              <span>
-                                {t('consent_accept_prefix')}
-                                <button
-                                  type="button"
-                                  className="underline text-[var(--bd-primary-600)]"
-                                  onClick={() => setConsentModal({ open: true, tab: 'terms' })}
-                                >
-                                  {t('consent_terms_link')}
-                                </button>
-                                {t('consent_and')}
-                                <button
-                                  type="button"
-                                  className="underline text-[var(--bd-primary-600)]"
-                                  onClick={() => setConsentModal({ open: true, tab: 'privacy' })}
-                                >
-                                  {t('consent_privacy_link')}
-                                </button>
-                                .
-                              </span>
-                            ) : (
-                              <span>{t('consent_label')}</span>
-                            )}
-                          </label>
-                          <label className="flex items-start gap-2.5 text-[14px] text-[var(--bd-fg)] cursor-pointer">
+                            <span>
+                              {consentContent ? (
+                                <>
+                                  {t('consent_accept_prefix')}
+                                  <button
+                                    type="button"
+                                    className="underline text-[var(--bd-primary-600)]"
+                                    onClick={() => setConsentModal({ open: true, tab: 'terms' })}
+                                  >
+                                    {t('consent_docs_link')}
+                                  </button>
+                                  .
+                                </>
+                              ) : (
+                                t('consent_label')
+                              )}
+                            </span>
+                          </div>
+                          <div className="flex items-start gap-2.5 text-[14px] text-[var(--bd-fg)]">
                             <input
+                              id="consent-profile"
                               type="checkbox"
                               checked={consentProfile}
                               onChange={(e) => setConsentProfile(e.target.checked)}
-                              className="mt-0.5 h-4 w-4 shrink-0"
+                              className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer"
                               aria-required
                             />
                             <span>{t('consent_profile_label')}</span>
-                          </label>
+                          </div>
                         </>
                       )}
                       {(() => {
