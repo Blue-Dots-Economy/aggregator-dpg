@@ -953,8 +953,16 @@ export function PublicRegistrationView({
           role="dialog"
           aria-modal="true"
         >
-          <div className="max-w-md w-full rounded-[14px] bg-white p-6 shadow-xl">
-            <h2 className="font-display font-bold text-[16px] text-[var(--bd-fg)]">
+          <div className="relative max-w-md w-full rounded-[14px] bg-white p-6 shadow-xl">
+            <button
+              type="button"
+              aria-label={t('consent_profile_modal_close')}
+              className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full text-ink-400 hover:bg-[var(--bd-primary-50)] hover:text-ink-700"
+              onClick={() => setProfileConsentModal(false)}
+            >
+              <I.x size={18} />
+            </button>
+            <h2 className="font-display font-bold text-[16px] text-[var(--bd-fg)] pr-8">
               {t('consent_profile_modal_title')}
             </h2>
             <p className="mt-3 text-[14px] text-ink-700">
@@ -967,7 +975,7 @@ export function PublicRegistrationView({
                 style={{ backgroundColor: cfg.brand.primary_color }}
                 onClick={() => setProfileConsentModal(false)}
               >
-                {t('consent_profile_modal_close')}
+                {t('consent_profile_modal_agree')}
               </button>
             </div>
           </div>
