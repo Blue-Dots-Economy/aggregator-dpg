@@ -47,10 +47,10 @@ const TILE_CAP = 1000;
 
 /**
  * Lifecycle statuses the aggregator dashboard surfaces. Signals filters the
- * rollup + items to this set (draft + retired are excluded). Broaden here if
+ * rollup + items to this set (paused + retired are excluded). Broaden here if
  * a deployment should show more buckets.
  */
-const DASHBOARD_LIFECYCLE = ['live', 'paused'] as const;
+const DASHBOARD_LIFECYCLE = ['draft', 'live'] as const;
 
 /**
  * Max rows signalstack's `fetch_local` accepts per request (`limit` is
@@ -353,7 +353,7 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
         limit,
         ...(status ? { status } : {}),
         domain,
-        // Aggregator dashboard shows only live + paused profiles; draft +
+        // Aggregator dashboard shows only draft + live profiles; paused +
         // retired are excluded server-side by signalstack (#lifecycle-filter).
         lifecycle: DASHBOARD_LIFECYCLE,
         refresh,
