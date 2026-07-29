@@ -564,6 +564,8 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
     if (query.page !== undefined) params.set('page', String(query.page));
     if (query.limit !== undefined) params.set('limit', String(query.limit));
     if (query.status) params.set('status', query.status);
+    if (query.lifecycle && query.lifecycle.length > 0)
+      params.set('lifecycle', query.lifecycle.join(','));
     if (query.refresh) params.set('refresh', 'true');
     // domain intentionally NOT forwarded — see method docblock.
     const qs = params.toString();

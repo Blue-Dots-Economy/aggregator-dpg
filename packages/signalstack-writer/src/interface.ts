@@ -235,6 +235,13 @@ export interface SignalStackDashboardQuery {
   status?: string;
   domain?: string;
   /**
+   * Lifecycle statuses to include (`draft` | `live` | `paused` | `retired`).
+   * Forwarded as a comma-separated `?lifecycle=` filter. Absent ⇒ Signals'
+   * default. The aggregator dashboard passes `['live','paused']` so draft +
+   * retired profiles are excluded server-side.
+   */
+  lifecycle?: readonly string[];
+  /**
    * When true, forwards `?refresh=true` to signalstack so it bypasses the
    * TTL cache and recomputes the rollup synchronously. Off by default.
    */

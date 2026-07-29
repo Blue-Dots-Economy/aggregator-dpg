@@ -16,7 +16,7 @@
  * (`z.enum(LIFECYCLE_STATUSES)`) or membership checks instead of
  * re-declaring `['draft', 'live', 'paused']` locally.
  */
-export const LIFECYCLE_STATUSES = ['draft', 'live', 'paused'] as const;
+export const LIFECYCLE_STATUSES = ['draft', 'live', 'paused', 'retired'] as const;
 
 /**
  * The set of lifecycle states a signals item can be in.
