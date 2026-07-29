@@ -14,7 +14,7 @@
  *
  * Single source of truth for the literal list — use it to build Zod enums
  * (`z.enum(LIFECYCLE_STATUSES)`) or membership checks instead of
- * re-declaring `['draft', 'live', 'paused']` locally.
+ * re-declaring `['draft', 'live', 'paused', 'retired']` locally.
  */
 export const LIFECYCLE_STATUSES = ['draft', 'live', 'paused', 'retired'] as const;
 
@@ -43,7 +43,7 @@ const VALID = new Set<LifecycleStatus>(LIFECYCLE_STATUSES);
  *
  * @param item - The signals item slice; only `lifecycle_status` is read.
  *               Pass `null` or `undefined` for "no item present".
- * @returns `'draft' | 'live' | 'paused'`, or `null` when item is null/undefined.
+ * @returns `'draft' | 'live' | 'paused' | 'retired'`, or `null` when item is null/undefined.
  */
 export function resolveLifecycle(
   item: { lifecycle_status?: LifecycleStatus | string } | null | undefined,
