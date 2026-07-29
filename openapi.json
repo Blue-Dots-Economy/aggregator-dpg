@@ -6905,7 +6905,8 @@
                       "enum": [
                         "draft",
                         "live",
-                        "paused"
+                        "paused",
+                        "retired"
                       ],
                       "nullable": true
                     },
@@ -7052,7 +7053,8 @@
                       "enum": [
                         "draft",
                         "live",
-                        "paused"
+                        "paused",
+                        "retired"
                       ],
                       "nullable": true
                     },

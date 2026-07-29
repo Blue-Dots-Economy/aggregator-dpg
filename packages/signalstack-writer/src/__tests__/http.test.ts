@@ -522,6 +522,26 @@ describe('HttpSignalStackWriter.fetchDashboard — refresh flag', () => {
     );
   });
 
+  it('forwards a comma-separated ?lifecycle= filter when provided', async () => {
+    fetchMock.mockResolvedValueOnce(okJsonResponse(CANONICAL_DASHBOARD_PAYLOAD));
+
+    await writer.fetchDashboard({ actingOrgId: 'org-abc', lifecycle: ['live', 'paused'] });
+
+    const url = String(fetchMock.mock.calls[0]?.[0]);
+    expect(url).toContain('lifecycle=live%2Cpaused');
+  });
+
+  it('does NOT append lifecycle when unset or empty', async () => {
+    fetchMock.mockResolvedValueOnce(okJsonResponse(CANONICAL_DASHBOARD_PAYLOAD));
+
+    await writer.fetchDashboard({ actingOrgId: 'org-abc', lifecycle: [] });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.not.stringContaining('lifecycle='),
+      expect.anything(),
+    );
+  });
+
   it('does NOT append refresh when query.refresh is unset', async () => {
     fetchMock.mockResolvedValueOnce(okJsonResponse(CANONICAL_DASHBOARD_PAYLOAD));
 
