@@ -14,8 +14,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "bullmq": "^5.76.6",
-    "ioredis": "^5.10.1"
+    "bullmq": "^5.81.2",
+    "ioredis": "^5.11.1"
   },
   "devDependencies": {
     "@aggregator-dpg/tsconfig": "workspace:*",
