@@ -26,7 +26,7 @@ describe('aggregator profile routes', () => {
     _resetJwks();
     _resetProfileValidator();
     process.env.KEYCLOAK_URL = 'http://kc.local';
-    process.env.KEYCLOAK_REALM = 'aggregator';
+    process.env.KEYCLOAK_REALM = 'bluedots';
 
     aggregatorStore = new AggregatorStoreFake();
     aggregatorStore.seed([buildAggregator({ id: aggregatorId, orgSlug: 'trrain-zzzz' })]);

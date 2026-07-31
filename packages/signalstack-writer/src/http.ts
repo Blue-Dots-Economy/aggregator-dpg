@@ -27,6 +27,7 @@ import type { Result } from '@aggregator-dpg/shared-primitives/result';
 
 import {
   SignalStackWriterBase,
+  type SignalStackTokenProviderBase,
   type SignalStackAggregator,
   type SignalStackDashboardExport,
   type SignalStackDashboardExportQuery,
@@ -48,8 +49,20 @@ import {
 export interface HttpSignalStackWriterConfig {
   /** Base URL of the signalstack API, e.g. `http://localhost:2743`. No trailing slash. */
   baseUrl: string;
-  /** Admin api-key issued by signalstack via better-auth. Sent as `x-api-key`. */
-  apiKey: string;
+  /**
+   * Admin api-key issued by signalstack via better-auth. Sent as `x-api-key`.
+   * Mutually exclusive with {@link tokenProvider} — exactly one must be set.
+   * The default/legacy credential; {@link tokenProvider} is the Phase C
+   * client-credentials bearer alternative.
+   */
+  apiKey?: string;
+  /**
+   * Client-credentials token provider for signals' bearer service-auth path.
+   * When set, every request sends `Authorization: Bearer <token>` instead of
+   * `x-api-key`. Mutually exclusive with {@link apiKey} — exactly one must
+   * be set.
+   */
+  tokenProvider?: SignalStackTokenProviderBase;
   /**
    * Platform-wide signalstack organisation id under which admin upserts
    * are performed. Sent as `x-acting-org-id` on the
@@ -79,7 +92,8 @@ export interface HttpSignalStackWriterConfig {
 export class HttpSignalStackWriter extends SignalStackWriterBase {
   private readonly baseUrl: string;
   private readonly endpoint: string;
-  private readonly headers: Record<string, string>;
+  private readonly apiKey: string | undefined;
+  private readonly tokenProvider: SignalStackTokenProviderBase | undefined;
   /**
    * Signalstack organisation id sent as `x-acting-org-id` on the aggregator
    * upsert call. `undefined` when not configured — the upsert method then
@@ -96,17 +110,20 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
     if (!config.baseUrl) {
       throw new Error('HttpSignalStackWriter requires baseUrl');
     }
-    if (!config.apiKey) {
-      throw new Error('HttpSignalStackWriter requires apiKey');
+    if (!config.apiKey && !config.tokenProvider) {
+      throw new Error('HttpSignalStackWriter requires either apiKey or tokenProvider');
+    }
+    if (config.apiKey && config.tokenProvider) {
+      throw new Error(
+        'HttpSignalStackWriter accepts only one of apiKey or tokenProvider, not both',
+      );
     }
     this.baseUrl = config.baseUrl.replace(/\/+$/, '');
     // Plan-C tier-aware participant upsert. Replaced the old
     // `/admin/onboard_participant` route which now returns 404.
     this.endpoint = `${this.baseUrl}/api/v1/admin/participant`;
-    this.headers = {
-      'content-type': 'application/json',
-      'x-api-key': config.apiKey,
-    };
+    this.apiKey = config.apiKey;
+    this.tokenProvider = config.tokenProvider;
     this.actingOrgId = config.actingOrgId;
     this.fetchImpl = config.fetchImpl ?? fetch;
     this.timeoutMs = config.timeoutMs;
@@ -168,6 +185,38 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
+  /**
+   * Builds the auth + content-type headers common to every request:
+   * `Authorization: Bearer <token>` when a {@link SignalStackTokenProviderBase}
+   * is configured (Phase C), else the legacy `x-api-key`.
+   *
+   * Fetched fresh per call (not cached on the instance) so the token
+   * provider's own cache/refresh policy governs freshness — a call made
+   * right before expiry and one right after both get a valid token.
+   * `requestWithRetry` reuses whatever headers it's given across retry
+   * attempts, so a transient signals-side `503 IDENTITY_PROVIDER_UNAVAILABLE`
+   * (signals could not reach Keycloak to judge the token) is retried with
+   * the SAME token rather than fetching a new one — the token itself was
+   * never judged, so there is nothing to refresh.
+   *
+   * @returns ok(headers) when a credential is available; err(BaseError) when
+   *   the token provider's grant fails (propagated as-is).
+   */
+  private async buildHeaders(): Promise<Result<Record<string, string>, BaseError>> {
+    if (this.tokenProvider) {
+      const tokenResult = await this.tokenProvider.getToken();
+      if (!tokenResult.success) return err(tokenResult.error);
+      return ok({
+        'content-type': 'application/json',
+        authorization: `Bearer ${tokenResult.value}`,
+      });
+    }
+    return ok({
+      'content-type': 'application/json',
+      'x-api-key': this.apiKey as string,
+    });
+  }
+
   override async onboard(
     input: SignalStackOnboardParticipantInput,
   ): Promise<Result<SignalStackOnboardParticipantResult, BaseError>> {
@@ -205,8 +254,10 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
     if (input.phoneNumber) body.phone_number = input.phoneNumber;
     if (input.email) body.email = input.email;
 
+    const headersResult = await this.buildHeaders();
+    if (!headersResult.success) return err(headersResult.error);
     const headers = {
-      ...this.headers,
+      ...headersResult.value,
       'x-acting-org-id': input.actingOrgId,
       ...(input.requestId ? { 'x-request-id': input.requestId } : {}),
     };
@@ -392,8 +443,10 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       limit: query.limit ?? 50,
       offset: query.offset ?? 0,
     };
+    const headersResult = await this.buildHeaders();
+    if (!headersResult.success) return err(headersResult.error);
     const headers = {
-      ...this.headers,
+      ...headersResult.value,
       ...(query.requestId ? { 'x-request-id': query.requestId } : {}),
     };
     try {
@@ -481,8 +534,10 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
     if (input.domains && input.domains.length > 0) body.domains = input.domains;
     if (input.metadata) body.metadata = input.metadata;
 
+    const headersResult = await this.buildHeaders();
+    if (!headersResult.success) return err(headersResult.error);
     const headers = {
-      ...this.headers,
+      ...headersResult.value,
       'x-acting-org-id': this.actingOrgId,
       ...(input.requestId ? { 'x-request-id': input.requestId } : {}),
     };
@@ -574,8 +629,10 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
     const qs = params.toString();
     const url = `${this.baseUrl}/api/v1/aggregator/dashboard${qs ? `?${qs}` : ''}`;
 
+    const headersResult = await this.buildHeaders();
+    if (!headersResult.success) return err(headersResult.error);
     const headers = {
-      ...this.headers,
+      ...headersResult.value,
       'x-acting-org-id': query.actingOrgId,
       ...(query.requestId ? { 'x-request-id': query.requestId } : {}),
     };
@@ -731,8 +788,10 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
     const qs = params.toString();
     const url = `${this.baseUrl}/api/v1/aggregator/dashboard/export${qs ? `?${qs}` : ''}`;
 
+    const headersResult = await this.buildHeaders();
+    if (!headersResult.success) return err(headersResult.error);
     const headers = {
-      ...this.headers,
+      ...headersResult.value,
       'x-acting-org-id': query.actingOrgId,
       accept: 'text/csv',
       ...(query.requestId ? { 'x-request-id': query.requestId } : {}),
@@ -803,8 +862,10 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
     }
 
     const url = `${this.baseUrl}/api/v1/admin/participant/decrypt`;
+    const headersResult = await this.buildHeaders();
+    if (!headersResult.success) return err(headersResult.error);
     const headers = {
-      ...this.headers,
+      ...headersResult.value,
       'x-acting-org-id': query.actingOrgId,
       ...(query.requestId ? { 'x-request-id': query.requestId } : {}),
     };
@@ -912,8 +973,10 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
     if (input.email) body.email = input.email;
     if (input.phoneNumber) body.phone_number = input.phoneNumber;
 
+    const headersResult = await this.buildHeaders();
+    if (!headersResult.success) return err(headersResult.error);
     const headers = {
-      ...this.headers,
+      ...headersResult.value,
       'x-acting-org-id': input.actingOrgId,
       ...(input.requestId ? { 'x-request-id': input.requestId } : {}),
     };
@@ -1086,8 +1149,10 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
     const url = `${this.baseUrl}/api/v1/network/item/fetch_local`;
     const body = { item_id: query.item_id, limit: 1, offset: 0 };
 
+    const headersResult = await this.buildHeaders();
+    if (!headersResult.success) return err(headersResult.error);
     const headers = {
-      ...this.headers,
+      ...headersResult.value,
       ...(query.requestId ? { 'x-request-id': query.requestId } : {}),
     };
     try {

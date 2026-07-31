@@ -58,7 +58,7 @@ describe('blue-dots routes', () => {
   beforeEach(async () => {
     _resetJwks();
     process.env.KEYCLOAK_URL = 'http://kc.local';
-    process.env.KEYCLOAK_REALM = 'aggregator';
+    process.env.KEYCLOAK_REALM = 'bluedots';
     // Treat signalstack as enabled so getSignalStackWriter returns our fake.
     process.env.SIGNALSTACK_BASE_URL = 'http://stub-signalstack';
     process.env.SIGNALSTACK_ADMIN_KEY = 'stub-key';
@@ -230,7 +230,7 @@ describe('GET /v1/dashboard', () => {
   beforeEach(async () => {
     _resetJwks();
     process.env.KEYCLOAK_URL = 'http://kc.local';
-    process.env.KEYCLOAK_REALM = 'aggregator';
+    process.env.KEYCLOAK_REALM = 'bluedots';
     process.env.SIGNALSTACK_BASE_URL = 'http://stub-signalstack';
     process.env.SIGNALSTACK_ADMIN_KEY = 'stub-key';
     process.env.SIGNALSTACK_ACTING_ORG_ID = 'org_platform';
@@ -543,7 +543,7 @@ describe('POST /v1/dashboard/export/profiles', () => {
   beforeEach(async () => {
     _resetJwks();
     process.env.KEYCLOAK_URL = 'http://kc.local';
-    process.env.KEYCLOAK_REALM = 'aggregator';
+    process.env.KEYCLOAK_REALM = 'bluedots';
     process.env.SIGNALSTACK_BASE_URL = 'http://stub-signalstack';
     process.env.SIGNALSTACK_ADMIN_KEY = 'stub-key';
     process.env.SIGNALSTACK_ACTING_ORG_ID = 'org_platform';

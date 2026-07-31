@@ -105,6 +105,28 @@ const ConfigSchema = z.object({
   SIGNALSTACK_ITEM_NETWORK: z.string().default('blue_dot'),
   /** Per-request timeout for signalstack onboard calls. */
   SIGNALSTACK_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
+  /**
+   * Phase C of the Keycloak integration plan: which credential
+   * `HttpSignalStackWriter` sends. `apikey` (default) is today's
+   * `SIGNALSTACK_ADMIN_KEY` header; `bearer` fetches a client-credentials
+   * token instead. Must match apps/api's setting — both processes call the
+   * same signals instance as the same service identity.
+   */
+  SIGNALSTACK_AUTH_MODE: z.enum(['apikey', 'bearer']).default('apikey'),
+  /**
+   * Confidential Keycloak client id for the bearer credential. Must equal
+   * `aggregator-dpg`. Required when SIGNALSTACK_AUTH_MODE=bearer.
+   */
+  SIGNALSTACK_CLIENT_ID: z.string().optional(),
+  /** Client secret for SIGNALSTACK_CLIENT_ID. Required when SIGNALSTACK_AUTH_MODE=bearer. */
+  SIGNALSTACK_CLIENT_SECRET: z.string().optional(),
+  /**
+   * Keycloak base URL for the bearer token grant. The worker has no OIDC
+   * login of its own (no acting-org header, no user session) — these two
+   * vars exist solely to mint the service token.
+   */
+  KEYCLOAK_URL: z.string().optional(),
+  KEYCLOAK_REALM: z.string().optional(),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

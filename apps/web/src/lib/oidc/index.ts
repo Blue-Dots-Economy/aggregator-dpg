@@ -14,7 +14,7 @@ let instance: IdentityProviderAdapter | null = null;
  * Returns the configured identity-provider adapter.
  *
  * Required env:
- *   - OIDC_ISSUER (e.g. http://localhost:8080/realms/aggregator)
+ *   - OIDC_ISSUER (e.g. http://localhost:8080/realms/bluedots)
  *   - OIDC_CLIENT_ID (e.g. aggregator-portal)
  * Optional env:
  *   - OIDC_CLIENT_SECRET (omit for public client)
