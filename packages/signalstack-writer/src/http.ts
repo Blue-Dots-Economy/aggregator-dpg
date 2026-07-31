@@ -177,14 +177,17 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
     const submitMode: 'with_item' | 'account_only' = input.submit_mode ?? 'with_item';
     const body: Record<string, unknown> = {
       name: input.name,
-      terms_accepted: input.terms_accepted,
-      privacy_accepted: input.privacy_accepted,
       channel: input.channel,
       source_id: input.source_id,
       network: input.network,
       domain: input.domain,
       item_type: input.item_type,
     };
+    // Consent is recorded via the `compliance` array (the live mechanism);
+    // the deprecated `terms_accepted`/`privacy_accepted` flags are never sent.
+    // `age` accompanies compliance on guardian-gated domains.
+    if (input.compliance && input.compliance.length > 0) body.compliance = input.compliance;
+    if (typeof input.age === 'number') body.age = input.age;
     // Signalstack Plan-C renamed the body field from `profile` to
     // `item_state` — the value is unchanged. When the caller opts out of
     // item creation (`submit_mode === 'account_only'`), omit `item_state`
@@ -564,6 +567,8 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
     if (query.page !== undefined) params.set('page', String(query.page));
     if (query.limit !== undefined) params.set('limit', String(query.limit));
     if (query.status) params.set('status', query.status);
+    if (query.lifecycle && query.lifecycle.length > 0)
+      params.set('lifecycle', query.lifecycle.join(','));
     if (query.refresh) params.set('refresh', 'true');
     // domain intentionally NOT forwarded — see method docblock.
     const qs = params.toString();
@@ -900,8 +905,6 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
     // is the truthful attribution surface.
     const body: Record<string, unknown> = {
       name: 'lookup',
-      terms_accepted: true,
-      privacy_accepted: true,
       channel: 'link',
       network: input.network,
       domain: input.domain,

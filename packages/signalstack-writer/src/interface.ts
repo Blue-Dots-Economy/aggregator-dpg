@@ -58,6 +58,14 @@ export interface SignalStackProfile {
  * signalstack organisation id (sourced from `aggregators.signalstack_org_id`),
  * NOT the platform-wide acting org id used by aggregator upsert.
  */
+/** One participant compliance point forwarded to Signals `/admin/participant`. */
+export interface ComplianceEntry {
+  /** Compliance point key, e.g. `user_terms`, `user_privacy`, `profile_creation`. */
+  key: string;
+  /** Accept-only: `false` makes Signals reject with `CONSENT_DECLINED`. */
+  value: boolean;
+}
+
 export interface SignalStackOnboardParticipantInput {
   /** Correlation id (the x-request-id header) forwarded to Signals for tracing. */
   requestId?: string;
@@ -69,10 +77,27 @@ export interface SignalStackOnboardParticipantInput {
   phoneNumber?: string;
   /** Email address — at least one of phoneNumber / email is required. */
   email?: string;
-  /** Whether the participant has accepted the aggregator's T&C. */
-  terms_accepted: boolean;
-  /** Whether the participant has accepted the aggregator's privacy policy. */
-  privacy_accepted: boolean;
+  /**
+   * @deprecated Signals ignores these — consent is recorded only via
+   * {@link SignalStackOnboardParticipantInput.compliance}. Retained optionally
+   * for callers mid-migration; never forwarded on the request body.
+   */
+  terms_accepted?: boolean;
+  /** @deprecated See {@link SignalStackOnboardParticipantInput.terms_accepted}. */
+  privacy_accepted?: boolean;
+  /**
+   * Participant compliance points recorded by Signals on `/admin/participant`
+   * (the live consent mechanism). Accept-only: any `value:false` → Signals
+   * `CONSENT_DECLINED`. `user_terms`/`user_privacy` are both-or-none, and on a
+   * guardian-gated domain recording them requires {@link age}. Omitted keys are
+   * skipped. Absent/empty ⇒ no consent recorded for this push.
+   */
+  compliance?: ComplianceEntry[];
+  /**
+   * Participant age. Required by Signals when recording `user_terms`/
+   * `user_privacy` on a guardian-gated domain; otherwise optional.
+   */
+  age?: number;
   /** Channel attribution — distinguishes bulk-upload from link submission. */
   channel: SignalStackOnboardChannel;
   /**
@@ -234,6 +259,13 @@ export interface SignalStackDashboardQuery {
   limit?: number;
   status?: string;
   domain?: string;
+  /**
+   * Lifecycle statuses to include (`draft` | `live` | `paused` | `retired`).
+   * Forwarded as a comma-separated `?lifecycle=` filter. Absent ⇒ Signals'
+   * default. The aggregator dashboard passes `['draft','live']` so paused +
+   * retired profiles are excluded server-side.
+   */
+  lifecycle?: readonly string[];
   /**
    * When true, forwards `?refresh=true` to signalstack so it bypasses the
    * TTL cache and recomputes the rollup synchronously. Off by default.

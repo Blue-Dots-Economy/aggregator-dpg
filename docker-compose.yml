@@ -436,6 +436,13 @@ services:
       AGGREGATOR_NETWORK: ${AGGREGATOR_NETWORK:-blue_dot}
       AGGREGATOR_BRAND: ${AGGREGATOR_BRAND:-}
       CONFIG_ROOT: /app/config
+      # Deploy-time override for the signalstack network.json URL (#512);
+      # empty = use `aggregator.network.source` from the YAML.
+      AGGREGATOR_NETWORK_SOURCE: ${AGGREGATOR_NETWORK_SOURCE:-}
+      # Force-empty so the app derives the config path from CONFIG_ROOT +
+      # AGGREGATOR_NETWORK. Exporting the key (even empty) stops dotenv from
+      # loading a stale host path baked into the image's /app/.env.
+      AGGREGATOR_CONFIG_PATH: ${AGGREGATOR_CONFIG_PATH:-}
       # ── Outward push to signalstack (onboard) and read (blue-dots) ───
       SIGNALSTACK_BASE_URL: ${SIGNALSTACK_BASE_URL:-}
       SIGNALSTACK_ADMIN_KEY: ${SIGNALSTACK_ADMIN_KEY:-}
@@ -514,6 +521,12 @@ services:
       AGGREGATOR_NETWORK: ${AGGREGATOR_NETWORK:-blue_dot}
       AGGREGATOR_BRAND: ${AGGREGATOR_BRAND:-}
       CONFIG_ROOT: /app/config
+      # Deploy-time override for the signalstack network.json URL (#512);
+      # empty = use `aggregator.network.source` from the YAML.
+      AGGREGATOR_NETWORK_SOURCE: ${AGGREGATOR_NETWORK_SOURCE:-}
+      # Force-empty so the app derives the config path from CONFIG_ROOT +
+      # AGGREGATOR_NETWORK (stops dotenv loading a stale host path baked in).
+      AGGREGATOR_CONFIG_PATH: ${AGGREGATOR_CONFIG_PATH:-}
       # ─── File processor row caps ───────────────────────────────────
       BULK_MAX_ROWS: ${BULK_MAX_ROWS:-10000}
       BULK_MAX_ROW_BYTES: ${BULK_MAX_ROW_BYTES:-65536}
@@ -523,6 +536,7 @@ services:
       # ─── Outward push to signalstack (onboard) ───────────────────
       SIGNALSTACK_BASE_URL: ${SIGNALSTACK_BASE_URL:-}
       SIGNALSTACK_ADMIN_KEY: ${SIGNALSTACK_ADMIN_KEY:-}
+      SIGNALSTACK_ACTING_ORG_ID: ${SIGNALSTACK_ACTING_ORG_ID:-}
       SIGNALSTACK_ITEM_NETWORK: ${AGGREGATOR_NETWORK:-blue_dot}
       SIGNALSTACK_TIMEOUT_MS: ${SIGNALSTACK_TIMEOUT_MS:-10000}
     volumes:
