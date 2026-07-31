@@ -34,6 +34,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - uses: pnpm/action-setup@v6
 
@@ -62,6 +64,10 @@ jobs:
       - name: Test
         run: pnpm -w test
 
+      - name: Generate coverage reports (for SonarCloud)
+        run: pnpm -w test:coverage
+        continue-on-error: true
+
       - name: Build
         run: pnpm -w build
 
@@ -73,6 +79,11 @@ jobs:
 
       - name: Dep-cruiser — check interface boundaries
         run: pnpm dep-check
+
+      - name: SonarCloud scan
+        uses: SonarSource/sonarqube-scan-action@v6
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
   docker:
     name: Docker / ${{ matrix.app }}
