@@ -8,49 +8,22 @@ Aggregator DPG — the Aggregator-facing app of the Blue Dots / Signal Stack eco
 
 ## Toolchain
 
-- **Node** ≥ 24 (CI pins Node 24; Node 22 works locally).
-- **pnpm** ≥ 10 — `corepack enable pnpm` or `npm i -g pnpm`. Required (other PMs are not supported).
-- **Turbo** orchestrates `build`, `test`, `lint`, `typecheck`, `dev` topologically.
-- **Docker + Compose** brings up Postgres (`:5433`), Keycloak (`:8080`), Redis (`:6379`), Mailpit (`:8025`).
+Versions and ports are in `package.json` (`engines`, `packageManager`), `turbo.json`, and `docker-compose.yml`. Two things those files don't tell you:
+
+- **pnpm is required** — other package managers are not supported.
 - **AWS S3** is **not** in compose — in the VM/prod posture the API and worker hit real S3 via IAM role / `~/.aws/credentials`. For local dev, object storage is a **MinIO** container behind the `storage` compose profile (started by the dev overlay); see the Local stack run modes note below.
 
 ## Common commands
 
-```bash
-# Whole-repo
-pnpm -w build            # turbo run build (cached, topological)
-pnpm -w test             # all package tests (vitest)
-pnpm -w lint             # eslint everywhere
-pnpm -w typecheck        # tsc --noEmit everywhere
-pnpm dep-check           # dep-cruiser: enforces interface-boundary rules (see below)
+Root `package.json` scripts cover the whole-repo tasks (`pnpm -w build|test|lint|typecheck`, `pnpm dep-check`) and the `stack:*` wrappers; each app/package `package.json` covers its own `dev`/`test`/`db:*`. `Makefile` covers the container targets. The non-obvious ones:
 
-# Per package / app
-pnpm --filter @aggregator-dpg/api dev          # Fastify API on :4000 (tsx watch)
-pnpm --filter @aggregator-dpg/web dev          # Next.js portal + BFF on :3000
-pnpm --filter @aggregator-dpg/worker dev       # BullMQ worker (tsx watch)
-pnpm --filter <pkg> test                       # one package's vitest
-pnpm --filter <pkg> test --coverage            # with coverage (≥ 70% line target)
+```bash
 pnpm --filter <pkg> test -- path/to/file.test.ts   # single test file
 pnpm --filter <pkg> test -- -t "test name"         # single test by name
-
-# DB (Drizzle, owned by apps/api)
-pnpm --filter @aggregator-dpg/api db:generate  # generate new migration after editing schema
-pnpm --filter @aggregator-dpg/api db:migrate   # apply migrations
-pnpm --filter @aggregator-dpg/api db:studio    # Drizzle Studio
-
-# Local stack
-# Cross-platform entrypoint (Windows-friendly; make not required):
-pnpm stack:setup        # = make setup  (env + hosts via scripts/stack.mjs)
-pnpm stack:up           # = make up
-# stack:down | stack:reset | stack:logs | stack:ps | stack:psql | stack:rebuild-web
-make setup    # one-shot: copies infra/env.template -> .env (chmod 600) + adds 127.0.0.1 keycloak to /etc/hosts
-make up       # docker compose up -d --build (everything containerised)
-make down     # stop containers (volumes preserved)
-make reset    # docker compose down -v — DESTROYS data volumes
-make psql     # psql into local postgres
-make rebuild-web         # rebuild web image + restart container (use after NEXT_PUBLIC_* env change)
-make rebuild-keycloak    # rebuild OTP SPI jar + restart Keycloak
+pnpm --filter <pkg> test --coverage                # ≥ 70% line target
 ```
+
+Stack run modes, env layout, and the VM-deploy checklist live in the `local-stack` skill — including the two footguns (`make reset` destroys data volumes; `make rebuild-web` is required after any `NEXT_PUBLIC_*` change, since those are baked at build time).
 
 Commits run husky/lint-staged (`prettier --write` + `eslint --fix`) on staged files. Conventional Commits required; **do not bypass with `--no-verify`** (per `CONTRIBUTING.md`).
 
@@ -85,11 +58,7 @@ Per-instance feature flag (default **off**), read once at startup by **both** th
 
 ### Local stack run modes
 
-- **Hybrid (dev)** — `docker compose up -d` for backing services + `pnpm --filter ... dev` for api/web/worker outside the container. Uses `apps/<app>/.env` (copy from `.env.example`).
-- **Docker-only (VM / prod-like)** — `make setup && make up`. All env values live in a **single root `.env`** sectioned per service (`infra/env.template` is the canonical layout). `NEXT_PUBLIC_API_URL` is baked at compile time, so VM redeploys must use `docker compose up -d --build`. The base `docker-compose.yml` is the prod/VM posture: TLS verify **on**, `INSTANCE_ENV=production`, no host-published DB/Redis/MinIO ports, and MinIO behind the **`storage`** compose profile. `make up` / `stack:up` layer `docker-compose.dev.yml`, which rebinds those ports to `127.0.0.1`, sets `INSTANCE_ENV=development`, and relaxes TLS for the local CA. api/worker run an `assertTlsPosture` startup guard that hard-fails boot when TLS verification is off under a production `INSTANCE_ENV`.
-- **Unified full-ecosystem stack (`local-setup/`)** — brings up **both** aggregator-dpg _and_ the upstream signals-dpg (+ shared Postgres/Redis/Keycloak/MinIO/Mailpit) in one `docker compose up -d`, wired for localhost. It builds both repos, so it expects `aggregator-dpg` and `signals-dpg` checked out as **siblings** and is run from `local-setup/`. See `local-setup/LOCAL_SETUP.md` for the full walkthrough (Track A = all-in-Docker, Track B = hybrid). The compose here (repo root `docker-compose.yml`) remains the VM/prod nginx+certbot ingress variant.
-
-When deploying to a VM, replace `localhost` and `keycloak` everywhere in `.env` with the VM hostname/IP, and update the `aggregator-portal` client's **Valid Redirect URIs** + **Web Origins** in the Keycloak admin console.
+Three modes (hybrid dev, docker-only VM/prod-like, and the unified full-ecosystem stack in `local-setup/`), the TLS/`INSTANCE_ENV` posture guard, and the VM-deploy checklist are all in the **`local-stack` skill** — read it before touching compose files, `.env`, or `infra/env.template`.
 
 ## Nested docs
 
@@ -104,16 +73,11 @@ Non-negotiable for any code change. Some load always; some are path-scoped and o
 - **`testing.md`** — **path-scoped** to `packages/*/src/testing.ts`, `packages/*/src/testing/**`, `apps/api/src/services/**` (wherever the `./testing` fake-subpath convention actually lives). Fakes over `vi.mock()`, extend the in-memory impl, `seed()` + `build<Entity>()` helpers.
 - **`testing-requirements.md`** — **path-scoped** to any test file (`**/*.test.ts(x)`, `**/*.integration.test.ts`, `**/__tests__/**`) — applies repo-wide including `apps/web`/`apps/worker` tests that don't use the fake-subpath convention. Vitest only, ≥70% line coverage, `.integration.test.ts` excluded from `pnpm -w test`.
 
-The dep-cruiser config (`.dependency-cruiser.cjs`) enforces these at CI time:
-
-1. `no-cross-service-impl-imports` — cross-package imports must go through `./interface` or `./testing` subpaths.
-2. `no-heavy-deps-in-interface` — interface files may only import `shared-primitives`, `zod`, or `node:*`.
-
-Run `pnpm dep-check` locally before pushing; it's a required CI step.
+`.dependency-cruiser.cjs` enforces the interface-boundary rules at CI time. Run `pnpm dep-check` locally before pushing; it's a required CI step.
 
 ## CI
 
-GitHub Actions `CI` job runs on pushes to `main` / `develop` and PRs to `main` / `develop` / `feature`: `pnpm -w lint`, `typecheck`, `test`, `build`, then `pnpm dep-check`. A separate `docker / {api,web,worker}` matrix builds and (on non-PR pushes) publishes to GHCR. Branch protection requires the `CI` check (see `docs/ci-required-checks.md`). Tags `web-v*`, `api-v*`, `worker-v*` cut release images per app.
+See `.github/workflows/ci.yml` for the job graph and `docs/ci-required-checks.md` for which checks branch protection requires (and which are deliberately advisory).
 
 ## Authoring pull requests
 
