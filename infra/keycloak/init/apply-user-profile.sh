@@ -461,3 +461,76 @@ for svc in aggregator-dpg voice-dpg; do
 done
 
 echo "[kc-init] acting-org claim mappers ready."
+
+# ────────────────────────────────────────────────────────────────────────────
+# 6) Per-client login theme
+#
+# `loginTheme` is a REALM-level setting, and since the Phase B merge one realm
+# serves both DPGs — so both apps rendered the same login page and signals
+# visitors were shown the aggregator's title and hero copy. Keycloak's
+# per-client `login_theme` attribute is the override.
+#
+# Set here as well as in the realm JSON for the usual reason: the JSON is only
+# read on FIRST import, so realms already in Postgres would never pick it up.
+#
+# aggregator-portal needs no entry — the realm default `otp` is already its
+# theme. Only the override is applied.
+# ────────────────────────────────────────────────────────────────────────────
+
+ensure_login_theme() {
+  target_client="$1"
+  theme_name="$2"
+
+  client_uuid=$(curl -fsS "${KC_URL}/admin/realms/${REALM}/clients?clientId=${target_client}" \
+    -H "Authorization: Bearer ${TOKEN}" | jq -r '.[0].id // empty')
+
+  if [ -z "$client_uuid" ]; then
+    echo "[kc-init] client '${target_client}' not found — skipping login theme"
+    return 0
+  fi
+
+  current=$(curl -fsS "${KC_URL}/admin/realms/${REALM}/clients/${client_uuid}" \
+    -H "Authorization: Bearer ${TOKEN}" | jq -r '.attributes.login_theme // empty')
+
+  if [ "$current" = "$theme_name" ]; then
+    echo "[kc-init] ${target_client}: login theme already '${theme_name}' — skip"
+    return 0
+  fi
+
+  # Merge into the existing attributes rather than PUTting a bare object — the
+  # client already carries pkce.code.challenge.method and
+  # post.logout.redirect.uris, and dropping those would break its login and
+  # logout flows.
+  curl -fsS "${KC_URL}/admin/realms/${REALM}/clients/${client_uuid}" \
+    -H "Authorization: Bearer ${TOKEN}" \
+    | jq --arg theme "$theme_name" '.attributes.login_theme = $theme' \
+    > /tmp/kc-client-theme.json
+
+  http=$(curl -s -o /tmp/kc-theme-resp.json -w "%{http_code}" -X PUT \
+    "${KC_URL}/admin/realms/${REALM}/clients/${client_uuid}" \
+    -H "Authorization: Bearer ${TOKEN}" \
+    -H "Content-Type: application/json" \
+    --data @/tmp/kc-client-theme.json)
+
+  if [ "$http" != "204" ]; then
+    echo "[kc-init] ${target_client}: login theme PUT FAILED: HTTP ${http}"
+    cat /tmp/kc-theme-resp.json || true
+    return 1
+  fi
+
+  # Verify rather than trust — see the note at the top of section 1. A 204 on a
+  # client update does not guarantee the attribute survived.
+  applied=$(curl -fsS "${KC_URL}/admin/realms/${REALM}/clients/${client_uuid}" \
+    -H "Authorization: Bearer ${TOKEN}" | jq -r '.attributes.login_theme // empty')
+
+  if [ "$applied" != "$theme_name" ]; then
+    echo "[kc-init] ${target_client}: login theme did NOT persist (got '${applied:-<unset>}', wanted '${theme_name}')"
+    return 1
+  fi
+
+  echo "[kc-init] ${target_client}: login theme set to '${theme_name}'"
+}
+
+ensure_login_theme signals-ui signals
+
+echo "[kc-init] per-client login themes ready."

@@ -223,7 +223,12 @@ services:
       SMTP_HOST: mailpit
       SMTP_PORT: "1025"
       SMTP_FROM: ${SMTP_FROM:-no-reply@bluedots.local}
-      SMTP_FROM_DISPLAY: ${SMTP_FROM_DISPLAY:-Blue Dots Aggregator}
+      # Neutral, not "Blue Dots Aggregator": this Keycloak serves both DPGs, and
+      # `emailTheme` is realm-level with no per-client override — so every OTP
+      # mail, signals' included, is sent under this one display name. Keep it
+      # app-agnostic. (aggregator's own standalone compose serves only
+      # aggregator, so its value can stay branded.)
+      SMTP_FROM_DISPLAY: ${SMTP_FROM_DISPLAY:-Blue Dots}
       SMTP_AUTH: "false"
       SMTP_STARTTLS: "false"
       SMTP_SSL: "false"
@@ -290,7 +295,9 @@ services:
       SMTP_HOST: mailpit
       SMTP_PORT: "1025"
       SMTP_FROM: ${SMTP_FROM:-no-reply@bluedots.local}
-      SMTP_FROM_DISPLAY: ${SMTP_FROM_DISPLAY:-Blue Dots Aggregator}
+      # Must match the keycloak service's value above — this sidecar re-applies
+      # the realm's SMTP config, so a divergence here would silently overwrite it.
+      SMTP_FROM_DISPLAY: ${SMTP_FROM_DISPLAY:-Blue Dots}
       SMTP_SECURE: "false"
       SMTP_USER: ""
       SMTP_PASSWORD: ""
