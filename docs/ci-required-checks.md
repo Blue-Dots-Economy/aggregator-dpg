@@ -40,6 +40,10 @@ until coverage and the security rating are green.
   local vitest thresholds, and that must not fail the build. The separate `Test` step
   is what actually gates. Do not "tidy" these into one step — that re-introduces the
   coupling.
+- The `SonarCloud scan` step is **also** `continue-on-error: true`, for a different
+  reason: the `docker` matrix depends on the `ci` job, so a SonarCloud outage or an
+  expired token must not stop a green build from publishing images. Scan failures show
+  up in the run log and in SonarCloud's own commit check instead of reddening CI.
 - `SONAR_TOKEN` lives in repo Actions secrets. Checkout uses `fetch-depth: 0` so
   Sonar can attribute new code to the right commits.
 
