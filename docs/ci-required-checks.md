@@ -46,6 +46,15 @@ until coverage and the security rating are green.
   up in the run log and in SonarCloud's own commit check instead of reddening CI.
 - `SONAR_TOKEN` lives in repo Actions secrets. Checkout uses `fetch-depth: 0` so
   Sonar can attribute new code to the right commits.
+- The token is exposed as a **job-level** `env` so the scan step can gate on it with
+  `if: env.SONAR_TOKEN != ''` (the `secrets` context is not available in a step `if:`,
+  and a step's own `env:` block is not in scope for its own `if:`). Runs without the
+  secret — Dependabot-raised and fork pull requests, which GitHub deliberately denies
+  repo secrets — therefore **skip** the scan instead of failing it. Before this gate,
+  every Dependabot PR went red on `exit code 3` / "Not authorized or project not
+  found" even when lint, type-check, test and build all passed. This complements the
+  bullet above rather than replacing it: `continue-on-error` handles a scan that runs
+  and fails, the `if:` handles one that could never authenticate in the first place.
 
 ### The 80%-vs-70% gap
 
