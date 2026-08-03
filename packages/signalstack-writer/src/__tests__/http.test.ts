@@ -173,6 +173,41 @@ describe('HttpSignalStackWriter.onboard', () => {
     expect(result.value.onboarded_at).toBe('2026-01-01T00:00:00Z');
   });
 
+  it('forwards the compliance array + age and never the deprecated consent flags', async () => {
+    fetchMock.mockResolvedValueOnce(okJsonResponse(ONBOARD_RESPONSE));
+
+    await writer.onboard({
+      actingOrgId: 'org-abc',
+      name: 'Asha',
+      phoneNumber: '+919876543210',
+      age: 27,
+      compliance: [
+        { key: 'user_terms', value: true },
+        { key: 'user_privacy', value: true },
+        { key: 'profile_creation', value: true },
+      ],
+      channel: 'link',
+      source_id: 'link-1',
+      network: 'blue_dot',
+      domain: 'seeker',
+      item_type: 'profile_1.0',
+      profile: { occupation: 'carpenter' },
+    });
+
+    const sentBody = JSON.parse(
+      String((fetchMock.mock.calls[0]?.[1] as RequestInit).body),
+    ) as Record<string, unknown>;
+    expect(sentBody.compliance).toEqual([
+      { key: 'user_terms', value: true },
+      { key: 'user_privacy', value: true },
+      { key: 'profile_creation', value: true },
+    ]);
+    expect(sentBody.age).toBe(27);
+    // Deprecated flags must never leave the writer.
+    expect(sentBody).not.toHaveProperty('terms_accepted');
+    expect(sentBody).not.toHaveProperty('privacy_accepted');
+  });
+
   it('returns SIGNALSTACK_INPUT_INVALID when actingOrgId is missing', async () => {
     const result = await writer.onboard({
       actingOrgId: '',
@@ -483,6 +518,26 @@ describe('HttpSignalStackWriter.fetchDashboard — refresh flag', () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining('refresh=true'),
+      expect.anything(),
+    );
+  });
+
+  it('forwards a comma-separated ?lifecycle= filter when provided', async () => {
+    fetchMock.mockResolvedValueOnce(okJsonResponse(CANONICAL_DASHBOARD_PAYLOAD));
+
+    await writer.fetchDashboard({ actingOrgId: 'org-abc', lifecycle: ['live', 'paused'] });
+
+    const url = String(fetchMock.mock.calls[0]?.[0]);
+    expect(url).toContain('lifecycle=live%2Cpaused');
+  });
+
+  it('does NOT append lifecycle when unset or empty', async () => {
+    fetchMock.mockResolvedValueOnce(okJsonResponse(CANONICAL_DASHBOARD_PAYLOAD));
+
+    await writer.fetchDashboard({ actingOrgId: 'org-abc', lifecycle: [] });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.not.stringContaining('lifecycle='),
       expect.anything(),
     );
   });
