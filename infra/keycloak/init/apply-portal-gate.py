@@ -2,17 +2,41 @@
 """Apply the aggregator-portal entitlement gate to a LIVE Keycloak realm.
 
 Mirrors infra/keycloak/realms/realm.json for stacks whose realm was already
-imported (--import-realm only runs on an empty realm). Idempotent: drops and
-recreates the aggregator-portal-browser flow tree each run.
+imported (--import-realm only runs on an empty realm). Idempotent.
+
+Fail-CLOSED apply order (build -> verify -> rebind -> delete):
+
+  1. Build a COMPLETE new flow tree under generation-suffixed aliases, while
+     the client stays bound to whatever it is bound to now.
+  2. Verify the new tree structurally — both gates present, DENY executions
+     REQUIRED, and both OTP gates positioned BEFORE otp-channel-choice-form
+     (the property that stops an OTP being issued to an ineligible user).
+  3. Only then rebind aggregator-portal, in a single PUT.
+  4. Only then delete the superseded flows.
+
+Nothing destructive happens before the rebind succeeds, so an interrupted run
+(assert trip, transport drop, 409, Keycloak restart) leaves the PREVIOUS
+binding intact rather than dropping the client onto the ungated default
+browser flow. Any failure restores the entry-time binding, prints a loud
+"GATE NOT APPLIED", and exits non-zero.
+
+Generation suffixes exist because Keycloak flow/config aliases are unique per
+realm: a stale alias blocks recreation, so the new tree cannot reuse the old
+names while the old tree is still live. The FIRST apply on a realm with no
+aggregator-portal-* flows uses the canonical aliases and the pinned FLOW_ID
+(matching realm.json); later re-applies use `-gN` aliases and a
+Keycloak-assigned id, which is immaterial because the client is rebound by the
+id read back from the server.
 """
-import json, os, sys, urllib.request, urllib.parse, urllib.error
+import json, os, re, sys, urllib.request, urllib.parse, urllib.error
 
 KC = os.environ.get("KC_URL", "http://localhost:8080")
 REALM = os.environ.get("KC_REALM", "bluedots")
 USER = os.environ.get("KC_ADMIN_USERNAME", "admin")
 PASS = os.environ["KC_ADMIN_PASSWORD"]
 
-PORTAL_FLOW = "aggregator-portal-browser"
+BASE_FLOW = "aggregator-portal-browser"
+ALIAS_PREFIX = "aggregator-portal-"
 FLOW_ID = "9f3b1c52-7a41-4c8e-9d16-3b0f5a2e7c84"
 
 
@@ -43,10 +67,15 @@ def token():
 
 TOK = token()
 A = f"/admin/realms/{REALM}/authentication"
+C = f"/admin/realms/{REALM}/clients"
 
 
 def executions(flow):
     return req("GET", f"{A}/flows/{urllib.parse.quote(flow)}/executions", tok=TOK)[1]
+
+
+def flows():
+    return req("GET", f"{A}/flows", tok=TOK)[1]
 
 
 def find_exec(flow, display=None, provider=None):
@@ -106,72 +135,200 @@ DENY_APPROVED = "Your Aggregator registration has not been approved yet."
 OTP_CHOICE = {"otpChoice.codeLength": "6", "otpChoice.ttl": "300",
               "otpChoice.maxRetries": "3", "otpChoice.phoneAttribute": "phoneNumber"}
 
-# --- tear down any previous attempt -----------------------------------------
-# Unbind first: Keycloak refuses to delete a flow a client still points at.
-_clients = req("GET", f"/admin/realms/{REALM}/clients?clientId=aggregator-portal", tok=TOK)[1]
-_cid = _clients[0]["id"]
-_rep = req("GET", f"/admin/realms/{REALM}/clients/{_cid}", tok=TOK)[1]
-if _rep.get("authenticationFlowBindingOverrides"):
-    # An empty map is silently ignored on update; an empty string clears it.
-    _rep["authenticationFlowBindingOverrides"] = {"browser": ""}
-    req("PUT", f"/admin/realms/{REALM}/clients/{_cid}", _rep, tok=TOK)
-    _now = req("GET", f"/admin/realms/{REALM}/clients/{_cid}", tok=TOK)[1]
-    print(f"  unbound aggregator-portal override -> {_now.get('authenticationFlowBindingOverrides')}")
 
-# Children are not cascade-deleted, and a stale alias blocks recreation.
-for f in req("GET", f"{A}/flows", tok=TOK)[1]:
-    if f["alias"].startswith("aggregator-portal-"):
+# --- resolve the client + its CURRENT binding (nothing mutated yet) ----------
+_clients = req("GET", f"{C}?clientId=aggregator-portal", tok=TOK)[1]
+assert _clients, "client aggregator-portal not found in realm " + REALM
+CID = _clients[0]["id"]
+PREV_BINDING = dict(
+    req("GET", f"{C}/{CID}", tok=TOK)[1].get("authenticationFlowBindingOverrides") or {}
+)
+print(f"  aggregator-portal current browser binding: {PREV_BINDING.get('browser') or '(none)'}")
+
+
+def bind(flow_id):
+    """Point aggregator-portal's browser flow at `flow_id` in a single PUT.
+
+    An empty string clears the override (an empty map is silently ignored on
+    update); clearing means the realm-default, UNGATED browser flow.
+    """
+    rep = req("GET", f"{C}/{CID}", tok=TOK)[1]
+    rep["authenticationFlowBindingOverrides"] = {"browser": flow_id or ""}
+    st, b = req("PUT", f"{C}/{CID}", rep, tok=TOK)
+    assert st in (200, 204), (st, b)
+
+
+# --- pick this run's generation ---------------------------------------------
+# Aliases are realm-unique, so a rebuild that must coexist with the live tree
+# needs fresh names. Generation 0 == the canonical realm.json aliases.
+_existing = [f["alias"] for f in flows() if f["alias"].startswith(ALIAS_PREFIX)]
+_gens = [0] if BASE_FLOW in _existing else []
+for _a in _existing:
+    m = re.fullmatch(re.escape(BASE_FLOW) + r"-g(\d+)", _a)
+    if m:
+        _gens.append(int(m.group(1)))
+# ANY leftover aggregator-portal-* alias forces a fresh generation, including an
+# orphaned sub-flow from a half-finished older run — reusing gen 0 there would
+# collide on the sub-flow alias, not just the top-level one.
+GEN = 0 if not _existing else (max(_gens) + 1 if _gens else 1)
+SUFFIX = "" if GEN == 0 else f"-g{GEN}"
+
+PORTAL_FLOW = BASE_FLOW + SUFFIX
+AUTH = "aggregator-portal-auth" + SUFFIX
+FORMS = "aggregator-portal-otp-forms" + SUFFIX
+NEW_ALIASES = set()
+
+
+def n(alias):
+    """Namespace an alias into this run's generation and record it as ours."""
+    a = alias + SUFFIX
+    NEW_ALIASES.add(a)
+    return a
+
+
+for _a in (PORTAL_FLOW, AUTH, FORMS):
+    NEW_ALIASES.add(_a)
+
+
+def verify(flow):
+    """Assert the freshly built tree actually gates, BEFORE it is bound.
+
+    @param flow - Top-level flow alias to inspect.
+    @raises AssertionError - When a gate is missing, a DENY is not REQUIRED, or
+        an OTP gate does not precede otp-channel-choice-form (which would let
+        an ineligible user receive a code — the whole point of the gate).
+    """
+    exs = executions(flow)
+    providers = [e.get("providerId") for e in exs]
+    names = [e.get("displayName") for e in exs]
+
+    assert providers.count("deny-access-authenticator") == 4, (
+        "expected 4 deny-access executions (2 OTP-path + 2 SSO-path), got "
+        f"{providers.count('deny-access-authenticator')}"
+    )
+    assert providers.count("conditional-user-attribute") == 4, (
+        "expected 4 conditional-user-attribute executions, got "
+        f"{providers.count('conditional-user-attribute')}"
+    )
+    for p in ("auth-cookie", "otp-identifier-form", "otp-channel-choice-form"):
+        assert p in providers, f"missing execution {p} in {flow}"
+
+    for e in exs:
+        if e.get("providerId") == "deny-access-authenticator":
+            assert e["requirement"] == "REQUIRED", ("deny not REQUIRED", e)
+        if (e.get("displayName") or "").startswith("aggregator-portal-gate-"):
+            assert e["requirement"] == "CONDITIONAL", ("gate not CONDITIONAL", e)
+
+    # Depth-first order: every OTP-path gate must sit ahead of the code issuer.
+    otp_idx = providers.index("otp-channel-choice-form")
+    gates = [i for i, d in enumerate(names) if (d or "").startswith("aggregator-portal-gate-otp-")]
+    assert len(gates) == 2, ("expected 2 OTP-path gates, got", gates)
+    assert max(gates) < otp_idx, (
+        "OTP entitlement gate is ordered AFTER otp-channel-choice-form — an "
+        "ineligible user would be sent a code"
+    )
+    print(f"  verified {flow}: 2 OTP gates + 2 SSO gates, all ahead of OTP dispatch")
+
+
+# --- already gated? then this is a no-op -------------------------------------
+# Lets the keycloak-init sidecar run this on EVERY boot: a realm freshly
+# imported from realm.json already carries the gate (with the pinned FLOW_ID),
+# so rebuilding would churn the tree and discard that id for no benefit. Only a
+# missing or structurally broken gate triggers a rebuild.
+_bound_id = PREV_BINDING.get("browser")
+if _bound_id:
+    _bound_alias = next((f["alias"] for f in flows() if f["id"] == _bound_id), None)
+    if _bound_alias:
+        try:
+            verify(_bound_alias)
+            print(f"\nGate already present on '{_bound_alias}' — nothing to do.")
+            sys.exit(0)
+        except AssertionError as e:
+            print(f"  bound flow '{_bound_alias}' failed verification ({e}) — rebuilding")
+    else:
+        print(f"  bound flow id {_bound_id} no longer exists — rebuilding")
+
+print(f"  building generation {GEN} (aliases suffixed {SUFFIX or '<none>'})")
+
+try:
+    # --- build the new tree, in execution order -----------------------------
+    body = {
+        "alias": PORTAL_FLOW, "providerId": "basic-flow",
+        "topLevel": True, "builtIn": False,
+        "description": "aggregator-portal only; bound by flow ID. Adds a portal-entitlement gate to aggregator-otp-browser.",
+    }
+    # Pin the realm.json id only on a clean realm; on a rebuild the old tree
+    # still holds it, so let Keycloak assign one and bind by the id read back.
+    if GEN == 0:
+        body["id"] = FLOW_ID
+    st, b = req("POST", f"{A}/flows", body, tok=TOK)
+    assert st in (200, 201), (st, b)
+    print(f"  created flow {PORTAL_FLOW}")
+
+    # The ALTERNATIVE pair must live one level down: Keycloak ignores every
+    # ALTERNATIVE at a level that also holds REQUIRED/CONDITIONAL executions.
+    add_subflow(PORTAL_FLOW, AUTH, "Cookie or OTP forms (ALTERNATIVE pair).", "REQUIRED")
+    add_exec(AUTH, "auth-cookie", "ALTERNATIVE")
+
+    add_subflow(AUTH, FORMS,
+                "Identifier resolution, entitlement gate, then OTP channel choice.", "ALTERNATIVE")
+    add_exec(FORMS, "otp-identifier-form", "REQUIRED")
+    gate(FORMS, n("aggregator-portal-gate-otp-coordinator"),
+         "Deny before OTP dispatch: no aggregator_id, so not a coordinator.",
+         NO_AGG_ID, n("aggregator-portal-cond-no-aggregator-id"), DENY_COORD,
+         n("aggregator-portal-deny-not-coordinator"))
+    gate(FORMS, n("aggregator-portal-gate-otp-approved"),
+         "Deny before OTP dispatch: decision_made is absent, pending or rejected.",
+         NOT_APPROVED, n("aggregator-portal-cond-not-approved"), DENY_APPROVED,
+         n("aggregator-portal-deny-not-approved"))
+    add_exec(FORMS, "otp-channel-choice-form", "REQUIRED", OTP_CHOICE,
+             n("aggregator-portal-otp-choice-config"))
+
+    gate(PORTAL_FLOW, n("aggregator-portal-gate-sso-coordinator"),
+         "Coordinator gate on the auth-cookie path (shared-realm SSO bypass).",
+         NO_AGG_ID, n("aggregator-portal-cond-no-aggregator-id-sso"), DENY_COORD,
+         n("aggregator-portal-deny-not-coordinator-sso"))
+    gate(PORTAL_FLOW, n("aggregator-portal-gate-sso-approved"),
+         "Approval gate on the auth-cookie path.",
+         NOT_APPROVED, n("aggregator-portal-cond-not-approved-sso"), DENY_APPROVED,
+         n("aggregator-portal-deny-not-approved-sso"))
+
+    # --- verify BEFORE the client is pointed at it --------------------------
+    verify(PORTAL_FLOW)
+
+    # --- swap: single PUT, gated tree already complete ----------------------
+    new_id = [f for f in flows() if f["alias"] == PORTAL_FLOW][0]["id"]
+    bind(new_id)
+    now = req("GET", f"{C}/{CID}", tok=TOK)[1].get("authenticationFlowBindingOverrides") or {}
+    assert now.get("browser") == new_id, ("rebind did not stick", now)
+    print(f"  bound aggregator-portal browser flow -> {new_id} "
+          f"(pinned id honoured: {new_id == FLOW_ID})")
+except Exception as e:
+    # Nothing destructive has run yet: the client is still on its entry-time
+    # binding, or we restore it here if the failing step was the rebind.
+    print(f"\n  !! apply failed: {type(e).__name__}: {e}", file=sys.stderr)
+    try:
+        bind(PREV_BINDING.get("browser", ""))
+        restored = PREV_BINDING.get("browser") or "(none — realm default)"
+        print(f"  restored previous browser binding: {restored}", file=sys.stderr)
+    except Exception as e2:
+        print(f"  !! could not restore previous binding: {e2}", file=sys.stderr)
+    if not PREV_BINDING.get("browser"):
+        print("\n*** GATE NOT APPLIED — aggregator-portal is on the UNGATED default "
+              "browser flow. Ineligible users can be sent OTPs. Re-run this script "
+              "before exposing the portal. ***", file=sys.stderr)
+    else:
+        print("\n*** GATE NOT APPLIED — aggregator-portal is still bound to its "
+              "previous flow; no change took effect. Re-run this script. ***",
+              file=sys.stderr)
+    sys.exit(1)
+
+# --- retire superseded generations (client is already on the new tree) -------
+# Children are not cascade-deleted, and a stale alias would block a later run.
+for f in flows():
+    if f["alias"].startswith(ALIAS_PREFIX) and f["alias"] not in NEW_ALIASES:
         st, _ = req("DELETE", f"{A}/flows/{f['id']}", tok=TOK)
-        print(f"  removed flow {f['alias']} -> HTTP {st}")
-
-# --- build the flow tree, in execution order --------------------------------
-st, b = req("POST", f"{A}/flows", {
-    "id": FLOW_ID, "alias": PORTAL_FLOW, "providerId": "basic-flow",
-    "topLevel": True, "builtIn": False,
-    "description": "aggregator-portal only; bound by flow ID. Adds a portal-entitlement gate to aggregator-otp-browser.",
-}, tok=TOK)
-assert st in (200, 201), (st, b)
-print(f"  created flow {PORTAL_FLOW}")
-
-# The ALTERNATIVE pair must live one level down: Keycloak ignores every
-# ALTERNATIVE at a level that also holds REQUIRED/CONDITIONAL executions.
-AUTH = "aggregator-portal-auth"
-add_subflow(PORTAL_FLOW, AUTH, "Cookie or OTP forms (ALTERNATIVE pair).", "REQUIRED")
-add_exec(AUTH, "auth-cookie", "ALTERNATIVE")
-
-FORMS = "aggregator-portal-otp-forms"
-add_subflow(AUTH, FORMS,
-            "Identifier resolution, entitlement gate, then OTP channel choice.", "ALTERNATIVE")
-add_exec(FORMS, "otp-identifier-form", "REQUIRED")
-gate(FORMS, "aggregator-portal-gate-otp-coordinator",
-     "Deny before OTP dispatch: no aggregator_id, so not a coordinator.",
-     NO_AGG_ID, "aggregator-portal-cond-no-aggregator-id", DENY_COORD,
-     "aggregator-portal-deny-not-coordinator")
-gate(FORMS, "aggregator-portal-gate-otp-approved",
-     "Deny before OTP dispatch: decision_made is absent, pending or rejected.",
-     NOT_APPROVED, "aggregator-portal-cond-not-approved", DENY_APPROVED,
-     "aggregator-portal-deny-not-approved")
-add_exec(FORMS, "otp-channel-choice-form", "REQUIRED", OTP_CHOICE,
-         "aggregator-portal-otp-choice-config")
-
-gate(PORTAL_FLOW, "aggregator-portal-gate-sso-coordinator",
-     "Coordinator gate on the auth-cookie path (shared-realm SSO bypass).",
-     NO_AGG_ID, "aggregator-portal-cond-no-aggregator-id-sso", DENY_COORD,
-     "aggregator-portal-deny-not-coordinator-sso")
-gate(PORTAL_FLOW, "aggregator-portal-gate-sso-approved",
-     "Approval gate on the auth-cookie path.",
-     NOT_APPROVED, "aggregator-portal-cond-not-approved-sso", DENY_APPROVED,
-     "aggregator-portal-deny-not-approved-sso")
-
-# --- bind to the aggregator-portal client only ------------------------------
-clients = req("GET", f"/admin/realms/{REALM}/clients?clientId=aggregator-portal", tok=TOK)[1]
-cid = clients[0]["id"]
-actual_id = [f for f in req("GET", f"{A}/flows", tok=TOK)[1] if f["alias"] == PORTAL_FLOW][0]["id"]
-rep = req("GET", f"/admin/realms/{REALM}/clients/{cid}", tok=TOK)[1]
-rep["authenticationFlowBindingOverrides"] = {"browser": actual_id}
-st, b = req("PUT", f"/admin/realms/{REALM}/clients/{cid}", rep, tok=TOK)
-assert st in (200, 204), (st, b)
-print(f"  bound aggregator-portal browser flow -> {actual_id} (pinned id honoured: {actual_id == FLOW_ID})")
+        print(f"  removed superseded flow {f['alias']} -> HTTP {st}")
 
 print("\nFinal structure:")
 for e in executions(PORTAL_FLOW):

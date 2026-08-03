@@ -22,7 +22,11 @@ export interface KeycloakTokenProviderConfig {
   baseUrl: string;
   /** Realm holding the service client (the combined realm both DPGs share). */
   realm: string;
-  /** Confidential client id — must equal `aggregator-dpg` (signals maps client id → organization.slug). */
+  /**
+   * Confidential client id. Signals maps client id → `organization.slug`, so
+   * this must equal the aggregator's slug there; the callers assert that at
+   * boot via `SIGNALSTACK_ORG_SLUG`.
+   */
   clientId: string;
   clientSecret: string;
   /** Optional override; defaults to global `fetch`. Lets tests inject a stub. */
@@ -36,6 +40,28 @@ interface CachedToken {
   expiresAt: number;
 }
 
+/**
+ * True when a thrown fetch error represents a client-side deadline rather than
+ * a connection-level failure.
+ *
+ * `AbortSignal.timeout()` rejects with a `DOMException` named
+ * **`TimeoutError`** (not `AbortError`, and with no `cause`), while a manual
+ * `AbortController.abort()` — the shape `http.ts` produces — rejects with
+ * `AbortError`. Undici also nests either name under `cause` on some paths.
+ * All of them mean "we gave up waiting", so all of them must map to
+ * `SIGNALSTACK_TIMEOUT`; classifying only `AbortError` mislabels a real
+ * Keycloak token-endpoint timeout as a transport failure.
+ *
+ * @param e - The value thrown by `fetch`.
+ * @returns `true` when the failure was a timeout/abort.
+ */
+function _isTimeout(e: unknown): boolean {
+  const names = new Set(['TimeoutError', 'AbortError']);
+  const outer = (e as Error | undefined)?.name;
+  const inner = ((e as { cause?: unknown } | undefined)?.cause as Error | undefined)?.name;
+  return (!!outer && names.has(outer)) || (!!inner && names.has(inner));
+}
+
 export class KeycloakClientCredentialsTokenProvider extends SignalStackTokenProviderBase {
   private readonly tokenUrl: string;
   private readonly clientId: string;
@@ -43,6 +69,14 @@ export class KeycloakClientCredentialsTokenProvider extends SignalStackTokenProv
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
   private cached: CachedToken | null = null;
+  /**
+   * In-flight mint, shared by every concurrent caller (single-flight). Without
+   * it, N concurrent calls on a cold/expired cache each POST their own
+   * client-credentials grant — a thundering herd at Keycloak on worker
+   * start-up or after an expiry. Cleared as soon as the mint settles, so a
+   * failed grant is never cached as a pending promise.
+   */
+  private inFlight: Promise<Result<string, BaseError>> | null = null;
 
   constructor(config: KeycloakTokenProviderConfig) {
     super();
@@ -65,7 +99,30 @@ export class KeycloakClientCredentialsTokenProvider extends SignalStackTokenProv
     if (this.cached && Date.now() < this.cached.expiresAt - REFRESH_LEAD_MS) {
       return ok(this.cached.accessToken);
     }
+    // Join an already-running mint instead of starting a second grant.
+    if (this.inFlight) return this.inFlight;
 
+    this.inFlight = this._mint().finally(() => {
+      this.inFlight = null;
+    });
+    return this.inFlight;
+  }
+
+  /**
+   * Discards the cached token so the next {@link getToken} call mints a fresh
+   * one.
+   *
+   * Called by {@link HttpSignalStackWriter} when signals rejects a bearer
+   * token with 401 — e.g. after a Keycloak realm signing-key rotation, where
+   * the cached token is still inside its `expires_in` window but no longer
+   * verifiable.
+   */
+  override invalidate(): void {
+    this.cached = null;
+  }
+
+  /** Performs one client-credentials grant. Callers go through {@link getToken}. */
+  private async _mint(): Promise<Result<string, BaseError>> {
     const params = new URLSearchParams();
     params.set('grant_type', 'client_credentials');
     params.set('client_id', this.clientId);
@@ -111,13 +168,13 @@ export class KeycloakClientCredentialsTokenProvider extends SignalStackTokenProv
       return ok(this.cached.accessToken);
     } catch (e) {
       const cause = e as Error;
-      const aborted = cause.name === 'AbortError';
+      const timedOut = _isTimeout(e);
       return err(
         new UpstreamError(
-          aborted
+          timedOut
             ? `signalstack token grant timed out after ${this.timeoutMs}ms`
             : `signalstack token grant transport failure: ${cause.message}`,
-          { cause, code: aborted ? 'SIGNALSTACK_TIMEOUT' : 'SIGNALSTACK_TRANSPORT_FAILED' },
+          { cause, code: timedOut ? 'SIGNALSTACK_TIMEOUT' : 'SIGNALSTACK_TRANSPORT_FAILED' },
         ),
       );
     }

@@ -595,13 +595,12 @@ Step 2 (`db:push:api` / `db:init:api` / `db:seed:services:api`) and Step 3
 - **Auth:** one Keycloak, one `bluedots` realm, shared by both DPGs — their
   clients (`aggregator-portal`/`aggregator-api`/`aggregator-bff` and
   `signals-ui`/`signals-api`) live side by side in it. signals-api runs with
-  `AUTH_PROVIDER=dual`: it accepts a Keycloak-issued token alongside its
-  existing better-auth session, but **signals-ui still shows its OTP login
-  screen by default** in this mode — the UI only switches to the Keycloak
-  redirect flow once that flips to `AUTH_PROVIDER=keycloak`, or via signals'
-  own `VITE_AUTH_PROVIDER` canary override (see signals-dpg's
-  `apps/ui/src/lib/keycloak-config.ts`). aggregator's own login is unaffected
-  either way. signals-api runs with `SELF_SIGNUP_MODE=allowed` (matching
+  `AUTH_PROVIDER=keycloak` — Keycloak is the only accepted issuer. The earlier
+  transitional `dual` mode (Keycloak token _alongside_ a better-auth session)
+  has been removed from signals-dpg, and its `assertAuthProviderSupported`
+  guard hard-fails at boot on any other value, so this is not optional.
+  aggregator's own login is unaffected. signals-api runs with
+  `SELF_SIGNUP_MODE=allowed` (matching
   signals-dpg's own local-setup default) so a Keycloak identity with no
   pre-existing local `user` row can still complete first login through
   signals-ui — set `SELF_SIGNUP_MODE=gated` in `.env` to test the admin-onboarded

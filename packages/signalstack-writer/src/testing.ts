@@ -32,6 +32,8 @@ export class SignalStackTokenProviderFake extends SignalStackTokenProviderBase {
   private token: string;
   private failNextError: BaseError | null = null;
   callCount = 0;
+  /** How many times {@link invalidate} was called (401-refresh assertions). */
+  invalidateCount = 0;
 
   constructor(token = 'fake-signalstack-token') {
     super();
@@ -58,6 +60,15 @@ export class SignalStackTokenProviderFake extends SignalStackTokenProviderBase {
       return err(e);
     }
     return ok(this.token);
+  }
+
+  /**
+   * Records that the caller asked for a re-mint. The fake holds no cache, so
+   * there is nothing to clear; `invalidateCount` lets a test assert that the
+   * 401 path actually forced a refresh.
+   */
+  override invalidate(): void {
+    this.invalidateCount += 1;
   }
 }
 

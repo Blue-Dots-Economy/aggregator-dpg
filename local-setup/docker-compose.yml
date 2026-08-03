@@ -304,9 +304,23 @@ services:
       # Reconcile the portal client secret to match the web BFF config.
       OIDC_CLIENT_SECRET: ${OIDC_PORTAL_CLIENT_SECRET:-aggregator-portal-local-dev-secret}
       PORTAL_CLIENT_ID: aggregator-portal
+      # apply-portal-gate.py reads these names (KC_ADMIN_*, not KC_BOOTSTRAP_*).
+      KC_ADMIN_USERNAME: ${KC_ADMIN_USERNAME:-admin}
+      KC_ADMIN_PASSWORD: ${KC_ADMIN_PASSWORD:?KC_ADMIN_PASSWORD must be set in .env}
     volumes:
       - ../infra/keycloak/init:/init:ro
-    entrypoint: ["sh", "-c", "apk add --no-cache curl jq > /dev/null && sh /init/apply-user-profile.sh"]
+    # apply-portal-gate.py runs on EVERY boot. This is the SHARED realm, so a
+    # signals-only account is a valid portal login as far as Keycloak is
+    # concerned; without the gate it completes OTP before being refused. Realm
+    # import only applies to an empty realm, so a re-`up` on an existing realm
+    # needs the REST path. The script verifies first (no-op when already
+    # correct) and exits non-zero if it cannot apply the gate.
+    entrypoint:
+      [
+        'sh',
+        '-c',
+        'apk add --no-cache curl jq python3 > /dev/null && sh /init/apply-user-profile.sh && python3 /init/apply-portal-gate.py',
+      ]
     restart: "no"
 
   # ───────────────────────────────────────────────────────────────────────
@@ -370,13 +384,11 @@ services:
       INSTANCE_SHARED_SECRET: ${INSTANCE_SHARED_SECRET:-local-dev-instance-shared-secret-change-me}
       PEER_AUTH_MODE: ${PEER_AUTH_MODE:-permissive}
       # ─── Keycloak (Phase B realm merge) ──────────────────────────────
-      # 'dual' accepts Keycloak tokens alongside better-auth sessions — the
-      # transition state (signals' own migration design, Build 1/R2-R3).
-      # Human login still defaults to the OTP screen under 'dual'; the UI
-      # only switches its default when this flips to 'keycloak'
-      # (apps/ui/src/lib/keycloak-config.ts resolveUiAuthProvider), or via
-      # that app's own VITE_AUTH_PROVIDER canary override.
-      AUTH_PROVIDER: ${AUTH_PROVIDER:-dual}
+      # Must be 'keycloak': signals-dpg REMOVED the transitional 'dual' mode,
+      # and its assertAuthProviderSupported guard now hard-fails at boot on any
+      # other value. The old `-dual` default only appeared to work because a
+      # local .env overrode it — a fresh clone would not boot.
+      AUTH_PROVIDER: ${AUTH_PROVIDER:-keycloak}
       KEYCLOAK_BASE_URL: http://keycloak:8080
       KEYCLOAK_REALM: ${KEYCLOAK_REALM:-bluedots}
       KEYCLOAK_API_CLIENT_ID: signals-api
@@ -474,6 +486,12 @@ services:
       KEYCLOAK_REALM: ${KEYCLOAK_REALM:-bluedots}
       KEYCLOAK_ADMIN_CLIENT_ID: aggregator-api
       KEYCLOAK_ADMIN_CLIENT_SECRET: ${OIDC_API_CLIENT_SECRET:-aggregator-api-local-dev-secret}
+      # Client-scoped token check (access-token.ts). REQUIRED on the shared
+      # realm: signals' clients issue tokens with the same issuer, and
+      # authenticateAny's service-account path would otherwise admit any valid
+      # bluedots token as isUser:false. The allow-list is off when unset, so a
+      # shared-realm deployment must set it explicitly.
+      KEYCLOAK_ALLOWED_AZP: ${KEYCLOAK_ALLOWED_AZP:-aggregator-portal,aggregator-api,aggregator-bff}
       # Mail -> Mailpit
       MAIL_PROVIDER: smtp
       SMTP_HOST: mailpit

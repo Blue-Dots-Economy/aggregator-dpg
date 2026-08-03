@@ -144,7 +144,35 @@ describe('KeycloakClientCredentialsTokenProvider', () => {
     expect(result.error.code).toBe('SIGNALSTACK_TRANSPORT_FAILED');
   });
 
-  it('maps an aborted request to SIGNALSTACK_TIMEOUT', async () => {
+  /**
+   * The reason object the platform itself produces when `AbortSignal.timeout()`
+   * fires — a `DOMException` named `TimeoutError` with no `cause`, NOT an
+   * `AbortError`. Taken from a real signal rather than hand-rolled so the test
+   * cannot drift from Node's actual behaviour.
+   */
+  async function realTimeoutReason(): Promise<unknown> {
+    const signal = AbortSignal.timeout(1);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(signal.aborted).toBe(true);
+    return signal.reason;
+  }
+
+  it("maps the reason AbortSignal.timeout() actually throws ('TimeoutError') to SIGNALSTACK_TIMEOUT", async () => {
+    const reason = await realTimeoutReason();
+    // Guard the premise: if Node ever renames this, the classifier must follow.
+    expect((reason as Error).name).toBe('TimeoutError');
+    fetchMock.mockRejectedValueOnce(reason);
+
+    const result = await provider.getToken();
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_TIMEOUT');
+    expect(result.error.message).toContain('timed out');
+  });
+
+  it('maps a manual AbortController abort to SIGNALSTACK_TIMEOUT', async () => {
+    // The shape http.ts's own per-attempt AbortController produces.
     const abortError = new Error('aborted');
     abortError.name = 'AbortError';
     fetchMock.mockRejectedValueOnce(abortError);
@@ -154,5 +182,67 @@ describe('KeycloakClientCredentialsTokenProvider', () => {
     expect(result.success).toBe(false);
     if (result.success) return;
     expect(result.error.code).toBe('SIGNALSTACK_TIMEOUT');
+  });
+
+  it('maps a timeout nested under `cause` to SIGNALSTACK_TIMEOUT', async () => {
+    // undici wraps the abort reason on some paths.
+    const wrapped = Object.assign(new TypeError('fetch failed'), {
+      cause: await realTimeoutReason(),
+    });
+    fetchMock.mockRejectedValueOnce(wrapped);
+
+    const result = await provider.getToken();
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_TIMEOUT');
+  });
+
+  it('mints only once for concurrent cold-cache callers (single flight)', async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    fetchMock.mockImplementation(async () => {
+      await gate;
+      return okTokenResponse('shared-token', 300);
+    });
+
+    const inFlight = [provider.getToken(), provider.getToken(), provider.getToken()];
+    release();
+    const results = await Promise.all(inFlight);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    for (const r of results) {
+      expect(r.success).toBe(true);
+      if (r.success) expect(r.value).toBe('shared-token');
+    }
+  });
+
+  it('does not cache a failed single-flight mint — the next call retries', async () => {
+    fetchMock.mockRejectedValueOnce(new Error('ECONNREFUSED'));
+    const first = await provider.getToken();
+    expect(first.success).toBe(false);
+
+    fetchMock.mockResolvedValueOnce(okTokenResponse('recovered', 300));
+    const second = await provider.getToken();
+
+    expect(second.success).toBe(true);
+    if (second.success) expect(second.value).toBe('recovered');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('invalidate() forces a fresh mint even inside the cached window', async () => {
+    fetchMock.mockResolvedValueOnce(okTokenResponse('first', 300));
+    expect(await provider.getToken()).toMatchObject({ success: true, value: 'first' });
+    // Still well inside expiry: without invalidate() this would be cached.
+    expect(await provider.getToken()).toMatchObject({ success: true, value: 'first' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    provider.invalidate();
+    fetchMock.mockResolvedValueOnce(okTokenResponse('rotated', 300));
+
+    expect(await provider.getToken()).toMatchObject({ success: true, value: 'rotated' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

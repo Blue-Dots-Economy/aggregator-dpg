@@ -268,9 +268,23 @@ services:
       # API confidential client whose service account creates the org KC group
       # + assigns org_owner (needs realm-management:manage-realm).
       API_CLIENT_ID: ${KEYCLOAK_ADMIN_CLIENT_ID:-aggregator-api}
+      # apply-portal-gate.py reads these names (KC_ADMIN_*, not KC_BOOTSTRAP_*).
+      KC_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}
+      KC_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD}
     volumes:
       - ./infra/keycloak/init:/init:ro
-    entrypoint: ["sh", "-c", "apk add --no-cache curl jq > /dev/null && sh /init/apply-user-profile.sh"]
+    # apply-portal-gate.py runs on EVERY boot, not just a fresh import: realm
+    # import only applies to an empty realm, so a redeploy onto an
+    # already-provisioned realm would otherwise leave aggregator-portal on the
+    # ungated default browser flow and send OTPs to ineligible accounts. The
+    # script verifies first and is a no-op when the gate is already correct; it
+    # exits non-zero (failing this sidecar, loudly) if it cannot apply it.
+    entrypoint:
+      [
+        'sh',
+        '-c',
+        'apk add --no-cache curl jq python3 > /dev/null && sh /init/apply-user-profile.sh && python3 /init/apply-portal-gate.py',
+      ]
     restart: "no"
 
   # ─────────────────────────────────────────────────────────────────────────

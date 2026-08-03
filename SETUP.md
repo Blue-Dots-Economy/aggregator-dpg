@@ -229,13 +229,22 @@ Two constraints worth knowing before editing this part of the realm:
 - The bound flow carries a **pinned `id`**. Realm import resolves `authenticationFlowBindingOverrides` by flow ID, not alias, and flow IDs are unique per Keycloak instance — so one Keycloak cannot import this realm twice under two names.
 - The ALTERNATIVE pair (`auth-cookie` / OTP forms) is nested inside `aggregator-portal-auth`. Keycloak **ignores every ALTERNATIVE at a level that also holds REQUIRED or CONDITIONAL executions**, so the gates cannot be siblings of the alternatives.
 
-`--import-realm` only runs against an empty realm, so an already-imported realm needs the change applied over the admin REST API instead:
+`--import-realm` only runs against an empty realm, so an already-imported realm needs the change applied over the admin REST API instead. **The `keycloak-init` sidecar now does this automatically on every `up`** (`apply-user-profile.sh` then `apply-portal-gate.py`), so a redeploy onto an existing realm cannot silently leave the portal ungated. No manual step is required.
+
+To run it by hand (e.g. against a remote Keycloak):
 
 ```bash
 KC_ADMIN_PASSWORD=<admin password> \
   python3 infra/keycloak/init/apply-portal-gate.py
-# override KC_URL / KC_REALM / KC_ADMIN_USERNAME as needed; the script is idempotent
+# override KC_URL / KC_REALM / KC_ADMIN_USERNAME as needed
 ```
+
+The script is safe to run repeatedly and is **fail-closed**:
+
+- It verifies the currently bound flow first and exits 0 without writing anything when the gate is already correct — so a freshly imported realm keeps its pinned flow ID rather than being rebuilt.
+- When it does rebuild, it builds and verifies the complete new flow tree **before** rebinding the client, then deletes the old tree. Verification asserts both gates are present and that they precede `otp-channel-choice-form` — the ordering that stops a code being issued to an ineligible user.
+- Any failure restores the entry-time binding, prints `GATE NOT APPLIED`, and exits non-zero (failing the sidecar). It never parks `aggregator-portal` on the ungated default browser flow to do its work.
+- Rebuilds use `-gN`-suffixed flow aliases, because Keycloak aliases are realm-unique and the new tree must coexist with the live one. Only the first apply on a clean realm uses the canonical aliases plus the pinned ID.
 
 ---
 

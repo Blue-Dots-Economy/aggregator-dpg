@@ -142,30 +142,64 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
    * caller's `catch` maps it to a `SIGNALSTACK_TIMEOUT` / `_TRANSPORT_FAILED`),
    * or the last failing `Response` is returned (so the caller maps the status).
    *
+   * **Bearer 401 re-mint.** On the {@link SignalStackTokenProviderBase} path a
+   * `401` gets exactly one extra attempt with a freshly minted token, outside
+   * the retry budget and with no backoff. A cached token can still be inside
+   * its `expires_in` window yet be rejected upstream — realm signing-key
+   * rotation is the expected trigger — and without this every request fails
+   * until the cache expires on its own. Bounded to one re-mint so a genuinely
+   * unauthorised client (bad secret, client disabled) still fails fast instead
+   * of looping. The `x-api-key` path is untouched: there is nothing to refresh.
+   *
    * @param url - Absolute request URL.
    * @param init - Fetch init; the `signal` is supplied per attempt.
    * @returns The final `Response` (success, non-retryable, or exhausted).
    * @throws The last transport/timeout error when every attempt threw.
    */
   private async requestWithRetry(url: string, init: RequestInit): Promise<Response> {
-    let lastError: unknown;
-    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+    let currentInit = init;
+    let remintDone = false;
+    // `attempt` counts the retry budget only; a 401 re-mint deliberately does
+    // not consume it, so a key rotation cannot eat a transient-failure retry.
+    let attempt = 0;
+    for (;;) {
       const controller = this.timeoutMs ? new AbortController() : undefined;
       const timer = controller ? setTimeout(() => controller.abort(), this.timeoutMs) : undefined;
       try {
         const res = await this.fetchImpl(url, {
-          ...init,
+          ...currentInit,
           ...(controller ? { signal: controller.signal } : {}),
         });
+
+        if (res.status === 401 && this.tokenProvider && !remintDone) {
+          remintDone = true;
+          this.tokenProvider.invalidate();
+          const refreshed = await this.tokenProvider.getToken();
+          // A failed re-mint returns the original 401 so the caller still maps
+          // it to SIGNALSTACK_FORBIDDEN rather than a token-grant error.
+          if (refreshed.success) {
+            currentInit = {
+              ...currentInit,
+              headers: {
+                ...(currentInit.headers as Record<string, string>),
+                authorization: `Bearer ${refreshed.value}`,
+              },
+            };
+            continue;
+          }
+          return res;
+        }
+
         if (attempt < this.maxRetries && (res.status === 429 || res.status >= 500)) {
           await this.backoff(attempt);
+          attempt += 1;
           continue;
         }
         return res;
       } catch (e) {
-        lastError = e;
         if (attempt < this.maxRetries) {
           await this.backoff(attempt);
+          attempt += 1;
           continue;
         }
         throw e;
@@ -173,9 +207,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
         if (timer) clearTimeout(timer);
       }
     }
-    // Unreachable — the loop always returns or throws — but satisfies the
-    // type checker that the function returns on every path.
-    throw lastError ?? new Error('signalstack request failed');
+    // Unreachable — the loop always returns or throws.
   }
 
   /** Sleep for `retryBaseMs * 2^attempt` ms before the next retry. */

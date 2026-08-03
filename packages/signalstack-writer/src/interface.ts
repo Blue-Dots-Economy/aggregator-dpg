@@ -501,6 +501,16 @@ export abstract class SignalStackTokenProviderBase {
    *   fails (bad client id/secret, IdP unreachable, timeout).
    */
   abstract getToken(): Promise<Result<string, BaseError>>;
+
+  /**
+   * Discards any cached token so the next {@link getToken} mints a fresh one.
+   *
+   * Exists for the 401 path: a token can be inside its `expires_in` window yet
+   * be rejected upstream (realm signing-key rotation, client disabled and
+   * re-enabled). Callers use this to force one re-mint and retry rather than
+   * failing every request until the cached token expires on its own.
+   */
+  abstract invalidate(): void;
 }
 
 /**
