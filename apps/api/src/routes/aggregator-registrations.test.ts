@@ -31,7 +31,7 @@ describe('POST /v1/aggregator-registrations/create', () => {
     process.env.APPROVAL_TOKEN_SECRET = 'k'.repeat(48);
     process.env.ADMIN_EMAILS = 'reviewer@bluedots.local';
     process.env.KEYCLOAK_URL = 'http://kc.local';
-    process.env.KEYCLOAK_REALM = 'aggregator';
+    process.env.KEYCLOAK_REALM = 'bluedots';
 
     aggregatorStore = new AggregatorStoreFake();
     profileStore = new AggregatorProfileStoreFake();

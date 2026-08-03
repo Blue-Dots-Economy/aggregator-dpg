@@ -33,6 +33,9 @@ ARG NETWORK=blue_dot
 ARG BRAND_SHORT_NAME=Aggregator
 ARG BRAND_LONG_NAME=Aggregator Portal
 ARG BRAND_SSO_LABEL=SSO
+# Names the app on the login page. The realm is shared with signals, whose
+# `signals` child theme sets its own — without this the two are indistinguishable.
+ARG BRAND_APP_LABEL=Aggregator Portal
 ARG BRAND_PRIMARY_COLOR=#4f46e5
 ARG BRAND_PRIMARY_DARK=#4338ca
 ARG BRAND_PRIMARY_500=#6366f1
@@ -63,6 +66,7 @@ RUN { \
       printf 'brandShortName=%s\n'      "${BRAND_SHORT_NAME}"; \
       printf 'brandLongName=%s\n'       "${BRAND_LONG_NAME}"; \
       printf 'brandSsoLabel=%s\n'       "${BRAND_SSO_LABEL}"; \
+      printf 'brandAppLabel=%s\n'       "${BRAND_APP_LABEL}"; \
       printf 'brandLogoSlug=%s\n'       "${BRAND_LOGO_SLUG}"; \
       printf 'brandFontSans=%s\n'       "${BRAND_FONT_SANS}"; \
       printf 'brandFontHeading=%s\n'    "${BRAND_FONT_HEADING}"; \
@@ -80,7 +84,18 @@ RUN { \
       printf 'brandHeroGrad=%s\n'       "${BRAND_HERO_GRAD}"; \
     } > /custom/otp/login/theme.properties
 
-# Init-container entrypoint: copy theme into the shared volume the main
+# Only `otp` is re-baked. The `signals` child theme's properties keep their
+# `${env.SIGNALS_*:default}` form, with the checked-in defaults being signals'
+# real values — signals branding does not vary per network today, so there is
+# nothing per-image to freeze. Add a second printf block here if that changes.
+
+# Init-container entrypoint: copy the themes into the shared volume the main
 # Keycloak container mounts at /opt/keycloak/themes, then exit. Using
 # `cp -aT` so symlinks (e.g. ../themes/...) and timestamps survive.
-CMD ["sh", "-c", "set -e; mkdir -p /shared/otp; cp -aT /custom/otp /shared/otp && ls /shared/otp/login >/dev/null && echo 'theme staged at /shared/otp'"]
+#
+# Stages the WHOLE tree, not just `otp`: `signals` (which the signals-ui client
+# selects via its `login_theme` attribute) sits alongside it, and copying only
+# `otp` would leave that override pointing at a theme absent from disk. Both are
+# listed so a missing one fails the init container loudly instead of silently
+# falling back to the realm default.
+CMD ["sh", "-c", "set -e; mkdir -p /shared; cp -aT /custom /shared && ls /shared/otp/login /shared/signals/login >/dev/null && echo 'themes staged at /shared: otp, signals'"]

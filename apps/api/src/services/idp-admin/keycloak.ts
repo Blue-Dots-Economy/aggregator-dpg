@@ -24,7 +24,7 @@ const TOKEN_REFRESH_LEAD_MS = 30_000;
 
 export interface KeycloakAdminOptions {
   baseUrl: string; // e.g. http://keycloak:8080
-  realm: string; // e.g. aggregator
+  realm: string; // e.g. bluedots
   clientId: string; // e.g. aggregator-api
   clientSecret: string;
   /** Override fetch (for tests). */

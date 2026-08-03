@@ -155,6 +155,10 @@ services:
       AGGREGATOR_API_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET:?KEYCLOAK_ADMIN_CLIENT_SECRET must be set in .env}
       AGGREGATOR_PORTAL_SECRET: ${OIDC_CLIENT_SECRET:?OIDC_CLIENT_SECRET must be set in .env}
       AGGREGATOR_BFF_SECRET: ${BFF_SERVICE_CLIENT_SECRET:?BFF_SERVICE_CLIENT_SECRET must be set in .env}
+      # Realm name substituted into the realm JSON's "realm" field by
+      # render-realm.sh. Per-deployment identity value, same as
+      # AGGREGATOR_NETWORK below — not a fixed constant across networks.
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-bluedots}
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
       KC_DB_USERNAME: ${POSTGRES_USER:-aggregator}
@@ -245,7 +249,7 @@ services:
     environment:
       # Internal URL — must include /auth because KC_HTTP_RELATIVE_PATH=/auth.
       KC_URL: http://keycloak:8080/auth
-      KC_REALM: ${KEYCLOAK_REALM:-aggregator}
+      KC_REALM: ${KEYCLOAK_REALM:-bluedots}
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD}
       UNMANAGED_POLICY: ENABLED
@@ -264,9 +268,23 @@ services:
       # API confidential client whose service account creates the org KC group
       # + assigns org_owner (needs realm-management:manage-realm).
       API_CLIENT_ID: ${KEYCLOAK_ADMIN_CLIENT_ID:-aggregator-api}
+      # apply-portal-gate.py reads these names (KC_ADMIN_*, not KC_BOOTSTRAP_*).
+      KC_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}
+      KC_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD}
     volumes:
       - ./infra/keycloak/init:/init:ro
-    entrypoint: ["sh", "-c", "apk add --no-cache curl jq > /dev/null && sh /init/apply-user-profile.sh"]
+    # apply-portal-gate.py runs on EVERY boot, not just a fresh import: realm
+    # import only applies to an empty realm, so a redeploy onto an
+    # already-provisioned realm would otherwise leave aggregator-portal on the
+    # ungated default browser flow and send OTPs to ineligible accounts. The
+    # script verifies first and is a no-op when the gate is already correct; it
+    # exits non-zero (failing this sidecar, loudly) if it cannot apply it.
+    entrypoint:
+      [
+        'sh',
+        '-c',
+        'apk add --no-cache curl jq python3 > /dev/null && sh /init/apply-user-profile.sh && python3 /init/apply-portal-gate.py',
+      ]
     restart: "no"
 
   # ─────────────────────────────────────────────────────────────────────────
@@ -304,7 +322,7 @@ services:
       # ${PUBLIC_PROTOCOL}://${PUBLIC_HOST}/auth/realms/${realm}. The web
       # container's back-channel call is short-circuited to the docker host
       # gateway via the `extra_hosts` mapping below.
-      OIDC_ISSUER: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}/auth/realms/${KEYCLOAK_REALM:-aggregator}"
+      OIDC_ISSUER: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}/auth/realms/${KEYCLOAK_REALM:-bluedots}"
       OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-aggregator-portal}
       OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
       OIDC_REDIRECT_URI: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}/api/auth/callback"
@@ -383,7 +401,7 @@ services:
       # so the JWT `iss` claim matches what `expectedIssuer()` derives from
       # KEYCLOAK_URL (apps/api/src/services/auth/access-token.ts).
       KEYCLOAK_URL: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}/auth"
-      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-aggregator}
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-bluedots}
       KEYCLOAK_ADMIN_CLIENT_ID: ${KEYCLOAK_ADMIN_CLIENT_ID:-aggregator-api}
       KEYCLOAK_ADMIN_CLIENT_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET:-}
       # JWT client-scoping (#1.7): azp allow-list (enforced) + optional aud check.

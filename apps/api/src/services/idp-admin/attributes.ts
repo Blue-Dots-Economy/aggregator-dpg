@@ -5,7 +5,7 @@
  * data we read with the data we write.
  *
  * The bare-string values match the keys configured in the Keycloak realm
- * (`infra/keycloak/realms/aggregator-realm.json`) and any custom protocol
+ * (`infra/keycloak/realms/realm.json`) and any custom protocol
  * mappers that publish them as access-token claims.
  */
 

@@ -111,7 +111,7 @@ function buildMetricsStubDb(): unknown {
 async function bootApp(): Promise<{ app: FastifyInstance; store: TrackingRegistrationLinksStore }> {
   _resetJwks();
   process.env.KEYCLOAK_URL = 'http://kc.local';
-  process.env.KEYCLOAK_REALM = 'aggregator';
+  process.env.KEYCLOAK_REALM = 'bluedots';
   _setNetworkConfig(buildBlueDotConfig());
   _setAccessTokenVerifier(async (token) => {
     if (token !== AUTH_TOKEN) throw new Error('invalid');
