@@ -32,6 +32,12 @@ jobs:
     name: CI
     runs-on: ubuntu-latest
 
+    # Job-level (not step-level) so the SonarCloud step's `if:` can read it —
+    # the `secrets` context is unavailable in a step conditional, and a step's
+    # own `env:` block is not in scope for its own `if:`.
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
     steps:
       - uses: actions/checkout@v7
         with:
@@ -80,15 +86,22 @@ jobs:
       - name: Dep-cruiser — check interface boundaries
         run: pnpm dep-check
 
-      # Non-blocking on purpose: the docker/GHCR matrix depends on this job, so a
-      # SonarCloud outage (or an expired token) must not stop a green build from
-      # publishing images. Scan problems surface as a failed step in the run log
-      # and as SonarCloud's own commit check, not as a red CI.
+      # Two independent guards, for two different failure modes:
+      #   `if:`               — no token at all. GitHub withholds repo secrets from
+      #                         Dependabot-raised (and fork) pull_request runs, so an
+      #                         ungated scan exits 3 with "Not authorized or project
+      #                         not found" on every dependency PR. Skip, don't run.
+      #   `continue-on-error` — token present but the scan fails (SonarCloud outage,
+      #                         expired token, quality gate). The docker/GHCR matrix
+      #                         depends on this job, so that must not stop a green
+      #                         build from publishing images; problems surface in the
+      #                         run log and SonarCloud's own commit check instead.
+      # SONAR_TOKEN comes from the job-level `env` above — a step's own `env:` block
+      # is not in scope for its own `if:`.
       - name: SonarCloud scan
+        if: env.SONAR_TOKEN != ''
         uses: SonarSource/sonarqube-scan-action@v6
         continue-on-error: true
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
   docker:
     name: Docker / ${{ matrix.app }}
