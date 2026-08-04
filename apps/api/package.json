@@ -46,7 +46,7 @@
     "fastify-type-provider-zod": "^4.0.2",
     "ioredis": "^5.11.1",
     "jose": "^5.9.6",
-    "nodemailer": "^6.10.1",
+    "nodemailer": "^9.0.4",
     "pg": "^8.22.0",
     "pino": "^9.5.0",
     "pino-pretty": "^11.3.0",
@@ -56,7 +56,7 @@
   "devDependencies": {
     "@aggregator-dpg/tsconfig": "workspace:*",
     "@types/node": "^22.10.5",
-    "@types/nodemailer": "^6.4.17",
+    "@types/nodemailer": "^8.0.1",
     "@types/pg": "^8.20.2",
     "@types/qrcode": "^1.5.5",
     "@vitest/coverage-v8": "^2.1.9",
