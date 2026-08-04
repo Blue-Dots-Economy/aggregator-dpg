@@ -354,9 +354,12 @@ describe('aggregator-orgs routes', () => {
   });
 
   it('503 DB_UNAVAILABLE when orgStore.create fails with an unmapped error code', async () => {
+    // NOT_FOUND is a real OrgStoreError variant, but the route only special-cases
+    // DUPLICATE_NAME/DUPLICATE_SLUG — everything else (including this) falls
+    // through to the generic DB_UNAVAILABLE branch.
     orgStore.create = async () => ({
       ok: false,
-      error: { code: 'UNKNOWN_ERROR', message: 'boom' },
+      error: { code: 'NOT_FOUND', message: 'boom' },
     });
     const res = await app.inject({
       method: 'POST',

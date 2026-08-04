@@ -852,7 +852,7 @@ describe('admin approval routes', () => {
   it('approve still returns 200 when the applicant approval email fails to send', async () => {
     mailer.send = async () => ({
       ok: false,
-      error: { code: 'MAIL_FAILED', message: 'smtp down' },
+      error: { code: 'TRANSPORT_FAILED', message: 'smtp down' },
     });
     const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
     const res = await app.inject({
@@ -900,7 +900,7 @@ describe('admin approval routes', () => {
   it('reject still returns 200 when the applicant rejection email fails to send', async () => {
     mailer.send = async () => ({
       ok: false,
-      error: { code: 'MAIL_FAILED', message: 'smtp down' },
+      error: { code: 'TRANSPORT_FAILED', message: 'smtp down' },
     });
     const { token } = await mintApprovalToken({ aggregatorId, intent: 'reject' });
     const res = await app.inject({
@@ -1006,8 +1006,8 @@ describe('admin approval routes', () => {
     ]);
     const kc = await idp.findById(kcUserId);
     if (kc.ok && kc.value) {
-      kc.value.firstName = undefined;
-      kc.value.lastName = undefined;
+      delete kc.value.firstName;
+      delete kc.value.lastName;
     }
     const { token } = await mintApprovalToken({ aggregatorId, intent: 'reject' });
     const res = await app.inject({

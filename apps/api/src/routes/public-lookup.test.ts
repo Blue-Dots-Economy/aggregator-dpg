@@ -21,6 +21,7 @@ import {
 } from '../services/aggregator-store/index.js';
 import { _setSignalStackWriter } from '../services/signalstack.js';
 import { SignalStackWriterFake } from '@aggregator-dpg/signalstack-writer/testing';
+import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 
 const { consumeMock } = vi.hoisted(() => ({
   consumeMock: vi.fn().mockResolvedValue({ allowed: true, count: 1, retryAfterSeconds: 0 }),
@@ -203,7 +204,7 @@ describe('GET /public/v1/aggregators/:orgSlug/lookup', () => {
       error: Object.assign(new Error('signalstack unreachable'), {
         name: 'UpstreamError',
         code: 'SIGNALSTACK_SERVER_ERROR',
-      }),
+      }) as BaseError,
     });
     const r = await app.inject({
       method: 'GET',

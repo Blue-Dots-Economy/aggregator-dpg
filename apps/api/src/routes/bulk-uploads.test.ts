@@ -30,6 +30,7 @@ import type {
 } from '../services/bulk-uploads-store/index.js';
 import { ConsentLedgerFake } from '@aggregator-dpg/consent-ledger/testing';
 import { _setConsentLedger } from '../services/consent-ledger/index.js';
+import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import { _setRedis } from '../services/redis/index.js';
 
 // Hoisted so the vi.mock factories can reference them (mocks are hoisted
@@ -711,7 +712,7 @@ describe('bulk-uploads routes', () => {
         error: Object.assign(new Error('ledger down'), {
           name: 'UpstreamError',
           code: 'CONSENT_INSERT_FAILED',
-        }),
+        }) as BaseError,
       });
       const res = await app.inject({
         method: 'POST',
