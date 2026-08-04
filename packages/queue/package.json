@@ -11,7 +11,9 @@
   },
   "scripts": {
     "build": "tsc && cp -r src/lua dist/lua",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "bullmq": "^5.76.6",
@@ -20,6 +22,8 @@
   "devDependencies": {
     "@aggregator-dpg/tsconfig": "workspace:*",
     "@types/node": "^22.0.0",
-    "typescript": "^6.0.3"
+    "@vitest/coverage-v8": "^3.2.0",
+    "typescript": "^6.0.3",
+    "vitest": "^3.2.0"
   }
 }
