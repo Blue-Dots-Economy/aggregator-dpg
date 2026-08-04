@@ -166,7 +166,7 @@ function Welcome({ onSignIn, onRegister, brand, t }: WelcomeProps): JSX.Element 
           type="button"
           onClick={onSignIn}
           className="group w-full flex items-center justify-between gap-4 p-4 pr-5 rounded-[14px] border text-left transition-all
-                     border-[var(--bd-primary)] bg-[var(--bd-primary-50)]/50 hover:bg-[var(--bd-primary-50)]"
+                     border-(--bd-primary) bg-(--bd-primary-50)/50 hover:bg-(--bd-primary-50)"
         >
           <div className="flex items-center gap-3.5">
             <div
@@ -184,7 +184,7 @@ function Welcome({ onSignIn, onRegister, brand, t }: WelcomeProps): JSX.Element 
               </div>
             </div>
           </div>
-          <div className="w-8 h-8 rounded-full flex items-center justify-center bg-[var(--bd-primary)] text-white shrink-0">
+          <div className="w-8 h-8 rounded-full flex items-center justify-center bg-(--bd-primary) text-white shrink-0">
             <I.arrowR size={14} />
           </div>
         </button>
@@ -193,7 +193,7 @@ function Welcome({ onSignIn, onRegister, brand, t }: WelcomeProps): JSX.Element 
           type="button"
           onClick={onRegister}
           className="group w-full flex items-center justify-between gap-4 p-4 pr-5 rounded-[14px] border text-left transition-all
-                     border-[var(--bd-border)] hover:border-ink-300 hover:bg-ink-50/60"
+                     border-(--bd-border) hover:border-ink-300 hover:bg-ink-50/60"
         >
           <div className="flex items-center gap-3.5">
             <div className="w-9 h-9 rounded-[10px] flex items-center justify-center bg-ink-100 group-hover:bg-white transition-colors">

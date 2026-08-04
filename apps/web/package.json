@@ -39,6 +39,7 @@
   },
   "devDependencies": {
     "@aggregator-dpg/tsconfig": "workspace:*",
+    "@tailwindcss/postcss": "^4.3.3",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.1.0",
     "@testing-library/user-event": "^14.5.2",
@@ -47,11 +48,10 @@
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.3.4",
     "@vitest/coverage-v8": "^3.2.7",
-    "autoprefixer": "^10.5.4",
     "jsdom": "^30.0.1",
     "pino-pretty": "^11.3.0",
     "postcss": "^8.5.25",
-    "tailwindcss": "^3.4.17",
+    "tailwindcss": "^4.3.3",
     "typescript": "^6.0.3",
     "vitest": "^3.2.7"
   }

@@ -248,8 +248,7 @@ export function PublicRegistrationView({
         // schemas omit it, so multi-select dropdowns render with zero
         // options without this nudge.
         const resolvedItems = (inlined[field] as Record<string, unknown>).items as
-          | Record<string, unknown>
-          | undefined;
+          Record<string, unknown> | undefined;
         if (resolvedItems && Array.isArray(resolvedItems['enum'])) {
           (inlined[field] as Record<string, unknown>).uniqueItems = true;
         }
@@ -598,7 +597,7 @@ export function PublicRegistrationView({
           <LanguageSwitcher />
         </header>
 
-        <div className="rounded-[18px] bg-white border border-[var(--bd-border)] overflow-hidden shadow-[0_1px_0_rgba(11,16,32,0.02),0_20px_60px_-30px_rgba(11,16,32,0.18)]">
+        <div className="rounded-[18px] bg-white border border-(--bd-border) overflow-hidden shadow-[0_1px_0_rgba(11,16,32,0.02),0_20px_60px_-30px_rgba(11,16,32,0.18)]">
           <div
             className="px-6 sm:px-8 py-6 text-white relative overflow-hidden"
             style={{ background: heroGradient }}
@@ -658,7 +657,7 @@ export function PublicRegistrationView({
                     ref={errorRef}
                     role="alert"
                     tabIndex={-1}
-                    className="mb-5 rounded-[10px] border border-rose-200 bg-rose-50 px-4 py-3 text-[13px] text-rose-700 scroll-mt-6 outline-none"
+                    className="mb-5 rounded-[10px] border border-rose-200 bg-rose-50 px-4 py-3 text-[13px] text-rose-700 scroll-mt-6 outline-hidden"
                   >
                     <div className="font-semibold">{state.title}</div>
                     <div className="mt-1 text-rose-600">{state.detail}</div>
@@ -832,14 +831,14 @@ export function PublicRegistrationView({
                   >
                     <div className="mt-4 flex flex-col gap-3">
                       <label className="block">
-                        <span className="text-[14px] font-medium text-[var(--bd-fg)]">
+                        <span className="text-[14px] font-medium text-(--bd-fg)">
                           {t('year_of_birth_label')}
                           <span className="text-rose-500 ml-0.5">*</span>
                         </span>
                         <select
                           value={yearOfBirth}
                           onChange={(e) => setYearOfBirth(e.target.value)}
-                          className="mt-1 w-full rounded-[10px] border border-[var(--bd-border)] px-3 py-2 text-[14px]"
+                          className="mt-1 w-full rounded-[10px] border border-(--bd-border) px-3 py-2 text-[14px]"
                           required
                         >
                           <option value="">{t('year_of_birth_placeholder')}</option>
@@ -854,11 +853,11 @@ export function PublicRegistrationView({
                         // Minor: no consent here — Signals creates the account
                         // without it; terms are accepted in the Signalstack app
                         // after signing in. Submit still proceeds.
-                        <div className="rounded-[12px] border border-[var(--bd-border)] bg-[var(--bd-primary-50)] px-4 py-3.5 text-[14px] text-[var(--bd-fg)]">
+                        <div className="rounded-[12px] border border-(--bd-border) bg-(--bd-primary-50) px-4 py-3.5 text-[14px] text-(--bd-fg)">
                           {t('u18_notice')}
                         </div>
                       ) : (
-                        <div className="flex items-start gap-2.5 rounded-[12px] border border-[var(--bd-border)] px-4 py-3.5 text-[14px] text-[var(--bd-fg)]">
+                        <div className="flex items-start gap-2.5 rounded-[12px] border border-(--bd-border) px-4 py-3.5 text-[14px] text-(--bd-fg)">
                           <input
                             id="consent-all"
                             type="checkbox"
@@ -873,7 +872,7 @@ export function PublicRegistrationView({
                                 {t('consent_accept_prefix')}
                                 <button
                                   type="button"
-                                  className="underline text-[var(--bd-primary-600)]"
+                                  className="underline text-(--bd-primary-600)"
                                   onClick={() => setConsentModal({ open: true, tab: 'terms' })}
                                 >
                                   {t('consent_docs_link')}
@@ -884,7 +883,7 @@ export function PublicRegistrationView({
                                     {' '}
                                     <button
                                       type="button"
-                                      className="underline text-[var(--bd-primary-600)]"
+                                      className="underline text-(--bd-primary-600)"
                                       onClick={() => setProfileConsentModal(true)}
                                     >
                                       {t('consent_profile_link')}
@@ -916,7 +915,7 @@ export function PublicRegistrationView({
                             className={`w-full py-3 rounded-[12px] font-display font-bold text-[15px] text-white transition-all
                     ${
                       blocked
-                        ? 'bg-[var(--bd-primary-100)] text-[var(--bd-primary-600)] cursor-not-allowed'
+                        ? 'bg-(--bd-primary-100) text-(--bd-primary-600) cursor-not-allowed'
                         : 'hover:opacity-90 bd-shadow-lg'
                     }`}
                           >
@@ -957,12 +956,12 @@ export function PublicRegistrationView({
             <button
               type="button"
               aria-label={t('consent_profile_modal_close')}
-              className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full text-ink-400 hover:bg-[var(--bd-primary-50)] hover:text-ink-700"
+              className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full text-ink-400 hover:bg-(--bd-primary-50) hover:text-ink-700"
               onClick={() => setProfileConsentModal(false)}
             >
               <I.x size={18} />
             </button>
-            <h2 className="font-display font-bold text-[16px] text-[var(--bd-fg)] pr-8">
+            <h2 className="font-display font-bold text-[16px] text-(--bd-fg) pr-8">
               {t('consent_profile_modal_title')}
             </h2>
             <p className="mt-3 text-[14px] text-ink-700">

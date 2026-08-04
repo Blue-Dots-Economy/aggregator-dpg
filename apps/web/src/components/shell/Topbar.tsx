@@ -31,7 +31,7 @@ export function Topbar({ title, subtitle, right }: TopbarProps) {
           onClick={toggle}
           title={mode === 'dark' ? t('switch_to_light') : t('switch_to_dark')}
           aria-label={t('toggle_aria')}
-          className="w-9 h-9 rounded-[10px] flex items-center justify-center border border-[var(--bd-border)] bg-[var(--bd-card)] text-[var(--bd-fg-muted)] hover:text-[var(--bd-fg)] hover:bg-[var(--bd-border-soft)] transition-colors"
+          className="w-9 h-9 rounded-[10px] flex items-center justify-center border border-(--bd-border) bg-(--bd-card) text-(--bd-fg-muted) hover:text-(--bd-fg) hover:bg-(--bd-border-soft) transition-colors"
         >
           {mode === 'dark' ? <I.sun size={16} /> : <I.moon size={16} />}
         </button>
