@@ -100,7 +100,7 @@ jobs:
       # is not in scope for its own `if:`.
       - name: SonarCloud scan
         if: env.SONAR_TOKEN != ''
-        uses: SonarSource/sonarqube-scan-action@v6
+        uses: SonarSource/sonarqube-scan-action@v8
         continue-on-error: true
 
   docker:
