@@ -32,6 +32,12 @@ updates:
       # vitest 4 needs vite 6 in lockstep — hold the major.
       - dependency-name: "vitest"
         update-types: ["version-update:semver-major"]
+      # tailwindcss 4 replaces the JS config with CSS-first `@theme` and drops the
+      # postcss plugin for @tailwindcss/postcss — a migration, not a bump (#560
+      # failed `Build`). Hold until the v4 migration is scheduled, otherwise every
+      # 4.x release re-raises a PR that cannot go green.
+      - dependency-name: "tailwindcss"
+        update-types: ["version-update:semver-major"]
 
   # GitHub Actions — keeps CI workflow action versions current
   - package-ecosystem: "github-actions"
