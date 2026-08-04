@@ -12,7 +12,12 @@ updates:
       day: "monday"
       time: "03:00"
       timezone: "UTC"
-    open-pull-requests-limit: 5
+    # 5 was throttling this repo: the limit counts open *version-update* PRs, and
+    # the grouped production/development PRs plus a few singletons sat right at it,
+    # so no further npm PR could be raised. Observed 2026-08-04 — the production
+    # group PR appeared within minutes of slots being freed. Grouped updates make a
+    # handful of PRs normal here, so 10 leaves headroom without becoming a flood.
+    open-pull-requests-limit: 10
     labels:
       - "dependencies"
     commit-message:
