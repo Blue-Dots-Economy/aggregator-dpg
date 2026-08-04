@@ -1,4 +1,20 @@
 packages:
-  - "apps/*"
-  - "services/*"
-  - "packages/*"
+  - 'apps/*'
+  - 'services/*'
+  - 'packages/*'
+
+overrides:
+  # Keep exactly ONE copy of ioredis in the tree. bullmq pins `ioredis: 5.10.1`
+  # exactly (not a range), so without this our apps get 5.11.x while bullmq gets
+  # 5.10.1 — and TypeScript cannot assign a `Redis` from one copy to the `Redis`
+  # in the other copy's `ConnectionOptions`, because the class carries private
+  # members. That produced 16 `Type 'Redis' is not assignable to type
+  # 'ConnectionOptions'` errors in apps/worker and packages/queue and stalled
+  # Dependabot's ioredis bump (#573, #585) — misread at the time as ioredis 5.11
+  # having retyped its client. It had not; there were simply two of it.
+  #
+  # Verified both ways: with two copies, 16 type errors; with this override, zero,
+  # and the full test suite passes. Revisit when bullmq moves its own pin — check
+  # `bullmq`'s `dependencies.ioredis` and align rather than dropping the override,
+  # or the duplicate reappears silently.
+  ioredis: ^5.11.1

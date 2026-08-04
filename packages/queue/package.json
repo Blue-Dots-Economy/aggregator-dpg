@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "bullmq": "^5.76.6",
-    "ioredis": "^5.10.1"
+    "ioredis": "^5.11.1"
   },
   "devDependencies": {
     "@aggregator-dpg/tsconfig": "workspace:*",
