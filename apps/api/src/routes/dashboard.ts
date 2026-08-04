@@ -257,10 +257,10 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
       // Tiles count the full dataset (up to TILE_CAP). `account_only` is the
       // local-only bucket — participants who exist in our table but have no
       // signals item — and requires a participants reader not wired here
-      // yet. v1: report 0 and refine once that reader lands.
-      // TODO: when a participants reader is exposed, count participants for
-      //       this aggregator + domain whose identity (phone/email) is not in
-      //       `tileRows`-corresponding items and surface that here.
+      // yet. v1: report 0; once a participants reader is exposed, count
+      // participants for this aggregator + domain whose identity
+      // (phone/email) is not in `tileRows`-corresponding items and surface
+      // that here.
       const tiles = {
         draft: tileRows.filter((s) => s === 'draft').length,
         live: tileRows.filter((s) => s === 'live').length,

@@ -16,7 +16,6 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "bullmq": "^5.76.6",
     "ioredis": "^5.10.1"
   },
   "devDependencies": {

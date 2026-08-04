@@ -22,15 +22,6 @@ export function isModeDeclared(mode: string, cfg: ResolvedNetworkConfig): boolea
   return Object.prototype.hasOwnProperty.call(modes, mode);
 }
 
-export function declaredModes(cfg: ResolvedNetworkConfig): string[] {
-  return Object.keys(cfg.aggregator.registration_modes ?? {});
-}
-
-export function defaultMode(cfg: ResolvedNetworkConfig): string {
-  const keys = declaredModes(cfg);
-  return keys[0] ?? 'form';
-}
-
 export function publicHintI18nKey(mode: string, cfg: ResolvedNetworkConfig): string | null {
   const modes = cfg.aggregator.registration_modes ?? {};
   return modes[mode]?.public_hint_i18n_key ?? null;

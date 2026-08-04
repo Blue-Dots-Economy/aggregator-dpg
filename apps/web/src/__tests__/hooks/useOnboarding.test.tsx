@@ -28,7 +28,6 @@ const {
   useOnboardingSummary,
   useOnboardingBySource,
   useBulkUpload,
-  useBulkUploadStatus,
   useRecentBulkUploads,
 } = await import('@/hooks/useOnboarding');
 
@@ -127,21 +126,6 @@ describe('useOnboarding hooks', () => {
     });
     expect(svc.uploadCsv).toHaveBeenCalledWith(file, 'seeker', true);
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['onboarding', 'summary'] });
-  });
-
-  it('useBulkUploadStatus stays disabled with a null uploadId', () => {
-    const { wrapper } = makeWrapper();
-    const { result } = renderHook(() => useBulkUploadStatus(null), { wrapper });
-    expect(result.current.fetchStatus).toBe('idle');
-    expect(svc.readBulkUpload).not.toHaveBeenCalled();
-  });
-
-  it('useBulkUploadStatus polls while in-flight and stops once terminal', async () => {
-    svc.readBulkUpload!.mockResolvedValue({ upload_id: 'u1', status: 'row_processing' });
-    const { wrapper } = makeWrapper();
-    const { result } = renderHook(() => useBulkUploadStatus('u1'), { wrapper });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(svc.readBulkUpload).toHaveBeenCalledWith('u1');
   });
 
   it('useRecentBulkUploads reflects in-flight items via refetchInterval config', async () => {
