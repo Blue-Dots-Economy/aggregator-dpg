@@ -120,6 +120,18 @@ describe('admin approval routes', () => {
     expect(res.body).toContain(`/admin/v1/aggregator-registrations/decision/${aggregatorId}`);
   });
 
+  it('GET /read/:id renders the reject confirm page (reason field + mirror script)', async () => {
+    const { token } = await mintApprovalToken({ aggregatorId, intent: 'reject' });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/admin/v1/aggregator-registrations/read/${aggregatorId}?token=${encodeURIComponent(token)}&intent=reject`,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain('Reject aggregator application');
+    expect(res.body).toContain('Reason (sent to the applicant)');
+    expect(res.body).toContain('reason-mirror');
+  });
+
   it('GET /read/:id shows already-approved when aggregator.status=active', async () => {
     await aggregatorStore.updateStatus(aggregatorId, 'active', 'admin');
     const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
@@ -742,5 +754,269 @@ describe('admin approval routes', () => {
     expect(res.statusCode).toBe(200);
     const stored = await aggregatorStore.findById(aggregatorId);
     expect(stored.ok && stored.value?.status).toBe('active');
+  });
+
+  // ---------------------------------------------------------------------------
+  // Org re-validation, soft-fail warn branches, hard-fail branches, and the
+  // loadAggregatorAndUser / applicantNameOf helpers.
+  // ---------------------------------------------------------------------------
+
+  it('renders TARGET_ORG_INACTIVE when the bound org is re-validated as inactive at decision time', async () => {
+    process.env.ORG_HIERARCHY_ENABLED = 'true';
+    try {
+      await aggregatorStore.update(aggregatorId, { parentOrgId: 'org-A', updatedBy: 'test' });
+      orgStore.seed([buildAggregatorOrg({ id: 'org-A', slug: 'a', status: 'pending' })]);
+      const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve', org: 'org-A' });
+      const res = await app.inject({
+        method: 'POST',
+        url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
+        payload: { token, decision: 'approve' },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.body).toContain('Organisation unavailable');
+      const stored = await aggregatorStore.findById(aggregatorId);
+      expect(stored.ok && stored.value?.status).toBe('pending');
+    } finally {
+      delete process.env.ORG_HIERARCHY_ENABLED;
+    }
+  });
+
+  it('approve still succeeds (soft-fail, warn-logged) when the decision_made stamp fails', async () => {
+    idp.setUserDecision = async () => ({
+      ok: false,
+      error: { code: 'IDP_UNAVAILABLE', message: 'stamp failed' },
+    });
+    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
+      payload: { token, decision: 'approve' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain('Application approved');
+    const dbAfter = await aggregatorStore.findById(aggregatorId);
+    if (dbAfter.ok && dbAfter.value) expect(dbAfter.value.status).toBe('active');
+  });
+
+  it('approve still succeeds (soft-fail, warn-logged) when stamping signalstack_org_id on KC + DB both fail', async () => {
+    idp.setAttributes = async () => ({
+      ok: false,
+      error: { code: 'IDP_UNAVAILABLE', message: 'attr write failed' },
+    });
+    aggregatorStore.updateSignalstackOrgId = async () => ({
+      ok: false,
+      error: { code: 'DB_UNAVAILABLE', message: 'db write failed' },
+    });
+    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
+      payload: { token, decision: 'approve' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain('Application approved');
+  });
+
+  it('approve returns 503 without side effects when the atomic CAS update fails', async () => {
+    aggregatorStore.approveFromPending = async () => ({
+      ok: false,
+      error: { code: 'DB_UNAVAILABLE', message: 'cas failed' },
+    });
+    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
+      payload: { token, decision: 'approve' },
+    });
+    expect(res.statusCode).toBe(503);
+    expect(res.body).toContain('Action failed');
+    expect(mailer.outbox).toHaveLength(0);
+  });
+
+  it('approve renders already-decided (no email) when the CAS loses a concurrent race', async () => {
+    // Simulates a second in-flight request winning the CAS between our
+    // pending-check read and the update — the store reports success but a
+    // null value, meaning some other request already flipped the row.
+    aggregatorStore.approveFromPending = async () => ({ ok: true, value: null });
+    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
+      payload: { token, decision: 'approve' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain('Already approved');
+    expect(mailer.outbox).toHaveLength(0);
+  });
+
+  it('approve still returns 200 when the applicant approval email fails to send', async () => {
+    mailer.send = async () => ({
+      ok: false,
+      error: { code: 'MAIL_FAILED', message: 'smtp down' },
+    });
+    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
+      payload: { token, decision: 'approve' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain('Application approved');
+    const dbAfter = await aggregatorStore.findById(aggregatorId);
+    expect(dbAfter.ok && dbAfter.value?.status).toBe('active');
+  });
+
+  it('reject returns 503 without side effects when updateStatus fails', async () => {
+    aggregatorStore.updateStatus = async () => ({
+      ok: false,
+      error: { code: 'DB_UNAVAILABLE', message: 'db down' },
+    });
+    const { token } = await mintApprovalToken({ aggregatorId, intent: 'reject' });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
+      payload: { token, decision: 'reject' },
+    });
+    expect(res.statusCode).toBe(503);
+    expect(res.body).toContain('Action failed');
+    expect(mailer.outbox).toHaveLength(0);
+  });
+
+  it('reject still succeeds (soft-fail, warn-logged) when the decision_made stamp fails', async () => {
+    idp.setUserDecision = async () => ({
+      ok: false,
+      error: { code: 'IDP_UNAVAILABLE', message: 'stamp failed' },
+    });
+    const { token } = await mintApprovalToken({ aggregatorId, intent: 'reject' });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
+      payload: { token, decision: 'reject' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain('Application rejected');
+  });
+
+  it('reject still returns 200 when the applicant rejection email fails to send', async () => {
+    mailer.send = async () => ({
+      ok: false,
+      error: { code: 'MAIL_FAILED', message: 'smtp down' },
+    });
+    const { token } = await mintApprovalToken({ aggregatorId, intent: 'reject' });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
+      payload: { token, decision: 'reject' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain('Application rejected');
+    const dbAfter = await aggregatorStore.findById(aggregatorId);
+    expect(dbAfter.ok && dbAfter.value?.status).toBe('inactive');
+  });
+
+  it('503s when loading the aggregator record fails (store unavailable)', async () => {
+    aggregatorStore.findById = async () => ({
+      ok: false,
+      error: { code: 'DB_UNAVAILABLE', message: 'db down' },
+    });
+    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
+      payload: { token, decision: 'approve' },
+    });
+    expect(res.statusCode).toBe(503);
+    expect(res.body).toContain('Could not load aggregator record');
+  });
+
+  it('404s when the aggregator id does not exist', async () => {
+    const unknownId = '22222222-2222-2222-2222-222222222299';
+    const { token } = await mintApprovalToken({ aggregatorId: unknownId, intent: 'approve' });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/decision/${unknownId}`,
+      payload: { token, decision: 'approve' },
+    });
+    expect(res.statusCode).toBe(404);
+    expect(res.body).toContain('Aggregator not found');
+  });
+
+  it('503s when the identity-service lookup fails', async () => {
+    idp.findByAttribute = async () => ({
+      ok: false,
+      error: { code: 'IDP_UNAVAILABLE', message: 'kc down' },
+    });
+    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
+      payload: { token, decision: 'approve' },
+    });
+    expect(res.statusCode).toBe(503);
+    expect(res.body).toContain('Could not load identity record');
+  });
+
+  it('404s when the identity record is missing for an otherwise-known aggregator', async () => {
+    idp.findByAttribute = async () => ({ ok: true, value: null });
+    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
+      payload: { token, decision: 'approve' },
+    });
+    expect(res.statusCode).toBe(404);
+    expect(res.body).toContain('Identity record missing');
+  });
+
+  it('falls back to the KC first+last name when the aggregator has no contact.name', async () => {
+    aggregatorStore.seed([
+      buildAggregator({
+        id: aggregatorId,
+        orgSlug: 'trrain-abcd',
+        actorType: 'aggregator',
+        type: null,
+        name: 'TRRAIN',
+        contact: { name: '', phone: '+919876543210', email: 'asha@trrain.org' },
+        status: 'pending',
+      }),
+    ]);
+    // firstName/lastName were seeded in beforeEach as Asha/Rao already.
+    const { token } = await mintApprovalToken({ aggregatorId, intent: 'reject' });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
+      payload: { token, decision: 'reject' },
+    });
+    expect(res.statusCode).toBe(200);
+    const rejected = mailer.outbox[0];
+    expect(rejected?.text).toContain('Hi Asha Rao,');
+  });
+
+  it('falls back to the KC email when neither contact.name nor KC first/last name are set', async () => {
+    aggregatorStore.seed([
+      buildAggregator({
+        id: aggregatorId,
+        orgSlug: 'trrain-abcd',
+        actorType: 'aggregator',
+        type: null,
+        name: 'TRRAIN',
+        contact: { name: '', phone: '+919876543210', email: 'asha@trrain.org' },
+        status: 'pending',
+      }),
+    ]);
+    const kc = await idp.findById(kcUserId);
+    if (kc.ok && kc.value) {
+      kc.value.firstName = undefined;
+      kc.value.lastName = undefined;
+    }
+    const { token } = await mintApprovalToken({ aggregatorId, intent: 'reject' });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
+      payload: { token, decision: 'reject' },
+    });
+    expect(res.statusCode).toBe(200);
+    const rejected = mailer.outbox[0];
+    expect(rejected?.text).toContain('Hi asha@trrain.org,');
   });
 });

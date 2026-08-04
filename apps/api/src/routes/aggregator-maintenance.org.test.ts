@@ -103,4 +103,83 @@ describe('cleanup-stale — org prune (ORG_HIERARCHY_ENABLED)', () => {
     expect(ownerLookup.ok && ownerLookup.value).toBeNull();
     expect(idp.getGroup(group.value.id)).toBeUndefined();
   });
+
+  it('prunes a stale pending org with no owner KC user on file (ownerKcSub unset)', async () => {
+    orgStore.seed([
+      buildAggregatorOrg({
+        id: 'o-no-owner',
+        slug: 'no-owner',
+        ownerEmail: 'never-signed-in@x.org',
+        ownerKcSub: null,
+        kcGroupId: null,
+        status: 'pending',
+        updatedAt: new Date('2020-01-01T00:00:00Z'),
+      }),
+    ]);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/admin/v1/aggregator-registrations/cleanup-stale',
+      headers: AUTH_HEADER,
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { orgsPruned: number; orgsPrunedIds: string[] };
+    expect(body.orgsPruned).toBe(1);
+    expect(body.orgsPrunedIds).toEqual(['o-no-owner']);
+    const row = await orgStore.findById('o-no-owner');
+    expect(row.ok && row.value).toBeNull();
+  });
+
+  it('skips (does not prune) a stale org when the mirrored KC group delete fails', async () => {
+    const owner = await idp.createUser({
+      email: 'group-fail-owner@x.org',
+      enabled: false,
+    });
+    if (!owner.ok) throw new Error('seed owner');
+    const group = await idp.createGroup('org-group-fail', { org_id: 'o-group-fail' });
+    if (!group.ok) throw new Error('seed group');
+    idp.deleteGroup = async () => ({
+      ok: false,
+      error: { code: 'IDP_UNAVAILABLE', message: 'group delete failed' },
+    });
+
+    orgStore.seed([
+      buildAggregatorOrg({
+        id: 'o-group-fail',
+        slug: 'group-fail',
+        ownerEmail: 'group-fail-owner@x.org',
+        ownerKcSub: owner.value.id,
+        kcGroupId: group.value.id,
+        status: 'pending',
+        updatedAt: new Date('2020-01-01T00:00:00Z'),
+      }),
+    ]);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/admin/v1/aggregator-registrations/cleanup-stale',
+      headers: AUTH_HEADER,
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { orgsPruned: number; orgsPrunedIds: string[] };
+    expect(body.orgsPruned).toBe(0);
+    expect(body.orgsPrunedIds).not.toContain('o-group-fail');
+    const row = await orgStore.findById('o-group-fail');
+    expect(row.ok && row.value).not.toBeNull();
+  });
+
+  it('503s when the org store listPending fails', async () => {
+    orgStore.listPending = async () => ({
+      ok: false,
+      error: { code: 'DB_UNAVAILABLE', message: 'org list failed' },
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/admin/v1/aggregator-registrations/cleanup-stale',
+      headers: AUTH_HEADER,
+    });
+    expect(res.statusCode).toBe(503);
+    const body = res.json() as { error: { code: string } };
+    expect(body.error.code).toBe('DB_UNAVAILABLE');
+  });
 });
