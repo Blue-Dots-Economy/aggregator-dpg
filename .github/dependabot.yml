@@ -32,6 +32,13 @@ updates:
       # vitest 4 needs vite 6 in lockstep — hold the major.
       - dependency-name: "vitest"
         update-types: ["version-update:semver-major"]
+      # @vitest/coverage-v8 peers on the EXACT vitest version, so its major can
+      # only move when vitest's does — and vitest's is held above. #559 proposed
+      # coverage-v8 4.1.10 against vitest 3, which passes CI (unmet peers are a
+      # warning, and `test:coverage` is continue-on-error) while silently
+      # producing no coverage for SonarCloud. Keep the two majors coupled.
+      - dependency-name: "@vitest/coverage-v8"
+        update-types: ["version-update:semver-major"]
       # tailwindcss 4 replaces the JS config with CSS-first `@theme` and drops the
       # postcss plugin for @tailwindcss/postcss — a migration, not a bump (#560
       # failed `Build`). Hold until the v4 migration is scheduled, otherwise every
