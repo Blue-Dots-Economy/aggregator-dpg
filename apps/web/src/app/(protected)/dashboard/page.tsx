@@ -234,7 +234,7 @@ function SummaryBar({
           {t('summary.total', { count: fmtCount(total) })}
         </span>
       </div>
-      <div className="w-px self-stretch bg-[var(--bd-border)] mx-1 hidden sm:block" />
+      <div className="w-px self-stretch bg-(--bd-border) mx-1 hidden sm:block" />
       <span className="text-[13px] text-ink-500 font-medium hidden sm:block">
         {t('summary.hint')}
       </span>
@@ -386,7 +386,7 @@ function FunnelCell({ total, parts }: FunnelCellProps) {
         createPortal(
           <div
             style={{ position: 'absolute', left: pos.x, top: pos.y, zIndex: 9999 }}
-            className="bg-white border border-[var(--bd-border)] rounded-[10px] bd-shadow-lg p-2.5 min-w-[160px] pointer-events-none animate-[fadeUp_.12s_ease-out]"
+            className="bg-white border border-(--bd-border) rounded-[10px] bd-shadow-lg p-2.5 min-w-[160px] pointer-events-none animate-[fadeUp_.12s_ease-out]"
           >
             <div className="flex flex-col gap-1.5">
               {parts.map((p, i) => (
@@ -396,7 +396,7 @@ function FunnelCell({ total, parts }: FunnelCellProps) {
                   <span className="font-semibold tabular-nums text-ink-900">{p.v}</span>
                 </div>
               ))}
-              <div className="border-t border-[var(--bd-border-soft)] mt-1 pt-1.5 flex items-center gap-2 text-[12px]">
+              <div className="border-t border-(--bd-border-soft) mt-1 pt-1.5 flex items-center gap-2 text-[12px]">
                 <span className="text-ink-400 flex-1">Total</span>
                 <span className="font-display font-bold tabular-nums text-ink-900">{total}</span>
               </div>
@@ -451,7 +451,7 @@ function ProgressTiny({ pct, title }: { pct: number; title?: string }) {
         createPortal(
           <div
             style={{ position: 'absolute', left: pos.x, top: pos.y, zIndex: 9999 }}
-            className="bg-white border border-[var(--bd-border)] rounded-[10px] bd-shadow-lg px-2.5 py-1.5 pointer-events-none animate-[fadeUp_.12s_ease-out]"
+            className="bg-white border border-(--bd-border) rounded-[10px] bd-shadow-lg px-2.5 py-1.5 pointer-events-none animate-[fadeUp_.12s_ease-out]"
           >
             <div className="flex items-center gap-2 text-[12px] min-w-[120px]">
               <span className="text-ink-500 flex-1">{label}</span>
@@ -642,7 +642,7 @@ function BulkActionBar({
   };
 
   return (
-    <div className="px-5 py-2.5 flex items-center gap-3 border-b border-[var(--bd-border)] bg-[var(--bd-primary-50)]">
+    <div className="px-5 py-2.5 flex items-center gap-3 border-b border-(--bd-border) bg-(--bd-primary-50)">
       <span className="text-[12.5px] font-semibold text-primary-600 whitespace-nowrap">
         {t('bulk.selected', { count: selectedRows.length })}
       </span>
@@ -912,7 +912,7 @@ function ParticipantTable<R extends ParticipantBase>({
 
   return (
     <div className="bd-card bd-shadow overflow-hidden">
-      <div className="px-5 py-4 flex items-center gap-3 border-b border-[var(--bd-border)]">
+      <div className="px-5 py-4 flex items-center gap-3 border-b border-(--bd-border)">
         <div className="font-display font-bold text-[15px] text-ink-900">
           {kind === 'opp'
             ? t('table.opportunityProviders')
@@ -971,7 +971,7 @@ function ParticipantTable<R extends ParticipantBase>({
             {filterOpen && (
               <div
                 role="menu"
-                className="absolute right-0 top-full mt-1 z-20 min-w-[180px] bg-white border border-[var(--bd-border)] rounded-[10px] bd-shadow-lg p-1"
+                className="absolute right-0 top-full mt-1 z-20 min-w-[180px] bg-white border border-(--bd-border) rounded-[10px] bd-shadow-lg p-1"
               >
                 {options.map((opt) => {
                   const active = statusFilter === opt.value;
@@ -987,7 +987,7 @@ function ParticipantTable<R extends ParticipantBase>({
                       }}
                       className={`w-full text-left px-2.5 py-1.5 rounded-md text-[12.5px] flex items-center justify-between ${
                         active
-                          ? 'bg-[var(--bd-primary-50)] text-primary-600 font-semibold'
+                          ? 'bg-(--bd-primary-50) text-primary-600 font-semibold'
                           : 'text-ink-700 hover:bg-ink-50'
                       }`}
                     >
@@ -1017,7 +1017,7 @@ function ParticipantTable<R extends ParticipantBase>({
       {/* Gmail-style: the header checkbox only selects the current page; this
           banner lets the operator expand to every matching row across pages. */}
       {(showSelectAllMatching || selectedAllMatching) && (
-        <div className="px-5 py-2 flex items-center justify-center gap-2 border-b border-[var(--bd-border)] bg-[var(--bd-primary-50)] text-[12.5px] text-ink-600">
+        <div className="px-5 py-2 flex items-center justify-center gap-2 border-b border-(--bd-border) bg-(--bd-primary-50) text-[12.5px] text-ink-600">
           {selectedAllMatching ? (
             <>
               <span>{t('bulk.allMatchingSelected', { count: selected.size })}</span>
@@ -1261,7 +1261,7 @@ function PaginationFooter({
   // so dashboards with many pages stay readable.
   const pageList = buildPageList(page, totalPages);
   return (
-    <div className="px-5 py-3 border-t border-[var(--bd-border)] flex items-center justify-between text-[12.5px] text-ink-500">
+    <div className="px-5 py-3 border-t border-(--bd-border) flex items-center justify-between text-[12.5px] text-ink-500">
       <div>
         {showSearchSummary
           ? t('pagination.matching', { shown: visibleCount, rowsOnPage })
@@ -1288,7 +1288,7 @@ function PaginationFooter({
                 key={p}
                 type="button"
                 aria-current="page"
-                className="px-3 py-1 rounded-md bg-[var(--bd-primary-50)] text-primary-600 font-semibold"
+                className="px-3 py-1 rounded-md bg-(--bd-primary-50) text-primary-600 font-semibold"
               >
                 {p}
               </button>

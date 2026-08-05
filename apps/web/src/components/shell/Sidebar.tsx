@@ -81,7 +81,7 @@ export function Sidebar() {
   }));
 
   return (
-    <aside className="w-[252px] shrink-0 bg-[var(--bd-card)] border-r border-[var(--bd-border)] flex flex-col h-screen sticky top-0">
+    <aside className="w-[252px] shrink-0 bg-(--bd-card) border-r border-(--bd-border) flex flex-col h-screen sticky top-0">
       <div className="px-5 pt-6 pb-5">
         {cfg.brand.logo?.default ? (
           <Image
@@ -100,10 +100,10 @@ export function Sidebar() {
           <div className="flex items-center gap-3">
             <BlueDotsLogo size={40} />
             <div>
-              <div className="font-display font-bold text-[17px] text-[var(--bd-fg)] leading-tight">
+              <div className="font-display font-bold text-[17px] text-(--bd-fg) leading-tight">
                 {cfg.brand.short_name}
               </div>
-              <div className="text-[12px] text-[var(--bd-fg-muted)] leading-tight mt-0.5">
+              <div className="text-[12px] text-(--bd-fg-muted) leading-tight mt-0.5">
                 {t('portal_label')}
               </div>
             </div>
@@ -112,7 +112,7 @@ export function Sidebar() {
       </div>
 
       <div className="px-3">
-        <div className="px-3 pt-3 pb-2 text-[10.5px] uppercase tracking-[0.12em] font-semibold text-[var(--bd-fg-muted)] opacity-60">
+        <div className="px-3 pt-3 pb-2 text-[10.5px] uppercase tracking-[0.12em] font-semibold text-(--bd-fg-muted) opacity-60">
           {t('overview')}
         </div>
         <nav className="flex flex-col gap-0.5">
@@ -127,7 +127,7 @@ export function Sidebar() {
                   'group flex items-center gap-3 px-3 py-2.5 rounded-[10px] text-[14px] font-medium transition-all',
                   isActive
                     ? 'nav-active'
-                    : 'text-[var(--bd-fg-muted)] hover:bg-[var(--bd-border-soft)] hover:text-[var(--bd-fg)]',
+                    : 'text-(--bd-fg-muted) hover:bg-(--bd-border-soft) hover:text-(--bd-fg)',
                 )}
               >
                 <Ic size={18} stroke={isActive ? 2 : 1.7} />
@@ -137,8 +137,8 @@ export function Sidebar() {
                     className={cn(
                       'ml-auto text-[11px] font-semibold px-1.5 py-0.5 rounded-md',
                       isActive
-                        ? 'bg-[var(--bd-card)] text-primary-600'
-                        : 'bg-[var(--bd-border-soft)] text-[var(--bd-fg-muted)]',
+                        ? 'bg-(--bd-card) text-primary-600'
+                        : 'bg-(--bd-border-soft) text-(--bd-fg-muted)',
                     )}
                   >
                     {n.badge}
@@ -165,15 +165,15 @@ export function Sidebar() {
         )}
 
         <div className="p-3 shrink-0">
-          <div className="rounded-[12px] bg-gradient-to-br from-[var(--bd-tint-primary)] to-[var(--bd-card)] border border-[var(--bd-border)] p-3 flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-[var(--bd-brand)] text-white flex items-center justify-center font-display font-bold text-[12px] shrink-0">
+          <div className="rounded-[12px] bg-linear-to-br from-(--bd-tint-primary) to-(--bd-card) border border-(--bd-border) p-3 flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-(--bd-brand) text-white flex items-center justify-center font-display font-bold text-[12px] shrink-0">
               {orgInitials}
             </div>
             <div className="min-w-0 flex-1">
-              <div className="text-[13px] font-semibold text-[var(--bd-fg)] truncate">
+              <div className="text-[13px] font-semibold text-(--bd-fg) truncate">
                 {user?.org ?? 'TRRAIN'}
               </div>
-              <div className="text-[11px] text-[var(--bd-fg-muted)] truncate">
+              <div className="text-[11px] text-(--bd-fg-muted) truncate">
                 {t('aggregator_sublabel')}
               </div>
             </div>
@@ -184,7 +184,7 @@ export function Sidebar() {
               }}
               title={t('sign_out')}
               aria-label={t('sign_out')}
-              className="w-7 h-7 rounded-md flex items-center justify-center text-[var(--bd-fg-muted)] hover:bg-[var(--bd-border-soft)] hover:text-rose-500 transition-colors shrink-0"
+              className="w-7 h-7 rounded-md flex items-center justify-center text-(--bd-fg-muted) hover:bg-(--bd-border-soft) hover:text-rose-500 transition-colors shrink-0"
             >
               <I.signout size={15} />
             </button>

@@ -136,7 +136,7 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
   if (!isMinor && !consentCall) blockers.push(t('blockers.consent_call'));
 
   return (
-    <div className="rounded-[18px] bg-white border border-[var(--bd-border)] overflow-hidden shadow-[0_1px_0_rgba(11,16,32,0.02),0_20px_60px_-30px_rgba(11,16,32,0.18)]">
+    <div className="rounded-[18px] bg-white border border-(--bd-border) overflow-hidden shadow-[0_1px_0_rgba(11,16,32,0.02),0_20px_60px_-30px_rgba(11,16,32,0.18)]">
       <div
         className="px-6 sm:px-8 py-6 text-white"
         style={{ background: props.brandColor ?? 'var(--bd-primary-600)' }}
@@ -253,7 +253,7 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
         {isMinor ? (
           // Minor: no consent here — Signals creates the account without it and
           // the participant accepts terms in the Signalstack app after signing in.
-          <div className="rounded-[10px] border border-[var(--bd-border)] bg-[var(--bd-primary-50)] px-4 py-3.5 text-[13.5px] text-ink-900">
+          <div className="rounded-[10px] border border-(--bd-border) bg-(--bd-primary-50) px-4 py-3.5 text-[13.5px] text-ink-900">
             {t('u18_notice')}
           </div>
         ) : (
@@ -264,7 +264,7 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
                 name="consent_call"
                 checked={consentCall}
                 onChange={(e) => setConsentCall(e.target.checked)}
-                className="mt-0.5 h-4 w-4 rounded border-[var(--bd-border)] accent-[var(--bd-primary-600)]"
+                className="mt-0.5 h-4 w-4 rounded-sm border-(--bd-border) accent-(--bd-primary-600)"
               />
               <span>{t('consent_call_label')}</span>
             </label>
@@ -273,7 +273,7 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
                 {t('consent_accept_prefix')}
                 <button
                   type="button"
-                  className="underline text-[var(--bd-primary-600)]"
+                  className="underline text-(--bd-primary-600)"
                   onClick={() => setConsentModal({ open: true, tab: 'terms' })}
                 >
                   {t('consent_docs_link')}
@@ -291,7 +291,7 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
             type="submit"
             disabled={!valid || submitting || props.busy}
             style={{ background: props.brandColor ?? undefined }}
-            className="inline-flex items-center justify-center rounded-[10px] px-5 py-2.5 text-[14px] font-semibold text-white bg-[var(--bd-primary-600)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition"
+            className="inline-flex items-center justify-center rounded-[10px] px-5 py-2.5 text-[14px] font-semibold text-white bg-(--bd-primary-600) hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition"
           >
             {t('submit_label')}
           </button>
