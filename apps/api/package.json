@@ -46,7 +46,7 @@
     "fastify-type-provider-zod": "^4.0.2",
     "ioredis": "^5.10.1",
     "jose": "^5.9.6",
-    "nodemailer": "^6.10.1",
+    "nodemailer": "^9.0.1",
     "pg": "^8.13.1",
     "pino": "^9.5.0",
     "pino-pretty": "^11.3.0",
@@ -63,6 +63,6 @@
     "drizzle-kit": "^0.28.1",
     "tsx": "^4.19.2",
     "typescript": "^6.0.3",
-    "vitest": "^2.1.8"
+    "vitest": "^3.2.6"
   }
 }
