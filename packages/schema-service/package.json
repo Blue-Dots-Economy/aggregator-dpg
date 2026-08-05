@@ -33,9 +33,9 @@
   "devDependencies": {
     "@aggregator-dpg/tsconfig": "workspace:*",
     "@types/js-yaml": "^4.0.9",
-    "@vitest/coverage-v8": "^3.2.0",
-    "js-yaml": "^4.1.0",
+    "@vitest/coverage-v8": "^3.2.7",
+    "js-yaml": "^4.3.1",
     "typescript": "^6.0.3",
-    "vitest": "^3.2.0"
+    "vitest": "^3.2.7"
   }
 }

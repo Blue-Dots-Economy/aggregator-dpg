@@ -16,7 +16,7 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "ioredis": "^5.10.1"
+    "ioredis": "^5.11.1"
   },
   "devDependencies": {
     "@aggregator-dpg/tsconfig": "workspace:*",

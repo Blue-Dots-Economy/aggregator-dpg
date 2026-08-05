@@ -119,11 +119,11 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.E
   };
 
   const inputClass =
-    'w-full rounded-[10px] border border-[var(--bd-border)] px-3 py-2 text-[14px] bg-transparent';
+    'w-full rounded-[10px] border border-(--bd-border) px-3 py-2 text-[14px] bg-transparent';
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4"
+      className="fixed inset-0 z-100 flex items-center justify-center bg-black/40 p-4"
       role="dialog"
       aria-modal="true"
       aria-label={t('title')}
@@ -136,19 +136,19 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.E
         onClick={() => onOpenChange(false)}
         tabIndex={-1}
       />
-      <div className="relative z-10 w-full max-w-md rounded-[14px] bg-[var(--bd-card)] border border-[var(--bd-border)] p-5 max-h-[90vh] overflow-y-auto">
+      <div className="relative z-10 w-full max-w-md rounded-[14px] bg-(--bd-card) border border-(--bd-border) p-5 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-1">
-          <h2 className="text-[17px] font-semibold text-[var(--bd-fg)]">{t('title')}</h2>
+          <h2 className="text-[17px] font-semibold text-(--bd-fg)">{t('title')}</h2>
           <button
             type="button"
             aria-label={t('cancel')}
             onClick={() => onOpenChange(false)}
-            className="text-[var(--bd-fg-muted)] hover:text-[var(--bd-fg)]"
+            className="text-(--bd-fg-muted) hover:text-(--bd-fg)"
           >
             <I.x size={18} />
           </button>
         </div>
-        <p className="text-[13px] text-[var(--bd-fg-muted)] mb-4">{t('description')}</p>
+        <p className="text-[13px] text-(--bd-fg-muted) mb-4">{t('description')}</p>
 
         {status === 'success' ? (
           <p className="text-[14px] text-emerald-600">{t('success')}</p>
@@ -224,7 +224,7 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.E
                 className={inputClass}
               />
             </div>
-            <label className="flex items-start gap-2 text-[13px] text-[var(--bd-fg)]">
+            <label className="flex items-start gap-2 text-[13px] text-(--bd-fg)">
               <input
                 type="checkbox"
                 checked={consent}

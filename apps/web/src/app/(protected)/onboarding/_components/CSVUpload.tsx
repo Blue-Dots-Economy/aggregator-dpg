@@ -32,7 +32,7 @@ function UploadToast({ message, onDone }: { message: string; onDone: () => void 
     <div
       role="status"
       aria-live="polite"
-      className="fixed top-4 right-4 z-[100] max-w-sm rounded-[10px] border border-emerald-200 bg-emerald-50 px-4 py-3 text-[13px] text-emerald-700 shadow-lg inline-flex items-start gap-2"
+      className="fixed top-4 right-4 z-100 max-w-sm rounded-[10px] border border-emerald-200 bg-emerald-50 px-4 py-3 text-[13px] text-emerald-700 shadow-lg inline-flex items-start gap-2"
     >
       <I.check size={14} className="mt-0.5 shrink-0" /> <span>{message}</span>
     </div>,
@@ -155,7 +155,7 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
            * the value is changeable.
            */}
           <div
-            className="flex items-center bg-ink-50 border border-[var(--bd-border)] rounded-[10px] p-0.5"
+            className="flex items-center bg-ink-50 border border-(--bd-border) rounded-[10px] p-0.5"
             aria-label={`Participant type: ${aggregatorTypeLabel}`}
           >
             {aggregatorTypeLabel && (
@@ -187,7 +187,7 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
           // Selected-file chip with explicit × dismissal. Cleared state +
           // resets the file input so the same filename can be re-picked.
           <div className="flex items-center justify-center gap-2">
-            <div className="inline-flex items-center gap-2 max-w-full px-3 py-2 rounded-[10px] bg-[var(--bd-primary-50)] border border-[var(--bd-primary-100)]">
+            <div className="inline-flex items-center gap-2 max-w-full px-3 py-2 rounded-[10px] bg-(--bd-primary-50) border border-(--bd-primary-100)">
               <I.upload size={14} className="text-primary-600 shrink-0" />
               <span className="text-[13.5px] font-semibold text-primary-700 truncate">
                 {pickedFile.name}
@@ -215,7 +215,7 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
           </div>
         ) : (
           <label htmlFor="csv-file-input" className="cursor-pointer block text-center">
-            <div className="w-12 h-12 mx-auto rounded-full bg-white border border-[var(--bd-border)] flex items-center justify-center text-primary-600 mb-3 bd-shadow">
+            <div className="w-12 h-12 mx-auto rounded-full bg-white border border-(--bd-border) flex items-center justify-center text-primary-600 mb-3 bd-shadow">
               <I.upload size={20} />
             </div>
             <div className="text-[14px] font-semibold text-ink-700">
@@ -229,12 +229,12 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
         )}
       </Dropzone>
 
-      <label className="mt-4 flex items-start gap-2.5 rounded-[10px] border border-[var(--bd-border)] px-3.5 py-3 text-[13px] text-ink-800 cursor-pointer">
+      <label className="mt-4 flex items-start gap-2.5 rounded-[10px] border border-(--bd-border) px-3.5 py-3 text-[13px] text-ink-800 cursor-pointer">
         <input
           type="checkbox"
           checked={attested}
           onChange={(e) => setAttested(e.target.checked)}
-          className="mt-0.5 h-4 w-4 shrink-0 rounded border-[var(--bd-border)] accent-[var(--bd-primary-600)]"
+          className="mt-0.5 h-4 w-4 shrink-0 rounded-sm border-(--bd-border) accent-(--bd-primary-600)"
           aria-required
         />
         <span>{attestation ? attestation.content : t('csv.attestation_fallback')}</span>
@@ -395,7 +395,7 @@ function UploadRow({ upload }: { upload: BulkUploadStatus }) {
             type="button"
             onClick={onDownloadErrors}
             disabled={downloading}
-            className="inline-flex items-center gap-1.5 px-2 py-1 rounded-[8px] bg-[var(--bd-primary-50)] text-primary-600 font-semibold hover:bg-[var(--bd-primary-100)] disabled:opacity-60"
+            className="inline-flex items-center gap-1.5 px-2 py-1 rounded-[8px] bg-(--bd-primary-50) text-primary-600 font-semibold hover:bg-(--bd-primary-100) disabled:opacity-60"
           >
             <I.download size={12} />
             {downloading ? t('csv.recent.signing') : 'errors.csv'}
@@ -405,7 +405,7 @@ function UploadRow({ upload }: { upload: BulkUploadStatus }) {
         ) : upload.status_reason ? (
           <span
             title={upload.status_reason}
-            className="text-rose-600 block whitespace-pre-line break-words max-w-[240px] align-middle leading-snug"
+            className="text-rose-600 block whitespace-pre-line wrap-break-word max-w-[240px] align-middle leading-snug"
           >
             {upload.status_reason.replace(/,\s*/g, ',\n')}
           </span>

@@ -121,7 +121,7 @@ function SuccessToast({ message, onDone }: { message: string; onDone: () => void
     <div
       role="status"
       aria-live="polite"
-      className="fixed top-4 right-4 z-[100] rounded-[10px] border border-emerald-200 bg-emerald-50 px-4 py-3 text-[13px] text-emerald-700 shadow-lg inline-flex items-center gap-2"
+      className="fixed top-4 right-4 z-100 rounded-[10px] border border-emerald-200 bg-emerald-50 px-4 py-3 text-[13px] text-emerald-700 shadow-lg inline-flex items-center gap-2"
     >
       <I.check size={14} /> {message}
     </div>,
@@ -270,7 +270,7 @@ export function CreateLinkSection() {
 
   return (
     <div className="bd-card bd-shadow overflow-hidden">
-      <div className="px-6 py-5 flex items-center gap-3 border-b border-[var(--bd-border)]">
+      <div className="px-6 py-5 flex items-center gap-3 border-b border-(--bd-border)">
         <I.link size={16} className="text-ink-500" />
         <div className="font-display font-bold text-[16px] text-ink-900">
           {t('create_link.title')}
@@ -395,11 +395,11 @@ export function CreateLinkSection() {
           )}
         </div>
 
-        <div className="border-t lg:border-t-0 lg:border-l border-[var(--bd-border)] bg-gradient-to-b from-[var(--bd-tint-primary)] to-[var(--bd-card)] p-6 flex flex-col items-center text-center">
+        <div className="border-t lg:border-t-0 lg:border-l border-(--bd-border) bg-linear-to-b from-(--bd-tint-primary) to-(--bd-card) p-6 flex flex-col items-center text-center">
           <div className="flex items-center gap-2 self-start text-[12.5px] font-semibold text-ink-500">
             <I.qr size={14} /> {t('create_link.qr_label')}
           </div>
-          <div className="mt-4 p-3 bg-white rounded-[14px] border border-[var(--bd-border)] bd-shadow-lg">
+          <div className="mt-4 p-3 bg-white rounded-[14px] border border-(--bd-border) bd-shadow-lg">
             <div className="w-[200px] h-[200px] flex items-center justify-center text-ink-300 text-[12px] text-center px-4">
               {t('create_link.qr_placeholder')}
             </div>
@@ -502,7 +502,7 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
   };
 
   return (
-    <div className="bd-card p-5 hover:border-[var(--bd-primary-100)] transition-colors">
+    <div className="bd-card p-5 hover:border-(--bd-primary-100) transition-colors">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
@@ -540,7 +540,7 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
            */}
           {isLive && link.public_url && (
             <div className="flex items-center gap-2 mt-3 flex-wrap">
-              <div className="inline-flex items-center gap-1 bg-ink-50 border border-[var(--bd-border)] rounded-[10px] px-3 py-1.5 text-[12.5px] font-mono">
+              <div className="inline-flex items-center gap-1 bg-ink-50 border border-(--bd-border) rounded-[10px] px-3 py-1.5 text-[12.5px] font-mono">
                 <span className="text-ink-500">{urlHost}/</span>
                 <span className="text-amber-700 font-semibold">{urlPath}</span>
                 <button
@@ -558,7 +558,7 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
                   target="_blank"
                   rel="noopener noreferrer"
                   title={t('link_card.view_qr')}
-                  className="inline-flex items-center justify-center w-8 h-8 rounded-[10px] border border-[var(--bd-border)] text-ink-500 hover:text-primary-600 hover:border-[var(--bd-primary-100)]"
+                  className="inline-flex items-center justify-center w-8 h-8 rounded-[10px] border border-(--bd-border) text-ink-500 hover:text-primary-600 hover:border-(--bd-primary-100)"
                 >
                   <I.qr size={14} />
                 </a>
@@ -568,14 +568,14 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
                 target="_blank"
                 rel="noopener noreferrer"
                 title={t('link_card.open_link')}
-                className="inline-flex items-center justify-center w-8 h-8 rounded-[10px] border border-[var(--bd-border)] text-ink-500 hover:text-primary-600 hover:border-[var(--bd-primary-100)]"
+                className="inline-flex items-center justify-center w-8 h-8 rounded-[10px] border border-(--bd-border) text-ink-500 hover:text-primary-600 hover:border-(--bd-primary-100)"
               >
                 <I.link size={14} />
               </a>
               <button
                 type="button"
                 onClick={onCopy}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] border border-[var(--bd-border)] text-ink-600 text-[12.5px] font-semibold hover:bg-ink-50"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] border border-(--bd-border) text-ink-600 text-[12.5px] font-semibold hover:bg-ink-50"
               >
                 {copied ? t('link_card.copied') : t('link_card.copy_link')}
               </button>
@@ -651,7 +651,7 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
       </div>
 
       {isDraft && editing && (
-        <div className="mt-4 pt-4 border-t border-[var(--bd-border)] grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="mt-4 pt-4 border-t border-(--bd-border) grid grid-cols-1 md:grid-cols-2 gap-3">
           <Field label={t('create_link.field_state')} required>
             <input
               className="bd-input"

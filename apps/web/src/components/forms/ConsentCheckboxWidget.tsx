@@ -39,8 +39,7 @@ export function ConsentCheckboxWidget(props: WidgetProps): JSX.Element {
   const [activeTab, setActiveTab] = useState<ConsentTab>('terms');
 
   const consentContent = (formContext as Record<string, unknown> | undefined)?.consentContent as
-    | ConsentDocContent
-    | undefined;
+    ConsentDocContent | undefined;
 
   const openTab = (tab: ConsentTab): void => {
     setActiveTab(tab);
@@ -81,7 +80,7 @@ export function ConsentCheckboxWidget(props: WidgetProps): JSX.Element {
         <input
           id={id}
           type="checkbox"
-          className="w-[18px] h-[18px] rounded-[5px] mt-0.5 accent-[var(--bd-primary)]"
+          className="w-[18px] h-[18px] rounded-[5px] mt-0.5 accent-(--bd-primary)"
           checked={Boolean(value)}
           required={required}
           disabled={disabled || readonly}

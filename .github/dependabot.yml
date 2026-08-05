@@ -12,7 +12,12 @@ updates:
       day: "monday"
       time: "03:00"
       timezone: "UTC"
-    open-pull-requests-limit: 5
+    # 5 was throttling this repo: the limit counts open *version-update* PRs, and
+    # the grouped production/development PRs plus a few singletons sat right at it,
+    # so no further npm PR could be raised. Observed 2026-08-04 — the production
+    # group PR appeared within minutes of slots being freed. Grouped updates make a
+    # handful of PRs normal here, so 10 leaves headroom without becoming a flood.
+    open-pull-requests-limit: 10
     labels:
       - "dependencies"
     commit-message:
@@ -31,6 +36,32 @@ updates:
         update-types: ["version-update:semver-major"]
       # vitest 4 needs vite 6 in lockstep — hold the major.
       - dependency-name: "vitest"
+        update-types: ["version-update:semver-major"]
+      # @vitest/coverage-v8 peers on the EXACT vitest version, so its major can
+      # only move when vitest's does — and vitest's is held above. #559 proposed
+      # coverage-v8 4.1.10 against vitest 3, which passes CI (unmet peers are a
+      # warning, and `test:coverage` is continue-on-error) while silently
+      # producing no coverage for SonarCloud. Keep the two majors coupled.
+      - dependency-name: "@vitest/coverage-v8"
+        update-types: ["version-update:semver-major"]
+      # Tailwind majors are migrations, not bumps: v4 (landed in #593, issue #586)
+      # moved the JS config into CSS-first `@theme`, swapped the PostCSS plugin for
+      # @tailwindcss/postcss, and renamed utilities in ways that change appearance
+      # without failing a build (`shadow` -> `shadow-sm`, `outline-none` ->
+      # `outline-hidden`). An un-migrated class silently emits no CSS, and jsdom
+      # tests cannot see it — verifying a Tailwind major needs a before/after
+      # screenshot diff. So the major stays held and is taken deliberately; 4.x
+      # minor and patch updates are unaffected by this entry and flow as normal.
+      #
+      # @tailwindcss/postcss is held WITH it, and must be: it depends on
+      # `tailwindcss` at an EXACT version (4.3.3 pins tailwindcss 4.3.3, plus
+      # @tailwindcss/node and @tailwindcss/oxide). Holding only the engine would let
+      # a v5 plugin land against a v4 engine and pull its own second copy of
+      # tailwindcss into the tree — the same duplicate-copy trap that broke the
+      # ioredis/bullmq typing in #585.
+      - dependency-name: "tailwindcss"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@tailwindcss/postcss"
         update-types: ["version-update:semver-major"]
 
   # GitHub Actions — keeps CI workflow action versions current

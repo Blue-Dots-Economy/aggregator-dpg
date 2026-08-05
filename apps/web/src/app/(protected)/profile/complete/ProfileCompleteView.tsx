@@ -117,7 +117,7 @@ export function ProfileCompleteView({ schema, uiSchema }: ProfileCompleteViewPro
               onValidityChange={setCanSubmit}
               onSubmit={handleSubmit}
             >
-              <div className="flex items-center justify-between border-t border-[var(--bd-border)] mt-6 pt-5">
+              <div className="flex items-center justify-between border-t border-(--bd-border) mt-6 pt-5">
                 {state.status === 'saved' && (
                   <span className="inline-flex items-center gap-1.5 text-emerald-700 text-[12.5px] font-semibold">
                     <I.check size={14} /> {t('status_saved')}

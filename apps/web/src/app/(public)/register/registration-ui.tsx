@@ -77,8 +77,8 @@ export function RegistrationSubmitButton({
         className={`w-full py-3 rounded-[12px] font-display font-bold text-[15px] text-white transition-all
           ${
             disabled
-              ? 'bg-[var(--bd-primary-100)] text-[var(--bd-primary-600)] cursor-not-allowed'
-              : 'bg-[var(--bd-primary)] hover:bg-[var(--bd-primary-600)] bd-shadow-lg'
+              ? 'bg-(--bd-primary-100) text-(--bd-primary-600) cursor-not-allowed'
+              : 'bg-(--bd-primary) hover:bg-(--bd-primary-600) bd-shadow-lg'
           }`}
       >
         {submitting ? submittingLabel : label}
@@ -115,7 +115,7 @@ export function RegistrationErrorBanner({
       ref={errorRef}
       role="alert"
       tabIndex={-1}
-      className="mb-5 rounded-[10px] border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-700 scroll-mt-6 outline-none"
+      className="mb-5 rounded-[10px] border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-700 scroll-mt-6 outline-hidden"
     >
       <div className="font-semibold">{title}</div>
       {detail ? (
@@ -131,7 +131,7 @@ export function RegistrationErrorBanner({
       {rawErrors ? (
         <details className="mt-2 text-[11px] text-red-500/80">
           <summary className="cursor-pointer">Show raw validation errors</summary>
-          <pre className="mt-1 whitespace-pre-wrap font-mono text-[11px] bg-red-100/40 rounded p-2 max-h-[200px] overflow-auto">
+          <pre className="mt-1 whitespace-pre-wrap font-mono text-[11px] bg-red-100/40 rounded-sm p-2 max-h-[200px] overflow-auto">
             {rawErrors}
           </pre>
         </details>
