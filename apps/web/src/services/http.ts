@@ -85,25 +85,3 @@ export async function jsonFetch<T>(input: RequestInfo, init?: RequestInit): Prom
 
   return (await res.json()) as T;
 }
-
-/**
- * Raw fetch for callers that need the `Response` object (e.g. binary
- * downloads). Still intercepts 401 NO_ACTIVE_SESSION.
- */
-export async function fetchWithAuth(input: RequestInfo, init?: RequestInit): Promise<Response> {
-  const res = await fetch(input, {
-    ...init,
-    credentials: 'include',
-  });
-  if (res.status === 401) {
-    const body = (await res
-      .clone()
-      .json()
-      .catch(() => null)) as unknown;
-    if (isSessionExpired(body)) {
-      forceLogout();
-      throw new Error('session expired');
-    }
-  }
-  return res;
-}

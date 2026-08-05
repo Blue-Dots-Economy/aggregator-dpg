@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { jsonFetch, fetchWithAuth } from '../http';
+import { jsonFetch } from '../http';
 
 describe('jsonFetch', () => {
   const origFetch = globalThis.fetch;
@@ -100,53 +100,5 @@ describe('jsonFetch', () => {
       ) as unknown as typeof fetch;
     await expect(jsonFetch('/api/thing')).rejects.toThrow();
     expect(window.location.href).toBe('');
-  });
-});
-
-describe('fetchWithAuth', () => {
-  const origFetch = globalThis.fetch;
-  const origLocation = window.location;
-
-  beforeEach(() => {
-    Object.defineProperty(window, 'location', {
-      writable: true,
-      configurable: true,
-      value: { ...origLocation, href: '', pathname: '/dashboard', search: '' } as Location,
-    });
-  });
-
-  afterEach(() => {
-    globalThis.fetch = origFetch;
-    Object.defineProperty(window, 'location', {
-      writable: true,
-      configurable: true,
-      value: origLocation,
-    });
-  });
-
-  it('returns the raw Response on success', async () => {
-    const res200 = new Response('binary-ish', { status: 200 });
-    globalThis.fetch = vi.fn().mockResolvedValue(res200) as unknown as typeof fetch;
-    const res = await fetchWithAuth('/api/export');
-    expect(res.status).toBe(200);
-  });
-
-  it('force-logs-out on a 401 NO_ACTIVE_SESSION body', async () => {
-    globalThis.fetch = vi
-      .fn()
-      .mockResolvedValue(
-        new Response(JSON.stringify({ code: 'NO_ACTIVE_SESSION' }), { status: 401 }),
-      ) as unknown as typeof fetch;
-    await expect(fetchWithAuth('/api/export')).rejects.toThrow();
-  });
-
-  it('returns the 401 Response untouched when the body is not the session-expired shape', async () => {
-    globalThis.fetch = vi
-      .fn()
-      .mockResolvedValue(
-        new Response(JSON.stringify({ error: 'nope' }), { status: 401 }),
-      ) as unknown as typeof fetch;
-    const res = await fetchWithAuth('/api/export');
-    expect(res.status).toBe(401);
   });
 });

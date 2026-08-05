@@ -557,9 +557,6 @@ importers:
 
   packages/queue:
     dependencies:
-      bullmq:
-        specifier: ^5.76.6
-        version: 5.76.6
       ioredis:
         specifier: ^5.10.1
         version: 5.10.1
@@ -610,9 +607,6 @@ importers:
 
   packages/schema-service:
     dependencies:
-      '@aggregator-dpg/shared-primitives':
-        specifier: workspace:*
-        version: link:../shared-primitives
       zod:
         specifier: ^3.24.0
         version: 3.25.76
