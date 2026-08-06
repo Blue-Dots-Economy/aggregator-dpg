@@ -28,11 +28,6 @@
     "stack:psql": "node scripts/stack.mjs psql",
     "stack:rebuild-web": "node scripts/stack.mjs rebuild-web"
   },
-  "pnpm": {
-    "overrides": {
-      "jiti": "^2.6.1"
-    }
-  },
   "lint-staged": {
     "*.{ts,tsx,js,mjs,cjs,json,yaml,md}": [
       "prettier --write"
