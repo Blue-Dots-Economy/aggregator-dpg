@@ -11,7 +11,12 @@ name: Keycloak Theme
 # <slug>-<branch>, <slug>-sha-xxxxxxx, and <slug>-latest on the default branch.
 #
 # Mirrors infra/keycloak/build-theme-image.sh.
-# Server image lives in keycloak-image-build.yaml.
+#
+# The Keycloak SERVER image is NOT built here anymore — it moved to the
+# bluedots-automation repo (`dockerfiles/keycloak/`, workflow "Build Keycloak
+# image", published as ghcr.io/<owner>/keycloak-server), because Keycloak is a
+# shared common service for both DPGs. Only the theme image stays in this repo,
+# since its brand strings come from this repo's config/<network>/keycloak.env.
 
 on:
   workflow_dispatch:
