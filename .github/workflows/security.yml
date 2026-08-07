@@ -59,4 +59,3 @@ jobs:
       language: ts
       node-version: "24"   # matches engines.node (>=24) and ci.yml
       block: false
-    secrets: inherit
