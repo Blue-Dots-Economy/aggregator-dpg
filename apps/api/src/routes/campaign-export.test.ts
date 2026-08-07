@@ -38,7 +38,8 @@ describe('POST /v1/campaign/export', () => {
       payload: { item_ids: [VALID_UUID], purpose: 'audit' },
     });
     expect(res.statusCode).toBe(202);
-    expect(res.json()).toEqual({ status: 'queued' });
+    expect(res.json().status).toBe('queued');
+    expect(res.json().message).toMatch(/network administrator/i);
   });
 
   it('returns 401 MISSING_ORG_ID when x-org-id is absent', async () => {

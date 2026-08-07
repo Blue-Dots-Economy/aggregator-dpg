@@ -52,7 +52,7 @@ export async function registerCampaignExportRoutes(app: FastifyInstance): Promis
           'Decrypts the given owned items, writes a CSV to private S3, and emails a short-lived pre-signed link to the configured network admin. Interim auth: x-org-id header (Signals org id). Fire-and-forget: returns 202 immediately.',
         body: ExportRequestSchema,
         response: {
-          202: z.object({ status: z.literal('queued') }),
+          202: z.object({ status: z.literal('queued'), message: z.string() }),
           ...errorResponses(400, 401, 503),
         },
       },
@@ -89,7 +89,11 @@ export async function registerCampaignExportRoutes(app: FastifyInstance): Promis
         });
       });
 
-      return reply.code(202).send({ status: 'queued' });
+      return reply.code(202).send({
+        status: 'queued',
+        message:
+          'Export request submitted. A secure, time-limited download link will be emailed to the network administrator once the export is ready.',
+      });
     },
   );
 }
