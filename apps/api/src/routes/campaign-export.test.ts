@@ -82,4 +82,16 @@ describe('POST /v1/campaign/export', () => {
     expect(res.statusCode).toBe(503);
     expect(res.json().error.code).toBe('EXPORT_NOT_CONFIGURED');
   });
+
+  it('returns 503 EXPORT_NOT_CONFIGURED when no signalstack writer is configured', async () => {
+    _setSignalStackWriter(null);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/campaign/export',
+      headers: { 'x-org-id': 'org-1' },
+      payload: { item_ids: [VALID_UUID] },
+    });
+    expect(res.statusCode).toBe(503);
+    expect(res.json().error.code).toBe('EXPORT_NOT_CONFIGURED');
+  });
 });

@@ -3,8 +3,12 @@
  *
  * Decrypts a set of owned Signals items, writes a CSV to private S3, and emails
  * a short-lived pre-signed download link to the configured network admin. Runs
- * fire-and-forget from the route: it NEVER throws and NEVER logs PII — every
- * failure branch logs counts only and returns. Belongs to `@aggregator-dpg/api`.
+ * fire-and-forget from the route: on every *handled* failure branch (decrypt
+ * error, no resolvable items, mixed item types, mail send failure) it never
+ * throws and never logs PII — it logs counts only and returns. It does NOT
+ * catch rejections from the injected `putObject` / `signDownloadUrl` / mailer
+ * collaborators themselves — those propagate to the caller's `.catch` (the
+ * route's fire-and-forget wrapper). Belongs to `@aggregator-dpg/api`.
  */
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
@@ -21,6 +25,8 @@ export interface ExportParams {
   orgId: string;
   itemIds: string[];
   purpose?: string;
+  /** Correlation id (the inbound `x-request-id`), forwarded to Signals decrypt for tracing. */
+  requestId?: string;
 }
 
 /** Minimal structured logger surface (satisfied by `req.log.child(...)`). */
@@ -96,11 +102,15 @@ function renderExportEmail(i: ExportEmailInput): { subject: string; html: string
  * @param deps - Injected decrypt / storage / mail collaborators + admin email + logger.
  */
 export async function runExport(params: ExportParams, deps: ExportDeps): Promise<void> {
-  const { orgId, itemIds, purpose } = params;
+  const { orgId, itemIds, purpose, requestId } = params;
   const start = Date.now();
   const base = { operation: 'campaign.export', org_id: orgId, requested: itemIds.length };
 
-  const result = await deps.fetchDecryptedProfiles({ actingOrgId: orgId, itemIds });
+  const result = await deps.fetchDecryptedProfiles({
+    actingOrgId: orgId,
+    itemIds,
+    ...(requestId ? { requestId } : {}),
+  });
   if (!result.success) {
     deps.log.error({
       ...base,

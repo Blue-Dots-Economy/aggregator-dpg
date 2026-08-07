@@ -152,6 +152,10 @@ export async function buildApp(): Promise<FastifyInstance> {
           { name: 'onboarding', description: 'Single-participant onboarding (authenticated).' },
           { name: 'dashboard', description: 'Dashboard rollup + items proxy to signalstack.' },
           { name: 'support', description: 'Authenticated contact-support form submission.' },
+          {
+            name: 'campaign',
+            description: 'Campaign integrations — participant PII export (#579).',
+          },
         ],
       },
       transform: jsonSchemaTransform,

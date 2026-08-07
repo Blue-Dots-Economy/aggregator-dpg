@@ -71,7 +71,7 @@ export async function registerCampaignExportRoutes(app: FastifyInstance): Promis
       // Fire-and-forget (interim, non-durable): the caller gets 202 at once and
       // the export runs in the background. Every failure is logged, never surfaced.
       void runExport(
-        { orgId, itemIds: item_ids, ...(purpose ? { purpose } : {}) },
+        { orgId, itemIds: item_ids, ...(purpose ? { purpose } : {}), requestId: req.id },
         {
           fetchDecryptedProfiles: (q) => ss.fetchDecryptedProfiles(q),
           putObject,

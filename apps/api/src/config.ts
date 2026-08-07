@@ -144,7 +144,9 @@ const ConfigSchema = z.object({
   PUBLIC_LINK_BASE_URL: z.string().default('http://localhost:3000'),
   /** Pre-signed GET URL TTL for QR PNG downloads (seconds). */
   QR_DOWNLOAD_URL_TTL_SECONDS: z.coerce.number().int().positive().default(900),
+  /** Max `item_ids` accepted per `POST /v1/campaign/export` request body. */
   EXPORT_MAX_ITEM_IDS: z.coerce.number().int().positive().default(500),
+  /** Pre-signed GET URL TTL for the campaign-export CSV download (seconds). */
   EXPORT_URL_TTL_SECONDS: z.coerce.number().int().positive().default(3600),
 
   // ─── Approval links ───────────────────────────────────────────────────────
@@ -290,6 +292,11 @@ export function supportEmail(): string | undefined {
  * Comma-separated env, normalised like {@link supportEmail}. Read live on
  * each request so an operator can change it without a restart. Unset ⇒ the
  * export endpoint reports `EXPORT_NOT_CONFIGURED`.
+ *
+ * @returns The configured network-admin recipient(s) as a clean comma-joined
+ *   list, or `undefined` when `EXPORT_NETWORK_ADMIN_EMAIL` is unset/empty (⇒
+ *   `POST /v1/campaign/export` returns 503 `EXPORT_NOT_CONFIGURED`). Multiple
+ *   comma-separated addresses are trimmed, de-blanked, and rejoined with `, `.
  */
 export function exportNetworkAdminEmail(): string | undefined {
   return normaliseEmailList(process.env.EXPORT_NETWORK_ADMIN_EMAIL);
