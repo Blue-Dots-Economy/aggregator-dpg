@@ -50,6 +50,7 @@ jobs:
       contents: read
       packages: write
       id-token: write
+      security-events: write # Trivy image scan uploads SARIF to code-scanning
 
     steps:
       - uses: actions/checkout@v7
@@ -144,3 +145,40 @@ jobs:
           SLUG: ${{ steps.resolve.outputs.slug }}
           DIGEST: ${{ steps.build.outputs.digest }}
           TAGS: ${{ steps.meta.outputs.tags }}
+
+      # Image scanning (Sec-Audit A2 — Blue-Dots-Economy/signals-dpg#300).
+      # Built on the same third-party Keycloak base as keycloak-server, so it
+      # inherits that base's CVEs regardless of the brand assets layered on top.
+      #
+      # `github.repository` preserves the org's capitalisation, which
+      # docker/metadata-action normalises for its own tag outputs; a ref assembled
+      # by hand must be normalised too or Trivy rejects it as invalid.
+      - name: Resolve scanned image ref
+        id: scanref
+        if: steps.build.outputs.digest != ''
+        run: echo "ref=${IMAGE,,}@${DIGEST}" >> "$GITHUB_OUTPUT"
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ github.repository }}/keycloak-theme
+          DIGEST: ${{ steps.build.outputs.digest }}
+
+      # Scanned by digest: buildx pushes to the registry without loading into the
+      # local docker image store, so `imageid` is not resolvable by Trivy.
+      - name: Trivy image scan
+        if: steps.scanref.outputs.ref != ''
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: image
+          image-ref: ${{ steps.scanref.outputs.ref }}
+          format: sarif
+          output: trivy-image.sarif
+          severity: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
+          exit-code: '0' # Phase A: report-only, never fails the build
+
+      - name: Upload Trivy image SARIF
+        if: always() && steps.scanref.outputs.ref != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-image.sarif
+          # Per-brand category: this workflow builds one image per network/brand,
+          # so a shared category would have each run overwrite the last.
+          category: trivy-image-keycloak-theme-${{ steps.resolve.outputs.slug }}
