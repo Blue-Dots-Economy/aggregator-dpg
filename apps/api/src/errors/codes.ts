@@ -47,6 +47,20 @@ export const ERR = {
     detail: 'One or more fields failed validation.',
     hint: 'Zod or Ajv rejected the request body. See response.error.fields for offending paths.',
   },
+  MISSING_ORG_ID: {
+    code: 'MISSING_ORG_ID',
+    status: 401,
+    title: 'Missing organisation id',
+    detail: 'The x-org-id header is required.',
+    hint: 'Interim auth: the caller must send x-org-id (Signals org id) until the KC token model (#576) lands.',
+  },
+  EXPORT_NOT_CONFIGURED: {
+    code: 'EXPORT_NOT_CONFIGURED',
+    status: 503,
+    title: 'Export not available',
+    detail: 'Participant export is not configured on this instance.',
+    hint: 'EXPORT_NETWORK_ADMIN_EMAIL and/or the signalstack writer are unset. Check env (SIGNALSTACK_BASE_URL, SIGNALSTACK_ADMIN_KEY, EXPORT_NETWORK_ADMIN_EMAIL).',
+  },
   CONSENT_REQUIRED: {
     code: 'CONSENT_REQUIRED',
     status: 400,

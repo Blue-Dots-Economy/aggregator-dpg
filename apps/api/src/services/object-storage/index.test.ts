@@ -55,6 +55,7 @@ const baseConfig = {
   BULK_UPLOAD_URL_TTL_SECONDS: 900,
   BULK_UPLOAD_MAX_BYTES: 10 * 1024 * 1024,
   QR_DOWNLOAD_URL_TTL_SECONDS: 600,
+  EXPORT_URL_TTL_SECONDS: 3600,
 };
 
 vi.mock('../../config.js', () => ({
@@ -255,6 +256,31 @@ describe('object-storage', () => {
       ];
       expect(command.input).toMatchObject({ ResponseContentType: 'image/png' });
       expect(opts.expiresIn).toBe(600);
+    });
+  });
+
+  describe('signExportDownloadUrl', () => {
+    it('signs a GET url with the export TTL and csv attachment disposition', async () => {
+      mockConfig = { ...baseConfig, EXPORT_URL_TTL_SECONDS: 3600 };
+      getSignedUrlMock.mockResolvedValue('https://signed.example/export.csv');
+      const { signExportDownloadUrl } = await import('./index.js');
+
+      const res = await signExportDownloadUrl('campaign-exports/org-1/2026.csv');
+
+      expect(res).toMatchObject({
+        url: 'https://signed.example/export.csv',
+        key: 'campaign-exports/org-1/2026.csv',
+      });
+      expect(typeof res.expiresAt).toBe('string');
+      // GetObjectCommand built for a csv download
+      const cmd = getSignedUrlMock.mock.calls[0]![1] as { input: Record<string, unknown> };
+      expect(cmd.input).toMatchObject({
+        Bucket: 'aggregator-bulk-uploads',
+        Key: 'campaign-exports/org-1/2026.csv',
+        ResponseContentType: 'text/csv',
+      });
+      // export TTL forwarded to the presigner
+      expect(getSignedUrlMock.mock.calls[0]![2]).toMatchObject({ expiresIn: 3600 });
     });
   });
 });

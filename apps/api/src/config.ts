@@ -144,6 +144,8 @@ const ConfigSchema = z.object({
   PUBLIC_LINK_BASE_URL: z.string().default('http://localhost:3000'),
   /** Pre-signed GET URL TTL for QR PNG downloads (seconds). */
   QR_DOWNLOAD_URL_TTL_SECONDS: z.coerce.number().int().positive().default(900),
+  EXPORT_MAX_ITEM_IDS: z.coerce.number().int().positive().default(500),
+  EXPORT_URL_TTL_SECONDS: z.coerce.number().int().positive().default(3600),
 
   // ─── Approval links ───────────────────────────────────────────────────────
   /**
@@ -281,6 +283,16 @@ export function orgHierarchyEnabled(): boolean {
  */
 export function supportEmail(): string | undefined {
   return normaliseEmailList(process.env.SUPPORT_EMAIL);
+}
+
+/**
+ * Recipient(s) of the participant-export download link (network admin).
+ * Comma-separated env, normalised like {@link supportEmail}. Read live on
+ * each request so an operator can change it without a restart. Unset ⇒ the
+ * export endpoint reports `EXPORT_NOT_CONFIGURED`.
+ */
+export function exportNetworkAdminEmail(): string | undefined {
+  return normaliseEmailList(process.env.EXPORT_NETWORK_ADMIN_EMAIL);
 }
 
 /**
