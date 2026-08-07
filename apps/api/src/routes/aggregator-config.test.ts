@@ -158,4 +158,35 @@ describe('GET /v1/aggregator-config', () => {
     }
     expect(body.dashboardBuckets).toBeUndefined();
   });
+
+  it('surfaces optional brand design-token fields when the resolved config carries them', async () => {
+    const withBrandTokens: ResolvedNetworkConfig = buildBlueDotConfig({
+      aggregator: {
+        ...buildBlueDotConfig().aggregator,
+        brand: {
+          ...buildBlueDotConfig().aggregator.brand,
+          primary_color: '#112233',
+          accent_color: '#445566',
+          favicon_url: 'https://example.invalid/favicon.ico',
+          typography: { primaryFont: 'Inter' },
+        },
+      },
+    });
+    _setNetworkConfig(withBrandTokens);
+
+    const res = await app.inject({ method: 'GET', url: '/v1/aggregator-config' });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as {
+      brand: {
+        primary_color?: string;
+        accent_color?: string;
+        favicon_url?: string;
+        typography?: { primaryFont: string };
+      };
+    };
+    expect(body.brand.primary_color).toBe('#112233');
+    expect(body.brand.accent_color).toBe('#445566');
+    expect(body.brand.favicon_url).toBe('https://example.invalid/favicon.ico');
+    expect(body.brand.typography?.primaryFont).toBe('Inter');
+  });
 });

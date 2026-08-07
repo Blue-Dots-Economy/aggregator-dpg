@@ -8,34 +8,48 @@
  * RJSF, the shadcn Select, and useAggregatorConfig are shimmed so the test
  * exercises RegisterView's own logic, not third-party rendering.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import messages from '@/i18n/messages/en.json';
 
+// jsdom does not implement scrollIntoView; the error banner's focus effect
+// calls it whenever state transitions to 'error'.
+beforeAll(() => {
+  Element.prototype.scrollIntoView = vi.fn();
+});
+
+let capturedOnError: ((errs: unknown[]) => void) | undefined;
+
 // Deterministic RJSF form: renders a submittable <form> plus children (the
 // submit button). Fires onSubmit with an empty payload — RegisterView merges
-// consent + org_id on top.
+// consent + org_id on top. Also exposes `onError` so tests can simulate a
+// client-validation failure the same way RJSF would surface one.
 vi.mock('@/components/forms/RjsfThemed', () => ({
   RjsfThemedForm: ({
     onSubmit,
+    onError,
     children,
   }: {
     onSubmit: (e: { formData: Record<string, unknown> }, ev: unknown) => void;
+    onError?: (errs: unknown[]) => void;
     children?: ReactNode;
-  }) => (
-    <form
-      data-testid="rjsf-shim"
-      onSubmit={(ev) => {
-        ev.preventDefault();
-        onSubmit({ formData: { name: 'Coord' } }, ev);
-      }}
-    >
-      {children}
-    </form>
-  ),
+  }) => {
+    capturedOnError = onError;
+    return (
+      <form
+        data-testid="rjsf-shim"
+        onSubmit={(ev) => {
+          ev.preventDefault();
+          onSubmit({ formData: { name: 'Coord' } }, ev);
+        }}
+      >
+        {children}
+      </form>
+    );
+  },
 }));
 
 // Native-select shim for the shadcn Select so onValueChange is fire-able.
@@ -181,5 +195,38 @@ describe('RegisterView org hierarchy', () => {
     // org_id forwarded, and name inherits the selected org's display name
     // (the free-text Organisation Name field is hidden in the coordinator flow).
     expect(JSON.parse(submitCall!.body)).toMatchObject({ org_id: 'o1', name: 'Enable India' });
+  });
+
+  it('flag on: shows the org-selector error state with a working retry', async () => {
+    let calls = 0;
+    globalThis.fetch = vi.fn(async () => {
+      calls += 1;
+      if (calls === 1) return new Response('boom', { status: 500 });
+      return new Response(
+        JSON.stringify({ orgs: [{ id: 'o1', slug: 's', display_name: 'Enable India' }] }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }) as unknown as typeof fetch;
+
+    renderView({ orgHierarchyEnabled: true, orgSchema, orgUiSchema: {} });
+
+    expect(await screen.findByText(messages.register.org_selector_error)).toBeInTheDocument();
+    fireEvent.click(screen.getByText(messages.register.org_selector_retry));
+
+    expect(await screen.findByTestId('org-select')).toBeInTheDocument();
+  });
+
+  it('coordinator form: surfaces a client-validation error via onError', async () => {
+    globalThis.fetch = vi.fn(
+      async () => new Response('{}', { status: 200 }),
+    ) as unknown as typeof fetch;
+    renderView({ orgHierarchyEnabled: false });
+
+    act(() => {
+      capturedOnError?.([{ property: '.name', message: 'is required', name: 'required' }]);
+    });
+
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    expect(screen.getByText(messages.register.validation_error_title)).toBeInTheDocument();
   });
 });

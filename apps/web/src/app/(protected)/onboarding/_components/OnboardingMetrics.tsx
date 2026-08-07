@@ -77,7 +77,7 @@ function statusLabel(key: string): string {
     .replace(/[_-]+/g, ' ')
     .split(' ')
     .filter(Boolean)
-    .map((w) => (w.length ? w[0]!.toUpperCase() + w.slice(1) : ''))
+    .map((w) => w[0]!.toUpperCase() + w.slice(1))
     .join(' ');
 }
 

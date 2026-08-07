@@ -604,6 +604,3 @@ async function resolveOwnerRouting(
   const ownerEmail = org.ok && org.value ? org.value.ownerEmail : undefined;
   return { org: parentOrgId, ...(ownerEmail ? { recipientEmail: ownerEmail } : {}) };
 }
-
-// Re-export so existing tests that import { z } from this module still resolve.
-export { z };

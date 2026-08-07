@@ -14,8 +14,9 @@
  * store + the in-memory aggregator fake. Auth is stubbed via
  * `_setAccessTokenVerifier`.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
+import QRCode from 'qrcode';
 import { buildApp } from '../app.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
 import {
@@ -30,9 +31,27 @@ import {
   RegistrationLinksStoreBase,
   type RegistrationLink,
   type CreateRegistrationLinkInput,
+  type ListRegistrationLinksOptions,
+  type RegistrationLinkStatus,
+  type StoreError,
   type StoreResult,
 } from '../services/registration-links-store/index.js';
+import type { UpdateDraftInput } from '../services/registration-links-store/interface.js';
 import { _setDbClients } from '../db/client.js';
+
+// Hoisted so the vi.mock factory can reference them (mocks are hoisted above
+// module code). registration-links.ts has no test-injection singleton for
+// object storage, so we mock the module directly — same pattern used in
+// bulk-uploads.test.ts.
+const { putObjectMock, signQrDownloadUrlMock } = vi.hoisted(() => ({
+  putObjectMock: vi.fn(),
+  signQrDownloadUrlMock: vi.fn(),
+}));
+
+vi.mock('../services/object-storage/index.js', () => ({
+  putObject: putObjectMock,
+  signQrDownloadUrl: signQrDownloadUrlMock,
+}));
 
 const AGG_ID = '11111111-1111-1111-1111-111111111111';
 const ORG_ID = 'org-signalstack-1';
@@ -230,5 +249,944 @@ describe('PATCH /v1/links/:id — registration_mode immutability', () => {
     });
     expect(r.statusCode).toBe(400);
     expect(r.json().error.code).toBe('SCHEMA_VALIDATION');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Full CRUD lifecycle — create/list/read/patch/activate/deactivate against a
+// stateful in-memory fake, covering the auth wrapper, aggregator-type
+// enforcement, slug-collision retries, QR/S3 side effects, and every
+// upstream-failure branch. `TrackingRegistrationLinksStore` above stays
+// scoped to the registration_mode-specific tests; this fake models the full
+// abstract contract so the rest of the route file's branches are exercised.
+// ---------------------------------------------------------------------------
+
+function buildLink(overrides: Partial<RegistrationLink> = {}): RegistrationLink {
+  const now = new Date('2026-08-01T00:00:00.000Z');
+  return {
+    id: 'link-fixed',
+    aggregatorId: AGG_ID,
+    slug: 'my-slug',
+    domain: 'seeker',
+    context: {},
+    registrationMode: 'form',
+    qrObjectKey: null,
+    status: 'draft',
+    expiresAt: null,
+    createdBy: USER_ID,
+    createdAt: now,
+    updatedAt: now,
+    ...overrides,
+  };
+}
+
+/** Stateful in-memory fake covering the full `RegistrationLinksStoreBase` contract. */
+class FullRegistrationLinksStore extends RegistrationLinksStoreBase {
+  private rows = new Map<string, RegistrationLink>();
+  private seq = 0;
+  private failNext = new Map<string, StoreError>();
+
+  seed(rows: RegistrationLink[]): void {
+    for (const r of rows) this.rows.set(r.id, r);
+  }
+
+  /** Force the next call to `method` to resolve with `error` instead. */
+  failOnce(method: string, error: StoreError): void {
+    this.failNext.set(method, error);
+  }
+
+  private take(method: string): StoreError | undefined {
+    const e = this.failNext.get(method);
+    if (e) this.failNext.delete(method);
+    return e;
+  }
+
+  private slugTaken(aggregatorId: string, slug: string, excludeId?: string): boolean {
+    for (const r of this.rows.values()) {
+      if (r.aggregatorId === aggregatorId && r.slug === slug && r.id !== excludeId) return true;
+    }
+    return false;
+  }
+
+  async create(input: CreateRegistrationLinkInput): Promise<StoreResult<RegistrationLink>> {
+    const fail = this.take('create');
+    if (fail) return { ok: false, error: fail };
+    if (this.slugTaken(input.aggregatorId, input.slug)) {
+      return { ok: false, error: { code: 'SLUG_COLLISION', message: 'slug taken' } };
+    }
+    this.seq += 1;
+    const now = new Date('2026-08-01T00:00:00.000Z');
+    const row: RegistrationLink = {
+      id: `link-${this.seq}`,
+      aggregatorId: input.aggregatorId,
+      slug: input.slug,
+      domain: input.domain,
+      context: input.context,
+      registrationMode: input.registrationMode ?? 'form',
+      qrObjectKey: null,
+      status: input.status ?? 'draft',
+      expiresAt: input.expiresAt ?? null,
+      createdBy: input.createdBy,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.rows.set(row.id, row);
+    return { ok: true, value: row };
+  }
+
+  async findById(id: string, aggregatorId: string): Promise<StoreResult<RegistrationLink | null>> {
+    const fail = this.take('findById');
+    if (fail) return { ok: false, error: fail };
+    const row = this.rows.get(id);
+    if (!row || row.aggregatorId !== aggregatorId) return { ok: true, value: null };
+    return { ok: true, value: row };
+  }
+
+  async findBySlug(): Promise<StoreResult<RegistrationLink | null>> {
+    return { ok: true, value: null };
+  }
+
+  async findByOrgAndSlug(): Promise<StoreResult<RegistrationLink | null>> {
+    return { ok: true, value: null };
+  }
+
+  async updateQrKey(
+    id: string,
+    aggregatorId: string,
+    qrObjectKey: string,
+  ): Promise<StoreResult<RegistrationLink>> {
+    const fail = this.take('updateQrKey');
+    if (fail) return { ok: false, error: fail };
+    const row = this.rows.get(id);
+    if (!row || row.aggregatorId !== aggregatorId) {
+      return { ok: false, error: { code: 'NOT_FOUND', message: 'not found' } };
+    }
+    const updated = { ...row, qrObjectKey, updatedAt: new Date() };
+    this.rows.set(id, updated);
+    return { ok: true, value: updated };
+  }
+
+  async updateDraft(
+    id: string,
+    aggregatorId: string,
+    patch: UpdateDraftInput,
+  ): Promise<StoreResult<RegistrationLink>> {
+    const fail = this.take('updateDraft');
+    if (fail) return { ok: false, error: fail };
+    const row = this.rows.get(id);
+    if (!row || row.aggregatorId !== aggregatorId || row.status !== 'draft') {
+      return { ok: false, error: { code: 'NOT_FOUND', message: 'not a draft' } };
+    }
+    if (patch.slug !== undefined && this.slugTaken(aggregatorId, patch.slug, id)) {
+      return { ok: false, error: { code: 'SLUG_COLLISION', message: 'slug taken' } };
+    }
+    const updated: RegistrationLink = {
+      ...row,
+      ...(patch.slug !== undefined ? { slug: patch.slug } : {}),
+      ...(patch.context !== undefined ? { context: patch.context } : {}),
+      ...(patch.expiresAt !== undefined ? { expiresAt: patch.expiresAt } : {}),
+      updatedAt: new Date(),
+    };
+    this.rows.set(id, updated);
+    return { ok: true, value: updated };
+  }
+
+  async list(
+    aggregatorId: string,
+    options: ListRegistrationLinksOptions,
+  ): Promise<StoreResult<{ rows: RegistrationLink[]; total: number }>> {
+    const fail = this.take('list');
+    if (fail) return { ok: false, error: fail };
+    let rows = [...this.rows.values()].filter((r) => r.aggregatorId === aggregatorId);
+    if (options.status) rows = rows.filter((r) => r.status === options.status);
+    rows.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    return {
+      ok: true,
+      value: {
+        rows: rows.slice(options.offset, options.offset + options.limit),
+        total: rows.length,
+      },
+    };
+  }
+
+  async updateStatus(
+    id: string,
+    aggregatorId: string,
+    nextStatus: RegistrationLinkStatus,
+  ): Promise<StoreResult<RegistrationLink>> {
+    const fail = this.take('updateStatus');
+    if (fail) return { ok: false, error: fail };
+    const row = this.rows.get(id);
+    if (!row || row.aggregatorId !== aggregatorId) {
+      return { ok: false, error: { code: 'NOT_FOUND', message: 'not found' } };
+    }
+    const updated = { ...row, status: nextStatus, updatedAt: new Date() };
+    this.rows.set(id, updated);
+    return { ok: true, value: updated };
+  }
+
+  get(id: string): RegistrationLink | undefined {
+    return this.rows.get(id);
+  }
+}
+
+interface MetricsRow {
+  linkId: string;
+  total: number;
+  passed: number;
+  failed: number;
+  skipped: number;
+}
+
+function buildMetricsDb(rows: MetricsRow[] = []): unknown {
+  const chain = {
+    select: () => chain,
+    from: () => chain,
+    where: () => chain,
+    groupBy: () => Promise.resolve(rows),
+  };
+  return chain;
+}
+
+const TOKEN_SEEKER_APPROVED = 'full-seeker-approved';
+const TOKEN_PROVIDER_APPROVED = 'full-provider-approved';
+const TOKEN_PENDING = 'full-pending';
+const TOKEN_NO_AGG_TYPE = 'full-no-agg-type';
+
+async function bootFullApp(opts: {
+  store: FullRegistrationLinksStore;
+  aggregatorStore?: AggregatorStoreFake;
+  metricsRows?: MetricsRow[];
+}): Promise<FastifyInstance> {
+  _resetJwks();
+  process.env.KEYCLOAK_URL = 'http://kc.local';
+  process.env.KEYCLOAK_REALM = 'aggregator';
+  _setNetworkConfig(buildBlueDotConfig());
+  _setAccessTokenVerifier(async (token) => {
+    if (token === TOKEN_SEEKER_APPROVED) {
+      return {
+        sub: USER_ID,
+        aggregator_id: AGG_ID,
+        aggregator_type: 'seeker',
+        decision_made: 'approved',
+      };
+    }
+    if (token === TOKEN_PROVIDER_APPROVED) {
+      return {
+        sub: USER_ID,
+        aggregator_id: AGG_ID,
+        aggregator_type: 'provider',
+        decision_made: 'approved',
+      };
+    }
+    if (token === TOKEN_PENDING) {
+      return {
+        sub: USER_ID,
+        aggregator_id: AGG_ID,
+        aggregator_type: 'seeker',
+        decision_made: 'pending',
+      };
+    }
+    if (token === TOKEN_NO_AGG_TYPE) {
+      return { sub: USER_ID, aggregator_id: AGG_ID, decision_made: 'approved' };
+    }
+    throw new Error('invalid token');
+  });
+
+  const aggregatorStore =
+    opts.aggregatorStore ??
+    (() => {
+      const s = new AggregatorStoreFake();
+      s.seed([
+        buildAggregator({
+          id: AGG_ID,
+          orgSlug: ORG_SLUG,
+          name: 'Acme',
+          status: 'active',
+          signalstackOrgId: ORG_ID,
+        }),
+      ]);
+      return s;
+    })();
+  _setAggregatorStore(aggregatorStore);
+  _setRegistrationLinksStore(opts.store);
+  _setDbClients(null, buildMetricsDb(opts.metricsRows ?? []) as never);
+
+  putObjectMock.mockReset().mockResolvedValue(undefined);
+  signQrDownloadUrlMock.mockReset().mockResolvedValue({
+    url: 'https://s3.example.invalid/qr.png',
+    expiresAt: '2026-08-01T01:00:00.000Z',
+  });
+
+  return buildApp();
+}
+
+async function teardownFullApp(app: FastifyInstance | undefined): Promise<void> {
+  await app?.close();
+  _setAccessTokenVerifier(null);
+  _setAggregatorStore(null);
+  _setRegistrationLinksStore(null);
+  _setNetworkConfig(null);
+  _setDbClients(null, null);
+}
+
+describe('registration-links auth wrapper (requireAuth)', () => {
+  let app: FastifyInstance;
+  let store: FullRegistrationLinksStore;
+
+  beforeEach(async () => {
+    store = new FullRegistrationLinksStore();
+    app = await bootFullApp({ store });
+  });
+  afterEach(async () => teardownFullApp(app));
+
+  it('401s without a Bearer token', async () => {
+    const r = await app.inject({ method: 'GET', url: '/v1/links' });
+    expect(r.statusCode).toBe(401);
+  });
+
+  it('403 NOT_APPROVED when decision_made is pending', async () => {
+    const r = await app.inject({
+      method: 'GET',
+      url: '/v1/links',
+      headers: { authorization: `Bearer ${TOKEN_PENDING}` },
+    });
+    expect(r.statusCode).toBe(403);
+    expect(r.json().error.code).toBe('NOT_APPROVED');
+  });
+});
+
+describe('POST /v1/links/create — full lifecycle', () => {
+  let app: FastifyInstance;
+  let store: FullRegistrationLinksStore;
+
+  beforeEach(async () => {
+    store = new FullRegistrationLinksStore();
+    app = await bootFullApp({ store });
+  });
+  afterEach(async () => teardownFullApp(app));
+
+  it('rejects an unknown domain with 400 SCHEMA_VALIDATION', async () => {
+    const r = await app.inject({
+      method: 'POST',
+      url: '/v1/links/create',
+      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
+      payload: { domain: 'bogus' },
+    });
+    expect(r.statusCode).toBe(400);
+    expect(r.json().error.code).toBe('SCHEMA_VALIDATION');
+  });
+
+  it('403 AGGREGATOR_TYPE_MISSING when the token has no aggregator_type claim', async () => {
+    const r = await app.inject({
+      method: 'POST',
+      url: '/v1/links/create',
+      headers: { authorization: `Bearer ${TOKEN_NO_AGG_TYPE}` },
+      payload: { domain: 'seeker' },
+    });
+    expect(r.statusCode).toBe(403);
+    expect(r.json().error.code).toBe('AGGREGATOR_TYPE_MISSING');
+  });
+
+  it('403 AGGREGATOR_TYPE_MISMATCH when creating a link for a different domain', async () => {
+    const r = await app.inject({
+      method: 'POST',
+      url: '/v1/links/create',
+      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
+      payload: { domain: 'provider' },
+    });
+    expect(r.statusCode).toBe(403);
+    expect(r.json().error.code).toBe('AGGREGATOR_TYPE_MISMATCH');
+  });
+
+  it('retries once on a slug collision and succeeds with a suffixed slug', async () => {
+    store.seed([buildLink({ id: 'existing', slug: 'taken-slug', aggregatorId: AGG_ID })]);
+    const r = await app.inject({
+      method: 'POST',
+      url: '/v1/links/create',
+      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
+      payload: { domain: 'seeker', slug: 'taken-slug' },
+    });
+    expect(r.statusCode).toBe(201);
+    const body = r.json() as { slug: string };
+    expect(body.slug).toMatch(/^taken-slug-[0-9a-f]{4}$/);
+  });
+
+  it('503 DB_UNAVAILABLE when store.create fails for a non-collision reason', async () => {
+    store.failOnce('create', { code: 'DB_UNAVAILABLE', message: 'db down' });
+    const r = await app.inject({
+      method: 'POST',
+      url: '/v1/links/create',
+      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
+      payload: { domain: 'seeker' },
+    });
+    expect(r.statusCode).toBe(503);
+    expect(r.json().error.code).toBe('DB_UNAVAILABLE');
+  });
+
+  it('503 DUPLICATE_SLUG when every slug retry collides', async () => {
+    // Seed a row occupying every suffix the route could generate is
+    // impractical (random suffixes) — instead, force create() to always
+    // report a collision so the retry loop exhausts.
+    const alwaysCollide = new (class extends FullRegistrationLinksStore {
+      override async create(): Promise<StoreResult<RegistrationLink>> {
+        return { ok: false, error: { code: 'SLUG_COLLISION', message: 'always taken' } };
+      }
+    })();
+    await app.close();
+    app = await bootFullApp({ store: alwaysCollide });
+    const r = await app.inject({
+      method: 'POST',
+      url: '/v1/links/create',
+      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
+      payload: { domain: 'seeker' },
+    });
+    expect(r.statusCode).toBe(503);
+    expect(r.json().error.code).toBe('DUPLICATE_SLUG');
+  });
+
+  it('503 DB_UNAVAILABLE when the caller aggregator row cannot be loaded', async () => {
+    const emptyAggStore = new AggregatorStoreFake();
+    await app.close();
+    app = await bootFullApp({ store, aggregatorStore: emptyAggStore });
+    const r = await app.inject({
+      method: 'POST',
+      url: '/v1/links/create',
+      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
+      payload: { domain: 'seeker' },
+    });
+    expect(r.statusCode).toBe(503);
+    expect(r.json().error.code).toBe('DB_UNAVAILABLE');
+  });
+
+  it('201s a draft with no QR/public URL (drafts are metadata-only)', async () => {
+    const r = await app.inject({
+      method: 'POST',
+      url: '/v1/links/create',
+      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
+      payload: { domain: 'seeker', status: 'draft' },
+    });
+    expect(r.statusCode).toBe(201);
+    const body = r.json() as { status: string; qr_url: string | null; public_url: string | null };
+    expect(body.status).toBe('draft');
+    expect(body.qr_url).toBeNull();
+    expect(body.public_url).toBeNull();
+    expect(putObjectMock).not.toHaveBeenCalled();
+  });
+
+  it('201s a live link, minting the QR PNG + public URL', async () => {
+    const r = await app.inject({
+      method: 'POST',
+      url: '/v1/links/create',
+      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
+      payload: { domain: 'seeker', slug: 'live-one', status: 'live' },
+    });
+    expect(r.statusCode).toBe(201);
+    const body = r.json() as { status: string; qr_url: string | null; public_url: string | null };
+    expect(body.status).toBe('live');
+    expect(body.public_url).toBe('http://localhost:3000/acme/live-one');
+    expect(body.qr_url).toBe('https://s3.example.invalid/qr.png');
+    expect(putObjectMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('500 INTERNAL when QR PNG generation fails', async () => {
+    const spy = vi.spyOn(QRCode, 'toBuffer').mockRejectedValueOnce(new Error('qr boom'));
+    const r = await app.inject({
+      method: 'POST',
+      url: '/v1/links/create',
+      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
+      payload: { domain: 'seeker', slug: 'live-two', status: 'live' },
+    });
+    expect(r.statusCode).toBe(500);
+    expect(r.json().error.code).toBe('INTERNAL');
+    spy.mockRestore();
+  });
+
+  it('500 INTERNAL when the S3 PUT fails', async () => {
+    putObjectMock.mockRejectedValueOnce(new Error('s3 down'));
+    const r = await app.inject({
+      method: 'POST',
+      url: '/v1/links/create',
+      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
+      payload: { domain: 'seeker', slug: 'live-three', status: 'live' },
+    });
+    expect(r.statusCode).toBe(500);
+    expect(r.json().error.code).toBe('INTERNAL');
+  });
+
+  it('503 DB_UNAVAILABLE when stamping the qr_object_key fails', async () => {
+    store.failOnce('updateQrKey', { code: 'DB_UNAVAILABLE', message: 'db down' });
+    const r = await app.inject({
+      method: 'POST',
+      url: '/v1/links/create',
+      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
+      payload: { domain: 'seeker', slug: 'live-four', status: 'live' },
+    });
+    expect(r.statusCode).toBe(503);
+    expect(r.json().error.code).toBe('DB_UNAVAILABLE');
+  });
+});
+
+describe('GET /v1/links — list', () => {
+  let app: FastifyInstance;
+  let store: FullRegistrationLinksStore;
+
+  beforeEach(async () => {
+    store = new FullRegistrationLinksStore();
+  });
+  afterEach(async () => teardownFullApp(app));
+
+  it('503 DB_UNAVAILABLE when the store list fails', async () => {
+    store.failOnce('list', { code: 'DB_UNAVAILABLE', message: 'db down' });
+    app = await bootFullApp({ store });
+    const r = await app.inject({
+      method: 'GET',
+      url: '/v1/links',
+      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
+    });
+    expect(r.statusCode).toBe(503);
+  });
+
+  it('200s with metrics attached from the grouped rollup query', async () => {
+    store.seed([
+      buildLink({ id: 'link-a', slug: 'a', status: 'live', qrObjectKey: 'qr/a.png' }),
+      buildLink({ id: 'link-b', slug: 'b', status: 'draft' }),
+    ]);
+    app = await bootFullApp({
+      store,
+      metricsRows: [{ linkId: 'link-a', total: 10, passed: 8, failed: 2, skipped: 0 }],
+    });
+    const r = await app.inject({
+      method: 'GET',
+      url: '/v1/links',
+      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
+    });
+    expect(r.statusCode).toBe(200);
+    const body = r.json() as {
+      items: Array<{ link_id: string; metrics: { total: number }; qr_url: string | null }>;
+      total: number;
+    };
+    expect(body.total).toBe(2);
+    const a = body.items.find((i) => i.link_id === 'link-a');
+    expect(a?.metrics.total).toBe(10);
+    expect(a?.qr_url).toBe('https://s3.example.invalid/qr.png');
+    const b = body.items.find((i) => i.link_id === 'link-b');
+    expect(b?.metrics.total).toBe(0);
+  });
+
+  it('filters by status query param', async () => {
+    store.seed([
+      buildLink({ id: 'link-live', slug: 'live-x', status: 'live' }),
+      buildLink({ id: 'link-draft', slug: 'draft-x', status: 'draft' }),
+    ]);
+    app = await bootFullApp({ store });
+    const r = await app.inject({
+      method: 'GET',
+      url: '/v1/links?status=draft',
+      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
+    });
+    expect(r.statusCode).toBe(200);
+    const body = r.json() as { items: Array<{ link_id: string }> };
+    expect(body.items.map((i) => i.link_id)).toEqual(['link-draft']);
+  });
+});
+
+describe('GET /v1/links/:id — read', () => {
+  let app: FastifyInstance;
+  let store: FullRegistrationLinksStore;
+
+  beforeEach(async () => {
+    store = new FullRegistrationLinksStore();
+    app = await bootFullApp({ store });
+  });
+  afterEach(async () => teardownFullApp(app));
+
+  it('503 DB_UNAVAILABLE when findById fails', async () => {
+    store.failOnce('findById', { code: 'DB_UNAVAILABLE', message: 'db down' });
+    const r = await app.inject({
+      method: 'GET',
+      url: '/v1/links/link-1',
+      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
+    });
+    expect(r.statusCode).toBe(503);
+  });
+
+  it('403 FORBIDDEN for a cross-aggregator / unknown id (no enumeration leak)', async () => {
+    const r = await app.inject({
+      method: 'GET',
+      url: '/v1/links/does-not-exist',
+      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
+    });
+    expect(r.statusCode).toBe(403);
+  });
+
+  it('200s a live link and lazily signs the QR URL from the stored key', async () => {
+    store.seed([
+      buildLink({
+        id: 'link-live',
+        slug: 'live-read',
+        status: 'live',
+        qrObjectKey: 'qr/live-read.png',
+      }),
+    ]);
+    const r = await app.inject({
+      method: 'GET',
+      url: '/v1/links/link-live',
+      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
+    });
+    expect(r.statusCode).toBe(200);
+    const body = r.json() as { qr_url: string | null; public_url: string | null };
+    expect(body.qr_url).toBe('https://s3.example.invalid/qr.png');
+    expect(body.public_url).toBe('http://localhost:3000/acme/live-read');
+    expect(signQrDownloadUrlMock).toHaveBeenCalledWith('qr/live-read.png');
+  });
+});
+
+describe('PATCH /v1/links/:id — full lifecycle', () => {
+  let app: FastifyInstance;
+  let store: FullRegistrationLinksStore;
+
+  beforeEach(async () => {
+    store = new FullRegistrationLinksStore();
+    app = await bootFullApp({ store });
+  });
+  afterEach(async () => teardownFullApp(app));
+
+  it('503 DB_UNAVAILABLE when findById fails', async () => {
+    store.failOnce('findById', { code: 'DB_UNAVAILABLE', message: 'db down' });
+    const r = await app.inject({
+      method: 'PATCH',
+      url: '/v1/links/link-1',
+      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
+      payload: {},
+    });
+    expect(r.statusCode).toBe(503);
+  });
+
+  it('403 FORBIDDEN when the link is not accessible', async () => {
+    const r = await app.inject({
+      method: 'PATCH',
+      url: '/v1/links/does-not-exist',
+      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
+      payload: {},
+    });
+    expect(r.statusCode).toBe(403);
+  });
+
+  it('409 CONFLICT when the link is no longer a draft', async () => {
+    store.seed([buildLink({ id: 'link-live', status: 'live' })]);
+    const r = await app.inject({
+      method: 'PATCH',
+      url: '/v1/links/link-live',
+      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
+      payload: { context: { a: 1 } },
+    });
+    expect(r.statusCode).toBe(409);
+    expect(r.json().error.code).toBe('CONFLICT');
+  });
+
+  it('200s updating context/expiry without touching the slug', async () => {
+    store.seed([buildLink({ id: 'link-draft', slug: 'stays-same' })]);
+    const r = await app.inject({
+      method: 'PATCH',
+      url: '/v1/links/link-draft',
+      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
+      payload: { context: { note: 'updated' }, expires_at: '2027-01-01T00:00:00Z' },
+    });
+    expect(r.statusCode).toBe(200);
+    const body = r.json() as { slug: string; context: Record<string, unknown>; expires_at: string };
+    expect(body.slug).toBe('stays-same');
+    expect(body.context).toEqual({ note: 'updated' });
+    expect(body.expires_at).toBe('2027-01-01T00:00:00.000Z');
+  });
+
+  it('200s and retries once when the requested slug collides with a sibling link', async () => {
+    store.seed([
+      buildLink({ id: 'link-a', slug: 'wanted' }),
+      buildLink({ id: 'link-b', slug: 'original-b' }),
+    ]);
+    const r = await app.inject({
+      method: 'PATCH',
+      url: '/v1/links/link-b',
+      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
+      payload: { slug: 'wanted' },
+    });
+    expect(r.statusCode).toBe(200);
+    const body = r.json() as { slug: string };
+    expect(body.slug).toMatch(/^wanted-[0-9a-f]{4}$/);
+  });
+
+  it('503 DB_UNAVAILABLE when updateDraft fails for a non-collision, non-not-found reason', async () => {
+    store.seed([buildLink({ id: 'link-draft' })]);
+    store.failOnce('updateDraft', { code: 'DB_UNAVAILABLE', message: 'db down' });
+    const r = await app.inject({
+      method: 'PATCH',
+      url: '/v1/links/link-draft',
+      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
+      payload: { slug: 'new-slug' },
+    });
+    expect(r.statusCode).toBe(503);
+  });
+
+  it('409 CONFLICT when updateDraft (slug path) reports the link raced out of draft', async () => {
+    store.seed([buildLink({ id: 'link-draft' })]);
+    const racing = new (class extends FullRegistrationLinksStore {
+      override async updateDraft(): Promise<StoreResult<RegistrationLink>> {
+        return { ok: false, error: { code: 'NOT_FOUND', message: 'raced' } };
+      }
+    })();
+    racing.seed([buildLink({ id: 'link-draft' })]);
+    await app.close();
+    app = await bootFullApp({ store: racing });
+    const r = await app.inject({
+      method: 'PATCH',
+      url: '/v1/links/link-draft',
+      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
+      payload: { slug: 'new-slug' },
+    });
+    expect(r.statusCode).toBe(409);
+    expect(r.json().error.code).toBe('CONFLICT');
+  });
+
+  it('409 CONFLICT when updateDraft (no-slug path) reports the link raced out of draft', async () => {
+    const racing = new (class extends FullRegistrationLinksStore {
+      override async updateDraft(): Promise<StoreResult<RegistrationLink>> {
+        return { ok: false, error: { code: 'NOT_FOUND', message: 'raced' } };
+      }
+    })();
+    racing.seed([buildLink({ id: 'link-draft' })]);
+    await app.close();
+    app = await bootFullApp({ store: racing });
+    const r = await app.inject({
+      method: 'PATCH',
+      url: '/v1/links/link-draft',
+      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
+      payload: { context: { a: 1 } },
+    });
+    expect(r.statusCode).toBe(409);
+    expect(r.json().error.code).toBe('CONFLICT');
+  });
+
+  it('503 DB_UNAVAILABLE when updateDraft (no-slug path) fails for a DB reason', async () => {
+    store.seed([buildLink({ id: 'link-draft' })]);
+    store.failOnce('updateDraft', { code: 'DB_UNAVAILABLE', message: 'db down' });
+    const r = await app.inject({
+      method: 'PATCH',
+      url: '/v1/links/link-draft',
+      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
+      payload: { context: { a: 1 } },
+    });
+    expect(r.statusCode).toBe(503);
+  });
+
+  it('503 DUPLICATE_SLUG when every slug retry collides', async () => {
+    store.seed([buildLink({ id: 'link-draft' })]);
+    const alwaysCollide = new (class extends FullRegistrationLinksStore {
+      override async updateDraft(): Promise<StoreResult<RegistrationLink>> {
+        return { ok: false, error: { code: 'SLUG_COLLISION', message: 'always taken' } };
+      }
+    })();
+    alwaysCollide.seed([buildLink({ id: 'link-draft' })]);
+    await app.close();
+    app = await bootFullApp({ store: alwaysCollide });
+    const r = await app.inject({
+      method: 'PATCH',
+      url: '/v1/links/link-draft',
+      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
+      payload: { slug: 'wanted' },
+    });
+    expect(r.statusCode).toBe(503);
+    expect(r.json().error.code).toBe('DUPLICATE_SLUG');
+  });
+});
+
+describe('POST /v1/links/:id/activate', () => {
+  let app: FastifyInstance;
+  let store: FullRegistrationLinksStore;
+
+  beforeEach(async () => {
+    store = new FullRegistrationLinksStore();
+    app = await bootFullApp({ store });
+  });
+  afterEach(async () => teardownFullApp(app));
+
+  it('503 DB_UNAVAILABLE when findById fails', async () => {
+    store.failOnce('findById', { code: 'DB_UNAVAILABLE', message: 'db down' });
+    const r = await app.inject({
+      method: 'POST',
+      url: '/v1/links/link-1/activate',
+      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
+    });
+    expect(r.statusCode).toBe(503);
+  });
+
+  it('403 FORBIDDEN when the link is not accessible', async () => {
+    const r = await app.inject({
+      method: 'POST',
+      url: '/v1/links/does-not-exist/activate',
+      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
+    });
+    expect(r.statusCode).toBe(403);
+  });
+
+  it('is idempotent (200, no QR/S3 work) when already live', async () => {
+    store.seed([buildLink({ id: 'link-live', status: 'live', qrObjectKey: 'qr/x.png' })]);
+    const r = await app.inject({
+      method: 'POST',
+      url: '/v1/links/link-live/activate',
+      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
+    });
+    expect(r.statusCode).toBe(200);
+    expect(putObjectMock).not.toHaveBeenCalled();
+  });
+
+  it('409 CONFLICT when the link is retired', async () => {
+    store.seed([buildLink({ id: 'link-retired', status: 'retired' })]);
+    const r = await app.inject({
+      method: 'POST',
+      url: '/v1/links/link-retired/activate',
+      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
+    });
+    expect(r.statusCode).toBe(409);
+    expect(r.json().error.code).toBe('CONFLICT');
+  });
+
+  it('200s activating a draft, minting a fresh QR PNG', async () => {
+    store.seed([buildLink({ id: 'link-draft', slug: 'to-activate', status: 'draft' })]);
+    const r = await app.inject({
+      method: 'POST',
+      url: '/v1/links/link-draft/activate',
+      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
+    });
+    expect(r.statusCode).toBe(200);
+    const body = r.json() as { status: string; public_url: string | null; qr_url: string | null };
+    expect(body.status).toBe('live');
+    expect(body.public_url).toBe('http://localhost:3000/acme/to-activate');
+    expect(body.qr_url).toBe('https://s3.example.invalid/qr.png');
+    expect(putObjectMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('reuses the existing qr_object_key when one is already stamped on a legacy draft', async () => {
+    store.seed([
+      buildLink({
+        id: 'link-draft',
+        slug: 'legacy',
+        status: 'draft',
+        qrObjectKey: 'qr/legacy-key.png',
+      }),
+    ]);
+    await app.inject({
+      method: 'POST',
+      url: '/v1/links/link-draft/activate',
+      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
+    });
+    expect(putObjectMock).toHaveBeenCalledWith('qr/legacy-key.png', expect.anything(), 'image/png');
+  });
+
+  it('500 INTERNAL when QR PNG generation fails', async () => {
+    store.seed([buildLink({ id: 'link-draft', status: 'draft' })]);
+    const spy = vi.spyOn(QRCode, 'toBuffer').mockRejectedValueOnce(new Error('qr boom'));
+    const r = await app.inject({
+      method: 'POST',
+      url: '/v1/links/link-draft/activate',
+      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
+    });
+    expect(r.statusCode).toBe(500);
+    spy.mockRestore();
+  });
+
+  it('500 INTERNAL when the S3 PUT fails', async () => {
+    store.seed([buildLink({ id: 'link-draft', status: 'draft' })]);
+    putObjectMock.mockRejectedValueOnce(new Error('s3 down'));
+    const r = await app.inject({
+      method: 'POST',
+      url: '/v1/links/link-draft/activate',
+      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
+    });
+    expect(r.statusCode).toBe(500);
+  });
+
+  it('503 DB_UNAVAILABLE when stamping the qr_object_key fails', async () => {
+    store.seed([buildLink({ id: 'link-draft', status: 'draft' })]);
+    store.failOnce('updateQrKey', { code: 'DB_UNAVAILABLE', message: 'db down' });
+    const r = await app.inject({
+      method: 'POST',
+      url: '/v1/links/link-draft/activate',
+      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
+    });
+    expect(r.statusCode).toBe(503);
+  });
+
+  it('503 DB_UNAVAILABLE when the status flip fails', async () => {
+    store.seed([buildLink({ id: 'link-draft', status: 'draft' })]);
+    store.failOnce('updateStatus', { code: 'DB_UNAVAILABLE', message: 'db down' });
+    const r = await app.inject({
+      method: 'POST',
+      url: '/v1/links/link-draft/activate',
+      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
+    });
+    expect(r.statusCode).toBe(503);
+  });
+});
+
+describe('POST /v1/links/:id/deactivate', () => {
+  let app: FastifyInstance;
+  let store: FullRegistrationLinksStore;
+
+  beforeEach(async () => {
+    store = new FullRegistrationLinksStore();
+    app = await bootFullApp({ store });
+  });
+  afterEach(async () => teardownFullApp(app));
+
+  it('503 DB_UNAVAILABLE when findById fails', async () => {
+    store.failOnce('findById', { code: 'DB_UNAVAILABLE', message: 'db down' });
+    const r = await app.inject({
+      method: 'POST',
+      url: '/v1/links/link-1/deactivate',
+      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
+    });
+    expect(r.statusCode).toBe(503);
+  });
+
+  it('403 FORBIDDEN when the link is not accessible', async () => {
+    const r = await app.inject({
+      method: 'POST',
+      url: '/v1/links/does-not-exist/deactivate',
+      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
+    });
+    expect(r.statusCode).toBe(403);
+  });
+
+  it('is idempotent (200) when already retired', async () => {
+    store.seed([buildLink({ id: 'link-retired', status: 'retired' })]);
+    const r = await app.inject({
+      method: 'POST',
+      url: '/v1/links/link-retired/deactivate',
+      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
+    });
+    expect(r.statusCode).toBe(200);
+  });
+
+  it('200s retiring a live link', async () => {
+    store.seed([buildLink({ id: 'link-live', status: 'live' })]);
+    const r = await app.inject({
+      method: 'POST',
+      url: '/v1/links/link-live/deactivate',
+      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
+    });
+    expect(r.statusCode).toBe(200);
+    expect((r.json() as { status: string }).status).toBe('retired');
+  });
+
+  it('503 DB_UNAVAILABLE when the status flip fails', async () => {
+    store.seed([buildLink({ id: 'link-live', status: 'live' })]);
+    store.failOnce('updateStatus', { code: 'DB_UNAVAILABLE', message: 'db down' });
+    const r = await app.inject({
+      method: 'POST',
+      url: '/v1/links/link-live/deactivate',
+      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
+    });
+    expect(r.statusCode).toBe(503);
   });
 });

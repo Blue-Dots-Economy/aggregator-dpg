@@ -6,6 +6,7 @@ settings:
 
 overrides:
   ioredis: ^5.11.1
+  jiti: ^2.6.1
 
 importers:
 
@@ -548,15 +549,18 @@ importers:
       '@types/node':
         specifier: ^22.0.0
         version: 22.19.17
+      '@vitest/coverage-v8':
+        specifier: ^3.2.0
+        version: 3.2.7(vitest@3.2.7(@types/debug@4.1.13)(@types/node@22.19.17)(jiti@2.7.0)(jsdom@30.0.1)(lightningcss@1.32.0)(tsx@4.23.1)(yaml@2.9.0))
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
+      vitest:
+        specifier: ^3.2.0
+        version: 3.2.7(@types/debug@4.1.13)(@types/node@22.19.17)(jiti@2.7.0)(jsdom@30.0.1)(lightningcss@1.32.0)(tsx@4.23.1)(yaml@2.9.0)
 
   packages/queue:
     dependencies:
-      bullmq:
-        specifier: ^5.76.6
-        version: 5.76.6
       ioredis:
         specifier: ^5.11.1
         version: 5.11.1
@@ -567,9 +571,15 @@ importers:
       '@types/node':
         specifier: ^22.0.0
         version: 22.19.17
+      '@vitest/coverage-v8':
+        specifier: ^3.2.0
+        version: 3.2.7(vitest@3.2.7(@types/debug@4.1.13)(@types/node@22.19.17)(jiti@2.7.0)(jsdom@30.0.1)(lightningcss@1.32.0)(tsx@4.23.1)(yaml@2.9.0))
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
+      vitest:
+        specifier: ^3.2.0
+        version: 3.2.7(@types/debug@4.1.13)(@types/node@22.19.17)(jiti@2.7.0)(jsdom@30.0.1)(lightningcss@1.32.0)(tsx@4.23.1)(yaml@2.9.0)
 
   packages/schema-loader:
     dependencies:
@@ -601,9 +611,6 @@ importers:
 
   packages/schema-service:
     dependencies:
-      '@aggregator-dpg/shared-primitives':
-        specifier: workspace:*
-        version: link:../shared-primitives
       zod:
         specifier: ^3.24.0
         version: 3.25.76
@@ -4215,7 +4222,7 @@ packages:
     engines: {node: ^20.19.0 || ^22.13.0 || >=24}
     hasBin: true
     peerDependencies:
-      jiti: '*'
+      jiti: ^2.6.1
     peerDependenciesMeta:
       jiti:
         optional: true
@@ -6404,7 +6411,7 @@ packages:
     hasBin: true
     peerDependencies:
       '@types/node': ^20.19.0 || >=22.12.0
-      jiti: '>=1.21.0'
+      jiti: ^2.6.1
       less: ^4.0.0
       lightningcss: ^1.21.0
       sass: ^1.70.0

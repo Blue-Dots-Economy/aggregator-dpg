@@ -6,11 +6,17 @@
  * goal here is to exercise the probe → branch → submit pipeline, not the
  * RJSF rendering surface (covered by RJSF's own tests).
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import messages from '@/i18n/messages/en.json';
+
+// jsdom does not implement scrollIntoView; the error banner's focus effect
+// calls it whenever state transitions to 'error'.
+beforeAll(() => {
+  Element.prototype.scrollIntoView = vi.fn();
+});
 
 // Shim RjsfThemedForm: render a deterministic <form>; reads schema defaults
 // for the email/name fields to construct a deterministic formData payload
@@ -299,5 +305,338 @@ describe('<PublicRegistrationView /> — lookup branches', () => {
     const lookupUrl = fetchMock.mock.calls[0]![0]!.toString();
     expect(lookupUrl).toContain('/lookup');
     expect(lookupUrl).toContain('phone_number=%2B919800000000');
+  });
+});
+
+describe('<PublicRegistrationView /> — remaining branches', () => {
+  let originalFetch: typeof fetch;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it('shows the already-registered banner for a live primary item and clears it on CTA click', async () => {
+    globalThis.fetch = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
+      const url = input.toString();
+      if (url.includes('/lookup')) {
+        return new Response(
+          JSON.stringify({
+            user_exists: true,
+            owned_elsewhere: false,
+            lifecycle_summary: {
+              primary_item: { item_id: 'item-1', lifecycle_status: 'live' },
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }) as unknown as typeof fetch;
+
+    renderView();
+    fireEvent.submit(screen.getByTestId('rjsf-shim'));
+    const banner = await screen.findByTestId('lookup-already-registered');
+    expect(banner).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText(messages.profile.public_reg.lookup.already_registered_cta));
+    expect(screen.queryByTestId('lookup-already-registered')).toBeNull();
+  });
+
+  it('clears the owned-elsewhere banner on "use a different contact" click', async () => {
+    globalThis.fetch = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
+      const url = input.toString();
+      if (url.includes('/lookup')) {
+        return new Response(
+          JSON.stringify({ user_exists: true, owned_elsewhere: true, lifecycle_summary: null }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }) as unknown as typeof fetch;
+
+    renderView();
+    fireEvent.submit(screen.getByTestId('rjsf-shim'));
+    await screen.findByTestId('lookup-owned-elsewhere');
+
+    fireEvent.click(screen.getByText(messages.profile.public_reg.lookup.owned_elsewhere_cta));
+    expect(screen.queryByTestId('lookup-owned-elsewhere')).toBeNull();
+  });
+
+  it('"Continue with a new submission" clears the resume banner and re-probes on next submit', async () => {
+    let lookupCalls = 0;
+    globalThis.fetch = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
+      const url = input.toString();
+      if (url.includes('/lookup')) {
+        lookupCalls += 1;
+        return new Response(
+          JSON.stringify({
+            user_exists: true,
+            owned_elsewhere: false,
+            lifecycle_summary: {
+              primary_item: { item_id: 'item-2', lifecycle_status: 'draft' },
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }) as unknown as typeof fetch;
+
+    renderView();
+    fireEvent.submit(screen.getByTestId('rjsf-shim'));
+    await screen.findByTestId('lookup-resume');
+
+    fireEvent.click(screen.getByText(messages.profile.public_reg.lookup.resume_continue_new));
+    expect(screen.queryByTestId('lookup-resume')).toBeNull();
+
+    fireEvent.submit(screen.getByTestId('rjsf-shim'));
+    await waitFor(() => expect(lookupCalls).toBe(2));
+  });
+
+  it('"Resume profile" bypasses the probe on the next submit', async () => {
+    const fetchMock = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
+      const url = input.toString();
+      if (url.includes('/lookup')) {
+        return new Response(
+          JSON.stringify({
+            user_exists: true,
+            owned_elsewhere: false,
+            lifecycle_summary: {
+              primary_item: { item_id: 'item-3', lifecycle_status: 'draft' },
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      if (url.includes('/submit')) {
+        return new Response(JSON.stringify({ outcome: 'passed', submission_id: 'sub-resume' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    renderView();
+    fireEvent.submit(screen.getByTestId('rjsf-shim'));
+    await screen.findByTestId('lookup-resume');
+
+    fireEvent.click(screen.getByText(messages.profile.public_reg.lookup.resume_cta));
+    fireEvent.submit(screen.getByTestId('rjsf-shim'));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    // Second call bypasses the probe and goes straight to /submit — no
+    // second /lookup call.
+    expect(fetchMock.mock.calls[1]![0]!.toString()).toContain('/submit');
+  });
+
+  it('shows a server error banner (title/detail/code) on a non-409 failure response', async () => {
+    globalThis.fetch = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
+      const url = input.toString();
+      if (url.includes('/lookup')) {
+        return new Response(
+          JSON.stringify({ user_exists: false, owned_elsewhere: false, lifecycle_summary: null }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return new Response(
+        JSON.stringify({ error: { title: 'Rejected', detail: 'Bad payload', code: 'BAD_INPUT' } }),
+        { status: 400, headers: { 'content-type': 'application/json' } },
+      );
+    }) as unknown as typeof fetch;
+
+    renderView();
+    fireEvent.submit(screen.getByTestId('rjsf-shim'));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Rejected');
+    expect(screen.getByText('Bad payload')).toBeInTheDocument();
+    expect(screen.getByText(/Code: BAD_INPUT/)).toBeInTheDocument();
+  });
+
+  it('shows a network-error banner when the /submit fetch throws', async () => {
+    globalThis.fetch = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
+      const url = input.toString();
+      if (url.includes('/lookup')) {
+        return new Response(
+          JSON.stringify({ user_exists: false, owned_elsewhere: false, lifecycle_summary: null }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      throw new Error('network down');
+    }) as unknown as typeof fetch;
+
+    renderView();
+    fireEvent.submit(screen.getByTestId('rjsf-shim'));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      messages.profile.public_reg.error_network_title,
+    );
+    expect(screen.getByText('network down')).toBeInTheDocument();
+  });
+
+  it('"Register another" resets the done screen back to the form', async () => {
+    globalThis.fetch = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
+      const url = input.toString();
+      if (url.includes('/lookup')) {
+        return new Response(
+          JSON.stringify({ user_exists: false, owned_elsewhere: false, lifecycle_summary: null }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return new Response(JSON.stringify({ outcome: 'passed', submission_id: 'sub-done' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch;
+
+    renderView();
+    fireEvent.submit(screen.getByTestId('rjsf-shim'));
+    await screen.findByText(messages.profile.public_reg.done_passed_title);
+
+    fireEvent.click(screen.getByText(messages.profile.public_reg.btn_register_another));
+    expect(screen.getByTestId('rjsf-shim')).toBeInTheDocument();
+  });
+
+  it('renders the U18 notice (no consent checkbox) for a minor year of birth and still submits', async () => {
+    const currentYear = new Date().getFullYear();
+    const fetchMock = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
+      const url = input.toString();
+      if (url.includes('/lookup')) {
+        return new Response(
+          JSON.stringify({ user_exists: false, owned_elsewhere: false, lifecycle_summary: null }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return new Response(JSON.stringify({ outcome: 'passed', submission_id: 'sub-minor' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    renderView();
+    fireEvent.change(screen.getByLabelText(/Year of birth/), {
+      target: { value: String(currentYear - 10) },
+    });
+    expect(screen.getByText(messages.profile.public_reg.u18_notice)).toBeInTheDocument();
+    expect(screen.queryByRole('checkbox')).toBeNull();
+
+    fireEvent.submit(screen.getByTestId('rjsf-shim'));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const submitBody = JSON.parse(String((fetchMock.mock.calls[1]![1] as RequestInit).body)) as {
+      consent_terms?: boolean;
+      year_of_birth?: string;
+    };
+    expect(submitBody.consent_terms).toBe(false);
+    expect(submitBody.year_of_birth).toBe(String(currentYear - 10));
+  });
+
+  it('adult path sends consent_terms/privacy/profile true when the checkbox is checked', async () => {
+    const currentYear = new Date().getFullYear();
+    const fetchMock = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
+      const url = input.toString();
+      if (url.includes('/lookup')) {
+        return new Response(
+          JSON.stringify({ user_exists: false, owned_elsewhere: false, lifecycle_summary: null }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return new Response(JSON.stringify({ outcome: 'passed', submission_id: 'sub-adult' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    renderView();
+    fireEvent.change(screen.getByLabelText(/Year of birth/), {
+      target: { value: String(currentYear - 30) },
+    });
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.submit(screen.getByTestId('rjsf-shim'));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const submitBody = JSON.parse(String((fetchMock.mock.calls[1]![1] as RequestInit).body)) as {
+      consent_terms?: boolean;
+      consent_privacy?: boolean;
+      consent_profile?: boolean;
+    };
+    expect(submitBody.consent_terms).toBe(true);
+    expect(submitBody.consent_privacy).toBe(true);
+    expect(submitBody.consent_profile).toBe(true);
+  });
+
+  it('opens and closes the profile-creation consent modal', async () => {
+    globalThis.fetch = vi.fn() as unknown as typeof fetch;
+    render(
+      <QueryClientProvider
+        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+      >
+        <NextIntlClientProvider locale="en" messages={messages as Record<string, unknown>}>
+          <PublicRegistrationView
+            {...baseProps}
+            consentContent={{
+              terms: { version: 1, title: 'Terms', content: 'T' },
+              privacy: { version: 1, title: 'Privacy', content: 'P' },
+              profileCreation: {
+                version: 1,
+                statement: 'We will use your data to build a profile.',
+              },
+            }}
+          />
+        </NextIntlClientProvider>
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(screen.getByText(messages.profile.public_reg.consent_profile_link));
+    expect(screen.getByText('We will use your data to build a profile.')).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: messages.profile.public_reg.consent_profile_modal_agree }),
+    );
+    expect(screen.queryByText('We will use your data to build a profile.')).toBeNull();
+  });
+
+  it('renders the MinimalIdentityForm for an account_only link and submits without a profile schema', async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ outcome: 'passed', submission_id: 'sub-mini' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+    );
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    render(
+      <QueryClientProvider
+        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+      >
+        <NextIntlClientProvider locale="en" messages={messages as Record<string, unknown>}>
+          <PublicRegistrationView
+            {...baseProps}
+            network=""
+            submissionShape="account_only"
+            identity={{ name: 'name', phone: 'phone', email: 'email' }}
+          />
+        </NextIntlClientProvider>
+      </QueryClientProvider>,
+    );
+
+    const currentYear = new Date().getFullYear();
+    fireEvent.change(screen.getByLabelText(/Name/), { target: { value: 'Quick Signup' } });
+    fireEvent.change(screen.getByLabelText(/Year of birth/), {
+      target: { value: String(currentYear - 22) },
+    });
+    fireEvent.change(screen.getByLabelText(/Phone/), { target: { value: '9876543210' } });
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: /Submit/ }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(fetchMock.mock.calls[0]![0]!.toString()).toContain('/submit');
   });
 });

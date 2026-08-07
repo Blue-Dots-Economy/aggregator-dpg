@@ -65,6 +65,82 @@ describe('SesMailer cc handling', () => {
     expect('CcAddresses' in input.Destination).toBe(false);
   });
 
+  it('maps AccessDeniedException to AUTH_FAILED', async () => {
+    const { mailer } = makeMailer();
+    (mailer as unknown as { client: { send: () => Promise<never> } }).client.send = () =>
+      Promise.reject({ name: 'AccessDeniedException', message: 'no permission' });
+    const r = await mailer.send({ to: 'to@org.com', subject: 's', html: '', text: '' });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.error.code).toBe('AUTH_FAILED');
+      expect(r.error.message).toContain('AccessDeniedException');
+    }
+  });
+
+  it('maps NotAuthorizedException to AUTH_FAILED', async () => {
+    const { mailer } = makeMailer();
+    (mailer as unknown as { client: { send: () => Promise<never> } }).client.send = () =>
+      Promise.reject({ name: 'NotAuthorizedException', message: 'nope' });
+    const r = await mailer.send({ to: 'to@org.com', subject: 's', html: '', text: '' });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.code).toBe('AUTH_FAILED');
+  });
+
+  it('maps MailFromDomainNotVerifiedException to INVALID_RECIPIENT', async () => {
+    const { mailer } = makeMailer();
+    (mailer as unknown as { client: { send: () => Promise<never> } }).client.send = () =>
+      Promise.reject({ name: 'MailFromDomainNotVerifiedException', message: 'unverified' });
+    const r = await mailer.send({ to: 'to@org.com', subject: 's', html: '', text: '' });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.code).toBe('INVALID_RECIPIENT');
+  });
+
+  it('maps MessageRejected to INVALID_RECIPIENT', async () => {
+    const { mailer } = makeMailer();
+    (mailer as unknown as { client: { send: () => Promise<never> } }).client.send = () =>
+      Promise.reject({ name: 'MessageRejected', message: 'bounced' });
+    const r = await mailer.send({ to: 'to@org.com', subject: 's', html: '', text: '' });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.code).toBe('INVALID_RECIPIENT');
+  });
+
+  it('maps an unrecognised SES error to TRANSPORT_FAILED', async () => {
+    const { mailer } = makeMailer();
+    (mailer as unknown as { client: { send: () => Promise<never> } }).client.send = () =>
+      Promise.reject({ name: 'ThrottlingException', message: 'slow down' });
+    const r = await mailer.send({ to: 'to@org.com', subject: 's', html: '', text: '' });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.error.code).toBe('TRANSPORT_FAILED');
+      expect(r.error.message).toContain('ThrottlingException');
+    }
+  });
+
+  it('falls back to default error text when the thrown value has no name/message', async () => {
+    const { mailer } = makeMailer();
+    (mailer as unknown as { client: { send: () => Promise<never> } }).client.send = () =>
+      Promise.reject({});
+    const r = await mailer.send({ to: 'to@org.com', subject: 's', html: '', text: '' });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.error.code).toBe('TRANSPORT_FAILED');
+      expect(r.error.message).toContain('send failed');
+    }
+  });
+
+  it('defaults messageId to empty string when the SDK omits MessageId', async () => {
+    const { client, mailer } = makeMailer();
+    client.send = async () => ({ MessageId: undefined as unknown as string });
+    const r = await mailer.send({ to: 'to@org.com', subject: 's', html: '', text: '' });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value.messageId).toBe('');
+  });
+
+  it('constructs a real SESv2Client when no client override is given', () => {
+    const mailer = new SesMailer({ region: 'ap-south-1', from: 'no-reply@org.com' });
+    expect(mailer).toBeInstanceOf(SesMailer);
+  });
+
   it('splits a comma-joined multi-recipient string into individual addresses (H1)', async () => {
     const { client, mailer } = makeMailer();
     // How the support config surfaces multiple recipients: a comma-joined

@@ -2,7 +2,7 @@
 // so the flag must be set before any import that pulls in `config`.
 process.env.ORG_HIERARCHY_ENABLED = 'true';
 
-import { describe, it, expect, beforeEach, afterAll } from 'vitest';
+import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
 import {
@@ -21,6 +21,14 @@ import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-tok
 import { ConsentLedgerFake } from '@aggregator-dpg/consent-ledger/testing';
 import { _setConsentLedger } from '../services/consent-ledger/index.js';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
+import { _setSubmitRateChecker } from '../services/submit-rate.js';
+import type * as ConfigLoaderFs from '@aggregator-dpg/config-loader/fs';
+
+const { loadConsentConfigMock } = vi.hoisted(() => ({ loadConsentConfigMock: vi.fn() }));
+vi.mock('@aggregator-dpg/config-loader/fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof ConfigLoaderFs>();
+  return { ...actual, loadConsentConfig: loadConsentConfigMock };
+});
 
 const SERVICE_BEARER = 'service-token';
 const AUTH_HEADER = { authorization: `Bearer ${SERVICE_BEARER}` };
@@ -45,6 +53,13 @@ describe('aggregator-orgs routes', () => {
     mailer = new FakeMailer();
     consentLedger = new ConsentLedgerFake();
 
+    _setSubmitRateChecker(null);
+    loadConsentConfigMock.mockReset();
+    const actualLoader = await vi.importActual<typeof ConfigLoaderFs>(
+      '@aggregator-dpg/config-loader/fs',
+    );
+    loadConsentConfigMock.mockImplementation(actualLoader.loadConsentConfig);
+
     _setAggregatorOrgStore(orgStore);
     _setIdpAdmin(idp);
     _setMailer(mailer);
@@ -66,6 +81,7 @@ describe('aggregator-orgs routes', () => {
     _setMailer(null);
     _setConsentLedger(null);
     _setAccessTokenVerifier(null);
+    _setSubmitRateChecker(null);
   });
 
   const orgBody = {
@@ -286,5 +302,167 @@ describe('aggregator-orgs routes', () => {
     });
     expect(res.statusCode).toBe(409);
     expect((res.json() as { error: { code: string } }).error.code).toBe('ORG_SLUG_TAKEN');
+  });
+
+  it('401s POST /v1/orgs/create without a token', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      payload: orgBody,
+    });
+    expect(res.statusCode).toBe(401);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('UNAUTHORIZED');
+  });
+
+  it('400 INVALID_PHONE on a malformed owner phone', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: { ...orgBody, owner: { ...orgBody.owner, phone: 'not-a-phone' } },
+    });
+    expect(res.statusCode).toBe(400);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('INVALID_PHONE');
+  });
+
+  it('429 RATE_LIMITED when the submit rate checker rejects the request', async () => {
+    _setSubmitRateChecker(async () => ({ allowed: false, retryAfterSeconds: 37 }));
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: orgBody,
+    });
+    expect(res.statusCode).toBe(429);
+    expect(res.headers['retry-after']).toBe('37');
+    expect((res.json() as { error: { code: string } }).error.code).toBe('RATE_LIMITED');
+  });
+
+  it('503 DB_UNAVAILABLE when findByOwnerEmail fails', async () => {
+    orgStore.findByOwnerEmail = async () => ({
+      ok: false,
+      error: { code: 'DB_UNAVAILABLE', message: 'db down' },
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: orgBody,
+    });
+    expect(res.statusCode).toBe(503);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('DB_UNAVAILABLE');
+  });
+
+  it('503 DB_UNAVAILABLE when orgStore.create fails with an unmapped error code', async () => {
+    // NOT_FOUND is a real OrgStoreError variant, but the route only special-cases
+    // DUPLICATE_NAME/DUPLICATE_SLUG — everything else (including this) falls
+    // through to the generic DB_UNAVAILABLE branch.
+    orgStore.create = async () => ({
+      ok: false,
+      error: { code: 'NOT_FOUND', message: 'boom' },
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: orgBody,
+    });
+    expect(res.statusCode).toBe(503);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('DB_UNAVAILABLE');
+  });
+
+  it('500 CONSENT_WRITE_FAILED (rolled back) when the consent config fails to load', async () => {
+    loadConsentConfigMock.mockRejectedValueOnce(new Error('disk error'));
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: { ...orgBody, owner: { ...orgBody.owner, email: 'consent-load-fail@enable.org' } },
+    });
+    expect(res.statusCode).toBe(500);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('CONSENT_WRITE_FAILED');
+    const found = await orgStore.findByOwnerEmail('consent-load-fail@enable.org');
+    expect(found.ok && found.value).toBeNull();
+  });
+
+  it('503 IDP_UNAVAILABLE (org rolled back to inactive) when the mirrored KC group create fails', async () => {
+    idp.createGroup = async () => ({
+      ok: false,
+      error: { code: 'IDP_UNAVAILABLE', message: 'kc down' },
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: { ...orgBody, owner: { ...orgBody.owner, email: 'group-fail@enable.org' } },
+    });
+    expect(res.statusCode).toBe(503);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('IDP_UNAVAILABLE');
+    const found = await orgStore.findByOwnerEmail('group-fail@enable.org');
+    expect(found.ok && found.value?.status).toBe('inactive');
+  });
+
+  it('409 OWNER_ALREADY_REGISTERED (rolled back to inactive) when the KC owner user already exists', async () => {
+    await idp.createUser({ email: 'dup-owner@enable.org' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: { ...orgBody, owner: { ...orgBody.owner, email: 'dup-owner@enable.org' } },
+    });
+    expect(res.statusCode).toBe(409);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('OWNER_ALREADY_REGISTERED');
+    const found = await orgStore.findByOwnerEmail('dup-owner@enable.org');
+    expect(found.ok && found.value?.status).toBe('inactive');
+  });
+
+  it('503 IDP_UNAVAILABLE (org rolled back to inactive) when KC owner user creation fails for another reason', async () => {
+    idp.createUser = async () => ({
+      ok: false,
+      error: { code: 'IDP_UNAVAILABLE', message: 'kc down' },
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: { ...orgBody, owner: { ...orgBody.owner, email: 'user-create-fail@enable.org' } },
+    });
+    expect(res.statusCode).toBe(503);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('IDP_UNAVAILABLE');
+    const found = await orgStore.findByOwnerEmail('user-create-fail@enable.org');
+    expect(found.ok && found.value?.status).toBe('inactive');
+  });
+
+  it('503 DB_UNAVAILABLE when the final stamp update (kcGroupId/ownerKcSub) fails', async () => {
+    const originalUpdate = orgStore.update.bind(orgStore);
+    let calls = 0;
+    orgStore.update = async (id, patch) => {
+      calls++;
+      if (calls === 1) return { ok: false, error: { code: 'DB_UNAVAILABLE', message: 'db down' } };
+      return originalUpdate(id, patch);
+    };
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: { ...orgBody, owner: { ...orgBody.owner, email: 'stamp-fail@enable.org' } },
+    });
+    expect(res.statusCode).toBe(503);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('DB_UNAVAILABLE');
+  });
+
+  it('401s GET /v1/orgs without a token', async () => {
+    const res = await app.inject({ method: 'GET', url: '/v1/orgs' });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('503 DB_UNAVAILABLE when GET /v1/orgs listActive fails', async () => {
+    orgStore.listActive = async () => ({
+      ok: false,
+      error: { code: 'DB_UNAVAILABLE', message: 'db down' },
+    });
+    const res = await app.inject({ method: 'GET', url: '/v1/orgs', headers: AUTH_HEADER });
+    expect(res.statusCode).toBe(503);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('DB_UNAVAILABLE');
   });
 });

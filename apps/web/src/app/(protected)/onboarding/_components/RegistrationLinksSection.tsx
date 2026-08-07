@@ -233,11 +233,10 @@ export function CreateLinkSection() {
   };
 
   const onCreate = async () => {
+    // The Create button is disabled while `createBlockers` is non-empty
+    // (state/district/lever_event required) — this handler can't fire
+    // with any of those missing, so no separate guard is needed here.
     setCreateError(null);
-    if (!form.state || !form.district || !form.lever_event) {
-      setCreateError(t('create_link.error_required'));
-      return;
-    }
     try {
       const title = buildLinkTitle(form);
       const slug = buildLinkSlug(form);
@@ -473,11 +472,10 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
   }));
   const [editError, setEditError] = useState<string | null>(null);
   const onSaveEdit = async () => {
+    // The Save button is disabled while state/district/lever_event are
+    // missing — this handler can't fire with any of those unset, so no
+    // separate guard is needed here.
     setEditError(null);
-    if (!editForm.state || !editForm.district || !editForm.lever_event) {
-      setEditError(t('link_card.error_required'));
-      return;
-    }
     try {
       const slug = buildLinkSlug(editForm);
       const editTitle = buildLinkTitle(editForm);

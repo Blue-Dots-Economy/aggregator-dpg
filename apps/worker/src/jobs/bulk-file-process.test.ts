@@ -30,6 +30,7 @@ const enqueueRowProcessBulk = vi.fn(async () => {
 
 const uploadRow = { status: 'uploaded' };
 const updates: Array<Record<string, unknown>> = [];
+let selectRowMissing = false;
 
 // Chainable Drizzle stub: `where` is thenable (resolves the awaited update path)
 // and also exposes `.limit` for the select path.
@@ -41,7 +42,7 @@ function makeDb() {
     return chain;
   };
   chain['where'] = () => chain;
-  chain['limit'] = async () => [uploadRow];
+  chain['limit'] = async () => (selectRowMissing ? [] : [uploadRow]);
   chain['then'] = (resolve: (v: unknown) => void) => resolve(undefined);
   return chain;
 }
@@ -57,14 +58,13 @@ vi.mock('../object-storage.js', () => ({
     Readable.from([Buffer.from('name,email\nAsha,a@x.io\nRavi,r@x.io', 'utf8')]),
   ),
 }));
+const getValidator = vi.fn(async () => ({ success: true, value: {} }));
+const getSchema = vi.fn(async () => ({
+  success: true,
+  value: { required: ['name', 'email'], properties: { name: {}, email: {} } },
+}));
 vi.mock('../services/schema-loader.js', () => ({
-  getSchemaLoader: () => ({
-    getValidator: async () => ({ success: true, value: {} }),
-    getSchema: async () => ({
-      success: true,
-      value: { required: ['name', 'email'], properties: { name: {}, email: {} } },
-    }),
-  }),
+  getSchemaLoader: () => ({ getValidator, getSchema }),
 }));
 vi.mock('../config.js', () => ({
   config: {
@@ -91,6 +91,7 @@ beforeEach(() => {
   calls.length = 0;
   updates.length = 0;
   uploadRow.status = 'uploaded';
+  selectRowMissing = false;
   vi.clearAllMocks();
 });
 
@@ -140,5 +141,62 @@ describe('processBulkFile — idempotency + failure', () => {
     expect(res.reason).toBe('header_mismatch');
     expect(enqueueRowProcessBulk).not.toHaveBeenCalled();
     expect(updates.some((u) => u['status'] === 'file_failed')).toBe(true);
+  });
+
+  it('marks file_failed with a bare (non-detailed) reason for a failure kind that carries no detail', async () => {
+    const { getCsvStream } = await import('../object-storage.js');
+    vi.mocked(getCsvStream).mockResolvedValueOnce(Readable.from([Buffer.from('', 'utf8')]));
+    const res = await processBulkFile(JOB);
+    expect(res.status).toBe('failed');
+    expect(res.reason).toBe('empty_csv');
+    expect(updates.some((u) => u['statusReason'] === 'empty_csv')).toBe(true);
+  });
+
+  it('reports a system_error when the upload row itself is missing', async () => {
+    selectRowMissing = true;
+    const res = await processBulkFile(JOB);
+    expect(res).toEqual({ status: 'failed', reason: 'system_error', detail: 'upload row missing' });
+    expect(enqueueRowProcessBulk).not.toHaveBeenCalled();
+  });
+
+  it('marks file_failed when the validator itself fails to load', async () => {
+    getValidator.mockResolvedValueOnce({
+      success: false,
+      error: { code: 'VALIDATOR_COMPILE_FAILED' },
+    } as never);
+    const res = await processBulkFile(JOB);
+    expect(res).toEqual({ status: 'failed', reason: 'schema_unavailable' });
+    expect(enqueueRowProcessBulk).not.toHaveBeenCalled();
+    expect(
+      updates.some(
+        (u) => u['status'] === 'file_failed' && u['statusReason'] === 'schema_unavailable',
+      ),
+    ).toBe(true);
+  });
+
+  it('marks file_failed and enqueues nothing when the schema itself fails to load', async () => {
+    getSchema.mockResolvedValueOnce({
+      success: false,
+      error: { code: 'SCHEMA_NOT_FOUND' },
+    } as never);
+    const res = await processBulkFile(JOB);
+    expect(res).toEqual({ status: 'failed', reason: 'schema_unavailable' });
+    expect(enqueueRowProcessBulk).not.toHaveBeenCalled();
+    expect(
+      updates.some(
+        (u) => u['status'] === 'file_failed' && u['statusReason'] === 'schema_unavailable',
+      ),
+    ).toBe(true);
+  });
+
+  it('marks file_failed with system_error when the S3 GetObject call throws', async () => {
+    const { getCsvStream } = await import('../object-storage.js');
+    vi.mocked(getCsvStream).mockRejectedValueOnce(new Error('s3 timeout'));
+    const res = await processBulkFile(JOB);
+    expect(res).toEqual({ status: 'failed', reason: 'system_error' });
+    expect(enqueueRowProcessBulk).not.toHaveBeenCalled();
+    expect(
+      updates.some((u) => u['status'] === 'file_failed' && u['statusReason'] === 'system_error'),
+    ).toBe(true);
   });
 });

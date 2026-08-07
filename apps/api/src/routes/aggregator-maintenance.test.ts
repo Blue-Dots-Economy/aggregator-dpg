@@ -202,4 +202,105 @@ describe('POST /admin/v1/aggregator-registrations/cleanup-stale', () => {
     const row = await aggregatorStore.findById(stale.id);
     if (row.ok) expect(row.value).not.toBeNull();
   });
+
+  it('skips (does not prune) a stale row when the KC user delete fails', async () => {
+    const stale = buildAggregator({
+      id: '55555555-5555-5555-5555-555555555555',
+      orgSlug: 'stale-eeee',
+      contact: { name: 'DeleteFail', phone: '+919000000005', email: 'delete-fail@x.org' },
+      contactPhone: '+919000000005',
+      contactEmail: 'delete-fail@x.org',
+      status: 'pending',
+      updatedAt: new Date('2020-01-01T00:00:00Z'),
+    });
+    aggregatorStore.seed([stale]);
+    await idp.createUser({
+      email: 'delete-fail@x.org',
+      enabled: false,
+      attributes: { aggregator_id: stale.id },
+    });
+    idp.deleteUser = async () => ({
+      ok: false,
+      error: { code: 'IDP_UNAVAILABLE', message: 'kc delete failed' },
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/admin/v1/aggregator-registrations/cleanup-stale',
+      headers: AUTH_HEADER,
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { pruned: number; prunedIds: string[] };
+    expect(body.pruned).toBe(0);
+    expect(body.prunedIds).not.toContain(stale.id);
+    const row = await aggregatorStore.findById(stale.id);
+    if (row.ok) expect(row.value).not.toBeNull();
+  });
+
+  it('skips (does not prune) a stale row when the DB row delete fails', async () => {
+    const stale = buildAggregator({
+      id: '66666666-6666-6666-6666-666666666666',
+      orgSlug: 'stale-ffff',
+      contact: { name: 'DbFail', phone: '+919000000006', email: 'db-fail@x.org' },
+      contactPhone: '+919000000006',
+      contactEmail: 'db-fail@x.org',
+      status: 'pending',
+      updatedAt: new Date('2020-01-01T00:00:00Z'),
+    });
+    aggregatorStore.seed([stale]);
+    aggregatorStore.deleteById = async () => ({
+      ok: false,
+      error: { code: 'DB_UNAVAILABLE', message: 'db delete failed' },
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/admin/v1/aggregator-registrations/cleanup-stale',
+      headers: AUTH_HEADER,
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { pruned: number; prunedIds: string[] };
+    expect(body.pruned).toBe(0);
+    expect(body.prunedIds).not.toContain(stale.id);
+  });
+
+  it('503s when the aggregator store list fails', async () => {
+    aggregatorStore.list = async () => ({
+      ok: false,
+      error: { code: 'DB_UNAVAILABLE', message: 'list failed' },
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/admin/v1/aggregator-registrations/cleanup-stale',
+      headers: AUTH_HEADER,
+    });
+    expect(res.statusCode).toBe(503);
+    const body = res.json() as { error: { code: string } };
+    expect(body.error.code).toBe('DB_UNAVAILABLE');
+  });
+
+  it('warns (but still 200s) when the stale-pending page hits the 1000-row cap', async () => {
+    const rows = Array.from({ length: 1000 }, (_, i) =>
+      buildAggregator({
+        id: `77777777-7777-7777-7777-${String(i).padStart(12, '0')}`,
+        orgSlug: `cap-org-${i}`,
+        contact: {
+          name: `Cap ${i}`,
+          phone: `+9190000${String(i).padStart(5, '0')}`,
+          email: `cap${i}@x.org`,
+        },
+        status: 'pending',
+        updatedAt: new Date('2020-01-01T00:00:00Z'),
+      }),
+    );
+    aggregatorStore.seed(rows);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/admin/v1/aggregator-registrations/cleanup-stale',
+      headers: AUTH_HEADER,
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { scanned: number };
+    expect(body.scanned).toBe(1000);
+  });
 });

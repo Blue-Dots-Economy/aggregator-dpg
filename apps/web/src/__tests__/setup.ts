@@ -33,6 +33,35 @@ if (typeof window !== 'undefined') {
       })),
     });
   }
+  // jsdom 25 on Node >=22 defers `window.localStorage` to Node's own
+  // experimental global Storage, which refuses to activate without a
+  // `--localstorage-file` flag and leaves the property `undefined`. Shim a
+  // plain in-memory Storage so code under test (e.g. `lib/theme-mode.tsx`)
+  // can read/write it like a real browser would.
+  if (!window.localStorage) {
+    const store = new Map<string, string>();
+    const memoryStorage: Storage = {
+      getItem: (key: string) => (store.has(key) ? store.get(key)! : null),
+      setItem: (key: string, value: string) => {
+        store.set(key, String(value));
+      },
+      removeItem: (key: string) => {
+        store.delete(key);
+      },
+      clear: () => {
+        store.clear();
+      },
+      key: (index: number) => Array.from(store.keys())[index] ?? null,
+      get length() {
+        return store.size;
+      },
+    };
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      writable: true,
+      value: memoryStorage,
+    });
+  }
 }
 
 if (typeof HTMLCanvasElement !== 'undefined') {
