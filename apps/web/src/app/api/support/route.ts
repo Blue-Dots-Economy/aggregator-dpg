@@ -11,7 +11,7 @@
 
 import { type NextRequest, NextResponse } from 'next/server';
 import { callApi } from '../../../lib/upstream-client';
-import { unauthorizedResponse, serviceUnavailableResponse } from '../../../lib/bff-errors';
+import { passthrough, proxyFailureResponse } from '../../../lib/bff-proxy';
 
 export const runtime = 'nodejs';
 
@@ -26,10 +26,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const upstream = await callApi('/v1/support', { method: 'POST', body });
     return await passthrough(upstream);
   } catch (err) {
-    if (isNoSession(err)) {
-      return unauthorizedResponse();
-    }
-    return serviceUnavailableResponse('support', err instanceof Error ? err.message : undefined);
+    return proxyFailureResponse(err, 'support');
   }
 }
 
@@ -40,19 +37,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
  * @param upstream - Raw `Response` returned by `callApi`.
  * @returns A `NextResponse` mirroring the upstream status/body.
  */
-async function passthrough(upstream: Response): Promise<NextResponse> {
-  const ct = upstream.headers.get('content-type') ?? '';
-  if (ct.includes('application/json')) {
-    const data = (await upstream.json()) as unknown;
-    return NextResponse.json(data, { status: upstream.status });
-  }
-  const text = await upstream.text();
-  return new NextResponse(text, {
-    status: upstream.status,
-    headers: { 'Content-Type': ct || 'text/plain' },
-  });
-}
-
 /**
  * Distinguishes `callApi`'s "no session" throw from other upstream
  * failures so the BFF can return 401 instead of 503.
@@ -60,6 +44,3 @@ async function passthrough(upstream: Response): Promise<NextResponse> {
  * @param err - The caught error value.
  * @returns `true` if `callApi` threw because no session is active.
  */
-function isNoSession(err: unknown): boolean {
-  return err instanceof Error && err.message === 'no active session';
-}
