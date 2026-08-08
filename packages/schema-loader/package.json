@@ -12,6 +12,10 @@
       "import": "./dist/file-loader.js",
       "types": "./dist/file-loader.d.ts"
     },
+    "./network": {
+      "import": "./dist/network.js",
+      "types": "./dist/network.d.ts"
+    },
     "./testing": {
       "import": "./dist/testing/index.js",
       "types": "./dist/testing/index.d.ts"

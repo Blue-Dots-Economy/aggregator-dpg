@@ -46,7 +46,7 @@ import {
 } from '../services/aggregator-profile-store/index.js';
 import { getIdpAdmin, KC_ATTR } from '../services/idp-admin/index.js';
 import type { IdpUser } from '../services/idp-admin/index.js';
-import { normalisePhone } from '../services/phone.js';
+import { normalisePhone } from '@aggregator-dpg/shared-primitives/phone';
 import { getSchemaRegistry } from '../services/schema-registry/index.js';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';

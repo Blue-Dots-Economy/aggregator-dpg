@@ -17,7 +17,6 @@
 
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { createRequire } from 'node:module';
 import { ok, err, type Result } from '@aggregator-dpg/shared-primitives/result';
 import { type BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import {
@@ -28,22 +27,7 @@ import {
   type SchemaRef,
   type ValidateFunction,
 } from './interface.js';
-
-const require = createRequire(import.meta.url);
-type AjvOptions = {
-  allErrors?: boolean;
-  strict?: boolean | 'log';
-  coerceTypes?: boolean | 'array';
-};
-type AjvLike = {
-  compile(schema: unknown): ValidateFunction;
-};
-type AjvCtorType = new (opts?: AjvOptions) => AjvLike;
-type AddFormatsFn = (ajv: AjvLike, opts?: unknown) => AjvLike;
-
-// Use the 2020-12 Ajv build because schemas declare draft 2020-12.
-const AjvCtor: AjvCtorType = require('ajv/dist/2020').default ?? require('ajv/dist/2020');
-const addFormats: AddFormatsFn = require('ajv-formats').default ?? require('ajv-formats');
+import { createAjv, type AjvLike } from './ajv.js';
 
 export interface FileSchemaLoaderOptions {
   /**
@@ -62,12 +46,11 @@ export class FileSchemaLoader extends SchemaLoaderBase {
   constructor(opts: FileSchemaLoaderOptions) {
     super();
     this.rootDir = opts.rootDir;
-    // coerceTypes: 'array' is the CSV-friendly mode — "5" → 5, "true" → true,
-    // and a single string is wrapped into a one-element array. Worker-side
-    // preprocess still has to split comma-joined cells into multi-element
-    // arrays before validate runs.
-    this.ajv = new AjvCtor({ allErrors: true, strict: false, coerceTypes: 'array' });
-    addFormats(this.ajv);
+    // createAjv uses coerceTypes: 'array', the CSV-friendly mode — "5" → 5,
+    // "true" → true, and a single string is wrapped into a one-element array.
+    // Worker-side preprocess still has to split comma-joined cells into
+    // multi-element arrays before validate runs.
+    this.ajv = createAjv();
   }
 
   async getSchema(ref: SchemaRef): Promise<Result<JsonSchema, BaseError>> {
