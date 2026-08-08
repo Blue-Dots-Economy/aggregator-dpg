@@ -204,7 +204,7 @@ function updateText(itemId, fieldName, text) {
 let n = 0;
 let errors = 0;
 for (const item of items) {
-  if (!item.content || item.content.__typename !== 'Issue') continue;
+  if (item.content?.__typename !== 'Issue') continue;
   const issueNum = item.content.number;
   const labels = item.content.labels?.nodes?.map((l) => l.name) ?? [];
   const vals = deriveValues(labels);

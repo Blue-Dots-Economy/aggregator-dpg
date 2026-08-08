@@ -2,6 +2,7 @@
 
 import { useEffect, type ReactNode } from 'react';
 import { useAggregatorConfig } from '../hooks/useAggregatorConfig';
+import { mix } from './hex-color';
 
 /**
  * Reads the active aggregator config and writes the brand colors onto
@@ -84,31 +85,4 @@ function slug(s: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '');
-}
-
-/**
- * Mix two hex colors `weight` toward `b`. `weight=0` returns `a`,
- * `weight=1` returns `b`. Inputs may be `#rrggbb` (with or without a
- * leading `#`). Unknown / malformed colors fall through to `a`.
- */
-function mix(a: string, b: string, weight: number): string {
-  const A = parseHex(a);
-  const B = parseHex(b);
-  if (!A || !B) return a;
-  const w = Math.max(0, Math.min(1, weight));
-  const r = Math.round(A[0] * (1 - w) + B[0] * w);
-  const g = Math.round(A[1] * (1 - w) + B[1] * w);
-  const bl = Math.round(A[2] * (1 - w) + B[2] * w);
-  return '#' + [r, g, bl].map((n) => n.toString(16).padStart(2, '0')).join('');
-}
-
-function parseHex(c: string): [number, number, number] | null {
-  const m = /^#?([0-9a-f]{6})$/i.exec(c.trim());
-  if (!m) return null;
-  const hex = m[1]!;
-  return [
-    Number.parseInt(hex.slice(0, 2), 16),
-    Number.parseInt(hex.slice(2, 4), 16),
-    Number.parseInt(hex.slice(4, 6), 16),
-  ];
 }
