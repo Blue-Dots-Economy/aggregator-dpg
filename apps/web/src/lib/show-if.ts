@@ -127,7 +127,11 @@ export function resolveVisibleSchema(
     prunedSchema.required = (schema.required as string[]).filter((r) => !hidden.has(r));
   }
 
-  return { schema: prunedSchema, formData: working, hidden: [...hidden].sort() };
+  return {
+    schema: prunedSchema,
+    formData: working,
+    hidden: [...hidden].sort((a, b) => a.localeCompare(b)),
+  };
 }
 
 /**

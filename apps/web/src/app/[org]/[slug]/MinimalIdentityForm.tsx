@@ -110,7 +110,7 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
   const yobNum = Number(yearOfBirth.trim());
   const yobValid =
     /^\d{4}$/.test(yearOfBirth.trim()) && yobNum >= currentYear - 120 && yobNum <= currentYear;
-  const derivedAge = yobValid ? currentYear - yobNum : NaN;
+  const derivedAge = yobValid ? currentYear - yobNum : Number.NaN;
   // U18 (§4.4): a minor cannot establish consent here — they accept terms in
   // the Signalstack app after signing in. The submit still goes through (the
   // API omits age + consent for a minor so Signals creates the account); we

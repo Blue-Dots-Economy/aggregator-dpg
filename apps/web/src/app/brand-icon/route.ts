@@ -20,7 +20,7 @@ function deriveDark(hex: string): string {
   // darker than the outer dots.
   const m = /^#?([0-9a-f]{6})$/i.exec(hex);
   if (!m) return FALLBACK_PRIMARY_DARK;
-  const num = parseInt(m[1]!, 16);
+  const num = Number.parseInt(m[1]!, 16);
   const r = Math.round(((num >> 16) & 0xff) * 0.88);
   const g = Math.round(((num >> 8) & 0xff) * 0.88);
   const b = Math.round((num & 0xff) * 0.88);
@@ -30,7 +30,7 @@ function deriveDark(hex: string): string {
 function rgbaTriple(hex: string): string {
   const m = /^#?([0-9a-f]{6})$/i.exec(hex);
   if (!m) return '37,99,235';
-  const num = parseInt(m[1]!, 16);
+  const num = Number.parseInt(m[1]!, 16);
   return `${(num >> 16) & 0xff},${(num >> 8) & 0xff},${num & 0xff}`;
 }
 

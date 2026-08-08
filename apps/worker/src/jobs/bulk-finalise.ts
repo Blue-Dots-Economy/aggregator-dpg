@@ -96,9 +96,9 @@ export async function finaliseBulk(job: BulkFinaliseJob): Promise<FinaliseOutcom
   // decision. Pulled directly from Redis (the Lua commit script is the
   // source of truth; periodic DB flushes lag).
   const counters = await redis.hgetall(`${ns}:counters`);
-  const passed = parseInt(counters['passed'] ?? '0', 10) || 0;
-  const failed = parseInt(counters['failed'] ?? '0', 10) || 0;
-  const skipped = parseInt(counters['skipped'] ?? '0', 10) || 0;
+  const passed = Number.parseInt(counters['passed'] ?? '0', 10) || 0;
+  const failed = Number.parseInt(counters['failed'] ?? '0', 10) || 0;
+  const skipped = Number.parseInt(counters['skipped'] ?? '0', 10) || 0;
   const total = passed + failed + skipped;
 
   // 5. Build + upload errors.csv only when there's at least one failure.
@@ -241,11 +241,11 @@ async function readHeaderCols(
  * shorter (defensive — File Processor already validates header coverage).
  */
 function parseRawRow(rawRow: string, expectedCols: number): string[] {
-  if (!rawRow) return Array(expectedCols).fill('');
+  if (!rawRow) return new Array<string>(expectedCols).fill('');
   const result = Papa.parse<string[]>(rawRow, { header: false, skipEmptyLines: 'greedy' });
   const cells = (result.data[0] ?? []) as string[];
   if (cells.length < expectedCols) {
-    return [...cells, ...Array(expectedCols - cells.length).fill('')];
+    return [...cells, ...new Array<string>(expectedCols - cells.length).fill('')];
   }
   return cells;
 }
