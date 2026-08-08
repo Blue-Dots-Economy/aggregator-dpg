@@ -15,7 +15,7 @@ import { KC_ATTR } from '../idp-admin/attributes.js';
 import { getSignalStackWriter } from '../signalstack.js';
 import { getNetworkConfig } from '../network-config.js';
 import { logger } from '../../logger.js';
-import { stripTrailingSlashes } from '../url.js';
+import { stripTrailingSlashes } from '@aggregator-dpg/shared-primitives/url';
 
 let cachedJwks: ReturnType<typeof createRemoteJWKSet> | null = null;
 let cachedJwksUrl: string | null = null;

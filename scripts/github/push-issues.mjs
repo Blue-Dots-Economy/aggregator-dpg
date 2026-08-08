@@ -15,6 +15,7 @@ import { readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { execSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
+import { randomUUID } from 'node:crypto';
 
 const argv = process.argv.slice(2);
 const flag = (name) => {
@@ -105,19 +106,16 @@ const stubsFiles = allMd.filter((p) => /-stubs\.md$/.test(basename(p)));
 
 // -------- Issue creation --------
 function createIssue({ title, body, labels = [], milestone }) {
-  const tmp = join(
-    tmpdir(),
-    `issue-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.md`,
-  );
+  const tmp = join(tmpdir(), `issue-${process.pid}-${Date.now()}-${randomUUID()}.md`);
   writeFileSync(tmp, body);
   const labelArgs = labels.map((l) => `--label "${l}"`).join(' ');
   const milestoneArg = milestone ? `--milestone "${milestone}"` : '';
   // Escape for double-quoted shell: backslash, backtick, dollar, double-quote
   const titleEsc = title
-    .replaceAll('\\', '\\\\')
-    .replaceAll('`', '\\`')
-    .replaceAll('$', '\\$')
-    .replaceAll('"', '\\"');
+    .replaceAll('\\', String.raw`\\`)
+    .replaceAll('`', String.raw`\``)
+    .replaceAll('$', String.raw`\$`)
+    .replaceAll('"', String.raw`\"`);
   const url = gh(
     `issue create --repo ${REPO} --title "${titleEsc}" --body-file "${tmp}" ${labelArgs} ${milestoneArg}`,
   );

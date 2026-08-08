@@ -11,6 +11,8 @@
  * round-trip per upstream call.
  */
 
+import { stripTrailingSlashes } from '@aggregator-dpg/shared-primitives/url';
+
 interface CachedToken {
   accessToken: string;
   expiresAt: number;
@@ -24,22 +26,6 @@ interface ServiceTokenConfig {
   tokenUrl: string;
   clientId: string;
   clientSecret: string;
-}
-
-/**
- * Removes every trailing `/` from a URL-ish string.
- *
- * A loop rather than `replace(/\/+$/, '')`: the regex form backtracks
- * super-linearly because the engine retries the greedy `\/+` from each start
- * offset (SonarCloud typescript:S8786). This scan is linear.
- *
- * @param value - The string to trim, e.g. the configured issuer URL.
- * @returns `value` with all trailing slashes removed.
- */
-function stripTrailingSlashes(value: string): string {
-  let end = value.length;
-  while (end > 0 && value.charAt(end - 1) === '/') end -= 1;
-  return end === value.length ? value : value.slice(0, end);
 }
 
 function readConfig(): ServiceTokenConfig {

@@ -194,7 +194,7 @@ function updateSingleSelect(itemId, fieldName, optionName) {
 function updateText(itemId, fieldName, text) {
   const fieldId = fields[fieldName]?.id;
   if (!fieldId) return false;
-  const escaped = text.replaceAll('"', '\\"');
+  const escaped = text.replaceAll('"', String.raw`\"`);
   const m = `mutation{updateProjectV2ItemFieldValue(input:{projectId:"${project.id}",itemId:"${itemId}",fieldId:"${fieldId}",value:{text:"${escaped}"}}){projectV2Item{id}}}`;
   gh(`api graphql -f query='${m}'`, { parse: false });
   return true;
@@ -206,7 +206,7 @@ let errors = 0;
 for (const item of items) {
   if (!item.content || item.content.__typename !== 'Issue') continue;
   const issueNum = item.content.number;
-  const labels = (item.content.labels?.nodes ?? []).map((l) => l.name);
+  const labels = item.content.labels?.nodes?.map((l) => l.name) ?? [];
   const vals = deriveValues(labels);
 
   try {

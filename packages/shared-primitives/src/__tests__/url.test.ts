@@ -1,10 +1,9 @@
 /**
- * Unit tests for the URL string helpers.
- *
- * @module @aggregator-dpg/api
+ * Tests for the shared URL string helpers.
  */
+
 import { describe, expect, it } from 'vitest';
-import { stripTrailingSlashes } from '../url.js';
+import { stripTrailingSlashes } from '../url/index.js';
 
 describe('stripTrailingSlashes', () => {
   it('leaves a URL without a trailing slash untouched', () => {

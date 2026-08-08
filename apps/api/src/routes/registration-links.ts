@@ -27,7 +27,7 @@ import { config } from '../config.js';
 import { getDb } from '../db/client.js';
 import { onboarding } from '../db/schema.js';
 import { getNetworkConfig } from '../services/network-config.js';
-import { stripTrailingSlashes } from '../services/url.js';
+import { stripTrailingSlashes } from '@aggregator-dpg/shared-primitives/url';
 
 interface LinkMetrics {
   total: number;
