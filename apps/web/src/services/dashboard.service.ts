@@ -570,12 +570,25 @@ function parseFilenameFromContentDisposition(header: string): string | null {
   if (!header) return null;
   // RFC 6266: prefer the encoded `filename*` form when present, falling
   // back to plain `filename=` for ASCII-only values.
-  const star = /filename\*\s*=\s*[^']*''([^;]+)/i.exec(header);
-  if (star && star[1]) {
-    try {
-      return decodeURIComponent(star[1].trim());
-    } catch {
-      // Fall through to the plain match below.
+  // Located by index rather than one `filename\*\s*=\s*[^']*''([^;]+)` regex:
+  // the header is upstream-controlled, and that pattern rescans `[^']*` from
+  // every start offset when the `''` never arrives — super-linear on a hostile
+  // header (SonarCloud typescript:S8786). Each step below is a single scan.
+  const starKey = /filename\*\s*=/i.exec(header);
+  if (starKey) {
+    const afterKey = header.slice(starKey.index + starKey[0].length);
+    const quoted = afterKey.indexOf("''");
+    if (quoted !== -1) {
+      const rest = afterKey.slice(quoted + 2);
+      const end = rest.indexOf(';');
+      const value = (end === -1 ? rest : rest.slice(0, end)).trim();
+      if (value) {
+        try {
+          return decodeURIComponent(value);
+        } catch {
+          // Malformed percent-encoding — fall through to the plain match below.
+        }
+      }
     }
   }
   const plain = /filename\s*=\s*"?([^";]+)"?/i.exec(header);

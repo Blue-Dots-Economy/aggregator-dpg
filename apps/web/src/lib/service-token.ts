@@ -26,8 +26,24 @@ interface ServiceTokenConfig {
   clientSecret: string;
 }
 
+/**
+ * Removes every trailing `/` from a URL-ish string.
+ *
+ * A loop rather than `replace(/\/+$/, '')`: the regex form backtracks
+ * super-linearly because the engine retries the greedy `\/+` from each start
+ * offset (SonarCloud typescript:S8786). This scan is linear.
+ *
+ * @param value - The string to trim, e.g. the configured issuer URL.
+ * @returns `value` with all trailing slashes removed.
+ */
+function stripTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value.charAt(end - 1) === '/') end -= 1;
+  return end === value.length ? value : value.slice(0, end);
+}
+
 function readConfig(): ServiceTokenConfig {
-  const issuer = mustEnv('OIDC_ISSUER').replace(/\/+$/, '');
+  const issuer = stripTrailingSlashes(mustEnv('OIDC_ISSUER'));
   return {
     tokenUrl: `${issuer}/protocol/openid-connect/token`,
     clientId: mustEnv('BFF_SERVICE_CLIENT_ID'),

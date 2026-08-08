@@ -76,6 +76,22 @@ export interface HttpSignalStackWriterConfig {
   retryBaseMs?: number;
 }
 
+/**
+ * Removes every trailing `/` from a URL-ish string.
+ *
+ * A loop rather than `replace(/\/+$/, '')`: the regex form backtracks
+ * super-linearly because the engine retries the greedy `\/+` from each start
+ * offset (SonarCloud typescript:S8786). This scan is linear.
+ *
+ * @param value - The string to trim, e.g. the configured base URL.
+ * @returns `value` with all trailing slashes removed.
+ */
+function stripTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value.charAt(end - 1) === '/') end -= 1;
+  return end === value.length ? value : value.slice(0, end);
+}
+
 export class HttpSignalStackWriter extends SignalStackWriterBase {
   private readonly baseUrl: string;
   private readonly endpoint: string;
@@ -99,7 +115,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
     if (!config.apiKey) {
       throw new Error('HttpSignalStackWriter requires apiKey');
     }
-    this.baseUrl = config.baseUrl.replace(/\/+$/, '');
+    this.baseUrl = stripTrailingSlashes(config.baseUrl);
     // Plan-C tier-aware participant upsert. Replaced the old
     // `/admin/onboard_participant` route which now returns 404.
     this.endpoint = `${this.baseUrl}/api/v1/admin/participant`;

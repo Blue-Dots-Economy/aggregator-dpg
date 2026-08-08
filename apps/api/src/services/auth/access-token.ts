@@ -15,6 +15,7 @@ import { KC_ATTR } from '../idp-admin/attributes.js';
 import { getSignalStackWriter } from '../signalstack.js';
 import { getNetworkConfig } from '../network-config.js';
 import { logger } from '../../logger.js';
+import { stripTrailingSlashes } from '../url.js';
 
 let cachedJwks: ReturnType<typeof createRemoteJWKSet> | null = null;
 let cachedJwksUrl: string | null = null;
@@ -456,13 +457,13 @@ function getJwks(): ReturnType<typeof createRemoteJWKSet> {
 function jwksUrl(): string {
   const base = mustEnv('KEYCLOAK_URL');
   const realm = mustEnv('KEYCLOAK_REALM');
-  return `${base.replace(/\/+$/, '')}/realms/${realm}/protocol/openid-connect/certs`;
+  return `${stripTrailingSlashes(base)}/realms/${realm}/protocol/openid-connect/certs`;
 }
 
 function expectedIssuer(): string {
   const base = mustEnv('KEYCLOAK_URL');
   const realm = mustEnv('KEYCLOAK_REALM');
-  return `${base.replace(/\/+$/, '')}/realms/${realm}`;
+  return `${stripTrailingSlashes(base)}/realms/${realm}`;
 }
 
 function mustEnv(name: string): string {

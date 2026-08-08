@@ -65,6 +65,29 @@ export interface MinimalIdentityFormProps {
   consentContent?: ConsentDocContent | null;
 }
 
+/**
+ * Client-side "does this look like an email" check used to gate the submit
+ * button. Accepts exactly what `/^[^\s@]+@[^\s@]+\.[^\s@]+$/` accepted — one
+ * `@`, non-empty whitespace-free parts either side, and at least one interior
+ * dot in the domain — but as index scans rather than a regex, whose adjacent
+ * greedy classes backtrack super-linearly (SonarCloud typescript:S8786).
+ *
+ * Authoritative validation still happens server-side; this only drives the
+ * inline blocker list.
+ *
+ * @param value - Trimmed contents of the email field.
+ * @returns True when the value is plausibly an email address.
+ */
+function looksLikeEmail(value: string): boolean {
+  const at = value.indexOf('@');
+  if (at <= 0 || at !== value.lastIndexOf('@')) return false;
+  const domain = value.slice(at + 1);
+  if (domain.length === 0) return false;
+  if (/\s/.test(value)) return false;
+  const dot = domain.indexOf('.');
+  return dot > 0 && dot < domain.length - 1;
+}
+
 export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Element {
   const t = useTranslations('profile.public_reg.account_only');
   const [name, setName] = useState('');
@@ -97,7 +120,7 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
   const hasPhone = !!phoneKey && phone.trim().length > 0;
   const hasEmail = showEmail && email.trim().length > 0;
   const phoneFormatOk = phone.replace(/\D/g, '').length >= 10;
-  const emailFormatOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+  const emailFormatOk = looksLikeEmail(email.trim());
   const phoneValid = hasPhone && phoneFormatOk;
   const emailValid = hasEmail && emailFormatOk;
   // An entered email must be valid even when it's optional (voice mode).
