@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterAll } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, afterAll } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { SignJWT } from 'jose';
 import { buildApp } from '../app.js';
@@ -19,6 +19,7 @@ import {
 import { IdpAdminFake, _setIdpAdmin } from '../services/idp-admin/index.js';
 import { FakeMailer, _setMailer } from '../services/mailer/index.js';
 import { _resetTokenKey, mintApprovalToken } from '../services/approval-token.js';
+import { _setAdminApprovalRateChecker } from '../services/admin-approval-rate.js';
 import { _setSignalStackWriter } from '../services/signalstack.js';
 import { _setNetworkConfig } from '../services/network-config.js';
 import { buildBlueDotConfig } from '@aggregator-dpg/network-config/testing';
@@ -105,6 +106,13 @@ describe('admin approval routes', () => {
     _setSignalStackWriter(null);
     _setNetworkConfig(null);
     _setAggregatorOrgStore(null);
+  });
+
+  // Module-level override, not per-test state — must reset after every test,
+  // not just at the end of the suite, or a denial set in one test bleeds
+  // into every test that runs after it.
+  afterEach(() => {
+    _setAdminApprovalRateChecker(null);
   });
 
   it('GET /read/:id renders the confirmation page when no decision yet', async () => {
@@ -717,6 +725,50 @@ describe('admin approval routes', () => {
     expect(res.body).toContain('Regenerate &amp; review');
     expect(res.body).toContain(`/admin/v1/aggregator-registrations/renew/${id}`);
     expect(mailer.outbox.length).toBe(0);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Rate limiting (GITHUB-ISSUES-COMPILATION.md #9 — these routes previously
+  // had no limit beyond Kong's global cap).
+  // ---------------------------------------------------------------------------
+
+  it('GET /read/:id returns 429 with Retry-After when the rate limiter denies', async () => {
+    _setAdminApprovalRateChecker(async () => ({ allowed: false, retryAfterSeconds: 17 }));
+    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/admin/v1/aggregator-registrations/read/${aggregatorId}?token=${encodeURIComponent(token)}`,
+    });
+    expect(res.statusCode).toBe(429);
+    expect(res.headers['retry-after']).toBe('17');
+  });
+
+  it('POST /decision/:id returns 429 with Retry-After when the rate limiter denies', async () => {
+    _setAdminApprovalRateChecker(async () => ({ allowed: false, retryAfterSeconds: 23 }));
+    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
+      payload: { token, decision: 'approve' },
+    });
+    expect(res.statusCode).toBe(429);
+    expect(res.headers['retry-after']).toBe('23');
+    // Denied before any decision logic runs — status must stay pending.
+    const dbAfter = await aggregatorStore.findById(aggregatorId);
+    if (dbAfter.ok) expect(dbAfter.value?.status).toBe('pending');
+  });
+
+  it('POST /renew/:id returns 429 with Retry-After when the rate limiter denies', async () => {
+    const { id } = await seedPendingAggregator();
+    const expired = await mintExpiredApproveToken(id);
+    _setAdminApprovalRateChecker(async () => ({ allowed: false, retryAfterSeconds: 31 }));
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/renew/${id}`,
+      payload: { token: expired },
+    });
+    expect(res.statusCode).toBe(429);
+    expect(res.headers['retry-after']).toBe('31');
   });
 
   it('rejects a coordinator decision when the token org claim mismatches parent_org_id', async () => {

@@ -155,19 +155,23 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
       // the reclaim path and the new-registration path below.
       const serverConsent = stampConsent(body.consent);
 
+      // Rate limit per (ip, email) (spec A6). Applied unconditionally —
+      // previously this only ran inside the org-hierarchy branch below,
+      // leaving flat-mode (ORG_HIERARCHY_ENABLED=false) registration create
+      // completely unlimited (GITHUB-ISSUES-COMPILATION.md #9).
+      const rl = await checkSubmitRate(`${req.ip}|${contact.email}`);
+      if (!rl.allowed) {
+        void reply.header('Retry-After', String(rl.retryAfterSeconds));
+        throw httpError('RATE_LIMITED', {
+          detail: `Retry in ${rl.retryAfterSeconds}s.`,
+          fields: { retry_after_seconds: rl.retryAfterSeconds },
+        });
+      }
+
       // Org-hierarchy gate (spec §6.2). When enabled, a coordinator must select
       // an *active* org; the link lives in `aggregators.parent_org_id`.
       let parentOrgId: string | null = null;
       if (orgHierarchyEnabled()) {
-        // Rate limit per (ip, email) (spec A6).
-        const rl = await checkSubmitRate(`${req.ip}|${contact.email}`);
-        if (!rl.allowed) {
-          void reply.header('Retry-After', String(rl.retryAfterSeconds));
-          throw httpError('RATE_LIMITED', {
-            detail: `Retry in ${rl.retryAfterSeconds}s.`,
-            fields: { retry_after_seconds: rl.retryAfterSeconds },
-          });
-        }
         const reqOrgId = (req.body as { org_id?: string }).org_id;
         if (!reqOrgId) {
           throw httpError('SCHEMA_VALIDATION', {
