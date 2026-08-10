@@ -111,6 +111,7 @@ jobs:
       contents: read
       packages: write
       id-token: write
+      security-events: write   # Trivy image scan uploads SARIF to code-scanning
 
     strategy:
       fail-fast: false
@@ -177,6 +178,55 @@ jobs:
           APP: ${{ matrix.app }}
           DIGEST: ${{ steps.build.outputs.digest }}
           TAGS: ${{ steps.meta.outputs.tags }}
+
+      # Image scanning (Sec-Audit A2 — Blue-Dots-Economy/signals-dpg#300).
+      # Scans the OS + system packages baked into the shipped artifact, which the
+      # source/lockfile scan in security.yml structurally cannot see (an outdated
+      # base-image library appears in no package.json). This repo carries the
+      # largest dependency backlog of the six (76 open Dependabot alerts), so the
+      # image surface is worth measuring rather than assuming.
+      #
+      # `github.repository` preserves the org's capitalisation
+      # ("Blue-Dots-Economy"), which docker/metadata-action normalises for its own
+      # tag outputs. A ref assembled by hand must be normalised too — an uppercase
+      # path is an invalid image reference and Trivy would reject it.
+      # Gated on the EVENT, not on `digest != ''`. Those look equivalent but are not:
+      # with the default docker driver, build-push-action populates `digest` from the
+      # locally-built image even when `push: false`, and Trivy would then resolve a
+      # digest for an image that is in no registry (MANIFEST_UNKNOWN). This job does
+      # configure buildx, where the output is empty on the PR path — but gating on
+      # the same condition that drives `push:` above does not depend on that detail.
+      - name: Resolve scanned image ref
+        id: scanref
+        if: github.event_name != 'pull_request'
+        run: echo "ref=${IMAGE,,}@${DIGEST}" >> "$GITHUB_OUTPUT"
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.app }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+
+      # Scanned by digest, not by tag: buildx pushes straight to the registry
+      # without loading into the local docker image store, so the action's
+      # `imageid` output is not resolvable by Trivy. The digest guard also means
+      # the PR path — which builds WITHOUT pushing, so no digest exists and
+      # nothing is in any registry to pull — skips cleanly instead of failing.
+      - name: Trivy image scan
+        if: steps.scanref.outputs.ref != ''
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ${{ steps.scanref.outputs.ref }}
+          format: sarif
+          output: trivy-image.sarif
+          severity: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
+          exit-code: "0"   # Phase A: report-only, never fails the build
+
+      - name: Upload Trivy image SARIF
+        if: always() && steps.scanref.outputs.ref != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-image.sarif
+          # One category per app so api/web/worker don't overwrite each other.
+          category: trivy-image-${{ matrix.app }}
 
       # TODO: add smoke test `docker run --rm -p 3000:3000 <image> /health`
       #       once apps/api has a real HTTP server with a /health endpoint.
