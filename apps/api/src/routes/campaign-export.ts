@@ -1,17 +1,18 @@
 /**
- * Campaign participant PII export (interim, aggregator-dpg#579).
+ * Campaign participant PII export (aggregator-dpg#579, #576).
  *
  *   POST /v1/campaign/export → 202; async, fire-and-forget.
  *
- * Interim auth is the `x-org-id` header (the caller's Signals org id), passed
- * straight through to Signals decrypt, which enforces ownership via
- * `onboarded_by`. Swapped for KC-token validation when #576 lands. The route
- * never returns PII — only a queued acknowledgement; the export is delivered as
- * a pre-signed link emailed to the configured network admin. Belongs to
+ * Auth is a Keycloak Bearer token; the caller's Signals org id is derived
+ * from the token's `signalstack_org_id` claim and passed straight through to
+ * Signals decrypt, which enforces ownership via `onboarded_by`. The route
+ * never returns PII — only a queued acknowledgement; the export is delivered
+ * as a pre-signed link emailed to the configured network admin. Belongs to
  * `@aggregator-dpg/api`.
  */
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { authenticate } from '../services/auth/access-token.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
 import { getMailer } from '../services/mailer/index.js';
 import { putObject, signExportDownloadUrl } from '../services/object-storage/index.js';
@@ -27,17 +28,16 @@ const ExportRequestSchema = z
   })
   .strict();
 
-/** Reads and trims the interim `x-org-id` header; undefined when absent/blank. */
-function orgIdHeader(req: FastifyRequest): string | undefined {
-  const raw = req.headers['x-org-id'];
-  const value = Array.isArray(raw) ? raw[0] : raw;
-  const trimmed = value?.trim();
-  return trimmed ? trimmed : undefined;
+/** Unwrap the auth context or throw the catalogue error. Mirrors the local helper in other route modules (e.g. `support.ts`, `dashboard.ts`). */
+async function requireAuth(req: FastifyRequest) {
+  const result = await authenticate(req);
+  if (result.ok) return result.context;
+  const code = result.error.code === 'MISSING_AGGREGATOR_ID' ? 'FORBIDDEN' : 'UNAUTHORIZED';
+  throw httpError(code, { detail: result.error.message, fields: { reason: result.error.code } });
 }
 
 /**
- * Registers the campaign-export route. Deliberately NOT under the session-auth
- * hook — the external caller has no session; interim auth is `x-org-id`.
+ * Registers the campaign-export route.
  *
  * @param app - The Fastify instance to attach the route to.
  */
@@ -47,23 +47,31 @@ export async function registerCampaignExportRoutes(app: FastifyInstance): Promis
     {
       schema: {
         tags: ['campaign'],
-        summary: 'Request an async participant PII export (interim)',
+        summary: 'Request an async participant PII export',
         description:
-          'Decrypts the given owned items, writes a CSV to private S3, and emails a short-lived pre-signed link to the configured network admin. Interim auth: x-org-id header (Signals org id). Fire-and-forget: returns 202 immediately.',
+          'Decrypts the given owned items, writes a CSV to private S3, and emails a short-lived pre-signed link to the configured network admin. Auth: Keycloak Bearer token; the caller org is derived from the token signalstack_org_id claim. Fire-and-forget: returns 202 immediately.',
+        security: [{ bearerAuth: [] }],
         body: ExportRequestSchema,
         response: {
           202: z.object({ status: z.literal('queued'), message: z.string() }),
-          ...errorResponses(400, 401, 503),
+          ...errorResponses(400, 401, 403, 503),
         },
       },
     },
     async (req, reply) => {
-      const orgId = orgIdHeader(req);
-      if (!orgId) throw httpError('MISSING_ORG_ID');
+      const auth = await requireAuth(req);
 
       const ss = getSignalStackWriter();
       const networkAdminEmail = exportNetworkAdminEmail();
       if (!ss || !networkAdminEmail) throw httpError('EXPORT_NOT_CONFIGURED');
+
+      const orgId = auth.signalstackOrgId;
+      if (!orgId) {
+        throw httpError('FORBIDDEN', {
+          detail: 'token has no signalstack_org_id claim',
+          fields: { reason: 'MISSING_SIGNALSTACK_ORG' },
+        });
+      }
 
       const { item_ids, purpose } = req.body as z.infer<typeof ExportRequestSchema>;
       const log = req.log.child({ operation: 'campaign.export', org_id: orgId });

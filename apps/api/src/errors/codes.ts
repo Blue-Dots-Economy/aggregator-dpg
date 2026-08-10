@@ -47,13 +47,6 @@ export const ERR = {
     detail: 'One or more fields failed validation.',
     hint: 'Zod or Ajv rejected the request body. See response.error.fields for offending paths.',
   },
-  MISSING_ORG_ID: {
-    code: 'MISSING_ORG_ID',
-    status: 401,
-    title: 'Missing organisation id',
-    detail: 'The x-org-id header is required.',
-    hint: 'Interim auth: the caller must send x-org-id (Signals org id) until the KC token model (#576) lands.',
-  },
   EXPORT_NOT_CONFIGURED: {
     code: 'EXPORT_NOT_CONFIGURED',
     status: 503,
