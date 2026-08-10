@@ -20,7 +20,7 @@ import type { SendInput, SendOk, MailerResult } from '../mailer/interface.js';
 import type { SignedDownloadUrl } from '../object-storage/index.js';
 import { buildDecryptedProfilesCsv } from '../profile-csv.js';
 
-/** Request-scoped inputs resolved from the route body + `x-org-id` header. */
+/** Request-scoped inputs: item_ids/purpose from the body; orgId from the token's `signalstack_org_id` claim. */
 export interface ExportParams {
   orgId: string;
   itemIds: string[];
