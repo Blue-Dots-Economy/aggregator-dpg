@@ -229,7 +229,7 @@
     {
       "clientId": "aggregator-api",
       "name": "Aggregator API (service account)",
-      "description": "Confidential client for apps/api Keycloak admin ops (create users on approval, org groups + org_owner role). Service account holds realm-management roles manage-users and manage-realm. Its secret must NOT be shared with the portal BFF — the BFF uses the minimal-scope aggregator-bff client below.",
+      "description": "Confidential client for apps/api Keycloak admin ops (user create on approval, org groups, org_owner). Holds realm-management manage-users + manage-realm. Secret must NOT be shared with the portal BFF (use aggregator-bff).",
       "enabled": true,
       "publicClient": false,
       "secret": "__AGGREGATOR_API_SECRET__",
@@ -245,7 +245,7 @@
     {
       "clientId": "aggregator-bff",
       "name": "Aggregator Portal BFF (anonymous proxy)",
-      "description": "Minimal-scope confidential client for the web BFF's client_credentials grant on anonymous-proxy routes (e.g. POST /api/aggregator/register). Holds NO realm-management roles — it only mints a service-account access token to authenticate to the aggregator API. Kept separate from aggregator-api so a leaked BFF secret cannot administer the realm.",
+      "description": "Minimal-scope confidential client for the web BFF client_credentials grant on anonymous-proxy routes. Holds NO realm-management roles — only mints a service-account token to call the aggregator API, so a leaked BFF secret cannot administer the realm.",
       "enabled": true,
       "publicClient": false,
       "secret": "__AGGREGATOR_BFF_SECRET__",
