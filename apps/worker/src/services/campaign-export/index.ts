@@ -63,7 +63,7 @@ interface ExportEmailInput {
 
 /** Escapes the few HTML metacharacters that can appear in org id / purpose. */
 function esc(value: string): string {
-  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 }
 
 /** Renders the network-admin notification (link only — never the PII itself). */
@@ -154,7 +154,7 @@ export async function runExport(params: ExportParams, deps: ExportDeps): Promise
 
   const email = renderExportEmail({
     orgId,
-    purpose: purpose && purpose.trim() ? purpose : '—',
+    purpose: purpose?.trim() ? purpose : '—',
     exported: profiles.length,
     skipped: skipped.length,
     url: signed.url,

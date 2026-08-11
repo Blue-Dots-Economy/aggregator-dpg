@@ -55,7 +55,7 @@ function neutralizeFormula(value: string): string {
  */
 function csvField(value: string): string {
   const safe = neutralizeFormula(value);
-  return /[",\r\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
+  return /[",\r\n]/.test(safe) ? `"${safe.replaceAll('"', '""')}"` : safe;
 }
 
 /**
@@ -68,7 +68,8 @@ function csvField(value: string): string {
 function renderCell(value: unknown): string {
   if (value === null || value === undefined) return '';
   if (typeof value === 'object') return JSON.stringify(value);
-  return String(value);
+  // object is handled above, so this is a primitive — safe to String()
+  return String(value as string | number | boolean | bigint | symbol);
 }
 
 /**
@@ -93,7 +94,7 @@ export function buildDecryptedProfilesCsv(rows: SignalStackDecryptedProfileRow[]
   for (const r of rows) {
     const cells = [
       csvField(r.item_id),
-      ...stateCols.map((c) => csvField(renderCell((r.item_state ?? {})[c]))),
+      ...stateCols.map((c) => csvField(renderCell(r.item_state?.[c]))),
     ];
     lines.push(cells.join(','));
   }

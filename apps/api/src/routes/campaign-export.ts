@@ -75,7 +75,7 @@ export async function registerCampaignExportRoutes(app: FastifyInstance): Promis
       // fast (403) so the caller learns immediately rather than via a silent
       // worker failure.
       const found = await getAggregatorStore().findById(auth.aggregatorId);
-      if (!found.ok || !found.value || !found.value.contactEmail) {
+      if (!found.ok || !found.value?.contactEmail) {
         throw httpError('FORBIDDEN', {
           detail: 'requesting aggregator has no resolvable contact email',
           fields: { reason: 'RECIPIENT_UNRESOLVED' },
