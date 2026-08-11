@@ -18,7 +18,7 @@ import { z } from 'zod';
 import { authenticate } from '../services/auth/access-token.js';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
 import { enqueueCampaignExport } from '../services/campaign-export-queue/index.js';
-import { config, campaignExportAllowedAzp } from '../config.js';
+import { config, campaignManagerAllowedAzp } from '../config.js';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 
@@ -30,15 +30,16 @@ const ExportRequestSchema = z
   .strict();
 
 /**
- * Unwrap the auth context or throw the catalogue error. Scoped to the campaign
- * client(s): the `allowedAzp` override means this route accepts ONLY tokens
- * whose `azp` is in `CAMPAIGN_EXPORT_ALLOWED_AZP` (default `campaign-manager`) —
- * a portal/api/bff token is rejected here. The global `KEYCLOAK_ALLOWED_AZP`
+ * Unwrap the auth context or throw the catalogue error. Scoped to the
+ * campaign-manager client(s): the `allowedAzp` override means this route accepts
+ * ONLY tokens whose `azp` is in `CAMPAIGN_MANAGER_ALLOWED_AZP` (default
+ * `campaign-manager`, shared with the sibling email/voice campaign routes) — a
+ * portal/api/bff token is rejected here. The global `KEYCLOAK_ALLOWED_AZP`
  * excludes campaign-manager, so a campaign-manager token is in turn rejected by
  * every other route (default-deny both ways).
  */
 async function requireAuth(req: FastifyRequest) {
-  const result = await authenticate(req, { allowedAzp: campaignExportAllowedAzp() });
+  const result = await authenticate(req, { allowedAzp: campaignManagerAllowedAzp() });
   if (result.ok) return result.context;
   const code = result.error.code === 'MISSING_AGGREGATOR_ID' ? 'FORBIDDEN' : 'UNAUTHORIZED';
   throw httpError(code, { detail: result.error.message, fields: { reason: result.error.code } });

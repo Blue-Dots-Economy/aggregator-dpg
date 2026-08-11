@@ -286,16 +286,18 @@ export function supportEmail(): string | undefined {
 }
 
 /**
- * `azp` client ids allowed to call the campaign PII export (#579). This
- * OVERRIDES the global `KEYCLOAK_ALLOWED_AZP` for that one route, so the export
- * accepts ONLY these clients — and the global list can exclude them, which
- * blocks a campaign-manager token on every other endpoint (default-deny).
+ * `azp` client ids allowed to reach the campaign-manager routes (PII export
+ * #579, and the email/voice APIs that follow — all called by the same
+ * `campaign-manager` client). This OVERRIDES the global `KEYCLOAK_ALLOWED_AZP`
+ * on those routes, so they accept ONLY these clients — and the global list
+ * excludes them, which blocks a campaign-manager token on every other endpoint
+ * (default-deny both ways).
  *
  * @returns The allow-listed `azp` values (comma-separated env;
  *   default `['campaign-manager']`).
  */
-export function campaignExportAllowedAzp(): string[] {
-  const raw = process.env.CAMPAIGN_EXPORT_ALLOWED_AZP?.trim() || 'campaign-manager';
+export function campaignManagerAllowedAzp(): string[] {
+  const raw = process.env.CAMPAIGN_MANAGER_ALLOWED_AZP?.trim() || 'campaign-manager';
   return raw
     .split(',')
     .map((s) => s.trim())
