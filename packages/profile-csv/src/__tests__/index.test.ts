@@ -111,7 +111,8 @@ describe('buildContactExportCsv (#579)', () => {
         },
       }),
     ]);
-    expect(csv.split('\r\n')[1]).toBe('i1,Asha,profile,asha@example.com,user,+9190,profile');
+    // phone starts with '+', so the CSV formula-injection guard prefixes a single quote
+    expect(csv.split('\r\n')[1]).toBe("i1,Asha,profile,asha@example.com,user,'+9190,profile");
   });
 
   it('renders absent/null contact fields as empty value + none', () => {
