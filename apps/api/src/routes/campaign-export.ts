@@ -18,7 +18,7 @@ import { z } from 'zod';
 import { authenticate } from '../services/auth/access-token.js';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
 import { enqueueCampaignExport } from '../services/campaign-export-queue/index.js';
-import { config } from '../config.js';
+import { config, campaignExportAllowedAzp } from '../config.js';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 
@@ -29,9 +29,16 @@ const ExportRequestSchema = z
   })
   .strict();
 
-/** Unwrap the auth context or throw the catalogue error. Mirrors the local helper in other route modules (e.g. `support.ts`, `dashboard.ts`). */
+/**
+ * Unwrap the auth context or throw the catalogue error. Scoped to the campaign
+ * client(s): the `allowedAzp` override means this route accepts ONLY tokens
+ * whose `azp` is in `CAMPAIGN_EXPORT_ALLOWED_AZP` (default `campaign-manager`) —
+ * a portal/api/bff token is rejected here. The global `KEYCLOAK_ALLOWED_AZP`
+ * excludes campaign-manager, so a campaign-manager token is in turn rejected by
+ * every other route (default-deny both ways).
+ */
 async function requireAuth(req: FastifyRequest) {
-  const result = await authenticate(req);
+  const result = await authenticate(req, { allowedAzp: campaignExportAllowedAzp() });
   if (result.ok) return result.context;
   const code = result.error.code === 'MISSING_AGGREGATOR_ID' ? 'FORBIDDEN' : 'UNAUTHORIZED';
   throw httpError(code, { detail: result.error.message, fields: { reason: result.error.code } });
@@ -75,9 +82,9 @@ export async function registerCampaignExportRoutes(app: FastifyInstance): Promis
       // fast (403) so the caller learns immediately rather than via a silent
       // worker failure.
       const found = await getAggregatorStore().findById(auth.aggregatorId);
-      if (!found.ok || !found.value?.contactEmail) {
+      if (!found.ok || !found.value?.contactEmail || found.value.status !== 'active') {
         throw httpError('FORBIDDEN', {
-          detail: 'requesting aggregator has no resolvable contact email',
+          detail: 'requesting aggregator is not an active aggregator with a contact email',
           fields: { reason: 'RECIPIENT_UNRESOLVED' },
         });
       }

@@ -87,8 +87,17 @@ export type AnyAuthResult =
 /**
  * Verifies the Bearer token on a Fastify request and returns an
  * `AuthContext`.
+ *
+ * @param req - The Fastify request.
+ * @param opts.allowedAzp - Per-call `azp` allow-list that OVERRIDES the global
+ *   `KEYCLOAK_ALLOWED_AZP`. Use to scope a single endpoint to a specific client
+ *   (e.g. `/v1/campaign/export` accepts only `campaign-manager`, while the
+ *   global list excludes it so no other route accepts campaign-manager tokens).
  */
-export async function authenticate(req: FastifyRequest): Promise<AuthResult> {
+export async function authenticate(
+  req: FastifyRequest,
+  opts?: { allowedAzp?: readonly string[] },
+): Promise<AuthResult> {
   const header = req.headers.authorization;
   if (!header || !header.startsWith('Bearer ')) {
     return { ok: false, error: { code: 'MISSING_TOKEN', message: 'missing Bearer token' } };
@@ -100,7 +109,7 @@ export async function authenticate(req: FastifyRequest): Promise<AuthResult> {
 
   let payload: JWTPayload;
   try {
-    payload = await verifyToken(token);
+    payload = await verifyToken(token, opts?.allowedAzp);
   } catch (err) {
     return {
       ok: false,
@@ -395,7 +404,7 @@ function readAggregatorId(payload: JWTPayload): string | undefined {
  * @returns The verified JWT claim set.
  * @throws {Error} If verification fails, or `azp` is not in the allow-list.
  */
-async function verifyToken(token: string): Promise<JWTPayload> {
+async function verifyToken(token: string, azpAllow?: readonly string[]): Promise<JWTPayload> {
   let payload: JWTPayload;
   if (testOverride) {
     payload = await testOverride(token);
@@ -408,18 +417,20 @@ async function verifyToken(token: string): Promise<JWTPayload> {
     });
     payload = verified;
   }
-  assertAllowedAzp(payload);
+  assertAllowedAzp(payload, azpAllow);
   return payload;
 }
 
 /**
- * Rejects a token whose `azp` is not in the configured allow-list.
+ * Rejects a token whose `azp` is not in the allow-list.
  *
  * @param payload - The verified JWT claim set.
- * @throws {Error} If an allow-list is configured and `azp` is absent or not in it.
+ * @param override - Per-call allow-list; when provided it REPLACES the global
+ *   `KEYCLOAK_ALLOWED_AZP` (used to scope one endpoint to a specific client).
+ * @throws {Error} If an allow-list is in effect and `azp` is absent or not in it.
  */
-function assertAllowedAzp(payload: JWTPayload): void {
-  const allow = allowedAzp();
+function assertAllowedAzp(payload: JWTPayload, override?: readonly string[]): void {
+  const allow = override ?? allowedAzp();
   if (allow.length === 0) return; // gate disabled when unconfigured
   const azp = (payload as Record<string, unknown>).azp;
   if (typeof azp !== 'string' || !allow.includes(azp)) {

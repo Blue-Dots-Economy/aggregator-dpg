@@ -35,7 +35,9 @@ describe('POST /v1/campaign/export', () => {
     // The requesting aggregator (token aggregator_id=agg-1) resolves to this
     // record; its contact_email is the export recipient.
     const store = new AggregatorStoreFake();
-    store.seed([buildAggregator({ id: 'agg-1', contactEmail: 'aggregator@org.example' })]);
+    store.seed([
+      buildAggregator({ id: 'agg-1', contactEmail: 'aggregator@org.example', status: 'active' }),
+    ]);
     _setAggregatorStore(store);
 
     _resetJwks();
@@ -82,6 +84,48 @@ describe('POST /v1/campaign/export', () => {
     });
   });
 
+  it('returns 401 when the token azp is not an allowed campaign-export client', async () => {
+    // A portal/api/bff token (the global allow-list) must NOT be accepted here —
+    // the route opts into CAMPAIGN_EXPORT_ALLOWED_AZP (campaign-manager) only.
+    _setAccessTokenVerifier(async (token) => {
+      if (token === 'good') {
+        return {
+          sub: 'u1',
+          aggregator_id: 'agg-1',
+          signalstack_org_id: 'org_5d3b7fa4-x',
+          azp: 'aggregator-portal',
+        };
+      }
+      throw new Error('invalid');
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/campaign/export',
+      headers: { authorization: 'Bearer good' },
+      payload: { item_ids: [VALID_UUID] },
+    });
+    expect(res.statusCode).toBe(401);
+    expect(res.json().error.code).toBe('UNAUTHORIZED');
+    expect(enqueueCampaignExportMock).not.toHaveBeenCalled();
+  });
+
+  it('returns 403 when the requesting aggregator is not active', async () => {
+    const store = new AggregatorStoreFake();
+    store.seed([
+      buildAggregator({ id: 'agg-1', contactEmail: 'aggregator@org.example', status: 'inactive' }),
+    ]);
+    _setAggregatorStore(store);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/campaign/export',
+      headers: { authorization: 'Bearer good' },
+      payload: { item_ids: [VALID_UUID] },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error.code).toBe('FORBIDDEN');
+    expect(enqueueCampaignExportMock).not.toHaveBeenCalled();
+  });
+
   it('returns 403 when the requesting aggregator has no resolvable contact email', async () => {
     // Empty store: findById(agg-1) resolves to null → no recipient.
     _setAggregatorStore(new AggregatorStoreFake());
@@ -121,7 +165,7 @@ describe('POST /v1/campaign/export', () => {
   it('returns 403 FORBIDDEN when the token has no signalstack_org_id claim', async () => {
     _setAccessTokenVerifier(async (token) => {
       if (token === 'good') {
-        return { sub: 'u1', aggregator_id: 'agg-1' };
+        return { sub: 'u1', aggregator_id: 'agg-1', azp: 'campaign-manager' };
       }
       throw new Error('invalid');
     });
@@ -139,7 +183,7 @@ describe('POST /v1/campaign/export', () => {
   it('returns 403 FORBIDDEN when the token has no aggregator_id claim (MISSING_AGGREGATOR_ID)', async () => {
     _setAccessTokenVerifier(async (token) => {
       if (token === 'good') {
-        return { sub: 'u1' };
+        return { sub: 'u1', azp: 'campaign-manager' };
       }
       throw new Error('invalid');
     });
