@@ -1,6 +1,5 @@
 // Env must be set before any import that pulls in `config` (parsed once at
 // first import). Mirrors the support.test.ts convention.
-process.env.EXPORT_NETWORK_ADMIN_EMAIL = 'admin@network.org';
 process.env.SIGNALSTACK_BASE_URL = 'http://signals.local';
 process.env.SIGNALSTACK_ADMIN_KEY = 'k';
 process.env.SIGNALSTACK_ACTING_ORG_ID = 'svc';

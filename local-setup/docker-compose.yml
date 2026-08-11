@@ -547,6 +547,18 @@ services:
       S3_PUBLIC_ENDPOINT: http://localhost:9000
       S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
       S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      # Mailer — the campaign PII export (#579) emails the download link from the
+      # worker, so it needs the same mailer config as aggregator-api (Mailpit here).
+      MAIL_PROVIDER: smtp
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      SMTP_SECURE: "false"
+      SMTP_FROM: ${SMTP_FROM:-no-reply@bluedots.local}
+      SMTP_USER: ""
+      SMTP_PASSWORD: ""
+      # Campaign PII export tunables (#579).
+      EXPORT_URL_TTL_SECONDS: ${EXPORT_URL_TTL_SECONDS:-3600}
+      CAMPAIGN_EXPORT_CONCURRENCY: ${CAMPAIGN_EXPORT_CONCURRENCY:-2}
       SCHEMA_ROOT_DIR: /app/config/${AGGREGATOR_NETWORK:-blue_dot}/schemas
       AGGREGATOR_CONFIG_PATH: /app/config/${AGGREGATOR_NETWORK:-blue_dot}/aggregator.config.yaml
       # Bulk-file processor caps + cron intervals (match aggregator-dpg/docker-compose.yml).
