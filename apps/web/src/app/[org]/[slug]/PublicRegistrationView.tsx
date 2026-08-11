@@ -9,7 +9,7 @@ import { RjsfThemedForm } from '../../../components/forms/RjsfThemed';
 import { BlueDotsLogo } from '../../../components/ui/BlueDotsLogo';
 import { I } from '../../../icons';
 import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
-import { domainRequiresConsent, domainRequiresBirthYear } from '../../../lib/registration-gates';
+import { registrationShowsConsent, domainRequiresBirthYear } from '../../../lib/registration-gates';
 import { MinimalIdentityForm, type MinimalIdentityPayload } from './MinimalIdentityForm';
 import { LanguageSwitcher } from '../../../components/shell/LanguageSwitcher';
 import { ConsentModal, type ConsentTab } from '../../../components/consent/ConsentModal';
@@ -179,11 +179,14 @@ export function PublicRegistrationView({
   const brandShort = cfg.brand.short_name;
   const brandLogo = cfg.brand.logo?.default;
   // #613: the consent step + birth-year field are config-driven per domain
-  // (network.json). Show consent only when the domain gates go-live on
-  // `consent_required`; collect a birth year only when guardian consent applies.
+  // (network.json). Collect a birth year only when guardian consent applies.
+  // Show consent when the domain gates go-live on `consent_required` OR when it
+  // collects a birth year — signalstack force-adds `consent_required` for any
+  // guardian-gated domain, so a birth-year domain always needs the consent step
+  // (see registrationShowsConsent).
   const domainCfg = cfg.domains.find((d) => d.id === domain);
-  const showConsent = domainRequiresConsent(domainCfg);
   const showBirthYear = domainRequiresBirthYear(domainCfg);
+  const showConsent = registrationShowsConsent(domainCfg);
   const errorRef = useRef<HTMLDivElement>(null);
 
   // Submit button sits below a long form; on failure pull the error

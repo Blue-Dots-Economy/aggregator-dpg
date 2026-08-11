@@ -8,6 +8,7 @@ import { describe, it, expect } from 'vitest';
 import {
   domainRequiresConsent,
   domainRequiresBirthYear,
+  registrationShowsConsent,
   CONSENT_REQUIRED_GATE,
 } from '@/lib/registration-gates';
 import type { AggregatorConfigDomain } from '@/hooks/useAggregatorConfig';
@@ -55,5 +56,33 @@ describe('domainRequiresBirthYear', () => {
 
   it('defaults to false for an undefined domain', () => {
     expect(domainRequiresBirthYear(undefined)).toBe(false);
+  });
+});
+
+describe('registrationShowsConsent', () => {
+  it('is true when go_live_required includes the consent gate', () => {
+    expect(registrationShowsConsent({ ...base, go_live_required: [CONSENT_REQUIRED_GATE] })).toBe(
+      true,
+    );
+  });
+
+  it('is true for a guardian domain even if go_live_required omits the consent gate', () => {
+    // signalstack force-adds consent_required for guardian domains; mirror it so
+    // a birth-year domain never skips the consent step (config drift / older payload).
+    expect(
+      registrationShowsConsent({
+        ...base,
+        guardian_consent_required: true,
+        go_live_required: ['schema_required'],
+      }),
+    ).toBe(true);
+  });
+
+  it('is false when neither consent gate nor guardian consent applies', () => {
+    expect(registrationShowsConsent({ ...base, go_live_required: ['schema_required'] })).toBe(
+      false,
+    );
+    expect(registrationShowsConsent({ ...base })).toBe(false);
+    expect(registrationShowsConsent(undefined)).toBe(false);
   });
 });

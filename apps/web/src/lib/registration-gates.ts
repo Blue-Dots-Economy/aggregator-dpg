@@ -41,3 +41,23 @@ export function domainRequiresConsent(domain: AggregatorConfigDomain | undefined
 export function domainRequiresBirthYear(domain: AggregatorConfigDomain | undefined): boolean {
   return domain?.guardian_consent_required === true;
 }
+
+/**
+ * Whether the registration form should show the consent step for a domain.
+ *
+ * True when the domain gates go-live on consent, OR when it collects a birth
+ * year (guardian/U18 domain). Signalstack **force-adds `consent_required` for
+ * any guardian-gated domain** (`resolveGoLiveGates` — the U18 age control can
+ * never be config-disabled), and its config schema rejects a guardian domain
+ * that drops the token. So a birth-year domain always needs the consent step,
+ * even if the surfaced `go_live_required` omitted it (config drift / older
+ * payload). Mirror that server invariant here rather than trusting
+ * `go_live_required` alone — otherwise a guardian domain missing the token
+ * would collect DOB but skip consent, and its profiles would never go live.
+ *
+ * @param domain - The resolved domain config, or undefined when not yet loaded.
+ * @returns True when the consent step must be shown.
+ */
+export function registrationShowsConsent(domain: AggregatorConfigDomain | undefined): boolean {
+  return domainRequiresConsent(domain) || domainRequiresBirthYear(domain);
+}
