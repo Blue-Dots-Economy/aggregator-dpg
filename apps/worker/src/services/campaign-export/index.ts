@@ -2,7 +2,7 @@
  * Participant PII export orchestrator (aggregator-dpg#579).
  *
  * Decrypts a set of owned Signals items, writes a CSV to private S3, and emails
- * a short-lived pre-signed download link to the configured network admin. Runs
+ * a short-lived pre-signed download link to the requesting aggregator. Runs
  * as the worker's `campaign-export` BullMQ job (was an inline fire-and-forget
  * task on the API before 2026-08-11). The export carries only the three
  * canonical contact fields (name/email/phone) with provenance — not item_state.
@@ -73,7 +73,7 @@ function esc(value: string): string {
   return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 }
 
-/** Renders the network-admin notification (link only — never the PII itself). */
+/** Renders the export-ready notification (link only — never the PII itself). */
 function renderExportEmail(i: ExportEmailInput): { subject: string; html: string; text: string } {
   const subject = `PII export ready — ${i.exported} records`;
   const text = [
@@ -109,7 +109,7 @@ function renderExportEmail(i: ExportEmailInput): { subject: string; html: string
  * Runs one export end-to-end (decrypt → CSV → S3 → email link).
  *
  * @param params - orgId (Signals org id), itemIds, optional purpose + requestId.
- * @param deps - Injected decrypt / storage / mail collaborators + admin email + logger.
+ * @param deps - Injected decrypt / storage / mail collaborators + recipient email + logger.
  */
 export async function runExport(params: ExportParams, deps: ExportDeps): Promise<void> {
   const { orgId, itemIds, purpose, requestId } = params;
