@@ -298,10 +298,15 @@ export function supportEmail(): string | undefined {
  */
 export function campaignManagerAllowedAzp(): string[] {
   const raw = process.env.CAMPAIGN_MANAGER_ALLOWED_AZP?.trim() || 'campaign-manager';
-  return raw
+  const parsed = raw
     .split(',')
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
+  // Never return an empty list: an empty allow-list disables the azp gate
+  // entirely (assertAllowedAzp treats `[]` as "off"), which would open the most
+  // sensitive route to any client. A pathological value (e.g. `","`) parses to
+  // empty — fall back to the default rather than silently un-gating.
+  return parsed.length > 0 ? parsed : ['campaign-manager'];
 }
 
 /**

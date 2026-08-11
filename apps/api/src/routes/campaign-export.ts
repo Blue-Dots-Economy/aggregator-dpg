@@ -113,7 +113,7 @@ export async function registerCampaignExportRoutes(app: FastifyInstance): Promis
       return reply.code(202).send({
         status: 'queued',
         message:
-          'Export request submitted. A secure, time-limited download link will be emailed to the network administrator once the export is ready.',
+          "Export request submitted. A secure, time-limited download link will be emailed to the requesting aggregator's registered contact address once the export is ready.",
       });
     },
   );

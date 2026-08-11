@@ -109,7 +109,7 @@ export interface SignedDownloadUrl {
  *
  * Signed against the browser-reachable presigner client and served as an
  * attachment; TTL is `EXPORT_URL_TTL_SECONDS`. Delivered by email to the
- * configured network admin — never returned to the export caller.
+ * requesting aggregator's contact email — never returned to the export caller.
  *
  * @param key - The S3 object key of the export CSV.
  * @returns The signed URL, its key, and an ISO expiry timestamp.

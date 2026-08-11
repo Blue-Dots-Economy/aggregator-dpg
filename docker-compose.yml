@@ -387,7 +387,10 @@ services:
       KEYCLOAK_ADMIN_CLIENT_ID: ${KEYCLOAK_ADMIN_CLIENT_ID:-aggregator-api}
       KEYCLOAK_ADMIN_CLIENT_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET:-}
       # JWT client-scoping (#1.7): azp allow-list (enforced) + optional aud check.
+      # campaign-manager is deliberately NOT in the global list — it is allowed
+      # only on the campaign routes via CAMPAIGN_MANAGER_ALLOWED_AZP (default-deny).
       KEYCLOAK_ALLOWED_AZP: ${KEYCLOAK_ALLOWED_AZP:-aggregator-portal,aggregator-api,aggregator-bff}
+      CAMPAIGN_MANAGER_ALLOWED_AZP: ${CAMPAIGN_MANAGER_ALLOWED_AZP:-campaign-manager}
       KEYCLOAK_EXPECTED_AUDIENCE: ${KEYCLOAK_EXPECTED_AUDIENCE:-}
       # Mailer — `smtp` (default, points at Mailpit in compose) or `ses`
       MAIL_PROVIDER: ${MAIL_PROVIDER:-smtp}
@@ -426,6 +429,8 @@ services:
       BULK_UPLOAD_URL_TTL_SECONDS: ${BULK_UPLOAD_URL_TTL_SECONDS:-900}
       BULK_UPLOAD_MAX_BYTES: ${BULK_UPLOAD_MAX_BYTES:-10485760}
       QR_DOWNLOAD_URL_TTL_SECONDS: ${QR_DOWNLOAD_URL_TTL_SECONDS:-900}
+      # Campaign PII export (#579): max item_ids accepted per request.
+      EXPORT_MAX_ITEM_IDS: ${EXPORT_MAX_ITEM_IDS:-500}
       PUBLIC_LINK_BASE_URL: ${PUBLIC_LINK_BASE_URL:-${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}}
       # Brand selectors — the api derives AGGREGATOR_CONFIG_PATH and SCHEMA_ROOT_DIR
       # from these two vars. Set AGGREGATOR_BRAND to select a brand subfolder (e.g. upsdm);
@@ -511,6 +516,22 @@ services:
       S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      # ─── Mailer (campaign PII export emails the download link, #579) ──
+      # The export job now sends from the worker, so it needs the same mailer
+      # config as the api — `smtp` (Mailpit in compose) or `ses`.
+      MAIL_PROVIDER: ${MAIL_PROVIDER:-smtp}
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-no-reply@bluedots.local}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      AWS_REGION: ${AWS_REGION:-ap-south-1}
+      SES_FROM: ${SES_FROM:-}
+      SES_CONFIGURATION_SET: ${SES_CONFIGURATION_SET:-}
+      # ─── Campaign PII export tunables (#579) ───────────────────────
+      EXPORT_URL_TTL_SECONDS: ${EXPORT_URL_TTL_SECONDS:-3600}
+      CAMPAIGN_EXPORT_CONCURRENCY: ${CAMPAIGN_EXPORT_CONCURRENCY:-2}
       # ─── Schemas (participant validators) ──────────────────────────
       # Brand selectors — the worker derives AGGREGATOR_CONFIG_PATH and SCHEMA_ROOT_DIR
       # from these two vars. Set AGGREGATOR_BRAND to select a brand subfolder (e.g. upsdm);

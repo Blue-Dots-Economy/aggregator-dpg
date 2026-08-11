@@ -133,24 +133,50 @@ describe('runExport', () => {
     expect(h.logs.error).toHaveLength(0);
   });
 
-  it('aborts when decrypt fails', async () => {
+  it('throws (so BullMQ retries) when decrypt fails, without uploading or emailing', async () => {
     const h = harness({
       fetchDecryptedProfiles: async () => err(new UpstreamError('signals down', { code: 'X' })),
     });
-    await runExport({ orgId: 'org-1', itemIds: ['a'] }, h.deps);
+    await expect(runExport({ orgId: 'org-1', itemIds: ['a'] }, h.deps)).rejects.toThrow(/decrypt/);
     expect(h.puts).toHaveLength(0);
     expect(h.mails).toHaveLength(0);
     expect(h.logs.error).toHaveLength(1);
   });
 
-  it('logs a failure and does not throw when the email send fails', async () => {
+  it('throws when the decrypt returns no contact block (Signals predates #521)', async () => {
+    const h = harness({
+      // Row with no `contact` key — what an older Signals returns after silently
+      // stripping the contact/fields projection. Must NOT be emailed as empty.
+      fetchDecryptedProfiles: async () =>
+        ok({
+          profiles: [
+            {
+              item_id: 'a',
+              item_network: 'blue_dot',
+              item_domain: 'seeker',
+              item_type: 'profile_1.0',
+              item_state: {},
+              created_at: '2026-08-01T00:00:00.000Z',
+              updated_at: '2026-08-01T00:00:00.000Z',
+            },
+          ],
+          skipped: [],
+        }),
+    });
+    await expect(runExport({ orgId: 'org-1', itemIds: ['a'] }, h.deps)).rejects.toThrow(/#521/);
+    expect(h.puts).toHaveLength(0);
+    expect(h.mails).toHaveLength(0);
+    expect(h.logs.error).toHaveLength(1);
+  });
+
+  it('throws (so BullMQ retries) when the email send fails, after uploading', async () => {
     const h = harness({
       sendMail: async () => ({
         ok: false,
         error: { code: 'TRANSPORT_FAILED', message: 'smtp down' },
       }),
     });
-    await expect(runExport({ orgId: 'org-1', itemIds: ['a'] }, h.deps)).resolves.toBeUndefined();
+    await expect(runExport({ orgId: 'org-1', itemIds: ['a'] }, h.deps)).rejects.toThrow(/email/);
     expect(h.puts).toHaveLength(1); // upload still happened before the email
     expect(h.logs.error).toHaveLength(1);
   });

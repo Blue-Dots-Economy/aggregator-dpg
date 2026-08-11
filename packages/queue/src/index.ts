@@ -76,7 +76,7 @@ export interface CronWatchdogJob {
  * Participant PII export job (aggregator-dpg#579). Enqueued by the API's
  * `POST /v1/campaign/export` handler and consumed by the worker's `export`
  * role, which decrypts the owned items, writes a CSV to private S3, and emails
- * a short-lived pre-signed link to the configured network admin.
+ * a short-lived pre-signed link to the requesting aggregator's contact email.
  */
 export interface CampaignExportJob {
   /** Signals org id (from the caller token's `signalstack_org_id` claim); scopes decrypt ownership. */

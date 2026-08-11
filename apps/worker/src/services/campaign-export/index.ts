@@ -6,11 +6,18 @@
  * as the worker's `campaign-export` BullMQ job (was an inline fire-and-forget
  * task on the API before 2026-08-11). The export carries only the three
  * canonical contact fields (name/email/phone) with provenance — not item_state.
- * On every *handled* terminal branch (decrypt error, no resolvable items, mail
- * send failure) it logs counts only — never PII — and returns without throwing, so BullMQ does
- * not burn retries on an outcome that will not change. A rejection from an
- * injected collaborator (`putObject` / `signDownloadUrl` decrypt transport)
- * *does* propagate, so the job fails and BullMQ retries it. Belongs to
+ *
+ * Failure semantics (BullMQ retry-aware): transient/infra failures re-throw so
+ * BullMQ counts the attempt and retries per `DEFAULT_JOB_OPTS` (3× exponential)
+ * — a decrypt error (the writer returns `err()`, never throws, on
+ * timeout/transport/upstream-5xx), a missing `contact` block (an older Signals
+ * predating #521 that strips the projection), an S3 put/sign rejection, and a
+ * mail-send failure. A 202-acknowledged export must never be silently dropped.
+ * The one terminal, non-retried branch is "no resolvable items" (nothing owned
+ * to export): logged (counts only, never PII) and returned. Never logs PII.
+ * The decrypted CSV is written under `campaign-exports/{orgId}/` in the shared
+ * bucket; its retention is an external S3 lifecycle rule on that prefix (the
+ * worker never deletes S3 objects — see `cron-watchdog.ts`). Belongs to
  * `@aggregator-dpg/worker`.
  */
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
@@ -127,7 +134,13 @@ export async function runExport(params: ExportParams, deps: ExportDeps): Promise
       error: result.error.message,
       error_type: result.error.code,
     });
-    return;
+    // The writer returns err() (never throws) on a transient upstream failure
+    // — timeout / transport / 5xx. Re-throw so BullMQ counts the attempt and
+    // retries; a log-and-return here would mark the job complete and silently
+    // drop a 202-acknowledged export.
+    throw new Error(
+      `campaign export decrypt failed: ${result.error.code}: ${result.error.message}`,
+    );
   }
 
   const { profiles, skipped } = result.value;
@@ -142,6 +155,26 @@ export async function runExport(params: ExportParams, deps: ExportDeps): Promise
       skipped: skipped.length,
     });
     return;
+  }
+
+  // Cross-repo contract guard (Signals #521): we requested a contact-only
+  // projection, so every resolved row must carry a `contact` block. A Signals
+  // that predates #521 silently strips the `contact`/`fields` keys and returns
+  // full item_state with no contact — which would otherwise be emailed as an
+  // all-empty "Records exported: N" CSV. Fail loud (and let BullMQ retry, in
+  // case Signals is mid-upgrade) instead of shipping a misleading empty export.
+  if (!profiles.some((p) => p.contact !== undefined)) {
+    deps.log.error({
+      ...base,
+      status: 'failure',
+      step: 'decrypt_contract',
+      reason: 'contact_block_absent',
+      latency_ms: Date.now() - start,
+      resolved: profiles.length,
+    });
+    throw new Error(
+      'campaign export decrypt returned no contact block — Signals participant/decrypt predates #521',
+    );
   }
 
   // Only the three fixed contact columns are exported, so the schema is stable
@@ -177,7 +210,11 @@ export async function runExport(params: ExportParams, deps: ExportDeps): Promise
       error_type: sent.error.code,
       s3_key: key,
     });
-    return;
+    // Re-throw so BullMQ retries the send. The CSV is already durably in S3; a
+    // retry re-decrypts + re-uploads (new timestamped key) + re-sends. A
+    // log-and-return would mark the job complete and drop the notification,
+    // leaving the caller's 202 unfulfilled with no link ever delivered.
+    throw new Error(`campaign export email failed: ${sent.error.code}: ${sent.error.message}`);
   }
 
   deps.log.info({

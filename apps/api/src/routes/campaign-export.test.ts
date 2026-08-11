@@ -73,7 +73,7 @@ describe('POST /v1/campaign/export', () => {
     });
     expect(res.statusCode).toBe(202);
     expect(res.json().status).toBe('queued');
-    expect(res.json().message).toMatch(/network administrator/i);
+    expect(res.json().message).toMatch(/requesting aggregator/i);
     expect(enqueueCampaignExportMock).toHaveBeenCalledTimes(1);
     const payload = enqueueCampaignExportMock.mock.calls[0]![0];
     expect(payload).toMatchObject({
@@ -86,7 +86,7 @@ describe('POST /v1/campaign/export', () => {
 
   it('returns 401 when the token azp is not an allowed campaign-export client', async () => {
     // A portal/api/bff token (the global allow-list) must NOT be accepted here —
-    // the route opts into CAMPAIGN_EXPORT_ALLOWED_AZP (campaign-manager) only.
+    // the route opts into CAMPAIGN_MANAGER_ALLOWED_AZP (campaign-manager) only.
     _setAccessTokenVerifier(async (token) => {
       if (token === 'good') {
         return {
@@ -107,6 +107,38 @@ describe('POST /v1/campaign/export', () => {
     expect(res.statusCode).toBe(401);
     expect(res.json().error.code).toBe('UNAUTHORIZED');
     expect(enqueueCampaignExportMock).not.toHaveBeenCalled();
+  });
+
+  it('does not disable the azp gate when CAMPAIGN_MANAGER_ALLOWED_AZP is pathological (",")', async () => {
+    const prev = process.env.CAMPAIGN_MANAGER_ALLOWED_AZP;
+    process.env.CAMPAIGN_MANAGER_ALLOWED_AZP = ',';
+    try {
+      // "," parses to an empty allow-list; the helper must fall back to the
+      // default rather than un-gating the route. A non-campaign-manager token
+      // must STILL be rejected.
+      _setAccessTokenVerifier(async (token) => {
+        if (token === 'good') {
+          return {
+            sub: 'u1',
+            aggregator_id: 'agg-1',
+            signalstack_org_id: 'org_5d3b7fa4-x',
+            azp: 'aggregator-portal',
+          };
+        }
+        throw new Error('invalid');
+      });
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/campaign/export',
+        headers: { authorization: 'Bearer good' },
+        payload: { item_ids: [VALID_UUID] },
+      });
+      expect(res.statusCode).toBe(401);
+      expect(enqueueCampaignExportMock).not.toHaveBeenCalled();
+    } finally {
+      if (prev === undefined) delete process.env.CAMPAIGN_MANAGER_ALLOWED_AZP;
+      else process.env.CAMPAIGN_MANAGER_ALLOWED_AZP = prev;
+    }
   });
 
   it('returns 403 when the requesting aggregator is not active', async () => {
