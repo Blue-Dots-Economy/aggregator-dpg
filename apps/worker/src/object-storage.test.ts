@@ -116,6 +116,31 @@ describe('worker object-storage', () => {
     expect(s3ClientCtorCalls[1]).toMatchObject({ endpoint: 'http://minio-internal:9000' });
   });
 
+  it('passes explicit credentials to the S3 client when both keys are set', async () => {
+    mockConfig.S3_ACCESS_KEY_ID = 'AKIA_TEST';
+    mockConfig.S3_SECRET_ACCESS_KEY = 'secret_test';
+    sendMock.mockResolvedValue({});
+    const { putObject } = await import('./object-storage.js');
+    await putObject('k', Buffer.from('x'), 'text/csv');
+    expect(s3ClientCtorCalls[0]).toMatchObject({
+      credentials: { accessKeyId: 'AKIA_TEST', secretAccessKey: 'secret_test' },
+    });
+  });
+
+  it('_resetObjectStorageClient clears both cached clients so fresh ones are built', async () => {
+    sendMock.mockResolvedValue({});
+    getSignedUrlMock.mockResolvedValue('https://signed.example/x');
+    const { putObject, signExportDownloadUrl, _resetObjectStorageClient } =
+      await import('./object-storage.js');
+    await putObject('k', Buffer.from('x'), 'text/csv'); // internal client (1)
+    await signExportDownloadUrl('k'); // presigner client (2)
+    expect(s3ClientCtorCalls).toHaveLength(2);
+    _resetObjectStorageClient();
+    await putObject('k', Buffer.from('x'), 'text/csv'); // rebuilt (3)
+    await signExportDownloadUrl('k'); // rebuilt (4)
+    expect(s3ClientCtorCalls).toHaveLength(4);
+  });
+
   it('getCsvStream returns the object body, and throws when it is empty', async () => {
     const { getCsvStream } = await import('./object-storage.js');
     sendMock.mockResolvedValue({ Body: 'a-readable-stream' });

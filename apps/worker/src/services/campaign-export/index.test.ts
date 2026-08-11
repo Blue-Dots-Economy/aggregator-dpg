@@ -79,6 +79,12 @@ describe('runExport', () => {
     });
   });
 
+  it('forwards requestId to the decrypt query when present', async () => {
+    const h = harness();
+    await runExport({ orgId: 'org-1', itemIds: ['a'], requestId: 'req-42' }, h.deps);
+    expect(h.decryptQueries[0]).toMatchObject({ requestId: 'req-42' });
+  });
+
   it('uploads a contact CSV (name/email/phone + provenance) and emails the requesting aggregator', async () => {
     const h = harness({
       fetchDecryptedProfiles: async () =>
