@@ -1,23 +1,24 @@
 /**
  * Campaign participant PII export (aggregator-dpg#579, #576).
  *
- *   POST /v1/campaign/export → 202; async, fire-and-forget.
+ *   POST /v1/campaign/export → 202; enqueues a durable worker job.
  *
- * Auth is a Keycloak Bearer token; the caller's Signals org id is derived
- * from the token's `signalstack_org_id` claim and passed straight through to
- * Signals decrypt, which enforces ownership via `onboarded_by`. The route
- * never returns PII — only a queued acknowledgement; the export is delivered
- * as a pre-signed link emailed to the configured network admin. Belongs to
- * `@aggregator-dpg/api`.
+ * Auth is a Keycloak Bearer token; the caller's Signals org id is derived from
+ * the token's `signalstack_org_id` claim. The route authenticates, resolves the
+ * requesting aggregator's contact email (from its `aggregator_id`), validates,
+ * and enqueues a `campaign-export` job — the decrypt → CSV → S3 → email work
+ * runs in `apps/worker` (the `export` role) with BullMQ retry. The export
+ * carries only the participant's name/email/phone (with profile/user
+ * provenance). The route never returns PII — only a queued acknowledgement; the
+ * export is delivered as a pre-signed link emailed to the requesting aggregator.
+ * Belongs to `@aggregator-dpg/api`.
  */
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { authenticate } from '../services/auth/access-token.js';
-import { getSignalStackWriter } from '../services/signalstack.js';
-import { getMailer } from '../services/mailer/index.js';
-import { putObject, signExportDownloadUrl } from '../services/object-storage/index.js';
-import { runExport } from '../services/campaign-export/index.js';
-import { config, exportNetworkAdminEmail } from '../config.js';
+import { getAggregatorStore } from '../services/aggregator-store/index.js';
+import { enqueueCampaignExport } from '../services/campaign-export-queue/index.js';
+import { config } from '../config.js';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 
@@ -49,7 +50,7 @@ export async function registerCampaignExportRoutes(app: FastifyInstance): Promis
         tags: ['campaign'],
         summary: 'Request an async participant PII export',
         description:
-          'Decrypts the given owned items, writes a CSV to private S3, and emails a short-lived pre-signed link to the configured network admin. Auth: Keycloak Bearer token; the caller org is derived from the token signalstack_org_id claim. Fire-and-forget: returns 202 immediately.',
+          'Enqueues a background job that exports the participant contact fields (name/email/phone, each with profile/user provenance) for the given owned items to a private CSV, and emails a short-lived pre-signed download link to the requesting aggregator. Auth: Keycloak Bearer token; the caller org is derived from the token signalstack_org_id claim, and the recipient from its aggregator_id. Returns 202 once the job is durably queued.',
         security: [{ bearerAuth: [] }],
         body: ExportRequestSchema,
         response: {
@@ -61,10 +62,6 @@ export async function registerCampaignExportRoutes(app: FastifyInstance): Promis
     async (req, reply) => {
       const auth = await requireAuth(req);
 
-      const ss = getSignalStackWriter();
-      const networkAdminEmail = exportNetworkAdminEmail();
-      if (!ss || !networkAdminEmail) throw httpError('EXPORT_NOT_CONFIGURED');
-
       const orgId = auth.signalstackOrgId;
       if (!orgId) {
         throw httpError('FORBIDDEN', {
@@ -73,29 +70,37 @@ export async function registerCampaignExportRoutes(app: FastifyInstance): Promis
         });
       }
 
-      const { item_ids, purpose } = req.body as z.infer<typeof ExportRequestSchema>;
-      const log = req.log.child({ operation: 'campaign.export', org_id: orgId });
-
-      // Fire-and-forget (interim, non-durable): the caller gets 202 at once and
-      // the export runs in the background. Every failure is logged, never surfaced.
-      void runExport(
-        { orgId, itemIds: item_ids, ...(purpose ? { purpose } : {}), requestId: req.id },
-        {
-          fetchDecryptedProfiles: (q) => ss.fetchDecryptedProfiles(q),
-          putObject,
-          signDownloadUrl: signExportDownloadUrl,
-          sendMail: (input) => getMailer().send(input),
-          networkAdminEmail,
-          log,
-        },
-      ).catch((cause: unknown) => {
-        log.error({
-          operation: 'campaign.export',
-          status: 'failure',
-          error: cause instanceof Error ? cause.message : String(cause),
-          error_type: cause instanceof Error ? cause.name : 'Unknown',
+      // Resolve the delivery recipient — the requesting aggregator's own contact
+      // email — from the token's aggregator identity, before enqueuing. Fail
+      // fast (403) so the caller learns immediately rather than via a silent
+      // worker failure.
+      const found = await getAggregatorStore().findById(auth.aggregatorId);
+      if (!found.ok || !found.value || !found.value.contactEmail) {
+        throw httpError('FORBIDDEN', {
+          detail: 'requesting aggregator has no resolvable contact email',
+          fields: { reason: 'RECIPIENT_UNRESOLVED' },
         });
-      });
+      }
+      const recipientEmail = found.value.contactEmail;
+
+      const { item_ids, purpose } = req.body as z.infer<typeof ExportRequestSchema>;
+
+      // Validate + enqueue only. The export runs in the worker with retry; a
+      // failed enqueue (e.g. Redis unreachable) is the one API-side failure we
+      // surface, because a 202 must mean the job is durably queued.
+      try {
+        await enqueueCampaignExport({
+          orgId,
+          itemIds: item_ids,
+          recipientEmail,
+          ...(purpose ? { purpose } : {}),
+          requestId: req.id,
+        });
+      } catch (cause) {
+        throw httpError('EXPORT_ENQUEUE_FAILED', {
+          detail: cause instanceof Error ? cause.message : 'failed to enqueue export',
+        });
+      }
 
       return reply.code(202).send({
         status: 'queued',

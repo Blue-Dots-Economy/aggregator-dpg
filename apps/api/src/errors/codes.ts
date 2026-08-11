@@ -47,12 +47,12 @@ export const ERR = {
     detail: 'One or more fields failed validation.',
     hint: 'Zod or Ajv rejected the request body. See response.error.fields for offending paths.',
   },
-  EXPORT_NOT_CONFIGURED: {
-    code: 'EXPORT_NOT_CONFIGURED',
+  EXPORT_ENQUEUE_FAILED: {
+    code: 'EXPORT_ENQUEUE_FAILED',
     status: 503,
-    title: 'Export not available',
-    detail: 'Participant export is not configured on this instance.',
-    hint: 'EXPORT_NETWORK_ADMIN_EMAIL and/or the signalstack writer are unset. Check env (SIGNALSTACK_BASE_URL, SIGNALSTACK_ADMIN_KEY, EXPORT_NETWORK_ADMIN_EMAIL).',
+    title: 'Export could not be queued',
+    detail: 'The export request could not be queued for processing. Please retry shortly.',
+    hint: 'The BullMQ enqueue failed — most likely Redis is unreachable. Check REDIS_URL and the queue Redis. (Downstream export config — network-admin email, Signals creds — lives on the worker and is not preflighted here.)',
   },
   CONSENT_REQUIRED: {
     code: 'CONSENT_REQUIRED',

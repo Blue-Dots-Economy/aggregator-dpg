@@ -28,7 +28,7 @@ import type {
   SignalStackDecryptedProfileRow,
   SignalStackProfile,
 } from '@aggregator-dpg/signalstack-writer/interface';
-import { buildDecryptedProfilesCsv } from '../services/profile-csv.js';
+import { buildDecryptedProfilesCsv } from '@aggregator-dpg/profile-csv';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import { resolveLifecycle } from '../services/onboarding/lifecycle.js';
 import { config } from '../config.js';

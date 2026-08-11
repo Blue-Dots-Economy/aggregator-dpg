@@ -10,7 +10,7 @@ import {
   _setAggregatorOrgStore,
 } from '../services/aggregator-org-store/index.js';
 import { IdpAdminFake, _setIdpAdmin } from '../services/idp-admin/index.js';
-import { FakeMailer, _setMailer } from '../services/mailer/index.js';
+import { FakeMailer, _setMailer } from '@aggregator-dpg/mailer';
 import { mintApprovalToken, _resetTokenKey } from '../services/approval-token.js';
 import { _resetJwks } from '../services/auth/access-token.js';
 

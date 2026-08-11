@@ -194,28 +194,6 @@ export async function signQrDownloadUrl(key: string): Promise<SignedDownloadUrl>
   return { url, key, expiresAt };
 }
 
-/**
- * Issues a pre-signed GET URL for a participant-export CSV. Delivered by email
- * to the configured network admin; TTL is the export-specific
- * EXPORT_URL_TTL_SECONDS so it can be tuned independently of bulk-upload URLs.
- *
- * @param key - The S3 object key of the export CSV.
- * @returns The signed URL, its key, and an ISO expiry timestamp.
- */
-export async function signExportDownloadUrl(key: string): Promise<SignedDownloadUrl> {
-  const command = new GetObjectCommand({
-    Bucket: config.S3_BUCKET,
-    Key: key,
-    ResponseContentDisposition: 'attachment; filename="participant-export.csv"',
-    ResponseContentType: 'text/csv',
-  });
-  const url = await getSignedUrl(getPresignerClient(), command, {
-    expiresIn: config.EXPORT_URL_TTL_SECONDS,
-  });
-  const expiresAt = new Date(Date.now() + config.EXPORT_URL_TTL_SECONDS * 1000).toISOString();
-  return { url, key, expiresAt };
-}
-
 /** Test-only — clears the cached clients so fresh instances are built next call. */
 export function _resetObjectStorageClient(): void {
   cachedInternalClient = null;

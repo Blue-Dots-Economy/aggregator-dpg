@@ -1,14 +1,17 @@
 /**
- * Participant PII export orchestrator (interim, aggregator-dpg#579).
+ * Participant PII export orchestrator (aggregator-dpg#579).
  *
  * Decrypts a set of owned Signals items, writes a CSV to private S3, and emails
  * a short-lived pre-signed download link to the configured network admin. Runs
- * fire-and-forget from the route: on every *handled* failure branch (decrypt
- * error, no resolvable items, mixed item types, mail send failure) it never
- * throws and never logs PII — it logs counts only and returns. It does NOT
- * catch rejections from the injected `putObject` / `signDownloadUrl` / mailer
- * collaborators themselves — those propagate to the caller's `.catch` (the
- * route's fire-and-forget wrapper). Belongs to `@aggregator-dpg/api`.
+ * as the worker's `campaign-export` BullMQ job (was an inline fire-and-forget
+ * task on the API before 2026-08-11). The export carries only the three
+ * canonical contact fields (name/email/phone) with provenance — not item_state.
+ * On every *handled* terminal branch (decrypt error, no resolvable items, mail
+ * send failure) it logs counts only — never PII — and returns without throwing, so BullMQ does
+ * not burn retries on an outcome that will not change. A rejection from an
+ * injected collaborator (`putObject` / `signDownloadUrl` decrypt transport)
+ * *does* propagate, so the job fails and BullMQ retries it. Belongs to
+ * `@aggregator-dpg/worker`.
  */
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
@@ -16,11 +19,11 @@ import type {
   SignalStackFetchDecryptedProfilesQuery,
   SignalStackDecryptedProfiles,
 } from '@aggregator-dpg/signalstack-writer/interface';
-import type { SendInput, SendOk, MailerResult } from '../mailer/interface.js';
-import type { SignedDownloadUrl } from '../object-storage/index.js';
-import { buildDecryptedProfilesCsv } from '../profile-csv.js';
+import type { SendInput, SendOk, MailerResult } from '@aggregator-dpg/mailer/interface';
+import type { SignedDownloadUrl } from '../../object-storage.js';
+import { buildContactExportCsv } from '@aggregator-dpg/profile-csv';
 
-/** Request-scoped inputs: item_ids/purpose from the body; orgId from the token's `signalstack_org_id` claim. */
+/** Job-scoped inputs: item_ids/purpose from the request; orgId from the token's `signalstack_org_id` claim. */
 export interface ExportParams {
   orgId: string;
   itemIds: string[];
@@ -29,7 +32,7 @@ export interface ExportParams {
   requestId?: string;
 }
 
-/** Minimal structured logger surface (satisfied by `req.log.child(...)`). */
+/** Minimal structured logger surface (satisfied by the worker's pino logger). */
 export interface ExportLogger {
   info(obj: object): void;
   warn(obj: object): void;
@@ -44,14 +47,14 @@ export interface ExportDeps {
   putObject: (key: string, body: Buffer, contentType: string) => Promise<void>;
   signDownloadUrl: (key: string) => Promise<SignedDownloadUrl>;
   sendMail: (input: SendInput) => Promise<MailerResult<SendOk>>;
-  networkAdminEmail: string;
+  /** The requesting aggregator's contact email (resolved by the API before enqueue). */
+  recipientEmail: string;
   log: ExportLogger;
 }
 
 interface ExportEmailInput {
   orgId: string;
   purpose: string;
-  domain: string;
   exported: number;
   skipped: number;
   url: string;
@@ -65,7 +68,7 @@ function esc(value: string): string {
 
 /** Renders the network-admin notification (link only — never the PII itself). */
 function renderExportEmail(i: ExportEmailInput): { subject: string; html: string; text: string } {
-  const subject = `PII export ready — ${i.domain} (${i.exported} records)`;
+  const subject = `PII export ready — ${i.exported} records`;
   const text = [
     'A participant PII export is ready.',
     '',
@@ -96,9 +99,9 @@ function renderExportEmail(i: ExportEmailInput): { subject: string; html: string
 }
 
 /**
- * Runs one export end-to-end. Fire-and-forget: awaited only in tests.
+ * Runs one export end-to-end (decrypt → CSV → S3 → email link).
  *
- * @param params - orgId (Signals org id), itemIds, optional purpose.
+ * @param params - orgId (Signals org id), itemIds, optional purpose + requestId.
  * @param deps - Injected decrypt / storage / mail collaborators + admin email + logger.
  */
 export async function runExport(params: ExportParams, deps: ExportDeps): Promise<void> {
@@ -106,9 +109,13 @@ export async function runExport(params: ExportParams, deps: ExportDeps): Promise
   const start = Date.now();
   const base = { operation: 'campaign.export', org_id: orgId, requested: itemIds.length };
 
+  // Contact-only decrypt: no item_state (`fields: []`), just the canonical
+  // name/email/phone with provenance (Signals #521).
   const result = await deps.fetchDecryptedProfiles({
     actingOrgId: orgId,
     itemIds,
+    fields: [],
+    contact: ['name', 'email', 'phone'],
     ...(requestId ? { requestId } : {}),
   });
   if (!result.success) {
@@ -137,22 +144,9 @@ export async function runExport(params: ExportParams, deps: ExportDeps): Promise
     return;
   }
 
-  const distinct = new Set(profiles.map((p) => `${p.item_domain}/${p.item_type}`));
-  if (distinct.size > 1) {
-    deps.log.error({
-      ...base,
-      status: 'failure',
-      step: 'validate',
-      latency_ms: Date.now() - start,
-      error: 'mixed item_type/domain in export request',
-      error_type: 'MIXED_ITEM_TYPES',
-      distinct: [...distinct],
-    });
-    return;
-  }
-
-  const domain = profiles[0]!.item_domain;
-  const csv = buildDecryptedProfilesCsv(profiles);
+  // Only the three fixed contact columns are exported, so the schema is stable
+  // regardless of item type/domain — no homogeneity check needed.
+  const csv = buildContactExportCsv(profiles);
   const key = `campaign-exports/${orgId}/${new Date().toISOString().replace(/[:.]/g, '-')}.csv`;
 
   await deps.putObject(key, Buffer.from(csv, 'utf8'), 'text/csv');
@@ -161,7 +155,6 @@ export async function runExport(params: ExportParams, deps: ExportDeps): Promise
   const email = renderExportEmail({
     orgId,
     purpose: purpose && purpose.trim() ? purpose : '—',
-    domain,
     exported: profiles.length,
     skipped: skipped.length,
     url: signed.url,
@@ -169,7 +162,7 @@ export async function runExport(params: ExportParams, deps: ExportDeps): Promise
   });
 
   const sent = await deps.sendMail({
-    to: deps.networkAdminEmail,
+    to: deps.recipientEmail,
     subject: email.subject,
     html: email.html,
     text: email.text,

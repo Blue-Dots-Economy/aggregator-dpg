@@ -10,8 +10,11 @@
  * @module @aggregator-dpg/worker
  */
 
-/** Selectable consumer roles. `cron` covers link-metrics + watchdog ticks. */
-export const WORKER_ROLES = ['file', 'row', 'finalise', 'cron'] as const;
+/**
+ * Selectable consumer roles. `cron` covers link-metrics + watchdog ticks;
+ * `export` runs the campaign PII export job (aggregator-dpg#579).
+ */
+export const WORKER_ROLES = ['file', 'row', 'finalise', 'cron', 'export'] as const;
 
 /** A single worker role. */
 export type WorkerRole = (typeof WORKER_ROLES)[number];

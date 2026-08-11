@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildDecryptedProfilesCsv } from '../profile-csv.js';
+import { buildDecryptedProfilesCsv, buildContactExportCsv } from '../index.js';
 import type { SignalStackDecryptedProfileRow } from '@aggregator-dpg/signalstack-writer/interface';
 
 const row = (over: Partial<SignalStackDecryptedProfileRow>): SignalStackDecryptedProfileRow => ({
@@ -91,5 +91,63 @@ describe('buildDecryptedProfilesCsv', () => {
       }),
     ]);
     expect(csv.split('\r\n')[1]).toBe('i1,Divya Test,9000000315');
+  });
+});
+
+describe('buildContactExportCsv (#579)', () => {
+  it('emits the fixed 7-column contact header', () => {
+    const csv = buildContactExportCsv([]);
+    expect(csv).toBe('item_id,name,name_source,email,email_source,phone,phone_source');
+  });
+
+  it('maps value + provenance per field (item→profile, user→user)', () => {
+    const csv = buildContactExportCsv([
+      row({
+        item_id: 'i1',
+        contact: {
+          name: { value: 'Asha', source: 'item' },
+          email: { value: 'asha@example.com', source: 'user' },
+          phone: { value: '+9190', source: 'item' },
+        },
+      }),
+    ]);
+    expect(csv.split('\r\n')[1]).toBe('i1,Asha,profile,asha@example.com,user,+9190,profile');
+  });
+
+  it('renders absent/null contact fields as empty value + none', () => {
+    const csv = buildContactExportCsv([
+      row({
+        item_id: 'i2',
+        contact: {
+          name: { value: 'Meena', source: 'item' },
+          email: { value: null, source: null },
+          // phone omitted entirely
+        },
+      }),
+    ]);
+    expect(csv.split('\r\n')[1]).toBe('i2,Meena,profile,,none,,none');
+  });
+
+  it('emits only header + empty cells when no contact block is present', () => {
+    const csv = buildContactExportCsv([row({ item_id: 'i3' })]);
+    expect(csv.split('\r\n')[1]).toBe('i3,,none,,none,,none');
+  });
+
+  it('handles mixed domains in one export (fixed schema)', () => {
+    const csv = buildContactExportCsv([
+      row({
+        item_id: 'a',
+        item_domain: 'seeker',
+        contact: { name: { value: 'A', source: 'item' } },
+      }),
+      row({
+        item_id: 'b',
+        item_domain: 'provider',
+        contact: { name: { value: 'B', source: 'user' } },
+      }),
+    ]);
+    const lines = csv.split('\r\n');
+    expect(lines[1]).toBe('a,A,profile,,none,,none');
+    expect(lines[2]).toBe('b,B,user,,none,,none');
   });
 });

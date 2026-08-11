@@ -15,7 +15,7 @@ import {
   type OrgStoreResult,
 } from '../services/aggregator-org-store/index.js';
 import { IdpAdminFake, _setIdpAdmin } from '../services/idp-admin/index.js';
-import { FakeMailer, _setMailer } from '../services/mailer/index.js';
+import { FakeMailer, _setMailer } from '@aggregator-dpg/mailer';
 import { _resetTokenKey } from '../services/approval-token.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
 import { ConsentLedgerFake } from '@aggregator-dpg/consent-ledger/testing';

@@ -27,6 +27,14 @@ const ConfigSchema = z.object({
 
   // ─── Object storage ─────────────────────────────────────────────────────
   S3_ENDPOINT: z.string().optional(),
+  /**
+   * Browser-reachable S3 host used ONLY to mint pre-signed URLs (the export
+   * download link is clicked in a browser/email client, which cannot resolve
+   * the internal `S3_ENDPOINT` inside docker). Pre-signed URLs encode the
+   * endpoint, so they must be signed against the public host. Falls back to
+   * `S3_ENDPOINT` when unset (single-host dev). Mirrors the API's field.
+   */
+  S3_PUBLIC_ENDPOINT: z.string().optional(),
   S3_REGION: z.string().default('us-east-1'),
   S3_BUCKET: z.string().default('aggregator-bulk-uploads'),
   S3_ACCESS_KEY_ID: z.string().optional(),
@@ -105,6 +113,14 @@ const ConfigSchema = z.object({
   SIGNALSTACK_ITEM_NETWORK: z.string().default('blue_dot'),
   /** Per-request timeout for signalstack onboard calls. */
   SIGNALSTACK_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
+
+  // ─── Campaign PII export (aggregator-dpg#579) ───────────────────────────
+  // Recipient is the requesting aggregator's email, resolved by the API and
+  // carried on the job — not a worker env.
+  /** Pre-signed GET TTL (seconds) for the export CSV link. Default 1h. */
+  EXPORT_URL_TTL_SECONDS: z.coerce.number().int().positive().default(3600),
+  /** How many export jobs this process runs in parallel. Default 2. */
+  CAMPAIGN_EXPORT_CONCURRENCY: z.coerce.number().int().positive().default(2),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

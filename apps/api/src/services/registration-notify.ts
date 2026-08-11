@@ -11,7 +11,7 @@ import type { FastifyBaseLogger } from 'fastify';
 import { config } from '../config.js';
 import { mintApprovalToken, formatApprovalTtl } from './approval-token.js';
 import { renderAdminReview } from './email-templates/index.js';
-import { getMailer } from './mailer/index.js';
+import { getMailer } from '@aggregator-dpg/mailer';
 import { httpError } from '../errors/http-error.js';
 
 /** Inputs needed to render and deliver the admin-review email. */

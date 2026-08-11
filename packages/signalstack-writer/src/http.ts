@@ -813,7 +813,11 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       const res = await this.requestWithRetry(url, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ item_ids: query.itemIds }),
+        body: JSON.stringify({
+          item_ids: query.itemIds,
+          ...(query.fields !== undefined ? { fields: query.fields } : {}),
+          ...(query.contact !== undefined ? { contact: query.contact } : {}),
+        }),
       });
 
       if (!res.ok) {

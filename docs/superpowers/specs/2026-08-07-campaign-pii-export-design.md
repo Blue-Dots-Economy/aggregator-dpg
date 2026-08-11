@@ -3,8 +3,23 @@
 - **Ticket:** aggregator-dpg#579 (`[campaign-manager] Full participant PII export`)
 - **Umbrella:** Blue-Dots-Economy/signals-dpg#237 (Raya & email integrations for campaign management)
 - **Date:** 2026-08-07
-- **Status:** Approved design, pre-implementation
+- **Status:** Approved design, implemented; revised 2026-08-11.
 - **Scope:** interim / prototype-grade. Deliberately time-boxed; several production controls are consciously deferred (see §11).
+
+> **Revision — 2026-08-11.** Two of the "clean seams" called out in the original
+> §10/§11 have now been taken:
+>
+> 1. **Auth → Keycloak token (#576, shipped).** The interim `x-org-id` header is
+>    gone; the caller org id is the validated token's `signalstack_org_id` claim.
+>    Sections referencing `x-org-id` / `MISSING_ORG_ID` below are annotated with
+>    the shipped behaviour.
+> 2. **Execution → durable BullMQ worker (this revision).** The inline,
+>    un-awaited fire-and-forget task is replaced by an enqueue on a dedicated
+>    `campaign-export` queue consumed by `apps/worker`. The API now only
+>    validates + enqueues and returns `202`; the export runs in the worker with
+>    the standard retry/backoff. See §4, §10, §11. **The export _contents_ are
+>    unchanged by this revision** — the pending name/email/phone+actions
+>    narrowing (the #579 comment) is orthogonal and handled separately.
 
 ## In Plain Terms
 
@@ -41,7 +56,14 @@ required on the Signals side.
   is the aggregator's own mail path (not the notification-service). Migration to
   notification-service is a separate, later effort.
 
-## 2. Ownership & auth model (interim)
+## 2. Ownership & auth model
+
+> **Shipped (#576):** the interim `x-org-id` header described below was replaced
+> by Keycloak Bearer-token auth. The route calls `authenticate(req)` and derives
+> the caller org from the token's **`signalstack_org_id`** claim (→ `actingOrgId`);
+> a missing/invalid token is `401`, a valid token without the claim is `403`.
+> The ownership-scoping guarantee (next bullet) is unchanged — the org id is now
+> sourced from a validated claim instead of a trusted header.
 
 - The **only** thing that proves ownership is the Signals decrypt scoping: called
   with `x-acting-org-id = <org's Signals org id>`, Signals returns **only** items
@@ -76,23 +98,54 @@ no session).
 
 **Responses (synchronous)**
 
-| Status | Code                    | When                                                                        |
-| ------ | ----------------------- | --------------------------------------------------------------------------- |
-| `202`  | —                       | Accepted; background export started. Body: `{ "status": "queued" }`         |
-| `400`  | `BAD_REQUEST`           | Malformed body, non-uuid ids, empty list, or over `EXPORT_MAX_ITEM_IDS`     |
-| `401`  | `MISSING_ORG_ID`        | No `x-org-id` header                                                        |
-| `503`  | `EXPORT_NOT_CONFIGURED` | A required dependency is unconfigured (admin email, S3, Signals, or mailer) |
+| Status | Code                    | When                                                                            |
+| ------ | ----------------------- | ------------------------------------------------------------------------------- |
+| `202`  | —                       | Accepted; export **job enqueued**. Body: `{ "status": "queued", "message": … }` |
+| `400`  | `BAD_REQUEST`           | Malformed body, non-uuid ids, empty list, or over `EXPORT_MAX_ITEM_IDS`         |
+| `401`  | `UNAUTHORIZED`          | Missing/invalid Bearer token _(shipped; was `MISSING_ORG_ID` / `x-org-id`)_     |
+| `403`  | `FORBIDDEN`             | Valid token without a `signalstack_org_id` claim                                |
+| `503`  | `EXPORT_NOT_CONFIGURED` | A required dependency is unconfigured (admin email, S3, Signals, or mailer)     |
 
-After `202` the work is **fire-and-forget**: no status is surfaced to the caller.
-The only delivery signal is the email to the network admin.
+After `202` the caller receives **no further status** — the export runs in the
+worker (with retry) and the only delivery signal is the email to the network
+admin. The `202` now means "durably queued" rather than "started in-process".
 
-## 4. Background job — `runExport({ orgId, itemIds, purpose, requestId }, deps)`
+## 4. Execution model — enqueue (API) → durable worker job
 
-Kicked off **un-awaited** from the handler, wrapped in `.catch(logError)` so a
-failure can never become an unhandled rejection. `deps` are injected so the job
-is unit-testable with fakes: `{ ss, mailer, storage, config, logger }`.
+**Revised (2026-08-11): durable BullMQ, not inline fire-and-forget.**
 
-Steps:
+The aggregator already runs this exact split for bulk-upload (_"the API only
+validates, reserves, and enqueues"_, `apps/api/CLAUDE.md`); campaign export now
+follows the same shape:
+
+- **API side.** After auth + Zod validation, the handler calls
+  `enqueueCampaignExport({ orgId, itemIds, purpose?, requestId? })` — a thin
+  BullMQ enqueue surface mirroring `services/bulk-queue` — and returns `202`
+  immediately. It does **not** touch S3, the mailer, or Signals. The request/
+  response contract in §3 is unchanged (still a bare `202 { status, message }`).
+- **Queue.** A dedicated `campaign-export` queue + `CampaignExportJob` payload
+  in `@aggregator-dpg/queue`. Uses the shared `DEFAULT_JOB_OPTS`
+  (**`attempts: 3`, exponential backoff, `removeOnComplete/​Fail` retention**),
+  so a transient decrypt / S3 / mail failure is retried rather than silently
+  lost. No `jobId` dedup key — repeated calls are intentionally distinct
+  exports (§11 idempotency note).
+- **Worker side.** A new `export` role in `apps/worker` (see `worker-roles.ts`;
+  unset `WORKER_ROLES` still = all roles, so it runs by default) registers a
+  `Worker<CampaignExportJob>` whose processor runs `runExport(payload, deps)` —
+  the same orchestrator as before, now hosted in the worker and wired with the
+  worker's real collaborators (its own S3 client + new presign, the shared
+  mailer, its `signalstack` client).
+
+`runExport(params, deps)` itself is unchanged in shape — pure orchestration with
+injected collaborators so it stays unit-testable with fakes:
+`{ fetchDecryptedProfiles, putObject, signDownloadUrl, sendMail, networkAdminEmail, log }`.
+A thrown error from a `deps` collaborator now **propagates out of the job** so
+BullMQ records the attempt and retries (previously it was swallowed by the
+route's `.catch`); the handled/early-return branches (decrypt `Err`, empty,
+mixed-type) still log-and-return without throwing — those are terminal, not
+retryable, and must not burn all 3 attempts.
+
+Steps (run in the worker):
 
 1. **Resolve + decrypt** — `ss.fetchDecryptedProfiles({ actingOrgId: orgId, itemIds, requestId })`
    → `{ profiles, skipped }`. On `Err`: log failure, abort (no email).
@@ -141,6 +194,15 @@ fields. Single item_type per file ⇒ consistent columns.
 Reused as-is: `S3_BUCKET`, `SIGNALSTACK_BASE_URL` / `SIGNALSTACK_ADMIN_KEY`, the
 existing mailer config. The S3 prefix `campaign-exports/` is a code constant.
 
+**Revised (2026-08-11):** because the export now runs in `apps/worker`, these
+vars must be present in the **worker's** environment, not the API's:
+`EXPORT_NETWORK_ADMIN_EMAIL`, `EXPORT_URL_TTL_SECONDS`, the mailer config
+(`MAIL_PROVIDER` + `SMTP_*` / `SES_*`), and the Signals admin creds (the worker
+already reads `S3_*` and `SIGNALSTACK_*` for bulk-upload). The **API** keeps only
+what the request path needs — `EXPORT_MAX_ITEM_IDS` (request validation) and
+`REDIS_URL` (enqueue). Set the `EXPORT_*`/`MAIL_*` vars on **both** if a single
+process runs both in dev.
+
 ## 8. Error handling
 
 - External calls keep the repo rules (timeout + retry + typed errors). The
@@ -166,34 +228,63 @@ Service tests inject fakes (`SignalStackWriterFake` seeded with profiles; fake
 Route tests: `202` on valid input; `400` on bad/empty/over-limit body; `401`
 missing `x-org-id`; `503` when a dependency is unconfigured. No real network/S3.
 
-## 10. File / module layout
+## 10. File / module layout (revised 2026-08-11)
+
+The move to the worker forces two things that used to be app-local `apps/api`
+services to become shared packages, because the worker cannot import from
+`apps/api/src`:
+
+- **`packages/mailer`** — the mailer transport (interface + SMTP + SES + factory
+  - `./testing` fake) extracted from `apps/api/src/services/mailer`. It has **no
+    app coupling** (reads `process.env` directly), so extraction is mechanical.
+    Consumed by `apps/api` (`support`, `aggregator-approvals`, was `campaign-export`)
+    **and** `apps/worker`.
+- **`packages/profile-csv`** — `buildDecryptedProfilesCsv` extracted from
+  `apps/api/src/services/profile-csv`. Still used by `apps/api` `dashboard.ts`
+  (the synchronous `/dashboard/export/profiles` route) **and** now the worker job.
 
 ```
-apps/api/src/routes/campaign-export.ts                 # route group + requireOrgId preHandler + Zod + 202
-apps/api/src/services/campaign-export/index.ts         # runExport orchestrator + step fns
-apps/api/src/services/campaign-export/__tests__/…      # service unit tests
-apps/api/src/services/object-storage/index.ts          # + signExportDownloadUrl()
-apps/api/src/routes/__tests__/campaign-export.test.ts  # route tests
-apps/api/src/config.ts (+ env schema)                  # EXPORT_* vars
-apps/api/src/app.ts / server.ts                        # register the new route group (outside session auth)
+# shared
+packages/queue/src/index.ts                            # + QueueName.CampaignExport + CampaignExportJob
+packages/mailer/**                                     # extracted mailer (was apps/api/src/services/mailer)
+packages/profile-csv/**                                # extracted CSV builder (was apps/api/src/services/profile-csv)
+
+# API — validate + enqueue only
+apps/api/src/routes/campaign-export.ts                 # auth + Zod + enqueueCampaignExport + 202 (no S3/mail/Signals)
+apps/api/src/services/campaign-export-queue/index.ts   # enqueueCampaignExport (mirrors services/bulk-queue)
+apps/api/src/routes/__tests__/campaign-export.test.ts  # route tests: 202 enqueues, 400/401/403/503
+apps/api/src/config.ts                                 # EXPORT_MAX_ITEM_IDS stays; EXPORT_NETWORK_ADMIN_EMAIL/URL_TTL move to worker
+
+# Worker — consume + run the export
+apps/worker/src/jobs/campaign-export-process.ts        # processor: build deps → runExport
+apps/worker/src/services/campaign-export/index.ts      # runExport orchestrator + renderExportEmail (moved from apps/api)
+apps/worker/src/services/campaign-export/__tests__/…   # orchestrator unit tests (moved from apps/api)
+apps/worker/src/object-storage.ts                      # + putExportObject() + signExportDownloadUrl() (presign)
+apps/worker/src/worker-roles.ts                        # + 'export' role
+apps/worker/src/main.ts                                # register Worker<CampaignExportJob> under the export role
+apps/worker/src/config.ts (+ env)                      # EXPORT_*, MAIL_*/SMTP_*/SES_*
 ```
 
-No new package — the mailer, S3, and Signals client are all app-local `apps/api`
-services, so the job lives beside them. Two clean seams for later: swap the
-un-awaited call for a durable queue enqueue (worker), and swap the `x-org-id`
-preHandler for KC-token validation (#576).
+Remaining clean seam: notification-service migration (§11) — swap
+`packages/mailer` for the notification client without touching the orchestrator.
 
 ## 11. Deferred / out of scope
 
 - **S3 lifecycle auto-delete** — owned by `bluedots-automation` (infra). Until it
   exists, exported objects **persist** in S3 (the presigned link still expires on
   its TTL). Recorded, accepted for interim.
-- **Keycloak-token auth** (#576) — replaces the `x-org-id` header.
-- **Durable execution** — inline background task is not restart-safe; a crash
-  mid-export loses that job with no retry.
+- ~~**Keycloak-token auth** (#576)~~ — **done** (shipped). Org id from the
+  `signalstack_org_id` token claim; see §2.
+- ~~**Durable execution**~~ — **done** (this revision). The export runs as a
+  durable `campaign-export` BullMQ job with 3 attempts + backoff; a worker crash
+  mid-export re-runs the job rather than losing it. (Each attempt re-decrypts and
+  re-uploads a fresh CSV — acceptable; the object key is timestamped so a retry
+  never overwrites a prior attempt's file.)
 - **Audit table** — a single unified metadata-audit table is planned later; this
   feature writes no audit row for now.
-- **Idempotency key** — dropped for the interim (no persistence to dedupe against).
+- **Idempotency key** — still none. No `jobId` dedup on the queue: two identical
+  requests enqueue two distinct exports (matches the interim "no persistence to
+  dedupe against" stance; revisit with the audit table).
 - **Consent / OTP gate** — not required for export in the interim.
 - **notification-service** migration — this feature uses the aggregator's own
   mailer.

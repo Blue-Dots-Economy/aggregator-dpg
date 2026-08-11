@@ -5,12 +5,24 @@ process.env.SIGNALSTACK_BASE_URL = 'http://signals.local';
 process.env.SIGNALSTACK_ADMIN_KEY = 'k';
 process.env.SIGNALSTACK_ACTING_ORG_ID = 'svc';
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
-import { SignalStackWriterFake } from '@aggregator-dpg/signalstack-writer/testing';
-import { _setSignalStackWriter } from '../services/signalstack.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
+import {
+  AggregatorStoreFake,
+  buildAggregator,
+  _setAggregatorStore,
+} from '../services/aggregator-store/index.js';
+
+// The route only enqueues; mock the queue so no real Redis is touched and we
+// can assert the payload and simulate an enqueue failure.
+const { enqueueCampaignExportMock } = vi.hoisted(() => ({
+  enqueueCampaignExportMock: vi.fn(),
+}));
+vi.mock('../services/campaign-export-queue/index.js', () => ({
+  enqueueCampaignExport: enqueueCampaignExportMock,
+}));
 
 const VALID_UUID = '11111111-1111-1111-1111-111111111111';
 
@@ -18,11 +30,13 @@ describe('POST /v1/campaign/export', () => {
   let app: FastifyInstance;
 
   beforeEach(async () => {
-    process.env.EXPORT_NETWORK_ADMIN_EMAIL = 'admin@network.org';
-    // Inject an empty fake writer: decrypt resolves to nothing, so the
-    // fire-and-forget job hits the empty-guard and performs no S3/mail I/O —
-    // keeping these tests deterministic on the synchronous contract.
-    _setSignalStackWriter(new SignalStackWriterFake());
+    enqueueCampaignExportMock.mockReset().mockResolvedValue(undefined);
+
+    // The requesting aggregator (token aggregator_id=agg-1) resolves to this
+    // record; its contact_email is the export recipient.
+    const store = new AggregatorStoreFake();
+    store.seed([buildAggregator({ id: 'agg-1', contactEmail: 'aggregator@org.example' })]);
+    _setAggregatorStore(store);
 
     _resetJwks();
     process.env.KEYCLOAK_URL = 'http://kc.local';
@@ -44,11 +58,11 @@ describe('POST /v1/campaign/export', () => {
 
   afterEach(async () => {
     await app?.close();
-    _setSignalStackWriter(null);
     _setAccessTokenVerifier(null);
+    _setAggregatorStore(null);
   });
 
-  it('returns 202 { status: "queued" } for a valid, configured request', async () => {
+  it('returns 202 { status: "queued" } and enqueues the job for a valid request', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/campaign/export',
@@ -58,6 +72,28 @@ describe('POST /v1/campaign/export', () => {
     expect(res.statusCode).toBe(202);
     expect(res.json().status).toBe('queued');
     expect(res.json().message).toMatch(/network administrator/i);
+    expect(enqueueCampaignExportMock).toHaveBeenCalledTimes(1);
+    const payload = enqueueCampaignExportMock.mock.calls[0]![0];
+    expect(payload).toMatchObject({
+      orgId: 'org_5d3b7fa4-x',
+      itemIds: [VALID_UUID],
+      purpose: 'audit',
+      recipientEmail: 'aggregator@org.example',
+    });
+  });
+
+  it('returns 403 when the requesting aggregator has no resolvable contact email', async () => {
+    // Empty store: findById(agg-1) resolves to null → no recipient.
+    _setAggregatorStore(new AggregatorStoreFake());
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/campaign/export',
+      headers: { authorization: 'Bearer good' },
+      payload: { item_ids: [VALID_UUID] },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error.code).toBe('FORBIDDEN');
+    expect(enqueueCampaignExportMock).not.toHaveBeenCalled();
   });
 
   it('returns 401 UNAUTHORIZED when no Authorization header is sent', async () => {
@@ -68,6 +104,7 @@ describe('POST /v1/campaign/export', () => {
     });
     expect(res.statusCode).toBe(401);
     expect(res.json().error.code).toBe('UNAUTHORIZED');
+    expect(enqueueCampaignExportMock).not.toHaveBeenCalled();
   });
 
   it('returns 401 UNAUTHORIZED for an invalid token', async () => {
@@ -96,6 +133,7 @@ describe('POST /v1/campaign/export', () => {
     });
     expect(res.statusCode).toBe(403);
     expect(res.json().error.code).toBe('FORBIDDEN');
+    expect(enqueueCampaignExportMock).not.toHaveBeenCalled();
   });
 
   it('returns 403 FORBIDDEN when the token has no aggregator_id claim (MISSING_AGGREGATOR_ID)', async () => {
@@ -147,8 +185,8 @@ describe('POST /v1/campaign/export', () => {
     expect(res.statusCode).toBe(400);
   });
 
-  it('returns 503 EXPORT_NOT_CONFIGURED when the network admin email is unset', async () => {
-    delete process.env.EXPORT_NETWORK_ADMIN_EMAIL;
+  it('returns 503 EXPORT_ENQUEUE_FAILED when the job cannot be queued', async () => {
+    enqueueCampaignExportMock.mockRejectedValueOnce(new Error('redis unavailable'));
     const res = await app.inject({
       method: 'POST',
       url: '/v1/campaign/export',
@@ -156,18 +194,6 @@ describe('POST /v1/campaign/export', () => {
       payload: { item_ids: [VALID_UUID] },
     });
     expect(res.statusCode).toBe(503);
-    expect(res.json().error.code).toBe('EXPORT_NOT_CONFIGURED');
-  });
-
-  it('returns 503 EXPORT_NOT_CONFIGURED when no signalstack writer is configured', async () => {
-    _setSignalStackWriter(null);
-    const res = await app.inject({
-      method: 'POST',
-      url: '/v1/campaign/export',
-      headers: { authorization: 'Bearer good' },
-      payload: { item_ids: [VALID_UUID] },
-    });
-    expect(res.statusCode).toBe(503);
-    expect(res.json().error.code).toBe('EXPORT_NOT_CONFIGURED');
+    expect(res.json().error.code).toBe('EXPORT_ENQUEUE_FAILED');
   });
 });

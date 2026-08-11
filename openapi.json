@@ -10078,7 +10078,7 @@
         "tags": [
           "campaign"
         ],
-        "description": "Decrypts the given owned items, writes a CSV to private S3, and emails a short-lived pre-signed link to the configured network admin. Auth: Keycloak Bearer token; the caller org is derived from the token signalstack_org_id claim. Fire-and-forget: returns 202 immediately.",
+        "description": "Enqueues a background job that exports the participant contact fields (name/email/phone, each with profile/user provenance) for the given owned items to a private CSV, and emails a short-lived pre-signed download link to the requesting aggregator. Auth: Keycloak Bearer token; the caller org is derived from the token signalstack_org_id claim, and the recipient from its aggregator_id. Returns 202 once the job is durably queued.",
         "requestBody": {
           "required": true,
           "content": {

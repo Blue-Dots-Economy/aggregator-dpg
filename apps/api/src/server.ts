@@ -11,6 +11,7 @@ import { closeDb } from './db/client.js';
 import { closeRateLimiter } from './services/rate-limiter/index.js';
 import { closeRedis } from './services/redis/index.js';
 import { closeBulkQueue } from './services/bulk-queue/index.js';
+import { closeCampaignExportQueue } from './services/campaign-export-queue/index.js';
 import { getNetworkConfig } from './services/network-config.js';
 import { setApprovalBrand } from './views/approval-pages.js';
 import { setEmailBrand } from './services/email-templates/shared.js';
@@ -56,7 +57,12 @@ async function main(): Promise<void> {
       // previously leaked on SIGTERM (only Fastify + the PG pool were closed).
       await app.close();
       await closeDb();
-      await Promise.allSettled([closeRateLimiter(), closeRedis(), closeBulkQueue()]);
+      await Promise.allSettled([
+        closeRateLimiter(),
+        closeRedis(),
+        closeBulkQueue(),
+        closeCampaignExportQueue(),
+      ]);
       process.exit(0);
     } catch (err) {
       logger.error({ err }, 'error during shutdown');
