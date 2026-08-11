@@ -64,6 +64,10 @@ interface PublicAggregatorConfig {
     label: string;
     plural_label: string;
     item_type: string;
+    /** Mirrors network.json — drives the registration birth-year field (#613). */
+    guardian_consent_required: boolean;
+    /** Mirrors network.json — drives the registration consent step (#613). */
+    go_live_required: string[];
     dashboardTiles?: DashboardTiles;
     status_rules?: StatusRule[];
   }>;
@@ -110,6 +114,8 @@ const AggregatorConfigResponseSchema = z
           label: z.string(),
           plural_label: z.string(),
           item_type: z.string(),
+          guardian_consent_required: z.boolean(),
+          go_live_required: z.array(z.string()),
         })
         .passthrough(),
     ),
@@ -180,6 +186,8 @@ export async function registerAggregatorConfigRoutes(app: FastifyInstance): Prom
             label: d.label,
             plural_label: d.pluralLabel,
             item_type: d.itemType,
+            guardian_consent_required: d.guardianConsentRequired,
+            go_live_required: d.goLiveRequired,
             ...(d.dashboardTiles ? { dashboardTiles: d.dashboardTiles } : {}),
             ...(d.statusRules ? { status_rules: d.statusRules } : {}),
           };

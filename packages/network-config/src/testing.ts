@@ -46,6 +46,8 @@ export function buildBlueDotConfig(
     itemType: 'profile_1.0',
     schema: {},
     identity: { name: 'name', phone: 'phone', email: 'email' },
+    guardianConsentRequired: false,
+    goLiveRequired: [],
   };
   const providerDomain: ResolvedDomain = {
     id: 'provider',
@@ -58,6 +60,8 @@ export function buildBlueDotConfig(
       phone: 'hiringManagerPhoneNumber',
       email: 'hiringManagerEmail',
     },
+    guardianConsentRequired: false,
+    goLiveRequired: [],
   };
   return {
     aggregator: {
@@ -115,6 +119,8 @@ export function buildPurpleDotConfig(
     itemType: 'profile_1.0',
     schema: {},
     identity: { name: 'beneficiary_name', phone: 'mobile_number', email: 'email' },
+    guardianConsentRequired: false,
+    goLiveRequired: [],
   };
   const providerDomain: ResolvedDomain = {
     id: 'provider',
@@ -123,6 +129,8 @@ export function buildPurpleDotConfig(
     itemType: 'profile_1.0',
     schema: {},
     identity: { name: 'contact_name', phone: 'contact_phone', email: 'contact_email' },
+    guardianConsentRequired: false,
+    goLiveRequired: [],
   };
   return {
     aggregator: {
