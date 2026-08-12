@@ -83,6 +83,32 @@ describe('POST /v1/campaign/export', () => {
     });
   });
 
+  it("uses the requesting user's token email as the recipient, over the DB contact_email", async () => {
+    _setAccessTokenVerifier(async (token) => {
+      if (token === 'good') {
+        return {
+          sub: 'u1',
+          aggregator_id: 'agg-1',
+          signalstack_org_id: 'org_5d3b7fa4-x',
+          azp: 'campaign-manager',
+          email: 'user@sanketika.in',
+        };
+      }
+      throw new Error('invalid');
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/campaign/export',
+      headers: { authorization: 'Bearer good' },
+      payload: { item_ids: [VALID_UUID] },
+    });
+    expect(res.statusCode).toBe(202);
+    // token email wins over the seeded aggregator contact_email
+    expect(enqueueCampaignExportMock.mock.calls[0]![0]).toMatchObject({
+      recipientEmail: 'user@sanketika.in',
+    });
+  });
+
   it('returns 401 when the token azp is not an allowed campaign-export client', async () => {
     // A portal/api/bff token (the global allow-list) must NOT be accepted here —
     // the route opts into CAMPAIGN_MANAGER_ALLOWED_AZP (campaign-manager) only.
@@ -157,8 +183,8 @@ describe('POST /v1/campaign/export', () => {
     expect(enqueueCampaignExportMock).not.toHaveBeenCalled();
   });
 
-  it('returns 403 when the requesting aggregator has no resolvable contact email', async () => {
-    // Empty store: findById(agg-1) resolves to null → no recipient.
+  it('returns 403 when the requesting aggregator is not found (inactive gate)', async () => {
+    // Empty store: findById(agg-1) resolves to null → not active.
     _setAggregatorStore(new AggregatorStoreFake());
     const res = await app.inject({
       method: 'POST',
@@ -168,6 +194,23 @@ describe('POST /v1/campaign/export', () => {
     });
     expect(res.statusCode).toBe(403);
     expect(res.json().error.code).toBe('FORBIDDEN');
+    expect(res.json().error.fields.reason).toBe('AGGREGATOR_INACTIVE');
+    expect(enqueueCampaignExportMock).not.toHaveBeenCalled();
+  });
+
+  it('returns 403 RECIPIENT_UNRESOLVED when neither the token nor the aggregator has an email', async () => {
+    // Active aggregator but no contact_email, and the token carries no email claim.
+    const store = new AggregatorStoreFake();
+    store.seed([buildAggregator({ id: 'agg-1', contactEmail: '', status: 'active' })]);
+    _setAggregatorStore(store);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/campaign/export',
+      headers: { authorization: 'Bearer good' },
+      payload: { item_ids: [VALID_UUID] },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error.fields.reason).toBe('RECIPIENT_UNRESOLVED');
     expect(enqueueCampaignExportMock).not.toHaveBeenCalled();
   });
 

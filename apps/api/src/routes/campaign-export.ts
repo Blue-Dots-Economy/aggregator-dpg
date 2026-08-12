@@ -78,18 +78,28 @@ export async function registerCampaignExportRoutes(app: FastifyInstance): Promis
         });
       }
 
-      // Resolve the delivery recipient — the requesting aggregator's own contact
-      // email — from the token's aggregator identity, before enqueuing. Fail
-      // fast (403) so the caller learns immediately rather than via a silent
-      // worker failure.
+      // Authorisation: the requesting aggregator must be active. Resolved before
+      // enqueuing so the caller fails fast (403) rather than via a silent worker
+      // failure — and it also supplies the fallback recipient email below.
       const found = await getAggregatorStore().findById(auth.aggregatorId);
-      if (!found.ok || !found.value?.contactEmail || found.value.status !== 'active') {
+      if (!found.ok || !found.value || found.value.status !== 'active') {
         throw httpError('FORBIDDEN', {
-          detail: 'requesting aggregator is not an active aggregator with a contact email',
+          detail: 'requesting aggregator is not active',
+          fields: { reason: 'AGGREGATOR_INACTIVE' },
+        });
+      }
+
+      // Delivery recipient: prefer the requesting user's own email from the
+      // token (the person who triggered the export), falling back to the
+      // aggregator's stored contact_email. Fail fast (403) if neither is set.
+      const recipientEmail = auth.email ?? found.value.contactEmail;
+      if (!recipientEmail) {
+        throw httpError('FORBIDDEN', {
+          detail:
+            'no recipient email — the token has no email claim and the aggregator has no contact_email',
           fields: { reason: 'RECIPIENT_UNRESOLVED' },
         });
       }
-      const recipientEmail = found.value.contactEmail;
 
       const { item_ids, purpose } = req.body as z.infer<typeof ExportRequestSchema>;
 
