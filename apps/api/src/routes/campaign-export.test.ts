@@ -72,7 +72,7 @@ describe('POST /v1/campaign/export', () => {
     });
     expect(res.statusCode).toBe(202);
     expect(res.json().status).toBe('queued');
-    expect(res.json().message).toMatch(/requesting aggregator/i);
+    expect(res.json().message).toMatch(/registered address/i);
     expect(enqueueCampaignExportMock).toHaveBeenCalledTimes(1);
     const payload = enqueueCampaignExportMock.mock.calls[0]![0];
     expect(payload).toMatchObject({

@@ -4,13 +4,15 @@
  *   POST /v1/campaign/export → 202; enqueues a durable worker job.
  *
  * Auth is a Keycloak Bearer token; the caller's Signals org id is derived from
- * the token's `signalstack_org_id` claim. The route authenticates, resolves the
- * requesting aggregator's contact email (from its `aggregator_id`), validates,
- * and enqueues a `campaign-export` job — the decrypt → CSV → S3 → email work
- * runs in `apps/worker` (the `export` role) with BullMQ retry. The export
- * carries only the participant's name/email/phone (with profile/user
- * provenance). The route never returns PII — only a queued acknowledgement; the
- * export is delivered as a pre-signed link emailed to the requesting aggregator.
+ * the token's `signalstack_org_id` claim. The route authenticates, checks the
+ * aggregator (from `aggregator_id`) is active, resolves the delivery recipient
+ * (the requesting user's token email, or the aggregator's contact_email as a
+ * fallback), validates, and enqueues a `campaign-export` job — the decrypt →
+ * CSV → S3 → email work runs in `apps/worker` (the `export` role) with BullMQ
+ * retry. The export carries only the participant's name/email/phone (with
+ * profile/user provenance). The route never returns PII — only a queued
+ * acknowledgement; the export is delivered as a pre-signed link emailed to the
+ * requesting user.
  * Belongs to `@aggregator-dpg/api`.
  */
 import type { FastifyInstance, FastifyRequest } from 'fastify';
@@ -58,7 +60,7 @@ export async function registerCampaignExportRoutes(app: FastifyInstance): Promis
         tags: ['campaign'],
         summary: 'Request an async participant PII export',
         description:
-          'Enqueues a background job that exports the participant contact fields (name/email/phone, each with profile/user provenance) for the given owned items to a private CSV, and emails a short-lived pre-signed download link to the requesting aggregator. Auth: Keycloak Bearer token; the caller org is derived from the token signalstack_org_id claim, and the recipient from its aggregator_id. Returns 202 once the job is durably queued.',
+          "Enqueues a background job that exports the participant contact fields (name/email/phone, each with profile/user provenance) for the given owned items to a private CSV, and emails a short-lived pre-signed download link to the requesting user. Auth: Keycloak Bearer token; the caller org is derived from the token signalstack_org_id claim, and the recipient is the requesting user's token email (falling back to the aggregator contact_email). Returns 202 once the job is durably queued.",
         security: [{ bearerAuth: [] }],
         body: ExportRequestSchema,
         response: {
@@ -123,7 +125,7 @@ export async function registerCampaignExportRoutes(app: FastifyInstance): Promis
       return reply.code(202).send({
         status: 'queued',
         message:
-          "Export request submitted. A secure, time-limited download link will be emailed to the requesting aggregator's registered contact address once the export is ready.",
+          'Export request submitted. A secure, time-limited download link will be emailed to your registered address once the export is ready.',
       });
     },
   );
