@@ -289,6 +289,18 @@ export interface NetworkDomain {
   dashboard_tiles?: DashboardTiles;
   /** Per-domain status taxonomy + UI copy. Optional passthrough from network.json. */
   status_rules?: StatusRule[];
+  /**
+   * Signalstack U18 flag: when true, minors in this domain route through a
+   * guardian-consent flow, so the registration form must collect a birth year
+   * to determine minor status. Absent ⇒ treated as `false` (no DOB collected).
+   */
+  guardian_consent_required?: boolean;
+  /**
+   * Signalstack go-live gate tokens for this domain (e.g. `schema_required`,
+   * `consent_required`). Drives whether the registration form shows the
+   * profile-creation consent step. Absent ⇒ treated as `[]` (no consent step).
+   */
+  go_live_required?: string[];
   item_schemas: Record<string, Record<string, unknown>>;
 }
 
@@ -340,6 +352,18 @@ export interface ResolvedDomain {
    * this domain). Drives the dashboard status-card labels + descriptions.
    */
   statusRules?: StatusRule[];
+  /**
+   * True when this domain requires guardian consent for minors (mirrors
+   * network.json `guardian_consent_required`). When true the registration
+   * form collects a birth year; defaults to `false` when absent upstream.
+   */
+  guardianConsentRequired: boolean;
+  /**
+   * Go-live gate tokens for this domain (mirrors network.json
+   * `go_live_required`). The registration form shows the profile-creation
+   * consent step iff this includes `consent_required`; defaults to `[]`.
+   */
+  goLiveRequired: string[];
 }
 
 /**
@@ -388,4 +412,36 @@ export abstract class NetworkConfigLoaderBase {
    * re-fetching signalstack.
    */
   abstract load(): Promise<Result<ResolvedNetworkConfig, BaseError | NetworkConfigError>>;
+}
+
+// ─── Registration-form gate predicates (reusable) ────────────────────────────
+
+/**
+ * Go-live gate token that, when present in a domain's `go_live_required`,
+ * means a profile needs profile-creation consent before it can go live.
+ * The single source of truth for the token string across api + web.
+ */
+export const CONSENT_REQUIRED_GATE = 'consent_required';
+
+/**
+ * Whether the registration form should show the profile-creation consent step
+ * for a domain. True iff the domain's go-live gates include
+ * {@link CONSENT_REQUIRED_GATE}. Absent/empty gates ⇒ false (no consent step).
+ *
+ * @param goLiveRequired - The domain's resolved `goLiveRequired` tokens.
+ * @returns True when a consent step is required.
+ */
+export function domainRequiresConsent(goLiveRequired: readonly string[] | undefined): boolean {
+  return (goLiveRequired ?? []).includes(CONSENT_REQUIRED_GATE);
+}
+
+/**
+ * Whether the registration form should collect a birth year for a domain.
+ * True iff the domain requires guardian consent (U18). Absent ⇒ false.
+ *
+ * @param guardianConsentRequired - The domain's resolved flag.
+ * @returns True when a birth year must be collected.
+ */
+export function domainRequiresBirthYear(guardianConsentRequired: boolean | undefined): boolean {
+  return guardianConsentRequired === true;
 }

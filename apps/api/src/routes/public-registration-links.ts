@@ -25,6 +25,7 @@ import { getRegistrationLinksStore } from '../services/registration-links-store/
 import type { RegistrationLink } from '../services/registration-links-store/index.js';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
 import { getNetworkConfig } from '../services/network-config.js';
+import { domainRequiresConsent } from '@aggregator-dpg/network-config/interface';
 import { resolveSubmissionShape, publicHintI18nKey } from '../services/registration-mode/index.js';
 import { getSchemaLoader } from '../services/schema-loader/index.js';
 import { normalisePhone } from '@aggregator-dpg/shared-primitives/phone';
@@ -261,6 +262,11 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
           detail: `link domain '${link.domain}' not declared in network ${networkCfgEarly.network.id}`,
         });
       }
+      // #613: consent is only demanded when this domain gates go-live on
+      // `consent_required`. A domain without that gate (e.g. a provider
+      // configured `["schema_required"]` / none) collects no consent, so the
+      // form omits the step and the submit must not 400 CONSENT_REQUIRED.
+      const consentRequiredForDomain = domainRequiresConsent(linkDomainCfgEarly.goLiveRequired);
 
       // Resolve the link's registration_mode to a form shape via the live
       // network config. Unknown keys fall back to `account_and_profile` (see
@@ -380,7 +386,7 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       // we require consent and forward both. Age is unknown ⇒ treat as adult
       // (form always collects year of birth).
       const isMinor = derivedAge !== undefined && derivedAge <= 18;
-      if (!isMinor) {
+      if (consentRequiredForDomain && !isMinor) {
         const missingConsent: string[] = [];
         if (!termsOk) missingConsent.push('user_terms');
         if (!privacyOk) missingConsent.push('user_privacy');
@@ -391,13 +397,16 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
         }
       }
       const ageNum = isMinor ? undefined : derivedAge;
-      const compliance = isMinor
-        ? undefined
-        : [
-            { key: 'user_terms', value: true },
-            { key: 'user_privacy', value: true },
-            ...(submitMode === 'account_only' ? [] : [{ key: 'profile_creation', value: true }]),
-          ];
+      // Only forward compliance when the domain requires consent AND the
+      // registrant is an adult — otherwise no consent was collected (#613).
+      const compliance =
+        !consentRequiredForDomain || isMinor
+          ? undefined
+          : [
+              { key: 'user_terms', value: true },
+              { key: 'user_privacy', value: true },
+              ...(submitMode === 'account_only' ? [] : [{ key: 'profile_creation', value: true }]),
+            ];
 
       // Identity selectors come from the resolved network config so the
       // route stays generic across signalstack networks. The sniffer
