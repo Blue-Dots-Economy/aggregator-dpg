@@ -84,10 +84,10 @@ function renderExportEmail(i: ExportEmailInput): { subject: string; html: string
     `Records exported: ${i.exported}`,
     `Skipped (not found / not owned): ${i.skipped}`,
     '',
-    `Download (expires ${i.expiresAt}):`,
+    `Download it before ${i.expiresAt}:`,
     i.url,
     '',
-    'This link is time-limited and the file contains personal data. Do not forward it.',
+    'After that the link stops working and the file is permanently deleted from storage — so download it now. The file contains personal data; do not forward this link.',
   ].join('\n');
   const html = [
     '<div style="font-family:sans-serif;font-size:14px;line-height:1.5">',
@@ -98,8 +98,8 @@ function renderExportEmail(i: ExportEmailInput): { subject: string; html: string
     `<li>Records exported: <strong>${i.exported}</strong></li>`,
     `<li>Skipped (not found / not owned): <strong>${i.skipped}</strong></li>`,
     '</ul>',
-    `<p><a href="${esc(i.url)}">Download the export</a> (expires ${esc(i.expiresAt)}).</p>`,
-    '<p style="color:#a00">This link is time-limited and the file contains personal data. Do not forward it.</p>',
+    `<p><a href="${esc(i.url)}">Download the export</a> before <strong>${esc(i.expiresAt)}</strong>.</p>`,
+    '<p style="color:#a00">After that the link stops working and the file is <strong>permanently deleted</strong> from storage — so download it now. The file contains personal data; do not forward this link.</p>',
     '</div>',
   ].join('');
   return { subject, html, text };
