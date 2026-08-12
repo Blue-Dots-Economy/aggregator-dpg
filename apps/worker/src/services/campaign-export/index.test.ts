@@ -110,6 +110,8 @@ describe('runExport', () => {
     expect(h.mails[0]!.text).toContain('Records exported: 2');
     expect(h.mails[0]!.text).toContain('Skipped (not found / not owned): 1');
     expect(h.mails[0]!.text).toContain('https://signed.example/');
+    // ISO expiry (2026-08-01T01:00:00.000Z) rendered human-friendly in UTC
+    expect(h.mails[0]!.text).toContain('01 Aug 2026, 01:00 UTC');
   });
 
   it('does nothing (no upload, no email) when no items resolve', async () => {

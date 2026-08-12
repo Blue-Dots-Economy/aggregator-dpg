@@ -73,6 +73,26 @@ function esc(value: string): string {
   return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 }
 
+/**
+ * Formats an ISO-8601 expiry timestamp for a human reader, in UTC — e.g.
+ * `2026-08-13T06:13:34.191Z` → `13 Aug 2026, 06:13 UTC`. Falls back to the raw
+ * value if it can't be parsed.
+ */
+function formatExpiry(iso: string): string {
+  const when = new Date(iso);
+  if (Number.isNaN(when.getTime())) return iso;
+  const formatted = new Intl.DateTimeFormat('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: 'UTC',
+  }).format(when);
+  return `${formatted} UTC`;
+}
+
 /** Renders the export-ready notification (link only — never the PII itself). */
 function renderExportEmail(i: ExportEmailInput): { subject: string; html: string; text: string } {
   const subject = `PII export ready — ${i.exported} records`;
@@ -84,7 +104,7 @@ function renderExportEmail(i: ExportEmailInput): { subject: string; html: string
     `Records exported: ${i.exported}`,
     `Skipped (not found / not owned): ${i.skipped}`,
     '',
-    `Download it before ${i.expiresAt}:`,
+    `Download it before ${formatExpiry(i.expiresAt)}:`,
     i.url,
     '',
     'After that the link stops working and the file is permanently deleted from storage — so download it now. The file contains personal data; do not forward this link.',
@@ -98,7 +118,7 @@ function renderExportEmail(i: ExportEmailInput): { subject: string; html: string
     `<li>Records exported: <strong>${i.exported}</strong></li>`,
     `<li>Skipped (not found / not owned): <strong>${i.skipped}</strong></li>`,
     '</ul>',
-    `<p><a href="${esc(i.url)}">Download the export</a> before <strong>${esc(i.expiresAt)}</strong>.</p>`,
+    `<p><a href="${esc(i.url)}">Download the export</a> before <strong>${formatExpiry(i.expiresAt)}</strong>.</p>`,
     '<p style="color:#a00">After that the link stops working and the file is <strong>permanently deleted</strong> from storage — so download it now. The file contains personal data; do not forward this link.</p>',
     '</div>',
   ].join('');
