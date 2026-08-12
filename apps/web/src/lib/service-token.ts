@@ -11,6 +11,8 @@
  * round-trip per upstream call.
  */
 
+import { stripTrailingSlashes } from '@aggregator-dpg/shared-primitives/url';
+
 interface CachedToken {
   accessToken: string;
   expiresAt: number;
@@ -27,7 +29,7 @@ interface ServiceTokenConfig {
 }
 
 function readConfig(): ServiceTokenConfig {
-  const issuer = mustEnv('OIDC_ISSUER').replace(/\/+$/, '');
+  const issuer = stripTrailingSlashes(mustEnv('OIDC_ISSUER'));
   return {
     tokenUrl: `${issuer}/protocol/openid-connect/token`,
     clientId: mustEnv('BFF_SERVICE_CLIENT_ID'),

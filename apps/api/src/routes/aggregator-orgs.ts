@@ -23,7 +23,7 @@ import { orgHierarchyEnabled } from '../config.js';
 import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js';
 import { getIdpAdmin, KC_ATTR } from '../services/idp-admin/index.js';
 import { sendOrgReviewEmail } from '../services/org-registration-notify.js';
-import { normalisePhone } from '../services/phone.js';
+import { normalisePhone } from '@aggregator-dpg/shared-primitives/phone';
 import { splitName } from '../services/name.js';
 import { checkSubmitRate } from '../services/submit-rate.js';
 import { slugFromName } from '../services/slug.js';

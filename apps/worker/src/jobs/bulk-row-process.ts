@@ -28,7 +28,7 @@ import { getDb, schema } from '../db.js';
 import { getSchemaLoader } from '../services/schema-loader.js';
 import { getRedis } from '../services/redis.js';
 import { enqueueFinalise } from '../services/bulk-queue.js';
-import { normalisePhone, normaliseEmail } from '../services/phone.js';
+import { normalisePhone, normaliseEmail } from '@aggregator-dpg/shared-primitives/phone';
 import { getNetworkConfig } from '../services/network-config.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
 import { config } from '../config.js';
@@ -345,8 +345,7 @@ async function commit(
  * Returns void; status is observable via structured logs.
  */
 type SignalStackPushResult =
-  | { success: true }
-  | { success: false; code: string; message: string; ownedElsewhere?: boolean };
+  { success: true } | { success: false; code: string; message: string; ownedElsewhere?: boolean };
 
 export async function pushToSignalStack(
   job: BulkRowProcessJob,

@@ -124,7 +124,7 @@ export async function headObject(key: string): Promise<ObjectHead | null> {
     );
     if (!result.ETag) return null;
     return {
-      etag: result.ETag.replace(/"/g, ''),
+      etag: result.ETag.replaceAll('"', ''),
       contentLength: typeof result.ContentLength === 'number' ? result.ContentLength : 0,
     };
   } catch (err: unknown) {

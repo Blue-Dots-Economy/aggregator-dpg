@@ -47,7 +47,7 @@ function pickBrand(override: PageBrand | undefined): PageBrand {
 function shade(hex: string, percent: number): string {
   const m = /^#([0-9a-f]{6})$/i.exec(hex);
   if (!m || !m[1]) return hex;
-  const num = parseInt(m[1], 16);
+  const num = Number.parseInt(m[1], 16);
   const r = (num >> 16) & 0xff;
   const g = (num >> 8) & 0xff;
   const b = num & 0xff;
@@ -84,7 +84,7 @@ interface ShellOptions {
 function hexToRgba(hex: string, alpha: number): string {
   const m = /^#([0-9a-f]{6})$/i.exec(hex);
   if (!m || !m[1]) return `rgba(79, 70, 229, ${alpha})`;
-  const num = parseInt(m[1], 16);
+  const num = Number.parseInt(m[1], 16);
   return `rgba(${(num >> 16) & 0xff}, ${(num >> 8) & 0xff}, ${num & 0xff}, ${alpha})`;
 }
 
@@ -447,9 +447,9 @@ function resultIconSvg(status: 'success' | 'error' | 'info'): string {
 
 function escape(s: string): string {
   return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
 }
