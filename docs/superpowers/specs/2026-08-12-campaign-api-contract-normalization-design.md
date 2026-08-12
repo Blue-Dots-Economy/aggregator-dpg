@@ -20,13 +20,27 @@ The three campaign endpoints are the **same request shape over a different chann
 
 **Headers:** `Idempotency-Key` (optional; request-level idempotency), `x-request-id` (optional; propagated as the correlation/trace id).
 
-**Body** (`application/json`, strict — unknown keys rejected):
+**Body** (`application/json`) — a fixed three-key envelope: `item_ids`, `metadata`, `content`.
 
-| Field                     | Type          | Required | Notes                                                                            |
-| ------------------------- | ------------- | -------- | -------------------------------------------------------------------------------- |
-| `item_ids`                | `uuid[]`      | yes      | 1 … `CAMPAIGN_<CHANNEL>_MAX_ITEMS`; over cap → `400` (rejected, never truncated) |
-| `purpose`                 | `string ≤500` | no       | audit context; echoed to the audit log, never to participants                    |
-| _(channel content block)_ | —             | per §5   | the only part that varies                                                        |
+```jsonc
+{
+  "item_ids": ["<uuid>", "..."], // required
+  "metadata": [
+    // optional; open list of {key, value}
+    { "key": "purpose", "value": "Q3 follow-up" },
+    { "key": "consent", "value": "<ref-or-json>" },
+  ],
+  "content": {/* endpoint-specific payload, its own schema — see §6 */},
+}
+```
+
+| Field      | Type                               | Required | Notes                                                                                                                                                                                                                                                                                                        |
+| ---------- | ---------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `item_ids` | `uuid[]`                           | yes      | 1 … `CAMPAIGN_<CHANNEL>_MAX_ITEMS`; over cap → `400` (rejected, never truncated)                                                                                                                                                                                                                             |
+| `metadata` | `{ key: string, value: string }[]` | no       | **Open** key/value list for cross-cutting inputs (e.g. `purpose`/`reason`, `consent`). Keys can be **added or removed without changing this contract** — recognised keys are interpreted where relevant (audit, consent); unknown keys are accepted and ignored. Structured values are JSON-encoded strings. |
+| `content`  | `object`                           | per §6   | Endpoint-specific payload with its **own schema** — the only part that varies by channel.                                                                                                                                                                                                                    |
+
+Strictness: the **top-level envelope is strict** (only these three keys); **`content` is strict** against its per-endpoint schema (§6); **`metadata` is open** by design. `purpose`/`consent` are metadata keys, not top-level fields — the audit log (#617) sources them from `metadata`.
 
 ## 3. Success response — `202`
 
@@ -49,11 +63,13 @@ Shared codes: `UNAUTHORIZED` (401) · `FORBIDDEN` (403; sub-codes `MISSING_SIGNA
 - **`GET /v1/campaign/{channel}/{job_id}`** — request-level status + **derived** counts + paginated per-item rows (`item_id`, `status`, `provider_ref`, skip/error). Org-scoped; another org's job → **403** (never a 404 existence-leak). Mirrors `GET /v1/bulk-uploads/:id`.
 - **`GET /v1/campaign/{channel}`** — paginated, org-scoped list.
 
-## 6. Per-channel content block (the only variance)
+## 6. `content` — per-endpoint schema (the only variance)
 
-- **voice:** `agent_id` (required); optional Raya passthrough forwarded **as-is** (no server defaults): `schedule?`, `max_retries?`, `retry_after_hrs?`, `selected_statuses?`, `concurrency?`. Shape-validated only.
-- **email:** `subject` (≤200), `body_markdown` (≤20 000), `reply_to?`. Placeholders `{{name|first_name|last_name|email|phone}}`; an unknown token → `400 UNKNOWN_PLACEHOLDER` at submit (fail-closed).
-- **export:** no caller content block beyond `item_ids`/`purpose`; fields resolved per `CAMPAIGN_EXPORT_FIELDS` (`contact`|`full`) and delivery per `CAMPAIGN_EXPORT_RECIPIENT` (`requester`|`network_admin`) — both config.
+`content` is an object validated against a per-endpoint schema; swapping channels swaps only this object.
+
+- **voice:** `{ agent_id }` (required) + optional Raya passthrough forwarded **as-is** (no server defaults): `schedule?`, `max_retries?`, `retry_after_hrs?`, `selected_statuses?`, `concurrency?`. Shape-validated only.
+- **email:** `{ subject (≤200), body_markdown (≤20 000), reply_to? }`. Placeholders `{{name|first_name|last_name|email|phone}}`; an unknown token → `400 UNKNOWN_PLACEHOLDER` at submit (fail-closed).
+- **export:** `{}` — empty/reserved in v1. Field-set and delivery are resolved from `CAMPAIGN_EXPORT_FIELDS` (`contact`|`full`) and `CAMPAIGN_EXPORT_RECIPIENT` (`requester`|`network_admin`) config, not the body.
 
 ## 7. Config (this spec)
 

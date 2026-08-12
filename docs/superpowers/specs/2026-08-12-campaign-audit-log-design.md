@@ -30,7 +30,7 @@ Indexes: `(actor_org_id, created_at)`, `(correlation_id)`, `(channel, created_at
 
 ## 4. Lifecycle
 
-- **On request accept** (API): write a `requested` event — actor, channel/action, `pii_fields`, `item_count`, `purpose`, `endpoint`, `correlation_id`, `requested_at`.
+- **On request accept** (API): write a `requested` event — actor, channel/action, `pii_fields`, `item_count`, `purpose` + `consent_ref` (**sourced from request `metadata` keys**), `endpoint`, `correlation_id`, `requested_at`.
 - **On completion** (worker): write a `completed`/`failed` event — final counts, `destination`, `completed_at`, `error_code` — sharing the `correlation_id`.
 
 ## 5. Relationship to the other specs

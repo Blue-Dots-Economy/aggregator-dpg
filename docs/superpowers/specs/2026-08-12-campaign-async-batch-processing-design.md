@@ -16,17 +16,17 @@ Reuse aggregator-dpg's bulk **machinery**, not its table:
 
 ### 2.1 `campaign_job` (batch/request level)
 
-| Column                                                              | Purpose                                                                                                                                         |
-| ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id uuid PK` (= `job_id`)                                           | handle returned in 202                                                                                                                          |
-| `aggregator_id`                                                     | owner — poll scoping                                                                                                                            |
-| `channel enum('voice','email','export')`                            | which handler                                                                                                                                   |
-| `status enum('queued','processing','partial','completed','failed')` | lifecycle                                                                                                                                       |
-| `status_reason text`                                                | last transition detail                                                                                                                          |
-| `channel_params jsonb`                                              | request content (voice: agent_id + optional Raya passthrough; email: subject/body_markdown/reply_to; export: resolved field-set/recipient mode) |
-| `idempotency_key text`                                              | request idempotency (unique when present)                                                                                                       |
-| `last_progress_at`                                                  | watchdog heartbeat                                                                                                                              |
-| `created_at`, `updated_at`, `completed_at`                          | timing                                                                                                                                          |
+| Column                                                              | Purpose                                                                                                                              |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `id uuid PK` (= `job_id`)                                           | handle returned in 202                                                                                                               |
+| `aggregator_id`                                                     | owner — poll scoping                                                                                                                 |
+| `channel enum('voice','email','export')`                            | which handler                                                                                                                        |
+| `status enum('queued','processing','partial','completed','failed')` | lifecycle                                                                                                                            |
+| `status_reason text`                                                | last transition detail                                                                                                               |
+| `channel_params jsonb`                                              | the request's `content` object (per-endpoint) + any relevant `metadata` (e.g. purpose/consent) — verbatim from the contract envelope |
+| `idempotency_key text`                                              | request idempotency (unique when present)                                                                                            |
+| `last_progress_at`                                                  | watchdog heartbeat                                                                                                                   |
+| `created_at`, `updated_at`, `completed_at`                          | timing                                                                                                                               |
 
 Indexes: `(aggregator_id, status)`, unique `(idempotency_key) WHERE idempotency_key IS NOT NULL`.
 **Counts are derived** (`COUNT … GROUP BY status` over `campaign_job_item`) at poll time — no counter columns, no drift.
