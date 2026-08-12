@@ -14,6 +14,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { load as parseYaml } from 'js-yaml';
 import { ConfigError } from '@aggregator-dpg/shared-primitives/errors';
+import { sliceFromStore, getFromStore, requireFromStore } from '../store-access.js';
 import type { ConfigChangeCallback, Env, Unsubscribe } from '../interface.js';
 import { ConfigServiceBase } from '../interface.js';
 import { discoverPackages, type RegisteredPackage } from '../discovery.js';
@@ -23,17 +24,6 @@ import { validateConfig } from '../validate.js';
 import { startWatcher } from './watcher.js';
 export { resolveEnv } from '../env.js';
 export { loadConsentConfig } from './consent-loader.js';
-
-/**
- * Resolves a dotted path into a nested object.
- * Returns undefined if any segment along the path is missing.
- */
-function resolvePath(obj: Record<string, unknown>, path: string): unknown {
-  return path.split('.').reduce<unknown>((current, key) => {
-    if (current === undefined || current === null || typeof current !== 'object') return undefined;
-    return (current as Record<string, unknown>)[key];
-  }, obj);
-}
 
 /**
  * Loads YAML from disk. Returns an empty object if the file does not exist.
@@ -152,14 +142,7 @@ export class FsConfigService extends ConfigServiceBase {
    * @throws {ConfigError} With code CONFIG_KEY_MISSING if the key is absent.
    */
   slice<T>(key: string): T {
-    const value = this.store[key];
-    if (value === undefined) {
-      throw new ConfigError(`Config slice not found: "${key}"`, {
-        code: 'CONFIG_KEY_MISSING',
-        details: { key },
-      });
-    }
-    return value as T;
+    return sliceFromStore<T>(this.store, key);
   }
 
   /**
@@ -168,7 +151,7 @@ export class FsConfigService extends ConfigServiceBase {
    * @param path - Dotted key path, e.g. "signalStack.baseUrl".
    */
   get<T = unknown>(path: string): T | undefined {
-    return resolvePath(this.store, path) as T | undefined;
+    return getFromStore<T>(this.store, path);
   }
 
   /**
@@ -178,14 +161,7 @@ export class FsConfigService extends ConfigServiceBase {
    * @throws {ConfigError} If the path does not exist or the value is undefined.
    */
   require<T = unknown>(path: string): T {
-    const value = resolvePath(this.store, path);
-    if (value === undefined) {
-      throw new ConfigError(`Required config key not found: "${path}"`, {
-        code: 'CONFIG_KEY_MISSING',
-        details: { path },
-      });
-    }
-    return value as T;
+    return requireFromStore<T>(this.store, path);
   }
 
   /**

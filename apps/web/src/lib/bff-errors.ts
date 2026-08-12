@@ -37,7 +37,7 @@ export function serviceUnavailableResponse(service: string, detail?: string): Ne
   return NextResponse.json(
     {
       error: 'ServiceUnavailable',
-      code: `${service.toUpperCase().replace(/-/g, '_')}_UPSTREAM_FAILED`,
+      code: `${service.toUpperCase().replaceAll('-', '_')}_UPSTREAM_FAILED`,
       message: `The ${service} service is temporarily unreachable. Please try again shortly.`,
       detail: detail ?? 'unknown error',
     },

@@ -173,7 +173,7 @@ export function PublicRegistrationView({
   const yobNum = Number(yearOfBirth.trim());
   const yobValid =
     /^\d{4}$/.test(yearOfBirth.trim()) && yobNum >= currentYear - 120 && yobNum <= currentYear;
-  const derivedAge = yobValid ? currentYear - yobNum : NaN;
+  const derivedAge = yobValid ? currentYear - yobNum : Number.NaN;
   const isMinor = yobValid && derivedAge <= 18;
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
   const brandShort = cfg.brand.short_name;

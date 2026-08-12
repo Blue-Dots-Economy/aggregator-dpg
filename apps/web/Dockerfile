@@ -29,7 +29,7 @@ COPY packages/tsconfig/package.json           packages/tsconfig/package.json
 COPY packages/config-loader/package.json      packages/config-loader/package.json
 COPY packages/shared-primitives/package.json  packages/shared-primitives/package.json
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
-    pnpm install --frozen-lockfile --filter @aggregator-dpg/web...
+    pnpm install --frozen-lockfile --ignore-scripts --filter @aggregator-dpg/web...
 
 # ── builder ───────────────────────────────────────────────────────────────────
 FROM installer AS builder

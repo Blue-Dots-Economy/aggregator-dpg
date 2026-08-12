@@ -473,7 +473,7 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
         .header('Content-Type', 'text/csv; charset=utf-8')
         .header(
           'Content-Disposition',
-          `attachment; filename="${result.value.filename.replace(/"/g, '')}"`,
+          `attachment; filename="${result.value.filename.replaceAll('"', '')}"`,
         )
         .send(result.value.csv);
     },
@@ -555,7 +555,7 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
 
       return reply
         .header('Content-Type', 'text/csv; charset=utf-8')
-        .header('Content-Disposition', `attachment; filename="${filename.replace(/"/g, '')}"`)
+        .header('Content-Disposition', `attachment; filename="${filename.replaceAll('"', '')}"`)
         .send(csv);
     },
   );

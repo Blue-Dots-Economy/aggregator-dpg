@@ -17,7 +17,7 @@ FROM base AS installer
 WORKDIR /app
 COPY . .
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
-    pnpm install --frozen-lockfile --filter "@aggregator-dpg/worker..."
+    pnpm install --frozen-lockfile --ignore-scripts --filter "@aggregator-dpg/worker..."
 
 # ── builder: compile workspace + worker ──────────────────────────────────────
 # pnpm runs `build` topologically across the worker subgraph.

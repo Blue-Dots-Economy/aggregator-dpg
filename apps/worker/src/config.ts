@@ -20,9 +20,13 @@ const ConfigSchema = z.object({
    */
   NODE_TLS_REJECT_UNAUTHORIZED: z.string().optional(),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
-  DATABASE_URL: z
-    .string()
-    .default('postgres://aggregator:aggregator-dev@localhost:5433/aggregator'),
+  /**
+   * Postgres connection string. Deliberately has **no default** — the URL
+   * carries credentials, so embedding one in source would ship a usable
+   * secret and mask a misconfigured deploy behind a silent fallback to
+   * localhost. Startup fails when it is unset.
+   */
+  DATABASE_URL: z.string().min(1, 'DATABASE_URL must be set'),
   REDIS_URL: z.string().default('redis://localhost:6379'),
 
   // ─── Object storage ─────────────────────────────────────────────────────

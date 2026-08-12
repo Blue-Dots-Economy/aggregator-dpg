@@ -396,6 +396,61 @@ describe('dashboardService.dashboardExport', () => {
     expect(result.filename).toBe('export file.csv');
   });
 
+  it('stops the filename* value at the next parameter', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response('data', {
+        status: 200,
+        headers: {
+          'content-disposition': "attachment; filename*=UTF-8''a%20b.csv; size=42",
+        },
+      }),
+    ) as unknown as typeof fetch;
+    const result = await dashboardService.dashboardExport({ domain: 'seeker' });
+    expect(result.filename).toBe('a b.csv');
+  });
+
+  it('falls back to the plain filename when filename* has no charset delimiter', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response('data', {
+        status: 200,
+        headers: {
+          'content-disposition': 'attachment; filename*=broken; filename="plain.csv"',
+        },
+      }),
+    ) as unknown as typeof fetch;
+    const result = await dashboardService.dashboardExport({ domain: 'seeker' });
+    expect(result.filename).toBe('plain.csv');
+  });
+
+  it('falls back to the plain filename when filename* is not valid percent-encoding', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response('data', {
+        status: 200,
+        headers: {
+          'content-disposition': 'attachment; filename*=UTF-8\'\'%E0%A4%A; filename="plain.csv"',
+        },
+      }),
+    ) as unknown as typeof fetch;
+    const result = await dashboardService.dashboardExport({ domain: 'seeker' });
+    expect(result.filename).toBe('plain.csv');
+  });
+
+  it('resolves a pathological non-terminating filename* header without hanging', async () => {
+    // Regression guard for the super-linear parse this replaced: a long run of
+    // non-quote characters after `filename*=` that never reaches the `''`
+    // charset delimiter used to be rescanned from every start offset.
+    const hostile = `attachment; filename*=${'a'.repeat(50_000)}`;
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response('data', { status: 200, headers: { 'content-disposition': hostile } }),
+      ) as unknown as typeof fetch;
+    const started = performance.now();
+    const result = await dashboardService.dashboardExport({ domain: 'seeker' });
+    expect(performance.now() - started).toBeLessThan(1_000);
+    expect(result.filename).toMatch(/^aggregator-dashboard-all-\d{4}-\d{2}-\d{2}\.csv$/);
+  });
+
   it('surfaces the upstream JSON error detail on failure', async () => {
     globalThis.fetch = vi
       .fn()

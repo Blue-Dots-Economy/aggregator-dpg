@@ -28,7 +28,7 @@ import { getNetworkConfig } from '../services/network-config.js';
 import { domainRequiresConsent } from '@aggregator-dpg/network-config/interface';
 import { resolveSubmissionShape, publicHintI18nKey } from '../services/registration-mode/index.js';
 import { getSchemaLoader } from '../services/schema-loader/index.js';
-import { normalisePhone } from '../services/phone.js';
+import { normalisePhone } from '@aggregator-dpg/shared-primitives/phone';
 import {
   LIFECYCLE_STATUSES,
   resolveLifecycle,

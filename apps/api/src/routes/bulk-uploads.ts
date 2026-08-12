@@ -730,10 +730,10 @@ async function loadCountsFromRedis(uploadId: string): Promise<UploadCounts> {
       redis.hmget(`${ns}:counters`, 'passed', 'failed', 'skipped'),
       redis.hget(`${ns}:meta`, 'total_rows'),
     ]);
-    const passed = parseInt(counters[0] ?? '0', 10) || 0;
-    const failed = parseInt(counters[1] ?? '0', 10) || 0;
-    const skipped = parseInt(counters[2] ?? '0', 10) || 0;
-    const totalRows = meta ? parseInt(meta, 10) || null : null;
+    const passed = Number.parseInt(counters[0] ?? '0', 10) || 0;
+    const failed = Number.parseInt(counters[1] ?? '0', 10) || 0;
+    const skipped = Number.parseInt(counters[2] ?? '0', 10) || 0;
+    const totalRows = meta ? Number.parseInt(meta, 10) || null : null;
     return { totalRows, passed, failed, skipped };
   } catch {
     return ZERO_COUNTS;
