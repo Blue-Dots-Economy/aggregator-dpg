@@ -530,7 +530,7 @@ services:
       SES_FROM: ${SES_FROM:-}
       SES_CONFIGURATION_SET: ${SES_CONFIGURATION_SET:-}
       # ─── Campaign PII export tunables (#579) ───────────────────────
-      EXPORT_URL_TTL_SECONDS: ${EXPORT_URL_TTL_SECONDS:-3600}
+      EXPORT_URL_TTL_SECONDS: ${EXPORT_URL_TTL_SECONDS:-86400}
       CAMPAIGN_EXPORT_CONCURRENCY: ${CAMPAIGN_EXPORT_CONCURRENCY:-2}
       # ─── Schemas (participant validators) ──────────────────────────
       # Brand selectors — the worker derives AGGREGATOR_CONFIG_PATH and SCHEMA_ROOT_DIR

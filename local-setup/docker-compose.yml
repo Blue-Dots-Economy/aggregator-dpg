@@ -557,7 +557,7 @@ services:
       SMTP_USER: ""
       SMTP_PASSWORD: ""
       # Campaign PII export tunables (#579).
-      EXPORT_URL_TTL_SECONDS: ${EXPORT_URL_TTL_SECONDS:-3600}
+      EXPORT_URL_TTL_SECONDS: ${EXPORT_URL_TTL_SECONDS:-86400}
       CAMPAIGN_EXPORT_CONCURRENCY: ${CAMPAIGN_EXPORT_CONCURRENCY:-2}
       SCHEMA_ROOT_DIR: /app/config/${AGGREGATOR_NETWORK:-blue_dot}/schemas
       AGGREGATOR_CONFIG_PATH: /app/config/${AGGREGATOR_NETWORK:-blue_dot}/aggregator.config.yaml

@@ -121,8 +121,13 @@ const ConfigSchema = z.object({
   // ─── Campaign PII export (aggregator-dpg#579) ───────────────────────────
   // Recipient is the requesting aggregator's email, resolved by the API and
   // carried on the job — not a worker env.
-  /** Pre-signed GET TTL (seconds) for the export CSV link. Default 1h. */
-  EXPORT_URL_TTL_SECONDS: z.coerce.number().int().positive().default(3600),
+  /**
+   * Pre-signed GET TTL (seconds) for the export CSV link. Default 1 day (86400).
+   * Keep in step with the S3 lifecycle rule that deletes the file at expiry
+   * (bluedots-automation `global.campaignExportExpiryDays` = this ÷ 86400), so
+   * the link and the file expire together.
+   */
+  EXPORT_URL_TTL_SECONDS: z.coerce.number().int().positive().default(86400),
   /** How many export jobs this process runs in parallel. Default 2. */
   CAMPAIGN_EXPORT_CONCURRENCY: z.coerce.number().int().positive().default(2),
 });
