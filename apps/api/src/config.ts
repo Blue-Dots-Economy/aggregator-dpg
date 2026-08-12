@@ -146,6 +146,8 @@ const ConfigSchema = z.object({
   QR_DOWNLOAD_URL_TTL_SECONDS: z.coerce.number().int().positive().default(900),
   /** Max `item_ids` accepted per `POST /v1/campaign/export` request body. */
   EXPORT_MAX_ITEM_IDS: z.coerce.number().int().positive().default(500),
+  /** Max `item_ids` (recipients) accepted per `POST /v1/campaign/email` request body. */
+  EMAIL_MAX_RECIPIENTS: z.coerce.number().int().positive().default(200),
 
   // ─── Approval links ───────────────────────────────────────────────────────
   /**

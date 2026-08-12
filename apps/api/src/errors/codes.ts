@@ -54,6 +54,20 @@ export const ERR = {
     detail: 'The export request could not be queued for processing. Please retry shortly.',
     hint: 'The BullMQ enqueue failed — most likely Redis is unreachable. Check REDIS_URL and the queue Redis. (Downstream export config — network-admin email, Signals creds — lives on the worker and is not preflighted here.)',
   },
+  EMAIL_ENQUEUE_FAILED: {
+    code: 'EMAIL_ENQUEUE_FAILED',
+    status: 503,
+    title: 'Email could not be queued',
+    detail: 'The campaign email request could not be queued for processing. Please retry shortly.',
+    hint: 'The BullMQ enqueue failed — most likely Redis is unreachable. Check REDIS_URL and the queue Redis. (Mailer + Signals creds live on the worker and are not preflighted here.)',
+  },
+  UNKNOWN_PLACEHOLDER: {
+    code: 'UNKNOWN_PLACEHOLDER',
+    status: 400,
+    title: 'Unknown template placeholder',
+    detail: 'The subject or body contains a placeholder that is not supported.',
+    hint: 'Only the fixed set is allowed: {{name}}, {{first_name}}, {{last_name}}, {{email}}, {{phone}}. See response.error.fields.unknown for the offending tokens.',
+  },
   CONSENT_REQUIRED: {
     code: 'CONSENT_REQUIRED',
     status: 400,

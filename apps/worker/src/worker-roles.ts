@@ -12,9 +12,10 @@
 
 /**
  * Selectable consumer roles. `cron` covers link-metrics + watchdog ticks;
- * `export` runs the campaign PII export job (aggregator-dpg#579).
+ * `export` runs the campaign PII export job (aggregator-dpg#579); `email` runs
+ * the campaign participant email job (aggregator-dpg#578).
  */
-export const WORKER_ROLES = ['file', 'row', 'finalise', 'cron', 'export'] as const;
+export const WORKER_ROLES = ['file', 'row', 'finalise', 'cron', 'export', 'email'] as const;
 
 /** A single worker role. */
 export type WorkerRole = (typeof WORKER_ROLES)[number];

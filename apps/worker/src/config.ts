@@ -121,6 +121,8 @@ const ConfigSchema = z.object({
   EXPORT_URL_TTL_SECONDS: z.coerce.number().int().positive().default(3600),
   /** How many export jobs this process runs in parallel. Default 2. */
   CAMPAIGN_EXPORT_CONCURRENCY: z.coerce.number().int().positive().default(2),
+  /** How many recipients a single campaign-email job sends in parallel. Default 5. */
+  EMAIL_SEND_CONCURRENCY: z.coerce.number().int().positive().default(5),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
