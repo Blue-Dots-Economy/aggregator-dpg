@@ -11,6 +11,7 @@
  * @module @aggregator-dpg/api
  */
 import { afterEach, describe, expect, it } from 'vitest';
+import { ConfigError } from '@aggregator-dpg/shared-primitives/errors';
 import { _setDbClients, closeDb, getDb, getPool } from '../client.js';
 
 afterEach(async () => {
@@ -21,14 +22,23 @@ afterEach(async () => {
 });
 
 describe('getPool', () => {
-  it('creates a pool using DATABASE_URL / defaults when no override is given', () => {
+  it('creates a pool from DATABASE_URL when no override is given', () => {
     const pool = getPool();
-    expect(pool.options.connectionString).toBe(
-      process.env.DATABASE_URL ?? 'postgres://aggregator:aggregator-dev@localhost:5433/aggregator',
-    );
+    expect(pool.options.connectionString).toBe(process.env.DATABASE_URL);
     expect(pool.options.max).toBe(10);
     expect(pool.options.idleTimeoutMillis).toBe(10_000);
     expect(pool.options.connectionTimeoutMillis).toBe(5_000);
+  });
+
+  it('throws ConfigError when neither an override nor DATABASE_URL is available', () => {
+    const saved = process.env.DATABASE_URL;
+    delete process.env.DATABASE_URL;
+    try {
+      expect(() => getPool()).toThrow(ConfigError);
+      expect(() => getPool()).toThrow(/DATABASE_URL is not set/);
+    } finally {
+      process.env.DATABASE_URL = saved;
+    }
   });
 
   it('honours explicit pool options', () => {

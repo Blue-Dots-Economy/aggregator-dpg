@@ -88,7 +88,7 @@ export function chooseEnvSource({ envExists, localExists, templateExists }) {
  */
 export function missingHostEntries(content, entries = HOST_ENTRIES) {
   return entries.filter(([ip, host]) => {
-    const escapedIp = ip.replace(/\./g, '\\.');
+    const escapedIp = ip.replaceAll('.', '\\.');
     const re = new RegExp(`^\\s*${escapedIp}\\s+${host}(\\s|$)`, 'm');
     return !re.test(content);
   });

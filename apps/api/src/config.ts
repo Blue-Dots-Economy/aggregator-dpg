@@ -30,11 +30,13 @@ const ConfigSchema = z.object({
    * direct browser clients. Use `*` only in dev.
    */
   CORS_ORIGINS: z.string().default('http://localhost:3000,http://localhost:3100'),
-  /** Postgres connection string. Default points at the compose Postgres
-   *  exposed on host port 5433 (5432 is left to system Postgres). */
-  DATABASE_URL: z
-    .string()
-    .default('postgres://aggregator:aggregator-dev@localhost:5433/aggregator'),
+  /**
+   * Postgres connection string. Deliberately has **no default** — the URL
+   * carries credentials, so embedding one in source would ship a usable
+   * secret and mask a misconfigured deploy behind a silent fallback to
+   * localhost. Startup fails when it is unset.
+   */
+  DATABASE_URL: z.string().min(1, 'DATABASE_URL must be set'),
   /** Run pending DB migrations on startup. Disable in CI/test to avoid races. */
   RUN_MIGRATIONS_ON_BOOT: z
     .enum(['true', 'false'])
