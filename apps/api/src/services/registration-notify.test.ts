@@ -1,7 +1,7 @@
 /**
  * Unit tests for the admin-review registration notifier.
  *
- * `./approval-token.js`, `./email-templates/index.js`, `./mailer/index.js`,
+ * `./approval-token.js`, `./email-templates/index.js`, `@aggregator-dpg/mailer`,
  * and `../config.js` are mocked so no real JWT signing, template rendering,
  * or mail transport is exercised — this module's own orchestration (token
  * mint → render → send → failure logging) is the unit under test. Covers
@@ -32,7 +32,7 @@ vi.mock('./email-templates/index.js', () => ({
   renderAdminReview: mockRenderAdminReview,
 }));
 
-vi.mock('./mailer/index.js', () => ({
+vi.mock('@aggregator-dpg/mailer', () => ({
   getMailer: mockGetMailer,
 }));
 

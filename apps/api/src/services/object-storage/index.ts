@@ -178,14 +178,17 @@ export async function signErrorsCsvDownloadUrl(key: string): Promise<SignedDownl
 }
 
 /**
- * Issues a pre-signed GET URL for a QR PNG. Browsers can render the URL
- * directly in an <img> tag.
+ * Issues a pre-signed GET URL for a QR PNG, served as an attachment so opening
+ * it downloads the file rather than rendering it inline in a browser tab — the
+ * aggregator saves the QR and shares the file, never an S3 URL. (`attachment`
+ * only affects top-level navigation; an `<img>` preview still renders it.)
  */
 export async function signQrDownloadUrl(key: string): Promise<SignedDownloadUrl> {
   const command = new GetObjectCommand({
     Bucket: config.S3_BUCKET,
     Key: key,
     ResponseContentType: 'image/png',
+    ResponseContentDisposition: 'attachment; filename="registration-qr.png"',
   });
   const url = await getSignedUrl(getPresignerClient(), command, {
     expiresIn: config.QR_DOWNLOAD_URL_TTL_SECONDS,

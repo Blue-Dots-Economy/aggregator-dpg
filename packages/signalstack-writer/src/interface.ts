@@ -386,11 +386,38 @@ export interface SignalStackFetchDecryptedProfilesQuery {
   requestId?: string;
   actingOrgId: string;
   itemIds: string[];
+  /**
+   * `item_state` field projection. `[]` returns an empty `item_state`
+   * (contact-only requests); omit for the full `item_state`. Passed through to
+   * Signals decrypt (`fields`).
+   */
+  fields?: string[];
+  /**
+   * Canonical contact fields to resolve with provenance (Signals `contact`,
+   * signals-dpg#521). `true` = all three; an array selects a subset. When set,
+   * each returned row carries a `contact` block.
+   */
+  contact?: boolean | SignalStackContactCanonical[];
+}
+
+/** Canonical contact fields resolved by Signals decrypt. */
+export type SignalStackContactCanonical = 'name' | 'email' | 'phone';
+
+/**
+ * One canonical contact value with provenance. `source` is `item` (from the
+ * participant's profile), `user` (from the account fallback), or `null`
+ * (absent in both — `value` is then `null`).
+ */
+export interface SignalStackContactValue {
+  value: string | null;
+  source: 'item' | 'user' | null;
 }
 
 /**
- * One decrypted profile row. `item_state` is the full cleartext profile
- * (private fields decrypted). signalstack never returns item_private_state.
+ * One decrypted profile row. `item_state` is the cleartext profile (private
+ * fields decrypted; empty when a `fields: []` projection was requested).
+ * signalstack never returns item_private_state. `contact` is present only when
+ * the query requested it (canonical name/email/phone with provenance).
  */
 export interface SignalStackDecryptedProfileRow {
   item_id: string;
@@ -398,6 +425,7 @@ export interface SignalStackDecryptedProfileRow {
   item_domain: string;
   item_type: string;
   item_state: Record<string, unknown>;
+  contact?: Partial<Record<SignalStackContactCanonical, SignalStackContactValue>>;
   created_at: string;
   updated_at: string;
 }

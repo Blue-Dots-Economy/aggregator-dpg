@@ -150,6 +150,16 @@ const ConfigSchema = z.object({
   PUBLIC_LINK_BASE_URL: z.string().default('http://localhost:3000'),
   /** Pre-signed GET URL TTL for QR PNG downloads (seconds). */
   QR_DOWNLOAD_URL_TTL_SECONDS: z.coerce.number().int().positive().default(900),
+  /** Max `item_ids` accepted per campaign request body (after de-dup). */
+  EXPORT_MAX_ITEM_IDS: z.coerce.number().int().positive().default(500),
+  /** Ingress rate-limit window (seconds) for campaign submits, per org. */
+  CAMPAIGN_SUBMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
+  /** Max campaign submits allowed per window, per org. */
+  CAMPAIGN_SUBMIT_MAX: z.coerce.number().int().positive().default(10),
+  /** Max active (pending|processing) campaign jobs allowed per org at once. */
+  CAMPAIGN_MAX_ACTIVE_PER_ORG: z.coerce.number().int().positive().default(3),
+  /** BullMQ attempts for a campaign-process job (retry count on transient failure). */
+  CAMPAIGN_EXPORT_ATTEMPTS: z.coerce.number().int().positive().default(3),
 
   // ─── Approval links ───────────────────────────────────────────────────────
   /**
@@ -254,6 +264,30 @@ export function orgHierarchyEnabled(): boolean {
  */
 export function supportEmail(): string | undefined {
   return normaliseEmailList(process.env.SUPPORT_EMAIL);
+}
+
+/**
+ * `azp` client ids allowed to reach the campaign-manager routes (PII export
+ * #579, and the email/voice APIs that follow — all called by the same
+ * `campaign-manager` client). This OVERRIDES the global `KEYCLOAK_ALLOWED_AZP`
+ * on those routes, so they accept ONLY these clients — and the global list
+ * excludes them, which blocks a campaign-manager token on every other endpoint
+ * (default-deny both ways).
+ *
+ * @returns The allow-listed `azp` values (comma-separated env;
+ *   default `['campaign-manager']`).
+ */
+export function campaignManagerAllowedAzp(): string[] {
+  const raw = process.env.CAMPAIGN_MANAGER_ALLOWED_AZP?.trim() || 'campaign-manager';
+  const parsed = raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  // Never return an empty list: an empty allow-list disables the azp gate
+  // entirely (assertAllowedAzp treats `[]` as "off"), which would open the most
+  // sensitive route to any client. A pathological value (e.g. `","`) parses to
+  // empty — fall back to the default rather than silently un-gating.
+  return parsed.length > 0 ? parsed : ['campaign-manager'];
 }
 
 /**

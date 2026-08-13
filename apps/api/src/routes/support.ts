@@ -12,7 +12,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { authenticate, type AuthContext } from '../services/auth/access-token.js';
-import { getMailer } from '../services/mailer/index.js';
+import { getMailer } from '@aggregator-dpg/mailer';
 import {
   renderSupportRequest,
   generateSupportReference,

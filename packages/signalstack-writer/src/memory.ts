@@ -23,6 +23,8 @@ import {
   type SignalStackDashboardExportQuery,
   type SignalStackDashboardPage,
   type SignalStackDashboardQuery,
+  type SignalStackContactCanonical,
+  type SignalStackContactValue,
   type SignalStackDecryptedProfileRow,
   type SignalStackDecryptedProfiles,
   type SignalStackFetchDecryptedProfilesQuery,
@@ -53,6 +55,13 @@ interface StoredProfile extends SignalStackProfile {
   channel: 'bulk' | 'link';
   /** Source id captured at onboard time (bulk_upload_id or link_id). */
   source_id: string;
+  /**
+   * Canonical contact block (name/email/phone with provenance) that a decrypt
+   * `contact` projection resolves — seeded by tests. Mirrors what the real
+   * Signals `participant/decrypt` returns (#521); optional so onboard-only
+   * seeds stay terse.
+   */
+  contact?: Partial<Record<SignalStackContactCanonical, SignalStackContactValue>>;
 }
 
 const ISO_FIXED = '2026-01-01T00:00:00.000Z';
@@ -614,15 +623,23 @@ export class InMemorySignalStackWriter extends SignalStackWriterBase {
     for (const id of requested) {
       const stored = this.profiles.get(id);
       if (stored && stored.acting_org_id === query.actingOrgId) {
-        profiles.push({
+        // Honour the same projection contract as the HTTP impl (interface.ts):
+        // `fields` narrows item_state (`[]` → empty object; omitted → full),
+        // and a `contact` request attaches the canonical contact block. A fake
+        // that ignored both would drift from the real shape (base-class rule).
+        const row: SignalStackDecryptedProfileRow = {
           item_id: stored.item_id,
           item_network: stored.item_network,
           item_domain: stored.item_domain,
           item_type: stored.item_type,
-          item_state: stored.item_state,
+          item_state: projectItemState(stored.item_state, query.fields),
           created_at: stored.created_at,
           updated_at: stored.updated_at,
-        });
+        };
+        if (query.contact) {
+          row.contact = resolveContactBlock(stored.contact, query.contact);
+        }
+        profiles.push(row);
       } else {
         skipped.push(id);
       }
@@ -660,8 +677,54 @@ function normalizePhone(value: string | null | undefined): string | null {
 
 function stripCreatedBy(profile: StoredProfile): SignalStackProfile {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { created_by, acting_org_id, channel, source_id, ...rest } = profile;
+  const { created_by, acting_org_id, channel, source_id, contact, ...rest } = profile;
   return rest;
+}
+
+/**
+ * Projects a stored item_state to the requested `fields` — mirroring the HTTP
+ * impl's decrypt contract. `undefined` returns the full state; `[]` returns an
+ * empty object (contact-only projection); a list keeps only present keys.
+ *
+ * @param state - The stored item_state.
+ * @param fields - Requested field names, or undefined for the full state.
+ * @returns The projected item_state.
+ */
+function projectItemState(
+  state: Record<string, unknown>,
+  fields: string[] | undefined,
+): Record<string, unknown> {
+  if (fields === undefined) return state;
+  const out: Record<string, unknown> = {};
+  for (const key of fields) {
+    if (Object.hasOwn(state, key)) out[key] = state[key];
+  }
+  return out;
+}
+
+/**
+ * Builds the canonical contact block for the requested fields, mirroring the
+ * Signals decrypt `contact` response (#521). `contact: true` resolves all three
+ * canonical fields; an array resolves only those. Seeded values are returned as
+ * stored; unseeded fields resolve to `{ value: null, source: null }` (absent in
+ * both profile and account).
+ *
+ * @param seeded - The stored contact block (from the seed), if any.
+ * @param contact - The decrypt query's `contact` selector.
+ * @returns The resolved contact block.
+ */
+function resolveContactBlock(
+  seeded: Partial<Record<SignalStackContactCanonical, SignalStackContactValue>> | undefined,
+  contact: boolean | SignalStackContactCanonical[],
+): Partial<Record<SignalStackContactCanonical, SignalStackContactValue>> {
+  const canonical: SignalStackContactCanonical[] = Array.isArray(contact)
+    ? contact
+    : ['name', 'email', 'phone'];
+  const out: Partial<Record<SignalStackContactCanonical, SignalStackContactValue>> = {};
+  for (const field of canonical) {
+    out[field] = seeded?.[field] ?? { value: null, source: null };
+  }
+  return out;
 }
 
 /**

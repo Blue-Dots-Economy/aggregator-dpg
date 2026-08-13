@@ -72,12 +72,18 @@ importers:
       '@aggregator-dpg/db-schema':
         specifier: workspace:*
         version: link:../../packages/db-schema
+      '@aggregator-dpg/mailer':
+        specifier: workspace:*
+        version: link:../../packages/mailer
       '@aggregator-dpg/network-config':
         specifier: workspace:*
         version: link:../../packages/network-config
       '@aggregator-dpg/participants-writer':
         specifier: workspace:*
         version: link:../../packages/participants-writer
+      '@aggregator-dpg/profile-csv':
+        specifier: workspace:*
+        version: link:../../packages/profile-csv
       '@aggregator-dpg/queue':
         specifier: workspace:*
         version: link:../../packages/queue
@@ -141,9 +147,6 @@ importers:
       jose:
         specifier: ^5.9.6
         version: 5.10.0
-      nodemailer:
-        specifier: ^9.0.4
-        version: 9.0.4
       pg:
         specifier: ^8.22.0
         version: 8.22.0
@@ -166,9 +169,6 @@ importers:
       '@types/node':
         specifier: ^22.10.5
         version: 22.19.17
-      '@types/nodemailer':
-        specifier: ^8.0.1
-        version: 8.0.1
       '@types/pg':
         specifier: ^8.20.2
         version: 8.20.2
@@ -320,12 +320,18 @@ importers:
       '@aggregator-dpg/db-schema':
         specifier: workspace:*
         version: link:../../packages/db-schema
+      '@aggregator-dpg/mailer':
+        specifier: workspace:*
+        version: link:../../packages/mailer
       '@aggregator-dpg/network-config':
         specifier: workspace:*
         version: link:../../packages/network-config
       '@aggregator-dpg/participants-writer':
         specifier: workspace:*
         version: link:../../packages/participants-writer
+      '@aggregator-dpg/profile-csv':
+        specifier: workspace:*
+        version: link:../../packages/profile-csv
       '@aggregator-dpg/queue':
         specifier: workspace:*
         version: link:../../packages/queue
@@ -339,6 +345,9 @@ importers:
         specifier: workspace:*
         version: link:../../packages/signalstack-writer
       '@aws-sdk/client-s3':
+        specifier: ^3.1105.0
+        version: 3.1105.0
+      '@aws-sdk/s3-request-presigner':
         specifier: ^3.1105.0
         version: 3.1105.0
       ajv:
@@ -509,6 +518,34 @@ importers:
         specifier: ^3.2.7
         version: 3.2.7(@types/debug@4.1.13)(@types/node@22.19.17)(jiti@2.7.0)(jsdom@30.0.1)(lightningcss@1.32.0)(tsx@4.23.11)(yaml@2.9.0)
 
+  packages/mailer:
+    dependencies:
+      '@aws-sdk/client-sesv2':
+        specifier: ^3.1101.0
+        version: 3.1105.0
+      nodemailer:
+        specifier: ^9.0.4
+        version: 9.0.4
+    devDependencies:
+      '@aggregator-dpg/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.17
+      '@types/nodemailer':
+        specifier: ^8.0.1
+        version: 8.0.1
+      '@vitest/coverage-v8':
+        specifier: ^3.2.7
+        version: 3.2.7(vitest@3.2.7(@types/debug@4.1.13)(@types/node@22.19.17)(jiti@2.7.0)(jsdom@30.0.1)(lightningcss@1.32.0)(tsx@4.23.11)(yaml@2.9.0))
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^3.2.7
+        version: 3.2.7(@types/debug@4.1.13)(@types/node@22.19.17)(jiti@2.7.0)(jsdom@30.0.1)(lightningcss@1.32.0)(tsx@4.23.11)(yaml@2.9.0)
+
   packages/network-config:
     dependencies:
       '@aggregator-dpg/shared-primitives':
@@ -563,6 +600,28 @@ importers:
         version: 6.0.3
       vitest:
         specifier: ^3.2.0
+        version: 3.2.7(@types/debug@4.1.13)(@types/node@22.19.17)(jiti@2.7.0)(jsdom@30.0.1)(lightningcss@1.32.0)(tsx@4.23.11)(yaml@2.9.0)
+
+  packages/profile-csv:
+    dependencies:
+      '@aggregator-dpg/signalstack-writer':
+        specifier: workspace:*
+        version: link:../signalstack-writer
+    devDependencies:
+      '@aggregator-dpg/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.17
+      '@vitest/coverage-v8':
+        specifier: ^3.2.7
+        version: 3.2.7(vitest@3.2.7(@types/debug@4.1.13)(@types/node@22.19.17)(jiti@2.7.0)(jsdom@30.0.1)(lightningcss@1.32.0)(tsx@4.23.11)(yaml@2.9.0))
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^3.2.7
         version: 3.2.7(@types/debug@4.1.13)(@types/node@22.19.17)(jiti@2.7.0)(jsdom@30.0.1)(lightningcss@1.32.0)(tsx@4.23.11)(yaml@2.9.0)
 
   packages/queue:
