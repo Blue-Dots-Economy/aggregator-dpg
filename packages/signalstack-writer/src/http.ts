@@ -581,31 +581,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
         headers,
         body: JSON.stringify(body),
       });
-
-      if (!res.ok) {
-        const bodyText = await safeReadText(res);
-        const upstreamMsg = extractUpstreamMessage(bodyText);
-        const message = upstreamMsg
-          ? `signalstack aggregator upsert returned ${res.status}: ${upstreamMsg}`
-          : `signalstack aggregator upsert returned ${res.status}`;
-        return err(
-          new UpstreamError(message, {
-            code: this.codeForStatus(res.status),
-            details: { status: res.status, body: bodyText },
-          }),
-        );
-      }
-
-      const payload = (await res.json()) as unknown;
-      if (!hasValidAggregatorOrgId(payload)) {
-        return err(
-          new UpstreamError('signalstack aggregator upsert returned unexpected payload', {
-            code: 'SIGNALSTACK_BAD_RESPONSE',
-            details: { payload },
-          }),
-        );
-      }
-      return ok(payload);
+      return await this.parseUpsertResponse(res);
     } catch (e) {
       const cause = e as Error;
       const aborted = cause.name === 'AbortError';
@@ -621,6 +597,35 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
         ),
       );
     }
+  }
+
+  /** Maps a signalstack aggregator-upsert response to a Result. */
+  private async parseUpsertResponse(
+    res: Response,
+  ): Promise<Result<SignalStackAggregator, BaseError>> {
+    if (!res.ok) {
+      const bodyText = await safeReadText(res);
+      const upstreamMsg = extractUpstreamMessage(bodyText);
+      const message = upstreamMsg
+        ? `signalstack aggregator upsert returned ${res.status}: ${upstreamMsg}`
+        : `signalstack aggregator upsert returned ${res.status}`;
+      return err(
+        new UpstreamError(message, {
+          code: this.codeForStatus(res.status),
+          details: { status: res.status, body: bodyText },
+        }),
+      );
+    }
+    const payload = (await res.json()) as unknown;
+    if (!hasValidAggregatorOrgId(payload)) {
+      return err(
+        new UpstreamError('signalstack aggregator upsert returned unexpected payload', {
+          code: 'SIGNALSTACK_BAD_RESPONSE',
+          details: { payload },
+        }),
+      );
+    }
+    return ok(payload);
   }
 
   /**

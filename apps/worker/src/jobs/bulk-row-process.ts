@@ -347,6 +347,48 @@ async function commit(
 type SignalStackPushResult =
   { success: true } | { success: false; code: string; message: string; ownedElsewhere?: boolean };
 
+/**
+ * Derives the participant's age and consent record from a bulk row.
+ *
+ * `year_of_birth` / `age` are the well-known participant keys the interactive
+ * link flow reads. A minor (age ≤ 18) sends neither age nor consent — as with
+ * the link flow's minor path, so the row lands and the minor accepts terms in
+ * the Signals app. When the network presumes consent for adults, forward the
+ * same accept record the link flow sends; otherwise omit `compliance` entirely
+ * (an explicit decline would reject every row).
+ */
+function deriveAgeAndConsent(
+  payload: Record<string, unknown>,
+  presumeConsent: boolean,
+): {
+  ageNum: number | undefined;
+  compliance: Array<{ key: string; value: boolean }> | undefined;
+} {
+  const coerceNum = (v: unknown): number | undefined => {
+    if (typeof v === 'number') return v;
+    if (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v))) {
+      return Number(v);
+    }
+    return undefined;
+  };
+  const yearOfBirth = coerceNum(payload['year_of_birth']);
+  const derivedAge =
+    yearOfBirth !== undefined
+      ? new Date().getUTCFullYear() - yearOfBirth
+      : coerceNum(payload['age']);
+  const rowIsMinor = derivedAge !== undefined && derivedAge <= 18;
+  const ageNum = rowIsMinor ? undefined : derivedAge;
+  const compliance =
+    presumeConsent && !rowIsMinor
+      ? [
+          { key: 'user_terms', value: true },
+          { key: 'user_privacy', value: true },
+          { key: 'profile_creation', value: true },
+        ]
+      : undefined;
+  return { ageNum, compliance };
+}
+
 export async function pushToSignalStack(
   job: BulkRowProcessJob,
   participantId: string,
@@ -440,29 +482,7 @@ export async function pushToSignalStack(
   // `year_of_birth` / `age` are the same well-known participant keys the link
   // flow reads; the bulk `seeker` schema ships an `age` column
   // (`config/<network>/bulk-samples/seeker.csv`).
-  const coerceNum = (v: unknown): number | undefined => {
-    if (typeof v === 'number') return v;
-    if (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v))) {
-      return Number(v);
-    }
-    return undefined;
-  };
-  const yearOfBirth = coerceNum(job.payload['year_of_birth']);
-  const derivedAge =
-    yearOfBirth !== undefined
-      ? new Date().getUTCFullYear() - yearOfBirth
-      : coerceNum(job.payload['age']);
-  const rowIsMinor = derivedAge !== undefined && derivedAge <= 18;
-  const ageNum = rowIsMinor ? undefined : derivedAge;
-
-  const compliance =
-    presumeConsent && !rowIsMinor
-      ? [
-          { key: 'user_terms', value: true },
-          { key: 'user_privacy', value: true },
-          { key: 'profile_creation', value: true },
-        ]
-      : undefined;
+  const { ageNum, compliance } = deriveAgeAndConsent(job.payload, presumeConsent);
   const result = await ss.onboard({
     actingOrgId: signalstackOrgId,
     name,
