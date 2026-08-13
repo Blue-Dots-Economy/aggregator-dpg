@@ -17,7 +17,7 @@ import { useOnboardingSummary, useOnboardingBySource } from '../../../../hooks/u
 /** Tone classes per onboarding outcome card (colored chip + value). */
 const ONBOARDING_TONES = {
   total: {
-    chip: 'bg-[var(--bd-primary-50)] text-[var(--bd-primary-600)]',
+    chip: 'bg-(--bd-primary-50) text-(--bd-primary-600)',
     value: 'text-ink-900',
   },
   passed: { chip: 'bg-emerald-50 text-emerald-600', value: 'text-emerald-700' },
@@ -77,7 +77,7 @@ function statusLabel(key: string): string {
     .replace(/[_-]+/g, ' ')
     .split(' ')
     .filter(Boolean)
-    .map((w) => (w.length ? w[0]!.toUpperCase() + w.slice(1) : ''))
+    .map((w) => w[0]!.toUpperCase() + w.slice(1))
     .join(' ');
 }
 

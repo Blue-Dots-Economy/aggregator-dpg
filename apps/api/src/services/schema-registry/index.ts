@@ -125,7 +125,7 @@ function parseSimpleYaml(raw: string): {
 } {
   const lines = raw
     .split('\n')
-    .map((l) => l.replace(/#.*$/, ''))
+    .map((l) => l.replace(/#.*/, ''))
     .map((l) => l.trimEnd());
 
   const personas: RegistryEntry[] = [];
@@ -153,16 +153,16 @@ function parseSimpleYaml(raw: string): {
       continue;
     }
     if (!bucket) continue;
-    const dash = line.match(/^\s*-\s+(.*)$/);
+    const dash = line.match(/^\s*-\s+(.*)/);
     if (dash && dash[1]) {
       flush();
       cur = {};
       const rest = dash[1];
-      const m = rest.match(/^(id|name)\s*:\s*(.+)$/);
+      const m = rest.match(/^(id|name)\s*:\s*(.+)/);
       if (m && m[1] && m[2]) cur[m[1] as 'id' | 'name'] = unquote(m[2]);
       continue;
     }
-    const kv = line.match(/^\s+(id|name)\s*:\s*(.+)$/);
+    const kv = line.match(/^\s+(id|name)\s*:\s*(.+)/);
     if (kv && kv[1] && kv[2] && cur) {
       cur[kv[1] as 'id' | 'name'] = unquote(kv[2]);
     }

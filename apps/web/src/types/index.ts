@@ -89,32 +89,6 @@ export interface User {
   phone?: string;
 }
 
-export interface RegistrationLink {
-  id: string;
-  title: string;
-  desc: string;
-  slug: string;
-  kind: 'Seeker' | 'Provider';
-  regs: number;
-  verified: number;
-  last: string;
-  active: boolean;
-}
-
-export interface RegistrationFormState {
-  org: string;
-  state: string;
-  lever: string;
-  date: string;
-  location: string;
-  district: string;
-  domain: 'Seeker' | 'Provider' | 'Both';
-  signal: 'Event' | 'Outreach' | 'Partner' | 'Walk-in';
-  sub: 'On-ground' | 'Online' | 'Referral';
-  full: string;
-  type: 'Walk-in' | 'Campaign' | 'Referral' | 'Direct';
-}
-
 export interface AggregatorProfile {
   id: string;
   org: string;

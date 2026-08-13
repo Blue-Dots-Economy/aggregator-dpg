@@ -130,6 +130,32 @@ const UPSERT_AGGREGATOR_RESPONSE = {
 };
 
 // ---------------------------------------------------------------------------
+// constructor
+// ---------------------------------------------------------------------------
+
+describe('HttpSignalStackWriter constructor', () => {
+  it('throws when baseUrl is missing', () => {
+    expect(
+      () =>
+        new HttpSignalStackWriter({
+          baseUrl: '',
+          apiKey: 'test-key',
+        }),
+    ).toThrow('HttpSignalStackWriter requires baseUrl');
+  });
+
+  it('throws when apiKey is missing', () => {
+    expect(
+      () =>
+        new HttpSignalStackWriter({
+          baseUrl: 'http://signalstack.test',
+          apiKey: '',
+        }),
+    ).toThrow('HttpSignalStackWriter requires either apiKey or tokenProvider');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // onboard()
 // ---------------------------------------------------------------------------
 
@@ -391,6 +417,301 @@ describe('HttpSignalStackWriter.onboard', () => {
     expect(result.success).toBe(true);
     if (!result.success) return;
     expect(result.value.owned_elsewhere).toBe(true);
+  });
+
+  // -------------------------------------------------------------------------
+  // guardInput() branches — every required-field gap must surface
+  // SIGNALSTACK_INPUT_INVALID before a request ever leaves the process.
+  // -------------------------------------------------------------------------
+
+  it('returns SIGNALSTACK_INPUT_INVALID when name is missing', async () => {
+    const result = await writer.onboard({
+      actingOrgId: 'org-abc',
+      name: '',
+      email: 'asha@example.com',
+      channel: 'link',
+      source_id: 'link-1',
+      network: 'blue_dot',
+      domain: 'seeker',
+      item_type: 'profile_1.0',
+      profile: {},
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_INPUT_INVALID');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('returns SIGNALSTACK_INPUT_INVALID when network/domain/item_type are missing', async () => {
+    const result = await writer.onboard({
+      actingOrgId: 'org-abc',
+      name: 'Asha',
+      email: 'asha@example.com',
+      channel: 'link',
+      source_id: 'link-1',
+      network: '',
+      domain: 'seeker',
+      item_type: 'profile_1.0',
+      profile: {},
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_INPUT_INVALID');
+  });
+
+  it('returns SIGNALSTACK_INPUT_INVALID when channel/source_id are missing', async () => {
+    const result = await writer.onboard({
+      actingOrgId: 'org-abc',
+      name: 'Asha',
+      email: 'asha@example.com',
+      channel: '' as unknown as 'link',
+      source_id: 'link-1',
+      network: 'blue_dot',
+      domain: 'seeker',
+      item_type: 'profile_1.0',
+      profile: {},
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_INPUT_INVALID');
+  });
+
+  it('returns SIGNALSTACK_INPUT_INVALID when profile is missing', async () => {
+    const result = await writer.onboard({
+      actingOrgId: 'org-abc',
+      name: 'Asha',
+      email: 'asha@example.com',
+      channel: 'link',
+      source_id: 'link-1',
+      network: 'blue_dot',
+      domain: 'seeker',
+      item_type: 'profile_1.0',
+    } as never);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_INPUT_INVALID');
+  });
+
+  // -------------------------------------------------------------------------
+  // with_item response-shape branches
+  // -------------------------------------------------------------------------
+
+  it('with_item: user_existed with empty items → already_registered + owned_elsewhere', async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJsonResponse({
+        user_id: 'u-1',
+        user_existed: true,
+        onboarded_at: '2026-01-01T00:00:00Z',
+        items: [],
+      }),
+    );
+
+    const result = await writer.onboard({
+      actingOrgId: 'org-abc',
+      name: 'Asha',
+      email: 'asha@example.com',
+      channel: 'link',
+      source_id: 'link-1',
+      network: 'blue_dot',
+      domain: 'seeker',
+      item_type: 'profile_1.0',
+      profile: {},
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.already_registered).toBe(true);
+    expect(result.value.owned_elsewhere).toBe(true);
+    expect(result.value.profile_item_id).toBe('');
+  });
+
+  it('with_item: fresh user with empty items → SIGNALSTACK_BAD_RESPONSE (no item for request)', async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJsonResponse({
+        user_id: 'u-1',
+        user_existed: false,
+        onboarded_at: '2026-01-01T00:00:00Z',
+        items: [],
+      }),
+    );
+
+    const result = await writer.onboard({
+      actingOrgId: 'org-abc',
+      name: 'Asha',
+      email: 'asha@example.com',
+      channel: 'link',
+      source_id: 'link-1',
+      network: 'blue_dot',
+      domain: 'seeker',
+      item_type: 'profile_1.0',
+      profile: {},
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_BAD_RESPONSE');
+    expect(result.error.message).toContain('no item');
+  });
+
+  it('surfaces the matched item lifecycle_status when present', async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJsonResponse({
+        user_id: 'u-1',
+        onboarded_at: '2026-01-01T00:00:00Z',
+        items: [
+          {
+            item_id: 'item-xyz',
+            item_network: 'blue_dot',
+            item_domain: 'seeker',
+            item_type: 'profile_1.0',
+            lifecycle_status: 'draft',
+          },
+        ],
+      }),
+    );
+
+    const result = await writer.onboard({
+      actingOrgId: 'org-abc',
+      name: 'Asha',
+      email: 'asha@example.com',
+      channel: 'link',
+      source_id: 'link-1',
+      network: 'blue_dot',
+      domain: 'seeker',
+      item_type: 'profile_1.0',
+      profile: {},
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.lifecycle_status).toBe('draft');
+  });
+
+  // -------------------------------------------------------------------------
+  // Error-body extraction branches
+  // -------------------------------------------------------------------------
+
+  it('distinguishes the per-user profile cap (409 + PROFILE_LIMIT_REACHED)', async () => {
+    fetchMock.mockResolvedValueOnce(
+      errJsonResponse(409, { error: 'PROFILE_LIMIT_REACHED', message: 'cap hit' }),
+    );
+
+    const result = await writer.onboard({
+      actingOrgId: 'org-abc',
+      name: 'Asha',
+      email: 'asha@example.com',
+      channel: 'link',
+      source_id: 'link-1',
+      network: 'blue_dot',
+      domain: 'seeker',
+      item_type: 'profile_1.0',
+      profile: {},
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_PROFILE_LIMIT_REACHED');
+  });
+
+  it('combines a nested { error: { code, message } } body into one message', async () => {
+    fetchMock.mockResolvedValueOnce(
+      errJsonResponse(422, { error: { code: 'FANCY_CODE', message: 'fancy message' } }),
+    );
+
+    const result = await writer.onboard({
+      actingOrgId: 'org-abc',
+      name: 'Asha',
+      email: 'asha@example.com',
+      channel: 'link',
+      source_id: 'link-1',
+      network: 'blue_dot',
+      domain: 'seeker',
+      item_type: 'profile_1.0',
+      profile: {},
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.message).toContain('FANCY_CODE');
+    expect(result.error.message).toContain('fancy message');
+    expect((result.error.details as { signalsMessage?: string })?.signalsMessage).toBe(
+      'fancy message',
+    );
+  });
+
+  it('falls back to the bare status message when the error body has no error/message fields', async () => {
+    fetchMock.mockResolvedValueOnce(errJsonResponse(500, {}));
+
+    const result = await writer.onboard({
+      actingOrgId: 'org-abc',
+      name: 'Asha',
+      email: 'asha@example.com',
+      channel: 'link',
+      source_id: 'link-1',
+      network: 'blue_dot',
+      domain: 'seeker',
+      item_type: 'profile_1.0',
+      profile: {},
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.message).toBe('signalstack onboard returned 500');
+  });
+
+  it('treats a body read failure as an empty body rather than throwing', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      json: async () => {
+        throw new SyntaxError('unreadable');
+      },
+      text: async () => {
+        throw new Error('stream already consumed');
+      },
+    } as unknown as Response);
+
+    const result = await writer.onboard({
+      actingOrgId: 'org-abc',
+      name: 'Asha',
+      email: 'asha@example.com',
+      channel: 'link',
+      source_id: 'link-1',
+      network: 'blue_dot',
+      domain: 'seeker',
+      item_type: 'profile_1.0',
+      profile: {},
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_SERVER_ERROR');
+  });
+
+  it('maps an aborted (timed-out) request to SIGNALSTACK_TIMEOUT', async () => {
+    const abortError = new Error('The operation was aborted');
+    abortError.name = 'AbortError';
+    fetchMock.mockRejectedValueOnce(abortError);
+
+    const result = await writer.onboard({
+      actingOrgId: 'org-abc',
+      name: 'Asha',
+      email: 'asha@example.com',
+      channel: 'link',
+      source_id: 'link-1',
+      network: 'blue_dot',
+      domain: 'seeker',
+      item_type: 'profile_1.0',
+      profile: {},
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_TIMEOUT');
   });
 });
 
@@ -733,6 +1054,97 @@ describe('HttpSignalStackWriter.fetchDashboard — malformed payload', () => {
     expect(result.error.code).toBe('SIGNALSTACK_INPUT_INVALID');
   });
 
+  it('returns SIGNALSTACK_BAD_RESPONSE when a domain slice is not an object', async () => {
+    const payload = {
+      by_domain: { seeker: 'not-an-object' },
+      metadata: { last_computed_at: '2026-01-01T00:00:00Z', ttl_seconds: 3600, refreshed: false },
+    };
+    fetchMock.mockResolvedValueOnce(okJsonResponse(payload));
+
+    const result = await writer.fetchDashboard({ actingOrgId: 'org-abc' });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_BAD_RESPONSE');
+    expect(result.error.message).toContain('is not an object');
+  });
+
+  it('returns SIGNALSTACK_BAD_RESPONSE when rollup is missing by_received_action_status', async () => {
+    const payload = {
+      by_domain: {
+        seeker: {
+          items: [],
+          rollup: {
+            total_items: 0,
+            by_initiated_action_status: {},
+            // by_received_action_status is missing
+            by_status: {},
+          },
+          total_matching: 0,
+          next_cursor: null,
+        },
+      },
+      metadata: { last_computed_at: '2026-01-01T00:00:00Z', ttl_seconds: 3600, refreshed: false },
+    };
+    fetchMock.mockResolvedValueOnce(okJsonResponse(payload));
+
+    const result = await writer.fetchDashboard({ actingOrgId: 'org-abc' });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_BAD_RESPONSE');
+    expect(result.error.message).toContain('by_received_action_status');
+  });
+
+  it('returns SIGNALSTACK_BAD_RESPONSE when rollup is missing by_status', async () => {
+    const payload = {
+      by_domain: {
+        seeker: {
+          items: [],
+          rollup: {
+            total_items: 0,
+            by_initiated_action_status: {},
+            by_received_action_status: {},
+            // by_status is missing
+          },
+          total_matching: 0,
+          next_cursor: null,
+        },
+      },
+      metadata: { last_computed_at: '2026-01-01T00:00:00Z', ttl_seconds: 3600, refreshed: false },
+    };
+    fetchMock.mockResolvedValueOnce(okJsonResponse(payload));
+
+    const result = await writer.fetchDashboard({ actingOrgId: 'org-abc' });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_BAD_RESPONSE');
+    expect(result.error.message).toContain('by_status');
+  });
+
+  it('returns a bare status message when the non-ok body carries no upstream message', async () => {
+    fetchMock.mockResolvedValueOnce(errTextResponse(500, ''));
+
+    const result = await writer.fetchDashboard({ actingOrgId: 'org-abc' });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.message).toBe('signalstack dashboard returned 500');
+  });
+
+  it('maps an aborted (timed-out) request to SIGNALSTACK_TIMEOUT', async () => {
+    const abortError = new Error('The operation was aborted');
+    abortError.name = 'AbortError';
+    fetchMock.mockRejectedValueOnce(abortError);
+
+    const result = await writer.fetchDashboard({ actingOrgId: 'org-abc' });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_TIMEOUT');
+  });
+
   it('maps 503 to SIGNALSTACK_SERVER_ERROR', async () => {
     fetchMock.mockResolvedValueOnce(errTextResponse(503, 'Service Unavailable'));
 
@@ -843,6 +1255,49 @@ describe('HttpSignalStackWriter.exportDashboardCsv', () => {
     if (result.success) return;
     expect(result.error.code).toBe('SIGNALSTACK_BAD_RESPONSE');
   });
+
+  it('maps a non-2xx response to UpstreamError', async () => {
+    fetchMock.mockResolvedValueOnce(errJsonResponse(503, { error: 'DOWN', message: 'try later' }));
+
+    const result = await writer.exportDashboardCsv({ actingOrgId: 'org-abc' });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_SERVER_ERROR');
+    expect(result.error.message).toContain('try later');
+  });
+
+  it('falls back to a bare status message when the error body has no upstream message', async () => {
+    fetchMock.mockResolvedValueOnce(errTextResponse(500, ''));
+
+    const result = await writer.exportDashboardCsv({ actingOrgId: 'org-abc' });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.message).toBe('signalstack dashboard export returned 500');
+  });
+
+  it('returns SIGNALSTACK_TRANSPORT_FAILED when fetch throws', async () => {
+    fetchMock.mockRejectedValueOnce(new Error('network down'));
+
+    const result = await writer.exportDashboardCsv({ actingOrgId: 'org-abc' });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_TRANSPORT_FAILED');
+  });
+
+  it('maps an aborted (timed-out) request to SIGNALSTACK_TIMEOUT', async () => {
+    const abortError = new Error('The operation was aborted');
+    abortError.name = 'AbortError';
+    fetchMock.mockRejectedValueOnce(abortError);
+
+    const result = await writer.exportDashboardCsv({ actingOrgId: 'org-abc' });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_TIMEOUT');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -908,6 +1363,37 @@ describe('HttpSignalStackWriter.upsertAggregator', () => {
     expect(result.error.code).toBe('SIGNALSTACK_INPUT_INVALID');
   });
 
+  it('maps a non-2xx response to UpstreamError', async () => {
+    fetchMock.mockResolvedValueOnce(
+      errJsonResponse(409, { error: 'DUPLICATE_SLUG', message: 'slug taken' }),
+    );
+
+    const result = await writer.upsertAggregator({
+      external_id: 'ext-abc',
+      name: 'Test Aggregator',
+      slug: 'test-aggregator',
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_CONFLICT');
+    expect(result.error.message).toContain('slug taken');
+  });
+
+  it('falls back to a bare status message when the error body has no upstream message', async () => {
+    fetchMock.mockResolvedValueOnce(errTextResponse(500, ''));
+
+    const result = await writer.upsertAggregator({
+      external_id: 'ext-abc',
+      name: 'Test Aggregator',
+      slug: 'test-aggregator',
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.message).toBe('signalstack aggregator upsert returned 500');
+  });
+
   it('returns SIGNALSTACK_BAD_RESPONSE when org_id is missing from payload', async () => {
     fetchMock.mockResolvedValueOnce(okJsonResponse({ external_id: 'ext-abc', name: 'Test' }));
 
@@ -920,6 +1406,36 @@ describe('HttpSignalStackWriter.upsertAggregator', () => {
     expect(result.success).toBe(false);
     if (result.success) return;
     expect(result.error.code).toBe('SIGNALSTACK_BAD_RESPONSE');
+  });
+
+  it('returns SIGNALSTACK_TRANSPORT_FAILED when fetch throws', async () => {
+    fetchMock.mockRejectedValueOnce(new Error('network down'));
+
+    const result = await writer.upsertAggregator({
+      external_id: 'ext-abc',
+      name: 'Test',
+      slug: 'test',
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_TRANSPORT_FAILED');
+  });
+
+  it('maps an aborted (timed-out) request to SIGNALSTACK_TIMEOUT', async () => {
+    const abortError = new Error('The operation was aborted');
+    abortError.name = 'AbortError';
+    fetchMock.mockRejectedValueOnce(abortError);
+
+    const result = await writer.upsertAggregator({
+      external_id: 'ext-abc',
+      name: 'Test',
+      slug: 'test',
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_TIMEOUT');
   });
 });
 
@@ -985,6 +1501,64 @@ describe('HttpSignalStackWriter.listItemsByAggregator', () => {
     expect(result.success).toBe(false);
     if (result.success) return;
     expect(result.error.code).toBe('SIGNALSTACK_INPUT_INVALID');
+  });
+
+  it('maps a non-2xx response to UpstreamError', async () => {
+    fetchMock.mockResolvedValueOnce(errTextResponse(500, 'Internal Server Error'));
+
+    const result = await writer.listItemsByAggregator({
+      aggregator_id: 'agg-1',
+      item_network: 'blue_dot',
+      item_domain: 'seeker',
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_SERVER_ERROR');
+  });
+
+  it('returns SIGNALSTACK_BAD_RESPONSE when items is missing from the payload', async () => {
+    fetchMock.mockResolvedValueOnce(okJsonResponse({ meta: { total: 0, limit: 50, offset: 0 } }));
+
+    const result = await writer.listItemsByAggregator({
+      aggregator_id: 'agg-1',
+      item_network: 'blue_dot',
+      item_domain: 'seeker',
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_BAD_RESPONSE');
+  });
+
+  it('returns SIGNALSTACK_TRANSPORT_FAILED when fetch throws', async () => {
+    fetchMock.mockRejectedValueOnce(new Error('connection reset'));
+
+    const result = await writer.listItemsByAggregator({
+      aggregator_id: 'agg-1',
+      item_network: 'blue_dot',
+      item_domain: 'seeker',
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_TRANSPORT_FAILED');
+  });
+
+  it('maps an aborted (timed-out) request to SIGNALSTACK_TIMEOUT', async () => {
+    const abortError = new Error('The operation was aborted');
+    abortError.name = 'AbortError';
+    fetchMock.mockRejectedValueOnce(abortError);
+
+    const result = await writer.listItemsByAggregator({
+      aggregator_id: 'agg-1',
+      item_network: 'blue_dot',
+      item_domain: 'seeker',
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_TIMEOUT');
   });
 });
 
@@ -1072,6 +1646,24 @@ describe('HttpSignalStackWriter — retry/backoff', () => {
     if (result.success) return;
     expect(result.error.code).toBe('SIGNALSTACK_BAD_REQUEST');
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('actually waits a positive backoff delay between attempts', async () => {
+    const delayedWriter = new HttpSignalStackWriter({
+      baseUrl: 'http://signalstack.test',
+      apiKey: 'test-key',
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      maxRetries: 1,
+      retryBaseMs: 5, // small but > 0 so the real setTimeout branch runs
+    });
+    fetchMock
+      .mockResolvedValueOnce(errTextResponse(503, 'Service Unavailable'))
+      .mockResolvedValueOnce(okJsonResponse(CANONICAL_DASHBOARD_PAYLOAD));
+
+    const result = await delayedWriter.fetchDashboard({ actingOrgId: 'org-abc' });
+
+    expect(result.success).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -1234,6 +1826,82 @@ describe('HttpSignalStackWriter.probeUser (http)', () => {
     if (result.success) return;
     expect(result.error.code).toBe('SIGNALSTACK_TRANSPORT_FAILED');
   });
+
+  it('returns a ValidationError when actingOrgId is missing', async () => {
+    const result = await writer.probeUser({
+      email: 'asha@example.com',
+      network: 'blue_dot',
+      domain: 'seeker',
+    } as never);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.name).toBe('ValidationError');
+    expect(result.error.code).toBe('SIGNALSTACK_INPUT_INVALID');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('returns a ValidationError when network/domain are missing', async () => {
+    const result = await writer.probeUser({
+      actingOrgId: 'org-abc',
+      email: 'asha@example.com',
+    } as never);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_INPUT_INVALID');
+  });
+
+  it('maps a status with no dedicated branch (e.g. 418) to SIGNALSTACK_UPSTREAM_ERROR and falls back to a bare message when the body is empty', async () => {
+    fetchMock.mockResolvedValueOnce(errTextResponse(418, ''));
+
+    const result = await writer.probeUser(PROBE_INPUT);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_UPSTREAM_ERROR');
+    expect(result.error.message).toBe('signalstack probe returned 418');
+  });
+
+  it('returns SIGNALSTACK_BAD_RESPONSE when the payload is not an object', async () => {
+    fetchMock.mockResolvedValueOnce(okJsonResponse(null));
+
+    const result = await writer.probeUser(PROBE_INPUT);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_BAD_RESPONSE');
+  });
+
+  it('returns SIGNALSTACK_BAD_RESPONSE when the primary item is missing item_id', async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJsonResponse({
+        user_id: 'u-1',
+        user_existed: true,
+        owned_elsewhere: false,
+        items: [{ lifecycle_status: 'live' }],
+      }),
+    );
+
+    const result = await writer.probeUser(PROBE_INPUT);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_BAD_RESPONSE');
+    expect(result.error.message).toContain('item_id');
+  });
+
+  it('maps an aborted (timed-out) request to SIGNALSTACK_TIMEOUT', async () => {
+    const abortError = new Error('The operation was aborted');
+    abortError.name = 'AbortError';
+    fetchMock.mockRejectedValueOnce(abortError);
+
+    const result = await writer.probeUser(PROBE_INPUT);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_TIMEOUT');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1293,6 +1961,48 @@ describe('HttpSignalStackWriter.getItem', () => {
     if (result.success) return;
     expect(result.error.name).toBe('ValidationError');
     expect(result.error.code).toBe('SIGNALSTACK_INPUT_INVALID');
+  });
+
+  it('maps a non-404/non-2xx response to UpstreamError', async () => {
+    fetchMock.mockResolvedValueOnce(errTextResponse(500, 'Internal Server Error'));
+
+    const result = await writer.getItem({ item_id: 'item-1' });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_SERVER_ERROR');
+  });
+
+  it('returns SIGNALSTACK_BAD_RESPONSE when items is missing from the payload', async () => {
+    fetchMock.mockResolvedValueOnce(okJsonResponse({}));
+
+    const result = await writer.getItem({ item_id: 'item-1' });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_BAD_RESPONSE');
+  });
+
+  it('returns SIGNALSTACK_TRANSPORT_FAILED when fetch throws', async () => {
+    fetchMock.mockRejectedValueOnce(new Error('connection reset'));
+
+    const result = await writer.getItem({ item_id: 'item-1' });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_TRANSPORT_FAILED');
+  });
+
+  it('maps an aborted (timed-out) request to SIGNALSTACK_TIMEOUT', async () => {
+    const abortError = new Error('The operation was aborted');
+    abortError.name = 'AbortError';
+    fetchMock.mockRejectedValueOnce(abortError);
+
+    const result = await writer.getItem({ item_id: 'item-1' });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_TIMEOUT');
   });
 });
 
@@ -1380,6 +2090,56 @@ describe('HttpSignalStackWriter.fetchDecryptedProfiles', () => {
     expect(result.success).toBe(false);
     if (result.success) return;
     expect(result.error.name).toBe('UpstreamError');
+  });
+
+  it('falls back to a bare status message when the error body has no upstream message', async () => {
+    fetchMock.mockResolvedValueOnce(errTextResponse(500, ''));
+
+    const result = await writer.fetchDecryptedProfiles({
+      actingOrgId: 'org-abc',
+      itemIds: ['item-1'],
+    });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.message).toBe('signalstack decrypt returned 500');
+  });
+
+  it('returns SIGNALSTACK_BAD_RESPONSE when profiles/skipped are missing from the body', async () => {
+    fetchMock.mockResolvedValueOnce(okJsonResponse({ profiles: 'nope' }));
+
+    const result = await writer.fetchDecryptedProfiles({
+      actingOrgId: 'org-abc',
+      itemIds: ['item-1'],
+    });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_BAD_RESPONSE');
+  });
+
+  it('returns SIGNALSTACK_TRANSPORT_FAILED when fetch throws', async () => {
+    fetchMock.mockRejectedValueOnce(new Error('connection reset'));
+
+    const result = await writer.fetchDecryptedProfiles({
+      actingOrgId: 'org-abc',
+      itemIds: ['item-1'],
+    });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_TRANSPORT_FAILED');
+  });
+
+  it('maps an aborted (timed-out) request to SIGNALSTACK_TIMEOUT', async () => {
+    const abortError = new Error('The operation was aborted');
+    abortError.name = 'AbortError';
+    fetchMock.mockRejectedValueOnce(abortError);
+
+    const result = await writer.fetchDecryptedProfiles({
+      actingOrgId: 'org-abc',
+      itemIds: ['item-1'],
+    });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_TIMEOUT');
   });
 });
 

@@ -1,4 +1,42 @@
 packages:
-  - "apps/*"
-  - "services/*"
-  - "packages/*"
+  - 'apps/*'
+  - 'services/*'
+  - 'packages/*'
+
+# Every override belongs in THIS block. pnpm 10 reads overrides from exactly one
+# source: adding a `pnpm.overrides` block to the root `package.json` does not merge
+# with this file, it *replaces* it — silently dropping the ioredis pin below and
+# resurrecting the duplicate-ioredis type errors it exists to prevent (#588).
+overrides:
+  # Keep exactly ONE copy of ioredis in the tree. bullmq pins `ioredis: 5.10.1`
+  # exactly (not a range), so without this our apps get 5.11.x while bullmq gets
+  # 5.10.1 — and TypeScript cannot assign a `Redis` from one copy to the `Redis`
+  # in the other copy's `ConnectionOptions`, because the class carries private
+  # members. That produced 16 `Type 'Redis' is not assignable to type
+  # 'ConnectionOptions'` errors in apps/worker and packages/queue and stalled
+  # Dependabot's ioredis bump (#573, #585) — misread at the time as ioredis 5.11
+  # having retyped its client. It had not; there were simply two of it.
+  #
+  # Verified both ways: with two copies, 16 type errors; with this override, zero,
+  # and the full test suite passes. Revisit when bullmq moves its own pin — check
+  # `bullmq`'s `dependencies.ioredis` and align rather than dropping the override,
+  # or the duplicate reappears silently.
+  ioredis: ^5.11.1
+
+  # Floor, not a pin. Nothing declares jiti directly — it arrives via eslint's
+  # optional peer and cosmiconfig-typescript-loader — and this range only keeps
+  # the tree off jiti 1.x. It does NOT collapse the 2.x copies: 2.6.1 (pulled by
+  # cosmiconfig-typescript-loader) and 2.7.0 (everything else) still coexist, which
+  # is fine because jiti is build-time only and carries no cross-copy types.
+  jiti: ^2.6.1
+
+  # Security bumps for vulnerable transitives (Trivy / GHSA). Range-scoped so
+  # only the vulnerable copies move; already-patched consumers are untouched.
+  #   postcss <8.5.26 → GHSA-r28c-9q8g-f849 + CVE-2026-45623 (HIGH), CVE-2026-41305
+  #     / -69153 (MED). apps/web already declares ^8.5.26; this dedups the
+  #     vulnerable transitive copy up to it.
+  #   sharp 0.34.x → GHSA-f88m-g3jw-g9cj (HIGH); 0.35.0 is the fix.
+  #   @babel/core <7.29.6 → CVE-2026-49356 (LOW).
+  'postcss@<8.5.26': 8.5.26
+  'sharp@<0.35.0': 0.35.0
+  '@babel/core@<7.29.6': 7.29.6

@@ -11,7 +11,7 @@
  *
  * @module apps/api/routes/public-lookup.test
  */
-import { describe, it, expect, beforeEach, afterAll } from 'vitest';
+import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
 import {
@@ -21,6 +21,12 @@ import {
 } from '../services/aggregator-store/index.js';
 import { _setSignalStackWriter } from '../services/signalstack.js';
 import { SignalStackWriterFake } from '@aggregator-dpg/signalstack-writer/testing';
+import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
+
+const { consumeMock } = vi.hoisted(() => ({
+  consumeMock: vi.fn().mockResolvedValue({ allowed: true, count: 1, retryAfterSeconds: 0 }),
+}));
+vi.mock('../services/rate-limiter/index.js', () => ({ consume: consumeMock }));
 
 const AGG_ID = '11111111-1111-1111-1111-111111111111';
 const ORG_ID = 'org-1';
@@ -31,6 +37,8 @@ describe('GET /public/v1/aggregators/:orgSlug/lookup', () => {
   let signalstack: SignalStackWriterFake;
 
   beforeEach(async () => {
+    consumeMock.mockClear();
+    consumeMock.mockResolvedValue({ allowed: true, count: 1, retryAfterSeconds: 0 });
     // Treat signalstack as enabled so getSignalStackWriter returns our fake.
     process.env.SIGNALSTACK_BASE_URL = 'http://stub-signalstack';
     process.env.SIGNALSTACK_ADMIN_KEY = 'stub-key';
@@ -122,11 +130,90 @@ describe('GET /public/v1/aggregators/:orgSlug/lookup', () => {
     expect(r.statusCode).toBe(400);
   });
 
+  it('429s RATE_LIMITED when the per-org rate limit trips', async () => {
+    consumeMock.mockResolvedValueOnce({ allowed: false, count: 21, retryAfterSeconds: 9 });
+    const r = await app.inject({
+      method: 'GET',
+      url: '/public/v1/aggregators/acme/lookup?email=a@b.com&network=blue_dot&domain=seeker',
+    });
+    expect(r.statusCode).toBe(429);
+    expect(r.headers['retry-after']).toBe('9');
+    expect((r.json() as { error: { code: string } }).error.code).toBe('RATE_LIMITED');
+  });
+
+  it('503s DB_UNAVAILABLE when the aggregator store lookup fails', async () => {
+    aggregatorStore.findBySlug = async () => ({
+      ok: false,
+      error: { code: 'DB_UNAVAILABLE', message: 'db down' },
+    });
+    const r = await app.inject({
+      method: 'GET',
+      url: '/public/v1/aggregators/acme/lookup?email=a@b.com&network=blue_dot&domain=seeker',
+    });
+    expect(r.statusCode).toBe(503);
+    expect((r.json() as { error: { code: string } }).error.code).toBe('DB_UNAVAILABLE');
+  });
+
+  it('normalises a valid phone_number before probing signalstack', async () => {
+    signalstack.seedOwnUser({
+      actingOrgId: ORG_ID,
+      phoneNumber: '+919876543210',
+      item: { item_id: 'item-2', lifecycle_status: 'live' },
+    });
+    const r = await app.inject({
+      method: 'GET',
+      url: '/public/v1/aggregators/acme/lookup?phone_number=9876543210&network=blue_dot&domain=seeker',
+    });
+    expect(r.statusCode).toBe(200);
+    const body = r.json() as { user_exists: boolean };
+    expect(body.user_exists).toBe(true);
+  });
+
+  it('400s INVALID_PHONE when phone_number cannot be normalised', async () => {
+    const r = await app.inject({
+      method: 'GET',
+      url: '/public/v1/aggregators/acme/lookup?phone_number=123&network=blue_dot&domain=seeker',
+    });
+    expect(r.statusCode).toBe(400);
+    expect((r.json() as { error: { code: string } }).error.code).toBe('INVALID_PHONE');
+  });
+
   it('404s when the aggregator slug is unknown', async () => {
     const r = await app.inject({
       method: 'GET',
       url: '/public/v1/aggregators/unknown/lookup?email=a@b.com&network=blue_dot&domain=seeker',
     });
     expect(r.statusCode).toBe(404);
+  });
+
+  it('503s with SIGNALSTACK_ORG_NOT_REGISTERED when signalstack is not configured', async () => {
+    _setSignalStackWriter(null);
+    const r = await app.inject({
+      method: 'GET',
+      url: '/public/v1/aggregators/acme/lookup?email=a@b.com&network=blue_dot&domain=seeker',
+    });
+    expect(r.statusCode).toBe(503);
+    expect((r.json() as { error: { code: string } }).error.code).toBe(
+      'SIGNALSTACK_ORG_NOT_REGISTERED',
+    );
+  });
+
+  it('502s with SIGNALSTACK_PROBE_FAILED when the signalstack probe errors', async () => {
+    signalstack.probeUser = async () => ({
+      success: false,
+      error: Object.assign(new Error('signalstack unreachable'), {
+        name: 'UpstreamError',
+        code: 'SIGNALSTACK_SERVER_ERROR',
+      }) as BaseError,
+    });
+    const r = await app.inject({
+      method: 'GET',
+      url: '/public/v1/aggregators/acme/lookup?email=a@b.com&network=blue_dot&domain=seeker',
+    });
+    expect(r.statusCode).toBe(502);
+    const body = r.json() as { error: { code: string; detail: string; fields?: { code: string } } };
+    expect(body.error.code).toBe('SIGNALSTACK_PROBE_FAILED');
+    expect(body.error.detail).toContain('signalstack unreachable');
+    expect(body.error.fields?.code).toBe('SIGNALSTACK_SERVER_ERROR');
   });
 });

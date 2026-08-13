@@ -3,7 +3,7 @@
  *   - per-item `lifecycle_status` on the response
  *   - `meta.tiles` block with `{ draft, live, paused, account_only }`
  *   - `?lifecycle=` query filter (rejects unknown values)
- *   - back-compat: items without `lifecycle_status` are treated as `live`
+ *   - #613: items without `lifecycle_status` are treated as `draft`
  */
 
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
@@ -24,7 +24,7 @@ describe('GET /v1/dashboard/items — lifecycle', () => {
   beforeEach(async () => {
     _resetJwks();
     process.env.KEYCLOAK_URL = 'http://kc.local';
-    process.env.KEYCLOAK_REALM = 'aggregator';
+    process.env.KEYCLOAK_REALM = 'bluedots';
     process.env.SIGNALSTACK_BASE_URL = 'http://stub-signalstack';
     process.env.SIGNALSTACK_ADMIN_KEY = 'stub-key';
     process.env.SIGNALSTACK_ITEM_NETWORK = 'blue_dot';
@@ -158,7 +158,7 @@ describe('GET /v1/dashboard/items — lifecycle', () => {
     expect(body.meta.tiles.live).toBe(1);
   });
 
-  it('treats items without lifecycle_status as live (back-compat)', async () => {
+  it('treats items without lifecycle_status as draft (#613 pessimistic default)', async () => {
     writer.seedItem('a', {
       aggregator_id: AGG_A,
       item_network: 'blue_dot',
@@ -172,10 +172,12 @@ describe('GET /v1/dashboard/items — lifecycle', () => {
     });
     expect(r.statusCode).toBe(200);
     const body = r.json();
-    expect(body.meta.tiles.live).toBeGreaterThan(0);
+    // #613: a row whose lifecycle_status we can't read must not be reported as
+    // live — the dashboard defaults it to draft so it never overstates go-live.
+    expect(body.meta.tiles.draft).toBeGreaterThan(0);
     expect(
       (body.items as Array<{ lifecycle_status?: string }>).every(
-        (i) => i.lifecycle_status === 'live',
+        (i) => i.lifecycle_status === 'draft',
       ),
     ).toBe(true);
   });

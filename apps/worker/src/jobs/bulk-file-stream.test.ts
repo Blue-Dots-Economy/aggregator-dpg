@@ -201,6 +201,18 @@ describe('createUtf8DecodeStream', () => {
       })(),
     ).rejects.toThrowError(/encoding/i);
   });
+
+  it('emits an encoding failure when a multi-byte sequence is left dangling at end-of-stream', async () => {
+    // 0xE2 0x82 is the first two of the three bytes for '€' (0xE2 0x82 0xAC) —
+    // valid as a mid-stream partial (decoder buffers with stream:true), but
+    // the final flush() decode (stream:false) must reject the truncation.
+    const src = Readable.from([Buffer.from([0xe2, 0x82])]);
+    await expect(
+      (async () => {
+        for await (const _ of src.pipe(createUtf8DecodeStream())) void _;
+      })(),
+    ).rejects.toThrowError(/encoding/i);
+  });
 });
 
 describe('streamCsvParse — large-file guarantees (positional parsing)', () => {
@@ -234,5 +246,23 @@ describe('streamCsvParse — large-file guarantees (positional parsing)', () => 
         expect(String(v)).not.toMatch(/^_\d+$/);
       }
     }
+  });
+});
+
+describe('streamCsvParse — unexpected stream failure', () => {
+  it('reports system_error (with the underlying message) for a generic, non-encoding stream error', async () => {
+    // A source stream that fails outside the decode/parse-failure paths this
+    // module already classifies (not an EncodingError, not a ParseFailure) —
+    // exercises the catch-all `system_error` branch.
+    const boom = new Readable({
+      read() {
+        this.destroy(new Error('upstream socket reset'));
+      },
+    });
+    const res = await streamCsvParse(boom, opts());
+    expect(res.status).toBe('failed');
+    if (res.status !== 'failed') return;
+    expect(res.reason).toBe('system_error');
+    expect(res.detail).toContain('upstream socket reset');
   });
 });

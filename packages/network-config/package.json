@@ -33,14 +33,14 @@
   },
   "dependencies": {
     "@aggregator-dpg/shared-primitives": "workspace:*",
-    "yaml": "^2.6.0",
+    "yaml": "^2.9.0",
     "zod": "^3.24.0"
   },
   "devDependencies": {
     "@aggregator-dpg/tsconfig": "workspace:*",
     "@types/node": "^22.0.0",
-    "@vitest/coverage-v8": "^3.2.0",
+    "@vitest/coverage-v8": "^3.2.7",
     "typescript": "^6.0.3",
-    "vitest": "^3.2.6"
+    "vitest": "^3.2.7"
   }
 }

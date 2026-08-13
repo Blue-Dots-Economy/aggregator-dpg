@@ -7,7 +7,11 @@
     <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="robots" content="noindex,nofollow">
-    <title>${msg("loginTitle",(realm.displayName!''))}</title>
+    <#-- Prefer the theme's own brandLongName over realm.displayName: the realm
+         is shared by both DPGs, so displayName names only one of them and every
+         signals visitor was being told they were signing in to the aggregator
+         portal. Falls back to displayName when a theme sets no brandLongName. -->
+    <title>${msg("loginTitle",(properties.brandLongName!realm.displayName!''))}</title>
 
     <link rel="icon" type="image/svg+xml" href="${url.resourcesPath}/img/brand/${properties.brandLogoSlug!'blue-dot'}/favicon.svg">
 
@@ -62,6 +66,14 @@
                     <img class="bd-brand-logo"
                          src="${url.resourcesPath}/img/brand/${properties.brandLogoSlug!'blue-dot'}/logo.png"
                          alt="${properties.brandShortName!'Aggregator'}"/>
+                    <#-- Names the app being signed in to. Both DPGs share one
+                         realm and the same logo, so this is what tells them
+                         apart — and what catches someone who arrived at the
+                         wrong door. Omitted entirely when unset, so a theme
+                         that defines no brandAppLabel renders as before. -->
+                    <#if (properties.brandAppLabel!'')?has_content>
+                        <span class="bd-app-label">${properties.brandAppLabel}</span>
+                    </#if>
                 </header>
 
                 <#if displayMessage && message?has_content && (message.type != 'warning' || !isAppInitiatedAction??)>

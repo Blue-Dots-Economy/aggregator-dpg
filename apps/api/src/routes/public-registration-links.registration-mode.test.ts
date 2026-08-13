@@ -18,7 +18,7 @@
  *   - body with unknown keys rejected as 400 REGISTRATION_MODE_MISMATCH
  *   - a stray `partial` key is now an unknown key → 400 (flag removed)
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
 import {
@@ -36,9 +36,19 @@ import {
   type StoreResult,
 } from '../services/registration-links-store/index.js';
 import { _setParticipantsWriter } from './public-registration-links.js';
+import { _setSchemaLoader } from '../services/schema-loader/index.js';
 import { SignalStackWriterFake } from '@aggregator-dpg/signalstack-writer/testing';
 import { ParticipantsWriterFake } from '@aggregator-dpg/participants-writer/testing';
 import { buildBlueDotConfig } from '@aggregator-dpg/network-config/testing';
+import type { ResolvedNetworkConfig } from '@aggregator-dpg/network-config/interface';
+
+// Hoisted so the vi.mock factory can reference it (mocks are hoisted above
+// module code). Default resolves "allowed" so every existing test in this
+// file is unaffected; the rate-limit test below overrides it once.
+const { consumeMock } = vi.hoisted(() => ({
+  consumeMock: vi.fn().mockResolvedValue({ allowed: true, count: 1, retryAfterSeconds: 0 }),
+}));
+vi.mock('../services/rate-limiter/index.js', () => ({ consume: consumeMock }));
 
 const AGG_ID = '11111111-1111-1111-1111-111111111111';
 const ORG_ID = 'org-signalstack-1';
@@ -126,6 +136,8 @@ async function bootApp(): Promise<{
   app: FastifyInstance;
   signalstack: SignalStackWriterFake;
 }> {
+  consumeMock.mockClear();
+  consumeMock.mockResolvedValue({ allowed: true, count: 1, retryAfterSeconds: 0 });
   process.env.SIGNALSTACK_BASE_URL = 'http://stub-signalstack';
   process.env.SIGNALSTACK_ADMIN_KEY = 'stub-key';
   process.env.SIGNALSTACK_ACTING_ORG_ID = 'org_platform';
@@ -175,6 +187,7 @@ async function teardown(app: FastifyInstance | undefined): Promise<void> {
   _setNetworkConfig(null);
   _setParticipantsWriter(null);
   _setDbClients(null, null);
+  _setSchemaLoader(null);
 }
 
 describe('GET /public/v1/aggregators/:org/links/:slug — registration_mode (resolve)', () => {
@@ -344,5 +357,285 @@ describe('POST /public/v1/aggregators/:org/registrations/:slug — account_only 
     });
     expect(r.statusCode).toBe(400);
     expect(r.json().error.code).toBe('SCHEMA_VALIDATION');
+  });
+});
+
+describe('link-not-live / link-lookup failure branches', () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    ({ app } = await bootApp());
+  });
+  afterEach(() => teardown(app));
+
+  it('503s (DB_UNAVAILABLE) when the registration-links store fails on GET resolve', async () => {
+    _setRegistrationLinksStore(
+      new (class extends RegistrationLinksStoreBase {
+        async findByOrgAndSlug(): Promise<StoreResult<RegistrationLink | null>> {
+          return { ok: false, error: { code: 'DB_UNAVAILABLE', message: 'store down' } };
+        }
+        async create(): Promise<StoreResult<RegistrationLink>> {
+          return { ok: false, error: { code: 'DB_UNAVAILABLE', message: 'stub' } };
+        }
+        async findById(): Promise<StoreResult<RegistrationLink | null>> {
+          return { ok: true, value: null };
+        }
+        async findBySlug(): Promise<StoreResult<RegistrationLink | null>> {
+          return { ok: true, value: null };
+        }
+        async updateQrKey(): Promise<StoreResult<RegistrationLink>> {
+          return { ok: false, error: { code: 'DB_UNAVAILABLE', message: 'stub' } };
+        }
+        async updateDraft(): Promise<StoreResult<RegistrationLink>> {
+          return { ok: false, error: { code: 'DB_UNAVAILABLE', message: 'stub' } };
+        }
+        async list(): Promise<StoreResult<{ rows: RegistrationLink[]; total: number }>> {
+          return { ok: true, value: { rows: [], total: 0 } };
+        }
+        async updateStatus(): Promise<StoreResult<RegistrationLink>> {
+          return { ok: false, error: { code: 'DB_UNAVAILABLE', message: 'stub' } };
+        }
+      })(),
+    );
+    const r = await app.inject({
+      method: 'GET',
+      url: `/public/v1/aggregators/${ORG_SLUG}/links/${SLUG_AO}`,
+    });
+    expect(r.statusCode).toBe(503);
+    expect(r.json().error.code).toBe('DB_UNAVAILABLE');
+  });
+
+  it('410s (LINK_NOT_LIVE) when the link is retired', async () => {
+    _setRegistrationLinksStore(
+      new TwoLinkStore(
+        {
+          ...baseLink,
+          id: LINK_ID_AO,
+          slug: SLUG_AO,
+          registrationMode: 'voice',
+          status: 'retired',
+        },
+        { ...baseLink, id: LINK_ID_FULL, slug: SLUG_FULL, registrationMode: 'form' },
+      ),
+    );
+    const r = await app.inject({
+      method: 'GET',
+      url: `/public/v1/aggregators/${ORG_SLUG}/links/${SLUG_AO}`,
+    });
+    expect(r.statusCode).toBe(410);
+    expect(r.json().error.code).toBe('LINK_NOT_LIVE');
+    expect(r.json().error.detail).toContain('retired');
+  });
+
+  it('410s (LINK_NOT_LIVE) when the link has expired', async () => {
+    _setRegistrationLinksStore(
+      new TwoLinkStore(
+        {
+          ...baseLink,
+          id: LINK_ID_AO,
+          slug: SLUG_AO,
+          registrationMode: 'voice',
+          expiresAt: new Date('2020-01-01T00:00:00Z'),
+        },
+        { ...baseLink, id: LINK_ID_FULL, slug: SLUG_FULL, registrationMode: 'form' },
+      ),
+    );
+    const r = await app.inject({
+      method: 'GET',
+      url: `/public/v1/aggregators/${ORG_SLUG}/links/${SLUG_AO}`,
+    });
+    expect(r.statusCode).toBe(410);
+    expect(r.json().error.code).toBe('LINK_NOT_LIVE');
+    expect(r.json().error.detail).toContain('expired');
+  });
+
+  it('404s when the link domain is not declared in the active network config (GET resolve)', async () => {
+    const cfg = buildBlueDotConfig();
+    const { seeker: _seeker, ...rest } = cfg.domains;
+    _setNetworkConfig({ ...cfg, domains: rest } as ResolvedNetworkConfig);
+    const r = await app.inject({
+      method: 'GET',
+      url: `/public/v1/aggregators/${ORG_SLUG}/links/${SLUG_FULL}`,
+    });
+    expect(r.statusCode).toBe(404);
+  });
+
+  it('404s when the link domain is not declared in the active network config (POST submit)', async () => {
+    const cfg = buildBlueDotConfig();
+    const { seeker: _seeker, ...rest } = cfg.domains;
+    _setNetworkConfig({ ...cfg, domains: rest } as ResolvedNetworkConfig);
+    const r = await app.inject({
+      method: 'POST',
+      url: `/public/v1/aggregators/${ORG_SLUG}/registrations/${SLUG_FULL}`,
+      payload: { name: 'X', phone: '+919999999999' },
+    });
+    expect(r.statusCode).toBe(404);
+  });
+});
+
+describe('rate limiting on POST submit', () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    ({ app } = await bootApp());
+  });
+  afterEach(() => teardown(app));
+
+  it('429s with Retry-After when the per-link rate limit trips', async () => {
+    consumeMock.mockResolvedValueOnce({ allowed: false, count: 21, retryAfterSeconds: 7 });
+    const r = await app.inject({
+      method: 'POST',
+      url: `/public/v1/aggregators/${ORG_SLUG}/registrations/${SLUG_AO}`,
+      payload: {
+        name: 'A. User',
+        phone: '+919999999999',
+        consent_terms: true,
+        consent_privacy: true,
+      },
+    });
+    expect(r.statusCode).toBe(429);
+    expect(r.headers['retry-after']).toBe('7');
+    expect(r.json().error.code).toBe('RATE_LIMITED');
+  });
+});
+
+describe('schema validation failure branches (account_and_profile)', () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    ({ app } = await bootApp());
+  });
+  afterEach(() => teardown(app));
+
+  it('500s (INTERNAL) when the schema loader cannot resolve a validator', async () => {
+    _setSchemaLoader({
+      getSchema: async () => ({
+        success: false,
+        error: { code: 'SCHEMA_NOT_FOUND', message: 'no schema' },
+      }),
+      getValidator: async () => ({
+        success: false,
+        error: { code: 'SCHEMA_NOT_FOUND', message: 'no schema' },
+      }),
+    } as unknown as Parameters<typeof _setSchemaLoader>[0]);
+    const r = await app.inject({
+      method: 'POST',
+      url: `/public/v1/aggregators/${ORG_SLUG}/registrations/${SLUG_FULL}`,
+      payload: {
+        name: 'A. User',
+        phone: '+919999999999',
+        consent_terms: true,
+        consent_privacy: true,
+        consent_profile: true,
+        year_of_birth: 1990,
+      },
+    });
+    expect(r.statusCode).toBe(500);
+    expect(r.json().error.code).toBe('INTERNAL');
+  });
+
+  it('400s (SCHEMA_VALIDATION) on a real (non-required) Ajv violation, e.g. wrong type', async () => {
+    const cfg = buildBlueDotConfig();
+    _setNetworkConfig({
+      ...cfg,
+      domains: {
+        ...cfg.domains,
+        seeker: {
+          ...cfg.domains.seeker,
+          schema: {
+            type: 'object',
+            properties: {
+              name: { type: 'string' },
+              phone: { type: 'string' },
+              years_experience: { type: 'integer', minimum: 0 },
+            },
+          },
+        },
+      },
+    } as ResolvedNetworkConfig);
+    const r = await app.inject({
+      method: 'POST',
+      url: `/public/v1/aggregators/${ORG_SLUG}/registrations/${SLUG_FULL}`,
+      payload: {
+        name: 'A. User',
+        phone: '+919999999999',
+        years_experience: 'not-a-number',
+        consent_terms: true,
+        consent_privacy: true,
+        consent_profile: true,
+        year_of_birth: 1990,
+      },
+    });
+    expect(r.statusCode).toBe(400);
+    expect(r.json().error.code).toBe('SCHEMA_VALIDATION');
+  });
+
+  it('400s (SCHEMA_VALIDATION) when name/phone/email are all empty after stripping blank cells', async () => {
+    const r = await app.inject({
+      method: 'POST',
+      url: `/public/v1/aggregators/${ORG_SLUG}/registrations/${SLUG_FULL}`,
+      payload: {
+        name: '   ',
+        phone: '',
+        consent_terms: true,
+        consent_privacy: true,
+        consent_profile: true,
+        year_of_birth: 1990,
+      },
+    });
+    expect(r.statusCode).toBe(400);
+    expect(r.json().error.code).toBe('SCHEMA_VALIDATION');
+    expect(r.json().error.fields?.missing).toContain('name');
+  });
+
+  it('400s (INVALID_PHONE) when the phone value fails E.164 normalisation', async () => {
+    const r = await app.inject({
+      method: 'POST',
+      url: `/public/v1/aggregators/${ORG_SLUG}/registrations/${SLUG_FULL}`,
+      payload: {
+        name: 'A. User',
+        phone: '123',
+        consent_terms: true,
+        consent_privacy: true,
+        consent_profile: true,
+        year_of_birth: 1990,
+      },
+    });
+    expect(r.statusCode).toBe(400);
+    expect(r.json().error.code).toBe('INVALID_PHONE');
+  });
+
+  it('accepts a numeric-string year_of_birth (coerced) and still succeeds', async () => {
+    const r = await app.inject({
+      method: 'POST',
+      url: `/public/v1/aggregators/${ORG_SLUG}/registrations/${SLUG_FULL}`,
+      payload: {
+        name: 'A. User',
+        phone: '+919999911111',
+        consent_terms: true,
+        consent_privacy: true,
+        consent_profile: true,
+        year_of_birth: '1990',
+      },
+    });
+    expect(r.statusCode).toBe(201);
+  });
+
+  it('strips blank optional cells before schema validation (whitespace, empty array)', async () => {
+    const r = await app.inject({
+      method: 'POST',
+      url: `/public/v1/aggregators/${ORG_SLUG}/registrations/${SLUG_FULL}`,
+      payload: {
+        name: 'A. User',
+        phone: '+919999922222',
+        notes: '   ',
+        tags: [],
+        consent_terms: true,
+        consent_privacy: true,
+        consent_profile: true,
+        year_of_birth: 1990,
+      },
+    });
+    expect(r.statusCode).toBe(201);
   });
 });

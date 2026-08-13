@@ -182,7 +182,7 @@ function CheckboxWidget(props: WidgetProps) {
       <input
         id={id}
         type="checkbox"
-        className="w-[18px] h-[18px] rounded-[5px] mt-0.5 accent-[var(--bd-primary)]"
+        className="w-[18px] h-[18px] rounded-[5px] mt-0.5 accent-(--bd-primary)"
         checked={Boolean(value)}
         required={required}
         disabled={disabled || readonly}

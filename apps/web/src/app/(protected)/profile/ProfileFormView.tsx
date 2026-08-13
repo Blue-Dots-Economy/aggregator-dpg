@@ -160,7 +160,7 @@ export function ProfileFormView({ schema, uiSchema }: ProfileFormViewProps): JSX
 
       <div className="bd-card bd-shadow overflow-hidden">
         {!requesting && (
-          <div className="px-7 py-4 bg-gradient-to-r from-[var(--bd-tint-primary)] to-[var(--bd-card)] border-b border-[var(--bd-border)] flex items-center justify-between gap-4">
+          <div className="px-7 py-4 bg-linear-to-r from-(--bd-tint-primary) to-(--bd-card) border-b border-(--bd-border) flex items-center justify-between gap-4">
             <h2 className="font-display font-bold text-[15px] text-ink-900">
               {t('section_details')}
             </h2>
@@ -177,7 +177,7 @@ export function ProfileFormView({ schema, uiSchema }: ProfileFormViewProps): JSX
 
         {requesting && (
           <div className="px-7 pt-6">
-            <div className="rounded-[12px] border border-[var(--bd-border)] bg-[var(--bd-tint-primary)] p-5">
+            <div className="rounded-[12px] border border-(--bd-border) bg-(--bd-tint-primary) p-5">
               <h3 className="font-display font-bold text-[15px] text-ink-900">
                 {t('update_request_heading')}
               </h3>
@@ -187,7 +187,7 @@ export function ProfileFormView({ schema, uiSchema }: ProfileFormViewProps): JSX
                 <p className="mt-4 text-[13px] text-ink-400">{t('update_request_empty')}</p>
               ) : (
                 <div className="mt-4 space-y-3">
-                  <div className="hidden md:grid grid-cols-[1fr_1.3fr_1.3fr] gap-3 px-1 text-[10.5px] uppercase tracking-[0.1em] font-semibold text-ink-400">
+                  <div className="hidden md:grid grid-cols-[1fr_1.3fr_1.3fr] gap-3 px-1 text-[10.5px] uppercase tracking-widest font-semibold text-ink-400">
                     <span>{t('col_field')}</span>
                     <span>{t('col_current')}</span>
                     <span>{t('col_requested')}</span>
@@ -198,7 +198,7 @@ export function ProfileFormView({ schema, uiSchema }: ProfileFormViewProps): JSX
                       className="grid grid-cols-1 md:grid-cols-[1fr_1.3fr_1.3fr] gap-1.5 md:gap-3 md:items-center"
                     >
                       <div className="text-[13.5px] font-medium text-ink-900">{f.label}</div>
-                      <div className="text-[13px] text-ink-500 break-words">
+                      <div className="text-[13px] text-ink-500 wrap-break-word">
                         {currentValueFor(f.key, data) || <span className="text-ink-300">—</span>}
                       </div>
                       <input
