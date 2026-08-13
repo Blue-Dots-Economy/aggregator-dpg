@@ -146,8 +146,14 @@ const ConfigSchema = z.object({
   PUBLIC_LINK_BASE_URL: z.string().default('http://localhost:3000'),
   /** Pre-signed GET URL TTL for QR PNG downloads (seconds). */
   QR_DOWNLOAD_URL_TTL_SECONDS: z.coerce.number().int().positive().default(900),
-  /** Max `item_ids` accepted per `POST /v1/campaign/export` request body. */
+  /** Max `item_ids` accepted per campaign request body (after de-dup). */
   EXPORT_MAX_ITEM_IDS: z.coerce.number().int().positive().default(500),
+  /** Ingress rate-limit window (seconds) for campaign submits, per org. */
+  CAMPAIGN_SUBMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
+  /** Max campaign submits allowed per window, per org. */
+  CAMPAIGN_SUBMIT_MAX: z.coerce.number().int().positive().default(10),
+  /** Max active (pending|processing) campaign jobs allowed per org at once. */
+  CAMPAIGN_MAX_ACTIVE_PER_ORG: z.coerce.number().int().positive().default(3),
 
   // ─── Approval links ───────────────────────────────────────────────────────
   /**
