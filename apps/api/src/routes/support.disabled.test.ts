@@ -18,7 +18,7 @@ describe('support routes (SUPPORT_EMAIL unset)', () => {
     delete process.env.SUPPORT_EMAIL;
     _resetJwks();
     process.env.KEYCLOAK_URL = 'http://kc.local';
-    process.env.KEYCLOAK_REALM = 'aggregator';
+    process.env.KEYCLOAK_REALM = 'bluedots';
     _setAccessTokenVerifier(async (token) => {
       if (token === 'good-token') {
         return { sub: 'u1', aggregator_id: 'agg-9', email: 'asha@example.com' };
