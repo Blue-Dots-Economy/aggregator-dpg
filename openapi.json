@@ -10078,7 +10078,7 @@
         "tags": [
           "campaign"
         ],
-        "description": "Enqueues a background job that exports the participant contact fields (name/email/phone, each with profile/user provenance) for the given owned items to a private CSV, and emails a short-lived pre-signed download link to the requesting user. Auth: Keycloak Bearer token; the caller org is derived from the token signalstack_org_id claim, and the recipient is the requesting user's token email (falling back to the aggregator contact_email). Returns 202 once the job is durably queued.",
+        "description": "Creates a durable campaign job that exports the participant contact fields (name/email/phone, each with profile/user provenance) for the given owned items to a private CSV, and emails a short-lived pre-signed download link to the requesting user. Body is the shared campaign envelope { item_ids, metadata[], content{} }. Send an Idempotency-Key header to make retries safe. Returns 202 { job_id }; poll GET /v1/campaign/export/{job_id} for status.",
         "requestBody": {
           "required": true,
           "content": {
@@ -10092,12 +10092,36 @@
                       "type": "string",
                       "format": "uuid"
                     },
-                    "minItems": 1,
-                    "maxItems": 500
+                    "minItems": 1
                   },
-                  "purpose": {
-                    "type": "string",
-                    "maxLength": 500
+                  "metadata": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "key": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "value": {
+                          "type": "string",
+                          "maxLength": 2000
+                        }
+                      },
+                      "required": [
+                        "key",
+                        "value"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "maxItems": 50,
+                    "default": []
+                  },
+                  "content": {
+                    "type": "object",
+                    "additionalProperties": {},
+                    "default": {}
                   }
                 },
                 "required": [
@@ -10121,19 +10145,13 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "status": {
+                    "job_id": {
                       "type": "string",
-                      "enum": [
-                        "queued"
-                      ]
-                    },
-                    "message": {
-                      "type": "string"
+                      "format": "uuid"
                     }
                   },
                   "required": [
-                    "status",
-                    "message"
+                    "job_id"
                   ],
                   "additionalProperties": false
                 }
@@ -10293,7 +10311,609 @@
               }
             }
           },
+          "429": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
           "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "List the org's campaign jobs (newest first)",
+        "tags": [
+          "campaign"
+        ],
+        "description": "Returns the requesting org's campaign jobs, newest first, with derived status counts. Optional channel filter and cursor pagination (pass the returned next_cursor to page).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "export",
+                "email",
+                "voice"
+              ]
+            },
+            "in": "query",
+            "name": "channel",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "cursor",
+            "required": false
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "jobs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "job_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "channel": {
+                            "type": "string",
+                            "enum": [
+                              "export",
+                              "email",
+                              "voice"
+                            ]
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "pending",
+                              "processing",
+                              "succeeded",
+                              "partially_failed",
+                              "failed"
+                            ]
+                          },
+                          "counts": {
+                            "type": "object",
+                            "properties": {
+                              "total": {
+                                "type": "integer"
+                              },
+                              "pending": {
+                                "type": "integer"
+                              },
+                              "resolved": {
+                                "type": "integer"
+                              },
+                              "submitted": {
+                                "type": "integer"
+                              },
+                              "failed": {
+                                "type": "integer"
+                              }
+                            },
+                            "required": [
+                              "total",
+                              "pending",
+                              "resolved",
+                              "submitted",
+                              "failed"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "created_at": {
+                            "type": "string"
+                          },
+                          "updated_at": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "job_id",
+                          "channel",
+                          "status",
+                          "counts",
+                          "created_at",
+                          "updated_at"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "next_cursor": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "jobs",
+                    "next_cursor"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/campaign/export/{job_id}": {
+      "get": {
+        "summary": "Get one campaign job's status and per-item outcomes",
+        "tags": [
+          "campaign"
+        ],
+        "description": "Returns the job status (derived from item counts) and each item id with its status and error reason. Tenant-scoped: a job owned by another org returns 404.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "name": "job_id",
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "job_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "channel": {
+                      "type": "string",
+                      "enum": [
+                        "export",
+                        "email",
+                        "voice"
+                      ]
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "pending",
+                        "processing",
+                        "succeeded",
+                        "partially_failed",
+                        "failed"
+                      ]
+                    },
+                    "counts": {
+                      "type": "object",
+                      "properties": {
+                        "total": {
+                          "type": "integer"
+                        },
+                        "pending": {
+                          "type": "integer"
+                        },
+                        "resolved": {
+                          "type": "integer"
+                        },
+                        "submitted": {
+                          "type": "integer"
+                        },
+                        "failed": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "total",
+                        "pending",
+                        "resolved",
+                        "submitted",
+                        "failed"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "created_at": {
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "type": "string"
+                    },
+                    "metadata": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "value": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "value"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "item_id": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "pending",
+                              "resolved",
+                              "submitted",
+                              "failed"
+                            ]
+                          },
+                          "error_reason": {
+                            "type": "string",
+                            "nullable": true
+                          }
+                        },
+                        "required": [
+                          "item_id",
+                          "status",
+                          "error_reason"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "job_id",
+                    "channel",
+                    "status",
+                    "counts",
+                    "created_at",
+                    "updated_at",
+                    "metadata",
+                    "items"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "404": {
             "description": "Default Response",
             "content": {
               "application/json": {

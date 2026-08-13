@@ -559,6 +559,11 @@ services:
       # Campaign PII export tunables (#579).
       EXPORT_URL_TTL_SECONDS: ${EXPORT_URL_TTL_SECONDS:-86400}
       CAMPAIGN_EXPORT_CONCURRENCY: ${CAMPAIGN_EXPORT_CONCURRENCY:-2}
+      CAMPAIGN_DECRYPT_CHUNK: ${CAMPAIGN_DECRYPT_CHUNK:-500}
+      CAMPAIGN_EXPORT_FIELDS: ${CAMPAIGN_EXPORT_FIELDS:-contact}
+      CAMPAIGN_STALL_SECONDS: ${CAMPAIGN_STALL_SECONDS:-900}
+      CAMPAIGN_EXPORT_RECIPIENT: ${CAMPAIGN_EXPORT_RECIPIENT:-}
+      EXPORT_NETWORK_ADMIN_EMAIL: ${EXPORT_NETWORK_ADMIN_EMAIL:-}
       SCHEMA_ROOT_DIR: /app/config/${AGGREGATOR_NETWORK:-blue_dot}/schemas
       AGGREGATOR_CONFIG_PATH: /app/config/${AGGREGATOR_NETWORK:-blue_dot}/aggregator.config.yaml
       # Bulk-file processor caps + cron intervals (match aggregator-dpg/docker-compose.yml).
