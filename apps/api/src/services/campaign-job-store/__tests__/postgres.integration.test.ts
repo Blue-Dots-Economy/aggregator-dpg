@@ -34,7 +34,7 @@ suite('PostgresCampaignJobStore (integration)', () => {
     // Rebind the shared Drizzle client to the real DB (getPool caches on the
     // real url; getDb() then builds its client against it).
     _setDbClients(null, null);
-    getPool({ url: realUrl });
+    getPool({ url: realUrl! });
 
     const suffix = randomUUID().slice(0, 8);
     const rows = await getDb()
