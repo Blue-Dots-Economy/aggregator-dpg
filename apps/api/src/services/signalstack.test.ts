@@ -1,94 +1,145 @@
 /**
- * Unit tests for the api process's SignalStack writer factory.
+ * Unit tests for the lazy SignalStack writer factory.
  *
- * `getSignalStackWriter()` memoises its result in a module-level `writer`
- * variable, and `config` is parsed once eagerly at module load — so every
- * test resets the module registry and re-imports both fresh, after setting
- * the env vars that case needs. That's the only way to exercise more than
- * one config combination in a single test file.
+ * `@aggregator-dpg/signalstack-writer/http` and `../config.js` are mocked so
+ * no real HTTP client is constructed and each test controls the
+ * `SIGNALSTACK_*` env-derived config directly. Covers the disabled (no
+ * base-url/api-key) path, the acting-org-id warning, singleton caching, and
+ * the test-only override hook.
+ *
+ * @module @aggregator-dpg/api
  */
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+const { mockHttpWriterCtor, mockLoggerWarn } = vi.hoisted(() => ({
+  mockHttpWriterCtor: vi.fn(),
+  mockLoggerWarn: vi.fn(),
+}));
 
-const BASE_ENV = {
-  SIGNALSTACK_BASE_URL: 'http://signalstack.test',
-  SIGNALSTACK_ACTING_ORG_ID: 'org-platform',
+vi.mock('@aggregator-dpg/signalstack-writer/http', () => ({
+  HttpSignalStackWriter: class {
+    opts: unknown;
+    constructor(opts: unknown) {
+      this.opts = opts;
+      mockHttpWriterCtor(opts);
+    }
+  },
+}));
+
+vi.mock('../logger.js', () => ({
+  logger: { warn: mockLoggerWarn, info: vi.fn(), error: vi.fn(), debug: vi.fn() },
+}));
+
+let mockConfig: {
+  SIGNALSTACK_BASE_URL: string | undefined;
+  SIGNALSTACK_ADMIN_KEY: string | undefined;
+  SIGNALSTACK_ACTING_ORG_ID: string | undefined;
+  SIGNALSTACK_TIMEOUT_MS: number;
 };
 
-async function freshFactory() {
-  vi.resetModules();
-  const configModule = await import('../config.js');
-  const factoryModule = await import('./signalstack.js');
-  return { config: configModule.config, getSignalStackWriter: factoryModule.getSignalStackWriter };
-}
+vi.mock('../config.js', () => ({
+  get config() {
+    return mockConfig;
+  },
+}));
 
 describe('getSignalStackWriter', () => {
-  const savedEnv = { ...process.env };
-
   beforeEach(() => {
-    process.env = { ...savedEnv, ...BASE_ENV };
-    delete process.env.SIGNALSTACK_ADMIN_KEY;
-    delete process.env.SIGNALSTACK_AUTH_MODE;
-    delete process.env.SIGNALSTACK_CLIENT_ID;
-    delete process.env.SIGNALSTACK_CLIENT_SECRET;
-    delete process.env.KEYCLOAK_URL;
-    delete process.env.KEYCLOAK_REALM;
+    vi.resetModules();
+    mockHttpWriterCtor.mockReset();
+    mockLoggerWarn.mockReset();
+    mockConfig = {
+      SIGNALSTACK_BASE_URL: undefined,
+      SIGNALSTACK_ADMIN_KEY: undefined,
+      SIGNALSTACK_ACTING_ORG_ID: undefined,
+      SIGNALSTACK_TIMEOUT_MS: 10_000,
+    };
   });
 
-  it('returns null when SIGNALSTACK_BASE_URL is unset', async () => {
-    delete process.env.SIGNALSTACK_BASE_URL;
-    const { getSignalStackWriter } = await freshFactory();
+  it('returns null when neither base url nor key is set', async () => {
+    const { getSignalStackWriter } = await import('./signalstack.js');
     expect(getSignalStackWriter()).toBeNull();
+    expect(mockHttpWriterCtor).not.toHaveBeenCalled();
+    expect(mockLoggerWarn).not.toHaveBeenCalled();
   });
 
-  describe('apikey mode (default)', () => {
-    it('returns null when SIGNALSTACK_ADMIN_KEY is missing', async () => {
-      const { getSignalStackWriter } = await freshFactory();
-      expect(getSignalStackWriter()).toBeNull();
-    });
+  it('returns null and warns when base url is set but the admin key is missing', async () => {
+    mockConfig.SIGNALSTACK_BASE_URL = 'https://signalstack.example.com';
+    const { getSignalStackWriter } = await import('./signalstack.js');
+    expect(getSignalStackWriter()).toBeNull();
+    expect(mockLoggerWarn).toHaveBeenCalledWith(
+      expect.objectContaining({ sub: 'signalstack.init' }),
+    );
+  });
 
-    it('builds a writer when SIGNALSTACK_ADMIN_KEY is set', async () => {
-      process.env.SIGNALSTACK_ADMIN_KEY = 'admin-key';
-      const { getSignalStackWriter } = await freshFactory();
-      expect(getSignalStackWriter()).not.toBeNull();
-    });
+  it('returns null without warning when only the key is set (no base url)', async () => {
+    mockConfig.SIGNALSTACK_ADMIN_KEY = 'key-1';
+    const { getSignalStackWriter } = await import('./signalstack.js');
+    expect(getSignalStackWriter()).toBeNull();
+    expect(mockLoggerWarn).not.toHaveBeenCalled();
+  });
 
-    it('memoises the writer across calls', async () => {
-      process.env.SIGNALSTACK_ADMIN_KEY = 'admin-key';
-      const { getSignalStackWriter } = await freshFactory();
-      expect(getSignalStackWriter()).toBe(getSignalStackWriter());
+  it('builds the writer and warns when acting org id is unset', async () => {
+    mockConfig.SIGNALSTACK_BASE_URL = 'https://signalstack.example.com';
+    mockConfig.SIGNALSTACK_ADMIN_KEY = 'key-1';
+    const { getSignalStackWriter } = await import('./signalstack.js');
+    const writer = getSignalStackWriter();
+    expect(writer).not.toBeNull();
+    expect(mockLoggerWarn).toHaveBeenCalledWith(
+      expect.objectContaining({ sub: 'signalstack.init' }),
+    );
+    expect(mockHttpWriterCtor).toHaveBeenCalledWith({
+      baseUrl: 'https://signalstack.example.com',
+      apiKey: 'key-1',
+      timeoutMs: 10_000,
     });
   });
 
-  describe('bearer mode', () => {
-    beforeEach(() => {
-      process.env.SIGNALSTACK_AUTH_MODE = 'bearer';
-      process.env.SIGNALSTACK_CLIENT_ID = 'aggregator-dpg';
-      process.env.SIGNALSTACK_CLIENT_SECRET = 'shh';
-      process.env.KEYCLOAK_URL = 'http://keycloak.test';
-      process.env.KEYCLOAK_REALM = 'bluedots';
+  it('builds the writer including actingOrgId when set, without the warning', async () => {
+    mockConfig.SIGNALSTACK_BASE_URL = 'https://signalstack.example.com';
+    mockConfig.SIGNALSTACK_ADMIN_KEY = 'key-1';
+    mockConfig.SIGNALSTACK_ACTING_ORG_ID = 'org-1';
+    const { getSignalStackWriter } = await import('./signalstack.js');
+    const writer = getSignalStackWriter();
+    expect(writer).not.toBeNull();
+    expect(mockLoggerWarn).not.toHaveBeenCalled();
+    expect(mockHttpWriterCtor).toHaveBeenCalledWith({
+      baseUrl: 'https://signalstack.example.com',
+      apiKey: 'key-1',
+      actingOrgId: 'org-1',
+      timeoutMs: 10_000,
     });
+  });
 
-    it('builds a writer when client id/secret + Keycloak URL/realm are all set', async () => {
-      const { getSignalStackWriter } = await freshFactory();
-      expect(getSignalStackWriter()).not.toBeNull();
-    });
+  it('caches the singleton (including a null result) across calls', async () => {
+    const { getSignalStackWriter } = await import('./signalstack.js');
+    const a = getSignalStackWriter();
+    const b = getSignalStackWriter();
+    expect(a).toBeNull();
+    expect(b).toBeNull();
 
-    it('does not require SIGNALSTACK_ADMIN_KEY', async () => {
-      delete process.env.SIGNALSTACK_ADMIN_KEY;
-      const { getSignalStackWriter } = await freshFactory();
-      expect(getSignalStackWriter()).not.toBeNull();
-    });
+    mockConfig.SIGNALSTACK_BASE_URL = 'https://signalstack.example.com';
+    mockConfig.SIGNALSTACK_ADMIN_KEY = 'key-1';
+    // Still cached as null even though config "changed" after first read.
+    expect(getSignalStackWriter()).toBeNull();
+    expect(mockHttpWriterCtor).not.toHaveBeenCalled();
+  });
 
-    it.each([
-      'SIGNALSTACK_CLIENT_ID',
-      'SIGNALSTACK_CLIENT_SECRET',
-      'KEYCLOAK_URL',
-      'KEYCLOAK_REALM',
-    ])('returns null when %s is missing', async (missing) => {
-      delete process.env[missing];
-      const { getSignalStackWriter } = await freshFactory();
-      expect(getSignalStackWriter()).toBeNull();
-    });
+  it('_setSignalStackWriter overrides the singleton for tests', async () => {
+    const { getSignalStackWriter, _setSignalStackWriter } = await import('./signalstack.js');
+    const fake = { onboard: vi.fn() } as never;
+    _setSignalStackWriter(fake);
+    expect(getSignalStackWriter()).toBe(fake);
+    expect(mockHttpWriterCtor).not.toHaveBeenCalled();
+  });
+
+  it('_setSignalStackWriter(null) pins the disabled state without re-evaluating env config', async () => {
+    mockConfig.SIGNALSTACK_BASE_URL = 'https://signalstack.example.com';
+    mockConfig.SIGNALSTACK_ADMIN_KEY = 'key-1';
+    const { getSignalStackWriter, _setSignalStackWriter } = await import('./signalstack.js');
+    _setSignalStackWriter(null);
+    // Even though config now supports a real writer, the pinned null wins.
+    expect(getSignalStackWriter()).toBeNull();
+    expect(mockHttpWriterCtor).not.toHaveBeenCalled();
   });
 });

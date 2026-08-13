@@ -9,6 +9,7 @@ import { RjsfThemedForm } from '../../../components/forms/RjsfThemed';
 import { BlueDotsLogo } from '../../../components/ui/BlueDotsLogo';
 import { I } from '../../../icons';
 import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
+import { registrationShowsConsent, domainRequiresBirthYear } from '../../../lib/registration-gates';
 import { MinimalIdentityForm, type MinimalIdentityPayload } from './MinimalIdentityForm';
 import { LanguageSwitcher } from '../../../components/shell/LanguageSwitcher';
 import { ConsentModal, type ConsentTab } from '../../../components/consent/ConsentModal';
@@ -172,11 +173,20 @@ export function PublicRegistrationView({
   const yobNum = Number(yearOfBirth.trim());
   const yobValid =
     /^\d{4}$/.test(yearOfBirth.trim()) && yobNum >= currentYear - 120 && yobNum <= currentYear;
-  const derivedAge = yobValid ? currentYear - yobNum : NaN;
+  const derivedAge = yobValid ? currentYear - yobNum : Number.NaN;
   const isMinor = yobValid && derivedAge <= 18;
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
   const brandShort = cfg.brand.short_name;
   const brandLogo = cfg.brand.logo?.default;
+  // #613: the consent step + birth-year field are config-driven per domain
+  // (network.json). Collect a birth year only when guardian consent applies.
+  // Show consent when the domain gates go-live on `consent_required` OR when it
+  // collects a birth year — signalstack force-adds `consent_required` for any
+  // guardian-gated domain, so a birth-year domain always needs the consent step
+  // (see registrationShowsConsent).
+  const domainCfg = cfg.domains.find((d) => d.id === domain);
+  const showBirthYear = domainRequiresBirthYear(domainCfg);
+  const showConsent = registrationShowsConsent(domainCfg);
   const errorRef = useRef<HTMLDivElement>(null);
 
   // Submit button sits below a long form; on failure pull the error
@@ -248,8 +258,7 @@ export function PublicRegistrationView({
         // schemas omit it, so multi-select dropdowns render with zero
         // options without this nudge.
         const resolvedItems = (inlined[field] as Record<string, unknown>).items as
-          | Record<string, unknown>
-          | undefined;
+          Record<string, unknown> | undefined;
         if (resolvedItems && Array.isArray(resolvedItems['enum'])) {
           (inlined[field] as Record<string, unknown>).uniqueItems = true;
         }
@@ -467,12 +476,20 @@ export function PublicRegistrationView({
           // consent_terms/consent_privacy carry the registrant's accepted
           // consent (#522); the API validates + records it, then strips the
           // keys before the participant profile is built.
+          // Consent + birth-year are config-driven (#613): only send consent
+          // flags when the domain shows the consent step, and only send the
+          // birth year when the domain collects it. Absent gates ⇒ neither is
+          // sent, so the server records no consent and omits age.
           body: JSON.stringify({
             ...values,
-            consent_terms: consentAccepted,
-            consent_privacy: consentAccepted,
-            consent_profile: consentAccepted,
-            year_of_birth: yearOfBirth.trim(),
+            ...(showConsent
+              ? {
+                  consent_terms: consentAccepted,
+                  consent_privacy: consentAccepted,
+                  consent_profile: consentAccepted,
+                }
+              : {}),
+            ...(showBirthYear ? { year_of_birth: yearOfBirth.trim() } : {}),
           }),
         },
       );
@@ -554,6 +571,8 @@ export function PublicRegistrationView({
             hintI18nKey={publicHintI18nKey}
             requirePhone={registrationMode === 'voice'}
             consentContent={consentContent}
+            showConsent={showConsent}
+            showBirthYear={showBirthYear}
           />
         </div>
         {consentContent && (
@@ -598,7 +617,7 @@ export function PublicRegistrationView({
           <LanguageSwitcher />
         </header>
 
-        <div className="rounded-[18px] bg-white border border-[var(--bd-border)] overflow-hidden shadow-[0_1px_0_rgba(11,16,32,0.02),0_20px_60px_-30px_rgba(11,16,32,0.18)]">
+        <div className="rounded-[18px] bg-white border border-(--bd-border) overflow-hidden shadow-[0_1px_0_rgba(11,16,32,0.02),0_20px_60px_-30px_rgba(11,16,32,0.18)]">
           <div
             className="px-6 sm:px-8 py-6 text-white relative overflow-hidden"
             style={{ background: heroGradient }}
@@ -658,7 +677,7 @@ export function PublicRegistrationView({
                     ref={errorRef}
                     role="alert"
                     tabIndex={-1}
-                    className="mb-5 rounded-[10px] border border-rose-200 bg-rose-50 px-4 py-3 text-[13px] text-rose-700 scroll-mt-6 outline-none"
+                    className="mb-5 rounded-[10px] border border-rose-200 bg-rose-50 px-4 py-3 text-[13px] text-rose-700 scroll-mt-6 outline-hidden"
                   >
                     <div className="font-semibold">{state.title}</div>
                     <div className="mt-1 text-rose-600">{state.detail}</div>
@@ -831,81 +850,86 @@ export function PublicRegistrationView({
                     }}
                   >
                     <div className="mt-4 flex flex-col gap-3">
-                      <label className="block">
-                        <span className="text-[14px] font-medium text-[var(--bd-fg)]">
-                          {t('year_of_birth_label')}
-                          <span className="text-rose-500 ml-0.5">*</span>
-                        </span>
-                        <select
-                          value={yearOfBirth}
-                          onChange={(e) => setYearOfBirth(e.target.value)}
-                          className="mt-1 w-full rounded-[10px] border border-[var(--bd-border)] px-3 py-2 text-[14px]"
-                          required
-                        >
-                          <option value="">{t('year_of_birth_placeholder')}</option>
-                          {Array.from({ length: 101 }, (_, i) => currentYear - i).map((y) => (
-                            <option key={y} value={String(y)}>
-                              {y}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      {isMinor ? (
-                        // Minor: no consent here — Signals creates the account
-                        // without it; terms are accepted in the Signalstack app
-                        // after signing in. Submit still proceeds.
-                        <div className="rounded-[12px] border border-[var(--bd-border)] bg-[var(--bd-primary-50)] px-4 py-3.5 text-[14px] text-[var(--bd-fg)]">
-                          {t('u18_notice')}
-                        </div>
-                      ) : (
-                        <div className="flex items-start gap-2.5 rounded-[12px] border border-[var(--bd-border)] px-4 py-3.5 text-[14px] text-[var(--bd-fg)]">
-                          <input
-                            id="consent-all"
-                            type="checkbox"
-                            checked={consentAccepted}
-                            onChange={(e) => setConsentAccepted(e.target.checked)}
-                            className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer"
-                            aria-required
-                          />
-                          <span>
-                            {consentContent ? (
-                              <>
-                                {t('consent_accept_prefix')}
-                                <button
-                                  type="button"
-                                  className="underline text-[var(--bd-primary-600)]"
-                                  onClick={() => setConsentModal({ open: true, tab: 'terms' })}
-                                >
-                                  {t('consent_docs_link')}
-                                </button>
-                                {t('consent_profile_conjunction')}
-                                {consentContent.profileCreation && (
-                                  <>
-                                    {' '}
-                                    <button
-                                      type="button"
-                                      className="underline text-[var(--bd-primary-600)]"
-                                      onClick={() => setProfileConsentModal(true)}
-                                    >
-                                      {t('consent_profile_link')}
-                                    </button>
-                                  </>
-                                )}
-                              </>
-                            ) : (
-                              t('consent_label')
-                            )}
+                      {showBirthYear && (
+                        <label className="block">
+                          <span className="text-[14px] font-medium text-(--bd-fg)">
+                            {t('year_of_birth_label')}
+                            <span className="text-rose-500 ml-0.5">*</span>
                           </span>
-                        </div>
+                          <select
+                            value={yearOfBirth}
+                            onChange={(e) => setYearOfBirth(e.target.value)}
+                            className="mt-1 w-full rounded-[10px] border border-(--bd-border) px-3 py-2 text-[14px]"
+                            required
+                          >
+                            <option value="">{t('year_of_birth_placeholder')}</option>
+                            {Array.from({ length: 101 }, (_, i) => currentYear - i).map((y) => (
+                              <option key={y} value={String(y)}>
+                                {y}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
                       )}
+                      {showConsent &&
+                        (isMinor ? (
+                          // Minor: no consent here — Signals creates the account
+                          // without it; terms are accepted in the Signalstack app
+                          // after signing in. Submit still proceeds.
+                          <div className="rounded-[12px] border border-(--bd-border) bg-(--bd-primary-50) px-4 py-3.5 text-[14px] text-(--bd-fg)">
+                            {t('u18_notice')}
+                          </div>
+                        ) : (
+                          <div className="flex items-start gap-2.5 rounded-[12px] border border-(--bd-border) px-4 py-3.5 text-[14px] text-(--bd-fg)">
+                            <input
+                              id="consent-all"
+                              type="checkbox"
+                              checked={consentAccepted}
+                              onChange={(e) => setConsentAccepted(e.target.checked)}
+                              className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer"
+                              aria-required
+                            />
+                            <span>
+                              {consentContent ? (
+                                <>
+                                  {t('consent_accept_prefix')}
+                                  <button
+                                    type="button"
+                                    className="underline text-(--bd-primary-600)"
+                                    onClick={() => setConsentModal({ open: true, tab: 'terms' })}
+                                  >
+                                    {t('consent_docs_link')}
+                                  </button>
+                                  {t('consent_profile_conjunction')}
+                                  {consentContent.profileCreation && (
+                                    <>
+                                      {' '}
+                                      <button
+                                        type="button"
+                                        className="underline text-(--bd-primary-600)"
+                                        onClick={() => setProfileConsentModal(true)}
+                                      >
+                                        {t('consent_profile_link')}
+                                      </button>
+                                    </>
+                                  )}
+                                </>
+                              ) : (
+                                t('consent_label')
+                              )}
+                            </span>
+                          </div>
+                        ))}
                       {(() => {
-                        // Adults must accept both consents; a minor submits
-                        // without consent (age + compliance omitted server-side).
+                        // #613: birth-year + consent are config-driven per domain —
+                        // require a valid birth year only when it's collected, and
+                        // consent only when the domain gates go-live on it (a minor
+                        // on a guardian domain still submits without consent).
                         const blocked =
                           state.status === 'submitting' ||
                           !canSubmit ||
-                          !yobValid ||
-                          (!isMinor && !consentAccepted);
+                          (showBirthYear && !yobValid) ||
+                          (showConsent && !isMinor && !consentAccepted);
                         return (
                           <button
                             type="submit"
@@ -916,7 +940,7 @@ export function PublicRegistrationView({
                             className={`w-full py-3 rounded-[12px] font-display font-bold text-[15px] text-white transition-all
                     ${
                       blocked
-                        ? 'bg-[var(--bd-primary-100)] text-[var(--bd-primary-600)] cursor-not-allowed'
+                        ? 'bg-(--bd-primary-100) text-(--bd-primary-600) cursor-not-allowed'
                         : 'hover:opacity-90 bd-shadow-lg'
                     }`}
                           >
@@ -957,12 +981,12 @@ export function PublicRegistrationView({
             <button
               type="button"
               aria-label={t('consent_profile_modal_close')}
-              className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full text-ink-400 hover:bg-[var(--bd-primary-50)] hover:text-ink-700"
+              className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full text-ink-400 hover:bg-(--bd-primary-50) hover:text-ink-700"
               onClick={() => setProfileConsentModal(false)}
             >
               <I.x size={18} />
             </button>
-            <h2 className="font-display font-bold text-[16px] text-[var(--bd-fg)] pr-8">
+            <h2 className="font-display font-bold text-[16px] text-(--bd-fg) pr-8">
               {t('consent_profile_modal_title')}
             </h2>
             <p className="mt-3 text-[14px] text-ink-700">

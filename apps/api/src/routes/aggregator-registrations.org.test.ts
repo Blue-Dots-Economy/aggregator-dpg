@@ -151,4 +151,19 @@ describe('coordinator submit with ORG_HIERARCHY_ENABLED', () => {
     });
     expect(res.statusCode).toBe(429);
   });
+
+  it('503 DB_UNAVAILABLE when the org store lookup fails', async () => {
+    orgStore.findById = async () => ({
+      ok: false,
+      error: { code: 'DB_UNAVAILABLE', message: 'db down' },
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/aggregator-registrations/create',
+      headers: AUTH_HEADER,
+      payload: { ...validBody, org_id: 'org-1' },
+    });
+    expect(res.statusCode).toBe(503);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('DB_UNAVAILABLE');
+  });
 });

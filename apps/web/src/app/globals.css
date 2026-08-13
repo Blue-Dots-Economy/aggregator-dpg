@@ -1,6 +1,69 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import 'tailwindcss';
+
+@custom-variant dark (&:is(.dark *));
+
+@theme {
+  --font-display:
+    var(--bd-font-heading), 'Plus Jakarta Sans', system-ui, sans-serif;
+  --font-sans: var(--bd-font-sans), Inter, system-ui, sans-serif;
+  --font-body:
+    var(--bd-font-body), var(--bd-font-sans), Inter, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  --color-ink-50: #f4f6fb;
+  --color-ink-100: #e5e8f2;
+  --color-ink-200: #c5cadd;
+  --color-ink-300: #9098b5;
+  --color-ink-400: #6b7493;
+  --color-ink-500: #475069;
+  --color-ink-600: #2a3350;
+  --color-ink-700: #1e263f;
+  --color-ink-800: #141a2e;
+  --color-ink-900: #0b1020;
+
+  --animate-fade-up: fadeUp 0.35s ease-out both;
+  --animate-pulse-dot: pulseDot 2s ease-in-out infinite;
+
+  @keyframes fadeUp {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  @keyframes pulseDot {
+    0%,
+    100% {
+      transform: scale(1);
+      opacity: 1;
+    }
+    50% {
+      transform: scale(1.4);
+      opacity: 0.5;
+    }
+  }
+}
+
+/*
+  The default border color has changed to `currentcolor` in Tailwind CSS v4,
+  so we've added these compatibility styles to make sure everything still
+  looks the same as it did with Tailwind CSS v3.
+
+  If we ever want to remove these styles, we need to add an explicit border
+  color utility to any element that depends on these defaults.
+*/
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-gray-200, currentcolor);
+  }
+}
 
 :root {
   --bd-primary: #4f46e5;

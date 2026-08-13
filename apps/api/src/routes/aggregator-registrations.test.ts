@@ -1,7 +1,11 @@
-import { describe, it, expect, beforeEach, afterAll } from 'vitest';
+import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
-import { AggregatorStoreFake, _setAggregatorStore } from '../services/aggregator-store/index.js';
+import {
+  AggregatorStoreFake,
+  _setAggregatorStore,
+  buildAggregator,
+} from '../services/aggregator-store/index.js';
 import {
   AggregatorProfileStoreFake,
   _setAggregatorProfileStore,
@@ -13,6 +17,13 @@ import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-tok
 import { ConsentLedgerFake } from '@aggregator-dpg/consent-ledger/testing';
 import { _setConsentLedger } from '../services/consent-ledger/index.js';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
+import type * as ConfigLoaderFs from '@aggregator-dpg/config-loader/fs';
+
+const { loadConsentConfigMock } = vi.hoisted(() => ({ loadConsentConfigMock: vi.fn() }));
+vi.mock('@aggregator-dpg/config-loader/fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof ConfigLoaderFs>();
+  return { ...actual, loadConsentConfig: loadConsentConfigMock };
+});
 
 const SERVICE_BEARER = 'service-token';
 const AUTH_HEADER = { authorization: `Bearer ${SERVICE_BEARER}` };
@@ -38,6 +49,12 @@ describe('POST /v1/aggregator-registrations/create', () => {
     idp = new IdpAdminFake();
     mailer = new FakeMailer();
     consentLedger = new ConsentLedgerFake();
+
+    loadConsentConfigMock.mockReset();
+    const actualLoader = await vi.importActual<typeof ConfigLoaderFs>(
+      '@aggregator-dpg/config-loader/fs',
+    );
+    loadConsentConfigMock.mockImplementation(actualLoader.loadConsentConfig);
 
     _setAggregatorStore(aggregatorStore);
     _setAggregatorProfileStore(profileStore);
@@ -425,5 +442,205 @@ describe('POST /v1/aggregator-registrations/create', () => {
     }
     // The review link was re-sent (to the reviewer, not the caller).
     expect(mailer.outbox.length).toBe(1);
+  });
+
+  it('400 SCHEMA_VALIDATION when `type` is not a domain declared by the active network (Ajv)', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/aggregator-registrations/create',
+      headers: AUTH_HEADER,
+      payload: { ...validBody, type: 'not-a-real-domain' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('SCHEMA_VALIDATION');
+  });
+
+  it('503 DB_UNAVAILABLE when findByContactEmail fails', async () => {
+    aggregatorStore.findByContactEmail = async () => ({
+      ok: false,
+      error: { code: 'DB_UNAVAILABLE', message: 'db down' },
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/aggregator-registrations/create',
+      headers: AUTH_HEADER,
+      payload: validBody,
+    });
+    expect(res.statusCode).toBe(503);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('DB_UNAVAILABLE');
+  });
+
+  it('503 DB_UNAVAILABLE when findByContactPhone fails', async () => {
+    aggregatorStore.findByContactPhone = async () => ({
+      ok: false,
+      error: { code: 'DB_UNAVAILABLE', message: 'db down' },
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/aggregator-registrations/create',
+      headers: AUTH_HEADER,
+      payload: validBody,
+    });
+    expect(res.statusCode).toBe(503);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('DB_UNAVAILABLE');
+  });
+
+  it('409 PHONE_EXISTS when the phone already exists in the DB (no matching KC user)', async () => {
+    // A prior aggregator row already holds this phone (e.g. KC user was
+    // separately cleaned up but the DB row remains) — the DB-level phone
+    // uniqueness check must still catch it before any KC calls happen.
+    aggregatorStore.seed([
+      buildAggregator({
+        id: '33333333-3333-3333-3333-333333333333',
+        orgSlug: 'other-org',
+        contact: { name: 'Other', phone: '+919876543210', email: 'other@other.org' },
+        status: 'pending',
+      }),
+    ]);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/aggregator-registrations/create',
+      headers: AUTH_HEADER,
+      payload: validBody, // same phone +919876543210, different email
+    });
+    expect(res.statusCode).toBe(409);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('PHONE_EXISTS');
+  });
+
+  it('503 IDP_UNAVAILABLE when idp.findByEmail fails', async () => {
+    idp.findByEmail = async () => ({
+      ok: false,
+      error: { code: 'IDP_UNAVAILABLE', message: 'kc down' },
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/aggregator-registrations/create',
+      headers: AUTH_HEADER,
+      payload: validBody,
+    });
+    expect(res.statusCode).toBe(503);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('IDP_UNAVAILABLE');
+  });
+
+  it('503 IDP_UNAVAILABLE when idp.findByAttribute(phoneNumber) fails', async () => {
+    idp.findByAttribute = async () => ({
+      ok: false,
+      error: { code: 'IDP_UNAVAILABLE', message: 'kc down' },
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/aggregator-registrations/create',
+      headers: AUTH_HEADER,
+      payload: validBody,
+    });
+    expect(res.statusCode).toBe(503);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('IDP_UNAVAILABLE');
+  });
+
+  it.each([
+    ['DUPLICATE_SLUG', 503, 'DUPLICATE_SLUG'],
+    ['DUPLICATE_PHONE', 409, 'PHONE_EXISTS'],
+    ['DUPLICATE_EMAIL', 409, 'USER_EXISTS'],
+    ['CHECK_VIOLATION', 400, 'SCHEMA_VALIDATION'],
+    ['DB_UNAVAILABLE', 503, 'DB_UNAVAILABLE'],
+    ['NOT_FOUND', 503, 'DB_UNAVAILABLE'],
+  ] as const)(
+    'maps aggregatorStore.create error %s to %d %s',
+    async (storeCode, status, errCode) => {
+      aggregatorStore.create = async () => ({
+        ok: false,
+        error: { code: storeCode, message: 'store error' },
+      });
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/aggregator-registrations/create',
+        headers: AUTH_HEADER,
+        payload: validBody,
+      });
+      expect(res.statusCode).toBe(status);
+      expect((res.json() as { error: { code: string } }).error.code).toBe(errCode);
+    },
+  );
+
+  it('500 CONSENT_WRITE_FAILED (rolled back) when the consent config fails to load', async () => {
+    loadConsentConfigMock.mockRejectedValueOnce(new Error('disk error'));
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/aggregator-registrations/create',
+      headers: AUTH_HEADER,
+      payload: {
+        ...validBody,
+        contact: { ...validBody.contact, email: 'consent-fail@trrain.org' },
+      },
+    });
+    expect(res.statusCode).toBe(500);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('CONSENT_WRITE_FAILED');
+    const found = await aggregatorStore.findByContactEmail('consent-fail@trrain.org');
+    expect(found.ok && found.value).toBeNull();
+  });
+
+  it('503 DB_UNAVAILABLE (rolled back) when profileStore.create fails', async () => {
+    profileStore.create = async () => ({
+      ok: false,
+      error: { code: 'DB_UNAVAILABLE', message: 'db down' },
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/aggregator-registrations/create',
+      headers: AUTH_HEADER,
+      payload: {
+        ...validBody,
+        contact: { ...validBody.contact, email: 'profile-fail@trrain.org' },
+      },
+    });
+    expect(res.statusCode).toBe(503);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('DB_UNAVAILABLE');
+    const found = await aggregatorStore.findByContactEmail('profile-fail@trrain.org');
+    expect(found.ok && found.value).toBeNull();
+  });
+
+  it('409 USER_EXISTS (rolled back) when idp.createUser races to USER_EXISTS after the pre-check passed', async () => {
+    idp.createUser = async () => ({
+      ok: false,
+      error: { code: 'USER_EXISTS', message: 'race: user created concurrently' },
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/aggregator-registrations/create',
+      headers: AUTH_HEADER,
+      payload: { ...validBody, contact: { ...validBody.contact, email: 'race@trrain.org' } },
+    });
+    expect(res.statusCode).toBe(409);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('USER_EXISTS');
+    const found = await aggregatorStore.findByContactEmail('race@trrain.org');
+    expect(found.ok && found.value).toBeNull();
+  });
+
+  it('clamps a consent valid_till far beyond the max validity window to the server ceiling', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/aggregator-registrations/create',
+      headers: AUTH_HEADER,
+      payload: {
+        ...validBody,
+        contact: { ...validBody.contact, email: 'long-consent@trrain.org' },
+        consent: {
+          value: true,
+          given_at: '2026-01-15T10:00:00Z',
+          valid_till: '2099-01-15T10:00:00Z',
+        },
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    const { aggregator_id } = res.json() as { aggregator_id: string };
+    const stored = await aggregatorStore.findById(aggregator_id);
+    if (stored.ok && stored.value) {
+      const validTill = new Date(stored.value.consent.valid_till).getTime();
+      const now = Date.now();
+      const fiveYearsMs = 5 * 365 * 24 * 60 * 60 * 1000;
+      // Clamped well under the requested 2099 date, at ~5 years from now.
+      expect(validTill).toBeLessThan(now + fiveYearsMs + 60_000);
+      expect(validTill).toBeGreaterThan(now + fiveYearsMs - 60_000);
+    }
   });
 });

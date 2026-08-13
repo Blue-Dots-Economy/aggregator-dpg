@@ -1,5 +1,35 @@
 import { describe, it, expect } from 'vitest';
-import { renderResultPage } from './approval-pages.js';
+import { renderResultPage, renderConfirmPage, setApprovalBrand } from './approval-pages.js';
+
+describe('setApprovalBrand', () => {
+  it('seeds the runtime brand used by render functions that omit an explicit override', () => {
+    setApprovalBrand({
+      short_name: 'Test Network',
+      long_name: 'Test Network Portal',
+      primary_color: '#123456',
+      portal_url: 'https://test.invalid',
+    });
+    const html = renderConfirmPage({
+      aggregatorId: 'agg-1',
+      intent: 'approve',
+      token: 'tok',
+      applicantEmail: 'a@b.com',
+      association: 'Acme',
+      aggregatorType: 'seeker',
+      postUrl: 'https://api.local/decision/agg-1',
+      expiresInText: '1 hour',
+    });
+    expect(html).toContain('Test Network');
+    // Restore the default runtime brand so later tests in the suite (which
+    // rely on DEFAULT_BRAND when no override is passed) are unaffected.
+    setApprovalBrand({
+      short_name: 'Aggregator',
+      long_name: 'Aggregator Portal',
+      primary_color: '#4f46e5',
+      portal_url: 'http://localhost:3000',
+    });
+  });
+});
 
 describe('renderResultPage action button', () => {
   it('omits the resend form when no action is given', () => {

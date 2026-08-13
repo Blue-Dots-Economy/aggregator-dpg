@@ -24,6 +24,7 @@ import {
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import { err, ok } from '@aggregator-dpg/shared-primitives/result';
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
+import { stripTrailingSlashes } from '@aggregator-dpg/shared-primitives/url';
 
 import {
   SignalStackWriterBase,
@@ -118,7 +119,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
         'HttpSignalStackWriter accepts only one of apiKey or tokenProvider, not both',
       );
     }
-    this.baseUrl = config.baseUrl.replace(/\/+$/, '');
+    this.baseUrl = stripTrailingSlashes(config.baseUrl);
     // Plan-C tier-aware participant upsert. Replaced the old
     // `/admin/onboard_participant` route which now returns 404.
     this.endpoint = `${this.baseUrl}/api/v1/admin/participant`;

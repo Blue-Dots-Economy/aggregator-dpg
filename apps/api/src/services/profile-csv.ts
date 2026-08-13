@@ -55,7 +55,7 @@ function neutralizeFormula(value: string): string {
  */
 function csvField(value: string): string {
   const safe = neutralizeFormula(value);
-  return /[",\r\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
+  return /[",\r\n]/.test(safe) ? `"${safe.replaceAll('"', '""')}"` : safe;
 }
 
 /**

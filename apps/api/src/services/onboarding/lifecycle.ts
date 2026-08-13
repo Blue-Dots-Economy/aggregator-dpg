@@ -3,7 +3,10 @@
  *
  * Signals may not have shipped the lifecycle column to every environment
  * yet. Any aggregator-facing read MUST go through this helper so the
- * fallback rule "absent → live" is enforced in one place.
+ * fallback rule "absent → draft" is enforced in one place. The default is
+ * pessimistic (#613): a row whose real status we can't read is treated as
+ * `draft` (not discoverable) rather than optimistically shown as `live`,
+ * so the dashboard never reports a draft profile as live.
  *
  * @packageDocumentation
  * @module @aggregator-dpg/api/services/onboarding/lifecycle
@@ -34,9 +37,9 @@ const VALID = new Set<LifecycleStatus>(LIFECYCLE_STATUSES);
  *
  * Resolution rules, in order:
  * 1. `null` / `undefined` item → `null` (no item present).
- * 2. `lifecycle_status` missing on the item → `'live'` (back-compat default).
+ * 2. `lifecycle_status` missing on the item → `'draft'` (pessimistic default).
  * 3. `lifecycle_status` is a known value → returned as-is.
- * 4. `lifecycle_status` is an unknown string → `'live'` (defensive clamp).
+ * 4. `lifecycle_status` is an unknown string → `'draft'` (defensive clamp).
  *
  * Always prefer this helper over reading `item.lifecycle_status` directly so
  * the fallback behaviour stays consistent across the codebase.
@@ -50,6 +53,6 @@ export function resolveLifecycle(
 ): LifecycleStatus | null {
   if (item == null) return null;
   const raw = item.lifecycle_status;
-  if (raw === undefined) return 'live';
-  return VALID.has(raw as LifecycleStatus) ? (raw as LifecycleStatus) : 'live';
+  if (raw === undefined) return 'draft';
+  return VALID.has(raw as LifecycleStatus) ? (raw as LifecycleStatus) : 'draft';
 }

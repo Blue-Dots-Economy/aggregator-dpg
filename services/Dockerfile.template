@@ -20,7 +20,7 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml       ./
 COPY services/<name>/package.json                           services/<name>/
 COPY packages/tsconfig/package.json                         packages/tsconfig/
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile --ignore-scripts
 
 # ── builder: compile TypeScript ───────────────────────────────────────────────
 FROM installer AS builder

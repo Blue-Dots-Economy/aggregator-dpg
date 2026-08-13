@@ -27,6 +27,7 @@ import { config } from '../config.js';
 import { getDb } from '../db/client.js';
 import { onboarding } from '../db/schema.js';
 import { getNetworkConfig } from '../services/network-config.js';
+import { stripTrailingSlashes } from '@aggregator-dpg/shared-primitives/url';
 
 interface LinkMetrics {
   total: number;
@@ -837,7 +838,7 @@ function generateSlug(): string {
  * slug without collision: `${base}/<org_slug>/<slug>`.
  */
 function buildPublicUrl(orgSlug: string, slug: string): string {
-  const base = config.PUBLIC_LINK_BASE_URL.replace(/\/+$/, '');
+  const base = stripTrailingSlashes(config.PUBLIC_LINK_BASE_URL);
   return `${base}/${orgSlug}/${slug}`;
 }
 

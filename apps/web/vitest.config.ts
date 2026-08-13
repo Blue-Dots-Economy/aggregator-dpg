@@ -10,6 +10,11 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
+      // `server-only` has no npm package on disk — Next.js recognises the
+      // bare specifier internally at build time. Vite's resolver can't do
+      // that, so `*.server.ts` files are unimportable under Vitest without
+      // this alias to a no-op shim. See src/__tests__/mocks/server-only.ts.
+      'server-only': path.resolve(__dirname, './src/__tests__/mocks/server-only.ts'),
     },
   },
   test: {
@@ -35,6 +40,19 @@ export default defineConfig({
         'src/app/layout.tsx',
         'src/app/page.tsx',
         'next-env.d.ts',
+        // Pure `export type`/`export interface` re-export modules — zero
+        // runtime statements after erasure, same rationale as *.d.ts.
+        'src/types/**',
+        // `ConsentDocContent`/`ParticipantConsent` are `export interface`
+        // declarations only — zero runtime statements after erasure.
+        'src/components/consent/consent-types.ts',
+        // `src/i18n/request.ts`'s computed dynamic import
+        // (`import(\`./messages/${locale}.json\`)`) makes Vite synthesize a
+        // `\0vite/dynamic-import-helper.js` virtual module. V8 coverage
+        // picks it up as a "file", and istanbul's html/lcov reporters crash
+        // trying to turn its null-byte-prefixed id into a directory path.
+        // It's Vite's own runtime shim, not our code — exclude it.
+        '**/dynamic-import-helper.js',
       ],
     },
   },

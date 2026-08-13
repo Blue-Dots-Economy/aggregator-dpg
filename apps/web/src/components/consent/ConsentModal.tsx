@@ -101,7 +101,7 @@ export function ConsentModal({
             not echoed here (matches the Signals-DPG consent modal). */}
         <div className="flex items-start justify-between gap-4 px-6 pt-6 pb-4 shrink-0">
           <div className="min-w-0">
-            <p className="text-[11px] font-bold uppercase tracking-wide text-[var(--bd-primary)]">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-(--bd-primary)">
               {t('consent.modal_eyebrow')}
             </p>
             <h2 className="font-display font-bold text-xl text-ink-900 leading-tight mt-0.5">
@@ -136,7 +136,7 @@ export function ConsentModal({
                   onClick={() => setActiveTab(tab)}
                   className={`flex-1 flex items-center justify-center rounded-md text-[13.5px] font-semibold transition-colors cursor-pointer ${
                     isActive
-                      ? 'bg-white text-[var(--bd-primary)] shadow-sm'
+                      ? 'bg-white text-(--bd-primary) shadow-xs'
                       : 'text-ink-500 hover:text-ink-800'
                   }`}
                 >

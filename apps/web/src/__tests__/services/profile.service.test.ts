@@ -103,4 +103,55 @@ describe('profileService', () => {
     // messages; assert that the call throws rather than match the text.
     await expect(profileService.get()).rejects.toThrow();
   });
+
+  it('update() ignores the legacy patch and re-fetches the canonical profile', async () => {
+    const profile = await profileService.update({ org: 'Ignored' });
+    expect(profile.org).toBe('TRRAIN');
+  });
+
+  it('edit() PATCHes the profile endpoint and maps the response', async () => {
+    const fetchSpy = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ ...apiResponse, org_name: 'Updated Org' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+    );
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+    const profile = await profileService.edit({ profile: { contact_name: 'New Name' } });
+    expect(profile.org).toBe('Updated Org');
+    const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(init.method).toBe('PATCH');
+    expect(JSON.parse(init.body as string)).toEqual({ profile: { contact_name: 'New Name' } });
+  });
+
+  it('falls back to KC identity or contact_name when contact.name is absent', async () => {
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            ...apiResponse,
+            contact: { ...apiResponse.contact, name: '' },
+            contact_name: null,
+            identity: { ...apiResponse.identity, first_name: 'Asha', last_name: 'Rao' },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+    ) as unknown as typeof fetch;
+    const profile = await profileService.get();
+    expect(profile.coordinator).toBe('Asha Rao');
+  });
+
+  it('renders an empty registered/lastReviewed date when the API date is invalid', async () => {
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ ...apiResponse, created_at: 'not-a-date', updated_at: 'not-a-date' }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+    ) as unknown as typeof fetch;
+    const profile = await profileService.get();
+    expect(profile.registered).toBe('');
+    expect(profile.consent.lastReviewed).toBe('');
+  });
 });
