@@ -9720,7 +9720,7 @@
         "tags": [
           "support"
         ],
-        "description": "Reports whether SUPPORT_EMAIL is configured on this instance. The web app hides the \"Contact support\" entry point when false.",
+        "description": "Reports whether SUPPORT_EMAIL is configured on this instance, plus the attachment limits and accepted content types. The web app hides the \"Contact support\" entry point when disabled, and validates files against these limits before uploading them.",
         "security": [
           {
             "bearerAuth": []
@@ -9736,10 +9736,29 @@
                   "properties": {
                     "enabled": {
                       "type": "boolean"
+                    },
+                    "maxTotalBytes": {
+                      "type": "integer",
+                      "exclusiveMinimum": true,
+                      "minimum": 0
+                    },
+                    "maxFiles": {
+                      "type": "integer",
+                      "exclusiveMinimum": true,
+                      "minimum": 0
+                    },
+                    "allowedTypes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
                     }
                   },
                   "required": [
-                    "enabled"
+                    "enabled",
+                    "maxTotalBytes",
+                    "maxFiles",
+                    "allowedTypes"
                   ],
                   "additionalProperties": false
                 }
@@ -9846,6 +9865,34 @@
                     "enum": [
                       true
                     ]
+                  },
+                  "attachments": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "filename": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 255
+                        },
+                        "contentType": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 127
+                        },
+                        "data": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "filename",
+                        "contentType",
+                        "data"
+                      ],
+                      "additionalProperties": false
+                    }
                   }
                 },
                 "required": [
@@ -9940,6 +9987,57 @@
             }
           },
           "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "429": {
             "description": "Default Response",
             "content": {
               "application/json": {
