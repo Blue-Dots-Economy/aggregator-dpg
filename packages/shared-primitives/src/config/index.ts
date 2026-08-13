@@ -84,3 +84,44 @@ export function assertTlsPosture(c: TlsPostureConfig): void {
     { code: 'INSECURE_TLS_POSTURE' },
   );
 }
+
+/** Minimal shape `assertSignalStackClientIdentity` reads. */
+export interface SignalStackIdentityConfig {
+  SIGNALSTACK_AUTH_MODE: 'apikey' | 'bearer';
+  SIGNALSTACK_CLIENT_ID?: string | undefined;
+  SIGNALSTACK_ORG_SLUG?: string | undefined;
+}
+
+/**
+ * Fails hard at boot when the bearer service-auth credential cannot resolve to
+ * the right Signals organisation.
+ *
+ * Signals maps the calling client id → `organization.slug` to decide *which*
+ * org a service call acts as, so `SIGNALSTACK_CLIENT_ID` must equal this
+ * aggregator's slug there. A mismatch is not a login failure — it authenticates
+ * fine and then acts as the wrong (or no) org, which is far harder to diagnose
+ * than a refused boot. The expected slug is deployment-specific, so it is
+ * configuration (`SIGNALSTACK_ORG_SLUG`), not a constant; the check no-ops when
+ * unset.
+ *
+ * Scope note: a *missing* client id is deliberately NOT fatal here — the
+ * signalstack factory already treats incomplete bearer config as "push
+ * disabled" (a warn, not a crash), and this guard must not turn that into a
+ * boot failure. It only rejects a client id that is present and *wrong*.
+ *
+ * @param c - Parsed runtime config.
+ * @throws {ConfigError} When bearer mode is on and client id ≠ expected slug.
+ */
+export function assertSignalStackClientIdentity(c: SignalStackIdentityConfig): void {
+  if (c.SIGNALSTACK_AUTH_MODE !== 'bearer') return;
+  if (!c.SIGNALSTACK_CLIENT_ID) return;
+  const expected = c.SIGNALSTACK_ORG_SLUG;
+  if (expected && c.SIGNALSTACK_CLIENT_ID !== expected) {
+    throw new ConfigError(
+      `SIGNALSTACK_CLIENT_ID (${c.SIGNALSTACK_CLIENT_ID}) must equal SIGNALSTACK_ORG_SLUG ` +
+        `(${expected}) — signals resolves the acting organisation from the client id, so a ` +
+        'mismatch would act as the wrong org.',
+      { code: 'SIGNALSTACK_CLIENT_ID_MISMATCH' },
+    );
+  }
+}

@@ -10,7 +10,8 @@
 
 import { describe, it, expect } from 'vitest';
 import { type ConfigError } from '@aggregator-dpg/shared-primitives/errors';
-import { assertSignalStackClientIdentity, type Config } from './config.js';
+import { assertSignalStackClientIdentity } from '@aggregator-dpg/shared-primitives/config';
+import { type Config } from './config.js';
 
 const cfg = (over: Partial<Config>): Config => over as Config;
 
