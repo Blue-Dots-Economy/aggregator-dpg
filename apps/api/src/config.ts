@@ -154,6 +154,8 @@ const ConfigSchema = z.object({
   CAMPAIGN_SUBMIT_MAX: z.coerce.number().int().positive().default(10),
   /** Max active (pending|processing) campaign jobs allowed per org at once. */
   CAMPAIGN_MAX_ACTIVE_PER_ORG: z.coerce.number().int().positive().default(3),
+  /** BullMQ attempts for a campaign-process job (retry count on transient failure). */
+  CAMPAIGN_EXPORT_ATTEMPTS: z.coerce.number().int().positive().default(3),
 
   // ─── Approval links ───────────────────────────────────────────────────────
   /**
