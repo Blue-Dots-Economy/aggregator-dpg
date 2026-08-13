@@ -596,13 +596,8 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
         );
       }
 
-      const payload = (await res.json()) as SignalStackAggregator;
-      if (
-        !payload ||
-        typeof payload !== 'object' ||
-        typeof payload.org_id !== 'string' ||
-        payload.org_id.length === 0
-      ) {
+      const payload = (await res.json()) as unknown;
+      if (!hasValidAggregatorOrgId(payload)) {
         return err(
           new UpstreamError('signalstack aggregator upsert returned unexpected payload', {
             code: 'SIGNALSTACK_BAD_RESPONSE',
@@ -1370,6 +1365,11 @@ function extractUpstreamMessage(bodyText: string): string | null {
 
 function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+/** True when a signalstack response carries a usable aggregator `org_id`. */
+function hasValidAggregatorOrgId(payload: unknown): payload is SignalStackAggregator {
+  return isObject(payload) && typeof payload.org_id === 'string' && payload.org_id.length > 0;
 }
 
 /**

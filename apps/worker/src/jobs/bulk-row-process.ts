@@ -440,12 +440,13 @@ export async function pushToSignalStack(
   // `year_of_birth` / `age` are the same well-known participant keys the link
   // flow reads; the bulk `seeker` schema ships an `age` column
   // (`config/<network>/bulk-samples/seeker.csv`).
-  const coerceNum = (v: unknown): number | undefined =>
-    typeof v === 'number'
-      ? v
-      : typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v))
-        ? Number(v)
-        : undefined;
+  const coerceNum = (v: unknown): number | undefined => {
+    if (typeof v === 'number') return v;
+    if (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v))) {
+      return Number(v);
+    }
+    return undefined;
+  };
   const yearOfBirth = coerceNum(job.payload['year_of_birth']);
   const derivedAge =
     yearOfBirth !== undefined

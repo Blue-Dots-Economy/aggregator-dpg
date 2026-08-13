@@ -87,7 +87,8 @@ export class KeycloakClientCredentialsTokenProvider extends SignalStackTokenProv
     if (!config.clientSecret) {
       throw new Error('KeycloakClientCredentialsTokenProvider requires clientSecret');
     }
-    const base = config.baseUrl.replace(/\/+$/, '');
+    let base = config.baseUrl;
+    while (base.endsWith('/')) base = base.slice(0, -1);
     this.tokenUrl = `${base}/realms/${config.realm}/protocol/openid-connect/token`;
     this.clientId = config.clientId;
     this.clientSecret = config.clientSecret;
