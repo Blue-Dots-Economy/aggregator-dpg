@@ -155,7 +155,7 @@ Four areas, matching PRD § 4:
 
 ### 4.1 Registration (pre-login)
 
-- **New member request** — short form (org name, aggregator type, admin name, email, phone) + T&Cs + consent checkbox. On submit, POSTs to Aggregator API, which emails the dedicated admin address. Approval is manual/external; the admin creates the org entry in the Signals Stack. An approval confirmation email is sent to the requester.
+- **New member request** — short form (org name, aggregator type, admin name, email, phone) + T&Cs + consent checkbox. On submit, POSTs to the Aggregator API, which records the registration plus an append-only consent-ledger row (fail-closed — no subject provisioned without one) and emails a **signed approval-token link** to the dedicated admin address. Approval is now **in-app**: the approver opens the link → approver page → atomic compare-and-set on the row → Keycloak user enable + role assignment → confirmation email to the requester. Expired links regenerate, a pending/rejected request can be resubmit-reclaimed, and a service-auth endpoint prunes stale pending registrations. (This supersedes the original manual/external approval — see the summary above and **Implementation status**.)
 - **Existing member login** — email-or-phone + OTP. On OTP verify, the Aggregator API looks up the org in the Signals Stack by email/phone, issues a session JWT.
 
 ### 4.2 Profile
