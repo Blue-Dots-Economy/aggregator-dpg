@@ -8,6 +8,10 @@
 
 import { z } from 'zod';
 import { ConfigError } from '@aggregator-dpg/shared-primitives/errors';
+import {
+  assertTlsPosture,
+  signalStackConfigFields,
+} from '@aggregator-dpg/shared-primitives/config';
 
 const ConfigSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
@@ -192,10 +196,9 @@ const ConfigSchema = z.object({
   TRUST_PROXY: z.string().default('loopback,linklocal,uniquelocal'),
 
   // ─── SignalStack outward push ───────────────────────────────────────────
-  /** Base URL of the signalstack API. When unset, signalstack push is disabled. */
-  SIGNALSTACK_BASE_URL: z.string().url().optional(),
-  /** Admin api-key for signalstack onboard. Required when SIGNALSTACK_BASE_URL is set. */
-  SIGNALSTACK_ADMIN_KEY: z.string().optional(),
+  // Base + Keycloak-bearer credential fields are shared with the worker via
+  // @aggregator-dpg/shared-primitives/config; acting-org-id is api-only.
+  ...signalStackConfigFields,
   /**
    * Platform-wide signalstack organisation id under which admin aggregator
    * upserts are performed (sent as `x-acting-org-id`). Required when
@@ -203,69 +206,9 @@ const ConfigSchema = z.object({
    * each newly-approved aggregator as a signalstack org.
    */
   SIGNALSTACK_ACTING_ORG_ID: z.string().optional(),
-  /** item_network sent on every onboard call. */
-  SIGNALSTACK_ITEM_NETWORK: z.string().default('blue_dot'),
-  /** Per-request timeout for signalstack onboard calls. */
-  SIGNALSTACK_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
-  /**
-   * Phase C of the Keycloak integration plan: which credential
-   * `HttpSignalStackWriter` sends. `apikey` (default) is today's
-   * `SIGNALSTACK_ADMIN_KEY` header; `bearer` fetches a client-credentials
-   * token instead. Flip only once signals accepts bearer on its service path
-   * (`AUTH_PROVIDER=dual`/`keycloak` + `KEYCLOAK_SERVICE_CLIENT_IDS` includes
-   * this client id, on the signals side).
-   */
-  SIGNALSTACK_AUTH_MODE: z.enum(['apikey', 'bearer']).default('apikey'),
-  /**
-   * Confidential Keycloak client id for the bearer credential. Signals maps
-   * client id → `organization.slug` to resolve the calling service org, so this
-   * must equal this aggregator's slug there — see {@link SIGNALSTACK_ORG_SLUG},
-   * which turns that into a boot-time assertion. Required when
-   * SIGNALSTACK_AUTH_MODE=bearer.
-   */
-  SIGNALSTACK_CLIENT_ID: z.string().optional(),
-  /** Client secret for SIGNALSTACK_CLIENT_ID. Required when SIGNALSTACK_AUTH_MODE=bearer. */
-  SIGNALSTACK_CLIENT_SECRET: z.string().optional(),
-  /**
-   * This aggregator's `organization.slug` on the signals side. When set, boot
-   * asserts `SIGNALSTACK_CLIENT_ID` equals it (see
-   * {@link assertSignalStackClientIdentity}) — signals resolves the acting org
-   * from the client id, so a silent mismatch acts as the wrong org. Optional:
-   * the check no-ops when unset.
-   */
-  SIGNALSTACK_ORG_SLUG: z.string().optional(),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
-
-/**
- * Fails hard (per designs/_DECISIONS.md D7) when TLS certificate verification
- * is disabled under a production environment; warns loudly in dev/staging so
- * the relaxation is never silent. This is the enforcement that makes the
- * insecure posture impossible in prod — the compose default flip alone is not
- * enough, because an operator can still export the var globally.
- *
- * Uses `process.emitWarning` (not the app logger) for the non-fatal path to
- * avoid a config↔logger import cycle at module load.
- *
- * @param c - Parsed runtime config.
- * @throws {ConfigError} When NODE_TLS_REJECT_UNAUTHORIZED=0 in production.
- */
-export function assertTlsPosture(c: Config): void {
-  // Node disables verification only for the exact string '0'.
-  if (c.NODE_TLS_REJECT_UNAUTHORIZED !== '0') return;
-  const env = c.INSTANCE_ENV ?? c.NODE_ENV;
-  const msg = 'NODE_TLS_REJECT_UNAUTHORIZED=0 disables all TLS certificate verification';
-  if (env === 'production') {
-    throw new ConfigError(`${msg}; refusing to start in production.`, {
-      code: 'INSECURE_TLS_IN_PROD',
-    });
-  }
-  process.emitWarning(
-    `${msg}. Allowed outside production (env=${env}); never use this on a VM/prod deploy.`,
-    { code: 'INSECURE_TLS_POSTURE' },
-  );
-}
 
 /**
  * Fails hard at boot when the bearer service-auth credential cannot resolve to
