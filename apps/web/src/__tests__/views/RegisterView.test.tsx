@@ -1,9 +1,12 @@
 /**
- * View test: <RegisterView /> — org-hierarchy flag behaviour.
+ * View test: <RegisterView /> — coordinator registration + org-selector flag.
  *
- * Covers the three surfaces the flag controls: flag-off single form (no tabs,
- * no org fetch), flag-on tabs + coordinator org selector, the bootstrap
- * empty-org state, and that a selected org is forwarded as `org_id` on submit.
+ * As of #619 the org (owner) registration tab is gone from the public page, so
+ * this view is always the single coordinator flow. The `orgHierarchyEnabled`
+ * flag now only toggles the coordinator's parent-org selector — never a tab.
+ * Covers: flag-off single form (no tabs, no org fetch, no selector), flag-on
+ * selector (still no tabs), the bootstrap empty-org state, org_id forwarding on
+ * submit, the selector error+retry, and a client-validation error.
  *
  * RJSF, the shadcn Select, and useAggregatorConfig are shimmed so the test
  * exercises RegisterView's own logic, not third-party rendering.
@@ -92,7 +95,6 @@ vi.mock('@/hooks/useAggregatorConfig', () => {
 import { RegisterView } from '@/app/(public)/register/RegisterView';
 
 const coordSchema = { title: 'Aggregator Registration', type: 'object', properties: {} } as never;
-const orgSchema = { title: 'Organisation Registration', type: 'object', properties: {} } as never;
 
 function renderView(props: Record<string, unknown>) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -105,7 +107,7 @@ function renderView(props: Record<string, unknown>) {
   );
 }
 
-describe('RegisterView org hierarchy', () => {
+describe('RegisterView', () => {
   let originalFetch: typeof fetch;
 
   beforeEach(() => {
@@ -116,7 +118,7 @@ describe('RegisterView org hierarchy', () => {
     vi.clearAllMocks();
   });
 
-  it('flag off: renders a single form, no tabs, no org fetch', async () => {
+  it('flag off: renders a single form, no tabs, no selector, no org fetch', async () => {
     const fetchSpy = vi.fn(async () => new Response('{}', { status: 200 }));
     globalThis.fetch = fetchSpy as unknown as typeof fetch;
 
@@ -129,7 +131,7 @@ describe('RegisterView org hierarchy', () => {
     expect(orgCalls).toHaveLength(0);
   });
 
-  it('flag on: shows both tabs and the coordinator org selector', async () => {
+  it('flag on: shows the coordinator org selector but never a tab switch', async () => {
     globalThis.fetch = vi.fn(
       async () =>
         new Response(
@@ -141,9 +143,10 @@ describe('RegisterView org hierarchy', () => {
         ),
     ) as unknown as typeof fetch;
 
-    renderView({ orgHierarchyEnabled: true, orgSchema, orgUiSchema: {} });
+    renderView({ orgHierarchyEnabled: true });
 
-    expect(screen.getAllByRole('tab')).toHaveLength(2);
+    // Owner registration is a deep link now — the public page has no tabs.
+    expect(screen.queryByRole('tab')).toBeNull();
     expect(await screen.findByTestId('org-select')).toBeInTheDocument();
     expect(await screen.findByRole('option', { name: 'Enable India' })).toBeInTheDocument();
   });
@@ -157,7 +160,7 @@ describe('RegisterView org hierarchy', () => {
         }),
     ) as unknown as typeof fetch;
 
-    renderView({ orgHierarchyEnabled: true, orgSchema, orgUiSchema: {} });
+    renderView({ orgHierarchyEnabled: true });
 
     expect(await screen.findByText(messages.register.coordinator_no_orgs)).toBeInTheDocument();
     expect(screen.queryByTestId('rjsf-shim')).toBeNull();
@@ -180,7 +183,7 @@ describe('RegisterView org hierarchy', () => {
       });
     }) as unknown as typeof fetch;
 
-    renderView({ orgHierarchyEnabled: true, orgSchema, orgUiSchema: {} });
+    renderView({ orgHierarchyEnabled: true });
 
     // Wait until the org option is present (list loaded) before selecting, so
     // the native-select value actually resolves to 'o1'.
@@ -208,7 +211,7 @@ describe('RegisterView org hierarchy', () => {
       );
     }) as unknown as typeof fetch;
 
-    renderView({ orgHierarchyEnabled: true, orgSchema, orgUiSchema: {} });
+    renderView({ orgHierarchyEnabled: true });
 
     expect(await screen.findByText(messages.register.org_selector_error)).toBeInTheDocument();
     fireEvent.click(screen.getByText(messages.register.org_selector_retry));

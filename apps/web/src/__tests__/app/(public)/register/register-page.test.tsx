@@ -3,8 +3,10 @@
  *
  * Invokes the async page function directly. Covers: the session-redirect
  * guard, the consent-load-failure → null fallback (per CLAUDE.md's "Consent
- * content has no API round-trip" note), the org-hierarchy flag gating the org
- * schema load, and the org-schema-missing graceful degrade.
+ * content has no API round-trip" note), and that — after #619 — the main
+ * register page never loads the org schema (owner registration moved to the
+ * `/register/owner` deep link) yet still surfaces the org-hierarchy flag so the
+ * coordinator's parent-org selector can render.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
@@ -102,44 +104,32 @@ describe('RegisterPage (server component)', () => {
       terms: { version: 1, title: 'Terms', content: 'T' },
       privacy: { version: 1, title: 'Privacy', content: 'P' },
     });
+    // Owner registration moved to the deep link — no org props here anymore.
     expect(el.props.orgSchema).toBeUndefined();
+    expect(el.props.orgConsentContent).toBeUndefined();
   });
 
   it('degrades consent content to null on a load failure (no API round-trip)', async () => {
     loadConsentConfig.mockRejectedValue(new Error('file not found'));
     const el = await RegisterPage();
     expect(el.props.aggregatorConsentContent).toBeNull();
-    expect(el.props.orgConsentContent).toBeNull();
     expect(loggerWarn).toHaveBeenCalledWith(
       expect.objectContaining({ operation: 'loadConsentContent', status: 'failure' }),
     );
   });
 
-  it('loads the org schema and enables the flag when ORG_HIERARCHY_ENABLED=true', async () => {
+  it('surfaces the org-hierarchy flag without loading the org schema when ORG_HIERARCHY_ENABLED=true', async () => {
     process.env.ORG_HIERARCHY_ENABLED = 'true';
     loadConsentConfig.mockResolvedValue(consentCfg());
-    readFile.mockImplementation((path: string) => {
-      if (path.includes('org-registration.v1.ui.json')) return Promise.resolve('{}');
-      return Promise.resolve(JSON.stringify({ title: 'Org', properties: {} }));
-    });
 
     const el = await RegisterPage();
     expect(el.props.orgHierarchyEnabled).toBe(true);
-    expect(el.props.orgSchema).toEqual({ title: 'Org', properties: {} });
-    expect(el.props.orgUiSchema).toEqual({});
-  });
-
-  it('degrades to coordinator-only when the org schema files are missing', async () => {
-    process.env.ORG_HIERARCHY_ENABLED = 'true';
-    loadConsentConfig.mockResolvedValue(consentCfg());
-    readFile.mockRejectedValue(new Error('ENOENT'));
-
-    const el = await RegisterPage();
-    expect(el.props.orgHierarchyEnabled).toBe(true);
+    // The main page never touches the org schema now — that is the owner route's job.
     expect(el.props.orgSchema).toBeUndefined();
+    expect(readFile).not.toHaveBeenCalled();
   });
 
-  it('does not attempt to load the org schema when the flag is off', async () => {
+  it('never loads the org schema when the flag is off', async () => {
     loadConsentConfig.mockResolvedValue(consentCfg());
     await RegisterPage();
     expect(readFile).not.toHaveBeenCalled();
