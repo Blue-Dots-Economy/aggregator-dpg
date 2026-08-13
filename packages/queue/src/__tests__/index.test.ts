@@ -41,7 +41,6 @@ describe('QueueName', () => {
       BulkFinalise: 'bulk-finalise',
       LinkMetricsRollup: 'link-metrics-rollup',
       CronWatchdog: 'cron-watchdog',
-      CampaignExport: 'campaign-export',
       CampaignProcess: 'campaign-process',
     });
   });

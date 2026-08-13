@@ -128,8 +128,28 @@ const ConfigSchema = z.object({
    * the link and the file expire together.
    */
   EXPORT_URL_TTL_SECONDS: z.coerce.number().int().positive().default(86400),
-  /** How many export jobs this process runs in parallel. Default 2. */
+  /** How many campaign-process jobs this process runs in parallel. Default 2. */
   CAMPAIGN_EXPORT_CONCURRENCY: z.coerce.number().int().positive().default(2),
+  /** Items per Signals decrypt chunk (bounds request size + gives heartbeat cadence). */
+  CAMPAIGN_DECRYPT_CHUNK: z.coerce.number().int().positive().default(500),
+  /**
+   * Export field-set. `contact` = the three canonical contact fields
+   * (name/email/phone) only; `full` = the full decrypted item_state (variable
+   * columns). Default `contact`.
+   */
+  CAMPAIGN_EXPORT_FIELDS: z.enum(['contact', 'full']).default('contact'),
+  /**
+   * Optional fixed recipient override for every export. When set, it wins over
+   * the job's requested_by (the token email resolved by the API).
+   */
+  CAMPAIGN_EXPORT_RECIPIENT: z.string().optional(),
+  /** Optional last-resort recipient when a job has no requested_by and no override. */
+  EXPORT_NETWORK_ADMIN_EMAIL: z.string().optional(),
+  /**
+   * A campaign job whose `last_progress_at` is older than this (seconds) is
+   * treated as stalled by the watchdog and failed. Default 900 (15 min).
+   */
+  CAMPAIGN_STALL_SECONDS: z.coerce.number().int().positive().default(900),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

@@ -18,7 +18,7 @@ import {
   type BulkFileProcessJob,
   type BulkFinaliseJob,
   type BulkRowProcessJob,
-  type CampaignExportJob,
+  type CampaignProcessJob,
   type CronWatchdogJob,
   type LinkMetricsRollupJob,
 } from '@aggregator-dpg/queue';
@@ -30,7 +30,7 @@ import { processBulkRow } from './jobs/bulk-row-process.js';
 import { finaliseBulk } from './jobs/bulk-finalise.js';
 import { rollupLinkMetrics } from './jobs/link-metrics-rollup.js';
 import { runWatchdog } from './jobs/cron-watchdog.js';
-import { processCampaignExport } from './jobs/campaign-export-process.js';
+import { processCampaignJob } from './jobs/campaign-process.js';
 import { getRedis, closeRedis } from './services/redis.js';
 import { closeQueues } from './services/bulk-queue.js';
 import { parseWorkerRoles, missingRoles } from './worker-roles.js';
@@ -76,12 +76,12 @@ async function main(): Promise<void> {
     ]);
   }
 
-  if (roles.has('export')) {
+  if (roles.has('campaign')) {
     workers.push([
-      'campaignExport',
-      new Worker<CampaignExportJob>(
-        QueueName.CampaignExport,
-        async (job) => processCampaignExport(job.data),
+      'campaignProcess',
+      new Worker<CampaignProcessJob>(
+        QueueName.CampaignProcess,
+        async (job) => processCampaignJob(job.data),
         { connection, concurrency: config.CAMPAIGN_EXPORT_CONCURRENCY },
       ),
     ]);

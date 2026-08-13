@@ -28,13 +28,11 @@ export const QueueName = {
   LinkMetricsRollup: 'link-metrics-rollup',
   /** Hourly watchdog + retention sweep. */
   CronWatchdog: 'cron-watchdog',
-  /** Async participant PII export: decrypt → CSV → S3 → email link (aggregator-dpg#579). */
-  CampaignExport: 'campaign-export',
   /**
    * Unified campaign async-job pipeline (aggregator-dpg#579). One job per
    * `campaign_job` row; the worker's `campaign` role loads the job + its items,
    * runs the per-channel handler (export/email/voice), and writes item + job
-   * status back. Supersedes the single-purpose `CampaignExport` queue.
+   * status back.
    */
   CampaignProcess: 'campaign-process',
 } as const;
@@ -77,29 +75,6 @@ export interface LinkMetricsRollupJob {
 
 export interface CronWatchdogJob {
   tick: number;
-}
-
-/**
- * Participant PII export job (aggregator-dpg#579). Enqueued by the API's
- * `POST /v1/campaign/export` handler and consumed by the worker's `export`
- * role, which decrypts the owned items, writes a CSV to private S3, and emails
- * a short-lived pre-signed link to the requesting aggregator's contact email.
- */
-export interface CampaignExportJob {
-  /** Signals org id (from the caller token's `signalstack_org_id` claim); scopes decrypt ownership. */
-  orgId: string;
-  /** Item ids to export. Validated (uuid, min 1, max EXPORT_MAX_ITEM_IDS) at the API before enqueue. */
-  itemIds: string[];
-  /**
-   * Delivery recipient — the requesting aggregator's contact email, resolved by
-   * the API from the token's aggregator identity before enqueue (never a fixed
-   * network admin).
-   */
-  recipientEmail: string;
-  /** Optional free-text purpose, echoed into the notification email. */
-  purpose?: string;
-  /** Inbound `x-request-id`, forwarded to Signals decrypt for cross-service tracing. */
-  requestId?: string;
 }
 
 /**
