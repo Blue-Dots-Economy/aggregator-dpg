@@ -9,7 +9,7 @@
  * @module @aggregator-dpg/worker
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   stripAllEmptyCells,
   blockingValidationReasons,
@@ -169,5 +169,162 @@ describe('pushToSignalStack — owned_elsewhere handling', () => {
     const result = await pushToSignalStack(job, 'pid-3', '+919876500001', null, logger);
 
     expect(result.success).toBe(true);
+  });
+});
+
+describe('pushToSignalStack — consent forwarding', () => {
+  const job = {
+    uploadId: 'up-1',
+    aggregatorId: 'agg-1',
+    rowIndex: 0,
+    schemaId: 'participant-seeker',
+    schemaVersion: 'v1',
+    participantType: 'seeker',
+    payload: { name: 'Asha', phone: '+919876543210' },
+  };
+
+  beforeEach(() => {
+    process.env.SIGNALSTACK_ITEM_NETWORK = 'blue_dot';
+    _setDb(fakeDbWithOrgId('org-signalstack-1') as never);
+  });
+
+  afterEach(() => {
+    _setSignalStackWriter(null);
+    _setNetworkConfig(null);
+    _setDb(null);
+  });
+
+  it('forwards a compliance accept record — not the retired terms_accepted/privacy_accepted booleans — when the network presumes consent', async () => {
+    _setNetworkConfig(buildBlueDotConfig());
+    const ss = new SignalStackWriterFake();
+    const onboardSpy = vi.spyOn(ss, 'onboard');
+    _setSignalStackWriter(ss);
+
+    const result = await pushToSignalStack(job, 'pid-4', '+919876500002', null, logger);
+
+    expect(result.success).toBe(true);
+    expect(onboardSpy).toHaveBeenCalledTimes(1);
+    const input = onboardSpy.mock.calls[0]![0];
+    expect(input.compliance).toEqual([
+      { key: 'user_terms', value: true },
+      { key: 'user_privacy', value: true },
+      { key: 'profile_creation', value: true },
+    ]);
+    expect(input).not.toHaveProperty('terms_accepted');
+    expect(input).not.toHaveProperty('privacy_accepted');
+  });
+
+  it('omits compliance entirely — rather than sending a decline that would reject the row — when the network does not presume consent', async () => {
+    const cfg = buildBlueDotConfig();
+    cfg.aggregator.onboarding.presume_consent = false;
+    _setNetworkConfig(cfg);
+    const ss = new SignalStackWriterFake();
+    const onboardSpy = vi.spyOn(ss, 'onboard');
+    _setSignalStackWriter(ss);
+
+    const result = await pushToSignalStack(job, 'pid-5', '+919876500003', null, logger);
+
+    expect(result.success).toBe(true);
+    expect(onboardSpy).toHaveBeenCalledTimes(1);
+    const input = onboardSpy.mock.calls[0]![0];
+    expect(input).not.toHaveProperty('compliance');
+    expect(input).not.toHaveProperty('terms_accepted');
+    expect(input).not.toHaveProperty('privacy_accepted');
+  });
+});
+
+describe('pushToSignalStack — age forwarding', () => {
+  const baseJob = {
+    uploadId: 'up-1',
+    aggregatorId: 'agg-1',
+    rowIndex: 0,
+    schemaId: 'participant-seeker',
+    schemaVersion: 'v1',
+    participantType: 'seeker',
+  };
+  const jobWith = (extra: Record<string, unknown>) => ({
+    ...baseJob,
+    payload: { name: 'Asha', phone: '+919876543210', ...extra },
+  });
+
+  beforeEach(() => {
+    process.env.SIGNALSTACK_ITEM_NETWORK = 'blue_dot';
+    _setDb(fakeDbWithOrgId('org-signalstack-1') as never);
+    _setNetworkConfig(buildBlueDotConfig());
+  });
+
+  afterEach(() => {
+    _setSignalStackWriter(null);
+    _setNetworkConfig(null);
+    _setDb(null);
+  });
+
+  const pushAndCaptureInput = async (job: ReturnType<typeof jobWith>) => {
+    const ss = new SignalStackWriterFake();
+    const onboardSpy = vi.spyOn(ss, 'onboard');
+    _setSignalStackWriter(ss);
+    const result = await pushToSignalStack(job, 'pid-age', '+919876500009', null, logger);
+    expect(result.success).toBe(true);
+    expect(onboardSpy).toHaveBeenCalledTimes(1);
+    return onboardSpy.mock.calls[0]![0];
+  };
+
+  // Without this, signals rejects every row on a guardian-gated domain with
+  // `AGE_REQUIRED` because consent is sent but no age ever is.
+  it('forwards the age column so consent can be recorded on a guardian-gated domain', async () => {
+    const input = await pushAndCaptureInput(jobWith({ age: 34 }));
+
+    expect(input.age).toBe(34);
+    expect(input.compliance).toBeDefined();
+  });
+
+  it('coerces a numeric age string from the CSV cell', async () => {
+    const input = await pushAndCaptureInput(jobWith({ age: '27' }));
+
+    expect(input.age).toBe(27);
+  });
+
+  it('derives the age from year_of_birth when present, preferring it over age', async () => {
+    const expected = new Date().getUTCFullYear() - 1990;
+
+    const input = await pushAndCaptureInput(jobWith({ year_of_birth: 1990, age: 5 }));
+
+    expect(input.age).toBe(expected);
+  });
+
+  it('omits age when the cell is blank, rather than sending 0', async () => {
+    const input = await pushAndCaptureInput(jobWith({ age: '   ' }));
+
+    expect(input).not.toHaveProperty('age');
+  });
+
+  it('omits age when the cell is non-numeric, rather than sending NaN', async () => {
+    const input = await pushAndCaptureInput(jobWith({ age: 'abc' }));
+
+    expect(input).not.toHaveProperty('age');
+  });
+
+  // Mirrors the link flow's minor path: signals rejects a server-to-server
+  // onboard carrying age < 18 (`U18_NOT_ALLOWED`), but accepts the row when
+  // neither age nor consent is sent.
+  it('sends neither age nor consent for a minor row', async () => {
+    const input = await pushAndCaptureInput(jobWith({ age: 15 }));
+
+    expect(input).not.toHaveProperty('age');
+    expect(input).not.toHaveProperty('compliance');
+  });
+
+  it('treats exactly 18 as a minor, matching the link flow boundary', async () => {
+    const input = await pushAndCaptureInput(jobWith({ age: 18 }));
+
+    expect(input).not.toHaveProperty('age');
+    expect(input).not.toHaveProperty('compliance');
+  });
+
+  it('treats 19 as an adult', async () => {
+    const input = await pushAndCaptureInput(jobWith({ age: 19 }));
+
+    expect(input.age).toBe(19);
+    expect(input.compliance).toBeDefined();
   });
 });

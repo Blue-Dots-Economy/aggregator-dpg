@@ -306,6 +306,14 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — lifecycle
   });
 
   it('rejects a submit with 400 CONSENT_REQUIRED when consent is not given (#522)', async () => {
+    // #613: consent is only enforced when the link's domain gates go-live on
+    // `consent_required`. Configure the domains as consent-gated so the #522
+    // no-consent rejection applies.
+    const consentGated = buildBlueDotConfig();
+    Object.values(consentGated.domains).forEach((d) => {
+      d.goLiveRequired = ['schema_required', 'consent_required'];
+    });
+    _setNetworkConfig(consentGated);
     const { consent_terms: _t, consent_privacy: _p, ...noConsent } = basePayload;
     const r = await app.inject({
       method: 'POST',

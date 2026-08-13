@@ -29,3 +29,14 @@ overrides:
   # cosmiconfig-typescript-loader) and 2.7.0 (everything else) still coexist, which
   # is fine because jiti is build-time only and carries no cross-copy types.
   jiti: ^2.6.1
+
+  # Security bumps for vulnerable transitives (Trivy / GHSA). Range-scoped so
+  # only the vulnerable copies move; already-patched consumers are untouched.
+  #   postcss <8.5.26 → GHSA-r28c-9q8g-f849 + CVE-2026-45623 (HIGH), CVE-2026-41305
+  #     / -69153 (MED). apps/web already declares ^8.5.26; this dedups the
+  #     vulnerable transitive copy up to it.
+  #   sharp 0.34.x → GHSA-f88m-g3jw-g9cj (HIGH); 0.35.0 is the fix.
+  #   @babel/core <7.29.6 → CVE-2026-49356 (LOW).
+  'postcss@<8.5.26': 8.5.26
+  'sharp@<0.35.0': 0.35.0
+  '@babel/core@<7.29.6': 7.29.6

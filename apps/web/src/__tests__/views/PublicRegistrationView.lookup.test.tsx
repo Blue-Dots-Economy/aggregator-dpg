@@ -59,7 +59,17 @@ vi.mock('@/components/forms/RjsfThemed', () => {
 vi.mock('@/hooks/useAggregatorConfig', () => {
   const cfg = {
     brand: { short_name: 'Test', primary_color: '#4338ca' },
-    domains: [{ id: 'seeker', label: 'Seeker' }],
+    // #613: guardian_consent_required drives the birth-year field; a
+    // go_live_required with consent_required drives the consent step. Both on
+    // here so the consent/U18 branches under test render.
+    domains: [
+      {
+        id: 'seeker',
+        label: 'Seeker',
+        guardian_consent_required: true,
+        go_live_required: ['schema_required', 'consent_required'],
+      },
+    ],
   };
   return {
     useAggregatorConfig: () => ({ data: cfg, isLoading: false }),

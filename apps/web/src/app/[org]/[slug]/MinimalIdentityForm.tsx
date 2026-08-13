@@ -63,6 +63,18 @@ export interface MinimalIdentityFormProps {
    * consent line renders without a "view terms" link.
    */
   consentContent?: ConsentDocContent | null;
+  /**
+   * #613: show the profile-creation consent step. Driven by the domain's
+   * `go_live_required` including `consent_required`. When false, no consent
+   * checkbox is shown or required and no consent flags are submitted.
+   */
+  showConsent: boolean;
+  /**
+   * #613: collect a birth year. Driven by the domain's
+   * `guardian_consent_required`. When false, no birth-year field is shown or
+   * required and no `year_of_birth` is submitted.
+   */
+  showBirthYear: boolean;
 }
 
 /**
@@ -139,7 +151,12 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
   // API omits age + consent for a minor so Signals creates the account); we
   // just don't collect/require consent. Fail-closed at the boundary: age <= 18.
   const isMinor = yobValid && derivedAge <= 18;
-  const valid = hasName && contactValid && emailOk && yobValid && (isMinor || consentCall);
+  const valid =
+    hasName &&
+    contactValid &&
+    emailOk &&
+    (!props.showBirthYear || yobValid) &&
+    (!props.showConsent || isMinor || consentCall);
 
   // Option B: the submit stays disabled until valid, but we surface exactly
   // what is blocking so the user is never left guessing.
@@ -155,8 +172,8 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
     if (hasPhone && !phoneFormatOk) blockers.push(t('blockers.phone_invalid'));
     if (hasEmail && !emailFormatOk) blockers.push(t('blockers.email_invalid'));
   }
-  if (!yobValid) blockers.push(t('blockers.year_of_birth'));
-  if (!isMinor && !consentCall) blockers.push(t('blockers.consent_call'));
+  if (props.showBirthYear && !yobValid) blockers.push(t('blockers.year_of_birth'));
+  if (props.showConsent && !isMinor && !consentCall) blockers.push(t('blockers.consent_call'));
 
   return (
     <div className="rounded-[18px] bg-white border border-(--bd-border) overflow-hidden shadow-[0_1px_0_rgba(11,16,32,0.02),0_20px_60px_-30px_rgba(11,16,32,0.18)]">
@@ -177,15 +194,13 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
           setSubmitting(true);
           const payload: MinimalIdentityPayload = {
             [nameKey]: name.trim(),
-            // Year of birth (§4.4); the API derives age and forwards it as the
-            // top-level `age` required with consent on gated domains.
-            year_of_birth: yearOfBirth.trim(),
-            // Drive the transmitted consent from the actual checkbox, not a
-            // hardcoded `true`. Submit is already gated on `consentCall`, but
-            // the backend now validates these server-side (#522) and rejects
-            // with CONSENT_REQUIRED when either is not `true`.
-            consent_terms: consentCall,
-            consent_privacy: consentCall,
+            // #613: only send birth year / consent flags when the domain
+            // actually collects them (config-driven). Absent gates ⇒ the server
+            // records no consent and omits age.
+            ...(props.showBirthYear ? { year_of_birth: yearOfBirth.trim() } : {}),
+            ...(props.showConsent
+              ? { consent_terms: consentCall, consent_privacy: consentCall }
+              : {}),
           };
           if (phoneKey && hasPhone) payload[phoneKey] = phone.trim();
           if (emailKey && hasEmail) payload[emailKey] = email.trim();
@@ -210,26 +225,28 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
           />
         </label>
 
-        <label className="block">
-          <span className="bd-label">
-            {t('year_of_birth_label')}
-            <span className="text-rose-500 ml-0.5">*</span>
-          </span>
-          <select
-            className="bd-input"
-            name="year_of_birth"
-            value={yearOfBirth}
-            onChange={(e) => setYearOfBirth(e.target.value)}
-            required
-          >
-            <option value="">{t('year_of_birth_placeholder')}</option>
-            {Array.from({ length: 101 }, (_, i) => currentYear - i).map((y) => (
-              <option key={y} value={String(y)}>
-                {y}
-              </option>
-            ))}
-          </select>
-        </label>
+        {props.showBirthYear && (
+          <label className="block">
+            <span className="bd-label">
+              {t('year_of_birth_label')}
+              <span className="text-rose-500 ml-0.5">*</span>
+            </span>
+            <select
+              className="bd-input"
+              name="year_of_birth"
+              value={yearOfBirth}
+              onChange={(e) => setYearOfBirth(e.target.value)}
+              required
+            >
+              <option value="">{t('year_of_birth_placeholder')}</option>
+              {Array.from({ length: 101 }, (_, i) => currentYear - i).map((y) => (
+                <option key={y} value={String(y)}>
+                  {y}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
 
         {(phoneKey || showEmail) && (
           <div>
@@ -273,39 +290,40 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
           </div>
         )}
 
-        {isMinor ? (
-          // Minor: no consent here — Signals creates the account without it and
-          // the participant accepts terms in the Signalstack app after signing in.
-          <div className="rounded-[10px] border border-(--bd-border) bg-(--bd-primary-50) px-4 py-3.5 text-[13.5px] text-ink-900">
-            {t('u18_notice')}
-          </div>
-        ) : (
-          <div className="flex flex-col gap-2.5 pt-1">
-            <label className="flex items-start gap-2.5 text-[13px] text-ink-900 cursor-pointer">
-              <input
-                type="checkbox"
-                name="consent_call"
-                checked={consentCall}
-                onChange={(e) => setConsentCall(e.target.checked)}
-                className="mt-0.5 h-4 w-4 rounded-sm border-(--bd-border) accent-(--bd-primary-600)"
-              />
-              <span>{t('consent_call_label')}</span>
-            </label>
-            {consentContent && (
-              <p className="text-[12px] text-ink-500">
-                {t('consent_accept_prefix')}
-                <button
-                  type="button"
-                  className="underline text-(--bd-primary-600)"
-                  onClick={() => setConsentModal({ open: true, tab: 'terms' })}
-                >
-                  {t('consent_docs_link')}
-                </button>
-                .
-              </p>
-            )}
-          </div>
-        )}
+        {props.showConsent &&
+          (isMinor ? (
+            // Minor: no consent here — Signals creates the account without it and
+            // the participant accepts terms in the Signalstack app after signing in.
+            <div className="rounded-[10px] border border-(--bd-border) bg-(--bd-primary-50) px-4 py-3.5 text-[13.5px] text-ink-900">
+              {t('u18_notice')}
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2.5 pt-1">
+              <label className="flex items-start gap-2.5 text-[13px] text-ink-900 cursor-pointer">
+                <input
+                  type="checkbox"
+                  name="consent_call"
+                  checked={consentCall}
+                  onChange={(e) => setConsentCall(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded-sm border-(--bd-border) accent-(--bd-primary-600)"
+                />
+                <span>{t('consent_call_label')}</span>
+              </label>
+              {consentContent && (
+                <p className="text-[12px] text-ink-500">
+                  {t('consent_accept_prefix')}
+                  <button
+                    type="button"
+                    className="underline text-(--bd-primary-600)"
+                    onClick={() => setConsentModal({ open: true, tab: 'terms' })}
+                  >
+                    {t('consent_docs_link')}
+                  </button>
+                  .
+                </p>
+              )}
+            </div>
+          ))}
 
         {!valid && <SubmitBlockers reasons={blockers} heading={t('blockers.heading')} />}
 

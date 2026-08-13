@@ -27,7 +27,7 @@ describe('POST /admin/v1/aggregator-registrations/cleanup-stale', () => {
   beforeEach(async () => {
     _resetJwks();
     process.env.KEYCLOAK_URL = 'http://kc.local';
-    process.env.KEYCLOAK_REALM = 'aggregator';
+    process.env.KEYCLOAK_REALM = 'bluedots';
 
     aggregatorStore = new AggregatorStoreFake();
     profileStore = new AggregatorProfileStoreFake();

@@ -64,6 +64,8 @@ describe('GET /v1/aggregator-config', () => {
           itemType: 'profile_1.0',
           schema: {},
           identity: { name: 'name', phone: 'phone', email: 'email' },
+          guardianConsentRequired: false,
+          goLiveRequired: [],
           dashboardTiles: {
             profile: [
               { field: 'total_items', label: 'Profiles' },
@@ -83,6 +85,8 @@ describe('GET /v1/aggregator-config', () => {
             phone: 'hiringManagerPhoneNumber',
             email: 'hiringManagerEmail',
           },
+          guardianConsentRequired: false,
+          goLiveRequired: [],
         },
       },
       dashboardBuckets: {

@@ -9532,13 +9532,24 @@
                           },
                           "item_type": {
                             "type": "string"
+                          },
+                          "guardian_consent_required": {
+                            "type": "boolean"
+                          },
+                          "go_live_required": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
                           }
                         },
                         "required": [
                           "id",
                           "label",
                           "plural_label",
-                          "item_type"
+                          "item_type",
+                          "guardian_consent_required",
+                          "go_live_required"
                         ],
                         "additionalProperties": true
                       }

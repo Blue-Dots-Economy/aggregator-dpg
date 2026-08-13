@@ -392,7 +392,7 @@ function readAggregatorId(payload: JWTPayload): string | undefined {
  *
  * - **`aud` (audience)** — when `KEYCLOAK_EXPECTED_AUDIENCE` is set, jose
  *   requires the token's `aud` to contain it. Off by default because it needs
- *   the realm's audience mapper (see `aggregator-realm.json`) to be present;
+ *   the realm's audience mapper (see `realm.json`) to be present;
  *   enable it once tokens actually carry the API audience.
  * - **`azp` (authorized party)** — when `KEYCLOAK_ALLOWED_AZP` is set, the
  *   token's `azp` (the client that requested it) must be in that allow-list.

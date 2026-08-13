@@ -8,7 +8,12 @@
  * have to make extra `onboard()` calls.
  */
 
+import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
+import { UpstreamError } from '@aggregator-dpg/shared-primitives/errors';
+import { err, ok } from '@aggregator-dpg/shared-primitives/result';
+import type { Result } from '@aggregator-dpg/shared-primitives/result';
 import { InMemorySignalStackWriter } from './memory.js';
+import { SignalStackTokenProviderBase } from './interface.js';
 import type {
   SignalStackContactCanonical,
   SignalStackContactValue,
@@ -18,6 +23,56 @@ import type {
 } from './interface.js';
 
 export { InMemorySignalStackWriter };
+
+/**
+ * In-memory fake for {@link SignalStackTokenProviderBase}. Returns a fixed
+ * token by default; `failNext()` forces the next `getToken()` call to error
+ * so callers (e.g. `HttpSignalStackWriter`) can be tested against a token
+ * grant failure without a real Keycloak.
+ */
+export class SignalStackTokenProviderFake extends SignalStackTokenProviderBase {
+  private token: string;
+  private failNextError: BaseError | null = null;
+  callCount = 0;
+  /** How many times {@link invalidate} was called (401-refresh assertions). */
+  invalidateCount = 0;
+
+  constructor(token = 'fake-signalstack-token') {
+    super();
+    this.token = token;
+  }
+
+  /** Test helper — change the token returned by subsequent calls. */
+  setToken(token: string): void {
+    this.token = token;
+  }
+
+  /** Test helper — force the next `getToken()` call to fail with this error. */
+  failNext(
+    error: BaseError = new UpstreamError('token grant failed', { code: 'SIGNALSTACK_AUTH_FAILED' }),
+  ): void {
+    this.failNextError = error;
+  }
+
+  override async getToken(): Promise<Result<string, BaseError>> {
+    this.callCount += 1;
+    if (this.failNextError) {
+      const e = this.failNextError;
+      this.failNextError = null;
+      return err(e);
+    }
+    return ok(this.token);
+  }
+
+  /**
+   * Records that the caller asked for a re-mint. The fake holds no cache, so
+   * there is nothing to clear; `invalidateCount` lets a test assert that the
+   * 401 path actually forced a refresh.
+   */
+  override invalidate(): void {
+    this.invalidateCount += 1;
+  }
+}
 
 export interface SignalStackUserSeed {
   id?: string;

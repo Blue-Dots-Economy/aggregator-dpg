@@ -98,11 +98,9 @@ function makeValidate(
 }
 
 type ValidatorResult =
-  | { success: true; value: FakeValidate }
-  | { success: false; error: { code: string } };
+  { success: true; value: FakeValidate } | { success: false; error: { code: string } };
 type SchemaResult =
-  | { success: true; value: Record<string, unknown> }
-  | { success: false; error: { code: string } };
+  { success: true; value: Record<string, unknown> } | { success: false; error: { code: string } };
 
 let validatorResult: ValidatorResult = { success: true, value: makeValidate(true) };
 let schemaResultVal: SchemaResult = { success: true, value: { required: [], properties: {} } };
