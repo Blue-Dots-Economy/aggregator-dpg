@@ -97,13 +97,10 @@ async function main(): Promise<void> {
       connection,
       defaultJobOptions: DEFAULT_JOB_OPTS,
     });
-    await linkMetricsQueue.add(
-      'tick',
-      { tick: Date.now() },
-      {
-        repeat: { every: config.LINK_METRICS_ROLLUP_INTERVAL_MS },
-        jobId: 'link-metrics-rollup-tick',
-      },
+    await linkMetricsQueue.upsertJobScheduler(
+      'link-metrics-rollup-tick',
+      { every: config.LINK_METRICS_ROLLUP_INTERVAL_MS },
+      { name: 'tick', data: { tick: Date.now() } },
     );
     queues.push(linkMetricsQueue);
 
@@ -111,21 +108,21 @@ async function main(): Promise<void> {
       connection,
       defaultJobOptions: DEFAULT_JOB_OPTS,
     });
-    await watchdogQueue.add(
-      'tick',
-      { tick: Date.now() },
-      { repeat: { every: config.WATCHDOG_INTERVAL_MS }, jobId: 'cron-watchdog-tick' },
+    await watchdogQueue.upsertJobScheduler(
+      'cron-watchdog-tick',
+      { every: config.WATCHDOG_INTERVAL_MS },
+      { name: 'tick', data: { tick: Date.now() } },
     );
     queues.push(watchdogQueue);
 
     // One-shot cleanup: removed cron-driven keycloak-sync. If a previous worker
-    // run registered the repeatable, drop it from Redis so it does not keep
+    // run registered the scheduler, drop it from Redis so it does not keep
     // firing without a consumer.
     const legacyKeycloakSyncQueue = new Queue('keycloak-sync', { connection });
     try {
-      const repeatables = await legacyKeycloakSyncQueue.getRepeatableJobs();
-      for (const r of repeatables) {
-        await legacyKeycloakSyncQueue.removeRepeatableByKey(r.key);
+      const schedulers = await legacyKeycloakSyncQueue.getJobSchedulers();
+      for (const s of schedulers) {
+        await legacyKeycloakSyncQueue.removeJobScheduler(s.key);
       }
     } finally {
       await legacyKeycloakSyncQueue.close();
