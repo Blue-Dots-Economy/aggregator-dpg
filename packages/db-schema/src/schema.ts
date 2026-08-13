@@ -98,6 +98,38 @@ export const linkSubmissionOutcomeEnum = pgEnum('link_submission_outcome', [
 
 export const onboardingSourceEnum = pgEnum('onboarding_source', ['bulk', 'link']);
 
+// ─── Campaign async-job engine (#579) ────────────────────────────────────────
+// Durable job model shared by every campaign channel (export/email/voice). A
+// request becomes one `campaign_job` row plus one `campaign_job_item` row per
+// target item; the worker writes per-item terminal statuses and the job status
+// is always DERIVED from item counts (never a stored counter — see
+// `campaign-job-store`), so it can't drift.
+
+/** Roll-up status of a whole campaign job, derived from its item statuses. */
+export const campaignJobStatusEnum = pgEnum('campaign_job_status', [
+  'pending',
+  'processing',
+  'succeeded',
+  'partially_failed',
+  'failed',
+]);
+
+/**
+ * Terminal-or-in-flight status of a single job item. `resolved` = the item's
+ * data was fetched/produced (export); `submitted` = a channel side-effect was
+ * dispatched (email/voice). Both are success terminals; `failed` is the error
+ * terminal; `pending` is the only non-terminal value.
+ */
+export const campaignJobItemStatusEnum = pgEnum('campaign_job_item_status', [
+  'pending',
+  'resolved',
+  'submitted',
+  'failed',
+]);
+
+/** Which campaign channel a job belongs to; picks the worker handler. */
+export const campaignChannelEnum = pgEnum('campaign_channel', ['export', 'email', 'voice']);
+
 // ─── aggregators ─────────────────────────────────────────────────────────────
 
 export const aggregators = pgTable(
@@ -508,6 +540,103 @@ export const onboarding = pgTable(
   }),
 );
 
+// ─── campaign_job / campaign_job_item ────────────────────────────────────────
+
+/**
+ * A single free-form campaign metadata pair. The request envelope's `metadata`
+ * list is stored verbatim on the job — there is no fixed allow-list; every pair
+ * a caller sends is persisted as-is (e.g. `{key:'purpose', value:'audit'}`).
+ */
+export interface CampaignMetadataPair {
+  key: string;
+  value: string;
+}
+
+export const campaignJob = pgTable(
+  'campaign_job',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    aggregatorId: uuid('aggregator_id')
+      .notNull()
+      .references(() => aggregators.id, { onDelete: 'cascade' }),
+    // Signalstack org id (the token's `signalstack_org_id` claim) — the tenant
+    // scope every read/list/cap query filters on.
+    signalstackOrgId: text('signalstack_org_id').notNull(),
+    channel: campaignChannelEnum('channel').notNull(),
+    status: campaignJobStatusEnum('status').notNull().default('pending'),
+    // Request idempotency: a repeated `Idempotency-Key` returns the original
+    // job instead of creating a second one. NULL when the caller omits it.
+    idempotencyKey: text('idempotency_key'),
+    // The request envelope's `metadata` list, stored verbatim.
+    metadata: jsonb('metadata')
+      .$type<CampaignMetadataPair[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    // Per-channel `content` block (empty `{}` for export).
+    content: jsonb('content')
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    // The requesting user (token email) — recipient/attribution, never trusted
+    // from the client for authz.
+    requestedBy: text('requested_by').notNull(),
+    // Inbound `x-request-id`, forwarded downstream for tracing.
+    requestId: text('request_id'),
+    errorReason: text('error_reason'),
+    // Heartbeat written each processing chunk; the watchdog fails jobs whose
+    // `last_progress_at` goes stale.
+    lastProgressAt: timestamp('last_progress_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    // Request idempotency — unique only over rows that carry a key.
+    idempotencyKeyUnique: uniqueIndex('campaign_job_idempotency_key_unique')
+      .on(table.idempotencyKey)
+      .where(sql`idempotency_key IS NOT NULL`),
+    // Tenant list (newest-first) + per-org active-job cap.
+    orgStatusIdx: index('campaign_job_org_status_idx').on(
+      table.signalstackOrgId,
+      table.status,
+      table.createdAt,
+    ),
+    // Watchdog scan for stalled processing jobs.
+    statusProgressIdx: index('campaign_job_status_progress_idx').on(
+      table.status,
+      table.lastProgressAt,
+    ),
+  }),
+);
+
+export const campaignJobItem = pgTable(
+  'campaign_job_item',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    jobId: uuid('job_id')
+      .notNull()
+      .references(() => campaignJob.id, { onDelete: 'cascade' }),
+    itemId: text('item_id').notNull(),
+    // The channel action being applied to the item (email/voice); NULL for
+    // export (there is no per-item action), which turns OFF the active-dedup
+    // constraint below for exports.
+    action: text('action'),
+    status: campaignJobItemStatusEnum('status').notNull().default('pending'),
+    errorReason: text('error_reason'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    // Derived-count + item-listing lookups.
+    jobStatusIdx: index('campaign_job_item_job_status_idx').on(table.jobId, table.status),
+    // Item-level active dedup: the same (item, action) can't be in flight twice
+    // across jobs. Only in-flight/succeeded rows count, and only when an action
+    // is present — so exports (action IS NULL) are never deduplicated.
+    activeDedupUnique: uniqueIndex('campaign_job_item_active_dedup')
+      .on(table.itemId, table.action)
+      .where(sql`status IN ('pending','resolved','submitted') AND action IS NOT NULL`),
+  }),
+);
+
 // ─── Inferred row types ──────────────────────────────────────────────────────
 
 export type AggregatorRow = typeof aggregators.$inferSelect;
@@ -526,6 +655,10 @@ export type LinkSubmissionRow = typeof linkSubmissions.$inferSelect;
 export type NewLinkSubmissionRow = typeof linkSubmissions.$inferInsert;
 export type OnboardingRow = typeof onboarding.$inferSelect;
 export type NewOnboardingRow = typeof onboarding.$inferInsert;
+export type CampaignJob = typeof campaignJob.$inferSelect;
+export type NewCampaignJob = typeof campaignJob.$inferInsert;
+export type CampaignJobItem = typeof campaignJobItem.$inferSelect;
+export type NewCampaignJobItem = typeof campaignJobItem.$inferInsert;
 
 /**
  * Inferred select type for a single `aggregator_consent_record` row.
