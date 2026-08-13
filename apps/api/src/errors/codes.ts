@@ -186,6 +186,37 @@ export const ERR = {
     detail: 'Failed to send your message. Please try again later.',
     hint: 'The mail transport rejected or failed the send.',
   },
+  // One code per rejection reason rather than a single generic 400, so the form
+  // can tell the submitter what to change (#551). The handler overrides `detail`
+  // with the specific limit or filename.
+  ATTACHMENT_COUNT_EXCEEDED: {
+    code: 'ATTACHMENT_COUNT_EXCEEDED',
+    status: 400,
+    title: 'Too many attachments',
+    detail: 'Too many files were attached to this submission.',
+    hint: 'Limit set by SUPPORT_ATTACHMENT_MAX_FILES.',
+  },
+  ATTACHMENT_TOO_LARGE: {
+    code: 'ATTACHMENT_TOO_LARGE',
+    status: 400,
+    title: 'Attachments too large',
+    detail: 'The attachments exceed the size allowed for one submission.',
+    hint: 'Budget set by SUPPORT_ATTACHMENT_MAX_TOTAL_BYTES; the route body limit is derived from it.',
+  },
+  PAYLOAD_TOO_LARGE: {
+    code: 'PAYLOAD_TOO_LARGE',
+    status: 413,
+    title: 'Request too large',
+    detail: 'The request body is larger than this endpoint accepts.',
+    hint: "Fastify's bodyLimit rejected the body before any handler ran; on /v1/support the limit is derived from SUPPORT_ATTACHMENT_MAX_TOTAL_BYTES.",
+  },
+  ATTACHMENT_TYPE_NOT_ALLOWED: {
+    code: 'ATTACHMENT_TYPE_NOT_ALLOWED',
+    status: 400,
+    title: 'Attachment type not accepted',
+    detail: 'One of the attached files is not an accepted type.',
+    hint: 'Allowlist lives in services/support-attachments.ts — image, video and audio only.',
+  },
 
   // ── Persistence ─────────────────────────────────────────────────────────
   DB_UNAVAILABLE: {

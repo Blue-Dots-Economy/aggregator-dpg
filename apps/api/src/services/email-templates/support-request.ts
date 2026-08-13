@@ -10,6 +10,7 @@
 
 import { randomBytes } from 'node:crypto';
 import { escapeHtml, renderShell } from './shared.js';
+import { formatBytes } from '../support-attachments.js';
 
 /** Kind of contact-support submission. */
 export type SupportRequestType = 'complaint' | 'support_request';
@@ -34,6 +35,12 @@ export interface SupportRequestVars {
   teamName: string;
   /** When the form was submitted. */
   submittedAt: Date;
+  /**
+   * Accepted attachments, listed in the body as well as carried as MIME parts
+   * (#551) — so a client that hides attachments still tells the agent what was
+   * sent, and one lost in transit shows up as a discrepancy rather than silence.
+   */
+  attachments?: Array<{ filename: string; bytes: number }>;
 }
 
 const REF_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -112,6 +119,15 @@ export function renderSupportRequest(v: SupportRequestVars): {
     )
     .join('');
 
+  const attachmentList = (v.attachments ?? [])
+    .map((a) => `${a.filename} (${formatBytes(a.bytes)})`)
+    .join(', ');
+  const attachmentsHtml = attachmentList
+    ? `<div style="margin:12px 0;font-size:13px;color:#475069;">Attachments (${
+        v.attachments?.length ?? 0
+      }): <strong style="color:#0b1020;">${escapeHtml(attachmentList)}</strong></div>`
+    : '';
+
   const linkHtml = link
     ? `<div style="margin:2px 0 12px;font-size:13px;color:#475069;">Raised from <a href="${escapeHtml(
         link,
@@ -132,6 +148,7 @@ ${linkHtml}
 <div style="font-size:14px;font-weight:600;color:#0b1020;margin:18px 0 6px;">Contact details</div>
 <table style="border-collapse:collapse;font-size:13px;">${contactRowsHtml}</table>
 <div style="margin:12px 0;font-size:13px;color:#475069;">Consent to share contact: <strong style="color:#0b1020;">Yes</strong></div>
+${attachmentsHtml}
 <div style="margin:2px 0 18px;font-size:12px;color:#475069;">Submitted at: ${escapeHtml(
     submitted,
   )}</div>
@@ -152,6 +169,7 @@ ${linkHtml}
     `Phone: ${phone}\n` +
     `Email: ${email}\n\n` +
     `Consent to share contact: Yes\n` +
+    (attachmentList ? `Attachments (${v.attachments?.length ?? 0}): ${attachmentList}\n` : '') +
     `Submitted at: ${submitted}\n\n` +
     `Regards,\nTeam ${v.teamName}`;
 

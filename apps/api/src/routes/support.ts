@@ -1,8 +1,10 @@
 /**
  * Contact-support endpoints (post-login).
  *
- *   GET  /v1/support/config → { enabled }   — whether SUPPORT_EMAIL is set.
- *   POST /v1/support        → emails the submission to SUPPORT_EMAIL.
+ *   GET  /v1/support/config → whether SUPPORT_EMAIL is set, plus the attachment
+ *                             limits and accepted content types (#551).
+ *   POST /v1/support        → emails the submission to SUPPORT_EMAIL, with any
+ *                             attached image/video/audio files.
  *
  * Any authenticated coordinator may submit — approval status is
  * intentionally not required (an aggregator awaiting approval may still
@@ -20,7 +22,13 @@ import {
 } from '../services/email-templates/index.js';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
-import { supportEmail, supportCc, supportPortalLink } from '../config.js';
+import { supportEmail, supportCc, supportPortalLink, supportAttachmentLimits } from '../config.js';
+import { checkSupportRate } from '../services/support-rate.js';
+import {
+  SUPPORT_ALLOWED_CONTENT_TYPES,
+  supportBodyLimitBytes,
+  validateSupportAttachments,
+} from '../services/support-attachments.js';
 
 const SupportRequestSchema = z
   .object({
@@ -30,6 +38,19 @@ const SupportRequestSchema = z
     type: z.enum(['complaint', 'support_request']),
     details: z.string().trim().min(1).max(5000),
     consent: z.literal(true),
+    // Count/size/type limits are applied in the handler by
+    // validateSupportAttachments so each rejection carries its own error code
+    // and a detail naming the offending file (#551).
+    attachments: z
+      .array(
+        z.object({
+          filename: z.string().min(1).max(255),
+          contentType: z.string().min(1).max(127),
+          /** Base64, no `data:` prefix. */
+          data: z.string().min(1),
+        }),
+      )
+      .optional(),
   })
   .strict()
   // At least one contact channel is required so support can reply. A failed
@@ -53,14 +74,30 @@ export async function registerSupportRoutes(app: FastifyInstance): Promise<void>
         tags: ['support'],
         summary: 'Whether the contact-support form is enabled',
         description:
-          'Reports whether SUPPORT_EMAIL is configured on this instance. The web app hides the "Contact support" entry point when false.',
+          'Reports whether SUPPORT_EMAIL is configured on this instance, plus the attachment limits and accepted content types. The web app hides the "Contact support" entry point when disabled, and validates files against these limits before uploading them.',
         security: [{ bearerAuth: [] }],
-        response: { 200: z.object({ enabled: z.boolean() }), ...errorResponses(401) },
+        response: {
+          200: z.object({
+            enabled: z.boolean(),
+            maxTotalBytes: z.number().int().positive(),
+            maxFiles: z.number().int().positive(),
+            allowedTypes: z.array(z.string()),
+          }),
+          ...errorResponses(401),
+        },
       },
     },
     async (req, reply) => {
       await requireAuth(req);
-      return reply.send({ enabled: Boolean(supportEmail()) });
+      // Limits are served rather than duplicated in the web bundle, so the
+      // form's validation cannot disagree with this API's.
+      const limits = supportAttachmentLimits();
+      return reply.send({
+        enabled: Boolean(supportEmail()),
+        maxTotalBytes: limits.maxTotalBytes,
+        maxFiles: limits.maxFiles,
+        allowedTypes: [...SUPPORT_ALLOWED_CONTENT_TYPES],
+      });
     },
   );
 
@@ -76,9 +113,13 @@ export async function registerSupportRoutes(app: FastifyInstance): Promise<void>
         body: SupportRequestSchema,
         response: {
           201: z.object({ ok: z.boolean(), reference: z.string() }),
-          ...errorResponses(400, 401, 502, 503),
+          ...errorResponses(400, 401, 429, 502, 503),
         },
       },
+      // Fastify's 1MB default would reject any attachment submission (base64
+      // inflates a 5MB file to ~6.7MB). Derived from the configured budget so
+      // raising the cap cannot turn into a silent 413; other routes keep 1MB.
+      bodyLimit: supportBodyLimitBytes(supportAttachmentLimits().maxTotalBytes),
     },
     async (req, reply) => {
       const auth = await requireAuth(req);
@@ -93,9 +134,26 @@ export async function registerSupportRoutes(app: FastifyInstance): Promise<void>
       // Validated by the route's `body` zod schema. Use the SUBMITTED
       // name/email/phone — the web form prefills them from the session but
       // lets the coordinator correct them before sending.
-      const { name, email, phone, type, details } = req.body as z.infer<
+      const { name, email, phone, type, details, attachments } = req.body as z.infer<
         typeof SupportRequestSchema
       >;
+
+      const checked = validateSupportAttachments(attachments, supportAttachmentLimits());
+      if (!checked.ok) {
+        throw httpError(checked.error, { detail: checked.detail });
+      }
+
+      // Per-coordinator cap, checked after the 503 so an unconfigured instance
+      // doesn't burn a submitter's quota. The underlying limiter fails open on a
+      // Redis error — a rate-limit outage must not silence a complaint.
+      const rate = await checkSupportRate(auth.userId);
+      if (!rate.allowed) {
+        throw httpError('RATE_LIMITED', {
+          detail: 'Too many support submissions; please try again later.',
+          fields: { retryAfterSeconds: rate.retryAfterSeconds },
+        });
+      }
+
       const reference = generateSupportReference();
       const rendered = renderSupportRequest({
         type,
@@ -109,6 +167,7 @@ export async function registerSupportRoutes(app: FastifyInstance): Promise<void>
         // (setEmailBrand); falls back to the generic default under test.
         teamName: getEmailBrand().short_name,
         submittedAt: new Date(),
+        attachments: checked.attachments.map(({ filename, bytes }) => ({ filename, bytes })),
       });
 
       const cc = supportCc();
@@ -119,6 +178,15 @@ export async function registerSupportRoutes(app: FastifyInstance): Promise<void>
         html: rendered.html,
         text: rendered.text,
         ...(email ? { replyTo: email } : {}),
+        ...(checked.attachments.length
+          ? {
+              attachments: checked.attachments.map(({ filename, contentType, content }) => ({
+                filename,
+                contentType,
+                content,
+              })),
+            }
+          : {}),
       });
 
       if (!sent.ok) {
@@ -137,6 +205,8 @@ export async function registerSupportRoutes(app: FastifyInstance): Promise<void>
         latency_ms: Date.now() - start,
         aggregator_id: auth.aggregatorId,
         reference,
+        attachment_count: checked.attachments.length,
+        attachment_bytes: checked.attachments.reduce((sum, a) => sum + a.bytes, 0),
       });
       return reply.code(201).send({ ok: true, reference });
     },

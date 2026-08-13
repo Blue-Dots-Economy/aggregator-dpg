@@ -15,12 +15,19 @@
  *
  * @module apps/web/src/components/support/SupportDialog
  */
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslations } from 'next-intl';
 import { I } from '../../icons';
 import { Button } from '../ui/Button';
 import { useAuth } from '../../lib/auth-context';
+import {
+  SUPPORT_CONFIG_FALLBACK,
+  encodeAttachments,
+  formatBytes,
+  validateAttachmentSelection,
+  type SupportConfig,
+} from '../../lib/support-attachments';
 
 /** Props for {@link SupportDialog}. */
 export interface SupportDialogProps {
@@ -30,8 +37,32 @@ export interface SupportDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-type Status = 'idle' | 'sending' | 'success' | 'unavailable' | 'error' | 'invalid';
+type Status =
+  | 'idle'
+  | 'sending'
+  | 'success'
+  | 'unavailable'
+  | 'error'
+  | 'invalid'
+  | 'rate_limited'
+  | 'attachment_rejected';
 type SupportType = 'complaint' | 'support_request';
+
+/**
+ * Reads the API's `{ error: { code, detail } }` envelope from a failed
+ * response, tolerating a non-JSON body (a proxy error page, say).
+ *
+ * @param res - The failed response.
+ * @returns The error code and detail, or null when unreadable.
+ */
+async function readErrorCode(res: Response): Promise<{ code?: string; detail?: string } | null> {
+  try {
+    const body = (await res.json()) as { error?: { code?: string; detail?: string } };
+    return body.error ?? null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Displays a modal contact-support form and relays submissions to the BFF.
@@ -52,6 +83,13 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.E
   const [details, setDetails] = useState('');
   const [consent, setConsent] = useState(false);
   const [status, setStatus] = useState<Status>('idle');
+  const [attachments, setAttachments] = useState<File[]>([]);
+  /** Client-side attachment rejection, shown inline like the other notices. */
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  /** Server-side attachment rejection message — it names the offending file. */
+  const [serverDetail, setServerDetail] = useState<string | null>(null);
+  const [config, setConfig] = useState<SupportConfig>(SUPPORT_CONFIG_FALLBACK);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   // Portal target only exists on the client; gate render until mounted so
   // the server pass (and first client paint) doesn't touch `document`.
   const [mounted, setMounted] = useState(false);
@@ -68,8 +106,28 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.E
       setDetails('');
       setConsent(false);
       setStatus('idle');
+      setAttachments([]);
+      setAttachmentError(null);
+      setServerDetail(null);
     }
   }, [open, user]);
+
+  // Attachment limits come from the API, so the form validates against the same
+  // numbers it enforces and an operator can raise them without a web rebuild.
+  // A failed fetch leaves the defaults in place rather than blocking the form.
+  useEffect(() => {
+    if (!open) return;
+    let active = true;
+    void fetch('/api/support/config')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: SupportConfig | null) => {
+        if (active && data) setConfig(data);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [open]);
 
   // Dismiss on ESC, mirroring ConsentModal.
   useEffect(() => {
@@ -86,6 +144,35 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.E
   const hasContact = email.trim() !== '' || phone.trim() !== '';
   const canSubmit = details.trim() !== '' && hasContact && consent;
 
+  const attachedBytes = attachments.reduce((sum, file) => sum + file.size, 0);
+
+  const onFilesSelected = (e: ChangeEvent<HTMLInputElement>) => {
+    const incoming = Array.from(e.target.files ?? []);
+    // Clear either way, so re-picking the same file still fires onChange and a
+    // rejected pick doesn't linger in the control.
+    e.target.value = '';
+    if (incoming.length === 0) return;
+
+    const result = validateAttachmentSelection(attachments, incoming, config);
+    if (!result.ok) {
+      setAttachmentError(
+        result.reason === 'count'
+          ? t('attachment_too_many', { count: config.maxFiles })
+          : result.reason === 'size'
+            ? t('attachment_too_large', { size: formatBytes(config.maxTotalBytes) })
+            : t('attachment_bad_type', { name: result.filename }),
+      );
+      return;
+    }
+    setAttachmentError(null);
+    setAttachments(result.files);
+  };
+
+  const removeAttachment = (index: number) => {
+    setAttachmentError(null);
+    setAttachments((current) => current.filter((_, i) => i !== index));
+  };
+
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (!canSubmit) {
@@ -93,7 +180,11 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.E
       return;
     }
     setStatus('sending');
+    setServerDetail(null);
     try {
+      // Encoded inside the sending state: a multi-MB file takes long enough
+      // that the button must already be disabled.
+      const encoded = attachments.length ? await encodeAttachments(attachments) : undefined;
       const res = await fetch('/api/support', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -104,14 +195,30 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.E
           type,
           details: details.trim(),
           consent: true,
+          ...(encoded ? { attachments: encoded } : {}),
         }),
       });
       if (res.status === 201) {
         setStatus('success');
       } else if (res.status === 503) {
         setStatus('unavailable');
+      } else if (res.status === 429) {
+        setStatus('rate_limited');
+      } else if (res.status === 413) {
+        // The body limit, not the attachment check — a payload this far over the
+        // cap never reaches the handler's specific codes.
+        setAttachmentError(t('attachment_too_large', { size: formatBytes(config.maxTotalBytes) }));
+        setStatus('idle');
       } else {
-        setStatus('error');
+        // A server-side attachment rejection names the offending file, so it is
+        // more useful than the generic failure line.
+        const code = await readErrorCode(res);
+        if (code?.code?.startsWith('ATTACHMENT_')) {
+          setServerDetail(code.detail ?? null);
+          setStatus('attachment_rejected');
+        } else {
+          setStatus('error');
+        }
       }
     } catch {
       setStatus('error');
@@ -224,6 +331,71 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.E
                 className={inputClass}
               />
             </div>
+            <div>
+              <label htmlFor="support-attachments" className="block text-[13px] font-medium mb-1">
+                {t('label_attachments')}
+              </label>
+              <p className="text-[12px] text-(--bd-fg-muted) mb-2">
+                {t('attachments_hint', {
+                  count: config.maxFiles,
+                  size: formatBytes(config.maxTotalBytes),
+                })}
+              </p>
+              <input
+                ref={fileInputRef}
+                id="support-attachments"
+                type="file"
+                multiple
+                accept={config.allowedTypes.join(',')}
+                onChange={onFilesSelected}
+                disabled={status === 'sending' || attachments.length >= config.maxFiles}
+                className="sr-only"
+              />
+              <Button
+                kind="ghost"
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={status === 'sending' || attachments.length >= config.maxFiles}
+                className="text-[13px]"
+              >
+                {t('attachments_add')}
+              </Button>
+              {attachments.length > 0 && (
+                <ul className="mt-2 space-y-1">
+                  {attachments.map((file, index) => (
+                    <li
+                      key={`${file.name}-${index}`}
+                      className="flex items-center justify-between gap-2 rounded-[8px] border border-(--bd-border) px-2 py-1 text-[13px]"
+                    >
+                      <span className="truncate">{file.name}</span>
+                      <span className="flex shrink-0 items-center gap-2">
+                        <span className="text-[12px] text-(--bd-fg-muted)">
+                          {formatBytes(file.size)}
+                        </span>
+                        <button
+                          type="button"
+                          aria-label={t('attachments_remove', { name: file.name })}
+                          onClick={() => removeAttachment(index)}
+                          disabled={status === 'sending'}
+                          className="text-(--bd-fg-muted) hover:text-(--bd-fg)"
+                        >
+                          <I.x size={14} />
+                        </button>
+                      </span>
+                    </li>
+                  ))}
+                  <li className="text-[12px] text-(--bd-fg-muted)">
+                    {t('attachments_total', {
+                      used: formatBytes(attachedBytes),
+                      total: formatBytes(config.maxTotalBytes),
+                    })}
+                  </li>
+                </ul>
+              )}
+              {attachmentError && (
+                <p className="mt-1 text-[13px] text-rose-600">{attachmentError}</p>
+              )}
+            </div>
             <label className="flex items-start gap-2 text-[13px] text-(--bd-fg)">
               <input
                 type="checkbox"
@@ -239,6 +411,12 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.E
             )}
             {status === 'unavailable' && (
               <p className="text-[13px] text-amber-600">{t('unavailable')}</p>
+            )}
+            {status === 'rate_limited' && (
+              <p className="text-[13px] text-amber-600">{t('rate_limited')}</p>
+            )}
+            {status === 'attachment_rejected' && (
+              <p className="text-[13px] text-rose-600">{serverDetail ?? t('error')}</p>
             )}
             {status === 'error' && <p className="text-[13px] text-rose-600">{t('error')}</p>}
             <Button
