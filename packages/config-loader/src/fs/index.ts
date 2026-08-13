@@ -44,6 +44,10 @@ function loadYaml(filePath: string): Record<string, unknown> {
   if (!existsSync(filePath)) return {};
   try {
     const raw = readFileSync(filePath, 'utf8');
+    // An empty (or whitespace-only) file is an empty override. js-yaml 5 throws
+    // "expected a document, but the input is empty" on such input rather than
+    // returning undefined like v4 did, so short-circuit before parsing.
+    if (raw.trim() === '') return {};
     const parsed = parseYaml(raw);
     if (parsed === null || parsed === undefined) return {};
     if (typeof parsed !== 'object' || Array.isArray(parsed)) {
