@@ -187,7 +187,7 @@ export class PostgresCampaignJobStore extends CampaignJobStoreBase {
       const page = rows.slice(0, limit);
       const countsByJob = await this.countsForJobs(page.map((r) => r.id));
       const jobs = page.map((r) => toView(r, countsByJob.get(r.id) ?? emptyCounts()));
-      const last = page[page.length - 1];
+      const last = page.at(-1);
       const nextCursor = hasMore && last ? encodeCursor(last.createdAt, last.id) : null;
       return { ok: true, value: { jobs, nextCursor } };
     } catch (err) {

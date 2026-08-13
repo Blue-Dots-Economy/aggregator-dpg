@@ -589,23 +589,16 @@ export const campaignJob = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => ({
+  (table) => [
     // Request idempotency — unique only over rows that carry a key.
-    idempotencyKeyUnique: uniqueIndex('campaign_job_idempotency_key_unique')
+    uniqueIndex('campaign_job_idempotency_key_unique')
       .on(table.idempotencyKey)
       .where(sql`idempotency_key IS NOT NULL`),
     // Tenant list (newest-first) + per-org active-job cap.
-    orgStatusIdx: index('campaign_job_org_status_idx').on(
-      table.signalstackOrgId,
-      table.status,
-      table.createdAt,
-    ),
+    index('campaign_job_org_status_idx').on(table.signalstackOrgId, table.status, table.createdAt),
     // Watchdog scan for stalled processing jobs.
-    statusProgressIdx: index('campaign_job_status_progress_idx').on(
-      table.status,
-      table.lastProgressAt,
-    ),
-  }),
+    index('campaign_job_status_progress_idx').on(table.status, table.lastProgressAt),
+  ],
 );
 
 export const campaignJobItem = pgTable(
@@ -625,16 +618,16 @@ export const campaignJobItem = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => ({
+  (table) => [
     // Derived-count + item-listing lookups.
-    jobStatusIdx: index('campaign_job_item_job_status_idx').on(table.jobId, table.status),
+    index('campaign_job_item_job_status_idx').on(table.jobId, table.status),
     // Item-level active dedup: the same (item, action) can't be in flight twice
     // across jobs. Only in-flight/succeeded rows count, and only when an action
     // is present — so exports (action IS NULL) are never deduplicated.
-    activeDedupUnique: uniqueIndex('campaign_job_item_active_dedup')
+    uniqueIndex('campaign_job_item_active_dedup')
       .on(table.itemId, table.action)
       .where(sql`status IN ('pending','resolved','submitted') AND action IS NOT NULL`),
-  }),
+  ],
 );
 
 // ─── Inferred row types ──────────────────────────────────────────────────────

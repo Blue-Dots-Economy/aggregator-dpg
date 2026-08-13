@@ -50,7 +50,7 @@ interface ItemRow {
   errorReason: string | null;
 }
 
-const TERMINAL_ITEM: readonly CampaignJobItemStatus[] = ['resolved', 'submitted', 'failed'];
+const TERMINAL_ITEM = new Set<CampaignJobItemStatus>(['resolved', 'submitted', 'failed']);
 
 export class InMemoryCampaignJobStore extends CampaignJobStoreBase {
   private readonly jobs = new Map<string, JobRow>();
@@ -113,7 +113,7 @@ export class InMemoryCampaignJobStore extends CampaignJobStoreBase {
 
   async getJob(jobId: string, signalstackOrgId: string): Promise<StoreResult<JobView | null>> {
     const job = this.jobs.get(jobId);
-    if (!job || job.signalstackOrgId !== signalstackOrgId) return { ok: true, value: null };
+    if (job?.signalstackOrgId !== signalstackOrgId) return { ok: true, value: null };
     return { ok: true, value: this.toView(job) };
   }
 
@@ -122,7 +122,7 @@ export class InMemoryCampaignJobStore extends CampaignJobStoreBase {
     signalstackOrgId: string,
   ): Promise<StoreResult<JobItemView[] | null>> {
     const job = this.jobs.get(jobId);
-    if (!job || job.signalstackOrgId !== signalstackOrgId) return { ok: true, value: null };
+    if (job?.signalstackOrgId !== signalstackOrgId) return { ok: true, value: null };
     return { ok: true, value: (this.items.get(jobId) ?? []).map((i) => ({ ...i })) };
   }
 
@@ -138,7 +138,7 @@ export class InMemoryCampaignJobStore extends CampaignJobStoreBase {
       .filter((j) => j.seq < cursorSeq)
       .sort((a, b) => b.seq - a.seq);
     const page = rows.slice(0, limit);
-    const nextCursor = rows.length > limit ? String(page[page.length - 1]!.seq) : null;
+    const nextCursor = rows.length > limit ? String(page.at(-1)!.seq) : null;
     return { ok: true, value: { jobs: page.map((j) => this.toView(j)), nextCursor } };
   }
 
@@ -175,7 +175,7 @@ export class InMemoryCampaignJobStore extends CampaignJobStoreBase {
     const item = rows?.find((i) => i.itemId === itemId);
     if (!item) return { ok: false, error: { code: 'NOT_FOUND', message: 'item not found' } };
     // Forward-only: don't overwrite a terminal status.
-    if (!TERMINAL_ITEM.includes(item.status)) {
+    if (!TERMINAL_ITEM.has(item.status)) {
       item.status = status;
       item.errorReason = errorReason ?? null;
       this.touch(jobId);

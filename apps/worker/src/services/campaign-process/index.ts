@@ -83,7 +83,7 @@ export interface CampaignJobDeps {
   log: CampaignLogger;
 }
 
-const TERMINAL_JOB: readonly CampaignJobStatus[] = ['succeeded', 'partially_failed', 'failed'];
+const TERMINAL_JOB = new Set<CampaignJobStatus>(['succeeded', 'partially_failed', 'failed']);
 
 /**
  * Runs one campaign job by id.
@@ -103,7 +103,7 @@ export async function runCampaignJob(jobId: string, deps: CampaignJobDeps): Prom
     return;
   }
   // Retry guard: a job that already reached a terminal status is not re-run.
-  if (TERMINAL_JOB.includes(job.status)) {
+  if (TERMINAL_JOB.has(job.status)) {
     deps.log.info({
       operation: 'campaign.process',
       status: 'skipped',
@@ -145,9 +145,16 @@ export async function runCampaignJob(jobId: string, deps: CampaignJobDeps): Prom
   }
 }
 
-/** Runs the export channel for a job: chunked decrypt → item marks → CSV → S3 → email. */
-async function runExportForJob(job: ProcessingJob, deps: CampaignJobDeps): Promise<void> {
-  const contactOnly = deps.config.fieldSet === 'contact';
+/**
+ * Decrypts the job's items in chunks, marking each resolved/failed and beating
+ * the heartbeat per chunk. Re-throws on a transient decrypt failure or the #521
+ * contact-block guard (so BullMQ retries). Returns the resolved profile rows.
+ */
+async function decryptAndMarkItems(
+  job: ProcessingJob,
+  deps: CampaignJobDeps,
+  contactOnly: boolean,
+): Promise<SignalStackDecryptedProfileRow[]> {
   const itemIds = job.items.map((i) => i.itemId);
   const resolvedRows: SignalStackDecryptedProfileRow[] = [];
 
@@ -188,12 +195,19 @@ async function runExportForJob(job: ProcessingJob, deps: CampaignJobDeps): Promi
     }
     await deps.client.heartbeat(job.id);
   }
+  return resolvedRows;
+}
+
+/** Runs the export channel for a job: chunked decrypt → item marks → CSV → S3 → email. */
+async function runExportForJob(job: ProcessingJob, deps: CampaignJobDeps): Promise<void> {
+  const contactOnly = deps.config.fieldSet === 'contact';
+  const resolvedRows = await decryptAndMarkItems(job, deps, contactOnly);
 
   const base = {
     operation: 'campaign.export',
     job_id: job.id,
     org_id: job.signalstackOrgId,
-    requested: itemIds.length,
+    requested: job.items.length,
   };
 
   if (resolvedRows.length === 0) {
@@ -220,7 +234,7 @@ async function runExportForJob(job: ProcessingJob, deps: CampaignJobDeps): Promi
     orgId: job.signalstackOrgId,
     purpose: purposeOf(job) ?? '—',
     exported: resolvedRows.length,
-    skipped: itemIds.length - resolvedRows.length,
+    skipped: job.items.length - resolvedRows.length,
     url: signed.url,
     expiresAt: signed.expiresAt,
   });

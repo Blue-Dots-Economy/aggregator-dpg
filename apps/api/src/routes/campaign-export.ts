@@ -61,7 +61,7 @@ export async function registerCampaignExportRoutes(app: FastifyInstance): Promis
       // The requesting aggregator must be active (fail fast, and it supplies the
       // fallback recipient email below).
       const found = await getAggregatorStore().findById(auth.aggregatorId);
-      if (!found.ok || !found.value || found.value.status !== 'active') {
+      if (!found.ok || found.value?.status !== 'active') {
         throw httpError('FORBIDDEN', {
           detail: 'requesting aggregator is not active',
           fields: { reason: 'AGGREGATOR_INACTIVE' },
@@ -147,5 +147,5 @@ function readIdempotencyKey(req: FastifyRequest): string | undefined {
   const raw = req.headers['idempotency-key'];
   const value = Array.isArray(raw) ? raw[0] : raw;
   const trimmed = value?.trim();
-  return trimmed ? trimmed : undefined;
+  return trimmed || undefined;
 }
