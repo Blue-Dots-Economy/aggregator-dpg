@@ -30,6 +30,13 @@ export const QueueName = {
   CronWatchdog: 'cron-watchdog',
   /** Async participant PII export: decrypt → CSV → S3 → email link (aggregator-dpg#579). */
   CampaignExport: 'campaign-export',
+  /**
+   * Unified campaign async-job pipeline (aggregator-dpg#579). One job per
+   * `campaign_job` row; the worker's `campaign` role loads the job + its items,
+   * runs the per-channel handler (export/email/voice), and writes item + job
+   * status back. Supersedes the single-purpose `CampaignExport` queue.
+   */
+  CampaignProcess: 'campaign-process',
 } as const;
 
 export type QueueName = (typeof QueueName)[keyof typeof QueueName];
@@ -95,6 +102,17 @@ export interface CampaignExportJob {
   requestId?: string;
 }
 
+/**
+ * Unified campaign-process job (aggregator-dpg#579). Carries only the durable
+ * `campaign_job` id — the worker loads the job, its items, channel, metadata,
+ * and content from Postgres. All request detail lives in the row, so the queue
+ * payload stays minimal and a replayed/retried job re-reads the source of truth.
+ */
+export interface CampaignProcessJob {
+  /** `campaign_job.id` — the durable job to process. */
+  jobId: string;
+}
+
 // ─── Redis connection ────────────────────────────────────────────────────────
 
 export interface RedisConnectionOptions {
@@ -147,6 +165,19 @@ export const DEFAULT_JOB_OPTS = {
   removeOnComplete: { age: 3600 },
   removeOnFail: { age: 604800 },
 } as const;
+
+/**
+ * Job options for the unified `campaign-process` queue. Same retry posture as
+ * {@link DEFAULT_JOB_OPTS} (3× exponential); the API may override `attempts`
+ * from `CAMPAIGN_EXPORT_ATTEMPTS` at enqueue time. Kept as a plain object (not
+ * `as const`) so callers can spread an `attempts` override.
+ */
+export const CAMPAIGN_PROCESS_JOB_OPTS = {
+  attempts: 3,
+  backoff: { type: 'exponential' as const, delay: 1000 },
+  removeOnComplete: { age: 3600 },
+  removeOnFail: { age: 604800 },
+};
 
 // ─── Bulk-upload Redis key namespace ─────────────────────────────────────────
 
