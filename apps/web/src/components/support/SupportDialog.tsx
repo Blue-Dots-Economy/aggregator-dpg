@@ -26,6 +26,7 @@ import {
   encodeAttachments,
   formatBytes,
   validateAttachmentSelection,
+  type AttachmentRejection,
   type SupportConfig,
 } from '../../lib/support-attachments';
 
@@ -62,6 +63,72 @@ async function readErrorCode(res: Response): Promise<{ code?: string; detail?: s
   } catch {
     return null;
   }
+}
+
+/** What the dialog should show after a submit response. */
+interface SubmitOutcome {
+  status: Status;
+  /** Set to replace the inline attachment message; left undefined to keep it. */
+  attachmentError?: string;
+  /** Set to carry the API's own rejection detail (it names the file). */
+  serverDetail?: string | null;
+}
+
+/**
+ * Maps a submit response to what the dialog shows. Extracted from the submit
+ * handler so the status ladder reads as a list and each failure keeps its own
+ * specific message instead of collapsing into the generic error line.
+ *
+ * @param res - The response from `POST /api/support`.
+ * @param t - The `support` namespace translator.
+ * @param config - Limits currently served by the API.
+ * @returns The status plus any message to display with it.
+ */
+async function resolveSubmitOutcome(
+  res: Response,
+  t: (key: string, values?: Record<string, string | number>) => string,
+  config: SupportConfig,
+): Promise<SubmitOutcome> {
+  if (res.status === 201) return { status: 'success' };
+  if (res.status === 503) return { status: 'unavailable' };
+  if (res.status === 429) return { status: 'rate_limited' };
+  if (res.status === 413) {
+    // The body limit, not the attachment check — a payload this far over the cap
+    // never reaches the handler's specific codes.
+    return {
+      status: 'idle',
+      attachmentError: t('attachment_too_large', { size: formatBytes(config.maxTotalBytes) }),
+    };
+  }
+  // A server-side attachment rejection names the offending file, so it is more
+  // useful than the generic failure line.
+  const error = await readErrorCode(res);
+  if (error?.code?.startsWith('ATTACHMENT_')) {
+    return { status: 'attachment_rejected', serverDetail: error.detail ?? null };
+  }
+  return { status: 'error' };
+}
+
+/**
+ * Translates a client-side attachment rejection into the inline message shown
+ * under the picker. Split out so each reason reads as its own line rather than a
+ * nested conditional.
+ *
+ * @param rejection - The failed selection result.
+ * @param t - The `support` namespace translator.
+ * @param config - Limits currently served by the API.
+ * @returns The translated message.
+ */
+function rejectionMessage(
+  rejection: AttachmentRejection,
+  t: (key: string, values?: Record<string, string | number>) => string,
+  config: SupportConfig,
+): string {
+  if (rejection.reason === 'count') return t('attachment_too_many', { count: config.maxFiles });
+  if (rejection.reason === 'size') {
+    return t('attachment_too_large', { size: formatBytes(config.maxTotalBytes) });
+  }
+  return t('attachment_bad_type', { name: rejection.filename });
 }
 
 /**
@@ -155,13 +222,7 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.E
 
     const result = validateAttachmentSelection(attachments, incoming, config);
     if (!result.ok) {
-      setAttachmentError(
-        result.reason === 'count'
-          ? t('attachment_too_many', { count: config.maxFiles })
-          : result.reason === 'size'
-            ? t('attachment_too_large', { size: formatBytes(config.maxTotalBytes) })
-            : t('attachment_bad_type', { name: result.filename }),
-      );
+      setAttachmentError(rejectionMessage(result, t, config));
       return;
     }
     setAttachmentError(null);
@@ -198,28 +259,10 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.E
           ...(encoded ? { attachments: encoded } : {}),
         }),
       });
-      if (res.status === 201) {
-        setStatus('success');
-      } else if (res.status === 503) {
-        setStatus('unavailable');
-      } else if (res.status === 429) {
-        setStatus('rate_limited');
-      } else if (res.status === 413) {
-        // The body limit, not the attachment check — a payload this far over the
-        // cap never reaches the handler's specific codes.
-        setAttachmentError(t('attachment_too_large', { size: formatBytes(config.maxTotalBytes) }));
-        setStatus('idle');
-      } else {
-        // A server-side attachment rejection names the offending file, so it is
-        // more useful than the generic failure line.
-        const code = await readErrorCode(res);
-        if (code?.code?.startsWith('ATTACHMENT_')) {
-          setServerDetail(code.detail ?? null);
-          setStatus('attachment_rejected');
-        } else {
-          setStatus('error');
-        }
-      }
+      const outcome = await resolveSubmitOutcome(res, t, config);
+      if (outcome.attachmentError !== undefined) setAttachmentError(outcome.attachmentError);
+      if (outcome.serverDetail !== undefined) setServerDetail(outcome.serverDetail);
+      setStatus(outcome.status);
     } catch {
       setStatus('error');
     }

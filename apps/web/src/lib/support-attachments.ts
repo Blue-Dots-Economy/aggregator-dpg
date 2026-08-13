@@ -106,8 +106,8 @@ export function validateAttachmentSelection(
 
 /**
  * Base64-encodes a file for the JSON body. Chunked because spreading a
- * multi-megabyte byte array into `String.fromCharCode` arguments overflows the
- * call stack.
+ * multi-megabyte byte array into `String.fromCodePoint` arguments overflows the
+ * call stack. Every byte is 0–255, so code points and char codes coincide here.
  *
  * @param file - The file to encode.
  * @returns Base64 string without a `data:` prefix.
@@ -117,7 +117,7 @@ export async function fileToBase64(file: File): Promise<string> {
   const CHUNK_SIZE = 0x8000;
   let binary = '';
   for (let offset = 0; offset < bytes.length; offset += CHUNK_SIZE) {
-    binary += String.fromCharCode(...bytes.subarray(offset, offset + CHUNK_SIZE));
+    binary += String.fromCodePoint(...bytes.subarray(offset, offset + CHUNK_SIZE));
   }
   return btoa(binary);
 }
