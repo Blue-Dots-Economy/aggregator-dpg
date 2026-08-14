@@ -1671,6 +1671,19 @@ function fmtCount(n: number | null | undefined): string {
  * table does not yet call. Missing fields render as em-dashes; the
  * `complete` profile bar uses `profile_completion_pct` from the rollup.
  */
+/**
+ * Resolves a row's lifecycle from signalstack's authoritative `lifecycle_status`
+ * (`draft`/`live`/`paused`, with the consent + schema go-live gates already
+ * applied server-side), falling back to the completion heuristic only for an
+ * older signalstack that omits the field. The heuristic mislabels a
+ * schema-complete-but-unconsented profile (genuinely `draft`) as `live`, so it
+ * is a last resort — see #558/#627.
+ */
+function resolveLifecycleStatus(raw: unknown, completion: number): LifecycleStatus {
+  if (raw === 'draft' || raw === 'live' || raw === 'paused') return raw;
+  return completion >= 100 ? 'live' : 'draft';
+}
+
 function toSeekerRow(participant: Record<string, unknown>, locale: string, index: number): Seeker {
   // Row key: profile_item_id (one row per profile), else the array index.
   // user_id is not unique per row (a user may own many profiles), so it is no
@@ -1682,20 +1695,9 @@ function toSeekerRow(participant: Record<string, unknown>, locale: string, index
   );
   const completion =
     typeof participant.profile_completion_pct === 'number' ? participant.profile_completion_pct : 0;
-  // Lifecycle comes straight from signalstack's dashboard row
-  // (`lifecycle_status`) — the authoritative draft/live/paused classification,
-  // with the consent + schema go-live gates already applied server-side. The
-  // completion heuristic is only a fallback for an older signalstack that omits
-  // the field: deriving `live` from `completion >= 100` mislabels a
-  // schema-complete-but-unconsented profile (genuinely `draft`) as `live`, so
-  // it vanishes from the Draft lifecycle filter (the bug this replaces).
-  const rawLifecycle = participant.lifecycle_status;
-  const lifecycle_status: LifecycleStatus =
-    rawLifecycle === 'draft' || rawLifecycle === 'live' || rawLifecycle === 'paused'
-      ? rawLifecycle
-      : completion >= 100
-        ? 'live'
-        : 'draft';
+  // Lifecycle from signalstack's authoritative row status, heuristic fallback
+  // only (see resolveLifecycleStatus).
+  const lifecycle_status = resolveLifecycleStatus(participant.lifecycle_status, completion);
   const lifecycleFields: Pick<Seeker, 'lifecycle_status'> = { lifecycle_status };
   const created =
     typeof participant.profile_created_at === 'string' ? participant.profile_created_at : '';
