@@ -33,6 +33,14 @@ export interface DashboardQuery {
   limit?: number;
   status?: string;
   /**
+   * Server-side lifecycle filter for the participant list. `'draft'` / `'live'`
+   * narrow the fetched (and paginated) rows to that lifecycle upstream; omit
+   * (the `'all'` case) to get the default draft+live set. Filtering server-side
+   * — not client-side over a page — is what lets a rare draft surface when the
+   * domain is dominated by live profiles.
+   */
+  lifecycle?: 'draft' | 'live';
+  /**
    * When true, the BFF forwards `?refresh=true` to signalstack to bypass
    * the rollup TTL and recompute synchronously. The page sets this only
    * for explicit user-initiated refreshes — passing it on every fetch
@@ -319,6 +327,7 @@ class HttpDashboardService implements DashboardService {
     // default landing render needs the full rollup + unfiltered list, so
     // the BFF/API must NOT see a `status` param in that mode.
     if (query?.status) params.set('status', query.status);
+    if (query?.lifecycle) params.set('lifecycle', query.lifecycle);
     if (query?.refresh) params.set('refresh', 'true');
     const url = `/api/dashboard?${params.toString()}`;
     return jsonFetch<DashboardPage>(url);

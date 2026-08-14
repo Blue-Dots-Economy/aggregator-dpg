@@ -1437,6 +1437,9 @@ function SeekersTab() {
           page,
           limit: PAGE_SIZE,
           ...(filterActive ? { status: statusFilter } : {}),
+          ...(lifecycleFilter === 'draft' || lifecycleFilter === 'live'
+            ? { lifecycle: lifecycleFilter }
+            : {}),
         }
       : undefined,
   );
@@ -1672,13 +1675,21 @@ function toSeekerRow(participant: Record<string, unknown>, locale: string, index
   );
   const completion =
     typeof participant.profile_completion_pct === 'number' ? participant.profile_completion_pct : 0;
-  // Lifecycle is derived from completion %: `live` iff the profile is 100%
-  // complete, `draft` otherwise. signals no longer exposes a per-item
-  // completion/lifecycle on the responses we read, so the rollup's
-  // `profile_completion_pct` is the source of truth.
-  const lifecycleFields: Pick<Seeker, 'lifecycle_status'> = {
-    lifecycle_status: completion >= 100 ? 'live' : 'draft',
-  };
+  // Lifecycle comes straight from signalstack's dashboard row
+  // (`lifecycle_status`) — the authoritative draft/live/paused classification,
+  // with the consent + schema go-live gates already applied server-side. The
+  // completion heuristic is only a fallback for an older signalstack that omits
+  // the field: deriving `live` from `completion >= 100` mislabels a
+  // schema-complete-but-unconsented profile (genuinely `draft`) as `live`, so
+  // it vanishes from the Draft lifecycle filter (the bug this replaces).
+  const rawLifecycle = participant.lifecycle_status;
+  const lifecycle_status: LifecycleStatus =
+    rawLifecycle === 'draft' || rawLifecycle === 'live' || rawLifecycle === 'paused'
+      ? rawLifecycle
+      : completion >= 100
+        ? 'live'
+        : 'draft';
+  const lifecycleFields: Pick<Seeker, 'lifecycle_status'> = { lifecycle_status };
   const created =
     typeof participant.profile_created_at === 'string' ? participant.profile_created_at : '';
   const updated =
@@ -1800,6 +1811,9 @@ function ProvidersTab() {
           page,
           limit: PAGE_SIZE,
           ...(filterActive ? { status: statusFilter } : {}),
+          ...(lifecycleFilter === 'draft' || lifecycleFilter === 'live'
+            ? { lifecycle: lifecycleFilter }
+            : {}),
         }
       : undefined,
   );

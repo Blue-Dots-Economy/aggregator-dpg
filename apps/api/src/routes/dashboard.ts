@@ -101,6 +101,14 @@ const DashboardQuerySchema = z.object({
     .max(32)
     .regex(/^[a-z0-9_]+$/i, 'status must be alphanumeric + underscore')
     .optional(),
+  /**
+   * Optional lifecycle narrowing for the participant list. When set, only that
+   * lifecycle is fetched (and paginated) upstream; absent ⇒ the default
+   * draft+live set ({@link DASHBOARD_LIFECYCLE}). Server-side so a rare draft
+   * surfaces in a domain dominated by live profiles — client-side filtering a
+   * single page cannot. `paused`/`retired` remain non-selectable here.
+   */
+  lifecycle: z.enum(['draft', 'live']).optional(),
   /** Bypass signalstack's TTL cache when true. Forwarded verbatim. */
   refresh: z.coerce.boolean().optional().default(false),
 });
@@ -329,7 +337,7 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
 
       // Validated (and defaulted) by the route's `querystring` zod schema.
       const query = req.query as z.infer<typeof DashboardQuerySchema>;
-      const { page, limit, status, refresh } = query;
+      const { page, limit, status, lifecycle, refresh } = query;
       const networkCfg = await getNetworkConfig();
       const domain = query.domain ?? networkCfg.domainIds[0]!;
       if (!networkCfg.domains[domain]) {
@@ -357,7 +365,9 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
         domain,
         // Aggregator dashboard shows only draft + live profiles; paused +
         // retired are excluded server-side by signalstack (#lifecycle-filter).
-        lifecycle: DASHBOARD_LIFECYCLE,
+        // A caller-supplied `?lifecycle=` narrows to that single lifecycle
+        // (server-side pagination over the filtered set); absent ⇒ draft+live.
+        lifecycle: lifecycle ? [lifecycle] : DASHBOARD_LIFECYCLE,
         refresh,
       });
 

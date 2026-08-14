@@ -31,13 +31,24 @@ export function useDashboard(query?: DashboardQuery) {
   // default to 'seeker' which silently broke orange_dot.
   const domain = query?.domain;
   const status = query?.status ?? null;
+  const lifecycle = query?.lifecycle ?? null;
   const page = query?.page ?? 1;
   const limit = query?.limit ?? 50;
   const refresh = query?.refresh ?? false;
   return useQuery({
     // refresh is in the queryKey so a forced refresh gets a fresh cache
-    // entry rather than serving stale data from the prior key.
-    queryKey: ['dashboard', 'dashboard', domain ?? '(no-domain)', status, page, limit, refresh],
+    // entry rather than serving stale data from the prior key. lifecycle is
+    // keyed too so switching the lifecycle filter refetches (server-side).
+    queryKey: [
+      'dashboard',
+      'dashboard',
+      domain ?? '(no-domain)',
+      status,
+      lifecycle,
+      page,
+      limit,
+      refresh,
+    ],
     queryFn: () => dashboardService.dashboard(query),
     enabled: Boolean(domain),
     staleTime: 0,
