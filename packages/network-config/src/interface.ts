@@ -168,9 +168,21 @@ export type NetworkBinding = z.infer<typeof NetworkBindingSchema>;
 
 /**
  * Onboarding behaviour toggles.
+ *
+ * `presume_consent` governs the BULK-UPLOAD path only (`bulk-row-process.ts`);
+ * the interactive registration-link flow always captures consent from the
+ * participant. When true, an adult bulk row is forwarded to Signals with
+ * `user_terms` / `user_privacy` / `profile_creation` all asserted on the
+ * participant's behalf, which satisfies the `consent_required` go-live gate and
+ * publishes the profile immediately. Minors are never presumed
+ * (`!rowIsMinor`). When false, `compliance` is omitted entirely and rows land
+ * as `draft` until the participant accepts for themselves.
+ *
+ * Defaults to **false**: presuming consent is a deliberate, per-network policy
+ * decision, so it must be opted into explicitly rather than inherited.
  */
 export const OnboardingConfigSchema = z.object({
-  presume_consent: z.boolean().default(true),
+  presume_consent: z.boolean().default(false),
   bulk_max_rows: z.coerce.number().int().positive().default(10000),
 });
 export type OnboardingConfig = z.infer<typeof OnboardingConfigSchema>;

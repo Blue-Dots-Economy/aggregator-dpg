@@ -72,11 +72,14 @@ aggregator:
 
   # ── Onboarding behaviour ───────────────────────────────────────────────────
   onboarding:
-    # Whether `terms_accepted` + `privacy_accepted` are hardcoded `true`
-    # on each signalstack onboard push (aggregator-level consent acts as
-    # participant-level consent). Set false to require per-row consent
-    # capture via a CSV column / form checkbox.
-    presume_consent: true
+    # Bulk-upload only. When true, an adult bulk row is pushed to Signals with
+    # user_terms / user_privacy / profile_creation asserted on the participant's
+    # behalf (aggregator-level consent acting as participant-level consent),
+    # which satisfies the consent_required go-live gate and publishes the
+    # profile immediately. Defaults to false: rows then stay `draft` until the
+    # participant accepts for themselves. Minors are never presumed either way.
+    # The interactive registration-link flow always captures real consent.
+    presume_consent: false
     bulk_max_rows: 10000
 
   # ── Admin email recipients (registration approval notifications) ───────────
