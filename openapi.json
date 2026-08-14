@@ -8557,6 +8557,18 @@
           },
           {
             "schema": {
+              "type": "string",
+              "enum": [
+                "draft",
+                "live"
+              ]
+            },
+            "in": "query",
+            "name": "lifecycle",
+            "required": false
+          },
+          {
+            "schema": {
               "type": "boolean",
               "default": false
             },
