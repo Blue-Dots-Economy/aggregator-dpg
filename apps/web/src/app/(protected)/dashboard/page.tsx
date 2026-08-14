@@ -1437,6 +1437,9 @@ function SeekersTab() {
           page,
           limit: PAGE_SIZE,
           ...(filterActive ? { status: statusFilter } : {}),
+          ...(lifecycleFilter === 'draft' || lifecycleFilter === 'live'
+            ? { lifecycle: lifecycleFilter }
+            : {}),
         }
       : undefined,
   );
@@ -1491,6 +1494,13 @@ function SeekersTab() {
       page: 1,
       limit: slice?.total_matching ?? total ?? PAGE_SIZE,
       ...(filterActive ? { status: statusFilter } : {}),
+      // Forward the lifecycle filter too: `total_matching` (the `limit` above)
+      // is the lifecycle-narrowed count, so the fetch must be narrowed the same
+      // way — else "Select all N matching" pulls N unfiltered rows and the
+      // client-side filter below finds almost none. Mirror the useDashboard call.
+      ...(lifecycleFilter === 'draft' || lifecycleFilter === 'live'
+        ? { lifecycle: lifecycleFilter }
+        : {}),
     });
     const all = (res.by_domain[seekerDomainId]?.items ?? []).map((p, i) =>
       toSeekerRow(p, locale, i),
@@ -1661,6 +1671,19 @@ function fmtCount(n: number | null | undefined): string {
  * table does not yet call. Missing fields render as em-dashes; the
  * `complete` profile bar uses `profile_completion_pct` from the rollup.
  */
+/**
+ * Resolves a row's lifecycle from signalstack's authoritative `lifecycle_status`
+ * (`draft`/`live`/`paused`, with the consent + schema go-live gates already
+ * applied server-side), falling back to the completion heuristic only for an
+ * older signalstack that omits the field. The heuristic mislabels a
+ * schema-complete-but-unconsented profile (genuinely `draft`) as `live`, so it
+ * is a last resort — see #558/#627.
+ */
+function resolveLifecycleStatus(raw: unknown, completion: number): LifecycleStatus {
+  if (raw === 'draft' || raw === 'live' || raw === 'paused') return raw;
+  return completion >= 100 ? 'live' : 'draft';
+}
+
 function toSeekerRow(participant: Record<string, unknown>, locale: string, index: number): Seeker {
   // Row key: profile_item_id (one row per profile), else the array index.
   // user_id is not unique per row (a user may own many profiles), so it is no
@@ -1672,13 +1695,10 @@ function toSeekerRow(participant: Record<string, unknown>, locale: string, index
   );
   const completion =
     typeof participant.profile_completion_pct === 'number' ? participant.profile_completion_pct : 0;
-  // Lifecycle is derived from completion %: `live` iff the profile is 100%
-  // complete, `draft` otherwise. signals no longer exposes a per-item
-  // completion/lifecycle on the responses we read, so the rollup's
-  // `profile_completion_pct` is the source of truth.
-  const lifecycleFields: Pick<Seeker, 'lifecycle_status'> = {
-    lifecycle_status: completion >= 100 ? 'live' : 'draft',
-  };
+  // Lifecycle from signalstack's authoritative row status, heuristic fallback
+  // only (see resolveLifecycleStatus).
+  const lifecycle_status = resolveLifecycleStatus(participant.lifecycle_status, completion);
+  const lifecycleFields: Pick<Seeker, 'lifecycle_status'> = { lifecycle_status };
   const created =
     typeof participant.profile_created_at === 'string' ? participant.profile_created_at : '';
   const updated =
@@ -1800,6 +1820,9 @@ function ProvidersTab() {
           page,
           limit: PAGE_SIZE,
           ...(filterActive ? { status: statusFilter } : {}),
+          ...(lifecycleFilter === 'draft' || lifecycleFilter === 'live'
+            ? { lifecycle: lifecycleFilter }
+            : {}),
         }
       : undefined,
   );
@@ -1837,6 +1860,13 @@ function ProvidersTab() {
       page: 1,
       limit: slice?.total_matching ?? total ?? PAGE_SIZE,
       ...(filterActive ? { status: statusFilter } : {}),
+      // Forward the lifecycle filter too: `total_matching` (the `limit` above)
+      // is the lifecycle-narrowed count, so the fetch must be narrowed the same
+      // way — else "Select all N matching" pulls N unfiltered rows and the
+      // client-side filter below finds almost none. Mirror the useDashboard call.
+      ...(lifecycleFilter === 'draft' || lifecycleFilter === 'live'
+        ? { lifecycle: lifecycleFilter }
+        : {}),
     });
     const all = (res.by_domain[providerDomainId]?.items ?? []).map((p, i) =>
       toProviderRow(p, locale, i),

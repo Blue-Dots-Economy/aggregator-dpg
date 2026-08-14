@@ -510,4 +510,69 @@ describe('<DashboardPageRoot />', () => {
       expect(mockDashboardServiceDashboard).toHaveBeenCalled();
     });
   });
+
+  // #627: the "select all N matching" batched fetch sizes its `limit` from
+  // `total_matching`, which is now the lifecycle-narrowed count. It must forward
+  // the active lifecycle too — otherwise it pulls N *unfiltered* rows and the
+  // client-side lifecycle filter drops almost all of them, so the operator
+  // selects nearly nothing. These guard that fetch stays in sync with the list.
+  describe('#627 — lifecycle-aware "select all matching"', () => {
+    it('forwards the active lifecycle filter to the batched select-all fetch', async () => {
+      nav.resetSearchParams('lifecycle=draft');
+      mockUseDashboard.mockReturnValue({
+        data: dashboardPageFixture({ totalMatching: 5 }),
+        isLoading: false,
+        isError: false,
+      });
+      // The batched fetch returns the full draft set (5 rows). They must be
+      // `draft` so they survive the client-side filter the fetch feeds into.
+      const draftItems = Array.from({ length: 5 }, (_, i) =>
+        rawItem({
+          profile_item_id: `draft-${i}`,
+          name: `Draft ${i}`,
+          lifecycle_status: 'draft',
+          profile_status: 'new',
+          profile_completion_pct: 40,
+        }),
+      );
+      mockDashboardServiceDashboard.mockResolvedValueOnce(
+        dashboardPageFixture({ items: draftItems, totalMatching: 5 }),
+      );
+      renderPage();
+
+      // Only the draft row is visible under the filter (Alice is live).
+      expect(screen.queryByText('Alice Seeker')).not.toBeInTheDocument();
+      expect(screen.getByText('Bob Draft')).toBeInTheDocument();
+
+      await userEvent.click(screen.getByLabelText('Select all rows on this page'));
+      await userEvent.click(screen.getByRole('button', { name: 'Select all 5 matching' }));
+
+      await waitFor(() =>
+        expect(mockDashboardServiceDashboard).toHaveBeenCalledWith(
+          expect.objectContaining({ domain: 'seeker', limit: 5, lifecycle: 'draft' }),
+        ),
+      );
+      expect(await screen.findByText('All 5 matching are selected.')).toBeInTheDocument();
+    });
+
+    it('omits lifecycle from the select-all fetch when the filter is "all"', async () => {
+      mockUseDashboard.mockReturnValue({
+        data: dashboardPageFixture({ totalMatching: 5 }),
+        isLoading: false,
+        isError: false,
+      });
+      mockDashboardServiceDashboard.mockResolvedValueOnce(
+        dashboardPageFixture({ totalMatching: 5 }),
+      );
+      renderPage();
+
+      await userEvent.click(screen.getByLabelText('Select all rows on this page'));
+      await userEvent.click(screen.getByRole('button', { name: 'Select all 5 matching' }));
+
+      await waitFor(() => expect(mockDashboardServiceDashboard).toHaveBeenCalled());
+      const arg = mockDashboardServiceDashboard.mock.calls.at(-1)?.[0];
+      expect(arg).toMatchObject({ domain: 'seeker', limit: 5 });
+      expect(arg).not.toHaveProperty('lifecycle');
+    });
+  });
 });

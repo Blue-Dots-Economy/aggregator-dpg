@@ -432,6 +432,37 @@ describe('GET /v1/dashboard', () => {
     expect(body.metadata.refreshed).toBe(true);
   });
 
+  it('forwards ?lifecycle=draft to signalstack as a single-lifecycle filter', async () => {
+    const spy = vi.spyOn(writer, 'fetchDashboard');
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/dashboard?domain=seeker&lifecycle=draft',
+      headers: { authorization: 'Bearer agg-a-approved-with-org' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(spy).toHaveBeenCalledWith(expect.objectContaining({ lifecycle: ['draft'] }));
+  });
+
+  it('defaults to draft+live when no ?lifecycle= is supplied', async () => {
+    const spy = vi.spyOn(writer, 'fetchDashboard');
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/dashboard?domain=seeker',
+      headers: { authorization: 'Bearer agg-a-approved-with-org' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(spy).toHaveBeenCalledWith(expect.objectContaining({ lifecycle: ['draft', 'live'] }));
+  });
+
+  it('rejects an unknown ?lifecycle= value with 400', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/dashboard?domain=seeker&lifecycle=bogus',
+      headers: { authorization: 'Bearer agg-a-approved-with-org' },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
   it('falls back to aggregators.signalstack_org_id when claim missing', async () => {
     const res = await app.inject({
       method: 'GET',
