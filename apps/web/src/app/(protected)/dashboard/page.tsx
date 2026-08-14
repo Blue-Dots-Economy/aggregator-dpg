@@ -1494,6 +1494,13 @@ function SeekersTab() {
       page: 1,
       limit: slice?.total_matching ?? total ?? PAGE_SIZE,
       ...(filterActive ? { status: statusFilter } : {}),
+      // Forward the lifecycle filter too: `total_matching` (the `limit` above)
+      // is the lifecycle-narrowed count, so the fetch must be narrowed the same
+      // way — else "Select all N matching" pulls N unfiltered rows and the
+      // client-side filter below finds almost none. Mirror the useDashboard call.
+      ...(lifecycleFilter === 'draft' || lifecycleFilter === 'live'
+        ? { lifecycle: lifecycleFilter }
+        : {}),
     });
     const all = (res.by_domain[seekerDomainId]?.items ?? []).map((p, i) =>
       toSeekerRow(p, locale, i),
@@ -1851,6 +1858,13 @@ function ProvidersTab() {
       page: 1,
       limit: slice?.total_matching ?? total ?? PAGE_SIZE,
       ...(filterActive ? { status: statusFilter } : {}),
+      // Forward the lifecycle filter too: `total_matching` (the `limit` above)
+      // is the lifecycle-narrowed count, so the fetch must be narrowed the same
+      // way — else "Select all N matching" pulls N unfiltered rows and the
+      // client-side filter below finds almost none. Mirror the useDashboard call.
+      ...(lifecycleFilter === 'draft' || lifecycleFilter === 'live'
+        ? { lifecycle: lifecycleFilter }
+        : {}),
     });
     const all = (res.by_domain[providerDomainId]?.items ?? []).map((p, i) =>
       toProviderRow(p, locale, i),
