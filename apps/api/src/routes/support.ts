@@ -142,20 +142,29 @@ export async function registerSupportRoutes(app: FastifyInstance): Promise<void>
         typeof SupportRequestSchema
       >;
 
-      const checked = validateSupportAttachments(attachments, supportAttachmentLimits());
-      if (!checked.ok) {
-        throw httpError(checked.error, { detail: checked.detail });
-      }
-
-      // Per-coordinator cap, checked after the 503 so an unconfigured instance
-      // doesn't burn a submitter's quota. The underlying limiter fails open on a
-      // Redis error — a rate-limit outage must not silence a complaint.
+      // Per-coordinator cap, counted BEFORE the body is validated, deliberately.
+      // Fastify (and the BFF proxy ahead of it) has already buffered and parsed
+      // the payload by the time this runs, so a rejected submission has cost the
+      // same as an accepted one — if only accepted ones counted, a caller could
+      // post oversized rubbish (a fourth file, a disallowed content type) without
+      // limit and never spend a slot. The web form validates the same rules before
+      // submitting, so a legitimate coordinator does not reach here with an
+      // invalid body.
+      //
+      // Still after the 503: an instance with no support address should not burn
+      // anyone's quota. The limiter fails open on a Redis error — an outage must
+      // not silence a complaint.
       const rate = await checkSupportRate(auth.userId);
       if (!rate.allowed) {
         throw httpError('RATE_LIMITED', {
           detail: 'Too many support submissions; please try again later.',
           fields: { retryAfterSeconds: rate.retryAfterSeconds },
         });
+      }
+
+      const checked = validateSupportAttachments(attachments, supportAttachmentLimits());
+      if (!checked.ok) {
+        throw httpError(checked.error, { detail: checked.detail });
       }
 
       const reference = generateSupportReference();

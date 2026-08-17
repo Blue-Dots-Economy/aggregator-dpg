@@ -215,7 +215,7 @@ export const ERR = {
     status: 400,
     title: 'Attachment type not accepted',
     detail: 'One of the attached files is not an accepted type.',
-    hint: 'Allowlist lives in services/support-attachments.ts — image, video and audio only.',
+    hint: 'Allowlist lives in services/support-attachments.ts. It matches the client-declared contentType, so it filters honest mistakes rather than a renamed file — the mailbox must still scan attachments.',
   },
 
   // ── Persistence ─────────────────────────────────────────────────────────

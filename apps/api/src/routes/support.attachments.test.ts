@@ -170,6 +170,40 @@ describe('POST /v1/support — attachments', () => {
     expect(res.statusCode).toBe(400);
     expect(mailer.outbox).toHaveLength(0);
   });
+
+  it('counts an invalid submission against the quota, not just accepted ones', async () => {
+    // The body is already buffered and parsed by the time the handler runs, so a
+    // rejected submission costs the same as an accepted one. If only accepted
+    // ones counted, a caller could post oversized rubbish without limit.
+    const keys: string[] = [];
+    _setSupportRateChecker(async (key) => {
+      keys.push(key);
+      return { allowed: true, retryAfterSeconds: 0 };
+    });
+    const res = await post(
+      validBody({
+        attachments: [
+          { filename: 'run.exe', contentType: 'application/x-msdownload', data: payload(16) },
+        ],
+      }),
+    );
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: { code: 'ATTACHMENT_TYPE_NOT_ALLOWED' } });
+    expect(keys).toEqual(['u1']);
+  });
+
+  it('429s an over-quota caller before it even looks at the attachments', async () => {
+    _setSupportRateChecker(async () => ({ allowed: false, retryAfterSeconds: 60 }));
+    const res = await post(
+      validBody({
+        attachments: [
+          { filename: 'run.exe', contentType: 'application/x-msdownload', data: payload(16) },
+        ],
+      }),
+    );
+    expect(res.statusCode).toBe(429);
+    expect(mailer.outbox).toHaveLength(0);
+  });
 });
 
 describe('POST /v1/support — rate limit', () => {
