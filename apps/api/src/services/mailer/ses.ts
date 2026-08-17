@@ -97,36 +97,44 @@ export class SesMailer extends MailerAdapter {
     const from = input.from ?? this.from;
     const toAddresses = toAddressList(input.to);
 
-    // SES's Simple content has no attachment field at all, so an
-    // attachment-bearing message must be sent as raw MIME (#551). Only that
-    // case takes the raw path; everything else keeps the well-tested Simple
-    // one, since raw MIME means we own header construction.
-    const content = input.attachments?.length
-      ? { Raw: { Data: await buildRawMime({ ...input, from, to: toAddresses, cc: ccAddresses }) } }
-      : {
-          Simple: {
-            Subject: { Data: input.subject, Charset: 'UTF-8' },
-            Body: {
-              Html: { Data: input.html, Charset: 'UTF-8' },
-              Text: { Data: input.text, Charset: 'UTF-8' },
-            },
-          },
-        };
-
-    const command = new SendEmailCommand({
-      FromEmailAddress: from,
-      // Kept for the raw path too: SES uses Destination as the envelope
-      // recipients, and relying on the MIME headers alone would drop CCs on
-      // some configurations.
-      Destination: {
-        ToAddresses: toAddresses,
-        ...(ccAddresses.length ? { CcAddresses: ccAddresses } : {}),
-      },
-      ...(input.replyTo ? { ReplyToAddresses: [input.replyTo] } : {}),
-      ...(this.configurationSetName ? { ConfigurationSetName: this.configurationSetName } : {}),
-      Content: content,
-    });
+    // Inside the try, with the send: `buildRawMime` awaits MailComposer, which
+    // can reject on pathological input. Outside, that rejection would escape
+    // `send()` instead of becoming a MailerResult — breaking the "adapters
+    // return Result, never throw across the boundary" rule, and surfacing as a
+    // 500 INTERNAL instead of the 502 SUPPORT_SEND_FAILED the caller expects.
     try {
+      // SES's Simple content has no attachment field at all, so an
+      // attachment-bearing message must be sent as raw MIME (#551). Only that
+      // case takes the raw path; everything else keeps the well-tested Simple
+      // one, since raw MIME means we own header construction.
+      const content = input.attachments?.length
+        ? {
+            Raw: { Data: await buildRawMime({ ...input, from, to: toAddresses, cc: ccAddresses }) },
+          }
+        : {
+            Simple: {
+              Subject: { Data: input.subject, Charset: 'UTF-8' },
+              Body: {
+                Html: { Data: input.html, Charset: 'UTF-8' },
+                Text: { Data: input.text, Charset: 'UTF-8' },
+              },
+            },
+          };
+
+      const command = new SendEmailCommand({
+        FromEmailAddress: from,
+        // Kept for the raw path too: SES uses Destination as the envelope
+        // recipients, and relying on the MIME headers alone would drop CCs on
+        // some configurations.
+        Destination: {
+          ToAddresses: toAddresses,
+          ...(ccAddresses.length ? { CcAddresses: ccAddresses } : {}),
+        },
+        ...(input.replyTo ? { ReplyToAddresses: [input.replyTo] } : {}),
+        ...(this.configurationSetName ? { ConfigurationSetName: this.configurationSetName } : {}),
+        Content: content,
+      });
+
       const out = await this.client.send(command);
       return {
         ok: true,

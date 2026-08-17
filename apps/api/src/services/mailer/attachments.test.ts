@@ -169,6 +169,36 @@ describe('SesMailer attachments', () => {
     });
     expect(r).toMatchObject({ ok: false, error: { code: 'INVALID_RECIPIENT' } });
   });
+
+  it('returns a Result instead of throwing when the MIME build fails', async () => {
+    // buildRawMime awaits MailComposer, which can reject on pathological input.
+    // Built outside the try, that rejection would escape send() and the route's
+    // error handler would turn it into a 500 INTERNAL instead of the intended
+    // 502 SUPPORT_SEND_FAILED — the adapter contract is "return a Result, never
+    // throw across the boundary".
+    const { mailer } = makeSesMailer();
+    // A throwing getter stands in for a MailComposer rejection: it fires while
+    // the raw MIME is being assembled, which is exactly where buildRawMime runs.
+    const hostile = {
+      filename: 'evidence.png',
+      contentType: 'image/png',
+      get content(): Buffer {
+        throw new Error('unreadable attachment');
+      },
+    } as unknown as { filename: string; contentType: string; content: Buffer };
+
+    const result = await mailer.send({
+      to: 'to@org.com',
+      subject: 's',
+      html: '',
+      text: '',
+      attachments: [hostile],
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('TRANSPORT_FAILED');
+  });
 });
 
 describe('totalAttachmentBytes', () => {
