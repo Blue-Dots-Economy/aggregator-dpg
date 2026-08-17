@@ -26,6 +26,7 @@ import { supportEmail, supportCc, supportPortalLink, supportAttachmentLimits } f
 import { checkSupportRate } from '../services/support-rate.js';
 import {
   SUPPORT_ALLOWED_CONTENT_TYPES,
+  SUPPORT_ALLOWED_EXTENSIONS,
   supportBodyLimitBytes,
   validateSupportAttachments,
 } from '../services/support-attachments.js';
@@ -82,6 +83,8 @@ export async function registerSupportRoutes(app: FastifyInstance): Promise<void>
             maxTotalBytes: z.number().int().positive(),
             maxFiles: z.number().int().positive(),
             allowedTypes: z.array(z.string()),
+            /** Picker hint only — validation is MIME-based. */
+            allowedExtensions: z.array(z.string()),
           }),
           ...errorResponses(401),
         },
@@ -97,6 +100,7 @@ export async function registerSupportRoutes(app: FastifyInstance): Promise<void>
         maxTotalBytes: limits.maxTotalBytes,
         maxFiles: limits.maxFiles,
         allowedTypes: [...SUPPORT_ALLOWED_CONTENT_TYPES],
+        allowedExtensions: [...SUPPORT_ALLOWED_EXTENSIONS],
       });
     },
   );

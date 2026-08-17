@@ -25,6 +25,7 @@ import {
   SUPPORT_CONFIG_FALLBACK,
   encodeAttachments,
   formatBytes,
+  pickerAccept,
   validateAttachmentSelection,
   type AttachmentRejection,
   type SupportConfig,
@@ -389,7 +390,7 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.E
                 id="support-attachments"
                 type="file"
                 multiple
-                accept={config.allowedTypes.join(',')}
+                accept={pickerAccept(config)}
                 onChange={onFilesSelected}
                 disabled={status === 'sending' || attachments.length >= config.maxFiles}
                 className="sr-only"

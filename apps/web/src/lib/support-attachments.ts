@@ -14,6 +14,12 @@ export interface SupportConfig {
   maxTotalBytes: number;
   maxFiles: number;
   allowedTypes: string[];
+  /**
+   * Extensions for the picker's `accept`, served alongside the MIME list because
+   * macOS won't match `.m4a` against `audio/mp4` and greys it out. Optional so a
+   * web build still works against an older API.
+   */
+  allowedExtensions?: string[];
 }
 
 /** One attachment in the request payload. */
@@ -41,6 +47,7 @@ export const SUPPORT_CONFIG_FALLBACK: SupportConfig = {
   maxTotalBytes: 5 * 1024 * 1024,
   maxFiles: 3,
   allowedTypes: ['image/*', 'video/*', 'audio/*'],
+  allowedExtensions: [],
 };
 
 /**
@@ -53,6 +60,23 @@ export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/**
+ * The `accept` attribute for the picker: MIME types *and* extensions.
+ *
+ * Types alone leave real files unselectable — macOS resolves `accept` through
+ * its UTI table, which doesn't map `.m4a` (an iPhone voice memo) onto
+ * `audio/mp4`, so the file shows up greyed out. Extensions are matched
+ * literally, so listing both makes the picker agree with the API.
+ *
+ * @param config - Limits currently served by the API.
+ * @returns A comma-separated `accept` value.
+ */
+export function pickerAccept(
+  config: Pick<SupportConfig, 'allowedTypes' | 'allowedExtensions'>,
+): string {
+  return [...config.allowedTypes, ...(config.allowedExtensions ?? [])].join(',');
 }
 
 /**
