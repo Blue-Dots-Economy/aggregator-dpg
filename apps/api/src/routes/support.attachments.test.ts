@@ -204,6 +204,29 @@ describe('POST /v1/support — attachments', () => {
     expect(res.statusCode).toBe(429);
     expect(mailer.outbox).toHaveLength(0);
   });
+
+  it('accepts a request exactly at the budget without a 413', async () => {
+    // The derived body limit must leave room for a max-legal payload: base64
+    // inflation plus the rest of the form. Only the far-over case was covered.
+    const exact = payload(5 * 1024 * 1024);
+    const res = await post(
+      validBody({ attachments: [{ filename: 'max.png', contentType: 'image/png', data: exact }] }),
+    );
+    expect(res.statusCode).toBe(201);
+  });
+
+  it('rejects an attachment whose data is not base64', async () => {
+    const res = await post(
+      validBody({
+        attachments: [
+          { filename: 'a.png', contentType: 'image/png', data: 'data:image/png;base64,aGVsbG8=' },
+        ],
+      }),
+    );
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: { code: 'ATTACHMENT_INVALID_ENCODING' } });
+    expect(mailer.outbox).toHaveLength(0);
+  });
 });
 
 describe('POST /v1/support — rate limit', () => {

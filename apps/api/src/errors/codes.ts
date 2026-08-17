@@ -210,6 +210,13 @@ export const ERR = {
     detail: 'The request body is larger than this endpoint accepts.',
     hint: "Fastify's bodyLimit rejected the body before any handler ran; on /v1/support the limit is derived from SUPPORT_ATTACHMENT_MAX_TOTAL_BYTES.",
   },
+  ATTACHMENT_INVALID_ENCODING: {
+    code: 'ATTACHMENT_INVALID_ENCODING',
+    status: 400,
+    title: 'Attachment could not be read',
+    detail: 'One of the attached files was not valid base64.',
+    hint: "Buffer.from(x, 'base64') ignores characters outside the alphabet, so an unvalidated payload would be mailed as a corrupt file. Checked in services/support-attachments.ts.",
+  },
   ATTACHMENT_TYPE_NOT_ALLOWED: {
     code: 'ATTACHMENT_TYPE_NOT_ALLOWED',
     status: 400,

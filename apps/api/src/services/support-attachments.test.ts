@@ -155,3 +155,39 @@ describe('supportBodyLimitBytes', () => {
     );
   });
 });
+
+describe('base64 validation', () => {
+  const png = (data: string) => [{ filename: 'a.png', contentType: 'image/png', data }];
+
+  it('rejects payloads that are not base64, rather than mailing garbage bytes', () => {
+    for (const bad of [
+      'data:image/png;base64,aGVsbG8=',
+      'not base64 at all!!',
+      'aGVsbG8=extra',
+      '@@@@',
+      '   ',
+    ]) {
+      expect(validateSupportAttachments(png(bad), LIMITS)).toMatchObject({
+        ok: false,
+        error: 'ATTACHMENT_INVALID_ENCODING',
+      });
+    }
+  });
+
+  it('accepts wrapped base64 and decodes from the compacted form', () => {
+    const raw = Buffer.alloc(200, 9).toString('base64');
+    const result = validateSupportAttachments(png(raw.replace(/(.{40})/g, '$1\n')), LIMITS);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.attachments[0]!.content.byteLength).toBe(200);
+    expect(result.attachments[0]!.bytes).toBe(200);
+  });
+
+  it('validates a max-legal payload without backtracking over it', () => {
+    // 5 MB of bytes is ~7 MB of base64. The grouped RFC-4648 pattern this check
+    // replaced overflowed V8's regex stack on exactly this input, turning a
+    // valid submission into a 500 — so the boundary is worth asserting.
+    const max = Buffer.alloc(LIMITS.maxTotalBytes, 7).toString('base64');
+    expect(validateSupportAttachments(png(max), LIMITS).ok).toBe(true);
+  });
+});
