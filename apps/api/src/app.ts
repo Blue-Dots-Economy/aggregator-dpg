@@ -207,6 +207,12 @@ export async function buildApp(): Promise<FastifyInstance> {
         cause: rawErr,
         fields: { issues: fastifyValidation },
       });
+    } else if ((rawErr as { code?: string }).code === 'FST_ERR_CTP_BODY_TOO_LARGE') {
+      // Fastify rejects an over-limit body before any handler runs, and its
+      // error carries no `statusCode` this handler would otherwise honour — so
+      // without this branch an oversized upload (e.g. a too-big support
+      // attachment) reports a 500 as though the server had broken (#551).
+      err = new HttpError(ERR.PAYLOAD_TOO_LARGE, { cause: rawErr });
     } else {
       err = coerceToHttpError(rawErr);
     }

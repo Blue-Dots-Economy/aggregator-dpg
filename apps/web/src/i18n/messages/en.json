@@ -583,6 +583,15 @@
     "validation_incomplete": "Please add details, at least one contact (email or phone), and tick consent.",
     "success": "Message sent. Our team will get back to you.",
     "unavailable": "Support isn't available right now. Please try again later.",
-    "error": "Couldn't send your message. Please try again in a moment."
+    "error": "Couldn't send your message. Please try again in a moment.",
+    "label_attachments": "Attachments (optional)",
+    "attachments_hint": "Image, video or audio. Up to {count} files, {size} in total.",
+    "attachments_add": "Add files",
+    "attachments_remove": "Remove {name}",
+    "attachments_total": "{used} of {total} used",
+    "attachment_too_many": "You can attach at most {count} files.",
+    "attachment_too_large": "Attachments must total no more than {size}.",
+    "attachment_bad_type": "{name} isn't an accepted file type. Attach an image, video or audio file.",
+    "rate_limited": "You've sent several messages recently. Please try again later."
   }
 }

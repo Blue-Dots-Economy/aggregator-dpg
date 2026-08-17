@@ -426,6 +426,15 @@ services:
       ADMIN_EMAILS: ${ADMIN_EMAILS:-admin@bluedots.local}
       PUBLIC_API_URL: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}/backend"
       PUBLIC_PORTAL_URL: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}"
+      # ─── Contact-support form ────────────────────────────────────────
+      # Without SUPPORT_EMAIL the endpoint 503s and the portal hides the
+      # entry point, so the form was unreachable in the composed stack until
+      # these were passed through. The attachment budget (#551) rides along:
+      # the API serves it to the form and derives its own body limit from it.
+      SUPPORT_EMAIL: ${SUPPORT_EMAIL:-}
+      SUPPORT_CC_EMAIL: ${SUPPORT_CC_EMAIL:-}
+      SUPPORT_ATTACHMENT_MAX_TOTAL_BYTES: ${SUPPORT_ATTACHMENT_MAX_TOTAL_BYTES:-5242880}
+      SUPPORT_ATTACHMENT_MAX_FILES: ${SUPPORT_ATTACHMENT_MAX_FILES:-3}
       # ─── Object storage (bulk uploads + QR PNGs + errors.csv) ────────
       # AWS S3 via IAM role on the VM. S3_ENDPOINT/S3_PUBLIC_ENDPOINT are
       # intentionally unset — the SDK uses the regional AWS endpoint.

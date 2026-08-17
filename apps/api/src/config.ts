@@ -99,6 +99,19 @@ const ConfigSchema = z.object({
    * multiple comma-separated addresses. Unset ⇒ no CC header is added.
    */
   SUPPORT_CC_EMAIL: z.string().optional(),
+  /**
+   * Attachment budget for the contact-support form (#551): total decoded bytes
+   * across all attachments on one submission, and how many files it may carry.
+   * Served to the web form by `GET /v1/support/config`, so raising them needs no
+   * web rebuild. SES rejects a message over 10MB after base64 inflation, so
+   * ~7MB of original file is the practical ceiling whatever these say.
+   */
+  SUPPORT_ATTACHMENT_MAX_TOTAL_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(5 * 1024 * 1024),
+  SUPPORT_ATTACHMENT_MAX_FILES: z.coerce.number().int().positive().default(3),
 
   // ─── Object storage (bulk uploads + errors.csv) ──────────────────────────
   /**
@@ -282,6 +295,39 @@ export function supportCc(): string | undefined {
  */
 export function supportPortalLink(): string {
   return config.PUBLIC_PORTAL_URL;
+}
+
+/**
+ * Attachment limits for the contact-support form (#551).
+ *
+ * Read from the live environment at **call time**, mirroring
+ * {@link supportEmail}'s rationale: both the config endpoint and the submit
+ * handler need the current value, and tests must be able to vary the limits
+ * across cases within one Vitest worker, where the frozen `config` snapshot
+ * cannot change after first import.
+ *
+ * @returns The configured maximum total decoded bytes and file count, falling
+ *   back to 5MB / 3 files when unset or not a positive integer.
+ */
+export function supportAttachmentLimits(): { maxTotalBytes: number; maxFiles: number } {
+  const parsed = z
+    .object({
+      SUPPORT_ATTACHMENT_MAX_TOTAL_BYTES: z.coerce
+        .number()
+        .int()
+        .positive()
+        .catch(5 * 1024 * 1024)
+        .default(5 * 1024 * 1024),
+      SUPPORT_ATTACHMENT_MAX_FILES: z.coerce.number().int().positive().catch(3).default(3),
+    })
+    .parse({
+      SUPPORT_ATTACHMENT_MAX_TOTAL_BYTES: process.env.SUPPORT_ATTACHMENT_MAX_TOTAL_BYTES,
+      SUPPORT_ATTACHMENT_MAX_FILES: process.env.SUPPORT_ATTACHMENT_MAX_FILES,
+    });
+  return {
+    maxTotalBytes: parsed.SUPPORT_ATTACHMENT_MAX_TOTAL_BYTES,
+    maxFiles: parsed.SUPPORT_ATTACHMENT_MAX_FILES,
+  };
 }
 
 /**
