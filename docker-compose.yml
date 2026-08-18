@@ -449,6 +449,8 @@ services:
       QR_DOWNLOAD_URL_TTL_SECONDS: ${QR_DOWNLOAD_URL_TTL_SECONDS:-900}
       # Campaign PII export (#579): max item_ids accepted per request.
       EXPORT_MAX_ITEM_IDS: ${EXPORT_MAX_ITEM_IDS:-500}
+      # Campaign participant email (#578): max recipients accepted per request.
+      EMAIL_MAX_RECIPIENTS: ${EMAIL_MAX_RECIPIENTS:-200}
       # Campaign async-job engine ingress controls (per signalstack org).
       CAMPAIGN_SUBMIT_WINDOW_SECONDS: ${CAMPAIGN_SUBMIT_WINDOW_SECONDS:-60}
       CAMPAIGN_SUBMIT_MAX: ${CAMPAIGN_SUBMIT_MAX:-10}
@@ -555,6 +557,8 @@ services:
       # ─── Campaign async-job engine tunables (#579) ─────────────────
       EXPORT_URL_TTL_SECONDS: ${EXPORT_URL_TTL_SECONDS:-86400}
       CAMPAIGN_EXPORT_CONCURRENCY: ${CAMPAIGN_EXPORT_CONCURRENCY:-2}
+      # ─── Campaign participant email tunable (#578) ─────────────────
+      EMAIL_SEND_CONCURRENCY: ${EMAIL_SEND_CONCURRENCY:-5}
       CAMPAIGN_DECRYPT_CHUNK: ${CAMPAIGN_DECRYPT_CHUNK:-500}
       CAMPAIGN_EXPORT_FIELDS: ${CAMPAIGN_EXPORT_FIELDS:-contact}
       CAMPAIGN_STALL_SECONDS: ${CAMPAIGN_STALL_SECONDS:-900}

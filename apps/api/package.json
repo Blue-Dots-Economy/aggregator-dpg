@@ -20,6 +20,7 @@
     "spec:dump": "tsx scripts/dump-openapi.ts"
   },
   "dependencies": {
+    "@aggregator-dpg/campaign-template": "workspace:*",
     "@aggregator-dpg/config-loader": "workspace:*",
     "@aggregator-dpg/consent-ledger": "workspace:*",
     "@aggregator-dpg/db-schema": "workspace:*",

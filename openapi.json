@@ -10670,6 +10670,302 @@
         }
       }
     },
+    "/v1/campaign/email": {
+      "post": {
+        "summary": "Send an email to owned participants (async)",
+        "tags": [
+          "campaign"
+        ],
+        "description": "Enqueues a background job that emails the given owned participants a shared message (subject + Markdown body, with an optional fixed set of {{placeholder}} tokens personalised per recipient). Recipient email addresses are resolved server-side and never returned. Auth: Keycloak Bearer token scoped to the campaign-manager client; the caller org is derived from the token signalstack_org_id claim. Returns 202 once the job is durably queued.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "item_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "minItems": 1,
+                    "maxItems": 200
+                  },
+                  "subject": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "body_markdown": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 20000
+                  },
+                  "reply_to": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "purpose": {
+                    "type": "string",
+                    "maxLength": 500
+                  }
+                },
+                "required": [
+                  "item_ids",
+                  "subject",
+                  "body_markdown"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "queued"
+                      ]
+                    },
+                    "requested": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "requested",
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/campaign/export/{job_id}": {
       "get": {
         "summary": "Get one campaign job's status and per-item outcomes",

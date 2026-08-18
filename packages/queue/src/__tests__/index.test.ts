@@ -28,6 +28,7 @@ vi.mock('ioredis', () => {
 import {
   QueueName,
   DEFAULT_JOB_OPTS,
+  EMAIL_JOB_OPTS,
   CAMPAIGN_PROCESS_JOB_OPTS,
   bulkRedisKeys,
   createRedisConnection,
@@ -41,6 +42,7 @@ describe('QueueName', () => {
       BulkFinalise: 'bulk-finalise',
       LinkMetricsRollup: 'link-metrics-rollup',
       CronWatchdog: 'cron-watchdog',
+      CampaignEmail: 'campaign-email',
       CampaignProcess: 'campaign-process',
     });
   });
@@ -66,6 +68,16 @@ describe('DEFAULT_JOB_OPTS', () => {
     expect(DEFAULT_JOB_OPTS).toEqual({
       attempts: 3,
       backoff: { type: 'exponential', delay: 1000 },
+      removeOnComplete: { age: 3600 },
+      removeOnFail: { age: 604800 },
+    });
+  });
+});
+
+describe('EMAIL_JOB_OPTS', () => {
+  it('is send-once (attempts: 1) so a retry never duplicates emails', () => {
+    expect(EMAIL_JOB_OPTS).toEqual({
+      attempts: 1,
       removeOnComplete: { age: 3600 },
       removeOnFail: { age: 604800 },
     });

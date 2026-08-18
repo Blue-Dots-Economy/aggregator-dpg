@@ -136,6 +136,8 @@ const ConfigSchema = z.object({
   EXPORT_URL_TTL_SECONDS: z.coerce.number().int().positive().default(86400),
   /** How many campaign-process jobs this process runs in parallel. Default 2. */
   CAMPAIGN_EXPORT_CONCURRENCY: z.coerce.number().int().positive().default(2),
+  /** How many recipients a single campaign-email job sends in parallel. Default 5. */
+  EMAIL_SEND_CONCURRENCY: z.coerce.number().int().positive().default(5),
   /** Items per Signals decrypt chunk (bounds request size + gives heartbeat cadence). */
   CAMPAIGN_DECRYPT_CHUNK: z.coerce.number().int().positive().default(500),
   /**

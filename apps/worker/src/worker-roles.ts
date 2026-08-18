@@ -12,9 +12,10 @@
 
 /**
  * Selectable consumer roles. `cron` covers link-metrics + watchdog ticks;
- * `campaign` runs the unified campaign async-job pipeline (aggregator-dpg#579).
+ * `campaign` runs the unified campaign async-job pipeline (aggregator-dpg#579);
+ * `email` runs the campaign participant email job (aggregator-dpg#578).
  */
-export const WORKER_ROLES = ['file', 'row', 'finalise', 'cron', 'campaign'] as const;
+export const WORKER_ROLES = ['file', 'row', 'finalise', 'cron', 'campaign', 'email'] as const;
 
 /** A single worker role. */
 export type WorkerRole = (typeof WORKER_ROLES)[number];
