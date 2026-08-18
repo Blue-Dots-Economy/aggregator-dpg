@@ -76,6 +76,18 @@ export interface AggregatorConfigDomain {
   label: string;
   plural_label: string;
   item_type: string;
+  /**
+   * Mirrors network.json `guardian_consent_required`. Drives whether the
+   * registration form collects a birth year (#613). Optional for back-compat
+   * with an older config payload; treated as `false` when absent.
+   */
+  guardian_consent_required?: boolean;
+  /**
+   * Mirrors network.json `go_live_required`. The registration form shows the
+   * consent step iff this includes `consent_required` (#613). Optional for
+   * back-compat; treated as `[]` when absent.
+   */
+  go_live_required?: string[];
   dashboardTiles?: DashboardTiles;
   status_rules?: StatusRule[];
 }

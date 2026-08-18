@@ -223,7 +223,12 @@ services:
       SMTP_HOST: mailpit
       SMTP_PORT: "1025"
       SMTP_FROM: ${SMTP_FROM:-no-reply@bluedots.local}
-      SMTP_FROM_DISPLAY: ${SMTP_FROM_DISPLAY:-Blue Dots Aggregator}
+      # Neutral, not "Blue Dots Aggregator": this Keycloak serves both DPGs, and
+      # `emailTheme` is realm-level with no per-client override — so every OTP
+      # mail, signals' included, is sent under this one display name. Keep it
+      # app-agnostic. (aggregator's own standalone compose serves only
+      # aggregator, so its value can stay branded.)
+      SMTP_FROM_DISPLAY: ${SMTP_FROM_DISPLAY:-Blue Dots}
       SMTP_AUTH: "false"
       SMTP_STARTTLS: "false"
       SMTP_SSL: "false"
@@ -235,6 +240,16 @@ services:
       AGGREGATOR_API_SECRET: ${OIDC_API_CLIENT_SECRET:-aggregator-api-local-dev-secret}
       AGGREGATOR_PORTAL_SECRET: ${OIDC_PORTAL_CLIENT_SECRET:-aggregator-portal-local-dev-secret}
       AGGREGATOR_BFF_SECRET: ${OIDC_BFF_CLIENT_SECRET:-aggregator-bff-local-dev-secret}
+      # Signals-side client secrets (Phase B realm merge). signals-api's must
+      # match KEYCLOAK_API_CLIENT_SECRET below; aggregator-dpg's is pre-wired
+      # for Phase C, not yet consumed by any aggregator env var.
+      SIGNALS_API_SECRET: ${SIGNALS_API_CLIENT_SECRET:-signals-api-local-dev-secret}
+      SIGNALSTACK_CLIENT_SECRET: ${SIGNALSTACK_CLIENT_SECRET:-aggregator-dpg-signals-local-dev-secret}
+      VOICE_DPG_SIGNALS_SECRET: ${VOICE_DPG_SIGNALS_SECRET:-voice-dpg-signals-local-dev-secret}
+      # Realm name substituted into the realm JSON's "realm" field by
+      # render-realm.sh. Per-deployment identity value, same as
+      # AGGREGATOR_NETWORK below — not a fixed constant across networks.
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-bluedots}
     env_file:
       # Brand strings (BRAND_*, HERO_*) for the login theme.
       - ../config/${AGGREGATOR_NETWORK:-blue_dot}/keycloak.env
@@ -273,23 +288,39 @@ services:
         condition: service_healthy
     environment:
       KC_URL: http://keycloak:8080          # root path (no /auth) in this stack
-      KC_REALM: ${KEYCLOAK_REALM:-aggregator}
+      KC_REALM: ${KEYCLOAK_REALM:-bluedots}
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_ADMIN_USERNAME:-admin}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_ADMIN_PASSWORD:?KC_ADMIN_PASSWORD must be set in .env}
       UNMANAGED_POLICY: ENABLED
       SMTP_HOST: mailpit
       SMTP_PORT: "1025"
       SMTP_FROM: ${SMTP_FROM:-no-reply@bluedots.local}
-      SMTP_FROM_DISPLAY: ${SMTP_FROM_DISPLAY:-Blue Dots Aggregator}
+      # Must match the keycloak service's value above — this sidecar re-applies
+      # the realm's SMTP config, so a divergence here would silently overwrite it.
+      SMTP_FROM_DISPLAY: ${SMTP_FROM_DISPLAY:-Blue Dots}
       SMTP_SECURE: "false"
       SMTP_USER: ""
       SMTP_PASSWORD: ""
       # Reconcile the portal client secret to match the web BFF config.
       OIDC_CLIENT_SECRET: ${OIDC_PORTAL_CLIENT_SECRET:-aggregator-portal-local-dev-secret}
       PORTAL_CLIENT_ID: aggregator-portal
+      # apply-portal-gate.py reads these names (KC_ADMIN_*, not KC_BOOTSTRAP_*).
+      KC_ADMIN_USERNAME: ${KC_ADMIN_USERNAME:-admin}
+      KC_ADMIN_PASSWORD: ${KC_ADMIN_PASSWORD:?KC_ADMIN_PASSWORD must be set in .env}
     volumes:
       - ../infra/keycloak/init:/init:ro
-    entrypoint: ["sh", "-c", "apk add --no-cache curl jq > /dev/null && sh /init/apply-user-profile.sh"]
+    # apply-portal-gate.py runs on EVERY boot. This is the SHARED realm, so a
+    # signals-only account is a valid portal login as far as Keycloak is
+    # concerned; without the gate it completes OTP before being refused. Realm
+    # import only applies to an empty realm, so a re-`up` on an existing realm
+    # needs the REST path. The script verifies first (no-op when already
+    # correct) and exits non-zero if it cannot apply the gate.
+    entrypoint:
+      [
+        'sh',
+        '-c',
+        'apk add --no-cache curl jq python3 > /dev/null && sh /init/apply-user-profile.sh && python3 /init/apply-portal-gate.py',
+      ]
     restart: "no"
 
   # ───────────────────────────────────────────────────────────────────────
@@ -331,6 +362,11 @@ services:
       AUTH_SECRET: ${SIGNALS_AUTH_SECRET:?SIGNALS_AUTH_SECRET must be set in .env}
       AUTH_MIDDLEWARE_ENABLED: "true"
       CREATE_TEST_OTP: "true"
+      # Matches signals-dpg's own local-setup default (signals-dpg/local-setup/docker-compose.yml).
+      # Without this it falls back to the packages/config default ('gated'), which
+      # rejects first-login provisioning for any Keycloak identity without a
+      # pre-existing local `user` row ("Self sign-up is disabled on this instance").
+      SELF_SIGNUP_MODE: ${SELF_SIGNUP_MODE:-allowed}
       SERVED_DOMAINS: ${SIGNALS_SERVED_DOMAINS:-blue_dot/seeker,blue_dot/provider}
       NETWORK_CONFIG_SOURCE: local
       NETWORK_CONFIG_LOCAL_FILE: examples/schemas/blue_dot/network.json
@@ -345,6 +381,26 @@ services:
       REDIS_PASSWORD: ${SIGNALS_REDIS_PASSWORD}
       REDIS_URL: redis://:${SIGNALS_REDIS_PASSWORD}@signals-redis:6379
       SIGNALS_PII_KEY: ${SIGNALS_PII_KEY:?SIGNALS_PII_KEY must be a base64-encoded 32-byte key}
+      INSTANCE_SHARED_SECRET: ${INSTANCE_SHARED_SECRET:-local-dev-instance-shared-secret-change-me}
+      PEER_AUTH_MODE: ${PEER_AUTH_MODE:-permissive}
+      # ─── Keycloak (Phase B realm merge) ──────────────────────────────
+      # Must be 'keycloak': signals-dpg REMOVED the transitional 'dual' mode,
+      # and its assertAuthProviderSupported guard now hard-fails at boot on any
+      # other value. The old `-dual` default only appeared to work because a
+      # local .env overrode it — a fresh clone would not boot.
+      AUTH_PROVIDER: ${AUTH_PROVIDER:-keycloak}
+      KEYCLOAK_BASE_URL: http://keycloak:8080
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-bluedots}
+      KEYCLOAK_API_CLIENT_ID: signals-api
+      KEYCLOAK_API_CLIENT_SECRET: ${SIGNALS_API_CLIENT_SECRET:-signals-api-local-dev-secret}
+      # Phase C: client-credentials clients allowed on the SERVICE (not
+      # human-login) path — separate allowlist from KEYCLOAK_ACCEPTED_CLIENT_IDS
+      # (which defaults to signals-ui,signals-api and is left alone). Without
+      # this, aggregator-dpg's bearer token is signature/iss-valid but signals
+      # rejects it with SERVICE_CLIENT_NOT_ALLOWED ("client is not allowlisted
+      # for service access") before even checking for a seeded service org.
+      # Matches signals-bootstrap's seed_service_users.ts slug ('aggregator-dpg').
+      KEYCLOAK_SERVICE_CLIENT_IDS: ${KEYCLOAK_SERVICE_CLIENT_IDS:-aggregator-dpg}
     depends_on:
       postgres:
         condition: service_healthy
@@ -370,6 +426,16 @@ services:
         condition: service_healthy
       signals-redis:
         condition: service_healthy
+      # signals-api runs AUTH_PROVIDER=keycloak, so it cannot verify a single
+      # token until the realm is imported AND keycloak-init has applied the
+      # user-profile/mapper fixups. Without these it boots and serves, and the
+      # first JWKS fetch races an unready Keycloak — surfacing as
+      # 503 IDENTITY_PROVIDER_UNAVAILABLE rather than an obvious startup error.
+      # aggregator-api already waits on both; this keeps the two symmetric.
+      keycloak:
+        condition: service_healthy
+      keycloak-init:
+        condition: service_completed_successfully
 
   signals-ui:
     build:
@@ -417,9 +483,15 @@ services:
       REDIS_URL: redis://aggregator-redis:6379
       # Keycloak (root path, localhost mode)
       KEYCLOAK_URL: http://keycloak:8080
-      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-aggregator}
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-bluedots}
       KEYCLOAK_ADMIN_CLIENT_ID: aggregator-api
       KEYCLOAK_ADMIN_CLIENT_SECRET: ${OIDC_API_CLIENT_SECRET:-aggregator-api-local-dev-secret}
+      # Client-scoped token check (access-token.ts). REQUIRED on the shared
+      # realm: signals' clients issue tokens with the same issuer, and
+      # authenticateAny's service-account path would otherwise admit any valid
+      # bluedots token as isUser:false. The allow-list is off when unset, so a
+      # shared-realm deployment must set it explicitly.
+      KEYCLOAK_ALLOWED_AZP: ${KEYCLOAK_ALLOWED_AZP:-aggregator-portal,aggregator-api,aggregator-bff}
       # Mail -> Mailpit
       MAIL_PROVIDER: smtp
       SMTP_HOST: mailpit
@@ -458,6 +530,14 @@ services:
       SIGNALSTACK_ACTING_ORG_ID: ${SIGNALSTACK_ACTING_ORG_ID:-}
       SIGNALSTACK_ITEM_NETWORK: ${AGGREGATOR_NETWORK:-blue_dot}
       SIGNALSTACK_TIMEOUT_MS: ${SIGNALSTACK_TIMEOUT_MS:-10000}
+      # Phase C, opt-in, stays manual: set SIGNALSTACK_AUTH_MODE=bearer in
+      # .env to switch from x-api-key to a Keycloak client-credentials token.
+      # SIGNALSTACK_CLIENT_SECRET must equal the value the `keycloak` service
+      # rendered into the aggregator-dpg client's secret (see that service's
+      # environment block above) — same var, same value, both read from .env.
+      SIGNALSTACK_AUTH_MODE: ${SIGNALSTACK_AUTH_MODE:-apikey}
+      SIGNALSTACK_CLIENT_ID: ${SIGNALSTACK_CLIENT_ID:-aggregator-dpg}
+      SIGNALSTACK_CLIENT_SECRET: ${SIGNALSTACK_CLIENT_SECRET:-aggregator-dpg-signals-local-dev-secret}
     volumes:
       - ../config:/app/config:ro
     healthcheck:
@@ -500,7 +580,7 @@ services:
       # OIDC issuer must resolve identically for the browser AND this container.
       # Both reach Keycloak at http://keycloak:8080 (browser via the /etc/hosts
       # entry, container via docker DNS) so the token `iss` claim always matches.
-      OIDC_ISSUER: http://keycloak:8080/realms/${KEYCLOAK_REALM:-aggregator}
+      OIDC_ISSUER: http://keycloak:8080/realms/${KEYCLOAK_REALM:-bluedots}
       OIDC_CLIENT_ID: aggregator-portal
       OIDC_CLIENT_SECRET: ${OIDC_PORTAL_CLIENT_SECRET:-aggregator-portal-local-dev-secret}
       OIDC_REDIRECT_URI: http://localhost:3100/api/auth/callback
@@ -557,10 +637,15 @@ services:
       SMTP_USER: ""
       SMTP_PASSWORD: ""
       # Campaign PII export tunables (#579).
-      EXPORT_URL_TTL_SECONDS: ${EXPORT_URL_TTL_SECONDS:-3600}
+      EXPORT_URL_TTL_SECONDS: ${EXPORT_URL_TTL_SECONDS:-86400}
       CAMPAIGN_EXPORT_CONCURRENCY: ${CAMPAIGN_EXPORT_CONCURRENCY:-2}
       # Campaign participant email tunable (#578).
       EMAIL_SEND_CONCURRENCY: ${EMAIL_SEND_CONCURRENCY:-5}
+      CAMPAIGN_DECRYPT_CHUNK: ${CAMPAIGN_DECRYPT_CHUNK:-500}
+      CAMPAIGN_EXPORT_FIELDS: ${CAMPAIGN_EXPORT_FIELDS:-contact}
+      CAMPAIGN_STALL_SECONDS: ${CAMPAIGN_STALL_SECONDS:-900}
+      CAMPAIGN_EXPORT_RECIPIENT: ${CAMPAIGN_EXPORT_RECIPIENT:-}
+      EXPORT_NETWORK_ADMIN_EMAIL: ${EXPORT_NETWORK_ADMIN_EMAIL:-}
       SCHEMA_ROOT_DIR: /app/config/${AGGREGATOR_NETWORK:-blue_dot}/schemas
       AGGREGATOR_CONFIG_PATH: /app/config/${AGGREGATOR_NETWORK:-blue_dot}/aggregator.config.yaml
       # Bulk-file processor caps + cron intervals (match aggregator-dpg/docker-compose.yml).
@@ -572,6 +657,14 @@ services:
       SIGNALSTACK_ADMIN_KEY: ${SIGNALSTACK_ADMIN_KEY:-}
       SIGNALSTACK_ITEM_NETWORK: ${AGGREGATOR_NETWORK:-blue_dot}
       SIGNALSTACK_TIMEOUT_MS: ${SIGNALSTACK_TIMEOUT_MS:-10000}
+      # Phase C, opt-in, stays manual — see aggregator-api's env block above
+      # for what these mean. Worker has no OIDC login of its own; KEYCLOAK_URL
+      # / KEYCLOAK_REALM here exist solely to mint this service token.
+      SIGNALSTACK_AUTH_MODE: ${SIGNALSTACK_AUTH_MODE:-apikey}
+      SIGNALSTACK_CLIENT_ID: ${SIGNALSTACK_CLIENT_ID:-aggregator-dpg}
+      SIGNALSTACK_CLIENT_SECRET: ${SIGNALSTACK_CLIENT_SECRET:-aggregator-dpg-signals-local-dev-secret}
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-bluedots}
     volumes:
       - ../config:/app/config:ro
     depends_on:

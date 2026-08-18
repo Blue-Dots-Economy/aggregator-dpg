@@ -88,7 +88,7 @@ export function chooseEnvSource({ envExists, localExists, templateExists }) {
  */
 export function missingHostEntries(content, entries = HOST_ENTRIES) {
   return entries.filter(([ip, host]) => {
-    const escapedIp = ip.replace(/\./g, '\\.');
+    const escapedIp = ip.replaceAll('.', '\\.');
     const re = new RegExp(`^\\s*${escapedIp}\\s+${host}(\\s|$)`, 'm');
     return !re.test(content);
   });
@@ -213,7 +213,16 @@ function setup() {
     console.log('');
   } else {
     console.log(`Adding host entries to ${hostsPath} (sudo required)...`);
-    const lines = missing.map(([ip, host]) => `${ip} ${host}`).join('\n') + '\n';
+    // Lead with a newline when the file does not already end in one. macOS ships
+    // /etc/hosts with no trailing newline, so a bare `tee -a` concatenates the
+    // first entry onto the final `::1 localhost` line — which both breaks IPv6
+    // localhost resolution and defeats missingHostEntries() (its `^\s*<ip>`
+    // anchor can no longer match), so every later run appends a duplicate.
+    const needsLeadingNewline = content.length > 0 && !content.endsWith('\n');
+    const lines =
+      (needsLeadingNewline ? '\n' : '') +
+      missing.map(([ip, host]) => `${ip} ${host}`).join('\n') +
+      '\n';
     const res = spawnSync('sudo', ['tee', '-a', hostsPath], {
       input: lines,
       stdio: ['pipe', 'ignore', 'inherit'],

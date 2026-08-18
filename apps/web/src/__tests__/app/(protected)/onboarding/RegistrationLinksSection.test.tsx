@@ -424,7 +424,11 @@ describe('<YourLinksBody />', () => {
 
     expect(screen.getByText('bluedots.example/')).toBeInTheDocument();
     expect(screen.getByText('acme/dharwad-drive')).toBeInTheDocument();
-    expect(screen.getByTitle('View QR')).toBeInTheDocument();
+    const qrLink = screen.getByTitle('Download QR');
+    expect(qrLink).toBeInTheDocument();
+    // downloads the file rather than opening it in a new tab
+    expect(qrLink).toHaveAttribute('download', 'registration-qr.png');
+    expect(qrLink).not.toHaveAttribute('target', '_blank');
     expect(screen.getByTitle('Open link')).toBeInTheDocument();
     expect(screen.getByText(/Expires/)).toBeInTheDocument();
 

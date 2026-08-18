@@ -243,16 +243,18 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
         });
       }
 
-      // Normalise lifecycle on every row via `resolveLifecycle` so an absent
-      // `lifecycle_status` from older signals deployments shows up as `'live'`.
+      // Normalise lifecycle on every row via `resolveLifecycle`. A row whose
+      // real `lifecycle_status` we can't read resolves to `'draft'` (#613) —
+      // never optimistically `'live'` — so the dashboard mirrors the true
+      // signals status instead of reporting a draft profile as live.
       const normalisedItems = itemsResult.items.map((item) => {
         const lifecycleStatus = resolveLifecycle(item);
         return {
           ...item,
-          lifecycle_status: lifecycleStatus ?? 'live',
+          lifecycle_status: lifecycleStatus ?? 'draft',
         };
       });
-      const tileRows = tilesResult.items.map((item) => resolveLifecycle(item) ?? 'live');
+      const tileRows = tilesResult.items.map((item) => resolveLifecycle(item) ?? 'draft');
 
       // Tiles count the full dataset (up to TILE_CAP). `account_only` is the
       // local-only bucket — participants who exist in our table but have no
@@ -471,7 +473,7 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
         .header('Content-Type', 'text/csv; charset=utf-8')
         .header(
           'Content-Disposition',
-          `attachment; filename="${result.value.filename.replace(/"/g, '')}"`,
+          `attachment; filename="${result.value.filename.replaceAll('"', '')}"`,
         )
         .send(result.value.csv);
     },
@@ -553,7 +555,7 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
 
       return reply
         .header('Content-Type', 'text/csv; charset=utf-8')
-        .header('Content-Disposition', `attachment; filename="${filename.replace(/"/g, '')}"`)
+        .header('Content-Disposition', `attachment; filename="${filename.replaceAll('"', '')}"`)
         .send(csv);
     },
   );

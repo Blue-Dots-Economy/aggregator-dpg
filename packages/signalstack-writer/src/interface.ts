@@ -508,6 +508,40 @@ export interface SignalStackGetItemQuery {
 }
 
 /**
+ * Provides a bearer access token for authenticating to Signals' client-
+ * credentials service-auth path — the alternative to the static `apiKey`
+ * credential on {@link HttpSignalStackWriterConfig} (Phase C of
+ * `docs/superpowers/plans/2026-07-29-aggregator-keycloak-integration-plan.md`).
+ *
+ * Implementations own their own caching/refresh policy; callers should treat
+ * every call as potentially async and never assume the token is memoised.
+ *
+ * Implementations:
+ *   - KeycloakClientCredentialsTokenProvider: real client-credentials grant
+ *     against a Keycloak realm, in-process cached until ~30s before expiry.
+ *   - Fake: in-memory, `setToken()`/`failNext()` helpers for tests.
+ */
+export abstract class SignalStackTokenProviderBase {
+  /**
+   * Returns a valid access token, fetching or refreshing it as needed.
+   *
+   * @returns ok(token) on success; err(BaseError) when the credential grant
+   *   fails (bad client id/secret, IdP unreachable, timeout).
+   */
+  abstract getToken(): Promise<Result<string, BaseError>>;
+
+  /**
+   * Discards any cached token so the next {@link getToken} mints a fresh one.
+   *
+   * Exists for the 401 path: a token can be inside its `expires_in` window yet
+   * be rejected upstream (realm signing-key rotation, client disabled and
+   * re-enabled). Callers use this to force one re-mint and retry rather than
+   * failing every request until the cached token expires on its own.
+   */
+  abstract invalidate(): void;
+}
+
+/**
  * Persistence port for the signalstack admin endpoints.
  *
  * Implementations:

@@ -55,7 +55,7 @@ describe('missingRoles', () => {
     expect(missingRoles(parseWorkerRoles('file,row'))).toEqual([
       'finalise',
       'cron',
-      'export',
+      'campaign',
       'email',
     ]);
   });

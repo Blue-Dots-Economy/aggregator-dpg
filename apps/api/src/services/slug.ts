@@ -29,7 +29,7 @@ export function slugify(input: string): string {
     .normalize('NFKD')
     .replace(/[̀-ͯ]/g, '') // strip diacritics
     .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
+    .replace(/^-|-$/g, '')
     .slice(0, MAX_SLUG_LEN);
   return cleaned || 'org';
 }

@@ -7,7 +7,11 @@
  */
 
 import { z } from 'zod';
-import { ConfigError } from '@aggregator-dpg/shared-primitives/errors';
+import {
+  assertSignalStackClientIdentity,
+  assertTlsPosture,
+  signalStackConfigFields,
+} from '@aggregator-dpg/shared-primitives/config';
 
 const ConfigSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
@@ -30,11 +34,13 @@ const ConfigSchema = z.object({
    * direct browser clients. Use `*` only in dev.
    */
   CORS_ORIGINS: z.string().default('http://localhost:3000,http://localhost:3100'),
-  /** Postgres connection string. Default points at the compose Postgres
-   *  exposed on host port 5433 (5432 is left to system Postgres). */
-  DATABASE_URL: z
-    .string()
-    .default('postgres://aggregator:aggregator-dev@localhost:5433/aggregator'),
+  /**
+   * Postgres connection string. Deliberately has **no default** — the URL
+   * carries credentials, so embedding one in source would ship a usable
+   * secret and mask a misconfigured deploy behind a silent fallback to
+   * localhost. Startup fails when it is unset.
+   */
+  DATABASE_URL: z.string().min(1, 'DATABASE_URL must be set'),
   /** Run pending DB migrations on startup. Disable in CI/test to avoid races. */
   RUN_MIGRATIONS_ON_BOOT: z
     .enum(['true', 'false'])
@@ -144,10 +150,18 @@ const ConfigSchema = z.object({
   PUBLIC_LINK_BASE_URL: z.string().default('http://localhost:3000'),
   /** Pre-signed GET URL TTL for QR PNG downloads (seconds). */
   QR_DOWNLOAD_URL_TTL_SECONDS: z.coerce.number().int().positive().default(900),
-  /** Max `item_ids` accepted per `POST /v1/campaign/export` request body. */
+  /** Max `item_ids` accepted per campaign request body (after de-dup). */
   EXPORT_MAX_ITEM_IDS: z.coerce.number().int().positive().default(500),
   /** Max `item_ids` (recipients) accepted per `POST /v1/campaign/email` request body. */
   EMAIL_MAX_RECIPIENTS: z.coerce.number().int().positive().default(200),
+  /** Ingress rate-limit window (seconds) for campaign submits, per org. */
+  CAMPAIGN_SUBMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
+  /** Max campaign submits allowed per window, per org. */
+  CAMPAIGN_SUBMIT_MAX: z.coerce.number().int().positive().default(10),
+  /** Max active (pending|processing) campaign jobs allowed per org at once. */
+  CAMPAIGN_MAX_ACTIVE_PER_ORG: z.coerce.number().int().positive().default(3),
+  /** BullMQ attempts for a campaign-process job (retry count on transient failure). */
+  CAMPAIGN_EXPORT_ATTEMPTS: z.coerce.number().int().positive().default(3),
 
   // ─── Approval links ───────────────────────────────────────────────────────
   /**
@@ -194,10 +208,9 @@ const ConfigSchema = z.object({
   TRUST_PROXY: z.string().default('loopback,linklocal,uniquelocal'),
 
   // ─── SignalStack outward push ───────────────────────────────────────────
-  /** Base URL of the signalstack API. When unset, signalstack push is disabled. */
-  SIGNALSTACK_BASE_URL: z.string().url().optional(),
-  /** Admin api-key for signalstack onboard. Required when SIGNALSTACK_BASE_URL is set. */
-  SIGNALSTACK_ADMIN_KEY: z.string().optional(),
+  // Base + Keycloak-bearer credential fields are shared with the worker via
+  // @aggregator-dpg/shared-primitives/config; acting-org-id is api-only.
+  ...signalStackConfigFields,
   /**
    * Platform-wide signalstack organisation id under which admin aggregator
    * upserts are performed (sent as `x-acting-org-id`). Required when
@@ -205,45 +218,13 @@ const ConfigSchema = z.object({
    * each newly-approved aggregator as a signalstack org.
    */
   SIGNALSTACK_ACTING_ORG_ID: z.string().optional(),
-  /** item_network sent on every onboard call. */
-  SIGNALSTACK_ITEM_NETWORK: z.string().default('blue_dot'),
-  /** Per-request timeout for signalstack onboard calls. */
-  SIGNALSTACK_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
 
-/**
- * Fails hard (per designs/_DECISIONS.md D7) when TLS certificate verification
- * is disabled under a production environment; warns loudly in dev/staging so
- * the relaxation is never silent. This is the enforcement that makes the
- * insecure posture impossible in prod — the compose default flip alone is not
- * enough, because an operator can still export the var globally.
- *
- * Uses `process.emitWarning` (not the app logger) for the non-fatal path to
- * avoid a config↔logger import cycle at module load.
- *
- * @param c - Parsed runtime config.
- * @throws {ConfigError} When NODE_TLS_REJECT_UNAUTHORIZED=0 in production.
- */
-export function assertTlsPosture(c: Config): void {
-  // Node disables verification only for the exact string '0'.
-  if (c.NODE_TLS_REJECT_UNAUTHORIZED !== '0') return;
-  const env = c.INSTANCE_ENV ?? c.NODE_ENV;
-  const msg = 'NODE_TLS_REJECT_UNAUTHORIZED=0 disables all TLS certificate verification';
-  if (env === 'production') {
-    throw new ConfigError(`${msg}; refusing to start in production.`, {
-      code: 'INSECURE_TLS_IN_PROD',
-    });
-  }
-  process.emitWarning(
-    `${msg}. Allowed outside production (env=${env}); never use this on a VM/prod deploy.`,
-    { code: 'INSECURE_TLS_POSTURE' },
-  );
-}
-
 export const config: Config = ConfigSchema.parse(process.env);
 assertTlsPosture(config);
+assertSignalStackClientIdentity(config);
 
 export const corsOrigins: string[] = config.CORS_ORIGINS.split(',')
   .map((s) => s.trim())

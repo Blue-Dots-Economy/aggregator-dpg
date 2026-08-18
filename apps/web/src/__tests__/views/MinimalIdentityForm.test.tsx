@@ -34,6 +34,8 @@ function renderForm(props: Partial<React.ComponentProps<typeof MinimalIdentityFo
       <MinimalIdentityForm
         identity={{ name: 'name', phone: 'phone', email: 'email' }}
         onSubmit={onSubmit}
+        showConsent
+        showBirthYear
         {...props}
       />
     </NextIntlClientProvider>,

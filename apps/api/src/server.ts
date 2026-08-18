@@ -11,8 +11,8 @@ import { closeDb } from './db/client.js';
 import { closeRateLimiter } from './services/rate-limiter/index.js';
 import { closeRedis } from './services/redis/index.js';
 import { closeBulkQueue } from './services/bulk-queue/index.js';
-import { closeCampaignExportQueue } from './services/campaign-export-queue/index.js';
 import { closeCampaignEmailQueue } from './services/campaign-email-queue/index.js';
+import { closeCampaignProcessQueue } from './services/campaign-process-queue/index.js';
 import { getNetworkConfig } from './services/network-config.js';
 import { setApprovalBrand } from './views/approval-pages.js';
 import { setEmailBrand } from './services/email-templates/shared.js';
@@ -62,8 +62,8 @@ async function main(): Promise<void> {
         closeRateLimiter(),
         closeRedis(),
         closeBulkQueue(),
-        closeCampaignExportQueue(),
         closeCampaignEmailQueue(),
+        closeCampaignProcessQueue(),
       ]);
       process.exit(0);
     } catch (err) {

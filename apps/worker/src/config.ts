@@ -4,7 +4,11 @@
  */
 
 import { z } from 'zod';
-import { ConfigError } from '@aggregator-dpg/shared-primitives/errors';
+import {
+  assertSignalStackClientIdentity,
+  assertTlsPosture,
+  signalStackConfigFields,
+} from '@aggregator-dpg/shared-primitives/config';
 
 const ConfigSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
@@ -20,9 +24,13 @@ const ConfigSchema = z.object({
    */
   NODE_TLS_REJECT_UNAUTHORIZED: z.string().optional(),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
-  DATABASE_URL: z
-    .string()
-    .default('postgres://aggregator:aggregator-dev@localhost:5433/aggregator'),
+  /**
+   * Postgres connection string. Deliberately has **no default** — the URL
+   * carries credentials, so embedding one in source would ship a usable
+   * secret and mask a misconfigured deploy behind a silent fallback to
+   * localhost. Startup fails when it is unset.
+   */
+  DATABASE_URL: z.string().min(1, 'DATABASE_URL must be set'),
   REDIS_URL: z.string().default('redis://localhost:6379'),
 
   // ─── Object storage ─────────────────────────────────────────────────────
@@ -105,56 +113,55 @@ const ConfigSchema = z.object({
     .default(60 * 60 * 1000),
 
   // ─── SignalStack outward push ───────────────────────────────────────────
-  /** Base URL of the signalstack API. When unset, signalstack push is disabled. */
-  SIGNALSTACK_BASE_URL: z.string().url().optional(),
-  /** Admin api-key for signalstack onboard. Required when SIGNALSTACK_BASE_URL is set. */
-  SIGNALSTACK_ADMIN_KEY: z.string().optional(),
-  /** item_network sent on every onboard call. */
-  SIGNALSTACK_ITEM_NETWORK: z.string().default('blue_dot'),
-  /** Per-request timeout for signalstack onboard calls. */
-  SIGNALSTACK_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
+  // Base + Keycloak-bearer credential fields are shared with the api via
+  // @aggregator-dpg/shared-primitives/config.
+  ...signalStackConfigFields,
+  /**
+   * Keycloak base URL for the bearer token grant. The worker has no OIDC
+   * login of its own (no acting-org header, no user session) — these two
+   * vars exist solely to mint the service token.
+   */
+  KEYCLOAK_URL: z.string().optional(),
+  KEYCLOAK_REALM: z.string().optional(),
 
   // ─── Campaign PII export (aggregator-dpg#579) ───────────────────────────
   // Recipient is the requesting aggregator's email, resolved by the API and
   // carried on the job — not a worker env.
-  /** Pre-signed GET TTL (seconds) for the export CSV link. Default 1h. */
-  EXPORT_URL_TTL_SECONDS: z.coerce.number().int().positive().default(3600),
-  /** How many export jobs this process runs in parallel. Default 2. */
+  /**
+   * Pre-signed GET TTL (seconds) for the export CSV link. Default 1 day (86400).
+   * Keep in step with the S3 lifecycle rule that deletes the file at expiry
+   * (bluedots-automation `global.campaignExportExpiryDays` = this ÷ 86400), so
+   * the link and the file expire together.
+   */
+  EXPORT_URL_TTL_SECONDS: z.coerce.number().int().positive().default(86400),
+  /** How many campaign-process jobs this process runs in parallel. Default 2. */
   CAMPAIGN_EXPORT_CONCURRENCY: z.coerce.number().int().positive().default(2),
   /** How many recipients a single campaign-email job sends in parallel. Default 5. */
   EMAIL_SEND_CONCURRENCY: z.coerce.number().int().positive().default(5),
+  /** Items per Signals decrypt chunk (bounds request size + gives heartbeat cadence). */
+  CAMPAIGN_DECRYPT_CHUNK: z.coerce.number().int().positive().default(500),
+  /**
+   * Export field-set. `contact` = the three canonical contact fields
+   * (name/email/phone) only; `full` = the full decrypted item_state (variable
+   * columns). Default `contact`.
+   */
+  CAMPAIGN_EXPORT_FIELDS: z.enum(['contact', 'full']).default('contact'),
+  /**
+   * Optional fixed recipient override for every export. When set, it wins over
+   * the job's requested_by (the token email resolved by the API).
+   */
+  CAMPAIGN_EXPORT_RECIPIENT: z.string().optional(),
+  /** Optional last-resort recipient when a job has no requested_by and no override. */
+  EXPORT_NETWORK_ADMIN_EMAIL: z.string().optional(),
+  /**
+   * A campaign job whose `last_progress_at` is older than this (seconds) is
+   * treated as stalled by the watchdog and failed. Default 900 (15 min).
+   */
+  CAMPAIGN_STALL_SECONDS: z.coerce.number().int().positive().default(900),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
 
-/**
- * Fails hard (per designs/_DECISIONS.md D7) when TLS certificate verification
- * is disabled under a production environment; warns loudly in dev/staging so
- * the relaxation is never silent. This is the enforcement that makes the
- * insecure posture impossible in prod — the compose default flip alone is not
- * enough, because an operator can still export the var globally.
- *
- * Uses `process.emitWarning` (not the app logger) for the non-fatal path to
- * avoid a config↔logger circular import (logger.ts imports this module).
- *
- * @param c - Parsed runtime config.
- * @throws {ConfigError} When NODE_TLS_REJECT_UNAUTHORIZED=0 in production.
- */
-export function assertTlsPosture(c: Config): void {
-  // Node disables verification only for the exact string '0'.
-  if (c.NODE_TLS_REJECT_UNAUTHORIZED !== '0') return;
-  const env = c.INSTANCE_ENV ?? c.NODE_ENV;
-  const msg = 'NODE_TLS_REJECT_UNAUTHORIZED=0 disables all TLS certificate verification';
-  if (env === 'production') {
-    throw new ConfigError(`${msg}; refusing to start in production.`, {
-      code: 'INSECURE_TLS_IN_PROD',
-    });
-  }
-  process.emitWarning(
-    `${msg}. Allowed outside production (env=${env}); never use this on a VM/prod deploy.`,
-    { code: 'INSECURE_TLS_POSTURE' },
-  );
-}
-
 export const config: Config = ConfigSchema.parse(process.env);
 assertTlsPosture(config);
+assertSignalStackClientIdentity(config);

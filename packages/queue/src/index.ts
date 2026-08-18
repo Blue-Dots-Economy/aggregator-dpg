@@ -28,10 +28,15 @@ export const QueueName = {
   LinkMetricsRollup: 'link-metrics-rollup',
   /** Hourly watchdog + retention sweep. */
   CronWatchdog: 'cron-watchdog',
-  /** Async participant PII export: decrypt → CSV → S3 → email link (aggregator-dpg#579). */
-  CampaignExport: 'campaign-export',
   /** Async participant campaign email: decrypt → render → send (aggregator-dpg#578). */
   CampaignEmail: 'campaign-email',
+  /**
+   * Unified campaign async-job pipeline (aggregator-dpg#579). One job per
+   * `campaign_job` row; the worker's `campaign` role loads the job + its items,
+   * runs the per-channel handler (export/email/voice), and writes item + job
+   * status back.
+   */
+  CampaignProcess: 'campaign-process',
 } as const;
 
 export type QueueName = (typeof QueueName)[keyof typeof QueueName];
@@ -75,26 +80,14 @@ export interface CronWatchdogJob {
 }
 
 /**
- * Participant PII export job (aggregator-dpg#579). Enqueued by the API's
- * `POST /v1/campaign/export` handler and consumed by the worker's `export`
- * role, which decrypts the owned items, writes a CSV to private S3, and emails
- * a short-lived pre-signed link to the requesting aggregator's contact email.
+ * Unified campaign-process job (aggregator-dpg#579). Carries only the durable
+ * `campaign_job` id — the worker loads the job, its items, channel, metadata,
+ * and content from Postgres. All request detail lives in the row, so the queue
+ * payload stays minimal and a replayed/retried job re-reads the source of truth.
  */
-export interface CampaignExportJob {
-  /** Signals org id (from the caller token's `signalstack_org_id` claim); scopes decrypt ownership. */
-  orgId: string;
-  /** Item ids to export. Validated (uuid, min 1, max EXPORT_MAX_ITEM_IDS) at the API before enqueue. */
-  itemIds: string[];
-  /**
-   * Delivery recipient — the requesting aggregator's contact email, resolved by
-   * the API from the token's aggregator identity before enqueue (never a fixed
-   * network admin).
-   */
-  recipientEmail: string;
-  /** Optional free-text purpose, echoed into the notification email. */
-  purpose?: string;
-  /** Inbound `x-request-id`, forwarded to Signals decrypt for cross-service tracing. */
-  requestId?: string;
+export interface CampaignProcessJob {
+  /** `campaign_job.id` — the durable job to process. */
+  jobId: string;
 }
 
 /**
@@ -187,6 +180,19 @@ export const EMAIL_JOB_OPTS = {
   removeOnComplete: { age: 3600 },
   removeOnFail: { age: 604800 },
 } as const;
+
+/**
+ * Job options for the unified `campaign-process` queue. Same retry posture as
+ * {@link DEFAULT_JOB_OPTS} (3× exponential); the API may override `attempts`
+ * from `CAMPAIGN_EXPORT_ATTEMPTS` at enqueue time. Kept as a plain object (not
+ * `as const`) so callers can spread an `attempts` override.
+ */
+export const CAMPAIGN_PROCESS_JOB_OPTS = {
+  attempts: 3,
+  backoff: { type: 'exponential' as const, delay: 1000 },
+  removeOnComplete: { age: 3600 },
+  removeOnFail: { age: 604800 },
+};
 
 // ─── Bulk-upload Redis key namespace ─────────────────────────────────────────
 

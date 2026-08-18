@@ -151,7 +151,7 @@ describe('HttpSignalStackWriter constructor', () => {
           baseUrl: 'http://signalstack.test',
           apiKey: '',
         }),
-    ).toThrow('HttpSignalStackWriter requires apiKey');
+    ).toThrow('HttpSignalStackWriter requires either apiKey or tokenProvider');
   });
 });
 

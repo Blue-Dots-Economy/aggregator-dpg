@@ -15,6 +15,7 @@ import { KC_ATTR } from '../idp-admin/attributes.js';
 import { getSignalStackWriter } from '../signalstack.js';
 import { getNetworkConfig } from '../network-config.js';
 import { logger } from '../../logger.js';
+import { stripTrailingSlashes } from '@aggregator-dpg/shared-primitives/url';
 
 let cachedJwks: ReturnType<typeof createRemoteJWKSet> | null = null;
 let cachedJwksUrl: string | null = null;
@@ -133,11 +134,21 @@ export async function authenticate(
       },
     };
   }
-  const ctx: AuthContext = {
-    userId: payload.sub,
-    aggregatorId,
-  };
+  return { ok: true, context: hydrateContext(payload.sub, aggregatorId, payload) };
+}
+
+/**
+ * Builds an {@link AuthContext} from a verified token's optional claims. Split
+ * out of {@link authenticate} so the guard logic there stays flat.
+ *
+ * @param userId - The token `sub`.
+ * @param aggregatorId - The resolved `aggregator_id`.
+ * @param payload - The verified JWT payload.
+ * @returns The populated auth context (optional fields set only when present).
+ */
+function hydrateContext(userId: string, aggregatorId: string, payload: JWTPayload): AuthContext {
   const claims = payload as Record<string, unknown>;
+  const ctx: AuthContext = { userId, aggregatorId };
   if (typeof claims.email === 'string') ctx.email = claims.email;
   if (typeof claims.email_verified === 'boolean') ctx.emailVerified = claims.email_verified;
   if (typeof claims.preferred_username === 'string') {
@@ -154,15 +165,13 @@ export async function authenticate(
   if (decision === 'pending' || decision === 'approved' || decision === 'rejected') {
     ctx.decisionMade = decision;
   }
-  const aggregatorType = readStringOrFirst(claims.aggregator_type);
   // Accept any non-empty domain id — the network config (loaded at the
   // route layer) decides which values are valid for this deployment.
-  if (aggregatorType) {
-    ctx.aggregatorType = aggregatorType;
-  }
+  const aggregatorType = readStringOrFirst(claims.aggregator_type);
+  if (aggregatorType) ctx.aggregatorType = aggregatorType;
   const signalstackOrgId = readStringOrFirst(claims.signalstack_org_id);
   if (signalstackOrgId) ctx.signalstackOrgId = signalstackOrgId;
-  return { ok: true, context: ctx };
+  return ctx;
 }
 
 /**
@@ -391,7 +400,7 @@ function readAggregatorId(payload: JWTPayload): string | undefined {
  *
  * - **`aud` (audience)** — when `KEYCLOAK_EXPECTED_AUDIENCE` is set, jose
  *   requires the token's `aud` to contain it. Off by default because it needs
- *   the realm's audience mapper (see `aggregator-realm.json`) to be present;
+ *   the realm's audience mapper (see `realm.json`) to be present;
  *   enable it once tokens actually carry the API audience.
  * - **`azp` (authorized party)** — when `KEYCLOAK_ALLOWED_AZP` is set, the
  *   token's `azp` (the client that requested it) must be in that allow-list.
@@ -467,13 +476,13 @@ function getJwks(): ReturnType<typeof createRemoteJWKSet> {
 function jwksUrl(): string {
   const base = mustEnv('KEYCLOAK_URL');
   const realm = mustEnv('KEYCLOAK_REALM');
-  return `${base.replace(/\/+$/, '')}/realms/${realm}/protocol/openid-connect/certs`;
+  return `${stripTrailingSlashes(base)}/realms/${realm}/protocol/openid-connect/certs`;
 }
 
 function expectedIssuer(): string {
   const base = mustEnv('KEYCLOAK_URL');
   const realm = mustEnv('KEYCLOAK_REALM');
-  return `${base.replace(/\/+$/, '')}/realms/${realm}`;
+  return `${stripTrailingSlashes(base)}/realms/${realm}`;
 }
 
 function mustEnv(name: string): string {

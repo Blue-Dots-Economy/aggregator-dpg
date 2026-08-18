@@ -18,8 +18,8 @@ import {
   type BulkFileProcessJob,
   type BulkFinaliseJob,
   type BulkRowProcessJob,
-  type CampaignExportJob,
   type CampaignEmailJob,
+  type CampaignProcessJob,
   type CronWatchdogJob,
   type LinkMetricsRollupJob,
 } from '@aggregator-dpg/queue';
@@ -31,8 +31,8 @@ import { processBulkRow } from './jobs/bulk-row-process.js';
 import { finaliseBulk } from './jobs/bulk-finalise.js';
 import { rollupLinkMetrics } from './jobs/link-metrics-rollup.js';
 import { runWatchdog } from './jobs/cron-watchdog.js';
-import { processCampaignExport } from './jobs/campaign-export-process.js';
 import { processCampaignEmail } from './jobs/campaign-email-process.js';
+import { processCampaignJob } from './jobs/campaign-process.js';
 import { getRedis, closeRedis } from './services/redis.js';
 import { closeQueues } from './services/bulk-queue.js';
 import { parseWorkerRoles, missingRoles } from './worker-roles.js';
@@ -78,12 +78,12 @@ async function main(): Promise<void> {
     ]);
   }
 
-  if (roles.has('export')) {
+  if (roles.has('campaign')) {
     workers.push([
-      'campaignExport',
-      new Worker<CampaignExportJob>(
-        QueueName.CampaignExport,
-        async (job) => processCampaignExport(job.data),
+      'campaignProcess',
+      new Worker<CampaignProcessJob>(
+        QueueName.CampaignProcess,
+        async (job) => processCampaignJob(job.data),
         { connection, concurrency: config.CAMPAIGN_EXPORT_CONCURRENCY },
       ),
     ]);
@@ -125,13 +125,10 @@ async function main(): Promise<void> {
       connection,
       defaultJobOptions: DEFAULT_JOB_OPTS,
     });
-    await linkMetricsQueue.add(
-      'tick',
-      { tick: Date.now() },
-      {
-        repeat: { every: config.LINK_METRICS_ROLLUP_INTERVAL_MS },
-        jobId: 'link-metrics-rollup-tick',
-      },
+    await linkMetricsQueue.upsertJobScheduler(
+      'link-metrics-rollup-tick',
+      { every: config.LINK_METRICS_ROLLUP_INTERVAL_MS },
+      { name: 'tick', data: { tick: Date.now() } },
     );
     queues.push(linkMetricsQueue);
 
@@ -139,21 +136,21 @@ async function main(): Promise<void> {
       connection,
       defaultJobOptions: DEFAULT_JOB_OPTS,
     });
-    await watchdogQueue.add(
-      'tick',
-      { tick: Date.now() },
-      { repeat: { every: config.WATCHDOG_INTERVAL_MS }, jobId: 'cron-watchdog-tick' },
+    await watchdogQueue.upsertJobScheduler(
+      'cron-watchdog-tick',
+      { every: config.WATCHDOG_INTERVAL_MS },
+      { name: 'tick', data: { tick: Date.now() } },
     );
     queues.push(watchdogQueue);
 
     // One-shot cleanup: removed cron-driven keycloak-sync. If a previous worker
-    // run registered the repeatable, drop it from Redis so it does not keep
+    // run registered the scheduler, drop it from Redis so it does not keep
     // firing without a consumer.
     const legacyKeycloakSyncQueue = new Queue('keycloak-sync', { connection });
     try {
-      const repeatables = await legacyKeycloakSyncQueue.getRepeatableJobs();
-      for (const r of repeatables) {
-        await legacyKeycloakSyncQueue.removeRepeatableByKey(r.key);
+      const schedulers = await legacyKeycloakSyncQueue.getJobSchedulers();
+      for (const s of schedulers) {
+        await legacyKeycloakSyncQueue.removeJobScheduler(s.key);
       }
     } finally {
       await legacyKeycloakSyncQueue.close();

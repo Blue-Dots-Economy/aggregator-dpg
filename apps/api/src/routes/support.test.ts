@@ -37,7 +37,7 @@ describe('support routes (SUPPORT_EMAIL configured)', () => {
   beforeEach(async () => {
     _resetJwks();
     process.env.KEYCLOAK_URL = 'http://kc.local';
-    process.env.KEYCLOAK_REALM = 'aggregator';
+    process.env.KEYCLOAK_REALM = 'bluedots';
     _setAccessTokenVerifier(async (token) => {
       if (token === 'good-token') {
         return {

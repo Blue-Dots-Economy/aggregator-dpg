@@ -17,7 +17,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
-import { normalisePhone } from '../services/phone.js';
+import { normalisePhone } from '@aggregator-dpg/shared-primitives/phone';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 import { consume } from '../services/rate-limiter/index.js';

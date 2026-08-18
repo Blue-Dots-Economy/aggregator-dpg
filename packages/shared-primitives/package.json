@@ -4,6 +4,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./config": {
+      "import": "./dist/config/index.js",
+      "types": "./dist/config/index.d.ts"
+    },
     "./errors": {
       "import": "./dist/errors/index.js",
       "types": "./dist/errors/index.d.ts"
@@ -27,6 +31,14 @@
     "./aggregator": {
       "import": "./dist/aggregator/index.js",
       "types": "./dist/aggregator/index.d.ts"
+    },
+    "./phone": {
+      "import": "./dist/phone/index.js",
+      "types": "./dist/phone/index.d.ts"
+    },
+    "./url": {
+      "import": "./dist/url/index.js",
+      "types": "./dist/url/index.d.ts"
     }
   },
   "scripts": {
@@ -40,6 +52,7 @@
   },
   "devDependencies": {
     "@aggregator-dpg/tsconfig": "workspace:*",
+    "@types/node": "^22.10.5",
     "@vitest/coverage-v8": "^3.2.7",
     "typescript": "^6.0.3",
     "vitest": "^3.2.7"

@@ -29,6 +29,7 @@ import {
   QueueName,
   DEFAULT_JOB_OPTS,
   EMAIL_JOB_OPTS,
+  CAMPAIGN_PROCESS_JOB_OPTS,
   bulkRedisKeys,
   createRedisConnection,
 } from '../index.js';
@@ -41,9 +42,24 @@ describe('QueueName', () => {
       BulkFinalise: 'bulk-finalise',
       LinkMetricsRollup: 'link-metrics-rollup',
       CronWatchdog: 'cron-watchdog',
-      CampaignExport: 'campaign-export',
       CampaignEmail: 'campaign-email',
+      CampaignProcess: 'campaign-process',
     });
+  });
+});
+
+describe('CAMPAIGN_PROCESS_JOB_OPTS', () => {
+  it('mirrors the bounded retry/backoff/retention policy', () => {
+    expect(CAMPAIGN_PROCESS_JOB_OPTS).toEqual({
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 1000 },
+      removeOnComplete: { age: 3600 },
+      removeOnFail: { age: 604800 },
+    });
+  });
+
+  it('is spreadable so the API can override attempts', () => {
+    expect({ ...CAMPAIGN_PROCESS_JOB_OPTS, attempts: 5 }.attempts).toBe(5);
   });
 });
 

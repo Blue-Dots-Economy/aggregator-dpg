@@ -76,7 +76,9 @@ docker compose up -d
 docker compose ps   # wait until aggregator-keycloak is "healthy"
 ```
 
-The Keycloak realm is auto-imported from `infra/keycloak/realms/aggregator-realm.json` on container start. The custom OTP authenticator SPI is bundled at `infra/keycloak/providers/keycloak-otp-1.0.0-SNAPSHOT.jar` and mounted into `/opt/keycloak/providers/` by Compose, so login-by-OTP works out of the box. The JAR is committed to the repo to keep first-time setup zero-friction; rebuild it from <https://github.com/sanketika-labs/keycloak-otp-authenticator> when you bump the version.
+The Keycloak realm is auto-imported from `infra/keycloak/realms/realm.json` on container start. The custom OTP authenticator SPI is bundled at `infra/keycloak/providers/keycloak-otp-1.0.0-SNAPSHOT.jar` and mounted into `/opt/keycloak/providers/` by Compose, so login-by-OTP works out of the box. The JAR is committed to the repo to keep first-time setup zero-friction; rebuild it from <https://github.com/sanketika-labs/keycloak-otp-authenticator> when you bump the version (`make kc-plugin`).
+
+> This JAR copy serves **local dev only**. The image that runs in real environments is built in the **bluedots-automation** repo (`dockerfiles/keycloak/` → `ghcr.io/<owner>/keycloak-server`), which bakes the SPI in and pre-runs `kc.sh build`. Keycloak is a shared common service for both DPGs, so bumping the JAR here does **not** change any deployment — that needs the same bump in bluedots-automation followed by an image rebuild. See `dockerfiles/keycloak/providers/README.md` there.
 
 ---
 
@@ -208,6 +210,43 @@ The realm import covers most settings. Two protocol mappers must be added by han
 | Multivalued         | OFF             |
 
 Repeat the steps for the `phoneNumber` attribute (token claim name `phone_number`). Without these mappers the profile endpoint returns `403 MISSING_AGGREGATOR_ID`.
+
+### Portal entitlement gate (shared realm)
+
+The realm is shared with signals-dpg, so every Signals participant is also a valid realm user. Without a gate they can complete the whole OTP login against `aggregator-portal` and are only turned away afterwards, at the BFF callback (`NO_AGGREGATOR_ID` → `org_no_portal`).
+
+`aggregator-portal` therefore has its own browser flow, `aggregator-portal-browser`, bound via `authenticationFlowBindingOverrides`. It is `aggregator-otp-browser` plus two conditional gates that deny **before** `otp-channel-choice-form` sends a code:
+
+| Gate                 | Condition                                        | Denies                                     |
+| -------------------- | ------------------------------------------------ | ------------------------------------------ |
+| `gate-*-coordinator` | user has no `aggregator_id` attribute            | Signals participants, org owners           |
+| `gate-*-approved`    | `decision_made` is absent, `pending`, `rejected` | unapproved / rejected coordinator sign-ups |
+
+Each gate exists twice — once inside the OTP forms sub-flow (the pre-OTP rejection) and once at the top level, because a user with a live Keycloak SSO cookie satisfies `auth-cookie` and never enters the forms sub-flow at all.
+
+`signals-ui` is untouched: the realm-wide `browserFlow` is still `aggregator-otp-browser`.
+
+Two constraints worth knowing before editing this part of the realm:
+
+- The bound flow carries a **pinned `id`**. Realm import resolves `authenticationFlowBindingOverrides` by flow ID, not alias, and flow IDs are unique per Keycloak instance — so one Keycloak cannot import this realm twice under two names.
+- The ALTERNATIVE pair (`auth-cookie` / OTP forms) is nested inside `aggregator-portal-auth`. Keycloak **ignores every ALTERNATIVE at a level that also holds REQUIRED or CONDITIONAL executions**, so the gates cannot be siblings of the alternatives.
+
+`--import-realm` only runs against an empty realm, so an already-imported realm needs the change applied over the admin REST API instead. **The `keycloak-init` sidecar now does this automatically on every `up`** (`apply-user-profile.sh` then `apply-portal-gate.py`), so a redeploy onto an existing realm cannot silently leave the portal ungated. No manual step is required.
+
+To run it by hand (e.g. against a remote Keycloak):
+
+```bash
+KC_ADMIN_PASSWORD=<admin password> \
+  python3 infra/keycloak/init/apply-portal-gate.py
+# override KC_URL / KC_REALM / KC_ADMIN_USERNAME as needed
+```
+
+The script is safe to run repeatedly and is **fail-closed**:
+
+- It verifies the currently bound flow first and exits 0 without writing anything when the gate is already correct — so a freshly imported realm keeps its pinned flow ID rather than being rebuilt.
+- When it does rebuild, it builds and verifies the complete new flow tree **before** rebinding the client, then deletes the old tree. Verification asserts both gates are present and that they precede `otp-channel-choice-form` — the ordering that stops a code being issued to an ineligible user.
+- Any failure restores the entry-time binding, prints `GATE NOT APPLIED`, and exits non-zero (failing the sidecar). It never parks `aggregator-portal` on the ungated default browser flow to do its work.
+- Rebuilds use `-gN`-suffixed flow aliases, because Keycloak aliases are realm-unique and the new tree must coexist with the live one. Only the first apply on a clean realm uses the canonical aliases plus the pinned ID.
 
 ---
 
@@ -354,7 +393,7 @@ config/
     profile.v1.json        Post-login profile completion schema
     profile.v1.ui.json
 infra/
-  keycloak/realms/aggregator-realm.json   Realm import (clients, roles, OTP authenticator)
+  keycloak/realms/realm.json     Realm import (clients, roles, OTP authenticator)
 docker-compose.yml         All backing services
 ```
 
@@ -380,7 +419,7 @@ docker-compose.yml         All backing services
 
 - Architecture document: `docs/aggregator-app-technical-design.md` (or whichever filename your fork uses) — covers the spec across all four functional layers.
 - Coding rules: `.claude/rules/*.md` — base-class pattern, interfaces, error handling, logging, testing, configuration discipline.
-- Realm export: `infra/keycloak/realms/aggregator-realm.json` — clients (`aggregator-portal`, `aggregator-api`), roles, OTP authenticator config.
+- Realm export: `infra/keycloak/realms/realm.json` — clients (`aggregator-portal`, `aggregator-api`), roles, OTP authenticator config.
 - Config schemas: `config/schemas/aggregator/*.json` — single source of truth for forms, API validation, and (in future) bulk-upload validation.
 
 ---

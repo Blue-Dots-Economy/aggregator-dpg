@@ -75,7 +75,7 @@ function slugifyForLink(input: string): string {
     .normalize('NFKD')
     .replace(/[̀-ͯ]/g, '')
     .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
+    .replace(/^-|-$/g, '')
     .slice(0, 40);
 }
 
@@ -555,9 +555,8 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
               {link.qr_url && (
                 <a
                   href={link.qr_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  title={t('link_card.view_qr')}
+                  download="registration-qr.png"
+                  title={t('link_card.download_qr')}
                   className="inline-flex items-center justify-center w-8 h-8 rounded-[10px] border border-(--bd-border) text-ink-500 hover:text-primary-600 hover:border-(--bd-primary-100)"
                 >
                   <I.qr size={14} />

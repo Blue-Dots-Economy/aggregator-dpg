@@ -25,7 +25,7 @@ describe('cleanup-stale — org prune (ORG_HIERARCHY_ENABLED)', () => {
   beforeEach(async () => {
     _resetJwks();
     process.env.KEYCLOAK_URL = 'http://kc.local';
-    process.env.KEYCLOAK_REALM = 'aggregator';
+    process.env.KEYCLOAK_REALM = 'bluedots';
 
     _setAggregatorStore(new AggregatorStoreFake());
     orgStore = new AggregatorOrgStoreFake();

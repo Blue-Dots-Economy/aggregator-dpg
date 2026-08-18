@@ -44,7 +44,7 @@ import { checkSubmitRate } from '../services/submit-rate.js';
 import { loadConsentConfig } from '@aggregator-dpg/config-loader/fs';
 import { getConsentLedger } from '../services/consent-ledger/index.js';
 import { resolveActiveNetwork } from '@aggregator-dpg/network-config/paths';
-import { normalisePhone } from '../services/phone.js';
+import { normalisePhone } from '@aggregator-dpg/shared-primitives/phone';
 import { splitName } from '../services/name.js';
 import { slugFromName } from '../services/slug.js';
 import { authenticateAny } from '../services/auth/access-token.js';
