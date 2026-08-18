@@ -10,6 +10,13 @@ on:
       - feature
 
     tags:
+      # Org-wide release tags — one tag builds all three apps. Both schemes:
+      #   v*.*.*  semver releases   e.g. v1.2.0
+      #   GA-*    dated GA cuts     e.g. GA-12-08-2026
+      - 'v*.*.*'
+      - 'GA-*'
+      # Per-app tags, retained: these release ONE app independently, and the
+      # type=semver entries below extract the version from the app prefix.
       - 'web-v*.*.*'
       - 'api-v*.*.*'
       - 'worker-v*.*.*'
@@ -134,9 +141,21 @@ jobs:
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.app }}
+          # `type=ref,event=tag` emits the tag VERBATIM so the image tag equals the
+          # release tag (v1.2.0 -> v1.2.0, GA-12-08-2026 -> GA-12-08-2026).
+          # type=semver below is not sufficient: it strips the leading `v`, and it
+          # cannot parse a GA-* tag at all (emits nothing, logs a warning).
+          #
+          # `enable=` restricts it to the ORG-WIDE tags. Without that guard an
+          # `api-v1.2.0` tag would stamp `api-v1.2.0` onto the web and worker
+          # images too — this matrix builds all three on any matching tag, while
+          # the type=semver `match=` below correctly resolves for only one of them.
+          # Comments stay OUT of the block scalar: it is passed to the action
+          # verbatim, not parsed as YAML.
           tags: |
             type=ref,event=branch
             type=ref,event=pr
+            type=ref,event=tag,enable=${{ startsWith(github.ref_name, 'GA-') || startsWith(github.ref_name, 'v') }}
             type=sha,prefix=sha-
             type=semver,pattern={{version}},match=${{ matrix.app }}-v(.*),group=1
             type=semver,pattern={{major}}.{{minor}},match=${{ matrix.app }}-v(.*),group=1
