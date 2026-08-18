@@ -355,6 +355,11 @@ function resolveDomains(
       itemType,
       schema,
       identity,
+      // Registration-form gates — mirror signalstack network.json, defaulting
+      // to "off" so an older network.json without these keys collects neither
+      // consent nor birth year (#613).
+      guardianConsentRequired: d.guardian_consent_required === true,
+      goLiveRequired: Array.isArray(d.go_live_required) ? d.go_live_required : [],
       ...(d.dashboard_tiles !== undefined ? { dashboardTiles: d.dashboard_tiles } : {}),
       ...(d.status_rules !== undefined ? { statusRules: d.status_rules } : {}),
     };

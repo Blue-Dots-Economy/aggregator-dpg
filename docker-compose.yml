@@ -155,10 +155,14 @@ services:
       AGGREGATOR_API_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET:?KEYCLOAK_ADMIN_CLIENT_SECRET must be set in .env}
       AGGREGATOR_PORTAL_SECRET: ${OIDC_CLIENT_SECRET:?OIDC_CLIENT_SECRET must be set in .env}
       AGGREGATOR_BFF_SECRET: ${BFF_SERVICE_CLIENT_SECRET:?BFF_SERVICE_CLIENT_SECRET must be set in .env}
+      # Realm name substituted into the realm JSON's "realm" field by
+      # render-realm.sh. Per-deployment identity value, same as
+      # AGGREGATOR_NETWORK below — not a fixed constant across networks.
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-bluedots}
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
       KC_DB_USERNAME: ${POSTGRES_USER:-aggregator}
-      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:-aggregator-dev}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
       KC_HOSTNAME: ${PUBLIC_HOST:-keycloak}
       # Substituted into realm JSON at boot (clients[].redirectUris,
       # webOrigins, post.logout.redirect.uris). Must be the browser-facing
@@ -245,7 +249,7 @@ services:
     environment:
       # Internal URL — must include /auth because KC_HTTP_RELATIVE_PATH=/auth.
       KC_URL: http://keycloak:8080/auth
-      KC_REALM: ${KEYCLOAK_REALM:-aggregator}
+      KC_REALM: ${KEYCLOAK_REALM:-bluedots}
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD}
       UNMANAGED_POLICY: ENABLED
@@ -264,9 +268,23 @@ services:
       # API confidential client whose service account creates the org KC group
       # + assigns org_owner (needs realm-management:manage-realm).
       API_CLIENT_ID: ${KEYCLOAK_ADMIN_CLIENT_ID:-aggregator-api}
+      # apply-portal-gate.py reads these names (KC_ADMIN_*, not KC_BOOTSTRAP_*).
+      KC_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}
+      KC_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD}
     volumes:
       - ./infra/keycloak/init:/init:ro
-    entrypoint: ["sh", "-c", "apk add --no-cache curl jq > /dev/null && sh /init/apply-user-profile.sh"]
+    # apply-portal-gate.py runs on EVERY boot, not just a fresh import: realm
+    # import only applies to an empty realm, so a redeploy onto an
+    # already-provisioned realm would otherwise leave aggregator-portal on the
+    # ungated default browser flow and send OTPs to ineligible accounts. The
+    # script verifies first and is a no-op when the gate is already correct; it
+    # exits non-zero (failing this sidecar, loudly) if it cannot apply it.
+    entrypoint:
+      [
+        'sh',
+        '-c',
+        'apk add --no-cache curl jq python3 > /dev/null && sh /init/apply-user-profile.sh && python3 /init/apply-portal-gate.py',
+      ]
     restart: "no"
 
   # ─────────────────────────────────────────────────────────────────────────
@@ -304,7 +322,7 @@ services:
       # ${PUBLIC_PROTOCOL}://${PUBLIC_HOST}/auth/realms/${realm}. The web
       # container's back-channel call is short-circuited to the docker host
       # gateway via the `extra_hosts` mapping below.
-      OIDC_ISSUER: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}/auth/realms/${KEYCLOAK_REALM:-aggregator}"
+      OIDC_ISSUER: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}/auth/realms/${KEYCLOAK_REALM:-bluedots}"
       OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-aggregator-portal}
       OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
       OIDC_REDIRECT_URI: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}/api/auth/callback"
@@ -377,13 +395,13 @@ services:
       HOST: "0.0.0.0"
       LOG_LEVEL: ${LOG_LEVEL:-info}
       CORS_ORIGINS: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}"
-      DATABASE_URL: postgres://${POSTGRES_USER:-aggregator}:${POSTGRES_PASSWORD:-aggregator-dev}@postgres:5432/${POSTGRES_DB:-aggregator}
+      DATABASE_URL: postgres://${POSTGRES_USER:-aggregator}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}@postgres:5432/${POSTGRES_DB:-aggregator}
       RUN_MIGRATIONS_ON_BOOT: "true"
       # Keycloak admin (service account). Must equal the public issuer prefix
       # so the JWT `iss` claim matches what `expectedIssuer()` derives from
       # KEYCLOAK_URL (apps/api/src/services/auth/access-token.ts).
       KEYCLOAK_URL: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}/auth"
-      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-aggregator}
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-bluedots}
       KEYCLOAK_ADMIN_CLIENT_ID: ${KEYCLOAK_ADMIN_CLIENT_ID:-aggregator-api}
       KEYCLOAK_ADMIN_CLIENT_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET:-}
       # JWT client-scoping (#1.7): azp allow-list (enforced) + optional aud check.
@@ -408,6 +426,15 @@ services:
       ADMIN_EMAILS: ${ADMIN_EMAILS:-admin@bluedots.local}
       PUBLIC_API_URL: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}/backend"
       PUBLIC_PORTAL_URL: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}"
+      # ─── Contact-support form ────────────────────────────────────────
+      # Without SUPPORT_EMAIL the endpoint 503s and the portal hides the
+      # entry point, so the form was unreachable in the composed stack until
+      # these were passed through. The attachment budget (#551) rides along:
+      # the API serves it to the form and derives its own body limit from it.
+      SUPPORT_EMAIL: ${SUPPORT_EMAIL:-}
+      SUPPORT_CC_EMAIL: ${SUPPORT_CC_EMAIL:-}
+      SUPPORT_ATTACHMENT_MAX_TOTAL_BYTES: ${SUPPORT_ATTACHMENT_MAX_TOTAL_BYTES:-5242880}
+      SUPPORT_ATTACHMENT_MAX_FILES: ${SUPPORT_ATTACHMENT_MAX_FILES:-3}
       # ─── Object storage (bulk uploads + QR PNGs + errors.csv) ────────
       # AWS S3 via IAM role on the VM. S3_ENDPOINT/S3_PUBLIC_ENDPOINT are
       # intentionally unset — the SDK uses the regional AWS endpoint.
@@ -498,7 +525,7 @@ services:
       # default and arm the config guard on the VM path. See the web/api notes.
       NODE_TLS_REJECT_UNAUTHORIZED: ${NODE_TLS_REJECT_UNAUTHORIZED:-1}
       INSTANCE_ENV: ${INSTANCE_ENV:-production}
-      DATABASE_URL: postgres://${POSTGRES_USER:-aggregator}:${POSTGRES_PASSWORD:-aggregator-dev}@postgres:5432/${POSTGRES_DB:-aggregator}
+      DATABASE_URL: postgres://${POSTGRES_USER:-aggregator}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}@postgres:5432/${POSTGRES_DB:-aggregator}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       # ─── Object storage (raw CSV download + errors.csv write) ──────
       # AWS S3 via IAM role on the VM — see notes on the api service.

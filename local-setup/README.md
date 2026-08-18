@@ -27,7 +27,9 @@ and is always run **from this directory**:
 ```bash
 cd aggregator-dpg/local-setup
 cp .env.example .env          # then set ADMIN_EMAILS (see LOCAL_SETUP.md §2)
-echo "127.0.0.1 keycloak" | sudo tee -a /etc/hosts   # once
+# once; safe to re-run
+grep -qE '^[[:space:]]*127\.0\.0\.1[[:space:]]+keycloak([[:space:]]|$)' /etc/hosts \
+  || sudo sh -c "printf '\n127.0.0.1 keycloak\n' >> /etc/hosts"
 docker compose up -d --build
 docker compose ps             # wait for keycloak + aggregator-api healthy
 ```

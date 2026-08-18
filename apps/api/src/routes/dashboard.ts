@@ -101,6 +101,14 @@ const DashboardQuerySchema = z.object({
     .max(32)
     .regex(/^[a-z0-9_]+$/i, 'status must be alphanumeric + underscore')
     .optional(),
+  /**
+   * Optional lifecycle narrowing for the participant list. When set, only that
+   * lifecycle is fetched (and paginated) upstream; absent ⇒ the default
+   * draft+live set ({@link DASHBOARD_LIFECYCLE}). Server-side so a rare draft
+   * surfaces in a domain dominated by live profiles — client-side filtering a
+   * single page cannot. `paused`/`retired` remain non-selectable here.
+   */
+  lifecycle: z.enum(['draft', 'live']).optional(),
   /** Bypass signalstack's TTL cache when true. Forwarded verbatim. */
   refresh: z.coerce.boolean().optional().default(false),
 });
@@ -243,24 +251,26 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
         });
       }
 
-      // Normalise lifecycle on every row via `resolveLifecycle` so an absent
-      // `lifecycle_status` from older signals deployments shows up as `'live'`.
+      // Normalise lifecycle on every row via `resolveLifecycle`. A row whose
+      // real `lifecycle_status` we can't read resolves to `'draft'` (#613) —
+      // never optimistically `'live'` — so the dashboard mirrors the true
+      // signals status instead of reporting a draft profile as live.
       const normalisedItems = itemsResult.items.map((item) => {
         const lifecycleStatus = resolveLifecycle(item);
         return {
           ...item,
-          lifecycle_status: lifecycleStatus ?? 'live',
+          lifecycle_status: lifecycleStatus ?? 'draft',
         };
       });
-      const tileRows = tilesResult.items.map((item) => resolveLifecycle(item) ?? 'live');
+      const tileRows = tilesResult.items.map((item) => resolveLifecycle(item) ?? 'draft');
 
       // Tiles count the full dataset (up to TILE_CAP). `account_only` is the
       // local-only bucket — participants who exist in our table but have no
       // signals item — and requires a participants reader not wired here
-      // yet. v1: report 0 and refine once that reader lands.
-      // TODO: when a participants reader is exposed, count participants for
-      //       this aggregator + domain whose identity (phone/email) is not in
-      //       `tileRows`-corresponding items and surface that here.
+      // yet. v1: report 0; once a participants reader is exposed, count
+      // participants for this aggregator + domain whose identity
+      // (phone/email) is not in `tileRows`-corresponding items and surface
+      // that here.
       const tiles = {
         draft: tileRows.filter((s) => s === 'draft').length,
         live: tileRows.filter((s) => s === 'live').length,
@@ -327,7 +337,7 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
 
       // Validated (and defaulted) by the route's `querystring` zod schema.
       const query = req.query as z.infer<typeof DashboardQuerySchema>;
-      const { page, limit, status, refresh } = query;
+      const { page, limit, status, lifecycle, refresh } = query;
       const networkCfg = await getNetworkConfig();
       const domain = query.domain ?? networkCfg.domainIds[0]!;
       if (!networkCfg.domains[domain]) {
@@ -355,7 +365,9 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
         domain,
         // Aggregator dashboard shows only draft + live profiles; paused +
         // retired are excluded server-side by signalstack (#lifecycle-filter).
-        lifecycle: DASHBOARD_LIFECYCLE,
+        // A caller-supplied `?lifecycle=` narrows to that single lifecycle
+        // (server-side pagination over the filtered set); absent ⇒ draft+live.
+        lifecycle: lifecycle ? [lifecycle] : DASHBOARD_LIFECYCLE,
         refresh,
       });
 
@@ -471,7 +483,7 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
         .header('Content-Type', 'text/csv; charset=utf-8')
         .header(
           'Content-Disposition',
-          `attachment; filename="${result.value.filename.replace(/"/g, '')}"`,
+          `attachment; filename="${result.value.filename.replaceAll('"', '')}"`,
         )
         .send(result.value.csv);
     },
@@ -553,7 +565,7 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
 
       return reply
         .header('Content-Type', 'text/csv; charset=utf-8')
-        .header('Content-Disposition', `attachment; filename="${filename.replace(/"/g, '')}"`)
+        .header('Content-Disposition', `attachment; filename="${filename.replaceAll('"', '')}"`)
         .send(csv);
     },
   );

@@ -28,7 +28,7 @@ import { getDb, schema } from '../db.js';
 import { getSchemaLoader } from '../services/schema-loader.js';
 import { getRedis } from '../services/redis.js';
 import { enqueueFinalise } from '../services/bulk-queue.js';
-import { normalisePhone, normaliseEmail } from '../services/phone.js';
+import { normalisePhone, normaliseEmail } from '@aggregator-dpg/shared-primitives/phone';
 import { getNetworkConfig } from '../services/network-config.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
 import { config } from '../config.js';
@@ -345,8 +345,49 @@ async function commit(
  * Returns void; status is observable via structured logs.
  */
 type SignalStackPushResult =
-  | { success: true }
-  | { success: false; code: string; message: string; ownedElsewhere?: boolean };
+  { success: true } | { success: false; code: string; message: string; ownedElsewhere?: boolean };
+
+/**
+ * Derives the participant's age and consent record from a bulk row.
+ *
+ * `year_of_birth` / `age` are the well-known participant keys the interactive
+ * link flow reads. A minor (age ≤ 18) sends neither age nor consent — as with
+ * the link flow's minor path, so the row lands and the minor accepts terms in
+ * the Signals app. When the network presumes consent for adults, forward the
+ * same accept record the link flow sends; otherwise omit `compliance` entirely
+ * (an explicit decline would reject every row).
+ */
+function deriveAgeAndConsent(
+  payload: Record<string, unknown>,
+  presumeConsent: boolean,
+): {
+  ageNum: number | undefined;
+  compliance: Array<{ key: string; value: boolean }> | undefined;
+} {
+  const coerceNum = (v: unknown): number | undefined => {
+    if (typeof v === 'number') return v;
+    if (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v))) {
+      return Number(v);
+    }
+    return undefined;
+  };
+  const yearOfBirth = coerceNum(payload['year_of_birth']);
+  const derivedAge =
+    yearOfBirth !== undefined
+      ? new Date().getUTCFullYear() - yearOfBirth
+      : coerceNum(payload['age']);
+  const rowIsMinor = derivedAge !== undefined && derivedAge <= 18;
+  const ageNum = rowIsMinor ? undefined : derivedAge;
+  const compliance =
+    presumeConsent && !rowIsMinor
+      ? [
+          { key: 'user_terms', value: true },
+          { key: 'user_privacy', value: true },
+          { key: 'profile_creation', value: true },
+        ]
+      : undefined;
+  return { ageNum, compliance };
+}
 
 export async function pushToSignalStack(
   job: BulkRowProcessJob,
@@ -414,17 +455,41 @@ export async function pushToSignalStack(
       ? (job.payload[phoneSourceKey] as string)
       : phone;
   const pushPhone = phone ?? phoneFromBody;
+  // Aggregator-level consent captured at registration is the legal basis for
+  // the bulk-row push — there is no per-row consent column in the bulk CSV
+  // contract. `terms_accepted`/`privacy_accepted` booleans are the OLD
+  // signals contract; signals now records consent only via `compliance`
+  // (accept-only: any `value: false` hard-rejects with CONSENT_DECLINED).
+  // So when the network presumes consent, forward the same accept record the
+  // interactive link flow sends for an adult; when it doesn't, omit
+  // `compliance` entirely (same as the link flow's minor path) rather than
+  // sending an explicit decline that would reject every row. Surface as CSV
+  // columns if signalstack ever demands real per-row participant consent.
+  const presumeConsent = networkCfg.aggregator.onboarding.presume_consent;
+
+  // Age (#331) — mirrors the interactive link flow
+  // (`apps/api/src/routes/public-registration-links.ts`) so bulk and link
+  // onboarding behave identically. Two upstream gates depend on it:
+  //
+  //   - `AGE_REQUIRED` (400): signals refuses to record `user_terms` +
+  //     `user_privacy` on a guardian-gated domain (blue_dot `seeker`) without a
+  //     known age. Sending consent but never an age — as this job used to —
+  //     therefore failed EVERY row on such a domain.
+  //   - `U18_NOT_ALLOWED` (400): a minor is never onboarded server-to-server.
+  //     As with the link flow's minor path we send neither age nor consent, so
+  //     the row still lands and the minor accepts terms in the Signals app.
+  //
+  // `year_of_birth` / `age` are the same well-known participant keys the link
+  // flow reads; the bulk `seeker` schema ships an `age` column
+  // (`config/<network>/bulk-samples/seeker.csv`).
+  const { ageNum, compliance } = deriveAgeAndConsent(job.payload, presumeConsent);
   const result = await ss.onboard({
     actingOrgId: signalstackOrgId,
     name,
     ...(pushPhone ? { phoneNumber: pushPhone } : {}),
     ...(email ? { email } : {}),
-    // Aggregator-level consent captured at registration is the legal basis
-    // for the bulk-row push; signalstack still expects these flags per-row
-    // so we hardcode `true`. Surface as CSV columns if signalstack ever
-    // demands per-row participant consent.
-    terms_accepted: networkCfg.aggregator.onboarding.presume_consent,
-    privacy_accepted: networkCfg.aggregator.onboarding.presume_consent,
+    ...(ageNum !== undefined ? { age: ageNum } : {}),
+    ...(compliance ? { compliance } : {}),
     channel: 'bulk',
     source_id: job.uploadId,
     network: config.SIGNALSTACK_ITEM_NETWORK,

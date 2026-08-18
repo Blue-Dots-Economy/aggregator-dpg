@@ -13,7 +13,7 @@ FROM base AS installer
 WORKDIR /app
 COPY . .
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
-    pnpm install --frozen-lockfile --filter "@aggregator-dpg/api..."
+    pnpm install --frozen-lockfile --ignore-scripts --filter "@aggregator-dpg/api..."
 
 # ── builder: compile TypeScript ───────────────────────────────────────────────
 # pnpm runs `build` topologically across the api subgraph, ensuring every

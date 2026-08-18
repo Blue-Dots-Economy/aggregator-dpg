@@ -8,10 +8,9 @@ import { useTranslations, useLocale } from 'next-intl';
 import { Button } from '../../../components/ui/Button';
 import { StatusPill } from '../../../components/ui/StatusPill';
 import { Avatar } from '../../../components/ui/Avatar';
-import { SegmentedTabs, type SegmentedTab } from '../../../components/ui/SegmentedTabs';
 import { Topbar } from '../../../components/shell/Topbar';
 import { I, type IconName } from '../../../icons';
-import { useOppProviders, useDashboard } from '../../../hooks/useDashboard';
+import { useDashboard } from '../../../hooks/useDashboard';
 import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
 import { dashboardService, type LifecycleFilter } from '../../../services/dashboard.service';
 import { mapDirectional } from '../../../services/row-mapping';
@@ -28,8 +27,6 @@ import type {
   Provider,
   Seeker,
 } from '../../../types';
-
-type Tab = 'seekers' | 'providers' | 'opp';
 
 /**
  * Indexes a domain's `status_rules` by status key so the dashboard can
@@ -234,7 +231,7 @@ function SummaryBar({
           {t('summary.total', { count: fmtCount(total) })}
         </span>
       </div>
-      <div className="w-px self-stretch bg-[var(--bd-border)] mx-1 hidden sm:block" />
+      <div className="w-px self-stretch bg-(--bd-border) mx-1 hidden sm:block" />
       <span className="text-[13px] text-ink-500 font-medium hidden sm:block">
         {t('summary.hint')}
       </span>
@@ -386,7 +383,7 @@ function FunnelCell({ total, parts }: FunnelCellProps) {
         createPortal(
           <div
             style={{ position: 'absolute', left: pos.x, top: pos.y, zIndex: 9999 }}
-            className="bg-white border border-[var(--bd-border)] rounded-[10px] bd-shadow-lg p-2.5 min-w-[160px] pointer-events-none animate-[fadeUp_.12s_ease-out]"
+            className="bg-white border border-(--bd-border) rounded-[10px] bd-shadow-lg p-2.5 min-w-[160px] pointer-events-none animate-[fadeUp_.12s_ease-out]"
           >
             <div className="flex flex-col gap-1.5">
               {parts.map((p, i) => (
@@ -396,7 +393,7 @@ function FunnelCell({ total, parts }: FunnelCellProps) {
                   <span className="font-semibold tabular-nums text-ink-900">{p.v}</span>
                 </div>
               ))}
-              <div className="border-t border-[var(--bd-border-soft)] mt-1 pt-1.5 flex items-center gap-2 text-[12px]">
+              <div className="border-t border-(--bd-border-soft) mt-1 pt-1.5 flex items-center gap-2 text-[12px]">
                 <span className="text-ink-400 flex-1">Total</span>
                 <span className="font-display font-bold tabular-nums text-ink-900">{total}</span>
               </div>
@@ -451,7 +448,7 @@ function ProgressTiny({ pct, title }: { pct: number; title?: string }) {
         createPortal(
           <div
             style={{ position: 'absolute', left: pos.x, top: pos.y, zIndex: 9999 }}
-            className="bg-white border border-[var(--bd-border)] rounded-[10px] bd-shadow-lg px-2.5 py-1.5 pointer-events-none animate-[fadeUp_.12s_ease-out]"
+            className="bg-white border border-(--bd-border) rounded-[10px] bd-shadow-lg px-2.5 py-1.5 pointer-events-none animate-[fadeUp_.12s_ease-out]"
           >
             <div className="flex items-center gap-2 text-[12px] min-w-[120px]">
               <span className="text-ink-500 flex-1">{label}</span>
@@ -642,7 +639,7 @@ function BulkActionBar({
   };
 
   return (
-    <div className="px-5 py-2.5 flex items-center gap-3 border-b border-[var(--bd-border)] bg-[var(--bd-primary-50)]">
+    <div className="px-5 py-2.5 flex items-center gap-3 border-b border-(--bd-border) bg-(--bd-primary-50)">
       <span className="text-[12.5px] font-semibold text-primary-600 whitespace-nowrap">
         {t('bulk.selected', { count: selectedRows.length })}
       </span>
@@ -912,7 +909,7 @@ function ParticipantTable<R extends ParticipantBase>({
 
   return (
     <div className="bd-card bd-shadow overflow-hidden">
-      <div className="px-5 py-4 flex items-center gap-3 border-b border-[var(--bd-border)]">
+      <div className="px-5 py-4 flex items-center gap-3 border-b border-(--bd-border)">
         <div className="font-display font-bold text-[15px] text-ink-900">
           {kind === 'opp'
             ? t('table.opportunityProviders')
@@ -971,7 +968,7 @@ function ParticipantTable<R extends ParticipantBase>({
             {filterOpen && (
               <div
                 role="menu"
-                className="absolute right-0 top-full mt-1 z-20 min-w-[180px] bg-white border border-[var(--bd-border)] rounded-[10px] bd-shadow-lg p-1"
+                className="absolute right-0 top-full mt-1 z-20 min-w-[180px] bg-white border border-(--bd-border) rounded-[10px] bd-shadow-lg p-1"
               >
                 {options.map((opt) => {
                   const active = statusFilter === opt.value;
@@ -987,7 +984,7 @@ function ParticipantTable<R extends ParticipantBase>({
                       }}
                       className={`w-full text-left px-2.5 py-1.5 rounded-md text-[12.5px] flex items-center justify-between ${
                         active
-                          ? 'bg-[var(--bd-primary-50)] text-primary-600 font-semibold'
+                          ? 'bg-(--bd-primary-50) text-primary-600 font-semibold'
                           : 'text-ink-700 hover:bg-ink-50'
                       }`}
                     >
@@ -1017,7 +1014,7 @@ function ParticipantTable<R extends ParticipantBase>({
       {/* Gmail-style: the header checkbox only selects the current page; this
           banner lets the operator expand to every matching row across pages. */}
       {(showSelectAllMatching || selectedAllMatching) && (
-        <div className="px-5 py-2 flex items-center justify-center gap-2 border-b border-[var(--bd-border)] bg-[var(--bd-primary-50)] text-[12.5px] text-ink-600">
+        <div className="px-5 py-2 flex items-center justify-center gap-2 border-b border-(--bd-border) bg-(--bd-primary-50) text-[12.5px] text-ink-600">
           {selectedAllMatching ? (
             <>
               <span>{t('bulk.allMatchingSelected', { count: selected.size })}</span>
@@ -1261,7 +1258,7 @@ function PaginationFooter({
   // so dashboards with many pages stay readable.
   const pageList = buildPageList(page, totalPages);
   return (
-    <div className="px-5 py-3 border-t border-[var(--bd-border)] flex items-center justify-between text-[12.5px] text-ink-500">
+    <div className="px-5 py-3 border-t border-(--bd-border) flex items-center justify-between text-[12.5px] text-ink-500">
       <div>
         {showSearchSummary
           ? t('pagination.matching', { shown: visibleCount, rowsOnPage })
@@ -1288,7 +1285,7 @@ function PaginationFooter({
                 key={p}
                 type="button"
                 aria-current="page"
-                className="px-3 py-1 rounded-md bg-[var(--bd-primary-50)] text-primary-600 font-semibold"
+                className="px-3 py-1 rounded-md bg-(--bd-primary-50) text-primary-600 font-semibold"
               >
                 {p}
               </button>
@@ -1440,6 +1437,9 @@ function SeekersTab() {
           page,
           limit: PAGE_SIZE,
           ...(filterActive ? { status: statusFilter } : {}),
+          ...(lifecycleFilter === 'draft' || lifecycleFilter === 'live'
+            ? { lifecycle: lifecycleFilter }
+            : {}),
         }
       : undefined,
   );
@@ -1494,6 +1494,13 @@ function SeekersTab() {
       page: 1,
       limit: slice?.total_matching ?? total ?? PAGE_SIZE,
       ...(filterActive ? { status: statusFilter } : {}),
+      // Forward the lifecycle filter too: `total_matching` (the `limit` above)
+      // is the lifecycle-narrowed count, so the fetch must be narrowed the same
+      // way — else "Select all N matching" pulls N unfiltered rows and the
+      // client-side filter below finds almost none. Mirror the useDashboard call.
+      ...(lifecycleFilter === 'draft' || lifecycleFilter === 'live'
+        ? { lifecycle: lifecycleFilter }
+        : {}),
     });
     const all = (res.by_domain[seekerDomainId]?.items ?? []).map((p, i) =>
       toSeekerRow(p, locale, i),
@@ -1664,6 +1671,19 @@ function fmtCount(n: number | null | undefined): string {
  * table does not yet call. Missing fields render as em-dashes; the
  * `complete` profile bar uses `profile_completion_pct` from the rollup.
  */
+/**
+ * Resolves a row's lifecycle from signalstack's authoritative `lifecycle_status`
+ * (`draft`/`live`/`paused`, with the consent + schema go-live gates already
+ * applied server-side), falling back to the completion heuristic only for an
+ * older signalstack that omits the field. The heuristic mislabels a
+ * schema-complete-but-unconsented profile (genuinely `draft`) as `live`, so it
+ * is a last resort — see #558/#627.
+ */
+function resolveLifecycleStatus(raw: unknown, completion: number): LifecycleStatus {
+  if (raw === 'draft' || raw === 'live' || raw === 'paused') return raw;
+  return completion >= 100 ? 'live' : 'draft';
+}
+
 function toSeekerRow(participant: Record<string, unknown>, locale: string, index: number): Seeker {
   // Row key: profile_item_id (one row per profile), else the array index.
   // user_id is not unique per row (a user may own many profiles), so it is no
@@ -1675,13 +1695,10 @@ function toSeekerRow(participant: Record<string, unknown>, locale: string, index
   );
   const completion =
     typeof participant.profile_completion_pct === 'number' ? participant.profile_completion_pct : 0;
-  // Lifecycle is derived from completion %: `live` iff the profile is 100%
-  // complete, `draft` otherwise. signals no longer exposes a per-item
-  // completion/lifecycle on the responses we read, so the rollup's
-  // `profile_completion_pct` is the source of truth.
-  const lifecycleFields: Pick<Seeker, 'lifecycle_status'> = {
-    lifecycle_status: completion >= 100 ? 'live' : 'draft',
-  };
+  // Lifecycle from signalstack's authoritative row status, heuristic fallback
+  // only (see resolveLifecycleStatus).
+  const lifecycle_status = resolveLifecycleStatus(participant.lifecycle_status, completion);
+  const lifecycleFields: Pick<Seeker, 'lifecycle_status'> = { lifecycle_status };
   const created =
     typeof participant.profile_created_at === 'string' ? participant.profile_created_at : '';
   const updated =
@@ -1803,6 +1820,9 @@ function ProvidersTab() {
           page,
           limit: PAGE_SIZE,
           ...(filterActive ? { status: statusFilter } : {}),
+          ...(lifecycleFilter === 'draft' || lifecycleFilter === 'live'
+            ? { lifecycle: lifecycleFilter }
+            : {}),
         }
       : undefined,
   );
@@ -1840,6 +1860,13 @@ function ProvidersTab() {
       page: 1,
       limit: slice?.total_matching ?? total ?? PAGE_SIZE,
       ...(filterActive ? { status: statusFilter } : {}),
+      // Forward the lifecycle filter too: `total_matching` (the `limit` above)
+      // is the lifecycle-narrowed count, so the fetch must be narrowed the same
+      // way — else "Select all N matching" pulls N unfiltered rows and the
+      // client-side filter below finds almost none. Mirror the useDashboard call.
+      ...(lifecycleFilter === 'draft' || lifecycleFilter === 'live'
+        ? { lifecycle: lifecycleFilter }
+        : {}),
     });
     const all = (res.by_domain[providerDomainId]?.items ?? []).map((p, i) =>
       toProviderRow(p, locale, i),
@@ -2004,108 +2031,6 @@ function toProviderRow(
   return { ...seeker, role: '—' };
 }
 
-function OppProvidersTab() {
-  const t = useTranslations('dashboard');
-  const { data, isLoading, isError } = useOppProviders();
-  return (
-    <div className="flex flex-col gap-5">
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <StatCard
-          tone="active"
-          icon="spark"
-          count="11"
-          label={t('opp.activeProgramsLabel')}
-          hint={t('opp.activeProgramsHint')}
-        />
-        <StatCard
-          tone="satisfied"
-          icon="check"
-          count="5"
-          label={t('opp.onboardedLabel')}
-          hint={t('opp.onboardedHint')}
-        />
-        <StatCard
-          tone="risk"
-          icon="alert"
-          count="2"
-          label={t('opp.atRiskLabel')}
-          hint={t('opp.atRiskHint')}
-        />
-        <StatCard
-          tone="inactive"
-          icon="pause"
-          count="0"
-          label={t('opp.inactiveLabel')}
-          hint={t('opp.inactiveHint')}
-        />
-      </div>
-
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <MiniStat label={t('opp.totalPrograms')} value="18" delta="+2" deltaTone="up" />
-        <MiniStat label={t('opp.activeCohorts')} value="31" delta="+5" deltaTone="up" />
-        <MiniStat label={t('opp.traineesEngaged')} value="612" delta="+58" deltaTone="up" />
-        <MiniStat label={t('opp.placementRate')} value="46%" delta="↑ 4%" deltaTone="up" />
-      </div>
-
-      {isLoading ? (
-        <LoadingCard />
-      ) : isError ? (
-        <ErrorCard />
-      ) : (
-        <ParticipantTable kind="opp" rows={data ?? []} />
-      )}
-    </div>
-  );
-}
-
-/**
- * Builds the seeker tab label with the live participants_total from the
- * signalstack dashboard. Dot + count are suppressed while the rollup
- * loads so the chip doesn't flash a stale "·" with no number.
- *
- * @param count - Live total from the dashboard rollup; omit to suppress the chip.
- * @param label - Localised tab label string (e.g. from `t('tabs.seekers')`).
- */
-function seekerTabLabel(count: number | undefined, label: string): SegmentedTab<Tab> {
-  return {
-    id: 'seekers',
-    label: (
-      <span className="inline-flex items-center gap-2">
-        <I.users size={14} /> {label}
-        {count !== undefined && (
-          <>
-            <span className="text-ink-300">·</span> {count}
-          </>
-        )}
-      </span>
-    ),
-  };
-}
-
-/**
- * Builds the provider tab label. Count source is TBD — signalstack's
- * dashboard endpoint is seeker-only today, so the chip stays
- * count-less for the provider tab until the provider rollout lands.
- *
- * @param count - Live total from the dashboard rollup; omit to suppress the chip.
- * @param label - Localised tab label string (e.g. from `t('tabs.providers')`).
- */
-function providerTabLabel(count: number | undefined, label: string): SegmentedTab<Tab> {
-  return {
-    id: 'providers',
-    label: (
-      <span className="inline-flex items-center gap-2">
-        <I.briefcase size={14} /> {label}
-        {count !== undefined && (
-          <>
-            <span className="text-ink-300">·</span> {count}
-          </>
-        )}
-      </span>
-    ),
-  };
-}
-
 export default function DashboardPageRoot() {
   const rawProfile = useProfileRaw();
   // Wait for the profile to resolve before mounting any tab — the SeekersTab
@@ -2145,22 +2070,6 @@ function DashboardContent({ aggregatorType }: { aggregatorType: string }) {
   const primaryDomainCfg = cfg.domains?.find((d) => d.id === aggregatorType);
   const primaryDomain = primaryDomainCfg?.id;
   const isProviderLike = !!primaryDomain && primaryDomain === cfg.domains?.[1]?.id;
-  const { data: dashboard } = useDashboard(primaryDomain ? { domain: primaryDomain } : undefined);
-  const liveCount = primaryDomain
-    ? dashboard?.by_domain[primaryDomain]?.rollup.total_items
-    : undefined;
-  // Tab label reads from the network config's `plural_label` so orange's
-  // `tourist` renders as "Tourists" not "Seekers".
-  const primaryLabel =
-    primaryDomainCfg?.plural_label ?? (isProviderLike ? t('tabs.providers') : t('tabs.seekers'));
-  const tabItems = useMemo<SegmentedTab<Tab>[]>(
-    () =>
-      isProviderLike
-        ? [providerTabLabel(liveCount, primaryLabel)]
-        : [seekerTabLabel(liveCount, primaryLabel)],
-    [isProviderLike, liveCount, primaryLabel],
-  );
-  const [tab, setTab] = useState<Tab>(isProviderLike ? 'providers' : 'seekers');
 
   return (
     <div className="fade-up">
@@ -2178,14 +2087,9 @@ function DashboardContent({ aggregatorType }: { aggregatorType: string }) {
 
       {/* Single-domain aggregators render no tab strip — the summary bar
           inside each tab already carries the domain label + live total
-          (design: redundant pill removed). */}
-      {tabItems.length > 1 && (
-        <SegmentedTabs<Tab> value={tab} onChange={setTab} items={tabItems} className="mb-6" />
-      )}
-
-      {tab === 'seekers' && <SeekersTab />}
-      {tab === 'providers' && <ProvidersTab />}
-      {tab === 'opp' && <OppProvidersTab />}
+          (design: redundant pill removed). Which tab renders is fixed by
+          the aggregator's own type; nothing lets the user switch it. */}
+      {isProviderLike ? <ProvidersTab /> : <SeekersTab />}
     </div>
   );
 }

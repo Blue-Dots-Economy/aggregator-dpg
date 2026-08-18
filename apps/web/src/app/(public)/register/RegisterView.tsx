@@ -150,7 +150,7 @@ export function RegisterView({
                     onClick={() => setTab(key)}
                     className={`rounded-[11px] px-3 py-[13px] text-center text-[15px] font-semibold tracking-[-0.1px] whitespace-nowrap cursor-pointer transition-[background,color,box-shadow] duration-200 ${
                       active
-                        ? 'bg-[var(--bd-primary)] text-white shadow-[0_4px_12px_color-mix(in_srgb,var(--bd-primary)_28%,transparent)]'
+                        ? 'bg-(--bd-primary) text-white shadow-[0_4px_12px_color-mix(in_srgb,var(--bd-primary)_28%,transparent)]'
                         : 'bg-transparent text-slate-500 hover:text-ink-900'
                     }`}
                   >

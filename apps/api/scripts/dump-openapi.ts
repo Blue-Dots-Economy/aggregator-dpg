@@ -7,6 +7,13 @@ import { writeFile } from 'node:fs/promises';
 
 process.env.API_REFERENCE_ENABLED = 'true';
 process.env.API_REFERENCE_FORCE = 'true';
+// `DATABASE_URL` has no source default — it carries credentials, so the config
+// schema requires it rather than falling back to a literal (secrets:S6698).
+// This script only builds the Fastify app to serialise its route metadata and
+// never opens a connection (`pg.Pool` is lazy), so a credential-free
+// placeholder satisfies startup validation. `??=` so an already-exported value
+// wins: the spec output does not depend on this URL either way.
+process.env.DATABASE_URL ??= 'postgres://localhost:5432/aggregator_spec_dump';
 // Reuses the repo's existing public-origin env (decision during Task 4 review:
 // no separate PUBLIC_API_BASE_URL — one source of truth).
 // Generic host by design: deployments are per instance, so the published

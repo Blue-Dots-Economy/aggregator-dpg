@@ -12,8 +12,8 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const kindStyles: Record<ButtonKind, string> = {
   primary: 'bg-primary text-white hover:bg-primary-600 bd-shadow',
-  ghost: 'bg-white text-ink-700 border border-[var(--bd-border)] hover:bg-ink-50',
-  soft: 'bg-[var(--bd-primary-50)] text-primary-600 hover:bg-[var(--bd-primary-100)]',
+  ghost: 'bg-white text-ink-700 border border-(--bd-border) hover:bg-ink-50',
+  soft: 'bg-(--bd-primary-50) text-primary-600 hover:bg-(--bd-primary-100)',
   danger: 'bg-rose-50 text-rose-700 hover:bg-rose-100',
 };
 

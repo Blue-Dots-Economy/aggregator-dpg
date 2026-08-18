@@ -148,7 +148,8 @@ Everything else has working dev defaults. Then add the hosts entry (once):
 
 ```bash
 # macOS / Linux
-echo "127.0.0.1 keycloak" | sudo tee -a /etc/hosts
+grep -qE '^[[:space:]]*127\.0\.0\.1[[:space:]]+keycloak([[:space:]]|$)' /etc/hosts \
+  || sudo sh -c "printf '\n127.0.0.1 keycloak\n' >> /etc/hosts"
 
 # Windows (PowerShell as Administrator)
 Add-Content C:\Windows\System32\drivers\etc\hosts "127.0.0.1 keycloak"
@@ -346,7 +347,9 @@ app images:
 ```bash
 cd aggregator-dpg/local-setup
 cp .env.example .env                                # then set ADMIN_EMAILS=you@yourorg.com
-echo "127.0.0.1 keycloak" | sudo tee -a /etc/hosts  # once (browser + host apps resolve the OIDC issuer)
+# once (browser + host apps resolve the OIDC issuer); safe to re-run
+grep -qE '^[[:space:]]*127\.0\.0\.1[[:space:]]+keycloak([[:space:]]|$)' /etc/hosts \
+  || sudo sh -c "printf '\n127.0.0.1 keycloak\n' >> /etc/hosts"
 
 docker compose up -d \
   postgres signals-redis aggregator-redis \
@@ -478,7 +481,7 @@ only these two:
 
 ```dotenv
 # Issuer must be keycloak:8080 (not localhost) — same reason as the API
-OIDC_ISSUER=http://keycloak:8080/realms/aggregator
+OIDC_ISSUER=http://keycloak:8080/realms/bluedots
 # Signed-cookie key
 SESSION_KEY=<same as local-setup/.env, >=32 chars>
 ```
@@ -574,7 +577,7 @@ Step 2 (`db:push:api` / `db:init:api` / `db:seed:services:api`) and Step 3
    ┌───────────────┐     ┌──────────────┐        ┌──────────────────┐
    │  Keycloak      │◀───▶│ aggregator-web│──────▶│  aggregator-api   │
    │  :8080         │     │ (Next.js BFF) │        │  (Fastify) :4000  │
-   │  realm=aggreg. │     └──────────────┘        └────────┬─────────┘
+   │  realm=bluedots│     └──────────────┘        └────────┬─────────┘
    └───────────────┘                                       │  x-api-key +
         ▲  OTP mail                                         │  x-acting-org-id
         │                                                   ▼
@@ -589,11 +592,26 @@ Step 2 (`db:push:api` / `db:init:api` / `db:seed:services:api`) and Step 3
    signals-redis :5555 (pw)      aggregator-redis :6379     signals-ui :5173
 ```
 
-- **Auth:** aggregator uses **Keycloak** (OIDC + email/phone OTP). signals uses
-  **better-auth** with its own OTP. They are separate identity systems.
-- **Cross-DPG:** aggregator-api / worker call signals-api over the two-header
-  service-auth model (`x-api-key` + `x-acting-org-id`) — see §4 and
-  `signals-dpg/docs/operations/integrating-dpgs.md`.
+- **Auth:** one Keycloak, one `bluedots` realm, shared by both DPGs — their
+  clients (`aggregator-portal`/`aggregator-api`/`aggregator-bff` and
+  `signals-ui`/`signals-api`) live side by side in it. signals-api runs with
+  `AUTH_PROVIDER=keycloak` — Keycloak is the only accepted issuer. The earlier
+  transitional `dual` mode (Keycloak token _alongside_ a better-auth session)
+  has been removed from signals-dpg, and its `assertAuthProviderSupported`
+  guard hard-fails at boot on any other value, so this is not optional.
+  aggregator's own login is unaffected. signals-api runs with
+  `SELF_SIGNUP_MODE=allowed` (matching
+  signals-dpg's own local-setup default) so a Keycloak identity with no
+  pre-existing local `user` row can still complete first login through
+  signals-ui — set `SELF_SIGNUP_MODE=gated` in `.env` to test the admin-onboarded
+  flow instead, at the cost of that first-login path failing with
+  `SELF_SIGNUP_DISABLED` for any user not pre-seeded into the signals db.
+- **Cross-DPG:** aggregator-api / worker still call signals-api over the
+  two-header service-auth model (`x-api-key` + `x-acting-org-id`) — see §4 and
+  `signals-dpg/docs/operations/integrating-dpgs.md`. Moving this to a Keycloak
+  client-credentials bearer token is a separate, not-yet-done phase; the
+  `aggregator-dpg` service client already exists in the realm (unused until
+  then).
 - **Networks/domains:** both are configured for the `blue_dot` network with
   `seeker` + `provider` domains. Change `AGGREGATOR_NETWORK` /
   `SIGNALS_SERVED_DOMAINS` in `.env` to target another (e.g. `purple_dot`).

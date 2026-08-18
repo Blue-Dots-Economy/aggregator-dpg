@@ -12,6 +12,8 @@ import {
 } from '../services/aggregator-store/index.js';
 import { IdpAdminFake, _setIdpAdmin } from '../services/idp-admin/index.js';
 import { SignalStackWriterFake } from '@aggregator-dpg/signalstack-writer/testing';
+import { err } from '@aggregator-dpg/shared-primitives/result';
+import { UpstreamError } from '@aggregator-dpg/shared-primitives/errors';
 
 const AGG_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const AGG_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -58,7 +60,7 @@ describe('blue-dots routes', () => {
   beforeEach(async () => {
     _resetJwks();
     process.env.KEYCLOAK_URL = 'http://kc.local';
-    process.env.KEYCLOAK_REALM = 'aggregator';
+    process.env.KEYCLOAK_REALM = 'bluedots';
     // Treat signalstack as enabled so getSignalStackWriter returns our fake.
     process.env.SIGNALSTACK_BASE_URL = 'http://stub-signalstack';
     process.env.SIGNALSTACK_ADMIN_KEY = 'stub-key';
@@ -219,6 +221,51 @@ describe('blue-dots routes', () => {
     });
     expect(res.statusCode).toBe(400);
   });
+
+  it('500 INTERNAL when signalstack is not configured', async () => {
+    _setSignalStackWriter(null);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/dashboard/items?domain=seeker',
+      headers: { authorization: 'Bearer agg-a-token' },
+    });
+    expect(res.statusCode).toBe(500);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('INTERNAL');
+  });
+
+  it('500 INTERNAL when the items page fetch fails', async () => {
+    writer.listItemsByAggregator = async () =>
+      err(new UpstreamError('signalstack down', { code: 'SIGNALSTACK_SERVER_ERROR' }));
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/dashboard/items?domain=seeker',
+      headers: { authorization: 'Bearer agg-a-token' },
+    });
+    expect(res.statusCode).toBe(500);
+    const body = res.json() as { error: { code: string; detail: string } };
+    expect(body.error.code).toBe('INTERNAL');
+    expect(body.error.detail).toContain('Signalstack list failed');
+  });
+
+  it('500 INTERNAL when the tile-count sweep fetch fails (items page still fine)', async () => {
+    const original = writer.listItemsByAggregator.bind(writer);
+    writer.listItemsByAggregator = async (args) => {
+      // Items page uses the default limit (50); the tile sweep pages at 100.
+      if (args.limit === 100) {
+        return err(new UpstreamError('signalstack down', { code: 'SIGNALSTACK_SERVER_ERROR' }));
+      }
+      return original(args);
+    };
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/dashboard/items?domain=seeker',
+      headers: { authorization: 'Bearer agg-a-token' },
+    });
+    expect(res.statusCode).toBe(500);
+    const body = res.json() as { error: { code: string; detail: string } };
+    expect(body.error.code).toBe('INTERNAL');
+    expect(body.error.detail).toContain('Signalstack tile list failed');
+  });
 });
 
 describe('GET /v1/dashboard', () => {
@@ -230,7 +277,7 @@ describe('GET /v1/dashboard', () => {
   beforeEach(async () => {
     _resetJwks();
     process.env.KEYCLOAK_URL = 'http://kc.local';
-    process.env.KEYCLOAK_REALM = 'aggregator';
+    process.env.KEYCLOAK_REALM = 'bluedots';
     process.env.SIGNALSTACK_BASE_URL = 'http://stub-signalstack';
     process.env.SIGNALSTACK_ADMIN_KEY = 'stub-key';
     process.env.SIGNALSTACK_ACTING_ORG_ID = 'org_platform';
@@ -385,6 +432,37 @@ describe('GET /v1/dashboard', () => {
     expect(body.metadata.refreshed).toBe(true);
   });
 
+  it('forwards ?lifecycle=draft to signalstack as a single-lifecycle filter', async () => {
+    const spy = vi.spyOn(writer, 'fetchDashboard');
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/dashboard?domain=seeker&lifecycle=draft',
+      headers: { authorization: 'Bearer agg-a-approved-with-org' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(spy).toHaveBeenCalledWith(expect.objectContaining({ lifecycle: ['draft'] }));
+  });
+
+  it('defaults to draft+live when no ?lifecycle= is supplied', async () => {
+    const spy = vi.spyOn(writer, 'fetchDashboard');
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/dashboard?domain=seeker',
+      headers: { authorization: 'Bearer agg-a-approved-with-org' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(spy).toHaveBeenCalledWith(expect.objectContaining({ lifecycle: ['draft', 'live'] }));
+  });
+
+  it('rejects an unknown ?lifecycle= value with 400', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/dashboard?domain=seeker&lifecycle=bogus',
+      headers: { authorization: 'Bearer agg-a-approved-with-org' },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
   it('falls back to aggregators.signalstack_org_id when claim missing', async () => {
     const res = await app.inject({
       method: 'GET',
@@ -532,6 +610,110 @@ describe('GET /v1/dashboard', () => {
     });
     expect(spy).toHaveBeenCalledWith(expect.objectContaining({ refresh: false }));
   });
+
+  it('403 FORBIDDEN when the token has no aggregator_id claim', async () => {
+    _setAccessTokenVerifier(async (token) => {
+      if (token === 'no-agg') return { sub: 'kc-x', decision_made: 'approved' };
+      throw new Error('invalid token');
+    });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/dashboard',
+      headers: { authorization: 'Bearer no-agg' },
+    });
+    expect(res.statusCode).toBe(403);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('FORBIDDEN');
+  });
+
+  it('400 SCHEMA_VALIDATION on an unknown domain', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/dashboard?domain=bogus',
+      headers: { authorization: 'Bearer agg-a-approved-with-org' },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('500 INTERNAL when signalstack is not configured', async () => {
+    _setSignalStackWriter(null);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/dashboard',
+      headers: { authorization: 'Bearer agg-a-approved-with-org' },
+    });
+    expect(res.statusCode).toBe(500);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('INTERNAL');
+  });
+
+  it('500 INTERNAL when fetchDashboard fails', async () => {
+    writer.fetchDashboard = async () =>
+      err(new UpstreamError('signalstack down', { code: 'SIGNALSTACK_SERVER_ERROR' }));
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/dashboard',
+      headers: { authorization: 'Bearer agg-a-approved-with-org' },
+    });
+    expect(res.statusCode).toBe(500);
+    const body = res.json() as { error: { code: string; detail: string } };
+    expect(body.error.code).toBe('INTERNAL');
+    expect(body.error.detail).toContain('Signalstack dashboard fetch failed');
+  });
+
+  it('503 DB_UNAVAILABLE when resolving the acting org id via the DB fallback fails', async () => {
+    aggregatorStore.findById = async () => ({
+      ok: false,
+      error: { code: 'DB_UNAVAILABLE', message: 'db down' },
+    });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/dashboard',
+      // No signalstack_org_id claim — forces the DB fallback lookup.
+      headers: { authorization: 'Bearer agg-a-approved-no-claim' },
+    });
+    expect(res.statusCode).toBe(503);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('DB_UNAVAILABLE');
+  });
+
+  it('503 SIGNALSTACK_ORG_NOT_REGISTERED when neither the claim nor the DB row carry an org id', async () => {
+    // requireApproved() auto-backfills a missing signalstack_org_id via
+    // upsertAggregator on every approved request — fail it here so AGG_B's
+    // row stays without an org id and the route's own fallback also misses.
+    writer.upsertAggregator = async () =>
+      err(new UpstreamError('signalstack down', { code: 'SIGNALSTACK_SERVER_ERROR' }));
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/dashboard',
+      // AGG_B has signalstackOrgId: null and the token carries no claim either.
+      headers: { authorization: 'Bearer agg-b-approved-null-store' },
+    });
+    expect(res.statusCode).toBe(503);
+    expect((res.json() as { error: { code: string } }).error.code).toBe(
+      'SIGNALSTACK_ORG_NOT_REGISTERED',
+    );
+  });
+
+  it('400 SCHEMA_VALIDATION on an unknown domain for /v1/dashboard/export', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/dashboard/export?domain=bogus',
+      headers: { authorization: 'Bearer agg-a-approved-with-org' },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('500 INTERNAL when exportDashboardCsv fails', async () => {
+    writer.exportDashboardCsv = async () =>
+      err(new UpstreamError('signalstack down', { code: 'SIGNALSTACK_SERVER_ERROR' }));
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/dashboard/export',
+      headers: { authorization: 'Bearer agg-a-approved-with-org' },
+    });
+    expect(res.statusCode).toBe(500);
+    const body = res.json() as { error: { code: string; detail: string } };
+    expect(body.error.code).toBe('INTERNAL');
+    expect(body.error.detail).toContain('Signalstack dashboard export failed');
+  });
 });
 
 describe('POST /v1/dashboard/export/profiles', () => {
@@ -543,7 +725,7 @@ describe('POST /v1/dashboard/export/profiles', () => {
   beforeEach(async () => {
     _resetJwks();
     process.env.KEYCLOAK_URL = 'http://kc.local';
-    process.env.KEYCLOAK_REALM = 'aggregator';
+    process.env.KEYCLOAK_REALM = 'bluedots';
     process.env.SIGNALSTACK_BASE_URL = 'http://stub-signalstack';
     process.env.SIGNALSTACK_ADMIN_KEY = 'stub-key';
     process.env.SIGNALSTACK_ACTING_ORG_ID = 'org_platform';
@@ -653,5 +835,51 @@ describe('POST /v1/dashboard/export/profiles', () => {
       payload: { item_ids: [], domain: 'seeker' },
     });
     expect(res.statusCode).toBe(400);
+  });
+
+  it('400 SCHEMA_VALIDATION on an unknown domain', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/dashboard/export/profiles',
+      headers: {
+        authorization: 'Bearer agg-a-approved-with-org',
+        'content-type': 'application/json',
+      },
+      payload: { item_ids: ['x'], domain: 'bogus' },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('500 INTERNAL when signalstack is not configured', async () => {
+    _setSignalStackWriter(null);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/dashboard/export/profiles',
+      headers: {
+        authorization: 'Bearer agg-a-approved-with-org',
+        'content-type': 'application/json',
+      },
+      payload: { item_ids: ['x'], domain: 'seeker' },
+    });
+    expect(res.statusCode).toBe(500);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('INTERNAL');
+  });
+
+  it('500 INTERNAL when fetchDecryptedProfiles fails', async () => {
+    writer.fetchDecryptedProfiles = async () =>
+      err(new UpstreamError('signalstack down', { code: 'SIGNALSTACK_SERVER_ERROR' }));
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/dashboard/export/profiles',
+      headers: {
+        authorization: 'Bearer agg-a-approved-with-org',
+        'content-type': 'application/json',
+      },
+      payload: { item_ids: ['x'], domain: 'seeker' },
+    });
+    expect(res.statusCode).toBe(500);
+    const body = res.json() as { error: { code: string; detail: string } };
+    expect(body.error.code).toBe('INTERNAL');
+    expect(body.error.detail).toContain('Signalstack profile decrypt failed');
   });
 });

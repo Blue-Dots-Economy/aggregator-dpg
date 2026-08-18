@@ -7,7 +7,11 @@
  */
 
 import { z } from 'zod';
-import { ConfigError } from '@aggregator-dpg/shared-primitives/errors';
+import {
+  assertSignalStackClientIdentity,
+  assertTlsPosture,
+  signalStackConfigFields,
+} from '@aggregator-dpg/shared-primitives/config';
 
 const ConfigSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
@@ -30,11 +34,13 @@ const ConfigSchema = z.object({
    * direct browser clients. Use `*` only in dev.
    */
   CORS_ORIGINS: z.string().default('http://localhost:3000,http://localhost:3100'),
-  /** Postgres connection string. Default points at the compose Postgres
-   *  exposed on host port 5433 (5432 is left to system Postgres). */
-  DATABASE_URL: z
-    .string()
-    .default('postgres://aggregator:aggregator-dev@localhost:5433/aggregator'),
+  /**
+   * Postgres connection string. Deliberately has **no default** — the URL
+   * carries credentials, so embedding one in source would ship a usable
+   * secret and mask a misconfigured deploy behind a silent fallback to
+   * localhost. Startup fails when it is unset.
+   */
+  DATABASE_URL: z.string().min(1, 'DATABASE_URL must be set'),
   /** Run pending DB migrations on startup. Disable in CI/test to avoid races. */
   RUN_MIGRATIONS_ON_BOOT: z
     .enum(['true', 'false'])
@@ -93,6 +99,19 @@ const ConfigSchema = z.object({
    * multiple comma-separated addresses. Unset ⇒ no CC header is added.
    */
   SUPPORT_CC_EMAIL: z.string().optional(),
+  /**
+   * Attachment budget for the contact-support form (#551): total decoded bytes
+   * across all attachments on one submission, and how many files it may carry.
+   * Served to the web form by `GET /v1/support/config`, so raising them needs no
+   * web rebuild. SES rejects a message over 10MB after base64 inflation, so
+   * ~7MB of original file is the practical ceiling whatever these say.
+   */
+  SUPPORT_ATTACHMENT_MAX_TOTAL_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(5 * 1024 * 1024),
+  SUPPORT_ATTACHMENT_MAX_FILES: z.coerce.number().int().positive().default(3),
 
   // ─── Object storage (bulk uploads + errors.csv) ──────────────────────────
   /**
@@ -190,10 +209,9 @@ const ConfigSchema = z.object({
   TRUST_PROXY: z.string().default('loopback,linklocal,uniquelocal'),
 
   // ─── SignalStack outward push ───────────────────────────────────────────
-  /** Base URL of the signalstack API. When unset, signalstack push is disabled. */
-  SIGNALSTACK_BASE_URL: z.string().url().optional(),
-  /** Admin api-key for signalstack onboard. Required when SIGNALSTACK_BASE_URL is set. */
-  SIGNALSTACK_ADMIN_KEY: z.string().optional(),
+  // Base + Keycloak-bearer credential fields are shared with the worker via
+  // @aggregator-dpg/shared-primitives/config; acting-org-id is api-only.
+  ...signalStackConfigFields,
   /**
    * Platform-wide signalstack organisation id under which admin aggregator
    * upserts are performed (sent as `x-acting-org-id`). Required when
@@ -201,45 +219,13 @@ const ConfigSchema = z.object({
    * each newly-approved aggregator as a signalstack org.
    */
   SIGNALSTACK_ACTING_ORG_ID: z.string().optional(),
-  /** item_network sent on every onboard call. */
-  SIGNALSTACK_ITEM_NETWORK: z.string().default('blue_dot'),
-  /** Per-request timeout for signalstack onboard calls. */
-  SIGNALSTACK_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
 
-/**
- * Fails hard (per designs/_DECISIONS.md D7) when TLS certificate verification
- * is disabled under a production environment; warns loudly in dev/staging so
- * the relaxation is never silent. This is the enforcement that makes the
- * insecure posture impossible in prod — the compose default flip alone is not
- * enough, because an operator can still export the var globally.
- *
- * Uses `process.emitWarning` (not the app logger) for the non-fatal path to
- * avoid a config↔logger import cycle at module load.
- *
- * @param c - Parsed runtime config.
- * @throws {ConfigError} When NODE_TLS_REJECT_UNAUTHORIZED=0 in production.
- */
-export function assertTlsPosture(c: Config): void {
-  // Node disables verification only for the exact string '0'.
-  if (c.NODE_TLS_REJECT_UNAUTHORIZED !== '0') return;
-  const env = c.INSTANCE_ENV ?? c.NODE_ENV;
-  const msg = 'NODE_TLS_REJECT_UNAUTHORIZED=0 disables all TLS certificate verification';
-  if (env === 'production') {
-    throw new ConfigError(`${msg}; refusing to start in production.`, {
-      code: 'INSECURE_TLS_IN_PROD',
-    });
-  }
-  process.emitWarning(
-    `${msg}. Allowed outside production (env=${env}); never use this on a VM/prod deploy.`,
-    { code: 'INSECURE_TLS_POSTURE' },
-  );
-}
-
 export const config: Config = ConfigSchema.parse(process.env);
 assertTlsPosture(config);
+assertSignalStackClientIdentity(config);
 
 export const corsOrigins: string[] = config.CORS_ORIGINS.split(',')
   .map((s) => s.trim())
@@ -309,6 +295,39 @@ export function supportCc(): string | undefined {
  */
 export function supportPortalLink(): string {
   return config.PUBLIC_PORTAL_URL;
+}
+
+/**
+ * Attachment limits for the contact-support form (#551).
+ *
+ * Read from the live environment at **call time**, mirroring
+ * {@link supportEmail}'s rationale: both the config endpoint and the submit
+ * handler need the current value, and tests must be able to vary the limits
+ * across cases within one Vitest worker, where the frozen `config` snapshot
+ * cannot change after first import.
+ *
+ * @returns The configured maximum total decoded bytes and file count, falling
+ *   back to 5MB / 3 files when unset or not a positive integer.
+ */
+export function supportAttachmentLimits(): { maxTotalBytes: number; maxFiles: number } {
+  const parsed = z
+    .object({
+      SUPPORT_ATTACHMENT_MAX_TOTAL_BYTES: z.coerce
+        .number()
+        .int()
+        .positive()
+        .catch(5 * 1024 * 1024)
+        .default(5 * 1024 * 1024),
+      SUPPORT_ATTACHMENT_MAX_FILES: z.coerce.number().int().positive().catch(3).default(3),
+    })
+    .parse({
+      SUPPORT_ATTACHMENT_MAX_TOTAL_BYTES: process.env.SUPPORT_ATTACHMENT_MAX_TOTAL_BYTES,
+      SUPPORT_ATTACHMENT_MAX_FILES: process.env.SUPPORT_ATTACHMENT_MAX_FILES,
+    });
+  return {
+    maxTotalBytes: parsed.SUPPORT_ATTACHMENT_MAX_TOTAL_BYTES,
+    maxFiles: parsed.SUPPORT_ATTACHMENT_MAX_FILES,
+  };
 }
 
 /**
