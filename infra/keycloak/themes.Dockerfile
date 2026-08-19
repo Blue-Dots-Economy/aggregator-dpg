@@ -23,6 +23,7 @@
 #     --build-arg HERO_TITLE_HIGHLIGHT='Purple Dots' \
 #     --build-arg HERO_TITLE_TAIL='discovery & services for people with disabilities.' \
 #     --build-arg HERO_SUBTITLE='Sign in to manage beneficiaries, service providers, and onboarding across the network.' \
+#     --build-arg EMAIL_SIGNOFF='Team ALIMCO' \
 #     -t registry.your.co/aggregator-kc-theme:purple-v1 .
 #
 # Or simpler — pass `--build-arg-file config/<network>/keycloak.env`.
@@ -53,6 +54,16 @@ ARG BRAND_LOGO_SLUG=purple-dot
 ARG BRAND_FONT_SANS=Inter, system-ui, sans-serif
 ARG BRAND_FONT_HEADING=Plus Jakarta Sans, system-ui, sans-serif
 ARG BRAND_FONT_BODY=Inter, system-ui, sans-serif
+# Sign-off on the login-OTP email (#626). The email theme's copy is otherwise
+# static, but this line differs per network (EkStep on Blue Dot, ALIMCO on
+# Purple Dot), so it is rebaked below from the network's keycloak.env like the
+# brand strings are. The default matches the checked-in messages_en.properties,
+# which is what the compose stack (mounting the theme tree directly) uses.
+# NB the quotes: an unquoted Dockerfile ARG default truncates at the first
+# space (the brand ARGs above have the same latent flaw, harmless only
+# because build-theme-image.sh always passes a keycloak.env that overrides
+# them). Without them this default bakes as "Team".
+ARG EMAIL_SIGNOFF="Team EkStep"
 
 # Theme source — read from the repo's checked-in theme tree.
 COPY infra/keycloak/themes /custom
@@ -83,6 +94,15 @@ RUN { \
       printf 'brandHeroBg=%s\n'         "${BRAND_HERO_BG}"; \
       printf 'brandHeroGrad=%s\n'       "${BRAND_HERO_GRAD}"; \
     } > /custom/otp/login/theme.properties
+
+# Same idea for the one per-network string in the EMAIL theme. Only this key is
+# rewritten — the rest of the copy stays reviewable in the theme tree rather
+# than being buried in a printf here. `|` as the sed delimiter so a sign-off
+# containing `/` cannot break the expression.
+RUN sed -i "s|^emailOtpSignoff=.*|emailOtpSignoff=${EMAIL_SIGNOFF}|" \
+      /custom/otp/email/messages/messages_en.properties \
+    && grep -qF -- "emailOtpSignoff=${EMAIL_SIGNOFF}" \
+      /custom/otp/email/messages/messages_en.properties
 
 # Only `otp` is re-baked. The `signals` child theme's properties keep their
 # `${env.SIGNALS_*:default}` form, with the checked-in defaults being signals'
