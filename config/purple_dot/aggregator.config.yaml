@@ -20,7 +20,7 @@ aggregator:
         name: beneficiary_name
         phone: mobile_number
         email: email
-      service_provider:
+      provider:
         name: contact_name
         phone: contact_phone
         email: contact_email
@@ -40,7 +40,7 @@ aggregator:
       singular: Seeker
       plural: Seekers
       tab_label: Seekers
-    service_provider:
+    provider:
       singular: Service Provider
       plural: Service Providers
       tab_label: Service Providers
