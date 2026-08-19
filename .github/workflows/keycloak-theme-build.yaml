@@ -38,6 +38,7 @@ on:
         options:
           - none
           - upsdm
+          - up-gzb
           - onetac
 
 concurrency:
