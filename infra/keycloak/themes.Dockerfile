@@ -51,6 +51,14 @@ ARG HERO_SUBTITLE=Sign in to manage participants, registrations, and onboarding 
 # brand.json-driven values (PR #355). Slug + font stack get baked
 # into theme.properties so the runtime never falls back to default.
 ARG BRAND_LOGO_SLUG=purple-dot
+# Hero-panel lockup: a filename inside img/brand/<BRAND_LOGO_SLUG>/, or empty to
+# keep the wordmark + strapline text. Empty by default because onetac and
+# orange-dot ship no logo-on-brand.png and would render a broken image.
+ARG BRAND_HERO_LOGO=
+# Strapline under the hero wordmark. Quoted for the same reason as
+# EMAIL_SIGNOFF below — an unquoted default truncates at the first space.
+# Blank it for a brand whose lockup artwork already carries the strapline.
+ARG BRAND_SEEDED_BY="Seeded by EkStep Foundation"
 ARG BRAND_FONT_SANS=Inter, system-ui, sans-serif
 ARG BRAND_FONT_HEADING=Plus Jakarta Sans, system-ui, sans-serif
 ARG BRAND_FONT_BODY=Inter, system-ui, sans-serif
@@ -85,6 +93,8 @@ RUN { \
       printf 'brandSsoLabel=%s\n'       "${BRAND_SSO_LABEL}"; \
       printf 'brandAppLabel=%s\n'       "${BRAND_APP_LABEL}"; \
       printf 'brandLogoSlug=%s\n'       "${BRAND_LOGO_SLUG}"; \
+      printf 'heroLogo=%s\n'            "${BRAND_HERO_LOGO}"; \
+      printf 'brandSeededBy=%s\n'       "${BRAND_SEEDED_BY}"; \
       printf 'brandFontSans=%s\n'       "${BRAND_FONT_SANS}"; \
       printf 'brandFontHeading=%s\n'    "${BRAND_FONT_HEADING}"; \
       printf 'brandFontBody=%s\n'       "${BRAND_FONT_BODY}"; \
