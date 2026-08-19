@@ -66,7 +66,7 @@
     "ui:enumNames": ["Seeker", "Provider", "Service Provider"]
   },
   "sub_org_name": {
-    "ui:placeholder": "e.g. GarvSe Centre, Doddaballapur"
+    "ui:placeholder": "e.g. GarvSe Centre, Ghaziabad"
   },
   "url": {
     "ui:placeholder": "https://yourorg.in",

@@ -24,8 +24,9 @@
     "state": {
       "type": "string",
       "title": "State",
+      "description": "Derived from the address block on this instance; not asked for separately.",
       "maxLength": 200,
-      "examples": ["Karnataka", "Maharashtra"]
+      "examples": ["Uttar Pradesh"]
     },
     "website": {
       "type": "string",
