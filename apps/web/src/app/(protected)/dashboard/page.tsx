@@ -1407,7 +1407,7 @@ interface DomainTabProps {
   domainId: string | undefined;
 }
 
-function SeekersTab({ domainId }: DomainTabProps) {
+function SeekersTab({ domainId }: Readonly<DomainTabProps>) {
   const t = useTranslations('dashboard');
   const locale = useLocale();
   // Signalstack's `/aggregator/dashboard` is the only endpoint that
@@ -1791,7 +1791,7 @@ function formatRelative(iso: string): string {
   return `${months}mo ago`;
 }
 
-function ProvidersTab({ domainId }: DomainTabProps) {
+function ProvidersTab({ domainId }: Readonly<DomainTabProps>) {
   const t = useTranslations('dashboard');
   const locale = useLocale();
   // Mirror SeekersTab: live counts come from the signalstack dashboard

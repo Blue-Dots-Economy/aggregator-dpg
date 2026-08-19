@@ -61,9 +61,9 @@ export function resolveSchemaRoot(): string {
 export function aggregatorSchemaRelPaths(file: string): string[] {
   const net = process.env.AGGREGATOR_NETWORK?.trim() || 'blue_dot';
   const brand = process.env.AGGREGATOR_BRAND?.trim();
-  const rel: string[] = [];
-  if (brand) rel.push(path.join(net, brand, 'schemas', 'aggregator', file));
-  rel.push(path.join(net, 'schemas', 'aggregator', file));
-  rel.push(path.join('schemas', 'aggregator', file));
-  return rel;
+  // Most specific first. A single expression rather than repeated `push` calls,
+  // so the ordering is readable in one glance and cannot be reordered by accident.
+  const relPath = (...prefix: string[]): string =>
+    path.join(...prefix, 'schemas', 'aggregator', file);
+  return brand ? [relPath(net, brand), relPath(net), relPath()] : [relPath(net), relPath()];
 }

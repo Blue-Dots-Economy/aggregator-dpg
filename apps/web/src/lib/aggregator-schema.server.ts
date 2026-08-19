@@ -49,7 +49,7 @@ export function resolveAggregatorSchemaPath(file: string): string {
   // beat the shared default in another.
   const candidates = rel.flatMap((r) => roots.map((root) => path.join(root, r)));
   const found = candidates.find((c) => existsSync(c));
-  return found ?? path.join(roots[0]!, rel[rel.length - 1]!);
+  return found ?? path.join(roots[0]!, rel.at(-1)!);
 }
 
 /**
