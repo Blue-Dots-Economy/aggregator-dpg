@@ -95,6 +95,9 @@ describe('getRegistrationValidator schema-not-found failure', () => {
     vi.resetModules();
     mockGetNetworkConfig.mockReset();
     vi.doMock('node:fs', () => ({
+      // schema-ref probes with existsSync; the validator still reads the file
+      // with readFileSync once a candidate resolves.
+      existsSync: () => false,
       readFileSync: () => {
         throw new Error('ENOENT');
       },

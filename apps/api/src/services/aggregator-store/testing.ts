@@ -71,6 +71,8 @@ export function buildAggregator(overrides: Partial<Aggregator> = {}): Aggregator
     contactEmail: overrides.contactEmail ?? contact.email.toLowerCase(),
     locations: [],
     consent: DEFAULT_CONSENT,
+    profile: {},
+    profileRef: null,
     status: 'pending',
     createdBy: 'system',
     updatedBy: 'system',

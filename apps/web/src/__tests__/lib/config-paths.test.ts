@@ -1,4 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { resolveSchemaRoot } from '@/lib/config-paths';
 
@@ -48,5 +49,55 @@ describe('resolveSchemaRoot', () => {
 
   it('falls back to defaults when CONFIG_ROOT/AGGREGATOR_NETWORK are unset', () => {
     expect(resolveSchemaRoot()).toBe(path.join('/app/config', 'blue_dot', 'schemas'));
+  });
+});
+
+// ─── Cross-package parity ────────────────────────────────────────────────────
+// `aggregatorSchemaRelPaths` exists twice on purpose: apps/web deliberately does
+// NOT depend on @aggregator-dpg/network-config, so the logic is mirrored rather
+// than imported. Two hand-synced copies of routing logic drift silently, and a
+// drift here means the API validates one schema file while the UI renders
+// another. This test makes that drift loud without adding the dependency — it
+// reads the sibling source off disk and compares the function bodies.
+describe('aggregatorSchemaRelPaths parity with @aggregator-dpg/network-config', () => {
+  /** Extracts a function body by name and strips comments + whitespace. */
+  function normalisedBody(source: string, fnName: string): string {
+    const start = source.indexOf(`export function ${fnName}(`);
+    expect(start).toBeGreaterThan(-1);
+    const open = source.indexOf('{', source.indexOf(')', start));
+    let depth = 0;
+    let end = open;
+    for (let i = open; i < source.length; i += 1) {
+      if (source[i] === '{') depth += 1;
+      if (source[i] === '}') {
+        depth -= 1;
+        if (depth === 0) {
+          end = i;
+          break;
+        }
+      }
+    }
+    return source
+      .slice(open + 1, end)
+      .replace(/\/\/[^\n]*/g, '')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  it('has a byte-equivalent body in both copies', () => {
+    const webSrc = readFileSync(path.resolve(process.cwd(), 'src/lib/config-paths.ts'), 'utf8');
+    const pkgSrc = readFileSync(
+      path.resolve(process.cwd(), '../../packages/network-config/src/paths.ts'),
+      'utf8',
+    );
+    const webBody = normalisedBody(webSrc, 'aggregatorSchemaRelPaths');
+    // The package copy reads from an injected `env` bag; the web copy reads
+    // `process.env` directly. Normalise that one deliberate difference away.
+    const pkgBody = normalisedBody(pkgSrc, 'aggregatorSchemaRelPaths').replace(
+      /\benv\./g,
+      'process.env.',
+    );
+    expect(webBody).toBe(pkgBody);
   });
 });

@@ -240,10 +240,7 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
         <span>{attestation ? attestation.content : t('csv.attestation_fallback')}</span>
       </label>
 
-      <div className="flex items-center justify-between mt-4">
-        <div className="text-[12px] text-ink-400 flex items-center gap-2">
-          <I.shield size={14} className="text-emerald-500" /> {t('csv.security_note')}
-        </div>
+      <div className="flex items-center justify-end mt-4">
         <Button onClick={onUpload} disabled={!pickedFile || upload.isPending || !attested}>
           {upload.isPending ? t('csv.uploading') : t('csv.upload_button')}
         </Button>

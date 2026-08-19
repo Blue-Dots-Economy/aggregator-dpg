@@ -6,11 +6,10 @@
  */
 
 import { readFileSync } from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import type { ValidateFunction } from 'ajv';
 import { getNetworkConfig } from './network-config.js';
+import { resolveSchema, schemaCandidates } from './schema-ref.js';
 
 const require = createRequire(import.meta.url);
 // CJS interop — ajv 8 and ajv-formats publish CommonJS modules. Default
@@ -29,7 +28,8 @@ type AddFormatsFn = (ajv: AjvLike, opts?: unknown) => AjvLike;
 const AjvCtor: AjvCtorType = require('ajv/dist/2020').default ?? require('ajv/dist/2020');
 const addFormats: AddFormatsFn = require('ajv-formats').default ?? require('ajv-formats');
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+/** The coordinator-registration schema this validator compiles. */
+const SCHEMA_FILE = 'registration.v1.json';
 
 let cachedValidator: ValidateFunction | null = null;
 
@@ -69,25 +69,40 @@ export async function getRegistrationValidator(): Promise<ValidateFunction> {
   return validator;
 }
 
+/**
+ * Locates `registration.v1.json`, preferring a network/brand override.
+ *
+ * Each `config/` root is crossed with {@link aggregatorSchemaRelPaths}, so an
+ * instance that needs extra registration fields (UP-GZB captures organisation
+ * type / sub-type / management type and a `service_provider` aggregator type)
+ * ships its own complete copy under
+ * `config/<network>[/<brand>]/schemas/aggregator/` without changing what Purple
+ * Dot or Dharwad validate against.
+ *
+ * @returns Absolute path to the most specific schema file that exists.
+ * @throws {Error} If no candidate is readable.
+ */
+/**
+ * Locates `registration.v1.json`, preferring a network/brand override.
+ *
+ * Delegates to {@link resolveSchema} so the candidate-root algorithm lives in
+ * exactly one place — this used to re-implement it, and two copies of the
+ * lookup would let the validator and the recorded `profile_ref` disagree about
+ * which file answered.
+ *
+ * @returns Absolute path to the most specific schema file that exists.
+ * @throws {Error} If no candidate is readable.
+ */
 function resolveSchemaPath(): string {
-  const candidates = [
-    // Source layout: apps/api/src/services → ../../../config
-    path.resolve(__dirname, '../../../../config/schemas/aggregator/registration.v1.json'),
-    // Compiled layout: apps/api/dist/services
-    path.resolve(__dirname, '../../../../../config/schemas/aggregator/registration.v1.json'),
-    // Container layout when only `config/` is mounted at /app/config
-    path.resolve(process.cwd(), 'config/schemas/aggregator/registration.v1.json'),
-    path.resolve(process.cwd(), '../../config/schemas/aggregator/registration.v1.json'),
-  ];
-  for (const c of candidates) {
-    try {
-      readFileSync(c, 'utf8');
-      return c;
-    } catch {
-      /* try next */
-    }
+  const resolved = resolveSchema(SCHEMA_FILE);
+  if (!resolved) {
+    throw new Error(
+      `registration schema not found; tried: ${schemaCandidates(SCHEMA_FILE)
+        .map((c) => c.path)
+        .join(', ')}`,
+    );
   }
-  throw new Error(`registration schema not found; tried: ${candidates.join(', ')}`);
+  return resolved.path;
 }
 
 /**

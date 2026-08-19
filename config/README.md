@@ -34,7 +34,12 @@ A brand folder is a **complete copy** of its parent network folder — not a par
 | Network      | Standard default     | Brand slug | Brand path                  |
 | ------------ | -------------------- | ---------- | --------------------------- |
 | `blue_dot`   | `config/blue_dot/`   | `upsdm`    | `config/blue_dot/upsdm/`    |
+| `blue_dot`   | `config/blue_dot/`   | `up-gzb`   | `config/blue_dot/up-gzb/`   |
 | `orange_dot` | `config/orange_dot/` | `onetac`   | `config/orange_dot/onetac/` |
+
+`up-gzb` is the Ghaziabad rollout. It is identical to the `blue_dot` defaults
+apart from its logo assets, which carry the refreshed Blue Dots lockup
+(uppercase wordmark, solid dot, "Seeded by EkStep").
 
 ---
 

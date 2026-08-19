@@ -43,6 +43,8 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
           createdBy: input.createdBy,
           updatedBy: input.updatedBy,
           parentOrgId: input.parentOrgId ?? null,
+          profile: input.profile ?? {},
+          profileRef: input.profileRef ?? null,
         })
         .returning();
       const row = rows[0];
@@ -314,6 +316,8 @@ function toDomain(row: typeof aggregators.$inferSelect): Aggregator {
     contactEmail: row.contactEmail,
     locations: row.locations,
     consent: row.consent,
+    profile: row.profile ?? {},
+    profileRef: row.profileRef,
     status: row.status,
     createdBy: row.createdBy,
     updatedBy: row.updatedBy,

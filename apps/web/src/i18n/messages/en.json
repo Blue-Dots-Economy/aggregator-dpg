@@ -43,7 +43,6 @@
     "success_approval": "The {brand} team will review your application. Once approved, sign in via {brand} SSO using the email or mobile you registered.",
     "submit": "Register as aggregator coordinator",
     "submitting": "Submitting…",
-    "footer_note": "Your application will be reviewed by the {brand} team. You'll receive an email once approved, then sign in via {brand} SSO.",
     "validation_error_title": "Please fix the highlighted fields",
     "page_title": "Aggregator Registration",
     "tab_coordinator": "Register as Coordinator",
@@ -288,7 +287,6 @@
       "upload_button": "Upload",
       "uploading": "Uploading…",
       "success_note": "Accounts will be live once the user logs in on the platform or via the call.",
-      "security_note": "All uploads are scanned and validated before import.",
       "attestation_fallback": "I confirm I have permission from the individuals in this file to submit their details.",
       "remove_file": "Remove file",
       "recent": {
@@ -474,7 +472,6 @@
       "consent_profile_modal_agree": "I agree to continue",
       "u18_notice": "As you are under 18, your account will be created without terms acceptance. Please sign in to the Signalstack app to review and accept the terms — a parent or guardian can help.",
       "privacy_note": "Your details are shared only with the aggregator who issued this link.",
-      "powered_by": "Powered by",
       "validation_error_title": "Form validation failed",
       "validation_required": "Please fill all required fields.",
       "validation_more": "(and {count} more)",
