@@ -150,6 +150,10 @@
                     "format": "uri",
                     "maxLength": 2048
                   },
+                  "sub_org_name": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
                   "contact": {
                     "type": "object",
                     "properties": {
