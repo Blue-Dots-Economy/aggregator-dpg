@@ -21,6 +21,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { orgHierarchyEnabled } from '../config.js';
 import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js';
+import { resolveProfileRef } from '../services/schema-ref.js';
 import { getIdpAdmin, KC_ATTR } from '../services/idp-admin/index.js';
 import { sendOrgReviewEmail } from '../services/org-registration-notify.js';
 import { normalisePhone } from '@aggregator-dpg/shared-primitives/phone';
@@ -101,21 +102,6 @@ function buildOrgProfile(body: z.infer<typeof OrgCreateBodySchema>): Record<stri
       ([key, value]) => !ORG_COLUMN_BACKED_KEYS.has(key) && value !== undefined,
     ),
   );
-}
-
-/**
- * Builds the `profile_ref` recorded alongside a `profile` payload.
- *
- * The registration schemas vary per deployment, so a row must name the variant
- * that produced it or the payload cannot be interpreted later. Network and
- * brand come from {@link resolveActiveNetwork} — never hardcoded.
- *
- * @param schemaId - Schema file id without extension, e.g. `org-registration.v1`.
- * @returns A ref such as `blue_dot/up-gzb/org-registration.v1`.
- */
-function buildProfileRef(schemaId: string): string {
-  const { network, brand } = resolveActiveNetwork();
-  return brand ? `${network}/${brand}/${schemaId}` : `${network}/${schemaId}`;
 }
 
 const OrgCreatedResponseSchema = z
@@ -235,6 +221,17 @@ export async function registerAggregatorOrgRoutes(app: FastifyInstance): Promise
         });
       }
 
+      const orgProfileRef = resolveProfileRef('org-registration.v1.json');
+      if (!orgProfileRef) {
+        log.warn(
+          {
+            operation: 'org-registration.create',
+            status: 'skipped',
+            sub_operation: 'resolveProfileRef',
+          },
+          'org-registration schema not found — storing profile without a variant ref',
+        );
+      }
       const slug = slugFromName(body.display_name);
       const created = await orgStore.create({
         slug,
@@ -246,7 +243,10 @@ export async function registerAggregatorOrgRoutes(app: FastifyInstance): Promise
         ownerEmail: ownerEmail,
         ownerPhone: phoneE164,
         profile: buildOrgProfile(body),
-        profileRef: buildProfileRef('org-registration.v1'),
+        // Derived from the schema file that actually resolved, not from the
+        // brand env — a missing override must not be recorded as if its
+        // variant had produced the payload. NULL means "variant unknown".
+        profileRef: orgProfileRef,
       });
       if (!created.ok) {
         if (created.error.code === 'DUPLICATE_NAME') {

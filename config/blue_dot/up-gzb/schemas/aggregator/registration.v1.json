@@ -22,7 +22,7 @@
     "sub_org_name": {
       "type": "string",
       "title": "Sub-Org / Division / Vertical / Institution Name",
-      "description": "Any specific sub-identity needed for identification and tracking. May be the same as the organisation name. Free text until the institution list is published.",
+      "description": "Any specific sub-identity needed for identification and tracking. May be the same as the organisation name.",
       "maxLength": 200,
       "examples": ["GarvSe Centre, Ghaziabad"],
       "x-updatable": true

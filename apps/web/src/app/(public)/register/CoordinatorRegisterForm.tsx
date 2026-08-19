@@ -122,8 +122,7 @@ export function CoordinatorRegisterForm({
       ...(e.formData ?? {}),
       consent: stampConsent(
         (e.formData as Record<string, unknown> | undefined)?.consent as
-          | Record<string, unknown>
-          | undefined,
+          Record<string, unknown> | undefined,
       ),
     };
     // The API strips `org_id` before RJSF validation and stores it on
@@ -244,11 +243,6 @@ export function CoordinatorRegisterForm({
               submittingLabel={t('submitting')}
             />
           </RjsfThemedForm>
-
-          <div className="mt-5 text-[12px] text-ink-400 flex items-start gap-2">
-            <span className="w-1 h-1 rounded-full bg-ink-300 mt-1.5 shrink-0" />
-            {t('footer_note', { brand })}
-          </div>
         </>
       )}
     </div>

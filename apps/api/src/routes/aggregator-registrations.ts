@@ -44,6 +44,7 @@ import { checkSubmitRate } from '../services/submit-rate.js';
 import { loadConsentConfig } from '@aggregator-dpg/config-loader/fs';
 import { getConsentLedger } from '../services/consent-ledger/index.js';
 import { resolveActiveNetwork } from '@aggregator-dpg/network-config/paths';
+import { resolveProfileRef } from '../services/schema-ref.js';
 import { normalisePhone } from '@aggregator-dpg/shared-primitives/phone';
 import { splitName } from '../services/name.js';
 import { slugFromName } from '../services/slug.js';
@@ -99,21 +100,6 @@ function buildAggregatorProfile(body: Record<string, unknown>): Record<string, u
       ([key, value]) => !AGGREGATOR_COLUMN_BACKED_KEYS.has(key) && value !== undefined,
     ),
   );
-}
-
-/**
- * Builds the `profile_ref` recorded alongside a `profile` payload.
- *
- * The registration schemas vary per deployment, so a row must name the variant
- * that produced it. Network and brand come from `resolveActiveNetwork()` —
- * never hardcoded.
- *
- * @param schemaId - Schema file id without extension, e.g. `registration.v1`.
- * @returns A ref such as `blue_dot/up-gzb/registration.v1`.
- */
-function buildProfileRef(schemaId: string): string {
-  const { network, brand } = resolveActiveNetwork();
-  return brand ? `${network}/${brand}/${schemaId}` : `${network}/${schemaId}`;
 }
 
 const RegistrationCreatedResponseSchema = z
@@ -350,7 +336,7 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
         consent: serverConsent,
         parentOrgId,
         profile: buildAggregatorProfile(body as unknown as Record<string, unknown>),
-        profileRef: buildProfileRef('registration.v1'),
+        profileRef: resolveProfileRef('registration.v1.json'),
       });
       if (!aggregator.ok) {
         const code = mapStoreCreateError(aggregator.error.code);
@@ -557,7 +543,8 @@ async function createAggregatorWithSlug(
     consent: ReturnType<typeof RegistrationPayloadSchema.parse>['consent'];
     parentOrgId: string | null;
     profile: Record<string, unknown>;
-    profileRef: string;
+    /** `null` when no registration schema resolved — variant unknown. */
+    profileRef: string | null;
   },
 ): ReturnType<typeof store.create> {
   let last: Awaited<ReturnType<typeof store.create>> | null = null;

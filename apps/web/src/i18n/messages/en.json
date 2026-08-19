@@ -43,7 +43,6 @@
     "success_approval": "The {brand} team will review your application. Once approved, sign in via {brand} SSO using the email or mobile you registered.",
     "submit": "Register as aggregator coordinator",
     "submitting": "Submitting…",
-    "footer_note": "Your application will be reviewed by the {brand} team. You'll receive an email once approved, then sign in via {brand} SSO.",
     "validation_error_title": "Please fix the highlighted fields",
     "page_title": "Aggregator Registration",
     "tab_coordinator": "Register as Coordinator",
