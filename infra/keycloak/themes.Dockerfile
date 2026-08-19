@@ -64,6 +64,12 @@ ARG BRAND_FONT_BODY=Inter, system-ui, sans-serif
 # because build-theme-image.sh always passes a keycloak.env that overrides
 # them). Without them this default bakes as "Team".
 ARG EMAIL_SIGNOFF="Team EkStep"
+# Logo slug for the SIGNALS login page (the `signals` child theme), which the
+# signals-ui client selects via its per-client login_theme. Separate from
+# BRAND_LOGO_SLUG above: that one brands the AGGREGATOR portal login. Both must
+# be set for a brand, or a visitor sees the new mark on one login page and the
+# old one on the other — the two pages sit either side of the same journey.
+ARG SIGNALS_BRAND_LOGO_SLUG=blue-dot
 
 # Theme source — read from the repo's checked-in theme tree.
 COPY infra/keycloak/themes /custom
@@ -104,10 +110,14 @@ RUN sed -i "s|^emailOtpSignoff=.*|emailOtpSignoff=${EMAIL_SIGNOFF}|" \
     && grep -qF -- "emailOtpSignoff=${EMAIL_SIGNOFF}" \
       /custom/otp/email/messages/messages_en.properties
 
-# Only `otp` is re-baked. The `signals` child theme's properties keep their
-# `${env.SIGNALS_*:default}` form, with the checked-in defaults being signals'
-# real values — signals branding does not vary per network today, so there is
-# nothing per-image to freeze. Add a second printf block here if that changes.
+# The `signals` child theme keeps its `${env.SIGNALS_*:default}` form for every
+# key EXCEPT the logo slug, which is now per-brand (up-gzb) — the case the
+# previous note here said to come back for. Only that one line is rewritten, so
+# every other signals string still resolves from env at request time.
+RUN sed -i "s|^brandLogoSlug=.*|brandLogoSlug=${SIGNALS_BRAND_LOGO_SLUG}|" \
+      /custom/signals/login/theme.properties \
+    && grep -qF -- "brandLogoSlug=${SIGNALS_BRAND_LOGO_SLUG}" \
+      /custom/signals/login/theme.properties
 
 # Init-container entrypoint: copy the themes into the shared volume the main
 # Keycloak container mounts at /opt/keycloak/themes, then exit. Using
