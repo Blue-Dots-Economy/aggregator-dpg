@@ -1,4 +1,6 @@
-# Active aggregator config for the running stack. Pinned to blue_dot;
+# Aggregator config for the UP-GZB instance of blue_dot. Points at the up-gzb
+# network.json (3 domains, incl. service_provider) and at the up-gzb
+# registration-schema override in schemas/aggregator/;
 # swap `network.source` to deploy against another signalstack network.
 # Treat this file as deploy state; the .example.yaml sibling documents
 # every supported field.
@@ -8,7 +10,7 @@ aggregator:
   contact_email: ops@bluedots.local
 
   network:
-    source: https://raw.githubusercontent.com/Blue-Dots-Economy/Signals-DPG/refs/heads/develop/examples/schemas/blue_dot/network.json
+    source: https://raw.githubusercontent.com/Blue-Dots-Economy/bluedots-schemas/refs/heads/main/blue_dot/up-gzb/network.json
     csv_array_delimiter: '|'
     field_overrides:
       seeker:
@@ -19,6 +21,14 @@ aggregator:
         name: jobProviderName
         phone: hiringManagerPhoneNumber
         email: hiringManagerEmail
+      # `name` is the CONTACT PERSON, not organisationName: these selectors feed
+      # dedup / Keycloak linking / the signals user payload, i.e. the human who
+      # logs in. organisationName is optional in the schema while
+      # contactPersonName is required, so organisationName risks an empty name.
+      service_provider:
+        name: contactPersonName
+        phone: contactPhoneNumber
+        email: contactEmail
 
   brand:
     short_name: Blue Dots
@@ -38,6 +48,10 @@ aggregator:
       singular: Provider
       plural: Providers
       tab_label: Providers
+    service_provider:
+      singular: Service Provider
+      plural: Service Providers
+      tab_label: Service Providers
 
   onboarding:
     # Bulk-upload only: when true, an adult bulk row is pushed to Signals with

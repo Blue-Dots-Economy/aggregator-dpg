@@ -42,6 +42,8 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
       ownerPhone: input.ownerPhone ?? null,
       ownerKcSub: input.ownerKcSub ?? null,
       kcGroupId: input.kcGroupId ?? null,
+      profile: input.profile ?? {},
+      profileRef: input.profileRef ?? null,
       status: 'pending',
       createdAt: now,
       updatedAt: now,

@@ -40,3 +40,30 @@ function resolveConfigDir(): string {
 export function resolveSchemaRoot(): string {
   return process.env.SCHEMA_ROOT_DIR?.trim() || path.join(resolveConfigDir(), 'schemas');
 }
+
+/**
+ * Returns the candidate locations of an aggregator schema file inside a
+ * `config/` root, most specific first.
+ *
+ * Registration schemas vary per deployment — the UP-GZB instance captures
+ * organisation type / sub-type / management type and a `service_provider`
+ * aggregator type that Purple Dot and Dharwad must not be asked for. Callers
+ * try each returned path in order and use the first that exists, so a network
+ * (or network+brand) overrides the shared default by placing a **complete**
+ * copy of the file at `<network>[/<brand>]/schemas/aggregator/<file>`.
+ *
+ * Mirrors `aggregatorSchemaRelPaths` in
+ * `packages/network-config/src/paths.ts` — keep both in sync.
+ *
+ * @param file - Bare schema file name, e.g. `registration.v1.json`.
+ * @returns Root-relative paths, most specific first.
+ */
+export function aggregatorSchemaRelPaths(file: string): string[] {
+  const net = process.env.AGGREGATOR_NETWORK?.trim() || 'blue_dot';
+  const brand = process.env.AGGREGATOR_BRAND?.trim();
+  const rel: string[] = [];
+  if (brand) rel.push(path.join(net, brand, 'schemas', 'aggregator', file));
+  rel.push(path.join(net, 'schemas', 'aggregator', file));
+  rel.push(path.join('schemas', 'aggregator', file));
+  return rel;
+}

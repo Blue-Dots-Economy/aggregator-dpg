@@ -10,6 +10,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import type { ValidateFunction } from 'ajv';
+import { aggregatorSchemaRelPaths } from '@aggregator-dpg/network-config/paths';
 import { getNetworkConfig } from './network-config.js';
 
 const require = createRequire(import.meta.url);
@@ -69,16 +70,34 @@ export async function getRegistrationValidator(): Promise<ValidateFunction> {
   return validator;
 }
 
+/**
+ * Locates `registration.v1.json`, preferring a network/brand override.
+ *
+ * Each `config/` root is crossed with {@link aggregatorSchemaRelPaths}, so an
+ * instance that needs extra registration fields (UP-GZB captures organisation
+ * type / sub-type / management type and a `service_provider` aggregator type)
+ * ships its own complete copy under
+ * `config/<network>[/<brand>]/schemas/aggregator/` without changing what Purple
+ * Dot or Dharwad validate against.
+ *
+ * @returns Absolute path to the most specific schema file that exists.
+ * @throws {Error} If no candidate is readable.
+ */
 function resolveSchemaPath(): string {
-  const candidates = [
-    // Source layout: apps/api/src/services → ../../../config
-    path.resolve(__dirname, '../../../../config/schemas/aggregator/registration.v1.json'),
+  const roots = [
+    // Source layout: apps/api/src/services → ../../../../config
+    path.resolve(__dirname, '../../../../config'),
     // Compiled layout: apps/api/dist/services
-    path.resolve(__dirname, '../../../../../config/schemas/aggregator/registration.v1.json'),
+    path.resolve(__dirname, '../../../../../config'),
     // Container layout when only `config/` is mounted at /app/config
-    path.resolve(process.cwd(), 'config/schemas/aggregator/registration.v1.json'),
-    path.resolve(process.cwd(), '../../config/schemas/aggregator/registration.v1.json'),
+    path.resolve(process.cwd(), 'config'),
+    path.resolve(process.cwd(), '../../config'),
   ];
+  const rel = aggregatorSchemaRelPaths('registration.v1.json');
+  // Specificity first, then root: a brand override in ANY resolvable root must
+  // beat the shared default, or a layout where two roots both resolve would
+  // silently fall back to the generic schema.
+  const candidates = rel.flatMap((r) => roots.map((root) => path.join(root, r)));
   for (const c of candidates) {
     try {
       readFileSync(c, 'utf8');

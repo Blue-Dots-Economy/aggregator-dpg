@@ -63,6 +63,59 @@ const CoordinatorRegistrationBodySchema = RegistrationPayloadSchema.extend({
   org_id: z.string().optional(),
 });
 
+/**
+ * Body keys that already own a typed column on `aggregators`, and so must never
+ * be copied into `profile`.
+ *
+ * `org_id` is excluded too — it is stored as `parent_org_id`, not payload data.
+ * Keeping one authoritative home per field is what stops the jsonb payload and
+ * the columns drifting apart.
+ */
+const AGGREGATOR_COLUMN_BACKED_KEYS: ReadonlySet<string> = new Set([
+  'name',
+  'type',
+  'url',
+  'contact',
+  'locations',
+  'consent',
+  'org_id',
+]);
+
+/**
+ * Collects the schema-driven fields of a registration body into the `profile`
+ * payload.
+ *
+ * Safe to build generically: the same body is validated against
+ * `registration.v1.json` with `additionalProperties: false`, so the schema —
+ * not this function — bounds which keys can appear. Adding a field to that
+ * schema therefore needs no storage change.
+ *
+ * @param body - Validated coordinator-registration body.
+ * @returns The `profile` payload; `{}` when the deployment declares no extra fields.
+ */
+function buildAggregatorProfile(body: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(body).filter(
+      ([key, value]) => !AGGREGATOR_COLUMN_BACKED_KEYS.has(key) && value !== undefined,
+    ),
+  );
+}
+
+/**
+ * Builds the `profile_ref` recorded alongside a `profile` payload.
+ *
+ * The registration schemas vary per deployment, so a row must name the variant
+ * that produced it. Network and brand come from `resolveActiveNetwork()` —
+ * never hardcoded.
+ *
+ * @param schemaId - Schema file id without extension, e.g. `registration.v1`.
+ * @returns A ref such as `blue_dot/up-gzb/registration.v1`.
+ */
+function buildProfileRef(schemaId: string): string {
+  const { network, brand } = resolveActiveNetwork();
+  return brand ? `${network}/${brand}/${schemaId}` : `${network}/${schemaId}`;
+}
+
 const RegistrationCreatedResponseSchema = z
   .object({
     aggregator_id: z.string(),
@@ -296,6 +349,8 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
         locations: body.locations,
         consent: serverConsent,
         parentOrgId,
+        profile: buildAggregatorProfile(body as unknown as Record<string, unknown>),
+        profileRef: buildProfileRef('registration.v1'),
       });
       if (!aggregator.ok) {
         const code = mapStoreCreateError(aggregator.error.code);
@@ -501,6 +556,8 @@ async function createAggregatorWithSlug(
     locations: ReturnType<typeof RegistrationPayloadSchema.parse>['locations'];
     consent: ReturnType<typeof RegistrationPayloadSchema.parse>['consent'];
     parentOrgId: string | null;
+    profile: Record<string, unknown>;
+    profileRef: string;
   },
 ): ReturnType<typeof store.create> {
   let last: Awaited<ReturnType<typeof store.create>> | null = null;
@@ -518,6 +575,8 @@ async function createAggregatorWithSlug(
       createdBy: 'self',
       updatedBy: 'self',
       parentOrgId: extras.parentOrgId,
+      profile: extras.profile,
+      profileRef: extras.profileRef,
     });
     if (last.ok) return last;
     if (last.error.code !== 'DUPLICATE_SLUG') return last;

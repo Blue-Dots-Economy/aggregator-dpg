@@ -73,6 +73,8 @@ function makeRow(overrides: Partial<AggregatorOrg> = {}): AggregatorOrg {
     ownerPhone: null,
     ownerKcSub: null,
     kcGroupId: null,
+    profile: {},
+    profileRef: null,
     status: 'pending',
     createdAt,
     updatedAt: createdAt,
