@@ -81,14 +81,35 @@ export function resolveSchema(
   file: string,
   env: ConfigPathEnv = process.env,
 ): ResolvedSchema | null {
-  const roots = configRoots();
-  for (const rel of aggregatorSchemaRelPaths(file, env)) {
-    for (const root of roots) {
-      const candidate = path.join(root, rel);
-      if (existsSync(candidate)) return { path: candidate, ref: refFromRelPath(rel) };
-    }
+  for (const { path: candidate, rel } of schemaCandidates(file, env)) {
+    if (existsSync(candidate)) return { path: candidate, ref: refFromRelPath(rel) };
   }
   return null;
+}
+
+/**
+ * Every absolute path {@link resolveSchema} will try, in order.
+ *
+ * Exported so a caller that must fail loudly can name what it looked for
+ * without re-deriving the root list — two copies of that algorithm would let
+ * the validator and the recorded `profile_ref` disagree about which file
+ * answered.
+ *
+ * @param file - Bare schema file name, e.g. `registration.v1.json`.
+ * @param env - Env-var bag; defaults to `process.env`.
+ * @returns Candidates, most specific first, each with its root-relative path.
+ */
+export function schemaCandidates(
+  file: string,
+  env: ConfigPathEnv = process.env,
+): { path: string; rel: string }[] {
+  const roots = configRoots();
+  // Specificity first, then root: a brand override in ANY resolvable root must
+  // beat the shared default, or a layout where two roots both resolve would
+  // silently fall back to the generic schema.
+  return aggregatorSchemaRelPaths(file, env).flatMap((rel) =>
+    roots.map((root) => ({ path: path.join(root, rel), rel })),
+  );
 }
 
 /**
