@@ -20,7 +20,7 @@ aggregator:
         name: beneficiary_name
         phone: mobile_number
         email: email
-      provider:
+      service_provider:
         name: contact_name
         phone: contact_phone
         email: contact_email
@@ -40,10 +40,10 @@ aggregator:
       singular: Seeker
       plural: Seekers
       tab_label: Seekers
-    provider:
+    service_provider:
       singular: Service Provider
       plural: Service Providers
-      tab_label: Providers
+      tab_label: Service Providers
 
   onboarding:
     # Bulk-upload only: when true, an adult bulk row is pushed to Signals with
