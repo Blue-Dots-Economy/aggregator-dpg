@@ -1396,7 +1396,18 @@ function filterRowsByLifecycle<R extends { lifecycle_status?: LifecycleStatus }>
   return rows.filter((r) => (r.lifecycle_status ?? 'live') === filter);
 }
 
-function SeekersTab() {
+/** Props for the participant-profile tab (any `profile_*` domain). */
+interface DomainTabProps {
+  /**
+   * Domain to render — the signed-in coordinator's OWN domain, from its
+   * `aggregator_type`. Passed in rather than read from a fixed position in
+   * `cfg.domains`, which assumed every network has exactly two domains in
+   * seeker-then-provider order.
+   */
+  domainId: string | undefined;
+}
+
+function SeekersTab({ domainId }: DomainTabProps) {
   const t = useTranslations('dashboard');
   const locale = useLocale();
   // Signalstack's `/aggregator/dashboard` is the only endpoint that
@@ -1405,15 +1416,12 @@ function SeekersTab() {
   // wraps every served domain under `by_domain[<id>]` so seeker +
   // provider tabs share a single fetch.
   //
-  // Domain id comes from the live network config so networks that
-  // declare non-default ids (e.g. orange_dot's `tourist`) still resolve
-  // to the right `by_domain[<id>]` slice. Falls back to 'seeker' for
-  // legacy blue/purple defaults.
-  const { data: cfgRaw } = useAggregatorConfig();
-  // No fallback — undefined here lets useDashboard's `enabled` gate skip
-  // the call until the live network config loads (prevents a stale
-  // `?domain=seeker` fetch on cold mount with DEFAULT_AGGREGATOR_CONFIG).
-  const seekerDomainId = cfgRaw?.domains?.[0]?.id;
+  // Domain id is the caller's own, passed in by the parent, so a network
+  // declaring non-default ids (orange_dot's `tourist`, up-gzb's
+  // `service_provider`) still resolves the right `by_domain[<id>]` slice.
+  // `undefined` until the parent's config loads, which lets useDashboard's
+  // `enabled` gate skip the call rather than firing a stale fetch.
+  const seekerDomainId = domainId;
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [lifecycleFilter, setLifecycleFilter] = useLifecycleUrlFilter();
@@ -1783,7 +1791,7 @@ function formatRelative(iso: string): string {
   return `${months}mo ago`;
 }
 
-function ProvidersTab() {
+function ProvidersTab({ domainId }: DomainTabProps) {
   const t = useTranslations('dashboard');
   const locale = useLocale();
   // Mirror SeekersTab: live counts come from the signalstack dashboard
@@ -1792,11 +1800,8 @@ function ProvidersTab() {
   //  by_received_action_status, complete_profiles, …)
   // so the cards map field-for-field; only the labels differ.
   //
-  // Domain id from cfg so networks declaring non-default ids (e.g.
-  // orange_dot's `practitioner`) still pick the right by_domain slice.
-  const { data: cfgRaw } = useAggregatorConfig();
-  // No fallback — see SeekersTab.
-  const providerDomainId = cfgRaw?.domains?.[1]?.id;
+  // Domain id is the caller's own — see SeekersTab.
+  const providerDomainId = domainId;
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [lifecycleFilter, setLifecycleFilter] = useLifecycleUrlFilter();
@@ -2069,7 +2074,15 @@ function DashboardContent({ aggregatorType }: { aggregatorType: string }) {
   // `?domain=seeker` fetch on cold mount with DEFAULT_AGGREGATOR_CONFIG.
   const primaryDomainCfg = cfg.domains?.find((d) => d.id === aggregatorType);
   const primaryDomain = primaryDomainCfg?.id;
-  const isProviderLike = !!primaryDomain && primaryDomain === cfg.domains?.[1]?.id;
+  // Provider-like = the domain publishes job postings rather than participant
+  // profiles, decided from the domain's own `item_type`.
+  //
+  // This was `primaryDomain === cfg.domains?.[1]?.id`, which assumed every
+  // network has exactly two domains in seeker-then-provider order. A third
+  // domain (blue_dot/up-gzb adds `service_provider`) matched neither branch, so
+  // it fell through to the seeker view AND that view fetched `domains[0]` —
+  // a service_provider coordinator saw a table headed "Seekers".
+  const isProviderLike = (primaryDomainCfg?.item_type ?? '').startsWith('job_posting');
 
   return (
     <div className="fade-up">
@@ -2089,7 +2102,11 @@ function DashboardContent({ aggregatorType }: { aggregatorType: string }) {
           inside each tab already carries the domain label + live total
           (design: redundant pill removed). Which tab renders is fixed by
           the aggregator's own type; nothing lets the user switch it. */}
-      {isProviderLike ? <ProvidersTab /> : <SeekersTab />}
+      {isProviderLike ? (
+        <ProvidersTab domainId={primaryDomain} />
+      ) : (
+        <SeekersTab domainId={primaryDomain} />
+      )}
     </div>
   );
 }
