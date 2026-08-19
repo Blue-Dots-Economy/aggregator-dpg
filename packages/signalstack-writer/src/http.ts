@@ -951,15 +951,22 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
   }
 
   /**
-   * Identity-only probe against signalstack's `/admin/participant` endpoint.
+   * Identity-only probe against signalstack's `GET /admin/participant`
+   * read endpoint.
    *
-   * Calls the same POST endpoint as {@link onboard} but with no
-   * `item_state` in the body and a sentinel `name: 'lookup'`. Signalstack
-   * treats that as an account-only path — it may create the user row but
-   * never an item — so the probe is safely idempotent for the caller.
-   * The response is reshaped into the slim {@link SignalStackProbeUserResult}
-   * tri-state so the caller never has to re-derive owned_elsewhere /
-   * lifecycle_summary from the raw items array.
+   * Read-only by construction (#648). The previous implementation POSTed to
+   * the same path with no `item_state` and a sentinel `name: 'lookup'`, which
+   * signalstack's account-only path treated as an onboard and **created the
+   * user row with `name = 'lookup'`** — a phantom the later real onboard never
+   * overwrote, so registration-link participants were saved as "lookup". The
+   * GET endpoint never writes; it returns `{ user_id, items }` scoped to the
+   * acting org's ownership, from which the {@link SignalStackProbeUserResult}
+   * tri-state is derived here so the caller never touches the raw shape.
+   *
+   * `owned_elsewhere` is best-effort: the read endpoint discloses items only
+   * for users this org onboarded, so an existing user with no visible items is
+   * reported as owned elsewhere. The authoritative ownership check still runs
+   * at {@link onboard}; this is only an early hint for the public form.
    *
    * @param input - actingOrgId + email and/or phoneNumber + network/domain.
    * @returns ok(SignalStackProbeUserResult) on 2xx; err(BaseError) on
@@ -990,21 +997,15 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       );
     }
 
-    // Probe body — deliberately omits `item_state` so signals' Plan-C
-    // account-only path runs (creates user row at most; never an item).
-    // The sentinel `name: 'lookup'` mirrors what signals' own admin UI
-    // sends for identity-only checks. `channel` is required by signals'
-    // UpsertParticipantRequest schema even on the account-only path; the
-    // probe always originates from the public registration link, so 'link'
-    // is the truthful attribution surface.
-    const body: Record<string, unknown> = {
-      name: 'lookup',
-      channel: 'link',
-      network: input.network,
-      domain: input.domain,
-    };
-    if (input.email) body.email = input.email;
-    if (input.phoneNumber) body.phone_number = input.phoneNumber;
+    // Read-only probe (#648): GET /admin/participant keys on the identity +
+    // acting org and never writes, so it cannot create a phantom user the way
+    // the old account-only POST did. `network`/`domain` are not query params of
+    // the read endpoint — item ownership is already scoped by the acting org —
+    // so they are not sent.
+    const query = new URLSearchParams();
+    if (input.email) query.set('email', input.email);
+    if (input.phoneNumber) query.set('phone_number', input.phoneNumber);
+    const url = `${this.endpoint}?${query.toString()}`;
 
     const headersResult = await this.buildHeaders();
     if (!headersResult.success) return err(headersResult.error);
@@ -1015,10 +1016,9 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
     };
 
     try {
-      const res = await this.requestWithRetry(this.endpoint, {
-        method: 'POST',
+      const res = await this.requestWithRetry(url, {
+        method: 'GET',
         headers,
-        body: JSON.stringify(body),
       });
 
       if (!res.ok) {
@@ -1051,13 +1051,12 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
         );
       }
 
-      // Account-only response shape:
-      //   { user_id, user_existed, owned_elsewhere?, items: [] | [item] }
-      // Reshape into the tri-state the caller branches on.
+      // Read-endpoint response shape: { user_id, items }. `items` are scoped
+      // to the acting org's ownership, so an empty list on an existing user
+      // means "owned by another aggregator" (see the owned_elsewhere note on
+      // the method doc). Reshape into the tri-state the caller branches on.
       const raw = (await res.json()) as {
         user_id?: unknown;
-        user_existed?: unknown;
-        owned_elsewhere?: unknown;
         items?: Array<{
           item_id?: unknown;
           lifecycle_status?: unknown;
@@ -1072,10 +1071,20 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
         );
       }
 
-      const userExisted = raw.user_existed === true;
-      const ownedElsewhere = raw.owned_elsewhere === true;
+      const userId = typeof raw.user_id === 'string' ? raw.user_id : null;
+      if (!userId) {
+        // No matching identity — a genuinely new participant.
+        return ok({
+          user_exists: false,
+          owned_elsewhere: false,
+          lifecycle_summary: null,
+        });
+      }
 
-      if (userExisted && ownedElsewhere) {
+      const items = Array.isArray(raw.items) ? raw.items : [];
+      if (items.length === 0) {
+        // Exists, but this org owns no visible item — treat as owned
+        // elsewhere. The definitive ownership guard runs at onboard.
         return ok({
           user_exists: true,
           owned_elsewhere: true,
@@ -1083,57 +1092,35 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
         });
       }
 
-      const items = Array.isArray(raw.items) ? raw.items : [];
-      if (userExisted && items.length > 0) {
-        const first = items[0]!;
-        const itemId = typeof first.item_id === 'string' ? first.item_id : '';
-        if (!itemId) {
-          return err(
-            new UpstreamError('signalstack probe primary item missing item_id', {
-              code: 'SIGNALSTACK_BAD_RESPONSE',
-              details: { payload: raw },
-            }),
-          );
-        }
-        // Back-compat fallback: older signalstack builds omit lifecycle_status
-        // on the account-only response. Treat absent as a live item — same
-        // default the resolveLifecycle helper in apps/api applies for read-side
-        // rows. The writer cannot import that helper (apps/api sits above this
-        // package in the dep graph), so inline the fallback here.
-        const lifecycleStatus =
-          first.lifecycle_status === 'draft' ||
-          first.lifecycle_status === 'live' ||
-          first.lifecycle_status === 'paused'
-            ? first.lifecycle_status
-            : 'live';
-        return ok({
-          user_exists: true,
-          owned_elsewhere: false,
-          lifecycle_summary: {
-            primary_item: {
-              item_id: itemId,
-              lifecycle_status: lifecycleStatus,
-            },
-          },
-        });
+      const first = items[0]!;
+      const itemId = typeof first.item_id === 'string' ? first.item_id : '';
+      if (!itemId) {
+        return err(
+          new UpstreamError('signalstack probe primary item missing item_id', {
+            code: 'SIGNALSTACK_BAD_RESPONSE',
+            details: { payload: raw },
+          }),
+        );
       }
-
-      if (userExisted) {
-        // Own user but no item yet (account-only probe response).
-        return ok({
-          user_exists: true,
-          owned_elsewhere: false,
-          lifecycle_summary: null,
-        });
-      }
-
-      // user_existed: false (or absent) — signals either created the row
-      // just now or there is no matching identity. Either way the caller
-      // treats the user as new.
+      // Back-compat fallback: treat an absent lifecycle_status as a live item —
+      // the same default the resolveLifecycle helper in apps/api applies for
+      // read-side rows. The writer cannot import that helper (apps/api sits
+      // above this package in the dep graph), so inline the fallback here.
+      const lifecycleStatus =
+        first.lifecycle_status === 'draft' ||
+        first.lifecycle_status === 'live' ||
+        first.lifecycle_status === 'paused'
+          ? first.lifecycle_status
+          : 'live';
       return ok({
-        user_exists: false,
+        user_exists: true,
         owned_elsewhere: false,
-        lifecycle_summary: null,
+        lifecycle_summary: {
+          primary_item: {
+            item_id: itemId,
+            lifecycle_status: lifecycleStatus,
+          },
+        },
       });
     } catch (e) {
       const cause = e as Error;

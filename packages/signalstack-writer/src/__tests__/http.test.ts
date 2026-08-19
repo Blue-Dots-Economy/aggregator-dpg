@@ -1692,10 +1692,8 @@ describe('HttpSignalStackWriter.probeUser (http)', () => {
     });
   });
 
-  it('reports a new user with no lifecycle leak', async () => {
-    fetchMock.mockResolvedValueOnce(
-      okJsonResponse({ user_id: 'u-1', user_existed: false, items: [] }),
-    );
+  it('reports a new user (user_id null) with no lifecycle leak', async () => {
+    fetchMock.mockResolvedValueOnce(okJsonResponse({ user_id: null, items: [] }));
 
     const result = await writer.probeUser(PROBE_INPUT);
 
@@ -1710,8 +1708,6 @@ describe('HttpSignalStackWriter.probeUser (http)', () => {
     fetchMock.mockResolvedValueOnce(
       okJsonResponse({
         user_id: 'u-1',
-        user_existed: true,
-        owned_elsewhere: false,
         items: [{ item_id: 'item-1', lifecycle_status: 'draft' }],
       }),
     );
@@ -1721,6 +1717,7 @@ describe('HttpSignalStackWriter.probeUser (http)', () => {
     expect(result.success).toBe(true);
     if (!result.success) return;
     expect(result.value.user_exists).toBe(true);
+    expect(result.value.owned_elsewhere).toBe(false);
     expect(result.value.lifecycle_summary?.primary_item.item_id).toBe('item-1');
     expect(result.value.lifecycle_summary?.primary_item.lifecycle_status).toBe('draft');
   });
@@ -1729,8 +1726,6 @@ describe('HttpSignalStackWriter.probeUser (http)', () => {
     fetchMock.mockResolvedValueOnce(
       okJsonResponse({
         user_id: 'u-1',
-        user_existed: true,
-        owned_elsewhere: false,
         items: [{ item_id: 'item-1' }], // no lifecycle_status (older signals build)
       }),
     );
@@ -1742,45 +1737,34 @@ describe('HttpSignalStackWriter.probeUser (http)', () => {
     expect(result.value.lifecycle_summary?.primary_item.lifecycle_status).toBe('live');
   });
 
-  it('owned_elsewhere → no lifecycle leak', async () => {
-    fetchMock.mockResolvedValueOnce(
-      okJsonResponse({ user_id: 'u-1', user_existed: true, owned_elsewhere: true, items: [] }),
-    );
-
-    const result = await writer.probeUser(PROBE_INPUT);
-
-    expect(result.success).toBe(true);
-    if (!result.success) return;
-    expect(result.value.owned_elsewhere).toBe(true);
-    expect(result.value.lifecycle_summary).toBeNull();
-  });
-
-  it('own user with no items yet → null lifecycle_summary', async () => {
-    fetchMock.mockResolvedValueOnce(
-      okJsonResponse({ user_id: 'u-1', user_existed: true, owned_elsewhere: false, items: [] }),
-    );
+  it('existing user with no visible items → owned_elsewhere, no lifecycle leak', async () => {
+    // The read endpoint discloses items only for users this org onboarded, so
+    // an existing user with an empty item list is reported as owned elsewhere.
+    fetchMock.mockResolvedValueOnce(okJsonResponse({ user_id: 'u-1', items: [] }));
 
     const result = await writer.probeUser(PROBE_INPUT);
 
     expect(result.success).toBe(true);
     if (!result.success) return;
     expect(result.value.user_exists).toBe(true);
-    expect(result.value.owned_elsewhere).toBe(false);
+    expect(result.value.owned_elsewhere).toBe(true);
     expect(result.value.lifecycle_summary).toBeNull();
   });
 
-  it('omits item_state and sends the lookup sentinel in the request body', async () => {
-    fetchMock.mockResolvedValueOnce(
-      okJsonResponse({ user_id: 'u-1', user_existed: false, items: [] }),
-    );
+  it('#648: issues a read-only GET and never sends a body or a lookup sentinel', async () => {
+    fetchMock.mockResolvedValueOnce(okJsonResponse({ user_id: null, items: [] }));
 
     await writer.probeUser(PROBE_INPUT);
 
-    const [, init] = fetchMock.mock.calls[0]!;
-    const sent = JSON.parse((init as RequestInit).body as string);
-    expect(sent).not.toHaveProperty('item_state');
-    expect(sent.name).toBe('lookup');
-    expect(sent.email).toBe('asha@example.com');
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect((init as RequestInit).method).toBe('GET');
+    // No request body — the probe must not write / create a user.
+    expect((init as RequestInit).body).toBeUndefined();
+    const sentUrl = String(url);
+    expect(sentUrl).toContain('/api/v1/admin/participant?');
+    expect(sentUrl).toContain('email=asha%40example.com');
+    // The phantom-user sentinel is gone entirely.
+    expect(sentUrl).not.toContain('lookup');
   });
 
   it('maps a 400 to a ValidationError with SIGNALSTACK_BAD_REQUEST', async () => {
