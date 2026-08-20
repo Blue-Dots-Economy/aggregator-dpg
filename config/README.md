@@ -160,3 +160,44 @@ DRY_RUN=1 ./infra/keycloak/build-theme-image.sh blue_dot upsdm v1
 make check-brand   # standalone check — no docker activity
 make up            # runs check-brand then brings the stack up
 ```
+
+---
+
+## Registration modes (`aggregator.registration_modes` in `aggregator.config.yaml`)
+
+Per-link capture channels offered on the forms/QR page. The admin dropdown is
+rendered straight from these keys, so adding a channel needs no code change —
+and removing one stops it being offered on this deployment.
+
+| Key                    | Meaning                                                                                                                                                                                   |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `submission_shape`     | `account_and_profile` = identity + full profile form. `account_only` = identity capture only.                                                                                             |
+| `public_hint_i18n_key` | Optional copy shown under the public form.                                                                                                                                                |
+| `signals_cta`          | Whether this mode offers the Signals UI hand-off (the "Already Registered — Sign In" link and the post-submit redirect). Optional; defaults to `submission_shape == account_and_profile`. |
+
+```yaml
+registration_modes:
+  voice:
+    label_i18n_key: registration_mode.voice.label
+    submission_shape: account_only
+    public_hint_i18n_key: registration_mode.voice.hint
+    signals_cta: false
+  form:
+    label_i18n_key: registration_mode.form.label
+    submission_shape: account_and_profile
+    public_hint_i18n_key: null
+    signals_cta: true
+```
+
+### The Signals UI hand-off URL lives in the environment, not here
+
+The hand-off also needs the `SIGNALS_UI_URLS` env var, which maps each domain
+to its Signals UI login URL. `SIGNALS_UI_URLS` lives in the environment
+(ConfigMap) rather than in this YAML, because it changes per environment while
+`signals_cta` must not.
+
+The Signals UI URL configured in `SIGNALS_UI_URLS` must be the Signals UI page
+(normally `<origin>/auth/login`) and NOT a Keycloak authorization URL. A
+Keycloak authorization URL embeds one-time `state` and PKCE `code_challenge`
+values bound to the browser that generated them, so a hardcoded one fails for
+every user.
