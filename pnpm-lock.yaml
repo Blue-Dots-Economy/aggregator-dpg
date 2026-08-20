@@ -190,6 +190,9 @@ importers:
       '@aggregator-dpg/config-loader':
         specifier: workspace:*
         version: link:../../packages/config-loader
+      '@aggregator-dpg/network-config':
+        specifier: workspace:*
+        version: link:../../packages/network-config
       '@aggregator-dpg/shared-primitives':
         specifier: workspace:*
         version: link:../../packages/shared-primitives

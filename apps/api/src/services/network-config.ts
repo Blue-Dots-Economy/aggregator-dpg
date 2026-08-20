@@ -15,6 +15,7 @@ import { FileNetworkConfigLoader } from '@aggregator-dpg/network-config/loader';
 import type { ResolvedNetworkConfig } from '@aggregator-dpg/network-config/interface';
 import { resolveConfigPath } from '@aggregator-dpg/network-config/paths';
 import { logger } from '../logger.js';
+import { signalsUiUrls, unknownSignalsUiUrlDomains } from '../config.js';
 
 let cached: ResolvedNetworkConfig | null = null;
 let inflight: Promise<ResolvedNetworkConfig> | null = null;
@@ -49,6 +50,23 @@ export async function getNetworkConfig(): Promise<ResolvedNetworkConfig> {
       throw new Error(`network-config load failed: ${message}`);
     }
     cached = result.value;
+    // First and only point in the process where both halves are known: the
+    // `SIGNALS_UI_URLS` keys (parsed at module load, before any config exists)
+    // and the network's declared domains. A key that matches no domain —
+    // `seekr=…` for `seeker` — is well-formed, so the parser passes it, and
+    // then the hand-off for the real domain never appears with nothing said.
+    // Warn only: see `unknownSignalsUiUrlDomains` for why this must not filter.
+    for (const domain of unknownSignalsUiUrlDomains(signalsUiUrls, cached.domainIds)) {
+      logger.warn(
+        {
+          operation: 'config.signalsUiUrls.domainCheck',
+          status: 'unknown_domain',
+          domain,
+          known_domains: cached.domainIds,
+        },
+        `SIGNALS_UI_URLS: domain "${domain}" is not declared by this network — its Signals hand-off will never appear`,
+      );
+    }
     logger.info(
       {
         operation: 'network-config.load',

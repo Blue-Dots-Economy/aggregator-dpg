@@ -11,9 +11,17 @@ import { I } from '../../../icons';
 import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
 import { registrationShowsConsent, domainRequiresBirthYear } from '../../../lib/registration-gates';
 import { MinimalIdentityForm, type MinimalIdentityPayload } from './MinimalIdentityForm';
+import { SignalsSignInCta, useSignalsHandoffUrl } from './SignalsSignInCta';
 import { LanguageSwitcher } from '../../../components/shell/LanguageSwitcher';
 import { ConsentModal, type ConsentTab } from '../../../components/consent/ConsentModal';
 import type { ParticipantConsent } from '../../../components/consent/consent-types';
+
+/**
+ * Shared page backdrop for every state of the public registration page —
+ * chooser, form, loading placeholder and the account-only surface.
+ */
+const PAGE_BACKGROUND =
+  'radial-gradient(1200px 600px at 50% -10%, var(--bd-tint-primary), transparent 70%), #FBFCFE';
 
 export interface PublicRegistrationViewProps {
   org: string;
@@ -137,6 +145,15 @@ export function PublicRegistrationView({
   // shown in its own lightweight modal — not the Terms/Privacy one.
   const [profileConsentModal, setProfileConsentModal] = useState(false);
   const [formData, setFormData] = useState<Record<string, unknown>>({});
+  /**
+   * #652: has the user chosen "Register" on the pre-form chooser? Pure view
+   * state — both the chooser and the form live at `/<org>/<slug>`, because
+   * printed QR codes encode exactly that URL and a route change (or a query
+   * param, hash or router.push) would strand every code already in the field.
+   * Irrelevant when the Signals hand-off is unconfigured: there is then
+   * nothing to choose between and the form renders directly.
+   */
+  const [formRevealed, setFormRevealed] = useState(false);
   const [state, setState] = useState<SubmitState>({ status: 'idle' });
   /**
    * Pre-submit probe outcome. `null` = probe hasn't run yet (or returned
@@ -175,7 +192,20 @@ export function PublicRegistrationView({
     /^\d{4}$/.test(yearOfBirth.trim()) && yobNum >= currentYear - 120 && yobNum <= currentYear;
   const derivedAge = yobValid ? currentYear - yobNum : Number.NaN;
   const isMinor = yobValid && derivedAge <= 18;
-  const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
+  const { data: cfgData, isError: cfgFailed } = useAggregatorConfig();
+  const cfg = cfgData ?? DEFAULT_AGGREGATOR_CONFIG;
+  /**
+   * Whether the config query has settled — either with a payload or with a
+   * failure that leaves us on {@link DEFAULT_AGGREGATOR_CONFIG}. Gates the
+   * chooser-vs-form decision below so neither surface flashes.
+   *
+   * The failure branch deliberately renders the form (a participant must still
+   * be able to register during a config outage) and is *not* silent: the
+   * failure is reported by `useAggregatorConfig` itself, so nothing extra is
+   * needed here. It does mean the chooser vanishes on a config outage — that
+   * is the degradation, not a bug.
+   */
+  const configResolved = cfgData !== undefined || cfgFailed;
   const brandShort = cfg.brand.short_name;
   const brandLogo = cfg.brand.logo?.default;
   // #613: the consent step + birth-year field are config-driven per domain
@@ -184,6 +214,10 @@ export function PublicRegistrationView({
   // collects a birth year — signalstack force-adds `consent_required` for any
   // guardian-gated domain, so a birth-year domain always needs the consent step
   // (see registrationShowsConsent).
+  // #652: pre-submit hand-off to the Signals UI for a participant who already
+  // has an account. Resolved here (above the account-only early return, so the
+  // hook order stays stable) and threaded into both form surfaces.
+  const signalsHandoffUrl = useSignalsHandoffUrl(domain, registrationMode ?? null, submissionShape);
   const domainCfg = cfg.domains.find((d) => d.id === domain);
   const showBirthYear = domainRequiresBirthYear(domainCfg);
   const showConsent = registrationShowsConsent(domainCfg);
@@ -548,32 +582,154 @@ export function PublicRegistrationView({
   // handling behave identically.
   const isAccountOnly = submissionShape === 'account_only';
 
+  // #652: whether to show the chooser is a config-driven decision. Painting a
+  // surface off the default config and swapping it a beat later would flash
+  // the wrong thing exactly as the user starts reading, so hold a neutral
+  // placeholder until the query settles. A failed query settles too (onto the
+  // defaults, i.e. no hand-off), so this can never wedge the page.
+  if (!configResolved) {
+    return (
+      <div
+        className="bd-public-light min-h-screen w-full"
+        style={{ background: PAGE_BACKGROUND }}
+        aria-busy="true"
+      >
+        <div
+          className={`${isAccountOnly ? 'max-w-[640px]' : 'max-w-[760px]'} mx-auto px-4 sm:px-6 lg:px-10 py-8 sm:py-12`}
+        >
+          <div
+            data-testid="public-reg-loading"
+            className="h-[300px] rounded-[18px] border border-(--bd-border) bg-white animate-pulse"
+          />
+        </div>
+      </div>
+    );
+  }
+
+  // #652: the pre-form chooser. Shown on first open whenever the Signals
+  // hand-off is configured for this domain + mode, so a participant who
+  // already has an account meets the sign-in option before a long form rather
+  // than a link buried under the submit button. `signalsHandoffUrl === null`
+  // (no URL for the domain, or a mode with `signals_cta: false`) means there
+  // is nothing to choose between — the form then renders directly, exactly as
+  // the page behaved before.
+  const showChooser = signalsHandoffUrl !== null && !formRevealed;
+
+  const chooserPanel = signalsHandoffUrl ? (
+    <div data-testid="registration-chooser">
+      <h2 className="font-display font-bold text-[19px] text-(--bd-fg) tracking-tight">
+        {t('chooser_title')}
+      </h2>
+      <p className="mt-2 text-[14px] text-ink-500 leading-relaxed">{t('chooser_subtitle')}</p>
+      <div className="mt-5 flex flex-col gap-3">
+        <button
+          type="button"
+          onClick={() => setFormRevealed(true)}
+          style={{ backgroundColor: cfg.brand.primary_color }}
+          className="w-full py-3 rounded-[12px] font-display font-bold text-[15px] text-white hover:opacity-90 transition-opacity bd-shadow-lg"
+        >
+          {t('chooser_register_cta')}
+        </button>
+        <SignalsSignInCta href={signalsHandoffUrl} />
+      </div>
+    </div>
+  ) : null;
+
+  // Escape hatch out of a mis-click: without it, choosing Register traps the
+  // user on a long form with no way back to the sign-in option.
+  const backToChooser =
+    signalsHandoffUrl && formRevealed ? (
+      <button
+        type="button"
+        onClick={() => setFormRevealed(false)}
+        className="mb-4 inline-flex items-center gap-1 text-[13px] font-semibold text-ink-500 hover:text-ink-700"
+      >
+        <I.arrowL size={14} />
+        {t('chooser_back')}
+      </button>
+    ) : null;
+
+  // Success panel shown once the submission (or a skip through the
+  // account-only lookup) resolves. Hoisted alongside `chooserPanel` /
+  // `backToChooser` so the three mutually-exclusive views below are
+  // symmetric siblings rather than a nested ternary (typescript:S3358).
+  const donePanel =
+    state.status === 'done' ? (
+      <div className="rounded-[14px] border border-emerald-200 bg-emerald-50 p-6">
+        <div className="flex items-center gap-2.5 font-display font-bold text-[18px] text-emerald-800">
+          <span className="w-7 h-7 rounded-full bg-emerald-500 text-white inline-flex items-center justify-center">
+            <I.check size={16} stroke={2.6} />
+          </span>
+          {state.outcome === 'passed' ? t('done_passed_title') : t('done_skipped_title')}
+        </div>
+        <p className="text-[14px] text-emerald-700 mt-3 leading-relaxed">
+          {state.outcome === 'passed' ? t('done_passed_body') : t('done_skipped_body')}
+        </p>
+        {state.submissionId ? (
+          <div className="text-[11px] text-emerald-600/80 font-mono mt-3">
+            {t('done_ref_prefix')} {state.submissionId}
+          </div>
+        ) : null}
+        <button
+          type="button"
+          onClick={() => {
+            setFormData({});
+            setShowValidation(false);
+            setState({ status: 'idle' });
+          }}
+          style={{ backgroundColor: cfg.brand.primary_color }}
+          className="mt-5 w-full py-3 rounded-[12px] font-display font-bold text-[15px] text-white hover:opacity-90 transition-opacity"
+        >
+          {t('btn_register_another')}
+        </button>
+      </div>
+    ) : null;
+
+  // Exactly one of the three panels below is active; computed once here
+  // rather than as a nested ternary in the JSX (typescript:S3358).
+  let activeView: 'done' | 'chooser' | 'form';
+  if (state.status === 'done') {
+    activeView = 'done';
+  } else if (showChooser) {
+    activeView = 'chooser';
+  } else {
+    activeView = 'form';
+  }
+
   if (isAccountOnly && state.status === 'idle' && !lookup) {
     return (
       <div
         className="bd-public-light min-h-screen w-full"
         style={{
-          background:
-            'radial-gradient(1200px 600px at 50% -10%, var(--bd-tint-primary), transparent 70%), #FBFCFE',
+          background: PAGE_BACKGROUND,
         }}
       >
         <div className="max-w-[640px] mx-auto px-4 sm:px-6 lg:px-10 py-8 sm:py-12">
           <div className="flex justify-end mb-3">
             <LanguageSwitcher />
           </div>
-          {/* This branch only renders while state is 'idle', so the parent
-              has no in-flight signal to pass — the form's own internal submit
-              guard prevents the double-tap during the async probe. */}
-          <MinimalIdentityForm
-            identity={identity ?? {}}
-            onSubmit={handleMinimalSubmit}
-            brandColor={heroGradient}
-            hintI18nKey={publicHintI18nKey}
-            requirePhone={registrationMode === 'voice'}
-            consentContent={consentContent}
-            showConsent={showConsent}
-            showBirthYear={showBirthYear}
-          />
+          {showChooser ? (
+            <div className="rounded-[18px] bg-white border border-(--bd-border) px-6 sm:px-8 py-7 shadow-[0_1px_0_rgba(11,16,32,0.02),0_20px_60px_-30px_rgba(11,16,32,0.18)]">
+              {chooserPanel}
+            </div>
+          ) : (
+            <>
+              {backToChooser}
+              {/* This branch only renders while state is 'idle', so the parent
+                  has no in-flight signal to pass — the form's own internal
+                  submit guard prevents the double-tap during the async probe. */}
+              <MinimalIdentityForm
+                identity={identity ?? {}}
+                onSubmit={handleMinimalSubmit}
+                brandColor={heroGradient}
+                hintI18nKey={publicHintI18nKey}
+                requirePhone={registrationMode === 'voice'}
+                consentContent={consentContent}
+                showConsent={showConsent}
+                showBirthYear={showBirthYear}
+              />
+            </>
+          )}
         </div>
         {consentContent && (
           <ConsentModal
@@ -591,8 +747,7 @@ export function PublicRegistrationView({
     <div
       className="bd-public-light min-h-screen w-full"
       style={{
-        background:
-          'radial-gradient(1200px 600px at 50% -10%, var(--bd-tint-primary), transparent 70%), #FBFCFE',
+        background: PAGE_BACKGROUND,
       }}
     >
       <div className="max-w-[760px] mx-auto px-4 sm:px-6 lg:px-10 py-8 sm:py-12">
@@ -641,37 +796,11 @@ export function PublicRegistrationView({
           </div>
 
           <div className="px-6 sm:px-8 py-7">
-            {state.status === 'done' ? (
-              <div className="rounded-[14px] border border-emerald-200 bg-emerald-50 p-6">
-                <div className="flex items-center gap-2.5 font-display font-bold text-[18px] text-emerald-800">
-                  <span className="w-7 h-7 rounded-full bg-emerald-500 text-white inline-flex items-center justify-center">
-                    <I.check size={16} stroke={2.6} />
-                  </span>
-                  {state.outcome === 'passed' ? t('done_passed_title') : t('done_skipped_title')}
-                </div>
-                <p className="text-[14px] text-emerald-700 mt-3 leading-relaxed">
-                  {state.outcome === 'passed' ? t('done_passed_body') : t('done_skipped_body')}
-                </p>
-                {state.submissionId ? (
-                  <div className="text-[11px] text-emerald-600/80 font-mono mt-3">
-                    {t('done_ref_prefix')} {state.submissionId}
-                  </div>
-                ) : null}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setFormData({});
-                    setShowValidation(false);
-                    setState({ status: 'idle' });
-                  }}
-                  style={{ backgroundColor: cfg.brand.primary_color }}
-                  className="mt-5 w-full py-3 rounded-[12px] font-display font-bold text-[15px] text-white hover:opacity-90 transition-opacity"
-                >
-                  {t('btn_register_another')}
-                </button>
-              </div>
-            ) : (
+            {activeView === 'done' && donePanel}
+            {activeView === 'chooser' && chooserPanel}
+            {activeView === 'form' && (
               <>
+                {backToChooser}
                 {state.status === 'error' ? (
                   <div
                     ref={errorRef}

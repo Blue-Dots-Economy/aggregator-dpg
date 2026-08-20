@@ -89,6 +89,22 @@ const ConfigSchema = z.object({
   /** Comma-separated list of admin recipient email addresses. */
   ADMIN_EMAILS: z.string().default(''),
   /**
+   * Per-domain Signals UI login URLs, as comma-separated `domain=url` pairs:
+   *
+   *   SIGNALS_UI_URLS=seeker=https://signals-seeker.example/auth/login,provider=https://...
+   *
+   * Each network domain (from network.json) is fronted by its own Signals UI
+   * deployment, so this is a map rather than a single origin. Unset ⇒ the
+   * public registration form shows no Signals hand-off at all.
+   *
+   * The value MUST be a Signals **UI** URL (normally `<origin>/auth/login`),
+   * never a Keycloak authorization URL: Keycloak URLs embed one-time `state`
+   * and `code_challenge` values bound to the browser that generated them, so a
+   * hardcoded one fails PKCE/state validation for every user. `/auth/login` is
+   * the page that mints a valid Keycloak URL per attempt.
+   */
+  SIGNALS_UI_URLS: z.string().default(''),
+  /**
    * Recipient(s) for contact-support submissions (#120-equivalent).
    * Feature-gated: unset ⇒ endpoint 503, web button hidden. Accepts multiple
    * comma-separated addresses (all receive the TO copy).
@@ -360,17 +376,184 @@ export const apiReferenceEnabled: boolean =
  * filters, stray whitespace, and newline separators.
  */
 function parseEnvEmailList(raw: string | undefined): string[] {
-  let v = (raw ?? '').trim();
-  if (
-    v.length >= 2 &&
-    ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'")))
-  ) {
-    v = v.slice(1, -1).trim();
-  }
-  return v
+  return stripHelmQuoting(raw ?? '')
     .split(/[,\n]/)
     .map((s) => s.trim())
     .filter(Boolean);
 }
 
 export const adminEmails: string[] = parseEnvEmailList(config.ADMIN_EMAILS);
+
+/**
+ * Result of parsing the `SIGNALS_UI_URLS` env value: the successfully parsed
+ * `{ domain: url }` map plus a warning string per skipped/malformed entry.
+ *
+ * The warnings are returned rather than logged directly because this module
+ * cannot import the pino logger (`logger.ts` imports `config.ts`, so the
+ * reverse import would be circular) — the caller (`app.ts`) logs them once a
+ * Fastify instance exists.
+ */
+export interface ParsedSignalsUiUrls {
+  urls: Record<string, string>;
+  warnings: string[];
+}
+
+/**
+ * Strips a single layer of Helm `| quote`-style wrapping (single or double
+ * quotes) plus surrounding whitespace from a raw env value.
+ *
+ * @param raw - The raw string that may be quote-wrapped by Helm templating.
+ * @returns The unwrapped, trimmed string.
+ */
+function stripHelmQuoting(raw: string): string {
+  const v = raw.trim();
+  if (
+    v.length >= 2 &&
+    ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'")))
+  ) {
+    return v.slice(1, -1).trim();
+  }
+  return v;
+}
+
+/** The outcome of parsing one `domain=url` entry from `SIGNALS_UI_URLS`. */
+type SignalsUiUrlEntryResult =
+  { ok: true; domain: string; url: string } | { ok: false; warning: string };
+
+/**
+ * Parses and validates a single `domain=url` entry from `SIGNALS_UI_URLS`.
+ *
+ * @param pair - One trimmed, non-empty `domain=url` entry.
+ * @returns The parsed `{ domain, url }` pair, or a warning naming the
+ *   offending key if the entry is malformed.
+ */
+function parseSignalsUiUrlEntry(pair: string): SignalsUiUrlEntryResult {
+  // First `=` only — URLs carry `=` inside query strings.
+  const eq = pair.indexOf('=');
+  if (eq === -1) {
+    // Called out separately from the invalid-key case below: a bare word is
+    // almost always a comma that should have been an `=` (or vice versa), and
+    // saying "no `=` separator" points straight at it.
+    return {
+      ok: false,
+      warning: `SIGNALS_UI_URLS: skipping entry with no "=" separator: "${pair}"`,
+    };
+  }
+  const domain = pair.slice(0, eq).trim();
+  const url = pair.slice(eq + 1).trim();
+  if (!/^[a-z][a-z0-9_]*$/.test(domain)) {
+    return {
+      ok: false,
+      warning: `SIGNALS_UI_URLS: skipping entry with invalid domain key: "${pair}"`,
+    };
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return {
+      ok: false,
+      warning: `SIGNALS_UI_URLS: skipping domain "${domain}" — value is not a valid URL`,
+    };
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return {
+      ok: false,
+      warning: `SIGNALS_UI_URLS: skipping domain "${domain}" — only http(s) URLs are allowed`,
+    };
+  }
+  return { ok: true, domain, url };
+}
+
+/**
+ * Parse the `SIGNALS_UI_URLS` env value into a `{ domain: url }` map.
+ *
+ * Exported (unlike `parseEnvEmailList`) so it can be unit-tested without
+ * mutating `process.env`, which `config` snapshots at module load.
+ *
+ * A malformed entry is dropped with a warning rather than crashing boot: the
+ * Signals hand-off is optional, and one typo must not take the API down. The
+ * warning keeps it from being a silent failure.
+ *
+ * On a **duplicate domain key** the last entry wins — the map is built by
+ * assignment, so a later `seeker=…` overwrites an earlier one. That is a
+ * warning too, because a repeated key means one of the two URLs the operator
+ * wrote is being thrown away.
+ *
+ * Domain keys are validated for *format* only, never against the network's
+ * declared domains — those resolve asynchronously, long after this runs at
+ * module load. `seeker` and `seekr` are equally well-formed here. The
+ * cross-check against the real domain list happens once the network config
+ * resolves; see `unknownSignalsUiUrlDomains`.
+ */
+export function parseSignalsUiUrls(raw: string | undefined): ParsedSignalsUiUrls {
+  const v = stripHelmQuoting(raw ?? '');
+  const urls: Record<string, string> = {};
+  const warnings: string[] = [];
+  for (const entry of v.split(/[,\n]/)) {
+    const pair = entry.trim();
+    if (!pair) continue;
+    const result = parseSignalsUiUrlEntry(pair);
+    if (!result.ok) {
+      warnings.push(result.warning);
+      continue;
+    }
+    if (Object.hasOwn(urls, result.domain)) {
+      warnings.push(
+        `SIGNALS_UI_URLS: duplicate entry for domain "${result.domain}" — the last one wins`,
+      );
+    }
+    urls[result.domain] = result.url;
+  }
+  return { urls, warnings };
+}
+
+/**
+ * Which parsed `SIGNALS_UI_URLS` keys name no domain this network declares.
+ *
+ * `parseSignalsUiUrls` cannot do this: it runs at module load, whereas the
+ * domain list comes from the resolved network config (a file read plus a
+ * signalstack `network.json` fetch). So a typo'd key — `seekr=…` — parses
+ * perfectly clean and then silently disables the hand-off for `seeker`, which
+ * is a worse failure than a malformed URL because nothing warns.
+ *
+ * Pure and log-only by design: the caller warns, and the parsed map is used
+ * unchanged. Filtering unknown keys would be wrong — a domain added to
+ * network.json ahead of the ConfigMap rollout (or vice versa) must not be able
+ * to turn a working hand-off off, and the api must never fail boot over an
+ * optional feature's env var.
+ *
+ * @param urls - The parsed `{ domain: url }` map.
+ * @param knownDomains - `ResolvedNetworkConfig.domainIds`.
+ * @returns The unrecognised keys, in insertion order; empty when all match.
+ */
+export function unknownSignalsUiUrlDomains(
+  urls: Readonly<Record<string, string>>,
+  knownDomains: readonly string[],
+): string[] {
+  const known = new Set(knownDomains);
+  return Object.keys(urls).filter((domain) => !known.has(domain));
+}
+
+const parsedSignalsUiUrls = parseSignalsUiUrls(config.SIGNALS_UI_URLS);
+
+/**
+ * Per-domain Signals UI login URLs, parsed once at boot.
+ * Empty when unset — the public form then renders no Signals hand-off.
+ *
+ * Frozen, and typed `Readonly`, because every value in here has been checked to
+ * be an absolute http(s) URL. That invariant is what lets the web app drop the
+ * value straight into an `href`; a mutable module-level export would let any
+ * importer quietly add an unvalidated entry and break it from the inside.
+ */
+export const signalsUiUrls: Readonly<Record<string, string>> = Object.freeze(
+  parsedSignalsUiUrls.urls,
+);
+
+/**
+ * Warnings from parsing `SIGNALS_UI_URLS`, one per skipped/malformed entry.
+ * Logged once by `app.ts` via `app.log.warn` so a misconfigured env is
+ * visible in cluster logs (this module can't log directly — see
+ * `ParsedSignalsUiUrls`).
+ */
+export const signalsUiUrlWarnings: string[] = parsedSignalsUiUrls.warnings;

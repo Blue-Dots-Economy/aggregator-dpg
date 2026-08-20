@@ -23,6 +23,10 @@
     "./paths": {
       "import": "./dist/paths.js",
       "types": "./dist/paths.d.ts"
+    },
+    "./signals-cta": {
+      "import": "./dist/signals-cta.js",
+      "types": "./dist/signals-cta.d.ts"
     }
   },
   "scripts": {
