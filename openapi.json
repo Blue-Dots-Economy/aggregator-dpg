@@ -5782,7 +5782,7 @@
         "tags": [
           "registration-links"
         ],
-        "description": "Flips the link status to live so the public form accepts submissions; mints the QR PNG + public URL. Idempotent when already live; retired links cannot be reactivated (409).",
+        "description": "Flips the link status to live so the public form accepts submissions and returns the public URL. Idempotent when already live; retired links cannot be reactivated (409).",
         "parameters": [
           {
             "schema": {
