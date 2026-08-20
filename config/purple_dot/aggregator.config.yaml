@@ -43,7 +43,7 @@ aggregator:
     provider:
       singular: Service Provider
       plural: Service Providers
-      tab_label: Providers
+      tab_label: Service Providers
 
   onboarding:
     # Bulk-upload only: when true, an adult bulk row is pushed to Signals with

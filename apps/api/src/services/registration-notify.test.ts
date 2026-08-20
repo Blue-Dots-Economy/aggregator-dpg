@@ -229,6 +229,27 @@ describe('sendReviewEmail', () => {
     );
   });
 
+  it('labels the coordinator review email "aggregator coordinator", not "aggregator"', async () => {
+    // A reviewer who also handles org registrations cannot tell the two apart
+    // from "New aggregator registration" alone, so sendAdminReviewEmail states
+    // the label rather than falling through to the template default.
+    const send = vi.fn().mockResolvedValue({ ok: true, value: { messageId: 'm-1' } });
+    mockGetMailer.mockReturnValue({ send });
+    const { sendAdminReviewEmail } = await import('./registration-notify.js');
+    await sendAdminReviewEmail(
+      {
+        aggregatorId: 'agg-1',
+        applicantName: 'SkillBridge Network',
+        applicantEmail: 'admin@skillbridge.in',
+        applicantPhone: '+911234567890',
+        recipientEmail: 'admin@bluedots.local',
+      },
+      fakeLogger(),
+    );
+    const renderArgs = mockRenderAdminReview.mock.calls[0]?.[0] as { entityLabel?: string };
+    expect(renderArgs.entityLabel).toBe('aggregator coordinator');
+  });
+
   it('passes entityLabel through to the template when set', async () => {
     const send = vi.fn().mockResolvedValue({ ok: true, value: { messageId: 'm-1' } });
     mockGetMailer.mockReturnValue({ send });

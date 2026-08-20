@@ -11,7 +11,47 @@ const { resolveAggregatorSchemaPath, patchTypeFromNetwork, loadRegistrationSchem
   await import('@/lib/aggregator-schema.server');
 
 describe('resolveAggregatorSchemaPath', () => {
-  it('resolves the first candidate relative to cwd', () => {
+  const origNetwork = process.env.AGGREGATOR_NETWORK;
+  const origBrand = process.env.AGGREGATOR_BRAND;
+
+  afterEach(() => {
+    if (origNetwork === undefined) delete process.env.AGGREGATOR_NETWORK;
+    else process.env.AGGREGATOR_NETWORK = origNetwork;
+    if (origBrand === undefined) delete process.env.AGGREGATOR_BRAND;
+    else process.env.AGGREGATOR_BRAND = origBrand;
+  });
+
+  it('resolves the network-level schema for the default network', () => {
+    delete process.env.AGGREGATOR_BRAND;
+    const p = resolveAggregatorSchemaPath('registration.v1.json');
+    // `config/blue_dot/schemas/aggregator` is a symlink to the shared
+    // `config/schemas/aggregator`, so this is the same file the flat path
+    // resolved to before override support existed.
+    expect(p).toBe(
+      path.resolve(
+        process.cwd(),
+        '../../config/blue_dot/schemas/aggregator',
+        'registration.v1.json',
+      ),
+    );
+  });
+
+  it('prefers a brand override when the brand ships its own schema', () => {
+    process.env.AGGREGATOR_NETWORK = 'blue_dot';
+    process.env.AGGREGATOR_BRAND = 'up-gzb';
+    const p = resolveAggregatorSchemaPath('registration.v1.json');
+    expect(p).toBe(
+      path.resolve(
+        process.cwd(),
+        '../../config/blue_dot/up-gzb/schemas/aggregator',
+        'registration.v1.json',
+      ),
+    );
+  });
+
+  it('falls back to the shared default when the network has no schema dir', () => {
+    process.env.AGGREGATOR_NETWORK = 'no_such_network';
+    delete process.env.AGGREGATOR_BRAND;
     const p = resolveAggregatorSchemaPath('registration.v1.json');
     expect(p).toBe(
       path.resolve(process.cwd(), '../../config/schemas/aggregator', 'registration.v1.json'),

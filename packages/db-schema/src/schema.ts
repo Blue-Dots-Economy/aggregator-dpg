@@ -134,6 +134,20 @@ export const aggregators = pgTable(
     // before the row is created). Refreshable via PATCH.
     consent: jsonb('consent').$type<ConsentRecord>().notNull(),
 
+    // Schema-driven registration payload (0018). Holds ONLY fields that have
+    // no column of their own — the typed columns above stay authoritative for
+    // everything they already carry, so there is never a second home for the
+    // same value. A new field on the registration schema lands here, which is
+    // what keeps a schema revision from needing a migration.
+    profile: jsonb('profile')
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    // Which schema variant produced `profile`, e.g. `blue_dot/up-gzb/registration.v1`.
+    // The schemas vary per use case, so a row that does not name its own
+    // contract cannot be interpreted later. NULL on rows created before 0018.
+    profileRef: text('profile_ref'),
+
     // Lifecycle
     status: aggregatorStatusEnum('status').notNull().default('pending'),
     createdBy: text('created_by').notNull(),
@@ -185,6 +199,16 @@ export const aggregatorOrgs = pgTable(
     ownerPhone: text('owner_phone'),
     ownerKcSub: text('owner_kc_sub'),
     kcGroupId: text('kc_group_id'),
+    // Schema-driven registration payload (0018) — see the note on
+    // `aggregators.profile`. `state` above stays authoritative for the state
+    // name; the rest of the address and every field added by the Aug 2026
+    // schema review live here.
+    profile: jsonb('profile')
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    /** Which schema variant produced `profile`, e.g. `blue_dot/org-registration.v1`. */
+    profileRef: text('profile_ref'),
     status: aggregatorStatusEnum('status').notNull().default('pending'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -305,6 +329,9 @@ export const registrationLinks = pgTable(
     domain: text('domain').notNull(),
     context: jsonb('context').$type<Record<string, unknown>>().notNull().default({}),
     registrationMode: text('registration_mode').notNull().default('form'),
+    // Legacy (#650): QR is now generated client-side; this is never written
+    // going forward. Retained one release for legacy reads — do NOT reintroduce
+    // a write. Drop in a follow-up migration.
     qrObjectKey: text('qr_object_key'),
     status: registrationLinkStatusEnum('status').notNull().default('draft'),
     expiresAt: timestamp('expires_at', { withTimezone: true }),

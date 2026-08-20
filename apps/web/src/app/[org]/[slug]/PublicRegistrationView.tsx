@@ -1189,13 +1189,6 @@ export function PublicRegistrationView({
             )}
           </div>
         </div>
-
-        <p className="text-center text-[11.5px] text-ink-400 mt-6">
-          {t('powered_by')}{' '}
-          <span className="font-semibold" style={{ color: cfg.brand.primary_color }}>
-            {brandShort}
-          </span>
-        </p>
       </div>
       {consentContent && (
         <ConsentModal

@@ -164,6 +164,24 @@ describe('PostgresRegistrationLinksStore.create', () => {
     expect(result.error.code).toBe('SLUG_COLLISION');
   });
 
+  it('maps a Drizzle-wrapped unique violation (code on .cause) to SLUG_COLLISION', async () => {
+    // Drizzle throws a DrizzleQueryError whose driver `code` sits on `.cause`,
+    // not the top-level error — the mapping must walk the cause chain, else a
+    // duplicate slug masquerades as DB_UNAVAILABLE and the route's retry never
+    // fires (surfacing a misleading 503 instead of allocating a fresh slug).
+    const db = makeFakeDb(() => {
+      const driverErr = Object.assign(new Error('duplicate key value'), { code: '23505' });
+      throw Object.assign(new Error('Failed query: insert into ...'), { cause: driverErr });
+    });
+    _setDbClients(null, db as never);
+    const store = new PostgresRegistrationLinksStore();
+
+    const result = await store.create(makeInput());
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('SLUG_COLLISION');
+  });
+
   it('maps any other driver error to DB_UNAVAILABLE', async () => {
     const db = makeFakeDb(() => {
       throw new Error('connection reset');
@@ -281,50 +299,6 @@ describe('PostgresRegistrationLinksStore.findById', () => {
 
     const result = await store.findById('link-1', 'agg-1');
     expect(result.ok).toBe(false);
-  });
-});
-
-// ─── updateQrKey ────────────────────────────────────────────────────────────
-
-describe('PostgresRegistrationLinksStore.updateQrKey', () => {
-  it('sets the qr object key and returns the mapped row', async () => {
-    let captured: ChainCall[] = [];
-    const db = makeFakeDb((chain) => {
-      captured = chain;
-      return [makeRow({ qrObjectKey: 'qr/link-1.png' })];
-    });
-    _setDbClients(null, db as never);
-    const store = new PostgresRegistrationLinksStore();
-
-    const result = await store.updateQrKey('link-1', 'agg-1', 'qr/link-1.png');
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.value.qrObjectKey).toBe('qr/link-1.png');
-    expect(callArgs(captured, 'set')?.[0]).toMatchObject({ qrObjectKey: 'qr/link-1.png' });
-  });
-
-  it('returns NOT_FOUND when no row matches', async () => {
-    const db = makeFakeDb(() => []);
-    _setDbClients(null, db as never);
-    const store = new PostgresRegistrationLinksStore();
-
-    const result = await store.updateQrKey('missing', 'agg-1', 'k');
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.error.code).toBe('NOT_FOUND');
-  });
-
-  it('returns DB_UNAVAILABLE when the driver throws', async () => {
-    const db = makeFakeDb(() => {
-      throw new Error('boom');
-    });
-    _setDbClients(null, db as never);
-    const store = new PostgresRegistrationLinksStore();
-
-    const result = await store.updateQrKey('link-1', 'agg-1', 'k');
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.error.code).toBe('DB_UNAVAILABLE');
   });
 });
 

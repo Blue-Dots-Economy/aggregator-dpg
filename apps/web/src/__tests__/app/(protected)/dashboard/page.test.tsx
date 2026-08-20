@@ -98,7 +98,7 @@ vi.mock('@/hooks/useDashboard', () => ({
 
 // `vi.hoisted` so these fixtures exist before the (hoisted) `vi.mock` factory
 // below — which also runs at module-evaluation time — reads them.
-const { CFG_FIXTURE, TWO_DOMAIN_CFG_FIXTURE } = vi.hoisted(() => {
+const { CFG_FIXTURE, TWO_DOMAIN_CFG_FIXTURE, THREE_DOMAIN_CFG_FIXTURE } = vi.hoisted(() => {
   const cfg = {
     aggregator: { name: 'Test Aggregator' },
     brand: { short_name: 'Blue Dots', long_name: 'Blue Dots Portal', tagline: 'Test tagline' },
@@ -118,7 +118,23 @@ const { CFG_FIXTURE, TWO_DOMAIN_CFG_FIXTURE } = vi.hoisted(() => {
       },
     ],
   };
-  return { CFG_FIXTURE: cfg, TWO_DOMAIN_CFG_FIXTURE: twoDomainCfg };
+  const threeDomainCfg = {
+    ...cfg,
+    domains: [
+      ...twoDomainCfg.domains,
+      {
+        id: 'service_provider',
+        label: 'Service Provider',
+        plural_label: 'Service Providers',
+        item_type: 'profile_1.0',
+      },
+    ],
+  };
+  return {
+    CFG_FIXTURE: cfg,
+    TWO_DOMAIN_CFG_FIXTURE: twoDomainCfg,
+    THREE_DOMAIN_CFG_FIXTURE: threeDomainCfg,
+  };
 });
 const mockUseAggregatorConfig = vi.fn(() => ({ data: CFG_FIXTURE }));
 vi.mock('@/hooks/useAggregatorConfig', () => ({
@@ -285,6 +301,48 @@ describe('<DashboardPageRoot />', () => {
       // Provider-tab-only copy: search placeholder differs from the seeker tab.
       expect(screen.getByPlaceholderText('Search org, role, ID…')).toBeInTheDocument();
       expect(screen.getByText('Alice Seeker')).toBeInTheDocument();
+    });
+  });
+
+  describe('multi-domain routing', () => {
+    it('requests its OWN domain for a third-domain aggregator, not domains[0]', () => {
+      // Regression: the branch was `primaryDomain === cfg.domains[1].id`, which
+      // assumed exactly two domains in seeker-then-provider order. A
+      // service_provider coordinator matched neither branch, fell through to the
+      // seeker view, and that view fetched `domains[0]` — so the dashboard was
+      // headed "Seekers" and asked for seeker data the coordinator does not own.
+      mockUseAggregatorConfig.mockReturnValue({ data: THREE_DOMAIN_CFG_FIXTURE });
+      mockUseProfileRaw.mockReturnValue({ data: { type: 'service_provider' } });
+      mockUseDashboard.mockReturnValue({
+        data: dashboardPageFixture({ domain: 'service_provider' }),
+        isLoading: false,
+        isError: false,
+      });
+      renderPage();
+      const domains = mockUseDashboard.mock.calls
+        .map((c) => (c[0] as { domain?: string } | undefined)?.domain)
+        .filter((d): d is string => typeof d === 'string');
+      expect(domains).toContain('service_provider');
+      expect(domains).not.toContain('seeker');
+    });
+
+    it('labels a third-domain dashboard from its own domain label', () => {
+      mockUseAggregatorConfig.mockReturnValue({ data: THREE_DOMAIN_CFG_FIXTURE });
+      mockUseProfileRaw.mockReturnValue({ data: { type: 'service_provider' } });
+      mockUseDashboard.mockReturnValue({
+        data: dashboardPageFixture({ domain: 'service_provider' }),
+        isLoading: false,
+        isError: false,
+      });
+      renderPage();
+      // The table heading uses the domain's SINGULAR `label`, so a
+      // service_provider coordinator reads "Service Provider Activity & Status"
+      // and never the seeker heading it used to get.
+      // Asserted on rendered text rather than a heading role — the table
+      // heading is not an <h*> element.
+      const rendered = document.body.textContent ?? '';
+      expect(rendered).toMatch(/Service Provider Activity & Status/i);
+      expect(rendered).not.toMatch(/\bSeekers? Activity & Status/i);
     });
   });
 

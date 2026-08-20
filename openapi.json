@@ -150,6 +150,10 @@
                     "format": "uri",
                     "maxLength": 2048
                   },
+                  "sub_org_name": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
                   "contact": {
                     "type": "object",
                     "properties": {
@@ -4266,7 +4270,7 @@
         "tags": [
           "registration-links"
         ],
-        "description": "Creates a QR / shareable registration link for the caller aggregator, scoped to a domain (seeker/provider). `domain` and `registration_mode` are validated against the active network config at request time. Drafts are metadata-only; status=live also mints the QR + public URL.",
+        "description": "Creates a shareable registration link for the caller aggregator, scoped to a domain (seeker/provider). `domain` and `registration_mode` are validated against the active network config at request time. Drafts are metadata-only; status=live also mints the public URL. The QR is generated client-side from that URL (#650).",
         "requestBody": {
           "required": true,
           "content": {
@@ -5778,7 +5782,7 @@
         "tags": [
           "registration-links"
         ],
-        "description": "Flips the link status to live so the public form accepts submissions; mints the QR PNG + public URL. Idempotent when already live; retired links cannot be reactivated (409).",
+        "description": "Flips the link status to live so the public form accepts submissions and returns the public URL. Idempotent when already live; retired links cannot be reactivated (409).",
         "parameters": [
           {
             "schema": {

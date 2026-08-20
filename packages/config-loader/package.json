@@ -33,7 +33,7 @@
   },
   "dependencies": {
     "@aggregator-dpg/shared-primitives": "workspace:*",
-    "js-yaml": "^5.2.3",
+    "js-yaml": "^5.3.0",
     "zod": "^3.24.0"
   },
   "devDependencies": {

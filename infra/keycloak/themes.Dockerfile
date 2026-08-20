@@ -23,6 +23,7 @@
 #     --build-arg HERO_TITLE_HIGHLIGHT='Purple Dots' \
 #     --build-arg HERO_TITLE_TAIL='discovery & services for people with disabilities.' \
 #     --build-arg HERO_SUBTITLE='Sign in to manage beneficiaries, service providers, and onboarding across the network.' \
+#     --build-arg EMAIL_SIGNOFF='Team ALIMCO' \
 #     -t registry.your.co/aggregator-kc-theme:purple-v1 .
 #
 # Or simpler — pass `--build-arg-file config/<network>/keycloak.env`.
@@ -50,9 +51,53 @@ ARG HERO_SUBTITLE=Sign in to manage participants, registrations, and onboarding 
 # brand.json-driven values (PR #355). Slug + font stack get baked
 # into theme.properties so the runtime never falls back to default.
 ARG BRAND_LOGO_SLUG=purple-dot
+# Hero-panel lockup: a filename inside img/brand/<BRAND_LOGO_SLUG>/, or empty to
+# keep the wordmark + strapline text. Empty by default because onetac and
+# orange-dot ship no logo-on-brand.png and would render a broken image.
+ARG BRAND_HERO_LOGO=
+# Strapline under the hero wordmark. Quoted for the same reason as
+# EMAIL_SIGNOFF below — an unquoted default truncates at the first space.
+# Blank it for a brand whose lockup artwork already carries the strapline.
+ARG BRAND_SEEDED_BY="Seeded by EkStep Foundation"
 ARG BRAND_FONT_SANS=Inter, system-ui, sans-serif
 ARG BRAND_FONT_HEADING=Plus Jakarta Sans, system-ui, sans-serif
 ARG BRAND_FONT_BODY=Inter, system-ui, sans-serif
+# Sign-off on the login-OTP email (#626). The email theme's copy is otherwise
+# static, but this line differs per network (EkStep on Blue Dot, ALIMCO on
+# Purple Dot), so it is rebaked below from the network's keycloak.env like the
+# brand strings are. The default matches the checked-in messages_en.properties,
+# which is what the compose stack (mounting the theme tree directly) uses.
+# NB the quotes: an unquoted Dockerfile ARG default truncates at the first
+# space (the brand ARGs above have the same latent flaw, harmless only
+# because build-theme-image.sh always passes a keycloak.env that overrides
+# them). Without them this default bakes as "Team".
+ARG EMAIL_SIGNOFF="Team EkStep"
+# ── SIGNALS login page (the `signals` child theme) ────────────────────────────
+# Each defaults to the network's own BRAND_* above, so a brand is correct with
+# no addition to its keycloak.env. Previously these were env-only with hardcoded
+# Blue Dots defaults that nothing set, so every non-blue network served the Blue
+# Dots mark and palette on its signals login. Override per brand only where
+# signals genuinely differs from the aggregator.
+ARG SIGNALS_BRAND_SHORT_NAME=${BRAND_SHORT_NAME}
+# "<short> Signals" — matches the old Blue Dots default, right for every network.
+ARG SIGNALS_BRAND_LONG_NAME="${BRAND_SHORT_NAME} Signals"
+ARG SIGNALS_BRAND_SSO_LABEL=${BRAND_SSO_LABEL}
+ARG SIGNALS_BRAND_LOGO_SLUG=${BRAND_LOGO_SLUG}
+ARG SIGNALS_BRAND_FONT_SANS=${BRAND_FONT_SANS}
+ARG SIGNALS_BRAND_FONT_HEADING=${BRAND_FONT_HEADING}
+ARG SIGNALS_BRAND_FONT_BODY=${BRAND_FONT_BODY}
+ARG SIGNALS_BRAND_PRIMARY_COLOR=${BRAND_PRIMARY_COLOR}
+ARG SIGNALS_BRAND_PRIMARY_DARK=${BRAND_PRIMARY_DARK}
+ARG SIGNALS_BRAND_PRIMARY_500=${BRAND_PRIMARY_500}
+ARG SIGNALS_BRAND_PRIMARY_100=${BRAND_PRIMARY_100}
+ARG SIGNALS_BRAND_PRIMARY_50=${BRAND_PRIMARY_50}
+# Signals-specific wording — NOT derived from the aggregator, because this is
+# where the two pages are meant to read differently.
+ARG SIGNALS_BRAND_APP_LABEL="Signals Network"
+ARG SIGNALS_HERO_TITLE_LEAD="Welcome to"
+ARG SIGNALS_HERO_TITLE_HIGHLIGHT="the Signals network"
+ARG SIGNALS_HERO_TITLE_TAIL=""
+ARG SIGNALS_HERO_SUBTITLE="Sign in to discover and connect across the network."
 
 # Theme source — read from the repo's checked-in theme tree.
 COPY infra/keycloak/themes /custom
@@ -68,6 +113,8 @@ RUN { \
       printf 'brandSsoLabel=%s\n'       "${BRAND_SSO_LABEL}"; \
       printf 'brandAppLabel=%s\n'       "${BRAND_APP_LABEL}"; \
       printf 'brandLogoSlug=%s\n'       "${BRAND_LOGO_SLUG}"; \
+      printf 'heroLogo=%s\n'            "${BRAND_HERO_LOGO}"; \
+      printf 'brandSeededBy=%s\n'       "${BRAND_SEEDED_BY}"; \
       printf 'brandFontSans=%s\n'       "${BRAND_FONT_SANS}"; \
       printf 'brandFontHeading=%s\n'    "${BRAND_FONT_HEADING}"; \
       printf 'brandFontBody=%s\n'       "${BRAND_FONT_BODY}"; \
@@ -84,10 +131,42 @@ RUN { \
       printf 'brandHeroGrad=%s\n'       "${BRAND_HERO_GRAD}"; \
     } > /custom/otp/login/theme.properties
 
-# Only `otp` is re-baked. The `signals` child theme's properties keep their
-# `${env.SIGNALS_*:default}` form, with the checked-in defaults being signals'
-# real values — signals branding does not vary per network today, so there is
-# nothing per-image to freeze. Add a second printf block here if that changes.
+# Same idea for the one per-network string in the EMAIL theme. Only this key is
+# rewritten — the rest of the copy stays reviewable in the theme tree rather
+# than being buried in a printf here. `|` as the sed delimiter so a sign-off
+# containing `/` cannot break the expression.
+RUN sed -i "s|^emailOtpSignoff=.*|emailOtpSignoff=${EMAIL_SIGNOFF}|" \
+      /custom/otp/email/messages/messages_en.properties \
+    && grep -qF -- "emailOtpSignoff=${EMAIL_SIGNOFF}" \
+      /custom/otp/email/messages/messages_en.properties
+
+# Bake the `signals` theme like `otp` above, so nothing depends on env at request
+# time. `parent=otp` is re-emitted first: without it the theme stops inheriting
+# and the keys it does not declare (brandSeededBy, brandHeroBg, brandHeroGrad)
+# vanish from the page.
+RUN { \
+      printf 'parent=otp\n'; \
+      printf 'brandShortName=%s\n'     "${SIGNALS_BRAND_SHORT_NAME}"; \
+      printf 'brandLongName=%s\n'      "${SIGNALS_BRAND_LONG_NAME}"; \
+      printf 'brandAppLabel=%s\n'      "${SIGNALS_BRAND_APP_LABEL}"; \
+      printf 'brandSsoLabel=%s\n'      "${SIGNALS_BRAND_SSO_LABEL}"; \
+      printf 'brandLogoSlug=%s\n'      "${SIGNALS_BRAND_LOGO_SLUG}"; \
+      printf 'heroTitleLead=%s\n'      "${SIGNALS_HERO_TITLE_LEAD}"; \
+      printf 'heroTitleHighlight=%s\n' "${SIGNALS_HERO_TITLE_HIGHLIGHT}"; \
+      printf 'heroTitleTail=%s\n'      "${SIGNALS_HERO_TITLE_TAIL}"; \
+      printf 'heroSubtitle=%s\n'       "${SIGNALS_HERO_SUBTITLE}"; \
+      printf 'brandFontSans=%s\n'      "${SIGNALS_BRAND_FONT_SANS}"; \
+      printf 'brandFontHeading=%s\n'   "${SIGNALS_BRAND_FONT_HEADING}"; \
+      printf 'brandFontBody=%s\n'      "${SIGNALS_BRAND_FONT_BODY}"; \
+      printf 'brandPrimary=%s\n'       "${SIGNALS_BRAND_PRIMARY_COLOR}"; \
+      printf 'brandPrimaryDark=%s\n'   "${SIGNALS_BRAND_PRIMARY_DARK}"; \
+      printf 'brandPrimary500=%s\n'    "${SIGNALS_BRAND_PRIMARY_500}"; \
+      printf 'brandPrimary100=%s\n'    "${SIGNALS_BRAND_PRIMARY_100}"; \
+      printf 'brandPrimary50=%s\n'     "${SIGNALS_BRAND_PRIMARY_50}"; \
+    } > /custom/signals/login/theme.properties \
+    && grep -qF -- "brandLogoSlug=${SIGNALS_BRAND_LOGO_SLUG}" \
+      /custom/signals/login/theme.properties \
+    && grep -qF -- 'parent=otp' /custom/signals/login/theme.properties
 
 # Init-container entrypoint: copy the themes into the shared volume the main
 # Keycloak container mounts at /opt/keycloak/themes, then exit. Using

@@ -10,9 +10,11 @@
  */
 
 import 'server-only';
+import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { RJSFSchema } from '@rjsf/utils';
+import { aggregatorSchemaRelPaths } from './config-paths';
 
 /** Parsed registration schema pair (JSON Schema + RJSF UI schema). */
 export interface AggregatorSchemaPair {
@@ -21,20 +23,33 @@ export interface AggregatorSchemaPair {
 }
 
 /**
- * Resolves a file under `config/schemas/aggregator/` relative to the running
- * cwd. Works for both `pnpm --filter web dev` (cwd = apps/web) and the
- * production Docker build (cwd = /app/apps/web).
+ * Resolves an aggregator schema file, preferring a network/brand override.
+ *
+ * Works for both `pnpm --filter web dev` (cwd = apps/web) and the production
+ * Docker build (cwd = /app/apps/web). Within each `config/` root the
+ * network/brand override is tried before the shared default, so an instance
+ * that needs extra registration fields (UP-GZB) ships its own complete copy
+ * under `config/<network>[/<brand>]/schemas/aggregator/` while Purple Dot and
+ * Dharwad keep rendering the generic form.
+ *
+ * Falls back to the shared-default path when nothing exists, so the caller's
+ * `readFile` surfaces a normal ENOENT naming a real location.
  *
  * @param file - Bare schema file name, e.g. `registration.v1.json`.
- * @returns Absolute path to the schema file.
+ * @returns Absolute path to the most specific schema file that exists.
  */
 export function resolveAggregatorSchemaPath(file: string): string {
-  const candidates = [
-    path.resolve(process.cwd(), '../../config/schemas/aggregator', file),
-    path.resolve(process.cwd(), '../config/schemas/aggregator', file),
-    path.resolve(process.cwd(), 'config/schemas/aggregator', file),
+  const roots = [
+    path.resolve(process.cwd(), '../../config'),
+    path.resolve(process.cwd(), '../config'),
+    path.resolve(process.cwd(), 'config'),
   ];
-  return candidates[0]!;
+  const rel = aggregatorSchemaRelPaths(file);
+  // Specificity first, then root — a brand override in any resolvable root must
+  // beat the shared default in another.
+  const candidates = rel.flatMap((r) => roots.map((root) => path.join(root, r)));
+  const found = candidates.find((c) => existsSync(c));
+  return found ?? path.join(roots[0]!, rel.at(-1)!);
 }
 
 /**
