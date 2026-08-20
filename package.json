@@ -18,7 +18,7 @@
     "prepare": "husky",
     "new-service": "tsx scripts/new-service.ts",
     "dep-check": "depcruise packages --config .dependency-cruiser.cjs --output-type err-long",
-    "test:scripts": "node --test scripts/stack.test.mjs",
+    "test:scripts": "node --test scripts/stack.test.mjs scripts/new-service.test.mjs",
     "stack:setup": "node scripts/stack.mjs setup",
     "stack:up": "node scripts/stack.mjs up",
     "stack:down": "node scripts/stack.mjs down",

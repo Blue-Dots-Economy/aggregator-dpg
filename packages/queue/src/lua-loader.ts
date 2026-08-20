@@ -1,13 +1,17 @@
 /**
  * Lua script loader + EVALSHA executor.
  *
- * Reads a `.lua` file once at module init, computes its SHA1, and exposes
- * a bound execute function that uses EVALSHA for fast path and falls back
- * to EVAL on NOSCRIPT (Redis flushed scripts).
+ * Reads a `.lua` file once at module init and exposes a bound execute
+ * function that uses EVALSHA for the fast path, falling back to EVAL on
+ * NOSCRIPT (Redis flushed its script cache).
+ *
+ * The digest EVALSHA keys on is SHA1 — that is fixed by the Redis protocol
+ * and cannot be swapped for a stronger hash. So this module never computes
+ * it locally: it asks Redis for the digest with `SCRIPT LOAD` (once per
+ * client, cached) and treats the reply as an opaque handle.
  */
 
 import { readFileSync } from 'node:fs';
-import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Redis } from 'ioredis';
@@ -16,17 +20,50 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export interface LuaScript {
   source: string;
-  sha1: string;
 }
 
 function loadScript(relPath: string): LuaScript {
   const filePath = path.resolve(__dirname, relPath);
-  const source = readFileSync(filePath, 'utf8');
-  const sha1 = createHash('sha1').update(source).digest('hex');
-  return { source, sha1 };
+  return { source: readFileSync(filePath, 'utf8') };
 }
 
 const bulkRowCommitScript = loadScript('./lua/bulk_row_commit.lua');
+
+/**
+ * Per-client cache of the digest Redis returned for the script. Keyed by the
+ * client because a digest is only valid against the server that cached it;
+ * weak so a discarded client does not pin the entry.
+ */
+const digestByClient = new WeakMap<Redis, Promise<string>>();
+
+/**
+ * Registers the script with Redis and returns the digest EVALSHA needs.
+ *
+ * @param redis - ioredis client.
+ * @param script - The loaded Lua source.
+ * @returns The server-assigned script digest.
+ * @throws {Error} If Redis replies with something other than a digest string.
+ */
+async function scriptDigest(redis: Redis, script: LuaScript): Promise<string> {
+  const cached = digestByClient.get(redis);
+  if (cached) return cached;
+
+  const pending = Promise.resolve(redis.script('LOAD', script.source))
+    .then((reply) => {
+      if (typeof reply !== 'string' || reply.length === 0) {
+        throw new Error(`SCRIPT LOAD returned an unexpected reply: ${JSON.stringify(reply)}`);
+      }
+      return reply;
+    })
+    .catch((err: unknown) => {
+      // Do not cache a failed load — the next call should retry.
+      digestByClient.delete(redis);
+      throw err;
+    });
+
+  digestByClient.set(redis, pending);
+  return pending;
+}
 
 export type BulkRowOutcome = 'passed' | 'failed' | 'skipped';
 
@@ -42,7 +79,8 @@ export interface BulkRowCommitResult {
 }
 
 /**
- * Runs the `bulk_row_commit.lua` script against Redis. Single round-trip.
+ * Runs the `bulk_row_commit.lua` script against Redis. Single round-trip
+ * once the script digest has been cached for this client.
  *
  * @param redis - ioredis client.
  * @param uploadId - bulk_uploads.id; used as the key namespace `bu:{id}:`.
@@ -69,13 +107,16 @@ export async function runBulkRowCommit(
   ];
   const args = [String(rowIndex), outcome, errorPayloadJson, String(ttlSeconds)];
 
+  const digest = await scriptDigest(redis, bulkRowCommitScript);
+
   let raw: unknown;
   try {
-    raw = await redis.evalsha(bulkRowCommitScript.sha1, keys.length, ...keys, ...args);
+    raw = await redis.evalsha(digest, keys.length, ...keys, ...args);
   } catch (err) {
     // NOSCRIPT — script not in Redis cache (e.g. server restart). Reload + retry.
     const message = (err as Error).message ?? '';
     if (message.includes('NOSCRIPT')) {
+      digestByClient.delete(redis);
       raw = await redis.eval(bulkRowCommitScript.source, keys.length, ...keys, ...args);
     } else {
       throw err;
