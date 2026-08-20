@@ -101,6 +101,12 @@ export interface RegistrationModeConfig {
   label_i18n_key: string;
   submission_shape: 'account_only' | 'account_and_profile';
   public_hint_i18n_key: string | null;
+  /**
+   * Whether links in this mode offer the Signals UI hand-off. Resolved
+   * server-side (the `submission_shape` default is already applied), so the
+   * client reads it directly. Optional for back-compat with an older api build.
+   */
+  signals_cta?: boolean;
 }
 
 /**
@@ -176,6 +182,11 @@ export interface AggregatorConfigPayload {
   dashboardBuckets?: DashboardBuckets;
   /** Per-link registration modes declared by the network (admin dropdown source). */
   registration_modes?: Record<string, RegistrationModeConfig>;
+  /**
+   * Per-domain Signals UI login URLs, keyed by domain id. Absent or missing a
+   * domain ⇒ no Signals hand-off for that domain.
+   */
+  signals_ui_urls?: Record<string, string>;
 }
 
 /**
