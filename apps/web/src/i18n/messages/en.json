@@ -462,6 +462,8 @@
       "btn_register_another": "Register another",
       "btn_submit": "Submit registration",
       "signals_cta": "Already Registered — Sign In",
+      "signals_redirect_notice": "Redirecting to Signals in {seconds}…",
+      "btn_continue_to_signals": "Continue to Signals",
       "btn_submitting": "Submitting…",
       "consent_label": "I have read and accept the terms and privacy policy.",
       "consent_accept_prefix": "I have read and accept the ",

@@ -65,6 +65,10 @@ type SubmitState =
   | { status: 'done'; submissionId: string; outcome: 'passed' | 'skipped' }
   | { status: 'error'; title: string; detail: string; code: string };
 
+/** Grace period before the post-submit hand-off fires, so the participant
+ *  actually sees the success panel and their reference id (#635). */
+const SIGNALS_REDIRECT_SECONDS = 3;
+
 /**
  * Outcome of the pre-submit identity probe — drives the branched UI
  * (allow normal submit / show owned-elsewhere / offer resume).
@@ -139,6 +143,10 @@ export function PublicRegistrationView({
   const [profileConsentModal, setProfileConsentModal] = useState(false);
   const [formData, setFormData] = useState<Record<string, unknown>>({});
   const [state, setState] = useState<SubmitState>({ status: 'idle' });
+  // #635: post-submit hand-off. `null` = no countdown running. Kept separate
+  // from `state` so cancelling the redirect (Register another) does not have
+  // to reconstruct the submit result.
+  const [redirectIn, setRedirectIn] = useState<number | null>(null);
   /**
    * Pre-submit probe outcome. `null` = probe hasn't run yet (or returned
    * "allow"); `owned_elsewhere` / `resume` short-circuit the submit
@@ -202,6 +210,25 @@ export function PublicRegistrationView({
       errorRef.current.focus();
     }
   }, [state]);
+
+  // Arm the countdown once a submit succeeds and the hand-off is configured.
+  // Both outcomes qualify: `passed` is a new registration, `skipped` is a dedup
+  // hit meaning "already registered here", for which signing in is if anything
+  // more apt.
+  useEffect(() => {
+    if (state.status !== 'done' || !signalsHandoffUrl) return;
+    setRedirectIn(SIGNALS_REDIRECT_SECONDS);
+  }, [state.status, signalsHandoffUrl]);
+
+  useEffect(() => {
+    if (redirectIn === null || !signalsHandoffUrl) return;
+    if (redirectIn <= 0) {
+      window.location.assign(signalsHandoffUrl);
+      return;
+    }
+    const timer = setTimeout(() => setRedirectIn((n) => (n === null ? null : n - 1)), 1000);
+    return () => clearTimeout(timer);
+  }, [redirectIn, signalsHandoffUrl]);
 
   // Hide schema's verbose title/description from the form — the page header
   // owns the framing copy. Also drop `participant_id` from the public form:
@@ -663,12 +690,30 @@ export function PublicRegistrationView({
                     {t('done_ref_prefix')} {state.submissionId}
                   </div>
                 ) : null}
+                {redirectIn !== null && signalsHandoffUrl ? (
+                  <>
+                    <p aria-live="polite" className="text-[13px] text-emerald-700 mt-4">
+                      {t('signals_redirect_notice', { seconds: redirectIn })}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => window.location.assign(signalsHandoffUrl)}
+                      style={{ backgroundColor: cfg.brand.primary_color }}
+                      className="mt-3 w-full py-3 rounded-[12px] font-display font-bold text-[15px] text-white hover:opacity-90 transition-opacity"
+                    >
+                      {t('btn_continue_to_signals')}
+                    </button>
+                  </>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => {
                     setFormData({});
                     setShowValidation(false);
                     setState({ status: 'idle' });
+                    // Cancel the #635 hand-off: a field operator registering
+                    // people back-to-back must not be bounced to Signals.
+                    setRedirectIn(null);
                   }}
                   style={{ backgroundColor: cfg.brand.primary_color }}
                   className="mt-5 w-full py-3 rounded-[12px] font-display font-bold text-[15px] text-white hover:opacity-90 transition-opacity"

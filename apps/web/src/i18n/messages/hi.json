@@ -462,6 +462,8 @@
       "btn_register_another": "दूसरे को पंजीकृत करें",
       "btn_submit": "पंजीकरण जमा करें",
       "signals_cta": "पहले से पंजीकृत हैं — साइन इन करें",
+      "signals_redirect_notice": "{seconds} सेकंड में Signals पर ले जाया जा रहा है…",
+      "btn_continue_to_signals": "Signals पर जारी रखें",
       "btn_submitting": "जमा किया जा रहा है…",
       "consent_label": "मैंने नियम और गोपनीयता नीति पढ़ ली है और स्वीकार करता/करती हूँ।",
       "consent_accept_prefix": "मैंने पढ़ लिया है और स्वीकार करता/करती हूँ ",
