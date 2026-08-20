@@ -53,7 +53,7 @@ export function useSignalsHandoffUrl(
  * @param props.href - Resolved Signals UI URL from {@link useSignalsHandoffUrl}.
  * @returns The CTA link, always opened in a new tab so a half-filled form survives.
  */
-export function SignalsSignInCta({ href }: { href: string }) {
+export function SignalsSignInCta({ href }: Readonly<{ href: string }>) {
   const t = useTranslations('profile.public_reg');
   return (
     <div className="mt-4 text-center">
