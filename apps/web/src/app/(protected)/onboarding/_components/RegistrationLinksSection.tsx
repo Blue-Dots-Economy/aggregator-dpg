@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import QRCode from 'qrcode';
 import { useRouter } from 'next/navigation';
@@ -125,6 +125,98 @@ function SuccessToast({ message, onDone }: { message: string; onDone: () => void
       className="fixed top-4 right-4 z-100 rounded-[10px] border border-emerald-200 bg-emerald-50 px-4 py-3 text-[13px] text-emerald-700 shadow-lg inline-flex items-center gap-2"
     >
       <I.check size={14} /> {message}
+    </div>,
+    document.body,
+  );
+}
+
+/**
+ * QR preview modal (#650). The QR is derived data — the caller generates the
+ * PNG data-URI in the browser from the link's public URL and passes it here;
+ * nothing is persisted. Portals to <body>. Shows the code with a Download
+ * action. `dataUrl === null` while generating; `error` when generation failed.
+ */
+function QrPreviewModal({
+  title,
+  dataUrl,
+  error,
+  onDownload,
+  onClose,
+}: {
+  title: string;
+  dataUrl: string | null;
+  error: string | null;
+  onDownload: () => void;
+  onClose: () => void;
+}) {
+  const t = useTranslations('onboarding');
+  const [mounted, setMounted] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useEffect(() => setMounted(true), []);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  // Move focus into the dialog on open and hand it back to the trigger on
+  // close, so keyboard users aren't stranded on the backdrop. (No full focus
+  // trap — Esc/backdrop close cover the common exits.)
+  useEffect(() => {
+    if (!mounted) return;
+    const restoreTo = document.activeElement as HTMLElement | null;
+    dialogRef.current?.focus();
+    return () => restoreTo?.focus?.();
+  }, [mounted]);
+  if (!mounted) return null;
+  return createPortal(
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      ref={dialogRef}
+      tabIndex={-1}
+      className="fixed inset-0 z-[100] flex items-center justify-center p-4 outline-none"
+    >
+      {/* Native button backdrop — click or keyboard closes; a plain div with
+          onClick fails jsx-a11y (no keyboard path). */}
+      <button
+        type="button"
+        aria-label={t('link_card.qr_close')}
+        onClick={onClose}
+        className="absolute inset-0 h-full w-full cursor-default bg-black/40"
+      />
+      <div className="relative w-full max-w-[340px] rounded-[14px] bg-white p-5 shadow-xl">
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="font-display text-[15px] font-bold text-ink-900">{title}</h3>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label={t('link_card.qr_close')}
+            className="text-ink-400 hover:text-ink-700"
+          >
+            <I.x size={16} />
+          </button>
+        </div>
+        <div className="flex min-h-[220px] items-center justify-center rounded-[10px] border border-(--bd-border) bg-ink-50 p-4">
+          {error ? (
+            <p className="text-[13px] text-rose-600">{error}</p>
+          ) : dataUrl ? (
+            <img src={dataUrl} alt={title} className="h-52 w-52" />
+          ) : (
+            <p className="text-[13px] text-ink-400">{t('link_card.qr_generating')}</p>
+          )}
+        </div>
+        <div className="mt-4">
+          <button
+            type="button"
+            onClick={onDownload}
+            disabled={!dataUrl}
+            className="inline-flex w-full items-center justify-center gap-1.5 rounded-[10px] bg-primary-600 px-3 py-2 text-[13px] font-semibold text-white hover:bg-primary-700 disabled:opacity-50"
+          >
+            <I.download size={14} /> {t('link_card.qr_download')}
+          </button>
+        </div>
+      </div>
     </div>,
     document.body,
   );
@@ -454,17 +546,31 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };
-  // #650: the QR is derived data — generate the PNG in the browser from the
-  // public URL and trigger a real download (no S3 round-trip, never expires).
-  const onDownloadQr = async () => {
+  // #650: the QR is derived data — generated in the browser from the public
+  // URL on demand (no S3 round-trip, never expires). Opening the preview
+  // renders the PNG data-URI; Download reuses the same in-memory value.
+  const [qrOpen, setQrOpen] = useState(false);
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [qrError, setQrError] = useState<string | null>(null);
+  const openQr = async () => {
     if (!link.public_url) return;
-    const dataUrl = await QRCode.toDataURL(link.public_url, {
-      errorCorrectionLevel: 'M',
-      margin: 1,
-      width: 512,
-    });
+    setQrError(null);
+    setQrOpen(true);
+    try {
+      const dataUrl = await QRCode.toDataURL(link.public_url, {
+        errorCorrectionLevel: 'M',
+        margin: 1,
+        width: 512,
+      });
+      setQrDataUrl(dataUrl);
+    } catch {
+      setQrError(t('link_card.qr_error'));
+    }
+  };
+  const downloadQr = () => {
+    if (!qrDataUrl) return;
     const a = document.createElement('a');
-    a.href = dataUrl;
+    a.href = qrDataUrl;
     a.download = `qr-${link.slug}.png`;
     document.body.appendChild(a);
     a.click();
@@ -571,8 +677,8 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
               </div>
               <button
                 type="button"
-                onClick={onDownloadQr}
-                title={t('link_card.download_qr')}
+                onClick={openQr}
+                title={t('link_card.view_qr')}
                 className="inline-flex items-center justify-center w-8 h-8 rounded-[10px] border border-(--bd-border) text-ink-500 hover:text-primary-600 hover:border-(--bd-primary-100)"
               >
                 <I.qr size={14} />
@@ -594,6 +700,15 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
                 {copied ? t('link_card.copied') : t('link_card.copy_link')}
               </button>
             </div>
+          )}
+          {qrOpen && (
+            <QrPreviewModal
+              title={t('link_card.qr_modal_title')}
+              dataUrl={qrDataUrl}
+              error={qrError}
+              onDownload={downloadQr}
+              onClose={() => setQrOpen(false)}
+            />
           )}
 
           {isDraft && !editing && (

@@ -423,9 +423,15 @@ describe('<YourLinksBody />', () => {
 
     expect(screen.getByText('bluedots.example/')).toBeInTheDocument();
     expect(screen.getByText('acme/dharwad-drive')).toBeInTheDocument();
-    expect(screen.getByTitle('Download QR')).toBeInTheDocument();
+    expect(screen.getByTitle('View QR')).toBeInTheDocument();
     expect(screen.getByTitle('Open link')).toBeInTheDocument();
     expect(screen.getByText(/Expires/)).toBeInTheDocument();
+
+    // #650: clicking the QR button opens the preview modal (no navigation).
+    await user.click(screen.getByTitle('View QR'));
+    expect(await screen.findByText('Registration QR')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Download/ })).toBeInTheDocument();
+    await user.keyboard('{Escape}');
 
     const copyButtons = screen.getAllByRole('button', { name: 'Copy link' });
     await user.click(copyButtons[copyButtons.length - 1]!);
