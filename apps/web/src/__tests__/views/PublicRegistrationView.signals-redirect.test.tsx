@@ -6,15 +6,19 @@
  * operator registering people back-to-back must not be thrown out of the
  * form), the dedup-hit outcome, and the unconfigured-domain no-op.
  *
- * Reuses the RJSF shim, render helper and config mock from
- * PublicRegistrationView.signals-cta.test.tsx — the same two config gates
- * decide whether this hand-off is armed at all.
+ * The RJSF shim, the fixture config, and the render helper come from
+ * `./publicRegistrationView.testHelpers` — shared with
+ * `PublicRegistrationView.signals-cta.test.tsx`, which exercises the same
+ * two config gates that decide whether this hand-off is armed at all.
  */
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, act } from '@testing-library/react';
-import { NextIntlClientProvider } from 'next-intl';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import messages from '@/i18n/messages/en.json';
+import { screen, fireEvent, act } from '@testing-library/react';
+import {
+  RjsfShim,
+  CFG,
+  SIGNALS_URL,
+  renderPublicRegistrationView,
+} from './publicRegistrationView.testHelpers';
 
 // jsdom does not implement scrollIntoView; the error banner's focus effect
 // calls it whenever state transitions to 'error'.
@@ -22,42 +26,7 @@ beforeAll(() => {
   Element.prototype.scrollIntoView = vi.fn();
 });
 
-// Shim RjsfThemedForm exactly as the CTA test does: a deterministic <form>
-// whose submit fires the view's real handleSubmit pipeline. The schema here
-// declares no defaults, so formData is `{}` — the identity probe short-
-// circuits to "allow" without a lookup fetch, leaving the submit POST as the
-// only network call the view makes.
-vi.mock('@/components/forms/RjsfThemed', () => {
-  return {
-    RjsfThemedForm: ({
-      schema,
-      onSubmit,
-      children,
-    }: {
-      schema: { properties?: Record<string, { default?: unknown }> };
-      onSubmit: (e: { formData: Record<string, unknown> }, ev: unknown) => void;
-      children?: React.ReactNode;
-    }) => {
-      const formData: Record<string, unknown> = {};
-      for (const [field, def] of Object.entries(schema.properties ?? {})) {
-        if (def && 'default' in def && def.default !== undefined) {
-          formData[field] = def.default;
-        }
-      }
-      return (
-        <form
-          data-testid="rjsf-shim"
-          onSubmit={(ev) => {
-            ev.preventDefault();
-            onSubmit({ formData }, ev);
-          }}
-        >
-          {children}
-        </form>
-      );
-    },
-  };
-});
+vi.mock('@/components/forms/RjsfThemed', () => ({ RjsfThemedForm: RjsfShim }));
 
 // Config drives the hand-off entirely; each test supplies its own payload.
 const cfgMock = vi.hoisted(() => ({ value: {} as Record<string, unknown> }));
@@ -69,35 +38,6 @@ vi.mock('@/hooks/useAggregatorConfig', () => ({
 // Pull the view after mocks register.
 import { PublicRegistrationView } from '@/app/[org]/[slug]/PublicRegistrationView';
 
-const CFG = {
-  aggregator: { name: 'Test' },
-  brand: {
-    short_name: 'Blue Dots',
-    long_name: 'Blue Dots',
-    url_slug: 'bd',
-    primary_color: '#2563EB',
-  },
-  network: { id: 'blue_dot' },
-  domains: [{ id: 'seeker', label: 'Seeker', plural_label: 'Seekers', item_type: 'profile_1.0' }],
-  registration_modes: {
-    form: {
-      label_i18n_key: 'x',
-      submission_shape: 'account_and_profile',
-      public_hint_i18n_key: null,
-      signals_cta: true,
-    },
-    voice: {
-      label_i18n_key: 'y',
-      submission_shape: 'account_only',
-      public_hint_i18n_key: null,
-      signals_cta: false,
-    },
-  },
-  signals_ui_urls: { seeker: 'https://signals-seeker.example/auth/login' },
-};
-
-const SIGNALS_URL = 'https://signals-seeker.example/auth/login';
-
 /**
  * Render the public registration view for one link shape. Everything the
  * hand-off depends on comes from the mocked config; the props here only
@@ -108,31 +48,7 @@ function renderView(opts: {
   registrationMode: string | null;
   submissionShape: 'account_only' | 'account_and_profile';
 }) {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  });
-  return render(
-    <QueryClientProvider client={client}>
-      <NextIntlClientProvider locale="en" messages={messages as Record<string, unknown>}>
-        <PublicRegistrationView
-          org="acme"
-          slug="winter25"
-          network="blue_dot"
-          domain={opts.domain}
-          context={{ title: 'Winter 2025 Registration', org_name: 'Acme' }}
-          schema={{
-            type: 'object',
-            properties: { email: { type: 'string' }, name: { type: 'string' } },
-          }}
-          uiSchema={{}}
-          identity={{ name: 'name', phone: 'phone', email: 'email' }}
-          submissionShape={opts.submissionShape}
-          publicHintI18nKey={null}
-          registrationMode={opts.registrationMode}
-        />
-      </NextIntlClientProvider>
-    </QueryClientProvider>,
-  );
+  return renderPublicRegistrationView(PublicRegistrationView, opts);
 }
 
 /**
@@ -230,6 +146,20 @@ describe('Signals post-submit redirect', () => {
     expect(assign).toHaveBeenCalledTimes(1);
   });
 
+  it('never shows a bare "0" countdown, even at the terminal tick', async () => {
+    cfgMock.value = CFG;
+    await submitSuccessfully({ domain: 'seeker', registrationMode: 'form' });
+    // Advance through 3 -> 2 -> 1 -> 0. The 3rd tick both lands the state at
+    // 0 AND fires `assign` in the same effect pass, so the render at
+    // `redirectIn === 0` is the one left on screen afterwards.
+    await tick(3);
+    expect(assign).toHaveBeenCalledWith(SIGNALS_URL);
+    expect(screen.queryByText(/Redirecting to Signals in 0/)).toBeNull();
+    // The number-less copy takes over instead of a bare "0".
+    const notice = screen.getByText(/Redirecting to Signals/);
+    expect(notice.textContent).not.toMatch(/\d/);
+  });
+
   it('announces once via a static live region and hides the ticking number from AT', async () => {
     cfgMock.value = CFG;
     await submitSuccessfully({ domain: 'seeker', registrationMode: 'form' });
@@ -246,6 +176,29 @@ describe('Signals post-submit redirect', () => {
     await tick(1);
     expect(screen.getByText(/Redirecting to Signals in 2/)).toBeInTheDocument();
     expect(screen.getByText(/You'll be taken to Signals shortly/).textContent).toBe(announced);
+  });
+
+  it('mounts the aria-live region even when no hand-off is configured, empty, before it could ever be populated', async () => {
+    // No `signals_ui_urls` entry for `seeker` — the countdown never arms, so
+    // if the live region were still gated on `redirectIn !== null` (the
+    // pre-fix behaviour) it would never enter the DOM at all. Screen readers
+    // only pick up mutations inside a region that was already present, so
+    // proving the element exists independently of the countdown arming is
+    // the discriminating check for the mount-order fix.
+    cfgMock.value = { ...CFG, signals_ui_urls: {} };
+    await submitSuccessfully({ domain: 'seeker', registrationMode: 'form' });
+    const region = document.querySelector('[aria-live="polite"]');
+    expect(region).not.toBeNull();
+    expect(region).toHaveClass('sr-only');
+    expect(region?.textContent).toBe('');
+  });
+
+  it('populates the pre-mounted live region once the countdown arms', async () => {
+    cfgMock.value = CFG;
+    await submitSuccessfully({ domain: 'seeker', registrationMode: 'form' });
+    const region = document.querySelector('[aria-live="polite"]');
+    expect(region).not.toBeNull();
+    expect(region?.textContent).toMatch(/You'll be taken to Signals shortly/);
   });
 
   it('cancels the countdown when Register another is clicked', async () => {

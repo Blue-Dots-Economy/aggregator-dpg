@@ -463,6 +463,7 @@
       "btn_submit": "Submit registration",
       "signals_cta": "Already Registered — Sign In",
       "signals_redirect_notice": "Redirecting to Signals in {seconds}…",
+      "signals_redirect_notice_now": "Redirecting to Signals…",
       "signals_redirect_announcement": "You'll be taken to Signals shortly. Use Continue to Signals to go now, or Register another to stay.",
       "btn_continue_to_signals": "Continue to Signals",
       "btn_submitting": "Submitting…",

@@ -690,21 +690,36 @@ export function PublicRegistrationView({
                     {t('done_ref_prefix')} {state.submissionId}
                   </div>
                 ) : null}
+                {/* The live region mounts unconditionally (empty) the moment
+                    the success panel does, and only gains text once the
+                    countdown arms. Screen readers detect a live region by
+                    observing DOM mutations *inside an already-present*
+                    region — a region injected already-populated is
+                    frequently skipped entirely by NVDA/JAWS/VoiceOver. The
+                    announcement itself still fires ONCE: putting the
+                    per-second number in here would fire three announcements
+                    in three seconds — faster than screen-reader speech
+                    cadence, so they'd interrupt each other and the user gets
+                    fragmented information about a navigation that is about
+                    to happen to them (WCAG 4.1.3 Status Messages). The
+                    static sentence names both escape routes instead; the
+                    ticking number below is visual-only. */}
+                <p aria-live="polite" className="sr-only">
+                  {redirectIn !== null && signalsHandoffUrl
+                    ? t('signals_redirect_announcement')
+                    : ''}
+                </p>
                 {redirectIn !== null && signalsHandoffUrl ? (
                   <>
-                    {/* The live region announces ONCE. Putting the per-second
-                        number in here would fire three announcements in three
-                        seconds — faster than screen-reader speech cadence, so
-                        they interrupt each other and the user gets fragmented
-                        information about a navigation that is about to happen
-                        to them (WCAG 4.1.3 Status Messages). The static
-                        sentence names both escape routes instead; the ticking
-                        number below is visual-only. */}
-                    <p aria-live="polite" className="sr-only">
-                      {t('signals_redirect_announcement')}
-                    </p>
+                    {/* Never render a bare "0" — on a slow or blocked
+                        cross-origin navigation the participant would
+                        otherwise stare at "in 0…" for the whole hop, and it
+                        is the permanent terminal state if the hand-off URL
+                        ever goes falsy at zero (a config refetch). */}
                     <p aria-hidden="true" className="text-[13px] text-emerald-700 mt-4">
-                      {t('signals_redirect_notice', { seconds: redirectIn })}
+                      {redirectIn > 0
+                        ? t('signals_redirect_notice', { seconds: redirectIn })
+                        : t('signals_redirect_notice_now')}
                     </p>
                     <button
                       type="button"
@@ -715,7 +730,7 @@ export function PublicRegistrationView({
                         setRedirectIn(null);
                         window.location.assign(signalsHandoffUrl);
                       }}
-                      style={{ backgroundColor: cfg.brand.primary_color }}
+                      style={{ backgroundColor: heroGradient }}
                       className="mt-3 w-full py-3 rounded-[12px] font-display font-bold text-[15px] text-white hover:opacity-90 transition-opacity"
                     >
                       {t('btn_continue_to_signals')}
@@ -732,8 +747,13 @@ export function PublicRegistrationView({
                     // people back-to-back must not be bounced to Signals.
                     setRedirectIn(null);
                   }}
-                  style={{ backgroundColor: cfg.brand.primary_color }}
-                  className="mt-5 w-full py-3 rounded-[12px] font-display font-bold text-[15px] text-white hover:opacity-90 transition-opacity"
+                  // Secondary action: an outline button (codebase's ghost-
+                  // button convention — see components/ui/Button.tsx's
+                  // `ghost` kind) so it doesn't compete visually with the
+                  // primary `Continue to Signals` above. A participant who
+                  // taps the first prominent button should be leaving the
+                  // page on purpose, not by default.
+                  className="mt-5 w-full py-3 rounded-[12px] border border-(--bd-border) bg-white font-display font-bold text-[15px] text-ink-700 hover:bg-ink-50 transition-colors"
                 >
                   {t('btn_register_another')}
                 </button>
