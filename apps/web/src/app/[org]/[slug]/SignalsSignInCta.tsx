@@ -38,9 +38,14 @@ export function useSignalsHandoffUrl(
   submissionShape: 'account_only' | 'account_and_profile',
 ): string | null {
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
-  const url = cfg.signals_ui_urls?.[domain];
+  const urls = cfg.signals_ui_urls;
+  const url = urls && Object.hasOwn(urls, domain) ? urls[domain] : undefined;
   if (!url) return null;
-  const mode = registrationMode ? cfg.registration_modes?.[registrationMode] : undefined;
+  const modes = cfg.registration_modes;
+  const mode =
+    registrationMode && modes && Object.hasOwn(modes, registrationMode)
+      ? modes[registrationMode]
+      : undefined;
   // No declared mode (older api build, or a mode this network dropped) falls
   // back to the shape, matching the server-side default.
   const enabled = mode?.signals_cta ?? submissionShape === 'account_and_profile';
