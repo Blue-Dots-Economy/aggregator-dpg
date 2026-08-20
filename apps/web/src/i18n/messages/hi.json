@@ -342,7 +342,8 @@
       "loading": "लिंक लोड हो रहे हैं…",
       "empty": "अभी तक कोई {type} लिंक नहीं। ऊपर एक बनाएं।",
       "active_count": "{count} सक्रिय",
-      "type_pill": "{type} लिंक"
+      "type_pill": "{type} लिंक",
+      "draft_created": "लिंक ड्राफ़्ट के रूप में बनाया गया — प्रकाशित करने के लिए \"Make Live\" पर क्लिक करें।"
     },
     "link_card": {
       "copy_link": "लिंक कॉपी करें",

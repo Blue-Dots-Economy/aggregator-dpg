@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import QRCode from 'qrcode';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations, useFormatter } from 'next-intl';
 import { Button } from '../../../../components/ui/Button';
 import { SubmitBlockers } from '../../../../components/ui/SubmitBlockers';
@@ -333,7 +333,7 @@ export function CreateLinkSection() {
     try {
       const title = buildLinkTitle(form);
       const slug = buildLinkSlug(form);
-      await create.mutateAsync({
+      const created = await create.mutateAsync({
         domain: form.domain,
         status: 'draft',
         registration_mode: form.registration_mode,
@@ -351,11 +351,13 @@ export function CreateLinkSection() {
         },
       });
       // Refresh the form so the user can compose the next link from scratch.
-      // The newly-created draft appears in "Your Registration Links" below;
-      // edits + Make Live happen on its card, not here.
+      // The newly-created draft appears in "Your Registration Links" on the
+      // onboarding page; pass its id as `?new=` so that list scrolls to and
+      // highlights the fresh draft (and its "Make Live" CTA) — otherwise the
+      // navigation makes the just-created link feel like it vanished.
       resetSection();
       setToast(t('create_link.link_created'));
-      router.push('/onboarding');
+      router.push(`/onboarding?new=${encodeURIComponent(created.link_id)}`);
     } catch (err) {
       setCreateError((err as Error).message);
     }
@@ -504,11 +506,29 @@ export function CreateLinkSection() {
   );
 }
 
-function LinkCard({ link }: { link: ApiRegistrationLink }) {
+function LinkCard({
+  link,
+  highlight = false,
+}: {
+  link: ApiRegistrationLink;
+  /** Freshly created via the create flow (`?new=`) — scroll to + ring it. */
+  highlight?: boolean;
+}) {
   const t = useTranslations('onboarding');
   const format = useFormatter();
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
+  const cardRef = useRef<HTMLDivElement>(null);
+  // On first render of a just-created draft, bring it into view and pulse a
+  // ring for ~2s so the user sees where it landed (and its "Make Live" CTA)
+  // instead of feeling the link vanished after the create → onboarding nav.
+  const [ringed, setRinged] = useState(highlight);
+  useEffect(() => {
+    if (!highlight) return;
+    cardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const timer = setTimeout(() => setRinged(false), 2000);
+    return () => clearTimeout(timer);
+  }, [highlight]);
   const activate = useActivateLink();
   const deactivate = useDeactivateLink();
   const update = useUpdateLink();
@@ -625,7 +645,12 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
   };
 
   return (
-    <div className="bd-card p-5 hover:border-(--bd-primary-100) transition-colors">
+    <div
+      ref={cardRef}
+      className={`bd-card p-5 hover:border-(--bd-primary-100) transition-all ${
+        ringed ? 'ring-2 ring-primary-400 ring-offset-2' : ''
+      }`}
+    >
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
@@ -848,6 +873,16 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
  */
 export function YourLinksBody() {
   const t = useTranslations('onboarding');
+  // `?new=<link_id>` is set by the create flow after it navigates here, so the
+  // fresh draft can be scrolled to and highlighted (its card carries the
+  // "Make Live" CTA). Absent on a normal visit.
+  const newLinkId = useSearchParams().get('new');
+  // The create toast can't survive the navigation from the create page, so it
+  // is surfaced here on arrival: confirm the draft + point at "Make Live".
+  const [toast, setToast] = useState<string | null>(null);
+  useEffect(() => {
+    if (newLinkId) setToast(t('your_links.draft_created'));
+  }, [newLinkId, t]);
   const rawProfile = useProfileRaw();
   const { data: cfg } = useAggregatorConfig();
   // Domain id the aggregator is scoped to; falls back to the network's first
@@ -886,9 +921,12 @@ export function YourLinksBody() {
             {t('your_links.empty', { type: aggregatorType })}
           </div>
         ) : (
-          links.map((l) => <LinkCard key={l.link_id} link={l} />)
+          links.map((l) => (
+            <LinkCard key={l.link_id} link={l} highlight={l.link_id === newLinkId} />
+          ))
         )}
       </div>
+      {toast && <SuccessToast message={toast} onDone={() => setToast(null)} />}
     </div>
   );
 }

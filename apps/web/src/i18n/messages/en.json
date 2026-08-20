@@ -342,7 +342,8 @@
       "loading": "Loading links…",
       "empty": "No {type} links yet. Create one above.",
       "active_count": "{count} active",
-      "type_pill": "{type} links"
+      "type_pill": "{type} links",
+      "draft_created": "Link created as a draft — click \"Make Live\" to publish it."
     },
     "link_card": {
       "copy_link": "Copy link",

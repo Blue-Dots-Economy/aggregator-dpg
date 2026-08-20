@@ -18,9 +18,15 @@ import { NextIntlClientProvider } from 'next-intl';
 import messages from '@/i18n/messages/en.json';
 import type { ApiRegistrationLink } from '@/services/onboarding.service';
 
-const { pushMock } = vi.hoisted(() => ({ pushMock: vi.fn() }));
+const { pushMock, searchParamsRef } = vi.hoisted(() => ({
+  pushMock: vi.fn(),
+  // Mutable so a test can set `?new=` before rendering YourLinksBody.
+  searchParamsRef: { current: new URLSearchParams() },
+}));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: pushMock }),
+  // YourLinksBody reads `?new=` to highlight a freshly-created draft.
+  useSearchParams: () => searchParamsRef.current,
 }));
 
 const { useActivateLink, useCreateLink, useDeactivateLink, useRegistrationLinks, useUpdateLink } =
@@ -214,7 +220,8 @@ describe('<CreateLinkSection />', () => {
     expect(input.context.tags).toEqual(['urgent', 'delhi']);
 
     expect(await screen.findByText('Registration link created')).toBeInTheDocument();
-    expect(pushMock).toHaveBeenCalledWith('/onboarding');
+    // Navigates to the list with `?new=<id>` so the fresh draft is highlighted.
+    expect(pushMock).toHaveBeenCalledWith('/onboarding?new=link-1');
     // Form resets after a successful create.
     expect(screen.getByPlaceholderText('State')).toHaveValue('');
   });
@@ -271,6 +278,9 @@ describe('<YourLinksBody />', () => {
     updateMutateAsync.mockReset();
     activateMutate.mockClear();
     deactivateMutate.mockClear();
+    searchParamsRef.current = new URLSearchParams();
+    // jsdom has no scrollIntoView; the highlight effect calls it.
+    Element.prototype.scrollIntoView = vi.fn();
     useAggregatorConfig.mockReturnValue({ data: cfg });
     useProfileRaw.mockReturnValue({ data: { type: 'seeker' } });
     useProfile.mockReturnValue({ data: { org: 'Acme Org' } });
@@ -325,6 +335,23 @@ describe('<YourLinksBody />', () => {
     expect(screen.getByText('seeker links')).toBeInTheDocument();
     expect(screen.getByText('Live One')).toBeInTheDocument();
     expect(screen.getByText('Draft One')).toBeInTheDocument();
+  });
+
+  it('scrolls the freshly-created draft into view when ?new= matches it', () => {
+    searchParamsRef.current = new URLSearchParams('new=l2');
+    useRegistrationLinks.mockReturnValue({
+      data: [
+        baseLink({ link_id: 'l1', status: 'live', context: { title: 'Live One' } }),
+        baseLink({ link_id: 'l2', status: 'draft', context: { title: 'Draft One' } }),
+      ],
+      isLoading: false,
+      error: null,
+    });
+    renderLinks();
+    // The highlighted card scrolls itself into view; non-matching cards don't.
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalledTimes(1);
+    // A toast confirms the draft and points at "Make Live".
+    expect(screen.getByText(/created as a draft/i)).toBeInTheDocument();
   });
 
   it('draft card: shows the draft notice and Edit + Make Live actions, and Make Live activates the link', async () => {
