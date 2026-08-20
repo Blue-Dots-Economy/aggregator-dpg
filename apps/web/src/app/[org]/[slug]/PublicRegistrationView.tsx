@@ -670,6 +670,103 @@ export function PublicRegistrationView({
       </button>
     ) : null;
 
+  // Success panel shown once the submission (or a skip through the
+  // account-only lookup) resolves. Hoisted alongside `chooserPanel` /
+  // `backToChooser` so the three mutually-exclusive views below are
+  // symmetric siblings rather than a nested ternary (typescript:S3358).
+  const donePanel =
+    state.status === 'done' ? (
+      <div className="rounded-[14px] border border-emerald-200 bg-emerald-50 p-6">
+        <div className="flex items-center gap-2.5 font-display font-bold text-[18px] text-emerald-800">
+          <span className="w-7 h-7 rounded-full bg-emerald-500 text-white inline-flex items-center justify-center">
+            <I.check size={16} stroke={2.6} />
+          </span>
+          {state.outcome === 'passed' ? t('done_passed_title') : t('done_skipped_title')}
+        </div>
+        <p className="text-[14px] text-emerald-700 mt-3 leading-relaxed">
+          {state.outcome === 'passed' ? t('done_passed_body') : t('done_skipped_body')}
+        </p>
+        {state.submissionId ? (
+          <div className="text-[11px] text-emerald-600/80 font-mono mt-3">
+            {t('done_ref_prefix')} {state.submissionId}
+          </div>
+        ) : null}
+        {/* The live region mounts unconditionally (empty) the moment the
+            success panel does, and only gains text once the countdown arms.
+            Screen readers detect a live region by observing DOM mutations
+            *inside an already-present* region — a region injected
+            already-populated is frequently skipped entirely by
+            NVDA/JAWS/VoiceOver. The announcement itself still fires ONCE:
+            putting the per-second number in here would fire three
+            announcements in three seconds — faster than screen-reader speech
+            cadence, so they'd interrupt each other and the user gets
+            fragmented information about a navigation that is about to happen
+            to them (WCAG 4.1.3 Status Messages). The static sentence names
+            both escape routes instead; the ticking number below is
+            visual-only. */}
+        <p aria-live="polite" className="sr-only">
+          {redirectIn !== null && signalsHandoffUrl ? t('signals_redirect_announcement') : ''}
+        </p>
+        {redirectIn !== null && signalsHandoffUrl ? (
+          <>
+            {/* Never render a bare "0" — on a slow or blocked cross-origin
+                navigation the participant would otherwise stare at "in 0…"
+                for the whole hop, and it is the permanent terminal state if
+                the hand-off URL ever goes falsy at zero (a config refetch). */}
+            <p aria-hidden="true" className="text-[13px] text-emerald-700 mt-4">
+              {redirectIn > 0
+                ? t('signals_redirect_notice', { seconds: redirectIn })
+                : t('signals_redirect_notice_now')}
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                // Stop the tick before leaving: if navigation is slow or
+                // blocked, the effect would otherwise fire `assign` again
+                // when the countdown reaches zero.
+                setRedirectIn(null);
+                window.location.assign(signalsHandoffUrl);
+              }}
+              style={{ backgroundColor: cfg.brand.primary_color }}
+              className="mt-3 w-full py-3 rounded-[12px] font-display font-bold text-[15px] text-white hover:opacity-90 transition-opacity"
+            >
+              {t('btn_continue_to_signals')}
+            </button>
+          </>
+        ) : null}
+        <button
+          type="button"
+          onClick={() => {
+            setFormData({});
+            setShowValidation(false);
+            setState({ status: 'idle' });
+            // Cancel the #635 hand-off: a field operator registering people
+            // back-to-back must not be bounced to Signals.
+            setRedirectIn(null);
+          }}
+          // Secondary action: an outline button (codebase's ghost-button
+          // convention — see components/ui/Button.tsx's `ghost` kind) so it
+          // doesn't compete visually with the primary `Continue to Signals`
+          // above. A participant who taps the first prominent button should
+          // be leaving the page on purpose, not by default.
+          className="mt-5 w-full py-3 rounded-[12px] border border-(--bd-border) bg-white font-display font-bold text-[15px] text-ink-700 hover:bg-ink-50 transition-colors"
+        >
+          {t('btn_register_another')}
+        </button>
+      </div>
+    ) : null;
+
+  // Exactly one of the three panels below is active; computed once here
+  // rather than as a nested ternary in the JSX (typescript:S3358).
+  let activeView: 'done' | 'chooser' | 'form';
+  if (state.status === 'done') {
+    activeView = 'done';
+  } else if (showChooser) {
+    activeView = 'chooser';
+  } else {
+    activeView = 'form';
+  }
+
   if (isAccountOnly && state.status === 'idle' && !lookup) {
     return (
       <div
@@ -770,93 +867,9 @@ export function PublicRegistrationView({
           </div>
 
           <div className="px-6 sm:px-8 py-7">
-            {state.status === 'done' ? (
-              <div className="rounded-[14px] border border-emerald-200 bg-emerald-50 p-6">
-                <div className="flex items-center gap-2.5 font-display font-bold text-[18px] text-emerald-800">
-                  <span className="w-7 h-7 rounded-full bg-emerald-500 text-white inline-flex items-center justify-center">
-                    <I.check size={16} stroke={2.6} />
-                  </span>
-                  {state.outcome === 'passed' ? t('done_passed_title') : t('done_skipped_title')}
-                </div>
-                <p className="text-[14px] text-emerald-700 mt-3 leading-relaxed">
-                  {state.outcome === 'passed' ? t('done_passed_body') : t('done_skipped_body')}
-                </p>
-                {state.submissionId ? (
-                  <div className="text-[11px] text-emerald-600/80 font-mono mt-3">
-                    {t('done_ref_prefix')} {state.submissionId}
-                  </div>
-                ) : null}
-                {/* The live region mounts unconditionally (empty) the moment
-                    the success panel does, and only gains text once the
-                    countdown arms. Screen readers detect a live region by
-                    observing DOM mutations *inside an already-present*
-                    region — a region injected already-populated is
-                    frequently skipped entirely by NVDA/JAWS/VoiceOver. The
-                    announcement itself still fires ONCE: putting the
-                    per-second number in here would fire three announcements
-                    in three seconds — faster than screen-reader speech
-                    cadence, so they'd interrupt each other and the user gets
-                    fragmented information about a navigation that is about
-                    to happen to them (WCAG 4.1.3 Status Messages). The
-                    static sentence names both escape routes instead; the
-                    ticking number below is visual-only. */}
-                <p aria-live="polite" className="sr-only">
-                  {redirectIn !== null && signalsHandoffUrl
-                    ? t('signals_redirect_announcement')
-                    : ''}
-                </p>
-                {redirectIn !== null && signalsHandoffUrl ? (
-                  <>
-                    {/* Never render a bare "0" — on a slow or blocked
-                        cross-origin navigation the participant would
-                        otherwise stare at "in 0…" for the whole hop, and it
-                        is the permanent terminal state if the hand-off URL
-                        ever goes falsy at zero (a config refetch). */}
-                    <p aria-hidden="true" className="text-[13px] text-emerald-700 mt-4">
-                      {redirectIn > 0
-                        ? t('signals_redirect_notice', { seconds: redirectIn })
-                        : t('signals_redirect_notice_now')}
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        // Stop the tick before leaving: if navigation is slow
-                        // or blocked, the effect would otherwise fire
-                        // `assign` again when the countdown reaches zero.
-                        setRedirectIn(null);
-                        window.location.assign(signalsHandoffUrl);
-                      }}
-                      style={{ backgroundColor: heroGradient }}
-                      className="mt-3 w-full py-3 rounded-[12px] font-display font-bold text-[15px] text-white hover:opacity-90 transition-opacity"
-                    >
-                      {t('btn_continue_to_signals')}
-                    </button>
-                  </>
-                ) : null}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setFormData({});
-                    setShowValidation(false);
-                    setState({ status: 'idle' });
-                    // Cancel the #635 hand-off: a field operator registering
-                    // people back-to-back must not be bounced to Signals.
-                    setRedirectIn(null);
-                  }}
-                  // Secondary action: an outline button (codebase's ghost-
-                  // button convention — see components/ui/Button.tsx's
-                  // `ghost` kind) so it doesn't compete visually with the
-                  // primary `Continue to Signals` above. A participant who
-                  // taps the first prominent button should be leaving the
-                  // page on purpose, not by default.
-                  className="mt-5 w-full py-3 rounded-[12px] border border-(--bd-border) bg-white font-display font-bold text-[15px] text-ink-700 hover:bg-ink-50 transition-colors"
-                >
-                  {t('btn_register_another')}
-                </button>
-              </div>
-            ) : showChooser ? (
-              chooserPanel
-            ) : (
+            {activeView === 'done' && donePanel}
+            {activeView === 'chooser' && chooserPanel}
+            {activeView === 'form' && (
               <>
                 {backToChooser}
                 {state.status === 'error' ? (
