@@ -76,7 +76,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   // so a misconfigured env is visible in cluster logs instead of silently
   // disabling the hand-off for one domain.
   for (const warning of signalsUiUrlWarnings) {
-    app.log.warn(warning);
+    app.log.warn({ operation: 'config.parseSignalsUiUrls', status: 'skipped' }, warning);
   }
 
   await app.register(cors, {
