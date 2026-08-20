@@ -1,14 +1,20 @@
 /**
- * View test: the Signals "Already Registered — Sign In" CTA (#652).
+ * View test: the pre-form registration chooser and its Signals
+ * "Already Registered — Sign In" option (#652).
+ *
+ * The chooser is what a participant meets first when the Signals hand-off is
+ * configured for the link's domain + registration mode; the form is revealed
+ * only after they pick Register. Both live at the same URL, because printed QR
+ * codes encode `/<org>/<slug>` verbatim — one case asserts that explicitly.
  *
  * Covers the two config gates (per-mode `signals_cta`, per-domain
- * `signals_ui_urls`) across both public form surfaces — the full-profile RJSF
- * form and the account-only MinimalIdentityForm. RJSF is mocked to the same
- * thin shim used by PublicRegistrationView.lookup.test.tsx: the CTA is
- * rendered as a child of the form, so the shim must render `children`.
+ * `signals_ui_urls`) across both form surfaces — the full-profile RJSF form
+ * and the account-only MinimalIdentityForm. RJSF is mocked to the same thin
+ * shim used by PublicRegistrationView.lookup.test.tsx.
  */
-import { describe, it, expect, vi, beforeAll } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { NextIntlClientProvider } from 'next-intl';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import messages from '@/i18n/messages/en.json';
@@ -19,47 +25,52 @@ beforeAll(() => {
   Element.prototype.scrollIntoView = vi.fn();
 });
 
-// Shim RjsfThemedForm: render a deterministic <form>; reads schema defaults
-// for the email/name fields to construct a deterministic formData payload
-// for onSubmit. Keeps RJSF's render tree out of the test — we exercise the
-// CTA gating, not RJSF rendering (covered by RJSF's own tests).
+/** The public link URL a printed QR code encodes. */
+const PAGE_URL = '/acme/winter25';
+
+// jsdom shares one `window.location` across the file, so a test that navigated
+// would poison the next one's baseline. Reset to the link URL before each.
+beforeEach(() => {
+  window.history.replaceState({}, '', PAGE_URL);
+});
+
+// Shim RjsfThemedForm: render a deterministic <form> tagged with a testid so
+// "is the form visible yet" is a single unambiguous assertion. Keeps RJSF's
+// render tree out of the test — we exercise the chooser, not RJSF rendering.
 vi.mock('@/components/forms/RjsfThemed', () => {
   return {
     RjsfThemedForm: ({
-      schema,
       onSubmit,
       children,
     }: {
-      schema: { properties?: Record<string, { default?: unknown }> };
       onSubmit: (e: { formData: Record<string, unknown> }, ev: unknown) => void;
       children?: React.ReactNode;
-    }) => {
-      const formData: Record<string, unknown> = {};
-      for (const [field, def] of Object.entries(schema.properties ?? {})) {
-        if (def && 'default' in def && def.default !== undefined) {
-          formData[field] = def.default;
-        }
-      }
-      return (
-        <form
-          data-testid="rjsf-shim"
-          onSubmit={(ev) => {
-            ev.preventDefault();
-            onSubmit({ formData }, ev);
-          }}
-        >
-          {children}
-        </form>
-      );
-    },
+    }) => (
+      <form
+        data-testid="rjsf-shim"
+        onSubmit={(ev) => {
+          ev.preventDefault();
+          onSubmit({ formData: {} }, ev);
+        }}
+      >
+        {children}
+      </form>
+    ),
   };
 });
 
-// Config drives the CTA entirely; each test supplies its own payload.
-const cfgMock = vi.hoisted(() => ({ value: {} as Record<string, unknown> }));
+// Config drives the chooser entirely; each test supplies its own payload.
+// `value: undefined` models the query still being in flight, which is when the
+// view must commit to neither surface.
+const cfgMock = vi.hoisted(() => ({
+  value: undefined as Record<string, unknown> | undefined,
+  // Stand-in for the real DEFAULT_AGGREGATOR_CONFIG: enough shape for the
+  // header to render while `data` is undefined, and no signals_ui_urls.
+  fallback: { brand: { short_name: 'Blue Dots' }, domains: [] },
+}));
 vi.mock('@/hooks/useAggregatorConfig', () => ({
-  useAggregatorConfig: () => ({ data: cfgMock.value }),
-  DEFAULT_AGGREGATOR_CONFIG: cfgMock.value,
+  useAggregatorConfig: () => ({ data: cfgMock.value, isError: false }),
+  DEFAULT_AGGREGATOR_CONFIG: cfgMock.fallback,
 }));
 
 // Pull the view after mocks register.
@@ -93,9 +104,9 @@ const CFG = {
 };
 
 /**
- * Render the public registration view for one link shape. Everything the CTA
- * depends on comes from the mocked config; the props here only select which
- * form surface renders and which mode/domain the link declares.
+ * Render the public registration view for one link shape. Everything the
+ * chooser depends on comes from the mocked config; the props here only select
+ * which form surface renders and which mode/domain the link declares.
  */
 function renderView(opts: {
   domain: string;
@@ -129,37 +140,127 @@ function renderView(opts: {
   );
 }
 
-describe('Signals sign-in CTA', () => {
-  it('renders on the full-profile form and opens the domain URL in a new tab', () => {
+/** The chooser's primary action. */
+const registerButton = () => screen.getByRole('button', { name: /^register$/i });
+/** The chooser's secondary action. */
+const signInLink = () => screen.queryByRole('link', { name: /already registered/i });
+
+describe('pre-form registration chooser', () => {
+  it('renders the chooser instead of the form when the hand-off is configured', () => {
     cfgMock.value = CFG;
     renderView({
       domain: 'seeker',
       registrationMode: 'form',
       submissionShape: 'account_and_profile',
     });
-    const link = screen.getByRole('link', { name: /already registered/i });
-    expect(link).toHaveAttribute('href', 'https://signals-seeker.example/auth/login');
-    expect(link).toHaveAttribute('target', '_blank');
-    expect(link).toHaveAttribute('rel', expect.stringContaining('noopener'));
+    expect(screen.getByTestId('registration-chooser')).toBeInTheDocument();
+    expect(screen.getByText(/how would you like to continue/i)).toBeInTheDocument();
+    // The form must not be rendered behind the chooser.
+    expect(screen.queryByTestId('rjsf-shim')).toBeNull();
+    expect(screen.queryByRole('button', { name: /submit registration/i })).toBeNull();
   });
 
-  it('is absent when the mode has signals_cta false', () => {
+  it('reveals the form on Register and drops the sign-in CTA from the form view', async () => {
     cfgMock.value = CFG;
-    renderView({ domain: 'seeker', registrationMode: 'voice', submissionShape: 'account_only' });
-    expect(screen.queryByRole('link', { name: /already registered/i })).toBeNull();
+    const user = userEvent.setup();
+    renderView({
+      domain: 'seeker',
+      registrationMode: 'form',
+      submissionShape: 'account_and_profile',
+    });
+    await user.click(registerButton());
+    expect(screen.getByTestId('rjsf-shim')).toBeInTheDocument();
+    expect(screen.queryByTestId('registration-chooser')).toBeNull();
+    // The old below-submit CTA is gone: no sign-in link anywhere in the form view.
+    expect(signInLink()).toBeNull();
   });
 
-  it('is absent when the domain has no configured URL', () => {
+  it('keeps the URL unchanged when Register is chosen (printed QR codes)', async () => {
+    cfgMock.value = CFG;
+    const user = userEvent.setup();
+    renderView({
+      domain: 'seeker',
+      registrationMode: 'form',
+      submissionShape: 'account_and_profile',
+    });
+    const before = {
+      href: window.location.href,
+      pathname: window.location.pathname,
+      search: window.location.search,
+      hash: window.location.hash,
+    };
+    expect(before.pathname).toBe(PAGE_URL);
+    await user.click(registerButton());
+    expect(screen.getByTestId('rjsf-shim')).toBeInTheDocument();
+    expect(window.location.href).toBe(before.href);
+    // Spelled out so a route, query param or hash added by the transition each
+    // fail on their own rather than hiding inside one href comparison.
+    expect(window.location.pathname).toBe(PAGE_URL);
+    expect(window.location.search).toBe('');
+    expect(window.location.hash).toBe('');
+  });
+
+  it('offers a way back to the chooser from the form', async () => {
+    cfgMock.value = CFG;
+    const user = userEvent.setup();
+    renderView({
+      domain: 'seeker',
+      registrationMode: 'form',
+      submissionShape: 'account_and_profile',
+    });
+    await user.click(registerButton());
+    await user.click(screen.getByRole('button', { name: /back to options/i }));
+    expect(screen.getByTestId('registration-chooser')).toBeInTheDocument();
+    expect(screen.queryByTestId('rjsf-shim')).toBeNull();
+  });
+
+  it('points the sign-in option at the per-domain URL in a new tab', () => {
+    cfgMock.value = {
+      ...CFG,
+      domains: [
+        ...CFG.domains,
+        { id: 'provider', label: 'Provider', plural_label: 'Providers', item_type: 'profile_1.0' },
+      ],
+      signals_ui_urls: {
+        seeker: 'https://signals-seeker.example/auth/login',
+        provider: 'https://signals-provider.example/auth/login',
+      },
+    };
+    renderView({
+      domain: 'provider',
+      registrationMode: 'form',
+      submissionShape: 'account_and_profile',
+    });
+    const link = signInLink();
+    expect(link).toHaveAttribute('href', 'https://signals-provider.example/auth/login');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+  });
+
+  it('renders the form directly when the domain has no configured URL', () => {
     cfgMock.value = { ...CFG, signals_ui_urls: {} };
     renderView({
       domain: 'seeker',
       registrationMode: 'form',
       submissionShape: 'account_and_profile',
     });
-    expect(screen.queryByRole('link', { name: /already registered/i })).toBeNull();
+    expect(screen.queryByTestId('registration-chooser')).toBeNull();
+    expect(screen.getByTestId('rjsf-shim')).toBeInTheDocument();
+    expect(signInLink()).toBeNull();
+    expect(screen.queryByRole('button', { name: /back to options/i })).toBeNull();
   });
 
-  it('renders on the account-only form when signals_cta is explicitly enabled for voice', () => {
+  it('sends an account-only voice link (signals_cta false) straight to the minimal form', () => {
+    cfgMock.value = CFG;
+    renderView({ domain: 'seeker', registrationMode: 'voice', submissionShape: 'account_only' });
+    expect(screen.queryByTestId('registration-chooser')).toBeNull();
+    expect(signInLink()).toBeNull();
+    // MinimalIdentityForm's own submit button, not the RJSF one.
+    expect(screen.getByRole('button', { name: /submit/i })).toBeInTheDocument();
+    expect(screen.queryByTestId('rjsf-shim')).toBeNull();
+  });
+
+  it('shows the chooser in front of the account-only form when signals_cta is on', async () => {
     cfgMock.value = {
       ...CFG,
       registration_modes: {
@@ -167,8 +268,14 @@ describe('Signals sign-in CTA', () => {
         voice: { ...CFG.registration_modes.voice, signals_cta: true },
       },
     };
+    const user = userEvent.setup();
     renderView({ domain: 'seeker', registrationMode: 'voice', submissionShape: 'account_only' });
-    expect(screen.getByRole('link', { name: /already registered/i })).toBeInTheDocument();
+    expect(screen.getByTestId('registration-chooser')).toBeInTheDocument();
+    expect(signInLink()).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /submit/i })).toBeNull();
+    await user.click(registerButton());
+    expect(screen.getByRole('button', { name: /submit/i })).toBeInTheDocument();
+    expect(signInLink()).toBeNull();
   });
 
   it('falls back to the submission shape when the mode is unknown to the config', () => {
@@ -178,6 +285,19 @@ describe('Signals sign-in CTA', () => {
       registrationMode: 'kiosk',
       submissionShape: 'account_and_profile',
     });
-    expect(screen.getByRole('link', { name: /already registered/i })).toBeInTheDocument();
+    expect(screen.getByTestId('registration-chooser')).toBeInTheDocument();
+  });
+
+  it('shows neither surface until the aggregator config resolves', () => {
+    // Config still in flight: `data` is undefined and the query has not errored.
+    cfgMock.value = undefined;
+    renderView({
+      domain: 'seeker',
+      registrationMode: 'form',
+      submissionShape: 'account_and_profile',
+    });
+    expect(screen.getByTestId('public-reg-loading')).toBeInTheDocument();
+    expect(screen.queryByTestId('registration-chooser')).toBeNull();
+    expect(screen.queryByTestId('rjsf-shim')).toBeNull();
   });
 });
