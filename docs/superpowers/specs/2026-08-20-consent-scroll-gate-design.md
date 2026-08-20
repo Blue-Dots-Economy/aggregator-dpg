@@ -134,6 +134,71 @@ escape hatch stay reachable. Those must stay green.
 - The `profileCreation` statement's own bespoke modal in `PublicRegistrationView` — folded
   into the guided read on that surface, not redesigned independently.
 - Any change to consent versioning or the `consent.json` config format.
+- Any consent capture on the public legal pages — they are read-only.
+- Linking from the gate to the public pages. The gate stays self-contained.
+
+## Public legal pages
+
+Separate from the gate, and deliberately so: the gate is a blocking step inside account
+creation, the public pages are a calm reference anyone can read at any time with no
+commitment attached. **The gate does not change** — it still opens automatically during
+account creation and carries no link away from itself.
+
+### Layout — a contents rail
+
+A persistent rail lists every document and every section within it; the reading column sits
+alongside. Chosen over a document switcher or a single stacked page because it is the only
+one of the three that makes each _section_ reachable in one click and deep-linkable, and the
+only one that absorbs more documents without redesign. On narrow screens the rail collapses
+above the reading column rather than beside it.
+
+Each document shows its **version and effective date**, both already carried in
+`consent.json` and surfaced nowhere in the product today.
+
+No checkbox, no agreement, no scroll gating. These pages capture nothing.
+
+### Routes — two, sharing one component
+
+`/privacy` and `/terms` in both products. Not one combined URL:
+
+- Signals' `/privacy` and `/terms` already exist and may be linked from Keycloak emails or
+  external references. Collapsing them is risk with no gain.
+- They are the conventional URLs for legal documents.
+- With a contents rail, switching document navigates to the other route, so the address bar
+  always matches what is on screen. Section anchors deep-link — `/privacy#retention`.
+
+### Signals-DPG — mostly a repair
+
+`apps/ui/src/pages/legal/privacy-page.tsx` and `terms-page.tsx` already exist, already render
+the config-sourced Markdown, and already carry the language and theme controls.
+`privacy-page.tsx` even documents that it is _"reachable straight from the auth footer"_ —
+but `auth-footer.tsx` opens the read-only `ConsentModal` instead of navigating. The link was
+never wired.
+
+Work: give both pages the contents-rail layout via a shared component, and change the auth
+footer's "Privacy Policy" and "Terms" from modal triggers to router links. The footer's
+sentence ("By continuing you agree to…") is unchanged.
+
+### aggregator-dpg — new routes, rail grouped by audience
+
+No `/privacy` or `/terms` route exists today. Both are new under the existing `(public)`
+route group.
+
+The aggregator carries **three** audiences of consent document, unlike Signals' one:
+
+| Audience      | Source                                              | Seen by                     |
+| ------------- | --------------------------------------------------- | --------------------------- |
+| `aggregator`  | `config/schemas/aggregator/consent.json`            | a coordinator registering   |
+| `org`         | same file, `org` section                            | an organisation registering |
+| `participant` | `config/<network>/schemas/participant/consent.json` | anyone scanning a QR poster |
+
+So `/privacy` alone is ambiguous. The rail resolves it by grouping: **For participants**,
+**For aggregators**, **For organisations**, each listing that audience's sections. One pair
+of URLs, every document reachable, nothing hidden behind a query parameter.
+
+Accepted trade-off: a seeker arriving from a poster will see that operator-facing terms
+exist. They are public documents either way, and an over-complete legal page is a smaller
+problem than an ambiguous one.
 
 ## Mobile
 
