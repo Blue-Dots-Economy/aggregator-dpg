@@ -9591,9 +9591,21 @@
                         "properties": {
                           "label": {
                             "type": "string"
+                          },
+                          "signals_cta": {
+                            "type": "boolean"
                           }
                         },
+                        "required": [
+                          "signals_cta"
+                        ],
                         "additionalProperties": true
+                      }
+                    },
+                    "signals_ui_urls": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
                       }
                     }
                   },
@@ -9602,7 +9614,8 @@
                     "brand",
                     "network",
                     "domains",
-                    "registration_modes"
+                    "registration_modes",
+                    "signals_ui_urls"
                   ],
                   "additionalProperties": true
                 }
