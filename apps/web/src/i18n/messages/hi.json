@@ -463,6 +463,7 @@
       "btn_submit": "पंजीकरण जमा करें",
       "signals_cta": "पहले से पंजीकृत हैं — साइन इन करें",
       "signals_redirect_notice": "{seconds} सेकंड में Signals पर ले जाया जा रहा है…",
+      "signals_redirect_announcement": "आपको शीघ्र ही Signals पर ले जाया जाएगा। अभी जाने के लिए Signals पर जारी रखें बटन दबाएँ, या यहीं बने रहने के लिए दूसरे को पंजीकृत करें बटन दबाएँ।",
       "btn_continue_to_signals": "Signals पर जारी रखें",
       "btn_submitting": "जमा किया जा रहा है…",
       "consent_label": "मैंने नियम और गोपनीयता नीति पढ़ ली है और स्वीकार करता/करती हूँ।",

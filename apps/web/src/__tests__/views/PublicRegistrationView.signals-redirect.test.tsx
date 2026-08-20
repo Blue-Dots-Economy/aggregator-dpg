@@ -224,6 +224,28 @@ describe('Signals post-submit redirect', () => {
     await submitSuccessfully({ domain: 'seeker', registrationMode: 'form' });
     fireEvent.click(screen.getByRole('button', { name: /continue to signals/i }));
     expect(assign).toHaveBeenCalledWith(SIGNALS_URL);
+    // Clicking cancels the tick, so a slow or blocked navigation cannot be
+    // followed by a second `assign` when the countdown would have hit zero.
+    await tick(5);
+    expect(assign).toHaveBeenCalledTimes(1);
+  });
+
+  it('announces once via a static live region and hides the ticking number from AT', async () => {
+    cfgMock.value = CFG;
+    await submitSuccessfully({ domain: 'seeker', registrationMode: 'form' });
+    const announcement = screen.getByText(/You'll be taken to Signals shortly/);
+    expect(announcement).toHaveAttribute('aria-live', 'polite');
+    // The number lives outside the live region and is hidden from AT — three
+    // announcements in three seconds would interrupt each other (WCAG 4.1.3).
+    const counter = screen.getByText(/Redirecting to Signals in 3/);
+    expect(counter).toHaveAttribute('aria-hidden', 'true');
+    expect(counter).not.toBe(announcement);
+    expect(announcement).not.toHaveTextContent(/\d/);
+    // Ticking must not re-announce: the live region's text is unchanged.
+    const announced = announcement.textContent;
+    await tick(1);
+    expect(screen.getByText(/Redirecting to Signals in 2/)).toBeInTheDocument();
+    expect(screen.getByText(/You'll be taken to Signals shortly/).textContent).toBe(announced);
   });
 
   it('cancels the countdown when Register another is clicked', async () => {
@@ -257,6 +279,7 @@ describe('Signals post-submit redirect', () => {
     expect(screen.getByRole('button', { name: /register another/i })).toBeInTheDocument();
     expect(screen.queryByText(/Redirecting to Signals/)).toBeNull();
     expect(screen.queryByRole('button', { name: /continue to signals/i })).toBeNull();
+    expect(screen.queryByText(/You'll be taken to Signals shortly/)).toBeNull();
     await tick(5);
     expect(assign).not.toHaveBeenCalled();
   });

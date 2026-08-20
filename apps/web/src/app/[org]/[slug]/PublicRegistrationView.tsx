@@ -692,12 +692,29 @@ export function PublicRegistrationView({
                 ) : null}
                 {redirectIn !== null && signalsHandoffUrl ? (
                   <>
-                    <p aria-live="polite" className="text-[13px] text-emerald-700 mt-4">
+                    {/* The live region announces ONCE. Putting the per-second
+                        number in here would fire three announcements in three
+                        seconds — faster than screen-reader speech cadence, so
+                        they interrupt each other and the user gets fragmented
+                        information about a navigation that is about to happen
+                        to them (WCAG 4.1.3 Status Messages). The static
+                        sentence names both escape routes instead; the ticking
+                        number below is visual-only. */}
+                    <p aria-live="polite" className="sr-only">
+                      {t('signals_redirect_announcement')}
+                    </p>
+                    <p aria-hidden="true" className="text-[13px] text-emerald-700 mt-4">
                       {t('signals_redirect_notice', { seconds: redirectIn })}
                     </p>
                     <button
                       type="button"
-                      onClick={() => window.location.assign(signalsHandoffUrl)}
+                      onClick={() => {
+                        // Stop the tick before leaving: if navigation is slow
+                        // or blocked, the effect would otherwise fire
+                        // `assign` again when the countdown reaches zero.
+                        setRedirectIn(null);
+                        window.location.assign(signalsHandoffUrl);
+                      }}
                       style={{ backgroundColor: cfg.brand.primary_color }}
                       className="mt-3 w-full py-3 rounded-[12px] font-display font-bold text-[15px] text-white hover:opacity-90 transition-opacity"
                     >
