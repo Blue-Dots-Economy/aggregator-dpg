@@ -193,4 +193,19 @@ describe('GET /v1/aggregator-config', () => {
     expect(body.brand.favicon_url).toBe('https://example.invalid/favicon.ico');
     expect(body.brand.typography?.primaryFont).toBe('Inter');
   });
+
+  it('exposes signals_ui_urls (empty when the env var is unset)', async () => {
+    const res = await app.inject({ method: 'GET', url: '/v1/aggregator-config' });
+    const body = res.json() as { signals_ui_urls: Record<string, string> };
+    expect(body.signals_ui_urls).toEqual({});
+  });
+
+  it('resolves signals_cta on every registration mode', async () => {
+    const res = await app.inject({ method: 'GET', url: '/v1/aggregator-config' });
+    const body = res.json() as {
+      registration_modes: Record<string, { signals_cta: boolean }>;
+    };
+    expect(body.registration_modes.form?.signals_cta).toBe(true);
+    expect(body.registration_modes.voice?.signals_cta).toBe(false);
+  });
 });
