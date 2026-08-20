@@ -78,6 +78,16 @@ async function submitSuccessfully(opts: {
     registrationMode: opts.registrationMode,
     submissionShape: opts.submissionShape ?? 'account_and_profile',
   });
+  // #652: when the Signals hand-off is configured for this domain/mode, the
+  // view opens on the pre-form chooser instead of the form. Only the
+  // "Register" option reveals the form; the redirect tests care about the
+  // post-submit countdown, not the chooser itself, so step past it here
+  // rather than in every test. The unconfigured-domain case never renders
+  // this button, so `queryByRole` leaves that path untouched.
+  const registerCta = screen.queryByRole('button', { name: /^register$/i });
+  if (registerCta) {
+    fireEvent.click(registerCta);
+  }
   await act(async () => {
     fireEvent.submit(screen.getByTestId('rjsf-shim'));
   });

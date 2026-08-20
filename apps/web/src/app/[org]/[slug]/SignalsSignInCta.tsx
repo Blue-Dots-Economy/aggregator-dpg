@@ -1,13 +1,13 @@
 'use client';
 
 /**
- * Pre-submit escape hatch (#652): a tertiary link under the submit button for
- * a participant who already has a Signals account and does not want to fill
- * the form.
+ * Pre-form escape hatch (#652): the secondary option on the registration
+ * chooser, for a participant who already has a Signals account and does not
+ * want to fill the form.
  *
  * Distinct from the reactive `already_registered` alert, which fires on a
  * submit-attempt after the identity probe and offers edit-and-retry. This one
- * is proactive and leaves the page.
+ * is proactive, sits in front of the form, and leaves the page.
  */
 
 import { useTranslations } from 'next-intl';
@@ -20,6 +20,9 @@ import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/u
  *  - the link's registration mode must have `signals_cta` (resolved
  *    server-side; defaults to full-profile modes only), and
  *  - the link's domain must have a URL in `signals_ui_urls`.
+ *
+ * `null` also means "no chooser": with nowhere to sign in there is nothing to
+ * choose between, so the page renders the registration form directly.
  *
  * The returned value is a full URL configured by the operator — normally the
  * Signals UI's `/auth/login`, which mints a fresh Keycloak authorization URL
@@ -53,23 +56,26 @@ export function useSignalsHandoffUrl(
 }
 
 /**
- * Renders the "Already Registered — Sign In" link.
+ * Renders the "Already Registered — Sign In" option of the chooser.
  *
- * @param props.href - Resolved Signals UI URL from {@link useSignalsHandoffUrl}.
- * @returns The CTA link, always opened in a new tab so a half-filled form survives.
+ * Deliberately secondary to the Register button next to it: outlined rather
+ * than brand-filled, so the two options never read as equal primaries.
+ *
+ * @param props.href - Resolved Signals UI URL from {@link useSignalsHandoffUrl},
+ *   used verbatim with nothing appended.
+ * @returns The sign-in link, always opened in a new tab so the registration
+ *   page survives behind it.
  */
 export function SignalsSignInCta({ href }: Readonly<{ href: string }>) {
   const t = useTranslations('profile.public_reg');
   return (
-    <div className="mt-4 text-center">
-      <a
-        href={href}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-[13.5px] font-semibold text-ink-500 underline underline-offset-4 hover:text-ink-700"
-      >
-        {t('signals_cta')}
-      </a>
-    </div>
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="block w-full rounded-[12px] border border-(--bd-border) bg-white py-3 text-center font-display font-semibold text-[15px] text-ink-700 transition-colors hover:bg-(--bd-primary-50) hover:text-ink-900"
+    >
+      {t('signals_cta')}
+    </a>
   );
 }
