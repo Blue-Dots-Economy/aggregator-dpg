@@ -75,6 +75,12 @@ export interface MinimalIdentityFormProps {
    * required and no `year_of_birth` is submitted.
    */
   showBirthYear: boolean;
+  /**
+   * Rendered directly beneath the submit button. Used for the Signals sign-in
+   * CTA, which is owned by PublicRegistrationView so the config lookup lives
+   * in one place for both form surfaces.
+   */
+  footer?: React.ReactNode;
 }
 
 /**
@@ -337,6 +343,7 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
             {t('submit_label')}
           </button>
         </div>
+        {props.footer}
       </form>
       {consentContent && (
         <ConsentModal

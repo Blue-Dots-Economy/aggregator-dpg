@@ -11,6 +11,7 @@ import { I } from '../../../icons';
 import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
 import { registrationShowsConsent, domainRequiresBirthYear } from '../../../lib/registration-gates';
 import { MinimalIdentityForm, type MinimalIdentityPayload } from './MinimalIdentityForm';
+import { SignalsSignInCta, useSignalsHandoffUrl } from './SignalsSignInCta';
 import { LanguageSwitcher } from '../../../components/shell/LanguageSwitcher';
 import { ConsentModal, type ConsentTab } from '../../../components/consent/ConsentModal';
 import type { ParticipantConsent } from '../../../components/consent/consent-types';
@@ -184,6 +185,10 @@ export function PublicRegistrationView({
   // collects a birth year — signalstack force-adds `consent_required` for any
   // guardian-gated domain, so a birth-year domain always needs the consent step
   // (see registrationShowsConsent).
+  // #652: pre-submit hand-off to the Signals UI for a participant who already
+  // has an account. Resolved here (above the account-only early return, so the
+  // hook order stays stable) and threaded into both form surfaces.
+  const signalsHandoffUrl = useSignalsHandoffUrl(domain, registrationMode ?? null, submissionShape);
   const domainCfg = cfg.domains.find((d) => d.id === domain);
   const showBirthYear = domainRequiresBirthYear(domainCfg);
   const showConsent = registrationShowsConsent(domainCfg);
@@ -573,6 +578,7 @@ export function PublicRegistrationView({
             consentContent={consentContent}
             showConsent={showConsent}
             showBirthYear={showBirthYear}
+            footer={signalsHandoffUrl ? <SignalsSignInCta href={signalsHandoffUrl} /> : null}
           />
         </div>
         {consentContent && (
@@ -948,6 +954,7 @@ export function PublicRegistrationView({
                           </button>
                         );
                       })()}
+                      {signalsHandoffUrl && <SignalsSignInCta href={signalsHandoffUrl} />}
                     </div>
                   </RjsfThemedForm>
                 )}
