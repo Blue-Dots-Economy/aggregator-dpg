@@ -284,50 +284,6 @@ describe('PostgresRegistrationLinksStore.findById', () => {
   });
 });
 
-// ─── updateQrKey ────────────────────────────────────────────────────────────
-
-describe('PostgresRegistrationLinksStore.updateQrKey', () => {
-  it('sets the qr object key and returns the mapped row', async () => {
-    let captured: ChainCall[] = [];
-    const db = makeFakeDb((chain) => {
-      captured = chain;
-      return [makeRow({ qrObjectKey: 'qr/link-1.png' })];
-    });
-    _setDbClients(null, db as never);
-    const store = new PostgresRegistrationLinksStore();
-
-    const result = await store.updateQrKey('link-1', 'agg-1', 'qr/link-1.png');
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.value.qrObjectKey).toBe('qr/link-1.png');
-    expect(callArgs(captured, 'set')?.[0]).toMatchObject({ qrObjectKey: 'qr/link-1.png' });
-  });
-
-  it('returns NOT_FOUND when no row matches', async () => {
-    const db = makeFakeDb(() => []);
-    _setDbClients(null, db as never);
-    const store = new PostgresRegistrationLinksStore();
-
-    const result = await store.updateQrKey('missing', 'agg-1', 'k');
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.error.code).toBe('NOT_FOUND');
-  });
-
-  it('returns DB_UNAVAILABLE when the driver throws', async () => {
-    const db = makeFakeDb(() => {
-      throw new Error('boom');
-    });
-    _setDbClients(null, db as never);
-    const store = new PostgresRegistrationLinksStore();
-
-    const result = await store.updateQrKey('link-1', 'agg-1', 'k');
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.error.code).toBe('DB_UNAVAILABLE');
-  });
-});
-
 // ─── list ───────────────────────────────────────────────────────────────────
 
 describe('PostgresRegistrationLinksStore.list', () => {

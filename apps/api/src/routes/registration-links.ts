@@ -553,7 +553,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
         tags: ['registration-links'],
         summary: 'Activate a registration link',
         description:
-          'Flips the link status to live so the public form accepts submissions; mints the QR PNG + public URL. Idempotent when already live; retired links cannot be reactivated (409).',
+          'Flips the link status to live so the public form accepts submissions and returns the public URL. Idempotent when already live; retired links cannot be reactivated (409).',
         security: [{ bearerAuth: [] }],
         params: LinkParamsSchema,
         response: {

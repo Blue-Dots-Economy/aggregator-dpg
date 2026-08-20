@@ -1,8 +1,8 @@
 /**
  * Registration links store contract.
  *
- * Persistence port for the `registration_links` table. Owns slug uniqueness,
- * status lifecycle (draft → live → retired), and qr_object_key updates.
+ * Persistence port for the `registration_links` table. Owns slug uniqueness
+ * and the status lifecycle (draft → live → retired).
  */
 
 export type RegistrationLinkStatus = 'draft' | 'live' | 'retired';
@@ -106,12 +106,6 @@ export abstract class RegistrationLinksStoreBase {
     orgSlug: string,
     slug: string,
   ): Promise<StoreResult<RegistrationLink | null>>;
-  /** Set the qr_object_key after the QR PNG has been uploaded to S3. */
-  abstract updateQrKey(
-    id: string,
-    aggregatorId: string,
-    qrObjectKey: string,
-  ): Promise<StoreResult<RegistrationLink>>;
   /**
    * Patch the editable fields on a draft row (`slug`, `context`, `expires_at`).
    * Live + retired rows reject with `NOT_FOUND` so the caller can surface a

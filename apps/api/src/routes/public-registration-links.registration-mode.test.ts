@@ -85,9 +85,6 @@ class TwoLinkStore extends RegistrationLinksStoreBase {
   async findBySlug(): Promise<StoreResult<RegistrationLink | null>> {
     return { ok: true, value: null };
   }
-  async updateQrKey(): Promise<StoreResult<RegistrationLink>> {
-    return { ok: false, error: { code: 'DB_UNAVAILABLE', message: 'stub' } };
-  }
   async updateDraft(): Promise<StoreResult<RegistrationLink>> {
     return { ok: false, error: { code: 'DB_UNAVAILABLE', message: 'stub' } };
   }
@@ -382,9 +379,6 @@ describe('link-not-live / link-lookup failure branches', () => {
         }
         async findBySlug(): Promise<StoreResult<RegistrationLink | null>> {
           return { ok: true, value: null };
-        }
-        async updateQrKey(): Promise<StoreResult<RegistrationLink>> {
-          return { ok: false, error: { code: 'DB_UNAVAILABLE', message: 'stub' } };
         }
         async updateDraft(): Promise<StoreResult<RegistrationLink>> {
           return { ok: false, error: { code: 'DB_UNAVAILABLE', message: 'stub' } };

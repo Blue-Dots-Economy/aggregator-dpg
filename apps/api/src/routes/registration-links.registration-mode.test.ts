@@ -84,9 +84,6 @@ class TrackingRegistrationLinksStore extends RegistrationLinksStoreBase {
   async findByOrgAndSlug(): Promise<StoreResult<RegistrationLink | null>> {
     return { ok: true, value: null };
   }
-  async updateQrKey(): Promise<StoreResult<RegistrationLink>> {
-    return { ok: false, error: { code: 'DB_UNAVAILABLE', message: 'stub' } };
-  }
   async updateDraft(): Promise<StoreResult<RegistrationLink>> {
     return { ok: false, error: { code: 'DB_UNAVAILABLE', message: 'stub' } };
   }
@@ -336,22 +333,6 @@ class FullRegistrationLinksStore extends RegistrationLinksStoreBase {
 
   async findByOrgAndSlug(): Promise<StoreResult<RegistrationLink | null>> {
     return { ok: true, value: null };
-  }
-
-  async updateQrKey(
-    id: string,
-    aggregatorId: string,
-    qrObjectKey: string,
-  ): Promise<StoreResult<RegistrationLink>> {
-    const fail = this.take('updateQrKey');
-    if (fail) return { ok: false, error: fail };
-    const row = this.rows.get(id);
-    if (!row || row.aggregatorId !== aggregatorId) {
-      return { ok: false, error: { code: 'NOT_FOUND', message: 'not found' } };
-    }
-    const updated = { ...row, qrObjectKey, updatedAt: new Date() };
-    this.rows.set(id, updated);
-    return { ok: true, value: updated };
   }
 
   async updateDraft(

@@ -136,8 +136,7 @@ export async function headObject(key: string): Promise<ObjectHead | null> {
 }
 
 /**
- * Uploads an artefact to S3. Used for QR PNGs at link-create time and for
- * any other API-side object writes.
+ * Uploads an artefact to S3. General-purpose API-side object write.
  */
 export async function putObject(key: string, body: Buffer, contentType: string): Promise<void> {
   await getInternalClient().send(

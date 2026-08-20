@@ -131,32 +131,6 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
     }
   }
 
-  async updateQrKey(
-    id: string,
-    aggregatorId: string,
-    qrObjectKey: string,
-  ): Promise<StoreResult<RegistrationLink>> {
-    try {
-      const rows = await getDb()
-        .update(registrationLinks)
-        .set({ qrObjectKey, updatedAt: new Date() })
-        .where(and(eq(registrationLinks.id, id), eq(registrationLinks.aggregatorId, aggregatorId)))
-        .returning();
-      const row = rows[0];
-      if (!row) {
-        return { ok: false, error: { code: 'NOT_FOUND', message: `link not found: ${id}` } };
-      }
-      return { ok: true, value: toDomain(row) };
-    } catch (err: unknown) {
-      logger.error({
-        operation: 'registrationLinksStore.updateQrKey',
-        status: 'failure',
-        error: (err as Error).message,
-      });
-      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: (err as Error).message } };
-    }
-  }
-
   async list(
     aggregatorId: string,
     options: ListRegistrationLinksOptions,
