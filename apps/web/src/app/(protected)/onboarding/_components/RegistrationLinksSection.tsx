@@ -106,6 +106,21 @@ function buildLinkTitle(f: CreateLinkFormState): string {
 }
 
 /**
+ * Splits a public URL into `{ host, path }` for the emphasised-slug display.
+ * Empty for a null URL (draft/retired rows); a malformed URL keeps the raw
+ * string as the host.
+ */
+function splitPublicUrl(publicUrl: string | null): { host: string; path: string } {
+  if (!publicUrl) return { host: '', path: '' };
+  try {
+    const u = new URL(publicUrl);
+    return { host: u.host, path: u.pathname.replace(/^\//, '') };
+  } catch {
+    return { host: publicUrl, path: '' };
+  }
+}
+
+/**
  * Top-right green toast for success notifications. Portals to <body> so a
  * transformed ancestor (e.g. `fade-up`) can't pin it inside the section. Auto-
  * dismisses after 2400ms, matching the profile-save toast.
@@ -142,83 +157,65 @@ function QrPreviewModal({
   error,
   onDownload,
   onClose,
-}: {
+}: Readonly<{
   title: string;
   dataUrl: string | null;
   error: string | null;
   onDownload: () => void;
   onClose: () => void;
-}) {
+}>) {
   const t = useTranslations('onboarding');
-  const [mounted, setMounted] = useState(false);
-  const dialogRef = useRef<HTMLDivElement>(null);
-  useEffect(() => setMounted(true), []);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  // Native <dialog> + showModal(): top-layer stacking (no z-index), a built-in
+  // focus trap, focus restore to the trigger, and Esc-to-close for free.
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-  // Move focus into the dialog on open and hand it back to the trigger on
-  // close, so keyboard users aren't stranded on the backdrop. (No full focus
-  // trap — Esc/backdrop close cover the common exits.)
-  useEffect(() => {
-    if (!mounted) return;
-    const restoreTo = document.activeElement as HTMLElement | null;
-    dialogRef.current?.focus();
-    return () => restoreTo?.focus?.();
-  }, [mounted]);
-  if (!mounted) return null;
-  return createPortal(
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label={title}
+    const el = dialogRef.current;
+    el?.showModal?.();
+    return () => el?.close?.();
+  }, []);
+
+  // Extracted from a nested ternary so each state reads as one branch.
+  let body: React.ReactNode;
+  if (error) {
+    body = <p className="text-[13px] text-rose-600">{error}</p>;
+  } else if (dataUrl) {
+    body = <img src={dataUrl} alt={title} className="h-52 w-52" />;
+  } else {
+    body = <p className="text-[13px] text-ink-400">{t('link_card.qr_generating')}</p>;
+  }
+
+  return (
+    <dialog
       ref={dialogRef}
-      tabIndex={-1}
-      className="fixed inset-0 z-[100] flex items-center justify-center p-4 outline-none"
+      aria-label={title}
+      onClose={onClose}
+      className="m-auto w-full max-w-[340px] rounded-[14px] bg-white p-5 shadow-xl backdrop:bg-black/40"
     >
-      {/* Native button backdrop — click or keyboard closes; a plain div with
-          onClick fails jsx-a11y (no keyboard path). */}
-      <button
-        type="button"
-        aria-label={t('link_card.qr_close')}
-        onClick={onClose}
-        className="absolute inset-0 h-full w-full cursor-default bg-black/40"
-      />
-      <div className="relative w-full max-w-[340px] rounded-[14px] bg-white p-5 shadow-xl">
-        <div className="mb-3 flex items-center justify-between">
-          <h3 className="font-display text-[15px] font-bold text-ink-900">{title}</h3>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label={t('link_card.qr_close')}
-            className="text-ink-400 hover:text-ink-700"
-          >
-            <I.x size={16} />
-          </button>
-        </div>
-        <div className="flex min-h-[220px] items-center justify-center rounded-[10px] border border-(--bd-border) bg-ink-50 p-4">
-          {error ? (
-            <p className="text-[13px] text-rose-600">{error}</p>
-          ) : dataUrl ? (
-            <img src={dataUrl} alt={title} className="h-52 w-52" />
-          ) : (
-            <p className="text-[13px] text-ink-400">{t('link_card.qr_generating')}</p>
-          )}
-        </div>
-        <div className="mt-4">
-          <button
-            type="button"
-            onClick={onDownload}
-            disabled={!dataUrl}
-            className="inline-flex w-full items-center justify-center gap-1.5 rounded-[10px] bg-primary-600 px-3 py-2 text-[13px] font-semibold text-white hover:bg-primary-700 disabled:opacity-50"
-          >
-            <I.download size={14} /> {t('link_card.qr_download')}
-          </button>
-        </div>
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="font-display text-[15px] font-bold text-ink-900">{title}</h3>
+        <button
+          type="button"
+          onClick={() => dialogRef.current?.close()}
+          aria-label={t('link_card.qr_close')}
+          className="text-ink-400 hover:text-ink-700"
+        >
+          <I.x size={16} />
+        </button>
       </div>
-    </div>,
-    document.body,
+      <div className="flex min-h-[220px] items-center justify-center rounded-[10px] border border-(--bd-border) bg-ink-50 p-4">
+        {body}
+      </div>
+      <div className="mt-4">
+        <button
+          type="button"
+          onClick={onDownload}
+          disabled={!dataUrl}
+          className="inline-flex w-full items-center justify-center gap-1.5 rounded-[10px] bg-primary-600 px-3 py-2 text-[13px] font-semibold text-white hover:bg-primary-700 disabled:opacity-50"
+        >
+          <I.download size={14} /> {t('link_card.qr_download')}
+        </button>
+      </div>
+    </dialog>
   );
 }
 
@@ -506,22 +503,14 @@ export function CreateLinkSection() {
   );
 }
 
-function LinkCard({
-  link,
-  highlight = false,
-}: {
-  link: ApiRegistrationLink;
-  /** Freshly created via the create flow (`?new=`) — scroll to + ring it. */
-  highlight?: boolean;
-}) {
-  const t = useTranslations('onboarding');
-  const format = useFormatter();
-  const [copied, setCopied] = useState(false);
-  const [editing, setEditing] = useState(false);
+/**
+ * When `highlight` is set (a just-created draft, `?new=`), bring the card into
+ * view and pulse a ring for ~2s so the user sees where it landed and its
+ * "Make Live" CTA — otherwise the create → onboarding nav can feel like the
+ * link vanished. Returns the card ref + whether the ring is currently shown.
+ */
+function useHighlightOnMount(highlight: boolean) {
   const cardRef = useRef<HTMLDivElement>(null);
-  // On first render of a just-created draft, bring it into view and pulse a
-  // ring for ~2s so the user sees where it landed (and its "Make Live" CTA)
-  // instead of feeling the link vanished after the create → onboarding nav.
   const [ringed, setRinged] = useState(highlight);
   useEffect(() => {
     if (!highlight) return;
@@ -529,6 +518,22 @@ function LinkCard({
     const timer = setTimeout(() => setRinged(false), 2000);
     return () => clearTimeout(timer);
   }, [highlight]);
+  return { cardRef, ringed };
+}
+
+function LinkCard({
+  link,
+  highlight = false,
+}: Readonly<{
+  link: ApiRegistrationLink;
+  /** Freshly created via the create flow (`?new=`) — scroll to + ring it. */
+  highlight?: boolean;
+}>) {
+  const t = useTranslations('onboarding');
+  const format = useFormatter();
+  const [copied, setCopied] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const { cardRef, ringed } = useHighlightOnMount(highlight);
   const activate = useActivateLink();
   const deactivate = useDeactivateLink();
   const update = useUpdateLink();
@@ -545,21 +550,9 @@ function LinkCard({
     [ctx['org_name'], ctx['event_location']].filter(Boolean).join(' · ') ||
     `${t('link_card.created_prefix')} ${format.dateTime(new Date(link.created_at), { day: '2-digit', month: 'short', year: 'numeric' })}`;
 
-  // Render `<host>/<orgSlug>/<slug>` with the slug emphasised. Only computed
-  // when the row is published (live) — drafts and retired rows carry a null
-  // public_url.
-  let urlHost = '';
-  let urlPath = '';
-  if (link.public_url) {
-    urlHost = link.public_url;
-    try {
-      const u = new URL(link.public_url);
-      urlHost = u.host;
-      urlPath = u.pathname.replace(/^\//, '');
-    } catch {
-      /* keep raw */
-    }
-  }
+  // `<host>/<orgSlug>/<slug>` with the slug emphasised. Empty for drafts/
+  // retired rows (null public_url); a malformed URL falls back to raw host.
+  const { host: urlHost, path: urlPath } = splitPublicUrl(link.public_url);
   const onCopy = async () => {
     if (!link.public_url || !navigator.clipboard) return;
     await navigator.clipboard.writeText(link.public_url);

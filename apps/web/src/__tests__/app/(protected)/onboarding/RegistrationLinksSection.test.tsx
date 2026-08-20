@@ -281,6 +281,15 @@ describe('<YourLinksBody />', () => {
     searchParamsRef.current = new URLSearchParams();
     // jsdom has no scrollIntoView; the highlight effect calls it.
     Element.prototype.scrollIntoView = vi.fn();
+    // jsdom doesn't implement <dialog> showModal/close — the QR preview uses
+    // them. Reflect `open` so role queries see the (now-open) dialog's contents.
+    HTMLDialogElement.prototype.showModal = vi.fn(function (this: HTMLDialogElement) {
+      this.open = true;
+    });
+    HTMLDialogElement.prototype.close = vi.fn(function (this: HTMLDialogElement) {
+      this.open = false;
+      this.dispatchEvent(new Event('close'));
+    });
     useAggregatorConfig.mockReturnValue({ data: cfg });
     useProfileRaw.mockReturnValue({ data: { type: 'seeker' } });
     useProfile.mockReturnValue({ data: { org: 'Acme Org' } });
