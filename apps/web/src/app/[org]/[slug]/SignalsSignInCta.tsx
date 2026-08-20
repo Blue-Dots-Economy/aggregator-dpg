@@ -11,7 +11,29 @@
  */
 
 import { useTranslations } from 'next-intl';
+import { resolveSignalsCta } from '@aggregator-dpg/network-config/signals-cta';
 import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
+
+/**
+ * Defence in depth on the hand-off target. The api is the sole source of these
+ * URLs and already rejects anything but http(s) at boot (`parseSignalsUiUrls`),
+ * so this can only fire if that guarantee is ever broken upstream — but the
+ * value lands in an `href` the participant clicks, so re-check it here rather
+ * than trust one validator. Valid http(s) URLs are unaffected.
+ *
+ * @param url - Candidate URL from the `signals_ui_urls` payload.
+ * @returns `true` for an absolute http(s) URL, `false` for anything else
+ *   (`javascript:`, `data:`, protocol-relative, relative, unparseable).
+ */
+function isSafeHandoffUrl(url: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+}
 
 /**
  * Resolve the Signals UI URL for this link, or `null` when the hand-off is off.
@@ -22,7 +44,8 @@ import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/u
  *  - the link's domain must have a URL in `signals_ui_urls`.
  *
  * `null` also means "no chooser": with nowhere to sign in there is nothing to
- * choose between, so the page renders the registration form directly.
+ * choose between, so the page renders the registration form directly. A URL
+ * that fails {@link isSafeHandoffUrl} is treated the same way as an absent one.
  *
  * The returned value is a full URL configured by the operator — normally the
  * Signals UI's `/auth/login`, which mints a fresh Keycloak authorization URL
@@ -44,14 +67,22 @@ export function useSignalsHandoffUrl(
   const urls = cfg.signals_ui_urls;
   const url = urls && Object.hasOwn(urls, domain) ? urls[domain] : undefined;
   if (!url) return null;
+  if (!isSafeHandoffUrl(url)) {
+    console.error(
+      `[signals-cta] refusing a non-http(s) hand-off URL for domain "${domain}"; the sign-in option will not render`,
+      { operation: 'signals-cta.validate-url', status: 'rejected', domain },
+    );
+    return null;
+  }
   const modes = cfg.registration_modes;
   const mode =
     registrationMode && modes && Object.hasOwn(modes, registrationMode)
       ? modes[registrationMode]
       : undefined;
-  // No declared mode (older api build, or a mode this network dropped) falls
-  // back to the shape, matching the server-side default.
-  const enabled = mode?.signals_cta ?? submissionShape === 'account_and_profile';
+  // The server resolves `signals_cta` and bakes it onto the wire payload; an
+  // absent flag means an older api build (or a mode this network dropped), so
+  // fall back to the shared default rule rather than a second local copy of it.
+  const enabled = resolveSignalsCta(mode?.signals_cta, submissionShape);
   return enabled ? url : null;
 }
 

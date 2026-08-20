@@ -203,8 +203,9 @@ export const RegistrationModeSchema = z.object({
   submission_shape: z.enum(['account_only', 'account_and_profile']),
   public_hint_i18n_key: z.string().min(1).nullable(),
   /**
-   * Whether links in this mode offer the Signals UI hand-off (the pre-submit
-   * "Already Registered — Sign In" CTA and the post-submit redirect).
+   * Whether links in this mode offer the Signals UI hand-off: today the
+   * pre-submit "Already Registered — Sign In" CTA on the public registration
+   * page. Once #635 lands it will gate that mode's post-submit redirect too.
    *
    * Optional. When omitted it resolves to
    * `submission_shape === 'account_and_profile'`, so with no config at all the

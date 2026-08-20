@@ -432,8 +432,17 @@ type SignalsUiUrlEntryResult =
 function parseSignalsUiUrlEntry(pair: string): SignalsUiUrlEntryResult {
   // First `=` only — URLs carry `=` inside query strings.
   const eq = pair.indexOf('=');
-  const domain = eq === -1 ? '' : pair.slice(0, eq).trim();
-  const url = eq === -1 ? '' : pair.slice(eq + 1).trim();
+  if (eq === -1) {
+    // Called out separately from the invalid-key case below: a bare word is
+    // almost always a comma that should have been an `=` (or vice versa), and
+    // saying "no `=` separator" points straight at it.
+    return {
+      ok: false,
+      warning: `SIGNALS_UI_URLS: skipping entry with no "=" separator: "${pair}"`,
+    };
+  }
+  const domain = pair.slice(0, eq).trim();
+  const url = pair.slice(eq + 1).trim();
   if (!/^[a-z][a-z0-9_]*$/.test(domain)) {
     return {
       ok: false,
@@ -467,6 +476,17 @@ function parseSignalsUiUrlEntry(pair: string): SignalsUiUrlEntryResult {
  * A malformed entry is dropped with a warning rather than crashing boot: the
  * Signals hand-off is optional, and one typo must not take the API down. The
  * warning keeps it from being a silent failure.
+ *
+ * On a **duplicate domain key** the last entry wins — the map is built by
+ * assignment, so a later `seeker=…` overwrites an earlier one. That is a
+ * warning too, because a repeated key means one of the two URLs the operator
+ * wrote is being thrown away.
+ *
+ * Domain keys are validated for *format* only, never against the network's
+ * declared domains — those resolve asynchronously, long after this runs at
+ * module load. `seeker` and `seekr` are equally well-formed here. The
+ * cross-check against the real domain list happens once the network config
+ * resolves; see `unknownSignalsUiUrlDomains`.
  */
 export function parseSignalsUiUrls(raw: string | undefined): ParsedSignalsUiUrls {
   const v = stripHelmQuoting(raw ?? '');
@@ -480,9 +500,41 @@ export function parseSignalsUiUrls(raw: string | undefined): ParsedSignalsUiUrls
       warnings.push(result.warning);
       continue;
     }
+    if (Object.hasOwn(urls, result.domain)) {
+      warnings.push(
+        `SIGNALS_UI_URLS: duplicate entry for domain "${result.domain}" — the last one wins`,
+      );
+    }
     urls[result.domain] = result.url;
   }
   return { urls, warnings };
+}
+
+/**
+ * Which parsed `SIGNALS_UI_URLS` keys name no domain this network declares.
+ *
+ * `parseSignalsUiUrls` cannot do this: it runs at module load, whereas the
+ * domain list comes from the resolved network config (a file read plus a
+ * signalstack `network.json` fetch). So a typo'd key — `seekr=…` — parses
+ * perfectly clean and then silently disables the hand-off for `seeker`, which
+ * is a worse failure than a malformed URL because nothing warns.
+ *
+ * Pure and log-only by design: the caller warns, and the parsed map is used
+ * unchanged. Filtering unknown keys would be wrong — a domain added to
+ * network.json ahead of the ConfigMap rollout (or vice versa) must not be able
+ * to turn a working hand-off off, and the api must never fail boot over an
+ * optional feature's env var.
+ *
+ * @param urls - The parsed `{ domain: url }` map.
+ * @param knownDomains - `ResolvedNetworkConfig.domainIds`.
+ * @returns The unrecognised keys, in insertion order; empty when all match.
+ */
+export function unknownSignalsUiUrlDomains(
+  urls: Readonly<Record<string, string>>,
+  knownDomains: readonly string[],
+): string[] {
+  const known = new Set(knownDomains);
+  return Object.keys(urls).filter((domain) => !known.has(domain));
 }
 
 const parsedSignalsUiUrls = parseSignalsUiUrls(config.SIGNALS_UI_URLS);
@@ -490,8 +542,15 @@ const parsedSignalsUiUrls = parseSignalsUiUrls(config.SIGNALS_UI_URLS);
 /**
  * Per-domain Signals UI login URLs, parsed once at boot.
  * Empty when unset — the public form then renders no Signals hand-off.
+ *
+ * Frozen, and typed `Readonly`, because every value in here has been checked to
+ * be an absolute http(s) URL. That invariant is what lets the web app drop the
+ * value straight into an `href`; a mutable module-level export would let any
+ * importer quietly add an unvalidated entry and break it from the inside.
  */
-export const signalsUiUrls: Record<string, string> = parsedSignalsUiUrls.urls;
+export const signalsUiUrls: Readonly<Record<string, string>> = Object.freeze(
+  parsedSignalsUiUrls.urls,
+);
 
 /**
  * Warnings from parsing `SIGNALS_UI_URLS`, one per skipped/malformed entry.
