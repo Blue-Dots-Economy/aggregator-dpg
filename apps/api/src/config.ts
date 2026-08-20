@@ -408,6 +408,64 @@ export interface ParsedSignalsUiUrls {
 }
 
 /**
+ * Strips a single layer of Helm `| quote`-style wrapping (single or double
+ * quotes) plus surrounding whitespace from a raw env value.
+ *
+ * @param raw - The raw string that may be quote-wrapped by Helm templating.
+ * @returns The unwrapped, trimmed string.
+ */
+function stripHelmQuoting(raw: string): string {
+  const v = raw.trim();
+  if (
+    v.length >= 2 &&
+    ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'")))
+  ) {
+    return v.slice(1, -1).trim();
+  }
+  return v;
+}
+
+/** The outcome of parsing one `domain=url` entry from `SIGNALS_UI_URLS`. */
+type SignalsUiUrlEntryResult =
+  { ok: true; domain: string; url: string } | { ok: false; warning: string };
+
+/**
+ * Parses and validates a single `domain=url` entry from `SIGNALS_UI_URLS`.
+ *
+ * @param pair - One trimmed, non-empty `domain=url` entry.
+ * @returns The parsed `{ domain, url }` pair, or a warning naming the
+ *   offending key if the entry is malformed.
+ */
+function parseSignalsUiUrlEntry(pair: string): SignalsUiUrlEntryResult {
+  // First `=` only — URLs carry `=` inside query strings.
+  const eq = pair.indexOf('=');
+  const domain = eq === -1 ? '' : pair.slice(0, eq).trim();
+  const url = eq === -1 ? '' : pair.slice(eq + 1).trim();
+  if (!/^[a-z][a-z0-9_]*$/.test(domain)) {
+    return {
+      ok: false,
+      warning: `SIGNALS_UI_URLS: skipping entry with invalid domain key: "${pair}"`,
+    };
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return {
+      ok: false,
+      warning: `SIGNALS_UI_URLS: skipping domain "${domain}" — value is not a valid URL`,
+    };
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return {
+      ok: false,
+      warning: `SIGNALS_UI_URLS: skipping domain "${domain}" — only http(s) URLs are allowed`,
+    };
+  }
+  return { ok: true, domain, url };
+}
+
+/**
  * Parse the `SIGNALS_UI_URLS` env value into a `{ domain: url }` map.
  *
  * Exported (unlike `parseEnvEmailList`) so it can be unit-tested without
@@ -418,38 +476,18 @@ export interface ParsedSignalsUiUrls {
  * warning keeps it from being a silent failure.
  */
 export function parseSignalsUiUrls(raw: string | undefined): ParsedSignalsUiUrls {
-  let v = (raw ?? '').trim();
-  if (
-    v.length >= 2 &&
-    ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'")))
-  ) {
-    v = v.slice(1, -1).trim();
-  }
+  const v = stripHelmQuoting(raw ?? '');
   const urls: Record<string, string> = {};
   const warnings: string[] = [];
   for (const entry of v.split(/[,\n]/)) {
     const pair = entry.trim();
     if (!pair) continue;
-    // First `=` only — URLs carry `=` inside query strings.
-    const eq = pair.indexOf('=');
-    const domain = eq === -1 ? '' : pair.slice(0, eq).trim();
-    const url = eq === -1 ? '' : pair.slice(eq + 1).trim();
-    if (!/^[a-z][a-z0-9_]*$/.test(domain)) {
-      warnings.push(`SIGNALS_UI_URLS: skipping entry with invalid domain key: "${pair}"`);
+    const result = parseSignalsUiUrlEntry(pair);
+    if (!result.ok) {
+      warnings.push(result.warning);
       continue;
     }
-    let parsed: URL;
-    try {
-      parsed = new URL(url);
-    } catch {
-      warnings.push(`SIGNALS_UI_URLS: skipping domain "${domain}" — value is not a valid URL`);
-      continue;
-    }
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      warnings.push(`SIGNALS_UI_URLS: skipping domain "${domain}" — only http(s) URLs are allowed`);
-      continue;
-    }
-    urls[domain] = url;
+    urls[result.domain] = result.url;
   }
   return { urls, warnings };
 }
