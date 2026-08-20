@@ -161,8 +161,6 @@ const ConfigSchema = z.object({
    * Example: https://aggregator.example.com
    */
   PUBLIC_LINK_BASE_URL: z.string().default('http://localhost:3000'),
-  /** Pre-signed GET URL TTL for QR PNG downloads (seconds). */
-  QR_DOWNLOAD_URL_TTL_SECONDS: z.coerce.number().int().positive().default(900),
 
   // ─── Approval links ───────────────────────────────────────────────────────
   /**

@@ -237,24 +237,4 @@ describe('object-storage', () => {
       });
     });
   });
-
-  describe('signQrDownloadUrl', () => {
-    it('signs a GET url for a PNG using QR_DOWNLOAD_URL_TTL_SECONDS', async () => {
-      const { signQrDownloadUrl } = await import('./index.js');
-      getSignedUrlMock.mockResolvedValue('https://signed.example/qr.png');
-      const before = Date.now();
-      const result = await signQrDownloadUrl('qr/agg-1/link-1.png');
-      expect(result.url).toBe('https://signed.example/qr.png');
-      const expiresAt = new Date(result.expiresAt).getTime();
-      expect(expiresAt - before).toBeGreaterThanOrEqual(600_000 - 1000);
-      expect(expiresAt - before).toBeLessThan(600_000 + 5000);
-      const [, command, opts] = getSignedUrlMock.mock.calls[0] as [
-        unknown,
-        { input: Record<string, unknown> },
-        { expiresIn: number },
-      ];
-      expect(command.input).toMatchObject({ ResponseContentType: 'image/png' });
-      expect(opts.expiresIn).toBe(600);
-    });
-  });
 });

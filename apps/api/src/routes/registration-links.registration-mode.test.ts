@@ -14,9 +14,8 @@
  * store + the in-memory aggregator fake. Auth is stubbed via
  * `_setAccessTokenVerifier`.
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { FastifyInstance } from 'fastify';
-import QRCode from 'qrcode';
 import { buildApp } from '../app.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
 import {
@@ -39,19 +38,8 @@ import {
 import type { UpdateDraftInput } from '../services/registration-links-store/interface.js';
 import { _setDbClients } from '../db/client.js';
 
-// Hoisted so the vi.mock factory can reference them (mocks are hoisted above
-// module code). registration-links.ts has no test-injection singleton for
-// object storage, so we mock the module directly — same pattern used in
-// bulk-uploads.test.ts.
-const { putObjectMock, signQrDownloadUrlMock } = vi.hoisted(() => ({
-  putObjectMock: vi.fn(),
-  signQrDownloadUrlMock: vi.fn(),
-}));
-
-vi.mock('../services/object-storage/index.js', () => ({
-  putObject: putObjectMock,
-  signQrDownloadUrl: signQrDownloadUrlMock,
-}));
+// #650: the QR is no longer persisted — it's generated client-side from the
+// public URL. The route touches no object storage, so there's nothing to mock.
 
 const AGG_ID = '11111111-1111-1111-1111-111111111111';
 const ORG_ID = 'org-signalstack-1';
@@ -512,12 +500,6 @@ async function bootFullApp(opts: {
   _setRegistrationLinksStore(opts.store);
   _setDbClients(null, buildMetricsDb(opts.metricsRows ?? []) as never);
 
-  putObjectMock.mockReset().mockResolvedValue(undefined);
-  signQrDownloadUrlMock.mockReset().mockResolvedValue({
-    url: 'https://s3.example.invalid/qr.png',
-    expiresAt: '2026-08-01T01:00:00.000Z',
-  });
-
   return buildApp();
 }
 
@@ -671,10 +653,9 @@ describe('POST /v1/links/create — full lifecycle', () => {
     expect(body.status).toBe('draft');
     expect(body.qr_url).toBeNull();
     expect(body.public_url).toBeNull();
-    expect(putObjectMock).not.toHaveBeenCalled();
   });
 
-  it('201s a live link, minting the QR PNG + public URL', async () => {
+  it('201s a live link with a public URL and no server-side QR (#650)', async () => {
     const r = await app.inject({
       method: 'POST',
       url: '/v1/links/create',
@@ -685,45 +666,8 @@ describe('POST /v1/links/create — full lifecycle', () => {
     const body = r.json() as { status: string; qr_url: string | null; public_url: string | null };
     expect(body.status).toBe('live');
     expect(body.public_url).toBe('http://localhost:3000/acme/live-one');
-    expect(body.qr_url).toBe('https://s3.example.invalid/qr.png');
-    expect(putObjectMock).toHaveBeenCalledTimes(1);
-  });
-
-  it('500 INTERNAL when QR PNG generation fails', async () => {
-    const spy = vi.spyOn(QRCode, 'toBuffer').mockRejectedValueOnce(new Error('qr boom'));
-    const r = await app.inject({
-      method: 'POST',
-      url: '/v1/links/create',
-      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
-      payload: { domain: 'seeker', slug: 'live-two', status: 'live' },
-    });
-    expect(r.statusCode).toBe(500);
-    expect(r.json().error.code).toBe('INTERNAL');
-    spy.mockRestore();
-  });
-
-  it('500 INTERNAL when the S3 PUT fails', async () => {
-    putObjectMock.mockRejectedValueOnce(new Error('s3 down'));
-    const r = await app.inject({
-      method: 'POST',
-      url: '/v1/links/create',
-      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
-      payload: { domain: 'seeker', slug: 'live-three', status: 'live' },
-    });
-    expect(r.statusCode).toBe(500);
-    expect(r.json().error.code).toBe('INTERNAL');
-  });
-
-  it('503 DB_UNAVAILABLE when stamping the qr_object_key fails', async () => {
-    store.failOnce('updateQrKey', { code: 'DB_UNAVAILABLE', message: 'db down' });
-    const r = await app.inject({
-      method: 'POST',
-      url: '/v1/links/create',
-      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
-      payload: { domain: 'seeker', slug: 'live-four', status: 'live' },
-    });
-    expect(r.statusCode).toBe(503);
-    expect(r.json().error.code).toBe('DB_UNAVAILABLE');
+    // QR is derived client-side from public_url — never returned by the API.
+    expect(body.qr_url).toBeNull();
   });
 });
 
@@ -769,7 +713,8 @@ describe('GET /v1/links — list', () => {
     expect(body.total).toBe(2);
     const a = body.items.find((i) => i.link_id === 'link-a');
     expect(a?.metrics.total).toBe(10);
-    expect(a?.qr_url).toBe('https://s3.example.invalid/qr.png');
+    // #650: a legacy row with a stored qr_object_key still returns qr_url null.
+    expect(a?.qr_url).toBeNull();
     const b = body.items.find((i) => i.link_id === 'link-b');
     expect(b?.metrics.total).toBe(0);
   });
@@ -820,12 +765,13 @@ describe('GET /v1/links/:id — read', () => {
     expect(r.statusCode).toBe(403);
   });
 
-  it('200s a live link and lazily signs the QR URL from the stored key', async () => {
+  it('200s a live link with the public URL and no server-side QR (#650)', async () => {
     store.seed([
       buildLink({
         id: 'link-live',
         slug: 'live-read',
         status: 'live',
+        // Legacy row: a key may still be stored, but the read never signs it.
         qrObjectKey: 'qr/live-read.png',
       }),
     ]);
@@ -836,9 +782,8 @@ describe('GET /v1/links/:id — read', () => {
     });
     expect(r.statusCode).toBe(200);
     const body = r.json() as { qr_url: string | null; public_url: string | null };
-    expect(body.qr_url).toBe('https://s3.example.invalid/qr.png');
+    expect(body.qr_url).toBeNull();
     expect(body.public_url).toBe('http://localhost:3000/acme/live-read');
-    expect(signQrDownloadUrlMock).toHaveBeenCalledWith('qr/live-read.png');
   });
 });
 
@@ -1029,7 +974,7 @@ describe('POST /v1/links/:id/activate', () => {
     expect(r.statusCode).toBe(403);
   });
 
-  it('is idempotent (200, no QR/S3 work) when already live', async () => {
+  it('is idempotent (200) when already live', async () => {
     store.seed([buildLink({ id: 'link-live', status: 'live', qrObjectKey: 'qr/x.png' })]);
     const r = await app.inject({
       method: 'POST',
@@ -1037,7 +982,6 @@ describe('POST /v1/links/:id/activate', () => {
       headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
     });
     expect(r.statusCode).toBe(200);
-    expect(putObjectMock).not.toHaveBeenCalled();
   });
 
   it('409 CONFLICT when the link is retired', async () => {
@@ -1051,7 +995,7 @@ describe('POST /v1/links/:id/activate', () => {
     expect(r.json().error.code).toBe('CONFLICT');
   });
 
-  it('200s activating a draft, minting a fresh QR PNG', async () => {
+  it('200s activating a draft — live with public URL, no server-side QR (#650)', async () => {
     store.seed([buildLink({ id: 'link-draft', slug: 'to-activate', status: 'draft' })]);
     const r = await app.inject({
       method: 'POST',
@@ -1062,59 +1006,7 @@ describe('POST /v1/links/:id/activate', () => {
     const body = r.json() as { status: string; public_url: string | null; qr_url: string | null };
     expect(body.status).toBe('live');
     expect(body.public_url).toBe('http://localhost:3000/acme/to-activate');
-    expect(body.qr_url).toBe('https://s3.example.invalid/qr.png');
-    expect(putObjectMock).toHaveBeenCalledTimes(1);
-  });
-
-  it('reuses the existing qr_object_key when one is already stamped on a legacy draft', async () => {
-    store.seed([
-      buildLink({
-        id: 'link-draft',
-        slug: 'legacy',
-        status: 'draft',
-        qrObjectKey: 'qr/legacy-key.png',
-      }),
-    ]);
-    await app.inject({
-      method: 'POST',
-      url: '/v1/links/link-draft/activate',
-      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
-    });
-    expect(putObjectMock).toHaveBeenCalledWith('qr/legacy-key.png', expect.anything(), 'image/png');
-  });
-
-  it('500 INTERNAL when QR PNG generation fails', async () => {
-    store.seed([buildLink({ id: 'link-draft', status: 'draft' })]);
-    const spy = vi.spyOn(QRCode, 'toBuffer').mockRejectedValueOnce(new Error('qr boom'));
-    const r = await app.inject({
-      method: 'POST',
-      url: '/v1/links/link-draft/activate',
-      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
-    });
-    expect(r.statusCode).toBe(500);
-    spy.mockRestore();
-  });
-
-  it('500 INTERNAL when the S3 PUT fails', async () => {
-    store.seed([buildLink({ id: 'link-draft', status: 'draft' })]);
-    putObjectMock.mockRejectedValueOnce(new Error('s3 down'));
-    const r = await app.inject({
-      method: 'POST',
-      url: '/v1/links/link-draft/activate',
-      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
-    });
-    expect(r.statusCode).toBe(500);
-  });
-
-  it('503 DB_UNAVAILABLE when stamping the qr_object_key fails', async () => {
-    store.seed([buildLink({ id: 'link-draft', status: 'draft' })]);
-    store.failOnce('updateQrKey', { code: 'DB_UNAVAILABLE', message: 'db down' });
-    const r = await app.inject({
-      method: 'POST',
-      url: '/v1/links/link-draft/activate',
-      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
-    });
-    expect(r.statusCode).toBe(503);
+    expect(body.qr_url).toBeNull();
   });
 
   it('503 DB_UNAVAILABLE when the status flip fails', async () => {

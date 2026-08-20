@@ -413,7 +413,6 @@ describe('<YourLinksBody />', () => {
         baseLink({
           status: 'live',
           public_url: 'https://bluedots.example/acme/dharwad-drive',
-          qr_url: 'https://bluedots.example/qr/link-1.png',
           expires_at: new Date('2027-01-01').toISOString(),
         }),
       ],
@@ -424,7 +423,7 @@ describe('<YourLinksBody />', () => {
 
     expect(screen.getByText('bluedots.example/')).toBeInTheDocument();
     expect(screen.getByText('acme/dharwad-drive')).toBeInTheDocument();
-    expect(screen.getByTitle('View QR')).toBeInTheDocument();
+    expect(screen.getByTitle('Download QR')).toBeInTheDocument();
     expect(screen.getByTitle('Open link')).toBeInTheDocument();
     expect(screen.getByText(/Expires/)).toBeInTheDocument();
 

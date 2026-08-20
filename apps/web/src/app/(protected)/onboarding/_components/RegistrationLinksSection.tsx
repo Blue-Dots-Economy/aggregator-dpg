@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
+import QRCode from 'qrcode';
 import { useRouter } from 'next/navigation';
 import { useTranslations, useFormatter } from 'next-intl';
 import { Button } from '../../../../components/ui/Button';
@@ -453,6 +454,22 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };
+  // #650: the QR is derived data — generate the PNG in the browser from the
+  // public URL and trigger a real download (no S3 round-trip, never expires).
+  const onDownloadQr = async () => {
+    if (!link.public_url) return;
+    const dataUrl = await QRCode.toDataURL(link.public_url, {
+      errorCorrectionLevel: 'M',
+      margin: 1,
+      width: 512,
+    });
+    const a = document.createElement('a');
+    a.href = dataUrl;
+    a.download = `qr-${link.slug}.png`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
 
   // Inline edit form state — drafts only. Pre-populated from the link's
   // current context. Slug is regenerated server-side from district+lever+date
@@ -552,17 +569,14 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
                   <I.copy size={12} />
                 </button>
               </div>
-              {link.qr_url && (
-                <a
-                  href={link.qr_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  title={t('link_card.view_qr')}
-                  className="inline-flex items-center justify-center w-8 h-8 rounded-[10px] border border-(--bd-border) text-ink-500 hover:text-primary-600 hover:border-(--bd-primary-100)"
-                >
-                  <I.qr size={14} />
-                </a>
-              )}
+              <button
+                type="button"
+                onClick={onDownloadQr}
+                title={t('link_card.download_qr')}
+                className="inline-flex items-center justify-center w-8 h-8 rounded-[10px] border border-(--bd-border) text-ink-500 hover:text-primary-600 hover:border-(--bd-primary-100)"
+              >
+                <I.qr size={14} />
+              </button>
               <a
                 href={link.public_url}
                 target="_blank"

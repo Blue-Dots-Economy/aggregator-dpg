@@ -177,23 +177,6 @@ export async function signErrorsCsvDownloadUrl(key: string): Promise<SignedDownl
   return { url, key, expiresAt };
 }
 
-/**
- * Issues a pre-signed GET URL for a QR PNG. Browsers can render the URL
- * directly in an <img> tag.
- */
-export async function signQrDownloadUrl(key: string): Promise<SignedDownloadUrl> {
-  const command = new GetObjectCommand({
-    Bucket: config.S3_BUCKET,
-    Key: key,
-    ResponseContentType: 'image/png',
-  });
-  const url = await getSignedUrl(getPresignerClient(), command, {
-    expiresIn: config.QR_DOWNLOAD_URL_TTL_SECONDS,
-  });
-  const expiresAt = new Date(Date.now() + config.QR_DOWNLOAD_URL_TTL_SECONDS * 1000).toISOString();
-  return { url, key, expiresAt };
-}
-
 /** Test-only — clears the cached clients so fresh instances are built next call. */
 export function _resetObjectStorageClient(): void {
   cachedInternalClient = null;
