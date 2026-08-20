@@ -24,6 +24,11 @@ export interface RegistrationLink {
   context: Record<string, unknown>;
   /** See {@link RegistrationLinkRegistrationMode}. */
   registrationMode: RegistrationLinkRegistrationMode;
+  /**
+   * Legacy (#650): QR is now generated client-side, so this is read but never
+   * written going forward. Retained one release for legacy rows — do NOT add a
+   * write path. Dropped in a follow-up migration.
+   */
   qrObjectKey: string | null;
   status: RegistrationLinkStatus;
   expiresAt: Date | null;

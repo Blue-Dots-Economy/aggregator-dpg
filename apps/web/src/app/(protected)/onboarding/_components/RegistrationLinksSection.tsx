@@ -576,7 +576,8 @@ function LinkCard({
         width: 512,
       });
       setQrDataUrl(dataUrl);
-    } catch {
+    } catch (err) {
+      console.error('qr generation failed', err);
       setQrError(t('link_card.qr_error'));
     }
   };

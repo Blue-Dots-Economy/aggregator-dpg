@@ -14,7 +14,7 @@
  * store + the in-memory aggregator fake. Auth is stubbed via
  * `_setAccessTokenVerifier`.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
@@ -36,10 +36,25 @@ import {
   type StoreResult,
 } from '../services/registration-links-store/index.js';
 import type { UpdateDraftInput } from '../services/registration-links-store/interface.js';
+import type * as ObjectStorageModule from '../services/object-storage/index.js';
 import { _setDbClients } from '../db/client.js';
 
-// #650: the QR is no longer persisted — it's generated client-side from the
-// public URL. The route touches no object storage, so there's nothing to mock.
+// #650 regression guard: the QR is no longer persisted — create/activate must
+// never touch object storage. Force the QR write primitives to REJECT (while
+// keeping the real bulk-upload helpers via importActual, so buildApp's other
+// routes still boot). If a putObject/signQrDownloadUrl call is ever
+// reintroduced into the link routes, the "S3 independence" tests below fail.
+vi.mock('../services/object-storage/index.js', async (importActual) => {
+  const actual = await importActual<typeof ObjectStorageModule>();
+  const rejectS3 = () =>
+    Promise.reject(new Error('S3 must not be on the link create/activate path'));
+  return {
+    ...actual,
+    putObject: vi.fn(rejectS3),
+    // Removed in #650; re-declared as a rejecting stub in case it's re-added.
+    signQrDownloadUrl: vi.fn(rejectS3),
+  };
+});
 
 const AGG_ID = '11111111-1111-1111-1111-111111111111';
 const ORG_ID = 'org-signalstack-1';
@@ -762,8 +777,14 @@ describe('GET /v1/links/:id — read', () => {
       headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
     });
     expect(r.statusCode).toBe(200);
-    const body = r.json() as { qr_url: string | null; public_url: string | null };
+    const body = r.json() as {
+      qr_url: string | null;
+      qr_expires_at: string | null;
+      public_url: string | null;
+    };
     expect(body.qr_url).toBeNull();
+    // The legacy sibling field is hard-null too (no presigned URL to expire).
+    expect(body.qr_expires_at).toBeNull();
     expect(body.public_url).toBe('http://localhost:3000/acme/live-read');
   });
 });
@@ -999,6 +1020,49 @@ describe('POST /v1/links/:id/activate', () => {
       headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
     });
     expect(r.statusCode).toBe(503);
+  });
+});
+
+// #650: object storage is mocked to REJECT for this whole file (see the
+// vi.mock at the top). These assert the central promise deterministically:
+// activation is independent of S3 — a create-live and a draft activation both
+// succeed even though every object-storage write would throw. If a QR→S3 write
+// is reintroduced into either path, these fail with 500 INTERNAL.
+describe('S3 independence (#650)', () => {
+  let app: FastifyInstance;
+  let store: FullRegistrationLinksStore;
+
+  beforeEach(async () => {
+    store = new FullRegistrationLinksStore();
+    app = await bootFullApp({ store });
+  });
+  afterEach(async () => teardownFullApp(app));
+
+  it('creates a live link with S3 unreachable — 201, qr_url null', async () => {
+    const r = await app.inject({
+      method: 'POST',
+      url: '/v1/links/create',
+      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
+      payload: { domain: 'seeker', slug: 'live-nos3', status: 'live' },
+    });
+    expect(r.statusCode).toBe(201);
+    const body = r.json() as { status: string; qr_url: string | null; public_url: string | null };
+    expect(body.status).toBe('live');
+    expect(body.public_url).toBe('http://localhost:3000/acme/live-nos3');
+    expect(body.qr_url).toBeNull();
+  });
+
+  it('activates a draft with S3 unreachable — 200, qr_url null', async () => {
+    store.seed([buildLink({ id: 'link-draft', slug: 'act-nos3', status: 'draft' })]);
+    const r = await app.inject({
+      method: 'POST',
+      url: '/v1/links/link-draft/activate',
+      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
+    });
+    expect(r.statusCode).toBe(200);
+    const body = r.json() as { status: string; qr_url: string | null };
+    expect(body.status).toBe('live');
+    expect(body.qr_url).toBeNull();
   });
 });
 

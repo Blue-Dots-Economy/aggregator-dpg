@@ -54,7 +54,6 @@ const baseConfig = {
   S3_FORCE_PATH_STYLE: true,
   BULK_UPLOAD_URL_TTL_SECONDS: 900,
   BULK_UPLOAD_MAX_BYTES: 10 * 1024 * 1024,
-  QR_DOWNLOAD_URL_TTL_SECONDS: 600,
 };
 
 vi.mock('../../config.js', () => ({

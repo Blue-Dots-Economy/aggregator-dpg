@@ -1,9 +1,9 @@
 /**
  * Registration links endpoints.
  *
- *   POST /v1/links/create              create a link + QR
+ *   POST /v1/links/create              create a link (QR is client-side, #650)
  *   GET  /v1/links                     list links scoped to aggregator
- *   GET  /v1/links/:id                 read a single link with QR URL
+ *   GET  /v1/links/:id                 read a single link
  *   POST /v1/links/:id/activate        flip a draft link to live (idempotent)
  *   POST /v1/links/:id/deactivate      retire a link (idempotent)
  *
@@ -189,7 +189,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
         tags: ['registration-links'],
         summary: 'Create a shareable registration link',
         description:
-          'Creates a QR / shareable registration link for the caller aggregator, scoped to a domain (seeker/provider). `domain` and `registration_mode` are validated against the active network config at request time. Drafts are metadata-only; status=live also mints the QR + public URL.',
+          'Creates a shareable registration link for the caller aggregator, scoped to a domain (seeker/provider). `domain` and `registration_mode` are validated against the active network config at request time. Drafts are metadata-only; status=live also mints the public URL. The QR is generated client-side from that URL (#650).',
         security: [{ bearerAuth: [] }],
         body: CreateLinkBodySchema,
         response: {

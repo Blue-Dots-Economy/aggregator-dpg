@@ -22,7 +22,7 @@ import { config } from '../../config.js';
 // Two S3 clients are kept on this module:
 //   - `getInternalClient()` uses S3_ENDPOINT (e.g. http://minio:9000 inside
 //     docker, or the AWS regional endpoint in prod). All server-side calls
-//     (HEAD, PUT for QR + errors.csv, GET for the worker's CSV download)
+//     (HEAD, PUT for errors.csv, GET for the worker's CSV download)
 //     route through here.
 //   - `getPresignerClient()` uses S3_PUBLIC_ENDPOINT — the host the BROWSER
 //     can reach. Pre-signed URLs encode the endpoint, so they MUST be minted
@@ -137,6 +137,9 @@ export async function headObject(key: string): Promise<ObjectHead | null> {
 
 /**
  * Uploads an artefact to S3. General-purpose API-side object write.
+ * NOTE: currently has no callers — the QR PNG write was removed in #650.
+ * Kept as the write primitive (bulk-upload uses presigned client-side PUTs);
+ * remove if no server-side write reappears.
  */
 export async function putObject(key: string, body: Buffer, contentType: string): Promise<void> {
   await getInternalClient().send(

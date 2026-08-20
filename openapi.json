@@ -4270,7 +4270,7 @@
         "tags": [
           "registration-links"
         ],
-        "description": "Creates a QR / shareable registration link for the caller aggregator, scoped to a domain (seeker/provider). `domain` and `registration_mode` are validated against the active network config at request time. Drafts are metadata-only; status=live also mints the QR + public URL.",
+        "description": "Creates a shareable registration link for the caller aggregator, scoped to a domain (seeker/provider). `domain` and `registration_mode` are validated against the active network config at request time. Drafts are metadata-only; status=live also mints the public URL. The QR is generated client-side from that URL (#650).",
         "requestBody": {
           "required": true,
           "content": {
