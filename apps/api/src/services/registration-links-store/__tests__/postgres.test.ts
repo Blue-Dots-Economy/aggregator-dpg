@@ -164,6 +164,24 @@ describe('PostgresRegistrationLinksStore.create', () => {
     expect(result.error.code).toBe('SLUG_COLLISION');
   });
 
+  it('maps a Drizzle-wrapped unique violation (code on .cause) to SLUG_COLLISION', async () => {
+    // Drizzle throws a DrizzleQueryError whose driver `code` sits on `.cause`,
+    // not the top-level error — the mapping must walk the cause chain, else a
+    // duplicate slug masquerades as DB_UNAVAILABLE and the route's retry never
+    // fires (surfacing a misleading 503 instead of allocating a fresh slug).
+    const db = makeFakeDb(() => {
+      const driverErr = Object.assign(new Error('duplicate key value'), { code: '23505' });
+      throw Object.assign(new Error('Failed query: insert into ...'), { cause: driverErr });
+    });
+    _setDbClients(null, db as never);
+    const store = new PostgresRegistrationLinksStore();
+
+    const result = await store.create(makeInput());
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('SLUG_COLLISION');
+  });
+
   it('maps any other driver error to DB_UNAVAILABLE', async () => {
     const db = makeFakeDb(() => {
       throw new Error('connection reset');
