@@ -171,6 +171,7 @@ and removing one stops it being offered on this deployment.
 
 | Key                    | Meaning                                                                                                                                                                                   |
 | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `label_i18n_key`       | Required. i18n key for the mode's label in the admin dropdown.                                                                                                                            |
 | `submission_shape`     | `account_and_profile` = identity + full profile form. `account_only` = identity capture only.                                                                                             |
 | `public_hint_i18n_key` | Optional copy shown under the public form.                                                                                                                                                |
 | `signals_cta`          | Whether this mode offers the Signals UI hand-off (the "Already Registered — Sign In" link and the post-submit redirect). Optional; defaults to `submission_shape == account_and_profile`. |

@@ -424,6 +424,12 @@ services:
       # Approval flow
       APPROVAL_TOKEN_SECRET: ${APPROVAL_TOKEN_SECRET:?APPROVAL_TOKEN_SECRET must be set in .env (≥32 chars)}
       ADMIN_EMAILS: ${ADMIN_EMAILS:-admin@bluedots.local}
+      # ─── Signals UI hand-off ──────────────────────────────────────────
+      # Per-domain Signals UI login URLs (`domain=url` pairs). Without this
+      # passed through, the feature was unreachable in the composed stack
+      # even with the host .env set — unset here means no hand-off anywhere,
+      # on any domain, regardless of the host .env value.
+      SIGNALS_UI_URLS: ${SIGNALS_UI_URLS:-}
       PUBLIC_API_URL: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}/backend"
       PUBLIC_PORTAL_URL: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}"
       # ─── Contact-support form ────────────────────────────────────────

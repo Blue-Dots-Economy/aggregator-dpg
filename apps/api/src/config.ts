@@ -378,14 +378,7 @@ export const apiReferenceEnabled: boolean =
  * filters, stray whitespace, and newline separators.
  */
 function parseEnvEmailList(raw: string | undefined): string[] {
-  let v = (raw ?? '').trim();
-  if (
-    v.length >= 2 &&
-    ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'")))
-  ) {
-    v = v.slice(1, -1).trim();
-  }
-  return v
+  return stripHelmQuoting(raw ?? '')
     .split(/[,\n]/)
     .map((s) => s.trim())
     .filter(Boolean);
