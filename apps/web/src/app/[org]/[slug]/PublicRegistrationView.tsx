@@ -72,9 +72,17 @@ type SubmitState =
   | { status: 'done'; submissionId: string; outcome: 'passed' | 'skipped' }
   | { status: 'error'; title: string; detail: string; code: string };
 
-/** Grace period before the post-submit hand-off fires, so the participant
- *  actually sees the success panel and their reference id (#635). */
-const SIGNALS_REDIRECT_SECONDS = 3;
+/**
+ * Grace period, in seconds, before the post-submit hand-off fires (#635).
+ *
+ * A considered UX number, not a default: the success panel is the ONLY place
+ * the participant's submission reference id is shown, and the hand-off
+ * navigates away in the same tab and takes it with it. Three seconds tested
+ * too short to read or note the ref down; four is the chosen balance between
+ * "long enough to see the ref" and "not a pointless wait". Shortening it means
+ * surfacing the ref somewhere that survives the navigation first.
+ */
+const SIGNALS_REDIRECT_SECONDS = 4;
 
 /**
  * Outcome of the pre-submit identity probe — drives the branched UI
@@ -670,6 +678,32 @@ export function PublicRegistrationView({
       </button>
     ) : null;
 
+  /**
+   * Visible label of the primary hand-off button while the #635 countdown
+   * runs — the count rides on the button itself rather than on a separate
+   * line above it, which testers read straight past: the seconds only matter
+   * because of what that button is about to do on its own.
+   *
+   * The terminal tick falls back to the plain label. A bare `(0)` would be
+   * the state left on screen for the whole cross-origin hop, and the
+   * permanent one if the hand-off URL ever goes falsy at zero (a config
+   * refetch).
+   *
+   * Visual-only — the button's accessible name is pinned to the plain label,
+   * so this string is never spoken (see `donePanel`).
+   */
+  const continueToSignalsLabel =
+    redirectIn !== null && redirectIn > 0
+      ? t('btn_continue_to_signals_counting', { seconds: redirectIn })
+      : t('btn_continue_to_signals');
+
+  /**
+   * Top margin of the success panel's secondary button: it sits tighter under
+   * the primary hand-off button than it does directly under the reference id,
+   * which is where it lands when the hand-off is unconfigured.
+   */
+  const registerAnotherSpacing = redirectIn !== null && signalsHandoffUrl ? 'mt-3' : 'mt-5';
+
   // Success panel shown once the submission (or a skip through the
   // account-only lookup) resolves. Hoisted alongside `chooserPanel` /
   // `backToChooser` so the three mutually-exclusive views below are
@@ -697,42 +731,36 @@ export function PublicRegistrationView({
             *inside an already-present* region — a region injected
             already-populated is frequently skipped entirely by
             NVDA/JAWS/VoiceOver. The announcement itself still fires ONCE:
-            putting the per-second number in here would fire three
-            announcements in three seconds — faster than screen-reader speech
-            cadence, so they'd interrupt each other and the user gets
-            fragmented information about a navigation that is about to happen
-            to them (WCAG 4.1.3 Status Messages). The static sentence names
-            both escape routes instead; the ticking number below is
-            visual-only. */}
+            putting the per-second number in here would fire one announcement
+            per second for the whole SIGNALS_REDIRECT_SECONDS window — faster
+            than screen-reader speech cadence, so they'd interrupt each other
+            and the user gets fragmented information about a navigation that
+            is about to happen to them (WCAG 4.1.3 Status Messages). The
+            static sentence names both escape routes instead; the number on
+            the button below is visual-only. */}
         <p aria-live="polite" className="sr-only">
           {redirectIn !== null && signalsHandoffUrl ? t('signals_redirect_announcement') : ''}
         </p>
         {redirectIn !== null && signalsHandoffUrl ? (
-          <>
-            {/* Never render a bare "0" — on a slow or blocked cross-origin
-                navigation the participant would otherwise stare at "in 0…"
-                for the whole hop, and it is the permanent terminal state if
-                the hand-off URL ever goes falsy at zero (a config refetch). */}
-            <p aria-hidden="true" className="text-[13px] text-emerald-700 mt-4">
-              {redirectIn > 0
-                ? t('signals_redirect_notice', { seconds: redirectIn })
-                : t('signals_redirect_notice_now')}
-            </p>
-            <button
-              type="button"
-              onClick={() => {
-                // Stop the tick before leaving: if navigation is slow or
-                // blocked, the effect would otherwise fire `assign` again
-                // when the countdown reaches zero.
-                setRedirectIn(null);
-                window.location.assign(signalsHandoffUrl);
-              }}
-              style={{ backgroundColor: cfg.brand.primary_color }}
-              className="mt-3 w-full py-3 rounded-[12px] font-display font-bold text-[15px] text-white hover:opacity-90 transition-opacity"
-            >
-              {t('btn_continue_to_signals')}
-            </button>
-          </>
+          <button
+            type="button"
+            onClick={() => {
+              // Stop the tick before leaving: if navigation is slow or
+              // blocked, the effect would otherwise fire `assign` again when
+              // the countdown reaches zero.
+              setRedirectIn(null);
+              window.location.assign(signalsHandoffUrl);
+            }}
+            // Pin the accessible name to the plain label so the once-a-second
+            // relabel below can never be re-announced — not even while the
+            // button holds focus, where some screen readers do speak an
+            // accessible-name change. The counting label is decorative.
+            aria-label={t('btn_continue_to_signals')}
+            style={{ backgroundColor: cfg.brand.primary_color }}
+            className="mt-5 w-full py-3 rounded-[12px] font-display font-bold text-[15px] text-white hover:opacity-90 transition-opacity"
+          >
+            <span aria-hidden="true">{continueToSignalsLabel}</span>
+          </button>
         ) : null}
         <button
           type="button"
@@ -749,7 +777,7 @@ export function PublicRegistrationView({
           // doesn't compete visually with the primary `Continue to Signals`
           // above. A participant who taps the first prominent button should
           // be leaving the page on purpose, not by default.
-          className="mt-5 w-full py-3 rounded-[12px] border border-(--bd-border) bg-white font-display font-bold text-[15px] text-ink-700 hover:bg-ink-50 transition-colors"
+          className={`${registerAnotherSpacing} w-full py-3 rounded-[12px] border border-(--bd-border) bg-white font-display font-bold text-[15px] text-ink-700 hover:bg-ink-50 transition-colors`}
         >
           {t('btn_register_another')}
         </button>

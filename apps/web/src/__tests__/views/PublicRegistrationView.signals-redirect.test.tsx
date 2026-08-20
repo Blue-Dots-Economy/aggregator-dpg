@@ -1,10 +1,11 @@
 /**
  * View test: the post-submit hand-off to the Signals UI (#635).
  *
- * Covers the countdown that runs on the success panel, the immediate
- * `Continue to Signals` button, the `Register another` cancel (a field
- * operator registering people back-to-back must not be thrown out of the
- * form), the dedup-hit outcome, and the unconfigured-domain no-op.
+ * Covers the countdown, which rides on the `Continue to Signals` button's own
+ * visible label rather than a standalone notice line, clicking that button to
+ * go immediately, the `Register another` cancel (a field operator registering
+ * people back-to-back must not be thrown out of the form), the dedup-hit
+ * outcome, and the unconfigured-domain no-op.
  *
  * The RJSF shim, the fixture config, and the render helper come from
  * `./publicRegistrationView.testHelpers` — shared with
@@ -131,60 +132,112 @@ afterEach(() => {
   if (originalLocation) Object.defineProperty(window, 'location', originalLocation);
 });
 
+/**
+ * The hand-off button, located by its accessible name — which is pinned to
+ * the plain label and never carries the count, so this lookup keeps working
+ * on every tick.
+ *
+ * @returns The button element, or `null` when the hand-off is unconfigured.
+ */
+function continueButton(): HTMLElement | null {
+  return screen.queryByRole('button', { name: /^continue to signals$/i });
+}
+
+/**
+ * The hand-off button's *visible* label, which is where the countdown lives.
+ *
+ * @returns The rendered text, or `null` when the button is absent.
+ */
+function continueLabel(): string | null {
+  return continueButton()?.textContent ?? null;
+}
+
 describe('Signals post-submit redirect', () => {
-  it('counts down from 3 and then navigates to the domain URL', async () => {
+  it('counts down 4 -> 3 -> 2 -> 1 on the button label and then navigates', async () => {
     cfgMock.value = CFG;
     await submitSuccessfully({ domain: 'seeker', registrationMode: 'form' });
-    expect(screen.getByText(/Redirecting to Signals in 3/)).toBeInTheDocument();
+    expect(continueLabel()).toBe('Continue to Signals (4)');
     await tick(1);
-    expect(screen.getByText(/Redirecting to Signals in 2/)).toBeInTheDocument();
+    expect(continueLabel()).toBe('Continue to Signals (3)');
     await tick(1);
-    expect(screen.getByText(/Redirecting to Signals in 1/)).toBeInTheDocument();
+    expect(continueLabel()).toBe('Continue to Signals (2)');
+    await tick(1);
+    expect(continueLabel()).toBe('Continue to Signals (1)');
+    // Still on the panel a full second before the last tick: the participant
+    // needs the whole window to read the reference id, which the hand-off
+    // navigates away from.
     expect(assign).not.toHaveBeenCalled();
     await tick(1);
     expect(assign).toHaveBeenCalledWith(SIGNALS_URL);
   });
 
-  it('navigates immediately when Continue to Signals is clicked', async () => {
+  it('shows no standalone countdown line — the button is the only countdown', async () => {
     cfgMock.value = CFG;
     await submitSuccessfully({ domain: 'seeker', registrationMode: 'form' });
-    fireEvent.click(screen.getByRole('button', { name: /continue to signals/i }));
+    // The pre-#652 notice paragraph ("Redirecting to Signals in 3…") is gone;
+    // testers read straight past it, so the count moved onto the button.
+    expect(screen.queryByText(/Redirecting to Signals/i)).toBeNull();
+    // Exactly one element carries the visible count.
+    expect(screen.getAllByText(/Continue to Signals \(4\)/)).toHaveLength(1);
+  });
+
+  it('navigates immediately when the button is clicked, ignoring the remaining count', async () => {
+    cfgMock.value = CFG;
+    await submitSuccessfully({ domain: 'seeker', registrationMode: 'form' });
+    // Full countdown still on the clock — the click must not wait it out.
+    expect(continueLabel()).toBe('Continue to Signals (4)');
+    fireEvent.click(continueButton() as HTMLElement);
     expect(assign).toHaveBeenCalledWith(SIGNALS_URL);
     // Clicking cancels the tick, so a slow or blocked navigation cannot be
     // followed by a second `assign` when the countdown would have hit zero.
-    await tick(5);
+    await tick(6);
     expect(assign).toHaveBeenCalledTimes(1);
   });
 
-  it('never shows a bare "0" countdown, even at the terminal tick', async () => {
+  it('never shows a bare "0" on the button, even at the terminal tick', async () => {
     cfgMock.value = CFG;
     await submitSuccessfully({ domain: 'seeker', registrationMode: 'form' });
-    // Advance through 3 -> 2 -> 1 -> 0. The 3rd tick both lands the state at
-    // 0 AND fires `assign` in the same effect pass, so the render at
+    // Advance through 4 -> 3 -> 2 -> 1 -> 0. The 4th tick both lands the
+    // state at 0 AND fires `assign` in the same effect pass, so the render at
     // `redirectIn === 0` is the one left on screen afterwards.
-    await tick(3);
+    await tick(4);
     expect(assign).toHaveBeenCalledWith(SIGNALS_URL);
-    expect(screen.queryByText(/Redirecting to Signals in 0/)).toBeNull();
-    // The number-less copy takes over instead of a bare "0".
-    const notice = screen.getByText(/Redirecting to Signals/);
-    expect(notice.textContent).not.toMatch(/\d/);
+    // The number-less label takes over rather than "(0)".
+    expect(continueLabel()).toBe('Continue to Signals');
+    expect(continueLabel()).not.toMatch(/\d/);
   });
 
-  it('announces once via a static live region and hides the ticking number from AT', async () => {
+  it('keeps the accessible name static so the per-second relabel is never announced', async () => {
+    cfgMock.value = CFG;
+    await submitSuccessfully({ domain: 'seeker', registrationMode: 'form' });
+    const button = continueButton() as HTMLElement;
+    // Accessible name is pinned to the plain label; the counting text is
+    // decorative, so a screen reader on the focused button hears nothing new
+    // when the number changes.
+    expect(button).toHaveAttribute('aria-label', 'Continue to Signals');
+    expect(button.getAttribute('aria-label')).not.toMatch(/\d/);
+    const counter = screen.getByText(/Continue to Signals \(4\)/);
+    expect(counter).toHaveAttribute('aria-hidden', 'true');
+    await tick(1);
+    // Same element, new number, unchanged accessible name.
+    expect(continueLabel()).toBe('Continue to Signals (3)');
+    expect(continueButton()).toHaveAttribute('aria-label', 'Continue to Signals');
+  });
+
+  it('announces once via a static live region that never carries the count', async () => {
     cfgMock.value = CFG;
     await submitSuccessfully({ domain: 'seeker', registrationMode: 'form' });
     const announcement = screen.getByText(/You'll be taken to Signals shortly/);
     expect(announcement).toHaveAttribute('aria-live', 'polite');
-    // The number lives outside the live region and is hidden from AT — three
-    // announcements in three seconds would interrupt each other (WCAG 4.1.3).
-    const counter = screen.getByText(/Redirecting to Signals in 3/);
-    expect(counter).toHaveAttribute('aria-hidden', 'true');
-    expect(counter).not.toBe(announcement);
+    // Three announcements in three seconds would interrupt each other
+    // (WCAG 4.1.3), so no digit may ever enter the live region...
     expect(announcement).not.toHaveTextContent(/\d/);
+    // ...and the ticking button must sit outside it.
+    expect(announcement.contains(continueButton())).toBe(false);
     // Ticking must not re-announce: the live region's text is unchanged.
     const announced = announcement.textContent;
     await tick(1);
-    expect(screen.getByText(/Redirecting to Signals in 2/)).toBeInTheDocument();
+    expect(continueLabel()).toBe('Continue to Signals (3)');
     expect(screen.getByText(/You'll be taken to Signals shortly/).textContent).toBe(announced);
   });
 
@@ -215,9 +268,9 @@ describe('Signals post-submit redirect', () => {
     cfgMock.value = CFG;
     await submitSuccessfully({ domain: 'seeker', registrationMode: 'form' });
     fireEvent.click(screen.getByRole('button', { name: /register another/i }));
-    await tick(5);
+    await tick(6);
     expect(assign).not.toHaveBeenCalled();
-    expect(screen.queryByText(/Redirecting to Signals/)).toBeNull();
+    expect(continueButton()).toBeNull();
     // The form is back, so the operator can key in the next person.
     expect(screen.getByTestId('rjsf-shim')).toBeInTheDocument();
   });
@@ -230,8 +283,8 @@ describe('Signals post-submit redirect', () => {
       status: 409,
       outcome: 'skipped',
     });
-    expect(screen.getByText(/Redirecting to Signals in 3/)).toBeInTheDocument();
-    await tick(3);
+    expect(continueLabel()).toBe('Continue to Signals (4)');
+    await tick(4);
     expect(assign).toHaveBeenCalledWith(SIGNALS_URL);
   });
 
@@ -240,10 +293,10 @@ describe('Signals post-submit redirect', () => {
     await submitSuccessfully({ domain: 'seeker', registrationMode: 'form' });
     // The success panel itself still renders — only the hand-off is absent.
     expect(screen.getByRole('button', { name: /register another/i })).toBeInTheDocument();
-    expect(screen.queryByText(/Redirecting to Signals/)).toBeNull();
-    expect(screen.queryByRole('button', { name: /continue to signals/i })).toBeNull();
+    expect(continueButton()).toBeNull();
+    expect(screen.queryByText(/Continue to Signals/i)).toBeNull();
     expect(screen.queryByText(/You'll be taken to Signals shortly/)).toBeNull();
-    await tick(5);
+    await tick(6);
     expect(assign).not.toHaveBeenCalled();
   });
 });
