@@ -18,9 +18,15 @@ import { NextIntlClientProvider } from 'next-intl';
 import messages from '@/i18n/messages/en.json';
 import type { ApiRegistrationLink } from '@/services/onboarding.service';
 
-const { pushMock } = vi.hoisted(() => ({ pushMock: vi.fn() }));
+const { pushMock, searchParamsRef } = vi.hoisted(() => ({
+  pushMock: vi.fn(),
+  // Mutable so a test can set `?new=` before rendering YourLinksBody.
+  searchParamsRef: { current: new URLSearchParams() },
+}));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: pushMock }),
+  // YourLinksBody reads `?new=` to highlight a freshly-created draft.
+  useSearchParams: () => searchParamsRef.current,
 }));
 
 const { useActivateLink, useCreateLink, useDeactivateLink, useRegistrationLinks, useUpdateLink } =
@@ -52,6 +58,11 @@ const { useAggregatorConfig } = vi.hoisted(() => ({ useAggregatorConfig: vi.fn()
 vi.mock('@/hooks/useAggregatorConfig', () => ({
   useAggregatorConfig: () => useAggregatorConfig(),
 }));
+
+// The QR is generated client-side (#650). Mock so the modal's toDataURL is
+// controllable — resolve a stub PNG by default, reject in the error test.
+const { qrToDataURL } = vi.hoisted(() => ({ qrToDataURL: vi.fn() }));
+vi.mock('qrcode', () => ({ default: { toDataURL: qrToDataURL } }));
 
 import {
   CreateLinkSection,
@@ -214,7 +225,8 @@ describe('<CreateLinkSection />', () => {
     expect(input.context.tags).toEqual(['urgent', 'delhi']);
 
     expect(await screen.findByText('Registration link created')).toBeInTheDocument();
-    expect(pushMock).toHaveBeenCalledWith('/onboarding');
+    // Navigates to the list with `?new=<id>` so the fresh draft is highlighted.
+    expect(pushMock).toHaveBeenCalledWith('/onboarding?new=link-1');
     // Form resets after a successful create.
     expect(screen.getByPlaceholderText('State')).toHaveValue('');
   });
@@ -271,6 +283,19 @@ describe('<YourLinksBody />', () => {
     updateMutateAsync.mockReset();
     activateMutate.mockClear();
     deactivateMutate.mockClear();
+    searchParamsRef.current = new URLSearchParams();
+    qrToDataURL.mockReset().mockResolvedValue('data:image/png;base64,STUB');
+    // jsdom has no scrollIntoView; the highlight effect calls it.
+    Element.prototype.scrollIntoView = vi.fn();
+    // jsdom doesn't implement <dialog> showModal/close — the QR preview uses
+    // them. Reflect `open` so role queries see the (now-open) dialog's contents.
+    HTMLDialogElement.prototype.showModal = vi.fn(function (this: HTMLDialogElement) {
+      this.open = true;
+    });
+    HTMLDialogElement.prototype.close = vi.fn(function (this: HTMLDialogElement) {
+      this.open = false;
+      this.dispatchEvent(new Event('close'));
+    });
     useAggregatorConfig.mockReturnValue({ data: cfg });
     useProfileRaw.mockReturnValue({ data: { type: 'seeker' } });
     useProfile.mockReturnValue({ data: { org: 'Acme Org' } });
@@ -325,6 +350,23 @@ describe('<YourLinksBody />', () => {
     expect(screen.getByText('seeker links')).toBeInTheDocument();
     expect(screen.getByText('Live One')).toBeInTheDocument();
     expect(screen.getByText('Draft One')).toBeInTheDocument();
+  });
+
+  it('scrolls the freshly-created draft into view when ?new= matches it', () => {
+    searchParamsRef.current = new URLSearchParams('new=l2');
+    useRegistrationLinks.mockReturnValue({
+      data: [
+        baseLink({ link_id: 'l1', status: 'live', context: { title: 'Live One' } }),
+        baseLink({ link_id: 'l2', status: 'draft', context: { title: 'Draft One' } }),
+      ],
+      isLoading: false,
+      error: null,
+    });
+    renderLinks();
+    // The highlighted card scrolls itself into view; non-matching cards don't.
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalledTimes(1);
+    // A toast confirms the draft and points at "Make Live".
+    expect(screen.getByText(/created as a draft/i)).toBeInTheDocument();
   });
 
   it('draft card: shows the draft notice and Edit + Make Live actions, and Make Live activates the link', async () => {
@@ -413,7 +455,6 @@ describe('<YourLinksBody />', () => {
         baseLink({
           status: 'live',
           public_url: 'https://bluedots.example/acme/dharwad-drive',
-          qr_url: 'https://bluedots.example/qr/link-1.png',
           expires_at: new Date('2027-01-01').toISOString(),
         }),
       ],
@@ -428,6 +469,12 @@ describe('<YourLinksBody />', () => {
     expect(screen.getByTitle('Open link')).toBeInTheDocument();
     expect(screen.getByText(/Expires/)).toBeInTheDocument();
 
+    // #650: clicking the QR button opens the preview modal (no navigation).
+    await user.click(screen.getByTitle('View QR'));
+    expect(await screen.findByText('Registration QR')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Download/ })).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+
     const copyButtons = screen.getAllByRole('button', { name: 'Copy link' });
     await user.click(copyButtons[copyButtons.length - 1]!);
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
@@ -437,6 +484,55 @@ describe('<YourLinksBody />', () => {
 
     await user.click(screen.getByRole('button', { name: 'Deactivate' }));
     expect(deactivateMutate).toHaveBeenCalledWith('link-1');
+  });
+
+  it('QR modal: Download generates from public_url and saves qr-<slug>.png', async () => {
+    const user = userEvent.setup();
+    const clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, 'click')
+      .mockImplementation(() => undefined);
+    useRegistrationLinks.mockReturnValue({
+      data: [
+        baseLink({ status: 'live', public_url: 'https://bluedots.example/acme/dharwad-drive' }),
+      ],
+      isLoading: false,
+      error: null,
+    });
+    renderLinks();
+
+    await user.click(screen.getByTitle('View QR'));
+    const download = await screen.findByRole('button', { name: /Download/ });
+    await user.click(download);
+
+    expect(qrToDataURL).toHaveBeenCalledWith(
+      'https://bluedots.example/acme/dharwad-drive',
+      expect.objectContaining({ width: 512 }),
+    );
+    const anchor = clickSpy.mock.instances[0] as HTMLAnchorElement;
+    expect(anchor.download).toBe('qr-dharwad-drive.png');
+    expect(anchor.href).toContain('data:image/png');
+    clickSpy.mockRestore();
+  });
+
+  it('QR modal: shows the error state and logs when generation fails', async () => {
+    const user = userEvent.setup();
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    qrToDataURL.mockRejectedValueOnce(new Error('boom'));
+    useRegistrationLinks.mockReturnValue({
+      data: [
+        baseLink({ status: 'live', public_url: 'https://bluedots.example/acme/dharwad-drive' }),
+      ],
+      isLoading: false,
+      error: null,
+    });
+    renderLinks();
+
+    await user.click(screen.getByTitle('View QR'));
+    expect(
+      await screen.findByText("Couldn't generate the QR. Please try again."),
+    ).toBeInTheDocument();
+    expect(consoleSpy).toHaveBeenCalledWith('qr generation failed', expect.any(Error));
+    consoleSpy.mockRestore();
   });
 
   it('live card: renders a malformed public_url as raw text instead of crashing', () => {

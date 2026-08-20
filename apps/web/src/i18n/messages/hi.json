@@ -342,13 +342,19 @@
       "loading": "लिंक लोड हो रहे हैं…",
       "empty": "अभी तक कोई {type} लिंक नहीं। ऊपर एक बनाएं।",
       "active_count": "{count} सक्रिय",
-      "type_pill": "{type} लिंक"
+      "type_pill": "{type} लिंक",
+      "draft_created": "लिंक ड्राफ़्ट के रूप में बनाया गया — प्रकाशित करने के लिए \"Make Live\" पर क्लिक करें।"
     },
     "link_card": {
       "copy_link": "लिंक कॉपी करें",
       "copied": "कॉपी हो गया!",
       "copy_title": "लिंक कॉपी करें",
       "view_qr": "QR देखें",
+      "qr_modal_title": "पंजीकरण QR",
+      "qr_download": "डाउनलोड",
+      "qr_close": "बंद करें",
+      "qr_generating": "बना रहे हैं…",
+      "qr_error": "QR नहीं बन सका। कृपया पुनः प्रयास करें।",
       "open_link": "लिंक खोलें",
       "draft_notice": "लाइव करने के बाद सार्वजनिक URL + QR दिखेगा।",
       "registrations": "पंजीकरण",

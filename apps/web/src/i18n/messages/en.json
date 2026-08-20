@@ -342,13 +342,19 @@
       "loading": "Loading links…",
       "empty": "No {type} links yet. Create one above.",
       "active_count": "{count} active",
-      "type_pill": "{type} links"
+      "type_pill": "{type} links",
+      "draft_created": "Link created as a draft — click \"Make Live\" to publish it."
     },
     "link_card": {
       "copy_link": "Copy link",
       "copied": "Copied!",
       "copy_title": "Copy link",
       "view_qr": "View QR",
+      "qr_modal_title": "Registration QR",
+      "qr_download": "Download",
+      "qr_close": "Close",
+      "qr_generating": "Generating…",
+      "qr_error": "Couldn't generate the QR. Please try again.",
       "open_link": "Open link",
       "draft_notice": "Public URL + QR appear after Make Live.",
       "registrations": "registrations",

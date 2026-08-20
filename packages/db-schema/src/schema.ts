@@ -329,6 +329,9 @@ export const registrationLinks = pgTable(
     domain: text('domain').notNull(),
     context: jsonb('context').$type<Record<string, unknown>>().notNull().default({}),
     registrationMode: text('registration_mode').notNull().default('form'),
+    // Legacy (#650): QR is now generated client-side; this is never written
+    // going forward. Retained one release for legacy reads — do NOT reintroduce
+    // a write. Drop in a follow-up migration.
     qrObjectKey: text('qr_object_key'),
     status: registrationLinkStatusEnum('status').notNull().default('draft'),
     expiresAt: timestamp('expires_at', { withTimezone: true }),

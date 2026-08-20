@@ -157,12 +157,10 @@ const ConfigSchema = z.object({
    * Base URL of the public landing page that resolves a registration link.
    * The public URL is `${PUBLIC_LINK_BASE_URL}/${org_slug}/${slug}`; the
    * aggregator's org_slug namespaces the per-link slug so two aggregators
-   * may use the same slug. Encoded into the QR PNG.
+   * may use the same slug. Also the value the QR encodes (client-side).
    * Example: https://aggregator.example.com
    */
   PUBLIC_LINK_BASE_URL: z.string().default('http://localhost:3000'),
-  /** Pre-signed GET URL TTL for QR PNG downloads (seconds). */
-  QR_DOWNLOAD_URL_TTL_SECONDS: z.coerce.number().int().positive().default(900),
 
   // ─── Approval links ───────────────────────────────────────────────────────
   /**
