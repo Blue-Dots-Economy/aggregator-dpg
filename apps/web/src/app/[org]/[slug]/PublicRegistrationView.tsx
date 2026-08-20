@@ -643,6 +643,53 @@ export function PublicRegistrationView({
       </button>
     ) : null;
 
+  // Success panel shown once the submission (or a skip through the
+  // account-only lookup) resolves. Hoisted alongside `chooserPanel` /
+  // `backToChooser` so the three mutually-exclusive views below are
+  // symmetric siblings rather than a nested ternary (typescript:S3358).
+  const donePanel =
+    state.status === 'done' ? (
+      <div className="rounded-[14px] border border-emerald-200 bg-emerald-50 p-6">
+        <div className="flex items-center gap-2.5 font-display font-bold text-[18px] text-emerald-800">
+          <span className="w-7 h-7 rounded-full bg-emerald-500 text-white inline-flex items-center justify-center">
+            <I.check size={16} stroke={2.6} />
+          </span>
+          {state.outcome === 'passed' ? t('done_passed_title') : t('done_skipped_title')}
+        </div>
+        <p className="text-[14px] text-emerald-700 mt-3 leading-relaxed">
+          {state.outcome === 'passed' ? t('done_passed_body') : t('done_skipped_body')}
+        </p>
+        {state.submissionId ? (
+          <div className="text-[11px] text-emerald-600/80 font-mono mt-3">
+            {t('done_ref_prefix')} {state.submissionId}
+          </div>
+        ) : null}
+        <button
+          type="button"
+          onClick={() => {
+            setFormData({});
+            setShowValidation(false);
+            setState({ status: 'idle' });
+          }}
+          style={{ backgroundColor: cfg.brand.primary_color }}
+          className="mt-5 w-full py-3 rounded-[12px] font-display font-bold text-[15px] text-white hover:opacity-90 transition-opacity"
+        >
+          {t('btn_register_another')}
+        </button>
+      </div>
+    ) : null;
+
+  // Exactly one of the three panels below is active; computed once here
+  // rather than as a nested ternary in the JSX (typescript:S3358).
+  let activeView: 'done' | 'chooser' | 'form';
+  if (state.status === 'done') {
+    activeView = 'done';
+  } else if (showChooser) {
+    activeView = 'chooser';
+  } else {
+    activeView = 'form';
+  }
+
   if (isAccountOnly && state.status === 'idle' && !lookup) {
     return (
       <div
@@ -743,38 +790,9 @@ export function PublicRegistrationView({
           </div>
 
           <div className="px-6 sm:px-8 py-7">
-            {state.status === 'done' ? (
-              <div className="rounded-[14px] border border-emerald-200 bg-emerald-50 p-6">
-                <div className="flex items-center gap-2.5 font-display font-bold text-[18px] text-emerald-800">
-                  <span className="w-7 h-7 rounded-full bg-emerald-500 text-white inline-flex items-center justify-center">
-                    <I.check size={16} stroke={2.6} />
-                  </span>
-                  {state.outcome === 'passed' ? t('done_passed_title') : t('done_skipped_title')}
-                </div>
-                <p className="text-[14px] text-emerald-700 mt-3 leading-relaxed">
-                  {state.outcome === 'passed' ? t('done_passed_body') : t('done_skipped_body')}
-                </p>
-                {state.submissionId ? (
-                  <div className="text-[11px] text-emerald-600/80 font-mono mt-3">
-                    {t('done_ref_prefix')} {state.submissionId}
-                  </div>
-                ) : null}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setFormData({});
-                    setShowValidation(false);
-                    setState({ status: 'idle' });
-                  }}
-                  style={{ backgroundColor: cfg.brand.primary_color }}
-                  className="mt-5 w-full py-3 rounded-[12px] font-display font-bold text-[15px] text-white hover:opacity-90 transition-opacity"
-                >
-                  {t('btn_register_another')}
-                </button>
-              </div>
-            ) : showChooser ? (
-              chooserPanel
-            ) : (
+            {activeView === 'done' && donePanel}
+            {activeView === 'chooser' && chooserPanel}
+            {activeView === 'form' && (
               <>
                 {backToChooser}
                 {state.status === 'error' ? (
