@@ -288,6 +288,62 @@ describe('pre-form registration chooser', () => {
     expect(screen.getByTestId('registration-chooser')).toBeInTheDocument();
   });
 
+  it('honours an explicit signals_cta:false on a full-profile mode that has a URL', () => {
+    // The override branch: the shape default would switch the chooser ON for
+    // account_and_profile, and a URL *is* configured for the domain, so the
+    // only thing that can suppress it is the explicit false being read.
+    cfgMock.value = {
+      ...CFG,
+      registration_modes: {
+        ...CFG.registration_modes,
+        form: { ...CFG.registration_modes.form, signals_cta: false },
+      },
+    };
+    renderView({
+      domain: 'seeker',
+      registrationMode: 'form',
+      submissionShape: 'account_and_profile',
+    });
+    expect(screen.queryByTestId('registration-chooser')).toBeNull();
+    expect(signInLink()).toBeNull();
+    expect(screen.getByTestId('rjsf-shim')).toBeInTheDocument();
+  });
+
+  it('refuses a non-http(s) hand-off URL rather than putting it in an href', () => {
+    // Defence in depth: the api already rejects these at boot, so this can
+    // only fire if that guarantee breaks. Assert on the rendered outcome, not
+    // on the guard's internals.
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      cfgMock.value = { ...CFG, signals_ui_urls: { seeker: 'javascript:alert(1)' } };
+      renderView({
+        domain: 'seeker',
+        registrationMode: 'form',
+        submissionShape: 'account_and_profile',
+      });
+      expect(screen.queryByTestId('registration-chooser')).toBeNull();
+      expect(signInLink()).toBeNull();
+      // Degrades to the plain form, exactly as an unconfigured domain does.
+      expect(screen.getByTestId('rjsf-shim')).toBeInTheDocument();
+      expect(spy).toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('still renders the chooser for a plain http URL (the guard is scheme-only)', () => {
+    // Guards against the re-validation over-reaching: a local/dev http origin
+    // is valid config and must behave exactly as https does.
+    cfgMock.value = { ...CFG, signals_ui_urls: { seeker: 'http://localhost:5173/auth/login' } };
+    renderView({
+      domain: 'seeker',
+      registrationMode: 'form',
+      submissionShape: 'account_and_profile',
+    });
+    expect(screen.getByTestId('registration-chooser')).toBeInTheDocument();
+    expect(signInLink()).toHaveAttribute('href', 'http://localhost:5173/auth/login');
+  });
+
   it('shows neither surface until the aggregator config resolves', () => {
     // Config still in flight: `data` is undefined and the query has not errored.
     cfgMock.value = undefined;

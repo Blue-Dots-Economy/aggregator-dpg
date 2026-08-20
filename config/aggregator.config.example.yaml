@@ -90,9 +90,10 @@ aggregator:
   #   submission_shape      account_and_profile = identity + full profile form
   #                         account_only        = identity capture only
   #   public_hint_i18n_key  optional copy shown under the public form
-  #   signals_cta           whether this mode offers the Signals UI hand-off
-  #                         (the "Already Registered — Sign In" link and the
-  #                         post-submit redirect). Optional; defaults to
+  #   signals_cta           whether this mode offers the Signals UI hand-off —
+  #                         today the pre-submit "Already Registered — Sign In"
+  #                         link; once #635 lands, that mode's post-submit
+  #                         redirect too. Optional; defaults to
   #                         `submission_shape == account_and_profile`.
   #
   # The hand-off also needs the SIGNALS_UI_URLS env var, which maps each domain

@@ -93,8 +93,12 @@ interface PublicAggregatorConfig {
    * deployment has not configured any — the public form then shows no Signals
    * hand-off. Sourced from the SIGNALS_UI_URLS env var, not from the YAML, so
    * it can be changed at deploy time without an image rebuild.
+   *
+   * `Readonly` to match the frozen `signalsUiUrls` export it is assigned from:
+   * every value is a boot-validated absolute http(s) URL and nothing on the
+   * response path has any business adding one that is not.
    */
-  signals_ui_urls: Record<string, string>;
+  signals_ui_urls: Readonly<Record<string, string>>;
 }
 
 const AggregatorConfigResponseSchema = z
@@ -148,6 +152,12 @@ const AggregatorConfigResponseSchema = z
       z.string(),
       z.object({ label: z.string().optional(), signals_cta: z.boolean() }).passthrough(),
     ),
+    // Values are absolute http(s) URLs (enforced at boot by
+    // `parseSignalsUiUrls`), but kept as a plain string here on purpose:
+    // `z.string().url()` is a *different* predicate from `new URL()`, so a
+    // value that boots fine could fail response serialisation and turn a
+    // working config into a 500. Tightening this needs the two validators
+    // reconciled first — tracked as a follow-up, not done here.
     signals_ui_urls: z.record(z.string(), z.string()),
   })
   .passthrough();
@@ -215,7 +225,11 @@ export async function registerAggregatorConfigRoutes(app: FastifyInstance): Prom
         registration_modes: Object.fromEntries(
           Object.entries(cfg.aggregator.registration_modes ?? {}).map(([key, mode]) => [
             key,
-            // Resolve the default server-side so the client never re-derives it.
+            // Resolve the `signals_cta` default here so the client normally
+            // reads a concrete boolean off the wire. The client keeps a
+            // back-compat fallback that re-derives it (for an older api build
+            // that omits the field) — both sides share the one rule in
+            // `@aggregator-dpg/network-config/signals-cta`.
             { ...mode, signals_cta: signalsCtaEnabled(key, cfg) },
           ]),
         ),

@@ -169,12 +169,12 @@ Per-link capture channels offered on the forms/QR page. The admin dropdown is
 rendered straight from these keys, so adding a channel needs no code change —
 and removing one stops it being offered on this deployment.
 
-| Key                    | Meaning                                                                                                                                                                                   |
-| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `label_i18n_key`       | Required. i18n key for the mode's label in the admin dropdown.                                                                                                                            |
-| `submission_shape`     | `account_and_profile` = identity + full profile form. `account_only` = identity capture only.                                                                                             |
-| `public_hint_i18n_key` | Optional copy shown under the public form.                                                                                                                                                |
-| `signals_cta`          | Whether this mode offers the Signals UI hand-off (the "Already Registered — Sign In" link and the post-submit redirect). Optional; defaults to `submission_shape == account_and_profile`. |
+| Key                    | Meaning                                                                                                                                                                                                                              |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `label_i18n_key`       | Required. i18n key for the mode's label in the admin dropdown.                                                                                                                                                                       |
+| `submission_shape`     | `account_and_profile` = identity + full profile form. `account_only` = identity capture only.                                                                                                                                        |
+| `public_hint_i18n_key` | Optional copy shown under the public form.                                                                                                                                                                                           |
+| `signals_cta`          | Whether this mode offers the Signals UI hand-off — today the pre-submit "Already Registered — Sign In" link; once #635 lands, that mode's post-submit redirect too. Optional; defaults to `submission_shape == account_and_profile`. |
 
 ```yaml
 registration_modes:
@@ -202,3 +202,15 @@ The Signals UI URL configured in `SIGNALS_UI_URLS` must be the Signals UI page
 Keycloak authorization URL embeds one-time `state` and PKCE `code_challenge`
 values bound to the browser that generated them, so a hardcoded one fails for
 every user.
+
+Each key must be a domain id from `network.json`, spelled exactly. A bad entry
+never fails boot — it is skipped and warned about in the api startup logs, so
+check them after a change. Watch for:
+
+| Problem                                   | Log line says                                                |
+| ----------------------------------------- | ------------------------------------------------------------ |
+| key names no domain this network declares | `domain "…" is not declared by this network`                 |
+| same key twice                            | `duplicate entry for domain "…" — the last one wins`         |
+| entry with no `=`                         | `skipping entry with no "=" separator`                       |
+| key is not lowercase snake_case           | `skipping entry with invalid domain key`                     |
+| value is not a URL, or not http(s)        | `value is not a valid URL` / `only http(s) URLs are allowed` |

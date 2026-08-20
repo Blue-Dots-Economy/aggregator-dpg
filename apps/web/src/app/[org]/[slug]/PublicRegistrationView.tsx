@@ -214,6 +214,12 @@ export function PublicRegistrationView({
    * Whether the config query has settled — either with a payload or with a
    * failure that leaves us on {@link DEFAULT_AGGREGATOR_CONFIG}. Gates the
    * chooser-vs-form decision below so neither surface flashes.
+   *
+   * The failure branch deliberately renders the form (a participant must still
+   * be able to register during a config outage) and is *not* silent: the
+   * failure is reported by `useAggregatorConfig` itself, so nothing extra is
+   * needed here. It does mean the chooser vanishes on a config outage — that
+   * is the degradation, not a bug.
    */
   const configResolved = cfgData !== undefined || cfgFailed;
   const brandShort = cfg.brand.short_name;

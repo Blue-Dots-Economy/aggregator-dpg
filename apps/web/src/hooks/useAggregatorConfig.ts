@@ -8,9 +8,14 @@
  * source changes.
  *
  * Falls back to a minimal Blue Dots default while the network call is
- * in flight so first paint is never blank.
+ * in flight so first paint is never blank. A *failed* call leaves callers on
+ * that same default — intentionally, so the public form still works — but the
+ * failure is logged to the console (see the effect in the hook body) rather
+ * than swallowed, because degraded branding is otherwise indistinguishable
+ * from a deployment that simply has no branding configured.
  */
 
+import { useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { jsonFetch } from '../services/http';
 
@@ -211,10 +216,32 @@ export const DEFAULT_AGGREGATOR_CONFIG: AggregatorConfigPayload = {
 };
 
 export function useAggregatorConfig() {
-  return useQuery({
+  const query = useQuery({
     queryKey: ['aggregator-config'],
     queryFn: () => jsonFetch<AggregatorConfigPayload>('/api/aggregator-config'),
     // Brand + domains rarely change between deploys; stale data is fine.
     staleTime: 5 * 60 * 1000,
   });
+  const { error } = query;
+  // Degrading to DEFAULT_AGGREGATOR_CONFIG on failure is deliberate — first
+  // paint is never blank and the public registration form still works. But
+  // degraded is not the same as fine: the deployment's real branding is gone
+  // and every config-gated surface (the #652 Signals hand-off chooser, the
+  // per-domain consent/birth-year gates) silently turns off. Without this the
+  // outage is invisible in the browser, which `.claude/rules/error-handling.md`
+  // forbids. Logged here rather than in each consumer so every caller of this
+  // hook is covered; react-query de-dupes the request, so a page with two
+  // consumers emits one line per mounted consumer, not one per retry.
+  useEffect(() => {
+    if (!error) return;
+    console.error(
+      '[aggregator-config] fetch failed — falling back to default branding; config-gated surfaces (Signals hand-off, consent gates) will not render',
+      {
+        operation: 'aggregator-config.fetch',
+        status: 'failure',
+        error: error instanceof Error ? error.message : String(error),
+      },
+    );
+  }, [error]);
+  return query;
 }

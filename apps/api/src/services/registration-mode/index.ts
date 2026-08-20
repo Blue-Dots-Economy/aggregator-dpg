@@ -9,8 +9,12 @@
  * `aggregator.registration_modes`. The DB column is just a key.
  */
 import type { ResolvedNetworkConfig } from '@aggregator-dpg/network-config/interface';
+import {
+  resolveSignalsCta,
+  type SubmissionShape,
+} from '@aggregator-dpg/network-config/signals-cta';
 
-export type SubmissionShape = 'account_only' | 'account_and_profile';
+export type { SubmissionShape };
 
 export function resolveSubmissionShape(mode: string, cfg: ResolvedNetworkConfig): SubmissionShape {
   const modes = cfg.aggregator.registration_modes ?? {};
@@ -30,13 +34,14 @@ export function publicHintI18nKey(mode: string, cfg: ResolvedNetworkConfig): str
 /**
  * Whether links in this mode offer the Signals UI hand-off.
  *
- * Defaults off the *resolved* submission shape rather than off the raw config,
- * so an undeclared mode — which already renders the full profile form via
- * {@link resolveSubmissionShape}'s fallback — behaves like `form` here too.
+ * The default rule itself lives in `@aggregator-dpg/network-config/signals-cta`
+ * because the web app re-derives it as a back-compat fallback; this function
+ * only supplies the two inputs. Passes the *resolved* submission shape rather
+ * than the raw config value, so an undeclared mode — which already renders the
+ * full profile form via {@link resolveSubmissionShape}'s fallback — behaves
+ * like `form` here too.
  */
 export function signalsCtaEnabled(mode: string, cfg: ResolvedNetworkConfig): boolean {
   const modes = cfg.aggregator.registration_modes ?? {};
-  const explicit = modes[mode]?.signals_cta;
-  if (typeof explicit === 'boolean') return explicit;
-  return resolveSubmissionShape(mode, cfg) === 'account_and_profile';
+  return resolveSignalsCta(modes[mode]?.signals_cta, resolveSubmissionShape(mode, cfg));
 }
