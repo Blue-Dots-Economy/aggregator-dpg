@@ -202,6 +202,16 @@ export const RegistrationModeSchema = z.object({
   label_i18n_key: z.string().min(1),
   submission_shape: z.enum(['account_only', 'account_and_profile']),
   public_hint_i18n_key: z.string().min(1).nullable(),
+  /**
+   * Whether links in this mode offer the Signals UI hand-off (the pre-submit
+   * "Already Registered — Sign In" CTA and the post-submit redirect).
+   *
+   * Optional. When omitted it resolves to
+   * `submission_shape === 'account_and_profile'`, so with no config at all the
+   * hand-off appears on the full-profile form only. Set explicitly to override
+   * per mode — including for modes that do not exist yet.
+   */
+  signals_cta: z.boolean().optional(),
 });
 export type RegistrationMode = z.infer<typeof RegistrationModeSchema>;
 

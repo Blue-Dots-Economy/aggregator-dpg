@@ -26,3 +26,17 @@ export function publicHintI18nKey(mode: string, cfg: ResolvedNetworkConfig): str
   const modes = cfg.aggregator.registration_modes ?? {};
   return modes[mode]?.public_hint_i18n_key ?? null;
 }
+
+/**
+ * Whether links in this mode offer the Signals UI hand-off.
+ *
+ * Defaults off the *resolved* submission shape rather than off the raw config,
+ * so an undeclared mode — which already renders the full profile form via
+ * {@link resolveSubmissionShape}'s fallback — behaves like `form` here too.
+ */
+export function signalsCtaEnabled(mode: string, cfg: ResolvedNetworkConfig): boolean {
+  const modes = cfg.aggregator.registration_modes ?? {};
+  const explicit = modes[mode]?.signals_cta;
+  if (typeof explicit === 'boolean') return explicit;
+  return resolveSubmissionShape(mode, cfg) === 'account_and_profile';
+}
