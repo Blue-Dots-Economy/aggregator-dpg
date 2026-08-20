@@ -1,6 +1,6 @@
 # Standardised consent gate with scroll tracking
 
-**Issue:** aggregator-dpg #636 — *Standardize T&C acceptance UX across the DPG*
+**Issue:** aggregator-dpg #636 — _Standardize T&C acceptance UX across the DPG_
 **Date:** 2026-08-20
 **Repos:** `aggregator-dpg` and `Signals-DPG` (two PRs, developed in parallel)
 
@@ -9,7 +9,7 @@
 Consent is captured in five places across two products, and no two behave the same way.
 
 In Signals, clicking **Create account** opens a blocking modal: two tabs, a checkbox,
-*Accept & Continue*. In the aggregator, the user ticks an inline checkbox on the form and
+_Accept & Continue_. In the aggregator, the user ticks an inline checkbox on the form and
 may optionally click a link to read the documents in a dismissible viewer. Nothing anywhere
 requires the user to have reached the end of the text before agreeing.
 
@@ -29,14 +29,14 @@ Rejected: a tab per document. The aggregator's public registration form has **th
 documents, and the third is a 111-character sentence. Three tabs of visibly unequal weight
 is poor, and tabs do not scale if a fourth document ever appears.
 
-The design (validated interactively before implementation — see *Prototype* below):
+The design (validated interactively before implementation — see _Prototype_ below):
 
 > One uninterrupted scroll containing every document in sequence, separated by rules, with
 > a progress tracker pinned above it. The tracker updates continuously as the user scrolls.
 > Finishing a document ticks its node and promotes the next. When every document has been
-> reached, one checkbox at the foot unlocks, and with it *Accept & continue*.
+> reached, one checkbox at the foot unlocks, and with it _Accept & continue_.
 
-No per-document checkbox. No *Next* button. One scroll, one agreement.
+No per-document checkbox. No _Next_ button. One scroll, one agreement.
 
 ### Why this shape
 
@@ -46,7 +46,7 @@ No per-document checkbox. No *Next* button. One scroll, one agreement.
   and how much remains — information a scrollbar cannot convey across concatenated documents.
 - **The short-statement problem dissolves.** As one continuous scroll, the 111-character
   profile statement is simply the tail. It cannot be individually unscrollable, so it cannot
-  lock the form (see *Failure modes*).
+  lock the form (see _Failure modes_).
 - **It scales.** Two documents in Signals, three on the aggregator's public form, N later —
   the tracker renders N nodes.
 
@@ -86,12 +86,12 @@ if per-document ticks are ever wanted later; this design does not foreclose that
 
 ### aggregator-dpg — all four acceptance surfaces
 
-| Surface | File | Documents |
-|---|---|---|
-| Org registration | `(public)/register/OrgRegisterForm.tsx` | Terms, Privacy |
-| Coordinator registration | `(public)/register/CoordinatorRegisterForm.tsx` | Terms, Privacy |
-| Public QR form | `[org]/[slug]/PublicRegistrationView.tsx` | Terms, Privacy, Profile creation |
-| Public QR minimal form | `[org]/[slug]/MinimalIdentityForm.tsx` | Terms, Privacy |
+| Surface                  | File                                            | Documents                        |
+| ------------------------ | ----------------------------------------------- | -------------------------------- |
+| Org registration         | `(public)/register/OrgRegisterForm.tsx`         | Terms, Privacy                   |
+| Coordinator registration | `(public)/register/CoordinatorRegisterForm.tsx` | Terms, Privacy                   |
+| Public QR form           | `[org]/[slug]/PublicRegistrationView.tsx`       | Terms, Privacy, Profile creation |
+| Public QR minimal form   | `[org]/[slug]/MinimalIdentityForm.tsx`          | Terms, Privacy                   |
 
 The two registration forms share `ConsentCheckboxWidget`, so they are one change. The two
 public forms each hand-roll their own checkbox and modal wiring and are converted separately.
@@ -157,7 +157,7 @@ responsive afterthought.
 naive scroll-to-bottom rule leaves its checkbox locked forever and makes registration
 impossible on every network. Content shorter than its viewport counts as read on open. The
 guided read makes this structurally unreachable for the aggregator's three documents, but
-the guard stays for the case where *all* documents together are shorter than the viewport —
+the guard stays for the case where _all_ documents together are shorter than the viewport —
 plausible on a desktop with brief policies.
 
 **Re-render on scroll.** Rebuilding the sheet on every scroll event resets `scrollTop` and
@@ -188,10 +188,16 @@ test in the other. The two products share no code; only the tests hold them toge
 
 Two PRs, developed in parallel, each opened as a **draft**.
 
-| | aggregator-dpg | Signals-DPG |
-|---|---|---|
-| Base branch | `feature` | `main` |
-| Branch | `feat/636-consent-scroll-gate` | `feat/636-consent-scroll-gate` |
+|             | aggregator-dpg                 | Signals-DPG                    |
+| ----------- | ------------------------------ | ------------------------------ |
+| Base branch | `feature`                      | `feature`                      |
+| Branch      | `feat/636-consent-scroll-gate` | `feat/636-consent-scroll-gate` |
+
+A freshly-created worktree must run `pnpm --filter "./packages/*" build` before the web
+suite will pass: several app imports resolve to workspace `dist/` subpaths
+(`@aggregator-dpg/config-loader/fs`, `@aggregator-dpg/network-config/signals-cta`,
+`@aggregator-dpg/shared-primitives/url`) that do not exist until the packages are built.
+Without it, seven suites fail to collect and the failure looks like a code regression.
 
 Conventional Commits; husky/lint-staged runs on commit and is never bypassed. Each PR
 description carries an **In Plain Terms** section. aggregator additionally runs
