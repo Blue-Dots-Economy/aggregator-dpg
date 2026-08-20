@@ -180,7 +180,7 @@ jobs:
 
       - name: Upload Trivy image SARIF
         if: always() && steps.scanref.outputs.ref != ''
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-image.sarif
           # Per-brand category: this workflow builds one image per network/brand,
