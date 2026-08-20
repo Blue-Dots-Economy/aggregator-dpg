@@ -89,6 +89,22 @@ const ConfigSchema = z.object({
   /** Comma-separated list of admin recipient email addresses. */
   ADMIN_EMAILS: z.string().default(''),
   /**
+   * Per-domain Signals UI login URLs, as comma-separated `domain=url` pairs:
+   *
+   *   SIGNALS_UI_URLS=seeker=https://signals-seeker.example/auth/login,provider=https://...
+   *
+   * Each network domain (from network.json) is fronted by its own Signals UI
+   * deployment, so this is a map rather than a single origin. Unset ⇒ the
+   * public registration form shows no Signals hand-off at all.
+   *
+   * The value MUST be a Signals **UI** URL (normally `<origin>/auth/login`),
+   * never a Keycloak authorization URL: Keycloak URLs embed one-time `state`
+   * and `code_challenge` values bound to the browser that generated them, so a
+   * hardcoded one fails PKCE/state validation for every user. `/auth/login` is
+   * the page that mints a valid Keycloak URL per attempt.
+   */
+  SIGNALS_UI_URLS: z.string().default(''),
+  /**
    * Recipient(s) for contact-support submissions (#120-equivalent).
    * Feature-gated: unset ⇒ endpoint 503, web button hidden. Accepts multiple
    * comma-separated addresses (all receive the TO copy).
@@ -376,3 +392,80 @@ function parseEnvEmailList(raw: string | undefined): string[] {
 }
 
 export const adminEmails: string[] = parseEnvEmailList(config.ADMIN_EMAILS);
+
+/**
+ * Result of parsing the `SIGNALS_UI_URLS` env value: the successfully parsed
+ * `{ domain: url }` map plus a warning string per skipped/malformed entry.
+ *
+ * The warnings are returned rather than logged directly because this module
+ * cannot import the pino logger (`logger.ts` imports `config.ts`, so the
+ * reverse import would be circular) — the caller (`app.ts`) logs them once a
+ * Fastify instance exists.
+ */
+export interface ParsedSignalsUiUrls {
+  urls: Record<string, string>;
+  warnings: string[];
+}
+
+/**
+ * Parse the `SIGNALS_UI_URLS` env value into a `{ domain: url }` map.
+ *
+ * Exported (unlike `parseEnvEmailList`) so it can be unit-tested without
+ * mutating `process.env`, which `config` snapshots at module load.
+ *
+ * A malformed entry is dropped with a warning rather than crashing boot: the
+ * Signals hand-off is optional, and one typo must not take the API down. The
+ * warning keeps it from being a silent failure.
+ */
+export function parseSignalsUiUrls(raw: string | undefined): ParsedSignalsUiUrls {
+  let v = (raw ?? '').trim();
+  if (
+    v.length >= 2 &&
+    ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'")))
+  ) {
+    v = v.slice(1, -1).trim();
+  }
+  const urls: Record<string, string> = {};
+  const warnings: string[] = [];
+  for (const entry of v.split(/[,\n]/)) {
+    const pair = entry.trim();
+    if (!pair) continue;
+    // First `=` only — URLs carry `=` inside query strings.
+    const eq = pair.indexOf('=');
+    const domain = eq === -1 ? '' : pair.slice(0, eq).trim();
+    const url = eq === -1 ? '' : pair.slice(eq + 1).trim();
+    if (!/^[a-z][a-z0-9_]*$/.test(domain)) {
+      warnings.push(`SIGNALS_UI_URLS: skipping entry with invalid domain key: "${pair}"`);
+      continue;
+    }
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      warnings.push(`SIGNALS_UI_URLS: skipping domain "${domain}" — value is not a valid URL`);
+      continue;
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      warnings.push(`SIGNALS_UI_URLS: skipping domain "${domain}" — only http(s) URLs are allowed`);
+      continue;
+    }
+    urls[domain] = url;
+  }
+  return { urls, warnings };
+}
+
+const parsedSignalsUiUrls = parseSignalsUiUrls(config.SIGNALS_UI_URLS);
+
+/**
+ * Per-domain Signals UI login URLs, parsed once at boot.
+ * Empty when unset — the public form then renders no Signals hand-off.
+ */
+export const signalsUiUrls: Record<string, string> = parsedSignalsUiUrls.urls;
+
+/**
+ * Warnings from parsing `SIGNALS_UI_URLS`, one per skipped/malformed entry.
+ * Logged once by `app.ts` via `app.log.warn` so a misconfigured env is
+ * visible in cluster logs (this module can't log directly — see
+ * `ParsedSignalsUiUrls`).
+ */
+export const signalsUiUrlWarnings: string[] = parsedSignalsUiUrls.warnings;
