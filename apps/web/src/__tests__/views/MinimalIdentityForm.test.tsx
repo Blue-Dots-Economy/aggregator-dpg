@@ -4,22 +4,18 @@
  *
  * Covers: field visibility driven by the `identity` selector map, the
  * name+contact+year-of-birth+consent validity gate (including the voice-mode
- * required-phone variant), the U18 no-consent branch, the submit payload
- * shape, and the consent-modal open/close interaction.
+ * required-phone variant), the U18 no-consent branch, and the submit payload
+ * shape. The form's own terms/privacy line + `ConsentModal` were removed in
+ * #636 Task 8 — that consent now runs through the parent
+ * (`PublicRegistrationView`)'s blocking gate; see
+ * `PublicRegistrationView.account-only-consent-gate.test.tsx` and
+ * `.account-only-consent-submit.test.tsx`. `consentCall` (the call-permission
+ * checkbox covered below) is a distinct consent this form still owns.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
 import messages from '@/i18n/messages/en.json';
-
-vi.mock('@/components/consent/ConsentModal', () => ({
-  ConsentModal: ({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) =>
-    open ? (
-      <div data-testid="consent-modal">
-        <button onClick={() => onOpenChange(false)}>close</button>
-      </div>
-    ) : null,
-}));
 
 import { MinimalIdentityForm } from '@/app/[org]/[slug]/MinimalIdentityForm';
 
@@ -122,10 +118,16 @@ describe('<MinimalIdentityForm />', () => {
         name: 'Jane Doe',
         phone: '9876543210',
         year_of_birth: validYear,
-        consent_terms: true,
-        consent_privacy: true,
       }),
     );
+    // #636 Task 8: consent_terms/consent_privacy are no longer set by this
+    // form — the parent view stamps them from its own blocking consent gate.
+    // Leaving the call-permission checkbox's value here would have been the
+    // silent-mis-record bug the task fixed (the parent used to overwrite
+    // whatever this form sent with `false` anyway).
+    const payload = onSubmit.mock.calls[0]![0] as Record<string, unknown>;
+    expect(payload['consent_terms']).toBeUndefined();
+    expect(payload['consent_privacy']).toBeUndefined();
   });
 
   it('requires phone and hides nothing else in voice mode (requirePhone)', () => {
@@ -151,17 +153,11 @@ describe('<MinimalIdentityForm />', () => {
     expect(onSubmit).toHaveBeenCalled();
   });
 
-  it('opens and closes the consent modal when consentContent is provided', () => {
-    renderForm({
-      consentContent: {
-        terms: { version: 1, title: 'Terms', content: 'T' },
-        privacy: { version: 1, title: 'Privacy', content: 'P' },
-      },
-    });
-    fireEvent.click(screen.getByText(messages.profile.public_reg.account_only.consent_docs_link));
-    expect(screen.getByTestId('consent-modal')).toBeInTheDocument();
-    fireEvent.click(screen.getByText('close'));
-    expect(screen.queryByTestId('consent-modal')).toBeNull();
+  it('keeps the call-permission checkbox on the form (a distinct consent from the parent gate)', () => {
+    renderForm();
+    expect(
+      screen.getByRole('checkbox', { name: /permit the aggregator to trigger the call/i }),
+    ).toBeInTheDocument();
   });
 
   it('renders the submit button disabled while `busy` is true even when otherwise valid', () => {

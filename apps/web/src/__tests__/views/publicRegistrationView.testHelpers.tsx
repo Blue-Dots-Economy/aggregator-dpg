@@ -19,6 +19,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import messages from '@/i18n/messages/en.json';
 import type { PublicRegistrationViewProps } from '@/app/[org]/[slug]/PublicRegistrationView';
+import type { ParticipantConsent } from '@/components/consent/consent-types';
 
 /**
  * Deterministic stand-in for `RjsfThemedForm`: renders a plain `<form>`
@@ -100,6 +101,11 @@ export const SIGNALS_URL = 'https://signals-seeker.example/auth/login';
  * @param View - The (mock-wired) `PublicRegistrationView` component, passed
  *   in by the caller so this helper never imports it directly — that import
  *   must happen in the test file, after its own `vi.mock` calls register.
+ * @param opts.consentContent - Participant consent copy, threaded straight
+ *   through to the view. Omitted/`null` (the default) matches every existing
+ *   caller, which never exercises the consent gate; a caller proving the gate
+ *   → post-submit hand-off composition supplies real content here so the
+ *   gate opens instead of the `CONSENT_UNAVAILABLE` error path.
  */
 export function renderPublicRegistrationView(
   View: ComponentType<PublicRegistrationViewProps>,
@@ -107,6 +113,7 @@ export function renderPublicRegistrationView(
     domain: string;
     registrationMode: string | null;
     submissionShape: 'account_only' | 'account_and_profile';
+    consentContent?: ParticipantConsent | null;
   },
 ) {
   const client = new QueryClient({
@@ -130,6 +137,7 @@ export function renderPublicRegistrationView(
           submissionShape={opts.submissionShape}
           publicHintI18nKey={null}
           registrationMode={opts.registrationMode}
+          consentContent={opts.consentContent ?? null}
         />
       </NextIntlClientProvider>
     </QueryClientProvider>,

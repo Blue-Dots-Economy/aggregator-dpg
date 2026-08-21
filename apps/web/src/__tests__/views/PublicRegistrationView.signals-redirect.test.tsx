@@ -14,6 +14,7 @@
  */
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { screen, fireEvent, act, cleanup } from '@testing-library/react';
+import type { ParticipantConsent } from '@/components/consent/consent-types';
 import {
   RjsfShim,
   CFG,
@@ -29,6 +30,21 @@ beforeAll(() => {
 
 vi.mock('@/components/forms/RjsfThemed', () => ({ RjsfThemedForm: RjsfShim }));
 
+// Shim ConsentGate exactly as PublicRegistrationView.account-only-consent-submit.test.tsx
+// does: capture the props and let a test fire `onAccept` directly, bypassing
+// the real gate's scroll-to-unlock mechanics (jsdom lays out no geometry for
+// it). Only the "gate → hand-off" describe block below ever opens it — every
+// other test in this file uses a domain config with no `consent_required`
+// gate, so `open` stays `false` and this mock is inert for them.
+let capturedGateProps: { open: boolean; onAccept: () => void; onCancel?: () => void } | undefined;
+
+vi.mock('@/components/consent/ConsentGate', () => ({
+  ConsentGate: (props: { open: boolean; onAccept: () => void; onCancel?: () => void }) => {
+    capturedGateProps = props;
+    return null;
+  },
+}));
+
 // Config drives the hand-off entirely; each test supplies its own payload.
 const cfgMock = vi.hoisted(() => ({ value: {} as Record<string, unknown> }));
 vi.mock('@/hooks/useAggregatorConfig', () => ({
@@ -38,6 +54,12 @@ vi.mock('@/hooks/useAggregatorConfig', () => ({
 
 // Pull the view after mocks register.
 import { PublicRegistrationView } from '@/app/[org]/[slug]/PublicRegistrationView';
+
+const CONSENT_CONTENT: ParticipantConsent = {
+  terms: { version: 1, title: 'Terms of Service', content: 'Terms body' },
+  privacy: { version: 1, title: 'Privacy Policy', content: 'Privacy body' },
+  profileCreation: { version: 1, statement: 'We will use your data to build a profile.' },
+};
 
 /**
  * Render the public registration view for one link shape. Everything the
@@ -118,6 +140,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   assign.mockReset();
   fetchMock.mockReset();
+  capturedGateProps = undefined;
   vi.stubGlobal('fetch', fetchMock);
   originalLocation = Object.getOwnPropertyDescriptor(window, 'location');
   Object.defineProperty(window, 'location', {
@@ -390,5 +413,108 @@ describe('Signals post-submit redirect', () => {
     expect(assign).not.toHaveBeenCalled();
     expect(continueButton()).toBeNull();
     expect(screen.getByTestId('rjsf-shim')).toBeInTheDocument();
+  });
+});
+
+/**
+ * Proves the #636 consent gate and the #654 hand-off actually compose:
+ * `handleGateAccept` re-enters `performSubmit` from a different call site
+ * than a direct (no-gate-needed) submit, and the hand-off's arming effect
+ * only watches `state.status === 'done'` — not which call site produced it.
+ * These tests exercise the gated path end to end and would fail if the
+ * hand-off were (a) wired to the direct-submit call site only, (b) armed
+ * twice by the submitting → idle → submitting → done sequence the gate
+ * causes, or (c) armed before `performSubmit`'s POST — which carries
+ * `consent_terms: true` — actually resolves.
+ */
+describe('Signals post-submit redirect through the consent gate', () => {
+  const CFG_WITH_CONSENT = {
+    ...CFG,
+    domains: [
+      {
+        ...CFG.domains[0],
+        go_live_required: ['schema_required', 'consent_required'],
+      },
+    ],
+  };
+
+  it('still arms and fires the hand-off after the gate is accepted', async () => {
+    cfgMock.value = CFG_WITH_CONSENT;
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ submission_id: 'SUB-GATE-1', outcome: 'passed' }),
+    } as unknown as Response);
+    renderPublicRegistrationView(PublicRegistrationView, {
+      domain: 'seeker',
+      registrationMode: 'form',
+      submissionShape: 'account_and_profile',
+      consentContent: CONSENT_CONTENT,
+    });
+    const registerCta = screen.queryByRole('button', { name: /^register$/i });
+    if (registerCta) fireEvent.click(registerCta);
+
+    // Submitting without prior consent must open the gate, not post directly.
+    // Fake timers are active in this file (for `tick`), so `waitFor`'s real-time
+    // polling is avoided throughout — every async step here is a microtask
+    // (probe short-circuit, mocked `fetch`), which a plain `await act` drains.
+    await act(async () => {
+      fireEvent.submit(screen.getByTestId('rjsf-shim'));
+    });
+    expect(capturedGateProps?.open).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(continueButton()).toBeNull();
+
+    // Accepting re-enters performSubmit from handleGateAccept, a different
+    // call site than the direct-submit tests above use.
+    await act(async () => {
+      capturedGateProps!.onAccept();
+    });
+
+    // Consent must already be on the wire, as `true`, before the hand-off
+    // is even eligible to arm (the POST is awaited inside performSubmit,
+    // which only sets state to 'done' once it resolves).
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(String((fetchMock.mock.calls[0]![1] as RequestInit).body)) as {
+      consent_terms?: boolean;
+    };
+    expect(body.consent_terms).toBe(true);
+
+    // The countdown arms exactly once and counts down normally.
+    expect(continueLabel()).toBe('Continue to Signals (4)');
+    await tick(4);
+    expect(assign).toHaveBeenCalledTimes(1);
+    expect(assign).toHaveBeenCalledWith(SIGNALS_URL);
+  });
+
+  it('does not open the gate a second time or double-arm the countdown', async () => {
+    cfgMock.value = CFG_WITH_CONSENT;
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ submission_id: 'SUB-GATE-2', outcome: 'passed' }),
+    } as unknown as Response);
+    renderPublicRegistrationView(PublicRegistrationView, {
+      domain: 'seeker',
+      registrationMode: 'form',
+      submissionShape: 'account_and_profile',
+      consentContent: CONSENT_CONTENT,
+    });
+    const registerCta = screen.queryByRole('button', { name: /^register$/i });
+    if (registerCta) fireEvent.click(registerCta);
+
+    await act(async () => {
+      fireEvent.submit(screen.getByTestId('rjsf-shim'));
+    });
+    expect(capturedGateProps?.open).toBe(true);
+    await act(async () => {
+      capturedGateProps!.onAccept();
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await tick(4);
+    expect(assign).toHaveBeenCalledTimes(1);
+    // Nothing left to fire: the countdown does not restart or fire again.
+    await tick(6);
+    expect(assign).toHaveBeenCalledTimes(1);
   });
 });
