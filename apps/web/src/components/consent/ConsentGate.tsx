@@ -9,7 +9,7 @@
  *
  * @module apps/web/src/components/consent/ConsentGate
  */
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { ArrowDown, Check, X } from 'lucide-react';
 import { MarkdownContent } from '../forms/MarkdownContent';
@@ -46,8 +46,22 @@ export function ConsentGate({
 }: ConsentGateProps): JSX.Element | null {
   const t = useTranslations('consent_gate');
   const readerRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
   const [agreed, setAgreed] = useState(false);
   const progress = useReadProgress(readerRef, docs);
+
+  // Move focus into the dialog on open, the same way ConsentModal does: a
+  // hard-blocking modal that leaves focus wherever it was tells keyboard and
+  // screen-reader users nothing opened. Prefer the close button when one
+  // exists; otherwise the reader itself, since that is the only interactive
+  // surface until the checkbox unlocks.
+  useEffect(() => {
+    if (!open) return;
+    requestAnimationFrame(() => {
+      if (onCancel) closeButtonRef.current?.focus();
+      else readerRef.current?.focus();
+    });
+  }, [open, onCancel]);
 
   // An empty list means the consent copy failed to load. Callers keep their
   // own fallback for that; an empty modal would be worse than none.
@@ -77,6 +91,7 @@ export function ConsentGate({
           </div>
           {onCancel && (
             <button
+              ref={closeButtonRef}
               type="button"
               aria-label={t('close')}
               onClick={onCancel}
@@ -95,6 +110,12 @@ export function ConsentGate({
           <div
             ref={readerRef}
             data-testid="consent-reader"
+            // Focusable (not just scrollable by mouse/touch): with no close
+            // button to land on, this is where initial focus goes, and a
+            // focusable scroll region is also a keyboard-scrollable one —
+            // necessary, since the gate cannot be completed without
+            // scrolling it.
+            tabIndex={-1}
             className="min-h-0 flex-1 overflow-y-auto rounded-xl border border-(--bd-border) bg-[#FBFCFF] p-4"
           >
             {docs.map((doc, i) => (

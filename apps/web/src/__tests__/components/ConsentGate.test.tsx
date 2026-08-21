@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
 import type { ReactNode } from 'react';
 import messages from '@/i18n/messages/en.json';
@@ -133,6 +133,24 @@ describe('<ConsentGate />', () => {
     fireEvent.click(screen.getByTestId('consent-gate-backdrop'));
     expect(onCancel).not.toHaveBeenCalled();
     expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+
+  it('moves focus into the dialog on open, to the close button when one exists', async () => {
+    render(
+      <Wrapper>
+        <ConsentGate open docs={docs} agreeLabel="I agree" onAccept={vi.fn()} onCancel={vi.fn()} />
+      </Wrapper>,
+    );
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Close' })).toHaveFocus());
+  });
+
+  it('moves focus to the reader when there is no close button to land on', async () => {
+    render(
+      <Wrapper>
+        <ConsentGate open docs={docs} agreeLabel="I agree" onAccept={vi.fn()} />
+      </Wrapper>,
+    );
+    await waitFor(() => expect(screen.getByTestId('consent-reader')).toHaveFocus());
   });
 
   it('calls onCancel from the explicit close button only', () => {
