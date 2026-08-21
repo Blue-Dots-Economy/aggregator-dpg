@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen, within, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, within, fireEvent, act } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
 import type { ReactNode } from 'react';
 import messages from '@/i18n/messages/en.json';
@@ -384,5 +384,134 @@ describe('<LegalDocumentView /> arrival landing', () => {
       scrollIntoView as unknown as typeof Element.prototype.scrollIntoView;
     renderView('terms', groups);
     expect(scrollIntoView).toHaveBeenCalled();
+  });
+
+  // Both documents open with intro prose before their first heading, so at
+  // scroll-top the scroll-spy has nothing "in view" to highlight on its own
+  // — without a fallback, the rail would land with no pill at all. Each
+  // route's first section must be pilled on arrival, and it must be that
+  // ROUTE's document's first section specifically (not merely whichever
+  // section happens to render first on the page, which is always the first
+  // audience's Privacy Policy).
+  const BOTH_HAVE_SECTIONS: LegalGroup[] = [
+    {
+      audience: 'participant',
+      label: 'For participants',
+      content: {
+        privacy: {
+          version: 1,
+          title: 'Privacy Policy',
+          content: '## Privacy Policy\n\nIntro.\n### Retention\nx',
+        },
+        terms: {
+          version: 1,
+          title: 'Terms of Service',
+          content: '## Terms of Service\n\nWelcome.\n### Governing law\nIndia.',
+        },
+      },
+    },
+  ];
+
+  it('pills the first section on arrival at /privacy', () => {
+    renderView('privacy', BOTH_HAVE_SECTIONS);
+    expect(screen.getByRole('link', { name: 'Retention' })).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByRole('link', { name: 'Governing law' })).not.toHaveAttribute('aria-current');
+  });
+
+  it('pills the first section on arrival at /terms — Terms’ own first section, not Privacy’s', () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView =
+      scrollIntoView as unknown as typeof Element.prototype.scrollIntoView;
+    renderView('terms', BOTH_HAVE_SECTIONS);
+    expect(screen.getByRole('link', { name: 'Governing law' })).toHaveAttribute(
+      'aria-current',
+      'true',
+    );
+    expect(screen.getByRole('link', { name: 'Retention' })).not.toHaveAttribute('aria-current');
+  });
+});
+
+describe('<LegalDocumentView /> click pins the highlight through its scroll', () => {
+  // Reproduction: a rail entry whose section body is short enough that the
+  // FOLLOWING heading also ends up within the scroll-spy's "passed the
+  // reading line" reach while the click's scroll is still in flight.
+  // Without a pin, that transient geometry would win and the pill would
+  // drift to the next entry down instead of staying on the one just
+  // clicked — the real defect found on this repo's org audience's own
+  // short "Sharing" section.
+  const SHORT_SECTION_GROUPS: LegalGroup[] = [
+    {
+      audience: 'org',
+      label: 'For organisations',
+      content: {
+        privacy: {
+          version: 1,
+          title: 'Privacy Policy',
+          content:
+            '## Privacy Policy\n\nIntro.\n### First\nBody one.\n### Sharing\nx\n### Third\nBody three.',
+        },
+        terms: {
+          version: 1,
+          title: 'Terms of Service',
+          content: '## Terms of Service\n\nWelcome.',
+        },
+      },
+    },
+  ];
+
+  function mockTop(id: string, top: number) {
+    const el = document.getElementById(id);
+    if (!el) throw new Error(`missing element #${id}`);
+    vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({
+      top,
+      bottom: top + 20,
+      left: 0,
+      right: 0,
+      width: 0,
+      height: 20,
+      x: 0,
+      y: top,
+      toJSON: () => ({}),
+    } as DOMRect);
+  }
+
+  beforeEach(() => {
+    Element.prototype.scrollIntoView =
+      vi.fn() as unknown as typeof Element.prototype.scrollIntoView;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('keeps the clicked short "Sharing" section highlighted through a misleading mid-scroll read, and after settling', () => {
+    vi.useFakeTimers();
+    renderView('privacy', SHORT_SECTION_GROUPS);
+
+    const sharingLink = screen.getByRole('link', { name: 'Sharing' });
+    fireEvent.click(sharingLink);
+    expect(sharingLink).toHaveAttribute('aria-current', 'true');
+
+    // Mid-flight: geometry momentarily suggests "Third" has also passed the
+    // reading line (the short-section overshoot). A spy with no pin would
+    // jump to it right here.
+    mockTop('org-privacy', 0);
+    mockTop('first', -50);
+    mockTop('sharing', 10);
+    mockTop('third', 50);
+    fireEvent.scroll(window);
+
+    expect(screen.getByRole('link', { name: 'Sharing' })).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByRole('link', { name: 'Third' })).not.toHaveAttribute('aria-current');
+
+    // Settled: the transient reading was transient — at rest, only
+    // "Sharing" has actually reached the reading line.
+    mockTop('third', 150);
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+
+    expect(screen.getByRole('link', { name: 'Sharing' })).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByRole('link', { name: 'Third' })).not.toHaveAttribute('aria-current');
   });
 });

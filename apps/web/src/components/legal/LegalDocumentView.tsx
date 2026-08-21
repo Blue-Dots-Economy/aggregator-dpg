@@ -22,7 +22,7 @@
  *
  * @module apps/web/src/components/legal/LegalDocumentView
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useTranslations, useLocale } from 'next-intl';
 import { ArrowLeft } from 'lucide-react';
@@ -393,19 +393,146 @@ export function LegalDocumentView({
     [groups, splitByDoc],
   );
 
-  // Every section id on the page, in render order, for the scroll-spy below.
-  const allSectionIds = useMemo(
+  // Every id on the page that the scroll-spy and arrival fallback need, in
+  // render order: each (group, document) pair's own structural heading id,
+  // immediately followed by that document's section ids. Doc headings are
+  // included (not just sections) so the spy can tell "this document's own
+  // intro prose is on screen, none of its sections yet" apart from
+  // "genuinely nothing has passed" (see `computeActiveId` below).
+  const allSpyIds = useMemo(
     () =>
       groups.flatMap((group, gi) =>
-        DOC_ORDER.flatMap((d) => sectionsByDoc[d][gi]!.map((s) => s.id)),
+        DOC_ORDER.flatMap((d) => [
+          docIds[group.audience]![d]!,
+          ...sectionsByDoc[d][gi]!.map((s) => s.id),
+        ]),
       ),
-    [groups, sectionsByDoc],
+    [groups, sectionsByDoc, docIds],
+  );
+
+  // The rail entry to highlight for a given (group, document) pair when no
+  // section within it has actually scrolled past the reading line yet —
+  // that document's own first section, or its own heading id when it has
+  // none (an edge case; every real document has at least one section
+  // today). Shared by the arrival landing and the scroll-spy so both fall
+  // back to the same entry.
+  const pillFallbackId = useCallback(
+    (gi: number, d: LegalDoc): string | undefined => {
+      const group = groups[gi];
+      if (!group) return undefined;
+      return sectionsByDoc[d][gi]?.[0]?.id ?? docIds[group.audience]?.[d];
+    },
+    [groups, sectionsByDoc, docIds],
+  );
+
+  // How close to the top of the viewport a heading must have scrolled to
+  // count as "passed" — matches the `scroll-mt-6` (24px) offset headings
+  // already carry, plus a little slack for the reading column's own top
+  // padding.
+  const READING_LINE_PX = 96;
+
+  // How long to wait, after the most recent scroll event, before treating a
+  // click-triggered scroll as settled and handing the highlight back to the
+  // spy. A fixed debounce rather than a "smooth scroll finished" callback
+  // (no such event is universally available) — each scroll event in flight
+  // pushes the release out again, so a long smooth scroll is protected for
+  // its whole duration, while a reduced-motion jump (at most one scroll
+  // event) releases almost immediately.
+  const SCROLL_SETTLE_MS = 150;
+
+  // Kept alongside `activeSectionId` so `computeActiveId`'s no-candidate
+  // branch (an empty page, defensively) has a same-render value to fall
+  // back to without needing `activeSectionId` itself in its dependency
+  // list.
+  const activeIdRef = useRef(activeSectionId);
+  activeIdRef.current = activeSectionId;
+
+  // Scroll-spy: the rail's highlight follows whichever heading has most
+  // recently scrolled past the reading line. Position-based (each heading's
+  // own `getBoundingClientRect().top`), not an IntersectionObserver
+  // percentage band — a band has to assume something about how tall a
+  // section is, and a section shorter than the band lets the *next*
+  // heading enter the band before the current one has genuinely been read,
+  // so the pill jumps to it early (reproduction: the org audience's short
+  // "Sharing" section). Comparing raw top-edge position makes no such
+  // assumption: the active entry is just the last heading (in document
+  // order) at or above `READING_LINE_PX`, which holds regardless of
+  // section length.
+  const computeActiveId = useCallback((): string | null => {
+    const elements = allSpyIds
+      .map((id) => document.getElementById(id))
+      .filter((el): el is HTMLElement => el !== null);
+    if (elements.length === 0) return activeIdRef.current;
+
+    // The last element (in document order) that has scrolled up past the
+    // reading line — a document's own heading counts here too, so this
+    // still finds something the moment a document's intro prose reaches
+    // the top, before any of its sections have.
+    let lastPassed: HTMLElement | null = null;
+    for (const el of elements) {
+      if (el.getBoundingClientRect().top <= READING_LINE_PX) {
+        lastPassed = el;
+      } else {
+        break;
+      }
+    }
+
+    // Nothing has passed yet — genuinely at the very top of the page.
+    // Highlight the first audience group's first document's first section,
+    // the same fallback a no-hash arrival at that document would use.
+    if (!lastPassed) return pillFallbackId(0, DOC_ORDER[0]!) ?? null;
+
+    for (let gi = 0; gi < groups.length; gi += 1) {
+      const group = groups[gi]!;
+      for (const d of DOC_ORDER) {
+        if (docIds[group.audience]?.[d] === lastPassed.id) {
+          // `lastPassed` is a document's own heading with none of its
+          // sections reached yet — highlight its first section instead of
+          // leaving the pill on a bare doc heading.
+          return pillFallbackId(gi, d) ?? lastPassed.id;
+        }
+      }
+    }
+    // `lastPassed` is already a section id — it is the entry to highlight.
+    return lastPassed.id;
+  }, [allSpyIds, groups, docIds, pillFallbackId]);
+
+  // A just-clicked rail entry, or a programmatic (arrival/deep-link) scroll,
+  // is pinned for the duration of its scroll — otherwise the effect below
+  // would recompute from transient mid-scroll geometry and the pill would
+  // drift to whichever entry the scroll happens to be passing through
+  // before resting on the intended one (the short-section defect this pin
+  // exists to close).
+  const pinnedIdRef = useRef<string | null>(null);
+  const pinReleaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const armPinRelease = useCallback(() => {
+    if (pinReleaseTimerRef.current) clearTimeout(pinReleaseTimerRef.current);
+    pinReleaseTimerRef.current = setTimeout(() => {
+      pinnedIdRef.current = null;
+      setActiveSectionId(computeActiveId());
+    }, SCROLL_SETTLE_MS);
+  }, [computeActiveId]);
+
+  /**
+   * Scrolls `targetElId` into view (if it exists) and pins the rail's
+   * highlight to `pillId` for the duration of that scroll. The two can
+   * differ: a no-hash arrival at a non-first document scrolls to that
+   * *document's* heading but pills its *first section* instead.
+   */
+  const scrollAndPin = useCallback(
+    (targetElId: string, pillId: string) => {
+      setActiveSectionId(pillId);
+      pinnedIdRef.current = pillId;
+      armPinRelease();
+      const el = document.getElementById(targetElId);
+      if (el) scrollElementIntoView(el);
+    },
+    [armPinRelease],
   );
 
   function navigateTo(id: string) {
-    const el = document.getElementById(id);
-    if (el) scrollElementIntoView(el);
-    setActiveSectionId(id);
+    scrollAndPin(id, id);
   }
 
   // Deep-link / arrival landing. The target is either the hash (deep link,
@@ -413,56 +540,69 @@ export function LegalDocumentView({
   // heading for the routed document — unless that document is already the
   // first one on the page (`/privacy` with no hash), in which case it is
   // already at the top and there is nothing to scroll to.
+  //
+  // No-hash arrival never highlights a section on its own: every document
+  // opens with intro prose before its first heading, so the scroll-spy has
+  // nothing "passed" at scroll-top and highlights nothing. Rather than land
+  // with the rail showing no pill at all, default the highlight to the
+  // routed document's own first section within the first (topmost)
+  // audience group — the same fallback `computeActiveId` uses once real
+  // scrolling starts — not simply the first section on the page, which
+  // would always be Privacy's even when the route is `/terms`.
   useEffect(() => {
     if (groups.length === 0) return;
     const hashId =
       typeof window !== 'undefined' && window.location.hash
         ? decodeURIComponent(window.location.hash.slice(1))
         : null;
-    const fallbackId = doc !== DOC_ORDER[0] ? docIds[groups[0]!.audience]?.[doc] : undefined;
-    const targetId = hashId ?? fallbackId;
-    if (!targetId) return;
-    const el = document.getElementById(targetId);
-    if (!el) return;
-    scrollElementIntoView(el);
-    if (allSectionIds.includes(targetId)) setActiveSectionId(targetId);
+
+    if (hashId) {
+      if (document.getElementById(hashId)) scrollAndPin(hashId, hashId);
+      return;
+    }
+
+    const fallbackDocId = docIds[groups[0]!.audience]?.[doc];
+    const fallbackPillId = pillFallbackId(0, doc);
+    if (doc !== DOC_ORDER[0] && fallbackDocId) {
+      scrollAndPin(fallbackDocId, fallbackPillId ?? fallbackDocId);
+    } else if (fallbackPillId) {
+      // Already at the top — nothing to scroll to, so no pin needed either.
+      setActiveSectionId(fallbackPillId);
+    }
     // Deliberately keyed on `doc`/`groups.length`, not on every id recomputation.
-  }, [doc, groups.length]);
+  }, [doc, groups.length, docIds, pillFallbackId, scrollAndPin]);
 
-  // Scroll-spy: the rail's section highlight follows whichever section
-  // heading is currently in view. jsdom (this project's test environment)
-  // has no `IntersectionObserver` at all — not even a non-firing stub — so
-  // this is skipped there entirely; fine, since clicking a rail entry sets
-  // `activeSectionId` directly (see `navigateTo`) and tests cover that path
-  // instead.
+  // Scroll-spy proper: recomputes the active id on scroll/resize, unless a
+  // click or arrival scroll currently has it pinned (see `scrollAndPin`).
   useEffect(() => {
-    if (allSectionIds.length === 0) return;
-    if (typeof IntersectionObserver === 'undefined') return;
-    const elements = allSectionIds
-      .map((id) => document.getElementById(id))
-      .filter((el): el is HTMLElement => el !== null);
-    if (elements.length === 0) return;
+    if (allSpyIds.length === 0) return;
 
-    const visible = new Set<string>();
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) visible.add(entry.target.id);
-          else visible.delete(entry.target.id);
-        }
-        for (let i = elements.length - 1; i >= 0; i -= 1) {
-          if (visible.has(elements[i]!.id)) {
-            setActiveSectionId(elements[i]!.id);
-            break;
-          }
-        }
-      },
-      { rootMargin: '-15% 0px -75% 0px', threshold: 0 },
-    );
-    elements.forEach((el) => observer.observe(el));
-    return () => observer.disconnect();
-    // Deliberately keyed on the id list, not element identity.
-  }, [allSectionIds.join('|')]);
+    function handleScroll() {
+      if (pinnedIdRef.current) {
+        // Still mid-flight: keep pushing the release out rather than
+        // acting on this event, so a long smooth scroll stays pinned for
+        // its whole duration.
+        armPinRelease();
+        return;
+      }
+      setActiveSectionId(computeActiveId());
+    }
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    window.addEventListener('resize', handleScroll);
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+      window.removeEventListener('resize', handleScroll);
+    };
+  }, [allSpyIds, computeActiveId, armPinRelease]);
+
+  // Release a pin left over from an unmounted click (e.g. navigating away
+  // mid-scroll) rather than leaking the timer.
+  useEffect(() => {
+    return () => {
+      if (pinReleaseTimerRef.current) clearTimeout(pinReleaseTimerRef.current);
+    };
+  }, []);
 
   if (groups.length === 0) {
     return (
