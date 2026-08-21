@@ -175,4 +175,23 @@ describe('useReadProgress', () => {
 
     expect(result.current.readIds).toContain('privacy');
   });
+
+  it('does not report allRead before the first measurement has happened', () => {
+    // Null ref: measure() and the mount effect both bail out, so setProgress never
+    // fires and the hook is observed at its bootstrap value. With a real element,
+    // RTL flushes the effect inside act() before renderHook returns and the
+    // bootstrap value is already gone — which is why the bug this pins survived
+    // review twice.
+    const ref: RefObject<HTMLElement | null> = { current: null };
+    const { result } = renderHook(() => useReadProgress(ref, docs));
+    expect(result.current.allRead).toBe(false);
+    expect(result.current.readIds).toEqual([]);
+    expect(result.current.currentId).toBe('privacy');
+  });
+
+  it('reports allRead for a genuinely empty document list so it cannot deadlock', () => {
+    const ref: RefObject<HTMLElement | null> = { current: null };
+    const { result } = renderHook(() => useReadProgress(ref, []));
+    expect(result.current.allRead).toBe(true);
+  });
 });
