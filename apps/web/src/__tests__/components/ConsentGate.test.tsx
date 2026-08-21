@@ -208,10 +208,16 @@ describe('<ConsentGate />', () => {
   // sequence traversal themselves; jsdom does not simulate it), so this
   // cannot assert actual keyboard reachability. It asserts the structural
   // facts the fix is made of: the reader stays in the tab sequence (a
-  // positive tabIndex, not the -1 that silently drops it) and carries a
-  // non-empty accessible name via `role="region"` + `aria-label`. Real
-  // reachability was verified against Radix's source and an empirical probe
-  // in the sibling Signals repo, not by this test.
+  // positive tabIndex, not the -1 that silently drops it) and resolves to the
+  // region role with a non-empty accessible name. Real reachability was
+  // verified against Radix's source and an empirical probe in the sibling
+  // Signals repo, not by this test.
+  //
+  // The role is asserted via `getByRole`, i.e. the *computed* role, not a
+  // literal `role="region"` attribute: the reader is a `<section>`, which maps
+  // to `region` implicitly — but only while it has an accessible name, so a
+  // dropped `aria-label` fails this query rather than quietly downgrading the
+  // element to a generic container.
   it('keeps the reader in the tab sequence with a non-empty accessible name', () => {
     render(
       <Wrapper>
@@ -220,9 +226,8 @@ describe('<ConsentGate />', () => {
     );
     const reader = screen.getByTestId('consent-reader');
     expect(reader).toHaveAttribute('tabIndex', '0');
-    expect(reader).toHaveAttribute('role', 'region');
     expect(reader.getAttribute('aria-label')?.trim()).not.toBe('');
-    expect(reader).toHaveAccessibleName('Terms and privacy documents');
+    expect(screen.getByRole('region', { name: 'Terms and privacy documents' })).toBe(reader);
   });
 
   it('mounts closed, opens, and can be completed — the mount-timing regression', () => {

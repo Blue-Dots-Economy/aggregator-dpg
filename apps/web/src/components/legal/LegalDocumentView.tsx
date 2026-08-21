@@ -131,7 +131,12 @@ function splitIntoSections(
       (current ?? preambleLines).push(line);
       continue;
     }
-    if (!inFence && /^(#{2,3})\s+(.*)$/.exec(line.trim())) {
+    // Must stay identical in effect to `extractSections`' own heading test in
+    // legal-sections.ts: that call produces the section list, this loop
+    // produces their bodies, and if the two disagree every section renders the
+    // wrong body. `/^#{2,3}\s/` (no capture groups — nothing here uses them)
+    // avoids the `\s+`/`(.*)` ambiguity that backtracks super-linearly.
+    if (!inFence && /^#{2,3}\s/.test(line.trim())) {
       current = [];
       bodies.push(current);
       continue;
@@ -249,11 +254,11 @@ function RailSections({
   sections,
   activeSectionId,
   onNavigate,
-}: {
+}: Readonly<{
   sections: LegalSection[];
   activeSectionId: string | null;
   onNavigate: (id: string) => void;
-}) {
+}>) {
   if (sections.length === 0) return null;
   return (
     <ul className="mt-1 space-y-0.5">
@@ -314,13 +319,13 @@ function RailDocument({
   sections,
   activeSectionId,
   onNavigate,
-}: {
+}: Readonly<{
   entry: DocEntry;
   headingId: string;
   sections: LegalSection[];
   activeSectionId: string | null;
   onNavigate: (id: string) => void;
-}) {
+}>) {
   return (
     <div className="mb-3">
       <a
@@ -372,10 +377,10 @@ function formatVersionLabel(
 export function LegalDocumentView({
   doc,
   groups,
-}: {
+}: Readonly<{
   doc: LegalDoc;
   groups: LegalGroup[];
-}): JSX.Element {
+}>): JSX.Element {
   const t = useTranslations('legal');
   const themeT = useTranslations('theme');
   const locale = useLocale();
@@ -620,9 +625,10 @@ export function LegalDocumentView({
   if (groups.length === 0) {
     return (
       <div className="flex min-h-svh items-center justify-center bg-(--bd-bg) px-6 py-12">
-        <p role="status" className="text-sm text-ink-500">
-          {t('unavailable')}
-        </p>
+        {/* `<output>` rather than `<p role="status">`: same implicit ARIA
+            role, announced by assistive tech without relying on the explicit
+            role attribute. */}
+        <output className="text-sm text-ink-500">{t('unavailable')}</output>
       </div>
     );
   }

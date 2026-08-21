@@ -18,6 +18,32 @@ export interface ConsentProgressTrackerProps {
   progress: ReadProgress;
 }
 
+/** How one document's dot renders: read, currently in hand, or not yet reached. */
+type NodeState = 'read' | 'current' | 'todo';
+
+/**
+ * Classifies one document's tracker node against current read progress.
+ *
+ * @param docId - The document's id.
+ * @param progress - Current read progress across the whole stack.
+ * @returns Whether the node is read, current, or still to do.
+ */
+function nodeState(docId: string, progress: ReadProgress): NodeState {
+  if (progress.readIds.includes(docId)) return 'read';
+  if (docId === progress.currentId) return 'current';
+  return 'todo';
+}
+
+/**
+ * Dot styling per node state. A keyed record rather than a conditional chain,
+ * so adding a state is a type error here instead of silently taking `todo`.
+ */
+const DOT_CLASS: Record<NodeState, string> = {
+  read: 'border-(--bd-primary-600) bg-(--bd-primary-600)',
+  current: 'border-(--bd-primary-600) bg-white ring-4 ring-(--bd-primary-600)/20',
+  todo: 'border-slate-300 bg-white',
+};
+
 /**
  * Renders the per-document progress dots and the connecting fill line.
  *
@@ -27,7 +53,7 @@ export interface ConsentProgressTrackerProps {
 export function ConsentProgressTracker({
   docs,
   progress,
-}: ConsentProgressTrackerProps): JSX.Element | null {
+}: Readonly<ConsentProgressTrackerProps>): JSX.Element | null {
   const t = useTranslations('consent_gate');
 
   // A tracker with one node reports nothing the reader cannot already see.
@@ -58,11 +84,7 @@ export function ConsentProgressTracker({
         />
       </div>
       {docs.map((doc) => {
-        const state = progress.readIds.includes(doc.id)
-          ? 'read'
-          : doc.id === progress.currentId
-            ? 'current'
-            : 'todo';
+        const state = nodeState(doc.id, progress);
         // The i18n key is added in a later task; until then this falls back
         // to the hardcoded `cap` so the tracker still renders a label.
         const capKey = `cap_${doc.id}`;
@@ -76,13 +98,7 @@ export function ConsentProgressTracker({
             className="relative z-10 flex flex-1 flex-col items-center gap-1.5"
           >
             <span
-              className={`grid h-5 w-5 place-items-center rounded-full border-2 transition-colors ${
-                state === 'read'
-                  ? 'border-(--bd-primary-600) bg-(--bd-primary-600)'
-                  : state === 'current'
-                    ? 'border-(--bd-primary-600) bg-white ring-4 ring-(--bd-primary-600)/20'
-                    : 'border-slate-300 bg-white'
-              }`}
+              className={`grid h-5 w-5 place-items-center rounded-full border-2 transition-colors ${DOT_CLASS[state]}`}
             >
               {state === 'read' && <Check className="h-3 w-3 text-white" aria-hidden="true" />}
             </span>

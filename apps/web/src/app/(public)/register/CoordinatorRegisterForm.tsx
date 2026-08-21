@@ -150,7 +150,9 @@ export function CoordinatorRegisterForm({
     setGateOpen(false);
     setState({ status: 'submitting' });
     const payload: Record<string, unknown> = {
-      ...(pendingRef.current ?? {}),
+      // No `?? {}`: spreading null contributes nothing, so the fallback
+      // object was dead weight rather than a guard.
+      ...pendingRef.current,
       consent: stampConsent({ value: true }),
     };
     // The API strips `org_id` before RJSF validation and stores it on

@@ -39,7 +39,9 @@ const PAGE_BACKGROUND =
  *   than calling `useTranslations` again for two strings.
  * @returns The footer link row.
  */
-function FooterLegalLinks({ tRegister }: { tRegister: (key: string) => string }): JSX.Element {
+function FooterLegalLinks({
+  tRegister,
+}: Readonly<{ tRegister: (key: string) => string }>): JSX.Element {
   return (
     <div className="mt-6 flex items-center justify-center gap-3 text-[12.5px] text-ink-500">
       <Link href="/privacy" className="underline-offset-2 hover:text-ink-900 hover:underline">

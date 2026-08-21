@@ -19,10 +19,18 @@ export interface LegalSection {
  * @returns Lowercase hyphenated slug.
  */
 function slugify(heading: string): string {
+  // Split on separator runs and drop the empties rather than collapsing to
+  // hyphens and trimming afterwards: leading/trailing hyphens become
+  // structurally impossible instead of removed by a second pass. That second
+  // pass was `/^-+|-+$/g`, whose `-+$` is retried at every start position
+  // (super-linear); it was safe only because the collapse above guaranteed no
+  // run of hyphens could reach it — an invariant a reordering would break
+  // silently.
   return heading
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean)
+    .join('-');
 }
 
 /**
@@ -50,10 +58,18 @@ export function extractSections(markdown: string): LegalSection[] {
     }
     if (inFence) continue;
 
-    const match = /^(#{2,3})\s+(.*)$/.exec(line.trim());
+    // `/^(#{2,3})\s/` + slice, not `/^(#{2,3})\s+(.*)$/`: in the latter, `\s`
+    // and `.` both match a space, so the split between `\s+` and `(.*)` is
+    // ambiguous and backtracks super-linearly on a failing match. Matching a
+    // single delimiter and slicing the remainder is unambiguous whatever the
+    // input, rather than relying on this caller passing a trimmed,
+    // newline-free line. Behaviour is identical: `####` and `##Title` still
+    // fail to match, and the heading is still trimmed.
+    const trimmed = line.trim();
+    const match = /^(#{2,3})\s/.exec(trimmed);
     if (!match) continue;
 
-    const heading = match[2]!.trim();
+    const heading = trimmed.slice(match[1]!.length).trim();
     const base = slugify(heading);
     const count = (seen.get(base) ?? 0) + 1;
     seen.set(base, count);

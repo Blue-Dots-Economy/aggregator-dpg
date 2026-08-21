@@ -91,7 +91,9 @@ export function OrgRegisterForm({
     setGateOpen(false);
     setState({ status: 'submitting' });
     const payload: Record<string, unknown> = {
-      ...(pendingRef.current ?? {}),
+      // No `?? {}`: spreading null contributes nothing, so the fallback
+      // object was dead weight rather than a guard.
+      ...pendingRef.current,
       consent: stampConsent({ value: true }),
     };
     const result = await submitRegistration('/api/org/register', payload);

@@ -43,7 +43,7 @@ export function ConsentGate({
   agreeLabel,
   onAccept,
   onCancel,
-}: ConsentGateProps): JSX.Element | null {
+}: Readonly<ConsentGateProps>): JSX.Element | null {
   // An empty list means the consent copy failed to load. Callers keep their
   // own fallback for that; an empty modal would be worse than none.
   if (!open || docs.length === 0) return null;
@@ -113,9 +113,9 @@ function ConsentGateDialog({
   agreeLabel,
   onAccept,
   onCancel,
-}: ConsentGateDialogProps): JSX.Element {
+}: Readonly<ConsentGateDialogProps>): JSX.Element {
   const t = useTranslations('consent_gate');
-  const readerRef = useRef<HTMLDivElement>(null);
+  const readerRef = useRef<HTMLElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const [agreed, setAgreed] = useState(false);
   const progress = useReadProgress(readerRef, docs);
@@ -173,10 +173,13 @@ function ConsentGateDialog({
         </div>
 
         <div className="flex min-h-0 flex-1 flex-col px-5 pt-3 sm:px-6">
-          <div
+          {/* `<section>` + `aria-label`, not `<div role="region">`: a named
+              `<section>` already carries the region role implicitly. The
+              accessible name is what makes it a region at all, so the label
+              is load-bearing, not decorative. */}
+          <section
             ref={readerRef}
             data-testid="consent-reader"
-            role="region"
             aria-label={t('reader_label')}
             // Focusable AND in the tab sequence (not just scrollable by
             // mouse/touch, and not `-1`): with no close button to land on,
@@ -186,11 +189,10 @@ function ConsentGateDialog({
             // still take initial focus but drop out of the tab sequence
             // entirely, so a keyboard user who tabs forward to the checkbox
             // could never tab back to keep scrolling — a trap the gate's own
-            // completion requirement makes unrecoverable. A positive
-            // tabIndex plus `role="region"` is the standard accessible
-            // pattern for a scrollable region (WAI-ARIA APG "scrollable
-            // region" pattern) — the lint rule's default allowlist just
-            // doesn't include `region`.
+            // completion requirement makes unrecoverable. `tabIndex={0}` on a
+            // named region is the standard accessible pattern for a
+            // scrollable region (WAI-ARIA APG "scrollable region") — the lint
+            // rule's default allowlist just doesn't include `region`.
             // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
             tabIndex={0}
             // `relative`: read-progress.ts measures each section via a
@@ -215,7 +217,7 @@ function ConsentGateDialog({
                 <MarkdownContent content={doc.body} />
               </section>
             ))}
-          </div>
+          </section>
         </div>
 
         <div className="mt-3 shrink-0 border-t border-(--bd-border) bg-[#FCFDFF] px-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] pt-3 sm:px-6">
