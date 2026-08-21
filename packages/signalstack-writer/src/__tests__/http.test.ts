@@ -1704,11 +1704,18 @@ describe('HttpSignalStackWriter.probeUser (http)', () => {
     expect(result.value.lifecycle_summary).toBeNull();
   });
 
-  it('reshapes an own user with a draft item into lifecycle_summary', async () => {
+  it('reshapes an own user with a draft item in the probed domain into lifecycle_summary', async () => {
     fetchMock.mockResolvedValueOnce(
       okJsonResponse({
         user_id: 'u-1',
-        items: [{ item_id: 'item-1', lifecycle_status: 'draft' }],
+        items: [
+          {
+            item_id: 'item-1',
+            item_network: 'blue_dot',
+            item_domain: 'seeker',
+            lifecycle_status: 'draft',
+          },
+        ],
       }),
     );
 
@@ -1726,7 +1733,8 @@ describe('HttpSignalStackWriter.probeUser (http)', () => {
     fetchMock.mockResolvedValueOnce(
       okJsonResponse({
         user_id: 'u-1',
-        items: [{ item_id: 'item-1' }], // no lifecycle_status (older signals build)
+        // no lifecycle_status (older signals build)
+        items: [{ item_id: 'item-1', item_network: 'blue_dot', item_domain: 'seeker' }],
       }),
     );
 
@@ -1735,6 +1743,89 @@ describe('HttpSignalStackWriter.probeUser (http)', () => {
     expect(result.success).toBe(true);
     if (!result.success) return;
     expect(result.value.lifecycle_summary?.primary_item.lifecycle_status).toBe('live');
+  });
+
+  it('scopes the primary item to the probed domain — an item in ANOTHER domain is not surfaced', async () => {
+    // Own user with a paused item in `provider`, nothing in the probed `seeker`.
+    fetchMock.mockResolvedValueOnce(
+      okJsonResponse({
+        user_id: 'u-1',
+        items: [
+          {
+            item_id: 'prov-1',
+            item_network: 'blue_dot',
+            item_domain: 'provider',
+            lifecycle_status: 'paused',
+          },
+        ],
+      }),
+    );
+
+    const result = await writer.probeUser(PROBE_INPUT); // domain: 'seeker'
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    // Own user (this org owns items) but nothing in `seeker` → no summary, and
+    // NOT owned_elsewhere (must not report the provider item's paused lifecycle).
+    expect(result.value.user_exists).toBe(true);
+    expect(result.value.owned_elsewhere).toBe(false);
+    expect(result.value.lifecycle_summary).toBeNull();
+  });
+
+  it('a retired item in the probed domain surfaces no resumable lifecycle', async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJsonResponse({
+        user_id: 'u-1',
+        items: [
+          {
+            item_id: 'old-1',
+            item_network: 'blue_dot',
+            item_domain: 'seeker',
+            lifecycle_status: 'retired',
+          },
+        ],
+      }),
+    );
+
+    const result = await writer.probeUser(PROBE_INPUT);
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.user_exists).toBe(true);
+    expect(result.value.owned_elsewhere).toBe(false);
+    expect(result.value.lifecycle_summary).toBeNull();
+  });
+
+  it('rejects an unknown lifecycle_status as SIGNALSTACK_BAD_RESPONSE (not coerced to live)', async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJsonResponse({
+        user_id: 'u-1',
+        items: [
+          {
+            item_id: 'item-1',
+            item_network: 'blue_dot',
+            item_domain: 'seeker',
+            lifecycle_status: 'archived', // unexpected future/garbage value
+          },
+        ],
+      }),
+    );
+
+    const result = await writer.probeUser(PROBE_INPUT);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_BAD_RESPONSE');
+  });
+
+  it('rejects a response whose items field is missing/non-array as SIGNALSTACK_BAD_RESPONSE', async () => {
+    fetchMock.mockResolvedValueOnce(okJsonResponse({ user_id: 'u-1' })); // no items array
+
+    const result = await writer.probeUser(PROBE_INPUT);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_BAD_RESPONSE');
   });
 
   it('user exists but this org owns no items → owned_elsewhere, no lifecycle leak', async () => {
@@ -1749,6 +1840,22 @@ describe('HttpSignalStackWriter.probeUser (http)', () => {
     expect(result.value.lifecycle_summary).toBeNull();
   });
 
+  it('matches a phone-only identity (omits email= from the query)', async () => {
+    fetchMock.mockResolvedValueOnce(okJsonResponse({ user_id: null, items: [] }));
+
+    await writer.probeUser({
+      actingOrgId: 'org-abc',
+      phoneNumber: '+919000000002',
+      network: 'blue_dot',
+      domain: 'seeker',
+    });
+
+    const [calledUrl] = fetchMock.mock.calls[0]!;
+    const urlStr = String(calledUrl);
+    expect(urlStr).toContain('phone_number=%2B919000000002');
+    expect(urlStr).not.toContain('email=');
+  });
+
   it('issues a read-only GET with identity query params and no body or lookup sentinel', async () => {
     fetchMock.mockResolvedValueOnce(okJsonResponse({ user_id: null, items: [] }));
 
@@ -1758,6 +1865,10 @@ describe('HttpSignalStackWriter.probeUser (http)', () => {
     expect((init as RequestInit).method).toBe('GET');
     // No write body — the phantom-user regression (#648) was the POST body.
     expect((init as RequestInit).body).toBeUndefined();
+    // x-acting-org-id is now the SOLE org-scoping mechanism — assert it is sent
+    // so a dropped/renamed header can't silently return the wrong org's items.
+    const headers = (init as RequestInit).headers as Record<string, string>;
+    expect(headers['x-acting-org-id']).toBe('org-abc');
     const urlStr = String(calledUrl);
     expect(urlStr).toContain('/admin/participant?');
     expect(urlStr).toContain('email=asha%40example.com');
@@ -1855,13 +1966,11 @@ describe('HttpSignalStackWriter.probeUser (http)', () => {
     expect(result.error.code).toBe('SIGNALSTACK_BAD_RESPONSE');
   });
 
-  it('returns SIGNALSTACK_BAD_RESPONSE when the primary item is missing item_id', async () => {
+  it('returns SIGNALSTACK_BAD_RESPONSE when the probed-domain item is missing item_id', async () => {
     fetchMock.mockResolvedValueOnce(
       okJsonResponse({
         user_id: 'u-1',
-        user_existed: true,
-        owned_elsewhere: false,
-        items: [{ lifecycle_status: 'live' }],
+        items: [{ item_network: 'blue_dot', item_domain: 'seeker', lifecycle_status: 'live' }],
       }),
     );
 

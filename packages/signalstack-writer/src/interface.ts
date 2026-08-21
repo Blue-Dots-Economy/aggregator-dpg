@@ -413,17 +413,20 @@ export interface SignalStackDecryptedProfiles {
 }
 
 /**
- * Input for an identity-only probe against signalstack's `/admin/participant`
- * endpoint with `submit_mode: 'account_only'`.
+ * Input for a **read-only** identity probe against signalstack's
+ * `GET /api/v1/admin/participant` endpoint.
  *
  * The probe is the read-side mirror of the {@link SignalStackOnboardParticipantInput}
- * write path: signalstack matches the identity by email and/or phoneNumber
- * (at least one is required) and returns whether the user already exists
- * under the calling aggregator (`user_exists` + `lifecycle_summary`) or
- * under a different aggregator (`owned_elsewhere`).
+ * write path, but it never writes (unlike the old account-only POST, which
+ * minted a phantom user — #648). Signalstack matches the identity by email
+ * and/or phoneNumber (at least one required) and returns whether the user
+ * already exists under the calling aggregator (`user_exists` +
+ * `lifecycle_summary`) or not (`owned_elsewhere`).
  *
- * `actingOrgId` is sent as the per-call `x-acting-org-id` header so
- * signalstack scopes the lifecycle answer to the calling aggregator's view.
+ * `actingOrgId` is sent as the per-call `x-acting-org-id` header so signalstack
+ * scopes the returned items to the calling aggregator's view. `network`/`domain`
+ * are both required and are used to select the primary item for the probed
+ * domain (org items span domains).
  */
 export interface SignalStackProbeUserInput {
   /** Correlation id (the x-request-id header) forwarded to Signals for tracing. */
@@ -434,26 +437,33 @@ export interface SignalStackProbeUserInput {
   email?: string;
   /** Phone number (E.164) — at least one of email / phoneNumber is required. */
   phoneNumber?: string;
-  /** `blue_dot` etc — partition the user would be probed under. */
+  /** `blue_dot` etc — required; used to scope the primary item to this network. */
   network: string;
-  /** `seeker` | `provider` — participant focus. */
+  /** `seeker` | `provider` etc — required; scopes the primary item to this domain. */
   domain: string;
 }
 
 /**
  * Response payload from {@link SignalStackWriterBase.probeUser}.
  *
- * Reshapes the raw signalstack `/admin/participant` body into a single
- * tri-state answer the caller can branch on without re-deriving:
+ * Reshapes the raw signalstack `GET /api/v1/admin/participant` body into a
+ * single answer the caller can branch on without re-deriving:
  *
  *   - `user_exists: false` — truly new identity.
  *   - `user_exists: true`, `owned_elsewhere: false`, `lifecycle_summary != null`
- *     — own user with at least one item; the caller can resume the lifecycle.
+ *     — own user with a resumable (draft/live/paused) item in the probed
+ *     domain; the caller can resume that lifecycle.
+ *   - `user_exists: true`, `owned_elsewhere: false`, `lifecycle_summary == null`
+ *     — own user (this org owns items) but nothing resumable in the probed
+ *     domain (no item there, or only a retired one) — a fresh start here.
  *   - `user_exists: true`, `owned_elsewhere: true`, `lifecycle_summary == null`
  *     — user exists but this aggregator owns none of their items; we
- *     deliberately leak no lifecycle state from another org. (The read-only
- *     probe returns no items for a user this org has not onboarded, so the
- *     old "own user, no item yet" state no longer arises.)
+ *     deliberately leak no lifecycle state from another org.
+ *
+ * Note: when this org owns NO items at all, a genuinely foreign user and an
+ * own account-only-no-item user both read as `owned_elsewhere` (the read is
+ * item-scoped). This only feeds the pre-submit UX hint; `onboard`'s 201/409 is
+ * authoritative, so it never blocks a real submit.
  */
 export interface SignalStackProbeUserResult {
   user_exists: boolean;
@@ -615,19 +625,20 @@ export abstract class SignalStackWriterBase {
 
   /**
    * Identity probe — a **read-only** lookup against signals'
-   * `GET /admin/participant`. Truly side-effect free: it never creates a
-   * user or item (unlike the old POST account-only probe, which minted a
+   * `GET /api/v1/admin/participant`. Truly side-effect free: it never creates
+   * a user or item (unlike the old POST account-only probe, which minted a
    * phantom `name: 'lookup'` user — #648). Safe to retry.
    *
    * Returns `user_exists: false` for truly new identities, and
    * `owned_elsewhere: true` (with null `lifecycle_summary`) for users who
-   * exist but whose items this aggregator does not own. When the user
-   * belongs to the calling aggregator, `lifecycle_summary` carries the
-   * primary item's `item_id` and `lifecycle_status` so the caller can
-   * resume the lifecycle without an extra round-trip.
+   * exist but whose items this aggregator does not own. When the user belongs
+   * to the calling aggregator, `lifecycle_summary` carries the probed domain's
+   * primary item `item_id` and `lifecycle_status` (null when they have no
+   * resumable item in that domain) so the caller can resume without an extra
+   * round-trip. See {@link SignalStackProbeUserResult} for the full state set.
    *
-   * @param input - actingOrgId + email and/or phoneNumber (network/domain
-   *   accepted for symmetry but unused by the read).
+   * @param input - actingOrgId + email and/or phoneNumber (>=1) + network and
+   *   domain (both required; used to scope the primary item to the domain).
    * @returns ok(SignalStackProbeUserResult) on 2xx; err(BaseError) when
    *   neither identifier is supplied, on transport failure, or any
    *   non-2xx response.
