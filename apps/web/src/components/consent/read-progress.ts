@@ -97,7 +97,28 @@ export function computeReadProgress(
   }
 
   const readIds = sections.filter((s) => read.has(s.id)).map((s) => s.id);
-  const segments = Math.max(1, sections.length - 1);
+  // The fill line spans the N-1 gaps *between* the N per-document dots, so a
+  // document's own reading progress only shows up once the reader has moved
+  // on to the NEXT document.
+  //
+  // That model degenerates at exactly two documents: with one gap,
+  // `(readIds.length + fractionOfCurrent) / segments` already reads 1/1 =
+  // 100% the instant the FIRST document finishes — before a single pixel of
+  // the second has been read. Three of this repo's four consent surfaces
+  // (org registration, coordinator registration, the account-only QR gate)
+  // show exactly two documents (privacy + terms), so this is the common case,
+  // not an edge case.
+  //
+  // Widening the denominator to `sections.length` (instead of `- 1`) would
+  // fix it, but would also change the fill trajectory for three-or-more
+  // documents — e.g. at 1 of 3 read, halfway through the 2nd: 75% today
+  // under the gap model vs 50% under a whole-count model — a real behaviour
+  // change for the QR full form (privacy + terms + profile) this repo does
+  // not want to diverge from. So only the exact two-document case gets the
+  // wider denominator; three-and-up keeps the unchanged gap model. Ported
+  // from the sibling Signals repo (commit 033d6315), which mirrors this
+  // repo's identical geometry.
+  const segments = sections.length === 2 ? sections.length : Math.max(1, sections.length - 1);
   const fillPercent = Math.min(100, ((readIds.length + fractionOfCurrent) / segments) * 100);
 
   return { readIds, currentId, fillPercent, allRead: readIds.length === sections.length };

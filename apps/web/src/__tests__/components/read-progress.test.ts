@@ -83,6 +83,68 @@ describe('computeReadProgress', () => {
     const p = computeReadProgress(scroll(0), short, ['privacy']);
     expect(p.readIds).toEqual([]);
   });
+
+  // The gap model (N-1 segments between N dots) degenerates at exactly two
+  // documents: with one gap, `readIds.length / segments` already reads 1/1 =
+  // 100% the instant the FIRST document finishes reading — before a single
+  // pixel of the second has been shown. Three of this repo's four consent
+  // surfaces (org registration, coordinator registration, the account-only
+  // QR gate) show exactly privacy + terms, so this is the common case, not an
+  // edge case. Ported from Signals commit 033d6315.
+  describe('exactly two documents (privacy + terms)', () => {
+    // Two 300px sections stacked in a 200px-tall viewport — the same shape
+    // as the three-section fixture above, minus 'profile'.
+    const twoSections = [
+      { id: 'privacy', top: 0, height: 300 },
+      { id: 'terms', top: 300, height: 300 },
+    ];
+    const twoScroll = (scrollTop: number) => ({ scrollTop, clientHeight: 200, scrollHeight: 600 });
+
+    it('does not claim completion the instant the first of two documents is read', () => {
+      // viewport bottom = 100 + 200 = 300 === privacy's bottom: privacy just
+      // finished, not one pixel of terms has been shown yet.
+      const p = computeReadProgress(twoScroll(100), twoSections, []);
+      expect(p.readIds).toEqual(['privacy']);
+      expect(p.currentId).toBe('terms');
+      // Pre-fix this read 100 (1 read / 1 segment): claiming complete while
+      // the reader is exactly halfway through the whole stack.
+      expect(p.fillPercent).toBe(50);
+    });
+
+    it('advances fill continuously through the second of two documents', () => {
+      // privacy read (1 of 2 segments = 50%), halfway through terms adds 25%.
+      const p = computeReadProgress(twoScroll(250), twoSections, []);
+      expect(p.readIds).toEqual(['privacy']);
+      expect(p.fillPercent).toBe(75);
+    });
+
+    it('reports every section read and 100% fill at the bottom of two documents', () => {
+      const p = computeReadProgress(twoScroll(400), twoSections, []);
+      expect(p.readIds).toEqual(['privacy', 'terms']);
+      expect(p.allRead).toBe(true);
+      expect(p.fillPercent).toBe(100);
+    });
+  });
+
+  // Regression pin: the two-document fix must not alter the three-document
+  // (and up) fill trajectory. Widening the denominator to `sections.length`
+  // unconditionally would change this repo's QR full form (privacy + terms +
+  // profile) from the gap model's 75% to a whole-count model's 50% at this
+  // exact scroll position — a real behaviour change this repo does not want.
+  describe('three or more documents — unchanged by the two-document fix', () => {
+    it('reports exactly 75% fill at one-of-three-read, halfway through the second', () => {
+      // Same scenario as 'advances fill continuously through the section in
+      // hand' above, pinned to its precise value rather than a range.
+      const p = computeReadProgress(scroll(250), sections, []);
+      expect(p.readIds).toEqual(['privacy']);
+      expect(p.fillPercent).toBe(75);
+    });
+
+    it('reports exactly 100% fill when all three documents are read', () => {
+      const p = computeReadProgress(scroll(700), sections, []);
+      expect(p.fillPercent).toBe(100);
+    });
+  });
 });
 
 // A pure-function test on computeReadProgress cannot catch a bug in the

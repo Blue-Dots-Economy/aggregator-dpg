@@ -59,6 +59,52 @@ describe('<ConsentProgressTracker />', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
+  // The connecting line spans from the first dot's centre to the last dot's
+  // centre. Each dot sits in its own `flex-1` node, so with `n` equal-width
+  // nodes, node `i`'s centre (0-indexed) is at `(i + 0.5) / n`; the first
+  // dot's centre is `0.5 / n` = `50 / n` percent from the left, and the last
+  // dot's centre is the same distance from the right. A hardcoded `16.67%`
+  // (`50 / 3`) is correct only for exactly three nodes; with two nodes the
+  // true centres are at 25%/75%, so that hardcoded value overshoots both
+  // dots. Ported from Signals commit 033d6315.
+  describe('connecting line inset', () => {
+    it('insets the line to the true dot centres for two documents (25%/75%)', () => {
+      render(
+        <Wrapper>
+          <ConsentProgressTracker
+            docs={docs}
+            progress={{ readIds: [], currentId: 'privacy', fillPercent: 0, allRead: false }}
+          />
+        </Wrapper>,
+      );
+      // Pre-fix this was the hardcoded 16.67%, which overshoots both dots
+      // when there are only two nodes.
+      expect(screen.getByTestId('consent-progress-track')).toHaveStyle({
+        left: '25%',
+        right: '25%',
+      });
+    });
+
+    it('insets the line to the true dot centres for three documents (unchanged)', () => {
+      const threeDocs: ConsentDoc[] = [
+        ...docs,
+        { id: 'profile', cap: 'Profile', title: 'Profile creation', body: 'p' },
+      ];
+      render(
+        <Wrapper>
+          <ConsentProgressTracker
+            docs={threeDocs}
+            progress={{ readIds: [], currentId: 'privacy', fillPercent: 0, allRead: false }}
+          />
+        </Wrapper>,
+      );
+      expect(screen.getByTestId('consent-progress-track')).toHaveStyle({
+        left: `${50 / 3}%`,
+        right: `${50 / 3}%`,
+      });
+    });
+  });
+
   it('prefers the consent_gate.cap_* translation over the doc.cap fallback', () => {
     // doc.cap is deliberately not the real label, so the assertion only
     // passes if the rendered text came from the translation key.
