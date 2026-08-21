@@ -44,28 +44,94 @@ export function ConsentGate({
   onAccept,
   onCancel,
 }: ConsentGateProps): JSX.Element | null {
+  // An empty list means the consent copy failed to load. Callers keep their
+  // own fallback for that; an empty modal would be worse than none.
+  if (!open || docs.length === 0) return null;
+
+  // The dialog's own hooks (its ref, its `agreed` state, and — critically —
+  // `useReadProgress`) must not exist until there is something for them to
+  // measure. See {@link ConsentGateDialog}'s doc comment for why.
+  return (
+    <ConsentGateDialog
+      docs={docs}
+      agreeLabel={agreeLabel}
+      onAccept={onAccept}
+      onCancel={onCancel}
+    />
+  );
+}
+
+/** Props for {@link ConsentGateDialog}. */
+interface ConsentGateDialogProps {
+  docs: ConsentDoc[];
+  agreeLabel: string;
+  onAccept: () => void;
+  // `| undefined` explicitly: exactOptionalPropertyTypes otherwise rejects
+  // forwarding ConsentGate's own (also optional) `onCancel` prop verbatim,
+  // since a destructured optional prop reads as `T | undefined`, not just `T`.
+  onCancel?: (() => void) | undefined;
+}
+
+/**
+ * The gate's actual dialog: tracker, reader, and footer. Rendered by
+ * {@link ConsentGate} only while `open` — never always-mounted-but-hidden.
+ *
+ * That split is load-bearing, not cosmetic. `useReadProgress`'s mount effect
+ * bails out immediately when `scrollRef.current` is `null`:
+ *
+ * ```ts
+ * useEffect(() => {
+ *   const el = scrollRef.current;
+ *   if (!el) return; // taken here, forever, under the old always-mounted shape
+ *   ...
+ * }, [scrollRef, measure]);
+ * ```
+ *
+ * When `ConsentGate` itself held this JSX and merely returned `null` while
+ * closed, its hooks (this ref included) still ran on every render — closed
+ * or open — because hooks cannot be conditional. The reader div only exists
+ * in the DOM once `open` flips true, but by then `useReadProgress`'s mount
+ * effect has already run once, against a `null` ref, and bailed. Because the
+ * ref object and the memoised `measure` callback are otherwise stable across
+ * re-renders (every caller memoises `docs`), that effect's dependency array
+ * never changes, so it never re-runs — no scroll listener, no
+ * `ResizeObserver`, `measure()` never called again. `progress` stays at
+ * `initialProgress(docs)` (`allRead: false`) forever: the gate could not be
+ * completed on any surface.
+ *
+ * Mounting this component fresh on every open means its ref is already
+ * attached to the real reader element by the time `useReadProgress`'s mount
+ * effect runs for the first (and only relevant) time — exactly how a
+ * Radix/vaul-based dialog (the sibling Signals gate) avoids this: it mounts
+ * its content on open rather than rendering it always, hidden.
+ *
+ * @param props - Documents, agreement copy, and callbacks.
+ * @returns The dialog element.
+ */
+function ConsentGateDialog({
+  docs,
+  agreeLabel,
+  onAccept,
+  onCancel,
+}: ConsentGateDialogProps): JSX.Element {
   const t = useTranslations('consent_gate');
   const readerRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const [agreed, setAgreed] = useState(false);
   const progress = useReadProgress(readerRef, docs);
 
-  // Move focus into the dialog on open, the same way ConsentModal does: a
+  // Move focus into the dialog on mount, the same way ConsentModal does: a
   // hard-blocking modal that leaves focus wherever it was tells keyboard and
   // screen-reader users nothing opened. Prefer the close button when one
   // exists; otherwise the reader itself, since that is the only interactive
-  // surface until the checkbox unlocks.
+  // surface until the checkbox unlocks. No `open` guard needed here — this
+  // component does not exist unless the gate is open.
   useEffect(() => {
-    if (!open) return;
     requestAnimationFrame(() => {
       if (onCancel) closeButtonRef.current?.focus();
       else readerRef.current?.focus();
     });
-  }, [open, onCancel]);
-
-  // An empty list means the consent copy failed to load. Callers keep their
-  // own fallback for that; an empty modal would be worse than none.
-  if (!open || docs.length === 0) return null;
+  }, [onCancel]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/55 p-0 sm:items-center sm:p-4">

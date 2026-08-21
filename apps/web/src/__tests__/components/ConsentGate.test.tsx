@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import messages from '@/i18n/messages/en.json';
 import { ConsentGate } from '@/components/consent/ConsentGate';
 import type { ConsentDoc } from '@/components/consent/consent-docs';
@@ -223,6 +223,41 @@ describe('<ConsentGate />', () => {
     expect(reader).toHaveAttribute('role', 'region');
     expect(reader.getAttribute('aria-label')?.trim()).not.toBe('');
     expect(reader).toHaveAccessibleName('Terms and privacy documents');
+  });
+
+  it('mounts closed, opens, and can be completed — the mount-timing regression', () => {
+    // A harness that genuinely toggles `open`, unlike every other test in
+    // this file (which renders `<ConsentGate open .../>` already mounted
+    // open). `useReadProgress`'s mount effect only ever sees a non-null
+    // `scrollRef.current` if the reader element exists at the moment that
+    // effect first runs — this is the transition production actually goes
+    // through on every surface, and the one a permanently-open render can
+    // never exercise.
+    function Harness() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>
+            open the gate
+          </button>
+          <ConsentGate open={open} docs={docs} agreeLabel="I agree" onAccept={vi.fn()} />
+        </>
+      );
+    }
+    render(
+      <Wrapper>
+        <Harness />
+      </Wrapper>,
+    );
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'open the gate' }));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+    const el = stubScroller(600, 200, 400); // scrollTop + clientHeight === scrollHeight
+    fireEvent.scroll(el);
+
+    expect(screen.getByRole('checkbox')).toBeEnabled();
   });
 
   it('calls onCancel from the explicit close button only', () => {
