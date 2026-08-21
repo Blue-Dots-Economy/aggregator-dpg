@@ -1169,7 +1169,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       } else {
         return err(
           new UpstreamError(
-            `signalstack probe returned unknown lifecycle_status: ${String(rawLifecycle)}`,
+            `signalstack probe returned unknown lifecycle_status: ${JSON.stringify(rawLifecycle)}`,
             { code: 'SIGNALSTACK_BAD_RESPONSE', details: { payload: raw } },
           ),
         );
