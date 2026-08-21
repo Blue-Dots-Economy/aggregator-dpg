@@ -1,7 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { renderHook, fireEvent } from '@testing-library/react';
 import type { RefObject } from 'react';
-import { computeReadProgress, useReadProgress } from '@/components/consent/read-progress';
+import {
+  computeReadProgress,
+  initialProgress,
+  useReadProgress,
+} from '@/components/consent/read-progress';
 import type { ConsentDoc } from '@/components/consent/consent-docs';
 
 // Three 300px sections stacked in a 200px-tall viewport.
@@ -78,6 +82,31 @@ describe('computeReadProgress', () => {
     const short = [sections[1]!]; // 'terms' only; 'privacy' section missing this call
     const p = computeReadProgress(scroll(0), short, ['privacy']);
     expect(p.readIds).toEqual([]);
+  });
+});
+
+// A pure-function test on computeReadProgress cannot catch a bug in the
+// hook's *bootstrap* state — render() from React Testing Library flushes
+// effects inside act() before returning, so the pre-effect value is never
+// observable through the hook either. initialProgress is extracted so the
+// bootstrap value itself is directly assertable.
+describe('initialProgress', () => {
+  const docs: ConsentDoc[] = [
+    { id: 'privacy', cap: 'Privacy', title: 'Privacy Policy', body: 'p' },
+    { id: 'terms', cap: 'Terms', title: 'Terms of Service', body: 't' },
+  ];
+
+  it('reports nothing read for a non-empty document list — an unmeasured gate must never look done', () => {
+    const p = initialProgress(docs);
+    expect(p.allRead).toBe(false);
+    expect(p.readIds).toEqual([]);
+    expect(p.currentId).toBe('privacy');
+  });
+
+  it('reports allRead for an empty document list so it still cannot block forever', () => {
+    const p = initialProgress([]);
+    expect(p.allRead).toBe(true);
+    expect(p.currentId).toBeNull();
   });
 });
 

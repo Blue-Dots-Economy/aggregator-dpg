@@ -104,6 +104,29 @@ export function computeReadProgress(
 }
 
 /**
+ * Bootstrap progress, before the first measurement has run.
+ *
+ * Deliberately NOT `computeReadProgress({...}, [], [])`: an empty `sections`
+ * array hits the pure function's empty-document-list branch, which reports
+ * `allRead: true` so a genuinely empty list cannot block forever. Here "no
+ * sections yet" means "not measured", the opposite — and an unmeasured gate
+ * must never render its checkbox enabled. `useEffect` runs after paint, so a
+ * wrong `true` here is briefly visible in a real browser before `measure()`
+ * ever runs.
+ *
+ * @param docs - Documents the gate is about to render, in order.
+ * @returns Nothing-read progress, except for a genuinely empty `docs` list.
+ */
+export function initialProgress(docs: readonly ConsentDoc[]): ReadProgress {
+  return {
+    readIds: [],
+    currentId: docs[0]?.id ?? null,
+    fillPercent: 0,
+    allRead: docs.length === 0,
+  };
+}
+
+/**
  * Tracks read progress for a scroll container holding `docs` in order.
  *
  * Re-measures on scroll and on resize: a web-font swap, async Markdown render,
@@ -118,9 +141,7 @@ export function useReadProgress(
   docs: ConsentDoc[],
 ): ReadProgress {
   const readRef = useRef<string[]>([]);
-  const [progress, setProgress] = useState<ReadProgress>(() =>
-    computeReadProgress({ scrollTop: 0, clientHeight: 0, scrollHeight: 0 }, [], []),
-  );
+  const [progress, setProgress] = useState<ReadProgress>(() => initialProgress(docs));
 
   const measure = useCallback(() => {
     const el = scrollRef.current;
