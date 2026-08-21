@@ -2,13 +2,17 @@
  * View test: <PublicRegistrationView /> — the blocking consent gate wired
  * into the public QR-form submit pipeline (#636 Task 7).
  *
- * RJSF is mocked to the same thin shim `PublicRegistrationView.lookup.test.tsx`
- * and `.signals-cta.test.tsx` use: a deterministic `<form>` whose `onSubmit`
- * is wired straight to the real handler, tagged with a testid so a submit can
- * be fired without depending on RJSF's own validity plumbing. `ConsentGate`
- * itself is NOT mocked — its own scroll-to-unlock mechanics are covered by
- * `ConsentGate.test.tsx`; here we only need the dialog and its tracker nodes
- * to prove the three documents actually reach it.
+ * RJSF is mocked to the shared thin shim in `./publicRegistrationView.testHelpers`
+ * (the same one `PublicRegistrationView.signals-redirect.test.tsx` uses): a
+ * deterministic `<form>` whose `onSubmit` is wired straight to the real
+ * handler, tagged with a testid so a submit can be fired without depending on
+ * RJSF's own validity plumbing. This file's schema declares no `default`
+ * values, so the shared shim's formData (built from schema defaults) is
+ * always `{}` here — identical to a hand-rolled empty-formData shim, just not
+ * a second copy of it. `ConsentGate` itself is NOT mocked — its own
+ * scroll-to-unlock mechanics are covered by `ConsentGate.test.tsx`; here we
+ * only need the dialog and its tracker nodes to prove the three documents
+ * actually reach it.
  */
 import { describe, it, expect, vi, beforeAll } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
@@ -16,6 +20,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import messages from '@/i18n/messages/en.json';
 import type { ParticipantConsent } from '@/components/consent/consent-types';
+import { RjsfShim } from './publicRegistrationView.testHelpers';
 
 // jsdom does not implement scrollIntoView; the error banner's focus effect
 // calls it whenever state transitions to 'error'.
@@ -23,31 +28,7 @@ beforeAll(() => {
   Element.prototype.scrollIntoView = vi.fn();
 });
 
-// Shim RjsfThemedForm exactly as PublicRegistrationView.signals-cta.test.tsx
-// does: a deterministic <form> tagged with a testid, onSubmit wired straight
-// through. Keeps RJSF's render tree out of the test — we exercise the gate
-// wiring, not RJSF rendering.
-vi.mock('@/components/forms/RjsfThemed', () => {
-  return {
-    RjsfThemedForm: ({
-      onSubmit,
-      children,
-    }: {
-      onSubmit: (e: { formData: Record<string, unknown> }, ev: unknown) => void;
-      children?: React.ReactNode;
-    }) => (
-      <form
-        data-testid="rjsf-shim"
-        onSubmit={(ev) => {
-          ev.preventDefault();
-          onSubmit({ formData: {} }, ev);
-        }}
-      >
-        {children}
-      </form>
-    ),
-  };
-});
+vi.mock('@/components/forms/RjsfThemed', () => ({ RjsfThemedForm: RjsfShim }));
 
 // Config drives showConsent/showBirthYear via the domain's go_live_required /
 // guardian_consent_required — same shape as PublicRegistrationView.lookup.test.tsx.
