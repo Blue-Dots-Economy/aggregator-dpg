@@ -1523,8 +1523,24 @@ alone would not say which. Section anchors make `/privacy#retention` work.
   just another section. Uniform styling, one indent level.
 - The group not being read is dimmed, not hidden.
 
-Slugify to lowercase-hyphenated ids, deduplicating collisions with a numeric suffix — both
-documents contain a "Grievances" heading, so collisions are real, not theoretical.
+Slugify to lowercase-hyphenated ids, deduplicating collisions with a numeric suffix. The
+dedup guards against a heading repeated **within a single document** — `extractSections`
+is called per document with a fresh `seen` map, so cross-document collisions cannot
+arise. (An earlier draft of this plan claimed both Terms and Privacy carry a
+"Grievances" heading and would therefore collide. That was wrong: only the Privacy
+documents carry that heading, and per-document dedup means it could not collide anyway.
+Keep the dedup as defensive code; do not repeat the false rationale.)
+
+**Trap, found in the sibling repo — every real consent document opens with
+`## <Document Title>`.** Verified across all six network schemas, both privacy and terms.
+If you treat that leading heading as an ordinary section you will render the title twice
+(once as the page `h1`, once as an `h2` directly beneath) and the rail will repeat its own
+group-header label as its first section entry. Drop the leading heading when its text
+matches the document's `title` field, compared case- and whitespace-insensitively. Do NOT
+blanket-drop the first `##`: a document legitimately opening with `## Overview` would
+lose that section. **And build your test fixtures with the real shape** — leading
+`## Privacy Policy` / `## Terms of Service`. The sibling's fixture started with
+`## Overview`, which is exactly why its tests passed while every real page was broken.
 
 - [ ] **Step 1: Write the failing test for section extraction**
 
