@@ -383,7 +383,7 @@ export const ERR = {
     status: 400,
     title: 'Invalid registration mode',
     detail: 'The selected registration mode is not declared in this network configuration.',
-    hint: 'Create body referenced a mode key not present in aggregator.config.yaml registration_modes. Surface the declared keys via fields.declared.',
+    hint: 'Create body referenced a mode key not present in aggregator.config.yaml registration_modes, or one this deployment withholds via AGGREGATOR_ONBOARDING_ENABLED. Surface the declared keys via fields.declared and the usable subset via fields.enabled.',
   },
   INVALID_CONFIG: {
     code: 'INVALID_CONFIG',

@@ -20,7 +20,13 @@ import {
   serializerCompiler,
   validatorCompiler,
 } from 'fastify-type-provider-zod';
-import { config, corsOrigins, apiReferenceEnabled, signalsUiUrlWarnings } from './config.js';
+import {
+  config,
+  corsOrigins,
+  apiReferenceEnabled,
+  signalsUiUrlWarnings,
+  onboardingEnabledWarnings,
+} from './config.js';
 import { loggerOptions } from './logger.js';
 import { registerHealthRoutes } from './routes/health.js';
 import { registerAggregatorRegistrationRoutes } from './routes/aggregator-registrations.js';
@@ -77,6 +83,15 @@ export async function buildApp(): Promise<FastifyInstance> {
   // disabling the hand-off for one domain.
   for (const warning of signalsUiUrlWarnings) {
     app.log.warn({ operation: 'config.parseSignalsUiUrls', status: 'skipped' }, warning);
+  }
+
+  // Same hand-off for the `AGGREGATOR_ONBOARDING_ENABLED` allow-list (#637):
+  // parsed at module load, so its duplicate-entry and "set but names nothing"
+  // warnings can only be emitted here. The complementary check — a value that
+  // matches no *declared* registration mode — needs the resolved network
+  // config and lives in `services/network-config.ts`.
+  for (const warning of onboardingEnabledWarnings) {
+    app.log.warn({ operation: 'config.parseOnboardingEnabled', status: 'skipped' }, warning);
   }
 
   await app.register(cors, {

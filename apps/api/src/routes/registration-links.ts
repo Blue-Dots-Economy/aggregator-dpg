@@ -21,7 +21,7 @@ import { getRegistrationLinksStore } from '../services/registration-links-store/
 import type { RegistrationLink } from '../services/registration-links-store/index.js';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
-import { config } from '../config.js';
+import { config, isOnboardingCapabilityEnabled } from '../config.js';
 import { getDb } from '../db/client.js';
 import { onboarding } from '../db/schema.js';
 import { getNetworkConfig } from '../services/network-config.js';
@@ -220,18 +220,27 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
       enforceAggregatorType(auth, body.domain);
 
       const declaredModes = Object.keys(networkCfg.aggregator.registration_modes ?? {});
+      // Second enforcement point for `AGGREGATOR_ONBOARDING_ENABLED` (#637).
+      // `GET /v1/aggregator-config` already hides a withheld mode from the
+      // admin dropdown, but that is a UI affordance — this is the gate, so the
+      // allow-list cannot be bypassed by calling the API directly. Unset ⇒
+      // `enabledModes` equals `declaredModes` and nothing below changes.
+      const enabledModes = declaredModes.filter((mode) => isOnboardingCapabilityEnabled(mode));
       // Omitted mode preserves the legacy full-profile default: prefer the
-      // `form` key (DB column default) when the network declares it, else the
-      // first declared mode. Never silently downgrade an omitted link to an
-      // account_only channel.
+      // `form` key (DB column default) when it is available, else the first
+      // one. Chosen from the *enabled* list, never the declared list — an
+      // omitted mode must not fall back to a mode this deployment withholds.
+      // Never silently downgrade an omitted link to an account_only channel.
       const modeKey =
         body.registration_mode ??
-        (declaredModes.includes('form') ? 'form' : declaredModes[0]) ??
+        (enabledModes.includes('form') ? 'form' : enabledModes[0]) ??
         'form';
-      if (!declaredModes.includes(modeKey)) {
+      if (!enabledModes.includes(modeKey)) {
         throw httpError('INVALID_REGISTRATION_MODE', {
-          detail: `registration_mode '${modeKey}' is not declared for this network`,
-          fields: { declared: declaredModes },
+          detail: declaredModes.includes(modeKey)
+            ? `registration_mode '${modeKey}' is not enabled for this deployment`
+            : `registration_mode '${modeKey}' is not declared for this network`,
+          fields: { declared: declaredModes, enabled: enabledModes },
         });
       }
       const store = getRegistrationLinksStore();
