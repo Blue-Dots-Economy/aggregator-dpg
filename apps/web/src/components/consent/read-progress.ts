@@ -135,7 +135,12 @@ export function useReadProgress(
       sections,
       readRef.current,
     );
-    readRef.current = next.readIds;
+    // Union, don't replace: computeReadProgress only re-emits an id whose
+    // section was found in *this* call's `sections`. A transiently missing
+    // DOM node (remount, conditional render, a measurement racing layout)
+    // would otherwise silently drop that id from the bookkeeping and the
+    // tracker would go backwards. Stickiness is the whole guarantee.
+    readRef.current = Array.from(new Set([...readRef.current, ...next.readIds]));
     setProgress(next);
   }, [scrollRef, docs]);
 
