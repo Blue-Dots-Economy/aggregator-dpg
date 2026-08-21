@@ -328,7 +328,7 @@ export function PublicRegistrationView({
   }, [state.status, signalsHandoffUrl]);
 
   useEffect(() => {
-    if (handoff === null || handoff.phase !== 'counting') return;
+    if (handoff?.phase !== 'counting') return;
     if (handoff.seconds <= 0) {
       // Mark terminal BEFORE navigating: this both re-runs the effect into the
       // early return above and survives a navigation that never completes, so
