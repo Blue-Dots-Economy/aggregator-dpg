@@ -676,6 +676,11 @@ describe('<PublicRegistrationView /> — remaining branches', () => {
             network=""
             submissionShape="account_only"
             identity={{ name: 'name', phone: 'phone', email: 'email' }}
+            consentContent={{
+              terms: { version: 1, title: 'Terms', content: 'Terms body' },
+              privacy: { version: 1, title: 'Privacy', content: 'Privacy body' },
+              profileCreation: { version: 1, statement: 'Profile statement.' },
+            }}
           />
         </NextIntlClientProvider>
       </QueryClientProvider>,
@@ -690,7 +695,25 @@ describe('<PublicRegistrationView /> — remaining branches', () => {
     fireEvent.click(screen.getByRole('checkbox'));
     fireEvent.click(screen.getByRole('button', { name: /Submit/ }));
 
+    // #636 Task 8: this surface is now routed through the same blocking
+    // consent gate as the full-profile form (a two-document privacy+terms
+    // variant — see PublicRegistrationView.account-only-consent-gate.test.tsx
+    // for the tracker-node assertions). Accept it before the /submit POST
+    // fires.
+    const gateProps = await gateShim.opened();
+    act(() => {
+      gateProps.onAccept();
+    });
+
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     expect(fetchMock.mock.calls[0]![0]!.toString()).toContain('/submit');
+    const submitBody = JSON.parse(String((fetchMock.mock.calls[0]![1] as RequestInit).body)) as {
+      consent_terms?: boolean;
+      consent_privacy?: boolean;
+      consent_profile?: boolean;
+    };
+    expect(submitBody.consent_terms).toBe(true);
+    expect(submitBody.consent_privacy).toBe(true);
+    expect(submitBody.consent_profile).toBeUndefined();
   });
 });
