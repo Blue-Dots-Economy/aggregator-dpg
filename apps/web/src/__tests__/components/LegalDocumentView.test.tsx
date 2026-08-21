@@ -2,8 +2,28 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, within, fireEvent, act } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
 import type { ReactNode } from 'react';
+import type * as UseAggregatorConfigModule from '@/hooks/useAggregatorConfig';
 import messages from '@/i18n/messages/en.json';
 import { LegalDocumentView, type LegalGroup } from '@/components/legal/LegalDocumentView';
+
+// The app bar (item 2 of the consent-scroll-gate port) reads the brand logo
+// and theme mode. Neither is under test here, so both are stubbed to their
+// real defaults (`useAggregatorConfig` re-exports the actual
+// `DEFAULT_AGGREGATOR_CONFIG`, which carries no brand logo, so the page
+// falls back to `BlueDotsLogo`) rather than requiring a real
+// `QueryClientProvider` in every test's render tree.
+vi.mock('@/hooks/useAggregatorConfig', async () => {
+  const actual = await vi.importActual<typeof UseAggregatorConfigModule>(
+    '@/hooks/useAggregatorConfig',
+  );
+  return {
+    ...actual,
+    useAggregatorConfig: () => ({ data: undefined, isError: false }),
+  };
+});
+vi.mock('@/lib/theme-mode', () => ({
+  useThemeMode: () => ({ mode: 'light', setMode: vi.fn(), toggle: vi.fn() }),
+}));
 
 function Wrapper({ children }: { children: ReactNode }) {
   return (

@@ -23,6 +23,7 @@
  * @module apps/web/src/components/legal/LegalDocumentView
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Image from 'next/image';
 import Link from 'next/link';
 import { useTranslations, useLocale } from 'next-intl';
 import { ArrowLeft } from 'lucide-react';
@@ -30,6 +31,10 @@ import { cn } from '../../lib/cn';
 import { MarkdownContent } from '../forms/MarkdownContent';
 import { extractSections, type LegalSection } from './legal-sections';
 import type { ConsentDocContent } from '../consent/consent-types';
+import { BlueDotsLogo } from '../ui/BlueDotsLogo';
+import { useThemeMode } from '../../lib/theme-mode';
+import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../hooks/useAggregatorConfig';
+import { I } from '../../icons';
 
 export type LegalDoc = 'privacy' | 'terms';
 
@@ -347,8 +352,8 @@ function formatVersionLabel(
 }
 
 /**
- * Renders the shared layout for `/privacy` and `/terms`: an app bar (back
- * link + language control, separated by a rule), a contents rail grouped by
+ * Renders the shared layout for `/privacy` and `/terms`: an app bar (brand
+ * logo, back link, and a theme toggle), a contents rail grouped by
  * audience then document, and the reading column holding every audience's
  * both documents in one continuous scroll.
  *
@@ -367,7 +372,10 @@ export function LegalDocumentView({
   groups: LegalGroup[];
 }): JSX.Element {
   const t = useTranslations('legal');
+  const themeT = useTranslations('theme');
   const locale = useLocale();
+  const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
+  const { mode, toggle: toggleTheme } = useThemeMode();
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
 
   // Split every audience's both documents' sections once, up front. The rail
@@ -617,17 +625,62 @@ export function LegalDocumentView({
   return (
     <div className="min-h-svh bg-(--bd-bg) px-6 py-12">
       <div className="mx-auto max-w-5xl">
-        {/* App bar: a way back to sign-in (someone can land here mid-signup
-            with no other path back) plus the language control, separated
-            from the content by a rule. */}
-        <div className="mb-8 flex items-center justify-between gap-4 border-b border-(--bd-border) pb-4">
+        {/* App bar: the brand logo (this page previously had no branding at
+            all, which is what made it look foreign next to the rest of the
+            app), a way back to sign-in (someone can land here mid-signup
+            with no other path back), and a theme toggle — composed from the
+            same pieces the rest of the app's public pages (login/register)
+            use for branding, plus a toggle mirroring `Topbar`'s own, rather
+            than a portal shell built for an authenticated session:
+            `Sidebar` (the app's real logo bar) pulls in `useAuth` for the
+            signed-in user menu, none of which means anything on a public,
+            unauthenticated legal page. No language switcher here — the
+            `(public)` route group's own layout already floats one
+            top-right for every route in it, this one included. The back
+            link's label drops below `sm` (icon-only) so the logo plus
+            theme toggle never wrap the row and overlap the content
+            underneath at narrow widths. */}
+        <div className="mb-8 flex min-h-14 flex-wrap items-center gap-3 border-b border-(--bd-border) pb-4">
+          {cfg.brand.logo?.default ? (
+            <Image
+              src={cfg.brand.logo.default}
+              alt={cfg.brand.short_name}
+              width={160}
+              height={40}
+              priority
+              className="h-9 w-auto shrink-0 object-contain object-left"
+            />
+          ) : (
+            <div className="flex min-w-0 shrink-0 items-center gap-2.5">
+              <BlueDotsLogo size={36} />
+              <span className="truncate font-display text-[15px] font-bold leading-tight text-ink-900">
+                {cfg.brand.short_name}
+              </span>
+            </div>
+          )}
+
           <Link
             href="/login"
-            className="inline-flex items-center gap-1.5 text-sm font-semibold text-ink-500 transition-colors hover:text-(--bd-primary-600)"
+            aria-label={t('back_to_sign_in')}
+            className="inline-flex shrink-0 items-center gap-1.5 text-sm font-semibold text-ink-500 transition-colors hover:text-(--bd-primary-600)"
           >
             <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-            {t('back_to_sign_in')}
+            <span className="hidden sm:inline">{t('back_to_sign_in')}</span>
           </Link>
+
+          {/* Language switching is already provided for every `(public)`
+              route — including this one — by that route group's own
+              layout (a fixed top-right control); adding a second instance
+              here would just duplicate it. Only the theme toggle is new. */}
+          <button
+            type="button"
+            onClick={toggleTheme}
+            title={mode === 'dark' ? themeT('switch_to_light') : themeT('switch_to_dark')}
+            aria-label={themeT('toggle_aria')}
+            className="ml-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] border border-(--bd-border) bg-(--bd-card) text-(--bd-fg-muted) transition-colors hover:bg-(--bd-border-soft) hover:text-(--bd-fg)"
+          >
+            {mode === 'dark' ? <I.sun size={16} /> : <I.moon size={16} />}
+          </button>
         </div>
 
         <div className="grid gap-8 md:grid-cols-[240px_1fr] md:gap-10">
