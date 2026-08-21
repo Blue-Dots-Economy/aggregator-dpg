@@ -1413,15 +1413,22 @@ export function PublicRegistrationView({
                           <button
                             type="submit"
                             disabled={blocked}
-                            style={
-                              blocked ? undefined : { backgroundColor: cfg.brand.primary_color }
-                            }
+                            // Applied unconditionally (previously only when
+                            // enabled): the disabled branch below used to
+                            // swap in `bg-(--bd-primary-100)
+                            // text-(--bd-primary-600)`, but that text colour
+                            // utility loses to this element's own
+                            // `text-white` under Tailwind's fixed stylesheet
+                            // ordering (utility precedence follows generation
+                            // order, not the class string), so the disabled
+                            // button rendered white-on-pale — effectively
+                            // invisible. Keeping the same brand background +
+                            // white text in both states and only fading
+                            // opacity when disabled avoids that trap and
+                            // matches the sibling Signals gate's CTA.
+                            style={{ backgroundColor: cfg.brand.primary_color }}
                             className={`w-full py-3 rounded-[12px] font-display font-bold text-[15px] text-white transition-all
-                    ${
-                      blocked
-                        ? 'bg-(--bd-primary-100) text-(--bd-primary-600) cursor-not-allowed'
-                        : 'hover:opacity-90 bd-shadow-lg'
-                    }`}
+                    ${blocked ? 'cursor-not-allowed opacity-60' : 'hover:opacity-90 bd-shadow-lg'}`}
                           >
                             {state.status === 'submitting' ? t('btn_submitting') : t('btn_submit')}
                           </button>

@@ -253,7 +253,15 @@ function ConsentGateDialog({
             type="button"
             disabled={!progress.allRead || !agreed}
             onClick={onAccept}
-            className="mt-3 w-full rounded-xl bg-(--bd-primary-600) py-3.5 text-[15px] font-bold text-white transition-colors disabled:bg-(--bd-primary-200) disabled:text-white"
+            // Disabled keeps the brand colour and label (never swaps to a
+            // colour pair that can turn illegible or vanish) and only fades
+            // opacity, the same idea the sibling Signals gate uses for its
+            // CTA — so the button still reads as present-but-inactive rather
+            // than gone. `--bd-primary-200` is not a token this repo
+            // defines, so its previous `disabled:bg-(--bd-primary-200)` fell
+            // back to `transparent`, leaving white text on the panel's own
+            // near-white background: not just pale, but actually invisible.
+            className="mt-3 w-full rounded-xl bg-(--bd-primary-600) py-3.5 text-[15px] font-bold text-white transition-all disabled:cursor-not-allowed disabled:opacity-60"
           >
             {t('accept')}
           </button>
