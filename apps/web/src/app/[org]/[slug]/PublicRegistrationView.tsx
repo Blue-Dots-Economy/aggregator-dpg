@@ -13,7 +13,6 @@ import { registrationShowsConsent, domainRequiresBirthYear } from '../../../lib/
 import { MinimalIdentityForm, type MinimalIdentityPayload } from './MinimalIdentityForm';
 import { SignalsSignInCta, useSignalsHandoffUrl } from './SignalsSignInCta';
 import { LanguageSwitcher } from '../../../components/shell/LanguageSwitcher';
-import { ConsentModal, type ConsentTab } from '../../../components/consent/ConsentModal';
 import { ConsentGate } from '../../../components/consent/ConsentGate';
 import { toConsentDocs } from '../../../components/consent/consent-docs';
 import type { ParticipantConsent } from '../../../components/consent/consent-types';
@@ -141,14 +140,6 @@ export function PublicRegistrationView({
   // The empty-consent-docs error banner reuses the register forms' copy
   // (§Task 7) rather than inventing a second "consent unavailable" string.
   const tRegister = useTranslations('register');
-  // Terms/Privacy modal for the participant consent copy (§4.1), opened
-  // read-only from the pre-form chooser / MinimalIdentityForm. The blocking
-  // three-document gate below is the actual consent-collection surface for
-  // the full-profile form.
-  const [consentModal, setConsentModal] = useState<{ open: boolean; tab: ConsentTab }>({
-    open: false,
-    tab: 'terms',
-  });
   const [formData, setFormData] = useState<Record<string, unknown>>({});
   /**
    * #652: has the user chosen "Register" on the pre-form chooser? Pure view
@@ -810,14 +801,6 @@ export function PublicRegistrationView({
             </>
           )}
         </div>
-        {consentContent && (
-          <ConsentModal
-            open={consentModal.open}
-            onOpenChange={(open) => setConsentModal((s) => ({ ...s, open }))}
-            initialTab={consentModal.tab}
-            content={consentContent}
-          />
-        )}
       </div>
     );
   }
@@ -1124,14 +1107,6 @@ export function PublicRegistrationView({
           </div>
         </div>
       </div>
-      {consentContent && (
-        <ConsentModal
-          open={consentModal.open}
-          onOpenChange={(open) => setConsentModal((s) => ({ ...s, open }))}
-          initialTab={consentModal.tab}
-          content={consentContent}
-        />
-      )}
       <ConsentGate
         open={gateOpen}
         docs={consentDocs}
