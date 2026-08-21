@@ -58,4 +58,25 @@ describe('<ConsentProgressTracker />', () => {
     );
     expect(container).toBeEmptyDOMElement();
   });
+
+  it('prefers the consent_gate.cap_* translation over the doc.cap fallback', () => {
+    // doc.cap is deliberately not the real label, so the assertion only
+    // passes if the rendered text came from the translation key.
+    const staleCap: ConsentDoc[] = [
+      { id: 'privacy', cap: 'stale-fallback-label', title: 'Privacy Policy', body: 'p' },
+      { id: 'terms', cap: 'Terms', title: 'Terms of Service', body: 't' },
+    ];
+    render(
+      <Wrapper>
+        <ConsentProgressTracker
+          docs={staleCap}
+          progress={{ readIds: [], currentId: 'privacy', fillPercent: 0, allRead: false }}
+        />
+      </Wrapper>,
+    );
+    expect(screen.getByTestId('consent-node-privacy')).toHaveTextContent(
+      messages.consent_gate.cap_privacy,
+    );
+    expect(screen.queryByText('stale-fallback-label')).not.toBeInTheDocument();
+  });
 });

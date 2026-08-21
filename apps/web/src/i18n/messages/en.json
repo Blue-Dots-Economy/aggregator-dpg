@@ -601,5 +601,17 @@
     "attachment_too_large": "Attachments must total no more than {size}.",
     "attachment_bad_type": "{name} isn't an accepted file type. Attach an image, video or audio file.",
     "rate_limited": "You've sent several messages recently. Please try again later."
+  },
+  "consent_gate": {
+    "eyebrow": "Before you continue",
+    "title": "Review & accept to continue",
+    "description": "Read straight through — the tracker follows as you go.",
+    "hint_scroll": "Scroll to the end to unlock the checkbox.",
+    "hint_done": "You have reached the end — you can agree now.",
+    "accept": "Accept & continue",
+    "close": "Close",
+    "cap_privacy": "Privacy",
+    "cap_terms": "Terms",
+    "cap_profile": "Profile"
   }
 }
