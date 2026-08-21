@@ -230,7 +230,7 @@ describe('<PublicRegistrationView /> account-only consent gate', () => {
     }
   });
 
-  it('cancelling the gate preserves the identity fields already entered', async () => {
+  it('cancelling the gate preserves the identity fields already entered, and the form stays submittable', async () => {
     // Important: `handleSubmit` sets `state.status` to `submitting` before
     // the (synchronous-when-`network`-is-unset) pre-submit probe resolves,
     // which used to fail the `isAccountOnly && state.status === 'idle'`
@@ -239,6 +239,17 @@ describe('<PublicRegistrationView /> account-only consent gate', () => {
     // gate set `status` back to `idle`, remounting a brand-new (empty)
     // instance underneath the now-open gate. Cancelling used to reveal that
     // empty form; this proves the fields survive the whole round trip.
+    //
+    // Field values alone are not enough, though — asserting only those is
+    // exactly what let a real regression through once already: fixing the
+    // remount left MinimalIdentityForm's own local `submitting` flag (set on
+    // submit, never reset anywhere in the file) permanently `true` once the
+    // form stopped being torn down and rebuilt on every transition, so the
+    // Submit button stayed disabled forever after the very first submit —
+    // dead exactly the way a field operator correcting a typo would hit it.
+    // So this also asserts the button is enabled again after cancelling, and
+    // that a second submit genuinely re-opens the gate rather than silently
+    // no-op'ing on a disabled button.
     renderView({ showConsent: true });
     fillAndTickCallConsent();
 
@@ -247,7 +258,8 @@ describe('<PublicRegistrationView /> account-only consent gate', () => {
     expect(nameInput).toHaveValue('Jane Doe');
     expect(phoneInput).toHaveValue('9876543210');
 
-    fireEvent.click(screen.getByRole('button', { name: /submit/i }));
+    const submitButton = screen.getByRole('button', { name: /submit/i });
+    fireEvent.click(submitButton);
     await screen.findByRole('dialog');
 
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
@@ -256,6 +268,12 @@ describe('<PublicRegistrationView /> account-only consent gate', () => {
     expect(screen.getByLabelText(/Name/)).toHaveValue('Jane Doe');
     expect(screen.getByLabelText(/Phone/)).toHaveValue('9876543210');
     expect(screen.getByRole('checkbox', { name: /permit the aggregator/i })).toBeChecked();
+
+    // The regression this pins: without it, this button stays disabled
+    // forever and the second click below would never re-open the gate.
+    expect(screen.getByRole('button', { name: /submit/i })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: /submit/i }));
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
   });
 
   it('shows a visible error instead of a dead submit when consent copy failed to load', async () => {

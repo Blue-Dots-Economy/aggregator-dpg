@@ -1081,11 +1081,15 @@ export function PublicRegistrationView({
   // again (e.g. once the gate needs to open, which sets `status` back to
   // `idle`). Same defect family as the gate's own mount-timing bug: state
   // that has nothing to do with rendering was, transiently, choosing to tear
-  // a subtree down and rebuild it. `submitting` needs no separate visual
-  // treatment here — MinimalIdentityForm already disables its own submit
-  // button via its own local `submitting` state. Once the outcome is truly
-  // `done` or `error`, this branch correctly falls through to the shared
-  // done/error views below, same as the full-profile surface.
+  // a subtree down and rebuild it. `submitting` needs the SAME `busy` prop
+  // passed to `MinimalIdentityForm` below that a submitting full-profile
+  // form's own button already reads off this state — the form has no local
+  // in-flight flag of its own to fall back on (removed: a second source of
+  // truth for the same fact is what let its button get stuck disabled
+  // forever the first time this branch stopped unmounting the form on every
+  // transition). Once the outcome is truly `done` or `error`, this branch
+  // correctly falls through to the shared done/error views below, same as
+  // the full-profile surface.
   if (isAccountOnly && (state.status === 'idle' || state.status === 'submitting') && !lookup) {
     return (
       <div
@@ -1105,9 +1109,11 @@ export function PublicRegistrationView({
           ) : (
             <>
               {backToChooser}
-              {/* This branch only renders while state is 'idle', so the parent
-                  has no in-flight signal to pass — the form's own internal
-                  submit guard prevents the double-tap during the async probe. */}
+              {/* This branch renders through both 'idle' and 'submitting' (see
+                  the guard above), so `busy` is threaded straight off
+                  `state.status` — the same in-flight signal the full-profile
+                  submit button reads off this state, and now the only one:
+                  MinimalIdentityForm has no local submitting flag of its own. */}
               <MinimalIdentityForm
                 identity={identity ?? {}}
                 onSubmit={handleMinimalSubmit}
@@ -1116,6 +1122,7 @@ export function PublicRegistrationView({
                 requirePhone={registrationMode === 'voice'}
                 showConsent={showConsent}
                 showBirthYear={showBirthYear}
+                busy={state.status === 'submitting'}
               />
             </>
           )}
