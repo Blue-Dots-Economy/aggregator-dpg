@@ -124,29 +124,27 @@ function splitIntoSections(
 }
 
 /**
- * Sections for the rail: the document's own repeated title heading (see
- * `isDocumentTitleHeading`) is dropped so the rail's first entry under a
- * group header is a real section, not the header's own label again.
- */
-function sectionsForRail(content: string, title: string): LegalSection[] {
-  const sections = extractSections(content);
-  const [leading] = sections;
-  if (leading && isDocumentTitleHeading(leading.heading, title)) {
-    return sections.slice(1);
-  }
-  return sections;
-}
-
-/**
- * Reassigns ids across every audience group's current-doc sections so two
- * audiences that happen to share a heading (all three consent audiences
- * carry a "Grievances" section, for example) don't collide into duplicate
- * DOM ids on the same `/privacy` or `/terms` page. Uses the same
+ * Reassigns ids across every audience group's sections for a given document
+ * so two audiences that happen to share a heading (all three consent
+ * audiences carry a "Grievances" section, for example) don't collide into
+ * duplicate DOM ids on the same `/privacy` or `/terms` page. Uses the same
  * first-occurrence-keeps-its-id, later-occurrences-get-a-numeric-suffix
  * scheme as `extractSections`' own within-document dedup, just applied once
  * more across the whole page.
  *
- * @param sectionsPerGroup - Each audience group's sections, in render order.
+ * Computed once per document and shared by both consumers that need these
+ * ids — the rail's `href="#id"` anchors and the reading column's `id="id"`
+ * headings — so they read from the exact same array instead of each parsing
+ * the Markdown again on its own and risking drifting apart (which is what
+ * happened before this fix: the rail called `extractSections` fresh per
+ * group with no cross-group dedup, so every audience's rail entry pointed at
+ * the bare, undeduped id — e.g. three "Grievances" rail links all
+ * `href="#grievances"` — while only the headings actually got the
+ * `-2`/`-3` suffixes, so two of the three links silently jumped to the
+ * wrong audience's section).
+ *
+ * @param sectionsPerGroup - Each audience group's sections for one document,
+ *   in render order.
  * @returns The same sections, with `id` made unique across all of them.
  */
 function dedupeAcrossGroups(sectionsPerGroup: RenderableSection[][]): RenderableSection[][] {
@@ -202,18 +200,23 @@ function RailSections({
  * version/effective-date line is shown once, in the reading column, rather
  * than repeated here — otherwise two audiences at the same version would
  * render the identical "Version N" text twice on one page.
+ *
+ * `sections` is passed in already deduped across audience groups (see
+ * `dedupeAcrossGroups`) — this component does not parse the Markdown itself,
+ * so the rail's `href`s and the reading column's heading `id`s can never
+ * drift apart the way they did before this fix.
  */
 function RailDocument({
   doc,
   isCurrent,
   entry,
+  sections,
 }: {
   doc: LegalDoc;
   isCurrent: boolean;
   entry: DocEntry;
+  sections: LegalSection[];
 }) {
-  const sections = sectionsForRail(entry.content, entry.title);
-
   return (
     <div className={cn('mb-3', !isCurrent && 'opacity-60')}>
       <Link
@@ -278,14 +281,22 @@ export function LegalDocumentView({
     );
   }
 
-  // Each group's current-doc sections, deduped across the whole page so two
-  // audiences sharing a heading (e.g. "Grievances") don't collide into
-  // duplicate DOM ids.
-  const perGroupSplit = groups.map((group) => {
-    const entry = group.content[doc];
-    return splitIntoSections(entry.content, entry.title);
-  });
-  const dedupedSections = dedupeAcrossGroups(perGroupSplit.map((s) => s.sections));
+  // Split + cross-group-dedupe *both* documents' sections once, up front,
+  // keyed by doc then by group index. The rail (current-doc anchors, other-
+  // doc route links) and the reading column's headings for the current doc
+  // both read from this same array — one computation, shared consumers — so
+  // a rail `href="#id"` and its matching heading's `id` cannot drift apart
+  // the way they did before this fix.
+  const splitByDoc = Object.fromEntries(
+    DOC_ORDER.map((d) => [
+      d,
+      groups.map((group) => splitIntoSections(group.content[d].content, group.content[d].title)),
+    ]),
+  ) as Record<LegalDoc, { preamble: string; sections: RenderableSection[] }[]>;
+
+  const dedupedSectionsByDoc = Object.fromEntries(
+    DOC_ORDER.map((d) => [d, dedupeAcrossGroups(splitByDoc[d].map((s) => s.sections))]),
+  ) as Record<LegalDoc, RenderableSection[][]>;
 
   return (
     <div className="min-h-svh bg-(--bd-bg) px-6 py-12">
@@ -295,13 +306,19 @@ export function LegalDocumentView({
             aria-label="Contents"
             className="md:sticky md:top-6 md:h-fit md:self-start md:border-r md:border-(--bd-border) md:pr-6"
           >
-            {groups.map((group) => (
+            {groups.map((group, gi) => (
               <div key={group.audience} className="mb-6">
                 <p className="mb-2 text-[11px] font-bold uppercase tracking-wide text-ink-500">
                   {group.label}
                 </p>
                 {DOC_ORDER.map((d) => (
-                  <RailDocument key={d} doc={d} isCurrent={d === doc} entry={group.content[d]} />
+                  <RailDocument
+                    key={d}
+                    doc={d}
+                    isCurrent={d === doc}
+                    entry={group.content[d]}
+                    sections={dedupedSectionsByDoc[d][gi]!}
+                  />
                 ))}
               </div>
             ))}
@@ -314,8 +331,8 @@ export function LegalDocumentView({
 
             {groups.map((group, i) => {
               const entry = group.content[doc];
-              const { preamble } = perGroupSplit[i]!;
-              const sections = dedupedSections[i]!;
+              const { preamble } = splitByDoc[doc][i]!;
+              const sections = dedupedSectionsByDoc[doc][i]!;
               return (
                 <section
                   key={group.audience}

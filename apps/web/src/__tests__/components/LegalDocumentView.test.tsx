@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
 import type { ReactNode } from 'react';
 import messages from '@/i18n/messages/en.json';
@@ -156,37 +156,97 @@ describe('<LegalDocumentView />', () => {
     expect(heading).toHaveAttribute('id', 'retention');
   });
 
+  // Three audiences, all carrying a colliding "### Grievances" section under
+  // Privacy Policy — the real shape: every real audience's Privacy Policy
+  // document has one (verified against the live config).
+  const collidingGroups: LegalGroup[] = [
+    {
+      audience: 'participant',
+      label: 'For participants',
+      content: {
+        privacy: {
+          version: 1,
+          title: 'Privacy Policy',
+          content: '## Privacy Policy\n### Grievances\nparticipant body',
+        },
+        terms: { version: 1, title: 'Terms of Service', content: '## Terms of Service' },
+      },
+    },
+    {
+      audience: 'aggregator',
+      label: 'For aggregators',
+      content: {
+        privacy: {
+          version: 1,
+          title: 'Privacy Policy',
+          content: '## Privacy Policy\n### Grievances\naggregator body',
+        },
+        terms: { version: 1, title: 'Terms of Service', content: '## Terms of Service' },
+      },
+    },
+    {
+      audience: 'org',
+      label: 'For organisations',
+      content: {
+        privacy: {
+          version: 1,
+          title: 'Privacy Policy',
+          content: '## Privacy Policy\n### Grievances\norg body',
+        },
+        terms: { version: 1, title: 'Terms of Service', content: '## Terms of Service' },
+      },
+    },
+  ];
+
   it('gives colliding section ids across audiences a unique suffix so anchors do not clash', () => {
-    const collidingGroups: LegalGroup[] = [
-      {
-        audience: 'participant',
-        label: 'For participants',
-        content: {
-          privacy: {
-            version: 1,
-            title: 'Privacy Policy',
-            content: '## Privacy Policy\n### Grievances\na',
-          },
-          terms: { version: 1, title: 'Terms of Service', content: '## Terms of Service' },
-        },
-      },
-      {
-        audience: 'aggregator',
-        label: 'For aggregators',
-        content: {
-          privacy: {
-            version: 1,
-            title: 'Privacy Policy',
-            content: '## Privacy Policy\n### Grievances\nb',
-          },
-          terms: { version: 1, title: 'Terms of Service', content: '## Terms of Service' },
-        },
-      },
-    ];
     renderView('privacy', collidingGroups);
     const headings = screen.getAllByRole('heading', { name: 'Grievances' });
     const ids = headings.map((h) => h.id);
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids).toContain('grievances');
+  });
+
+  // Regression for a half-fix: cross-group dedup was applied to the rendered
+  // headings but not threaded into the rail's hrefs, so all three "Grievances"
+  // rail links pointed at the same bare "#grievances" — two of three silently
+  // jumped to the wrong audience's section instead of their own. This proves
+  // *correspondence* (each rail entry's href resolves to exactly one heading,
+  // which belongs to that same audience's reading section), not just that the
+  // heading ids happen to be unique.
+  it('each audience group’s rail link resolves to that same audience’s heading, not another’s', () => {
+    const { container } = renderView('privacy', collidingGroups);
+
+    for (const [label, audience] of [
+      ['For participants', 'participant'],
+      ['For aggregators', 'aggregator'],
+      ['For organisations', 'org'],
+    ] as const) {
+      // Scope to this audience's rail group (the <div> wrapping its <p> label
+      // and its two RailDocument rows).
+      const groupContainer = screen.getByText(label).closest('div');
+      expect(groupContainer).not.toBeNull();
+      const link = within(groupContainer!).getByRole('link', { name: 'Grievances' });
+      const href = link.getAttribute('href');
+      expect(href).toMatch(/^#/);
+      const targetId = href!.slice(1);
+
+      // Exactly one element carries that id.
+      const matches = container.querySelectorAll(`#${CSS.escape(targetId)}`);
+      expect(matches).toHaveLength(1);
+      const heading = matches[0]!;
+      expect(heading.tagName).toBe('H3');
+      expect(heading.textContent).toBe('Grievances');
+
+      // And it must live inside *this* audience's reading section, not
+      // another audience's — the actual bug: an org rail link landing on the
+      // participant heading because both rendered as bare "#grievances".
+      const readingSection = screen.getByRole('region', { name: label });
+      expect(readingSection.contains(heading)).toBe(true);
+
+      // Sanity: the section's body text is this audience's own copy, not a
+      // different audience's — confirms we didn't just get lucky landing on
+      // *a* Grievances heading that happens to sit inside the right section.
+      expect(readingSection.textContent).toContain(`${audience} body`);
+    }
   });
 });
