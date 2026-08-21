@@ -14,6 +14,8 @@ import { MinimalIdentityForm, type MinimalIdentityPayload } from './MinimalIdent
 import { SignalsSignInCta, useSignalsHandoffUrl } from './SignalsSignInCta';
 import { LanguageSwitcher } from '../../../components/shell/LanguageSwitcher';
 import { ConsentModal, type ConsentTab } from '../../../components/consent/ConsentModal';
+import { ConsentGate } from '../../../components/consent/ConsentGate';
+import { toConsentDocs } from '../../../components/consent/consent-docs';
 import type { ParticipantConsent } from '../../../components/consent/consent-types';
 
 /**
@@ -136,14 +138,17 @@ export function PublicRegistrationView({
   consentContent = null,
 }: PublicRegistrationViewProps): JSX.Element {
   const t = useTranslations('profile.public_reg');
-  // Terms/Privacy modal for the participant consent copy (§4.1).
+  // The empty-consent-docs error banner reuses the register forms' copy
+  // (§Task 7) rather than inventing a second "consent unavailable" string.
+  const tRegister = useTranslations('register');
+  // Terms/Privacy modal for the participant consent copy (§4.1), opened
+  // read-only from the pre-form chooser / MinimalIdentityForm. The blocking
+  // three-document gate below is the actual consent-collection surface for
+  // the full-profile form.
   const [consentModal, setConsentModal] = useState<{ open: boolean; tab: ConsentTab }>({
     open: false,
     tab: 'terms',
   });
-  // Profile-creation consent has its OWN statement (a separate consent point),
-  // shown in its own lightweight modal — not the Terms/Privacy one.
-  const [profileConsentModal, setProfileConsentModal] = useState(false);
   const [formData, setFormData] = useState<Record<string, unknown>>({});
   /**
    * #652: has the user chosen "Register" on the pre-form chooser? Pure view
@@ -176,10 +181,20 @@ export function PublicRegistrationView({
   // submit button — disabled until every visible required field is valid.
   const [canSubmit, setCanSubmit] = useState(false);
   // Single consent acceptance covering terms + privacy + profile-creation
-  // (§3.1's three points). Gates the submit button and is sent as
-  // consent_terms / consent_privacy / consent_profile (all true on accept),
-  // validated server-side (CONSENT_REQUIRED).
+  // (§3.1's three points), collected through the blocking ConsentGate rather
+  // than an inline checkbox. Feeds consent_terms / consent_privacy /
+  // consent_profile (all true on accept), validated server-side
+  // (CONSENT_REQUIRED). Also governs whether a retry after a failed
+  // submission re-opens the gate — once true, it stays true for the rest of
+  // this session.
   const [consentAccepted, setConsentAccepted] = useState(false);
+  // Whether the blocking consent gate is open. Opened by `handleSubmit` when
+  // consent is required and not yet accepted; closed on accept or cancel.
+  const [gateOpen, setGateOpen] = useState(false);
+  // Holds the RJSF formData a submit attempt was made with, so it can be
+  // resubmitted once the gate is accepted (the accept callback has no event
+  // to read formData from).
+  const pendingValuesRef = useRef<Record<string, unknown> | null>(null);
   // Year of birth → derived age (§4.4 snapshot: no birthdate stored). Drives
   // the U18 branch and the compliance `age`, independent of the profile's own
   // `age` schema field. A minor still submits, but without consent — the API
@@ -222,6 +237,30 @@ export function PublicRegistrationView({
   const showBirthYear = domainRequiresBirthYear(domainCfg);
   const showConsent = registrationShowsConsent(domainCfg);
   const errorRef = useRef<HTMLDivElement>(null);
+  // `account_only` shape locks the form to identity fields only — render
+  // MinimalIdentityForm and skip the RJSF profile tree entirely. Moved above
+  // `handleSubmit` (rather than computed just before its own render branch,
+  // as before) because handleSubmit's consent-gate check needs it: the
+  // minimal form collects its own consent via its own checkbox and must
+  // never have this view's three-document gate opened on top of it.
+  const isAccountOnly = submissionShape === 'account_only';
+  // Flattens the participant consent copy into the ordered document list the
+  // blocking ConsentGate reads. `null`/`undefined` (loadParticipantConsent
+  // failed, or the caller omitted it) yields an empty list — handleSubmit
+  // surfaces a visible error instead of opening a gate with nothing to show.
+  const consentDocs = useMemo(() => toConsentDocs(consentContent ?? undefined), [consentContent]);
+  // The existing copy already covers all three consent points (terms,
+  // privacy, profile-creation) in one sentence — unchanged from the inline
+  // checkbox it replaces.
+  const agreeLabel = `${t('consent_accept_prefix')}${t('consent_docs_link')}${t('consent_profile_conjunction')}`;
+  // Whether a full-profile submit must go through the gate before posting:
+  // never for the minimal identity form (it collects its own consent), never
+  // for a minor (guardian-gated domains never collect consent here — terms
+  // are accepted later in the Signalstack app), never when the domain
+  // doesn't show the consent step, and never once consent has already been
+  // accepted this session (so a retry after a failed submit doesn't re-open
+  // the gate).
+  const needsConsent = !isAccountOnly && showConsent && !isMinor && !consentAccepted;
 
   // Submit button sits below a long form; on failure pull the error
   // banner into view + focus so the user sees why nothing happened.
@@ -478,24 +517,21 @@ export function PublicRegistrationView({
     );
   };
 
-  const handleSubmit = async (
-    e: IChangeEvent<Record<string, unknown>>,
-    _event: FormEvent<HTMLFormElement>,
+  /**
+   * The actual POST — split out of {@link handleSubmit} so it can run either
+   * immediately (no consent needed) or after the gate is accepted, without
+   * threading through a second probe. `consentGiven` is passed explicitly
+   * rather than read off `consentAccepted` state: the gate's accept callback
+   * calls this in the same tick it calls `setConsentAccepted(true)`, and that
+   * state update is not visible to this closure until the next render.
+   *
+   * @param values - RJSF formData (or the minimal-identity payload).
+   * @param consentGiven - Whether to stamp consent_terms/privacy/profile true.
+   */
+  const performSubmit = async (
+    values: Record<string, unknown>,
+    consentGiven: boolean,
   ): Promise<void> => {
-    const values = (e.formData ?? {}) as Record<string, unknown>;
-    // Pre-submit probe. Skipped when the user has explicitly chosen
-    // "Continue with a new submission" after a resume prompt.
-    if (!bypassProbe) {
-      setState({ status: 'submitting' });
-      const outcome = await runIdentityProbe(values);
-      if (outcome.kind !== 'allow') {
-        setLookup(outcome);
-        setState({ status: 'idle' });
-        return;
-      }
-    } else {
-      setBypassProbe(false);
-    }
     setLookup(null);
     setState({ status: 'submitting' });
     try {
@@ -518,9 +554,9 @@ export function PublicRegistrationView({
             ...values,
             ...(showConsent
               ? {
-                  consent_terms: consentAccepted,
-                  consent_privacy: consentAccepted,
-                  consent_profile: consentAccepted,
+                  consent_terms: consentGiven,
+                  consent_privacy: consentGiven,
+                  consent_profile: consentGiven,
                 }
               : {}),
             ...(showBirthYear ? { year_of_birth: yearOfBirth.trim() } : {}),
@@ -571,16 +607,59 @@ export function PublicRegistrationView({
     }
   };
 
+  const handleSubmit = async (
+    e: IChangeEvent<Record<string, unknown>>,
+    _event: FormEvent<HTMLFormElement>,
+  ): Promise<void> => {
+    const values = (e.formData ?? {}) as Record<string, unknown>;
+    // Pre-submit probe. Skipped when the user has explicitly chosen
+    // "Continue with a new submission" after a resume prompt.
+    if (!bypassProbe) {
+      setState({ status: 'submitting' });
+      const outcome = await runIdentityProbe(values);
+      if (outcome.kind !== 'allow') {
+        setLookup(outcome);
+        setState({ status: 'idle' });
+        return;
+      }
+    } else {
+      setBypassProbe(false);
+    }
+    setLookup(null);
+
+    if (needsConsent) {
+      // The consent copy failed to load (loadParticipantConsent errored at
+      // boot): the gate would have nothing to show. Surface a visible error
+      // instead of opening an invisible gate, which is a dead submit button
+      // with no explanation — a Critical on the previous task's register
+      // forms, fixed there the same way.
+      if (consentDocs.length === 0) {
+        setState({
+          status: 'error',
+          title: tRegister('consent.load_failed_title'),
+          detail: tRegister('consent.load_failed_detail'),
+          code: 'CONSENT_UNAVAILABLE',
+        });
+        return;
+      }
+      pendingValuesRef.current = values;
+      setGateOpen(true);
+      setState({ status: 'idle' });
+      return;
+    }
+
+    await performSubmit(values, consentAccepted);
+  };
+
+  /** Accepting the gate: records consent, closes it, and resubmits. */
+  const handleGateAccept = (): void => {
+    setGateOpen(false);
+    setConsentAccepted(true);
+    void performSubmit(pendingValuesRef.current ?? {}, true);
+  };
+
   // Hero fill — flat solid primary. No gradient shades.
   const heroGradient = cfg.brand.primary_color ?? '#4338ca';
-
-  // `account_only` shape locks the form to identity fields only — render
-  // MinimalIdentityForm and skip the RJSF profile tree entirely. Owned-
-  // elsewhere / resume / done / error states stay shared with the full form
-  // path; only the data-entry surface differs. The full handleSubmit
-  // pipeline runs underneath via handleMinimalSubmit so probe + dedup + 409
-  // handling behave identically.
-  const isAccountOnly = submissionShape === 'account_only';
 
   // #652: whether to show the chooser is a config-driven decision. Painting a
   // surface off the default config and swapping it a beat later would flash
@@ -1000,65 +1079,25 @@ export function PublicRegistrationView({
                           </select>
                         </label>
                       )}
-                      {showConsent &&
-                        (isMinor ? (
-                          // Minor: no consent here — Signals creates the account
-                          // without it; terms are accepted in the Signalstack app
-                          // after signing in. Submit still proceeds.
-                          <div className="rounded-[12px] border border-(--bd-border) bg-(--bd-primary-50) px-4 py-3.5 text-[14px] text-(--bd-fg)">
-                            {t('u18_notice')}
-                          </div>
-                        ) : (
-                          <div className="flex items-start gap-2.5 rounded-[12px] border border-(--bd-border) px-4 py-3.5 text-[14px] text-(--bd-fg)">
-                            <input
-                              id="consent-all"
-                              type="checkbox"
-                              checked={consentAccepted}
-                              onChange={(e) => setConsentAccepted(e.target.checked)}
-                              className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer"
-                              aria-required
-                            />
-                            <span>
-                              {consentContent ? (
-                                <>
-                                  {t('consent_accept_prefix')}
-                                  <button
-                                    type="button"
-                                    className="underline text-(--bd-primary-600)"
-                                    onClick={() => setConsentModal({ open: true, tab: 'terms' })}
-                                  >
-                                    {t('consent_docs_link')}
-                                  </button>
-                                  {t('consent_profile_conjunction')}
-                                  {consentContent.profileCreation && (
-                                    <>
-                                      {' '}
-                                      <button
-                                        type="button"
-                                        className="underline text-(--bd-primary-600)"
-                                        onClick={() => setProfileConsentModal(true)}
-                                      >
-                                        {t('consent_profile_link')}
-                                      </button>
-                                    </>
-                                  )}
-                                </>
-                              ) : (
-                                t('consent_label')
-                              )}
-                            </span>
-                          </div>
-                        ))}
+                      {showConsent && isMinor && (
+                        // Minor: no consent here — Signals creates the account
+                        // without it; terms are accepted in the Signalstack app
+                        // after signing in. Submit still proceeds.
+                        <div className="rounded-[12px] border border-(--bd-border) bg-(--bd-primary-50) px-4 py-3.5 text-[14px] text-(--bd-fg)">
+                          {t('u18_notice')}
+                        </div>
+                      )}
                       {(() => {
-                        // #613: birth-year + consent are config-driven per domain —
-                        // require a valid birth year only when it's collected, and
-                        // consent only when the domain gates go-live on it (a minor
-                        // on a guardian domain still submits without consent).
+                        // #613: birth-year is config-driven per domain — require a
+                        // valid birth year only when it's collected. Consent itself
+                        // is no longer a button-disable condition: submitting opens
+                        // the blocking ConsentGate (via `needsConsent` in
+                        // handleSubmit) when it applies, and a minor on a guardian
+                        // domain still submits without consent either way.
                         const blocked =
                           state.status === 'submitting' ||
                           !canSubmit ||
-                          (showBirthYear && !yobValid) ||
-                          (showConsent && !isMinor && !consentAccepted);
+                          (showBirthYear && !yobValid);
                         return (
                           <button
                             type="submit"
@@ -1093,40 +1132,13 @@ export function PublicRegistrationView({
           content={consentContent}
         />
       )}
-      {consentContent?.profileCreation && profileConsentModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
-          role="dialog"
-          aria-modal="true"
-        >
-          <div className="relative max-w-md w-full rounded-[14px] bg-white p-6 shadow-xl">
-            <button
-              type="button"
-              aria-label={t('consent_profile_modal_close')}
-              className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full text-ink-400 hover:bg-(--bd-primary-50) hover:text-ink-700"
-              onClick={() => setProfileConsentModal(false)}
-            >
-              <I.x size={18} />
-            </button>
-            <h2 className="font-display font-bold text-[16px] text-(--bd-fg) pr-8">
-              {t('consent_profile_modal_title')}
-            </h2>
-            <p className="mt-3 text-[14px] text-ink-700">
-              {consentContent.profileCreation.statement}
-            </p>
-            <div className="mt-5 flex justify-end">
-              <button
-                type="button"
-                className="rounded-[10px] px-4 py-2 text-[14px] font-semibold text-white"
-                style={{ backgroundColor: cfg.brand.primary_color }}
-                onClick={() => setProfileConsentModal(false)}
-              >
-                {t('consent_profile_modal_agree')}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConsentGate
+        open={gateOpen}
+        docs={consentDocs}
+        agreeLabel={agreeLabel}
+        onAccept={handleGateAccept}
+        onCancel={() => setGateOpen(false)}
+      />
     </div>
   );
 }

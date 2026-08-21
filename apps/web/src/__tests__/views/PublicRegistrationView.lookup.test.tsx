@@ -7,7 +7,7 @@
  * RJSF rendering surface (covered by RJSF's own tests).
  */
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import messages from '@/i18n/messages/en.json';
@@ -54,27 +54,65 @@ vi.mock('@/components/forms/RjsfThemed', () => {
   };
 });
 
+// Shim ConsentGate for the one test that exercises the gate wiring (submit →
+// open → accept → resubmit): its own scroll-to-unlock mechanics are covered
+// by ConsentGate.test.tsx, so this file only needs to reach in and fire
+// `onAccept`. Same shimming approach as OrgRegisterForm.test.tsx.
+let capturedGateProps: { open: boolean; onAccept: () => void; onCancel?: () => void } | undefined;
+
+vi.mock('@/components/consent/ConsentGate', () => ({
+  ConsentGate: (props: { open: boolean; onAccept: () => void; onCancel?: () => void }) => {
+    capturedGateProps = props;
+    if (!props.open) return null;
+    return <div role="dialog" aria-label="consent-gate-shim" />;
+  },
+}));
+
+/** Waits for the shimmed gate to open and returns its captured props. */
+const gateShim = {
+  async opened() {
+    await waitFor(() => expect(capturedGateProps?.open).toBe(true));
+    return capturedGateProps!;
+  },
+};
+
 // useAggregatorConfig hits the BFF. We don't need its real behaviour here.
-// vi.mock factories are hoisted — keep defaults inline (no shared const).
-vi.mock('@/hooks/useAggregatorConfig', () => {
-  const cfg = {
-    brand: { short_name: 'Test', primary_color: '#4338ca' },
-    // #613: guardian_consent_required drives the birth-year field; a
-    // go_live_required with consent_required drives the consent step. Both on
-    // here so the consent/U18 branches under test render.
-    domains: [
-      {
-        id: 'seeker',
-        label: 'Seeker',
-        guardian_consent_required: true,
-        go_live_required: ['schema_required', 'consent_required'],
-      },
-    ],
-  };
-  return {
-    useAggregatorConfig: () => ({ data: cfg, isLoading: false }),
-    DEFAULT_AGGREGATOR_CONFIG: cfg,
-  };
+// Most of this file exercises the probe/lookup/submit pipeline, which is
+// orthogonal to consent — those tests get a domain that doesn't show the
+// consent step at all, so the pipeline behaves exactly as it did before #636
+// Task 7 wired the blocking gate in. The two tests that actually exercise the
+// U18 / consent branches (`CONSENT_DOMAIN` below) opt in explicitly.
+const cfgMock = vi.hoisted(() => ({
+  value: undefined as Record<string, unknown> | undefined,
+}));
+vi.mock('@/hooks/useAggregatorConfig', () => ({
+  useAggregatorConfig: () => ({ data: cfgMock.value, isLoading: false }),
+  DEFAULT_AGGREGATOR_CONFIG: cfgMock.value,
+}));
+
+const NO_CONSENT_CFG = {
+  brand: { short_name: 'Test', primary_color: '#4338ca' },
+  domains: [{ id: 'seeker', label: 'Seeker' }],
+};
+
+// #613: guardian_consent_required drives the birth-year field; a
+// go_live_required with consent_required drives the consent step. Both on
+// here so the consent/U18 branches under test render.
+const CONSENT_DOMAIN_CFG = {
+  brand: { short_name: 'Test', primary_color: '#4338ca' },
+  domains: [
+    {
+      id: 'seeker',
+      label: 'Seeker',
+      guardian_consent_required: true,
+      go_live_required: ['schema_required', 'consent_required'],
+    },
+  ],
+};
+
+beforeEach(() => {
+  cfgMock.value = NO_CONSENT_CFG;
+  capturedGateProps = undefined;
 });
 
 // Pull the view after mocks register.
@@ -513,6 +551,7 @@ describe('<PublicRegistrationView /> — remaining branches', () => {
   });
 
   it('renders the U18 notice (no consent checkbox) for a minor year of birth and still submits', async () => {
+    cfgMock.value = CONSENT_DOMAIN_CFG;
     const currentYear = new Date().getFullYear();
     const fetchMock = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
       const url = input.toString();
@@ -546,7 +585,14 @@ describe('<PublicRegistrationView /> — remaining branches', () => {
     expect(submitBody.year_of_birth).toBe(String(currentYear - 10));
   });
 
-  it('adult path sends consent_terms/privacy/profile true when the checkbox is checked', async () => {
+  it('adult path opens the gate on submit and sends consent_terms/privacy/profile true on accept', async () => {
+    // #636 Task 7: consent no longer comes from an inline checkbox — the
+    // adult path now goes through the blocking ConsentGate. The gate's own
+    // scroll-to-unlock mechanics are covered by ConsentGate.test.tsx; here we
+    // exercise the wiring (submit opens it, accept resubmits with consent
+    // true), so ConsentGate is shimmed the same way OrgRegisterForm.test.tsx
+    // shims it.
+    cfgMock.value = CONSENT_DOMAIN_CFG;
     const currentYear = new Date().getFullYear();
     const fetchMock = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
       const url = input.toString();
@@ -563,12 +609,40 @@ describe('<PublicRegistrationView /> — remaining branches', () => {
     });
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
-    renderView();
+    render(
+      <QueryClientProvider
+        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+      >
+        <NextIntlClientProvider locale="en" messages={messages as Record<string, unknown>}>
+          <PublicRegistrationView
+            {...baseProps}
+            schema={{
+              ...baseProps.schema,
+              properties: {
+                ...baseProps.schema.properties,
+                email: { type: 'string', default: 'a@b.com' },
+              },
+            }}
+            consentContent={{
+              terms: { version: 1, title: 'Terms', content: 'Terms body' },
+              privacy: { version: 1, title: 'Privacy', content: 'Privacy body' },
+              profileCreation: { version: 1, statement: 'Profile statement.' },
+            }}
+          />
+        </NextIntlClientProvider>
+      </QueryClientProvider>,
+    );
     fireEvent.change(screen.getByLabelText(/Year of birth/), {
       target: { value: String(currentYear - 30) },
     });
-    fireEvent.click(screen.getByRole('checkbox'));
+    // No inline checkbox before the gate opens.
+    expect(screen.queryByRole('checkbox')).toBeNull();
+
     fireEvent.submit(screen.getByTestId('rjsf-shim'));
+    const gateProps = await gateShim.opened();
+    act(() => {
+      gateProps.onAccept();
+    });
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const submitBody = JSON.parse(String((fetchMock.mock.calls[1]![1] as RequestInit).body)) as {
@@ -581,38 +655,8 @@ describe('<PublicRegistrationView /> — remaining branches', () => {
     expect(submitBody.consent_profile).toBe(true);
   });
 
-  it('opens and closes the profile-creation consent modal', async () => {
-    globalThis.fetch = vi.fn() as unknown as typeof fetch;
-    render(
-      <QueryClientProvider
-        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
-      >
-        <NextIntlClientProvider locale="en" messages={messages as Record<string, unknown>}>
-          <PublicRegistrationView
-            {...baseProps}
-            consentContent={{
-              terms: { version: 1, title: 'Terms', content: 'T' },
-              privacy: { version: 1, title: 'Privacy', content: 'P' },
-              profileCreation: {
-                version: 1,
-                statement: 'We will use your data to build a profile.',
-              },
-            }}
-          />
-        </NextIntlClientProvider>
-      </QueryClientProvider>,
-    );
-
-    fireEvent.click(screen.getByText(messages.profile.public_reg.consent_profile_link));
-    expect(screen.getByText('We will use your data to build a profile.')).toBeInTheDocument();
-
-    fireEvent.click(
-      screen.getByRole('button', { name: messages.profile.public_reg.consent_profile_modal_agree }),
-    );
-    expect(screen.queryByText('We will use your data to build a profile.')).toBeNull();
-  });
-
   it('renders the MinimalIdentityForm for an account_only link and submits without a profile schema', async () => {
+    cfgMock.value = CONSENT_DOMAIN_CFG;
     const fetchMock = vi.fn(
       async () =>
         new Response(JSON.stringify({ outcome: 'passed', submission_id: 'sub-mini' }), {
