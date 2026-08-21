@@ -15,7 +15,7 @@
  * actually reach it.
  */
 import { describe, it, expect, vi, beforeAll } from 'vitest';
-import { render, screen, fireEvent, act } from '@testing-library/react';
+import { render, screen, fireEvent, act, waitFor } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import messages from '@/i18n/messages/en.json';
@@ -144,6 +144,86 @@ describe('<PublicRegistrationView /> consent gate', () => {
       await Promise.resolve();
     });
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('re-opens the gate for a second registration after "Register another", and cannot post consent without it', async () => {
+    // The Critical this pins: `handleRegisterAnother` used to reset
+    // formData/state/handoff but leave `consentAccepted` (and
+    // `yearOfBirth`) untouched. `needsConsentNow` is gated on
+    // `!consentAccepted`, so a second person submitted after "Register
+    // another" skipped the gate entirely and still posted
+    // consent_terms/consent_privacy/consent_profile: true — on the strength
+    // of the FIRST person having read the documents.
+    const originalFetch = globalThis.fetch;
+    const calls: { url: string; body: string }[] = [];
+    globalThis.fetch = vi.fn(async (input: unknown, init?: { body?: string }) => {
+      calls.push({ url: String(input), body: init?.body ?? '' });
+      return new Response(JSON.stringify({ submission_id: 'sub_1', outcome: 'passed' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch;
+
+    try {
+      renderView({ showConsent: true });
+
+      // --- Person #1: complete the gate for real. ---
+      fireEvent.submit(screen.getByTestId('rjsf-shim'));
+      await screen.findByRole('dialog');
+
+      const reader1 = screen.getByTestId('consent-reader');
+      // Three 300px sections (privacy/terms/profile) in a 200px viewport —
+      // 900px of scrollHeight total, so max scroll is scrollTop 700.
+      Object.defineProperty(reader1, 'scrollHeight', { value: 900, configurable: true });
+      Object.defineProperty(reader1, 'clientHeight', { value: 200, configurable: true });
+      Object.defineProperty(reader1, 'scrollTop', {
+        value: 700,
+        writable: true,
+        configurable: true,
+      });
+      const readerTop = 149;
+      reader1.getBoundingClientRect = () =>
+        ({ top: readerTop, height: 200, bottom: readerTop + 200 }) as DOMRect;
+      const contentTops: Record<string, number> = { privacy: 0, terms: 300, profile: 600 };
+      for (const id of ['privacy', 'terms', 'profile']) {
+        const section = reader1.querySelector<HTMLElement>(`[data-consent-section="${id}"]`)!;
+        section.getBoundingClientRect = () =>
+          ({
+            top: readerTop + contentTops[id]! - 700,
+            height: 300,
+            bottom: readerTop + contentTops[id]! - 700 + 300,
+          }) as DOMRect;
+      }
+      fireEvent.scroll(reader1);
+
+      const checkbox1 = screen.getByRole('checkbox');
+      await waitFor(() => expect(checkbox1).toBeEnabled());
+      fireEvent.click(checkbox1);
+      fireEvent.click(screen.getByRole('button', { name: 'Accept & continue' }));
+
+      await waitFor(() => expect(calls.length).toBe(1));
+      expect(JSON.parse(calls[0]!.body)['consent_terms']).toBe(true);
+
+      // --- Reaches "done", then "Register another". ---
+      await screen.findByRole('button', { name: messages.profile.public_reg.btn_register_another });
+      fireEvent.click(
+        screen.getByRole('button', { name: messages.profile.public_reg.btn_register_another }),
+      );
+
+      // Back on the form, gate closed — nothing was carried over visibly.
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(await screen.findByTestId('rjsf-shim')).toBeInTheDocument();
+
+      // --- Person #2: submitting again MUST re-open the gate. ---
+      fireEvent.submit(screen.getByTestId('rjsf-shim'));
+      expect(await screen.findByRole('dialog')).toBeInTheDocument();
+
+      // And the second person's consent is not yet posted — the gate is
+      // still waiting on them, not silently reusing person #1's acceptance.
+      expect(calls.length).toBe(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it('shows a visible error instead of a dead submit when consent copy failed to load', async () => {

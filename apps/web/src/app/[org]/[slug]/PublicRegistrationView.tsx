@@ -1,6 +1,7 @@
 'use client';
 
 import Image from 'next/image';
+import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import type { RJSFSchema, UiSchema } from '@rjsf/utils';
 import type { IChangeEvent } from '@rjsf/core';
@@ -23,6 +24,34 @@ import type { ParticipantConsent } from '../../../components/consent/consent-typ
  */
 const PAGE_BACKGROUND =
   'radial-gradient(1200px 600px at 50% -10%, var(--bd-tint-primary), transparent 70%), #FBFCFE';
+
+/**
+ * Small in-page footer linking to the read-only `/privacy` and `/terms`
+ * pages (§4.1's `LegalDocumentView`). Once the blocking `ConsentGate` closes
+ * (accepted or cancelled), nothing else on this page links there — a
+ * registrant who wants to re-read what they agreed to, or a chooser/error
+ * state that never reached the gate at all, otherwise has no in-product
+ * path to either document. Reuses `register.consent.privacy_link` /
+ * `terms_link` rather than adding new strings: the copy ("Privacy Policy" /
+ * "Terms of Service") is identical, just no longer embedded in a sentence.
+ *
+ * @param props - The `register` namespace translator, threaded down rather
+ *   than calling `useTranslations` again for two strings.
+ * @returns The footer link row.
+ */
+function FooterLegalLinks({ tRegister }: { tRegister: (key: string) => string }): JSX.Element {
+  return (
+    <div className="mt-6 flex items-center justify-center gap-3 text-[12.5px] text-ink-500">
+      <Link href="/privacy" className="underline-offset-2 hover:text-ink-900 hover:underline">
+        {tRegister('consent.privacy_link')}
+      </Link>
+      <span aria-hidden="true">·</span>
+      <Link href="/terms" className="underline-offset-2 hover:text-ink-900 hover:underline">
+        {tRegister('consent.terms_link')}
+      </Link>
+    </div>
+  );
+}
 
 export interface PublicRegistrationViewProps {
   org: string;
@@ -997,6 +1026,21 @@ export function PublicRegistrationView({
             setFormData({});
             setShowValidation(false);
             setState({ status: 'idle' });
+            // Reset consent and age for the NEXT person, not the next attempt
+            // at the SAME person's submission. `consentAccepted` gates
+            // `needsConsentNow`; leaving it true here means person #2 never
+            // sees the gate and still ships consent_terms/consent_privacy/
+            // consent_profile: true on the strength of person #1 having read
+            // the documents — the one thing this feature exists to prevent,
+            // and worse than the inline checkbox it replaced. `yearOfBirth`
+            // carries the same risk: left set, a minor's year of birth makes
+            // person #2 inherit minor status and skip the gate too, whatever
+            // their actual age. The stickiness this handler is otherwise
+            // careful to preserve — surviving a failed retry of the *same*
+            // submission — only ever meant "don't lose progress mid-attempt",
+            // never "carry it to a different person".
+            setConsentAccepted(false);
+            setYearOfBirth('');
             // Cancel the #635 hand-off: a field operator registering people
             // back-to-back must not be bounced to Signals. Nulling the state
             // also beats an already-queued final tick, whose updater bails on
@@ -1027,7 +1071,22 @@ export function PublicRegistrationView({
     activeView = 'form';
   }
 
-  if (isAccountOnly && state.status === 'idle' && !lookup) {
+  // `idle` OR `submitting`, not `idle` alone: `handleSubmit` flips
+  // `state.status` to `submitting` synchronously before the async
+  // pre-submit probe resolves (and again, briefly, if the gate isn't needed
+  // and it falls straight into `performSubmit`). `MinimalIdentityForm`'s
+  // name/phone/email/birth-year/consentCall are all component-local state —
+  // gating this branch on `idle` alone unmounted it for that window, and
+  // remounted a brand-new (empty) instance the moment the branch became true
+  // again (e.g. once the gate needs to open, which sets `status` back to
+  // `idle`). Same defect family as the gate's own mount-timing bug: state
+  // that has nothing to do with rendering was, transiently, choosing to tear
+  // a subtree down and rebuild it. `submitting` needs no separate visual
+  // treatment here — MinimalIdentityForm already disables its own submit
+  // button via its own local `submitting` state. Once the outcome is truly
+  // `done` or `error`, this branch correctly falls through to the shared
+  // done/error views below, same as the full-profile surface.
+  if (isAccountOnly && (state.status === 'idle' || state.status === 'submitting') && !lookup) {
     return (
       <div
         className="bd-public-light min-h-screen w-full"
@@ -1060,6 +1119,7 @@ export function PublicRegistrationView({
               />
             </>
           )}
+          <FooterLegalLinks tRegister={tRegister} />
         </div>
         {consentGateElement}
       </div>
@@ -1367,6 +1427,8 @@ export function PublicRegistrationView({
             )}
           </div>
         </div>
+
+        <FooterLegalLinks tRegister={tRegister} />
       </div>
       {consentGateElement}
     </div>

@@ -178,6 +178,20 @@ export function RegisterView({
               {...(aggregatorConsentContent ? { consentContent: aggregatorConsentContent } : {})}
             />
           )}
+
+          {/* Once the blocking ConsentGate closes, nothing else on this page
+              links to the read-only /privacy or /terms pages (§4.1's
+              LegalDocumentView) — reuses the existing consent.*_link copy
+              rather than adding new strings, since the words are identical. */}
+          <div className="mt-8 flex items-center justify-center gap-3 text-[12.5px] text-ink-500">
+            <Link href="/privacy" className="underline-offset-2 hover:text-ink-900 hover:underline">
+              {t('consent.privacy_link')}
+            </Link>
+            <span aria-hidden="true">·</span>
+            <Link href="/terms" className="underline-offset-2 hover:text-ink-900 hover:underline">
+              {t('consent.terms_link')}
+            </Link>
+          </div>
         </div>
       </div>
     </div>

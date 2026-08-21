@@ -18,7 +18,7 @@
  * surface.
  */
 import { describe, it, expect, vi, beforeAll } from 'vitest';
-import { render, screen, fireEvent, act } from '@testing-library/react';
+import { render, screen, fireEvent, act, waitFor } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import messages from '@/i18n/messages/en.json';
@@ -29,6 +29,13 @@ import type { ParticipantConsent } from '@/components/consent/consent-types';
 beforeAll(() => {
   Element.prototype.scrollIntoView = vi.fn();
 });
+
+// This file's tests render the full view tree (react-query + the real
+// ConsentGate) more than once each; observed to occasionally trip the
+// default 5s timeout under concurrent system load even though the actual
+// work completes in ~1-2s (confirmed by rerunning slow instances with a
+// larger timeout, which pass comfortably well under it) — not a hang.
+vi.setConfig({ testTimeout: 15000 });
 
 // ResizeObserver is stubbed globally in src/__tests__/setup.ts.
 
@@ -161,6 +168,94 @@ describe('<PublicRegistrationView /> account-only consent gate', () => {
       await Promise.resolve();
     });
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('mounts the gate closed, opens it on submit, and completes it after scrolling to the end', async () => {
+    // Unlike every other test in this file, which only checks the gate
+    // OPENS, this drives it all the way through — the real reproduction of
+    // the mount-timing Critical: `ConsentGate` mounts closed (nothing in the
+    // DOM for `useReadProgress` to measure), `handleSubmit` flips it open,
+    // and only a gate that re-measures on THAT transition can ever unlock.
+    const originalFetch = globalThis.fetch;
+    const calls: { url: string; body: string }[] = [];
+    globalThis.fetch = vi.fn(async (input: unknown, init?: { body?: string }) => {
+      calls.push({ url: String(input), body: init?.body ?? '' });
+      return new Response(JSON.stringify({ submission_id: 'sub_123', outcome: 'passed' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch;
+
+    try {
+      renderView({ showConsent: true });
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+      fillAndTickCallConsent();
+      fireEvent.click(screen.getByRole('button', { name: /submit/i }));
+      await screen.findByRole('dialog');
+
+      const checkbox = screen.getByRole('checkbox', { name: /I have read and accept/i });
+      expect(checkbox).toBeDisabled();
+
+      const el = screen.getByTestId('consent-reader');
+      Object.defineProperty(el, 'scrollHeight', { value: 600, configurable: true });
+      Object.defineProperty(el, 'clientHeight', { value: 200, configurable: true });
+      Object.defineProperty(el, 'scrollTop', { value: 400, writable: true, configurable: true });
+      const readerTop = 149; // nonzero: a real reader is never flush with the viewport edge
+      el.getBoundingClientRect = () =>
+        ({ top: readerTop, height: 200, bottom: readerTop + 200 }) as DOMRect;
+      const contentTops: Record<string, number> = { privacy: 0, terms: 300 };
+      for (const id of ['privacy', 'terms']) {
+        const section = el.querySelector<HTMLElement>(`[data-consent-section="${id}"]`)!;
+        section.getBoundingClientRect = () =>
+          ({
+            top: readerTop + contentTops[id]! - 400,
+            height: 300,
+            bottom: readerTop + contentTops[id]! - 400 + 300,
+          }) as DOMRect;
+      }
+      fireEvent.scroll(el);
+
+      await waitFor(() => expect(checkbox).toBeEnabled());
+      fireEvent.click(checkbox);
+      fireEvent.click(screen.getByRole('button', { name: 'Accept & continue' }));
+
+      await waitFor(() => expect(calls.length).toBe(1));
+      expect(calls[0]!.url).toContain('/submit');
+      const body = JSON.parse(calls[0]!.body) as Record<string, unknown>;
+      expect(body['consent_terms']).toBe(true);
+      expect(body['consent_privacy']).toBe(true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('cancelling the gate preserves the identity fields already entered', async () => {
+    // Important: `handleSubmit` sets `state.status` to `submitting` before
+    // the (synchronous-when-`network`-is-unset) pre-submit probe resolves,
+    // which used to fail the `isAccountOnly && state.status === 'idle'`
+    // check and unmount MinimalIdentityForm — whose name/phone/email/
+    // birth-year/consentCall are all component-local state. Opening the
+    // gate set `status` back to `idle`, remounting a brand-new (empty)
+    // instance underneath the now-open gate. Cancelling used to reveal that
+    // empty form; this proves the fields survive the whole round trip.
+    renderView({ showConsent: true });
+    fillAndTickCallConsent();
+
+    const nameInput = screen.getByLabelText(/Name/);
+    const phoneInput = screen.getByLabelText(/Phone/);
+    expect(nameInput).toHaveValue('Jane Doe');
+    expect(phoneInput).toHaveValue('9876543210');
+
+    fireEvent.click(screen.getByRole('button', { name: /submit/i }));
+    await screen.findByRole('dialog');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+    expect(screen.getByLabelText(/Name/)).toHaveValue('Jane Doe');
+    expect(screen.getByLabelText(/Phone/)).toHaveValue('9876543210');
+    expect(screen.getByRole('checkbox', { name: /permit the aggregator/i })).toBeChecked();
   });
 
   it('shows a visible error instead of a dead submit when consent copy failed to load', async () => {
