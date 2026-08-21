@@ -16,8 +16,6 @@
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { SubmitBlockers } from '../../../components/ui/SubmitBlockers';
-import { ConsentModal, type ConsentTab } from '../../../components/consent/ConsentModal';
-import type { ConsentDocContent } from '../../../components/consent/consent-types';
 
 export interface MinimalIdentityPayload {
   /** Name field. Key is the network's `identity.name` selector. */
@@ -58,11 +56,6 @@ export interface MinimalIdentityFormProps {
    * When false (default), the classic "name + (phone OR email)" rule applies.
    */
   requirePhone?: boolean;
-  /**
-   * Participant Terms/Privacy copy for the consent modal (§4.1). `null` ⇒ the
-   * consent line renders without a "view terms" link.
-   */
-  consentContent?: ConsentDocContent | null;
   /**
    * #613: show the profile-creation consent step. Driven by the domain's
    * `go_live_required` including `consent_required`. When false, no consent
@@ -107,11 +100,6 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
   const [email, setEmail] = useState('');
   const [yearOfBirth, setYearOfBirth] = useState('');
   const [consentCall, setConsentCall] = useState(false);
-  const consentContent = props.consentContent ?? null;
-  const [consentModal, setConsentModal] = useState<{ open: boolean; tab: ConsentTab }>({
-    open: false,
-    tab: 'terms',
-  });
   // Local double-submit guard. The parent runs an async probe before its own
   // `submitting` state flips, so this form can stay mounted for one render
   // after the click — a fast double-tap would otherwise fire two pipelines.
@@ -194,13 +182,16 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
           setSubmitting(true);
           const payload: MinimalIdentityPayload = {
             [nameKey]: name.trim(),
-            // #613: only send birth year / consent flags when the domain
-            // actually collects them (config-driven). Absent gates ⇒ the server
-            // records no consent and omits age.
+            // #613: only send the birth year when the domain actually
+            // collects it (config-driven). Absent gate ⇒ the server omits
+            // age. `consent_terms` / `consent_privacy` are NOT set here: the
+            // parent view (`PublicRegistrationView`) owns those — it runs
+            // this submit through its blocking consent gate and stamps the
+            // real accepted value onto the payload afterwards. `consentCall`
+            // is a *different* consent (permission to place a call on the
+            // registrant's behalf) and must never be conflated with terms/
+            // privacy acceptance.
             ...(props.showBirthYear ? { year_of_birth: yearOfBirth.trim() } : {}),
-            ...(props.showConsent
-              ? { consent_terms: consentCall, consent_privacy: consentCall }
-              : {}),
           };
           if (phoneKey && hasPhone) payload[phoneKey] = phone.trim();
           if (emailKey && hasEmail) payload[emailKey] = email.trim();
@@ -309,19 +300,6 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
                 />
                 <span>{t('consent_call_label')}</span>
               </label>
-              {consentContent && (
-                <p className="text-[12px] text-ink-500">
-                  {t('consent_accept_prefix')}
-                  <button
-                    type="button"
-                    className="underline text-(--bd-primary-600)"
-                    onClick={() => setConsentModal({ open: true, tab: 'terms' })}
-                  >
-                    {t('consent_docs_link')}
-                  </button>
-                  .
-                </p>
-              )}
             </div>
           ))}
 
@@ -338,14 +316,6 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
           </button>
         </div>
       </form>
-      {consentContent && (
-        <ConsentModal
-          open={consentModal.open}
-          onOpenChange={(open) => setConsentModal((s) => ({ ...s, open }))}
-          initialTab={consentModal.tab}
-          content={consentContent}
-        />
-      )}
     </div>
   );
 }
