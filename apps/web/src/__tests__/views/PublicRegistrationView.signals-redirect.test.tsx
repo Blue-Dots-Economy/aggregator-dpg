@@ -13,7 +13,7 @@
  * two config gates that decide whether this hand-off is armed at all.
  */
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
-import { screen, fireEvent, act } from '@testing-library/react';
+import { screen, fireEvent, act, cleanup } from '@testing-library/react';
 import {
   RjsfShim,
   CFG,
@@ -99,8 +99,8 @@ async function submitSuccessfully(opts: {
  *
  * The countdown re-arms its `setTimeout` from an effect, so the next tick's
  * timer does not exist until React has rendered the previous one. A single
- * `advanceTimersByTime(3000)` would therefore fire exactly one tick; each
- * second needs its own flush.
+ * `advanceTimersByTime(n * 1000)` would therefore fire exactly one tick, no
+ * matter how large `n` is; each second needs its own flush.
  */
 async function tick(seconds: number): Promise<void> {
   for (let i = 0; i < seconds; i += 1) {
@@ -174,7 +174,7 @@ describe('Signals post-submit redirect', () => {
   it('shows no standalone countdown line — the button is the only countdown', async () => {
     cfgMock.value = CFG;
     await submitSuccessfully({ domain: 'seeker', registrationMode: 'form' });
-    // The pre-#652 notice paragraph ("Redirecting to Signals in 3…") is gone;
+    // The pre-#652 notice paragraph ("Redirecting to Signals in N…") is gone;
     // testers read straight past it, so the count moved onto the button.
     expect(screen.queryByText(/Redirecting to Signals/i)).toBeNull();
     // Exactly one element carries the visible count.
@@ -229,7 +229,7 @@ describe('Signals post-submit redirect', () => {
     await submitSuccessfully({ domain: 'seeker', registrationMode: 'form' });
     const announcement = screen.getByText(/You'll be taken to Signals shortly/);
     expect(announcement).toHaveAttribute('aria-live', 'polite');
-    // Three announcements in three seconds would interrupt each other
+    // One announcement per remaining second would interrupt itself
     // (WCAG 4.1.3), so no digit may ever enter the live region...
     expect(announcement).not.toHaveTextContent(/\d/);
     // ...and the ticking button must sit outside it.
@@ -298,5 +298,97 @@ describe('Signals post-submit redirect', () => {
     expect(screen.queryByText(/You'll be taken to Signals shortly/)).toBeNull();
     await tick(6);
     expect(assign).not.toHaveBeenCalled();
+  });
+
+  it('keeps the plain success panel when the mode has signals_cta off but a URL exists', async () => {
+    // `signalsHandoffUrl` fuses two independent gates: the per-domain URL and
+    // the per-mode `signals_cta`. Every other no-op test here starves the
+    // *URL* gate, so a regression that made the mode gate always-on would
+    // leave them all green while redirecting voice / account-only links that
+    // deliberately opted out. This test starves only the mode gate: the
+    // `seeker` URL is present and valid.
+    cfgMock.value = {
+      ...CFG,
+      registration_modes: {
+        ...CFG.registration_modes,
+        form: { ...CFG.registration_modes.form, signals_cta: false },
+      },
+    };
+    await submitSuccessfully({ domain: 'seeker', registrationMode: 'form' });
+    expect(screen.getByRole('button', { name: /register another/i })).toBeInTheDocument();
+    expect(continueButton()).toBeNull();
+    expect(screen.queryByText(/Continue to Signals/i)).toBeNull();
+    expect(screen.queryByText(/You'll be taken to Signals shortly/)).toBeNull();
+    await tick(6);
+    expect(assign).not.toHaveBeenCalled();
+  });
+
+  it('navigates exactly once on the natural countdown, even if the hop never completes', async () => {
+    // Only the click path pinned the call count before. On the timed path a
+    // cross-origin `assign` that is deferred or blocked (a dismissed
+    // `beforeunload`, an extension intercept) leaves the component mounted and
+    // still ticking-capable, so the fire has to be terminal, not just
+    // "happened once so far".
+    cfgMock.value = CFG;
+    await submitSuccessfully({ domain: 'seeker', registrationMode: 'form' });
+    await tick(4);
+    expect(assign).toHaveBeenCalledTimes(1);
+    // Nothing left on the clock: no second hop, and no negative count leaking
+    // onto the label.
+    await tick(6);
+    expect(assign).toHaveBeenCalledTimes(1);
+    expect(continueLabel()).toBe('Continue to Signals');
+  });
+
+  it('does not navigate after the view unmounts mid-countdown', async () => {
+    // A participant who closes the tab (or a router-level unmount) mid-window
+    // must not be navigated by a surviving timer.
+    cfgMock.value = CFG;
+    await submitSuccessfully({ domain: 'seeker', registrationMode: 'form' });
+    expect(continueLabel()).toBe('Continue to Signals (4)');
+    cleanup();
+    await tick(6);
+    expect(assign).not.toHaveBeenCalled();
+  });
+
+  it('navigates to the URL captured at arm time even if the config drops it mid-countdown', async () => {
+    // The hand-off URL comes from the `useAggregatorConfig` query cache. A
+    // background refetch landing inside the 4s window used to be read live on
+    // the next tick: the countdown froze with the button unmounted and the
+    // participant was stranded on the success panel, never handed off and
+    // never told. The destination is snapshotted when the countdown arms, so
+    // the hop still completes.
+    cfgMock.value = CFG;
+    await submitSuccessfully({ domain: 'seeker', registrationMode: 'form' });
+    await tick(1);
+    expect(continueLabel()).toBe('Continue to Signals (3)');
+    // The refetch lands: this domain no longer resolves to a hand-off URL.
+    // Every subsequent render reads the emptied config.
+    cfgMock.value = { ...CFG, signals_ui_urls: {} };
+    await tick(1);
+    // Countdown carries on rather than freezing, and the button is still up.
+    expect(continueLabel()).toBe('Continue to Signals (2)');
+    await tick(2);
+    expect(assign).toHaveBeenCalledTimes(1);
+    expect(assign).toHaveBeenCalledWith(SIGNALS_URL);
+  });
+
+  it('loses the final tick to a Register another click that lands in the same flush', async () => {
+    // The narrow race the null-guard exists for: the pending 1 -> 0 macrotask
+    // runs before React has re-rendered the cancel. Both are driven inside one
+    // outer `act` so the click's state update is still queued when the timer
+    // fires — an operator who just cancelled must not be thrown to Signals.
+    cfgMock.value = CFG;
+    await submitSuccessfully({ domain: 'seeker', registrationMode: 'form' });
+    await tick(3);
+    expect(continueLabel()).toBe('Continue to Signals (1)');
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /register another/i }));
+      vi.advanceTimersByTime(1000);
+    });
+    await tick(6);
+    expect(assign).not.toHaveBeenCalled();
+    expect(continueButton()).toBeNull();
+    expect(screen.getByTestId('rjsf-shim')).toBeInTheDocument();
   });
 });

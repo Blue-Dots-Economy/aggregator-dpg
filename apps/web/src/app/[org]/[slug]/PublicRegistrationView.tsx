@@ -81,8 +81,69 @@ type SubmitState =
  * too short to read or note the ref down; four is the chosen balance between
  * "long enough to see the ref" and "not a pointless wait". Shortening it means
  * surfacing the ref somewhere that survives the navigation first.
+ *
+ * Same-tab is not a shortcut taken to avoid that problem — it is forced (see
+ * the guardrail comment on the timed navigation in `navigateToSignals`).
  */
 const SIGNALS_REDIRECT_SECONDS = 4;
+
+/**
+ * Armed state of the #635 post-submit hand-off.
+ *
+ * The destination is captured **when the countdown arms** rather than read
+ * live from the config query on every tick. `useSignalsHandoffUrl` derives
+ * from the `useAggregatorConfig` React Query cache, so a background refetch
+ * landing inside the countdown window could otherwise (a) make the URL falsy
+ * and freeze the countdown with the button unmounted — stranding the
+ * participant on the success panel, handed off nowhere and told nothing — or
+ * (b) change the URL and send them somewhere else. Snapshotting makes the
+ * hand-off decided once, at arm time, and immune to both.
+ *
+ * `phase` is the terminal-fire guard: `navigating` is set in the same effect
+ * pass that calls `assign`, so a navigation that is deferred or blocked
+ * (dismissed `beforeunload`, SPA/extension intercept) cannot be followed by a
+ * second automatic `assign` on a re-render.
+ */
+type SignalsHandoff =
+  { phase: 'counting'; url: string; seconds: number } | { phase: 'navigating'; url: string };
+
+/**
+ * Hands the participant off to the Signals UI, in **this** tab.
+ *
+ * GUARDRAIL — do NOT "improve" this into `window.open(url, '_blank')`. The
+ * post-submit hand-off fires from a timer, and a timer callback carries no
+ * transient user activation: every major browser classifies a `window.open`
+ * from one as a pop-up and blocks it. The failure is silent (no throw, a null
+ * return at best), so it would look fine on the developer's machine with
+ * pop-ups allowed and simply lose the hand-off — the last step of
+ * registration — for the significant share of users on a blocker. The
+ * pre-submit "Already registered — Sign In" CTA next door DOES open a new tab
+ * (`SignalsSignInCta`), and legitimately so: that one is a real click, i.e. a
+ * user gesture, and it must preserve a half-filled form behind it. This one
+ * has nothing left to preserve — the form is submitted and the panel it
+ * replaces is a dead end.
+ *
+ * Wrapped because a CSP / sandboxed-iframe navigation block throws here; the
+ * caller runs inside an effect, where an uncaught throw would leave no trace
+ * at all and a countdown that has visibly finished with nothing happening.
+ * The button stays on screen and remains clickable in that case.
+ *
+ * @param url - Hand-off URL snapshotted when the countdown armed.
+ */
+function navigateToSignals(url: string): void {
+  try {
+    window.location.assign(url);
+  } catch (err) {
+    console.error(
+      '[signals-handoff] navigation to the Signals UI was blocked; the participant stays on the success panel',
+      {
+        operation: 'signals-handoff.navigate',
+        status: 'failure',
+        error: err instanceof Error ? err.message : String(err),
+      },
+    );
+  }
+}
 
 /**
  * Outcome of the pre-submit identity probe — drives the branched UI
@@ -167,10 +228,10 @@ export function PublicRegistrationView({
    */
   const [formRevealed, setFormRevealed] = useState(false);
   const [state, setState] = useState<SubmitState>({ status: 'idle' });
-  // #635: post-submit hand-off. `null` = no countdown running. Kept separate
-  // from `state` so cancelling the redirect (Register another) does not have
-  // to reconstruct the submit result.
-  const [redirectIn, setRedirectIn] = useState<number | null>(null);
+  // #635: post-submit hand-off. `null` = not armed (no countdown, no
+  // navigation). Kept separate from `state` so cancelling the redirect
+  // (Register another) does not have to reconstruct the submit result.
+  const [handoff, setHandoff] = useState<SignalsHandoff | null>(null);
   /**
    * Pre-submit probe outcome. `null` = probe hasn't run yet (or returned
    * "allow"); `owned_elsewhere` / `resume` short-circuit the submit
@@ -252,20 +313,42 @@ export function PublicRegistrationView({
   // Both outcomes qualify: `passed` is a new registration, `skipped` is a dedup
   // hit meaning "already registered here", for which signing in is if anything
   // more apt.
+  //
+  // The URL is snapshotted into state here (see `SignalsHandoff`), and the
+  // updater is functional + `??`-guarded so a config refetch that changes the
+  // resolved URL mid-window re-runs this effect without restarting the
+  // countdown or re-pointing the destination. Only a cancel (which nulls the
+  // state) can re-arm it.
   useEffect(() => {
     if (state.status !== 'done' || !signalsHandoffUrl) return;
-    setRedirectIn(SIGNALS_REDIRECT_SECONDS);
+    setHandoff(
+      (prev) =>
+        prev ?? { phase: 'counting', url: signalsHandoffUrl, seconds: SIGNALS_REDIRECT_SECONDS },
+    );
   }, [state.status, signalsHandoffUrl]);
 
   useEffect(() => {
-    if (redirectIn === null || !signalsHandoffUrl) return;
-    if (redirectIn <= 0) {
-      window.location.assign(signalsHandoffUrl);
+    if (handoff === null || handoff.phase !== 'counting') return;
+    if (handoff.seconds <= 0) {
+      // Mark terminal BEFORE navigating: this both re-runs the effect into the
+      // early return above and survives a navigation that never completes, so
+      // `navigateToSignals` can only ever fire once per armed countdown.
+      setHandoff({ phase: 'navigating', url: handoff.url });
+      navigateToSignals(handoff.url);
       return;
     }
-    const timer = setTimeout(() => setRedirectIn((n) => (n === null ? null : n - 1)), 1000);
+    // Functional updater with a null/phase guard so the in-flight tick loses
+    // to a cancel or a fire that was queued first: if `Register another` has
+    // already nulled the state, this macrotask must not resurrect it.
+    const timer = setTimeout(
+      () =>
+        setHandoff((prev) =>
+          prev?.phase === 'counting' ? { ...prev, seconds: prev.seconds - 1 } : prev,
+        ),
+      1000,
+    );
     return () => clearTimeout(timer);
-  }, [redirectIn, signalsHandoffUrl]);
+  }, [handoff]);
 
   // Hide schema's verbose title/description from the form — the page header
   // owns the framing copy. Also drop `participant_id` from the public form:
@@ -690,17 +773,16 @@ export function PublicRegistrationView({
    * line above it, which testers read straight past: the seconds only matter
    * because of what that button is about to do on its own.
    *
-   * The terminal tick falls back to the plain label. A bare `(0)` would be
-   * the state left on screen for the whole cross-origin hop, and the
-   * permanent one if the hand-off URL ever goes falsy at zero (a config
-   * refetch).
+   * The terminal `navigating` phase falls back to the plain label. A bare
+   * `(0)` would be the state left on screen for the whole cross-origin hop,
+   * and the permanent one if that hop is ever blocked.
    *
    * Visual-only — the button's accessible name is pinned to the plain label,
    * so this string is never spoken (see `donePanel`).
    */
   const continueToSignalsLabel =
-    redirectIn !== null && redirectIn > 0
-      ? t('btn_continue_to_signals_counting', { seconds: redirectIn })
+    handoff?.phase === 'counting' && handoff.seconds > 0
+      ? t('btn_continue_to_signals_counting', { seconds: handoff.seconds })
       : t('btn_continue_to_signals');
 
   /**
@@ -708,7 +790,7 @@ export function PublicRegistrationView({
    * the primary hand-off button than it does directly under the reference id,
    * which is where it lands when the hand-off is unconfigured.
    */
-  const registerAnotherSpacing = redirectIn !== null && signalsHandoffUrl ? 'mt-3' : 'mt-5';
+  const registerAnotherSpacing = handoff ? 'mt-3' : 'mt-5';
 
   // Success panel shown once the submission (or a skip through the
   // account-only lookup) resolves. Hoisted alongside `chooserPanel` /
@@ -745,17 +827,20 @@ export function PublicRegistrationView({
             static sentence names both escape routes instead; the number on
             the button below is visual-only. */}
         <p aria-live="polite" className="sr-only">
-          {redirectIn !== null && signalsHandoffUrl ? t('signals_redirect_announcement') : ''}
+          {handoff ? t('signals_redirect_announcement') : ''}
         </p>
-        {redirectIn !== null && signalsHandoffUrl ? (
+        {handoff ? (
           <button
             type="button"
             onClick={() => {
-              // Stop the tick before leaving: if navigation is slow or
-              // blocked, the effect would otherwise fire `assign` again when
-              // the countdown reaches zero.
-              setRedirectIn(null);
-              window.location.assign(signalsHandoffUrl);
+              // Disarm before leaving: if navigation is slow or blocked, the
+              // tick effect would otherwise navigate again when the countdown
+              // reaches zero. The destination is the same snapshot the
+              // countdown armed with, so an impatient click and waiting it out
+              // can never disagree.
+              const { url } = handoff;
+              setHandoff(null);
+              navigateToSignals(url);
             }}
             // Pin the accessible name to the plain label so the once-a-second
             // relabel below can never be re-announced — not even while the
@@ -775,8 +860,11 @@ export function PublicRegistrationView({
             setShowValidation(false);
             setState({ status: 'idle' });
             // Cancel the #635 hand-off: a field operator registering people
-            // back-to-back must not be bounced to Signals.
-            setRedirectIn(null);
+            // back-to-back must not be bounced to Signals. Nulling the state
+            // also beats an already-queued final tick, whose updater bails on
+            // a null previous value rather than re-arming a cancelled
+            // countdown.
+            setHandoff(null);
           }}
           // Secondary action: an outline button (codebase's ghost-button
           // convention — see components/ui/Button.tsx's `ghost` kind) so it
