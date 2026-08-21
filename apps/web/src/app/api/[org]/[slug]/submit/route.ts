@@ -9,6 +9,7 @@
  * POST /api/[org]/[slug]/submit
  */
 
+import { randomUUID } from 'node:crypto';
 import { type NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
@@ -49,8 +50,7 @@ interface RouteParams {
 
 export async function POST(req: NextRequest, { params }: RouteParams): Promise<NextResponse> {
   const { org, slug } = await params;
-  const reqId =
-    req.headers.get(REQUEST_ID_HEADER) ?? `req-${Math.random().toString(36).slice(2, 10)}`;
+  const reqId = req.headers.get(REQUEST_ID_HEADER) ?? `req-${randomUUID()}`;
 
   const base = process.env.API_BASE_URL ?? 'http://localhost:4000';
 

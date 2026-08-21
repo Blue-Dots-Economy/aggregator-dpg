@@ -15,6 +15,13 @@ import {
   type TokenSet,
 } from './interface';
 
+/**
+ * Origin the fake mints its authorization/logout URLs under. Nothing is
+ * dialled — `kc.fake` does not resolve — but the scheme stays `https` so the
+ * repo contains no cleartext URL literals.
+ */
+const FAKE_ISSUER = 'https://kc.fake';
+
 interface SeededExchange {
   code: string;
   tokens: TokenSet;
@@ -42,7 +49,7 @@ export class IdentityProviderFake extends IdentityProviderAdapter {
   }
 
   async buildAuthorizationUrl(input: AuthorizationUrlInput): Promise<string> {
-    const url = new URL('http://kc.fake/authorize');
+    const url = new URL(`${FAKE_ISSUER}/authorize`);
     url.searchParams.set('state', input.state);
     url.searchParams.set('nonce', input.nonce);
     url.searchParams.set('code_challenge', input.codeChallenge);
@@ -84,7 +91,7 @@ export class IdentityProviderFake extends IdentityProviderAdapter {
   }
 
   async buildLogoutUrl(input: LogoutUrlInput): Promise<string> {
-    const url = new URL('http://kc.fake/logout');
+    const url = new URL(`${FAKE_ISSUER}/logout`);
     url.searchParams.set('id_token_hint', input.idToken);
     url.searchParams.set('post_logout_redirect_uri', input.postLogoutRedirectUri);
     return url.toString();

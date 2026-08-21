@@ -67,13 +67,16 @@ function makeDb() {
   };
 }
 
-// ─── Redis fake: only `evalsha` (the Lua row-commit) is exercised here ──────
+// ─── Redis fake: `script` (SCRIPT LOAD) + `evalsha` (the Lua row-commit) ────
 
 let evalshaResult: [number, number, number, number] = [1, -1, 0, 1];
 const evalshaCalls: unknown[][] = [];
 
 vi.mock('../services/redis.js', () => ({
   getRedis: () => ({
+    // The loader asks Redis for the script digest rather than hashing the
+    // source itself; any non-empty string is an acceptable stand-in here.
+    script: vi.fn(async () => 'f'.repeat(40)),
     evalsha: vi.fn(async (...args: unknown[]) => {
       evalshaCalls.push(args);
       return evalshaResult;
