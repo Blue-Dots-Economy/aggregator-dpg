@@ -63,6 +63,43 @@ const ReadQuerySchema = z.object({
   intent: z.string().optional(),
 });
 
+/**
+ * Emits a structured audit log entry for an admin approval action.
+ *
+ * These routes are reached by an admin clicking a signed link in an email —
+ * there is no Keycloak-authenticated admin identity to attribute the action
+ * to (see `docs/security/admin-approval-auth-design.md` for why, and the
+ * proposed fix). `identity_verified: false` makes that gap explicit in every
+ * audit entry rather than silently implying stronger attribution than the
+ * system actually has.
+ *
+ * @param req - The Fastify request handling the admin action.
+ * @param fields - Action-specific context (aggregator id, action name, and
+ *   optional decision outcome) to merge into the log entry.
+ */
+function logApprovalAudit(
+  req: FastifyRequest,
+  fields: {
+    aggregatorId: string;
+    action: 'view_confirm' | 'decision' | 'renew';
+    decision?: 'approve' | 'reject';
+  },
+): void {
+  req.log.info(
+    {
+      operation: 'aggregator-approval.audit',
+      status: 'success',
+      aggregator_id: fields.aggregatorId,
+      action: fields.action,
+      decision: fields.decision ?? null,
+      identity_verified: false,
+      client_ip: req.ip,
+      request_id: req.id,
+    },
+    'admin approval action',
+  );
+}
+
 export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Promise<void> {
   app.get(
     '/admin/v1/aggregator-registrations/read/:id',
@@ -124,6 +161,8 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
       if (prior) {
         return sendHtml(reply, 200, renderResultPage(alreadyDecidedView(prior)));
       }
+
+      logApprovalAudit(req, { aggregatorId, action: 'view_confirm' });
 
       return sendHtml(
         reply,
@@ -221,6 +260,8 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
           );
         }
       }
+
+      logApprovalAudit(req, { aggregatorId, action: 'decision', decision: parsed.data.decision });
 
       const store = getAggregatorStore();
       const idp = getIdpAdmin();
@@ -565,6 +606,8 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
       if (prior) {
         return sendHtml(reply, 200, renderResultPage(alreadyDecidedView(prior)));
       }
+
+      logApprovalAudit(req, { aggregatorId, action: 'renew' });
 
       // Mint a fresh token pair, preserving the original org binding (so the
       // decision handler's parent_org_id check still passes), and land the
