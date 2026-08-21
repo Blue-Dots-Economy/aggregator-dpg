@@ -628,6 +628,8 @@
     "audience_org": "For organisations",
     "version_effective": "Version {version} · Effective {date}",
     "version_only": "Version {version}",
-    "unavailable": "Legal documents are currently unavailable. Please try again later."
+    "unavailable": "Legal documents are currently unavailable. Please try again later.",
+    "back_to_sign_in": "Back to sign in",
+    "contents_label": "Contents"
   }
 }

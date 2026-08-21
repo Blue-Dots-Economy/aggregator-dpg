@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen, within, fireEvent } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
 import type { ReactNode } from 'react';
 import messages from '@/i18n/messages/en.json';
@@ -50,15 +50,19 @@ describe('<LegalDocumentView />', () => {
     expect(screen.getByText('For aggregators')).toBeInTheDocument();
   });
 
-  it('links each extracted section as an anchor', () => {
+  it('links each extracted section as a same-page anchor', () => {
     renderView('privacy', groups);
     expect(screen.getByRole('link', { name: 'Retention' })).toHaveAttribute('href', '#retention');
   });
 
-  it('shows the version for each audience', () => {
+  // Both of an audience's documents now render together, so each version
+  // number appears once per document — twice per audience in this fixture,
+  // since both of participant's documents (and both of aggregator's) share a
+  // version number.
+  it('shows the version for each audience and each document', () => {
     renderView('privacy', groups);
-    expect(screen.getByText(/Version 1/)).toBeInTheDocument();
-    expect(screen.getByText(/Version 2/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Version 1/)).toHaveLength(2);
+    expect(screen.getAllByText(/Version 2/)).toHaveLength(2);
   });
 
   it('captures no consent — there is no checkbox anywhere on the page', () => {
@@ -71,7 +75,7 @@ describe('<LegalDocumentView />', () => {
     expect(screen.getByRole('status')).toBeInTheDocument();
   });
 
-  it('marks the document being read with aria-current within its audience group', () => {
+  it('marks the routed document current within every audience group', () => {
     renderView('privacy', groups);
     const currentLinks = screen.getAllByRole('link', { name: 'Privacy Policy' });
     expect(currentLinks.length).toBeGreaterThan(0);
@@ -80,14 +84,60 @@ describe('<LegalDocumentView />', () => {
     }
   });
 
-  it('links to the other document by route', () => {
+  // Regression for the reported defect: the other document's rail entry used
+  // to be a route Link (`href="/terms"`), so hovering it showed a full
+  // navigation instead of an in-page anchor. Both documents already render
+  // on this page, so it must be a same-page anchor with no aria-current
+  // (the routed document is still Privacy Policy).
+  it('links to the other document as a same-page anchor, not a route', () => {
     renderView('privacy', groups);
     const otherLinks = screen.getAllByRole('link', { name: 'Terms of Service' });
-    expect(otherLinks.length).toBeGreaterThan(0);
+    expect(otherLinks).toHaveLength(2);
+    expect(otherLinks.map((l) => l.getAttribute('href')).sort()).toEqual([
+      '#aggregator-terms',
+      '#participant-terms',
+    ]);
     for (const link of otherLinks) {
-      expect(link).toHaveAttribute('href', '/terms');
       expect(link).not.toHaveAttribute('aria-current');
     }
+  });
+
+  it('uses the i18n contents label for the rail, not a hardcoded string', () => {
+    renderView('privacy', groups);
+    expect(screen.getByRole('navigation', { name: 'Contents' })).toBeInTheDocument();
+  });
+
+  it('has a back-to-sign-in link', () => {
+    renderView('privacy', groups);
+    expect(screen.getByRole('link', { name: /Back to sign in/i })).toHaveAttribute(
+      'href',
+      '/login',
+    );
+  });
+
+  it('clicking a rail section scrolls it into view and highlights it', () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView =
+      scrollIntoView as unknown as typeof Element.prototype.scrollIntoView;
+    renderView('privacy', groups);
+
+    const link = screen.getByRole('link', { name: 'Retention' });
+    fireEvent.click(link);
+
+    expect(scrollIntoView).toHaveBeenCalled();
+    expect(link).toHaveAttribute('aria-current', 'true');
+  });
+
+  it("clicking the other document's rail header scrolls to its heading", () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView =
+      scrollIntoView as unknown as typeof Element.prototype.scrollIntoView;
+    renderView('privacy', groups);
+
+    const [termsHeader] = screen.getAllByRole('link', { name: 'Terms of Service' });
+    fireEvent.click(termsHeader!);
+
+    expect(scrollIntoView).toHaveBeenCalled();
   });
 
   // --- Trap 1 regression: every real consent document opens with a `##`
@@ -156,6 +206,55 @@ describe('<LegalDocumentView />', () => {
     expect(heading).toHaveAttribute('id', 'retention');
   });
 
+  it('renders a document with no ### headings at all, without crashing', () => {
+    const noSubsectionGroups: LegalGroup[] = [
+      {
+        audience: 'participant',
+        label: 'For participants',
+        content: {
+          privacy: {
+            version: 1,
+            title: 'Privacy Policy',
+            content: '## Privacy Policy\n\nJust a paragraph, no subsections at all.',
+          },
+          terms: {
+            version: 1,
+            title: 'Terms of Service',
+            content: '## Terms of Service\n\nWelcome.',
+          },
+        },
+      },
+    ];
+    renderView('privacy', noSubsectionGroups);
+    expect(screen.getByText('Just a paragraph, no subsections at all.')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Privacy Policy' })).toBeInTheDocument();
+  });
+
+  it('renders a document with five levels of heading nesting, without crashing', () => {
+    const deepNestingGroups: LegalGroup[] = [
+      {
+        audience: 'participant',
+        label: 'For participants',
+        content: {
+          privacy: {
+            version: 1,
+            title: 'Privacy Policy',
+            content:
+              '## Privacy Policy\n\n### A section\nintro\n#### A subsection\nmore\n##### Deeper still\neven more\n###### Deepest\ndeepest text',
+          },
+          terms: {
+            version: 1,
+            title: 'Terms of Service',
+            content: '## Terms of Service\n\nWelcome.',
+          },
+        },
+      },
+    ];
+    renderView('privacy', deepNestingGroups);
+    expect(screen.getByRole('heading', { name: 'A section' })).toBeInTheDocument();
+    expect(screen.getByText('deepest text')).toBeInTheDocument();
+  });
+
   // Three audiences, all carrying a colliding "### Grievances" section under
   // Privacy Policy — the real shape: every real audience's Privacy Policy
   // document has one (verified against the live config).
@@ -213,6 +312,12 @@ describe('<LegalDocumentView />', () => {
   // *correspondence* (each rail entry's href resolves to exactly one heading,
   // which belongs to that same audience's reading section), not just that the
   // heading ids happen to be unique.
+  //
+  // Extended for this port to also prove the same correspondence one level up
+  // the hierarchy: each audience's own *document*-level rail entry (its
+  // "Privacy Policy" / "Terms of Service" row) resolves to that same
+  // audience's document block too, now that every audience's every document
+  // shares one page and one id namespace.
   it('each audience group’s rail link resolves to that same audience’s heading, not another’s', () => {
     const { container } = renderView('privacy', collidingGroups);
 
@@ -225,6 +330,8 @@ describe('<LegalDocumentView />', () => {
       // and its two RailDocument rows).
       const groupContainer = screen.getByText(label).closest('div');
       expect(groupContainer).not.toBeNull();
+
+      // --- section-level correspondence ---
       const link = within(groupContainer!).getByRole('link', { name: 'Grievances' });
       const href = link.getAttribute('href');
       expect(href).toMatch(/^#/);
@@ -247,6 +354,35 @@ describe('<LegalDocumentView />', () => {
       // different audience's — confirms we didn't just get lucky landing on
       // *a* Grievances heading that happens to sit inside the right section.
       expect(readingSection.textContent).toContain(`${audience} body`);
+
+      // --- document-level correspondence ---
+      const privacyDocLink = within(groupContainer!).getByRole('link', { name: 'Privacy Policy' });
+      const docHref = privacyDocLink.getAttribute('href');
+      expect(docHref).toMatch(/^#/);
+      const docTargetId = docHref!.slice(1);
+      const docMatches = container.querySelectorAll(`#${CSS.escape(docTargetId)}`);
+      expect(docMatches).toHaveLength(1);
+      expect(readingSection.contains(docMatches[0]!)).toBe(true);
+      // Structural, not content-derived — carries the audience key itself.
+      expect(docTargetId).toBe(`${audience}-privacy`);
     }
+  });
+});
+
+describe('<LegalDocumentView /> arrival landing', () => {
+  it('does nothing on /privacy with no hash — privacy is already the top of the page', () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView =
+      scrollIntoView as unknown as typeof Element.prototype.scrollIntoView;
+    renderView('privacy', groups);
+    expect(scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it('scrolls to the first audience’s terms heading when arriving at /terms with no hash', () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView =
+      scrollIntoView as unknown as typeof Element.prototype.scrollIntoView;
+    renderView('terms', groups);
+    expect(scrollIntoView).toHaveBeenCalled();
   });
 });
