@@ -28,11 +28,11 @@ export interface OrgRegisterFormProps {
   /** RJSF UI schema for the org form. */
   uiSchema: Record<string, unknown>;
   /**
-   * Versioned Terms/Privacy content for the org audience.
-   * Passed as `formContext.consentContent` to the RJSF form so the
-   * {@link ConsentCheckboxWidget} can render clickable links.
-   * Omit (or pass `undefined`) when `loadConsentConfig` failed — widget
-   * degrades gracefully to plain text labels.
+   * Versioned Terms/Privacy content for the org audience. Flattened via
+   * {@link toConsentDocs} into the ordered document list the blocking
+   * {@link ConsentGate} reads at submit time. Omit (or pass `undefined`)
+   * when `loadConsentConfig` failed — the gate then has nothing to show, so
+   * submit surfaces an error instead of opening it.
    */
   consentContent?: ConsentDocContent;
 }
@@ -62,12 +62,27 @@ export function OrgRegisterForm({
 
   const agreeLabel = `${t('consent.accept_prefix')}${t('consent.privacy_link')}${t('consent.and')}${t('consent.terms_link')}.`;
 
-  /** Holds the payload and opens the gate — consent is collected there. */
+  /**
+   * Holds the payload and opens the gate — consent is collected there.
+   * When the consent copy failed to load (`consentDocs` is empty), the gate
+   * would render nothing at all and the form would be stuck with no way to
+   * finish or explain why — surface an error instead of a dead button.
+   */
   const handleSubmit = async (
     e: IChangeEvent<Record<string, unknown>>,
     _event: FormEvent<HTMLFormElement>,
   ): Promise<void> => {
     pendingRef.current = (e.formData ?? {}) as Record<string, unknown>;
+    if (consentDocs.length === 0) {
+      setState({
+        status: 'error',
+        title: t('consent.load_failed_title'),
+        detail: t('consent.load_failed_detail'),
+        code: 'CONSENT_UNAVAILABLE',
+        requestId: '',
+      });
+      return;
+    }
     setGateOpen(true);
   };
 

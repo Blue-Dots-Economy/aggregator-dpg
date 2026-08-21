@@ -132,12 +132,25 @@ import { RegisterView } from '@/app/(public)/register/RegisterView';
 const coordSchema = { title: 'Aggregator Registration', type: 'object', properties: {} } as never;
 const orgSchema = { title: 'Organisation Registration', type: 'object', properties: {} } as never;
 
+// Present by default so the consent gate has something to show; the
+// "consent copy unavailable" tests override these back to `undefined`/`null`.
+const consentContentFixture = {
+  terms: { version: 1, title: 'Terms', content: 'Terms body' },
+  privacy: { version: 1, title: 'Privacy', content: 'Privacy body' },
+};
+
 function renderView(props: Record<string, unknown>) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
       <NextIntlClientProvider locale="en" messages={messages}>
-        <RegisterView schema={coordSchema} uiSchema={{}} {...props} />
+        <RegisterView
+          schema={coordSchema}
+          uiSchema={{}}
+          aggregatorConsentContent={consentContentFixture}
+          orgConsentContent={consentContentFixture}
+          {...props}
+        />
       </NextIntlClientProvider>
     </QueryClientProvider>,
   );
@@ -428,5 +441,50 @@ describe('RegisterView consent gate', () => {
     expect(body.consent).toMatchObject({ value: true });
     expect(body.consent?.['given_at']).toBeDefined();
     expect(body.consent?.['valid_till']).toBeDefined();
+  });
+
+  it('coordinator: when the consent copy failed to load, submitting shows a visible error and posts nothing', async () => {
+    const fetchSpy = vi.fn();
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    // `aggregatorConsentContent: null` mirrors loadConsentConfig failing at
+    // boot — `toConsentDocs(null)` returns `[]`, so the gate would have
+    // nothing to show. Without the fix this is a dead Submit button: no
+    // gate, no error, no way for the user to tell what happened.
+    renderView({ orgHierarchyEnabled: false, aggregatorConsentContent: null });
+    fireEvent.submit(screen.getByTestId('rjsf-shim'));
+
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    expect(screen.getByText(messages.register.consent.load_failed_title)).toBeInTheDocument();
+    expect(screen.getByText(messages.register.consent.load_failed_detail)).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('org: when the consent copy failed to load, submitting shows a visible error and posts nothing', async () => {
+    // The coordinator tab mounts first and fetches `/api/orgs` regardless —
+    // resolve that harmlessly and track only the org-registration endpoint,
+    // the one that must not be hit.
+    const registerCalls: string[] = [];
+    globalThis.fetch = vi.fn(async (input: unknown) => {
+      const url = String(input);
+      if (url.includes('/api/org/register')) registerCalls.push(url);
+      return new Response('{}', { status: 200 });
+    }) as unknown as typeof fetch;
+
+    renderView({
+      orgHierarchyEnabled: true,
+      orgSchema,
+      orgUiSchema: {},
+      orgConsentContent: null,
+    });
+    fireEvent.click(screen.getAllByRole('tab')[1]!);
+    fireEvent.submit(screen.getByTestId('rjsf-shim'));
+
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    expect(screen.getByText(messages.register.consent.load_failed_title)).toBeInTheDocument();
+    expect(screen.getByText(messages.register.consent.load_failed_detail)).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(registerCalls).toHaveLength(0);
   });
 });

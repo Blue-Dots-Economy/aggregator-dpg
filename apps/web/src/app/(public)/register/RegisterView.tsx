@@ -24,15 +24,18 @@ export interface RegisterViewProps {
   orgUiSchema?: Record<string, unknown>;
   /**
    * Versioned Terms/Privacy content for the coordinator (aggregator) form.
-   * Passed as `formContext.consentContent` to the RJSF form so the
-   * {@link ConsentCheckboxWidget} can render clickable links.
-   * `null` when `loadConsentConfig` failed — widget degrades to plain text.
+   * Forwarded to {@link CoordinatorRegisterForm} as `consentContent`, which
+   * flattens it via `toConsentDocs` for the blocking `ConsentGate`.
+   * `null` when `loadConsentConfig` failed — the form then surfaces an error
+   * on submit instead of opening an empty gate.
    */
   aggregatorConsentContent?: ConsentDocContent | null;
   /**
    * Versioned Terms/Privacy content for the org registration form.
-   * Forwarded to {@link OrgRegisterForm} as `consentContent`.
-   * `null` when `loadConsentConfig` failed — widget degrades to plain text.
+   * Forwarded to {@link OrgRegisterForm} as `consentContent`, which flattens
+   * it via `toConsentDocs` for the blocking `ConsentGate`.
+   * `null` when `loadConsentConfig` failed — the form then surfaces an error
+   * on submit instead of opening an empty gate.
    */
   orgConsentContent?: ConsentDocContent | null;
 }

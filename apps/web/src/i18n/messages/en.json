@@ -65,7 +65,9 @@
       "modal_eyebrow": "Before you register",
       "modal_title": "Terms & Privacy",
       "modal_desc": "Please review the terms of service and privacy policy below.",
-      "modal_close": "Close"
+      "modal_close": "Close",
+      "load_failed_title": "Terms unavailable",
+      "load_failed_detail": "We could not load the Terms of Service and Privacy Policy, so your consent cannot be recorded. Please reload the page and try again."
     }
   },
   "dashboard": {
