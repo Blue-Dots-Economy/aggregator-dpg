@@ -43,7 +43,14 @@ import {
 } from '../services/email-templates/index.js';
 import { renderConfirmPage, renderResultPage } from '../views/approval-pages.js';
 import { mintApprovalTokenPair } from '../services/registration-notify.js';
-import { sendHtml, sendPage, missingTokenPage, verifyTokenForId } from './approval-shared.js';
+import {
+  sendHtml,
+  sendPage,
+  missingTokenPage,
+  rateLimitedPage,
+  verifyTokenForId,
+} from './approval-shared.js';
+import { checkAdminApprovalRate } from '../services/admin-approval-rate.js';
 import type { Aggregator } from '../services/aggregator-store/index.js';
 import { KC_ATTR } from '../services/idp-admin/index.js';
 import type { IdpUser } from '../services/idp-admin/index.js';
@@ -85,6 +92,14 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
     ) => {
       const aggregatorId = req.params.id;
       const { token, intent } = req.query;
+
+      // GITHUB-ISSUES-COMPILATION.md #9 — no rate limit previously existed
+      // beyond Kong's global cap.
+      const rl = await checkAdminApprovalRate(req.ip);
+      if (!rl.allowed) {
+        void reply.header('Retry-After', String(rl.retryAfterSeconds));
+        return sendPage(reply, rateLimitedPage(rl.retryAfterSeconds));
+      }
 
       if (!token) return sendPage(reply, missingTokenPage());
 
@@ -161,6 +176,15 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
         operation: 'aggregator-approval.decide',
         aggregator_id: aggregatorId,
       });
+
+      // GITHUB-ISSUES-COMPILATION.md #9 — no rate limit previously existed
+      // beyond Kong's global cap.
+      const rl = await checkAdminApprovalRate(req.ip);
+      if (!rl.allowed) {
+        void reply.header('Retry-After', String(rl.retryAfterSeconds));
+        return sendPage(reply, rateLimitedPage(rl.retryAfterSeconds));
+      }
+
       const parsed = DecisionBodySchema.safeParse(req.body);
       if (!parsed.success) {
         return sendHtml(
@@ -552,6 +576,14 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
       const aggregatorId = req.params.id;
       const body = (req.body ?? {}) as { token?: string };
       const token = typeof body.token === 'string' ? body.token : '';
+
+      // GITHUB-ISSUES-COMPILATION.md #9 — no rate limit previously existed
+      // beyond Kong's global cap.
+      const rl = await checkAdminApprovalRate(req.ip);
+      if (!rl.allowed) {
+        void reply.header('Retry-After', String(rl.retryAfterSeconds));
+        return sendPage(reply, rateLimitedPage(rl.retryAfterSeconds));
+      }
 
       const verified = await verifyTokenForId(token, aggregatorId, 'aggregator', {
         allowExpired: true,

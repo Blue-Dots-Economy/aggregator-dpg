@@ -124,6 +124,18 @@ export function serviceUnavailablePage(title: string, message: string): HtmlPage
   return { status: 503, html: renderResultPage({ status: 'error', title, message }) };
 }
 
+/** The 429 page when the caller has exceeded the admin-approval rate limit. */
+export function rateLimitedPage(retryAfterSeconds: number): HtmlPage {
+  return {
+    status: 429,
+    html: renderResultPage({
+      status: 'error',
+      title: 'Too many requests',
+      message: `Too many requests. Try again in ${retryAfterSeconds}s.`,
+    }),
+  };
+}
+
 /** Success of {@link verifyTokenForId}: the token is valid + bound to the id. */
 export interface VerifiedToken {
   ok: true;

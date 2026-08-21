@@ -14,6 +14,7 @@ import { IdpAdminFake, _setIdpAdmin } from '../services/idp-admin/index.js';
 import { FakeMailer, _setMailer } from '../services/mailer/index.js';
 import { _resetTokenKey } from '../services/approval-token.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
+import { _setSubmitRateChecker } from '../services/submit-rate.js';
 import { ConsentLedgerFake } from '@aggregator-dpg/consent-ledger/testing';
 import { _setConsentLedger } from '../services/consent-ledger/index.js';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
@@ -79,6 +80,7 @@ describe('POST /v1/aggregator-registrations/create', () => {
     _setMailer(null);
     _setConsentLedger(null);
     _setAccessTokenVerifier(null);
+    _setSubmitRateChecker(null);
   });
 
   const validBody = {
@@ -642,5 +644,22 @@ describe('POST /v1/aggregator-registrations/create', () => {
       expect(validTill).toBeLessThan(now + fiveYearsMs + 60_000);
       expect(validTill).toBeGreaterThan(now + fiveYearsMs - 60_000);
     }
+  });
+
+  // GITHUB-ISSUES-COMPILATION.md #9: the rate-limit check previously only
+  // ran inside the org-hierarchy branch, so flat-mode (ORG_HIERARCHY_ENABLED
+  // unset, as in this file's setup) registration create had no limit at all.
+  // Placed last: _setSubmitRateChecker is only reset in afterAll, not
+  // beforeEach, so an earlier position would poison every subsequent test.
+  it('throttles a submit when the rate checker denies (429), even with org-hierarchy off', async () => {
+    _setSubmitRateChecker(async () => ({ allowed: false, retryAfterSeconds: 42 }));
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/aggregator-registrations/create',
+      headers: AUTH_HEADER,
+      payload: validBody,
+    });
+    expect(res.statusCode).toBe(429);
+    expect(res.headers['retry-after']).toBe('42');
   });
 });

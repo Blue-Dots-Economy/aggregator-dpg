@@ -209,6 +209,11 @@ const ConfigSchema = z.object({
   PUBLIC_SUBMIT_RATE_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
   PUBLIC_SUBMIT_RATE_MAX_PER_WINDOW: z.coerce.number().int().positive().default(20),
 
+  // ─── Rate limit (admin approval routes, GITHUB-ISSUES-COMPILATION.md #9) ──
+  /** Window + cap for `/admin/v1/aggregator-registrations/*` per IP. */
+  ADMIN_APPROVAL_RATE_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
+  ADMIN_APPROVAL_RATE_MAX_PER_WINDOW: z.coerce.number().int().positive().default(10),
+
   /**
    * Trust-proxy configuration for Fastify. Controls which upstream addresses
    * are allowed to supply `X-Forwarded-For` (and therefore decide what
