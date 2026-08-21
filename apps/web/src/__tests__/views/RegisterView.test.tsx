@@ -22,6 +22,10 @@ beforeAll(() => {
 });
 
 let capturedOnError: ((errs: unknown[]) => void) | undefined;
+// The schema RegisterView last handed to RJSF — lets consent-gate tests
+// assert `stripConsentBlock` actually ran on the real schema, without this
+// shim needing to render RJSF's own field widgets.
+let capturedSchema: unknown;
 
 // Deterministic RJSF form: renders a submittable <form> plus children (the
 // submit button). Fires onSubmit with an empty payload — RegisterView merges
@@ -29,14 +33,17 @@ let capturedOnError: ((errs: unknown[]) => void) | undefined;
 // client-validation failure the same way RJSF would surface one.
 vi.mock('@/components/forms/RjsfThemed', () => ({
   RjsfThemedForm: ({
+    schema,
     onSubmit,
     onError,
     children,
   }: {
+    schema?: unknown;
     onSubmit: (e: { formData: Record<string, unknown> }, ev: unknown) => void;
     onError?: (errs: unknown[]) => void;
     children?: ReactNode;
   }) => {
+    capturedSchema = schema;
     capturedOnError = onError;
     return (
       <form
@@ -48,6 +55,37 @@ vi.mock('@/components/forms/RjsfThemed', () => ({
       >
         {children}
       </form>
+    );
+  },
+}));
+
+// The consent gate's own scroll-to-unlock behaviour is covered by
+// ConsentGate.test.tsx. Here it is shimmed to a plain dialog with an Accept /
+// Cancel button so these tests exercise RegisterView's wiring (open/close,
+// what gets posted on accept) rather than re-driving the scroll mechanics.
+let capturedGateProps:
+  { open: boolean; onAccept: () => void; onCancel?: () => void; agreeLabel?: string } | undefined;
+
+vi.mock('@/components/consent/ConsentGate', () => ({
+  ConsentGate: (props: {
+    open: boolean;
+    onAccept: () => void;
+    onCancel?: () => void;
+    agreeLabel?: string;
+  }) => {
+    capturedGateProps = props;
+    if (!props.open) return null;
+    return (
+      <div role="dialog" aria-label="consent-gate-shim">
+        <button type="button" onClick={props.onAccept}>
+          Accept (shim)
+        </button>
+        {props.onCancel ? (
+          <button type="button" onClick={props.onCancel}>
+            Cancel (shim)
+          </button>
+        ) : null}
+      </div>
     );
   },
 }));
@@ -189,6 +227,13 @@ describe('RegisterView org hierarchy', () => {
     fireEvent.change(select, { target: { value: 'o1' } });
     fireEvent.submit(screen.getByTestId('rjsf-shim'));
 
+    // Submit now opens the consent gate rather than posting directly; accept
+    // it (the shim) to reach the actual POST.
+    await screen.findByRole('dialog');
+    act(() => {
+      capturedGateProps?.onAccept();
+    });
+
     await waitFor(() => expect(calls.length).toBeGreaterThan(0));
     const submitCall = calls.find((c) => c.url.includes('/api/aggregator/register'));
     expect(submitCall).toBeDefined();
@@ -228,5 +273,160 @@ describe('RegisterView org hierarchy', () => {
 
     expect(await screen.findByRole('alert')).toBeInTheDocument();
     expect(screen.getByText(messages.register.validation_error_title)).toBeInTheDocument();
+  });
+});
+
+describe('RegisterView consent gate', () => {
+  const schemaWithConsent = {
+    type: 'object',
+    required: ['name', 'consent'],
+    properties: {
+      name: { type: 'string' },
+      consent: {
+        type: 'object',
+        title: 'Terms & Privacy Consent',
+        required: ['value'],
+        properties: { value: { type: 'boolean' } },
+      },
+    },
+  };
+
+  let originalFetch: typeof fetch;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+  });
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.clearAllMocks();
+  });
+
+  it('coordinator: strips the consent block from the schema handed to RJSF', () => {
+    globalThis.fetch = vi.fn(
+      async () => new Response('{}', { status: 200 }),
+    ) as unknown as typeof fetch;
+
+    renderView({ orgHierarchyEnabled: false, schema: schemaWithConsent });
+
+    const rendered = capturedSchema as {
+      properties?: Record<string, unknown>;
+      required?: string[];
+    };
+    expect(rendered.properties).not.toHaveProperty('consent');
+    expect(rendered.required).not.toContain('consent');
+  });
+
+  it('coordinator: submitting opens the gate and posts nothing', async () => {
+    const fetchSpy = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ aggregator_id: 'agg-1' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+    );
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    renderView({ orgHierarchyEnabled: false });
+    fireEvent.submit(screen.getByTestId('rjsf-shim'));
+
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('coordinator: cancelling the gate closes it without posting, leaving the form in place', async () => {
+    const fetchSpy = vi.fn(async () => new Response('{}', { status: 200 }));
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    renderView({ orgHierarchyEnabled: false });
+    fireEvent.submit(screen.getByTestId('rjsf-shim'));
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+
+    act(() => {
+      capturedGateProps?.onCancel?.();
+    });
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(screen.getByTestId('rjsf-shim')).toBeInTheDocument();
+  });
+
+  it('coordinator: accepting the gate posts consent.value:true with both timestamps to /api/aggregator/register', async () => {
+    const calls: { url: string; body: string }[] = [];
+    const fetchSpy = vi.fn(async (input: unknown, init?: { body?: string }) => {
+      calls.push({ url: String(input), body: init?.body ?? '' });
+      return new Response(JSON.stringify({ aggregator_id: 'agg-1' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    renderView({ orgHierarchyEnabled: false });
+    fireEvent.submit(screen.getByTestId('rjsf-shim'));
+    await screen.findByRole('dialog');
+
+    act(() => {
+      capturedGateProps?.onAccept();
+    });
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]!.url).toContain('/api/aggregator/register');
+    const body = JSON.parse(calls[0]!.body) as { consent?: Record<string, unknown> };
+    expect(body.consent).toMatchObject({ value: true });
+    expect(body.consent?.['given_at']).toBeDefined();
+    expect(body.consent?.['valid_till']).toBeDefined();
+  });
+
+  it('org: strips the consent block from the schema handed to RJSF', () => {
+    globalThis.fetch = vi.fn(
+      async () => new Response('{}', { status: 200 }),
+    ) as unknown as typeof fetch;
+
+    renderView({
+      orgHierarchyEnabled: true,
+      orgSchema: schemaWithConsent,
+      orgUiSchema: {},
+    });
+    fireEvent.click(screen.getAllByRole('tab')[1]!);
+
+    const rendered = capturedSchema as {
+      properties?: Record<string, unknown>;
+      required?: string[];
+    };
+    expect(rendered.properties).not.toHaveProperty('consent');
+    expect(rendered.required).not.toContain('consent');
+  });
+
+  it('org: submitting opens the gate, posts nothing, then accepting posts consent.value:true with both timestamps to /api/org/register', async () => {
+    const calls: { url: string; body: string }[] = [];
+    const fetchSpy = vi.fn(async (input: unknown, init?: { body?: string }) => {
+      const url = String(input);
+      if (url.includes('/api/org/register')) {
+        calls.push({ url, body: init?.body ?? '' });
+        return new Response(JSON.stringify({ slug: 'acme-org' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response('{}', { status: 200 });
+    });
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    renderView({ orgHierarchyEnabled: true, orgSchema, orgUiSchema: {} });
+    fireEvent.click(screen.getAllByRole('tab')[1]!);
+    fireEvent.submit(screen.getByTestId('rjsf-shim'));
+
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(calls).toHaveLength(0);
+
+    act(() => {
+      capturedGateProps?.onAccept();
+    });
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    const body = JSON.parse(calls[0]!.body) as { consent?: Record<string, unknown> };
+    expect(body.consent).toMatchObject({ value: true });
+    expect(body.consent?.['given_at']).toBeDefined();
+    expect(body.consent?.['valid_till']).toBeDefined();
   });
 });

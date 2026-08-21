@@ -1,11 +1,13 @@
 'use client';
 
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { RJSFSchema, UiSchema } from '@rjsf/utils';
 import type { IChangeEvent } from '@rjsf/core';
 import { useTranslations } from 'next-intl';
 import { RjsfThemedForm } from '../../../components/forms/RjsfThemed';
+import { ConsentGate } from '../../../components/consent/ConsentGate';
+import { toConsentDocs } from '../../../components/consent/consent-docs';
 import {
   Select,
   SelectContent,
@@ -18,6 +20,7 @@ import { jsonFetch } from '../../../services/http';
 import {
   humaniseValidationErrors,
   stampConsent,
+  stripConsentBlock,
   stripFormChrome,
   submitRegistration,
 } from './registration-shared';
@@ -75,10 +78,12 @@ export function CoordinatorRegisterForm({
   const { state, setState, canSubmit, setCanSubmit, errorRef } = useRegistrationFormState();
   const [formData, setFormData] = useState<Record<string, unknown>>(() => ({
     locations: [{ geo: { type: 'Point', coordinates: [0, 0] }, address: { addressCountry: 'IN' } }],
-    consent: stampConsent(undefined),
   }));
   // Selected parent org (spec §6.2). Empty until picked.
   const [orgId, setOrgId] = useState<string>('');
+  const [gateOpen, setGateOpen] = useState(false);
+  const pendingRef = useRef<Record<string, unknown> | null>(null);
+  const consentDocs = useMemo(() => toConsentDocs(consentContent), [consentContent]);
 
   // Fetch the active-org list only when the hierarchy is on.
   const orgsQuery = useQuery({
@@ -101,7 +106,9 @@ export function CoordinatorRegisterForm({
     setFormData((prev) => (prev['name'] === next ? prev : { ...prev, name: next }));
   }, [orgHierarchyEnabled, selectedOrgName]);
 
-  const formSchema = useMemo(() => stripFormChrome(schema), [schema]);
+  const formSchema = useMemo(() => stripConsentBlock(stripFormChrome(schema)), [schema]);
+
+  const agreeLabel = `${t('consent.accept_prefix')}${t('consent.privacy_link')}${t('consent.and')}${t('consent.terms_link')}.`;
 
   // Flag-on: hide the free-text "Organisation Name" (`name`) — auto-filled from
   // the selected org. Flag-off keeps the flat form unchanged.
@@ -113,17 +120,22 @@ export function CoordinatorRegisterForm({
     };
   }, [uiSchema, orgHierarchyEnabled]);
 
+  /** Holds the payload and opens the gate — consent is collected there. */
   const handleSubmit = async (
     e: IChangeEvent<Record<string, unknown>>,
     _event: FormEvent<HTMLFormElement>,
   ): Promise<void> => {
+    pendingRef.current = (e.formData ?? {}) as Record<string, unknown>;
+    setGateOpen(true);
+  };
+
+  /** Runs after the gate is accepted: stamps consent and posts. */
+  const submitWithConsent = async (): Promise<void> => {
+    setGateOpen(false);
     setState({ status: 'submitting' });
     const payload: Record<string, unknown> = {
-      ...(e.formData ?? {}),
-      consent: stampConsent(
-        (e.formData as Record<string, unknown> | undefined)?.consent as
-          Record<string, unknown> | undefined,
-      ),
+      ...(pendingRef.current ?? {}),
+      consent: stampConsent({ value: true }),
     };
     // The API strips `org_id` before RJSF validation and stores it on
     // `aggregators.parent_org_id`. Sent only when the hierarchy is on; `name`
@@ -245,6 +257,14 @@ export function CoordinatorRegisterForm({
           </RjsfThemedForm>
         </>
       )}
+
+      <ConsentGate
+        open={gateOpen}
+        docs={consentDocs}
+        agreeLabel={agreeLabel}
+        onAccept={submitWithConsent}
+        onCancel={() => setGateOpen(false)}
+      />
     </div>
   );
 }
