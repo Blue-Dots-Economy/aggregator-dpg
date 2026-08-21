@@ -449,11 +449,11 @@ export interface SignalStackProbeUserInput {
  *   - `user_exists: false` — truly new identity.
  *   - `user_exists: true`, `owned_elsewhere: false`, `lifecycle_summary != null`
  *     — own user with at least one item; the caller can resume the lifecycle.
- *   - `user_exists: true`, `owned_elsewhere: false`, `lifecycle_summary == null`
- *     — own user with no item yet (e.g., previous probe created the account).
  *   - `user_exists: true`, `owned_elsewhere: true`, `lifecycle_summary == null`
- *     — user exists under a different aggregator; we deliberately leak no
- *     lifecycle state from another org.
+ *     — user exists but this aggregator owns none of their items; we
+ *     deliberately leak no lifecycle state from another org. (The read-only
+ *     probe returns no items for a user this org has not onboarded, so the
+ *     old "own user, no item yet" state no longer arises.)
  */
 export interface SignalStackProbeUserResult {
   user_exists: boolean;
@@ -614,19 +614,20 @@ export abstract class SignalStackWriterBase {
   ): Promise<Result<SignalStackDecryptedProfiles, BaseError>>;
 
   /**
-   * Identity probe — wraps signals' `/admin/participant` with
-   * `submit_mode: 'account_only'`. Idempotent and (from the signals
-   * caller's perspective) side-effect free: signals may create a user
-   * row at most; never an item.
+   * Identity probe — a **read-only** lookup against signals'
+   * `GET /admin/participant`. Truly side-effect free: it never creates a
+   * user or item (unlike the old POST account-only probe, which minted a
+   * phantom `name: 'lookup'` user — #648). Safe to retry.
    *
    * Returns `user_exists: false` for truly new identities, and
-   * `owned_elsewhere: true` (with null `lifecycle_summary`) for
-   * users owned by another aggregator. When the user belongs to the
-   * calling aggregator, `lifecycle_summary` carries the primary item's
-   * `item_id` and `lifecycle_status` so the caller can resume the
-   * lifecycle without an extra round-trip.
+   * `owned_elsewhere: true` (with null `lifecycle_summary`) for users who
+   * exist but whose items this aggregator does not own. When the user
+   * belongs to the calling aggregator, `lifecycle_summary` carries the
+   * primary item's `item_id` and `lifecycle_status` so the caller can
+   * resume the lifecycle without an extra round-trip.
    *
-   * @param input - actingOrgId + email and/or phoneNumber + network/domain.
+   * @param input - actingOrgId + email and/or phoneNumber (network/domain
+   *   accepted for symmetry but unused by the read).
    * @returns ok(SignalStackProbeUserResult) on 2xx; err(BaseError) when
    *   neither identifier is supplied, on transport failure, or any
    *   non-2xx response.
