@@ -127,7 +127,15 @@ export function ConsentGate({
             // doesn't include `region`.
             // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
             tabIndex={0}
-            className="min-h-0 flex-1 overflow-y-auto rounded-xl border border-(--bd-border) bg-[#FBFCFF] p-4"
+            // `relative`: read-progress.ts measures each section via a
+            // getBoundingClientRect delta, which is correct regardless of
+            // which ancestor is positioned — this class isn't load-bearing
+            // for that math. It's here anyway so this scroller is its own
+            // positioning context, matching what a reader of this markup
+            // would expect from `data-consent-section` children measured
+            // against it, rather than leaving that an implicit accident of
+            // the dialog panel above being `relative`.
+            className="relative min-h-0 flex-1 overflow-y-auto rounded-xl border border-(--bd-border) bg-[#FBFCFF] p-4"
           >
             {docs.map((doc, i) => (
               <section

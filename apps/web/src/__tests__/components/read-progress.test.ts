@@ -120,10 +120,42 @@ describe('useReadProgress', () => {
     { id: 'terms', cap: 'Terms', title: 'Terms of Service', body: 't' },
   ];
 
+  // Non-zero and, deliberately, the exact figure a real Chromium reported for
+  // the sibling Signals repo's equivalent markup (panel > header > tracker >
+  // reader, reader with no `position: relative` of its own): the reader's own
+  // viewport `top` is never 0 in production. A stub that used 0 here would
+  // pass whether sections were measured from the reader or from the (also
+  // top:0-in-jsdom) positioned ancestor several levels up — exactly the bug
+  // that shipped. See `rect` below for why this file stubs
+  // `getBoundingClientRect`, not `offsetTop`/`offsetHeight`.
+  const READER_VIEWPORT_TOP = 149;
+
+  function rect(top: number, height: number): DOMRect {
+    return {
+      top,
+      height,
+      bottom: top + height,
+      left: 0,
+      right: 0,
+      width: 0,
+      x: 0,
+      y: top,
+      toJSON: () => ({}),
+    } as DOMRect;
+  }
+
   /** Builds the reader element's section children, optionally omitting one. */
   function setSections(el: HTMLElement, omit?: string) {
     el.innerHTML = '';
-    const offsets: Record<string, { top: number; height: number }> = {
+    // Section position in the scroller's CONTENT space (what the old, buggy
+    // `offsetTop` conflated with "relative to the nearest positioned
+    // ancestor"). The production code now derives this from a
+    // getBoundingClientRect delta, so the honest stub here is
+    // getBoundingClientRect too — one in viewport space, recomputed against
+    // the reader's current `scrollTop` exactly as a real scrolling browser
+    // would report it, not one pre-expressed in the implementation's own
+    // content-space assumption.
+    const contentOffsets: Record<string, { top: number; height: number }> = {
       privacy: { top: 0, height: 300 },
       terms: { top: 300, height: 300 },
     };
@@ -131,14 +163,8 @@ describe('useReadProgress', () => {
       if (doc.id === omit) continue;
       const section = document.createElement('div');
       section.setAttribute('data-consent-section', doc.id);
-      Object.defineProperty(section, 'offsetTop', {
-        value: offsets[doc.id]!.top,
-        configurable: true,
-      });
-      Object.defineProperty(section, 'offsetHeight', {
-        value: offsets[doc.id]!.height,
-        configurable: true,
-      });
+      const { top, height } = contentOffsets[doc.id]!;
+      section.getBoundingClientRect = () => rect(READER_VIEWPORT_TOP + top - el.scrollTop, height);
       el.appendChild(section);
     }
   }
@@ -148,6 +174,7 @@ describe('useReadProgress', () => {
     Object.defineProperty(el, 'scrollHeight', { value: 600, configurable: true });
     Object.defineProperty(el, 'clientHeight', { value: 200, configurable: true });
     Object.defineProperty(el, 'scrollTop', { value: 0, writable: true, configurable: true });
+    el.getBoundingClientRect = () => rect(READER_VIEWPORT_TOP, 200);
     setSections(el);
     return el;
   }
@@ -174,6 +201,45 @@ describe('useReadProgress', () => {
     fireEvent.scroll(el);
 
     expect(result.current.readIds).toContain('privacy');
+  });
+
+  it('marks nothing read at the top even though the reader has a nonzero viewport offset', () => {
+    // The mirror image of the test below: with the same nonzero
+    // READER_VIEWPORT_TOP, an implementation that measured sections from the
+    // wrong coordinate space could just as easily land on "everything looks
+    // read immediately" as "nothing is ever readable" depending on exactly
+    // how the mismatch resolves arithmetically — jsdom's real (unstubbed)
+    // `offsetTop`/`offsetHeight` both default to 0, which satisfies
+    // computeReadProgress's read check trivially at any scrollTop. This test
+    // is what catches that failure mode; the one below alone would not have.
+    const el = makeReader();
+    const ref: RefObject<HTMLElement | null> = { current: el };
+    const { result } = renderHook(() => useReadProgress(ref, docs));
+
+    fireEvent.scroll(el); // scrollTop is still 0
+
+    expect(result.current.readIds).toEqual([]);
+    expect(result.current.allRead).toBe(false);
+  });
+
+  it('reaches allRead at max scroll when the reader is not the positioned ancestor — the production defect', () => {
+    // This is the shape that shipped broken: the reader itself is not
+    // `position: relative` (READER_VIEWPORT_TOP is nonzero and independent
+    // of any ancestor), so a section's `offsetTop` would have been measured
+    // from whatever positioned ancestor sits above the reader, not from the
+    // reader's own scroll origin. `computeReadProgress` can only ever see
+    // `allRead: true` if the hook feeds it a section `top` in the *reader's*
+    // content space — which is exactly what a getBoundingClientRect delta
+    // gives it and `offsetTop` does not.
+    const el = makeReader();
+    const ref: RefObject<HTMLElement | null> = { current: el };
+    const { result } = renderHook(() => useReadProgress(ref, docs));
+
+    (el as unknown as { scrollTop: number }).scrollTop = el.scrollHeight - el.clientHeight; // max scroll
+    fireEvent.scroll(el);
+
+    expect(result.current.allRead).toBe(true);
+    expect(result.current.readIds).toEqual(['privacy', 'terms']);
   });
 
   it('does not report allRead before the first measurement has happened', () => {

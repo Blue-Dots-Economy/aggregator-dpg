@@ -146,10 +146,26 @@ export function useReadProgress(
   const measure = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
+    // Section top in the SCROLLER's own content space — the same space as
+    // `scrollTop + clientHeight` below — via a getBoundingClientRect delta.
+    // `node.offsetTop` measures from the nearest *positioned* ancestor, which
+    // in a real layout is very often not the scroller itself (here it was the
+    // dialog panel, several headers up). That produced a constant shortfall
+    // between `viewBottom` and every section's bottom, so `allRead` could
+    // never be reached — verified in a real browser, not just jsdom. A rect
+    // delta is independent of which ancestor happens to be positioned.
+    const readerRect = el.getBoundingClientRect();
     const sections: SectionBox[] = [];
     for (const doc of docs) {
       const node = el.querySelector<HTMLElement>(`[data-consent-section="${doc.id}"]`);
-      if (node) sections.push({ id: doc.id, top: node.offsetTop, height: node.offsetHeight });
+      if (node) {
+        const nodeRect = node.getBoundingClientRect();
+        sections.push({
+          id: doc.id,
+          top: nodeRect.top - readerRect.top + el.scrollTop,
+          height: nodeRect.height,
+        });
+      }
     }
     const next = computeReadProgress(
       { scrollTop: el.scrollTop, clientHeight: el.clientHeight, scrollHeight: el.scrollHeight },

@@ -23,17 +23,48 @@ function Wrapper({ children }: { children: ReactNode }) {
  * jsdom lays nothing out, so the gate would see a 0x0 scroller and treat it as
  * unscrollable (correctly — an unmeasurable box cannot be scrolled). To drive
  * the locked path we stub a taller-than-viewport scroller.
+ *
+ * Stubs `getBoundingClientRect`, not `offsetTop`/`offsetHeight`: the gate
+ * shipped broken in production because `offsetTop` is relative to the
+ * nearest *positioned* ancestor, not the scroller — here that ancestor was
+ * the dialog panel several elements up, not `consent-reader` itself. A stub
+ * expressed directly in the reader's content space (as `offsetTop`-based
+ * stubs necessarily are) cannot fail the way the real DOM failed. Giving the
+ * reader a non-zero, ancestor-independent viewport `top` — 149, the figure a
+ * real Chromium reported for the sibling repo's equivalent markup — means a
+ * regression back to `offsetTop`-style measurement fails this test rather
+ * than passing it.
  */
+const READER_VIEWPORT_TOP = 149;
+
+function rect(top: number, height: number): DOMRect {
+  return {
+    top,
+    height,
+    bottom: top + height,
+    left: 0,
+    right: 0,
+    width: 0,
+    x: 0,
+    y: top,
+    toJSON: () => ({}),
+  } as DOMRect;
+}
+
 function stubScroller(scrollHeight: number, clientHeight: number, scrollTop = 0) {
   const el = screen.getByTestId('consent-reader');
   Object.defineProperty(el, 'scrollHeight', { value: scrollHeight, configurable: true });
   Object.defineProperty(el, 'clientHeight', { value: clientHeight, configurable: true });
   Object.defineProperty(el, 'scrollTop', { value: scrollTop, writable: true, configurable: true });
+  el.getBoundingClientRect = () => rect(READER_VIEWPORT_TOP, clientHeight);
   for (const doc of docs) {
     const section = el.querySelector<HTMLElement>(`[data-consent-section="${doc.id}"]`)!;
     const top = doc.id === 'privacy' ? 0 : 300;
-    Object.defineProperty(section, 'offsetTop', { value: top, configurable: true });
-    Object.defineProperty(section, 'offsetHeight', { value: 300, configurable: true });
+    // Recomputed against the reader's *current* scrollTop each call, the way
+    // a real scrolling browser reports a child's viewport position — not a
+    // static value pre-expressed in the reader's content space.
+    section.getBoundingClientRect = () =>
+      rect(READER_VIEWPORT_TOP + top - (el as unknown as { scrollTop: number }).scrollTop, 300);
   }
   return el;
 }
@@ -70,6 +101,25 @@ describe('<ConsentGate />', () => {
     expect(screen.getByRole('checkbox')).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Accept & continue' })).toBeDisabled();
     expect(screen.getByText('Scroll to the end to unlock the checkbox.')).toBeInTheDocument();
+  });
+
+  it('reaches allRead at max scroll even though the reader is not the positioned ancestor — the production defect', () => {
+    // The gate shipped broken: sections were measured via `offsetTop`, which
+    // is relative to the nearest *positioned* ancestor — the dialog panel,
+    // several elements above the reader — not the reader itself. `viewBottom`
+    // is in the reader's own scroll space, so the two were never comparable
+    // and `allRead` could not be reached at any scroll position, on any
+    // surface that uses this gate. `stubScroller`'s nonzero, ancestor-
+    // independent `READER_VIEWPORT_TOP` reproduces that mismatch; this test
+    // is the one that would have caught it.
+    render(
+      <Wrapper>
+        <ConsentGate open docs={docs} agreeLabel="I agree" onAccept={vi.fn()} />
+      </Wrapper>,
+    );
+    const el = stubScroller(600, 200, 400); // scrollTop + clientHeight === scrollHeight: max scroll
+    fireEvent.scroll(el);
+    expect(screen.getByRole('checkbox')).toBeEnabled();
   });
 
   it('unlocks the checkbox at the end, then the CTA once ticked', () => {
@@ -110,13 +160,14 @@ describe('<ConsentGate />', () => {
     // "shorter than the viewport" (see its own dedicated guard against that
     // ambiguity). To exercise the real-world case — a document that fits
     // without scrolling — we stub the one section as unscrollable, the same
-    // way `stubScroller` does above.
+    // way `stubScroller` does above (getBoundingClientRect, not offsetTop —
+    // see the comment on `stubScroller`).
     const el = screen.getByTestId('consent-reader');
     Object.defineProperty(el, 'scrollHeight', { value: 100, configurable: true });
     Object.defineProperty(el, 'clientHeight', { value: 200, configurable: true });
+    el.getBoundingClientRect = () => rect(READER_VIEWPORT_TOP, 200);
     const section = el.querySelector<HTMLElement>('[data-consent-section="profile"]')!;
-    Object.defineProperty(section, 'offsetTop', { value: 0, configurable: true });
-    Object.defineProperty(section, 'offsetHeight', { value: 100, configurable: true });
+    section.getBoundingClientRect = () => rect(READER_VIEWPORT_TOP, 100);
     fireEvent.scroll(el);
 
     expect(screen.getByRole('checkbox')).toBeEnabled();
