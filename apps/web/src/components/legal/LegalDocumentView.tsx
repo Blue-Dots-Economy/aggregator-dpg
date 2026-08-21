@@ -291,14 +291,17 @@ function RailSections({
  * reading column, rather than repeated here.
  *
  * Every document row renders identically — there is no "current document"
- * styling any more. The page holds all six documents in one continuous
- * scroll, so a route-derived "this is the current one" would light up every
+ * indication of any kind here, visual or otherwise. The page holds all six
+ * documents in one continuous scroll, so "which document is current" is not
+ * a fact the route knows: a route-derived value would light up every
  * document whose id happens to match the route (e.g. both audiences'
  * "Privacy Policy" on `/privacy`) — the exact defect this component used to
- * have. `isActiveDoc` is scroll-derived (the reader has actually scrolled
- * into this document) and is only ever surfaced as `aria-current`, never as
- * a visual difference — the section pill (`RailSections`, driven by the same
- * scroll-spy) is the page's one live indicator.
+ * have, first in styling, then (once the styling was removed) surviving as
+ * an `aria-current="page"` that a screen reader announced on every one of
+ * them. The document heading carries no `aria-current` at all now; the
+ * section pill (`RailSections`, driven by the scroll-spy) is the page's one
+ * live indicator, because a section genuinely knows whether the reader has
+ * scrolled to it.
  *
  * `sections` is passed in already deduped across the whole page (see
  * `assignPageAnchorIds`) — this component does not parse the Markdown
@@ -306,14 +309,12 @@ function RailSections({
  * never drift apart.
  */
 function RailDocument({
-  isActiveDoc,
   entry,
   headingId,
   sections,
   activeSectionId,
   onNavigate,
 }: {
-  isActiveDoc: boolean;
   entry: DocEntry;
   headingId: string;
   sections: LegalSection[];
@@ -324,7 +325,6 @@ function RailDocument({
     <div className="mb-3">
       <a
         href={`#${headingId}`}
-        aria-current={isActiveDoc ? 'page' : undefined}
         onClick={(event) => {
           event.preventDefault();
           onNavigate(headingId);
@@ -436,25 +436,6 @@ export function LegalDocumentView({
       return sectionsByDoc[d][gi]?.[0]?.id ?? docIds[group.audience]?.[d];
     },
     [groups, sectionsByDoc, docIds],
-  );
-
-  // Whether the reader has actually scrolled into this (group, document)
-  // pair — its own heading, or one of its own sections, is the current
-  // scroll-spy highlight. Derived from `activeSectionId` alone, never from
-  // the route: that is what keeps this to "the one document being read"
-  // instead of "every document whose id matches the routed doc kind" (the
-  // reported defect, since both audiences' Privacy Policy match `/privacy`
-  // equally). Used only for `aria-current` on the rail's document heading —
-  // never for styling, per the fix.
-  const isActiveDoc = useCallback(
-    (gi: number, d: LegalDoc): boolean => {
-      if (activeSectionId === null) return false;
-      const group = groups[gi];
-      if (!group) return false;
-      if (docIds[group.audience]?.[d] === activeSectionId) return true;
-      return sectionsByDoc[d][gi]?.some((section) => section.id === activeSectionId) ?? false;
-    },
-    [activeSectionId, groups, docIds, sectionsByDoc],
   );
 
   // How close to the top of the viewport a heading must have scrolled to
@@ -720,7 +701,6 @@ export function LegalDocumentView({
                 {DOC_ORDER.map((d) => (
                   <RailDocument
                     key={d}
-                    isActiveDoc={isActiveDoc(gi, d)}
                     entry={group.content[d]}
                     headingId={docIds[group.audience]![d]!}
                     sections={sectionsByDoc[d][gi]!}

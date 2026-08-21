@@ -131,10 +131,21 @@ describe('<LegalDocumentView />', () => {
     expect(privacyLinks).toHaveLength(2);
     // Identical classes — no "current document" tint on either.
     expect(privacyLinks[0]!.className).toBe(privacyLinks[1]!.className);
-    // At most one may carry aria-current (scroll-derived, never "every id
-    // matching the route"); on arrival, only the topmost audience's is.
-    const current = privacyLinks.filter((l) => l.getAttribute('aria-current') === 'page');
-    expect(current.length).toBeLessThanOrEqual(1);
+  });
+
+  // Regression for the surviving half of the same defect: once the visual
+  // tint was removed, `aria-current="page"` stayed behind on every
+  // document-heading anchor, still route-derived — so a screen reader
+  // announced all of a route's same-named document headings as "current"
+  // (verified: three "current page" hits on `/terms`, none on `/privacy`).
+  // "Which document is current" isn't a fact the route knows on a page that
+  // renders every document at once, so the attribute is dropped from the
+  // document heading entirely — the section pill is the one live indicator.
+  it('never puts aria-current on a document-heading anchor, on either route', () => {
+    renderView('privacy', groups);
+    for (const link of screen.getAllByRole('link', { name: /Privacy Policy|Terms of Service/ })) {
+      expect(link).not.toHaveAttribute('aria-current');
+    }
   });
 
   // Regression for the sibling defect: the non-routed document ("Terms of
@@ -177,9 +188,9 @@ describe('<LegalDocumentView />', () => {
   // Regression for an older defect: this rail entry used to be a route
   // `Link` (`href="/terms"`), so hovering it showed a full navigation
   // instead of an in-page anchor. Both documents already render on this
-  // page, so it must be a same-page anchor. Neither carries aria-current
-  // here because, on arrival at /privacy with no hash, the scroll-spy's
-  // fallback pill lands on Privacy's own first section, not on Terms.
+  // page, so it must be a same-page anchor. Neither carries aria-current —
+  // document-heading anchors never do, regardless of scroll position (see
+  // the dedicated test above).
   it('links to the other document as a same-page anchor, not a route', () => {
     renderView('privacy', groups);
     const otherLinks = screen.getAllByRole('link', { name: 'Terms of Service' });
