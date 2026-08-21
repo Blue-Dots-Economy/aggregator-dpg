@@ -100,7 +100,7 @@ describe('<ConsentGate />', () => {
     fireEvent.scroll(el);
     expect(screen.getByRole('checkbox')).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Accept & continue' })).toBeDisabled();
-    expect(screen.getByText('Scroll to the end to unlock the checkbox.')).toBeInTheDocument();
+    expect(screen.getByText('Keep reading to continue.')).toBeInTheDocument();
   });
 
   it('reaches allRead at max scroll even though the reader is not the positioned ancestor — the production defect', () => {
@@ -134,7 +134,7 @@ describe('<ConsentGate />', () => {
 
     const box = screen.getByRole('checkbox');
     expect(box).toBeEnabled();
-    expect(screen.getByText('You have reached the end — you can agree now.')).toBeInTheDocument();
+    expect(screen.getByText("That's everything — you can agree now.")).toBeInTheDocument();
 
     const cta = screen.getByRole('button', { name: 'Accept & continue' });
     expect(cta).toBeDisabled();
