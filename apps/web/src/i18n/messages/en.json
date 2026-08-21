@@ -616,5 +616,15 @@
     "cap_privacy": "Privacy",
     "cap_terms": "Terms",
     "cap_profile": "Profile"
+  },
+  "legal": {
+    "privacy_title": "Privacy Policy",
+    "terms_title": "Terms of Service",
+    "audience_participant": "For participants",
+    "audience_aggregator": "For aggregators",
+    "audience_org": "For organisations",
+    "version_effective": "Version {version} · Effective {date}",
+    "version_only": "Version {version}",
+    "unavailable": "Legal documents are currently unavailable. Please try again later."
   }
 }

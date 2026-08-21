@@ -616,5 +616,15 @@
     "cap_privacy": "गोपनीयता",
     "cap_terms": "शर्तें",
     "cap_profile": "प्रोफ़ाइल"
+  },
+  "legal": {
+    "privacy_title": "गोपनीयता नीति",
+    "terms_title": "सेवा की शर्तें",
+    "audience_participant": "प्रतिभागियों के लिए",
+    "audience_aggregator": "एग्रीगेटर्स के लिए",
+    "audience_org": "संगठनों के लिए",
+    "version_effective": "संस्करण {version} · प्रभावी {date}",
+    "version_only": "संस्करण {version}",
+    "unavailable": "कानूनी दस्तावेज़ इस समय अनुपलब्ध हैं। कृपया बाद में पुनः प्रयास करें।"
   }
 }
