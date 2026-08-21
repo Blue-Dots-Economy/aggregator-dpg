@@ -1002,6 +1002,13 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
     // account-only probe created a phantom `name: 'lookup'` user). Org scoping
     // is via the `x-acting-org-id` header; signals returns only items owned by
     // this org.
+    //
+    // Privacy note: because this is a GET, the email/phone ride the query string
+    // rather than a POST body, so an intermediary (proxy / LB / ingress) that
+    // logs full request URIs could capture them. Acceptable — this is an
+    // internal server-to-server call and matches signals' existing read
+    // contract — but the signals ingress should keep `/admin/participant` query
+    // strings out of its access log.
     const params = new URLSearchParams();
     if (input.email) params.set('email', input.email);
     if (input.phoneNumber) params.set('phone_number', input.phoneNumber);
@@ -1083,8 +1090,14 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
 
       const items = Array.isArray(raw.items) ? raw.items : [];
 
-      // User exists but this aggregator owns none of their items → owned
-      // elsewhere. We deliberately leak no lifecycle state from another org.
+      // User exists but this aggregator owns none of their items → treated as
+      // owned elsewhere (no lifecycle leak from another org). NOTE: the read
+      // endpoint returns `items: []` both for a genuinely foreign user AND for
+      // an own account-only participant who has no item yet, so those two states
+      // collapse here. This only affects the pre-submit UX hint (public-lookup);
+      // the `onboard` result remains authoritative for the real 201/409 outcome,
+      // so a collapsed hint never blocks a legitimate submit. A precise split
+      // would need an explicit `owned_by_me` flag from signals (follow-up).
       if (items.length === 0) {
         return ok({
           user_exists: true,
