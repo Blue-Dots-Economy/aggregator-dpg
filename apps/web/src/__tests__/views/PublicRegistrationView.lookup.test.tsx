@@ -11,6 +11,7 @@ import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { NextIntlClientProvider } from 'next-intl';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import messages from '@/i18n/messages/en.json';
+import type * as UseAggregatorConfigModule from '@/hooks/useAggregatorConfig';
 
 // jsdom does not implement scrollIntoView; the error banner's focus effect
 // calls it whenever state transitions to 'error'.
@@ -85,10 +86,22 @@ const gateShim = {
 const cfgMock = vi.hoisted(() => ({
   value: undefined as Record<string, unknown> | undefined,
 }));
-vi.mock('@/hooks/useAggregatorConfig', () => ({
-  useAggregatorConfig: () => ({ data: cfgMock.value, isLoading: false }),
-  DEFAULT_AGGREGATOR_CONFIG: cfgMock.value,
-}));
+vi.mock('@/hooks/useAggregatorConfig', async (importOriginal) => {
+  // DEFAULT_AGGREGATOR_CONFIG must come from the real module, not
+  // `cfgMock.value`: a mock factory runs exactly once, so
+  // `DEFAULT_AGGREGATOR_CONFIG: cfgMock.value` would snapshot whatever
+  // `cfgMock.value` happened to be at that one moment (`undefined`, since
+  // that's its initial value) and stay that way for the rest of the file,
+  // silently ignoring every later `cfgMock.value = ...` a test makes. No
+  // test in this file currently depends on the real fallback shape, but a
+  // future one that does (or a shared assumption a reader brings from
+  // elsewhere) shouldn't get a mock that looks live but isn't.
+  const actual = await importOriginal<typeof UseAggregatorConfigModule>();
+  return {
+    useAggregatorConfig: () => ({ data: cfgMock.value, isLoading: false }),
+    DEFAULT_AGGREGATOR_CONFIG: actual.DEFAULT_AGGREGATOR_CONFIG,
+  };
+});
 
 const NO_CONSENT_CFG = {
   brand: { short_name: 'Test', primary_color: '#4338ca' },
