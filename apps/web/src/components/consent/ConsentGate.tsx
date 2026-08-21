@@ -110,12 +110,23 @@ export function ConsentGate({
           <div
             ref={readerRef}
             data-testid="consent-reader"
-            // Focusable (not just scrollable by mouse/touch): with no close
-            // button to land on, this is where initial focus goes, and a
-            // focusable scroll region is also a keyboard-scrollable one —
-            // necessary, since the gate cannot be completed without
-            // scrolling it.
-            tabIndex={-1}
+            role="region"
+            aria-label={t('reader_label')}
+            // Focusable AND in the tab sequence (not just scrollable by
+            // mouse/touch, and not `-1`): with no close button to land on,
+            // this is where initial focus goes, and a focusable scroll
+            // region is also a keyboard-scrollable one — necessary, since
+            // the gate cannot be completed without scrolling it. `-1` would
+            // still take initial focus but drop out of the tab sequence
+            // entirely, so a keyboard user who tabs forward to the checkbox
+            // could never tab back to keep scrolling — a trap the gate's own
+            // completion requirement makes unrecoverable. A positive
+            // tabIndex plus `role="region"` is the standard accessible
+            // pattern for a scrollable region (WAI-ARIA APG "scrollable
+            // region" pattern) — the lint rule's default allowlist just
+            // doesn't include `region`.
+            // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
+            tabIndex={0}
             className="min-h-0 flex-1 overflow-y-auto rounded-xl border border-(--bd-border) bg-[#FBFCFF] p-4"
           >
             {docs.map((doc, i) => (

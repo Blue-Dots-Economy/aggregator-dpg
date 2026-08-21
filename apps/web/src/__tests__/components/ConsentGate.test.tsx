@@ -153,6 +153,27 @@ describe('<ConsentGate />', () => {
     await waitFor(() => expect(screen.getByTestId('consent-reader')).toHaveFocus());
   });
 
+  // jsdom has no real focus-order / Tab-key manager (browsers implement tab
+  // sequence traversal themselves; jsdom does not simulate it), so this
+  // cannot assert actual keyboard reachability. It asserts the structural
+  // facts the fix is made of: the reader stays in the tab sequence (a
+  // positive tabIndex, not the -1 that silently drops it) and carries a
+  // non-empty accessible name via `role="region"` + `aria-label`. Real
+  // reachability was verified against Radix's source and an empirical probe
+  // in the sibling Signals repo, not by this test.
+  it('keeps the reader in the tab sequence with a non-empty accessible name', () => {
+    render(
+      <Wrapper>
+        <ConsentGate open docs={docs} agreeLabel="I agree" onAccept={vi.fn()} />
+      </Wrapper>,
+    );
+    const reader = screen.getByTestId('consent-reader');
+    expect(reader).toHaveAttribute('tabIndex', '0');
+    expect(reader).toHaveAttribute('role', 'region');
+    expect(reader.getAttribute('aria-label')?.trim()).not.toBe('');
+    expect(reader).toHaveAccessibleName('Terms and privacy documents');
+  });
+
   it('calls onCancel from the explicit close button only', () => {
     const onCancel = vi.fn();
     render(
