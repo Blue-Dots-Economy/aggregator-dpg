@@ -66,8 +66,12 @@ const groups: LegalGroup[] = [
 describe('<LegalDocumentView />', () => {
   it('renders a rail group per audience', () => {
     renderView('privacy', groups);
-    expect(screen.getByText('For participants')).toBeInTheDocument();
-    expect(screen.getByText('For aggregators')).toBeInTheDocument();
+    // Each audience's label now renders twice — once in the rail, once as
+    // the reading column's audience-boundary heading (see the "audience
+    // boundary is legible" fix) — so this scopes to the rail specifically.
+    const nav = screen.getByRole('navigation', { name: 'Contents' });
+    expect(within(nav).getByText('For participants')).toBeInTheDocument();
+    expect(within(nav).getByText('For aggregators')).toBeInTheDocument();
   });
 
   it('links each extracted section as a same-page anchor', () => {
@@ -85,6 +89,26 @@ describe('<LegalDocumentView />', () => {
     expect(screen.getAllByText(/Version 2/)).toHaveLength(2);
   });
 
+  // Regression for the reported defect: scrolling from one document's
+  // content into the next used to give no indication a new document had
+  // started (the title appeared once, at the very top of the page, and
+  // never again). Every document — for every audience — now carries its own
+  // title heading right where its content begins, sourced from the `title`
+  // field.
+  it("renders each document's own title where its content begins, for every document", () => {
+    renderView('privacy', groups);
+    expect(screen.getAllByRole('heading', { name: 'Privacy Policy' })).toHaveLength(2);
+    expect(screen.getAllByRole('heading', { name: 'Terms of Service' })).toHaveLength(2);
+  });
+
+  // Regression for the sibling defect: nothing in the reading column marked
+  // where one audience's documents ended and the next audience's began.
+  it('makes the audience boundary legible in the reading column', () => {
+    renderView('privacy', groups);
+    expect(screen.getByRole('heading', { name: 'For participants' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'For aggregators' })).toBeInTheDocument();
+  });
+
   it('captures no consent — there is no checkbox anywhere on the page', () => {
     renderView('terms', groups);
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
@@ -95,20 +119,67 @@ describe('<LegalDocumentView />', () => {
     expect(screen.getByRole('status')).toBeInTheDocument();
   });
 
-  it('marks the routed document current within every audience group', () => {
+  // Regression for the reported defect: every audience's "Privacy Policy"
+  // rail heading used to light up blue on `/privacy`, because "current" was
+  // derived from the route (which document *kind*) rather than from where
+  // the reader actually is. All six documents live on one page now, so
+  // every "Privacy Policy" heading matches the route equally — the fix is
+  // that the route must not drive any document-level styling at all.
+  it('does not tint every same-named document heading — the route no longer drives document styling', () => {
     renderView('privacy', groups);
-    const currentLinks = screen.getAllByRole('link', { name: 'Privacy Policy' });
-    expect(currentLinks.length).toBeGreaterThan(0);
-    for (const link of currentLinks) {
-      expect(link).toHaveAttribute('aria-current', 'page');
-    }
+    const privacyLinks = screen.getAllByRole('link', { name: 'Privacy Policy' });
+    expect(privacyLinks).toHaveLength(2);
+    // Identical classes — no "current document" tint on either.
+    expect(privacyLinks[0]!.className).toBe(privacyLinks[1]!.className);
+    // At most one may carry aria-current (scroll-derived, never "every id
+    // matching the route"); on arrival, only the topmost audience's is.
+    const current = privacyLinks.filter((l) => l.getAttribute('aria-current') === 'page');
+    expect(current.length).toBeLessThanOrEqual(1);
   });
 
-  // Regression for the reported defect: the other document's rail entry used
-  // to be a route Link (`href="/terms"`), so hovering it showed a full
-  // navigation instead of an in-page anchor. Both documents already render
-  // on this page, so it must be a same-page anchor with no aria-current
-  // (the routed document is still Privacy Policy).
+  // Regression for the sibling defect: the non-routed document ("Terms of
+  // Service" on `/privacy`) used to render its whole rail row — heading and
+  // sections alike — at reduced opacity, reading as disabled even though
+  // every entry is perfectly clickable. Every document row must look the
+  // same regardless of which document (or route) is "current".
+  it('does not dim the other document — every document row looks the same', () => {
+    renderView('privacy', groups);
+    const privacyLink = screen.getAllByRole('link', { name: 'Privacy Policy' })[0]!;
+    const termsLink = screen.getAllByRole('link', { name: 'Terms of Service' })[0]!;
+    expect(privacyLink.className).toBe(termsLink.className);
+    expect(privacyLink.closest('div')?.className).not.toMatch(/opacity/);
+    expect(termsLink.closest('div')?.className).not.toMatch(/opacity/);
+  });
+
+  // /privacy and /terms must render an identical-looking rail — the route
+  // only decides which document the reader lands on (which, in turn,
+  // legitimately moves the scroll-spy's single pill), never how a document
+  // heading is styled. Compares the document-level rail entries' classes
+  // specifically, not the section pill, which is expected to differ between
+  // the two routes' different arrival positions.
+  it('styles every document row identically on /privacy and /terms', () => {
+    const { unmount } = renderView('privacy', groups);
+    const privacyClasses = screen
+      .getAllByRole('link', { name: /Privacy Policy|Terms of Service/ })
+      .map((link) => link.className)
+      .sort();
+    unmount();
+
+    renderView('terms', groups);
+    const termsClasses = screen
+      .getAllByRole('link', { name: /Privacy Policy|Terms of Service/ })
+      .map((link) => link.className)
+      .sort();
+
+    expect(termsClasses).toEqual(privacyClasses);
+  });
+
+  // Regression for an older defect: this rail entry used to be a route
+  // `Link` (`href="/terms"`), so hovering it showed a full navigation
+  // instead of an in-page anchor. Both documents already render on this
+  // page, so it must be a same-page anchor. Neither carries aria-current
+  // here because, on arrival at /privacy with no hash, the scroll-spy's
+  // fallback pill lands on Privacy's own first section, not on Terms.
   it('links to the other document as a same-page anchor, not a route', () => {
     renderView('privacy', groups);
     const otherLinks = screen.getAllByRole('link', { name: 'Terms of Service' });
@@ -340,6 +411,7 @@ describe('<LegalDocumentView />', () => {
   // shares one page and one id namespace.
   it('each audience group’s rail link resolves to that same audience’s heading, not another’s', () => {
     const { container } = renderView('privacy', collidingGroups);
+    const nav = screen.getByRole('navigation', { name: 'Contents' });
 
     for (const [label, audience] of [
       ['For participants', 'participant'],
@@ -347,8 +419,11 @@ describe('<LegalDocumentView />', () => {
       ['For organisations', 'org'],
     ] as const) {
       // Scope to this audience's rail group (the <div> wrapping its <p> label
-      // and its two RailDocument rows).
-      const groupContainer = screen.getByText(label).closest('div');
+      // and its two RailDocument rows). Scoped to the rail (`nav`), not the
+      // whole page — the audience label also renders as the reading
+      // column's audience-boundary heading now, so an unscoped
+      // `getByText(label)` would match twice.
+      const groupContainer = within(nav).getByText(label).closest('div');
       expect(groupContainer).not.toBeNull();
 
       // --- section-level correspondence ---

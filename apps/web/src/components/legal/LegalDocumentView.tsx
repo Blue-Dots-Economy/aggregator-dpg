@@ -290,20 +290,30 @@ function RailSections({
  * its section list. The version/effective-date line is shown once, in the
  * reading column, rather than repeated here.
  *
+ * Every document row renders identically — there is no "current document"
+ * styling any more. The page holds all six documents in one continuous
+ * scroll, so a route-derived "this is the current one" would light up every
+ * document whose id happens to match the route (e.g. both audiences'
+ * "Privacy Policy" on `/privacy`) — the exact defect this component used to
+ * have. `isActiveDoc` is scroll-derived (the reader has actually scrolled
+ * into this document) and is only ever surfaced as `aria-current`, never as
+ * a visual difference — the section pill (`RailSections`, driven by the same
+ * scroll-spy) is the page's one live indicator.
+ *
  * `sections` is passed in already deduped across the whole page (see
  * `assignPageAnchorIds`) — this component does not parse the Markdown
  * itself, so the rail's `href`s and the reading column's heading `id`s can
  * never drift apart.
  */
 function RailDocument({
-  isCurrent,
+  isActiveDoc,
   entry,
   headingId,
   sections,
   activeSectionId,
   onNavigate,
 }: {
-  isCurrent: boolean;
+  isActiveDoc: boolean;
   entry: DocEntry;
   headingId: string;
   sections: LegalSection[];
@@ -311,20 +321,15 @@ function RailDocument({
   onNavigate: (id: string) => void;
 }) {
   return (
-    <div className={cn('mb-3', !isCurrent && 'opacity-60')}>
+    <div className="mb-3">
       <a
         href={`#${headingId}`}
-        aria-current={isCurrent ? 'page' : undefined}
+        aria-current={isActiveDoc ? 'page' : undefined}
         onClick={(event) => {
           event.preventDefault();
           onNavigate(headingId);
         }}
-        className={cn(
-          'block rounded-md py-1 text-[10.5px] font-bold uppercase tracking-[0.1em] transition-colors',
-          isCurrent
-            ? 'text-(--bd-primary-600)'
-            : 'text-ink-500 hover:bg-(--bd-border-soft) hover:text-(--bd-primary-600)',
-        )}
+        className="block rounded-md py-1 text-[10.5px] font-bold uppercase tracking-[0.1em] text-ink-500 transition-colors hover:bg-(--bd-border-soft) hover:text-(--bd-primary-600)"
       >
         {entry.title}
       </a>
@@ -431,6 +436,25 @@ export function LegalDocumentView({
       return sectionsByDoc[d][gi]?.[0]?.id ?? docIds[group.audience]?.[d];
     },
     [groups, sectionsByDoc, docIds],
+  );
+
+  // Whether the reader has actually scrolled into this (group, document)
+  // pair — its own heading, or one of its own sections, is the current
+  // scroll-spy highlight. Derived from `activeSectionId` alone, never from
+  // the route: that is what keeps this to "the one document being read"
+  // instead of "every document whose id matches the routed doc kind" (the
+  // reported defect, since both audiences' Privacy Policy match `/privacy`
+  // equally). Used only for `aria-current` on the rail's document heading —
+  // never for styling, per the fix.
+  const isActiveDoc = useCallback(
+    (gi: number, d: LegalDoc): boolean => {
+      if (activeSectionId === null) return false;
+      const group = groups[gi];
+      if (!group) return false;
+      if (docIds[group.audience]?.[d] === activeSectionId) return true;
+      return sectionsByDoc[d][gi]?.some((section) => section.id === activeSectionId) ?? false;
+    },
+    [activeSectionId, groups, docIds, sectionsByDoc],
   );
 
   // How close to the top of the viewport a heading must have scrolled to
@@ -696,7 +720,7 @@ export function LegalDocumentView({
                 {DOC_ORDER.map((d) => (
                   <RailDocument
                     key={d}
-                    isCurrent={d === doc}
+                    isActiveDoc={isActiveDoc(gi, d)}
                     entry={group.content[d]}
                     headingId={docIds[group.audience]![d]!}
                     sections={sectionsByDoc[d][gi]!}
@@ -709,56 +733,79 @@ export function LegalDocumentView({
           </nav>
 
           <div className="min-w-0 max-w-[72ch]">
-            <h1 className="text-2xl font-bold text-ink-900">
-              {doc === 'privacy' ? t('privacy_title') : t('terms_title')}
-            </h1>
+            {groups.map((group, gi) => {
+              const audienceHeadingId = `${group.audience}-audience`;
+              return (
+                <section
+                  key={group.audience}
+                  aria-labelledby={audienceHeadingId}
+                  className="mt-10 border-t border-(--bd-border) pt-8 first:mt-6 first:border-t-0 first:pt-0"
+                >
+                  {/* The audience boundary: with every audience's both
+                      documents now on one continuous page, this is what
+                      tells the reader they've crossed from, say, "For
+                      participants" into "For aggregators" — there is
+                      nothing else on the page marking that jump. */}
+                  <h2 id={audienceHeadingId} className="mb-6 text-2xl font-bold text-ink-900">
+                    {group.label}
+                  </h2>
 
-            {groups.map((group, gi) => (
-              <section
-                key={group.audience}
-                aria-label={group.label}
-                className="mt-10 border-t border-(--bd-border) pt-8 first:mt-6 first:border-t-0 first:pt-0"
-              >
-                {DOC_ORDER.map((d) => {
-                  const entry = group.content[d];
-                  const { preamble } = splitByDoc[d][gi]!;
-                  const sections = sectionsByDoc[d][gi]!;
-                  return (
-                    <div key={d} id={docIds[group.audience]![d]} className="scroll-mt-6">
-                      <p className="mb-4 text-xs text-ink-500">
-                        {formatVersionLabel(entry, t, locale)}
-                      </p>
+                  {DOC_ORDER.map((d) => {
+                    const entry = group.content[d];
+                    const { preamble } = splitByDoc[d][gi]!;
+                    const sections = sectionsByDoc[d][gi]!;
+                    return (
+                      <div key={d} className="scroll-mt-6">
+                        {/* This document's own title, rendered where its
+                            content begins — for every document, including
+                            the first. The leading `## <title>` heading was
+                            deliberately stripped from the markdown (see
+                            `isDocumentTitleHeading`), so without this the
+                            reader would scroll into a document with no
+                            indication of which one it is. Sourced from the
+                            `title` field, never from the (stripped)
+                            content. */}
+                        <h3
+                          id={docIds[group.audience]![d]}
+                          className="mt-2 mb-1 scroll-mt-6 text-xl font-bold text-ink-900"
+                        >
+                          {entry.title}
+                        </h3>
+                        <p className="mb-4 text-xs text-ink-500">
+                          {formatVersionLabel(entry, t, locale)}
+                        </p>
 
-                      {preamble && <MarkdownContent content={preamble} />}
+                        {preamble && <MarkdownContent content={preamble} />}
 
-                      {sections.map((section) =>
-                        section.level === 2 ? (
-                          <div key={section.id}>
-                            <h2
-                              id={section.id}
-                              className="mt-8 mb-2 scroll-mt-6 text-lg font-bold text-ink-900"
-                            >
-                              {section.heading}
-                            </h2>
-                            {section.body && <MarkdownContent content={section.body} />}
-                          </div>
-                        ) : (
-                          <div key={section.id}>
-                            <h3
-                              id={section.id}
-                              className="mt-6 mb-2 scroll-mt-6 text-base font-semibold text-ink-900"
-                            >
-                              {section.heading}
-                            </h3>
-                            {section.body && <MarkdownContent content={section.body} />}
-                          </div>
-                        ),
-                      )}
-                    </div>
-                  );
-                })}
-              </section>
-            ))}
+                        {sections.map((section) =>
+                          section.level === 2 ? (
+                            <div key={section.id}>
+                              <h2
+                                id={section.id}
+                                className="mt-8 mb-2 scroll-mt-6 text-lg font-bold text-ink-900"
+                              >
+                                {section.heading}
+                              </h2>
+                              {section.body && <MarkdownContent content={section.body} />}
+                            </div>
+                          ) : (
+                            <div key={section.id}>
+                              <h3
+                                id={section.id}
+                                className="mt-6 mb-2 scroll-mt-6 text-base font-semibold text-ink-900"
+                              >
+                                {section.heading}
+                              </h3>
+                              {section.body && <MarkdownContent content={section.body} />}
+                            </div>
+                          ),
+                        )}
+                      </div>
+                    );
+                  })}
+                </section>
+              );
+            })}
           </div>
         </div>
       </div>
