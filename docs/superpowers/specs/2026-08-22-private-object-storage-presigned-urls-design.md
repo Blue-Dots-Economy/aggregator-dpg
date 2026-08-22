@@ -36,7 +36,8 @@ not URLs:
 - `registration_links.qr_object_key` (`:332`)
 
 `registration_links.public_url` is the **landing-page** URL built from `PUBLIC_LINK_BASE_URL`, not an
-S3 URL. So **there is no persisted-public-URL backfill to do in this repo.** Making the bucket
+S3 URL. So **there is no persisted-public-URL backfill to do in this repo** — established by code
+reading, and to be confirmed per environment by the audit query in §3.5 before any cutover. Making the bucket
 private is, for the application, mostly a configuration change plus the three corrections in §3.
 
 ## 2. Current object-storage surface
@@ -120,10 +121,36 @@ qr/{aggregator_id}/{link_id}.png                 # durable
 ```
 
 **No backfill.** Both keys are already persisted per row, so reads use the stored value verbatim and
-old objects keep resolving. Only newly created objects get new keys. `bulk-uploads.ts:627` rebuilds
-the expected errors key from `upload.id` — that derivation must switch to reading
-`errors_csv_s3_key` from the row rather than recomputing, otherwise old rows break. This is the one
-genuine correctness trap in the change.
+old objects keep resolving. Only newly created objects get new keys.
+
+**The trap — and what *not* to do about it.** `bulk-uploads.ts:627` rebuilds the expected errors key
+from `upload.id` and refuses to sign anything that doesn't match:
+
+```ts
+const expectedKey = `bulk-uploads/${upload.id}/errors.csv`;
+if (upload.errorsCsvS3Key !== expectedKey) { /* 404 + log errors_csv_key_invalid */ }
+```
+
+Its own comment says why: *"only sign keys that match the canonical errors.csv layout … guards
+against any future path (or DB tamper) signing a GET URL for an arbitrary object."* This is a
+**deliberate security control — a signing allow-list**, not a redundant recomputation. Replacing it
+with "just read the column" would let any write path that can influence `errors_csv_s3_key` mint a
+pre-signed GET for an arbitrary object in the bucket. That is strictly worse than the public bucket
+this change is meant to fix.
+
+The correct change is to make the allow-list accept **both** layouts:
+
+```ts
+const allowed = [
+  `uploads/errors/${upload.aggregatorId}/${upload.id}.csv`, // new
+  `bulk-uploads/${upload.id}/errors.csv`,                   // legacy, pre-migration rows
+];
+if (!allowed.includes(upload.errorsCsvS3Key)) { /* reject as today */ }
+```
+
+Once the legacy retention window (§3.3) has elapsed, the legacy entry can be dropped. Track that as a
+dated follow-up rather than leaving it permanently — an allow-list that only ever grows stops being
+one.
 
 ### 3.3 Object classification for lifecycle expiry
 
@@ -146,7 +173,89 @@ in a noncurrent version forever. Every transient rule **must** be paired with
 `NoncurrentVersionExpiration`, plus `AbortIncompleteMultipartUpload`. Missing this is the most likely
 way this change ships looking complete while retaining every CSV indefinitely.
 
-### 3.4 Nothing else moves
+### 3.4 QR downloads: stop presigning in list responses
+
+The QR path is **already fully pre-signed** — `buildResponse` (`registration-links.ts:775`) mints
+`qr_url` per row via `signQrDownloadUrl` and returns it alongside `qr_expires_at`; the portal renders
+it as an `<a href target="_blank">` (`RegistrationLinksSection.tsx:555`–`:557`), never an `<img src>`.
+So no browser ever needs unauthenticated bucket access for a QR. That part is right today.
+
+Two problems, both made worse by cutting the TTL from 900s to 600s:
+
+1. **Every list response presigns every row.** `GET /v1/links` batches metrics into one grouped query
+   and fans out with `Promise.all` (`:411`–`:421`) — the DB access is already clean. But it still
+   computes one SigV4 signature per row for a URL the operator usually never clicks. At `limit=50`
+   that is 50 HMAC-SHA256 signings and ~50 extra URLs (each several hundred bytes of query string) on
+   the wire, per page view, per poll.
+2. **Every URL starts dying on serialization.** A page left open for 11 minutes has a QR link that
+   fails with an opaque S3 `AccessDenied` XML body. The API already returns `qr_expires_at` and the UI
+   ignores it, so nothing refreshes and nothing explains the failure.
+
+Fix both with one change — **mint on click, not on list**:
+
+- Add `GET /v1/links/:id/qr`: authorize as today, then `302` to a freshly minted pre-signed GET.
+- List and single-link responses return a stable, non-expiring **relative path**
+  (`qr_download_path: "/v1/links/{id}/qr"`) instead of `qr_url`.
+- Keep `qr_url` populated for one release for compatibility, then drop it with `qr_expires_at`.
+
+This removes N signings per page, shrinks the payload, and makes staleness structurally impossible —
+the URL is minted microseconds before the browser follows it, so a 600s TTL (or a 60s one) is
+comfortable. It also removes the only reason a pre-signed URL was ever serialized into a list
+response, which is the thing most likely to end up in a log, a screenshot, or a support ticket.
+
+The redirect must send `Cache-Control: no-store`. A cached `302` would pin one expiring URL into the
+browser cache and reintroduce exactly the staleness being removed.
+
+### 3.5 Pre-migration audit: prove nothing stored is a URL
+
+§1 asserts there are no persisted object URLs, from reading the code. That is necessary but not
+sufficient — a URL pasted into a free-form `jsonb` column would not show up in a grep for
+`getSignedUrl`. Run this against **each** environment's database before the cutover and attach the
+output to the migration ticket:
+
+```sql
+-- 1. Key columns must hold keys, never URLs. Expect 0 rows.
+SELECT 'bulk_uploads.s3_key' AS col, id, s3_key AS val
+  FROM bulk_uploads WHERE s3_key ~ '://'
+UNION ALL
+SELECT 'bulk_uploads.errors_csv_s3_key', id, errors_csv_s3_key
+  FROM bulk_uploads WHERE errors_csv_s3_key ~ '://'
+UNION ALL
+SELECT 'registration_links.qr_object_key', id, qr_object_key
+  FROM registration_links WHERE qr_object_key ~ '://';
+
+-- 2. Free-form jsonb must not carry a bucket reference. Every schema-driven
+--    payload column, not just the obvious ones. Expect 0 rows.
+WITH pat AS (SELECT '(amazonaws\.com|s3://|X-Amz-Signature|X-Amz-Credential)' AS re)
+SELECT 'registration_links.context' AS col, id::text FROM registration_links, pat WHERE context::text            ~* re
+UNION ALL SELECT 'aggregators.profile',              id::text FROM aggregators,        pat WHERE profile::text            ~* re
+UNION ALL SELECT 'aggregator_orgs.profile',          id::text FROM aggregator_orgs,    pat WHERE profile::text            ~* re
+UNION ALL SELECT 'participants.data',                id::text FROM participants,       pat WHERE data::text               ~* re
+UNION ALL SELECT 'link_submissions.submitted_data',  id::text FROM link_submissions,   pat WHERE submitted_data::text     ~* re
+UNION ALL SELECT 'link_submissions.metadata_snapshot', id::text FROM link_submissions, pat WHERE metadata_snapshot::text  ~* re;
+
+-- 3. Sanity: aggregators.url is the org's WEBSITE (Beckn actor), not object
+--    storage. Eyeball it; a bucket hostname here means someone repurposed it.
+SELECT id, org_slug, url FROM aggregators WHERE url IS NOT NULL;
+```
+
+`participants.data` and `link_submissions.submitted_data` hold schema-driven participant payloads, so
+a future network schema *could* legitimately introduce a document field — which is exactly why they
+are in the query rather than reasoned about. Two columns that look like object references but are
+not, and should not be chased:
+
+- `aggregator_profile.verified_certificate` is `PublicKeyEntry[]` — cryptographic public keys keyed by
+  `key_id`, not uploaded files.
+- **Support-form attachments never touch object storage.** `apps/api/src/routes/support.ts` accepts
+  them base64-encoded in the request body (hence the raised body limit at `:123`), validates them via
+  `validateSupportAttachments`, and hands them straight to the mailer as inline attachments. Nothing
+  is written to S3 and nothing is persisted. The feature name invites the opposite assumption.
+
+Query 1 returning rows means the "no backfill" premise is wrong for that environment and the
+migration plan needs a rewrite-and-backfill step. **Do not proceed on the assumption; run it.** If
+query 3 shows a bucket hostname, treat it the same way.
+
+### 3.6 Nothing else moves
 
 `S3_PUBLIC_ENDPOINT` stays as-is: for real AWS it is unset and the presigner uses the regional
 endpoint. `S3_FORCE_PATH_STYLE` stays. The two-client split stays — it is exactly what a private
@@ -176,7 +285,18 @@ holds today and this change must not weaken it. Specifically:
 - **Legacy-key regression:** a `bulk_uploads` row whose `errors_csv_s3_key` is the old
   `bulk-uploads/{id}/errors.csv` still presigns and downloads. This is the test that catches §3.2's
   trap.
+- **Allow-list still rejects:** a row whose `errors_csv_s3_key` is neither layout — e.g.
+  `qr/{other_aggregator}/x.png`, or `uploads/errors/{other_aggregator}/{id}.csv` — is refused with
+  `errors_csv_key_invalid` and **no URL is minted**. Without this test, widening the allow-list in
+  §3.2 silently becomes "sign whatever the column says".
 - Cross-tenant: aggregator B requesting A's `upload_id` gets 404/403 and **no URL is minted**.
+- **QR redirect (§3.4):** `GET /v1/links/:id/qr` returns `302` with a `Location` carrying
+  `X-Amz-Signature` and `Cache-Control: no-store`; a link owned by another aggregator gets 403 with no
+  `Location` header; a `draft`/`retired` link gets 404 (matching `buildResponse`'s existing rule that
+  only `live` links expose a QR).
+- **List responses carry no signed URL** once `qr_url` is retired — assert the serialized list
+  contains no `X-Amz-Signature`. This is the regression guard against someone reintroducing per-row
+  presigning.
 - Existing bulk-upload and registration-link suites pass unchanged — the presign surface is stable.
 
 Integration coverage runs against MinIO, which is already private, so the local suite exercises the
@@ -188,14 +308,37 @@ target posture without new fixtures.
 |---|---|
 | Bucket flipped to private before objects are copied → existing downloads 404 | Automation/infra sequencing: provision private, sync, *then* flip. See the infra-deployments doc. |
 | CORS missing on the private bucket → browser PUT fails preflight | The private bucket **must** carry `cors_enabled: true`. The current `private` bucket template does not. Called out in the automation doc. |
-| `bulk-uploads.ts:627` key recomputation left in place | Covered by the legacy-key test above. |
+| §3.2 read as "drop the `expectedKey` check" → arbitrary-object signing | The check is a security allow-list. Widen it, never remove it; guarded by the allow-list rejection test. |
+| Legacy `errors.csv` keys break after the key move | Legacy-key regression test; legacy entry stays in the allow-list for the retention window. |
+| `qr_url` retired before the portal switches to `qr_download_path` | Keep both for one release; retire `qr_url` + `qr_expires_at` only after `apps/web` ships the new path. |
 | TTL shortened too aggressively → large CSV upload times out mid-PUT | 600s at 10 MiB (`BULK_UPLOAD_MAX_BYTES`) is ~140 kbit/s to fail; acceptable. Keep `BULK_UPLOAD_URL_TTL_SECONDS` as the override for slow-link environments. |
 
 ## 7. Open questions
 
-1. Should `qr/` objects move behind a short-lived redirect endpoint instead of a raw pre-signed GET,
-   so a leaked QR URL dies with the TTL rather than the printed code? Out of scope here.
-2. Is 30 days right for `uploads/errors/`, or should it track a stated data-retention commitment to
+1. Is 30 days right for `uploads/errors/`, or should it track a stated data-retention commitment to
    aggregators? Needs a product answer, not an engineering one.
+2. Should `errors.csv` downloads move behind the same redirect treatment as §3.4? They are already
+   single-object, on-demand endpoints, so the payoff is only consistency — worth doing when the QR
+   endpoint lands, not before.
 3. The `signals-export` bucket is already `type: private` and written by a separate write-only IRSA
    role. Confirmed out of scope for this change.
+
+## 8. Adjacent findings — deliberately not in this change
+
+Surfaced while tracing the object-storage paths. Not an object-storage problem, so folding it in
+would widen the diff past what the migration needs. Recorded so it is not lost.
+
+1. **Sequential Redis round-trips in the bulk-upload list.** `apps/api/src/routes/bulk-uploads.ts`
+   batches finished uploads via one grouped SQL read, then falls back to a per-upload Redis fetch for
+   in-flight rows in a serial loop:
+
+   ```ts
+   for (const u of liveUploads) {
+     out.set(u.id, await loadCountsFromRedis(u.id));
+   }
+   ```
+
+   One awaited round-trip per in-flight upload, serialized. An aggregator with 20 uploads in progress
+   pays 20 sequential RTTs on every dashboard poll. `Promise.all` over the same calls — or a single
+   pipelined `MGET`/`HMGET` — collapses it to one. Contrast `registration-links.ts:417`, which already
+   fans out with `Promise.all`. Worth its own PR.
