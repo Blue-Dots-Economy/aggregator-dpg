@@ -111,10 +111,17 @@ const ConfigSchema = z.object({
    * and `voice`; `bulk` is reserved for a future bulk-upload gate and does
    * nothing yet.
    *
-   * **Unset or blank ⇒ every capability is enabled**, which is exactly today's
-   * behaviour, so an existing deployment that never sets this is unaffected.
-   * `form,voice` is therefore identical to leaving it unset, and `form` alone
-   * stops voice links being offered or created.
+   * **Absent from the environment ⇒ every capability is enabled**, which is
+   * exactly today's behaviour, so an existing deployment that never sets this
+   * is unaffected. `form,voice` is therefore identical to leaving it unset,
+   * and `form` alone stops voice links being offered or created.
+   *
+   * A var that is *present but blank* is a misconfiguration, not a default:
+   * it names no capability, so it disables everything and says so loudly. That
+   * is why this is `.optional()` rather than `.default('')` — collapsing the
+   * two would make the dangerous case indistinguishable from the safe one.
+   * Anything shipping this key (compose, Helm ConfigMap) must omit it entirely
+   * when unconfigured rather than render an empty string.
    *
    * Deliberately an env var rather than a key in `aggregator.config.yaml`:
    * every deployment pulls that YAML from the same repo branch, so dropping
@@ -125,7 +132,7 @@ const ConfigSchema = z.object({
    * mode — a printed voice QR must not stop working — which is why
    * `routes/public-registration-links.ts` reads the unfiltered network config.
    */
-  AGGREGATOR_ONBOARDING_ENABLED: z.string().default(''),
+  AGGREGATOR_ONBOARDING_ENABLED: z.string().optional(),
   /**
    * Recipient(s) for contact-support submissions (#120-equivalent).
    * Feature-gated: unset ⇒ endpoint 503, web button hidden. Accepts multiple
@@ -590,23 +597,45 @@ export const signalsUiUrlWarnings: string[] = parsedSignalsUiUrls.warnings;
  */
 export interface ParsedOnboardingEnabled {
   /**
-   * The allow-listed capability keys, or `null` when the var is unset or
-   * blank. `null` means "no restriction — every capability is enabled" and is
-   * deliberately a different value from `[]`, which means "explicitly nothing
-   * is enabled" (what a value of only separators or only quotes parses to).
-   * Collapsing the two would make an unset var indistinguishable from one that
-   * disables everything.
+   * The allow-listed capability keys, or `null` when the var is **absent from
+   * the environment entirely**. `null` means "no restriction — every
+   * capability is enabled" and is deliberately a different value from `[]`,
+   * which means "explicitly nothing is enabled" (what a value that is present
+   * but names no capability parses to — blank, whitespace-only, empty quotes,
+   * or only separators). Collapsing the two would make an unset var
+   * indistinguishable from one that disables everything.
    */
   capabilities: string[] | null;
   warnings: string[];
 }
 
 /**
+ * Capability keys the allow-list accepts but which gate nothing yet.
+ *
+ * Forward-compatibility: a ConfigMap may ship `bulk` ahead of the code that
+ * implements bulk gating, and that must neither break boot nor be reported as
+ * a typo. Reserved keys are excluded from {@link unknownOnboardingCapabilities}
+ * so they get their own, accurate diagnostic — but they are **not** excluded
+ * from the allow-list itself, so listing only reserved keys still disables all
+ * onboarding (fail-closed; see {@link parseOnboardingEnabled}).
+ */
+export const RESERVED_ONBOARDING_CAPABILITIES: ReadonlySet<string> = new Set(['bulk']);
+
+/**
  * Parse the `AGGREGATOR_ONBOARDING_ENABLED` allow-list.
  *
  * Exported so it can be unit-tested without mutating `process.env`. Trims and
- * lowercases each entry, accepts `,` or newline separators, drops empties,
- * de-duplicates, and tolerates a layer of Helm `| quote` wrapping.
+ * lowercases each entry, accepts commas and any whitespace (including
+ * newlines) as separators, drops empties, de-duplicates, and tolerates a layer
+ * of Helm `| quote` wrapping.
+ *
+ * Only a genuinely **absent** var enables everything. A var that is present
+ * but blank — `""`, `"   "`, a Helm `| quote` over an empty string, a block
+ * scalar whose `{{- if }}` rendered nothing — is a misconfiguration, and the
+ * one shape most likely to occur in a real deployment. Treating it as "unset"
+ * would silently re-enable the very modes the operator set out to withhold,
+ * with nothing in the logs to explain it, so it takes the same loud lockout
+ * path as `","`.
  *
  * Values are **not** validated against the network's declared registration
  * modes here — those resolve asynchronously, long after this runs, exactly as
@@ -614,16 +643,21 @@ export interface ParsedOnboardingEnabled {
  * cross-check happens once the network config resolves (see
  * {@link unknownOnboardingCapabilities}).
  *
- * @param raw - The raw env value (or `undefined`).
+ * @param raw - The raw env value (or `undefined` when the var is not set).
  * @returns The parsed capability list (`null` ⇒ all enabled) plus a warning
  *   per duplicate entry, and one more when the var is set yet names nothing.
  */
 export function parseOnboardingEnabled(raw: string | undefined): ParsedOnboardingEnabled {
-  const v = stripHelmQuoting(raw ?? '');
-  if (v === '') return { capabilities: null, warnings: [] };
+  // Genuinely unset — the only path to "everything enabled".
+  if (raw === undefined) return { capabilities: null, warnings: [] };
+  const v = stripHelmQuoting(raw);
   const capabilities: string[] = [];
   const warnings: string[] = [];
-  for (const entry of v.split(/[,\n]/)) {
+  // Whitespace counts as a separator alongside `,`: `form voice` is an obvious
+  // operator intent, and splitting on commas alone would turn it into the
+  // single bogus capability `"form voice"` that matches nothing and hard-locks
+  // link creation without so much as a parse warning.
+  for (const entry of v.split(/[\s,]+/)) {
     const key = entry.trim().toLowerCase();
     if (!key) continue;
     if (capabilities.includes(key)) {
@@ -635,11 +669,13 @@ export function parseOnboardingEnabled(raw: string | undefined): ParsedOnboardin
     capabilities.push(key);
   }
   if (capabilities.length === 0) {
-    // Set, but every entry was blank (`",,"`, `"''"`, …). Treated as
-    // "nothing enabled" rather than "unset": failing open here would silently
-    // re-enable the very modes the operator was trying to withhold.
+    // Set, but names nothing: blank/whitespace-only (`""`, `"   "`, `"''"`) or
+    // separators only (`",,"`). Treated as "nothing enabled" rather than
+    // "unset" — see the fail-closed rationale above.
     warnings.push(
-      'AGGREGATOR_ONBOARDING_ENABLED is set but names no capability — no registration mode will be offered. Unset the variable to enable all of them.',
+      v === ''
+        ? 'AGGREGATOR_ONBOARDING_ENABLED is set but blank — it names no capability, so no registration mode will be offered. Remove the variable entirely (not just its value) to enable all of them.'
+        : 'AGGREGATOR_ONBOARDING_ENABLED is set but names no capability — no registration mode will be offered. Unset the variable to enable all of them.',
     );
   }
   return { capabilities, warnings };
@@ -678,6 +714,42 @@ export function isOnboardingCapabilityEnabled(capability: string): boolean {
 }
 
 /**
+ * The declared registration modes this deployment actually offers.
+ *
+ * The single derivation of "enabled", shared by all three consumers: the boot
+ * cross-check diagnostics, the `registration_modes` map served by
+ * `GET /v1/aggregator-config`, and create-link validation. Deriving it
+ * independently anywhere would let the diagnostics disagree with enforcement
+ * the moment the predicate grows a rule (a wildcard, a reserved key) — an
+ * ERROR claiming nothing is enabled where creation works, or silence where
+ * every call 400s.
+ *
+ * @param declared - The network's declared `registration_modes` keys.
+ * @returns The subset the allow-list permits, in declared order; the whole
+ *   list unchanged when the allow-list is unset.
+ */
+export function enabledRegistrationModes(declared: readonly string[]): string[] {
+  return declared.filter((mode) => isOnboardingCapabilityEnabled(mode));
+}
+
+/**
+ * Which allow-listed capabilities are reserved keys that gate nothing yet.
+ *
+ * Split out from {@link unknownOnboardingCapabilities} so a forward-compatible
+ * value gets an accurate diagnostic. `bulk` is documented as an accepted
+ * value, so reporting it as "matches no registration mode declared by this
+ * network" reads as a bug report about a value the docs endorsed.
+ *
+ * @param capabilities - The parsed allow-list (`null` ⇒ all enabled).
+ * @returns The reserved values in listed order; always empty when the
+ *   allow-list is unset, since it restricts nothing.
+ */
+export function reservedOnboardingCapabilities(capabilities: readonly string[] | null): string[] {
+  if (capabilities === null) return [];
+  return capabilities.filter((capability) => RESERVED_ONBOARDING_CAPABILITIES.has(capability));
+}
+
+/**
  * Which allow-listed capabilities name no registration mode this network
  * declares.
  *
@@ -688,7 +760,9 @@ export function isOnboardingCapabilityEnabled(capability: string): boolean {
  * just quietly empties. Mirrors {@link unknownSignalsUiUrlDomains}.
  *
  * Pure and log-only: the caller warns and the allow-list is used unchanged.
- * `bulk` is expected to show up here until bulk gating is implemented.
+ * Reserved keys are excluded — they are reported separately by
+ * {@link reservedOnboardingCapabilities}, because "unrecognised" would be the
+ * wrong thing to say about a value this repo documents as accepted.
  *
  * @param capabilities - The parsed allow-list (`null` ⇒ all enabled).
  * @param declaredModes - The network's declared `registration_modes` keys.
@@ -701,7 +775,9 @@ export function unknownOnboardingCapabilities(
 ): string[] {
   if (capabilities === null) return [];
   const declared = new Set(declaredModes);
-  return capabilities.filter((capability) => !declared.has(capability));
+  return capabilities.filter(
+    (capability) => !declared.has(capability) && !RESERVED_ONBOARDING_CAPABILITIES.has(capability),
+  );
 }
 
 /**

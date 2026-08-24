@@ -88,7 +88,13 @@ describe('getNetworkConfig AGGREGATOR_ONBOARDING_ENABLED cross-check', () => {
     await loadWith('form,frm');
     const calls = warnCalls();
     expect(calls).toHaveLength(1);
-    expect(calls[0]![0]).toMatchObject({ status: 'unknown_capability', capability: 'frm' });
+    expect(calls[0]![0]).toMatchObject({
+      // `status` stays inside the documented success/failure/skipped enum
+      // (.claude/rules/logging-observability.md); the finding rides alongside.
+      status: 'skipped',
+      finding: 'unknown_capability',
+      capability: 'frm',
+    });
     expect(calls[0]![1]).toContain('frm');
     // The correctly spelled value must not be flagged.
     expect(JSON.stringify(calls[0])).not.toContain('"capability":"form"');
@@ -96,17 +102,44 @@ describe('getNetworkConfig AGGREGATOR_ONBOARDING_ENABLED cross-check', () => {
     expect(errorCalls()).toHaveLength(0);
   });
 
-  it('warns about `bulk`, which is reserved and gates nothing yet', async () => {
+  it('warns about `bulk` as reserved, not as an unrecognised value', async () => {
     await loadWith('form,bulk');
+    const calls = warnCalls();
+    expect(calls).toHaveLength(1);
+    expect(calls[0]![0]).toMatchObject({
+      status: 'skipped',
+      finding: 'reserved_capability',
+      capability: 'bulk',
+    });
+    // `bulk` is documented as accepted, so the "matches no registration mode
+    // declared by this network" text would read as a bug report about a value
+    // this repo endorsed.
+    expect(calls[0]![1]).toContain('reserved');
+    expect(calls[0]![1]).not.toContain('matches no registration mode');
+    // `form` still enables something, so this is not the lockout case.
+    expect(errorCalls()).toHaveLength(0);
+  });
+
+  it('still locks out — loudly — when `bulk` is the only value', async () => {
+    // Reserved must not mean "ignored". Dropping it would leave an empty
+    // allow-list that then looked unset, i.e. a fail-open on a value the docs
+    // present as legitimate.
+    await loadWith('bulk');
     expect(warnCalls()).toHaveLength(1);
-    expect(warnCalls()[0]![0]).toMatchObject({ capability: 'bulk' });
+    const errors = errorCalls();
+    expect(errors).toHaveLength(1);
+    expect(errors[0]![1]).toContain('bulk');
   });
 
   it('logs an ERROR when nothing in the allow-list enables a declared mode', async () => {
     await loadWith('frm');
     const errors = errorCalls();
     expect(errors).toHaveLength(1);
-    expect(errors[0]![0]).toMatchObject({ status: 'failure', enabled: ['frm'] });
+    // `configured`, not `enabled`: the enabled set is empty by construction in
+    // this branch, and `fields.enabled` on the create-link 400 means the
+    // enabled subset — the same key must not mean the opposite here.
+    expect(errors[0]![0]).toMatchObject({ status: 'failure', configured: ['frm'] });
+    expect(errors[0]![0]).not.toHaveProperty('enabled');
     // Loudly diagnosable: the message must name both what was configured and
     // what the network actually declares.
     expect(errors[0]![1]).toContain('frm');
@@ -118,6 +151,16 @@ describe('getNetworkConfig AGGREGATOR_ONBOARDING_ENABLED cross-check', () => {
     await loadWith(',,');
     expect(errorCalls()).toHaveLength(1);
   });
+
+  it.each(['', '   ', '""'])(
+    'logs an ERROR for a set-but-blank value rather than enabling everything (%j)',
+    async (blank) => {
+      // The blocking regression: these used to parse as "unset" — every mode
+      // enabled, not one line of output.
+      await loadWith(blank);
+      expect(errorCalls()).toHaveLength(1);
+    },
+  );
 
   it('never rejects the load over a bad allow-list', async () => {
     // Log-only, exactly like the SIGNALS_UI_URLS check: an optional narrowing

@@ -436,7 +436,11 @@ services:
       # Unset — the default — enables all of them, i.e. today's behaviour.
       # This map is a closed list, so without the passthrough the var would
       # never reach the container however the host .env is set.
-      AGGREGATOR_ONBOARDING_ENABLED: ${AGGREGATOR_ONBOARDING_ENABLED:-}
+      # Value-less on purpose: `${VAR:-}` would define the key as an empty
+      # string inside the container, and an empty value is a misconfiguration
+      # that disables ALL onboarding (see config.ts). A bare key is a true
+      # passthrough — the var reaches the container only when the host sets it.
+      AGGREGATOR_ONBOARDING_ENABLED:
       PUBLIC_API_URL: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}/backend"
       PUBLIC_PORTAL_URL: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}"
       # ─── Contact-support form ────────────────────────────────────────

@@ -28,7 +28,7 @@ import type {
 } from '@aggregator-dpg/network-config/interface';
 import { errorResponses } from '../errors/openapi.js';
 import { getNetworkConfig } from '../services/network-config.js';
-import { isOnboardingCapabilityEnabled, signalsUiUrls } from '../config.js';
+import { enabledRegistrationModes, signalsUiUrls } from '../config.js';
 import { signalsCtaEnabled } from '../services/registration-mode/index.js';
 
 /**
@@ -176,6 +176,12 @@ export async function registerAggregatorConfigRoutes(app: FastifyInstance): Prom
     },
     async (_req, reply) => {
       const cfg = await getNetworkConfig();
+      // Deployment-level narrowing (#637). Derived through the one shared
+      // helper the create-link gate and the boot diagnostics also use, so the
+      // dropdown can never disagree with what creation actually accepts.
+      const enabledModes = new Set(
+        enabledRegistrationModes(Object.keys(cfg.aggregator.registration_modes ?? {})),
+      );
       const payload: PublicAggregatorConfig = {
         aggregator: {
           name: cfg.aggregator.name,
@@ -224,12 +230,12 @@ export async function registerAggregatorConfigRoutes(app: FastifyInstance): Prom
         ...(cfg.dashboardBuckets ? { dashboardBuckets: cfg.dashboardBuckets } : {}),
         registration_modes: Object.fromEntries(
           Object.entries(cfg.aggregator.registration_modes ?? {})
-            // Deployment-level narrowing (#637): a mode the
-            // `AGGREGATOR_ONBOARDING_ENABLED` allow-list withholds is dropped
-            // from the wire payload entirely. The admin create-link dropdown
-            // renders these keys verbatim, so filtering here is what removes
-            // the option — no web change involved. Unset ⇒ nothing is filtered.
-            .filter(([key]) => isOnboardingCapabilityEnabled(key))
+            // A mode the `AGGREGATOR_ONBOARDING_ENABLED` allow-list withholds
+            // is dropped from the wire payload entirely. The admin create-link
+            // dropdown renders these keys verbatim, so filtering here is what
+            // removes the option — no web change involved. Unset ⇒ nothing is
+            // filtered.
+            .filter(([key]) => enabledModes.has(key))
             .map(([key, mode]) => [
               key,
               // Resolve the `signals_cta` default here so the client normally
