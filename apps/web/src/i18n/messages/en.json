@@ -65,7 +65,9 @@
       "modal_eyebrow": "Before you register",
       "modal_title": "Terms & Privacy",
       "modal_desc": "Please review the terms of service and privacy policy below.",
-      "modal_close": "Close"
+      "modal_close": "Close",
+      "load_failed_title": "Terms unavailable",
+      "load_failed_detail": "We could not load the Terms of Service and Privacy Policy, so your consent cannot be recorded. Please reload the page and try again."
     }
   },
   "dashboard": {
@@ -604,5 +606,30 @@
     "attachment_too_large": "Attachments must total no more than {size}.",
     "attachment_bad_type": "{name} isn't an accepted file type. Attach an image, video or audio file.",
     "rate_limited": "You've sent several messages recently. Please try again later."
+  },
+  "consent_gate": {
+    "eyebrow": "Before you continue",
+    "title": "Review & accept to continue",
+    "description": "Read straight through — the tracker follows as you go.",
+    "reader_label": "Terms and privacy documents",
+    "hint_scroll": "Keep reading to continue.",
+    "hint_done": "That's everything — you can agree now.",
+    "accept": "Accept & continue",
+    "close": "Close",
+    "cap_privacy": "Privacy",
+    "cap_terms": "Terms",
+    "cap_profile": "Profile"
+  },
+  "legal": {
+    "privacy_title": "Privacy Policy",
+    "terms_title": "Terms of Service",
+    "audience_participant": "For participants",
+    "audience_aggregator": "For aggregators",
+    "audience_org": "For organisations",
+    "version_effective": "Version {version} · Effective {date}",
+    "version_only": "Version {version}",
+    "unavailable": "Legal documents are currently unavailable. Please try again later.",
+    "back_to_sign_in": "Back to sign in",
+    "contents_label": "Contents"
   }
 }

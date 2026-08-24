@@ -81,6 +81,7 @@ function toCurrent(doc: ConsentDoc, supportEmail: string): ConsentDocContent['te
     version: v?.version ?? doc.current_version,
     title: v?.title ?? '',
     content: (v?.content ?? '').replaceAll('__SUPPORT_EMAIL__', supportEmail),
+    ...(v?.effective_from ? { effective_from: v.effective_from } : {}),
   };
 }
 
