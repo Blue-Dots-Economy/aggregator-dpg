@@ -116,6 +116,11 @@ jobs:
     name: Docker / ${{ matrix.app }}
     runs-on: ubuntu-latest
     needs: ci
+    # Fork PRs get no repository secrets/vars, so the dhi.io login step below
+    # throws `Password required` before it ever reaches `FROM` — a red build
+    # the contributor has no way to fix. Skip entirely rather than fail; push
+    # and same-repo pull_request runs are unaffected.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
     permissions:
       contents: read
       packages: write

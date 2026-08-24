@@ -176,8 +176,10 @@ RUN { \
     && grep -qF -- 'parent=otp' /custom/signals/login/theme.properties
 
 # Init-container entrypoint: copy the themes into the shared volume the main
-# Keycloak container mounts at /opt/keycloak/themes, then exit. Using
-# `cp -aT` so symlinks (e.g. ../themes/...) and timestamps survive.
+# Keycloak container mounts at /opt/keycloak/themes, then exit. Using `cp -rT`
+# — there are no symlinks in this tree (`find infra/keycloak/themes -type l`
+# is empty), so `-a`'s symlink-preservation buys nothing here and was the sole
+# reason `cp` emitted the ownership/permissions warnings below on every boot.
 #
 # Stages the WHOLE tree, not just `otp`: `signals` (which the signals-ui client
 # selects via its `login_theme` attribute) sits alongside it, and copying only
@@ -185,18 +187,11 @@ RUN { \
 # listed so a missing one fails the init container loudly instead of silently
 # falling back to the realm default.
 #
-# TWO THINGS THIS DEPENDS ON, now that the image runs as nonroot (uid 65532):
-#
-#  1. The Keycloak pod's `fsGroup` MUST be set. The kubelet then group-owns the
-#     shared emptyDir and adds that group to this process, which is the only
-#     reason uid 65532 can write into it. Verified against the current
-#     `fsGroup: 0`: exits 0, stages 42 files. Without an fsGroup the volume is
-#     root-owned 0755 and this fails with `cp: can't create directory
-#     '/shared/otp': Permission denied` and exit 1 — i.e. Keycloak never starts.
-#
-#  2. `cp -aT` emits three harmless warnings on every boot:
-#       cp: can't preserve times/ownership/permissions of '/shared'
-#     A nonroot user cannot chown the destination directory. They are NOT
-#     failures — cp continues and exits 0. `-a` is kept deliberately (see above:
-#     symlinks must survive); `-rT` would dereference them.
-CMD ["sh", "-c", "set -e; mkdir -p /shared; cp -aT /custom /shared && ls /shared/otp/login /shared/signals/login >/dev/null && echo 'themes staged at /shared: otp, signals'"]
+# ONE THING THIS DEPENDS ON, now that the image runs as nonroot (uid 65532):
+# the Keycloak pod's `fsGroup` MUST be set. The kubelet then group-owns the
+# shared emptyDir and adds that group to this process, which is the only
+# reason uid 65532 can write into it. Verified against the current
+# `fsGroup: 0`: exits 0, stages 42 files. Without an fsGroup the volume is
+# root-owned 0755 and this fails with `cp: can't create directory
+# '/shared/otp': Permission denied` and exit 1 — i.e. Keycloak never starts.
+CMD ["sh", "-c", "set -e; mkdir -p /shared; cp -rT /custom /shared && ls /shared/otp/login /shared/signals/login >/dev/null && echo 'themes staged at /shared: otp, signals'"]
