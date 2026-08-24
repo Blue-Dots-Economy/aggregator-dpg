@@ -26,7 +26,7 @@ export interface ConfigPathEnv {
   AGGREGATOR_CONFIG_PATH?: string;
   SCHEMA_ROOT_DIR?: string;
   AGGREGATOR_NETWORK_SOURCE?: string;
-  AGGREGATOR_CONSENT_SOURCE?: string;
+  AGGREGATOR_PARTICIPANT_CONSENT_SOURCE?: string;
 }
 
 /**
@@ -46,7 +46,7 @@ export function resolveNetworkSourceOverride(env: ConfigPathEnv = process.env): 
 
 /**
  * Resolves the deploy-time override for the participant `consent.json` URL.
- * When `AGGREGATOR_CONSENT_SOURCE` is set (non-empty after trim) it wins over
+ * When `AGGREGATOR_PARTICIPANT_CONSENT_SOURCE` is set (non-empty after trim) it wins over
  * `aggregator.network.consent_source` from the YAML — the consent-document
  * analogue of {@link resolveNetworkSourceOverride}.
  *
@@ -54,7 +54,7 @@ export function resolveNetworkSourceOverride(env: ConfigPathEnv = process.env): 
  * @returns The override URL, or `undefined` when unset/blank.
  */
 export function resolveConsentSourceOverride(env: ConfigPathEnv = process.env): string | undefined {
-  const value = env.AGGREGATOR_CONSENT_SOURCE?.trim();
+  const value = env.AGGREGATOR_PARTICIPANT_CONSENT_SOURCE?.trim();
   return value ? value : undefined;
 }
 

@@ -5,7 +5,7 @@
  * The authoritative source is the aggregator API's `GET /v1/participant-consent`,
  * which serves the participant `consent.json` the network-config loader fetches
  * from `aggregator.network.consent_source` — the same cache-backed HTTPS pull as
- * `network.json` (env override `AGGREGATOR_CONSENT_SOURCE`). When that endpoint
+ * `network.json` (env override `AGGREGATOR_PARTICIPANT_CONSENT_SOURCE`). When that endpoint
  * yields no document (no `consent_source` configured, or its fetch failed with
  * no cached copy) this loader falls back to the on-disk copy at
  * `config/<network>[/<brand>]/schemas/participant/consent.json`.

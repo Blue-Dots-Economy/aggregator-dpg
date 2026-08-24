@@ -82,7 +82,7 @@ export interface FileNetworkConfigLoaderOptions {
   networkSourceOverride?: string;
   /**
    * Deploy-time replacement for the YAML `aggregator.network.consent_source`
-   * URL. Defaults to the `AGGREGATOR_CONSENT_SOURCE` env var (see
+   * URL. Defaults to the `AGGREGATOR_PARTICIPANT_CONSENT_SOURCE` env var (see
    * {@link resolveConsentSourceOverride}); pass explicitly in tests. Must be a
    * valid URL — a malformed value fails `load()` with `CONFIG_PARSE_FAILED`.
    */
@@ -165,7 +165,7 @@ export class FileNetworkConfigLoader extends NetworkConfigLoaderBase {
       if (!checked.success) {
         return err({
           code: 'CONFIG_PARSE_FAILED',
-          message: `AGGREGATOR_CONSENT_SOURCE is not a valid URL: "${consentOverride}"`,
+          message: `AGGREGATOR_PARTICIPANT_CONSENT_SOURCE is not a valid URL: "${consentOverride}"`,
         });
       }
       yaml.value.aggregator.network.consent_source = checked.data;

@@ -941,7 +941,7 @@ describe('FileNetworkConfigLoader — brand.json present but empty', () => {
     }
 
     beforeEach(() => {
-      delete process.env.AGGREGATOR_CONSENT_SOURCE;
+      delete process.env.AGGREGATOR_PARTICIPANT_CONSENT_SOURCE;
     });
 
     it('fetches + attaches the participant consent document from consent_source', async () => {
@@ -1058,7 +1058,9 @@ aggregator:
       expect(result.success).toBe(false);
       if (result.success) return;
       expect((result.error as { code: string }).code).toBe('CONFIG_PARSE_FAILED');
-      expect((result.error as { message: string }).message).toContain('AGGREGATOR_CONSENT_SOURCE');
+      expect((result.error as { message: string }).message).toContain(
+        'AGGREGATOR_PARTICIPANT_CONSENT_SOURCE',
+      );
     });
   });
 });

@@ -466,6 +466,10 @@ services:
       # Deploy-time override for the signalstack network.json URL (#512);
       # empty = use `aggregator.network.source` from the YAML.
       AGGREGATOR_NETWORK_SOURCE: ${AGGREGATOR_NETWORK_SOURCE:-}
+      # Deploy-time override for the participant consent.json URL (ConfigMap-
+      # injected by automation); empty = use `aggregator.network.consent_source`
+      # from the YAML, or fall back to the on-disk copy when neither is set.
+      AGGREGATOR_PARTICIPANT_CONSENT_SOURCE: ${AGGREGATOR_PARTICIPANT_CONSENT_SOURCE:-}
       # Force-empty so the app derives the config path from CONFIG_ROOT +
       # AGGREGATOR_NETWORK. Exporting the key (even empty) stops dotenv from
       # loading a stale host path baked into the image's /app/.env.
@@ -551,6 +555,10 @@ services:
       # Deploy-time override for the signalstack network.json URL (#512);
       # empty = use `aggregator.network.source` from the YAML.
       AGGREGATOR_NETWORK_SOURCE: ${AGGREGATOR_NETWORK_SOURCE:-}
+      # Deploy-time override for the participant consent.json URL (ConfigMap-
+      # injected by automation); empty = use `aggregator.network.consent_source`
+      # from the YAML, or fall back to the on-disk copy when neither is set.
+      AGGREGATOR_PARTICIPANT_CONSENT_SOURCE: ${AGGREGATOR_PARTICIPANT_CONSENT_SOURCE:-}
       # Force-empty so the app derives the config path from CONFIG_ROOT +
       # AGGREGATOR_NETWORK (stops dotenv loading a stale host path baked in).
       AGGREGATOR_CONFIG_PATH: ${AGGREGATOR_CONFIG_PATH:-}

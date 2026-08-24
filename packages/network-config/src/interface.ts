@@ -166,7 +166,7 @@ export const NetworkBindingSchema = z.object({
    * profile-creation), fetched over HTTPS exactly like {@link source} — same
    * timeout + last-known-good cache. Typically the sibling of `source` in the
    * schemas repo. Optional in the YAML because a deployment may provide it via
-   * the `AGGREGATOR_CONSENT_SOURCE` env override instead, or omit it entirely
+   * the `AGGREGATOR_PARTICIPANT_CONSENT_SOURCE` env override instead, or omit it entirely
    * (the web app then falls back to the on-disk participant `consent.json`).
    */
   consent_source: z.string().url().optional(),
