@@ -364,6 +364,10 @@ services:
       AGGREGATOR_NETWORK: ${AGGREGATOR_NETWORK:-blue_dot}
       AGGREGATOR_BRAND: ${AGGREGATOR_BRAND:-}
       CONFIG_ROOT: /app/config
+      # Consent `__SUPPORT_EMAIL__` token (Terms/Privacy/Grievances) reuses the
+      # aggregator's existing SUPPORT_EMAIL — no separate var. Empty ⇒ default
+      # hello@bluedotseconomy.org.
+      CONSENT_SUPPORT_EMAIL: ${SUPPORT_EMAIL:-}
     # No host port mapping — exposed only via nginx at /.
     # Resolve PUBLIC_HOST (the VM's public IP) to the docker host gateway so
     # the BFF's back-channel OIDC discovery + token exchange reaches nginx via
