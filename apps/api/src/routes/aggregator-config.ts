@@ -198,4 +198,28 @@ export async function registerAggregatorConfigRoutes(app: FastifyInstance): Prom
       return reply.header('Cache-Control', 'public, max-age=60').send(payload);
     },
   );
+
+  app.get(
+    '/v1/participant-consent',
+    {
+      schema: {
+        tags: ['aggregator-config'],
+        summary: 'Participant registration-link consent document',
+        description:
+          'The participant `consent.json` (Terms / Privacy / profile-creation) fetched from `aggregator.network.consent_source` — the same cache-backed pull as network.json. `participant_consent` is null when no `consent_source` is configured (the web app then falls back to its on-disk copy). No auth — operator-controlled content shown on the public registration form.',
+        response: {
+          200: z
+            .object({ participant_consent: z.record(z.string(), z.unknown()).nullable() })
+            .passthrough(),
+          ...errorResponses(500, 503),
+        },
+      },
+    },
+    async (_req, reply) => {
+      const cfg = await getNetworkConfig();
+      return reply
+        .header('Cache-Control', 'public, max-age=60')
+        .send({ participant_consent: cfg.participantConsent ?? null });
+    },
+  );
 }

@@ -2,17 +2,18 @@
  * Server-side loader for the PARTICIPANT consent copy (Terms / Privacy) shown
  * on the public registration form.
  *
- * INTERIM (#522): the authoritative source is Signals' upcoming public endpoint
- * `GET /api/v1/consent/active?network=&audience=participant&variant=adult`
- * (§4.1). Until that ships, the participant `consent.json` is copied verbatim
- * from Signals into the aggregator config tree
- * (`config/<network>/schemas/participant/consent.json`) and read here — so the
- * form can render the real Terms/Privacy text now. When the endpoint lands,
- * swap {@link loadParticipantConsent}'s body to fetch it; the returned
- * {@link ConsentDocContent} shape (and every caller) stays unchanged.
+ * The authoritative source is the aggregator API's `GET /v1/participant-consent`,
+ * which serves the participant `consent.json` the network-config loader fetches
+ * from `aggregator.network.consent_source` — the same cache-backed HTTPS pull as
+ * `network.json` (env override `AGGREGATOR_PARTICIPANT_CONSENT_SOURCE`). When that endpoint
+ * yields no document (no `consent_source` configured, or its fetch failed with
+ * no cached copy) this loader falls back to the on-disk copy at
+ * `config/<network>[/<brand>]/schemas/participant/consent.json`.
  *
- * This is distinct from the aggregator's OWN `consent.json`
- * (`schemas/aggregator/`), which stays operator-only. Do not merge the two.
+ * This is best-effort — a consent-copy problem must never take down the public
+ * page, so every path returns null rather than throwing. It is scoped to the
+ * registration LINK only; the aggregator's OWN operator consent
+ * (`schemas/aggregator/`) is loaded separately and unaffected.
  *
  * @module apps/web/src/lib/participant-consent.server
  */
@@ -22,12 +23,16 @@ import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { resolveSchemaRoot } from './config-paths';
+import { logger } from './logger';
 import type { ConsentDocContent, ParticipantConsent } from '../components/consent/consent-types';
 
 export type { ParticipantConsent };
 
 /** Default grievances/support contact rendered into the `__SUPPORT_EMAIL__` token. */
 const DEFAULT_SUPPORT_EMAIL = 'hello@bluedotseconomy.org';
+
+/** Explicit timeout for the `GET /v1/participant-consent` fetch. */
+const FETCH_TIMEOUT_MS = 5_000;
 
 /** One version entry inside a Signals `consent.json` document. */
 interface ConsentVersion {
@@ -85,37 +90,105 @@ function toCurrent(doc: ConsentDoc, supportEmail: string): ConsentDocContent['te
 }
 
 /**
+ * Shapes a parsed participant consent file into the view DTO, rendering the
+ * `__SUPPORT_EMAIL__` token throughout. Returns null when the required Terms
+ * or Privacy documents are missing so callers can fall back.
+ */
+function shapeParticipantConsent(
+  parsed: ParticipantConsentFile,
+  supportEmail: string,
+): ParticipantConsent | null {
+  const terms = parsed.documents?.terms;
+  const privacy = parsed.documents?.privacy;
+  if (!terms?.versions?.length || !privacy?.versions?.length) return null;
+  const pc = parsed.documents?.profile_creation;
+  const pcVersion = pc?.versions?.find((x) => x.version === pc.current_version) ?? pc?.versions[0];
+  return {
+    terms: toCurrent(terms, supportEmail),
+    privacy: toCurrent(privacy, supportEmail),
+    ...(pcVersion
+      ? {
+          profileCreation: {
+            version: pcVersion.version,
+            // Guard like `toCurrent` — an on-disk copy is not schema-validated,
+            // so a version missing `statement` must not throw and 500 the page.
+            statement: (pcVersion.statement ?? '').replaceAll('__SUPPORT_EMAIL__', supportEmail),
+          },
+        }
+      : {}),
+  };
+}
+
+/**
+ * Fetches the resolved participant consent document from the aggregator API.
+ * Best-effort — returns null on timeout / non-2xx / malformed body / absent
+ * document so the caller falls back to the on-disk copy.
+ */
+async function loadFromApi(): Promise<ParticipantConsentFile | null> {
+  const apiBase = process.env.API_BASE_URL ?? 'http://localhost:4000';
+  const start = Date.now();
+  try {
+    const res = await fetch(`${apiBase}/v1/participant-consent`, {
+      cache: 'no-store',
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+    if (!res.ok) {
+      logger.warn({
+        operation: 'participantConsent.loadFromApi',
+        status: 'failure',
+        error: `HTTP ${res.status}`,
+        latency_ms: Date.now() - start,
+      });
+      return null;
+    }
+    const body = (await res.json()) as { participant_consent?: ParticipantConsentFile | null };
+    return body.participant_consent ?? null;
+  } catch (err) {
+    logger.warn({
+      operation: 'participantConsent.loadFromApi',
+      status: 'failure',
+      error: err instanceof Error ? err.message : String(err),
+      latency_ms: Date.now() - start,
+    });
+    return null;
+  }
+}
+
+/**
+ * Reads the participant consent document from the on-disk copy. Returns null
+ * when the file is missing or malformed — never throws.
+ */
+async function loadFromDisk(): Promise<ParticipantConsentFile | null> {
+  const file = resolveParticipantConsentPath();
+  if (!file) return null;
+  try {
+    return JSON.parse(await readFile(file, 'utf8')) as ParticipantConsentFile;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Loads the participant Terms + Privacy copy at their current versions for the
- * public registration form's consent modal. Returns null (form falls back to a
- * plain checkbox label) when the file is missing or malformed — never throws,
- * so a consent-copy problem can't take down the public page.
+ * public registration form's consent modal. Prefers the API-served document
+ * (fetched by the network-config loader from `consent_source`), falling back to
+ * the on-disk copy. Returns null (form falls back to a plain checkbox label)
+ * when no source yields usable content — never throws, so a consent-copy problem
+ * can't take down the public page.
  *
  * @returns The versioned Terms/Privacy (+ profile-creation) content, or null.
  */
 export async function loadParticipantConsent(): Promise<ParticipantConsent | null> {
-  const file = resolveParticipantConsentPath();
-  if (!file) return null;
   const supportEmail = process.env.CONSENT_SUPPORT_EMAIL?.trim() || DEFAULT_SUPPORT_EMAIL;
+  // Belt-and-braces: shaping an unvalidated on-disk document must never throw
+  // out of this server-component caller and 500 the public page.
   try {
-    const parsed = JSON.parse(await readFile(file, 'utf8')) as ParticipantConsentFile;
-    const terms = parsed.documents?.terms;
-    const privacy = parsed.documents?.privacy;
-    if (!terms?.versions?.length || !privacy?.versions?.length) return null;
-    const pc = parsed.documents?.profile_creation;
-    const pcVersion =
-      pc?.versions?.find((x) => x.version === pc.current_version) ?? pc?.versions[0];
-    return {
-      terms: toCurrent(terms, supportEmail),
-      privacy: toCurrent(privacy, supportEmail),
-      ...(pcVersion
-        ? {
-            profileCreation: {
-              version: pcVersion.version,
-              statement: pcVersion.statement.replaceAll('__SUPPORT_EMAIL__', supportEmail),
-            },
-          }
-        : {}),
-    };
+    const fromApi = await loadFromApi();
+    const shapedApi = fromApi ? shapeParticipantConsent(fromApi, supportEmail) : null;
+    if (shapedApi) return shapedApi;
+    // API had no usable document — fall back to the on-disk copy.
+    const fromDisk = await loadFromDisk();
+    return fromDisk ? shapeParticipantConsent(fromDisk, supportEmail) : null;
   } catch {
     return null;
   }
