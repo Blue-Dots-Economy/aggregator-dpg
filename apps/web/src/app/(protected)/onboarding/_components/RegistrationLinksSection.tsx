@@ -464,21 +464,37 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
    *
    * The list payload deliberately carries no presigned URL — one embedded in a
    * page render expires while the tab sits open, and the user then gets an
-   * opaque storage error instead of an image. The blank tab is opened
-   * synchronously, before the await, because a `window.open` that happens after
-   * one is treated as unsolicited and blocked.
+   * opaque storage error instead of an image.
+   *
+   * The blank tab is opened synchronously, BEFORE the await: a `window.open`
+   * that happens after one is treated as unsolicited and blocked. Note the
+   * feature string must NOT contain `noopener` — per the HTML spec that makes
+   * `window.open` discard the handle and return null, which would leave us with
+   * nothing to navigate. `tab.opener` is cleared manually instead, which is what
+   * `noopener` would have bought us.
+   *
+   * If the popup is blocked anyway we do NOT fall back to navigating the current
+   * tab: that would replace the portal with a raw storage URL and write a bearer
+   * credential into the address bar and browser history.
    */
   const onViewQr = async () => {
     if (!link.qr_download_path || qrPending) return;
-    const tab = window.open('', '_blank', 'noopener,noreferrer');
+    const tab = window.open('', '_blank');
     setQrPending(true);
     try {
       const { url } = await onboardingService.qrDownloadUrl(link.link_id);
-      if (tab) {
-        tab.location.href = url;
-      } else {
-        window.location.href = url;
+      if (!tab) {
+        setQrError(true);
+        setTimeout(() => setQrError(false), 4000);
+        return;
       }
+      // Sever the back-reference before handing the tab a third-party URL.
+      try {
+        tab.opener = null;
+      } catch {
+        /* cross-origin already navigated — nothing to sever */
+      }
+      tab.location.href = url;
     } catch {
       tab?.close();
       setQrError(true);

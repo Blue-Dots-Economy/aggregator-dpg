@@ -34,6 +34,22 @@ export const QR_PREFIX = 'qr/';
 const LEGACY_BULK_UPLOAD_PREFIX = 'bulk-uploads/';
 
 /**
+ * Characters permitted in a key segment.
+ *
+ * A positive allow-list, deliberately: every caller passes a UUID from the
+ * database or a verified session claim, so the accepted alphabet is known and
+ * narrow. A denylist of "dangerous" characters is the weaker construction — it
+ * has to enumerate separators, traversals, control characters, percent-encoded
+ * separators, unicode line separators and length limits, and it silently admits
+ * whatever the next reviewer forgets.
+ *
+ * 64 characters is comfortably above a UUID (36) while staying far under S3's
+ * 1024-byte key limit, so an over-long id fails here rather than as a
+ * `KeyTooLongError` from S3 at request time.
+ */
+const KEY_SEGMENT_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+
+/**
  * Rejects any id that would change the meaning of the key it is interpolated
  * into.
  *
@@ -48,26 +64,13 @@ const LEGACY_BULK_UPLOAD_PREFIX = 'bulk-uploads/';
  * @param value - Candidate key segment (an aggregator, upload, or link id).
  * @param name - Parameter name, echoed in the error so the caller is findable.
  * @returns `value` unchanged when it is safe to interpolate.
- * @throws If `value` is blank, or contains a separator, traversal, or control
- *   character.
+ * @throws If `value` is not 1-64 characters of `[A-Za-z0-9_-]`.
  */
 function assertKeySegment(value: string, name: string): string {
-  if (value.trim().length === 0) {
-    throw new Error(`Invalid object key segment for '${name}': must not be blank.`);
-  }
-  if (value.includes('/') || value.includes('\\')) {
-    throw new Error(`Invalid object key segment for '${name}': must not contain a path separator.`);
-  }
-  if (value.includes('..')) {
-    throw new Error(`Invalid object key segment for '${name}': must not contain '..'.`);
-  }
-  for (const ch of value) {
-    const code = ch.codePointAt(0) ?? 0;
-    if (code < 0x20 || code === 0x7f) {
-      throw new Error(
-        `Invalid object key segment for '${name}': must not contain control characters.`,
-      );
-    }
+  if (!KEY_SEGMENT_PATTERN.test(value)) {
+    throw new Error(
+      `Invalid object key segment for '${name}': must be 1-64 characters of [A-Za-z0-9_-].`,
+    );
   }
   return value;
 }
@@ -129,8 +132,17 @@ export function qrObjectKey(aggregatorId: string, linkId: string): string {
  * a tampered row cannot talk it into signing an arbitrary object. Widen it only
  * by adding a layout here — never by trusting the stored column.
  *
+ * CALLER CONTRACT: the legacy entry is derived from `uploadId` ALONE — the
+ * pre-migration layout had no tenant segment — so this function cannot by
+ * itself keep one aggregator off another's objects. The caller MUST already
+ * have established that `uploadId` belongs to `aggregatorId` (today: the store
+ * fetch is scoped by aggregator id). A future admin, support, or cross-org read
+ * path that resolves an upload row without that predicate makes the legacy
+ * branch cross-tenant. Retire the legacy entry once the bucket lifecycle window
+ * for `bulk-uploads/` has elapsed.
+ *
  * @param aggregatorId - Owning aggregator, from the caller's session.
- * @param uploadId - `bulk_uploads.id` the caller has been shown to own.
+ * @param uploadId - `bulk_uploads.id` the caller has ALREADY been shown to own.
  * @returns Current layout first, then the pre-migration one.
  */
 export function allowedBulkUploadErrorsKeys(

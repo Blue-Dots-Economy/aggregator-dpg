@@ -46,10 +46,19 @@ describe('object key layout', () => {
     ]);
   });
 
-  // A key builder that interpolates unvalidated input is a path-traversal
-  // primitive: `../..` in a segment would let a caller address another
-  // tenant's prefix, and the API's signing allow-list compares against these
-  // builders. Reject rather than sanitise so a bad caller fails loudly.
+  it('accepts the id shapes real callers pass', () => {
+    // UUIDs from the database, and the short slug-ish ids the test fakes use.
+    expect(() => bulkUploadRawKey(AGG, UPLOAD)).not.toThrow();
+    expect(() => qrObjectKey('agg-1', 'link-1')).not.toThrow();
+    expect(() => qrObjectKey('AGG_1', 'Link_2')).not.toThrow();
+  });
+
+  // The validator is a positive allow-list, not a denylist of "dangerous"
+  // characters: interpolating unvalidated input into an object key is a
+  // path-traversal primitive, and the API's signing allow-list compares against
+  // these builders. A denylist has to enumerate separators, traversals, control
+  // characters, percent-encoded separators, unicode line separators and length
+  // limits — and admits whatever the next reviewer forgets.
   describe.each([
     ['empty', ''],
     ['whitespace only', '   '],
@@ -59,6 +68,18 @@ describe('object key layout', () => {
     ['an embedded traversal', 'a/../b'],
     ['a NUL byte', 'a\u0000b'],
     ['a newline', 'a\nb'],
+    ['a percent-encoded separator', 'a%2Fb'],
+    ['a percent-encoded traversal', '%2E%2E'],
+    ['a bare dot', '.'],
+    ['a dot inside', 'a.b'],
+    ['leading whitespace', ' abc'],
+    ['trailing whitespace', 'abc '],
+    ['a C1 control character', 'a\u0085b'],
+    ['a unicode line separator', 'a\u2028b'],
+    ['a non-ASCII letter', 'aéb'],
+    // S3 caps a key at 1024 bytes. An over-long id must fail here, not as a
+    // KeyTooLongError from S3 at request time.
+    ['more than 64 characters', 'a'.repeat(65)],
   ])('rejects a segment containing %s', (_label, bad) => {
     it('in every builder', () => {
       expect(() => bulkUploadRawKey(bad, UPLOAD)).toThrow(/segment/i);

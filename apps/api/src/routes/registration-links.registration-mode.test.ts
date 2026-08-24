@@ -1086,13 +1086,21 @@ describe('POST /v1/links/:id/activate', () => {
     expect(putObjectMock).toHaveBeenCalledTimes(1);
   });
 
-  it('reuses the existing qr_object_key when one is already stamped on a legacy draft', async () => {
+  // The key is DERIVED, never read from the row. Honouring a stored value would
+  // make activate a write-and-presign primitive for an arbitrary object: a
+  // tampered or mis-migrated qr_object_key would have putObject overwrite
+  // another tenant's object with a PNG and then hand the caller a presigned GET
+  // for it. This test previously asserted the opposite; it was codifying that.
+  //
+  // Nothing real regresses: the QR layout never changed, so a genuine legacy row
+  // already holds exactly qr/{aggregatorId}/{linkId}.png.
+  it('derives the qr_object_key on activate and ignores a foreign stored key', async () => {
     store.seed([
       buildLink({
         id: 'link-draft',
         slug: 'legacy',
         status: 'draft',
-        qrObjectKey: 'qr/legacy-key.png',
+        qrObjectKey: 'uploads/errors/some-other-aggregator/an-upload.csv',
       }),
     ]);
     await app.inject({
@@ -1100,7 +1108,17 @@ describe('POST /v1/links/:id/activate', () => {
       url: '/v1/links/link-draft/activate',
       headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
     });
-    expect(putObjectMock).toHaveBeenCalledWith('qr/legacy-key.png', expect.anything(), 'image/png');
+    expect(putObjectMock).toHaveBeenCalledWith(
+      `qr/${AGG_ID}/link-draft.png`,
+      expect.anything(),
+      'image/png',
+    );
+    // The foreign object must not be touched.
+    expect(putObjectMock).not.toHaveBeenCalledWith(
+      'uploads/errors/some-other-aggregator/an-upload.csv',
+      expect.anything(),
+      expect.anything(),
+    );
   });
 
   it('500 INTERNAL when QR PNG generation fails', async () => {

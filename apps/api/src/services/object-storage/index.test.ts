@@ -266,3 +266,53 @@ describe('object-storage', () => {
     });
   });
 });
+
+// The three classes share one canonical TTL by default, which means a test that
+// only exercises the default cannot tell them apart: swapping
+// signedUrlTtlSeconds.errorsCsvDownload for .bulkUpload at the call site would
+// leave the suite green. These give each class a DISTINCT value so the wiring
+// itself is pinned — the bug this change fixes was exactly a call site reaching
+// for the wrong class (errors.csv borrowed the upload TTL).
+describe('per-class TTL wiring', () => {
+  const DISTINCT = {
+    SIGNED_URL_TTL_SECONDS: 600,
+    BULK_UPLOAD_URL_TTL_SECONDS: 1111,
+    ERRORS_CSV_DOWNLOAD_URL_TTL_SECONDS: 2222,
+    QR_DOWNLOAD_URL_TTL_SECONDS: 3333,
+  };
+
+  beforeEach(() => {
+    vi.resetModules();
+    sendMock.mockReset();
+    getSignedUrlMock.mockReset();
+    getSignedUrlMock.mockResolvedValue('https://signed.example.invalid/x');
+    mockConfig = { ...baseConfig, ...DISTINCT };
+  });
+
+  it('signs the upload PUT with the bulk-upload TTL', async () => {
+    const { signBulkUploadUrl } = await import('./index.js');
+    await signBulkUploadUrl({ uploadId: 'up-1', aggregatorId: 'agg-1' });
+    expect(getSignedUrlMock.mock.calls[0]?.[2]).toEqual({ expiresIn: 1111 });
+  });
+
+  it('signs the errors-CSV GET with the errors-CSV TTL, not the upload one', async () => {
+    const { signErrorsCsvDownloadUrl } = await import('./index.js');
+    await signErrorsCsvDownloadUrl('uploads/errors/agg-1/up-1.csv');
+    expect(getSignedUrlMock.mock.calls[0]?.[2]).toEqual({ expiresIn: 2222 });
+  });
+
+  it('signs the QR GET with the QR TTL', async () => {
+    const { signQrDownloadUrl } = await import('./index.js');
+    await signQrDownloadUrl('qr/agg-1/link-1.png');
+    expect(getSignedUrlMock.mock.calls[0]?.[2]).toEqual({ expiresIn: 3333 });
+  });
+
+  it('reports expiresAt from the same per-class TTL it signed with', async () => {
+    const { signQrDownloadUrl } = await import('./index.js');
+    const before = Date.now();
+    const result = await signQrDownloadUrl('qr/agg-1/link-1.png');
+    const delta = new Date(result.expiresAt).getTime() - before;
+    expect(delta).toBeGreaterThanOrEqual(3333 * 1000 - 1000);
+    expect(delta).toBeLessThan(3333 * 1000 + 5000);
+  });
+});

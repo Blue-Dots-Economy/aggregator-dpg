@@ -491,6 +491,85 @@ describe('<YourLinksBody />', () => {
     openSpy.mockRestore();
   });
 
+  // If the popup is blocked we must NOT fall back to navigating the current tab:
+  // that replaces the portal with a raw storage URL and writes a bearer
+  // credential into the address bar and browser history.
+  it('does not navigate the current tab when the popup is blocked', async () => {
+    const user = userEvent.setup();
+    qrDownloadUrlMock.mockReset();
+    qrDownloadUrlMock.mockResolvedValue({
+      url: 'https://s3.example.invalid/qr.png?X-Amz-Signature=abc',
+      expires_at: '2026-08-24T00:10:00.000Z',
+    });
+    useRegistrationLinks.mockReturnValue({
+      data: [
+        baseLink({
+          status: 'live',
+          public_url: 'https://bluedots.example/acme/dharwad-drive',
+          qr_download_path: '/v1/links/link-1/qr',
+        }),
+      ],
+      isLoading: false,
+      error: null,
+    });
+    // What a blocker actually does — and also what window.open returns when
+    // `noopener` is in the feature string, which is why it must not be.
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
+    const hrefSetter = vi.fn();
+    const original = window.location;
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: {
+        ...original,
+        set href(v: string) {
+          hrefSetter(v);
+        },
+      },
+    });
+
+    renderLinks();
+    await user.click(screen.getByTitle('View QR'));
+
+    expect(hrefSetter).not.toHaveBeenCalled();
+
+    Object.defineProperty(window, 'location', { configurable: true, value: original });
+    openSpy.mockRestore();
+  });
+
+  // The feature string must not contain `noopener`: per the HTML spec that makes
+  // window.open discard the handle and return null, leaving nothing to navigate.
+  it('opens the tab without noopener so the handle is usable', async () => {
+    const user = userEvent.setup();
+    qrDownloadUrlMock.mockReset();
+    qrDownloadUrlMock.mockResolvedValue({
+      url: 'https://s3.example.invalid/qr.png?X-Amz-Signature=abc',
+      expires_at: '2026-08-24T00:10:00.000Z',
+    });
+    useRegistrationLinks.mockReturnValue({
+      data: [
+        baseLink({
+          status: 'live',
+          public_url: 'https://bluedots.example/acme/dharwad-drive',
+          qr_download_path: '/v1/links/link-1/qr',
+        }),
+      ],
+      isLoading: false,
+      error: null,
+    });
+    const tab = { location: { href: '' }, close: vi.fn(), opener: {} as unknown };
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(tab as unknown as Window);
+
+    renderLinks();
+    await user.click(screen.getByTitle('View QR'));
+
+    const features = openSpy.mock.calls[0]?.[2];
+    expect(features ?? '').not.toContain('noopener');
+    // The back-reference is severed manually instead.
+    expect(tab.opener).toBeNull();
+    expect(tab.location.href).toContain('X-Amz-Signature');
+    openSpy.mockRestore();
+  });
+
   it('closes the opened tab when minting the QR URL fails', async () => {
     const user = userEvent.setup();
     qrDownloadUrlMock.mockReset();

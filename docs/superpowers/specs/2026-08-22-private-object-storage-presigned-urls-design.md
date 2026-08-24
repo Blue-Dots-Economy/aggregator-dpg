@@ -313,10 +313,20 @@ holds today and this change must not weaken it. Specifically:
   `errors_csv_key_invalid` and **no URL is minted**. Without this test, widening the allow-list in
   §3.2 silently becomes "sign whatever the column says".
 - Cross-tenant: aggregator B requesting A's `upload_id` gets 404/403 and **no URL is minted**.
-- **QR redirect (§3.4):** `GET /v1/links/:id/qr` returns `302` with a `Location` carrying
-  `X-Amz-Signature` and `Cache-Control: no-store`; a link owned by another aggregator gets 403 with no
-  `Location` header; a `draft`/`retired` link gets 404 (matching `buildResponse`'s existing rule that
-  only `live` links expose a QR).
+- **QR mint endpoint (§3.4):** `GET /v1/links/:id/qr` returns JSON carrying a URL with
+  `X-Amz-Signature` and sets `Cache-Control: no-store`; a link owned by another aggregator gets 403
+  and mints nothing; a `draft`/`retired` link gets 404 (matching `buildResponse`'s existing rule that
+  only `live` links expose a QR); a stored `qr_object_key` that is not the canonical key for this
+  caller + link is refused, as are another tenant's prefix and another object class.
+- **Per-class TTL wiring**, with three _distinct_ TTLs so the assertion cannot pass with the classes
+  swapped. Tested by mutation: swapping `errorsCsvDownload` for `bulkUpload` at the call site fails
+  the suite. The default-config tests cannot catch this — all three classes resolve to 600.
+- **Boot guards** on the TTL surface: over-ceiling, empty string, zero, negative and non-numeric all
+  refuse to boot, and the ceiling applies to per-class overrides too.
+- **Popup-blocked path:** when `window.open` returns `null` the client must NOT navigate the current
+  tab — that would replace the portal with a raw storage URL and write a bearer credential into the
+  address bar and browser history. Also asserts the feature string omits `noopener`, since that makes
+  `window.open` return `null` by spec and would leave nothing to navigate.
 - **List responses carry no signed URL** once `qr_url` is retired — assert the serialized list
   contains no `X-Amz-Signature`. This is the regression guard against someone reintroducing per-row
   presigning.

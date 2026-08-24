@@ -652,11 +652,17 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
       }
 
       // Mint the QR PNG at activation time — the draft slug is now frozen and
-      // the public URL it encodes will not change. If a qr_object_key already
-      // exists (e.g. legacy row from when drafts also got QRs) we reuse the key
-      // and overwrite the bytes; the key is deterministic.
+      // the public URL it encodes will not change.
+      //
+      // The key is DERIVED, never read from the row. It is deterministic, so a
+      // stored value can only ever equal this or be wrong — and honouring a
+      // stored value would make this endpoint a write-and-presign primitive for
+      // an arbitrary object: a tampered or mis-migrated `qr_object_key` would
+      // have `putObject` overwrite another tenant's object with a PNG and then
+      // hand the caller a pre-signed GET for it. `GET /v1/links/:id/qr` guards
+      // the read side with the same allow-list; this is the write side of it.
       const publicUrl = buildPublicUrl(orgSlug, found.value.slug);
-      const qrKey = found.value.qrObjectKey ?? qrObjectKey(auth.aggregatorId, found.value.id);
+      const qrKey = qrObjectKey(auth.aggregatorId, found.value.id);
       let qrPng: Buffer;
       try {
         qrPng = await QRCode.toBuffer(publicUrl, {
