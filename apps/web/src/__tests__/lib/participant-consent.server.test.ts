@@ -175,5 +175,21 @@ describe('loadParticipantConsent', () => {
       readFileMock.mockRejectedValue(new Error('EACCES'));
       await expect(loadParticipantConsent()).resolves.toBeNull();
     });
+
+    it('does not throw when an on-disk profile_creation version lacks statement', async () => {
+      // On-disk copies are not schema-validated; a missing `statement` must not
+      // 500 the public page (regression: unguarded replaceAll threw TypeError).
+      existsSyncMock.mockReturnValue(true);
+      readFileMock.mockResolvedValue(
+        JSON.stringify(
+          validDoc({
+            profile_creation: { current_version: 1, versions: [{ version: 1 }] },
+          }),
+        ),
+      );
+      const result = await loadParticipantConsent();
+      expect(result).not.toBeNull();
+      expect(result!.profileCreation).toEqual({ version: 1, statement: '' });
+    });
   });
 });

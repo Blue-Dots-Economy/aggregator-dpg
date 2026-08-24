@@ -110,7 +110,9 @@ function shapeParticipantConsent(
       ? {
           profileCreation: {
             version: pcVersion.version,
-            statement: pcVersion.statement.replaceAll('__SUPPORT_EMAIL__', supportEmail),
+            // Guard like `toCurrent` — an on-disk copy is not schema-validated,
+            // so a version missing `statement` must not throw and 500 the page.
+            statement: (pcVersion.statement ?? '').replaceAll('__SUPPORT_EMAIL__', supportEmail),
           },
         }
       : {}),
@@ -178,10 +180,16 @@ async function loadFromDisk(): Promise<ParticipantConsentFile | null> {
  */
 export async function loadParticipantConsent(): Promise<ParticipantConsent | null> {
   const supportEmail = process.env.CONSENT_SUPPORT_EMAIL?.trim() || DEFAULT_SUPPORT_EMAIL;
-  const fromApi = await loadFromApi();
-  const shapedApi = fromApi ? shapeParticipantConsent(fromApi, supportEmail) : null;
-  if (shapedApi) return shapedApi;
-  // API had no usable document — fall back to the on-disk copy.
-  const fromDisk = await loadFromDisk();
-  return fromDisk ? shapeParticipantConsent(fromDisk, supportEmail) : null;
+  // Belt-and-braces: shaping an unvalidated on-disk document must never throw
+  // out of this server-component caller and 500 the public page.
+  try {
+    const fromApi = await loadFromApi();
+    const shapedApi = fromApi ? shapeParticipantConsent(fromApi, supportEmail) : null;
+    if (shapedApi) return shapedApi;
+    // API had no usable document — fall back to the on-disk copy.
+    const fromDisk = await loadFromDisk();
+    return fromDisk ? shapeParticipantConsent(fromDisk, supportEmail) : null;
+  } catch {
+    return null;
+  }
 }
