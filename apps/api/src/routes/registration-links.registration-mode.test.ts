@@ -8,6 +8,9 @@
  *   - create rejects a non-snake_case mode value with 400 SCHEMA_VALIDATION
  *   - PATCH rejects any `registration_mode` in the body (UpdateLinkBodySchema
  *     is .strict(); this pins that as a regression)
+ *   - create honours the `AGGREGATOR_ONBOARDING_ENABLED` allow-list (#637):
+ *     a withheld mode is rejected even when called directly, and an omitted
+ *     mode never falls back to one
  *
  * The blue_dot test fixture declares two modes: `voice` (account_only) and
  * `form` (account_and_profile). Uses a tracking stub for the registration-links
@@ -222,6 +225,113 @@ describe('POST /v1/links/create — registration_mode', () => {
     });
     expect(r.statusCode).toBe(400);
     expect(r.json().error.code).toBe('SCHEMA_VALIDATION');
+  });
+});
+
+describe('POST /v1/links/create — AGGREGATOR_ONBOARDING_ENABLED gate (#637)', () => {
+  let app: FastifyInstance;
+  let store: TrackingRegistrationLinksStore;
+  const original = process.env.AGGREGATOR_ONBOARDING_ENABLED;
+
+  beforeEach(async () => {
+    ({ app, store } = await bootApp());
+  });
+  afterEach(async () => {
+    await app?.close();
+    _setAccessTokenVerifier(null);
+    _setAggregatorStore(null);
+    _setRegistrationLinksStore(null);
+    _setNetworkConfig(null);
+    _setDbClients(null, null);
+    if (original === undefined) delete process.env.AGGREGATOR_ONBOARDING_ENABLED;
+    else process.env.AGGREGATOR_ONBOARDING_ENABLED = original;
+  });
+
+  const create = (payload: Record<string, unknown>) =>
+    app.inject({
+      method: 'POST',
+      url: '/v1/links/create',
+      headers: { authorization: `Bearer ${AUTH_TOKEN}` },
+      payload,
+    });
+
+  it('rejects a withheld mode with 400 INVALID_REGISTRATION_MODE', async () => {
+    // The config endpoint already hides `voice` from the dropdown, but the
+    // gate has to hold for a caller hitting the API directly.
+    process.env.AGGREGATOR_ONBOARDING_ENABLED = 'form';
+    const r = await create({ domain: 'seeker', registration_mode: 'voice' });
+    expect(r.statusCode).toBe(400);
+    expect(r.json().error.code).toBe('INVALID_REGISTRATION_MODE');
+    expect(store.creates).toHaveLength(0);
+  });
+
+  it('still creates an enabled mode with the var set', async () => {
+    process.env.AGGREGATOR_ONBOARDING_ENABLED = 'form';
+    const r = await create({ domain: 'seeker', registration_mode: 'form' });
+    expect(r.statusCode).toBe(201);
+    expect(r.json().registration_mode).toBe('form');
+    expect(store.creates[0]!.registrationMode).toBe('form');
+  });
+
+  it('keeps both modes creatable when the var lists them all', async () => {
+    process.env.AGGREGATOR_ONBOARDING_ENABLED = 'form,voice';
+    const r = await create({ domain: 'seeker', registration_mode: 'voice' });
+    expect(r.statusCode).toBe(201);
+    expect(r.json().registration_mode).toBe('voice');
+  });
+
+  it('never falls back to a withheld mode when the mode is omitted', async () => {
+    // `form` is withheld here, so the omitted-mode fallback must not land on
+    // it; it picks the first *enabled* mode instead.
+    process.env.AGGREGATOR_ONBOARDING_ENABLED = 'voice';
+    const r = await create({ domain: 'seeker' });
+    expect(r.statusCode).toBe(201);
+    expect(r.json().registration_mode).toBe('voice');
+    expect(store.creates[0]!.registrationMode).toBe('voice');
+  });
+
+  it('still prefers form for an omitted mode when form is enabled', async () => {
+    process.env.AGGREGATOR_ONBOARDING_ENABLED = 'form';
+    const r = await create({ domain: 'seeker' });
+    expect(r.statusCode).toBe(201);
+    expect(r.json().registration_mode).toBe('form');
+  });
+
+  it('rejects every mode — including an omitted one — when nothing is enabled', async () => {
+    // An all-typo allow-list. Loud 400s, not a silent fall-open to all modes.
+    process.env.AGGREGATOR_ONBOARDING_ENABLED = 'frm';
+    const omitted = await create({ domain: 'seeker' });
+    expect(omitted.statusCode).toBe(400);
+    expect(omitted.json().error.code).toBe('INVALID_REGISTRATION_MODE');
+    const explicit = await create({ domain: 'seeker', registration_mode: 'form' });
+    expect(explicit.statusCode).toBe(400);
+    expect(store.creates).toHaveLength(0);
+  });
+
+  it('surfaces the declared and the enabled mode lists on the error', async () => {
+    process.env.AGGREGATOR_ONBOARDING_ENABLED = 'form';
+    const r = await create({ domain: 'seeker', registration_mode: 'voice' });
+    const err = r.json().error as { detail: string; fields: Record<string, unknown> };
+    // "not enabled" rather than "not declared" — the operator needs to know
+    // this is a deployment setting, not a missing YAML entry.
+    expect(err.detail).toContain('not enabled');
+    expect(err.fields.declared).toEqual(['voice', 'form']);
+    expect(err.fields.enabled).toEqual(['form']);
+  });
+
+  it('leaves an undeclared mode reported as undeclared, not as withheld', async () => {
+    process.env.AGGREGATOR_ONBOARDING_ENABLED = 'form';
+    const r = await create({ domain: 'seeker', registration_mode: 'kiosk' });
+    expect(r.statusCode).toBe(400);
+    expect((r.json().error as { detail: string }).detail).toContain('not declared');
+  });
+
+  it('behaves exactly as before when the var is unset', async () => {
+    delete process.env.AGGREGATOR_ONBOARDING_ENABLED;
+    const voice = await create({ domain: 'seeker', registration_mode: 'voice' });
+    expect(voice.statusCode).toBe(201);
+    const omitted = await create({ domain: 'seeker' });
+    expect(omitted.json().registration_mode).toBe('form');
   });
 });
 
