@@ -9508,6 +9508,9 @@
                         },
                         "favicon_url": {
                           "type": "string"
+                        },
+                        "participant_consent_url": {
+                          "type": "string"
                         }
                       },
                       "required": [
