@@ -1,9 +1,9 @@
 /**
  * Unit tests for the Lua script loader + EVALSHA executor.
  *
- * `redis` is a hand-built stub exposing only `evalsha`/`eval` (the subset
- * `runBulkRowCommit` calls) rather than a real ioredis client — no network
- * access, per testing.md §6.
+ * `redis` is a hand-built stub exposing only `script`/`evalsha`/`eval` (the
+ * subset `runBulkRowCommit` calls) rather than a real ioredis client — no
+ * network access, per testing.md §6.
  *
  * @module @aggregator-dpg/queue
  */
@@ -11,18 +11,25 @@ import { describe, it, expect, vi } from 'vitest';
 import type { Redis } from 'ioredis';
 import { runBulkRowCommit, bulkRowCommitScript } from '../lua-loader.js';
 
-function makeRedisStub(overrides: Partial<Record<'evalsha' | 'eval', unknown>> = {}) {
+/** Digest the stubbed `SCRIPT LOAD` hands back, standing in for Redis's reply. */
+const SCRIPT_DIGEST = 'a'.repeat(40);
+
+function makeRedisStub(overrides: Partial<Record<'script' | 'evalsha' | 'eval', unknown>> = {}) {
   return {
+    script: vi.fn().mockResolvedValue(SCRIPT_DIGEST),
     evalsha: vi.fn(),
     eval: vi.fn(),
     ...overrides,
-  } as unknown as Redis & { evalsha: ReturnType<typeof vi.fn>; eval: ReturnType<typeof vi.fn> };
+  } as unknown as Redis & {
+    script: ReturnType<typeof vi.fn>;
+    evalsha: ReturnType<typeof vi.fn>;
+    eval: ReturnType<typeof vi.fn>;
+  };
 }
 
 describe('bulkRowCommitScript', () => {
-  it('loads the Lua source from disk with a non-empty sha1', () => {
+  it('loads the Lua source from disk', () => {
     expect(bulkRowCommitScript.source.length).toBeGreaterThan(0);
-    expect(bulkRowCommitScript.sha1).toMatch(/^[0-9a-f]{40}$/);
   });
 });
 
@@ -33,8 +40,9 @@ describe('runBulkRowCommit', () => {
 
     const result = await runBulkRowCommit(redis, 'up-1', 3, 'passed', '', 60);
 
+    expect(redis.script).toHaveBeenCalledWith('LOAD', bulkRowCommitScript.source);
     expect(redis.evalsha).toHaveBeenCalledWith(
-      bulkRowCommitScript.sha1,
+      SCRIPT_DIGEST,
       5,
       'bu:up-1:processed',
       'bu:up-1:counters',
@@ -56,6 +64,36 @@ describe('runBulkRowCommit', () => {
     const result = await runBulkRowCommit(redis, 'up-2', 0, 'skipped', '', 0);
 
     expect(result).toEqual({ processed: 2, total: -1, readerDone: 0, wasNew: 0 });
+  });
+
+  it('falls back to EVAL when SCRIPT LOAD itself fails (SCRIPT renamed / ACL-blocked)', async () => {
+    // Regression guard: the digest is resolved BEFORE the EVALSHA try block, so
+    // a rejecting SCRIPT LOAD used to propagate straight out of
+    // runBulkRowCommit and the EVAL fallback was unreachable — every bulk row
+    // commit threw on any Redis with SCRIPT restricted, where the previous
+    // locally-computed SHA1 had worked fine.
+    const redis = makeRedisStub({
+      script: vi.fn().mockRejectedValue(new Error("ERR unknown command 'SCRIPT'")),
+    });
+    (redis.eval as ReturnType<typeof vi.fn>).mockResolvedValue([1, 4, 0, 1]);
+
+    const result = await runBulkRowCommit(redis, 'up-9', 2, 'failed', '{}', 30);
+
+    expect(redis.evalsha).not.toHaveBeenCalled();
+    expect(redis.eval).toHaveBeenCalledWith(
+      bulkRowCommitScript.source,
+      5,
+      'bu:up-9:processed',
+      'bu:up-9:counters',
+      'bu:up-9:errors',
+      'bu:up-9:error_rows',
+      'bu:up-9:meta',
+      '2',
+      'failed',
+      '{}',
+      '30',
+    );
+    expect(result).toEqual({ processed: 1, total: 4, readerDone: 0, wasNew: 1 });
   });
 
   it('falls back to EVAL when EVALSHA rejects with NOSCRIPT', async () => {
@@ -100,5 +138,25 @@ describe('runBulkRowCommit', () => {
     await expect(runBulkRowCommit(redis, 'up-5', 0, 'passed', '', 60)).rejects.toThrow(
       /unexpected shape/,
     );
+  });
+
+  it('issues SCRIPT LOAD once per client and reuses the digest', async () => {
+    const redis = makeRedisStub();
+    (redis.evalsha as ReturnType<typeof vi.fn>).mockResolvedValue([1, 2, 0, 1]);
+
+    await runBulkRowCommit(redis, 'up-6', 0, 'passed', '', 60);
+    await runBulkRowCommit(redis, 'up-6', 1, 'passed', '', 60);
+
+    expect(redis.script).toHaveBeenCalledTimes(1);
+    expect(redis.evalsha).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects a SCRIPT LOAD reply that is not a digest string', async () => {
+    const redis = makeRedisStub({ script: vi.fn().mockResolvedValue(null) });
+
+    await expect(runBulkRowCommit(redis, 'up-7', 0, 'passed', '', 60)).rejects.toThrow(
+      /SCRIPT LOAD returned an unexpected reply/,
+    );
+    expect(redis.evalsha).not.toHaveBeenCalled();
   });
 });
