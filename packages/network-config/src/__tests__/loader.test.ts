@@ -919,4 +919,146 @@ describe('FileNetworkConfigLoader — brand.json present but empty', () => {
     expect(brand.logo).toBeUndefined();
     expect(brand.strapline).toBeUndefined();
   });
+
+  describe('participant consent fetch', () => {
+    const CONSENT_SOURCE = 'https://example.invalid/blue_dot/consent.json';
+    const CONSENT_DOC = {
+      documents: {
+        terms: { current_version: 1, versions: [{ version: 1, title: 'Terms', content: 'body' }] },
+        privacy: {
+          current_version: 1,
+          versions: [{ version: 1, title: 'Privacy', content: 'body' }],
+        },
+      },
+    };
+
+    /** Routes the consent URL to `consent`; everything else returns network.json. */
+    function makeFetch(consent: () => Response | Promise<Response>): typeof fetch {
+      return (async (input: RequestInfo | URL) => {
+        if (String(input) === CONSENT_SOURCE) return consent();
+        return new Response(JSON.stringify(BLUE_DOT_NETWORK), { status: 200 });
+      }) as unknown as typeof fetch;
+    }
+
+    beforeEach(() => {
+      delete process.env.AGGREGATOR_CONSENT_SOURCE;
+    });
+
+    it('fetches + attaches the participant consent document from consent_source', async () => {
+      const loader = new FileNetworkConfigLoader({
+        configPath,
+        consentSourceOverride: CONSENT_SOURCE,
+        fetchImpl: makeFetch(() => new Response(JSON.stringify(CONSENT_DOC), { status: 200 })),
+      });
+      const result = await loader.load();
+      expect(result.success).toBe(true);
+      if (!result.success) return;
+      expect(result.value.participantConsent).toEqual(CONSENT_DOC);
+    });
+
+    it('reads consent_source from the YAML when no override is set', async () => {
+      const yamlWithConsent = `
+aggregator:
+  name: BBMP
+  network:
+    source: https://example.invalid/blue_dot/network.json
+    consent_source: ${CONSENT_SOURCE}
+  brand:
+    short_name: Blue Dots
+    long_name: Blue Dots Aggregator Portal
+    url_slug: blue-dots
+`;
+      await fs.writeFile(configPath, yamlWithConsent, 'utf8');
+      const loader = new FileNetworkConfigLoader({
+        configPath,
+        fetchImpl: makeFetch(() => new Response(JSON.stringify(CONSENT_DOC), { status: 200 })),
+      });
+      const result = await loader.load();
+      expect(result.success).toBe(true);
+      if (!result.success) return;
+      expect(result.value.participantConsent).toEqual(CONSENT_DOC);
+    });
+
+    it('leaves participantConsent undefined when no consent_source is configured', async () => {
+      const loader = new FileNetworkConfigLoader({
+        configPath,
+        fetchImpl: makeFetch(() => new Response('unused', { status: 200 })),
+      });
+      const result = await loader.load();
+      expect(result.success).toBe(true);
+      if (!result.success) return;
+      expect(result.value.participantConsent).toBeUndefined();
+    });
+
+    it('is non-fatal: a consent fetch 4xx leaves participantConsent undefined but load succeeds', async () => {
+      const loader = new FileNetworkConfigLoader({
+        configPath,
+        consentSourceOverride: CONSENT_SOURCE,
+        fetchImpl: makeFetch(() => new Response('missing', { status: 404 })),
+      });
+      const result = await loader.load();
+      expect(result.success).toBe(true);
+      if (!result.success) return;
+      expect(result.value.participantConsent).toBeUndefined();
+    });
+
+    it('is non-fatal: a consent fetch transport throw leaves participantConsent undefined', async () => {
+      const loader = new FileNetworkConfigLoader({
+        configPath,
+        consentSourceOverride: CONSENT_SOURCE,
+        fetchImpl: makeFetch(() => Promise.reject(new Error('boom'))),
+      });
+      const result = await loader.load();
+      expect(result.success).toBe(true);
+      if (!result.success) return;
+      expect(result.value.participantConsent).toBeUndefined();
+    });
+
+    it('rejects a consent document with the wrong shape (no documents block)', async () => {
+      const loader = new FileNetworkConfigLoader({
+        configPath,
+        consentSourceOverride: CONSENT_SOURCE,
+        fetchImpl: makeFetch(() => new Response(JSON.stringify({ nope: true }), { status: 200 })),
+      });
+      const result = await loader.load();
+      expect(result.success).toBe(true);
+      if (!result.success) return;
+      expect(result.value.participantConsent).toBeUndefined();
+    });
+
+    it('recovers the last-known-good consent from cache when a later fetch fails', async () => {
+      const cacheDir = path.join(tmpDir, 'cache');
+      const good = new FileNetworkConfigLoader({
+        configPath,
+        cacheDir,
+        consentSourceOverride: CONSENT_SOURCE,
+        fetchImpl: makeFetch(() => new Response(JSON.stringify(CONSENT_DOC), { status: 200 })),
+      });
+      await good.load(); // writes the last-known-good cache
+
+      const degraded = new FileNetworkConfigLoader({
+        configPath,
+        cacheDir,
+        consentSourceOverride: CONSENT_SOURCE,
+        fetchImpl: makeFetch(() => new Response('down', { status: 500 })),
+      });
+      const result = await degraded.load();
+      expect(result.success).toBe(true);
+      if (!result.success) return;
+      expect(result.value.participantConsent).toEqual(CONSENT_DOC);
+    });
+
+    it('fails load() with CONFIG_PARSE_FAILED when the override URL is malformed', async () => {
+      const loader = new FileNetworkConfigLoader({
+        configPath,
+        consentSourceOverride: 'not-a-url',
+        fetchImpl: makeFetch(() => new Response('unused', { status: 200 })),
+      });
+      const result = await loader.load();
+      expect(result.success).toBe(false);
+      if (result.success) return;
+      expect((result.error as { code: string }).code).toBe('CONFIG_PARSE_FAILED');
+      expect((result.error as { message: string }).message).toContain('AGGREGATOR_CONSENT_SOURCE');
+    });
+  });
 });

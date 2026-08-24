@@ -11,6 +11,11 @@ aggregator:
 
   network:
     source: https://raw.githubusercontent.com/Blue-Dots-Economy/bluedots-schemas/refs/heads/main/blue_dot/up-gzb/network.json
+    # Participant registration-link consent (Terms/Privacy/profile-creation),
+    # fetched the same cache-backed way as network.json (sibling in the schemas
+    # repo). Env AGGREGATOR_CONSENT_SOURCE overrides; absent ⇒ web app uses the
+    # on-disk schemas/participant/consent.json copy.
+    consent_source: https://raw.githubusercontent.com/Blue-Dots-Economy/bluedots-schemas/refs/heads/main/blue_dot/up-gzb/consent.json
     csv_array_delimiter: '|'
     field_overrides:
       seeker:
@@ -38,11 +43,6 @@ aggregator:
     # Canonical hex from Blue Dots Brand Guidelines (see brand.json).
     primary_color: '#0074ff'
     accent_color: '#57abff'
-    # Participant registration-link consent (Terms/Privacy) is fetched from this
-    # external source; GitHub blob URLs are normalised to raw by the web loader.
-    # Env PARTICIPANT_CONSENT_URL overrides; absent falls back to the on-disk
-    # schemas/participant/consent.json copy.
-    participant_consent_url: https://github.com/Blue-Dots-Economy/bluedots-schemas/blob/main/blue_dot/up-gzb/consent.json
 
   domain_labels:
     seeker:

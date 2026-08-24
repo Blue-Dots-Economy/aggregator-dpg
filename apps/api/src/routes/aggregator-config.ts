@@ -51,8 +51,6 @@ interface PublicAggregatorConfig {
     accent_color?: string;
     logo_url?: string;
     favicon_url?: string;
-    /** External participant registration-link consent URL (see BrandConfigSchema). */
-    participant_consent_url?: string;
     palette?: BrandPalette;
     typography?: BrandTypography;
     logo?: BrandLogo;
@@ -101,7 +99,6 @@ const AggregatorConfigResponseSchema = z
         accent_color: z.string().optional(),
         logo_url: z.string().optional(),
         favicon_url: z.string().optional(),
-        participant_consent_url: z.string().optional(),
       })
       .passthrough(),
     network: z
@@ -172,9 +169,6 @@ export async function registerAggregatorConfigRoutes(app: FastifyInstance): Prom
           ...(cfg.aggregator.brand.favicon_url
             ? { favicon_url: cfg.aggregator.brand.favicon_url }
             : {}),
-          ...(cfg.aggregator.brand.participant_consent_url
-            ? { participant_consent_url: cfg.aggregator.brand.participant_consent_url }
-            : {}),
           ...(cfg.aggregator.brand.palette ? { palette: cfg.aggregator.brand.palette } : {}),
           ...(cfg.aggregator.brand.typography
             ? { typography: cfg.aggregator.brand.typography }
@@ -202,6 +196,30 @@ export async function registerAggregatorConfigRoutes(app: FastifyInstance): Prom
         registration_modes: cfg.aggregator.registration_modes ?? {},
       };
       return reply.header('Cache-Control', 'public, max-age=60').send(payload);
+    },
+  );
+
+  app.get(
+    '/v1/participant-consent',
+    {
+      schema: {
+        tags: ['aggregator-config'],
+        summary: 'Participant registration-link consent document',
+        description:
+          'The participant `consent.json` (Terms / Privacy / profile-creation) fetched from `aggregator.network.consent_source` — the same cache-backed pull as network.json. `participant_consent` is null when no `consent_source` is configured (the web app then falls back to its on-disk copy). No auth — operator-controlled content shown on the public registration form.',
+        response: {
+          200: z
+            .object({ participant_consent: z.record(z.string(), z.unknown()).nullable() })
+            .passthrough(),
+          ...errorResponses(500, 503),
+        },
+      },
+    },
+    async (_req, reply) => {
+      const cfg = await getNetworkConfig();
+      return reply
+        .header('Cache-Control', 'public, max-age=60')
+        .send({ participant_consent: cfg.participantConsent ?? null });
     },
   );
 }

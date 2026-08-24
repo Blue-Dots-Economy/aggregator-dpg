@@ -164,8 +164,6 @@ export interface AggregatorConfigPayload {
     accent_color?: string;
     logo_url?: string;
     favicon_url?: string;
-    /** External participant registration-link consent URL (see BrandConfigSchema). */
-    participant_consent_url?: string;
     palette?: BrandPalette;
     typography?: BrandTypography;
     logo?: BrandLogo;

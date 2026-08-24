@@ -25,16 +25,18 @@ import {
   BrandPaletteSchema,
   BrandTypographySchema,
   NetworkConfigLoaderBase,
+  ParticipantConsentDocSchema,
   type AggregatorYaml,
   type IdentitySelectors,
   type NetworkConfigError,
   type NetworkDomain,
+  type ParticipantConsentDoc,
   type ResolvedDomain,
   type ResolvedNetworkConfig,
   type SignalstackNetwork,
 } from './interface.js';
 import { sniffIdentitySelectors } from './sniffer.js';
-import { resolveNetworkSourceOverride } from './paths.js';
+import { resolveConsentSourceOverride, resolveNetworkSourceOverride } from './paths.js';
 
 /**
  * Loader-internal shape of the sibling `brand.json` file. Not exported
@@ -78,6 +80,13 @@ export interface FileNetworkConfigLoaderOptions {
    * `CONFIG_PARSE_FAILED` instead of silently falling back to the YAML.
    */
   networkSourceOverride?: string;
+  /**
+   * Deploy-time replacement for the YAML `aggregator.network.consent_source`
+   * URL. Defaults to the `AGGREGATOR_CONSENT_SOURCE` env var (see
+   * {@link resolveConsentSourceOverride}); pass explicitly in tests. Must be a
+   * valid URL — a malformed value fails `load()` with `CONFIG_PARSE_FAILED`.
+   */
+  consentSourceOverride?: string;
 }
 
 export class FileNetworkConfigLoader extends NetworkConfigLoaderBase {
@@ -85,17 +94,22 @@ export class FileNetworkConfigLoader extends NetworkConfigLoaderBase {
   private readonly opts: Required<
     Pick<FileNetworkConfigLoaderOptions, 'configPath' | 'fetchTimeoutMs'>
   > &
-    Pick<FileNetworkConfigLoaderOptions, 'cacheDir' | 'fetchImpl' | 'networkSourceOverride'>;
+    Pick<
+      FileNetworkConfigLoaderOptions,
+      'cacheDir' | 'fetchImpl' | 'networkSourceOverride' | 'consentSourceOverride'
+    >;
 
   constructor(opts: FileNetworkConfigLoaderOptions) {
     super();
     const sourceOverride = opts.networkSourceOverride ?? resolveNetworkSourceOverride();
+    const consentOverride = opts.consentSourceOverride ?? resolveConsentSourceOverride();
     this.opts = {
       configPath: opts.configPath,
       fetchTimeoutMs: opts.fetchTimeoutMs ?? 5000,
       ...(opts.cacheDir ? { cacheDir: opts.cacheDir } : {}),
       ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
       ...(sourceOverride ? { networkSourceOverride: sourceOverride } : {}),
+      ...(consentOverride ? { consentSourceOverride: consentOverride } : {}),
     };
   }
 
@@ -139,6 +153,28 @@ export class FileNetworkConfigLoader extends NetworkConfigLoaderBase {
 
     const resolved = resolveDomains(yaml.value, network.value);
     if (!resolved.success) return err(resolved.error);
+
+    // Participant consent is fetched the same way as network.json (timeout +
+    // last-known-good cache) but is NON-fatal: unlike network.json it has an
+    // on-disk fallback in the web app, so a fetch/parse failure leaves
+    // `participantConsent` undefined rather than failing boot. Same
+    // env-override → YAML precedence, and the same fail-loud on a malformed URL.
+    const consentOverride = this.opts.consentSourceOverride;
+    if (consentOverride !== undefined) {
+      const checked = z.string().url().safeParse(consentOverride);
+      if (!checked.success) {
+        return err({
+          code: 'CONFIG_PARSE_FAILED',
+          message: `AGGREGATOR_CONSENT_SOURCE is not a valid URL: "${consentOverride}"`,
+        });
+      }
+      yaml.value.aggregator.network.consent_source = checked.data;
+    }
+    const consentSource = yaml.value.aggregator.network.consent_source;
+    if (consentSource) {
+      const consent = await this.fetchConsent(consentSource);
+      if (consent) resolved.value.participantConsent = consent;
+    }
 
     this.cached = resolved.value;
     return ok(resolved.value);
@@ -232,7 +268,7 @@ export class FileNetworkConfigLoader extends NetworkConfigLoaderBase {
       if (!checked.success) {
         return this.recoverFromCache(url, checked.error.message);
       }
-      await this.writeCache(url, payload);
+      await this.writeCacheFile(url, 'network', payload);
       return ok(payload);
     } catch (e) {
       const cause = e as Error;
@@ -268,8 +304,17 @@ export class FileNetworkConfigLoader extends NetworkConfigLoaderBase {
     }
   }
 
-  private async writeCache(url: string, payload: SignalstackNetwork): Promise<void> {
-    const cachePath = this.cachePath(url);
+  /**
+   * Writes a fetched payload to its last-known-good cache file (best-effort).
+   * Shared by the network.json and consent.json fetch paths — the `kind`
+   * selects the cache filename suffix.
+   */
+  private async writeCacheFile(
+    url: string,
+    kind: 'network' | 'consent',
+    payload: unknown,
+  ): Promise<void> {
+    const cachePath = this.cachePath(url, kind);
     if (!cachePath) return;
     try {
       await fs.mkdir(path.dirname(cachePath), { recursive: true });
@@ -280,12 +325,51 @@ export class FileNetworkConfigLoader extends NetworkConfigLoaderBase {
     }
   }
 
-  private cachePath(url: string): string | null {
+  private cachePath(url: string, kind: 'network' | 'consent' = 'network'): string | null {
     if (!this.opts.cacheDir) return null;
-    // Deterministic file name per network so different deployments
+    // Deterministic file name per source URL so different deployments
     // sharing a host don't overwrite each other.
     const safe = url.replace(/[^a-z0-9]/gi, '_').slice(0, 200);
-    return path.join(this.opts.cacheDir, `${safe}.network.json`);
+    return path.join(this.opts.cacheDir, `${safe}.${kind}.json`);
+  }
+
+  // ─── participant consent.json ───────────────────────────────────────────────
+
+  /**
+   * Fetches + validates the participant `consent.json`, mirroring
+   * {@link fetchNetwork} (timeout + last-known-good cache). Returns null on any
+   * failure with no cached copy — consent is optional (the web app falls back to
+   * its on-disk copy), so a failure must never fail aggregator boot.
+   */
+  private async fetchConsent(url: string): Promise<ParticipantConsentDoc | null> {
+    const fetchImpl = this.opts.fetchImpl ?? fetch;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.opts.fetchTimeoutMs);
+    try {
+      const res = await fetchImpl(url, { signal: controller.signal });
+      if (!res.ok) return this.recoverConsentFromCache(url);
+      const checked = ParticipantConsentDocSchema.safeParse(await res.json());
+      if (!checked.success) return this.recoverConsentFromCache(url);
+      await this.writeCacheFile(url, 'consent', checked.data);
+      return checked.data;
+    } catch {
+      return this.recoverConsentFromCache(url);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  private async recoverConsentFromCache(url: string): Promise<ParticipantConsentDoc | null> {
+    const cachePath = this.cachePath(url, 'consent');
+    if (!cachePath) return null;
+    try {
+      const parsed = ParticipantConsentDocSchema.safeParse(
+        JSON.parse(await fs.readFile(cachePath, 'utf8')),
+      );
+      return parsed.success ? parsed.data : null;
+    } catch {
+      return null;
+    }
   }
 }
 

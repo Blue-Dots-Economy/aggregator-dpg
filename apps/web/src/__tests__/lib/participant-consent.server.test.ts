@@ -11,15 +11,14 @@ vi.mock('node:fs', () => ({ existsSync: existsSyncMock, default: { existsSync: e
 
 vi.mock('@/lib/config-paths', () => ({ resolveSchemaRoot: () => '/config/schemas' }));
 
-// Silence structured logging in the URL-fetch paths.
+// Silence structured logging in the API-fetch path.
 vi.mock('@/lib/logger', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
-const { loadParticipantConsent, normalizeConsentUrl } =
-  await import('@/lib/participant-consent.server');
+const { loadParticipantConsent } = await import('@/lib/participant-consent.server');
 
-function validFile(overrides: Record<string, unknown> = {}) {
+function validDoc(overrides: Record<string, unknown> = {}) {
   return {
     documents: {
       terms: {
@@ -38,188 +37,143 @@ function validFile(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function jsonResponse(body: unknown, { ok = true, status = 200 } = {}) {
-  return { ok, status, json: async () => body } as unknown as Response;
+/** Fetch mock for `GET /v1/participant-consent` returning `{ participant_consent }`. */
+function apiConsent(doc: unknown) {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => ({ participant_consent: doc }),
+  } as unknown as Response;
 }
-
-describe('normalizeConsentUrl', () => {
-  it('rewrites a GitHub blob URL to raw.githubusercontent.com', () => {
-    expect(
-      normalizeConsentUrl('https://github.com/Blue-Dots-Economy/bluedots-schemas/blob/main/x.json'),
-    ).toBe('https://raw.githubusercontent.com/Blue-Dots-Economy/bluedots-schemas/main/x.json');
-  });
-
-  it('passes an already-raw URL through unchanged', () => {
-    const raw = 'https://raw.githubusercontent.com/o/r/main/x.json';
-    expect(normalizeConsentUrl(raw)).toBe(raw);
-  });
-
-  it('passes a non-GitHub URL through unchanged', () => {
-    const url = 'https://example.org/consent.json';
-    expect(normalizeConsentUrl(url)).toBe(url);
-  });
-});
 
 describe('loadParticipantConsent', () => {
   beforeEach(() => {
     readFileMock.mockReset();
     existsSyncMock.mockReset();
     delete process.env.CONSENT_SUPPORT_EMAIL;
-    delete process.env.PARTICIPANT_CONSENT_URL;
-    // Default: no external URL source reachable — the aggregator-config lookup
-    // fails, so every test below exercises the on-disk fallback unless it opts
-    // into a URL source explicitly.
-    global.fetch = vi.fn().mockRejectedValue(new Error('ECONNREFUSED')) as unknown as typeof fetch;
+    // Default: API serves no document, so tests exercise the on-disk fallback
+    // unless they opt into an API document explicitly.
+    global.fetch = vi.fn().mockResolvedValue(apiConsent(null)) as unknown as typeof fetch;
   });
 
   afterEach(() => {
     delete process.env.CONSENT_SUPPORT_EMAIL;
-    delete process.env.PARTICIPANT_CONSENT_URL;
     vi.restoreAllMocks();
   });
 
-  it('returns null when no consent file exists on any candidate path', async () => {
-    existsSyncMock.mockReturnValue(false);
-    await expect(loadParticipantConsent()).resolves.toBeNull();
-    expect(readFileMock).not.toHaveBeenCalled();
-  });
-
-  it('loads terms + privacy at their current version, rendering __SUPPORT_EMAIL__', async () => {
-    existsSyncMock.mockReturnValue(true);
-    readFileMock.mockResolvedValue(JSON.stringify(validFile()));
-    const result = await loadParticipantConsent();
-    expect(result).not.toBeNull();
-    expect(result!.terms).toEqual({
-      version: 2,
-      title: 'Terms v2',
-      content: 'Contact us at hello@bluedotseconomy.org',
-    });
-    expect(result!.privacy).toEqual({ version: 1, title: 'Privacy v1', content: 'privacy body' });
-    expect(result!.profileCreation).toBeUndefined();
-  });
-
-  it('renders CONSENT_SUPPORT_EMAIL when set', async () => {
-    process.env.CONSENT_SUPPORT_EMAIL = 'support@example.org';
-    existsSyncMock.mockReturnValue(true);
-    readFileMock.mockResolvedValue(JSON.stringify(validFile()));
-    const result = await loadParticipantConsent();
-    expect(result!.terms.content).toBe('Contact us at support@example.org');
-  });
-
-  it('includes profileCreation when present', async () => {
-    existsSyncMock.mockReturnValue(true);
-    readFileMock.mockResolvedValue(
-      JSON.stringify(
-        validFile({
-          profile_creation: {
-            current_version: 1,
-            versions: [{ version: 1, statement: 'I consent, contact __SUPPORT_EMAIL__' }],
-          },
-        }),
-      ),
-    );
-    const result = await loadParticipantConsent();
-    expect(result!.profileCreation).toEqual({
-      version: 1,
-      statement: 'I consent, contact hello@bluedotseconomy.org',
-    });
-  });
-
-  it('falls back to the first version when current_version does not match any entry', async () => {
-    existsSyncMock.mockReturnValue(true);
-    readFileMock.mockResolvedValue(
-      JSON.stringify({
-        documents: {
-          terms: { current_version: 99, versions: [{ version: 1, title: 'T', content: 'c' }] },
-          privacy: { current_version: 1, versions: [{ version: 1, title: 'P', content: 'p' }] },
-        },
-      }),
-    );
-    const result = await loadParticipantConsent();
-    expect(result!.terms).toEqual({ version: 1, title: 'T', content: 'c' });
-  });
-
-  it('returns null when terms or privacy have no versions', async () => {
-    existsSyncMock.mockReturnValue(true);
-    readFileMock.mockResolvedValue(
-      JSON.stringify({ documents: { terms: { current_version: 1, versions: [] } } }),
-    );
-    await expect(loadParticipantConsent()).resolves.toBeNull();
-  });
-
-  it('returns null when the file is malformed JSON', async () => {
-    existsSyncMock.mockReturnValue(true);
-    readFileMock.mockResolvedValue('{not-json');
-    await expect(loadParticipantConsent()).resolves.toBeNull();
-  });
-
-  it('returns null when readFile throws', async () => {
-    existsSyncMock.mockReturnValue(true);
-    readFileMock.mockRejectedValue(new Error('EACCES'));
-    await expect(loadParticipantConsent()).resolves.toBeNull();
-  });
-
-  describe('external URL source', () => {
-    it('fetches consent from the brand participant_consent_url, normalizing a blob URL', async () => {
-      const blob = 'https://github.com/o/r/blob/main/agg-config-source.json';
-      const raw = 'https://raw.githubusercontent.com/o/r/main/agg-config-source.json';
-      existsSyncMock.mockReturnValue(false); // prove it came from the URL, not disk
-      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-        const url = String(input);
-        if (url.includes('/v1/aggregator-config')) {
-          return jsonResponse({ brand: { participant_consent_url: blob } });
-        }
-        return jsonResponse(validFile());
-      });
-      global.fetch = fetchMock as unknown as typeof fetch;
-
-      const result = await loadParticipantConsent();
-      expect(result!.terms.title).toBe('Terms v2');
-      expect(readFileMock).not.toHaveBeenCalled();
-      const fetchedUrls = fetchMock.mock.calls.map((c) => String(c[0]));
-      expect(fetchedUrls).toContain(raw);
-    });
-
-    it('PARTICIPANT_CONSENT_URL env overrides brand config (no aggregator-config call)', async () => {
-      process.env.PARTICIPANT_CONSENT_URL = 'https://example.org/env-override.json';
+  describe('API source', () => {
+    it('shapes the API document, rendering __SUPPORT_EMAIL__ (no disk read)', async () => {
       existsSyncMock.mockReturnValue(false);
-      const fetchMock = vi.fn(async () => jsonResponse(validFile()));
-      global.fetch = fetchMock as unknown as typeof fetch;
-
+      global.fetch = vi.fn().mockResolvedValue(apiConsent(validDoc())) as unknown as typeof fetch;
       const result = await loadParticipantConsent();
-      expect(result!.terms.title).toBe('Terms v2');
-      const fetchedUrls = fetchMock.mock.calls.map((c) => String(c[0]));
-      expect(fetchedUrls).toEqual(['https://example.org/env-override.json']);
-      expect(fetchedUrls.some((u) => u.includes('/v1/aggregator-config'))).toBe(false);
+      expect(result!.terms).toEqual({
+        version: 2,
+        title: 'Terms v2',
+        content: 'Contact us at hello@bluedotseconomy.org',
+      });
+      expect(result!.privacy).toEqual({ version: 1, title: 'Privacy v1', content: 'privacy body' });
+      expect(readFileMock).not.toHaveBeenCalled();
     });
 
-    it('falls back to the on-disk copy when the URL fetch fails', async () => {
-      process.env.PARTICIPANT_CONSENT_URL = 'https://example.org/unreachable.json';
-      existsSyncMock.mockReturnValue(true);
-      readFileMock.mockResolvedValue(JSON.stringify(validFile()));
-      global.fetch = vi
-        .fn()
-        .mockResolvedValue(
-          jsonResponse(null, { ok: false, status: 500 }),
-        ) as unknown as typeof fetch;
+    it('includes profileCreation from the API document', async () => {
+      existsSyncMock.mockReturnValue(false);
+      global.fetch = vi.fn().mockResolvedValue(
+        apiConsent(
+          validDoc({
+            profile_creation: {
+              current_version: 1,
+              versions: [{ version: 1, statement: 'I consent, contact __SUPPORT_EMAIL__' }],
+            },
+          }),
+        ),
+      ) as unknown as typeof fetch;
+      const result = await loadParticipantConsent();
+      expect(result!.profileCreation).toEqual({
+        version: 1,
+        statement: 'I consent, contact hello@bluedotseconomy.org',
+      });
+    });
 
+    it('renders CONSENT_SUPPORT_EMAIL when set', async () => {
+      process.env.CONSENT_SUPPORT_EMAIL = 'support@example.org';
+      existsSyncMock.mockReturnValue(false);
+      global.fetch = vi.fn().mockResolvedValue(apiConsent(validDoc())) as unknown as typeof fetch;
+      const result = await loadParticipantConsent();
+      expect(result!.terms.content).toBe('Contact us at support@example.org');
+    });
+  });
+
+  describe('on-disk fallback', () => {
+    it('falls back to the on-disk copy when the API serves no document', async () => {
+      existsSyncMock.mockReturnValue(true);
+      readFileMock.mockResolvedValue(JSON.stringify(validDoc()));
       const result = await loadParticipantConsent();
       expect(result!.terms.title).toBe('Terms v2');
       expect(readFileMock).toHaveBeenCalled();
     });
 
-    it('caches a successful URL fetch across calls', async () => {
-      process.env.PARTICIPANT_CONSENT_URL = 'https://example.org/cached-source.json';
-      existsSyncMock.mockReturnValue(false);
-      const fetchMock = vi.fn(async () => jsonResponse(validFile()));
-      global.fetch = fetchMock as unknown as typeof fetch;
+    it('falls back to disk when the API fetch fails', async () => {
+      existsSyncMock.mockReturnValue(true);
+      readFileMock.mockResolvedValue(JSON.stringify(validDoc()));
+      global.fetch = vi
+        .fn()
+        .mockRejectedValue(new Error('ECONNREFUSED')) as unknown as typeof fetch;
+      const result = await loadParticipantConsent();
+      expect(result!.terms.title).toBe('Terms v2');
+    });
 
-      await loadParticipantConsent();
-      await loadParticipantConsent();
-      const docCalls = fetchMock.mock.calls.filter((c) =>
-        String(c[0]).includes('cached-source.json'),
+    it('falls back to disk when the API returns a non-2xx', async () => {
+      existsSyncMock.mockReturnValue(true);
+      readFileMock.mockResolvedValue(JSON.stringify(validDoc()));
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 503,
+        json: async () => ({}),
+      }) as unknown as typeof fetch;
+      const result = await loadParticipantConsent();
+      expect(result!.terms.title).toBe('Terms v2');
+    });
+
+    it('falls back to disk when the API document lacks terms/privacy', async () => {
+      existsSyncMock.mockReturnValue(true);
+      readFileMock.mockResolvedValue(JSON.stringify(validDoc()));
+      global.fetch = vi
+        .fn()
+        .mockResolvedValue(apiConsent({ documents: {} })) as unknown as typeof fetch;
+      const result = await loadParticipantConsent();
+      expect(result!.terms.title).toBe('Terms v2');
+    });
+
+    it('returns null when neither API nor disk has a document', async () => {
+      existsSyncMock.mockReturnValue(false);
+      await expect(loadParticipantConsent()).resolves.toBeNull();
+      expect(readFileMock).not.toHaveBeenCalled();
+    });
+
+    it('falls back to the first version when current_version does not match', async () => {
+      existsSyncMock.mockReturnValue(true);
+      readFileMock.mockResolvedValue(
+        JSON.stringify({
+          documents: {
+            terms: { current_version: 99, versions: [{ version: 1, title: 'T', content: 'c' }] },
+            privacy: { current_version: 1, versions: [{ version: 1, title: 'P', content: 'p' }] },
+          },
+        }),
       );
-      expect(docCalls).toHaveLength(1);
+      const result = await loadParticipantConsent();
+      expect(result!.terms).toEqual({ version: 1, title: 'T', content: 'c' });
+    });
+
+    it('returns null when the on-disk file is malformed JSON', async () => {
+      existsSyncMock.mockReturnValue(true);
+      readFileMock.mockResolvedValue('{not-json');
+      await expect(loadParticipantConsent()).resolves.toBeNull();
+    });
+
+    it('returns null when disk readFile throws', async () => {
+      existsSyncMock.mockReturnValue(true);
+      readFileMock.mockRejectedValue(new Error('EACCES'));
+      await expect(loadParticipantConsent()).resolves.toBeNull();
     });
   });
 });
