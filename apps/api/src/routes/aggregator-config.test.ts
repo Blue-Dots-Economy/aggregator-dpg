@@ -172,6 +172,7 @@ describe('GET /v1/aggregator-config', () => {
           primary_color: '#112233',
           accent_color: '#445566',
           favicon_url: 'https://example.invalid/favicon.ico',
+          participant_consent_url: 'https://example.invalid/consent.json',
           typography: { primaryFont: 'Inter' },
         },
       },
@@ -185,12 +186,14 @@ describe('GET /v1/aggregator-config', () => {
         primary_color?: string;
         accent_color?: string;
         favicon_url?: string;
+        participant_consent_url?: string;
         typography?: { primaryFont: string };
       };
     };
     expect(body.brand.primary_color).toBe('#112233');
     expect(body.brand.accent_color).toBe('#445566');
     expect(body.brand.favicon_url).toBe('https://example.invalid/favicon.ico');
+    expect(body.brand.participant_consent_url).toBe('https://example.invalid/consent.json');
     expect(body.brand.typography?.primaryFont).toBe('Inter');
   });
 });

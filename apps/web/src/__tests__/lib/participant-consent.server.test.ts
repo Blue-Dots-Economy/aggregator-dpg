@@ -11,7 +11,13 @@ vi.mock('node:fs', () => ({ existsSync: existsSyncMock, default: { existsSync: e
 
 vi.mock('@/lib/config-paths', () => ({ resolveSchemaRoot: () => '/config/schemas' }));
 
-const { loadParticipantConsent } = await import('@/lib/participant-consent.server');
+// Silence structured logging in the URL-fetch paths.
+vi.mock('@/lib/logger', () => ({
+  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+}));
+
+const { loadParticipantConsent, normalizeConsentUrl } =
+  await import('@/lib/participant-consent.server');
 
 function validFile(overrides: Record<string, unknown> = {}) {
   return {
@@ -32,15 +38,44 @@ function validFile(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function jsonResponse(body: unknown, { ok = true, status = 200 } = {}) {
+  return { ok, status, json: async () => body } as unknown as Response;
+}
+
+describe('normalizeConsentUrl', () => {
+  it('rewrites a GitHub blob URL to raw.githubusercontent.com', () => {
+    expect(
+      normalizeConsentUrl('https://github.com/Blue-Dots-Economy/bluedots-schemas/blob/main/x.json'),
+    ).toBe('https://raw.githubusercontent.com/Blue-Dots-Economy/bluedots-schemas/main/x.json');
+  });
+
+  it('passes an already-raw URL through unchanged', () => {
+    const raw = 'https://raw.githubusercontent.com/o/r/main/x.json';
+    expect(normalizeConsentUrl(raw)).toBe(raw);
+  });
+
+  it('passes a non-GitHub URL through unchanged', () => {
+    const url = 'https://example.org/consent.json';
+    expect(normalizeConsentUrl(url)).toBe(url);
+  });
+});
+
 describe('loadParticipantConsent', () => {
   beforeEach(() => {
     readFileMock.mockReset();
     existsSyncMock.mockReset();
     delete process.env.CONSENT_SUPPORT_EMAIL;
+    delete process.env.PARTICIPANT_CONSENT_URL;
+    // Default: no external URL source reachable — the aggregator-config lookup
+    // fails, so every test below exercises the on-disk fallback unless it opts
+    // into a URL source explicitly.
+    global.fetch = vi.fn().mockRejectedValue(new Error('ECONNREFUSED')) as unknown as typeof fetch;
   });
 
   afterEach(() => {
     delete process.env.CONSENT_SUPPORT_EMAIL;
+    delete process.env.PARTICIPANT_CONSENT_URL;
+    vi.restoreAllMocks();
   });
 
   it('returns null when no consent file exists on any candidate path', async () => {
@@ -122,5 +157,69 @@ describe('loadParticipantConsent', () => {
     existsSyncMock.mockReturnValue(true);
     readFileMock.mockRejectedValue(new Error('EACCES'));
     await expect(loadParticipantConsent()).resolves.toBeNull();
+  });
+
+  describe('external URL source', () => {
+    it('fetches consent from the brand participant_consent_url, normalizing a blob URL', async () => {
+      const blob = 'https://github.com/o/r/blob/main/agg-config-source.json';
+      const raw = 'https://raw.githubusercontent.com/o/r/main/agg-config-source.json';
+      existsSyncMock.mockReturnValue(false); // prove it came from the URL, not disk
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes('/v1/aggregator-config')) {
+          return jsonResponse({ brand: { participant_consent_url: blob } });
+        }
+        return jsonResponse(validFile());
+      });
+      global.fetch = fetchMock as unknown as typeof fetch;
+
+      const result = await loadParticipantConsent();
+      expect(result!.terms.title).toBe('Terms v2');
+      expect(readFileMock).not.toHaveBeenCalled();
+      const fetchedUrls = fetchMock.mock.calls.map((c) => String(c[0]));
+      expect(fetchedUrls).toContain(raw);
+    });
+
+    it('PARTICIPANT_CONSENT_URL env overrides brand config (no aggregator-config call)', async () => {
+      process.env.PARTICIPANT_CONSENT_URL = 'https://example.org/env-override.json';
+      existsSyncMock.mockReturnValue(false);
+      const fetchMock = vi.fn(async () => jsonResponse(validFile()));
+      global.fetch = fetchMock as unknown as typeof fetch;
+
+      const result = await loadParticipantConsent();
+      expect(result!.terms.title).toBe('Terms v2');
+      const fetchedUrls = fetchMock.mock.calls.map((c) => String(c[0]));
+      expect(fetchedUrls).toEqual(['https://example.org/env-override.json']);
+      expect(fetchedUrls.some((u) => u.includes('/v1/aggregator-config'))).toBe(false);
+    });
+
+    it('falls back to the on-disk copy when the URL fetch fails', async () => {
+      process.env.PARTICIPANT_CONSENT_URL = 'https://example.org/unreachable.json';
+      existsSyncMock.mockReturnValue(true);
+      readFileMock.mockResolvedValue(JSON.stringify(validFile()));
+      global.fetch = vi
+        .fn()
+        .mockResolvedValue(
+          jsonResponse(null, { ok: false, status: 500 }),
+        ) as unknown as typeof fetch;
+
+      const result = await loadParticipantConsent();
+      expect(result!.terms.title).toBe('Terms v2');
+      expect(readFileMock).toHaveBeenCalled();
+    });
+
+    it('caches a successful URL fetch across calls', async () => {
+      process.env.PARTICIPANT_CONSENT_URL = 'https://example.org/cached-source.json';
+      existsSyncMock.mockReturnValue(false);
+      const fetchMock = vi.fn(async () => jsonResponse(validFile()));
+      global.fetch = fetchMock as unknown as typeof fetch;
+
+      await loadParticipantConsent();
+      await loadParticipantConsent();
+      const docCalls = fetchMock.mock.calls.filter((c) =>
+        String(c[0]).includes('cached-source.json'),
+      );
+      expect(docCalls).toHaveLength(1);
+    });
   });
 });

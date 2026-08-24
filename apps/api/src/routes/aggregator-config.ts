@@ -51,6 +51,8 @@ interface PublicAggregatorConfig {
     accent_color?: string;
     logo_url?: string;
     favicon_url?: string;
+    /** External participant registration-link consent URL (see BrandConfigSchema). */
+    participant_consent_url?: string;
     palette?: BrandPalette;
     typography?: BrandTypography;
     logo?: BrandLogo;
@@ -99,6 +101,7 @@ const AggregatorConfigResponseSchema = z
         accent_color: z.string().optional(),
         logo_url: z.string().optional(),
         favicon_url: z.string().optional(),
+        participant_consent_url: z.string().optional(),
       })
       .passthrough(),
     network: z
@@ -168,6 +171,9 @@ export async function registerAggregatorConfigRoutes(app: FastifyInstance): Prom
           ...(cfg.aggregator.brand.logo_url ? { logo_url: cfg.aggregator.brand.logo_url } : {}),
           ...(cfg.aggregator.brand.favicon_url
             ? { favicon_url: cfg.aggregator.brand.favicon_url }
+            : {}),
+          ...(cfg.aggregator.brand.participant_consent_url
+            ? { participant_consent_url: cfg.aggregator.brand.participant_consent_url }
             : {}),
           ...(cfg.aggregator.brand.palette ? { palette: cfg.aggregator.brand.palette } : {}),
           ...(cfg.aggregator.brand.typography

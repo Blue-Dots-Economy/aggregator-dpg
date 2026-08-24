@@ -142,6 +142,16 @@ export const BrandConfigSchema = z.object({
   accent_color: HexColorSchema.optional(),
   logo_url: z.string().url().optional(),
   favicon_url: z.string().url().optional(),
+  /**
+   * External URL the web app fetches the PARTICIPANT registration-link consent
+   * (Terms / Privacy / profile-creation) from, in place of the on-disk
+   * `schemas/participant/consent.json`. GitHub `blob` view URLs are normalised
+   * to `raw.githubusercontent.com` by the web loader before fetching. Optional
+   * — absent (and no `PARTICIPANT_CONSENT_URL` env override) falls back to the
+   * on-disk copy. Scoped to the registration link only; the operator's own
+   * `/register` consent is unaffected.
+   */
+  participant_consent_url: z.string().url().optional(),
   palette: BrandPaletteSchema.optional(),
   typography: BrandTypographySchema.optional(),
   logo: BrandLogoSchema.optional(),
