@@ -19,6 +19,20 @@ import messages from '@/i18n/messages/en.json';
 import type { ApiRegistrationLink } from '@/services/onboarding.service';
 
 const { pushMock } = vi.hoisted(() => ({ pushMock: vi.fn() }));
+import type * as OnboardingServiceModule from '@/services/onboarding.service';
+
+const { qrDownloadUrlMock } = vi.hoisted(() => ({ qrDownloadUrlMock: vi.fn() }));
+
+// Only the QR minting call is stubbed; everything else on the service is real,
+// so this cannot drift from the module's actual shape.
+vi.mock('@/services/onboarding.service', async (importOriginal) => {
+  const actual = await importOriginal<typeof OnboardingServiceModule>();
+  return {
+    ...actual,
+    onboardingService: { ...actual.onboardingService, qrDownloadUrl: qrDownloadUrlMock },
+  };
+});
+
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: pushMock }),
 }));
@@ -107,6 +121,7 @@ function baseLink(overrides: Partial<ApiRegistrationLink> = {}): ApiRegistration
     public_url: null,
     qr_url: null,
     qr_expires_at: null,
+    qr_download_path: null,
     metrics: { total: 0, passed: 0, failed: 0, skipped: 0 },
     created_at: new Date(0).toISOString(),
     updated_at: new Date(0).toISOString(),
@@ -413,7 +428,7 @@ describe('<YourLinksBody />', () => {
         baseLink({
           status: 'live',
           public_url: 'https://bluedots.example/acme/dharwad-drive',
-          qr_url: 'https://bluedots.example/qr/link-1.png',
+          qr_download_path: '/v1/links/link-1/qr',
           expires_at: new Date('2027-01-01').toISOString(),
         }),
       ],
@@ -437,6 +452,70 @@ describe('<YourLinksBody />', () => {
 
     await user.click(screen.getByRole('button', { name: 'Deactivate' }));
     expect(deactivateMutate).toHaveBeenCalledWith('link-1');
+  });
+
+  it('mints a fresh QR URL on click instead of embedding one in the list', async () => {
+    const user = userEvent.setup();
+    qrDownloadUrlMock.mockReset();
+    qrDownloadUrlMock.mockResolvedValue({
+      url: 'https://s3.example.invalid/qr.png?X-Amz-Signature=abc',
+      expires_at: '2026-08-24T00:10:00.000Z',
+    });
+    useRegistrationLinks.mockReturnValue({
+      data: [
+        baseLink({
+          status: 'live',
+          public_url: 'https://bluedots.example/acme/dharwad-drive',
+          qr_download_path: '/v1/links/link-1/qr',
+        }),
+      ],
+      isLoading: false,
+      error: null,
+    });
+    // The tab has to be opened synchronously, before the await — a window.open
+    // that happens after one is treated as unsolicited and blocked.
+    const tab = { location: { href: '' }, close: vi.fn() };
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(tab as unknown as Window);
+
+    renderLinks();
+
+    // Nothing presigned is present in the rendered list.
+    expect(document.body.innerHTML).not.toContain('X-Amz-Signature');
+    expect(qrDownloadUrlMock).not.toHaveBeenCalled();
+
+    await user.click(screen.getByTitle('View QR'));
+
+    expect(qrDownloadUrlMock).toHaveBeenCalledWith('link-1');
+    expect(openSpy).toHaveBeenCalled();
+    expect(tab.location.href).toContain('X-Amz-Signature');
+    openSpy.mockRestore();
+  });
+
+  it('closes the opened tab when minting the QR URL fails', async () => {
+    const user = userEvent.setup();
+    qrDownloadUrlMock.mockReset();
+    qrDownloadUrlMock.mockRejectedValue(new Error('upstream down'));
+    useRegistrationLinks.mockReturnValue({
+      data: [
+        baseLink({
+          status: 'live',
+          public_url: 'https://bluedots.example/acme/dharwad-drive',
+          qr_download_path: '/v1/links/link-1/qr',
+        }),
+      ],
+      isLoading: false,
+      error: null,
+    });
+    const tab = { location: { href: '' }, close: vi.fn() };
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(tab as unknown as Window);
+
+    renderLinks();
+    await user.click(screen.getByTitle('View QR'));
+
+    // A blank tab left behind on failure reads as a broken app.
+    expect(tab.close).toHaveBeenCalled();
+    expect(tab.location.href).toBe('');
+    openSpy.mockRestore();
   });
 
   it('live card: renders a malformed public_url as raw text instead of crashing', () => {

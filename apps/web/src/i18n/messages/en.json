@@ -349,6 +349,7 @@
       "copied": "Copied!",
       "copy_title": "Copy link",
       "view_qr": "View QR",
+      "qr_failed": "Could not open QR — try again",
       "open_link": "Open link",
       "draft_notice": "Public URL + QR appear after Make Live.",
       "registrations": "registrations",

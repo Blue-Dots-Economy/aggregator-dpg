@@ -18,11 +18,11 @@ dev) provision exactly one aggregator bucket, `type: public`, and the generated
 
 What is sitting in that bucket:
 
-| Object | Contents |
-|---|---|
+| Object                                             | Contents                                                             |
+| -------------------------------------------------- | -------------------------------------------------------------------- |
 | `bulk-uploads/{aggregator_id}/{upload_id}/raw.csv` | Raw participant CSV — **name, phone, and every other profile field** |
-| `bulk-uploads/{upload_id}/errors.csv` | Failed rows, verbatim — same PII |
-| `qr/{aggregator_id}/{link_id}.png` | Registration-link QR codes |
+| `bulk-uploads/{upload_id}/errors.csv`              | Failed rows, verbatim — same PII                                     |
+| `qr/{aggregator_id}/{link_id}.png`                 | Registration-link QR codes                                           |
 
 Anyone who can guess or obtain a key can `GET` it with a spoofed `Referer` and no credentials. Object
 keys embed UUIDs so they are not trivially enumerable, but that is obscurity, not access control.
@@ -46,13 +46,13 @@ private is, for the application, mostly a configuration change plus the three co
 `S3_ENDPOINT` for server-side ops, `getPresignerClient()` on `S3_PUBLIC_ENDPOINT || S3_ENDPOINT`
 because a pre-signed URL encodes the host the browser must reach.
 
-| Export | Line | Role |
-|---|---|---|
-| `signBulkUploadUrl` | `:86` | pre-signed **PUT**, `ContentType: text/csv` signed in |
-| `headObject` | `:120` | confirm the browser's PUT landed, capture ETag |
-| `putObject` | `:142` | server-side write (QR PNG) |
+| Export                     | Line   | Role                                                  |
+| -------------------------- | ------ | ----------------------------------------------------- |
+| `signBulkUploadUrl`        | `:86`  | pre-signed **PUT**, `ContentType: text/csv` signed in |
+| `headObject`               | `:120` | confirm the browser's PUT landed, capture ETag        |
+| `putObject`                | `:142` | server-side write (QR PNG)                            |
 | `signErrorsCsvDownloadUrl` | `:166` | pre-signed **GET**, `Content-Disposition: attachment` |
-| `signQrDownloadUrl` | `:184` | pre-signed **GET** for the QR PNG |
+| `signQrDownloadUrl`        | `:184` | pre-signed **GET** for the QR PNG                     |
 
 **`apps/worker/src/object-storage.ts`** — single internal client: `getCsvStream:52` (GET, streamed
 into the parser), `putObject:69` (writes `errors.csv`).
@@ -81,15 +81,15 @@ private** — `mc anonymous set download` is never run, so no local bucket polic
 ### 3.1 One canonical signed-URL TTL, defaulting to 10 minutes
 
 Today there are two independent TTLs, both defaulting to **900s (15 min)**, and `errors.csv`
-downloads borrow the *upload* TTL (`index.ts:174` — noted in its own comment as a reuse).
+downloads borrow the _upload_ TTL (`index.ts:174` — noted in its own comment as a reuse).
 
 Introduce a single canonical key and make the existing two optional overrides:
 
-| Var | Default | Applies to |
-|---|---|---|
-| `SIGNED_URL_TTL_SECONDS` | **600** | every pre-signed URL this service mints |
-| `BULK_UPLOAD_URL_TTL_SECONDS` | *(unset → falls back)* | upload PUT only |
-| `QR_DOWNLOAD_URL_TTL_SECONDS` | *(unset → falls back)* | QR GET only |
+| Var                           | Default                | Applies to                              |
+| ----------------------------- | ---------------------- | --------------------------------------- |
+| `SIGNED_URL_TTL_SECONDS`      | **600**                | every pre-signed URL this service mints |
+| `BULK_UPLOAD_URL_TTL_SECONDS` | _(unset → falls back)_ | upload PUT only                         |
+| `QR_DOWNLOAD_URL_TTL_SECONDS` | _(unset → falls back)_ | QR GET only                             |
 
 In `apps/api/src/config.ts`: add `SIGNED_URL_TTL_SECONDS` (`z.coerce.number().int().positive().default(600)`),
 change the two existing keys to `.optional()`, and expose resolved accessors so call sites never
@@ -123,16 +123,18 @@ qr/{aggregator_id}/{link_id}.png                 # durable
 **No backfill.** Both keys are already persisted per row, so reads use the stored value verbatim and
 old objects keep resolving. Only newly created objects get new keys.
 
-**The trap — and what *not* to do about it.** `bulk-uploads.ts:627` rebuilds the expected errors key
+**The trap — and what _not_ to do about it.** `bulk-uploads.ts:627` rebuilds the expected errors key
 from `upload.id` and refuses to sign anything that doesn't match:
 
 ```ts
 const expectedKey = `bulk-uploads/${upload.id}/errors.csv`;
-if (upload.errorsCsvS3Key !== expectedKey) { /* 404 + log errors_csv_key_invalid */ }
+if (upload.errorsCsvS3Key !== expectedKey) {
+  /* 404 + log errors_csv_key_invalid */
+}
 ```
 
-Its own comment says why: *"only sign keys that match the canonical errors.csv layout … guards
-against any future path (or DB tamper) signing a GET URL for an arbitrary object."* This is a
+Its own comment says why: _"only sign keys that match the canonical errors.csv layout … guards
+against any future path (or DB tamper) signing a GET URL for an arbitrary object."_ This is a
 **deliberate security control — a signing allow-list**, not a redundant recomputation. Replacing it
 with "just read the column" would let any write path that can influence `errors_csv_s3_key` mint a
 pre-signed GET for an arbitrary object in the bucket. That is strictly worse than the public bucket
@@ -143,9 +145,11 @@ The correct change is to make the allow-list accept **both** layouts:
 ```ts
 const allowed = [
   `uploads/errors/${upload.aggregatorId}/${upload.id}.csv`, // new
-  `bulk-uploads/${upload.id}/errors.csv`,                   // legacy, pre-migration rows
+  `bulk-uploads/${upload.id}/errors.csv`, // legacy, pre-migration rows
 ];
-if (!allowed.includes(upload.errorsCsvS3Key)) { /* reject as today */ }
+if (!allowed.includes(upload.errorsCsvS3Key)) {
+  /* reject as today */
+}
 ```
 
 Once the legacy retention window (§3.3) has elapsed, the legacy entry can be dropped. Track that as a
@@ -159,11 +163,11 @@ classification is a product decision and belongs here. `apps/worker/src/jobs/cro
 already documents the assumption that "S3 lifecycle (raw CSVs + errors.csv) is configured externally"
 — that configuration has never existed.
 
-| Class | Prefix | Retention | Rationale |
-|---|---|---|---|
-| Raw upload CSV | `uploads/raw/` | **7 days** | Consumed by the worker within minutes. Kept a week only so a failed run can be re-driven and support can reproduce a complaint. Highest-PII object we hold — shortest life. |
-| Errors CSV | `uploads/errors/` | **30 days** | The aggregator's own worklist for fixing rejected rows; they need more than a week to act, and the dashboard links to it. |
-| QR PNG | `qr/` | **durable — never expires** | Deterministically regenerable from the link, but a printed QR outlives any TTL; expiring it breaks physical collateral already in the field. |
+| Class          | Prefix            | Retention                   | Rationale                                                                                                                                                                   |
+| -------------- | ----------------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Raw upload CSV | `uploads/raw/`    | **7 days**                  | Consumed by the worker within minutes. Kept a week only so a failed run can be re-driven and support can reproduce a complaint. Highest-PII object we hold — shortest life. |
+| Errors CSV     | `uploads/errors/` | **30 days**                 | The aggregator's own worklist for fixing rejected rows; they need more than a week to act, and the dashboard links to it.                                                   |
+| QR PNG         | `qr/`             | **durable — never expires** | Deterministically regenerable from the link, but a printed QR outlives any TTL; expiring it breaks physical collateral already in the field.                                |
 
 Retention is deployment-configurable, not hardcoded — see the automation doc for variable names.
 
@@ -193,18 +197,37 @@ Two problems, both made worse by cutting the TTL from 900s to 600s:
 
 Fix both with one change — **mint on click, not on list**:
 
-- Add `GET /v1/links/:id/qr`: authorize as today, then `302` to a freshly minted pre-signed GET.
+- Add `GET /v1/links/:id/qr`: authorize as today, then return a freshly minted pre-signed GET URL.
 - List and single-link responses return a stable, non-expiring **relative path**
-  (`qr_download_path: "/v1/links/{id}/qr"`) instead of `qr_url`.
-- Keep `qr_url` populated for one release for compatibility, then drop it with `qr_expires_at`.
+  (`qr_download_path: "/v1/links/{id}/qr"`).
+- `qr_url` / `qr_expires_at` stay on the wire but are populated **only** by the handler that just
+  minted one (create / activate). They are `null` on every read and list.
 
 This removes N signings per page, shrinks the payload, and makes staleness structurally impossible —
-the URL is minted microseconds before the browser follows it, so a 600s TTL (or a 60s one) is
-comfortable. It also removes the only reason a pre-signed URL was ever serialized into a list
+the URL is minted milliseconds before the browser follows it, so a 600s TTL (or a 60s one) is
+comfortable. It also removes the only reason a pre-signed URL was ever serialised into a list
 response, which is the thing most likely to end up in a log, a screenshot, or a support ticket.
 
-The redirect must send `Cache-Control: no-store`. A cached `302` would pin one expiring URL into the
-browser cache and reintroduce exactly the staleness being removed.
+The response must send `Cache-Control: no-store`. A cached response would pin one expiring URL into
+the browser cache and reintroduce exactly the staleness being removed.
+
+**Implementation deviation from this section, and why.** The first draft specified a `302` redirect.
+The implementation returns **JSON** (`{ link_id, url, expires_at }`) instead, because:
+
+1. It mirrors the existing `GET /v1/bulk-uploads/:id/errors.csv` endpoint exactly — same shape, same
+   `passthrough()` BFF proxy. A redirect would have needed bespoke `redirect: 'manual'` handling in
+   the Next.js BFF to forward a `Location` header, i.e. a second pattern for the same job.
+2. The client cost is one synchronously-opened blank tab whose `location` is set once the URL
+   arrives. That is required regardless: a `window.open` _after_ an await is treated as unsolicited
+   and blocked by popup blockers, so the anchor could not have stayed a plain `<a href>` under either
+   design.
+
+The security and performance properties are identical; only the transport differs. Both are covered
+by tests, including that a list response contains no `X-Amz-Signature` anywhere.
+
+**Signing allow-list here too.** The endpoint refuses to sign any `qr_object_key` that is not
+`qr/{caller_aggregator_id}/{link_id}.png`, matching the errors-CSV posture in §3.2. Without it, a
+tampered column would turn this into a pre-signed read of any object in the bucket.
 
 ### 3.5 Pre-migration audit: prove nothing stored is a URL
 
@@ -240,7 +263,7 @@ SELECT id, org_slug, url FROM aggregators WHERE url IS NOT NULL;
 ```
 
 `participants.data` and `link_submissions.submitted_data` hold schema-driven participant payloads, so
-a future network schema *could* legitimately introduce a document field — which is exactly why they
+a future network schema _could_ legitimately introduce a document field — which is exactly why they
 are in the query rather than reasoned about. Two columns that look like object references but are
 not, and should not be chased:
 
@@ -270,10 +293,10 @@ holds today and this change must not weaken it. Specifically:
 
 - No endpoint may accept an object key from the client and presign it. The key is always derived
   server-side from a row the caller has been proven to own.
-- The `{aggregator_id}` segment in a key is a *grouping and lifecycle* device, not an authorization
+- The `{aggregator_id}` segment in a key is a _grouping and lifecycle_ device, not an authorization
   boundary. Authorization is the row-ownership check. Do not let the prefix become load-bearing.
 - Pre-signed URLs are bearer credentials for one object. They must never be logged
-  (`.claude/rules/logging-observability.md`) or persisted. Audit the *mint event* with the key, not
+  (`.claude/rules/logging-observability.md`) or persisted. Audit the _mint event_ with the key, not
   the URL.
 
 ## 5. Test plan (Vitest)
@@ -304,14 +327,14 @@ target posture without new fixtures.
 
 ## 6. Risks
 
-| Risk | Mitigation |
-|---|---|
-| Bucket flipped to private before objects are copied → existing downloads 404 | Automation/infra sequencing: provision private, sync, *then* flip. See the infra-deployments doc. |
-| CORS missing on the private bucket → browser PUT fails preflight | The private bucket **must** carry `cors_enabled: true`. The current `private` bucket template does not. Called out in the automation doc. |
-| §3.2 read as "drop the `expectedKey` check" → arbitrary-object signing | The check is a security allow-list. Widen it, never remove it; guarded by the allow-list rejection test. |
-| Legacy `errors.csv` keys break after the key move | Legacy-key regression test; legacy entry stays in the allow-list for the retention window. |
-| `qr_url` retired before the portal switches to `qr_download_path` | Keep both for one release; retire `qr_url` + `qr_expires_at` only after `apps/web` ships the new path. |
-| TTL shortened too aggressively → large CSV upload times out mid-PUT | 600s at 10 MiB (`BULK_UPLOAD_MAX_BYTES`) is ~140 kbit/s to fail; acceptable. Keep `BULK_UPLOAD_URL_TTL_SECONDS` as the override for slow-link environments. |
+| Risk                                                                         | Mitigation                                                                                                                                                  |
+| ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Bucket flipped to private before objects are copied → existing downloads 404 | Automation/infra sequencing: provision private, sync, _then_ flip. See the infra-deployments doc.                                                           |
+| CORS missing on the private bucket → browser PUT fails preflight             | The private bucket **must** carry `cors_enabled: true`. The current `private` bucket template does not. Called out in the automation doc.                   |
+| §3.2 read as "drop the `expectedKey` check" → arbitrary-object signing       | The check is a security allow-list. Widen it, never remove it; guarded by the allow-list rejection test.                                                    |
+| Legacy `errors.csv` keys break after the key move                            | Legacy-key regression test; legacy entry stays in the allow-list for the retention window.                                                                  |
+| `qr_url` retired before the portal switches to `qr_download_path`            | Keep both for one release; retire `qr_url` + `qr_expires_at` only after `apps/web` ships the new path.                                                      |
+| TTL shortened too aggressively → large CSV upload times out mid-PUT          | 600s at 10 MiB (`BULK_UPLOAD_MAX_BYTES`) is ~140 kbit/s to fail; acceptable. Keep `BULK_UPLOAD_URL_TTL_SECONDS` as the override for slow-link environments. |
 
 ## 7. Open questions
 

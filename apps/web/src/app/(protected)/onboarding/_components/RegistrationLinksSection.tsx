@@ -16,7 +16,10 @@ import {
 } from '../../../../hooks/useOnboarding';
 import { useProfile, useProfileRaw } from '../../../../hooks/useProfile';
 import { useAggregatorConfig } from '../../../../hooks/useAggregatorConfig';
-import type { ApiRegistrationLink } from '../../../../services/onboarding.service';
+import {
+  onboardingService,
+  type ApiRegistrationLink,
+} from '../../../../services/onboarding.service';
 
 interface CreateLinkFormState {
   /**
@@ -454,6 +457,37 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
     setTimeout(() => setCopied(false), 1500);
   };
 
+  const [qrPending, setQrPending] = useState(false);
+  const [qrError, setQrError] = useState(false);
+  /**
+   * Fetches a presigned QR URL at the moment of the click.
+   *
+   * The list payload deliberately carries no presigned URL — one embedded in a
+   * page render expires while the tab sits open, and the user then gets an
+   * opaque storage error instead of an image. The blank tab is opened
+   * synchronously, before the await, because a `window.open` that happens after
+   * one is treated as unsolicited and blocked.
+   */
+  const onViewQr = async () => {
+    if (!link.qr_download_path || qrPending) return;
+    const tab = window.open('', '_blank', 'noopener,noreferrer');
+    setQrPending(true);
+    try {
+      const { url } = await onboardingService.qrDownloadUrl(link.link_id);
+      if (tab) {
+        tab.location.href = url;
+      } else {
+        window.location.href = url;
+      }
+    } catch {
+      tab?.close();
+      setQrError(true);
+      setTimeout(() => setQrError(false), 4000);
+    } finally {
+      setQrPending(false);
+    }
+  };
+
   // Inline edit form state — drafts only. Pre-populated from the link's
   // current context. Slug is regenerated server-side from district+lever+date
   // on save (matches the create flow).
@@ -552,16 +586,17 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
                   <I.copy size={12} />
                 </button>
               </div>
-              {link.qr_url && (
-                <a
-                  href={link.qr_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  title={t('link_card.view_qr')}
-                  className="inline-flex items-center justify-center w-8 h-8 rounded-[10px] border border-(--bd-border) text-ink-500 hover:text-primary-600 hover:border-(--bd-primary-100)"
+              {link.qr_download_path && (
+                <button
+                  type="button"
+                  onClick={onViewQr}
+                  disabled={qrPending}
+                  aria-busy={qrPending}
+                  title={qrError ? t('link_card.qr_failed') : t('link_card.view_qr')}
+                  className="inline-flex items-center justify-center w-8 h-8 rounded-[10px] border border-(--bd-border) text-ink-500 hover:text-primary-600 hover:border-(--bd-primary-100) disabled:opacity-50"
                 >
                   <I.qr size={14} />
-                </a>
+                </button>
               )}
               <a
                 href={link.public_url}

@@ -25,6 +25,7 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { requireApproved, type AuthContext } from '../services/auth/access-token.js';
 import { getBulkUploadsStore } from '../services/bulk-uploads-store/index.js';
 import { enqueueBulkFileProcess } from '../services/bulk-queue/index.js';
+import { allowedBulkUploadErrorsKeys } from '@aggregator-dpg/shared-primitives/object-keys';
 import {
   headObject,
   signBulkUploadUrl,
@@ -621,11 +622,16 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
           detail: 'No errors to download — all rows in this upload passed.',
         });
       }
-      // Hardened: only sign keys that match the canonical errors.csv layout.
-      // Even though the worker writes a deterministic key, this guards against
-      // any future path (or DB tamper) signing a GET URL for an arbitrary object.
-      const expectedKey = `bulk-uploads/${upload.id}/errors.csv`;
-      if (upload.errorsCsvS3Key !== expectedKey) {
+      // Hardened: only sign keys that match a known errors.csv layout. Even
+      // though the worker writes a deterministic key, this guards against any
+      // future path (or DB tamper) signing a GET URL for an arbitrary object.
+      //
+      // This is a signing ALLOW-LIST, not a lookup: never replace it with
+      // "trust the stored column". It carries two entries because rows written
+      // before the tenant prefix was introduced still hold the legacy layout;
+      // the legacy entry retires once that bucket lifecycle window elapses.
+      const allowedKeys = allowedBulkUploadErrorsKeys(auth.aggregatorId, upload.id);
+      if (!allowedKeys.includes(upload.errorsCsvS3Key)) {
         log.error({
           status: 'failure',
           reason: 'errors_csv_key_invalid',

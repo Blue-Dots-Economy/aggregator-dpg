@@ -218,7 +218,9 @@ describe('finaliseBulk — normal completion', () => {
     expect(res).toEqual({ status: 'completed', total: 2, passed: 1, failed: 1, skipped: 0 });
     expect(putObject).toHaveBeenCalledTimes(1);
     const [key, body, contentType] = putObject.mock.calls[0]!;
-    expect(key).toBe('bulk-uploads/up-1/errors.csv');
+    // Tenant-prefixed, under the errors prefix so lifecycle rules can expire
+    // error reports separately from raw CSVs.
+    expect(key).toBe('uploads/errors/agg-1/up-1.csv');
     expect(contentType).toBe('text/csv');
     const csv = (body as Buffer).toString('utf8');
     expect(csv).toContain('name');
@@ -229,7 +231,7 @@ describe('finaliseBulk — normal completion', () => {
     expect(csv).toContain('bad email');
     expect(txUpdates[0]).toMatchObject({
       status: 'completed',
-      errorsCsvS3Key: 'bulk-uploads/up-1/errors.csv',
+      errorsCsvS3Key: 'uploads/errors/agg-1/up-1.csv',
     });
   });
 

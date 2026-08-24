@@ -27,8 +27,18 @@ export interface ApiRegistrationLink {
    * artifacts.
    */
   public_url: string | null;
+  /**
+   * Presigned QR URL. Populated only by the response to a request that just
+   * minted one (create / activate); `null` on reads and lists. Prefer
+   * `qr_download_path` — a URL from here is already expiring.
+   */
   qr_url: string | null;
   qr_expires_at: string | null;
+  /**
+   * Stable API path that mints a fresh presigned QR URL per call. `null` while
+   * the link has no QR. Fetch it at the moment of use; never cache the result.
+   */
+  qr_download_path: string | null;
   /**
    * Optional rollup counters surfaced by the listing endpoint. Defaults
    * to zeros when the link has no submissions yet.
@@ -241,6 +251,19 @@ export const onboardingService = {
     if (opts.offset) params.set('offset', String(opts.offset));
     const qs = params.toString();
     return jsonFetch(`/api/bulk-uploads/list${qs ? `?${qs}` : ''}`);
+  },
+
+  /**
+   * Mints a short-lived presigned URL for a link's QR PNG.
+   *
+   * Called on click rather than read from the list payload: the URL expires in
+   * minutes, so one embedded in a page render is dead by the time a user who
+   * left the tab open comes back to it.
+   */
+  async qrDownloadUrl(linkId: string): Promise<{ url: string; expires_at: string }> {
+    return jsonFetch<{ link_id: string; url: string; expires_at: string }>(
+      `/api/links/${encodeURIComponent(linkId)}/qr`,
+    );
   },
 
   async errorsCsvUrl(uploadId: string): Promise<BulkUploadErrorsResponse> {

@@ -12,6 +12,12 @@ import {
   assertTlsPosture,
   signalStackConfigFields,
 } from '@aggregator-dpg/shared-primitives/config';
+import {
+  SIGNED_URL_TTL_DEFAULT_SECONDS,
+  SignedUrlTtlSchema,
+  type SignedUrlTtls,
+  resolveSignedUrlTtls,
+} from '@aggregator-dpg/shared-primitives/signed-url-ttl';
 
 const ConfigSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
@@ -143,8 +149,25 @@ const ConfigSchema = z.object({
     .transform((v) => v === 'true'),
   /** Redis connection URL used by BullMQ queues. */
   REDIS_URL: z.string().default('redis://localhost:6379'),
-  /** Pre-signed PUT URL TTL for bulk uploads (seconds). */
-  BULK_UPLOAD_URL_TTL_SECONDS: z.coerce.number().int().positive().default(900),
+  /**
+   * Canonical TTL (seconds) for EVERY pre-signed URL this service mints.
+   * Deployment-time config; 600 (ten minutes) unless overridden. Capped at
+   * SIGNED_URL_TTL_MAX_SECONDS because a pre-signed URL cannot be revoked.
+   */
+  SIGNED_URL_TTL_SECONDS: SignedUrlTtlSchema.default(SIGNED_URL_TTL_DEFAULT_SECONDS),
+  /**
+   * Optional per-class override for the bulk-upload pre-signed PUT. Unset =
+   * SIGNED_URL_TTL_SECONDS. Raise it only for environments on slow links,
+   * where a 10 MiB CSV may not finish inside the canonical window.
+   */
+  BULK_UPLOAD_URL_TTL_SECONDS: SignedUrlTtlSchema.optional(),
+  /**
+   * Optional per-class override for the errors-CSV pre-signed GET. Unset =
+   * SIGNED_URL_TTL_SECONDS. Deliberately independent of the upload TTL: this
+   * download previously borrowed it, so lengthening the upload window silently
+   * lengthened how long a leaked download URL stayed live.
+   */
+  ERRORS_CSV_DOWNLOAD_URL_TTL_SECONDS: SignedUrlTtlSchema.optional(),
   /** Maximum CSV file size for the pre-signed PUT (bytes). */
   BULK_UPLOAD_MAX_BYTES: z.coerce
     .number()
@@ -161,8 +184,12 @@ const ConfigSchema = z.object({
    * Example: https://aggregator.example.com
    */
   PUBLIC_LINK_BASE_URL: z.string().default('http://localhost:3000'),
-  /** Pre-signed GET URL TTL for QR PNG downloads (seconds). */
-  QR_DOWNLOAD_URL_TTL_SECONDS: z.coerce.number().int().positive().default(900),
+  /**
+   * Optional per-class override for the QR PNG pre-signed GET. Unset =
+   * SIGNED_URL_TTL_SECONDS. Short is fine: the URL is minted per click by
+   * `GET /v1/links/:id/qr`, never persisted or serialised into a list.
+   */
+  QR_DOWNLOAD_URL_TTL_SECONDS: SignedUrlTtlSchema.optional(),
 
   // ─── Approval links ───────────────────────────────────────────────────────
   /**
@@ -376,3 +403,13 @@ function parseEnvEmailList(raw: string | undefined): string[] {
 }
 
 export const adminEmails: string[] = parseEnvEmailList(config.ADMIN_EMAILS);
+
+/**
+ * Effective pre-signed URL lifetime per class, with the canonical TTL already
+ * applied wherever no per-class override is set.
+ *
+ * Call sites read this, never the raw `SIGNED_URL_TTL_SECONDS` /
+ * `*_TTL_SECONDS` fields: the fallback rule belongs in one place, and a use
+ * site that re-derives it is where the two quietly diverge.
+ */
+export const signedUrlTtlSeconds: SignedUrlTtls = resolveSignedUrlTtls(config);

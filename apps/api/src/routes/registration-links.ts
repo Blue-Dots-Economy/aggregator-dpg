@@ -20,6 +20,7 @@ import { requireApproved, type AuthContext } from '../services/auth/access-token
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
 import { getRegistrationLinksStore } from '../services/registration-links-store/index.js';
 import type { RegistrationLink } from '../services/registration-links-store/index.js';
+import { qrObjectKey } from '@aggregator-dpg/shared-primitives/object-keys';
 import { putObject, signQrDownloadUrl } from '../services/object-storage/index.js';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
@@ -158,8 +159,19 @@ const LinkResponseSchema = z
     context: z.record(z.unknown()),
     expires_at: z.string().nullable(),
     public_url: z.string().nullable(),
+    /**
+     * Pre-signed GET URL. Populated ONLY on responses to a request that just
+     * minted one (create / activate). `null` on reads and lists — see
+     * `qr_download_path`.
+     */
     qr_url: z.string().nullable(),
     qr_expires_at: z.string().nullable(),
+    /**
+     * Stable, non-expiring API path that mints a fresh pre-signed URL per
+     * call. Clients should use this and never cache the result. `null` while
+     * the link has no QR (draft / retired / not yet generated).
+     */
+    qr_download_path: z.string().nullable(),
     metrics: z
       .object({
         total: z.number(),
@@ -172,6 +184,14 @@ const LinkResponseSchema = z
     updated_at: z.string(),
   })
   .passthrough();
+
+/** 200 payload for a freshly minted QR download URL. */
+const QrDownloadResponseSchema = z.object({
+  link_id: z.string(),
+  /** Short-lived pre-signed GET URL. Follow immediately; never persist it. */
+  url: z.string(),
+  expires_at: z.string(),
+});
 
 /** 200 payload for the paginated links list. */
 const ListLinksResponseSchema = z
@@ -320,7 +340,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
       // status === 'live' — eager activate-at-create path. Generate the QR
       // PNG, upload to S3 keyed deterministically, then stamp qr_object_key.
       const publicUrl = buildPublicUrl(callerOrgSlug, slug);
-      const qrKey = `qr/${auth.aggregatorId}/${created.id}.png`;
+      const qrKey = qrObjectKey(auth.aggregatorId, created.id);
       let qrPng: Buffer;
       try {
         qrPng = await QRCode.toBuffer(publicUrl, {
@@ -636,7 +656,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
       // exists (e.g. legacy row from when drafts also got QRs) we reuse the key
       // and overwrite the bytes; the key is deterministic.
       const publicUrl = buildPublicUrl(orgSlug, found.value.slug);
-      const qrKey = found.value.qrObjectKey ?? `qr/${auth.aggregatorId}/${found.value.id}.png`;
+      const qrKey = found.value.qrObjectKey ?? qrObjectKey(auth.aggregatorId, found.value.id);
       let qrPng: Buffer;
       try {
         qrPng = await QRCode.toBuffer(publicUrl, {
@@ -740,6 +760,81 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
       return reply.send(await buildResponse(updated.value, orgSlug));
     },
   );
+
+  app.get(
+    '/v1/links/:id/qr',
+    {
+      schema: {
+        tags: ['registration-links'],
+        summary: 'Mint a short-lived QR download URL',
+        description:
+          "Returns a freshly minted, short-lived pre-signed GET URL for the link's QR PNG. Minted per call rather than embedded in list responses, so the URL is seconds old when the browser follows it and no signed URL is ever serialised into a collection. Available only while the link is live and its QR has been generated. Responses are never cacheable.",
+        security: [{ bearerAuth: [] }],
+        params: LinkParamsSchema,
+        response: {
+          200: QrDownloadResponseSchema,
+          ...errorResponses(400, 401, 403, 404, 503),
+        },
+      },
+    },
+    async (req, reply) => {
+      const auth = await requireAuth(req);
+      // Params are already validated by the route schema (id: non-empty string).
+      const { id: linkId } = req.params as z.infer<typeof LinkParamsSchema>;
+      const log = req.log.child({
+        operation: 'registrationLinks.qr',
+        actor: auth.userId,
+        link_id: linkId,
+      });
+      const start = Date.now();
+
+      const found = await getRegistrationLinksStore().findById(linkId, auth.aggregatorId);
+      if (!found.ok) {
+        throw httpError('DB_UNAVAILABLE', { cause: new Error(found.error.message) });
+      }
+      if (!found.value) {
+        // 403, not 404: a 404 here would confirm which link ids exist to a
+        // caller from another aggregator.
+        throw httpError('FORBIDDEN', { detail: 'Link not accessible.' });
+      }
+      const row = found.value;
+
+      // Mirrors buildResponse: a QR is published only while the link is live.
+      // A retired link's printed poster is no longer authoritative.
+      if (row.status !== 'live') {
+        log.info({ status: 'skipped', reason: 'not_live', link_status: row.status });
+        throw httpError('NOT_FOUND', {
+          detail: `No QR available for a link in status '${row.status}'.`,
+        });
+      }
+      if (!row.qrObjectKey) {
+        log.info({ status: 'skipped', reason: 'no_qr_object' });
+        throw httpError('NOT_FOUND', { detail: 'No QR has been generated for this link.' });
+      }
+
+      // Signing allow-list, same posture as the errors.csv download: only ever
+      // sign the canonical QR key for THIS caller and THIS link. Without it a
+      // tampered `qr_object_key` would turn this endpoint into a pre-signed
+      // read of any object in the bucket.
+      const expectedKey = qrObjectKey(auth.aggregatorId, row.id);
+      if (row.qrObjectKey !== expectedKey) {
+        log.error({ status: 'failure', reason: 'qr_key_invalid' });
+        throw httpError('NOT_FOUND', { detail: 'No QR available for this link.' });
+      }
+
+      const signed = await signQrDownloadUrl(row.qrObjectKey);
+
+      log.info({ status: 'success', latency_ms: Date.now() - start });
+
+      // The URL inside expires; a cached response would hand a client a dead
+      // URL and reintroduce exactly the staleness this endpoint removes.
+      return reply.header('cache-control', 'no-store').send({
+        link_id: row.id,
+        url: signed.url,
+        expires_at: signed.expiresAt,
+      });
+    },
+  );
 }
 
 /**
@@ -764,9 +859,12 @@ interface ResponseOverrides {
 }
 
 /**
- * Renders a registration link as the canonical API response shape. Lazily
- * presigns the QR URL when the row has a stored qr_object_key — keeps list
- * responses fresh without persisting short-lived URLs.
+ * Renders a registration link as the canonical API response shape.
+ *
+ * Never mints a pre-signed URL of its own: `qr_url` is passed in by the
+ * handler that just created one, and every other caller gets
+ * `qr_download_path` to mint on demand. That keeps signing off the list path
+ * entirely — see the comment in the body.
  *
  * @param orgSlug - The owning aggregator's `org_slug`. The public URL is
  *   namespaced under it (`<base>/<org_slug>/<link_slug>`), so we need it to
@@ -783,18 +881,19 @@ async function buildResponse(
   // longer authoritative.
   const isPublished = row.status === 'live';
   const publicUrl = isPublished ? (overrides.publicUrl ?? buildPublicUrl(orgSlug, row.slug)) : null;
-  let qrUrl: string | null = null;
-  let qrExpiresAt: string | null = null;
-  if (isPublished) {
-    if (overrides.qrSigned) {
-      qrUrl = overrides.qrSigned.url;
-      qrExpiresAt = overrides.qrSigned.expiresAt;
-    } else if (row.qrObjectKey) {
-      const signed = await signQrDownloadUrl(row.qrObjectKey);
-      qrUrl = signed.url;
-      qrExpiresAt = signed.expiresAt;
-    }
-  }
+  // Only surface a pre-signed URL when this very request already minted one
+  // (create / activate). Reads and lists deliberately do NOT presign:
+  //   - Cost: the list endpoint would compute one signature per row, for URLs
+  //     the operator mostly never clicks.
+  //   - Staleness: a serialised URL starts expiring immediately, so a page left
+  //     open outlives it and the QR link fails with an opaque S3 error.
+  //   - Exposure: a pre-signed URL is a bearer credential for that object, and
+  //     a list response is the most likely thing to end up in a log or a
+  //     screenshot.
+  // Clients follow `qr_download_path` instead, which mints per click.
+  const qrUrl = isPublished ? (overrides.qrSigned?.url ?? null) : null;
+  const qrExpiresAt = isPublished ? (overrides.qrSigned?.expiresAt ?? null) : null;
+  const qrDownloadPath = isPublished && row.qrObjectKey ? `/v1/links/${row.id}/qr` : null;
   // `metrics` may be supplied by the caller when responding to a list (one
   // grouped SQL aggregation per request); otherwise fall back to a per-link
   // lookup so single-link reads still surface counters.
@@ -813,6 +912,7 @@ async function buildResponse(
     public_url: publicUrl,
     qr_url: qrUrl,
     qr_expires_at: qrExpiresAt,
+    qr_download_path: qrDownloadPath,
     metrics,
     created_at: row.createdAt.toISOString(),
     updated_at: row.updatedAt.toISOString(),

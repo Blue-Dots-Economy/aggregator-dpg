@@ -16,6 +16,14 @@
       "import": "./dist/ids/index.js",
       "types": "./dist/ids/index.d.ts"
     },
+    "./object-keys": {
+      "import": "./dist/object_keys/index.js",
+      "types": "./dist/object_keys/index.d.ts"
+    },
+    "./signed-url-ttl": {
+      "import": "./dist/signed_url_ttl/index.js",
+      "types": "./dist/signed_url_ttl/index.d.ts"
+    },
     "./result": {
       "import": "./dist/result/index.js",
       "types": "./dist/result/index.d.ts"
