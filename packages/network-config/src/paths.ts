@@ -41,7 +41,7 @@ export interface ConfigPathEnv {
  */
 export function resolveNetworkSourceOverride(env: ConfigPathEnv = process.env): string | undefined {
   const value = env.AGGREGATOR_NETWORK_SOURCE?.trim();
-  return value ? value : undefined;
+  return value || undefined;
 }
 
 /**
@@ -55,7 +55,7 @@ export function resolveNetworkSourceOverride(env: ConfigPathEnv = process.env): 
  */
 export function resolveConsentSourceOverride(env: ConfigPathEnv = process.env): string | undefined {
   const value = env.AGGREGATOR_PARTICIPANT_CONSENT_SOURCE?.trim();
-  return value ? value : undefined;
+  return value || undefined;
 }
 
 /**
