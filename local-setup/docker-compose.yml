@@ -540,7 +540,12 @@ services:
     volumes:
       - ../config:/app/config:ro
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:4000/health/ready || exit 1"]
+      # CMD, not CMD-SHELL, and node rather than wget: the api image is a Docker
+      # Hardened Image with no /bin/sh and no wget, so CMD-SHELL fails with
+      # `exec: "/bin/sh": no such file or directory` and the container never
+      # reports healthy — which blocks every service that waits on it.
+      # node is PID 1 here and has global fetch (v24), so it needs nothing extra.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
       timeout: 3s
       retries: 15

@@ -1,6 +1,9 @@
 # syntax=docker/dockerfile:1
 
-FROM node:24-alpine AS base
+# Build stages use the DHI *dev* variant — the only one carrying a shell, apk,
+# corepack and npm. The runner below uses the hardened variant, which has none of
+# them, so no RUN is possible past that FROM.
+FROM dhi.io/node:24-alpine-dev AS base
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
 RUN corepack enable
@@ -28,15 +31,19 @@ FROM builder AS deployer
 RUN pnpm deploy --filter @aggregator-dpg/api --prod --legacy /standalone
 
 # ── runner: minimal runtime image ─────────────────────────────────────────────
-FROM node:24-alpine AS runner
-RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+FROM dhi.io/node:24-alpine AS runner
+# Hardened runtime: no shell, no apk, no npm/corepack. The previous
+# `RUN addgroup … && adduser …` cannot run here — and is unnecessary: the image
+# already ships an unprivileged `node` user at uid 1000, which is exactly the
+# runAsUser the deploy charts set for this service, so the two now agree
+# (`appuser` was a system-range uid that never matched).
 WORKDIR /app
-COPY --from=deployer --chown=appuser:appgroup /standalone .
+COPY --from=deployer --chown=node:node /standalone .
 # Schemas are loaded from config/ at runtime by registration-validator.
-COPY --from=builder --chown=appuser:appgroup /app/config ./config
+COPY --from=builder --chown=node:node /app/config ./config
 # Drizzle migrations are read at runtime by db/migrate.ts (resolved via
 # `../../drizzle/migrations` relative to dist/db/, i.e. /app/drizzle/migrations).
-COPY --from=builder --chown=appuser:appgroup /app/apps/api/drizzle ./drizzle
-USER appuser
+COPY --from=builder --chown=node:node /app/apps/api/drizzle ./drizzle
+USER node
 EXPOSE 4000
 CMD ["node", "dist/server.js"]
