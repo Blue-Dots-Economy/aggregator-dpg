@@ -32,6 +32,8 @@ const ConfigSchema = z.object({
    */
   DATABASE_URL: z.string().min(1, 'DATABASE_URL must be set'),
   REDIS_URL: z.string().default('redis://localhost:6379'),
+  /** Liveness endpoint port, see health.ts. */
+  HEALTH_PORT: z.coerce.number().int().positive().default(8080),
 
   // ─── Object storage ─────────────────────────────────────────────────────
   S3_ENDPOINT: z.string().optional(),
