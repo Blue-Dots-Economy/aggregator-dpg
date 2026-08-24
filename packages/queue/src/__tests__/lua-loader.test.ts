@@ -66,6 +66,36 @@ describe('runBulkRowCommit', () => {
     expect(result).toEqual({ processed: 2, total: -1, readerDone: 0, wasNew: 0 });
   });
 
+  it('falls back to EVAL when SCRIPT LOAD itself fails (SCRIPT renamed / ACL-blocked)', async () => {
+    // Regression guard: the digest is resolved BEFORE the EVALSHA try block, so
+    // a rejecting SCRIPT LOAD used to propagate straight out of
+    // runBulkRowCommit and the EVAL fallback was unreachable — every bulk row
+    // commit threw on any Redis with SCRIPT restricted, where the previous
+    // locally-computed SHA1 had worked fine.
+    const redis = makeRedisStub({
+      script: vi.fn().mockRejectedValue(new Error("ERR unknown command 'SCRIPT'")),
+    });
+    (redis.eval as ReturnType<typeof vi.fn>).mockResolvedValue([1, 4, 0, 1]);
+
+    const result = await runBulkRowCommit(redis, 'up-9', 2, 'failed', '{}', 30);
+
+    expect(redis.evalsha).not.toHaveBeenCalled();
+    expect(redis.eval).toHaveBeenCalledWith(
+      bulkRowCommitScript.source,
+      5,
+      'bu:up-9:processed',
+      'bu:up-9:counters',
+      'bu:up-9:errors',
+      'bu:up-9:error_rows',
+      'bu:up-9:meta',
+      '2',
+      'failed',
+      '{}',
+      '30',
+    );
+    expect(result).toEqual({ processed: 1, total: 4, readerDone: 0, wasNew: 1 });
+  });
+
   it('falls back to EVAL when EVALSHA rejects with NOSCRIPT', async () => {
     const redis = makeRedisStub();
     (redis.evalsha as ReturnType<typeof vi.fn>).mockRejectedValue(

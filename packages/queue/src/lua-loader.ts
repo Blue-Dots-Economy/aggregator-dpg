@@ -44,6 +44,15 @@ const digestByClient = new WeakMap<Redis, Promise<string>>();
  * @returns The server-assigned script digest.
  * @throws {Error} If Redis replies with something other than a digest string.
  */
+/**
+ * Raised when `SCRIPT LOAD` succeeds at the protocol level but hands back
+ * something that is not a digest. Distinguished from a failed/blocked `SCRIPT`
+ * command because the two want opposite handling: an unavailable command is
+ * recoverable (fall back to EVAL), a malformed reply means we are not talking to
+ * the Redis we think we are and must not be papered over.
+ */
+class ScriptLoadReplyError extends Error {}
+
 async function scriptDigest(redis: Redis, script: LuaScript): Promise<string> {
   const cached = digestByClient.get(redis);
   if (cached) return cached;
@@ -51,7 +60,9 @@ async function scriptDigest(redis: Redis, script: LuaScript): Promise<string> {
   const pending = Promise.resolve(redis.script('LOAD', script.source))
     .then((reply) => {
       if (typeof reply !== 'string' || reply.length === 0) {
-        throw new Error(`SCRIPT LOAD returned an unexpected reply: ${JSON.stringify(reply)}`);
+        throw new ScriptLoadReplyError(
+          `SCRIPT LOAD returned an unexpected reply: ${JSON.stringify(reply)}`,
+        );
       }
       return reply;
     })
@@ -107,11 +118,27 @@ export async function runBulkRowCommit(
   ];
   const args = [String(rowIndex), outcome, errorPayloadJson, String(ttlSeconds)];
 
-  const digest = await scriptDigest(redis, bulkRowCommitScript);
+  // SCRIPT LOAD is a network round-trip that can fail independently of the
+  // script: `SCRIPT` renamed or ACL-blocked on the server, or a timeout on that
+  // one call. EVAL needs no digest, so a failed load must degrade to it rather
+  // than fail the row commit — before this loader asked Redis for the digest it
+  // computed the SHA1 locally, so this path could not fail at all, and losing
+  // that would strand bulk uploads on any Redis with SCRIPT restricted.
+  // `scriptDigest` does not cache a rejection, so each call retries the LOAD;
+  // that costs one wasted round-trip per row while SCRIPT is unavailable, which
+  // is the right trade against silently pinning the client to EVAL forever.
+  const digest = await scriptDigest(redis, bulkRowCommitScript).catch((err: unknown) => {
+    // A malformed reply stays fatal (see ScriptLoadReplyError); only an
+    // unavailable/failed SCRIPT command degrades to EVAL.
+    if (err instanceof ScriptLoadReplyError) throw err;
+    return null;
+  });
 
   let raw: unknown;
   try {
-    raw = await redis.evalsha(digest, keys.length, ...keys, ...args);
+    raw = digest
+      ? await redis.evalsha(digest, keys.length, ...keys, ...args)
+      : await redis.eval(bulkRowCommitScript.source, keys.length, ...keys, ...args);
   } catch (err) {
     // NOSCRIPT — script not in Redis cache (e.g. server restart). Reload + retry.
     const message = (err as Error).message ?? '';
