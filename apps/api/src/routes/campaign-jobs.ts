@@ -107,7 +107,7 @@ export async function registerCampaignJobRoutes(
       // Spec §5: another org's job is a 403, not a 404. A job on a different
       // channel is the same answer — this path only serves `channel`, and
       // saying "wrong channel" would confirm the id exists.
-      if (!job.value || job.value.channel !== channel) throw httpError('CAMPAIGN_JOB_FORBIDDEN');
+      if (job.value?.channel !== channel) throw httpError('CAMPAIGN_JOB_FORBIDDEN');
 
       const items = await store.getJobItems(jobId, orgId);
       if (!items.ok) throw httpError('INTERNAL', { detail: 'could not read campaign job items' });
