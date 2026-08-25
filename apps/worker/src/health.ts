@@ -46,6 +46,10 @@ export function startHealthServer(port: number, redis: Redis): Server {
     });
   });
 
+  server.on('error', (err) => {
+    logger.error({ operation: 'worker.health', status: 'failure', error: err.message });
+  });
+
   server.listen(port, () => {
     logger.info({ operation: 'worker.health', status: 'listening', port });
   });
