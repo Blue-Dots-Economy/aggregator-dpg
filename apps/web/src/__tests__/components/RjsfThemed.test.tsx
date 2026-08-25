@@ -252,6 +252,39 @@ describe('<RjsfThemedForm /> widgets', () => {
     renderThemed({ schema, uiSchema, formData: {}, onChange: () => {}, formContext: {} });
     expect(screen.getByRole('checkbox')).toBeInTheDocument();
   });
+
+  it('ConsentCheckbox: formContext reaches the widget, so the consent links render', () => {
+    // Guards an RJSF v6 change that types cannot catch: `formContext` moved off
+    // the top-level widget props onto `registry.formContext`, and `WidgetProps`
+    // extends `GenericObjectType`, so reading `props.formContext` still compiles
+    // and silently yields undefined. The only visible symptom is the widget
+    // quietly falling back to plain-text labels instead of clickable links —
+    // which the empty-formContext test above cannot distinguish.
+    const schema: RJSFSchema = {
+      type: 'object',
+      properties: {
+        consent: {
+          type: 'object',
+          properties: { value: { type: 'boolean', title: 'Consent' } },
+        },
+      },
+    };
+    const uiSchema: UiSchema = { consent: { value: { 'ui:widget': 'ConsentCheckbox' } } };
+    const consentContent = {
+      terms: { version: 1, title: 'Terms of Service', content: '# Terms' },
+      privacy: { version: 1, title: 'Privacy Policy', content: '# Privacy' },
+    };
+    renderThemed({
+      schema,
+      uiSchema,
+      formData: {},
+      onChange: () => {},
+      formContext: { consentContent },
+    });
+
+    expect(screen.getByRole('button', { name: 'Terms of Service' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Privacy Policy' })).toBeInTheDocument();
+  });
 });
 
 describe('<RjsfThemedForm /> templates', () => {
@@ -414,6 +447,35 @@ describe('<RjsfThemedForm /> templates', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: /Add another/i }));
     expect((latest.contacts as unknown[]).length).toBe(2);
+  });
+
+  it('ArrayFieldTemplate: clicking Remove drops that item from the array', () => {
+    // Covers the RJSF v6 item-callback change directly. In v5 the template
+    // called `item.onDropIndexClick(item.index)`, which *returned* a handler;
+    // v6's `buttonsProps.onRemoveItem` *is* the handler. Wiring the two shapes
+    // up the wrong way round still renders a Remove button that does nothing,
+    // so asserting the button exists is not enough — it has to be clicked.
+    const schema: RJSFSchema = {
+      type: 'object',
+      properties: {
+        contacts: {
+          type: 'array',
+          title: 'Contacts',
+          items: {
+            type: 'object',
+            properties: { phone: { type: 'string', title: 'Phone' } },
+          },
+        },
+      },
+    };
+    let latest: Record<string, unknown> = { contacts: [{ phone: '1' }, { phone: '2' }] };
+    renderControlled({
+      schema,
+      initialData: { contacts: [{ phone: '1' }, { phone: '2' }] },
+      onDataChange: (d) => (latest = d),
+    });
+    fireEvent.click(screen.getAllByRole('button', { name: 'Remove' })[0]!);
+    expect(latest.contacts).toEqual([{ phone: '2' }]);
   });
 });
 
