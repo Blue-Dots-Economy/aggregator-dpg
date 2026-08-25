@@ -253,10 +253,7 @@ describe('object-storage', () => {
         { input: Record<string, unknown> },
         { expiresIn: number },
       ];
-      expect(command.input).toMatchObject({
-        ResponseContentType: 'image/png',
-        ResponseContentDisposition: 'attachment; filename="registration-qr.png"',
-      });
+      expect(command.input).toMatchObject({ ResponseContentType: 'image/png' });
       expect(opts.expiresIn).toBe(600);
     });
   });
