@@ -1,5 +1,6 @@
 'use client';
 
+import type { JSX } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { Topbar } from '../../../../components/shell/Topbar';

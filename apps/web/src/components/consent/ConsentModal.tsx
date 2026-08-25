@@ -10,7 +10,7 @@
  *
  * @module apps/web/src/components/consent/ConsentModal
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type JSX } from 'react';
 import { useTranslations } from 'next-intl';
 import { X } from 'lucide-react';
 import { MarkdownContent } from '../forms/MarkdownContent';

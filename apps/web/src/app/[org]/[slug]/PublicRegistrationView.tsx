@@ -2,7 +2,7 @@
 
 import Image from 'next/image';
 import Link from 'next/link';
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import type { RJSFSchema, UiSchema } from '@rjsf/utils';
 import type { IChangeEvent } from '@rjsf/core';
 import { useTranslations } from 'next-intl';
@@ -667,13 +667,9 @@ export function PublicRegistrationView({
    * the capture-scope; this form simply does not collect profile fields.
    */
   const handleMinimalSubmit = async (payload: MinimalIdentityPayload): Promise<void> => {
-    await handleSubmit(
-      { formData: payload as unknown as Record<string, unknown> } as IChangeEvent<
-        Record<string, unknown>
-      >,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      undefined as any,
-    );
+    await handleSubmit({ formData: payload as unknown as Record<string, unknown> } as IChangeEvent<
+      Record<string, unknown>
+    >);
   };
 
   /**
@@ -771,10 +767,7 @@ export function PublicRegistrationView({
     }
   };
 
-  const handleSubmit = async (
-    e: IChangeEvent<Record<string, unknown>>,
-    _event: FormEvent<HTMLFormElement>,
-  ): Promise<void> => {
+  const handleSubmit = async (e: IChangeEvent<Record<string, unknown>>): Promise<void> => {
     const values = (e.formData ?? {}) as Record<string, unknown>;
     // Effective minority for THIS submit. The full-profile form's own
     // Year-of-birth field writes straight into this component's own

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState, type FormEvent, type JSX } from 'react';
+import { useEffect, useMemo, useState, type JSX } from 'react';
 import type { RJSFSchema } from '@rjsf/utils';
 import type { IChangeEvent } from '@rjsf/core';
 import { useTranslations } from 'next-intl';
@@ -70,10 +70,7 @@ export function ProfileCompleteView({ schema, uiSchema }: ProfileCompleteViewPro
     };
   }, []);
 
-  const handleSubmit = async (
-    e: IChangeEvent<Record<string, unknown>>,
-    _event: FormEvent<HTMLFormElement>,
-  ): Promise<void> => {
+  const handleSubmit = async (e: IChangeEvent<Record<string, unknown>>): Promise<void> => {
     setState({ status: 'submitting' });
     try {
       const res = await fetch('/api/aggregator/profile/me', {

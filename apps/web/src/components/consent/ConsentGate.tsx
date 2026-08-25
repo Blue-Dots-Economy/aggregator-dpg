@@ -9,7 +9,7 @@
  *
  * @module apps/web/src/components/consent/ConsentGate
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type JSX } from 'react';
 import { useTranslations } from 'next-intl';
 import { ArrowDown, Check, X } from 'lucide-react';
 import { MarkdownContent } from '../forms/MarkdownContent';
