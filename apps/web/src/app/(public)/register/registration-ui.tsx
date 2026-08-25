@@ -13,7 +13,10 @@
 
 import Link from 'next/link';
 import { useEffect, useRef, useState, type RefObject, type JSX } from 'react';
+import { useTranslations } from 'next-intl';
+import type { IChangeEvent } from '@rjsf/core';
 import { I } from '../../../icons';
+import type { ConsentDoc } from '../../../components/consent/consent-docs';
 import type { SubmitState } from './registration-shared';
 
 /** Local form lifecycle shared by the coordinator + org registration forms. */
@@ -47,6 +50,58 @@ export function useRegistrationFormState(): RegistrationFormState {
     }
   }, [state]);
   return { state, setState, canSubmit, setCanSubmit, errorRef };
+}
+
+/** The park-then-gate submit cycle shared by the coordinator + org forms. */
+export interface ConsentGateSubmit {
+  /** True while the blocking consent gate is open. */
+  gateOpen: boolean;
+  /** Opens/closes the gate — `false` on cancel and once consent is accepted. */
+  setGateOpen: (open: boolean) => void;
+  /** Form values parked at submit, replayed once consent is accepted. */
+  pendingRef: RefObject<Record<string, unknown> | null>;
+  /** RJSF `onSubmit`: parks the payload, then opens the gate. */
+  handleSubmit: (e: IChangeEvent<Record<string, unknown>>) => Promise<void>;
+}
+
+/**
+ * Holds the park-then-gate submit cycle both registration forms share.
+ *
+ * Neither form POSTs straight from `onSubmit`: consent is collected in the
+ * blocking `ConsentGate` first, so the values are parked in a ref for the
+ * caller's own accept handler to replay. When the consent copy failed to load
+ * (`consentDocs` is empty) the gate would render nothing at all and the form
+ * would be stuck with no way to finish or explain why — that case surfaces an
+ * error rather than opening a dead gate.
+ *
+ * @param consentDocs - Ordered consent documents; empty when loading failed.
+ * @param setState - Submit-lifecycle setter from {@link useRegistrationFormState}.
+ * @returns The gate flag, its setter, the parked payload, and the RJSF handler.
+ */
+export function useConsentGateSubmit(
+  consentDocs: ConsentDoc[],
+  setState: (s: SubmitState) => void,
+): ConsentGateSubmit {
+  const t = useTranslations('register');
+  const [gateOpen, setGateOpen] = useState(false);
+  const pendingRef = useRef<Record<string, unknown> | null>(null);
+
+  const handleSubmit = async (e: IChangeEvent<Record<string, unknown>>): Promise<void> => {
+    pendingRef.current = (e.formData ?? {}) as Record<string, unknown>;
+    if (consentDocs.length === 0) {
+      setState({
+        status: 'error',
+        title: t('consent.load_failed_title'),
+        detail: t('consent.load_failed_detail'),
+        code: 'CONSENT_UNAVAILABLE',
+        requestId: '',
+      });
+      return;
+    }
+    setGateOpen(true);
+  };
+
+  return { gateOpen, setGateOpen, pendingRef, handleSubmit };
 }
 
 export interface RegistrationSubmitButtonProps {

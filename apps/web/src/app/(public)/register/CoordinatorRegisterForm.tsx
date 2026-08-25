@@ -1,9 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
+import { useEffect, useMemo, useState, type JSX } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { RJSFSchema, UiSchema } from '@rjsf/utils';
-import type { IChangeEvent } from '@rjsf/core';
 import { useTranslations } from 'next-intl';
 import { RjsfThemedForm } from '../../../components/forms/RjsfThemed';
 import { ConsentGate } from '../../../components/consent/ConsentGate';
@@ -28,6 +27,7 @@ import {
   RegistrationErrorBanner,
   RegistrationSubmitButton,
   RegistrationSuccessPanel,
+  useConsentGateSubmit,
   useRegistrationFormState,
 } from './registration-ui';
 import type { ConsentDocContent } from '../../../components/consent/consent-types';
@@ -82,9 +82,11 @@ export function CoordinatorRegisterForm({
   }));
   // Selected parent org (spec §6.2). Empty until picked.
   const [orgId, setOrgId] = useState<string>('');
-  const [gateOpen, setGateOpen] = useState(false);
-  const pendingRef = useRef<Record<string, unknown> | null>(null);
   const consentDocs = useMemo(() => toConsentDocs(consentContent), [consentContent]);
+  const { gateOpen, setGateOpen, pendingRef, handleSubmit } = useConsentGateSubmit(
+    consentDocs,
+    setState,
+  );
 
   // Fetch the active-org list only when the hierarchy is on.
   const orgsQuery = useQuery({
@@ -120,27 +122,6 @@ export function CoordinatorRegisterForm({
       name: { ...((uiSchema['name'] as Record<string, unknown>) ?? {}), 'ui:widget': 'hidden' },
     };
   }, [uiSchema, orgHierarchyEnabled]);
-
-  /**
-   * Holds the payload and opens the gate — consent is collected there.
-   * When the consent copy failed to load (`consentDocs` is empty), the gate
-   * would render nothing at all and the form would be stuck with no way to
-   * finish or explain why — surface an error instead of a dead button.
-   */
-  const handleSubmit = async (e: IChangeEvent<Record<string, unknown>>): Promise<void> => {
-    pendingRef.current = (e.formData ?? {}) as Record<string, unknown>;
-    if (consentDocs.length === 0) {
-      setState({
-        status: 'error',
-        title: t('consent.load_failed_title'),
-        detail: t('consent.load_failed_detail'),
-        code: 'CONSENT_UNAVAILABLE',
-        requestId: '',
-      });
-      return;
-    }
-    setGateOpen(true);
-  };
 
   /** Runs after the gate is accepted: stamps consent and posts. */
   const submitWithConsent = async (): Promise<void> => {
