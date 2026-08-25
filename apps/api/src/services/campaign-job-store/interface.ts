@@ -14,20 +14,58 @@
 
 export type CampaignChannel = 'export' | 'email' | 'voice';
 
-export type CampaignJobStatus =
-  'pending' | 'processing' | 'succeeded' | 'partially_failed' | 'failed';
+export type CampaignJobStatus = 'queued' | 'processing' | 'partial' | 'completed' | 'failed';
 
-export type CampaignJobItemStatus = 'pending' | 'resolved' | 'submitted' | 'failed';
+export type CampaignJobItemStatus =
+  | 'pending'
+  | 'resolved'
+  | 'submitted'
+  | 'sent'
+  | 'skipped_not_owned'
+  | 'skipped_no_contact'
+  | 'duplicate_active'
+  | 'failed';
 
-/** In-flight/success item statuses — everything that isn't a hard failure. */
-export const NON_FAILED_ITEM_STATUSES: readonly CampaignJobItemStatus[] = [
+/** Item statuses that mean the channel acted successfully on the item. */
+export const SUCCESS_ITEM_STATUSES: readonly CampaignJobItemStatus[] = [
+  'resolved',
+  'submitted',
+  'sent',
+];
+
+/**
+ * Item statuses that are neither success nor failure — the item was
+ * deliberately not acted on. Skips never make a job `partial`.
+ */
+export const SKIPPED_ITEM_STATUSES: readonly CampaignJobItemStatus[] = [
+  'skipped_not_owned',
+  'skipped_no_contact',
+  'duplicate_active',
+];
+
+/** Item statuses an item can no longer move out of (retry-safety guard). */
+export const TERMINAL_ITEM_STATUSES: readonly CampaignJobItemStatus[] = [
+  ...SUCCESS_ITEM_STATUSES,
+  ...SKIPPED_ITEM_STATUSES,
+  'failed',
+];
+
+/** Statuses that keep an item inside the active-dedup predicate. */
+export const ACTIVE_DEDUP_ITEM_STATUSES: readonly CampaignJobItemStatus[] = [
   'pending',
   'resolved',
   'submitted',
 ];
 
 /** Job statuses that count against a tenant's active-job cap. */
-export const ACTIVE_JOB_STATUSES: readonly CampaignJobStatus[] = ['pending', 'processing'];
+export const ACTIVE_JOB_STATUSES: readonly CampaignJobStatus[] = ['queued', 'processing'];
+
+/** Job statuses a job can no longer move out of. */
+export const TERMINAL_JOB_STATUSES: readonly CampaignJobStatus[] = [
+  'partial',
+  'completed',
+  'failed',
+];
 
 /** A single free-form metadata pair; stored verbatim from the request envelope. */
 export interface CampaignMetadataPair {
@@ -68,6 +106,10 @@ export interface JobStatusCounts {
   pending: number;
   resolved: number;
   submitted: number;
+  sent: number;
+  skipped_not_owned: number;
+  skipped_no_contact: number;
+  duplicate_active: number;
   failed: number;
 }
 
@@ -75,6 +117,10 @@ export interface JobItemView {
   itemId: string;
   action: string | null;
   status: CampaignJobItemStatus;
+  /** External id this item produced (voice: Raya call id; email: message id). */
+  providerRef: string | null;
+  /** Why the item was skipped, when `status` is one of the skip terminals. */
+  skipReason: string | null;
   errorReason: string | null;
 }
 
@@ -131,11 +177,16 @@ export type StoreResult<T> = { ok: true; value: T } | { ok: false; error: StoreE
  */
 export function deriveJobStatus(counts: JobStatusCounts): CampaignJobStatus {
   if (counts.pending > 0) return 'processing';
-  if (counts.total === 0) return 'succeeded';
-  const succeeded = counts.resolved + counts.submitted;
-  if (counts.failed === 0) return 'succeeded';
+  if (counts.total === 0) return 'completed';
+  const succeeded = counts.resolved + counts.submitted + counts.sent;
+  // Skips (not owned / no contact / duplicate) are deliberate no-ops, not
+  // failures, so they never make a job `partial`. A job whose items were ALL
+  // skipped is therefore `completed`, not `failed`: the handler ran correctly
+  // and simply found nothing to act on. The caller distinguishes the two from
+  // `counts` (e.g. resolved: 0, skipped_not_owned: 4), not from the status.
+  if (counts.failed === 0) return 'completed';
   if (succeeded === 0) return 'failed';
-  return 'partially_failed';
+  return 'partial';
 }
 
 export abstract class CampaignJobStoreBase {
@@ -174,14 +225,16 @@ export abstract class CampaignJobStoreBase {
 
   /**
    * Sets an item's status. Forward-only: an item already in a terminal status
-   * (resolved|submitted|failed) is not overwritten (a retried job re-processes
-   * only still-pending items).
+   * is not overwritten (a retried job re-processes only still-pending items).
+   *
+   * @param reason - Free-text cause. Stored in `skip_reason` when `status` is a
+   *   skip terminal, otherwise in `error_reason`.
    */
   abstract markItem(
     jobId: string,
     itemId: string,
     status: CampaignJobItemStatus,
-    errorReason?: string,
+    reason?: string,
   ): Promise<StoreResult<void>>;
 
   /** Stamps `last_progress_at = now()` (watchdog heartbeat). */

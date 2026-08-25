@@ -57,20 +57,20 @@ const jobRow = {
 describe('deriveJobStatus', () => {
   it('maps counts to the roll-up status', () => {
     expect(
-      client.deriveJobStatus({ total: 0, pending: 0, resolved: 0, submitted: 0, failed: 0 }),
-    ).toBe('succeeded');
+      client.deriveJobStatus({ total: 0, pending: 0, resolved: 0, submitted: 0, sent: 0, skipped_not_owned: 0, skipped_no_contact: 0, duplicate_active: 0, failed: 0 }),
+    ).toBe('completed');
     expect(
-      client.deriveJobStatus({ total: 2, pending: 1, resolved: 1, submitted: 0, failed: 0 }),
+      client.deriveJobStatus({ total: 2, pending: 1, resolved: 1, submitted: 0, sent: 0, skipped_not_owned: 0, skipped_no_contact: 0, duplicate_active: 0, failed: 0 }),
     ).toBe('processing');
     expect(
-      client.deriveJobStatus({ total: 2, pending: 0, resolved: 2, submitted: 0, failed: 0 }),
-    ).toBe('succeeded');
+      client.deriveJobStatus({ total: 2, pending: 0, resolved: 2, submitted: 0, sent: 0, skipped_not_owned: 0, skipped_no_contact: 0, duplicate_active: 0, failed: 0 }),
+    ).toBe('completed');
     expect(
-      client.deriveJobStatus({ total: 2, pending: 0, resolved: 0, submitted: 0, failed: 2 }),
+      client.deriveJobStatus({ total: 2, pending: 0, resolved: 0, submitted: 0, sent: 0, skipped_not_owned: 0, skipped_no_contact: 0, duplicate_active: 0, failed: 2 }),
     ).toBe('failed');
     expect(
-      client.deriveJobStatus({ total: 2, pending: 0, resolved: 1, submitted: 0, failed: 1 }),
-    ).toBe('partially_failed');
+      client.deriveJobStatus({ total: 2, pending: 0, resolved: 1, submitted: 0, sent: 0, skipped_not_owned: 0, skipped_no_contact: 0, duplicate_active: 0, failed: 1 }),
+    ).toBe('partial');
   });
 });
 
@@ -102,6 +102,10 @@ describe('campaign job client', () => {
       pending: 0,
       resolved: 3,
       submitted: 0,
+      sent: 0,
+      skipped_not_owned: 0,
+      skipped_no_contact: 0,
+      duplicate_active: 0,
       failed: 1,
     });
   });
@@ -116,9 +120,19 @@ describe('campaign job client', () => {
     expect(sets.some((s) => s.status === 'failed' && s.errorReason === 'stalled')).toBe(true);
   });
 
+  it('markItem routes a skip reason to skip_reason, never error_reason', async () => {
+    queue(undefined);
+    await client.markItem('job-1', 'b', 'skipped_not_owned', 'not_owned_by_org');
+    expect(
+      sets.some((s) => s.skipReason === 'not_owned_by_org' && s.errorReason === null),
+    ).toBe(true);
+    // and it stamps a completion time, since a skip is terminal
+    expect(sets.some((s) => s.completedAt instanceof Date)).toBe(true);
+  });
+
   it('rollUpStatus derives + persists', async () => {
     queue([{ status: 'resolved', n: 2 }], undefined);
-    expect(await client.rollUpStatus('job-1')).toBe('succeeded');
+    expect(await client.rollUpStatus('job-1')).toBe('completed');
   });
 
   it('claimStalledJobs returns ids', async () => {

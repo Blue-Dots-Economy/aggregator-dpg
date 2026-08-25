@@ -206,14 +206,17 @@ const ConfigSchema = z.object({
    * Example: https://aggregator.example.com
    */
   PUBLIC_LINK_BASE_URL: z.string().default('http://localhost:3000'),
-  /** Max `item_ids` accepted per campaign request body (after de-dup). */
-  EXPORT_MAX_ITEM_IDS: z.coerce.number().int().positive().default(500),
-  /** Ingress rate-limit window (seconds) for campaign submits, per org. */
-  CAMPAIGN_SUBMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
-  /** Max campaign submits allowed per window, per org. */
-  CAMPAIGN_SUBMIT_MAX: z.coerce.number().int().positive().default(10),
-  /** Max active (pending|processing) campaign jobs allowed per org at once. */
-  CAMPAIGN_MAX_ACTIVE_PER_ORG: z.coerce.number().int().positive().default(3),
+  // ─── Campaign export channel (#579) ─────────────────────────────────────
+  // Per-channel by design: voice (#577) and email (#578) add their own
+  // CAMPAIGN_VOICE_* / CAMPAIGN_EMAIL_* knobs rather than sharing these.
+  /** Max `item_ids` accepted per export request body (after de-dup). */
+  CAMPAIGN_EXPORT_MAX_ITEMS: z.coerce.number().int().positive().default(500),
+  /** Ingress rate-limit window (seconds) for export submits, per org. */
+  CAMPAIGN_EXPORT_SUBMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
+  /** Max export submits allowed per window, per org. */
+  CAMPAIGN_EXPORT_SUBMIT_MAX: z.coerce.number().int().positive().default(10),
+  /** Max active (queued|processing) export jobs allowed per org at once. */
+  CAMPAIGN_EXPORT_MAX_ACTIVE_PER_ORG: z.coerce.number().int().positive().default(3),
   /** BullMQ attempts for a campaign-process job (retry count on transient failure). */
   CAMPAIGN_EXPORT_ATTEMPTS: z.coerce.number().int().positive().default(3),
 

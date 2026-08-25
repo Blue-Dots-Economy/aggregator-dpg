@@ -10424,13 +10424,28 @@
                 "schema": {
                   "type": "object",
                   "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "queued"
+                      ]
+                    },
+                    "requested": {
+                      "type": "integer"
+                    },
                     "job_id": {
                       "type": "string",
                       "format": "uuid"
+                    },
+                    "message": {
+                      "type": "string"
                     }
                   },
                   "required": [
-                    "job_id"
+                    "status",
+                    "requested",
+                    "job_id",
+                    "message"
                   ],
                   "additionalProperties": false
                 }
@@ -10766,10 +10781,10 @@
                           "status": {
                             "type": "string",
                             "enum": [
-                              "pending",
+                              "queued",
                               "processing",
-                              "succeeded",
-                              "partially_failed",
+                              "partial",
+                              "completed",
                               "failed"
                             ]
                           },
@@ -10788,6 +10803,18 @@
                               "submitted": {
                                 "type": "integer"
                               },
+                              "sent": {
+                                "type": "integer"
+                              },
+                              "skipped_not_owned": {
+                                "type": "integer"
+                              },
+                              "skipped_no_contact": {
+                                "type": "integer"
+                              },
+                              "duplicate_active": {
+                                "type": "integer"
+                              },
                               "failed": {
                                 "type": "integer"
                               }
@@ -10797,6 +10824,10 @@
                               "pending",
                               "resolved",
                               "submitted",
+                              "sent",
+                              "skipped_not_owned",
+                              "skipped_no_contact",
+                              "duplicate_active",
                               "failed"
                             ],
                             "additionalProperties": false
@@ -10984,10 +11015,10 @@
                     "status": {
                       "type": "string",
                       "enum": [
-                        "pending",
+                        "queued",
                         "processing",
-                        "succeeded",
-                        "partially_failed",
+                        "partial",
+                        "completed",
                         "failed"
                       ]
                     },
@@ -11006,6 +11037,18 @@
                         "submitted": {
                           "type": "integer"
                         },
+                        "sent": {
+                          "type": "integer"
+                        },
+                        "skipped_not_owned": {
+                          "type": "integer"
+                        },
+                        "skipped_no_contact": {
+                          "type": "integer"
+                        },
+                        "duplicate_active": {
+                          "type": "integer"
+                        },
                         "failed": {
                           "type": "integer"
                         }
@@ -11015,6 +11058,10 @@
                         "pending",
                         "resolved",
                         "submitted",
+                        "sent",
+                        "skipped_not_owned",
+                        "skipped_no_contact",
+                        "duplicate_active",
                         "failed"
                       ],
                       "additionalProperties": false
@@ -11058,8 +11105,20 @@
                               "pending",
                               "resolved",
                               "submitted",
+                              "sent",
+                              "skipped_not_owned",
+                              "skipped_no_contact",
+                              "duplicate_active",
                               "failed"
                             ]
+                          },
+                          "provider_ref": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "skip_reason": {
+                            "type": "string",
+                            "nullable": true
                           },
                           "error_reason": {
                             "type": "string",
@@ -11069,6 +11128,8 @@
                         "required": [
                           "item_id",
                           "status",
+                          "provider_ref",
+                          "skip_reason",
                           "error_reason"
                         ],
                         "additionalProperties": false
@@ -11142,57 +11203,6 @@
             }
           },
           "403": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string"
-                        },
-                        "title": {
-                          "type": "string"
-                        },
-                        "detail": {
-                          "type": "string"
-                        },
-                        "docs": {
-                          "type": "string"
-                        },
-                        "fields": {
-                          "type": "object",
-                          "additionalProperties": {}
-                        },
-                        "requestId": {
-                          "type": "string"
-                        },
-                        "timestamp": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "title",
-                        "detail",
-                        "requestId",
-                        "timestamp"
-                      ],
-                      "additionalProperties": true
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": true
-                }
-              }
-            }
-          },
-          "404": {
             "description": "Default Response",
             "content": {
               "application/json": {

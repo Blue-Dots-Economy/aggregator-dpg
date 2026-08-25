@@ -22,18 +22,25 @@ const countsSchema = z.object({
   pending: z.number().int(),
   resolved: z.number().int(),
   submitted: z.number().int(),
+  sent: z.number().int(),
+  skipped_not_owned: z.number().int(),
+  skipped_no_contact: z.number().int(),
+  duplicate_active: z.number().int(),
   failed: z.number().int(),
 });
 
 const channelSchema = z.enum(['export', 'email', 'voice']);
-const jobStatusSchema = z.enum([
+const jobStatusSchema = z.enum(['queued', 'processing', 'partial', 'completed', 'failed']);
+const itemStatusSchema = z.enum([
   'pending',
-  'processing',
-  'succeeded',
-  'partially_failed',
+  'resolved',
+  'submitted',
+  'sent',
+  'skipped_not_owned',
+  'skipped_no_contact',
+  'duplicate_active',
   'failed',
 ]);
-const itemStatusSchema = z.enum(['pending', 'resolved', 'submitted', 'failed']);
 const metadataSchema = z.array(z.object({ key: z.string(), value: z.string() }));
 
 const jobSummarySchema = z.object({
@@ -68,11 +75,13 @@ export async function registerCampaignJobRoutes(app: FastifyInstance): Promise<v
               z.object({
                 item_id: z.string(),
                 status: itemStatusSchema,
+                provider_ref: z.string().nullable(),
+                skip_reason: z.string().nullable(),
                 error_reason: z.string().nullable(),
               }),
             ),
           }),
-          ...errorResponses(401, 403, 404),
+          ...errorResponses(401, 403),
         },
       },
     },
@@ -84,7 +93,8 @@ export async function registerCampaignJobRoutes(app: FastifyInstance): Promise<v
       const store = getCampaignJobStore();
       const job = await store.getJob(jobId, orgId);
       if (!job.ok) throw httpError('INTERNAL', { detail: 'could not read campaign job' });
-      if (!job.value) throw httpError('CAMPAIGN_JOB_NOT_FOUND');
+      // Spec §5: another org's job is a 403, not a 404.
+      if (!job.value) throw httpError('CAMPAIGN_JOB_FORBIDDEN');
 
       const items = await store.getJobItems(jobId, orgId);
       if (!items.ok) throw httpError('INTERNAL', { detail: 'could not read campaign job items' });
@@ -98,6 +108,8 @@ export async function registerCampaignJobRoutes(app: FastifyInstance): Promise<v
         items: (items.value ?? []).map((i) => ({
           item_id: i.itemId,
           status: i.status,
+          provider_ref: i.providerRef,
+          skip_reason: i.skipReason,
           error_reason: i.errorReason,
         })),
         created_at: job.value.createdAt.toISOString(),

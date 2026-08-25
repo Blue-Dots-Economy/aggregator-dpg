@@ -59,14 +59,14 @@ export const ERR = {
     status: 400,
     title: 'Too many items',
     detail: 'The request asks for more items than a single campaign job allows.',
-    hint: 'item_ids length (after de-dup) exceeded EXPORT_MAX_ITEM_IDS. Split the request or raise the cap.',
+    hint: 'item_ids length (after de-dup) exceeded the channel cap (e.g. CAMPAIGN_EXPORT_MAX_ITEMS). Split the request or raise the cap.',
   },
   CAMPAIGN_RATE_LIMITED: {
     code: 'CAMPAIGN_RATE_LIMITED',
     status: 429,
     title: 'Too many requests',
     detail: 'Too many campaign requests in a short window. Please retry shortly.',
-    hint: 'Ingress rate-limit tripped (CAMPAIGN_SUBMIT_MAX per CAMPAIGN_SUBMIT_WINDOW_SECONDS, per org). See Retry-After.',
+    hint: 'Ingress rate-limit tripped (per-channel CAMPAIGN_<CHANNEL>_SUBMIT_MAX per CAMPAIGN_<CHANNEL>_SUBMIT_WINDOW_SECONDS, per org). See Retry-After.',
   },
   CAMPAIGN_ACTIVE_LIMIT: {
     code: 'CAMPAIGN_ACTIVE_LIMIT',
@@ -74,14 +74,14 @@ export const ERR = {
     title: 'Too many active jobs',
     detail:
       'This organisation already has the maximum number of campaign jobs in progress. Wait for one to finish.',
-    hint: 'Active (pending|processing) job count reached CAMPAIGN_MAX_ACTIVE_PER_ORG for this signalstack_org_id.',
+    hint: 'Active (queued|processing) job count reached CAMPAIGN_<CHANNEL>_MAX_ACTIVE_PER_ORG for this signalstack_org_id.',
   },
-  CAMPAIGN_JOB_NOT_FOUND: {
-    code: 'CAMPAIGN_JOB_NOT_FOUND',
-    status: 404,
-    title: 'Job not found',
-    detail: 'No campaign job with that id exists for your organisation.',
-    hint: 'getJob/getJobItems is tenant-scoped by signalstack_org_id; a job owned by another org reads as not-found.',
+  CAMPAIGN_JOB_FORBIDDEN: {
+    code: 'CAMPAIGN_JOB_FORBIDDEN',
+    status: 403,
+    title: 'Job not accessible',
+    detail: 'That campaign job does not belong to your organisation.',
+    hint: 'getJob/getJobItems is tenant-scoped by signalstack_org_id. Per the contract spec §5 an unknown or other-org job id is a 403, not a 404.',
   },
   CONSENT_REQUIRED: {
     code: 'CONSENT_REQUIRED',

@@ -11,6 +11,8 @@
 import { randomUUID } from 'node:crypto';
 import {
   ACTIVE_JOB_STATUSES,
+  SKIPPED_ITEM_STATUSES,
+  TERMINAL_ITEM_STATUSES,
   CampaignJobStoreBase,
   type CampaignJobItemStatus,
   type CampaignJobStatus,
@@ -47,10 +49,12 @@ interface ItemRow {
   itemId: string;
   action: string | null;
   status: CampaignJobItemStatus;
+  providerRef: string | null;
+  skipReason: string | null;
   errorReason: string | null;
 }
 
-const TERMINAL_ITEM = new Set<CampaignJobItemStatus>(['resolved', 'submitted', 'failed']);
+const TERMINAL_ITEM = new Set<CampaignJobItemStatus>(TERMINAL_ITEM_STATUSES);
 
 export class InMemoryCampaignJobStore extends CampaignJobStoreBase {
   private readonly jobs = new Map<string, JobRow>();
@@ -76,7 +80,7 @@ export class InMemoryCampaignJobStore extends CampaignJobStoreBase {
       aggregatorId: input.aggregatorId,
       signalstackOrgId: input.signalstackOrgId,
       channel: input.channel,
-      status: 'pending',
+      status: 'queued',
       idempotencyKey: input.idempotencyKey ?? null,
       metadata: input.metadata,
       content: input.content,
@@ -94,6 +98,8 @@ export class InMemoryCampaignJobStore extends CampaignJobStoreBase {
         itemId: i.itemId,
         action: i.action,
         status: 'pending' as const,
+        providerRef: null,
+        skipReason: null,
         errorReason: null,
       })),
     );
@@ -169,15 +175,17 @@ export class InMemoryCampaignJobStore extends CampaignJobStoreBase {
     jobId: string,
     itemId: string,
     status: CampaignJobItemStatus,
-    errorReason?: string,
+    reason?: string,
   ): Promise<StoreResult<void>> {
     const rows = this.items.get(jobId);
     const item = rows?.find((i) => i.itemId === itemId);
     if (!item) return { ok: false, error: { code: 'NOT_FOUND', message: 'item not found' } };
     // Forward-only: don't overwrite a terminal status.
     if (!TERMINAL_ITEM.has(item.status)) {
+      const isSkip = SKIPPED_ITEM_STATUSES.includes(status);
       item.status = status;
-      item.errorReason = errorReason ?? null;
+      item.skipReason = isSkip ? (reason ?? null) : null;
+      item.errorReason = isSkip ? null : (reason ?? null);
       this.touch(jobId);
     }
     return { ok: true, value: undefined };
@@ -242,7 +250,17 @@ export class InMemoryCampaignJobStore extends CampaignJobStoreBase {
 }
 
 function tally(items: ItemRow[]): JobStatusCounts {
-  const counts: JobStatusCounts = { total: 0, pending: 0, resolved: 0, submitted: 0, failed: 0 };
+  const counts: JobStatusCounts = {
+    total: 0,
+    pending: 0,
+    resolved: 0,
+    submitted: 0,
+    sent: 0,
+    skipped_not_owned: 0,
+    skipped_no_contact: 0,
+    duplicate_active: 0,
+    failed: 0,
+  };
   for (const i of items) {
     counts.total++;
     counts[i.status]++;

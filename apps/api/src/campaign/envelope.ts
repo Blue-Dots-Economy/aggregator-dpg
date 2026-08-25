@@ -11,7 +11,7 @@
  * export; the email/voice PRs give it a channel-specific shape).
  *
  * This module owns only the transport-shape validation. The per-request item
- * cap (`EXPORT_MAX_ITEM_IDS`) is enforced in the route so it can return the
+ * cap (`CAMPAIGN_<CHANNEL>_MAX_ITEMS`) is enforced in the route so it can return the
  * dedicated `CAMPAIGN_TOO_MANY_ITEMS` error instead of a generic 400.
  *
  * @module @aggregator-dpg/api

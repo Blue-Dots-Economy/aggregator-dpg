@@ -147,11 +147,14 @@ const ConfigSchema = z.object({
    */
   CAMPAIGN_EXPORT_FIELDS: z.enum(['contact', 'full']).default('contact'),
   /**
-   * Optional fixed recipient override for every export. When set, it wins over
-   * the job's requested_by (the token email resolved by the API).
+   * Who receives the export link. `requester` (default) sends it to the user
+   * who made the request (the job's `requested_by`, resolved from the verified
+   * token by the API). `network_admin` sends it to
+   * `EXPORT_NETWORK_ADMIN_EMAIL` instead — a deployment-level override, never
+   * caller-controlled.
    */
-  CAMPAIGN_EXPORT_RECIPIENT: z.string().optional(),
-  /** Optional last-resort recipient when a job has no requested_by and no override. */
+  CAMPAIGN_EXPORT_RECIPIENT: z.enum(['requester', 'network_admin']).default('requester'),
+  /** Recipient used when CAMPAIGN_EXPORT_RECIPIENT=network_admin. */
   EXPORT_NETWORK_ADMIN_EMAIL: z.string().optional(),
   /**
    * A campaign job whose `last_progress_at` is older than this (seconds) is
