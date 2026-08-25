@@ -34,23 +34,27 @@ describe('startHealthServer', () => {
     expect(JSON.parse(body)).toEqual({ status: 'ok', redis: 'ready' });
   });
 
-  it('returns 503 when Redis ping rejects', async () => {
+  it('stays 200 but reports degraded when Redis ping rejects', async () => {
+    // Liveness must NOT fail on an unreachable Redis: a restart cannot bring
+    // Redis back, so a non-2xx here would CrashLoopBackOff every replica
+    // through the outage and leave them backing off once it recovers.
     server = startHealthServer(
       0,
       fakeRedis(async () => Promise.reject(new Error('down'))),
     );
     const { status, body } = await get(server, '/healthz');
-    expect(status).toBe(503);
-    expect(JSON.parse(body)).toEqual({ status: 'unhealthy', redis: 'unreachable' });
+    expect(status).toBe(200);
+    expect(JSON.parse(body)).toEqual({ status: 'degraded', redis: 'unreachable' });
   });
 
-  it('returns 503 when Redis ping never resolves (blocked/half-open)', async () => {
+  it('stays 200 but reports degraded when Redis ping never resolves (blocked/half-open)', async () => {
     server = startHealthServer(
       0,
       fakeRedis(() => new Promise(() => {})),
     );
-    const { status } = await get(server, '/healthz');
-    expect(status).toBe(503);
+    const { status, body } = await get(server, '/healthz');
+    expect(status).toBe(200);
+    expect(JSON.parse(body)).toEqual({ status: 'degraded', redis: 'unreachable' });
   }, 5000);
 
   it('returns 404 for any other path', async () => {
