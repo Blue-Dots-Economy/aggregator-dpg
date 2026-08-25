@@ -10710,25 +10710,12 @@
         }
       },
       "get": {
-        "summary": "List the org's campaign jobs (newest first)",
+        "summary": "List the org's export jobs (newest first)",
         "tags": [
           "campaign"
         ],
-        "description": "Returns the requesting org's campaign jobs, newest first, with derived status counts. Optional channel filter and cursor pagination (pass the returned next_cursor to page).",
+        "description": "Returns the requesting org's export jobs, newest first, with derived status counts. Cursor pagination — pass the returned next_cursor to page.",
         "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "enum": [
-                "export",
-                "email",
-                "voice"
-              ]
-            },
-            "in": "query",
-            "name": "channel",
-            "required": false
-          },
           {
             "schema": {
               "type": "integer",
@@ -10971,11 +10958,11 @@
     },
     "/v1/campaign/export/{job_id}": {
       "get": {
-        "summary": "Get one campaign job's status and per-item outcomes",
+        "summary": "Get one export job's status and per-item outcomes",
         "tags": [
           "campaign"
         ],
-        "description": "Returns the job status (derived from item counts) and each item id with its status and error reason. Tenant-scoped: a job owned by another org returns 404.",
+        "description": "Returns the job status (derived from item counts) and each item id with its status, provider ref and skip/error reason. Scoped to this org and to the export channel — a job belonging to another org or channel returns 403.",
         "parameters": [
           {
             "schema": {
