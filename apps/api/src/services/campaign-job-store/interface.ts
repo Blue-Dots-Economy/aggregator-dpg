@@ -43,12 +43,35 @@ export const SKIPPED_ITEM_STATUSES: readonly CampaignJobItemStatus[] = [
   'duplicate_active',
 ];
 
-/** Item statuses an item can no longer move out of (retry-safety guard). */
+/**
+ * Statuses a channel handler must never act on again when a job retries.
+ *
+ * NOT the same as "success": `resolved` is deliberately absent. Per the batch
+ * spec the guard is on `submitted`/`sent` — the states that mean an external
+ * side-effect already happened. `resolved` only means the item's data was
+ * fetched, which is an intermediate step for the multi-write channels (email
+ * resolves then sends; voice resolves then submits). Treating it as terminal
+ * would make the second write a no-op and every email job would report
+ * "completed, 0 sent". Export writes `resolved` last, and re-resolving on a
+ * retry is harmless — the spec calls export retry an idempotent rebuild.
+ */
 export const TERMINAL_ITEM_STATUSES: readonly CampaignJobItemStatus[] = [
-  ...SUCCESS_ITEM_STATUSES,
+  'submitted',
+  'sent',
   ...SKIPPED_ITEM_STATUSES,
   'failed',
 ];
+
+/**
+ * The retry guard rendered for a SQL `NOT IN (...)` predicate, so the Postgres
+ * stores can't drift from {@link TERMINAL_ITEM_STATUSES}. Values are a fixed
+ * enum, never user input.
+ *
+ * @returns e.g. `'submitted','sent','skipped_not_owned',…`
+ */
+export function terminalItemStatusSqlList(): string {
+  return TERMINAL_ITEM_STATUSES.map((s) => `'${s}'`).join(',');
+}
 
 /** Statuses that keep an item inside the active-dedup predicate. */
 export const ACTIVE_DEDUP_ITEM_STATUSES: readonly CampaignJobItemStatus[] = [
@@ -199,8 +222,17 @@ export abstract class CampaignJobStoreBase {
     input: CreateJobInput,
   ): Promise<StoreResult<{ job: JobRecord; created: boolean }>>;
 
-  /** Count a tenant's active (pending|processing) jobs — for the per-org cap. */
-  abstract countActiveJobs(signalstackOrgId: string): Promise<StoreResult<number>>;
+  /**
+   * Count a tenant's active (queued|processing) jobs — for the per-org cap.
+   *
+   * @param channel - Restrict the count to one channel. The cap is per-channel
+   *   (`CAMPAIGN_<CHANNEL>_MAX_ACTIVE_PER_ORG`), so an export must not be
+   *   throttled by in-flight email jobs. Omit to count every channel.
+   */
+  abstract countActiveJobs(
+    signalstackOrgId: string,
+    channel?: CampaignChannel,
+  ): Promise<StoreResult<number>>;
 
   /** Tenant-scoped job detail (with derived counts); null when absent/not owned. */
   abstract getJob(jobId: string, signalstackOrgId: string): Promise<StoreResult<JobView | null>>;
@@ -229,12 +261,15 @@ export abstract class CampaignJobStoreBase {
    *
    * @param reason - Free-text cause. Stored in `skip_reason` when `status` is a
    *   skip terminal, otherwise in `error_reason`.
+   * @param providerRef - External id the channel produced for this item (voice:
+   *   Raya call id; email: message id). Ignored when absent.
    */
   abstract markItem(
     jobId: string,
     itemId: string,
     status: CampaignJobItemStatus,
     reason?: string,
+    providerRef?: string,
   ): Promise<StoreResult<void>>;
 
   /** Stamps `last_progress_at = now()` (watchdog heartbeat). */

@@ -44,6 +44,20 @@ describe('enqueueCampaignProcess', () => {
     expect(opts).toEqual({ jobId: 'job-123' });
   });
 
+  it('passes the caller channel attempts per enqueue, not per queue', async () => {
+    // One queue serves export/email/voice, so attempts must not be baked into
+    // defaultJobOptions — otherwise export's knob would govern every channel.
+    addMock.mockResolvedValueOnce(undefined);
+    await enqueueCampaignProcess({ jobId: 'job-a' }, { attempts: 7 });
+    expect(addMock.mock.calls[0]![2]).toEqual({ jobId: 'job-a', attempts: 7 });
+  });
+
+  it('omits attempts when the caller does not set one', async () => {
+    addMock.mockResolvedValueOnce(undefined);
+    await enqueueCampaignProcess({ jobId: 'job-b' });
+    expect(addMock.mock.calls[0]![2]).toEqual({ jobId: 'job-b' });
+  });
+
   it('reuses the singleton queue across calls', async () => {
     addMock.mockResolvedValue(undefined);
     await enqueueCampaignProcess({ jobId: 'a' });

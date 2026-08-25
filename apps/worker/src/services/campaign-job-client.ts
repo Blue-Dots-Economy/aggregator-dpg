@@ -37,9 +37,13 @@ export const SKIPPED_ITEM_STATUSES: readonly CampaignJobItemStatus[] = [
   'duplicate_active',
 ];
 
-/** Item statuses an item can no longer move out of (retry-safety guard). */
+/**
+ * Statuses a channel handler must never act on again when a job retries.
+ * `resolved` is deliberately absent — it means "data fetched", an intermediate
+ * step for email (resolve → send) and voice (resolve → submit). Twin of the
+ * API-side constant; keep the two in step.
+ */
 export const TERMINAL_ITEM_STATUSES: readonly CampaignJobItemStatus[] = [
-  'resolved',
   'submitted',
   'sent',
   'skipped_not_owned',
@@ -47,6 +51,9 @@ export const TERMINAL_ITEM_STATUSES: readonly CampaignJobItemStatus[] = [
   'duplicate_active',
   'failed',
 ];
+
+/** The guard rendered for a SQL `NOT IN (...)`, derived so it can't drift. */
+const TERMINAL_SQL_LIST = TERMINAL_ITEM_STATUSES.map((s) => `'${s}'`).join(',');
 
 /** Job statuses a job can no longer move out of. */
 export const TERMINAL_JOB_STATUSES: readonly CampaignJobStatus[] = [
@@ -158,6 +165,7 @@ export async function markItem(
   itemId: string,
   status: CampaignJobItemStatus,
   reason?: string,
+  providerRef?: string,
 ): Promise<void> {
   await getDb()
     .update(campaignJobItem)
@@ -166,6 +174,7 @@ export async function markItem(
       // A skip is not an error: its reason belongs in `skip_reason`.
       skipReason: SKIPPED_ITEM_STATUSES.includes(status) ? (reason ?? null) : null,
       errorReason: SKIPPED_ITEM_STATUSES.includes(status) ? null : (reason ?? null),
+      ...(providerRef !== undefined ? { providerRef } : {}),
       updatedAt: new Date(),
       ...(TERMINAL_ITEM_STATUSES.includes(status) ? { completedAt: new Date() } : {}),
     })
@@ -173,7 +182,7 @@ export async function markItem(
       and(
         eq(campaignJobItem.jobId, jobId),
         eq(campaignJobItem.itemId, itemId),
-        sql`${campaignJobItem.status} NOT IN ('resolved','submitted','sent','skipped_not_owned','skipped_no_contact','duplicate_active','failed')`,
+        sql.raw(`"campaign_job_item"."status" NOT IN (${TERMINAL_SQL_LIST})`),
       ),
     );
 }

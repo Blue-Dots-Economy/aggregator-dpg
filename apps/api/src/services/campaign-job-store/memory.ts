@@ -14,6 +14,7 @@ import {
   SKIPPED_ITEM_STATUSES,
   TERMINAL_ITEM_STATUSES,
   CampaignJobStoreBase,
+  type CampaignChannel,
   type CampaignJobItemStatus,
   type CampaignJobStatus,
   type CreateJobInput,
@@ -107,10 +108,17 @@ export class InMemoryCampaignJobStore extends CampaignJobStoreBase {
     return { ok: true, value: { job: this.toRecord(row), created: true } };
   }
 
-  async countActiveJobs(signalstackOrgId: string): Promise<StoreResult<number>> {
+  async countActiveJobs(
+    signalstackOrgId: string,
+    channel?: CampaignChannel,
+  ): Promise<StoreResult<number>> {
     let n = 0;
     for (const job of this.jobs.values()) {
-      if (job.signalstackOrgId === signalstackOrgId && ACTIVE_JOB_STATUSES.includes(job.status)) {
+      if (
+        job.signalstackOrgId === signalstackOrgId &&
+        ACTIVE_JOB_STATUSES.includes(job.status) &&
+        (channel === undefined || job.channel === channel)
+      ) {
         n++;
       }
     }
@@ -176,6 +184,7 @@ export class InMemoryCampaignJobStore extends CampaignJobStoreBase {
     itemId: string,
     status: CampaignJobItemStatus,
     reason?: string,
+    providerRef?: string,
   ): Promise<StoreResult<void>> {
     const rows = this.items.get(jobId);
     const item = rows?.find((i) => i.itemId === itemId);
@@ -186,6 +195,7 @@ export class InMemoryCampaignJobStore extends CampaignJobStoreBase {
       item.status = status;
       item.skipReason = isSkip ? (reason ?? null) : null;
       item.errorReason = isSkip ? null : (reason ?? null);
+      if (providerRef !== undefined) item.providerRef = providerRef;
       this.touch(jobId);
     }
     return { ok: true, value: undefined };

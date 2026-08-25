@@ -136,8 +136,12 @@ const ConfigSchema = z.object({
    * the link and the file expire together.
    */
   EXPORT_URL_TTL_SECONDS: z.coerce.number().int().positive().default(86400),
-  /** How many campaign-process jobs this process runs in parallel. Default 2. */
-  CAMPAIGN_EXPORT_CONCURRENCY: z.coerce.number().int().positive().default(2),
+  /**
+   * How many campaign-process jobs this process runs in parallel, across every
+   * channel — one queue and one worker role serve export, email and voice.
+   * Default 2.
+   */
+  CAMPAIGN_CONCURRENCY: z.coerce.number().int().positive().default(2),
   /** Items per Signals decrypt chunk (bounds request size + gives heartbeat cadence). */
   CAMPAIGN_DECRYPT_CHUNK: z.coerce.number().int().positive().default(500),
   /**

@@ -95,7 +95,8 @@ export async function registerCampaignExportRoutes(app: FastifyInstance): Promis
 
       // Ingress rate-limit, per org. Fails open on a Redis blip (see consume).
       const rl = await consume({
-        namespace: 'campaign-submit',
+        // Per-channel bucket: an export burst must not throttle email/voice.
+        namespace: 'campaign-submit-export',
         key: orgId,
         windowSeconds: config.CAMPAIGN_EXPORT_SUBMIT_WINDOW_SECONDS,
         max: config.CAMPAIGN_EXPORT_SUBMIT_MAX,
@@ -108,7 +109,7 @@ export async function registerCampaignExportRoutes(app: FastifyInstance): Promis
       const store = getCampaignJobStore();
 
       // Per-org active-job cap.
-      const active = await store.countActiveJobs(orgId);
+      const active = await store.countActiveJobs(orgId, 'export');
       if (!active.ok) throw httpError('INTERNAL', { detail: 'could not read active job count' });
       if (active.value >= config.CAMPAIGN_EXPORT_MAX_ACTIVE_PER_ORG) {
         throw httpError('CAMPAIGN_ACTIVE_LIMIT', {
@@ -134,7 +135,10 @@ export async function registerCampaignExportRoutes(app: FastifyInstance): Promis
       // job id without queuing a duplicate.
       if (created.value.created) {
         try {
-          await enqueueCampaignProcess({ jobId: created.value.job.id });
+          await enqueueCampaignProcess(
+            { jobId: created.value.job.id },
+            { attempts: config.CAMPAIGN_EXPORT_ATTEMPTS },
+          );
         } catch (cause) {
           throw httpError('EXPORT_ENQUEUE_FAILED', {
             detail: cause instanceof Error ? cause.message : 'failed to enqueue export',

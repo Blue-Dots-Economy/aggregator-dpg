@@ -32,9 +32,12 @@ function getConnection(): Redis {
 
 function getProcessQueue(): Queue<CampaignProcessJob> {
   if (processQueue) return processQueue;
+  // No `attempts` here: one queue serves every channel, so baking in the
+  // export knob would silently govern email and voice too. Callers pass their
+  // own CAMPAIGN_<CHANNEL>_ATTEMPTS per enqueue.
   processQueue = new Queue<CampaignProcessJob>(QueueName.CampaignProcess, {
     connection: getConnection(),
-    defaultJobOptions: { ...CAMPAIGN_PROCESS_JOB_OPTS, attempts: config.CAMPAIGN_EXPORT_ATTEMPTS },
+    defaultJobOptions: CAMPAIGN_PROCESS_JOB_OPTS,
   });
   return processQueue;
 }
@@ -46,11 +49,19 @@ function getProcessQueue(): Queue<CampaignProcessJob> {
  * surface a 503 rather than acknowledge a job that was never queued.
  *
  * @param payload - `{ jobId }` — the campaign_job row to process.
+ * @param opts.attempts - Retry count for this channel
+ *   (`CAMPAIGN_<CHANNEL>_ATTEMPTS`). Falls back to the shared default.
  */
-export async function enqueueCampaignProcess(payload: CampaignProcessJob): Promise<void> {
+export async function enqueueCampaignProcess(
+  payload: CampaignProcessJob,
+  opts: { attempts?: number } = {},
+): Promise<void> {
   const start = Date.now();
   try {
-    await getProcessQueue().add(QueueName.CampaignProcess, payload, { jobId: payload.jobId });
+    await getProcessQueue().add(QueueName.CampaignProcess, payload, {
+      jobId: payload.jobId,
+      ...(opts.attempts !== undefined ? { attempts: opts.attempts } : {}),
+    });
     logger.info({
       operation: 'campaignProcessQueue.enqueue',
       status: 'success',

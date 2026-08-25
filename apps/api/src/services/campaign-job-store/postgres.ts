@@ -16,8 +16,10 @@ import {
   ACTIVE_JOB_STATUSES,
   SKIPPED_ITEM_STATUSES,
   TERMINAL_ITEM_STATUSES,
+  terminalItemStatusSqlList,
   TERMINAL_JOB_STATUSES,
   CampaignJobStoreBase,
+  type CampaignChannel,
   type CampaignJobItemStatus,
   type CampaignJobStatus,
   type CreateJobInput,
@@ -106,7 +108,10 @@ export class PostgresCampaignJobStore extends CampaignJobStoreBase {
     }
   }
 
-  async countActiveJobs(signalstackOrgId: string): Promise<StoreResult<number>> {
+  async countActiveJobs(
+    signalstackOrgId: string,
+    channel?: CampaignChannel,
+  ): Promise<StoreResult<number>> {
     const start = Date.now();
     try {
       const rows = await getDb()
@@ -116,6 +121,7 @@ export class PostgresCampaignJobStore extends CampaignJobStoreBase {
           and(
             eq(campaignJob.signalstackOrgId, signalstackOrgId),
             inArray(campaignJob.status, [...ACTIVE_JOB_STATUSES]),
+            ...(channel ? [eq(campaignJob.channel, channel)] : []),
           ),
         );
       return { ok: true, value: Number(rows[0]?.n ?? 0) };
@@ -258,6 +264,7 @@ export class PostgresCampaignJobStore extends CampaignJobStoreBase {
     itemId: string,
     status: CampaignJobItemStatus,
     reason?: string,
+    providerRef?: string,
   ): Promise<StoreResult<void>> {
     const start = Date.now();
     try {
@@ -270,6 +277,7 @@ export class PostgresCampaignJobStore extends CampaignJobStoreBase {
           status,
           skipReason: isSkip ? (reason ?? null) : null,
           errorReason: isSkip ? null : (reason ?? null),
+          ...(providerRef !== undefined ? { providerRef } : {}),
           updatedAt: now,
           ...(TERMINAL_ITEM_STATUSES.includes(status) ? { completedAt: now } : {}),
         })
@@ -278,7 +286,9 @@ export class PostgresCampaignJobStore extends CampaignJobStoreBase {
             eq(campaignJobItem.jobId, jobId),
             eq(campaignJobItem.itemId, itemId),
             // Forward-only: skip rows already in a terminal status.
-            sql`${campaignJobItem.status} NOT IN ('resolved','submitted','sent','skipped_not_owned','skipped_no_contact','duplicate_active','failed')`,
+            // Derived from TERMINAL_ITEM_STATUSES so this can't drift from the
+            // in-memory store (it did: the literal used to include 'resolved').
+            sql.raw(`"campaign_job_item"."status" NOT IN (${terminalItemStatusSqlList()})`),
           ),
         );
       return { ok: true, value: undefined };
