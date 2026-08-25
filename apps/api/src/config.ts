@@ -217,10 +217,27 @@ const ConfigSchema = z.object({
   CAMPAIGN_EXPORT_SUBMIT_MAX: z.coerce.number().int().positive().default(10),
   /** Max active (queued|processing) export jobs allowed per org at once. */
   CAMPAIGN_EXPORT_MAX_ACTIVE_PER_ORG: z.coerce.number().int().positive().default(3),
-  /** Max `item_ids` (recipients) accepted per `POST /v1/campaign/email` request body. */
-  EMAIL_MAX_RECIPIENTS: z.coerce.number().int().positive().default(200),
-  /** BullMQ attempts for a campaign-process job (retry count on transient failure). */
+  /** BullMQ attempts for an export campaign-process job (retry count on transient failure). */
   CAMPAIGN_EXPORT_ATTEMPTS: z.coerce.number().int().positive().default(3),
+
+  // ─── Campaign email channel (#578) ──────────────────────────────────────
+  // Deliberately its own knobs, not shared with the export channel above: an
+  // email blast and a PII export have different safe volumes and cadences.
+  /** Max `item_ids` (recipients) accepted per email request body (after de-dup). */
+  CAMPAIGN_EMAIL_MAX_ITEMS: z.coerce.number().int().positive().default(200),
+  /** Ingress rate-limit window (seconds) for email submits, per org. */
+  CAMPAIGN_EMAIL_SUBMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
+  /** Max email submits allowed per window, per org. */
+  CAMPAIGN_EMAIL_SUBMIT_MAX: z.coerce.number().int().positive().default(10),
+  /** Max active (queued|processing) email jobs allowed per org at once. */
+  CAMPAIGN_EMAIL_MAX_ACTIVE_PER_ORG: z.coerce.number().int().positive().default(3),
+  /**
+   * BullMQ attempts for an email campaign-process job. Retries are SAFE here
+   * (and deliberately kept at 3, not 1): the worker's per-item terminal-status
+   * guard means a retried job never re-emails an item already marked `sent`, so
+   * durability costs no duplicate sends.
+   */
+  CAMPAIGN_EMAIL_ATTEMPTS: z.coerce.number().int().positive().default(3),
 
   // ─── Approval links ───────────────────────────────────────────────────────
   /**

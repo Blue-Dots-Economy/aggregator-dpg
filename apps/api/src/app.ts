@@ -230,6 +230,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await registerCampaignExportRoutes(app);
   await registerCampaignEmailRoutes(app);
   await registerCampaignJobRoutes(app, 'export');
+  await registerCampaignJobRoutes(app, 'email');
 
   app.setErrorHandler((rawErr, req, reply) => {
     // Fastify schema validation error — promote to a typed HttpError so the

@@ -1,53 +1,54 @@
 /**
  * Campaign participant email (aggregator-dpg#578).
  *
- *   POST /v1/campaign/email → 202; enqueues a durable worker job.
+ *   POST /v1/campaign/email → 202 { job_id }
  *
- * Auth is a Keycloak Bearer token scoped to the campaign-manager client(s). The
- * route authenticates, derives the caller's Signals org id from the token's
- * `signalstack_org_id` claim, validates the request (recipients + subject +
- * Markdown body) and its placeholders, and enqueues a `campaign-email` job — the
- * decrypt → render → send work runs in `apps/worker` (the `email` role) with
- * send-once semantics. The route never returns PII — only a queued
- * acknowledgement; recipient emails are resolved server-side in the worker and
+ * Routes the email send through the durable campaign async-job engine (#579):
+ * it validates the shared request envelope plus the email-specific `content`
+ * block, fails closed on an unknown `{{placeholder}}`, applies request
+ * idempotency (`Idempotency-Key`), an ingress rate-limit and a per-org
+ * active-job cap, then in one transaction persists a `campaign_job` (+ one
+ * `campaign_job_item` per recipient) and enqueues a single `campaign-process`
+ * job carrying the job id. The decrypt → render → send work runs in
+ * `apps/worker` (the `campaign` role), writing per-recipient item status back so
+ * the caller can poll `GET /v1/campaign/email/{job_id}` for outcomes.
+ *
+ * Auth is a Keycloak Bearer token scoped to the campaign-manager client; the
+ * caller's Signals org id is the token's `signalstack_org_id` claim, which also
+ * scopes the decrypt (an unowned id is skipped, never leaked). The route never
+ * returns PII — recipient addresses are resolved server-side in the worker and
  * never leave the aggregator. Belongs to `@aggregator-dpg/api`.
  */
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { unknownPlaceholders } from '@aggregator-dpg/campaign-template';
-import { authenticate } from '../services/auth/access-token.js';
-import { enqueueCampaignEmail } from '../services/campaign-email-queue/index.js';
-import { config, campaignManagerAllowedAzp } from '../config.js';
+import { getCampaignJobStore } from '../services/campaign-job-store/index.js';
+import { enqueueCampaignProcess } from '../services/campaign-process-queue/index.js';
+import { campaignEnvelopeSchema, dedupeItemIds } from '../campaign/envelope.js';
+import { requireCampaignAuth, requireOrgId } from '../campaign/auth.js';
+import { consume } from '../services/rate-limiter/index.js';
+import { config } from '../config.js';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 
-const EmailRequestSchema = z
+/**
+ * The email channel's `content` block (contract spec §6). Strict: the only
+ * variance between the three campaign endpoints is this object, so an unknown
+ * key here is a client error, not a silently ignored field.
+ */
+const emailContentSchema = z
   .object({
-    item_ids: z.array(z.string().uuid()).min(1).max(config.EMAIL_MAX_RECIPIENTS),
     subject: z.string().trim().min(1).max(200),
     body_markdown: z.string().min(1).max(20000),
     reply_to: z.string().email().optional(),
-    purpose: z.string().trim().max(500).optional(),
   })
   .strict();
 
-/**
- * Unwrap the auth context or throw the catalogue error. Scoped to the
- * campaign-manager client(s): the `allowedAzp` override means this route accepts
- * ONLY tokens whose `azp` is in `CAMPAIGN_MANAGER_ALLOWED_AZP` (default
- * `campaign-manager`) — a portal/api/bff token is rejected here, and because the
- * global `KEYCLOAK_ALLOWED_AZP` excludes campaign-manager, a campaign-manager
- * token is in turn rejected by every other route (default-deny both ways).
- */
-async function requireAuth(req: FastifyRequest) {
-  const result = await authenticate(req, { allowedAzp: campaignManagerAllowedAzp() });
-  if (result.ok) return result.context;
-  const code = result.error.code === 'MISSING_AGGREGATOR_ID' ? 'FORBIDDEN' : 'UNAUTHORIZED';
-  throw httpError(code, { detail: result.error.message, fields: { reason: result.error.code } });
-}
+/** The shared envelope with the email `content` schema substituted in. */
+const emailRequestSchema = campaignEnvelopeSchema.extend({ content: emailContentSchema });
 
 /**
- * Registers the campaign-email route.
+ * Registers the campaign-email submit route.
  *
  * @param app - The Fastify instance to attach the route to.
  */
@@ -57,66 +58,115 @@ export async function registerCampaignEmailRoutes(app: FastifyInstance): Promise
     {
       schema: {
         tags: ['campaign'],
-        summary: 'Send an email to owned participants (async)',
+        summary: 'Email owned participants (async)',
         description:
-          'Enqueues a background job that emails the given owned participants a shared message (subject + Markdown body, with an optional fixed set of {{placeholder}} tokens personalised per recipient). Recipient email addresses are resolved server-side and never returned. Auth: Keycloak Bearer token scoped to the campaign-manager client; the caller org is derived from the token signalstack_org_id claim. Returns 202 once the job is durably queued.',
+          'Creates a durable campaign job that emails the given owned participants a shared message (subject + Markdown body, with an optional fixed set of {{placeholder}} tokens personalised per recipient). Body is the shared campaign envelope { item_ids, metadata[], content{subject, body_markdown, reply_to?} }. Recipient email addresses are resolved server-side and never returned. Send an Idempotency-Key header to make retries safe. Returns 202 { job_id }; poll GET /v1/campaign/email/{job_id} for per-recipient outcomes.',
         security: [{ bearerAuth: [] }],
-        body: EmailRequestSchema,
+        body: emailRequestSchema,
         response: {
           202: z.object({
             status: z.literal('queued'),
-            requested: z.number().int().nonnegative(),
+            requested: z.number().int(),
+            job_id: z.string().uuid(),
             message: z.string(),
           }),
-          ...errorResponses(400, 401, 403, 503),
+          ...errorResponses(400, 401, 403, 429, 503),
         },
       },
     },
     async (req, reply) => {
-      const auth = await requireAuth(req);
+      const auth = await requireCampaignAuth(req);
+      const orgId = requireOrgId(auth);
 
-      const orgId = auth.signalstackOrgId;
-      if (!orgId) {
-        throw httpError('FORBIDDEN', {
-          detail: 'token has no signalstack_org_id claim',
-          fields: { reason: 'MISSING_SIGNALSTACK_ORG' },
+      const envelope = req.body as z.infer<typeof emailRequestSchema>;
+      const itemIds = dedupeItemIds(envelope.item_ids);
+      if (itemIds.length > config.CAMPAIGN_EMAIL_MAX_ITEMS) {
+        throw httpError('CAMPAIGN_TOO_MANY_ITEMS', {
+          fields: { max: config.CAMPAIGN_EMAIL_MAX_ITEMS, received: itemIds.length },
         });
       }
 
-      const body = req.body as z.infer<typeof EmailRequestSchema>;
-
       // Fail-closed placeholder check: reject any {{token}} outside the fixed
-      // set before enqueuing, so a typo never ships to real inboxes.
-      const unknown = unknownPlaceholders(body.subject, body.body_markdown);
+      // set before the job is created, so a typo never ships to real inboxes.
+      const unknown = unknownPlaceholders(envelope.content.subject, envelope.content.body_markdown);
       if (unknown.length > 0) {
         throw httpError('UNKNOWN_PLACEHOLDER', { fields: { unknown } });
       }
 
-      // Validate + enqueue only. The send runs in the worker with send-once
-      // semantics; a failed enqueue (e.g. Redis unreachable) is the one
-      // API-side failure we surface, because a 202 must mean durably queued.
-      try {
-        await enqueueCampaignEmail({
-          orgId,
-          itemIds: body.item_ids,
-          subject: body.subject,
-          bodyMarkdown: body.body_markdown,
-          ...(body.reply_to ? { replyTo: body.reply_to } : {}),
-          ...(body.purpose ? { purpose: body.purpose } : {}),
-          requestId: req.id,
-        });
-      } catch (cause) {
-        throw httpError('EMAIL_ENQUEUE_FAILED', {
-          detail: cause instanceof Error ? cause.message : 'failed to enqueue email',
+      // Ingress rate-limit, per org, in the email channel's own bucket (its
+      // limits are separate from export's). Fails open on a Redis blip.
+      const rl = await consume({
+        namespace: 'campaign-submit-email',
+        key: orgId,
+        windowSeconds: config.CAMPAIGN_EMAIL_SUBMIT_WINDOW_SECONDS,
+        max: config.CAMPAIGN_EMAIL_SUBMIT_MAX,
+      });
+      if (!rl.allowed) {
+        reply.header('retry-after', String(rl.retryAfterSeconds));
+        throw httpError('CAMPAIGN_RATE_LIMITED', { fields: { retry_after: rl.retryAfterSeconds } });
+      }
+
+      const store = getCampaignJobStore();
+
+      // Per-org active-job cap, counted within the email channel only.
+      const active = await store.countActiveJobs(orgId, 'email');
+      if (!active.ok) throw httpError('INTERNAL', { detail: 'could not read active job count' });
+      if (active.value >= config.CAMPAIGN_EMAIL_MAX_ACTIVE_PER_ORG) {
+        throw httpError('CAMPAIGN_ACTIVE_LIMIT', {
+          fields: { max: config.CAMPAIGN_EMAIL_MAX_ACTIVE_PER_ORG },
         });
       }
 
+      const idempotencyKey = readIdempotencyKey(req);
+      const created = await store.createJob({
+        aggregatorId: auth.aggregatorId,
+        signalstackOrgId: orgId,
+        channel: 'email',
+        metadata: envelope.metadata,
+        // The template lives on the job row, so a retried/replayed job re-reads
+        // exactly what was submitted rather than trusting a queue payload.
+        content: envelope.content,
+        // Audit trail only — the email channel resolves every recipient from
+        // the decrypt, so this is never used as a destination.
+        requestedBy: auth.email ?? auth.aggregatorId,
+        requestId: req.id,
+        ...(idempotencyKey ? { idempotencyKey } : {}),
+        // `action: null` keeps email out of the item-level active-dedup
+        // predicate — dedup is ON for voice only (batch spec §3.2).
+        items: itemIds.map((id) => ({ itemId: id, action: null })),
+      });
+      if (!created.ok) throw httpError('INTERNAL', { detail: 'could not create campaign job' });
+
+      // Only enqueue on first creation. An idempotency replay returns the same
+      // job id without queuing a duplicate send.
+      if (created.value.created) {
+        try {
+          await enqueueCampaignProcess(
+            { jobId: created.value.job.id },
+            { attempts: config.CAMPAIGN_EMAIL_ATTEMPTS },
+          );
+        } catch (cause) {
+          throw httpError('EMAIL_ENQUEUE_FAILED', {
+            detail: cause instanceof Error ? cause.message : 'failed to enqueue email',
+          });
+        }
+      }
+
       return reply.code(202).send({
-        status: 'queued',
-        requested: body.item_ids.length,
+        status: 'queued' as const,
+        requested: itemIds.length,
+        job_id: created.value.job.id,
         message:
-          'Your campaign email has been queued and will be sent to the resolved participants shortly.',
+          'Your campaign email has been queued. Poll GET /v1/campaign/email/{job_id} for per-recipient outcomes.',
       });
     },
   );
+}
+
+/** Reads the `Idempotency-Key` request header (Fastify lowercases header names). */
+function readIdempotencyKey(req: FastifyRequest): string | undefined {
+  const raw = req.headers['idempotency-key'];
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  const trimmed = value?.trim();
+  return trimmed || undefined;
 }
