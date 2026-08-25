@@ -161,10 +161,77 @@ export const NetworkBindingSchema = z.object({
    * set.
    */
   source: z.string().url().optional(),
+  /**
+   * URL of the upstream participant `consent.json` (Terms / Privacy /
+   * profile-creation), fetched over HTTPS exactly like {@link source} — same
+   * timeout + last-known-good cache. Typically the sibling of `source` in the
+   * schemas repo. Optional in the YAML because a deployment may provide it via
+   * the `AGGREGATOR_PARTICIPANT_CONSENT_SOURCE` env override instead, or omit it entirely
+   * (the web app then falls back to the on-disk participant `consent.json`).
+   */
+  consent_source: z.string().url().optional(),
   field_overrides: z.record(z.string(), IdentitySelectorsSchema).optional(),
   csv_array_delimiter: z.string().min(1).default('|'),
 });
 export type NetworkBinding = z.infer<typeof NetworkBindingSchema>;
+
+/** One title+content version entry of a participant consent document. */
+export const ConsentDocVersionSchema = z
+  .object({
+    version: z.number(),
+    title: z.string(),
+    content: z.string(),
+    effective_from: z.string().optional(),
+  })
+  .passthrough();
+
+/** One statement-only version entry (profile-creation consent). */
+export const ConsentStatementVersionSchema = z
+  .object({
+    version: z.number(),
+    statement: z.string(),
+    effective_from: z.string().optional(),
+  })
+  .passthrough();
+
+/**
+ * Participant `consent.json` document fetched from
+ * {@link NetworkBindingSchema.consent_source}. Deliberately lenient
+ * (`passthrough`, all-optional) — its role is to reject a non-JSON / wrong-shape
+ * body (e.g. a GitHub 404 page) on fetch, not to fully model Signals' schema.
+ * The web app renders the current-version entries and the `__SUPPORT_EMAIL__`
+ * token from this shape.
+ */
+export const ParticipantConsentDocSchema = z
+  .object({
+    documents: z
+      .object({
+        terms: z
+          .object({
+            current_version: z.number(),
+            versions: z.array(ConsentDocVersionSchema),
+          })
+          .passthrough()
+          .optional(),
+        privacy: z
+          .object({
+            current_version: z.number(),
+            versions: z.array(ConsentDocVersionSchema),
+          })
+          .passthrough()
+          .optional(),
+        profile_creation: z
+          .object({
+            current_version: z.number(),
+            versions: z.array(ConsentStatementVersionSchema),
+          })
+          .passthrough()
+          .optional(),
+      })
+      .passthrough(),
+  })
+  .passthrough();
+export type ParticipantConsentDoc = z.infer<typeof ParticipantConsentDocSchema>;
 
 /**
  * Onboarding behaviour toggles.
@@ -406,6 +473,14 @@ export interface ResolvedNetworkConfig {
    * network.json doesn't declare the block.
    */
   dashboardBuckets?: DashboardBuckets;
+  /**
+   * Participant registration-link consent document fetched from
+   * {@link NetworkBindingSchema.consent_source} (over HTTPS, cache-backed like
+   * `network.json`). Undefined when no `consent_source` is configured or the
+   * fetch failed with no cached copy — the web app then falls back to its
+   * on-disk participant `consent.json`.
+   */
+  participantConsent?: ParticipantConsentDoc;
 }
 
 // ─── Loader port ─────────────────────────────────────────────────────────────

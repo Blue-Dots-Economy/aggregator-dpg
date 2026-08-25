@@ -364,6 +364,10 @@ services:
       AGGREGATOR_NETWORK: ${AGGREGATOR_NETWORK:-blue_dot}
       AGGREGATOR_BRAND: ${AGGREGATOR_BRAND:-}
       CONFIG_ROOT: /app/config
+      # Consent `__SUPPORT_EMAIL__` token (Terms/Privacy/Grievances) reuses the
+      # aggregator's existing SUPPORT_EMAIL — no separate var. Empty ⇒ default
+      # hello@bluedotseconomy.org.
+      CONSENT_SUPPORT_EMAIL: ${SUPPORT_EMAIL:-}
     # No host port mapping — exposed only via nginx at /.
     # Resolve PUBLIC_HOST (the VM's public IP) to the docker host gateway so
     # the BFF's back-channel OIDC discovery + token exchange reaches nginx via
@@ -482,6 +486,10 @@ services:
       # Deploy-time override for the signalstack network.json URL (#512);
       # empty = use `aggregator.network.source` from the YAML.
       AGGREGATOR_NETWORK_SOURCE: ${AGGREGATOR_NETWORK_SOURCE:-}
+      # Deploy-time override for the participant consent.json URL (ConfigMap-
+      # injected by automation); empty = use `aggregator.network.consent_source`
+      # from the YAML, or fall back to the on-disk copy when neither is set.
+      AGGREGATOR_PARTICIPANT_CONSENT_SOURCE: ${AGGREGATOR_PARTICIPANT_CONSENT_SOURCE:-}
       # Force-empty so the app derives the config path from CONFIG_ROOT +
       # AGGREGATOR_NETWORK. Exporting the key (even empty) stops dotenv from
       # loading a stale host path baked into the image's /app/.env.
@@ -572,6 +580,10 @@ services:
       # Deploy-time override for the signalstack network.json URL (#512);
       # empty = use `aggregator.network.source` from the YAML.
       AGGREGATOR_NETWORK_SOURCE: ${AGGREGATOR_NETWORK_SOURCE:-}
+      # Deploy-time override for the participant consent.json URL (ConfigMap-
+      # injected by automation); empty = use `aggregator.network.consent_source`
+      # from the YAML, or fall back to the on-disk copy when neither is set.
+      AGGREGATOR_PARTICIPANT_CONSENT_SOURCE: ${AGGREGATOR_PARTICIPANT_CONSENT_SOURCE:-}
       # Force-empty so the app derives the config path from CONFIG_ROOT +
       # AGGREGATOR_NETWORK (stops dotenv loading a stale host path baked in).
       AGGREGATOR_CONFIG_PATH: ${AGGREGATOR_CONFIG_PATH:-}

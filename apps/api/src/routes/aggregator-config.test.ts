@@ -240,4 +240,28 @@ describe('GET /v1/aggregator-config', () => {
     expect(body.registration_modes.profile_mode?.signals_cta).toBe(true);
     expect(body.registration_modes.account_mode?.signals_cta).toBe(false);
   });
+
+  it('GET /v1/participant-consent returns the resolved consent document', async () => {
+    const doc = {
+      documents: {
+        terms: { current_version: 1, versions: [{ version: 1, title: 'T', content: 'c' }] },
+        privacy: { current_version: 1, versions: [{ version: 1, title: 'P', content: 'p' }] },
+      },
+    };
+    _setNetworkConfig(buildBlueDotConfig({ participantConsent: doc }));
+
+    const res = await app.inject({ method: 'GET', url: '/v1/participant-consent' });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { participant_consent: typeof doc | null };
+    expect(body.participant_consent).toEqual(doc);
+  });
+
+  it('GET /v1/participant-consent returns null when no consent_source is configured', async () => {
+    _setNetworkConfig(buildBlueDotConfig());
+
+    const res = await app.inject({ method: 'GET', url: '/v1/participant-consent' });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { participant_consent: unknown };
+    expect(body.participant_consent).toBeNull();
+  });
 });
