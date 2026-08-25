@@ -599,7 +599,7 @@ services:
       SES_CONFIGURATION_SET: ${SES_CONFIGURATION_SET:-}
       # ─── Campaign async-job engine tunables (#579) ─────────────────
       EXPORT_URL_TTL_SECONDS: ${EXPORT_URL_TTL_SECONDS:-86400}
-      CAMPAIGN_EXPORT_CONCURRENCY: ${CAMPAIGN_EXPORT_CONCURRENCY:-2}
+      CAMPAIGN_CONCURRENCY: ${CAMPAIGN_CONCURRENCY:-2}
       # ─── Campaign email channel tunable (#578) ─────────────────────
       EMAIL_SEND_CONCURRENCY: ${EMAIL_SEND_CONCURRENCY:-5}
       CAMPAIGN_DECRYPT_CHUNK: ${CAMPAIGN_DECRYPT_CHUNK:-500}

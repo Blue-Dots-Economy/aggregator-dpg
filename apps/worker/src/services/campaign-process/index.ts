@@ -178,9 +178,9 @@ interface DecryptOptions {
    */
   contact: ContactField[] | null;
   /**
-   * Mark every resolved item `resolved`. True for export, whose success
-   * terminal IS "decrypted into the CSV"; false for email, which must leave the
-   * item non-terminal so the send loop can mark it `sent`/`failed` after.
+   * Mark every decrypted item `resolved`. True for export, whose success
+   * terminal IS "decrypted into the CSV"; false for email, which acts after the
+   * decrypt and writes `sent`/`failed` per recipient instead.
    */
   markResolved: boolean;
 }
@@ -318,8 +318,8 @@ async function runEmailForJob(job: ProcessingJob, deps: CampaignJobDeps): Promis
   const rows = await decryptAndMarkItems(job, deps, {
     itemIds: pending.map((i) => i.itemId),
     contact,
-    // Email's success terminal is `sent`, written per recipient below — marking
-    // `resolved` here would make the item terminal before it was ever emailed.
+    // `sent` is the email channel's only success write (per recipient, below),
+    // so the intermediate `resolved` mark would be a wasted write per item.
     markResolved: false,
   });
 

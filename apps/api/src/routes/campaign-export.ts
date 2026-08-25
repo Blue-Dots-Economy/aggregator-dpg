@@ -96,6 +96,7 @@ export async function registerCampaignExportRoutes(app: FastifyInstance): Promis
       // Ingress rate-limit, per org, in the export channel's own bucket (its
       // limits are separate from email's). Fails open on a Redis blip.
       const rl = await consume({
+        // Per-channel bucket: an export burst must not throttle email/voice.
         namespace: 'campaign-submit-export',
         key: orgId,
         windowSeconds: config.CAMPAIGN_EXPORT_SUBMIT_WINDOW_SECONDS,

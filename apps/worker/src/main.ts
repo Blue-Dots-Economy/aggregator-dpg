@@ -84,7 +84,7 @@ async function main(): Promise<void> {
       new Worker<CampaignProcessJob>(
         QueueName.CampaignProcess,
         async (job) => processCampaignJob(job.data),
-        { connection, concurrency: config.CAMPAIGN_EXPORT_CONCURRENCY },
+        { connection, concurrency: config.CAMPAIGN_CONCURRENCY },
       ),
     ]);
   }

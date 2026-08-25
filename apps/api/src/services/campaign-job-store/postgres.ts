@@ -16,6 +16,7 @@ import {
   ACTIVE_JOB_STATUSES,
   SKIPPED_ITEM_STATUSES,
   TERMINAL_ITEM_STATUSES,
+  terminalItemStatusSqlList,
   TERMINAL_JOB_STATUSES,
   CampaignJobStoreBase,
   type CampaignChannel,
@@ -285,7 +286,9 @@ export class PostgresCampaignJobStore extends CampaignJobStoreBase {
             eq(campaignJobItem.jobId, jobId),
             eq(campaignJobItem.itemId, itemId),
             // Forward-only: skip rows already in a terminal status.
-            sql`${campaignJobItem.status} NOT IN ('resolved','submitted','sent','skipped_not_owned','skipped_no_contact','duplicate_active','failed')`,
+            // Derived from TERMINAL_ITEM_STATUSES so this can't drift from the
+            // in-memory store (it did: the literal used to include 'resolved').
+            sql.raw(`"campaign_job_item"."status" NOT IN (${terminalItemStatusSqlList()})`),
           ),
         );
       return { ok: true, value: undefined };

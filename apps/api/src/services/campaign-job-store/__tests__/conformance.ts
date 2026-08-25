@@ -128,15 +128,31 @@ export function runStoreConformance(
       expect(unwrap(await store.rollUpStatus(job.id))).toBe('processing');
     });
 
+    it('allows resolved -> sent: resolve is a step, not a terminal', async () => {
+      // The multi-write channels resolve first and then act (email: sent,
+      // voice: submitted). If `resolved` were in the retry guard this second
+      // write would be refused and every email job would report 0 sent.
+      const store = makeStore();
+      const input = base();
+      const { job } = unwrap(await store.createJob(input));
+      const id = input.items[0]!.itemId;
+      unwrap(await store.markItem(job.id, id, 'resolved'));
+      unwrap(await store.markItem(job.id, id, 'sent', undefined, 'msg-123'));
+      const items = unwrap(await store.getJobItems(job.id, input.signalstackOrgId))!;
+      const item = items.find((i) => i.itemId === id)!;
+      expect(item.status).toBe('sent');
+      expect(item.providerRef).toBe('msg-123');
+    });
+
     it('markItem is forward-only — a terminal item is not overwritten', async () => {
       const store = makeStore();
       const input = base();
       const { job } = unwrap(await store.createJob(input));
-      unwrap(await store.markItem(job.id, input.items[0]!.itemId, 'resolved'));
+      unwrap(await store.markItem(job.id, input.items[0]!.itemId, 'sent'));
       unwrap(await store.markItem(job.id, input.items[0]!.itemId, 'failed', 'late failure'));
       const items = unwrap(await store.getJobItems(job.id, input.signalstackOrgId))!;
       const item = items.find((i) => i.itemId === input.items[0]!.itemId)!;
-      expect(item.status).toBe('resolved');
+      expect(item.status).toBe('sent');
       expect(item.errorReason).toBeNull();
     });
   });
@@ -201,19 +217,6 @@ export function runStoreConformance(
     });
   });
 
-  describe('provider ref', () => {
-    it('persists the provider ref passed with a terminal status', async () => {
-      const store = makeStore();
-      const input = base({ channel: 'email' });
-      const { job } = unwrap(await store.createJob(input));
-      unwrap(await store.markItem(job.id, input.items[0]!.itemId, 'sent', undefined, 'smtp-msg-1'));
-      const items = unwrap(await store.getJobItems(job.id, input.signalstackOrgId))!;
-      const item = items.find((i) => i.itemId === input.items[0]!.itemId)!;
-      expect(item.status).toBe('sent');
-      expect(item.providerRef).toBe('smtp-msg-1');
-    });
-  });
-
   describe('active-job cap', () => {
     it('counts only queued/processing jobs for the org', async () => {
       const store = makeStore();
@@ -226,12 +229,14 @@ export function runStoreConformance(
       expect(unwrap(await store.countActiveJobs('nobody'))).toBe(0);
     });
 
-    it('scopes the count to one channel when asked (per-channel caps)', async () => {
+    it('scopes the active count to one channel when asked', async () => {
       const store = makeStore();
       const org = `org-${randomUUID().slice(0, 8)}`;
       unwrap(await store.createJob(base({ signalstackOrgId: org, channel: 'export' })));
       unwrap(await store.createJob(base({ signalstackOrgId: org, channel: 'email' })));
       expect(unwrap(await store.countActiveJobs(org))).toBe(2);
+      // an in-flight email job must not consume the export channel's cap
+      expect(unwrap(await store.countActiveJobs(org, 'export'))).toBe(1);
       expect(unwrap(await store.countActiveJobs(org, 'email'))).toBe(1);
       expect(unwrap(await store.countActiveJobs(org, 'voice'))).toBe(0);
     });

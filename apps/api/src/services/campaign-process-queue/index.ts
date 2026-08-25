@@ -32,11 +32,11 @@ function getConnection(): Redis {
 
 function getProcessQueue(): Queue<CampaignProcessJob> {
   if (processQueue) return processQueue;
+  // No `attempts` here: one queue serves every channel, so baking in the
+  // export knob would silently govern email and voice too. Callers pass their
+  // own CAMPAIGN_<CHANNEL>_ATTEMPTS per enqueue.
   processQueue = new Queue<CampaignProcessJob>(QueueName.CampaignProcess, {
     connection: getConnection(),
-    // One queue, many channels: the retry count is a per-channel knob
-    // (CAMPAIGN_<CHANNEL>_ATTEMPTS), so each route passes its own at enqueue
-    // time and this default only applies if a caller omits it.
     defaultJobOptions: CAMPAIGN_PROCESS_JOB_OPTS,
   });
   return processQueue;
@@ -49,8 +49,8 @@ function getProcessQueue(): Queue<CampaignProcessJob> {
  * surface a 503 rather than acknowledge a job that was never queued.
  *
  * @param payload - `{ jobId }` — the campaign_job row to process.
- * @param opts - Per-channel overrides; `attempts` comes from the submitting
- *   channel's `CAMPAIGN_<CHANNEL>_ATTEMPTS`.
+ * @param opts.attempts - Retry count for this channel
+ *   (`CAMPAIGN_<CHANNEL>_ATTEMPTS`). Falls back to the shared default.
  */
 export async function enqueueCampaignProcess(
   payload: CampaignProcessJob,

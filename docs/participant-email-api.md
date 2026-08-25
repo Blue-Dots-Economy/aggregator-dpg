@@ -360,8 +360,8 @@ Per channel by design — the email knobs are never shared with export or voice.
 | `CAMPAIGN_MANAGER_ALLOWED_AZP`         | `campaign-manager` | The Keycloak client(s) permitted on the campaign endpoints.          |
 
 Shared with the rest of the engine: `CAMPAIGN_DECRYPT_CHUNK`,
-`CAMPAIGN_STALL_SECONDS`, `CAMPAIGN_EXPORT_CONCURRENCY` (parallel campaign jobs
-per worker process — all channels), plus the mail transport
+`CAMPAIGN_STALL_SECONDS`, `CAMPAIGN_CONCURRENCY` (parallel campaign jobs per
+worker process — all channels), plus the mail transport
 (`MAIL_PROVIDER` + `SMTP_*` / `SES_*`) and `REDIS_URL`.
 
 ---
