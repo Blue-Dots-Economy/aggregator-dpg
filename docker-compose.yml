@@ -478,13 +478,18 @@ services:
       BULK_UPLOAD_MAX_BYTES: ${BULK_UPLOAD_MAX_BYTES:-10485760}
       # Campaign PII export (#579): max item_ids accepted per request.
       CAMPAIGN_EXPORT_MAX_ITEMS: ${CAMPAIGN_EXPORT_MAX_ITEMS:-500}
-      # Campaign participant email (#578): max recipients accepted per request.
-      EMAIL_MAX_RECIPIENTS: ${EMAIL_MAX_RECIPIENTS:-200}
-      # Campaign async-job engine ingress controls (per signalstack org).
+      # Campaign async-job engine ingress controls (per signalstack org),
+      # per channel — export (#579) and email (#578) never share a budget.
       CAMPAIGN_EXPORT_SUBMIT_WINDOW_SECONDS: ${CAMPAIGN_EXPORT_SUBMIT_WINDOW_SECONDS:-60}
       CAMPAIGN_EXPORT_SUBMIT_MAX: ${CAMPAIGN_EXPORT_SUBMIT_MAX:-10}
       CAMPAIGN_EXPORT_MAX_ACTIVE_PER_ORG: ${CAMPAIGN_EXPORT_MAX_ACTIVE_PER_ORG:-3}
       CAMPAIGN_EXPORT_ATTEMPTS: ${CAMPAIGN_EXPORT_ATTEMPTS:-3}
+      # Campaign participant email (#578): recipients per request + ingress.
+      CAMPAIGN_EMAIL_MAX_ITEMS: ${CAMPAIGN_EMAIL_MAX_ITEMS:-200}
+      CAMPAIGN_EMAIL_SUBMIT_WINDOW_SECONDS: ${CAMPAIGN_EMAIL_SUBMIT_WINDOW_SECONDS:-60}
+      CAMPAIGN_EMAIL_SUBMIT_MAX: ${CAMPAIGN_EMAIL_SUBMIT_MAX:-10}
+      CAMPAIGN_EMAIL_MAX_ACTIVE_PER_ORG: ${CAMPAIGN_EMAIL_MAX_ACTIVE_PER_ORG:-3}
+      CAMPAIGN_EMAIL_ATTEMPTS: ${CAMPAIGN_EMAIL_ATTEMPTS:-3}
       PUBLIC_LINK_BASE_URL: ${PUBLIC_LINK_BASE_URL:-${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}}
       # Brand selectors — the api derives AGGREGATOR_CONFIG_PATH and SCHEMA_ROOT_DIR
       # from these two vars. Set AGGREGATOR_BRAND to select a brand subfolder (e.g. upsdm);
@@ -595,7 +600,7 @@ services:
       # ─── Campaign async-job engine tunables (#579) ─────────────────
       EXPORT_URL_TTL_SECONDS: ${EXPORT_URL_TTL_SECONDS:-86400}
       CAMPAIGN_EXPORT_CONCURRENCY: ${CAMPAIGN_EXPORT_CONCURRENCY:-2}
-      # ─── Campaign participant email tunable (#578) ─────────────────
+      # ─── Campaign email channel tunable (#578) ─────────────────────
       EMAIL_SEND_CONCURRENCY: ${EMAIL_SEND_CONCURRENCY:-5}
       CAMPAIGN_DECRYPT_CHUNK: ${CAMPAIGN_DECRYPT_CHUNK:-500}
       CAMPAIGN_EXPORT_FIELDS: ${CAMPAIGN_EXPORT_FIELDS:-contact}
