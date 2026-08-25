@@ -105,25 +105,41 @@ export const onboardingSourceEnum = pgEnum('onboarding_source', ['bulk', 'link']
 // is always DERIVED from item counts (never a stored counter — see
 // `campaign-job-store`), so it can't drift.
 
-/** Roll-up status of a whole campaign job, derived from its item statuses. */
+/**
+ * Roll-up status of a whole campaign job, derived from its item statuses.
+ * Names follow the async batch-processing design: a job is `queued` until the
+ * worker picks it up, then `processing`, then one of the three terminals —
+ * `completed` (no failures), `partial` (a mix), `failed` (nothing succeeded).
+ */
 export const campaignJobStatusEnum = pgEnum('campaign_job_status', [
-  'pending',
+  'queued',
   'processing',
-  'succeeded',
-  'partially_failed',
+  'partial',
+  'completed',
   'failed',
 ]);
 
 /**
- * Terminal-or-in-flight status of a single job item. `resolved` = the item's
- * data was fetched/produced (export); `submitted` = a channel side-effect was
- * dispatched (email/voice). Both are success terminals; `failed` is the error
- * terminal; `pending` is the only non-terminal value.
+ * Status of a single job item — the durable row-model shared by every channel.
+ *
+ * Non-terminal: `pending`.
+ * Success terminals: `resolved` (data fetched/produced — export), `submitted`
+ * (side-effect dispatched, outcome pending reconciliation — voice), `sent`
+ * (delivery confirmed — email).
+ * Skip terminals (not failures — they do not make a job `partial`):
+ * `skipped_not_owned` (the org does not own the item), `skipped_no_contact`
+ * (no address/number to reach), `duplicate_active` (the same (item, action) is
+ * already in flight elsewhere).
+ * Error terminal: `failed`.
  */
 export const campaignJobItemStatusEnum = pgEnum('campaign_job_item_status', [
   'pending',
   'resolved',
   'submitted',
+  'sent',
+  'skipped_not_owned',
+  'skipped_no_contact',
+  'duplicate_active',
   'failed',
 ]);
 
@@ -165,6 +181,20 @@ export const aggregators = pgTable(
     // Onboarding consent (snapshot at signup; aggregator must accept T&C
     // before the row is created). Refreshable via PATCH.
     consent: jsonb('consent').$type<ConsentRecord>().notNull(),
+
+    // Schema-driven registration payload (0018). Holds ONLY fields that have
+    // no column of their own — the typed columns above stay authoritative for
+    // everything they already carry, so there is never a second home for the
+    // same value. A new field on the registration schema lands here, which is
+    // what keeps a schema revision from needing a migration.
+    profile: jsonb('profile')
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    // Which schema variant produced `profile`, e.g. `blue_dot/up-gzb/registration.v1`.
+    // The schemas vary per use case, so a row that does not name its own
+    // contract cannot be interpreted later. NULL on rows created before 0018.
+    profileRef: text('profile_ref'),
 
     // Lifecycle
     status: aggregatorStatusEnum('status').notNull().default('pending'),
@@ -217,6 +247,16 @@ export const aggregatorOrgs = pgTable(
     ownerPhone: text('owner_phone'),
     ownerKcSub: text('owner_kc_sub'),
     kcGroupId: text('kc_group_id'),
+    // Schema-driven registration payload (0018) — see the note on
+    // `aggregators.profile`. `state` above stays authoritative for the state
+    // name; the rest of the address and every field added by the Aug 2026
+    // schema review live here.
+    profile: jsonb('profile')
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    /** Which schema variant produced `profile`, e.g. `blue_dot/org-registration.v1`. */
+    profileRef: text('profile_ref'),
     status: aggregatorStatusEnum('status').notNull().default('pending'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -337,6 +377,9 @@ export const registrationLinks = pgTable(
     domain: text('domain').notNull(),
     context: jsonb('context').$type<Record<string, unknown>>().notNull().default({}),
     registrationMode: text('registration_mode').notNull().default('form'),
+    // Legacy (#650): QR is now generated client-side; this is never written
+    // going forward. Retained one release for legacy reads — do NOT reintroduce
+    // a write. Drop in a follow-up migration.
     qrObjectKey: text('qr_object_key'),
     status: registrationLinkStatusEnum('status').notNull().default('draft'),
     expiresAt: timestamp('expires_at', { withTimezone: true }),
@@ -563,7 +606,7 @@ export const campaignJob = pgTable(
     // scope every read/list/cap query filters on.
     signalstackOrgId: text('signalstack_org_id').notNull(),
     channel: campaignChannelEnum('channel').notNull(),
-    status: campaignJobStatusEnum('status').notNull().default('pending'),
+    status: campaignJobStatusEnum('status').notNull().default('queued'),
     // Request idempotency: a repeated `Idempotency-Key` returns the original
     // job instead of creating a second one. NULL when the caller omits it.
     idempotencyKey: text('idempotency_key'),
@@ -588,6 +631,8 @@ export const campaignJob = pgTable(
     lastProgressAt: timestamp('last_progress_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    // Stamped when the job reaches a terminal status.
+    completedAt: timestamp('completed_at', { withTimezone: true }),
   },
   (table) => [
     // Request idempotency — unique only over rows that carry a key.
@@ -608,19 +653,35 @@ export const campaignJobItem = pgTable(
     jobId: uuid('job_id')
       .notNull()
       .references(() => campaignJob.id, { onDelete: 'cascade' }),
-    itemId: text('item_id').notNull(),
+    // Mirrors the parent job's channel so item-level queries (and the
+    // cross-job dedup sweep) don't need a join. Set once at insert.
+    channel: campaignChannelEnum('channel').notNull(),
+    itemId: uuid('item_id').notNull(),
     // The channel action being applied to the item (email/voice); NULL for
     // export (there is no per-item action), which turns OFF the active-dedup
     // constraint below for exports.
     action: text('action'),
     status: campaignJobItemStatusEnum('status').notNull().default('pending'),
+    // Provider linkage — the external id this item produced, so an async
+    // outcome can be reconciled back to the row (voice: Raya call id +
+    // batch id + last polled status; email: message id).
+    providerRef: text('provider_ref'),
+    rayaBatchId: text('raya_batch_id'),
+    lastProviderStatus: text('last_provider_status'),
+    // Why the item skipped or failed, and how many handler attempts it took.
+    skipReason: text('skip_reason'),
     errorReason: text('error_reason'),
+    attempts: integer('attempts').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    // Stamped when the item reaches a terminal status.
+    completedAt: timestamp('completed_at', { withTimezone: true }),
   },
   (table) => [
     // Derived-count + item-listing lookups.
     index('campaign_job_item_job_status_idx').on(table.jobId, table.status),
+    // One row per item per job — makes the insert idempotent under retry.
+    uniqueIndex('campaign_job_item_job_item_unique').on(table.jobId, table.itemId),
     // Item-level active dedup: the same (item, action) can't be in flight twice
     // across jobs. Only in-flight/succeeded rows count, and only when an action
     // is present — so exports (action IS NULL) are never deduplicated.

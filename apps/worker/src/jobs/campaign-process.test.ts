@@ -24,8 +24,8 @@ vi.mock('../config.js', () => ({
   config: {
     CAMPAIGN_DECRYPT_CHUNK: 500,
     CAMPAIGN_EXPORT_FIELDS: 'contact',
-    CAMPAIGN_EXPORT_RECIPIENT: 'admin@network.example',
-    EXPORT_NETWORK_ADMIN_EMAIL: undefined,
+    CAMPAIGN_EXPORT_RECIPIENT: 'network_admin',
+    EXPORT_NETWORK_ADMIN_EMAIL: 'admin@network.example',
   },
 }));
 
@@ -51,7 +51,8 @@ describe('processCampaignJob', () => {
     expect(jobId).toBe('job-1');
     expect(deps.config.decryptChunk).toBe(500);
     expect(deps.config.fieldSet).toBe('contact');
-    expect(deps.config.recipientOverride).toBe('admin@network.example');
+    expect(deps.config.recipientMode).toBe('network_admin');
+    expect(deps.config.networkAdminEmail).toBe('admin@network.example');
     expect(typeof deps.export.fetchDecryptedProfiles).toBe('function');
     expect(typeof deps.client.getJobForProcessing).toBe('function');
   });

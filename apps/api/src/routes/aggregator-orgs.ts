@@ -21,6 +21,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { orgHierarchyEnabled } from '../config.js';
 import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js';
+import { resolveProfileRef } from '../services/schema-ref.js';
 import { getIdpAdmin, KC_ATTR } from '../services/idp-admin/index.js';
 import { sendOrgReviewEmail } from '../services/org-registration-notify.js';
 import { normalisePhone } from '@aggregator-dpg/shared-primitives/phone';
@@ -47,7 +48,61 @@ const OrgCreateBodySchema = z.object({
     given_at: z.string(),
     valid_till: z.string(),
   }),
+  // Schema-driven fields from the Aug 2026 review. Present only on deployments
+  // whose org-registration schema declares them (UP-GZB today); every other
+  // network omits them and they stay undefined. All persist to
+  // `aggregator_orgs.profile` — none has a column of its own.
+  website: z.string().url().max(2048).optional(),
+  aggregator_type: z.array(z.enum(['seeker', 'provider', 'service_provider'])).optional(),
+  organisation_type: z.enum(['educational', 'non_educational']).optional(),
+  organisation_sub_type_educational: z.string().max(100).optional(),
+  organisation_sub_type_non_educational: z.string().max(100).optional(),
+  management_type: z.enum(['private', 'government', 'ngo', 'other']).optional(),
+  address: z
+    .object({
+      streetAddress: z.string().max(300).optional(),
+      addressLocality: z.string().max(200).optional(),
+      addressDistrict: z.string().max(200).optional(),
+      addressRegion: z.string().max(200).optional(),
+      postalCode: z.string().max(20).optional(),
+      addressCountry: z.string().max(100).optional(),
+    })
+    .optional(),
 });
+
+/**
+ * Body keys that already own a typed column on `aggregator_orgs`, and so must
+ * never be copied into `profile`.
+ *
+ * Keeping one authoritative home per field is what stops the jsonb payload and
+ * the columns drifting apart. `consent` is excluded because the consent ledger
+ * plus the existing column already record it.
+ */
+const ORG_COLUMN_BACKED_KEYS: ReadonlySet<string> = new Set([
+  'display_name',
+  'state',
+  'owner',
+  'consent',
+]);
+
+/**
+ * Collects the schema-driven fields of an org-registration body into the
+ * `profile` payload.
+ *
+ * Only keys with no column of their own are carried over, so adding a field to
+ * the org-registration schema needs no storage change — just an entry on
+ * {@link OrgCreateBodySchema}.
+ *
+ * @param body - Validated org-registration body.
+ * @returns The `profile` payload; `{}` when the deployment declares no extra fields.
+ */
+function buildOrgProfile(body: z.infer<typeof OrgCreateBodySchema>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(body).filter(
+      ([key, value]) => !ORG_COLUMN_BACKED_KEYS.has(key) && value !== undefined,
+    ),
+  );
+}
 
 const OrgCreatedResponseSchema = z
   .object({
@@ -166,13 +221,32 @@ export async function registerAggregatorOrgRoutes(app: FastifyInstance): Promise
         });
       }
 
+      const orgProfileRef = resolveProfileRef('org-registration.v1.json');
+      if (!orgProfileRef) {
+        log.warn(
+          {
+            operation: 'org-registration.create',
+            status: 'skipped',
+            sub_operation: 'resolveProfileRef',
+          },
+          'org-registration schema not found — storing profile without a variant ref',
+        );
+      }
       const slug = slugFromName(body.display_name);
       const created = await orgStore.create({
         slug,
         displayName: body.display_name,
-        state: body.state ?? null,
+        // `address.addressRegion` is the form's only State input on schemas that
+        // declare an address block; the standalone `state` field is hidden there.
+        // Prefer it so the column stays populated either way.
+        state: body.address?.addressRegion ?? body.state ?? null,
         ownerEmail: ownerEmail,
         ownerPhone: phoneE164,
+        profile: buildOrgProfile(body),
+        // Derived from the schema file that actually resolved, not from the
+        // brand env — a missing override must not be recorded as if its
+        // variant had produced the payload. NULL means "variant unknown".
+        profileRef: orgProfileRef,
       });
       if (!created.ok) {
         if (created.error.code === 'DUPLICATE_NAME') {

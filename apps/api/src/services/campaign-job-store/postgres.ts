@@ -14,6 +14,9 @@ import { campaignJob, campaignJobItem } from '../../db/schema.js';
 import { getDb } from '../../db/client.js';
 import {
   ACTIVE_JOB_STATUSES,
+  SKIPPED_ITEM_STATUSES,
+  TERMINAL_ITEM_STATUSES,
+  TERMINAL_JOB_STATUSES,
   CampaignJobStoreBase,
   type CampaignJobItemStatus,
   type CampaignJobStatus,
@@ -79,6 +82,7 @@ export class PostgresCampaignJobStore extends CampaignJobStoreBase {
           await tx.insert(campaignJobItem).values(
             input.items.map((i) => ({
               jobId: row!.id,
+              channel: input.channel,
               itemId: i.itemId,
               action: i.action,
             })),
@@ -253,19 +257,28 @@ export class PostgresCampaignJobStore extends CampaignJobStoreBase {
     jobId: string,
     itemId: string,
     status: CampaignJobItemStatus,
-    errorReason?: string,
+    reason?: string,
   ): Promise<StoreResult<void>> {
     const start = Date.now();
     try {
+      const now = new Date();
+      // A skip is not an error: its reason belongs in `skip_reason`.
+      const isSkip = SKIPPED_ITEM_STATUSES.includes(status);
       await getDb()
         .update(campaignJobItem)
-        .set({ status, errorReason: errorReason ?? null, updatedAt: new Date() })
+        .set({
+          status,
+          skipReason: isSkip ? (reason ?? null) : null,
+          errorReason: isSkip ? null : (reason ?? null),
+          updatedAt: now,
+          ...(TERMINAL_ITEM_STATUSES.includes(status) ? { completedAt: now } : {}),
+        })
         .where(
           and(
             eq(campaignJobItem.jobId, jobId),
             eq(campaignJobItem.itemId, itemId),
             // Forward-only: skip rows already in a terminal status.
-            sql`${campaignJobItem.status} NOT IN ('resolved','submitted','failed')`,
+            sql`${campaignJobItem.status} NOT IN ('resolved','submitted','sent','skipped_not_owned','skipped_no_contact','duplicate_active','failed')`,
           ),
         );
       return { ok: true, value: undefined };
@@ -300,6 +313,7 @@ export class PostgresCampaignJobStore extends CampaignJobStoreBase {
           status,
           ...(errorReason !== undefined ? { errorReason } : {}),
           updatedAt: new Date(),
+          ...(TERMINAL_JOB_STATUSES.includes(status) ? { completedAt: new Date() } : {}),
         })
         .where(eq(campaignJob.id, jobId));
       return { ok: true, value: undefined };
@@ -347,7 +361,17 @@ export class PostgresCampaignJobStore extends CampaignJobStoreBase {
 }
 
 function emptyCounts(): JobStatusCounts {
-  return { total: 0, pending: 0, resolved: 0, submitted: 0, failed: 0 };
+  return {
+    total: 0,
+    pending: 0,
+    resolved: 0,
+    submitted: 0,
+    sent: 0,
+    skipped_not_owned: 0,
+    skipped_no_contact: 0,
+    duplicate_active: 0,
+    failed: 0,
+  };
 }
 
 function toRecord(row: JobRow): JobRecord {
@@ -378,6 +402,8 @@ function toItemView(row: typeof campaignJobItem.$inferSelect): JobItemView {
     itemId: row.itemId,
     action: row.action,
     status: row.status,
+    providerRef: row.providerRef,
+    skipReason: row.skipReason,
     errorReason: row.errorReason,
   };
 }

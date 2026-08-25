@@ -59,6 +59,8 @@ describe('support routes (SUPPORT_EMAIL unset)', () => {
       headers: { authorization: 'Bearer good-token' },
     });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ enabled: false });
+    // Attachment limits are still reported when support is off (#551) — the
+    // form is hidden on `enabled`, not on the absence of the limits.
+    expect(res.json()).toMatchObject({ enabled: false, maxFiles: 3 });
   });
 });

@@ -4,6 +4,7 @@ import Image from 'next/image';
 import { useRef, useEffect } from 'react';
 import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../hooks/useAggregatorConfig';
 import { mix, parseHex } from '../../lib/hex-color';
+import { randomUnit } from '../../lib/random';
 
 interface Dot {
   ax: number;
@@ -80,22 +81,22 @@ export function BrandPanel(): JSX.Element {
       for (let r = 0; r < ROWS; r++) {
         for (let c = 0; c < COLS; c++) {
           if (next.length >= COUNT) break;
-          const cx = cellW * (c + 0.2 + Math.random() * 0.6);
-          const cy = cellH * (r + 0.2 + Math.random() * 0.6);
+          const cx = cellW * (c + 0.2 + randomUnit() * 0.6);
+          const cy = cellH * (r + 0.2 + randomUnit() * 0.6);
           next.push({
             ax: cx,
             ay: cy,
             x: cx,
             y: cy,
-            dPhaseX: Math.random() * Math.PI * 2,
-            dPhaseY: Math.random() * Math.PI * 2,
-            dSpeedX: 0.003 + Math.random() * 0.004,
-            dSpeedY: 0.003 + Math.random() * 0.004,
-            dAmpX: 6 + Math.random() * 10,
-            dAmpY: 6 + Math.random() * 10,
-            r: Math.random() * 1.6 + 1.6,
-            pulse: Math.random() * Math.PI * 2,
-            hue: Math.random() < 0.22 ? 'bright' : 'soft',
+            dPhaseX: randomUnit() * Math.PI * 2,
+            dPhaseY: randomUnit() * Math.PI * 2,
+            dSpeedX: 0.003 + randomUnit() * 0.004,
+            dSpeedY: 0.003 + randomUnit() * 0.004,
+            dAmpX: 6 + randomUnit() * 10,
+            dAmpY: 6 + randomUnit() * 10,
+            r: randomUnit() * 1.6 + 1.6,
+            pulse: randomUnit() * Math.PI * 2,
+            hue: randomUnit() < 0.22 ? 'bright' : 'soft',
           });
         }
       }

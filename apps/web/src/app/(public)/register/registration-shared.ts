@@ -225,3 +225,25 @@ export function stampConsent(
     valid_till: oneYear.toISOString(),
   };
 }
+
+/**
+ * Returns a copy of an RJSF schema with the `consent` block removed.
+ *
+ * Consent is collected by {@link ConsentGate} after the form is otherwise
+ * valid, so the client-side schema must neither render the block nor gate
+ * submit on it. The on-disk schema files are deliberately unchanged — the API
+ * still requires `consent`, and the gate supplies it at submit time.
+ *
+ * @param schema - The loaded JSON Schema.
+ * @returns A copy without the consent property or its `required` entry.
+ */
+export function stripConsentBlock(schema: RJSFSchema): RJSFSchema {
+  const properties = { ...((schema.properties ?? {}) as Record<string, unknown>) };
+  if (!('consent' in properties)) return schema;
+  delete properties['consent'];
+  const clone: RJSFSchema = { ...schema, properties: properties as RJSFSchema['properties'] };
+  if (Array.isArray(schema.required)) {
+    clone.required = schema.required.filter((k) => k !== 'consent');
+  }
+  return clone;
+}

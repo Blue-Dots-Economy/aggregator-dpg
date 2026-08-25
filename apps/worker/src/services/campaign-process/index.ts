@@ -28,6 +28,7 @@ import type {
 import type { SendInput, SendOk, MailerResult } from '@aggregator-dpg/mailer/interface';
 import { buildContactExportCsv, buildDecryptedProfilesCsv } from '@aggregator-dpg/profile-csv';
 import type { SignedDownloadUrl } from '../../object-storage.js';
+import { TERMINAL_JOB_STATUSES } from '../campaign-job-client.js';
 import type {
   CampaignJobItemStatus,
   CampaignJobStatus,
@@ -70,10 +71,13 @@ export interface CampaignJobConfig {
   decryptChunk: number;
   /** `contact` = name/email/phone only; `full` = full item_state (variable columns). */
   fieldSet: 'contact' | 'full';
-  /** Fixed recipient override; wins over the job's requested_by when set. */
-  recipientOverride?: string;
-  /** Last-resort recipient when the job has no requested_by. */
-  adminEmailFallback?: string;
+  /**
+   * Who gets the export link: `requester` (the job's `requested_by`) or
+   * `network_admin` (`networkAdminEmail`). Deployment-level, never caller-set.
+   */
+  recipientMode: 'requester' | 'network_admin';
+  /** Recipient used when `recipientMode` is `network_admin`. */
+  networkAdminEmail?: string;
 }
 
 export interface CampaignJobDeps {
@@ -83,7 +87,7 @@ export interface CampaignJobDeps {
   log: CampaignLogger;
 }
 
-const TERMINAL_JOB = new Set<CampaignJobStatus>(['succeeded', 'partially_failed', 'failed']);
+const TERMINAL_JOB = new Set<CampaignJobStatus>(TERMINAL_JOB_STATUSES);
 
 /**
  * Runs one campaign job by id.
@@ -191,7 +195,9 @@ async function decryptAndMarkItems(
       await deps.client.markItem(job.id, p.item_id, 'resolved');
     }
     for (const missing of skipped) {
-      await deps.client.markItem(job.id, missing, 'failed', 'not_found_or_not_owned');
+      // Not a failure: the org simply doesn't own this item, so it is skipped
+      // (and never leaked). Skips don't make the job `partial`.
+      await deps.client.markItem(job.id, missing, 'skipped_not_owned', 'not_owned_by_org');
     }
     await deps.client.heartbeat(job.id);
   }
@@ -225,9 +231,14 @@ async function runExportForJob(job: ProcessingJob, deps: CampaignJobDeps): Promi
   const signed = await deps.export.signDownloadUrl(key);
 
   const recipient =
-    deps.config.recipientOverride ?? job.requestedBy ?? deps.config.adminEmailFallback;
+    deps.config.recipientMode === 'network_admin'
+      ? deps.config.networkAdminEmail
+      : job.requestedBy;
   if (!recipient) {
-    throw new Error('campaign export has no recipient (no override, requested_by, or admin email)');
+    throw new Error(
+      `campaign export has no recipient for mode "${deps.config.recipientMode}" ` +
+        '(set EXPORT_NETWORK_ADMIN_EMAIL, or use CAMPAIGN_EXPORT_RECIPIENT=requester)',
+    );
   }
 
   const email = renderExportEmail({

@@ -98,7 +98,7 @@ vi.mock('@/hooks/useDashboard', () => ({
 
 // `vi.hoisted` so these fixtures exist before the (hoisted) `vi.mock` factory
 // below — which also runs at module-evaluation time — reads them.
-const { CFG_FIXTURE, TWO_DOMAIN_CFG_FIXTURE } = vi.hoisted(() => {
+const { CFG_FIXTURE, TWO_DOMAIN_CFG_FIXTURE, THREE_DOMAIN_CFG_FIXTURE } = vi.hoisted(() => {
   const cfg = {
     aggregator: { name: 'Test Aggregator' },
     brand: { short_name: 'Blue Dots', long_name: 'Blue Dots Portal', tagline: 'Test tagline' },
@@ -118,7 +118,23 @@ const { CFG_FIXTURE, TWO_DOMAIN_CFG_FIXTURE } = vi.hoisted(() => {
       },
     ],
   };
-  return { CFG_FIXTURE: cfg, TWO_DOMAIN_CFG_FIXTURE: twoDomainCfg };
+  const threeDomainCfg = {
+    ...cfg,
+    domains: [
+      ...twoDomainCfg.domains,
+      {
+        id: 'service_provider',
+        label: 'Service Provider',
+        plural_label: 'Service Providers',
+        item_type: 'profile_1.0',
+      },
+    ],
+  };
+  return {
+    CFG_FIXTURE: cfg,
+    TWO_DOMAIN_CFG_FIXTURE: twoDomainCfg,
+    THREE_DOMAIN_CFG_FIXTURE: threeDomainCfg,
+  };
 });
 const mockUseAggregatorConfig = vi.fn(() => ({ data: CFG_FIXTURE }));
 vi.mock('@/hooks/useAggregatorConfig', () => ({
@@ -285,6 +301,48 @@ describe('<DashboardPageRoot />', () => {
       // Provider-tab-only copy: search placeholder differs from the seeker tab.
       expect(screen.getByPlaceholderText('Search org, role, ID…')).toBeInTheDocument();
       expect(screen.getByText('Alice Seeker')).toBeInTheDocument();
+    });
+  });
+
+  describe('multi-domain routing', () => {
+    it('requests its OWN domain for a third-domain aggregator, not domains[0]', () => {
+      // Regression: the branch was `primaryDomain === cfg.domains[1].id`, which
+      // assumed exactly two domains in seeker-then-provider order. A
+      // service_provider coordinator matched neither branch, fell through to the
+      // seeker view, and that view fetched `domains[0]` — so the dashboard was
+      // headed "Seekers" and asked for seeker data the coordinator does not own.
+      mockUseAggregatorConfig.mockReturnValue({ data: THREE_DOMAIN_CFG_FIXTURE });
+      mockUseProfileRaw.mockReturnValue({ data: { type: 'service_provider' } });
+      mockUseDashboard.mockReturnValue({
+        data: dashboardPageFixture({ domain: 'service_provider' }),
+        isLoading: false,
+        isError: false,
+      });
+      renderPage();
+      const domains = mockUseDashboard.mock.calls
+        .map((c) => (c[0] as { domain?: string } | undefined)?.domain)
+        .filter((d): d is string => typeof d === 'string');
+      expect(domains).toContain('service_provider');
+      expect(domains).not.toContain('seeker');
+    });
+
+    it('labels a third-domain dashboard from its own domain label', () => {
+      mockUseAggregatorConfig.mockReturnValue({ data: THREE_DOMAIN_CFG_FIXTURE });
+      mockUseProfileRaw.mockReturnValue({ data: { type: 'service_provider' } });
+      mockUseDashboard.mockReturnValue({
+        data: dashboardPageFixture({ domain: 'service_provider' }),
+        isLoading: false,
+        isError: false,
+      });
+      renderPage();
+      // The table heading uses the domain's SINGULAR `label`, so a
+      // service_provider coordinator reads "Service Provider Activity & Status"
+      // and never the seeker heading it used to get.
+      // Asserted on rendered text rather than a heading role — the table
+      // heading is not an <h*> element.
+      const rendered = document.body.textContent ?? '';
+      expect(rendered).toMatch(/Service Provider Activity & Status/i);
+      expect(rendered).not.toMatch(/\bSeekers? Activity & Status/i);
     });
   });
 
@@ -508,6 +566,71 @@ describe('<DashboardPageRoot />', () => {
       await userEvent.click(selectAllBtn);
       expect(await screen.findByText('All 5 matching are selected.')).toBeInTheDocument();
       expect(mockDashboardServiceDashboard).toHaveBeenCalled();
+    });
+  });
+
+  // #627: the "select all N matching" batched fetch sizes its `limit` from
+  // `total_matching`, which is now the lifecycle-narrowed count. It must forward
+  // the active lifecycle too — otherwise it pulls N *unfiltered* rows and the
+  // client-side lifecycle filter drops almost all of them, so the operator
+  // selects nearly nothing. These guard that fetch stays in sync with the list.
+  describe('#627 — lifecycle-aware "select all matching"', () => {
+    it('forwards the active lifecycle filter to the batched select-all fetch', async () => {
+      nav.resetSearchParams('lifecycle=draft');
+      mockUseDashboard.mockReturnValue({
+        data: dashboardPageFixture({ totalMatching: 5 }),
+        isLoading: false,
+        isError: false,
+      });
+      // The batched fetch returns the full draft set (5 rows). They must be
+      // `draft` so they survive the client-side filter the fetch feeds into.
+      const draftItems = Array.from({ length: 5 }, (_, i) =>
+        rawItem({
+          profile_item_id: `draft-${i}`,
+          name: `Draft ${i}`,
+          lifecycle_status: 'draft',
+          profile_status: 'new',
+          profile_completion_pct: 40,
+        }),
+      );
+      mockDashboardServiceDashboard.mockResolvedValueOnce(
+        dashboardPageFixture({ items: draftItems, totalMatching: 5 }),
+      );
+      renderPage();
+
+      // Only the draft row is visible under the filter (Alice is live).
+      expect(screen.queryByText('Alice Seeker')).not.toBeInTheDocument();
+      expect(screen.getByText('Bob Draft')).toBeInTheDocument();
+
+      await userEvent.click(screen.getByLabelText('Select all rows on this page'));
+      await userEvent.click(screen.getByRole('button', { name: 'Select all 5 matching' }));
+
+      await waitFor(() =>
+        expect(mockDashboardServiceDashboard).toHaveBeenCalledWith(
+          expect.objectContaining({ domain: 'seeker', limit: 5, lifecycle: 'draft' }),
+        ),
+      );
+      expect(await screen.findByText('All 5 matching are selected.')).toBeInTheDocument();
+    });
+
+    it('omits lifecycle from the select-all fetch when the filter is "all"', async () => {
+      mockUseDashboard.mockReturnValue({
+        data: dashboardPageFixture({ totalMatching: 5 }),
+        isLoading: false,
+        isError: false,
+      });
+      mockDashboardServiceDashboard.mockResolvedValueOnce(
+        dashboardPageFixture({ totalMatching: 5 }),
+      );
+      renderPage();
+
+      await userEvent.click(screen.getByLabelText('Select all rows on this page'));
+      await userEvent.click(screen.getByRole('button', { name: 'Select all 5 matching' }));
+
+      await waitFor(() => expect(mockDashboardServiceDashboard).toHaveBeenCalled());
+      const arg = mockDashboardServiceDashboard.mock.calls.at(-1)?.[0];
+      expect(arg).toMatchObject({ domain: 'seeker', limit: 5 });
+      expect(arg).not.toHaveProperty('lifecycle');
     });
   });
 });

@@ -22,6 +22,22 @@ import {
 
 const PG_UNIQUE_VIOLATION = '23505';
 
+/**
+ * Extracts the Postgres SQLSTATE from a thrown error. Drizzle wraps driver
+ * errors in a `DrizzleQueryError`, so the `code` lives on `.cause` (or deeper),
+ * not the top-level error — walk the cause chain so a unique-violation is
+ * recognised as SLUG_COLLISION instead of masquerading as DB_UNAVAILABLE.
+ */
+function pgErrorCode(err: unknown): string | undefined {
+  let cur: unknown = err;
+  for (let depth = 0; cur && depth < 5; depth++) {
+    const code = (cur as { code?: unknown }).code;
+    if (typeof code === 'string') return code;
+    cur = (cur as { cause?: unknown }).cause;
+  }
+  return undefined;
+}
+
 export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
   async create(input: CreateRegistrationLinkInput): Promise<StoreResult<RegistrationLink>> {
     const start = Date.now();
@@ -52,7 +68,7 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
       });
       return { ok: true, value: toDomain(row) };
     } catch (err: unknown) {
-      const code = (err as { code?: string }).code;
+      const code = pgErrorCode(err);
       if (code === PG_UNIQUE_VIOLATION) {
         return {
           ok: false,
@@ -124,32 +140,6 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
     } catch (err: unknown) {
       logger.error({
         operation: 'registrationLinksStore.findById',
-        status: 'failure',
-        error: (err as Error).message,
-      });
-      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: (err as Error).message } };
-    }
-  }
-
-  async updateQrKey(
-    id: string,
-    aggregatorId: string,
-    qrObjectKey: string,
-  ): Promise<StoreResult<RegistrationLink>> {
-    try {
-      const rows = await getDb()
-        .update(registrationLinks)
-        .set({ qrObjectKey, updatedAt: new Date() })
-        .where(and(eq(registrationLinks.id, id), eq(registrationLinks.aggregatorId, aggregatorId)))
-        .returning();
-      const row = rows[0];
-      if (!row) {
-        return { ok: false, error: { code: 'NOT_FOUND', message: `link not found: ${id}` } };
-      }
-      return { ok: true, value: toDomain(row) };
-    } catch (err: unknown) {
-      logger.error({
-        operation: 'registrationLinksStore.updateQrKey',
         status: 'failure',
         error: (err as Error).message,
       });
@@ -238,7 +228,7 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
       });
       return { ok: true, value: toDomain(row) };
     } catch (err: unknown) {
-      const code = (err as { code?: string }).code;
+      const code = pgErrorCode(err);
       if (code === PG_UNIQUE_VIOLATION) {
         return {
           ok: false,

@@ -49,7 +49,12 @@ export async function registerCampaignExportRoutes(app: FastifyInstance): Promis
         security: [{ bearerAuth: [] }],
         body: campaignEnvelopeSchema,
         response: {
-          202: z.object({ job_id: z.string().uuid() }),
+          202: z.object({
+            status: z.literal('queued'),
+            requested: z.number().int(),
+            job_id: z.string().uuid(),
+            message: z.string(),
+          }),
           ...errorResponses(400, 401, 403, 429, 503),
         },
       },
@@ -82,9 +87,9 @@ export async function registerCampaignExportRoutes(app: FastifyInstance): Promis
 
       const envelope = req.body as z.infer<typeof campaignEnvelopeSchema>;
       const itemIds = dedupeItemIds(envelope.item_ids);
-      if (itemIds.length > config.EXPORT_MAX_ITEM_IDS) {
+      if (itemIds.length > config.CAMPAIGN_EXPORT_MAX_ITEMS) {
         throw httpError('CAMPAIGN_TOO_MANY_ITEMS', {
-          fields: { max: config.EXPORT_MAX_ITEM_IDS, received: itemIds.length },
+          fields: { max: config.CAMPAIGN_EXPORT_MAX_ITEMS, received: itemIds.length },
         });
       }
 
@@ -92,8 +97,8 @@ export async function registerCampaignExportRoutes(app: FastifyInstance): Promis
       const rl = await consume({
         namespace: 'campaign-submit',
         key: orgId,
-        windowSeconds: config.CAMPAIGN_SUBMIT_WINDOW_SECONDS,
-        max: config.CAMPAIGN_SUBMIT_MAX,
+        windowSeconds: config.CAMPAIGN_EXPORT_SUBMIT_WINDOW_SECONDS,
+        max: config.CAMPAIGN_EXPORT_SUBMIT_MAX,
       });
       if (!rl.allowed) {
         reply.header('retry-after', String(rl.retryAfterSeconds));
@@ -105,9 +110,9 @@ export async function registerCampaignExportRoutes(app: FastifyInstance): Promis
       // Per-org active-job cap.
       const active = await store.countActiveJobs(orgId);
       if (!active.ok) throw httpError('INTERNAL', { detail: 'could not read active job count' });
-      if (active.value >= config.CAMPAIGN_MAX_ACTIVE_PER_ORG) {
+      if (active.value >= config.CAMPAIGN_EXPORT_MAX_ACTIVE_PER_ORG) {
         throw httpError('CAMPAIGN_ACTIVE_LIMIT', {
-          fields: { max: config.CAMPAIGN_MAX_ACTIVE_PER_ORG },
+          fields: { max: config.CAMPAIGN_EXPORT_MAX_ACTIVE_PER_ORG },
         });
       }
 
@@ -137,7 +142,13 @@ export async function registerCampaignExportRoutes(app: FastifyInstance): Promis
         }
       }
 
-      return reply.code(202).send({ job_id: created.value.job.id });
+      return reply.code(202).send({
+        status: 'queued' as const,
+        requested: itemIds.length,
+        job_id: created.value.job.id,
+        message:
+          'Export request submitted. A secure, time-limited download link will be emailed to your registered address once the export is ready.',
+      });
     },
   );
 }

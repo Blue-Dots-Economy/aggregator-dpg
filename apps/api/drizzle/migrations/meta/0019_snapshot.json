@@ -370,8 +370,12 @@
           "name": "aggregator_profile_aggregator_id_aggregators_id_fk",
           "tableFrom": "aggregator_profile",
           "tableTo": "aggregators",
-          "columnsFrom": ["aggregator_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "aggregator_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -577,8 +581,12 @@
           "name": "aggregators_parent_org_id_aggregator_orgs_id_fk",
           "tableFrom": "aggregators",
           "tableTo": "aggregator_orgs",
-          "columnsFrom": ["parent_org_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "parent_org_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -588,7 +596,9 @@
         "aggregators_org_slug_unique": {
           "name": "aggregators_org_slug_unique",
           "nullsNotDistinct": false,
-          "columns": ["org_slug"]
+          "columns": [
+            "org_slug"
+          ]
         }
       },
       "policies": {},
@@ -744,8 +754,12 @@
           "name": "bulk_uploads_aggregator_id_aggregators_id_fk",
           "tableFrom": "bulk_uploads",
           "tableTo": "aggregators",
-          "columnsFrom": ["aggregator_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "aggregator_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -792,7 +806,7 @@
           "typeSchema": "public",
           "primaryKey": false,
           "notNull": true,
-          "default": "'pending'"
+          "default": "'queued'"
         },
         "idempotency_key": {
           "name": "idempotency_key",
@@ -851,6 +865,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "completed_at": {
+          "name": "completed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -924,8 +944,12 @@
           "name": "campaign_job_aggregator_id_aggregators_id_fk",
           "tableFrom": "campaign_job",
           "tableTo": "aggregators",
-          "columnsFrom": ["aggregator_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "aggregator_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -955,7 +979,7 @@
         },
         "item_id": {
           "name": "item_id",
-          "type": "text",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -992,6 +1016,50 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "channel": {
+          "name": "channel",
+          "type": "campaign_channel",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provider_ref": {
+          "name": "provider_ref",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "raya_batch_id": {
+          "name": "raya_batch_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_provider_status": {
+          "name": "last_provider_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "skip_reason": {
+          "name": "skip_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "attempts": {
+          "name": "attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "completed_at": {
+          "name": "completed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -1037,6 +1105,27 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "campaign_job_item_job_item_unique": {
+          "name": "campaign_job_item_job_item_unique",
+          "columns": [
+            {
+              "expression": "job_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "item_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -1044,8 +1133,12 @@
           "name": "campaign_job_item_job_id_campaign_job_id_fk",
           "tableFrom": "campaign_job_item",
           "tableTo": "campaign_job",
-          "columnsFrom": ["job_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "job_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1184,8 +1277,12 @@
           "name": "link_submissions_link_id_registration_links_id_fk",
           "tableFrom": "link_submissions",
           "tableTo": "registration_links",
-          "columnsFrom": ["link_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "link_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1193,8 +1290,12 @@
           "name": "link_submissions_aggregator_id_aggregators_id_fk",
           "tableFrom": "link_submissions",
           "tableTo": "aggregators",
-          "columnsFrom": ["aggregator_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "aggregator_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1202,8 +1303,12 @@
           "name": "link_submissions_participant_id_participants_id_fk",
           "tableFrom": "link_submissions",
           "tableTo": "participants",
-          "columnsFrom": ["participant_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "participant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -1396,8 +1501,12 @@
           "name": "onboarding_aggregator_id_aggregators_id_fk",
           "tableFrom": "onboarding",
           "tableTo": "aggregators",
-          "columnsFrom": ["aggregator_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "aggregator_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1405,8 +1514,12 @@
           "name": "onboarding_link_id_registration_links_id_fk",
           "tableFrom": "onboarding",
           "tableTo": "registration_links",
-          "columnsFrom": ["link_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "link_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -1583,8 +1696,12 @@
           "name": "participants_aggregator_id_aggregators_id_fk",
           "tableFrom": "participants",
           "tableTo": "aggregators",
-          "columnsFrom": ["aggregator_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "aggregator_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1592,8 +1709,12 @@
           "name": "participants_source_bulk_upload_id_bulk_uploads_id_fk",
           "tableFrom": "participants",
           "tableTo": "bulk_uploads",
-          "columnsFrom": ["source_bulk_upload_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "source_bulk_upload_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "set null",
           "onUpdate": "no action"
         },
@@ -1601,8 +1722,12 @@
           "name": "participants_source_link_id_registration_links_id_fk",
           "tableFrom": "participants",
           "tableTo": "registration_links",
-          "columnsFrom": ["source_link_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "source_link_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -1746,8 +1871,12 @@
           "name": "registration_links_aggregator_id_aggregators_id_fk",
           "tableFrom": "registration_links",
           "tableTo": "aggregators",
-          "columnsFrom": ["aggregator_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "aggregator_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1763,12 +1892,21 @@
     "public.aggregator_actor_type": {
       "name": "aggregator_actor_type",
       "schema": "public",
-      "values": ["aggregator", "seeker", "provider"]
+      "values": [
+        "aggregator",
+        "seeker",
+        "provider"
+      ]
     },
     "public.aggregator_status": {
       "name": "aggregator_status",
       "schema": "public",
-      "values": ["pending", "active", "inactive", "retired"]
+      "values": [
+        "pending",
+        "active",
+        "inactive",
+        "retired"
+      ]
     },
     "public.bulk_upload_status": {
       "name": "bulk_upload_status",
@@ -1787,32 +1925,62 @@
     "public.campaign_channel": {
       "name": "campaign_channel",
       "schema": "public",
-      "values": ["export", "email", "voice"]
+      "values": [
+        "export",
+        "email",
+        "voice"
+      ]
     },
     "public.campaign_job_item_status": {
       "name": "campaign_job_item_status",
       "schema": "public",
-      "values": ["pending", "resolved", "submitted", "failed"]
+      "values": [
+        "pending",
+        "resolved",
+        "submitted",
+        "sent",
+        "skipped_not_owned",
+        "skipped_no_contact",
+        "duplicate_active",
+        "failed"
+      ]
     },
     "public.campaign_job_status": {
       "name": "campaign_job_status",
       "schema": "public",
-      "values": ["pending", "processing", "succeeded", "partially_failed", "failed"]
+      "values": [
+        "queued",
+        "processing",
+        "partial",
+        "completed",
+        "failed"
+      ]
     },
     "public.link_submission_outcome": {
       "name": "link_submission_outcome",
       "schema": "public",
-      "values": ["passed", "skipped", "failed"]
+      "values": [
+        "passed",
+        "skipped",
+        "failed"
+      ]
     },
     "public.onboarding_source": {
       "name": "onboarding_source",
       "schema": "public",
-      "values": ["bulk", "link"]
+      "values": [
+        "bulk",
+        "link"
+      ]
     },
     "public.registration_link_status": {
       "name": "registration_link_status",
       "schema": "public",
-      "values": ["draft", "live", "retired"]
+      "values": [
+        "draft",
+        "live",
+        "retired"
+      ]
     }
   },
   "schemas": {},

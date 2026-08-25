@@ -291,6 +291,7 @@ describe('dashboardService.dashboard', () => {
       page: 2,
       limit: 25,
       status: 'active',
+      lifecycle: 'draft',
       refresh: true,
     });
     const [url] = fetchMock.mock.calls[0] as [string];
@@ -298,6 +299,7 @@ describe('dashboardService.dashboard', () => {
     expect(url).toContain('page=2');
     expect(url).toContain('limit=25');
     expect(url).toContain('status=active');
+    expect(url).toContain('lifecycle=draft');
     expect(url).toContain('refresh=true');
   });
 
@@ -312,6 +314,7 @@ describe('dashboardService.dashboard', () => {
     await dashboardService.dashboard({ domain: 'seeker' });
     const [url] = fetchMock.mock.calls[0] as [string];
     expect(url).not.toContain('status=');
+    expect(url).not.toContain('lifecycle=');
     expect(url).not.toContain('refresh=');
   });
 });

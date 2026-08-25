@@ -22,7 +22,7 @@ import { config } from '../../config.js';
 // Two S3 clients are kept on this module:
 //   - `getInternalClient()` uses S3_ENDPOINT (e.g. http://minio:9000 inside
 //     docker, or the AWS regional endpoint in prod). All server-side calls
-//     (HEAD, PUT for QR + errors.csv, GET for the worker's CSV download)
+//     (HEAD, PUT for errors.csv, GET for the worker's CSV download)
 //     route through here.
 //   - `getPresignerClient()` uses S3_PUBLIC_ENDPOINT — the host the BROWSER
 //     can reach. Pre-signed URLs encode the endpoint, so they MUST be minted
@@ -136,8 +136,10 @@ export async function headObject(key: string): Promise<ObjectHead | null> {
 }
 
 /**
- * Uploads an artefact to S3. Used for QR PNGs at link-create time and for
- * any other API-side object writes.
+ * Uploads an artefact to S3. General-purpose API-side object write.
+ * NOTE: currently has no callers — the QR PNG write was removed in #650.
+ * Kept as the write primitive (bulk-upload uses presigned client-side PUTs);
+ * remove if no server-side write reappears.
  */
 export async function putObject(key: string, body: Buffer, contentType: string): Promise<void> {
   await getInternalClient().send(
@@ -174,26 +176,6 @@ export async function signErrorsCsvDownloadUrl(key: string): Promise<SignedDownl
     expiresIn: config.BULK_UPLOAD_URL_TTL_SECONDS,
   });
   const expiresAt = new Date(Date.now() + config.BULK_UPLOAD_URL_TTL_SECONDS * 1000).toISOString();
-  return { url, key, expiresAt };
-}
-
-/**
- * Issues a pre-signed GET URL for a QR PNG, served as an attachment so opening
- * it downloads the file rather than rendering it inline in a browser tab — the
- * aggregator saves the QR and shares the file, never an S3 URL. (`attachment`
- * only affects top-level navigation; an `<img>` preview still renders it.)
- */
-export async function signQrDownloadUrl(key: string): Promise<SignedDownloadUrl> {
-  const command = new GetObjectCommand({
-    Bucket: config.S3_BUCKET,
-    Key: key,
-    ResponseContentType: 'image/png',
-    ResponseContentDisposition: 'attachment; filename="registration-qr.png"',
-  });
-  const url = await getSignedUrl(getPresignerClient(), command, {
-    expiresIn: config.QR_DOWNLOAD_URL_TTL_SECONDS,
-  });
-  const expiresAt = new Date(Date.now() + config.QR_DOWNLOAD_URL_TTL_SECONDS * 1000).toISOString();
   return { url, key, expiresAt };
 }
 

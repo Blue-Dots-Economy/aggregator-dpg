@@ -40,11 +40,9 @@ export async function processCampaignJob(data: CampaignProcessJob): Promise<void
     config: {
       decryptChunk: config.CAMPAIGN_DECRYPT_CHUNK,
       fieldSet: config.CAMPAIGN_EXPORT_FIELDS,
-      ...(config.CAMPAIGN_EXPORT_RECIPIENT
-        ? { recipientOverride: config.CAMPAIGN_EXPORT_RECIPIENT }
-        : {}),
+      recipientMode: config.CAMPAIGN_EXPORT_RECIPIENT,
       ...(config.EXPORT_NETWORK_ADMIN_EMAIL
-        ? { adminEmailFallback: config.EXPORT_NETWORK_ADMIN_EMAIL }
+        ? { networkAdminEmail: config.EXPORT_NETWORK_ADMIN_EMAIL }
         : {}),
     },
     log,

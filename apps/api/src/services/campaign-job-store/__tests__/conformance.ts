@@ -35,9 +35,10 @@ export function runStoreConformance(
       metadata: [{ key: 'purpose', value: 'audit' }],
       content: {},
       requestedBy: 'user@org.example',
+      // item_id is a uuid column (Signals item ids), so fixtures must be real uuids.
       items: [
-        { itemId: `${p}-a`, action: null },
-        { itemId: `${p}-b`, action: null },
+        { itemId: randomUUID(), action: null },
+        { itemId: randomUUID(), action: null },
       ],
       ...over,
     };
@@ -49,9 +50,9 @@ export function runStoreConformance(
       const input = base();
       const { job, created } = unwrap(await store.createJob(input));
       expect(created).toBe(true);
-      expect(job.status).toBe('pending');
+      expect(job.status).toBe('queued');
       const view = unwrap(await store.getJob(job.id, input.signalstackOrgId));
-      expect(view!.counts).toEqual({ total: 2, pending: 2, resolved: 0, submitted: 0, failed: 0 });
+      expect(view!.counts).toEqual({ total: 2, pending: 2, resolved: 0, submitted: 0, sent: 0, skipped_not_owned: 0, skipped_no_contact: 0, duplicate_active: 0, failed: 0 });
       expect(view!.metadata).toEqual([{ key: 'purpose', value: 'audit' }]);
     });
 
@@ -84,9 +85,9 @@ export function runStoreConformance(
       const { job } = unwrap(await store.createJob(input));
       unwrap(await store.markItem(job.id, input.items[0]!.itemId, 'resolved'));
       unwrap(await store.markItem(job.id, input.items[1]!.itemId, 'resolved'));
-      expect(unwrap(await store.rollUpStatus(job.id))).toBe('succeeded');
+      expect(unwrap(await store.rollUpStatus(job.id))).toBe('completed');
       const view = unwrap(await store.getJob(job.id, input.signalstackOrgId));
-      expect(view!.status).toBe('succeeded');
+      expect(view!.status).toBe('completed');
     });
 
     it('rolls up to partially_failed on a mix and surfaces the error reason', async () => {
@@ -95,7 +96,7 @@ export function runStoreConformance(
       const { job } = unwrap(await store.createJob(input));
       unwrap(await store.markItem(job.id, input.items[0]!.itemId, 'resolved'));
       unwrap(await store.markItem(job.id, input.items[1]!.itemId, 'failed', 'not owned'));
-      expect(unwrap(await store.rollUpStatus(job.id))).toBe('partially_failed');
+      expect(unwrap(await store.rollUpStatus(job.id))).toBe('partial');
       const items = unwrap(await store.getJobItems(job.id, input.signalstackOrgId))!;
       expect(items.find((i) => i.itemId === input.items[1]!.itemId)!.errorReason).toBe('not owned');
     });
@@ -130,14 +131,49 @@ export function runStoreConformance(
     });
   });
 
+  describe('skip semantics (spec: skips are not failures)', () => {
+    it('a skipped item does not make the job partial — it completes', async () => {
+      const store = makeStore();
+      const input = base();
+      const { job } = unwrap(await store.createJob(input));
+      unwrap(await store.markItem(job.id, input.items[0]!.itemId, 'resolved'));
+      unwrap(
+        await store.markItem(job.id, input.items[1]!.itemId, 'skipped_not_owned', 'not_owned_by_org'),
+      );
+      expect(unwrap(await store.rollUpStatus(job.id))).toBe('completed');
+      const items = unwrap(await store.getJobItems(job.id, input.signalstackOrgId))!;
+      const skipped = items.find((i) => i.itemId === input.items[1]!.itemId)!;
+      // the reason lands in skip_reason, never error_reason
+      expect(skipped.skipReason).toBe('not_owned_by_org');
+      expect(skipped.errorReason).toBeNull();
+    });
+
+    it('a real failure alongside a success rolls up to partial', async () => {
+      const store = makeStore();
+      const input = base();
+      const { job } = unwrap(await store.createJob(input));
+      unwrap(await store.markItem(job.id, input.items[0]!.itemId, 'resolved'));
+      unwrap(await store.markItem(job.id, input.items[1]!.itemId, 'failed', 'upstream 500'));
+      expect(unwrap(await store.rollUpStatus(job.id))).toBe('partial');
+    });
+
+    it('treats sent as a success terminal (email channel)', async () => {
+      const store = makeStore();
+      const input = base();
+      const { job } = unwrap(await store.createJob(input));
+      for (const i of input.items) unwrap(await store.markItem(job.id, i.itemId, 'sent'));
+      expect(unwrap(await store.rollUpStatus(job.id))).toBe('completed');
+    });
+  });
+
   describe('active-job cap', () => {
-    it('counts only pending/processing jobs for the org', async () => {
+    it('counts only queued/processing jobs for the org', async () => {
       const store = makeStore();
       const org = `org-${randomUUID().slice(0, 8)}`;
       const a = unwrap(await store.createJob(base({ signalstackOrgId: org })));
       unwrap(await store.createJob(base({ signalstackOrgId: org })));
       expect(unwrap(await store.countActiveJobs(org))).toBe(2);
-      unwrap(await store.setJobStatus(a.job.id, 'succeeded'));
+      unwrap(await store.setJobStatus(a.job.id, 'completed'));
       expect(unwrap(await store.countActiveJobs(org))).toBe(1);
       expect(unwrap(await store.countActiveJobs('nobody'))).toBe(0);
     });

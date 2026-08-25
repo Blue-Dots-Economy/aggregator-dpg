@@ -14,11 +14,16 @@ import {
 
 const ORG = 'org_5d3b7fa4-x';
 
-async function seedJob(store: InMemoryCampaignJobStore, org: string, itemIds: string[]) {
+async function seedJob(
+  store: InMemoryCampaignJobStore,
+  org: string,
+  itemIds: string[],
+  channel: 'export' | 'email' | 'voice' = 'export',
+) {
   const created = await store.createJob({
     aggregatorId: 'agg-1',
     signalstackOrgId: org,
-    channel: 'export',
+    channel,
     metadata: [{ key: 'purpose', value: 'audit' }],
     content: {},
     requestedBy: 'user@org.example',
@@ -84,22 +89,32 @@ describe('campaign job status endpoints', () => {
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.job_id).toBe(jobId);
-    expect(body.status).toBe('partially_failed');
-    expect(body.counts).toEqual({ total: 2, pending: 0, resolved: 1, submitted: 0, failed: 1 });
+    expect(body.status).toBe('partial');
+    expect(body.counts).toEqual({
+      total: 2,
+      pending: 0,
+      resolved: 1,
+      submitted: 0,
+      sent: 0,
+      skipped_not_owned: 0,
+      skipped_no_contact: 0,
+      duplicate_active: 0,
+      failed: 1,
+    });
     const failed = body.items.find((i: { item_id: string }) => i.item_id === 'b');
     expect(failed.status).toBe('failed');
     expect(failed.error_reason).toBe('not owned');
   });
 
-  it('GET /:job_id returns 404 for a job owned by another org', async () => {
+  it('GET /:job_id returns 403 for a job owned by another org', async () => {
     const jobId = await seedJob(store, ORG, ['a']);
     const res = await app.inject({
       method: 'GET',
       url: `/v1/campaign/export/${jobId}`,
       headers: { authorization: 'Bearer other-org' },
     });
-    expect(res.statusCode).toBe(404);
-    expect(res.json().error.code).toBe('CAMPAIGN_JOB_NOT_FOUND');
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error.code).toBe('CAMPAIGN_JOB_FORBIDDEN');
   });
 
   it('GET / lists the org jobs newest-first with derived counts', async () => {
@@ -131,6 +146,29 @@ describe('campaign job status endpoints', () => {
       headers: auth,
     });
     expect(page2.json().jobs.map((j: { job_id: string }) => j.job_id)).toEqual([first]);
+  });
+
+  it('GET /:job_id does not serve a job from another channel (403)', async () => {
+    // Regression: the /export path used to return email/voice jobs too.
+    const emailJob = await seedJob(store, ORG, ['a'], 'email');
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/campaign/export/${emailJob}`,
+      headers: auth,
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error.code).toBe('CAMPAIGN_JOB_FORBIDDEN');
+  });
+
+  it('GET / lists only this channel, never email or voice jobs', async () => {
+    const exportJob = await seedJob(store, ORG, ['a'], 'export');
+    await seedJob(store, ORG, ['b'], 'email');
+    await seedJob(store, ORG, ['c'], 'voice');
+    const res = await app.inject({ method: 'GET', url: '/v1/campaign/export', headers: auth });
+    expect(res.statusCode).toBe(200);
+    const jobs = res.json().jobs as Array<{ job_id: string; channel: string }>;
+    expect(jobs.map((j) => j.job_id)).toEqual([exportJob]);
+    expect(jobs.every((j) => j.channel === 'export')).toBe(true);
   });
 
   it('GET / requires auth (401 without a token)', async () => {

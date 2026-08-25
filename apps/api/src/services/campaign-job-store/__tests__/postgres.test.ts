@@ -130,6 +130,10 @@ describe('PostgresCampaignJobStore', () => {
       pending: 0,
       resolved: 2,
       submitted: 0,
+      sent: 0,
+      skipped_not_owned: 0,
+      skipped_no_contact: 0,
+      duplicate_active: 0,
       failed: 0,
     });
   });
@@ -190,6 +194,10 @@ describe('PostgresCampaignJobStore', () => {
       pending: 0,
       resolved: 2,
       submitted: 0,
+      sent: 0,
+      skipped_not_owned: 0,
+      skipped_no_contact: 0,
+      duplicate_active: 0,
       failed: 1,
     });
   });
@@ -198,16 +206,16 @@ describe('PostgresCampaignJobStore', () => {
     queue(undefined, undefined, undefined);
     expect((await store.markItem('job-1', 'a', 'resolved')).ok).toBe(true);
     expect((await store.heartbeat('job-1')).ok).toBe(true);
-    expect((await store.setJobStatus('job-1', 'succeeded', 'done')).ok).toBe(true);
+    expect((await store.setJobStatus('job-1', 'completed', 'done')).ok).toBe(true);
     expect(sets.some((s) => s.status === 'resolved')).toBe(true);
     expect(sets.some((s) => s.lastProgressAt instanceof Date)).toBe(true);
-    expect(sets.some((s) => s.status === 'succeeded' && s.errorReason === 'done')).toBe(true);
+    expect(sets.some((s) => s.status === 'completed' && s.errorReason === 'done')).toBe(true);
   });
 
   it('rollUpStatus: derives + persists from counts', async () => {
     queue([{ status: 'resolved', n: 2 }], undefined); // countItems ; setJobStatus update
     const r = await store.rollUpStatus('job-1');
-    expect(r.ok && r.value).toBe('succeeded');
+    expect(r.ok && r.value).toBe('completed');
   });
 
   it('claimStalledJobs: returns the stale ids', async () => {

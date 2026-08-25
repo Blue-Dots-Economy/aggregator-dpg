@@ -19,9 +19,41 @@ import {
 } from '@aggregator-dpg/db-schema/schema';
 import { getDb } from '../db.js';
 
-export type CampaignJobStatus =
-  'pending' | 'processing' | 'succeeded' | 'partially_failed' | 'failed';
-export type CampaignJobItemStatus = 'pending' | 'resolved' | 'submitted' | 'failed';
+export type CampaignJobStatus = 'queued' | 'processing' | 'partial' | 'completed' | 'failed';
+export type CampaignJobItemStatus =
+  | 'pending'
+  | 'resolved'
+  | 'submitted'
+  | 'sent'
+  | 'skipped_not_owned'
+  | 'skipped_no_contact'
+  | 'duplicate_active'
+  | 'failed';
+
+/** Item statuses that are deliberate no-ops rather than failures. */
+export const SKIPPED_ITEM_STATUSES: readonly CampaignJobItemStatus[] = [
+  'skipped_not_owned',
+  'skipped_no_contact',
+  'duplicate_active',
+];
+
+/** Item statuses an item can no longer move out of (retry-safety guard). */
+export const TERMINAL_ITEM_STATUSES: readonly CampaignJobItemStatus[] = [
+  'resolved',
+  'submitted',
+  'sent',
+  'skipped_not_owned',
+  'skipped_no_contact',
+  'duplicate_active',
+  'failed',
+];
+
+/** Job statuses a job can no longer move out of. */
+export const TERMINAL_JOB_STATUSES: readonly CampaignJobStatus[] = [
+  'partial',
+  'completed',
+  'failed',
+];
 export type CampaignChannel = 'export' | 'email' | 'voice';
 
 export interface ProcessingJobItem {
@@ -47,6 +79,10 @@ export interface JobStatusCounts {
   pending: number;
   resolved: number;
   submitted: number;
+  sent: number;
+  skipped_not_owned: number;
+  skipped_no_contact: number;
+  duplicate_active: number;
   failed: number;
 }
 
@@ -59,11 +95,12 @@ export interface JobStatusCounts {
  */
 export function deriveJobStatus(c: JobStatusCounts): CampaignJobStatus {
   if (c.pending > 0) return 'processing';
-  if (c.total === 0) return 'succeeded';
-  const succeeded = c.resolved + c.submitted;
-  if (c.failed === 0) return 'succeeded';
+  if (c.total === 0) return 'completed';
+  const succeeded = c.resolved + c.submitted + c.sent;
+  // Skips are deliberate no-ops, never failures — see the API-side twin.
+  if (c.failed === 0) return 'completed';
   if (succeeded === 0) return 'failed';
-  return 'partially_failed';
+  return 'partial';
 }
 
 /** Loads a job + its items for processing (unscoped — the jobId is trusted). */
@@ -96,7 +133,17 @@ export async function countItems(jobId: string): Promise<JobStatusCounts> {
     .from(campaignJobItem)
     .where(eq(campaignJobItem.jobId, jobId))
     .groupBy(campaignJobItem.status);
-  const counts: JobStatusCounts = { total: 0, pending: 0, resolved: 0, submitted: 0, failed: 0 };
+  const counts: JobStatusCounts = {
+    total: 0,
+    pending: 0,
+    resolved: 0,
+    submitted: 0,
+    sent: 0,
+    skipped_not_owned: 0,
+    skipped_no_contact: 0,
+    duplicate_active: 0,
+    failed: 0,
+  };
   for (const r of rows) {
     const n = Number(r.n);
     counts[r.status] += n;
@@ -110,16 +157,23 @@ export async function markItem(
   jobId: string,
   itemId: string,
   status: CampaignJobItemStatus,
-  errorReason?: string,
+  reason?: string,
 ): Promise<void> {
   await getDb()
     .update(campaignJobItem)
-    .set({ status, errorReason: errorReason ?? null, updatedAt: new Date() })
+    .set({
+      status,
+      // A skip is not an error: its reason belongs in `skip_reason`.
+      skipReason: SKIPPED_ITEM_STATUSES.includes(status) ? (reason ?? null) : null,
+      errorReason: SKIPPED_ITEM_STATUSES.includes(status) ? null : (reason ?? null),
+      updatedAt: new Date(),
+      ...(TERMINAL_ITEM_STATUSES.includes(status) ? { completedAt: new Date() } : {}),
+    })
     .where(
       and(
         eq(campaignJobItem.jobId, jobId),
         eq(campaignJobItem.itemId, itemId),
-        sql`${campaignJobItem.status} NOT IN ('resolved','submitted','failed')`,
+        sql`${campaignJobItem.status} NOT IN ('resolved','submitted','sent','skipped_not_owned','skipped_no_contact','duplicate_active','failed')`,
       ),
     );
 }
@@ -140,7 +194,12 @@ export async function setJobStatus(
 ): Promise<void> {
   await getDb()
     .update(campaignJob)
-    .set({ status, ...(errorReason !== undefined ? { errorReason } : {}), updatedAt: new Date() })
+    .set({
+      status,
+      ...(errorReason !== undefined ? { errorReason } : {}),
+      updatedAt: new Date(),
+      ...(TERMINAL_JOB_STATUSES.includes(status) ? { completedAt: new Date() } : {}),
+    })
     .where(eq(campaignJob.id, jobId));
 }
 

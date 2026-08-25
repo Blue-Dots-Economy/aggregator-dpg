@@ -26,6 +26,7 @@ export interface ConfigPathEnv {
   AGGREGATOR_CONFIG_PATH?: string;
   SCHEMA_ROOT_DIR?: string;
   AGGREGATOR_NETWORK_SOURCE?: string;
+  AGGREGATOR_PARTICIPANT_CONSENT_SOURCE?: string;
 }
 
 /**
@@ -40,7 +41,21 @@ export interface ConfigPathEnv {
  */
 export function resolveNetworkSourceOverride(env: ConfigPathEnv = process.env): string | undefined {
   const value = env.AGGREGATOR_NETWORK_SOURCE?.trim();
-  return value ? value : undefined;
+  return value || undefined;
+}
+
+/**
+ * Resolves the deploy-time override for the participant `consent.json` URL.
+ * When `AGGREGATOR_PARTICIPANT_CONSENT_SOURCE` is set (non-empty after trim) it wins over
+ * `aggregator.network.consent_source` from the YAML — the consent-document
+ * analogue of {@link resolveNetworkSourceOverride}.
+ *
+ * @param env - Env-var bag; defaults to `process.env`.
+ * @returns The override URL, or `undefined` when unset/blank.
+ */
+export function resolveConsentSourceOverride(env: ConfigPathEnv = process.env): string | undefined {
+  const value = env.AGGREGATOR_PARTICIPANT_CONSENT_SOURCE?.trim();
+  return value || undefined;
 }
 
 /**
@@ -103,6 +118,38 @@ export function resolveSchemaRoot(env: ConfigPathEnv = process.env): string {
  * @param env - Env-var bag; defaults to `process.env`.
  * @returns `{ network, brand? }` — `brand` is `undefined` when not set.
  */
+/**
+ * Returns the candidate locations of an aggregator schema file inside a
+ * `config/` root, most specific first.
+ *
+ * Registration schemas vary per deployment — the UP-GZB instance captures
+ * organisation type / sub-type / management type and a `service_provider`
+ * aggregator type that Purple Dot and Dharwad must not be asked for. Callers
+ * try each returned path in order and use the first that exists, so a network
+ * (or network+brand) may override the shared default by placing a **complete**
+ * copy of the file at `<network>[/<brand>]/schemas/aggregator/<file>`.
+ *
+ * These are complete files, not partials: the registration validator compiles
+ * one JSON Schema with Ajv and there is no merge layer, so a partial override
+ * would drop every field it did not restate.
+ *
+ * Logic change here must be mirrored in `apps/web/src/lib/config-paths.ts`,
+ * which deliberately does not depend on this package.
+ *
+ * @param file - Bare schema file name, e.g. `registration.v1.json`.
+ * @param env - Env-var bag; defaults to `process.env`.
+ * @returns Root-relative paths, most specific first.
+ */
+export function aggregatorSchemaRelPaths(file: string, env: ConfigPathEnv = process.env): string[] {
+  const net = env.AGGREGATOR_NETWORK?.trim() || 'blue_dot';
+  const brand = env.AGGREGATOR_BRAND?.trim();
+  // Most specific first. A single expression rather than repeated `push` calls,
+  // so the ordering is readable in one glance and cannot be reordered by accident.
+  const relPath = (...prefix: string[]): string =>
+    path.join(...prefix, 'schemas', 'aggregator', file);
+  return brand ? [relPath(net, brand), relPath(net), relPath()] : [relPath(net), relPath()];
+}
+
 export function resolveActiveNetwork(env: ConfigPathEnv = process.env): {
   network: string;
   brand?: string;

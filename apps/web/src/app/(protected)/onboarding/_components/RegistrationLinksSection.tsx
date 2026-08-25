@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useRouter } from 'next/navigation';
+import QRCode from 'qrcode';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations, useFormatter } from 'next-intl';
 import { Button } from '../../../../components/ui/Button';
 import { SubmitBlockers } from '../../../../components/ui/SubmitBlockers';
@@ -105,6 +106,21 @@ function buildLinkTitle(f: CreateLinkFormState): string {
 }
 
 /**
+ * Splits a public URL into `{ host, path }` for the emphasised-slug display.
+ * Empty for a null URL (draft/retired rows); a malformed URL keeps the raw
+ * string as the host.
+ */
+function splitPublicUrl(publicUrl: string | null): { host: string; path: string } {
+  if (!publicUrl) return { host: '', path: '' };
+  try {
+    const u = new URL(publicUrl);
+    return { host: u.host, path: u.pathname.replace(/^\//, '') };
+  } catch {
+    return { host: publicUrl, path: '' };
+  }
+}
+
+/**
  * Top-right green toast for success notifications. Portals to <body> so a
  * transformed ancestor (e.g. `fade-up`) can't pin it inside the section. Auto-
  * dismisses after 2400ms, matching the profile-save toast.
@@ -126,6 +142,80 @@ function SuccessToast({ message, onDone }: { message: string; onDone: () => void
       <I.check size={14} /> {message}
     </div>,
     document.body,
+  );
+}
+
+/**
+ * QR preview modal (#650). The QR is derived data — the caller generates the
+ * PNG data-URI in the browser from the link's public URL and passes it here;
+ * nothing is persisted. Portals to <body>. Shows the code with a Download
+ * action. `dataUrl === null` while generating; `error` when generation failed.
+ */
+function QrPreviewModal({
+  title,
+  dataUrl,
+  error,
+  onDownload,
+  onClose,
+}: Readonly<{
+  title: string;
+  dataUrl: string | null;
+  error: string | null;
+  onDownload: () => void;
+  onClose: () => void;
+}>) {
+  const t = useTranslations('onboarding');
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  // Native <dialog> + showModal(): top-layer stacking (no z-index), a built-in
+  // focus trap, focus restore to the trigger, and Esc-to-close for free.
+  useEffect(() => {
+    const el = dialogRef.current;
+    el?.showModal?.();
+    return () => el?.close?.();
+  }, []);
+
+  // Extracted from a nested ternary so each state reads as one branch.
+  let body: React.ReactNode;
+  if (error) {
+    body = <p className="text-[13px] text-rose-600">{error}</p>;
+  } else if (dataUrl) {
+    body = <img src={dataUrl} alt={title} className="h-52 w-52" />;
+  } else {
+    body = <p className="text-[13px] text-ink-400">{t('link_card.qr_generating')}</p>;
+  }
+
+  return (
+    <dialog
+      ref={dialogRef}
+      aria-label={title}
+      onClose={onClose}
+      className="m-auto w-full max-w-[340px] rounded-[14px] bg-white p-5 shadow-xl backdrop:bg-black/40"
+    >
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="font-display text-[15px] font-bold text-ink-900">{title}</h3>
+        <button
+          type="button"
+          onClick={() => dialogRef.current?.close()}
+          aria-label={t('link_card.qr_close')}
+          className="text-ink-400 hover:text-ink-700"
+        >
+          <I.x size={16} />
+        </button>
+      </div>
+      <div className="flex min-h-[220px] items-center justify-center rounded-[10px] border border-(--bd-border) bg-ink-50 p-4">
+        {body}
+      </div>
+      <div className="mt-4">
+        <button
+          type="button"
+          onClick={onDownload}
+          disabled={!dataUrl}
+          className="inline-flex w-full items-center justify-center gap-1.5 rounded-[10px] bg-primary-600 px-3 py-2 text-[13px] font-semibold text-white hover:bg-primary-700 disabled:opacity-50"
+        >
+          <I.download size={14} /> {t('link_card.qr_download')}
+        </button>
+      </div>
+    </dialog>
   );
 }
 
@@ -240,7 +330,7 @@ export function CreateLinkSection() {
     try {
       const title = buildLinkTitle(form);
       const slug = buildLinkSlug(form);
-      await create.mutateAsync({
+      const created = await create.mutateAsync({
         domain: form.domain,
         status: 'draft',
         registration_mode: form.registration_mode,
@@ -258,11 +348,13 @@ export function CreateLinkSection() {
         },
       });
       // Refresh the form so the user can compose the next link from scratch.
-      // The newly-created draft appears in "Your Registration Links" below;
-      // edits + Make Live happen on its card, not here.
+      // The newly-created draft appears in "Your Registration Links" on the
+      // onboarding page; pass its id as `?new=` so that list scrolls to and
+      // highlights the fresh draft (and its "Make Live" CTA) — otherwise the
+      // navigation makes the just-created link feel like it vanished.
       resetSection();
       setToast(t('create_link.link_created'));
-      router.push('/onboarding');
+      router.push(`/onboarding?new=${encodeURIComponent(created.link_id)}`);
     } catch (err) {
       setCreateError((err as Error).message);
     }
@@ -411,11 +503,37 @@ export function CreateLinkSection() {
   );
 }
 
-function LinkCard({ link }: { link: ApiRegistrationLink }) {
+/**
+ * When `highlight` is set (a just-created draft, `?new=`), bring the card into
+ * view and pulse a ring for ~2s so the user sees where it landed and its
+ * "Make Live" CTA — otherwise the create → onboarding nav can feel like the
+ * link vanished. Returns the card ref + whether the ring is currently shown.
+ */
+function useHighlightOnMount(highlight: boolean) {
+  const cardRef = useRef<HTMLDivElement>(null);
+  const [ringed, setRinged] = useState(highlight);
+  useEffect(() => {
+    if (!highlight) return;
+    cardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const timer = setTimeout(() => setRinged(false), 2000);
+    return () => clearTimeout(timer);
+  }, [highlight]);
+  return { cardRef, ringed };
+}
+
+function LinkCard({
+  link,
+  highlight = false,
+}: Readonly<{
+  link: ApiRegistrationLink;
+  /** Freshly created via the create flow (`?new=`) — scroll to + ring it. */
+  highlight?: boolean;
+}>) {
   const t = useTranslations('onboarding');
   const format = useFormatter();
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
+  const { cardRef, ringed } = useHighlightOnMount(highlight);
   const activate = useActivateLink();
   const deactivate = useDeactivateLink();
   const update = useUpdateLink();
@@ -432,26 +550,45 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
     [ctx['org_name'], ctx['event_location']].filter(Boolean).join(' · ') ||
     `${t('link_card.created_prefix')} ${format.dateTime(new Date(link.created_at), { day: '2-digit', month: 'short', year: 'numeric' })}`;
 
-  // Render `<host>/<orgSlug>/<slug>` with the slug emphasised. Only computed
-  // when the row is published (live) — drafts and retired rows carry a null
-  // public_url.
-  let urlHost = '';
-  let urlPath = '';
-  if (link.public_url) {
-    urlHost = link.public_url;
-    try {
-      const u = new URL(link.public_url);
-      urlHost = u.host;
-      urlPath = u.pathname.replace(/^\//, '');
-    } catch {
-      /* keep raw */
-    }
-  }
+  // `<host>/<orgSlug>/<slug>` with the slug emphasised. Empty for drafts/
+  // retired rows (null public_url); a malformed URL falls back to raw host.
+  const { host: urlHost, path: urlPath } = splitPublicUrl(link.public_url);
   const onCopy = async () => {
     if (!link.public_url || !navigator.clipboard) return;
     await navigator.clipboard.writeText(link.public_url);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
+  };
+  // #650: the QR is derived data — generated in the browser from the public
+  // URL on demand (no S3 round-trip, never expires). Opening the preview
+  // renders the PNG data-URI; Download reuses the same in-memory value.
+  const [qrOpen, setQrOpen] = useState(false);
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [qrError, setQrError] = useState<string | null>(null);
+  const openQr = async () => {
+    if (!link.public_url) return;
+    setQrError(null);
+    setQrOpen(true);
+    try {
+      const dataUrl = await QRCode.toDataURL(link.public_url, {
+        errorCorrectionLevel: 'M',
+        margin: 1,
+        width: 512,
+      });
+      setQrDataUrl(dataUrl);
+    } catch (err) {
+      console.error('qr generation failed', err);
+      setQrError(t('link_card.qr_error'));
+    }
+  };
+  const downloadQr = () => {
+    if (!qrDataUrl) return;
+    const a = document.createElement('a');
+    a.href = qrDataUrl;
+    a.download = `qr-${link.slug}.png`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
   };
 
   // Inline edit form state — drafts only. Pre-populated from the link's
@@ -502,7 +639,12 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
   };
 
   return (
-    <div className="bd-card p-5 hover:border-(--bd-primary-100) transition-colors">
+    <div
+      ref={cardRef}
+      className={`bd-card p-5 hover:border-(--bd-primary-100) transition-all ${
+        ringed ? 'ring-2 ring-primary-400 ring-offset-2' : ''
+      }`}
+    >
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
@@ -552,16 +694,14 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
                   <I.copy size={12} />
                 </button>
               </div>
-              {link.qr_url && (
-                <a
-                  href={link.qr_url}
-                  download="registration-qr.png"
-                  title={t('link_card.download_qr')}
-                  className="inline-flex items-center justify-center w-8 h-8 rounded-[10px] border border-(--bd-border) text-ink-500 hover:text-primary-600 hover:border-(--bd-primary-100)"
-                >
-                  <I.qr size={14} />
-                </a>
-              )}
+              <button
+                type="button"
+                onClick={openQr}
+                title={t('link_card.view_qr')}
+                className="inline-flex items-center justify-center w-8 h-8 rounded-[10px] border border-(--bd-border) text-ink-500 hover:text-primary-600 hover:border-(--bd-primary-100)"
+              >
+                <I.qr size={14} />
+              </button>
               <a
                 href={link.public_url}
                 target="_blank"
@@ -579,6 +719,15 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
                 {copied ? t('link_card.copied') : t('link_card.copy_link')}
               </button>
             </div>
+          )}
+          {qrOpen && (
+            <QrPreviewModal
+              title={t('link_card.qr_modal_title')}
+              dataUrl={qrDataUrl}
+              error={qrError}
+              onDownload={downloadQr}
+              onClose={() => setQrOpen(false)}
+            />
           )}
 
           {isDraft && !editing && (
@@ -718,6 +867,16 @@ function LinkCard({ link }: { link: ApiRegistrationLink }) {
  */
 export function YourLinksBody() {
   const t = useTranslations('onboarding');
+  // `?new=<link_id>` is set by the create flow after it navigates here, so the
+  // fresh draft can be scrolled to and highlighted (its card carries the
+  // "Make Live" CTA). Absent on a normal visit.
+  const newLinkId = useSearchParams().get('new');
+  // The create toast can't survive the navigation from the create page, so it
+  // is surfaced here on arrival: confirm the draft + point at "Make Live".
+  const [toast, setToast] = useState<string | null>(null);
+  useEffect(() => {
+    if (newLinkId) setToast(t('your_links.draft_created'));
+  }, [newLinkId, t]);
   const rawProfile = useProfileRaw();
   const { data: cfg } = useAggregatorConfig();
   // Domain id the aggregator is scoped to; falls back to the network's first
@@ -756,9 +915,12 @@ export function YourLinksBody() {
             {t('your_links.empty', { type: aggregatorType })}
           </div>
         ) : (
-          links.map((l) => <LinkCard key={l.link_id} link={l} />)
+          links.map((l) => (
+            <LinkCard key={l.link_id} link={l} highlight={l.link_id === newLinkId} />
+          ))
         )}
       </div>
+      {toast && <SuccessToast message={toast} onDone={() => setToast(null)} />}
     </div>
   );
 }

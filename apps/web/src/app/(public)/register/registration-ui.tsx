@@ -74,11 +74,18 @@ export function RegistrationSubmitButton({
       <button
         type="submit"
         disabled={disabled}
-        className={`w-full py-3 rounded-[12px] font-display font-bold text-[15px] text-white transition-all
+        // Same fix as ConsentGate's CTA: `text-white` here and
+        // `text-(--bd-primary-600)` in the disabled branch are both "text
+        // color" utilities, so which one actually renders depends on
+        // Tailwind's internal stylesheet order, not on their order in this
+        // string — here `text-white` was winning, leaving white-on-pale
+        // (effectively invisible) instead of the intended indigo label.
+        // Keeping one background + one text colour always, and only fading
+        // opacity when disabled, sidesteps that class-precedence trap
+        // entirely and matches the sibling Signals gate's CTA.
+        className={`w-full py-3 rounded-[12px] font-display font-bold text-[15px] text-white bg-(--bd-primary) transition-all
           ${
-            disabled
-              ? 'bg-(--bd-primary-100) text-(--bd-primary-600) cursor-not-allowed'
-              : 'bg-(--bd-primary) hover:bg-(--bd-primary-600) bd-shadow-lg'
+            disabled ? 'cursor-not-allowed opacity-60' : 'hover:bg-(--bd-primary-600) bd-shadow-lg'
           }`}
       >
         {submitting ? submittingLabel : label}

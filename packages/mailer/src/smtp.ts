@@ -54,6 +54,10 @@ export class SmtpMailer extends MailerAdapter {
       text: input.text,
       ...(input.replyTo ? { replyTo: input.replyTo } : {}),
       ...(input.cc ? { cc: input.cc } : {}),
+      // nodemailer's attachment shape matches SendAttachment exactly, so this
+      // is a straight passthrough — unlike the SES adapter, which has to build
+      // raw MIME (#551).
+      ...(input.attachments?.length ? { attachments: input.attachments } : {}),
     };
     try {
       const info = await this.transporter.sendMail(message);

@@ -28,7 +28,7 @@ function job(over: Partial<ProcessingJob> = {}): ProcessingJob {
   return {
     id: 'job-1',
     channel: 'export',
-    status: 'pending',
+    status: 'queued',
     signalstackOrgId: 'org-1',
     metadata: [{ key: 'purpose', value: 'audit' }],
     content: {},
@@ -89,7 +89,7 @@ function harness(
         if (theJob) theJob.status = status;
       },
       rollUpStatus: async () => {
-        const counts = { total: 0, pending: 0, resolved: 0, submitted: 0, failed: 0 };
+        const counts = { total: 0, pending: 0, resolved: 0, submitted: 0, sent: 0, skipped_not_owned: 0, skipped_no_contact: 0, duplicate_active: 0, failed: 0 };
         for (const v of itemStatus.values()) {
           counts.total++;
           counts[v.status as 'pending' | 'resolved' | 'submitted' | 'failed']++;
@@ -116,7 +116,7 @@ function harness(
       },
       ...over,
     },
-    config: { decryptChunk: 500, fieldSet: 'contact', ...config },
+    config: { decryptChunk: 500, fieldSet: 'contact', recipientMode: 'requester', ...config },
     log: {
       info: (o) => logs.info.push(o),
       warn: (o) => logs.warn.push(o),
@@ -132,7 +132,7 @@ describe('runCampaignJob (export channel)', () => {
     await runCampaignJob('job-1', h.deps);
 
     expect(h.jobStatuses[0]).toBe('processing');
-    expect(h.jobStatuses.at(-1)).toBe('succeeded');
+    expect(h.jobStatuses.at(-1)).toBe('completed');
     expect(h.itemMarks).toEqual([{ itemId: 'item-1', status: 'resolved' }]);
     expect(h.heartbeats()).toBeGreaterThanOrEqual(1);
     expect(h.puts).toHaveLength(1);
@@ -142,7 +142,7 @@ describe('runCampaignJob (export channel)', () => {
     expect(h.mails[0]!.text).toContain('01 Aug 2026, 01:00 UTC');
   });
 
-  it('marks a skipped item failed and rolls up to partially_failed', async () => {
+  it('marks an unowned item skipped_not_owned and still completes the job', async () => {
     const h = harness(
       job({
         items: [
@@ -160,19 +160,28 @@ describe('runCampaignJob (export channel)', () => {
     expect(h.itemMarks).toContainEqual({ itemId: 'a', status: 'resolved' });
     expect(h.itemMarks).toContainEqual({
       itemId: 'b',
-      status: 'failed',
-      err: 'not_found_or_not_owned',
+      status: 'skipped_not_owned',
+      err: 'not_owned_by_org',
     });
-    expect(h.jobStatuses.at(-1)).toBe('partially_failed');
-    expect(h.mails).toHaveLength(1); // one record still exported
+    // A skip is not a failure, so the job completes rather than going partial.
+    expect(h.jobStatuses.at(-1)).toBe('completed');
+    expect(h.mails).toHaveLength(1); // the one owned record is still exported
   });
 
-  it('rolls up to failed and sends no email when nothing resolves', async () => {
+  it('completes with no email when every item is unowned (all skipped)', async () => {
     const h = harness(job({ items: [{ itemId: 'a', action: null, status: 'pending' }] }), {
       fetchDecryptedProfiles: async () => ok({ profiles: [], skipped: ['a'] }),
     });
     await runCampaignJob('job-1', h.deps);
-    expect(h.jobStatuses.at(-1)).toBe('failed');
+    // Nothing was owned, so nothing was exported — but the handler ran
+    // correctly, so this is `completed` with counts telling the real story,
+    // not `failed`. See deriveJobStatus.
+    expect(h.jobStatuses.at(-1)).toBe('completed');
+    expect(h.itemMarks).toContainEqual({
+      itemId: 'a',
+      status: 'skipped_not_owned',
+      err: 'not_owned_by_org',
+    });
     expect(h.puts).toHaveLength(0);
     expect(h.mails).toHaveLength(0);
   });
@@ -210,7 +219,7 @@ describe('runCampaignJob (export channel)', () => {
   });
 
   it('is a no-op for an already-terminal job (retry guard)', async () => {
-    const h = harness(job({ status: 'succeeded' }));
+    const h = harness(job({ status: 'completed' }));
     await runCampaignJob('job-1', h.deps);
     expect(h.jobStatuses).toEqual([]); // never set processing
     expect(h.puts).toHaveLength(0);
@@ -232,7 +241,7 @@ describe('runCampaignJob (export channel)', () => {
   });
 
   it('prefers the recipient override over the job requested_by', async () => {
-    const h = harness(job(), {}, { recipientOverride: 'admin@network.example' });
+    const h = harness(job(), {}, { recipientMode: 'network_admin', networkAdminEmail: 'admin@network.example' });
     await runCampaignJob('job-1', h.deps);
     expect(h.mails[0]!.to).toBe('admin@network.example');
   });

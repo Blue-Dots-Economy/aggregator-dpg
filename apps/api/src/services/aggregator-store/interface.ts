@@ -31,6 +31,16 @@ export interface Aggregator {
   contactEmail: string;
   locations: BecknLocation[];
   consent: ConsentRecord;
+  /**
+   * Schema-driven registration fields with no column of their own. `{}` when
+   * the deployment's registration schema declares no extra fields.
+   */
+  profile: Record<string, unknown>;
+  /**
+   * Which schema variant produced `profile`, e.g. `blue_dot/up-gzb/registration.v1`.
+   * NULL on rows created before migration 0018.
+   */
+  profileRef: string | null;
   status: AggregatorStatus;
   createdBy: string;
   updatedBy: string;
@@ -66,6 +76,17 @@ export interface CreateAggregatorInput {
   updatedBy: string;
   /** Optional parent org id (spec §5.2). Defaults to null when omitted. */
   parentOrgId?: string | null;
+  /**
+   * Schema-driven registration fields with no column of their own. Defaults to
+   * `{}` when omitted — the typed fields above stay authoritative for
+   * everything they already carry.
+   */
+  profile?: Record<string, unknown>;
+  /**
+   * Which schema variant produced `profile`, e.g. `blue_dot/up-gzb/registration.v1`.
+   * Defaults to null when omitted.
+   */
+  profileRef?: string | null;
 }
 
 /**

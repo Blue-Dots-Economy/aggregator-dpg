@@ -33,6 +33,8 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
           ownerPhone: input.ownerPhone ?? null,
           ownerKcSub: input.ownerKcSub ?? null,
           kcGroupId: input.kcGroupId ?? null,
+          profile: input.profile ?? {},
+          profileRef: input.profileRef ?? null,
         })
         .returning();
       if (!row) return errResult('DB_UNAVAILABLE', 'insert returned no row');
@@ -145,6 +147,8 @@ function toDomain(row: typeof aggregatorOrgs.$inferSelect): AggregatorOrg {
     ownerPhone: row.ownerPhone,
     ownerKcSub: row.ownerKcSub,
     kcGroupId: row.kcGroupId,
+    profile: row.profile ?? {},
+    profileRef: row.profileRef,
     status: row.status,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,

@@ -12,9 +12,9 @@
  */
 export interface ConsentDocContent {
   /** Current-version Terms of Service document. */
-  terms: { version: number; title: string; content: string };
+  terms: { version: number; title: string; content: string; effective_from?: string };
   /** Current-version Privacy Policy document. */
-  privacy: { version: number; title: string; content: string };
+  privacy: { version: number; title: string; content: string; effective_from?: string };
 }
 
 /**

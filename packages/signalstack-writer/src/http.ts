@@ -955,17 +955,25 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
   }
 
   /**
-   * Identity-only probe against signalstack's `/admin/participant` endpoint.
+   * Read-only identity probe against signalstack's `GET /admin/participant`.
    *
-   * Calls the same POST endpoint as {@link onboard} but with no
-   * `item_state` in the body and a sentinel `name: 'lookup'`. Signalstack
-   * treats that as an account-only path — it may create the user row but
-   * never an item — so the probe is safely idempotent for the caller.
-   * The response is reshaped into the slim {@link SignalStackProbeUserResult}
-   * tri-state so the caller never has to re-derive owned_elsewhere /
-   * lifecycle_summary from the raw items array.
+   * Repointed from the old `POST /admin/participant` account-only probe, which
+   * created a phantom `name: 'lookup'` user row as a side effect (#648). This
+   * GET endpoint is side-effect-free: it returns `{ user_id, items }` where the
+   * `items` are already scoped to the acting aggregator's org. The response is
+   * reshaped into the slim {@link SignalStackProbeUserResult} tri-state so the
+   * caller never has to re-derive owned_elsewhere / lifecycle_summary:
+   *   - `user_id` null             → new identity
+   *   - `user_id` + owned items     → own user (+ lifecycle summary)
+   *   - `user_id` + no owned items  → user exists under a different aggregator
    *
-   * @param input - actingOrgId + email and/or phoneNumber + network/domain.
+   * Being a GET, it is safe to retry (the old POST was not — a retry could
+   * mint a second phantom user).
+   *
+   * @param input - actingOrgId + email and/or phoneNumber (both required, at
+   *   least one identifier) + network/domain (both required). Org scoping is via
+   *   the `x-acting-org-id` header; `network`/`domain` scope the returned
+   *   org items to the probed domain when selecting the primary item.
    * @returns ok(SignalStackProbeUserResult) on 2xx; err(BaseError) on
    *   validation failure, transport failure, or non-2xx.
    */
@@ -994,21 +1002,22 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       );
     }
 
-    // Probe body — deliberately omits `item_state` so signals' Plan-C
-    // account-only path runs (creates user row at most; never an item).
-    // The sentinel `name: 'lookup'` mirrors what signals' own admin UI
-    // sends for identity-only checks. `channel` is required by signals'
-    // UpsertParticipantRequest schema even on the account-only path; the
-    // probe always originates from the public registration link, so 'link'
-    // is the truthful attribution surface.
-    const body: Record<string, unknown> = {
-      name: 'lookup',
-      channel: 'link',
-      network: input.network,
-      domain: input.domain,
-    };
-    if (input.email) body.email = input.email;
-    if (input.phoneNumber) body.phone_number = input.phoneNumber;
+    // Read-only lookup — the identity travels as query params and there is no
+    // request body, so signals performs no write (#648: the old POST
+    // account-only probe created a phantom `name: 'lookup'` user). Org scoping
+    // is via the `x-acting-org-id` header; signals returns only items owned by
+    // this org.
+    //
+    // Privacy note: because this is a GET, the email/phone ride the query string
+    // rather than a POST body, so an intermediary (proxy / LB / ingress) that
+    // logs full request URIs could capture them. Acceptable — this is an
+    // internal server-to-server call and matches signals' existing read
+    // contract — but the signals ingress should keep `/admin/participant` query
+    // strings out of its access log.
+    const params = new URLSearchParams();
+    if (input.email) params.set('email', input.email);
+    if (input.phoneNumber) params.set('phone_number', input.phoneNumber);
+    const url = `${this.endpoint}?${params.toString()}`;
 
     const headersResult = await this.buildHeaders();
     if (!headersResult.success) return err(headersResult.error);
@@ -1019,10 +1028,9 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
     };
 
     try {
-      const res = await this.requestWithRetry(this.endpoint, {
-        method: 'POST',
+      const res = await this.requestWithRetry(url, {
+        method: 'GET',
         headers,
-        body: JSON.stringify(body),
       });
 
       if (!res.ok) {
@@ -1055,17 +1063,12 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
         );
       }
 
-      // Account-only response shape:
-      //   { user_id, user_existed, owned_elsewhere?, items: [] | [item] }
-      // Reshape into the tri-state the caller branches on.
+      // GET /api/v1/admin/participant response: { user_id: string | null, items: [...] }.
+      // `items` are org-scoped by signals (only items this aggregator owns) and
+      // span every domain the user has here. Reshape into the tri-state.
       const raw = (await res.json()) as {
         user_id?: unknown;
-        user_existed?: unknown;
-        owned_elsewhere?: unknown;
-        items?: Array<{
-          item_id?: unknown;
-          lifecycle_status?: unknown;
-        }>;
+        items?: unknown;
       };
       if (!raw || typeof raw !== 'object') {
         return err(
@@ -1076,10 +1079,38 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
         );
       }
 
-      const userExisted = raw.user_existed === true;
-      const ownedElsewhere = raw.owned_elsewhere === true;
+      const userId = typeof raw.user_id === 'string' && raw.user_id.length > 0 ? raw.user_id : null;
 
-      if (userExisted && ownedElsewhere) {
+      // No matching identity — a genuinely new user.
+      if (!userId) {
+        return ok({
+          user_exists: false,
+          owned_elsewhere: false,
+          lifecycle_summary: null,
+        });
+      }
+
+      // `items` is a required array on a well-formed response
+      // (GetParticipantResponse.items). A missing / non-array field is upstream
+      // drift — fail rather than silently coerce it to "owned elsewhere".
+      if (!Array.isArray(raw.items)) {
+        return err(
+          new UpstreamError('signalstack probe response missing items array', {
+            code: 'SIGNALSTACK_BAD_RESPONSE',
+            details: { payload: raw },
+          }),
+        );
+      }
+      const items = raw.items as Array<{
+        item_id?: unknown;
+        item_network?: unknown;
+        item_domain?: unknown;
+        lifecycle_status?: unknown;
+      }>;
+
+      // No items owned by this aggregator → owned elsewhere (or a foreign /
+      // account-only identity). No lifecycle leak from another org.
+      if (items.length === 0) {
         return ok({
           user_exists: true,
           owned_elsewhere: true,
@@ -1087,43 +1118,19 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
         });
       }
 
-      const items = Array.isArray(raw.items) ? raw.items : [];
-      if (userExisted && items.length > 0) {
-        const first = items[0]!;
-        const itemId = typeof first.item_id === 'string' ? first.item_id : '';
-        if (!itemId) {
-          return err(
-            new UpstreamError('signalstack probe primary item missing item_id', {
-              code: 'SIGNALSTACK_BAD_RESPONSE',
-              details: { payload: raw },
-            }),
-          );
-        }
-        // Back-compat fallback: older signalstack builds omit lifecycle_status
-        // on the account-only response. Treat absent as a live item — same
-        // default the resolveLifecycle helper in apps/api applies for read-side
-        // rows. The writer cannot import that helper (apps/api sits above this
-        // package in the dep graph), so inline the fallback here.
-        const lifecycleStatus =
-          first.lifecycle_status === 'draft' ||
-          first.lifecycle_status === 'live' ||
-          first.lifecycle_status === 'paused'
-            ? first.lifecycle_status
-            : 'live';
-        return ok({
-          user_exists: true,
-          owned_elsewhere: false,
-          lifecycle_summary: {
-            primary_item: {
-              item_id: itemId,
-              lifecycle_status: lifecycleStatus,
-            },
-          },
-        });
-      }
+      // Scope the "primary" item to the probed network + domain — mirrors the
+      // onboard path, which matches by network/domain before touching an item.
+      // `items` span domains, so items[0] could belong to a DIFFERENT domain;
+      // reporting its lifecycle for THIS domain would be wrong (a paused
+      // domain-A profile must not read as a paused domain-B one).
+      const domainItem = items.find(
+        (it) => it.item_domain === input.domain && it.item_network === input.network,
+      );
 
-      if (userExisted) {
-        // Own user but no item yet (account-only probe response).
+      // Own user (this org owns items) but nothing in the requested domain yet —
+      // a fresh start in this domain, so no lifecycle summary. NOT owned
+      // elsewhere: the user belongs to this org.
+      if (!domainItem) {
         return ok({
           user_exists: true,
           owned_elsewhere: false,
@@ -1131,13 +1138,57 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
         });
       }
 
-      // user_existed: false (or absent) — signals either created the row
-      // just now or there is no matching identity. Either way the caller
-      // treats the user as new.
+      const itemId = typeof domainItem.item_id === 'string' ? domainItem.item_id : '';
+      if (!itemId) {
+        return err(
+          new UpstreamError('signalstack probe primary item missing item_id', {
+            code: 'SIGNALSTACK_BAD_RESPONSE',
+            details: { payload: raw },
+          }),
+        );
+      }
+
+      // lifecycle_status → the result models only resumable states
+      // (draft | live | paused):
+      //   - absent/empty     → 'live' (back-compat: older builds omit it; same
+      //     default apps/api's read-side resolveLifecycle applies). Inlined
+      //     because apps/api sits above this package in the dep graph.
+      //   - draft/live/paused → used as-is.
+      //   - retired          → a real but non-resumable signals state: no
+      //     summary; the user starts a fresh profile in this domain.
+      //   - anything else    → upstream drift; fail rather than mislabel as live.
+      const rawLifecycle = domainItem.lifecycle_status;
+      if (rawLifecycle === 'retired') {
+        return ok({
+          user_exists: true,
+          owned_elsewhere: false,
+          lifecycle_summary: null,
+        });
+      }
+      let lifecycleStatus: 'draft' | 'live' | 'paused';
+      if (rawLifecycle === undefined || rawLifecycle === null || rawLifecycle === '') {
+        lifecycleStatus = 'live';
+      } else if (rawLifecycle === 'draft' || rawLifecycle === 'live' || rawLifecycle === 'paused') {
+        lifecycleStatus = rawLifecycle;
+      } else {
+        return err(
+          new UpstreamError(
+            `signalstack probe returned unknown lifecycle_status: ${
+              typeof rawLifecycle === 'string' ? rawLifecycle : JSON.stringify(rawLifecycle)
+            }`,
+            { code: 'SIGNALSTACK_BAD_RESPONSE', details: { payload: raw } },
+          ),
+        );
+      }
       return ok({
-        user_exists: false,
+        user_exists: true,
         owned_elsewhere: false,
-        lifecycle_summary: null,
+        lifecycle_summary: {
+          primary_item: {
+            item_id: itemId,
+            lifecycle_status: lifecycleStatus,
+          },
+        },
       });
     } catch (e) {
       const cause = e as Error;

@@ -193,4 +193,75 @@ describe('GET /v1/aggregator-config', () => {
     expect(body.brand.favicon_url).toBe('https://example.invalid/favicon.ico');
     expect(body.brand.typography?.primaryFont).toBe('Inter');
   });
+
+  it('exposes signals_ui_urls (empty when the env var is unset)', async () => {
+    const res = await app.inject({ method: 'GET', url: '/v1/aggregator-config' });
+    const body = res.json() as { signals_ui_urls: Record<string, string> };
+    expect(body.signals_ui_urls).toEqual({});
+  });
+
+  it('passes an explicit signals_cta flag through unchanged', async () => {
+    const res = await app.inject({ method: 'GET', url: '/v1/aggregator-config' });
+    const body = res.json() as {
+      registration_modes: Record<string, { signals_cta: boolean }>;
+    };
+    expect(body.registration_modes.form?.signals_cta).toBe(true);
+    expect(body.registration_modes.voice?.signals_cta).toBe(false);
+  });
+
+  it('resolves signals_cta from the default when the mode omits it', async () => {
+    // Modes here deliberately omit `signals_cta` so the only way the wire
+    // value can be a boolean is through signalsCtaEnabled's default-fallback
+    // branch (submission_shape === 'account_and_profile'), not a fixture
+    // literal or raw passthrough of the config object.
+    const withDefaultedModes: ResolvedNetworkConfig = buildBlueDotConfig({
+      aggregator: {
+        ...buildBlueDotConfig().aggregator,
+        registration_modes: {
+          profile_mode: {
+            label_i18n_key: 'registration_mode.profile_mode.label',
+            submission_shape: 'account_and_profile',
+            public_hint_i18n_key: null,
+          },
+          account_mode: {
+            label_i18n_key: 'registration_mode.account_mode.label',
+            submission_shape: 'account_only',
+            public_hint_i18n_key: null,
+          },
+        },
+      },
+    });
+    _setNetworkConfig(withDefaultedModes);
+
+    const res = await app.inject({ method: 'GET', url: '/v1/aggregator-config' });
+    const body = res.json() as {
+      registration_modes: Record<string, { signals_cta: boolean }>;
+    };
+    expect(body.registration_modes.profile_mode?.signals_cta).toBe(true);
+    expect(body.registration_modes.account_mode?.signals_cta).toBe(false);
+  });
+
+  it('GET /v1/participant-consent returns the resolved consent document', async () => {
+    const doc = {
+      documents: {
+        terms: { current_version: 1, versions: [{ version: 1, title: 'T', content: 'c' }] },
+        privacy: { current_version: 1, versions: [{ version: 1, title: 'P', content: 'p' }] },
+      },
+    };
+    _setNetworkConfig(buildBlueDotConfig({ participantConsent: doc }));
+
+    const res = await app.inject({ method: 'GET', url: '/v1/participant-consent' });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { participant_consent: typeof doc | null };
+    expect(body.participant_consent).toEqual(doc);
+  });
+
+  it('GET /v1/participant-consent returns null when no consent_source is configured', async () => {
+    _setNetworkConfig(buildBlueDotConfig());
+
+    const res = await app.inject({ method: 'GET', url: '/v1/participant-consent' });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { participant_consent: unknown };
+    expect(body.participant_consent).toBeNull();
+  });
 });

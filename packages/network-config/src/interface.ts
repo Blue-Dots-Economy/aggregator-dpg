@@ -161,16 +161,95 @@ export const NetworkBindingSchema = z.object({
    * set.
    */
   source: z.string().url().optional(),
+  /**
+   * URL of the upstream participant `consent.json` (Terms / Privacy /
+   * profile-creation), fetched over HTTPS exactly like {@link source} — same
+   * timeout + last-known-good cache. Typically the sibling of `source` in the
+   * schemas repo. Optional in the YAML because a deployment may provide it via
+   * the `AGGREGATOR_PARTICIPANT_CONSENT_SOURCE` env override instead, or omit it entirely
+   * (the web app then falls back to the on-disk participant `consent.json`).
+   */
+  consent_source: z.string().url().optional(),
   field_overrides: z.record(z.string(), IdentitySelectorsSchema).optional(),
   csv_array_delimiter: z.string().min(1).default('|'),
 });
 export type NetworkBinding = z.infer<typeof NetworkBindingSchema>;
 
+/** One title+content version entry of a participant consent document. */
+export const ConsentDocVersionSchema = z
+  .object({
+    version: z.number(),
+    title: z.string(),
+    content: z.string(),
+    effective_from: z.string().optional(),
+  })
+  .passthrough();
+
+/** One statement-only version entry (profile-creation consent). */
+export const ConsentStatementVersionSchema = z
+  .object({
+    version: z.number(),
+    statement: z.string(),
+    effective_from: z.string().optional(),
+  })
+  .passthrough();
+
+/**
+ * Participant `consent.json` document fetched from
+ * {@link NetworkBindingSchema.consent_source}. Deliberately lenient
+ * (`passthrough`, all-optional) — its role is to reject a non-JSON / wrong-shape
+ * body (e.g. a GitHub 404 page) on fetch, not to fully model Signals' schema.
+ * The web app renders the current-version entries and the `__SUPPORT_EMAIL__`
+ * token from this shape.
+ */
+export const ParticipantConsentDocSchema = z
+  .object({
+    documents: z
+      .object({
+        terms: z
+          .object({
+            current_version: z.number(),
+            versions: z.array(ConsentDocVersionSchema),
+          })
+          .passthrough()
+          .optional(),
+        privacy: z
+          .object({
+            current_version: z.number(),
+            versions: z.array(ConsentDocVersionSchema),
+          })
+          .passthrough()
+          .optional(),
+        profile_creation: z
+          .object({
+            current_version: z.number(),
+            versions: z.array(ConsentStatementVersionSchema),
+          })
+          .passthrough()
+          .optional(),
+      })
+      .passthrough(),
+  })
+  .passthrough();
+export type ParticipantConsentDoc = z.infer<typeof ParticipantConsentDocSchema>;
+
 /**
  * Onboarding behaviour toggles.
+ *
+ * `presume_consent` governs the BULK-UPLOAD path only (`bulk-row-process.ts`);
+ * the interactive registration-link flow always captures consent from the
+ * participant. When true, an adult bulk row is forwarded to Signals with
+ * `user_terms` / `user_privacy` / `profile_creation` all asserted on the
+ * participant's behalf, which satisfies the `consent_required` go-live gate and
+ * publishes the profile immediately. Minors are never presumed
+ * (`!rowIsMinor`). When false, `compliance` is omitted entirely and rows land
+ * as `draft` until the participant accepts for themselves.
+ *
+ * Defaults to **false**: presuming consent is a deliberate, per-network policy
+ * decision, so it must be opted into explicitly rather than inherited.
  */
 export const OnboardingConfigSchema = z.object({
-  presume_consent: z.boolean().default(true),
+  presume_consent: z.boolean().default(false),
   bulk_max_rows: z.coerce.number().int().positive().default(10000),
 });
 export type OnboardingConfig = z.infer<typeof OnboardingConfigSchema>;
@@ -190,6 +269,17 @@ export const RegistrationModeSchema = z.object({
   label_i18n_key: z.string().min(1),
   submission_shape: z.enum(['account_only', 'account_and_profile']),
   public_hint_i18n_key: z.string().min(1).nullable(),
+  /**
+   * Whether links in this mode offer the Signals UI hand-off: today the
+   * pre-submit "Already Registered — Sign In" CTA on the public registration
+   * page. Once #635 lands it will gate that mode's post-submit redirect too.
+   *
+   * Optional. When omitted it resolves to
+   * `submission_shape === 'account_and_profile'`, so with no config at all the
+   * hand-off appears on the full-profile form only. Set explicitly to override
+   * per mode — including for modes that do not exist yet.
+   */
+  signals_cta: z.boolean().optional(),
 });
 export type RegistrationMode = z.infer<typeof RegistrationModeSchema>;
 
@@ -383,6 +473,14 @@ export interface ResolvedNetworkConfig {
    * network.json doesn't declare the block.
    */
   dashboardBuckets?: DashboardBuckets;
+  /**
+   * Participant registration-link consent document fetched from
+   * {@link NetworkBindingSchema.consent_source} (over HTTPS, cache-backed like
+   * `network.json`). Undefined when no `consent_source` is configured or the
+   * fetch failed with no cached copy — the web app then falls back to its
+   * on-disk participant `consent.json`.
+   */
+  participantConsent?: ParticipantConsentDoc;
 }
 
 // ─── Loader port ─────────────────────────────────────────────────────────────

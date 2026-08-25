@@ -43,7 +43,6 @@
     "success_approval": "The {brand} team will review your application. Once approved, sign in via {brand} SSO using the email or mobile you registered.",
     "submit": "Register as aggregator coordinator",
     "submitting": "Submitting…",
-    "footer_note": "Your application will be reviewed by the {brand} team. You'll receive an email once approved, then sign in via {brand} SSO.",
     "validation_error_title": "Please fix the highlighted fields",
     "page_title": "Aggregator Registration",
     "tab_coordinator": "Register as Coordinator",
@@ -66,7 +65,9 @@
       "modal_eyebrow": "Before you register",
       "modal_title": "Terms & Privacy",
       "modal_desc": "Please review the terms of service and privacy policy below.",
-      "modal_close": "Close"
+      "modal_close": "Close",
+      "load_failed_title": "Terms unavailable",
+      "load_failed_detail": "We could not load the Terms of Service and Privacy Policy, so your consent cannot be recorded. Please reload the page and try again."
     }
   },
   "dashboard": {
@@ -288,7 +289,6 @@
       "upload_button": "Upload",
       "uploading": "Uploading…",
       "success_note": "Accounts will be live once the user logs in on the platform or via the call.",
-      "security_note": "All uploads are scanned and validated before import.",
       "attestation_fallback": "I confirm I have permission from the individuals in this file to submit their details.",
       "remove_file": "Remove file",
       "recent": {
@@ -344,13 +344,19 @@
       "loading": "Loading links…",
       "empty": "No {type} links yet. Create one above.",
       "active_count": "{count} active",
-      "type_pill": "{type} links"
+      "type_pill": "{type} links",
+      "draft_created": "Link created as a draft — click \"Make Live\" to publish it."
     },
     "link_card": {
       "copy_link": "Copy link",
       "copied": "Copied!",
       "copy_title": "Copy link",
-      "download_qr": "Download QR",
+      "view_qr": "View QR",
+      "qr_modal_title": "Registration QR",
+      "qr_download": "Download",
+      "qr_close": "Close",
+      "qr_generating": "Generating…",
+      "qr_error": "Couldn't generate the QR. Please try again.",
       "open_link": "Open link",
       "draft_notice": "Public URL + QR appear after Make Live.",
       "registrations": "registrations",
@@ -461,6 +467,14 @@
       "done_ref_prefix": "Ref:",
       "btn_register_another": "Register another",
       "btn_submit": "Submit registration",
+      "signals_cta": "Already Registered — Sign In",
+      "signals_redirect_announcement": "You'll be taken to Signals shortly. Use Continue to Signals to go now, or Register another to stay.",
+      "btn_continue_to_signals": "Continue to Signals",
+      "btn_continue_to_signals_counting": "Continue to Signals ({seconds})",
+      "chooser_title": "How would you like to continue?",
+      "chooser_subtitle": "Fill in the registration form, or sign in if you already have an account.",
+      "chooser_register_cta": "Register",
+      "chooser_back": "Back to options",
       "btn_submitting": "Submitting…",
       "consent_label": "I have read and accept the terms and privacy policy.",
       "consent_accept_prefix": "I have read and accept the ",
@@ -474,7 +488,6 @@
       "consent_profile_modal_agree": "I agree to continue",
       "u18_notice": "As you are under 18, your account will be created without terms acceptance. Please sign in to the Signalstack app to review and accept the terms — a parent or guardian can help.",
       "privacy_note": "Your details are shared only with the aggregator who issued this link.",
-      "powered_by": "Powered by",
       "validation_error_title": "Form validation failed",
       "validation_required": "Please fill all required fields.",
       "validation_more": "(and {count} more)",
@@ -583,6 +596,40 @@
     "validation_incomplete": "Please add details, at least one contact (email or phone), and tick consent.",
     "success": "Message sent. Our team will get back to you.",
     "unavailable": "Support isn't available right now. Please try again later.",
-    "error": "Couldn't send your message. Please try again in a moment."
+    "error": "Couldn't send your message. Please try again in a moment.",
+    "label_attachments": "Attachments (optional)",
+    "attachments_hint": "Image, video or audio. Up to {count} files, {size} in total.",
+    "attachments_add": "Add files",
+    "attachments_remove": "Remove {name}",
+    "attachments_total": "{used} of {total} used",
+    "attachment_too_many": "You can attach at most {count} files.",
+    "attachment_too_large": "Attachments must total no more than {size}.",
+    "attachment_bad_type": "{name} isn't an accepted file type. Attach an image, video or audio file.",
+    "rate_limited": "You've sent several messages recently. Please try again later."
+  },
+  "consent_gate": {
+    "eyebrow": "Before you continue",
+    "title": "Review & accept to continue",
+    "description": "Read straight through — the tracker follows as you go.",
+    "reader_label": "Terms and privacy documents",
+    "hint_scroll": "Keep reading to continue.",
+    "hint_done": "That's everything — you can agree now.",
+    "accept": "Accept & continue",
+    "close": "Close",
+    "cap_privacy": "Privacy",
+    "cap_terms": "Terms",
+    "cap_profile": "Profile"
+  },
+  "legal": {
+    "privacy_title": "Privacy Policy",
+    "terms_title": "Terms of Service",
+    "audience_participant": "For participants",
+    "audience_aggregator": "For aggregators",
+    "audience_org": "For organisations",
+    "version_effective": "Version {version} · Effective {date}",
+    "version_only": "Version {version}",
+    "unavailable": "Legal documents are currently unavailable. Please try again later.",
+    "back_to_sign_in": "Back to sign in",
+    "contents_label": "Contents"
   }
 }

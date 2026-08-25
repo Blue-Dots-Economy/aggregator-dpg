@@ -1396,7 +1396,18 @@ function filterRowsByLifecycle<R extends { lifecycle_status?: LifecycleStatus }>
   return rows.filter((r) => (r.lifecycle_status ?? 'live') === filter);
 }
 
-function SeekersTab() {
+/** Props for the participant-profile tab (any `profile_*` domain). */
+interface DomainTabProps {
+  /**
+   * Domain to render — the signed-in coordinator's OWN domain, from its
+   * `aggregator_type`. Passed in rather than read from a fixed position in
+   * `cfg.domains`, which assumed every network has exactly two domains in
+   * seeker-then-provider order.
+   */
+  domainId: string | undefined;
+}
+
+function SeekersTab({ domainId }: Readonly<DomainTabProps>) {
   const t = useTranslations('dashboard');
   const locale = useLocale();
   // Signalstack's `/aggregator/dashboard` is the only endpoint that
@@ -1405,15 +1416,12 @@ function SeekersTab() {
   // wraps every served domain under `by_domain[<id>]` so seeker +
   // provider tabs share a single fetch.
   //
-  // Domain id comes from the live network config so networks that
-  // declare non-default ids (e.g. orange_dot's `tourist`) still resolve
-  // to the right `by_domain[<id>]` slice. Falls back to 'seeker' for
-  // legacy blue/purple defaults.
-  const { data: cfgRaw } = useAggregatorConfig();
-  // No fallback — undefined here lets useDashboard's `enabled` gate skip
-  // the call until the live network config loads (prevents a stale
-  // `?domain=seeker` fetch on cold mount with DEFAULT_AGGREGATOR_CONFIG).
-  const seekerDomainId = cfgRaw?.domains?.[0]?.id;
+  // Domain id is the caller's own, passed in by the parent, so a network
+  // declaring non-default ids (orange_dot's `tourist`, up-gzb's
+  // `service_provider`) still resolves the right `by_domain[<id>]` slice.
+  // `undefined` until the parent's config loads, which lets useDashboard's
+  // `enabled` gate skip the call rather than firing a stale fetch.
+  const seekerDomainId = domainId;
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [lifecycleFilter, setLifecycleFilter] = useLifecycleUrlFilter();
@@ -1437,6 +1445,9 @@ function SeekersTab() {
           page,
           limit: PAGE_SIZE,
           ...(filterActive ? { status: statusFilter } : {}),
+          ...(lifecycleFilter === 'draft' || lifecycleFilter === 'live'
+            ? { lifecycle: lifecycleFilter }
+            : {}),
         }
       : undefined,
   );
@@ -1491,6 +1502,13 @@ function SeekersTab() {
       page: 1,
       limit: slice?.total_matching ?? total ?? PAGE_SIZE,
       ...(filterActive ? { status: statusFilter } : {}),
+      // Forward the lifecycle filter too: `total_matching` (the `limit` above)
+      // is the lifecycle-narrowed count, so the fetch must be narrowed the same
+      // way — else "Select all N matching" pulls N unfiltered rows and the
+      // client-side filter below finds almost none. Mirror the useDashboard call.
+      ...(lifecycleFilter === 'draft' || lifecycleFilter === 'live'
+        ? { lifecycle: lifecycleFilter }
+        : {}),
     });
     const all = (res.by_domain[seekerDomainId]?.items ?? []).map((p, i) =>
       toSeekerRow(p, locale, i),
@@ -1661,6 +1679,19 @@ function fmtCount(n: number | null | undefined): string {
  * table does not yet call. Missing fields render as em-dashes; the
  * `complete` profile bar uses `profile_completion_pct` from the rollup.
  */
+/**
+ * Resolves a row's lifecycle from signalstack's authoritative `lifecycle_status`
+ * (`draft`/`live`/`paused`, with the consent + schema go-live gates already
+ * applied server-side), falling back to the completion heuristic only for an
+ * older signalstack that omits the field. The heuristic mislabels a
+ * schema-complete-but-unconsented profile (genuinely `draft`) as `live`, so it
+ * is a last resort — see #558/#627.
+ */
+function resolveLifecycleStatus(raw: unknown, completion: number): LifecycleStatus {
+  if (raw === 'draft' || raw === 'live' || raw === 'paused') return raw;
+  return completion >= 100 ? 'live' : 'draft';
+}
+
 function toSeekerRow(participant: Record<string, unknown>, locale: string, index: number): Seeker {
   // Row key: profile_item_id (one row per profile), else the array index.
   // user_id is not unique per row (a user may own many profiles), so it is no
@@ -1672,13 +1703,10 @@ function toSeekerRow(participant: Record<string, unknown>, locale: string, index
   );
   const completion =
     typeof participant.profile_completion_pct === 'number' ? participant.profile_completion_pct : 0;
-  // Lifecycle is derived from completion %: `live` iff the profile is 100%
-  // complete, `draft` otherwise. signals no longer exposes a per-item
-  // completion/lifecycle on the responses we read, so the rollup's
-  // `profile_completion_pct` is the source of truth.
-  const lifecycleFields: Pick<Seeker, 'lifecycle_status'> = {
-    lifecycle_status: completion >= 100 ? 'live' : 'draft',
-  };
+  // Lifecycle from signalstack's authoritative row status, heuristic fallback
+  // only (see resolveLifecycleStatus).
+  const lifecycle_status = resolveLifecycleStatus(participant.lifecycle_status, completion);
+  const lifecycleFields: Pick<Seeker, 'lifecycle_status'> = { lifecycle_status };
   const created =
     typeof participant.profile_created_at === 'string' ? participant.profile_created_at : '';
   const updated =
@@ -1763,7 +1791,7 @@ function formatRelative(iso: string): string {
   return `${months}mo ago`;
 }
 
-function ProvidersTab() {
+function ProvidersTab({ domainId }: Readonly<DomainTabProps>) {
   const t = useTranslations('dashboard');
   const locale = useLocale();
   // Mirror SeekersTab: live counts come from the signalstack dashboard
@@ -1772,11 +1800,8 @@ function ProvidersTab() {
   //  by_received_action_status, complete_profiles, …)
   // so the cards map field-for-field; only the labels differ.
   //
-  // Domain id from cfg so networks declaring non-default ids (e.g.
-  // orange_dot's `practitioner`) still pick the right by_domain slice.
-  const { data: cfgRaw } = useAggregatorConfig();
-  // No fallback — see SeekersTab.
-  const providerDomainId = cfgRaw?.domains?.[1]?.id;
+  // Domain id is the caller's own — see SeekersTab.
+  const providerDomainId = domainId;
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [lifecycleFilter, setLifecycleFilter] = useLifecycleUrlFilter();
@@ -1800,6 +1825,9 @@ function ProvidersTab() {
           page,
           limit: PAGE_SIZE,
           ...(filterActive ? { status: statusFilter } : {}),
+          ...(lifecycleFilter === 'draft' || lifecycleFilter === 'live'
+            ? { lifecycle: lifecycleFilter }
+            : {}),
         }
       : undefined,
   );
@@ -1837,6 +1865,13 @@ function ProvidersTab() {
       page: 1,
       limit: slice?.total_matching ?? total ?? PAGE_SIZE,
       ...(filterActive ? { status: statusFilter } : {}),
+      // Forward the lifecycle filter too: `total_matching` (the `limit` above)
+      // is the lifecycle-narrowed count, so the fetch must be narrowed the same
+      // way — else "Select all N matching" pulls N unfiltered rows and the
+      // client-side filter below finds almost none. Mirror the useDashboard call.
+      ...(lifecycleFilter === 'draft' || lifecycleFilter === 'live'
+        ? { lifecycle: lifecycleFilter }
+        : {}),
     });
     const all = (res.by_domain[providerDomainId]?.items ?? []).map((p, i) =>
       toProviderRow(p, locale, i),
@@ -2039,7 +2074,15 @@ function DashboardContent({ aggregatorType }: { aggregatorType: string }) {
   // `?domain=seeker` fetch on cold mount with DEFAULT_AGGREGATOR_CONFIG.
   const primaryDomainCfg = cfg.domains?.find((d) => d.id === aggregatorType);
   const primaryDomain = primaryDomainCfg?.id;
-  const isProviderLike = !!primaryDomain && primaryDomain === cfg.domains?.[1]?.id;
+  // Provider-like = the domain publishes job postings rather than participant
+  // profiles, decided from the domain's own `item_type`.
+  //
+  // This was `primaryDomain === cfg.domains?.[1]?.id`, which assumed every
+  // network has exactly two domains in seeker-then-provider order. A third
+  // domain (blue_dot/up-gzb adds `service_provider`) matched neither branch, so
+  // it fell through to the seeker view AND that view fetched `domains[0]` —
+  // a service_provider coordinator saw a table headed "Seekers".
+  const isProviderLike = (primaryDomainCfg?.item_type ?? '').startsWith('job_posting');
 
   return (
     <div className="fade-up">
@@ -2059,7 +2102,11 @@ function DashboardContent({ aggregatorType }: { aggregatorType: string }) {
           inside each tab already carries the domain label + live total
           (design: redundant pill removed). Which tab renders is fixed by
           the aggregator's own type; nothing lets the user switch it. */}
-      {isProviderLike ? <ProvidersTab /> : <SeekersTab />}
+      {isProviderLike ? (
+        <ProvidersTab domainId={primaryDomain} />
+      ) : (
+        <SeekersTab domainId={primaryDomain} />
+      )}
     </div>
   );
 }

@@ -14,6 +14,7 @@
  * elsewhere" UI states.
  */
 
+import { randomUUID } from 'node:crypto';
 import { type NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
@@ -58,8 +59,7 @@ interface RouteParams {
  */
 export async function GET(req: NextRequest, { params }: RouteParams): Promise<NextResponse> {
   const { org } = await params;
-  const reqId =
-    req.headers.get(REQUEST_ID_HEADER) ?? `req-${Math.random().toString(36).slice(2, 10)}`;
+  const reqId = req.headers.get(REQUEST_ID_HEADER) ?? `req-${randomUUID()}`;
 
   const base = process.env.API_BASE_URL ?? 'http://localhost:4000';
   const search = new URL(req.url).searchParams.toString();

@@ -150,6 +150,10 @@
                     "format": "uri",
                     "maxLength": 2048
                   },
+                  "sub_org_name": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
                   "contact": {
                     "type": "object",
                     "properties": {
@@ -4266,7 +4270,7 @@
         "tags": [
           "registration-links"
         ],
-        "description": "Creates a QR / shareable registration link for the caller aggregator, scoped to a domain (seeker/provider). `domain` and `registration_mode` are validated against the active network config at request time. Drafts are metadata-only; status=live also mints the QR + public URL.",
+        "description": "Creates a shareable registration link for the caller aggregator, scoped to a domain (seeker/provider). `domain` and `registration_mode` are validated against the active network config at request time. Drafts are metadata-only; status=live also mints the public URL. The QR is generated client-side from that URL (#650).",
         "requestBody": {
           "required": true,
           "content": {
@@ -5778,7 +5782,7 @@
         "tags": [
           "registration-links"
         ],
-        "description": "Flips the link status to live so the public form accepts submissions; mints the QR PNG + public URL. Idempotent when already live; retired links cannot be reactivated (409).",
+        "description": "Flips the link status to live so the public form accepts submissions and returns the public URL. Idempotent when already live; retired links cannot be reactivated (409).",
         "parameters": [
           {
             "schema": {
@@ -8557,6 +8561,18 @@
           },
           {
             "schema": {
+              "type": "string",
+              "enum": [
+                "draft",
+                "live"
+              ]
+            },
+            "in": "query",
+            "name": "lifecycle",
+            "required": false
+          },
+          {
+            "schema": {
               "type": "boolean",
               "default": false
             },
@@ -9579,9 +9595,21 @@
                         "properties": {
                           "label": {
                             "type": "string"
+                          },
+                          "signals_cta": {
+                            "type": "boolean"
                           }
                         },
+                        "required": [
+                          "signals_cta"
+                        ],
                         "additionalProperties": true
+                      }
+                    },
+                    "signals_ui_urls": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
                       }
                     }
                   },
@@ -9590,7 +9618,142 @@
                     "brand",
                     "network",
                     "domains",
-                    "registration_modes"
+                    "registration_modes",
+                    "signals_ui_urls"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/participant-consent": {
+      "get": {
+        "summary": "Participant registration-link consent document",
+        "tags": [
+          "aggregator-config"
+        ],
+        "description": "The participant `consent.json` (Terms / Privacy / profile-creation) fetched from `aggregator.network.consent_source` — the same cache-backed pull as network.json. `participant_consent` is null when no `consent_source` is configured (the web app then falls back to its on-disk copy). No auth — operator-controlled content shown on the public registration form.",
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "participant_consent": {
+                      "type": "object",
+                      "additionalProperties": {},
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "participant_consent"
                   ],
                   "additionalProperties": true
                 }
@@ -9708,7 +9871,7 @@
         "tags": [
           "support"
         ],
-        "description": "Reports whether SUPPORT_EMAIL is configured on this instance. The web app hides the \"Contact support\" entry point when false.",
+        "description": "Reports whether SUPPORT_EMAIL is configured on this instance, plus the attachment limits and accepted content types. The web app hides the \"Contact support\" entry point when disabled, and validates files against these limits before uploading them.",
         "security": [
           {
             "bearerAuth": []
@@ -9724,10 +9887,36 @@
                   "properties": {
                     "enabled": {
                       "type": "boolean"
+                    },
+                    "maxTotalBytes": {
+                      "type": "integer",
+                      "exclusiveMinimum": true,
+                      "minimum": 0
+                    },
+                    "maxFiles": {
+                      "type": "integer",
+                      "exclusiveMinimum": true,
+                      "minimum": 0
+                    },
+                    "allowedTypes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "allowedExtensions": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
                     }
                   },
                   "required": [
-                    "enabled"
+                    "enabled",
+                    "maxTotalBytes",
+                    "maxFiles",
+                    "allowedTypes",
+                    "allowedExtensions"
                   ],
                   "additionalProperties": false
                 }
@@ -9834,6 +10023,34 @@
                     "enum": [
                       true
                     ]
+                  },
+                  "attachments": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "filename": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 255
+                        },
+                        "contentType": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 127
+                        },
+                        "data": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "filename",
+                        "contentType",
+                        "data"
+                      ],
+                      "additionalProperties": false
+                    }
                   }
                 },
                 "required": [
@@ -9928,6 +10145,57 @@
             }
           },
           "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "429": {
             "description": "Default Response",
             "content": {
               "application/json": {
@@ -10156,13 +10424,28 @@
                 "schema": {
                   "type": "object",
                   "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "queued"
+                      ]
+                    },
+                    "requested": {
+                      "type": "integer"
+                    },
                     "job_id": {
                       "type": "string",
                       "format": "uuid"
+                    },
+                    "message": {
+                      "type": "string"
                     }
                   },
                   "required": [
-                    "job_id"
+                    "status",
+                    "requested",
+                    "job_id",
+                    "message"
                   ],
                   "additionalProperties": false
                 }
@@ -10427,25 +10710,12 @@
         }
       },
       "get": {
-        "summary": "List the org's campaign jobs (newest first)",
+        "summary": "List the org's export jobs (newest first)",
         "tags": [
           "campaign"
         ],
-        "description": "Returns the requesting org's campaign jobs, newest first, with derived status counts. Optional channel filter and cursor pagination (pass the returned next_cursor to page).",
+        "description": "Returns the requesting org's export jobs, newest first, with derived status counts. Cursor pagination — pass the returned next_cursor to page.",
         "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "enum": [
-                "export",
-                "email",
-                "voice"
-              ]
-            },
-            "in": "query",
-            "name": "channel",
-            "required": false
-          },
           {
             "schema": {
               "type": "integer",
@@ -10498,10 +10768,10 @@
                           "status": {
                             "type": "string",
                             "enum": [
-                              "pending",
+                              "queued",
                               "processing",
-                              "succeeded",
-                              "partially_failed",
+                              "partial",
+                              "completed",
                               "failed"
                             ]
                           },
@@ -10520,6 +10790,18 @@
                               "submitted": {
                                 "type": "integer"
                               },
+                              "sent": {
+                                "type": "integer"
+                              },
+                              "skipped_not_owned": {
+                                "type": "integer"
+                              },
+                              "skipped_no_contact": {
+                                "type": "integer"
+                              },
+                              "duplicate_active": {
+                                "type": "integer"
+                              },
                               "failed": {
                                 "type": "integer"
                               }
@@ -10529,6 +10811,10 @@
                               "pending",
                               "resolved",
                               "submitted",
+                              "sent",
+                              "skipped_not_owned",
+                              "skipped_no_contact",
+                              "duplicate_active",
                               "failed"
                             ],
                             "additionalProperties": false
@@ -10968,11 +11254,11 @@
     },
     "/v1/campaign/export/{job_id}": {
       "get": {
-        "summary": "Get one campaign job's status and per-item outcomes",
+        "summary": "Get one export job's status and per-item outcomes",
         "tags": [
           "campaign"
         ],
-        "description": "Returns the job status (derived from item counts) and each item id with its status and error reason. Tenant-scoped: a job owned by another org returns 404.",
+        "description": "Returns the job status (derived from item counts) and each item id with its status, provider ref and skip/error reason. Scoped to this org and to the export channel — a job belonging to another org or channel returns 403.",
         "parameters": [
           {
             "schema": {
@@ -11012,10 +11298,10 @@
                     "status": {
                       "type": "string",
                       "enum": [
-                        "pending",
+                        "queued",
                         "processing",
-                        "succeeded",
-                        "partially_failed",
+                        "partial",
+                        "completed",
                         "failed"
                       ]
                     },
@@ -11034,6 +11320,18 @@
                         "submitted": {
                           "type": "integer"
                         },
+                        "sent": {
+                          "type": "integer"
+                        },
+                        "skipped_not_owned": {
+                          "type": "integer"
+                        },
+                        "skipped_no_contact": {
+                          "type": "integer"
+                        },
+                        "duplicate_active": {
+                          "type": "integer"
+                        },
                         "failed": {
                           "type": "integer"
                         }
@@ -11043,6 +11341,10 @@
                         "pending",
                         "resolved",
                         "submitted",
+                        "sent",
+                        "skipped_not_owned",
+                        "skipped_no_contact",
+                        "duplicate_active",
                         "failed"
                       ],
                       "additionalProperties": false
@@ -11086,8 +11388,20 @@
                               "pending",
                               "resolved",
                               "submitted",
+                              "sent",
+                              "skipped_not_owned",
+                              "skipped_no_contact",
+                              "duplicate_active",
                               "failed"
                             ]
+                          },
+                          "provider_ref": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "skip_reason": {
+                            "type": "string",
+                            "nullable": true
                           },
                           "error_reason": {
                             "type": "string",
@@ -11097,6 +11411,8 @@
                         "required": [
                           "item_id",
                           "status",
+                          "provider_ref",
+                          "skip_reason",
                           "error_reason"
                         ],
                         "additionalProperties": false
@@ -11170,57 +11486,6 @@
             }
           },
           "403": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string"
-                        },
-                        "title": {
-                          "type": "string"
-                        },
-                        "detail": {
-                          "type": "string"
-                        },
-                        "docs": {
-                          "type": "string"
-                        },
-                        "fields": {
-                          "type": "object",
-                          "additionalProperties": {}
-                        },
-                        "requestId": {
-                          "type": "string"
-                        },
-                        "timestamp": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "title",
-                        "detail",
-                        "requestId",
-                        "timestamp"
-                      ],
-                      "additionalProperties": true
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": true
-                }
-              }
-            }
-          },
-          "404": {
             "description": "Default Response",
             "content": {
               "application/json": {
