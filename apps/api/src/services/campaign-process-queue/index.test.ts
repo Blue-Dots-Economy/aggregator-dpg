@@ -44,6 +44,12 @@ describe('enqueueCampaignProcess', () => {
     expect(opts).toEqual({ jobId: 'job-123' });
   });
 
+  it('forwards a per-channel attempts override to BullMQ', async () => {
+    addMock.mockResolvedValueOnce(undefined);
+    await enqueueCampaignProcess({ jobId: 'job-123' }, { attempts: 3 });
+    expect(addMock.mock.calls[0]![2]).toEqual({ jobId: 'job-123', attempts: 3 });
+  });
+
   it('reuses the singleton queue across calls', async () => {
     addMock.mockResolvedValue(undefined);
     await enqueueCampaignProcess({ jobId: 'a' });

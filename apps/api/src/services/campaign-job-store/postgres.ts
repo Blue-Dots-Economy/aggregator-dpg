@@ -18,6 +18,7 @@ import {
   TERMINAL_ITEM_STATUSES,
   TERMINAL_JOB_STATUSES,
   CampaignJobStoreBase,
+  type CampaignChannel,
   type CampaignJobItemStatus,
   type CampaignJobStatus,
   type CreateJobInput,
@@ -106,7 +107,10 @@ export class PostgresCampaignJobStore extends CampaignJobStoreBase {
     }
   }
 
-  async countActiveJobs(signalstackOrgId: string): Promise<StoreResult<number>> {
+  async countActiveJobs(
+    signalstackOrgId: string,
+    channel?: CampaignChannel,
+  ): Promise<StoreResult<number>> {
     const start = Date.now();
     try {
       const rows = await getDb()
@@ -116,6 +120,7 @@ export class PostgresCampaignJobStore extends CampaignJobStoreBase {
           and(
             eq(campaignJob.signalstackOrgId, signalstackOrgId),
             inArray(campaignJob.status, [...ACTIVE_JOB_STATUSES]),
+            ...(channel ? [eq(campaignJob.channel, channel)] : []),
           ),
         );
       return { ok: true, value: Number(rows[0]?.n ?? 0) };
@@ -258,6 +263,7 @@ export class PostgresCampaignJobStore extends CampaignJobStoreBase {
     itemId: string,
     status: CampaignJobItemStatus,
     reason?: string,
+    providerRef?: string,
   ): Promise<StoreResult<void>> {
     const start = Date.now();
     try {
@@ -270,6 +276,7 @@ export class PostgresCampaignJobStore extends CampaignJobStoreBase {
           status,
           skipReason: isSkip ? (reason ?? null) : null,
           errorReason: isSkip ? null : (reason ?? null),
+          ...(providerRef !== undefined ? { providerRef } : {}),
           updatedAt: now,
           ...(TERMINAL_ITEM_STATUSES.includes(status) ? { completedAt: now } : {}),
         })

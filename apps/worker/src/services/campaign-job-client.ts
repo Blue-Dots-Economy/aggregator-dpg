@@ -152,12 +152,18 @@ export async function countItems(jobId: string): Promise<JobStatusCounts> {
   return counts;
 }
 
-/** Forward-only item status write — a terminal item is not overwritten. */
+/**
+ * Forward-only item status write — a terminal item is not overwritten.
+ *
+ * @param providerRef - External id this item produced (email: the mailer's
+ *   message id; voice: the Raya call id). Left untouched when omitted.
+ */
 export async function markItem(
   jobId: string,
   itemId: string,
   status: CampaignJobItemStatus,
   reason?: string,
+  providerRef?: string,
 ): Promise<void> {
   await getDb()
     .update(campaignJobItem)
@@ -166,6 +172,7 @@ export async function markItem(
       // A skip is not an error: its reason belongs in `skip_reason`.
       skipReason: SKIPPED_ITEM_STATUSES.includes(status) ? (reason ?? null) : null,
       errorReason: SKIPPED_ITEM_STATUSES.includes(status) ? null : (reason ?? null),
+      ...(providerRef !== undefined ? { providerRef } : {}),
       updatedAt: new Date(),
       ...(TERMINAL_ITEM_STATUSES.includes(status) ? { completedAt: new Date() } : {}),
     })

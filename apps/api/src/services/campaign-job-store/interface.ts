@@ -199,8 +199,18 @@ export abstract class CampaignJobStoreBase {
     input: CreateJobInput,
   ): Promise<StoreResult<{ job: JobRecord; created: boolean }>>;
 
-  /** Count a tenant's active (pending|processing) jobs — for the per-org cap. */
-  abstract countActiveJobs(signalstackOrgId: string): Promise<StoreResult<number>>;
+  /**
+   * Count a tenant's active (queued|processing) jobs — for the per-org cap.
+   *
+   * @param signalstackOrgId - The acting org.
+   * @param channel - Restrict the count to one channel. The caps are per
+   *   channel (`CAMPAIGN_<CHANNEL>_MAX_ACTIVE_PER_ORG`), so an in-flight export
+   *   must not consume an org's email budget; omit to count every channel.
+   */
+  abstract countActiveJobs(
+    signalstackOrgId: string,
+    channel?: CampaignChannel,
+  ): Promise<StoreResult<number>>;
 
   /** Tenant-scoped job detail (with derived counts); null when absent/not owned. */
   abstract getJob(jobId: string, signalstackOrgId: string): Promise<StoreResult<JobView | null>>;
@@ -229,12 +239,16 @@ export abstract class CampaignJobStoreBase {
    *
    * @param reason - Free-text cause. Stored in `skip_reason` when `status` is a
    *   skip terminal, otherwise in `error_reason`.
+   * @param providerRef - The external id this item produced (email: the
+   *   mailer's message id; voice: the Raya call id). Left untouched when
+   *   omitted.
    */
   abstract markItem(
     jobId: string,
     itemId: string,
     status: CampaignJobItemStatus,
     reason?: string,
+    providerRef?: string,
   ): Promise<StoreResult<void>>;
 
   /** Stamps `last_progress_at = now()` (watchdog heartbeat). */

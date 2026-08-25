@@ -34,7 +34,10 @@ function getProcessQueue(): Queue<CampaignProcessJob> {
   if (processQueue) return processQueue;
   processQueue = new Queue<CampaignProcessJob>(QueueName.CampaignProcess, {
     connection: getConnection(),
-    defaultJobOptions: { ...CAMPAIGN_PROCESS_JOB_OPTS, attempts: config.CAMPAIGN_EXPORT_ATTEMPTS },
+    // One queue, many channels: the retry count is a per-channel knob
+    // (CAMPAIGN_<CHANNEL>_ATTEMPTS), so each route passes its own at enqueue
+    // time and this default only applies if a caller omits it.
+    defaultJobOptions: CAMPAIGN_PROCESS_JOB_OPTS,
   });
   return processQueue;
 }
@@ -46,11 +49,19 @@ function getProcessQueue(): Queue<CampaignProcessJob> {
  * surface a 503 rather than acknowledge a job that was never queued.
  *
  * @param payload - `{ jobId }` — the campaign_job row to process.
+ * @param opts - Per-channel overrides; `attempts` comes from the submitting
+ *   channel's `CAMPAIGN_<CHANNEL>_ATTEMPTS`.
  */
-export async function enqueueCampaignProcess(payload: CampaignProcessJob): Promise<void> {
+export async function enqueueCampaignProcess(
+  payload: CampaignProcessJob,
+  opts: { attempts?: number } = {},
+): Promise<void> {
   const start = Date.now();
   try {
-    await getProcessQueue().add(QueueName.CampaignProcess, payload, { jobId: payload.jobId });
+    await getProcessQueue().add(QueueName.CampaignProcess, payload, {
+      jobId: payload.jobId,
+      ...(opts.attempts !== undefined ? { attempts: opts.attempts } : {}),
+    });
     logger.info({
       operation: 'campaignProcessQueue.enqueue',
       status: 'success',
