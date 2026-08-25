@@ -2,8 +2,8 @@
  * `campaign-process` job processor (aggregator-dpg#579).
  *
  * Builds the real collaborators from the worker's environment (job DB client,
- * Signals client, S3, mailer) and delegates to the pure `runCampaignJob`
- * orchestrator. A missing Signals client (terminal misconfiguration) fails the
+ * Signals client, S3, mailer) for every channel and delegates to the pure
+ * `runCampaignJob` orchestrator, which dispatches on the job's channel. A missing Signals client (terminal misconfiguration) fails the
  * job so BullMQ surfaces it; any other collaborator rejection propagates so
  * BullMQ retries. Belongs to `@aggregator-dpg/worker`.
  */
@@ -31,16 +31,20 @@ export async function processCampaignJob(data: CampaignProcessJob): Promise<void
 
   await runCampaignJob(data.jobId, {
     client: jobClient,
+    fetchDecryptedProfiles: (q) => ss.fetchDecryptedProfiles(q),
     export: {
-      fetchDecryptedProfiles: (q) => ss.fetchDecryptedProfiles(q),
       putObject,
       signDownloadUrl: signExportDownloadUrl,
+      sendMail: (input) => getMailer().send(input),
+    },
+    email: {
       sendMail: (input) => getMailer().send(input),
     },
     config: {
       decryptChunk: config.CAMPAIGN_DECRYPT_CHUNK,
       fieldSet: config.CAMPAIGN_EXPORT_FIELDS,
       recipientMode: config.CAMPAIGN_EXPORT_RECIPIENT,
+      emailSendConcurrency: config.EMAIL_SEND_CONCURRENCY,
       ...(config.EXPORT_NETWORK_ADMIN_EMAIL
         ? { networkAdminEmail: config.EXPORT_NETWORK_ADMIN_EMAIL }
         : {}),

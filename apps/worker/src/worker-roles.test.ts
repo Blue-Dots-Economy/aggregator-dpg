@@ -52,11 +52,6 @@ describe('missingRoles', () => {
   });
 
   it('reports the complement for a partial role set', () => {
-    expect(missingRoles(parseWorkerRoles('file,row'))).toEqual([
-      'finalise',
-      'cron',
-      'campaign',
-      'email',
-    ]);
+    expect(missingRoles(parseWorkerRoles('file,row'))).toEqual(['finalise', 'cron', 'campaign']);
   });
 });

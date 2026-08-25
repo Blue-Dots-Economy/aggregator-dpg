@@ -26,6 +26,7 @@ vi.mock('../config.js', () => ({
     CAMPAIGN_EXPORT_FIELDS: 'contact',
     CAMPAIGN_EXPORT_RECIPIENT: 'network_admin',
     EXPORT_NETWORK_ADMIN_EMAIL: 'admin@network.example',
+    EMAIL_SEND_CONCURRENCY: 5,
   },
 }));
 
@@ -53,7 +54,11 @@ describe('processCampaignJob', () => {
     expect(deps.config.fieldSet).toBe('contact');
     expect(deps.config.recipientMode).toBe('network_admin');
     expect(deps.config.networkAdminEmail).toBe('admin@network.example');
-    expect(typeof deps.export.fetchDecryptedProfiles).toBe('function');
+    expect(typeof deps.fetchDecryptedProfiles).toBe('function');
     expect(typeof deps.client.getJobForProcessing).toBe('function');
+    // Both channels get their collaborators — the job dispatches on the row.
+    expect(typeof deps.export.putObject).toBe('function');
+    expect(typeof deps.email.sendMail).toBe('function');
+    expect(deps.config.emailSendConcurrency).toBe(5);
   });
 });

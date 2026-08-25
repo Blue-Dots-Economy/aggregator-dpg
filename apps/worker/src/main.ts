@@ -18,7 +18,6 @@ import {
   type BulkFileProcessJob,
   type BulkFinaliseJob,
   type BulkRowProcessJob,
-  type CampaignEmailJob,
   type CampaignProcessJob,
   type CronWatchdogJob,
   type LinkMetricsRollupJob,
@@ -31,7 +30,6 @@ import { processBulkRow } from './jobs/bulk-row-process.js';
 import { finaliseBulk } from './jobs/bulk-finalise.js';
 import { rollupLinkMetrics } from './jobs/link-metrics-rollup.js';
 import { runWatchdog } from './jobs/cron-watchdog.js';
-import { processCampaignEmail } from './jobs/campaign-email-process.js';
 import { processCampaignJob } from './jobs/campaign-process.js';
 import { getRedis, closeRedis } from './services/redis.js';
 import { closeQueues } from './services/bulk-queue.js';
@@ -87,19 +85,6 @@ async function main(): Promise<void> {
         QueueName.CampaignProcess,
         async (job) => processCampaignJob(job.data),
         { connection, concurrency: config.CAMPAIGN_EXPORT_CONCURRENCY },
-      ),
-    ]);
-  }
-
-  if (roles.has('email')) {
-    workers.push([
-      'campaignEmail',
-      new Worker<CampaignEmailJob>(
-        QueueName.CampaignEmail,
-        async (job) => processCampaignEmail(job.data),
-        // Per-recipient concurrency is handled inside the job; one job at a time
-        // per process keeps a large batch from fanning out unboundedly.
-        { connection, concurrency: 1 },
       ),
     ]);
   }
