@@ -3,7 +3,7 @@
  * RJSF widget for the consent checkbox that renders clickable Terms of Service
  * and Privacy Policy links.
  *
- * Reads consent content from `formContext.consentContent`. When content is
+ * Reads consent content from `registry.formContext.consentContent`. When content is
  * present the labels are interactive buttons that open {@link ConsentModal} on
  * the relevant tab. Falls back to plain non-interactive text when
  * `consentContent` is absent (e.g. when `loadConsentConfig` failed at boot).
@@ -23,23 +23,28 @@ import type { ConsentDocContent } from '../consent/consent-types';
 /**
  * Renders the registration consent checkbox with clickable Terms/Privacy links.
  *
- * Pulls `consentContent` from `formContext` so it can be passed server-side
+ * Pulls `consentContent` from the form context so it can be passed server-side
  * from the page without threading extra props through RJSF field wiring. The
  * checkbox state is controlled by RJSF via `value`/`onChange`.
  *
+ * RJSF v6 dropped the top-level `formContext` prop from `WidgetProps` in favour
+ * of `registry.formContext`. `WidgetProps` extends `GenericObjectType`, so the
+ * old `props.formContext` still type-checks and silently reads `undefined` —
+ * read it off the registry, never off `props`.
+ *
  * @param props - Standard RJSF WidgetProps; uses `id`, `value`, `required`,
- *   `disabled`, `readonly`, `onChange`, and `formContext.consentContent`.
+ *   `disabled`, `readonly`, `onChange`, and `registry.formContext.consentContent`.
  * @returns The checkbox with linked label and (when content available) a
  *   read-only consent modal.
  */
 export function ConsentCheckboxWidget(props: WidgetProps): JSX.Element {
-  const { id, value, required, disabled, readonly, onChange, formContext } = props;
+  const { id, value, required, disabled, readonly, onChange, registry } = props;
   const t = useTranslations('register');
   const [modalOpen, setModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<ConsentTab>('terms');
 
-  const consentContent = (formContext as Record<string, unknown> | undefined)?.consentContent as
-    ConsentDocContent | undefined;
+  const consentContent = (registry.formContext as Record<string, unknown> | undefined)
+    ?.consentContent as ConsentDocContent | undefined;
 
   const openTab = (tab: ConsentTab): void => {
     setActiveTab(tab);

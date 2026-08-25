@@ -10,7 +10,9 @@ import type {
   FieldTemplateProps,
   ObjectFieldTemplateProps,
   ArrayFieldTemplateProps,
+  ArrayFieldItemTemplateProps,
   TitleFieldProps,
+  UiSchema,
   ValidatorType,
   RJSFSchema,
   GenericObjectType,
@@ -308,35 +310,67 @@ function ObjectFieldTemplate(props: ObjectFieldTemplateProps) {
   );
 }
 
+/**
+ * Reads the `itemLabel` ui option off an array field's own uiSchema.
+ *
+ * `ArrayFieldTemplate` sees this as `uiSchema`; `ArrayFieldItemTemplate` sees
+ * the same object as `parentUiSchema` (its own `uiSchema` is the *item's*), so
+ * both go through here to stay in step.
+ *
+ * @param uiSchema - The array field's uiSchema, if it declares one.
+ * @returns The configured item noun, defaulting to `entry`.
+ */
+function arrayItemLabel(uiSchema: UiSchema | undefined): string {
+  return (uiSchema?.['ui:options']?.['itemLabel'] as string | undefined) ?? 'entry';
+}
+
+/**
+ * Per-item chrome for array fields: an "<Item> N" heading and a Remove button,
+ * shown only once the array holds more than one entry.
+ *
+ * RJSF v6 renders array items through this template and hands
+ * `ArrayFieldTemplate` the finished elements, so the item-level markup that
+ * used to live inside the array template's `items.map()` belongs here now.
+ *
+ * @param props - v6 item props; uses `children`, `index`, `totalItems`,
+ *   `buttonsProps.hasRemove` / `.onRemoveItem`, and `parentUiSchema`.
+ * @returns One array row, with its header when the array has several rows.
+ */
+function ArrayFieldItemTemplate(props: ArrayFieldItemTemplateProps) {
+  const { children, index, totalItems, buttonsProps, parentUiSchema } = props;
+  const itemLabel = arrayItemLabel(parentUiSchema);
+  const multiple = totalItems > 1;
+  return (
+    <div className="space-y-2">
+      {multiple && (
+        <div className="flex items-center justify-between">
+          <span className="text-[12.5px] font-semibold text-ink-500">
+            {capitalise(itemLabel)} {index + 1}
+          </span>
+          {buttonsProps.hasRemove && (
+            <button
+              type="button"
+              onClick={buttonsProps.onRemoveItem}
+              className="text-[12.5px] text-rose-500 hover:text-rose-600"
+            >
+              Remove
+            </button>
+          )}
+        </div>
+      )}
+      {children}
+    </div>
+  );
+}
+
 function ArrayFieldTemplate(props: ArrayFieldTemplateProps) {
-  const { title, items, canAdd, onAddClick, uiSchema, formContext } = props;
-  void formContext;
-  const itemLabel = (uiSchema?.['ui:options']?.['itemLabel'] as string | undefined) ?? 'entry';
-  const multiple = items.length > 1;
+  const { title, items, canAdd, onAddClick, uiSchema } = props;
+  const itemLabel = arrayItemLabel(uiSchema);
   return (
     <div className="space-y-3">
       {title && <h3 className="font-display font-bold text-[15px] text-ink-900">{title}</h3>}
-      {items.map((item) => (
-        <div key={item.key} className="space-y-2">
-          {multiple && (
-            <div className="flex items-center justify-between">
-              <span className="text-[12.5px] font-semibold text-ink-500">
-                {capitalise(itemLabel)} {item.index + 1}
-              </span>
-              {item.hasRemove && (
-                <button
-                  type="button"
-                  onClick={item.onDropIndexClick(item.index)}
-                  className="text-[12.5px] text-rose-500 hover:text-rose-600"
-                >
-                  Remove
-                </button>
-              )}
-            </div>
-          )}
-          {item.children}
-        </div>
-      ))}
+      {/* v6 hands over already-rendered, already-keyed item elements. */}
+      {items}
       {canAdd && (
         <button
           type="button"
@@ -510,6 +544,7 @@ export function RjsfThemedForm<T extends GenericObjectType = GenericObjectType>(
           FieldTemplate,
           ObjectFieldTemplate,
           ArrayFieldTemplate,
+          ArrayFieldItemTemplate,
           TitleFieldTemplate: TitleField,
         }}
       />
