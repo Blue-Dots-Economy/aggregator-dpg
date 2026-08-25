@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, type JSX } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import type { RJSFSchema } from '@rjsf/utils';

@@ -1,4 +1,4 @@
-import type { ReactNode, SVGProps } from 'react';
+import type { ReactNode, SVGProps, JSX } from 'react';
 
 interface IconProps extends Omit<SVGProps<SVGSVGElement>, 'children' | 'stroke'> {
   size?: number;

@@ -16,7 +16,7 @@ import type {
   GenericObjectType,
 } from '@rjsf/utils';
 import type { IChangeEvent } from '@rjsf/core';
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactElement } from 'react';
 import { useTranslations } from 'next-intl';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/Select';
 import { MultiSelect } from '../ui/MultiSelect';
@@ -253,6 +253,20 @@ function FieldTemplate(props: FieldTemplateProps) {
   );
 }
 
+/**
+ * Reads the `uiSchema` off one of `ObjectFieldTemplate`'s child slots.
+ *
+ * `properties[].content` is a `ReactElement`, and React 19's types default its
+ * `props` to `unknown` (React 18 defaulted them to `any`), so the shape has to
+ * be narrowed explicitly instead of being read straight off `.props`.
+ *
+ * @param content - The rendered child field element RJSF hands to the template.
+ * @returns The child's `uiSchema`, or `undefined` when it carries none.
+ */
+function childUiSchema(content: ReactElement): Record<string, unknown> | undefined {
+  return (content.props as { uiSchema?: Record<string, unknown> }).uiSchema;
+}
+
 function ObjectFieldTemplate(props: ObjectFieldTemplateProps) {
   const { properties, title, description, uiSchema } = props;
   const layout = (uiSchema?.['ui:layout'] as 'grid' | 'stack' | undefined) ?? 'grid';
@@ -263,10 +277,9 @@ function ObjectFieldTemplate(props: ObjectFieldTemplateProps) {
   const showTitle = explicitTitle !== '' && explicitTitle !== false && Boolean(title);
   // Drop child slots whose inner widget is `hidden` — otherwise an empty
   // wrapper div lands in the grid/stack and inflates the section height.
-  const visibleProperties = properties.filter((p) => {
-    const childUi = p.content.props.uiSchema as Record<string, unknown> | undefined;
-    return childUi?.['ui:widget'] !== 'hidden';
-  });
+  const visibleProperties = properties.filter(
+    (p) => childUiSchema(p.content)?.['ui:widget'] !== 'hidden',
+  );
   return (
     <div className="space-y-3">
       {showTitle && (
@@ -283,7 +296,7 @@ function ObjectFieldTemplate(props: ObjectFieldTemplateProps) {
         }
       >
         {visibleProperties.map((p) => {
-          const span = (p.content.props.uiSchema?.['ui:colSpan'] as 1 | 2 | undefined) ?? 1;
+          const span = (childUiSchema(p.content)?.['ui:colSpan'] as 1 | 2 | undefined) ?? 1;
           return (
             <div key={p.name} className={span === 2 ? 'md:col-span-2' : ''}>
               {p.content}

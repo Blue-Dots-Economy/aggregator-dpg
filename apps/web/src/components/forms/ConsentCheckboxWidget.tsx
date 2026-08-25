@@ -13,7 +13,7 @@
  *
  * @module apps/web/src/components/forms/ConsentCheckboxWidget
  */
-import { useState } from 'react';
+import { useState, type JSX } from 'react';
 import { useTranslations } from 'next-intl';
 import type { WidgetProps } from '@rjsf/utils';
 import { ConsentModal } from '../consent/ConsentModal';

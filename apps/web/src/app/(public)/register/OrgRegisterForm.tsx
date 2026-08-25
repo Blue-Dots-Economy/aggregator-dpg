@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useRef, useState, type FormEvent } from 'react';
+import { useMemo, useRef, useState, type JSX } from 'react';
 import type { RJSFSchema, UiSchema } from '@rjsf/utils';
 import type { IChangeEvent } from '@rjsf/core';
 import { useTranslations } from 'next-intl';
@@ -68,10 +68,7 @@ export function OrgRegisterForm({
    * would render nothing at all and the form would be stuck with no way to
    * finish or explain why — surface an error instead of a dead button.
    */
-  const handleSubmit = async (
-    e: IChangeEvent<Record<string, unknown>>,
-    _event: FormEvent<HTMLFormElement>,
-  ): Promise<void> => {
+  const handleSubmit = async (e: IChangeEvent<Record<string, unknown>>): Promise<void> => {
     pendingRef.current = (e.formData ?? {}) as Record<string, unknown>;
     if (consentDocs.length === 0) {
       setState({

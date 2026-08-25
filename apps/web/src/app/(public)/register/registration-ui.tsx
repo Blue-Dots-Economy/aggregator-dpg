@@ -12,7 +12,7 @@
  */
 
 import Link from 'next/link';
-import { useEffect, useRef, useState, type RefObject } from 'react';
+import { useEffect, useRef, useState, type RefObject, type JSX } from 'react';
 import { I } from '../../../icons';
 import type { SubmitState } from './registration-shared';
 
@@ -22,7 +22,12 @@ export interface RegistrationFormState {
   setState: (s: SubmitState) => void;
   canSubmit: boolean;
   setCanSubmit: (v: boolean) => void;
-  errorRef: RefObject<HTMLDivElement>;
+  /**
+   * React 19 folded `MutableRefObject` into `RefObject` and types
+   * `useRef<T>(null)` as `RefObject<T | null>` — `.current` genuinely is null
+   * until the error banner mounts, so the null belongs in the declared type.
+   */
+  errorRef: RefObject<HTMLDivElement | null>;
 }
 
 /**
@@ -100,7 +105,7 @@ export interface RegistrationErrorBannerProps {
   /** Newline-separated error lines rendered as a bullet list. */
   detail: string;
   /** Focus/scroll target so the banner can be pulled into view on submit. */
-  errorRef: RefObject<HTMLDivElement>;
+  errorRef: RefObject<HTMLDivElement | null>;
   /** Raw Ajv dump shown behind a `<details>` for client-validation errors. */
   rawErrors?: string;
 }
