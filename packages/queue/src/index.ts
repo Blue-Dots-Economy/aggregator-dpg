@@ -28,8 +28,6 @@ export const QueueName = {
   LinkMetricsRollup: 'link-metrics-rollup',
   /** Hourly watchdog + retention sweep. */
   CronWatchdog: 'cron-watchdog',
-  /** Async participant campaign email: decrypt → render → send (aggregator-dpg#578). */
-  CampaignEmail: 'campaign-email',
   /**
    * Unified campaign async-job pipeline (aggregator-dpg#579). One job per
    * `campaign_job` row; the worker's `campaign` role loads the job + its items,
@@ -90,30 +88,6 @@ export interface CampaignProcessJob {
   jobId: string;
 }
 
-/**
- * Participant campaign email job (aggregator-dpg#578). Enqueued by the API's
- * `POST /v1/campaign/email` handler and consumed by the worker's `email` role,
- * which decrypts the owned participants, renders the Markdown template per
- * recipient (substituting placeholders), and sends via the aggregator mailer.
- * Runs send-once (see {@link EMAIL_JOB_OPTS}) so a retry never duplicates emails.
- */
-export interface CampaignEmailJob {
-  /** Signals org id (from the caller token's `signalstack_org_id` claim); scopes decrypt ownership. */
-  orgId: string;
-  /** Participant profile item ids to email. Validated (uuid, 1..EMAIL_MAX_RECIPIENTS) at the API. */
-  itemIds: string[];
-  /** Subject template; may contain `{{placeholder}}` tokens. */
-  subject: string;
-  /** Markdown body template; may contain `{{placeholder}}` tokens. */
-  bodyMarkdown: string;
-  /** Optional Reply-To header for the sent emails. */
-  replyTo?: string;
-  /** Optional free-text purpose, recorded for audit (never emailed). */
-  purpose?: string;
-  /** Inbound `x-request-id`, forwarded to Signals decrypt for cross-service tracing. */
-  requestId?: string;
-}
-
 // ─── Redis connection ────────────────────────────────────────────────────────
 
 export interface RedisConnectionOptions {
@@ -163,20 +137,6 @@ export function createRedisConnection(opts: RedisConnectionOptions = {}): Redis 
 export const DEFAULT_JOB_OPTS = {
   attempts: 3,
   backoff: { type: 'exponential' as const, delay: 1000 },
-  removeOnComplete: { age: 3600 },
-  removeOnFail: { age: 604800 },
-} as const;
-
-/**
- * Send-once job options for the campaign email queue (aggregator-dpg#578).
- *
- * `attempts: 1` — the email send does NOT retry as a whole, because re-running
- * the job would re-send to recipients who already received the email. A
- * transient per-recipient failure is recorded rather than retried, guaranteeing
- * no duplicate emails.
- */
-export const EMAIL_JOB_OPTS = {
-  attempts: 1,
   removeOnComplete: { age: 3600 },
   removeOnFail: { age: 604800 },
 } as const;
