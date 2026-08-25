@@ -207,13 +207,13 @@ importers:
         version: 2.3.7(@types/react-dom@18.3.7(@types/react@18.3.28))(@types/react@18.3.28)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       '@rjsf/core':
         specifier: ^5.24.0
-        version: 5.24.13(@rjsf/utils@5.24.13(react@18.3.1))(react@18.3.1)
+        version: 5.24.13(@rjsf/utils@6.8.0(react@18.3.1))(react@18.3.1)
       '@rjsf/utils':
-        specifier: ^5.24.0
-        version: 5.24.13(react@18.3.1)
+        specifier: ^6.8.0
+        version: 6.8.0(react@18.3.1)
       '@rjsf/validator-ajv8':
         specifier: ^5.24.0
-        version: 5.24.13(@rjsf/utils@5.24.13(react@18.3.1))
+        version: 5.24.13(@rjsf/utils@6.8.0(react@18.3.1))
       '@tanstack/react-query':
         specifier: ^5.101.4
         version: 5.101.4(react@18.3.1)
@@ -2366,11 +2366,11 @@ packages:
       '@rjsf/utils': ^5.24.x
       react: ^16.14.0 || >=17
 
-  '@rjsf/utils@5.24.13':
-    resolution: {integrity: sha512-rNF8tDxIwTtXzz5O/U23QU73nlhgQNYJ+Sv5BAwQOIyhIE2Z3S5tUiSVMwZHt0julkv/Ryfwi+qsD4FiE5rOuw==}
-    engines: {node: '>=14'}
+  '@rjsf/utils@6.8.0':
+    resolution: {integrity: sha512-gHcqPFSHdOz29tZiLlzDvD+Gfq21zVIFBufprSYTiHpUdcVNJEK6+V5aw++FtQncHdDWnTf2YCky/e1Bol2NEQ==}
+    engines: {node: '>=20'}
     peerDependencies:
-      react: ^16.14.0 || >=17
+      react: '>=18'
 
   '@rjsf/validator-ajv8@5.24.13':
     resolution: {integrity: sha512-oWHP7YK581M8I5cF1t+UXFavnv+bhcqjtL1a7MG/Kaffi0EwhgcYjODrD8SsnrhncsEYMqSECr4ZOEoirnEUWw==}
@@ -3162,6 +3162,9 @@ packages:
   '@vitest/utils@3.2.7':
     resolution: {integrity: sha512-x6BDOd7dyo3PFLY3I9/HJ25X/6OurhGXk2/B9gOZNPF7XDVjeBK4k01lQE5uvDpbuheErh91qYuE1E2OEjK3Rw==}
 
+  '@x0k/json-schema-merge@1.0.4':
+    resolution: {integrity: sha512-KvmMgAftbVzATq4IRnkno/SKSu+gjaR2ZUPJG5JUlY4W3twRJo03sk2914u8scmosibBZ0m7s6euZlJuqpv8Ww==}
+
   abort-controller@3.0.0:
     resolution: {integrity: sha512-h8lQ8tacZYnR3vNQTgibj+tODHI5/+l06Au2Pcriv/Gmet0eaj4TwWH41sO9wnHDiQsEj19q0drzdWdeAHtweg==}
     engines: {node: '>=6.5'}
@@ -3496,12 +3499,6 @@ packages:
   comment-parser@1.4.7:
     resolution: {integrity: sha512-0h+uSNtQGW3D98eQt3jJ8L06Fves8hncB4V/PKdw/Qb8Hnk19VaKuTr55UNRYiSoVa7WwrFls+rh3ux9agmkeQ==}
     engines: {node: '>= 12.0.0'}
-
-  compute-gcd@1.2.1:
-    resolution: {integrity: sha512-TwMbxBNz0l71+8Sc4czv13h4kEqnchV9igQZBi6QUaz09dnz13juGnnaWWJTRsP3brxOoxeB4SA2WELLw1hCtg==}
-
-  compute-lcm@1.1.2:
-    resolution: {integrity: sha512-OFNPdQAXnQhDSKioX8/XYT6sdUlXwpeMjfd6ApxMJfyZ4GxmLR1xvMERctlYhlHwIiz6CSpBc2+qYKjHGZw4TQ==}
 
   concat-map@0.0.1:
     resolution: {integrity: sha512-/Srv4dswyQNBfohGpz9o6Yb3Gz3SrUDqBH5rTuhGR7ahtlbYKnVxw2bCFMRljaA7EXHaXZ8wsHdodFvbkhKmqg==}
@@ -3991,6 +3988,10 @@ packages:
 
   fast-deep-equal@3.1.3:
     resolution: {integrity: sha512-f3qQ9oQy9j2AhBe/H9VC91wLmKBCCU/gDOnKNAYG5hswO7BLKj09Hc5HYNz9cGI++xlpDCIgDaitVs03ATR84Q==}
+
+  fast-equals@6.0.2:
+    resolution: {integrity: sha512-sAjhj9ZhOxYCGiNMnZLaucOqf5ZeFnHNoKoAZiD9thhJ0N8RP85qJK759/97C/3L7NzzmGVB5uiX9AUpySZmUQ==}
+    engines: {node: '>=6.0.0'}
 
   fast-glob@3.3.3:
     resolution: {integrity: sha512-7MptL8U0cqcFdzIzwOTHoilX9x5BrNqye7Z/LuC7kCMRio1EMSyqRK3BEAUD7sXRq4iT4AzTVuZdhgQ2TCvYLg==}
@@ -4537,13 +4538,6 @@ packages:
 
   json-parse-even-better-errors@2.3.1:
     resolution: {integrity: sha512-xyFwyhro/JEof6Ghe2iz2NcXoj2sloNsWr/XsERDK/oiPCfaNhl5ONfp+jQdAZRQQ0IJWNzH9zIZF7li91kh2w==}
-
-  json-schema-compare@0.2.2:
-    resolution: {integrity: sha512-c4WYmDKyJXhs7WWvAWm3uIYnfyWFoIp+JEoX34rctVvEkMYCPGhXtvmFFXiffBbxfZsvQ0RNnV5H7GvDF5HCqQ==}
-
-  json-schema-merge-allof@0.8.1:
-    resolution: {integrity: sha512-CTUKmIlPJbsWfzRRnOXz+0MjIqvnleIXwFTzz+t9T86HnYX/Rozria6ZVGLktAU9e+NygNljveP+yxqtQp/Q4w==}
-    engines: {node: '>=12.0.0'}
 
   json-schema-ref-resolver@3.0.0:
     resolution: {integrity: sha512-hOrZIVL5jyYFjzk7+y7n5JDzGlU8rfWDuYyHwGa2WA8/pcmMHezp2xsVwxrebD/Q9t8Nc5DboieySDpCp4WG4A==}
@@ -5959,21 +5953,6 @@ packages:
     peerDependenciesMeta:
       '@types/react':
         optional: true
-
-  validate.io-array@1.0.6:
-    resolution: {integrity: sha512-DeOy7CnPEziggrOO5CZhVKJw6S3Yi7e9e65R1Nl/RTN1vTQKnzjfvks0/8kQ40FP/dsjRAOd4hxmJ7uLa6vxkg==}
-
-  validate.io-function@1.0.2:
-    resolution: {integrity: sha512-LlFybRJEriSuBnUhQyG5bwglhh50EpTL2ul23MPIuR1odjO7XaMLFV8vHGwp7AZciFxtYOeiSCT5st+XSPONiQ==}
-
-  validate.io-integer-array@1.0.0:
-    resolution: {integrity: sha512-mTrMk/1ytQHtCY0oNO3dztafHYyGU88KL+jRxWuzfOmQb+4qqnWmI+gykvGp8usKZOM0H7keJHEbRaFiYA0VrA==}
-
-  validate.io-integer@1.0.5:
-    resolution: {integrity: sha512-22izsYSLojN/P6bppBqhgUDjCkr5RY2jd+N2a3DCAUey8ydvrZ/OkGvFPR7qfOpwR2LC5p4Ngzxz36g5Vgr/hQ==}
-
-  validate.io-number@1.0.3:
-    resolution: {integrity: sha512-kRAyotcbNaSYoDnXvb4MHg/0a1egJdLwS6oJ38TJY7aw9n93Fl/3blIXdyYvPOp55CNxywooG/3BcrwNrBpcSg==}
 
   vary@1.1.2:
     resolution: {integrity: sha512-BNGbWLfd0eUPabhkXUVm0j8uuvREyTh5ovRa/dyow/BqAbZJyC+5fU+IzQOzmAKzYqYRAISoRhdQr3eIZ/PXqg==}
@@ -7767,27 +7746,29 @@ snapshots:
 
   '@radix-ui/rect@1.1.3': {}
 
-  '@rjsf/core@5.24.13(@rjsf/utils@5.24.13(react@18.3.1))(react@18.3.1)':
+  '@rjsf/core@5.24.13(@rjsf/utils@6.8.0(react@18.3.1))(react@18.3.1)':
     dependencies:
-      '@rjsf/utils': 5.24.13(react@18.3.1)
+      '@rjsf/utils': 6.8.0(react@18.3.1)
       lodash: 4.18.1
       lodash-es: 4.18.1
       markdown-to-jsx: 7.7.17(react@18.3.1)
       prop-types: 15.8.1
       react: 18.3.1
 
-  '@rjsf/utils@5.24.13(react@18.3.1)':
+  '@rjsf/utils@6.8.0(react@18.3.1)':
     dependencies:
-      json-schema-merge-allof: 0.8.1
+      '@x0k/json-schema-merge': 1.0.4
+      fast-equals: 6.0.2
+      fast-uri: 4.1.2
       jsonpointer: 5.0.1
       lodash: 4.18.1
       lodash-es: 4.18.1
       react: 18.3.1
       react-is: 18.3.1
 
-  '@rjsf/validator-ajv8@5.24.13(@rjsf/utils@5.24.13(react@18.3.1))':
+  '@rjsf/validator-ajv8@5.24.13(@rjsf/utils@6.8.0(react@18.3.1))':
     dependencies:
-      '@rjsf/utils': 5.24.13(react@18.3.1)
+      '@rjsf/utils': 6.8.0(react@18.3.1)
       ajv: 8.20.0
       ajv-formats: 2.1.1(ajv@8.20.0)
       lodash: 4.18.1
@@ -8493,6 +8474,10 @@ snapshots:
       loupe: 3.2.1
       tinyrainbow: 2.0.0
 
+  '@x0k/json-schema-merge@1.0.4':
+    dependencies:
+      '@types/json-schema': 7.0.15
+
   abort-controller@3.0.0:
     dependencies:
       event-target-shim: 5.0.1
@@ -8798,19 +8783,6 @@ snapshots:
   commander@14.0.3: {}
 
   comment-parser@1.4.7: {}
-
-  compute-gcd@1.2.1:
-    dependencies:
-      validate.io-array: 1.0.6
-      validate.io-function: 1.0.2
-      validate.io-integer-array: 1.0.0
-
-  compute-lcm@1.1.2:
-    dependencies:
-      compute-gcd: 1.2.1
-      validate.io-array: 1.0.6
-      validate.io-function: 1.0.2
-      validate.io-integer-array: 1.0.0
 
   concat-map@0.0.1: {}
 
@@ -9351,6 +9323,8 @@ snapshots:
   fast-decode-uri-component@1.0.1: {}
 
   fast-deep-equal@3.1.3: {}
+
+  fast-equals@6.0.2: {}
 
   fast-glob@3.3.3:
     dependencies:
@@ -9940,16 +9914,6 @@ snapshots:
   json-buffer@3.0.1: {}
 
   json-parse-even-better-errors@2.3.1: {}
-
-  json-schema-compare@0.2.2:
-    dependencies:
-      lodash: 4.18.1
-
-  json-schema-merge-allof@0.8.1:
-    dependencies:
-      compute-lcm: 1.1.2
-      json-schema-compare: 0.2.2
-      lodash: 4.18.1
 
   json-schema-ref-resolver@3.0.0:
     dependencies:
@@ -11666,21 +11630,6 @@ snapshots:
       tslib: 2.8.1
     optionalDependencies:
       '@types/react': 18.3.28
-
-  validate.io-array@1.0.6: {}
-
-  validate.io-function@1.0.2: {}
-
-  validate.io-integer-array@1.0.0:
-    dependencies:
-      validate.io-array: 1.0.6
-      validate.io-integer: 1.0.5
-
-  validate.io-integer@1.0.5:
-    dependencies:
-      validate.io-number: 1.0.3
-
-  validate.io-number@1.0.3: {}
 
   vary@1.1.2: {}
 
