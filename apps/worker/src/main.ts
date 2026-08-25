@@ -34,9 +34,11 @@ import { processCampaignJob } from './jobs/campaign-process.js';
 import { getRedis, closeRedis } from './services/redis.js';
 import { closeQueues } from './services/bulk-queue.js';
 import { parseWorkerRoles, missingRoles } from './worker-roles.js';
+import { startHealthServer } from './health.js';
 
 async function main(): Promise<void> {
   const connection = getRedis();
+  const healthServer = startHealthServer(config.HEALTH_PORT, connection);
   // Which consumers this process runs. Default (unset) = all, preserving the
   // single-process deployment; `WORKER_ROLES=file` isolates the parser.
   const roles = parseWorkerRoles(config.WORKER_ROLES);
@@ -176,6 +178,7 @@ async function main(): Promise<void> {
 
   const shutdown = async (signal: string): Promise<void> => {
     logger.info({ operation: 'worker.shutdown', signal });
+    await new Promise<void>((resolve) => healthServer.close(() => resolve()));
     await Promise.all(workers.map(([, w]) => w.close()));
     await Promise.all(queues.map((q) => q.close()));
     await closeQueues();

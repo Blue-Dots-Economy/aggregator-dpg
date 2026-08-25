@@ -28,6 +28,17 @@ import type {
 } from '@aggregator-dpg/network-config/interface';
 import { errorResponses } from '../errors/openapi.js';
 import { getNetworkConfig } from '../services/network-config.js';
+import { enabledRegistrationModes, signalsUiUrls } from '../config.js';
+import { signalsCtaEnabled } from '../services/registration-mode/index.js';
+
+/**
+ * Wire shape of a `registration_modes` entry. Distinct from the shared
+ * `RegistrationMode` type because `signals_cta` is optional in the YAML
+ * schema (it defaults from `submission_shape` when omitted) but is always
+ * resolved to a concrete boolean before it reaches the client — the two
+ * must not collapse into the same type.
+ */
+type PublicRegistrationMode = RegistrationMode & { signals_cta: boolean };
 
 /**
  * Public-safe projection of the resolved network config. Excludes
@@ -76,7 +87,18 @@ interface PublicAggregatorConfig {
    * Per-link registration modes declared by the network. The web admin form
    * renders its mode dropdown from these keys (label + optional public hint).
    */
-  registration_modes: Record<string, RegistrationMode>;
+  registration_modes: Record<string, PublicRegistrationMode>;
+  /**
+   * Per-domain Signals UI login URLs, keyed by domain id. Empty when the
+   * deployment has not configured any — the public form then shows no Signals
+   * hand-off. Sourced from the SIGNALS_UI_URLS env var, not from the YAML, so
+   * it can be changed at deploy time without an image rebuild.
+   *
+   * `Readonly` to match the frozen `signalsUiUrls` export it is assigned from:
+   * every value is a boot-validated absolute http(s) URL and nothing on the
+   * response path has any business adding one that is not.
+   */
+  signals_ui_urls: Readonly<Record<string, string>>;
 }
 
 const AggregatorConfigResponseSchema = z
@@ -128,8 +150,15 @@ const AggregatorConfigResponseSchema = z
       .optional(),
     registration_modes: z.record(
       z.string(),
-      z.object({ label: z.string().optional() }).passthrough(),
+      z.object({ label: z.string().optional(), signals_cta: z.boolean() }).passthrough(),
     ),
+    // Values are absolute http(s) URLs (enforced at boot by
+    // `parseSignalsUiUrls`), but kept as a plain string here on purpose:
+    // `z.string().url()` is a *different* predicate from `new URL()`, so a
+    // value that boots fine could fail response serialisation and turn a
+    // working config into a 500. Tightening this needs the two validators
+    // reconciled first — tracked as a follow-up, not done here.
+    signals_ui_urls: z.record(z.string(), z.string()),
   })
   .passthrough();
 
@@ -147,6 +176,12 @@ export async function registerAggregatorConfigRoutes(app: FastifyInstance): Prom
     },
     async (_req, reply) => {
       const cfg = await getNetworkConfig();
+      // Deployment-level narrowing (#637). Derived through the one shared
+      // helper the create-link gate and the boot diagnostics also use, so the
+      // dropdown can never disagree with what creation actually accepts.
+      const enabledModes = new Set(
+        enabledRegistrationModes(Object.keys(cfg.aggregator.registration_modes ?? {})),
+      );
       const payload: PublicAggregatorConfig = {
         aggregator: {
           name: cfg.aggregator.name,
@@ -193,9 +228,51 @@ export async function registerAggregatorConfigRoutes(app: FastifyInstance): Prom
           };
         }),
         ...(cfg.dashboardBuckets ? { dashboardBuckets: cfg.dashboardBuckets } : {}),
-        registration_modes: cfg.aggregator.registration_modes ?? {},
+        registration_modes: Object.fromEntries(
+          Object.entries(cfg.aggregator.registration_modes ?? {})
+            // A mode the `AGGREGATOR_ONBOARDING_ENABLED` allow-list withholds
+            // is dropped from the wire payload entirely. The admin create-link
+            // dropdown renders these keys verbatim, so filtering here is what
+            // removes the option — no web change involved. Unset ⇒ nothing is
+            // filtered.
+            .filter(([key]) => enabledModes.has(key))
+            .map(([key, mode]) => [
+              key,
+              // Resolve the `signals_cta` default here so the client normally
+              // reads a concrete boolean off the wire. The client keeps a
+              // back-compat fallback that re-derives it (for an older api build
+              // that omits the field) — both sides share the one rule in
+              // `@aggregator-dpg/network-config/signals-cta`.
+              { ...mode, signals_cta: signalsCtaEnabled(key, cfg) },
+            ]),
+        ),
+        signals_ui_urls: signalsUiUrls,
       };
       return reply.header('Cache-Control', 'public, max-age=60').send(payload);
+    },
+  );
+
+  app.get(
+    '/v1/participant-consent',
+    {
+      schema: {
+        tags: ['aggregator-config'],
+        summary: 'Participant registration-link consent document',
+        description:
+          'The participant `consent.json` (Terms / Privacy / profile-creation) fetched from `aggregator.network.consent_source` — the same cache-backed pull as network.json. `participant_consent` is null when no `consent_source` is configured (the web app then falls back to its on-disk copy). No auth — operator-controlled content shown on the public registration form.',
+        response: {
+          200: z
+            .object({ participant_consent: z.record(z.string(), z.unknown()).nullable() })
+            .passthrough(),
+          ...errorResponses(500, 503),
+        },
+      },
+    },
+    async (_req, reply) => {
+      const cfg = await getNetworkConfig();
+      return reply
+        .header('Cache-Control', 'public, max-age=60')
+        .send({ participant_consent: cfg.participantConsent ?? null });
     },
   );
 }

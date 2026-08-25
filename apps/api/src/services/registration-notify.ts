@@ -169,6 +169,11 @@ export async function sendAdminReviewEmail(
       applicantPhone: input.applicantPhone,
       recipients: input.recipientEmail ? [input.recipientEmail] : parseAdminEmails(),
       ...(input.org ? { org: input.org } : {}),
+      // Stated explicitly rather than left to the `aggregator` default: this
+      // email announces a COORDINATOR, and a reviewer who also handles org
+      // registrations cannot tell the two apart from "New aggregator
+      // registration" alone.
+      entityLabel: 'aggregator coordinator',
       logOperation: 'registration-notify.sendAdminReviewEmail',
     },
     log,

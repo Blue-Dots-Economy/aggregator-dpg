@@ -20,7 +20,13 @@ import {
   serializerCompiler,
   validatorCompiler,
 } from 'fastify-type-provider-zod';
-import { config, corsOrigins, apiReferenceEnabled } from './config.js';
+import {
+  config,
+  corsOrigins,
+  apiReferenceEnabled,
+  signalsUiUrlWarnings,
+  onboardingEnabledWarnings,
+} from './config.js';
 import { loggerOptions } from './logger.js';
 import { registerHealthRoutes } from './routes/health.js';
 import { registerAggregatorRegistrationRoutes } from './routes/aggregator-registrations.js';
@@ -71,6 +77,24 @@ export async function buildApp(): Promise<FastifyInstance> {
     },
     disableRequestLogging: true,
   });
+
+  // `SIGNALS_UI_URLS` is parsed at module load, before a logger exists (see
+  // config.ts's `ParsedSignalsUiUrls` doc comment) — surface any skipped
+  // entries here (the message itself names which entry was skipped and why)
+  // so a misconfigured env is visible in cluster logs instead of silently
+  // disabling the hand-off for one domain.
+  for (const warning of signalsUiUrlWarnings) {
+    app.log.warn({ operation: 'config.parseSignalsUiUrls', status: 'skipped' }, warning);
+  }
+
+  // Same hand-off for the `AGGREGATOR_ONBOARDING_ENABLED` allow-list (#637):
+  // parsed at module load, so its duplicate-entry and "set but names nothing"
+  // warnings can only be emitted here. The complementary check — a value that
+  // matches no *declared* registration mode — needs the resolved network
+  // config and lives in `services/network-config.ts`.
+  for (const warning of onboardingEnabledWarnings) {
+    app.log.warn({ operation: 'config.parseOnboardingEnabled', status: 'skipped' }, warning);
+  }
 
   await app.register(cors, {
     origin: corsOrigins.length === 0 || corsOrigins.includes('*') ? true : corsOrigins,
@@ -215,6 +239,12 @@ export async function buildApp(): Promise<FastifyInstance> {
         cause: rawErr,
         fields: { issues: fastifyValidation },
       });
+    } else if ((rawErr as { code?: string }).code === 'FST_ERR_CTP_BODY_TOO_LARGE') {
+      // Fastify rejects an over-limit body before any handler runs, and its
+      // error carries no `statusCode` this handler would otherwise honour — so
+      // without this branch an oversized upload (e.g. a too-big support
+      // attachment) reports a 500 as though the server had broken (#551).
+      err = new HttpError(ERR.PAYLOAD_TOO_LARGE, { cause: rawErr });
     } else {
       err = coerceToHttpError(rawErr);
     }

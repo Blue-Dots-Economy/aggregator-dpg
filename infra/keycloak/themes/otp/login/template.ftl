@@ -53,9 +53,21 @@
             <canvas id="bd-hero-canvas" class="bd-hero-canvas"></canvas>
             <div class="bd-hero-glow"></div>
             <div class="bd-hero-copy">
+                <#-- Brand lockup when the brand ships one (heroLogo names a file
+                     in img/brand/<brandLogoSlug>/), otherwise the wordmark +
+                     strapline text. Opt-in because not every brand has the
+                     artwork, and a missing file would render a broken image. -->
                 <div class="bd-hero-brand">
-                    <span class="bd-hero-wordmark">${properties.brandShortName!'Aggregator'}</span>
-                    <span class="bd-hero-strapline">Seeded by EkStep Foundation</span>
+                    <#if (properties.heroLogo!'')?has_content>
+                        <img class="bd-hero-logo"
+                             src="${url.resourcesPath}/img/brand/${properties.brandLogoSlug!'blue-dot'}/${properties.heroLogo}"
+                             alt="${properties.brandShortName!'Aggregator'}"/>
+                    <#else>
+                        <span class="bd-hero-wordmark">${properties.brandShortName!'Aggregator'}</span>
+                        <#if (properties.brandSeededBy!'')?has_content>
+                            <span class="bd-hero-strapline">${properties.brandSeededBy}</span>
+                        </#if>
+                    </#if>
                 </div>
             </div>
         </aside>

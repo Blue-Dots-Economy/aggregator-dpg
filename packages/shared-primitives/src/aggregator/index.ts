@@ -119,6 +119,12 @@ export const RegistrationPayloadSchema = z
      */
     type: RoleTypeSchema,
     url: z.string().url().max(2048).optional(),
+    /**
+     * Sub-org / division / vertical / institution name. Declared only by
+     * deployments whose registration schema asks for it (UP-GZB today), so it
+     * is absent elsewhere. Has no column — persisted to `aggregators.profile`.
+     */
+    sub_org_name: z.string().max(200).optional(),
     contact: BecknContactSchema,
     locations: z.array(BecknLocationSchema).default([]),
     consent: RegistrationConsentSchema,

@@ -47,7 +47,13 @@ aggregator:
       tab_label: Practitioners
 
   onboarding:
-    presume_consent: true
+    # Bulk-upload only: when true, an adult bulk row is pushed to Signals with
+    # user_terms / user_privacy / profile_creation asserted on the participant's
+    # behalf, satisfying the consent_required go-live gate and publishing the
+    # profile immediately. false => compliance omitted, rows stay draft until the
+    # participant accepts. Minors are never presumed either way. The interactive
+    # registration-link flow always captures real consent.
+    presume_consent: false
     bulk_max_rows: 10000
 
   admin_emails:

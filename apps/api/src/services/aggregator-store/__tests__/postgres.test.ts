@@ -91,6 +91,8 @@ function makeRow(overrides: Partial<Aggregator> = {}): Aggregator {
     contactEmail: 'a@x.org',
     locations: [],
     consent: { value: true, given_at: '2026-01-01T00:00:00Z', valid_till: '2027-01-01T00:00:00Z' },
+    profile: {},
+    profileRef: null,
     status: 'pending',
     createdBy: 'system',
     updatedBy: 'system',

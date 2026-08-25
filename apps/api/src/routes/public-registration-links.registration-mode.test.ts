@@ -17,6 +17,10 @@
  *   - body with `item_state` rejected as 400 REGISTRATION_MODE_MISMATCH
  *   - body with unknown keys rejected as 400 REGISTRATION_MODE_MISMATCH
  *   - a stray `partial` key is now an unknown key → 400 (flag removed)
+ *
+ * Resolve with `AGGREGATOR_ONBOARDING_ENABLED=form` (#637):
+ *   - an existing voice link is untouched — the create-time allow-list must
+ *     never reach this path, or every printed voice QR would break
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
@@ -84,9 +88,6 @@ class TwoLinkStore extends RegistrationLinksStoreBase {
   }
   async findBySlug(): Promise<StoreResult<RegistrationLink | null>> {
     return { ok: true, value: null };
-  }
-  async updateQrKey(): Promise<StoreResult<RegistrationLink>> {
-    return { ok: false, error: { code: 'DB_UNAVAILABLE', message: 'stub' } };
   }
   async updateDraft(): Promise<StoreResult<RegistrationLink>> {
     return { ok: false, error: { code: 'DB_UNAVAILABLE', message: 'stub' } };
@@ -225,6 +226,59 @@ describe('GET /public/v1/aggregators/:org/links/:slug — registration_mode (res
     expect(body.schema).not.toBeNull();
     expect(body.schema_id).toBe('participant-seeker');
     expect(body.schema_version).toBe('v1');
+  });
+});
+
+describe('GET /public/v1/aggregators/:org/links/:slug — AGGREGATOR_ONBOARDING_ENABLED (#637)', () => {
+  // The most important regression guard in #637. The env var narrows which
+  // modes a *new* link may be created in; it must never touch the resolve
+  // path, or every voice QR already printed and handed out would resolve as
+  // a full-profile link (wrong shape, wrong hint, and a Signals CTA it was
+  // built without). `public-registration-links.ts` reads `getNetworkConfig()`
+  // directly — unfiltered — and this pins that.
+  let app: FastifyInstance;
+  const original = process.env.AGGREGATOR_ONBOARDING_ENABLED;
+
+  beforeEach(async () => {
+    process.env.AGGREGATOR_ONBOARDING_ENABLED = 'form';
+    ({ app } = await bootApp());
+  });
+  afterEach(async () => {
+    await teardown(app);
+    if (original === undefined) delete process.env.AGGREGATOR_ONBOARDING_ENABLED;
+    else process.env.AGGREGATOR_ONBOARDING_ENABLED = original;
+  });
+
+  it('still resolves an existing voice link as account_only with its hint', async () => {
+    const r = await app.inject({
+      method: 'GET',
+      url: `/public/v1/aggregators/${ORG_SLUG}/links/${SLUG_AO}`,
+    });
+    expect(r.statusCode).toBe(200);
+    const body = r.json();
+    expect(body.registration_mode).toBe('voice');
+    expect(body.submission_shape).toBe('account_only');
+    expect(body.public_hint_i18n_key).toBe('registration_mode.voice.hint');
+    expect(body.schema).toBeNull();
+  });
+
+  it('still accepts a submission on that voice link', async () => {
+    const r = await app.inject({
+      method: 'POST',
+      url: `/public/v1/aggregators/${ORG_SLUG}/registrations/${SLUG_AO}`,
+      payload: { name: 'Withheld Mode', phone: '+919812345670' },
+    });
+    expect(r.statusCode).toBe(201);
+    expect(r.json().submission_shape).toBe('account_only');
+  });
+
+  it('leaves the form link untouched too', async () => {
+    const r = await app.inject({
+      method: 'GET',
+      url: `/public/v1/aggregators/${ORG_SLUG}/links/${SLUG_FULL}`,
+    });
+    expect(r.statusCode).toBe(200);
+    expect(r.json().submission_shape).toBe('account_and_profile');
   });
 });
 
@@ -382,9 +436,6 @@ describe('link-not-live / link-lookup failure branches', () => {
         }
         async findBySlug(): Promise<StoreResult<RegistrationLink | null>> {
           return { ok: true, value: null };
-        }
-        async updateQrKey(): Promise<StoreResult<RegistrationLink>> {
-          return { ok: false, error: { code: 'DB_UNAVAILABLE', message: 'stub' } };
         }
         async updateDraft(): Promise<StoreResult<RegistrationLink>> {
           return { ok: false, error: { code: 'DB_UNAVAILABLE', message: 'stub' } };

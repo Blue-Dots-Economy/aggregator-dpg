@@ -18,6 +18,16 @@ export interface AggregatorOrg {
   ownerPhone: string | null;
   ownerKcSub: string | null;
   kcGroupId: string | null;
+  /**
+   * Schema-driven registration payload — only fields with no column of their
+   * own. The typed columns above stay authoritative for what they already hold.
+   */
+  profile: Record<string, unknown>;
+  /**
+   * Which schema variant produced `profile`, e.g. `blue_dot/org-registration.v1`.
+   * NULL on rows created before migration 0018.
+   */
+  profileRef: string | null;
   status: AggregatorStatus;
   createdAt: Date;
   updatedAt: Date;
@@ -31,6 +41,8 @@ export interface CreateOrgInput {
   ownerPhone?: string | null;
   ownerKcSub?: string | null;
   kcGroupId?: string | null;
+  profile?: Record<string, unknown>;
+  profileRef?: string | null;
 }
 
 export interface UpdateOrgPatch {

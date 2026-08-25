@@ -11,6 +11,7 @@
  * declare `export const runtime = 'nodejs'`.
  */
 
+import { randomUUID } from 'node:crypto';
 import pino from 'pino';
 
 const level = process.env.LOG_LEVEL ?? 'info';
@@ -61,6 +62,6 @@ export const logger = pino({
 export function pickRequestId(headers: Headers): string {
   const incoming = headers.get('x-request-id');
   if (incoming && incoming.length > 0 && incoming.length <= 128) return incoming;
-  const rand = Math.random().toString(16).slice(2, 10);
+  const rand = randomUUID().slice(0, 8);
   return `req-${Date.now().toString(36)}-${rand}`;
 }

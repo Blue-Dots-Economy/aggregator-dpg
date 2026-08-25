@@ -54,6 +54,8 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
       contactEmail: email,
       locations: input.locations ?? [],
       consent: input.consent,
+      profile: input.profile ?? {},
+      profileRef: input.profileRef ?? null,
       status: 'pending',
       createdBy: input.createdBy,
       updatedBy: input.updatedBy,
