@@ -7,6 +7,7 @@
  *
  * @module apps/web/src/components/consent/ConsentProgressTracker
  */
+import type { JSX } from 'react';
 import { Check } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import type { ConsentDoc } from './consent-docs';

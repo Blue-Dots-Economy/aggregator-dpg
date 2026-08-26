@@ -15,7 +15,7 @@
  *
  * @module apps/web/src/components/support/SupportDialog
  */
-import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent, type SubmitEvent, type JSX } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslations } from 'next-intl';
 import { I } from '../../icons';
@@ -235,7 +235,7 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.E
     setAttachments((current) => current.filter((_, i) => i !== index));
   };
 
-  const submit = async (e: FormEvent) => {
+  const submit = async (e: SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!canSubmit) {
       setStatus('invalid');

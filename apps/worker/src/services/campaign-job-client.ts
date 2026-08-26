@@ -78,6 +78,8 @@ export interface ProcessingJob {
   content: Record<string, unknown>;
   requestedBy: string;
   requestId: string | null;
+  /** Set once the user-visible notification was sent; a retry must not re-send. */
+  notifiedAt: Date | null;
   items: ProcessingJobItem[];
 }
 
@@ -129,6 +131,7 @@ export async function getJobForProcessing(jobId: string): Promise<ProcessingJob 
     content: row.content,
     requestedBy: row.requestedBy,
     requestId: row.requestId,
+    notifiedAt: row.notifiedAt,
     items: items.map((i) => ({ itemId: i.itemId, action: i.action, status: i.status })),
   };
 }
@@ -159,12 +162,7 @@ export async function countItems(jobId: string): Promise<JobStatusCounts> {
   return counts;
 }
 
-/**
- * Forward-only item status write — a terminal item is not overwritten.
- *
- * @param providerRef - External id this item produced (email: the mailer's
- *   message id; voice: the Raya call id). Left untouched when omitted.
- */
+/** Forward-only item status write — a terminal item is not overwritten. */
 export async function markItem(
   jobId: string,
   itemId: string,
@@ -222,6 +220,34 @@ export async function rollUpStatus(jobId: string): Promise<CampaignJobStatus> {
   const status = deriveJobStatus(await countItems(jobId));
   await setJobStatus(jobId, status);
   return status;
+}
+
+/**
+ * Stamps the job's notification as sent, so a retry cannot deliver a second
+ * working pre-signed link to the same participant PII.
+ *
+ * @param jobId - The job whose notification was delivered.
+ */
+export async function setNotifiedAt(jobId: string): Promise<void> {
+  await getDb()
+    .update(campaignJob)
+    .set({ notifiedAt: new Date(), updatedAt: new Date() })
+    .where(eq(campaignJob.id, jobId));
+}
+
+/**
+ * Fails every item still `pending` on a job that has exhausted its retries, so
+ * the derived counts account for all requested items instead of leaving rows
+ * in a non-terminal status no later run will touch.
+ *
+ * @param jobId - The job that ran out of attempts.
+ * @param errorReason - Reason recorded on each item.
+ */
+export async function failPendingItems(jobId: string, errorReason: string): Promise<void> {
+  await getDb()
+    .update(campaignJobItem)
+    .set({ status: 'failed', errorReason, updatedAt: new Date() })
+    .where(and(eq(campaignJobItem.jobId, jobId), eq(campaignJobItem.status, 'pending')));
 }
 
 /** Ids of `processing` jobs whose `last_progress_at` is older than the cutoff. */

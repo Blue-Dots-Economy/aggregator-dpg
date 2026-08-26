@@ -61,4 +61,14 @@ describe('processCampaignJob', () => {
     expect(typeof deps.email.sendMail).toBe('function');
     expect(deps.config.emailSendConcurrency).toBe(5);
   });
+
+  it('threads the BullMQ retry position through to the orchestrator', async () => {
+    getWriterMock.mockReturnValue({ fetchDecryptedProfiles: vi.fn() });
+    runCampaignJobMock.mockResolvedValue(undefined);
+
+    await processCampaignJob({ jobId: 'job-1' }, { attempt: 3, maxAttempts: 3 });
+
+    const [, deps] = runCampaignJobMock.mock.calls[0]!;
+    expect(deps.attempt).toEqual({ attempt: 3, maxAttempts: 3 });
+  });
 });

@@ -38,6 +38,7 @@ function job(over: Partial<ProcessingJob> = {}): ProcessingJob {
     content: {},
     requestedBy: 'user@org.example',
     requestId: null,
+    notifiedAt: null,
     items: [{ itemId: 'item-1', action: null, status: 'pending' }],
     ...over,
   };
@@ -53,6 +54,10 @@ interface Harness {
   heartbeats: () => number;
   jobStatuses: string[];
   logs: { info: object[]; warn: object[]; error: object[] };
+  /** Reasons passed to setJobStatus, positionally aligned with jobStatuses. */
+  statusReasons: Array<string | undefined>;
+  pendingFails: string[];
+  notified: () => number;
 }
 
 /**
@@ -68,16 +73,19 @@ function harness(
   theJob: ProcessingJob | null,
   over: CollabOverrides = {},
   config: Partial<CampaignJobDeps['config']> = {},
+  attempt?: CampaignJobDeps['attempt'],
 ): Harness {
   const puts: Harness['puts'] = [];
   const mails: SendInput[] = [];
   const emails: SendInput[] = [];
+  const { fetchDecryptedProfiles, emailSendMail, ...exportOver } = over;
   const itemMarks: Harness['itemMarks'] = [];
   const jobStatuses: string[] = [];
+  const statusReasons: Array<string | undefined> = [];
+  const pendingFails: string[] = [];
+  let notified = 0;
   const logs = { info: [] as object[], warn: [] as object[], error: [] as object[] };
   let heartbeats = 0;
-
-  const { fetchDecryptedProfiles, emailSendMail, ...exportOver } = over;
 
   // In-memory item-status map for roll-up + forward-only marks.
   const itemStatus = new Map(
@@ -107,9 +115,23 @@ function harness(
       heartbeat: async () => {
         heartbeats++;
       },
-      setJobStatus: async (_jobId, status) => {
+      setJobStatus: async (_jobId, status, errorReason) => {
         jobStatuses.push(status);
+        statusReasons.push(errorReason);
         if (theJob) theJob.status = status;
+      },
+      setNotifiedAt: async () => {
+        notified++;
+        if (theJob) theJob.notifiedAt = new Date('2026-08-01T00:30:00.000Z');
+      },
+      failPendingItems: async (_jobId, reason) => {
+        pendingFails.push(reason);
+        for (const v of itemStatus.values()) {
+          if (v.status === 'pending') {
+            v.status = 'failed';
+            v.err = reason;
+          }
+        }
       },
       rollUpStatus: async () => {
         const counts = {
@@ -170,6 +192,7 @@ function harness(
       warn: (o) => logs.warn.push(o),
       error: (o) => logs.error.push(o),
     },
+    ...(attempt ? { attempt } : {}),
   };
   return {
     deps,
@@ -180,6 +203,9 @@ function harness(
     heartbeats: () => heartbeats,
     jobStatuses,
     logs,
+    statusReasons,
+    pendingFails,
+    notified: () => notified,
   };
 }
 
@@ -314,6 +340,105 @@ describe('runCampaignJob (export channel)', () => {
     expect(serialized).not.toContain('Asha');
     expect(serialized).not.toContain('asha@example.com');
     expect(serialized).not.toContain('+910000000000');
+  });
+});
+
+describe('runCampaignJob failure paths', () => {
+  it('leaves a mid-sequence failure retryable: still processing, no terminal mark', async () => {
+    const h = harness(
+      job(),
+      {
+        putObject: async () => {
+          throw new Error('s3 unreachable');
+        },
+      },
+      {},
+      { attempt: 1, maxAttempts: 3 },
+    );
+
+    await expect(runCampaignJob('job-1', h.deps)).rejects.toThrow('s3 unreachable');
+    // BullMQ will retry, so the job must NOT be marked terminal here.
+    expect(h.jobStatuses).toEqual(['processing']);
+    expect(h.pendingFails).toEqual([]);
+    expect(h.mails).toHaveLength(0);
+  });
+
+  it('records the real reason and fails leftover items on the final attempt', async () => {
+    const h = harness(
+      job(),
+      {
+        putObject: async () => {
+          throw new Error('s3 unreachable');
+        },
+      },
+      {},
+      { attempt: 3, maxAttempts: 3 },
+    );
+
+    await expect(runCampaignJob('job-1', h.deps)).rejects.toThrow('s3 unreachable');
+    expect(h.jobStatuses.at(-1)).toBe('failed');
+    // The cause is preserved rather than being swept later as a generic stall.
+    expect(h.statusReasons.at(-1)).toBe('s3 unreachable');
+    expect(h.pendingFails).toEqual(['job_failed']);
+  });
+
+  it('fails terminally when the mailer rejects on the final attempt', async () => {
+    const h = harness(
+      job(),
+      {
+        sendMail: async (): Promise<MailerResult<SendOk>> => ({
+          ok: false,
+          error: { code: 'TRANSPORT_FAILED', message: 'smtp refused' },
+        }),
+      },
+      {},
+      { attempt: 2, maxAttempts: 2 },
+    );
+
+    await expect(runCampaignJob('job-1', h.deps)).rejects.toThrow(/email failed/);
+    expect(h.jobStatuses.at(-1)).toBe('failed');
+    expect(h.statusReasons.at(-1)).toContain('TRANSPORT_FAILED');
+    // The CSV was uploaded before the send failed; the link was never delivered.
+    expect(h.puts).toHaveLength(1);
+    expect(h.notified()).toBe(0);
+  });
+
+  it('fails when recipientMode is network_admin but no admin address is configured', async () => {
+    const h = harness(
+      job(),
+      {},
+      { recipientMode: 'network_admin' },
+      { attempt: 1, maxAttempts: 1 },
+    );
+
+    await expect(runCampaignJob('job-1', h.deps)).rejects.toThrow(/no recipient/);
+    // Fail closed: a PII export is never redirected to the requester as a fallback.
+    expect(h.mails).toHaveLength(0);
+    expect(h.jobStatuses.at(-1)).toBe('failed');
+  });
+});
+
+describe('runCampaignJob retry safety', () => {
+  it('writes the CSV at a deterministic per-job key so a retry overwrites it', async () => {
+    const h = harness(job());
+    await runCampaignJob('job-1', h.deps);
+    expect(h.puts[0]!.key).toBe('campaign-exports/org-1/job-1.csv');
+  });
+
+  it('stamps notified_at after a successful send', async () => {
+    const h = harness(job());
+    await runCampaignJob('job-1', h.deps);
+    expect(h.notified()).toBe(1);
+  });
+
+  it('never re-sends the download link for an already-notified job', async () => {
+    const h = harness(job({ notifiedAt: new Date('2026-08-01T00:30:00.000Z') }));
+    await runCampaignJob('job-1', h.deps);
+
+    // A second working pre-signed link to the same PII must not go out.
+    expect(h.mails).toHaveLength(0);
+    expect(h.notified()).toBe(0);
+    expect(h.jobStatuses.at(-1)).toBe('completed');
   });
 });
 

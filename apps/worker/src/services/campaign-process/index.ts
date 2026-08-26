@@ -13,7 +13,9 @@
  *
  * Failure semantics: a transient/infra failure (decrypt err(), the #521
  * contact-block guard, an S3 or mail rejection) re-throws so BullMQ retries and
- * the job is left `processing` — never falsely marked terminal. Per-item
+ * the job is left `processing` — never falsely marked terminal, except on the
+ * final attempt, where the real reason is recorded rather than lost to the
+ * watchdog's generic `stalled`. Per-item
  * "not found / not owned" is a terminal item failure (not a job failure); the
  * roll-up turns a mix into `partially_failed`. Never logs PII.
  * Belongs to `@aggregator-dpg/worker`.
@@ -58,6 +60,10 @@ export interface CampaignJobClient {
   heartbeat(jobId: string): Promise<void>;
   setJobStatus(jobId: string, status: CampaignJobStatus, errorReason?: string): Promise<void>;
   rollUpStatus(jobId: string): Promise<CampaignJobStatus>;
+  /** Marks the job's user-visible notification as sent; a retry must not re-send. */
+  setNotifiedAt(jobId: string): Promise<void>;
+  /** Fails items still `pending` on a job that has run out of retries. */
+  failPendingItems(jobId: string, errorReason: string): Promise<void>;
 }
 
 /** Signals decrypt — the one collaborator every channel needs. */
@@ -101,9 +107,16 @@ export interface CampaignJobDeps {
   email: EmailCollaborators;
   config: CampaignJobConfig;
   log: CampaignLogger;
+  /** Retry position, so the final attempt can record a terminal failure. */
+  attempt?: { attempt: number; maxAttempts: number };
 }
 
 const TERMINAL_JOB = new Set<CampaignJobStatus>(TERMINAL_JOB_STATUSES);
+
+/** `campaign_job.error_reason` is a bounded column; keep the head of the message. */
+function truncateReason(reason: string): string {
+  return reason.length > 500 ? `${reason.slice(0, 497)}...` : reason;
+}
 const TERMINAL_ITEM = new Set<CampaignJobItemStatus>(TERMINAL_ITEM_STATUSES);
 
 /**
@@ -155,15 +168,35 @@ export async function runCampaignJob(jobId: string, deps: CampaignJobDeps): Prom
       job_status: status,
     });
   } catch (err) {
-    // Leave the job `processing` so BullMQ retries; never mark terminal here.
+    const reason = err instanceof Error ? err.message : String(err);
+    // Unknown retry position (no `attempt` injected) is treated as NOT final:
+    // marking a job terminal while BullMQ still has retries left would abandon
+    // work that would otherwise have succeeded, so the guard fails safe.
+    const attempt = deps.attempt;
+    const isFinalAttempt = attempt !== undefined && attempt.attempt >= attempt.maxAttempts;
+
     deps.log.error({
       operation: 'campaign.process',
       status: 'failure',
       job_id: jobId,
       channel: job.channel,
-      error: err instanceof Error ? err.message : String(err),
+      attempt: attempt?.attempt,
+      max_attempts: attempt?.maxAttempts,
+      final_attempt: isFinalAttempt,
+      error: reason,
       error_type: err instanceof Error ? err.constructor.name : 'unknown',
     });
+
+    // Mid-sequence: leave the job `processing` so BullMQ retries it.
+    // On the LAST attempt there is no retry coming, so leaving it `processing`
+    // would strand it until the watchdog swept it with a generic `stalled`
+    // reason — losing the actual cause. Record the real reason instead, and
+    // resolve items still `pending` (never reached, so never marked) so the
+    // derived counts add up to the requested total.
+    if (isFinalAttempt) {
+      await deps.client.failPendingItems(jobId, 'job_failed');
+      await deps.client.setJobStatus(jobId, 'failed', truncateReason(reason));
+    }
     throw err;
   }
 }
@@ -295,7 +328,11 @@ async function runEmailForJob(job: ProcessingJob, deps: CampaignJobDeps): Promis
   const content = parsed.data;
 
   // Retry guard: an item already `sent` (or skipped/failed) is terminal — never
-  // decrypt it again, never email it again.
+  // decrypt it again, never email it again. This is deliberately NOT the
+  // job-level `notified_at` guard the export channel uses: export sends ONE
+  // message per job, so a job-level stamp is enough, whereas this channel sends
+  // one per recipient and needs per-recipient resolution — a job that got
+  // halfway through its recipients must resume, not be skipped wholesale.
   const pending = job.items.filter((i) => !TERMINAL_ITEM.has(i.status));
   if (pending.length === 0) {
     deps.log.info({
@@ -388,7 +425,10 @@ async function runExportForJob(job: ProcessingJob, deps: CampaignJobDeps): Promi
   const csv = contactOnly
     ? buildContactExportCsv(resolvedRows)
     : buildDecryptedProfilesCsv(resolvedRows);
-  const key = `campaign-exports/${job.signalstackOrgId}/${new Date().toISOString().replace(/[:.]/g, '-')}.csv`;
+  // Deterministic per job: a retry overwrites the same object rather than
+  // leaving an orphaned CSV of participant PII behind at a timestamped key
+  // (which nothing would ever clean up before its lifecycle expiry).
+  const key = `campaign-exports/${job.signalstackOrgId}/${job.id}.csv`;
   await deps.export.putObject(key, Buffer.from(csv, 'utf8'), 'text/csv');
   const signed = await deps.export.signDownloadUrl(key);
 
@@ -409,6 +449,19 @@ async function runExportForJob(job: ProcessingJob, deps: CampaignJobDeps): Promi
     url: signed.url,
     expiresAt: signed.expiresAt,
   });
+  // At-least-once delivery means a lost SMTP response leaves the job
+  // `processing` and BullMQ retries it. Without this guard the requester would
+  // get a SECOND working pre-signed link to the same participant PII.
+  if (job.notifiedAt) {
+    deps.log.info({
+      ...base,
+      status: 'skipped',
+      reason: 'already_notified',
+      exported: resolvedRows.length,
+    });
+    return;
+  }
+
   const sent = await deps.export.sendMail({
     to: recipient,
     subject: email.subject,
@@ -419,6 +472,9 @@ async function runExportForJob(job: ProcessingJob, deps: CampaignJobDeps): Promi
     // CSV is durably in S3; re-throw so BullMQ re-sends (re-decrypt + re-upload).
     throw new Error(`campaign export email failed: ${sent.error.code}: ${sent.error.message}`);
   }
+
+  // Stamp before returning so a retry after this point cannot re-send.
+  await deps.client.setNotifiedAt(job.id);
 
   deps.log.info({ ...base, status: 'success', exported: resolvedRows.length, s3_key: key });
 }

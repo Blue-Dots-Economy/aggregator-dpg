@@ -370,12 +370,8 @@
           "name": "aggregator_profile_aggregator_id_aggregators_id_fk",
           "tableFrom": "aggregator_profile",
           "tableTo": "aggregators",
-          "columnsFrom": [
-            "aggregator_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["aggregator_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -581,12 +577,8 @@
           "name": "aggregators_parent_org_id_aggregator_orgs_id_fk",
           "tableFrom": "aggregators",
           "tableTo": "aggregator_orgs",
-          "columnsFrom": [
-            "parent_org_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["parent_org_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -596,9 +588,7 @@
         "aggregators_org_slug_unique": {
           "name": "aggregators_org_slug_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "org_slug"
-          ]
+          "columns": ["org_slug"]
         }
       },
       "policies": {},
@@ -754,12 +744,8 @@
           "name": "bulk_uploads_aggregator_id_aggregators_id_fk",
           "tableFrom": "bulk_uploads",
           "tableTo": "aggregators",
-          "columnsFrom": [
-            "aggregator_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["aggregator_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -871,12 +857,24 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
+        },
+        "notified_at": {
+          "name": "notified_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
         "campaign_job_idempotency_key_unique": {
           "name": "campaign_job_idempotency_key_unique",
           "columns": [
+            {
+              "expression": "signalstack_org_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
             {
               "expression": "idempotency_key",
               "isExpression": false,
@@ -944,12 +942,8 @@
           "name": "campaign_job_aggregator_id_aggregators_id_fk",
           "tableFrom": "campaign_job",
           "tableTo": "aggregators",
-          "columnsFrom": [
-            "aggregator_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["aggregator_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1133,12 +1127,8 @@
           "name": "campaign_job_item_job_id_campaign_job_id_fk",
           "tableFrom": "campaign_job_item",
           "tableTo": "campaign_job",
-          "columnsFrom": [
-            "job_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["job_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1277,12 +1267,8 @@
           "name": "link_submissions_link_id_registration_links_id_fk",
           "tableFrom": "link_submissions",
           "tableTo": "registration_links",
-          "columnsFrom": [
-            "link_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["link_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1290,12 +1276,8 @@
           "name": "link_submissions_aggregator_id_aggregators_id_fk",
           "tableFrom": "link_submissions",
           "tableTo": "aggregators",
-          "columnsFrom": [
-            "aggregator_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["aggregator_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1303,12 +1285,8 @@
           "name": "link_submissions_participant_id_participants_id_fk",
           "tableFrom": "link_submissions",
           "tableTo": "participants",
-          "columnsFrom": [
-            "participant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["participant_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -1501,12 +1479,8 @@
           "name": "onboarding_aggregator_id_aggregators_id_fk",
           "tableFrom": "onboarding",
           "tableTo": "aggregators",
-          "columnsFrom": [
-            "aggregator_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["aggregator_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1514,12 +1488,8 @@
           "name": "onboarding_link_id_registration_links_id_fk",
           "tableFrom": "onboarding",
           "tableTo": "registration_links",
-          "columnsFrom": [
-            "link_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["link_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -1696,12 +1666,8 @@
           "name": "participants_aggregator_id_aggregators_id_fk",
           "tableFrom": "participants",
           "tableTo": "aggregators",
-          "columnsFrom": [
-            "aggregator_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["aggregator_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1709,12 +1675,8 @@
           "name": "participants_source_bulk_upload_id_bulk_uploads_id_fk",
           "tableFrom": "participants",
           "tableTo": "bulk_uploads",
-          "columnsFrom": [
-            "source_bulk_upload_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["source_bulk_upload_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         },
@@ -1722,12 +1684,8 @@
           "name": "participants_source_link_id_registration_links_id_fk",
           "tableFrom": "participants",
           "tableTo": "registration_links",
-          "columnsFrom": [
-            "source_link_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["source_link_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -1871,12 +1829,8 @@
           "name": "registration_links_aggregator_id_aggregators_id_fk",
           "tableFrom": "registration_links",
           "tableTo": "aggregators",
-          "columnsFrom": [
-            "aggregator_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["aggregator_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1892,21 +1846,12 @@
     "public.aggregator_actor_type": {
       "name": "aggregator_actor_type",
       "schema": "public",
-      "values": [
-        "aggregator",
-        "seeker",
-        "provider"
-      ]
+      "values": ["aggregator", "seeker", "provider"]
     },
     "public.aggregator_status": {
       "name": "aggregator_status",
       "schema": "public",
-      "values": [
-        "pending",
-        "active",
-        "inactive",
-        "retired"
-      ]
+      "values": ["pending", "active", "inactive", "retired"]
     },
     "public.bulk_upload_status": {
       "name": "bulk_upload_status",
@@ -1925,11 +1870,7 @@
     "public.campaign_channel": {
       "name": "campaign_channel",
       "schema": "public",
-      "values": [
-        "export",
-        "email",
-        "voice"
-      ]
+      "values": ["export", "email", "voice"]
     },
     "public.campaign_job_item_status": {
       "name": "campaign_job_item_status",
@@ -1948,39 +1889,22 @@
     "public.campaign_job_status": {
       "name": "campaign_job_status",
       "schema": "public",
-      "values": [
-        "queued",
-        "processing",
-        "partial",
-        "completed",
-        "failed"
-      ]
+      "values": ["queued", "processing", "partial", "completed", "failed"]
     },
     "public.link_submission_outcome": {
       "name": "link_submission_outcome",
       "schema": "public",
-      "values": [
-        "passed",
-        "skipped",
-        "failed"
-      ]
+      "values": ["passed", "skipped", "failed"]
     },
     "public.onboarding_source": {
       "name": "onboarding_source",
       "schema": "public",
-      "values": [
-        "bulk",
-        "link"
-      ]
+      "values": ["bulk", "link"]
     },
     "public.registration_link_status": {
       "name": "registration_link_status",
       "schema": "public",
-      "values": [
-        "draft",
-        "live",
-        "retired"
-      ]
+      "values": ["draft", "live", "retired"]
     }
   },
   "schemas": {},

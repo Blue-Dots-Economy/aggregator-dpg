@@ -12,9 +12,7 @@
 
 /**
  * Selectable consumer roles. `cron` covers link-metrics + watchdog ticks;
- * `campaign` runs the unified campaign async-job pipeline (aggregator-dpg#579)
- * for every channel — export, email (#578) and voice (#577) all ride the one
- * `campaign-process` queue, so there is no per-channel role.
+ * `campaign` runs the unified campaign async-job pipeline (aggregator-dpg#579).
  */
 export const WORKER_ROLES = ['file', 'row', 'finalise', 'cron', 'campaign'] as const;
 

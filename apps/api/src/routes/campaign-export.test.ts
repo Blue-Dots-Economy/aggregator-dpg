@@ -128,7 +128,13 @@ describe('POST /v1/campaign/export', () => {
     const first = await post(body, { 'idempotency-key': 'key-123' });
     const second = await post(body, { 'idempotency-key': 'key-123' });
     expect(first.json().job_id).toBe(second.json().job_id);
-    expect(enqueueCampaignProcessMock).toHaveBeenCalledTimes(1);
+    // A replay never creates a second job. It does re-prime the queue for a
+    // job still `queued` (the first enqueue may have been lost), which BullMQ
+    // collapses because the campaign_job id is used as the BullMQ jobId.
+    const enqueuedIds = enqueueCampaignProcessMock.mock.calls.map(
+      (c) => (c[0] as { jobId: string }).jobId,
+    );
+    expect(new Set(enqueuedIds)).toEqual(new Set([first.json().job_id]));
   });
 
   it('returns 400 CAMPAIGN_TOO_MANY_ITEMS when the item count exceeds the cap', async () => {
@@ -244,5 +250,37 @@ describe('POST /v1/campaign/export', () => {
     const res = await post({ item_ids: [VALID_UUID] });
     expect(res.statusCode).toBe(503);
     expect(res.json().error.code).toBe('EXPORT_ENQUEUE_FAILED');
+  });
+
+  it('does not strand the job row when the enqueue fails', async () => {
+    enqueueCampaignProcessMock.mockRejectedValueOnce(new Error('redis unavailable'));
+    await post({ item_ids: [VALID_UUID] });
+
+    // The row was committed before the enqueue was attempted. Leaving it
+    // `queued` would be a lie no worker will ever correct — and it would keep
+    // consuming the org's active-job slot, so a run of Redis blips would wedge
+    // the org out of exporting entirely.
+    const list = await store.listJobs('org_5d3b7fa4-x', { channel: 'export', limit: 10 });
+    const jobs = list.ok ? list.value.jobs : [];
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]!.status).toBe('failed');
+
+    const active = await store.countActiveJobs('org_5d3b7fa4-x', 'export');
+    expect(active.ok && active.value).toBe(0);
+  });
+
+  it('re-enqueues an idempotency replay whose job is still queued', async () => {
+    const headers = { 'Idempotency-Key': 'replay-key-1' };
+    const first = await post({ item_ids: [VALID_UUID] }, headers);
+    expect(first.statusCode).toBe(202);
+    enqueueCampaignProcessMock.mockClear();
+
+    const second = await post({ item_ids: [VALID_UUID] }, headers);
+    expect(second.statusCode).toBe(202);
+    expect(second.json().job_id).toBe(first.json().job_id);
+    // Same job id, but the queue is re-primed: a replay of a still-`queued`
+    // job means the original enqueue may never have landed, and answering 202
+    // again without re-queuing would promise an export that never runs.
+    expect(enqueueCampaignProcessMock).toHaveBeenCalledTimes(1);
   });
 });

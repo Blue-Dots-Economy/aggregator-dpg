@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type JSX } from 'react';
 import type { RJSFSchema, UiSchema } from '@rjsf/utils';
 import { useTranslations } from 'next-intl';
 import { Topbar } from '../../../components/shell/Topbar';

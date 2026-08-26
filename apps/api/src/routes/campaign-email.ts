@@ -137,18 +137,36 @@ export async function registerCampaignEmailRoutes(app: FastifyInstance): Promise
       });
       if (!created.ok) throw httpError('INTERNAL', { detail: 'could not create campaign job' });
 
-      // Only enqueue on first creation. An idempotency replay returns the same
-      // job id without queuing a duplicate send.
-      if (created.value.created) {
+      // Enqueue on first creation, and ALSO on a replay whose job is still
+      // `queued` — that means a previous enqueue never landed, and returning
+      // 202 again without re-queuing would promise a send that never runs.
+      // BullMQ de-duplicates on jobId, so a redundant add is a no-op, and the
+      // worker's per-item terminal guard means even a genuine double-run
+      // re-emails nobody already `sent`.
+      const needsEnqueue = created.value.created || created.value.job.status === 'queued';
+      if (needsEnqueue) {
         try {
           await enqueueCampaignProcess(
             { jobId: created.value.job.id },
             { attempts: config.CAMPAIGN_EMAIL_ATTEMPTS },
           );
         } catch (cause) {
-          throw httpError('EMAIL_ENQUEUE_FAILED', {
-            detail: cause instanceof Error ? cause.message : 'failed to enqueue email',
-          });
+          // The row is already committed. Leaving it `queued` strands it: the
+          // watchdog only reaps `processing`, and `queued` counts against
+          // CAMPAIGN_EMAIL_MAX_ACTIVE_PER_ORG, so repeated Redis blips would
+          // permanently wedge the org's cap. Mark it failed so the state is
+          // truthful and the slot is released.
+          const reason = cause instanceof Error ? cause.message : 'failed to enqueue email';
+          const marked = await store.setJobStatus(created.value.job.id, 'failed', 'enqueue_failed');
+          if (!marked.ok) {
+            req.log.error({
+              operation: 'campaignEmail.enqueue',
+              status: 'failure',
+              job_id: created.value.job.id,
+              error: 'could not mark the un-enqueued job failed',
+            });
+          }
+          throw httpError('EMAIL_ENQUEUE_FAILED', { detail: reason });
         }
       }
 
