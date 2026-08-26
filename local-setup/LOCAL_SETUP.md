@@ -663,6 +663,13 @@ stack builds from source, signals-search is pulled prebuilt).
 
 > **Every `--profile search` command needs the flag**, `down` and `ps` included.
 
+> **On Apple Silicon / arm64 these run emulated.** Both images are amd64-only, so
+> the compose pins `platform: linux/amd64` — without it the pull fails with
+> `no matching manifest for linux/arm64/v8`. It works (bge-m3 serves a 1024-dim
+> embedding ~35s after start on an M-series host), just slower. Upstream TEI has
+> no arm64 build, so the embedder cannot be made native; the search app can, via
+> `SIGNALS_SEARCH_IMAGE=signals-search:local` + `SEARCH_PLATFORM=linux/arm64`.
+
 ### 10.2 What differs from signals-dpg's own stack
 
 |                      | signals-dpg stack       | here                                                                                                                                                                                |
