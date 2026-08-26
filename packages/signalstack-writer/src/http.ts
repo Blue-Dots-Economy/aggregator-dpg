@@ -907,7 +907,11 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       const res = await this.requestWithRetry(url, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ item_ids: query.itemIds }),
+        body: JSON.stringify({
+          item_ids: query.itemIds,
+          ...(query.fields !== undefined ? { fields: query.fields } : {}),
+          ...(query.contact !== undefined ? { contact: query.contact } : {}),
+        }),
       });
 
       if (!res.ok) {
@@ -1169,7 +1173,9 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       } else {
         return err(
           new UpstreamError(
-            `signalstack probe returned unknown lifecycle_status: ${String(rawLifecycle)}`,
+            `signalstack probe returned unknown lifecycle_status: ${
+              typeof rawLifecycle === 'string' ? rawLifecycle : JSON.stringify(rawLifecycle)
+            }`,
             { code: 'SIGNALSTACK_BAD_RESPONSE', details: { payload: raw } },
           ),
         );

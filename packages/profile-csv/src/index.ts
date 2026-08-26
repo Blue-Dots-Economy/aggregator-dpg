@@ -1,6 +1,6 @@
 /**
  * Builds a CSV from decrypted signalstack profiles for the aggregator's
- * "Export profile data" action. Belongs to @aggregator-dpg/api.
+ * "Export profile data" action. Belongs to @aggregator-dpg/profile-csv.
  *
  * Columns: `item_id` first, then identity-like columns (name fields, then
  * phone/mobile fields) regardless of the network-specific field names, then
@@ -68,7 +68,8 @@ function csvField(value: string): string {
 function renderCell(value: unknown): string {
   if (value === null || value === undefined) return '';
   if (typeof value === 'object') return JSON.stringify(value);
-  return String(value);
+  // object is handled above, so this is a primitive — safe to String()
+  return String(value as string | number | boolean | bigint | symbol);
 }
 
 /**
@@ -93,8 +94,53 @@ export function buildDecryptedProfilesCsv(rows: SignalStackDecryptedProfileRow[]
   for (const r of rows) {
     const cells = [
       csvField(r.item_id),
-      ...stateCols.map((c) => csvField(renderCell((r.item_state ?? {})[c]))),
+      ...stateCols.map((c) => csvField(renderCell(r.item_state?.[c]))),
     ];
+    lines.push(cells.join(','));
+  }
+  return lines.join('\r\n');
+}
+
+/** The three canonical contact fields exported by the campaign PII export. */
+const CONTACT_FIELDS = ['name', 'email', 'phone'] as const;
+
+/**
+ * Maps a Signals decrypt contact `source` to the export's provenance label:
+ * `item` → `profile`, `user` → `user`, and absent/`null` → `none`.
+ *
+ * @param source - The `source` from a Signals `contact` field.
+ * @returns The export-facing provenance label.
+ */
+function contactSourceLabel(
+  source: 'item' | 'user' | null | undefined,
+): 'profile' | 'user' | 'none' {
+  if (source === 'item') return 'profile';
+  if (source === 'user') return 'user';
+  return 'none';
+}
+
+/**
+ * Builds the campaign PII export CSV (aggregator-dpg#579): one row per profile
+ * carrying only the three canonical contact fields, each paired with its
+ * provenance. Columns, in order:
+ * `item_id,name,name_source,email,email_source,phone,phone_source`. Column set
+ * is fixed regardless of network/domain/item type, so mixed types in one export
+ * are fine. Every field is formula-neutralised and RFC-4180 escaped.
+ *
+ * @param rows - Decrypted profiles carrying a `contact` block (Signals #521).
+ * @returns The CSV text (CRLF line endings).
+ */
+export function buildContactExportCsv(rows: SignalStackDecryptedProfileRow[]): string {
+  const header = ['item_id'];
+  for (const f of CONTACT_FIELDS) header.push(f, `${f}_source`);
+  const lines = [header.map(csvField).join(',')];
+  for (const r of rows) {
+    const cells = [csvField(r.item_id)];
+    for (const f of CONTACT_FIELDS) {
+      const c = r.contact?.[f];
+      const value = typeof c?.value === 'string' ? c.value : '';
+      cells.push(csvField(value), csvField(contactSourceLabel(c?.source)));
+    }
     lines.push(cells.join(','));
   }
   return lines.join('\r\n');

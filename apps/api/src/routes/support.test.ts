@@ -14,7 +14,7 @@ process.env.SUPPORT_CC_EMAIL = 'cc@org.com';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
-import { FakeMailer, _setMailer } from '../services/mailer/index.js';
+import { FakeMailer, _setMailer } from '@aggregator-dpg/mailer';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
 import { _setSupportRateChecker } from '../services/support-rate.js';
 

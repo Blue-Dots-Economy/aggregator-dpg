@@ -43,6 +43,8 @@ import { registerOnboardingRoutes } from './routes/onboarding.js';
 import { registerDashboardRoutes } from './routes/dashboard.js';
 import { registerAggregatorConfigRoutes } from './routes/aggregator-config.js';
 import { registerSupportRoutes } from './routes/support.js';
+import { registerCampaignExportRoutes } from './routes/campaign-export.js';
+import { registerCampaignJobRoutes } from './routes/campaign-jobs.js';
 import { ERR } from './errors/codes.js';
 import { HttpError } from './errors/http-error.js';
 import { coerceToHttpError, toEnvelope, toLogPayload } from './errors/serialize.js';
@@ -175,6 +177,10 @@ export async function buildApp(): Promise<FastifyInstance> {
           { name: 'onboarding', description: 'Single-participant onboarding (authenticated).' },
           { name: 'dashboard', description: 'Dashboard rollup + items proxy to signalstack.' },
           { name: 'support', description: 'Authenticated contact-support form submission.' },
+          {
+            name: 'campaign',
+            description: 'Campaign integrations — participant PII export (#579).',
+          },
         ],
       },
       transform: jsonSchemaTransform,
@@ -220,6 +226,8 @@ export async function buildApp(): Promise<FastifyInstance> {
   await registerDashboardRoutes(app);
   await registerAggregatorConfigRoutes(app);
   await registerSupportRoutes(app);
+  await registerCampaignExportRoutes(app);
+  await registerCampaignJobRoutes(app, 'export');
 
   app.setErrorHandler((rawErr, req, reply) => {
     // Fastify schema validation error — promote to a typed HttpError so the

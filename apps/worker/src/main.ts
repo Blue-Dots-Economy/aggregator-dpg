@@ -18,6 +18,7 @@ import {
   type BulkFileProcessJob,
   type BulkFinaliseJob,
   type BulkRowProcessJob,
+  type CampaignProcessJob,
   type CronWatchdogJob,
   type LinkMetricsRollupJob,
 } from '@aggregator-dpg/queue';
@@ -29,6 +30,7 @@ import { processBulkRow } from './jobs/bulk-row-process.js';
 import { finaliseBulk } from './jobs/bulk-finalise.js';
 import { rollupLinkMetrics } from './jobs/link-metrics-rollup.js';
 import { runWatchdog } from './jobs/cron-watchdog.js';
+import { processCampaignJob } from './jobs/campaign-process.js';
 import { getRedis, closeRedis } from './services/redis.js';
 import { closeQueues } from './services/bulk-queue.js';
 import { parseWorkerRoles, missingRoles } from './worker-roles.js';
@@ -73,6 +75,21 @@ async function main(): Promise<void> {
         connection,
         concurrency: config.BULK_FINALISE_CONCURRENCY,
       }),
+    ]);
+  }
+
+  if (roles.has('campaign')) {
+    workers.push([
+      'campaignProcess',
+      new Worker<CampaignProcessJob>(
+        QueueName.CampaignProcess,
+        async (job) =>
+          processCampaignJob(job.data, {
+            attempt: job.attemptsMade + 1,
+            maxAttempts: job.opts.attempts ?? 1,
+          }),
+        { connection, concurrency: config.CAMPAIGN_CONCURRENCY },
+      ),
     ]);
   }
 
