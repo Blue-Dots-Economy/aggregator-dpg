@@ -117,12 +117,32 @@ describe('POST /v1/campaign/email', () => {
     expect(items.ok && items.value?.[0]?.action).toBeNull();
   });
 
-  it('is idempotent on the Idempotency-Key header (same job_id, enqueues once)', async () => {
+  it('is idempotent on the Idempotency-Key header (same job_id, one job)', async () => {
     const body = { item_ids: [VALID_UUID], content: CONTENT };
     const first = await post(body, { 'idempotency-key': 'key-123' });
     const second = await post(body, { 'idempotency-key': 'key-123' });
     expect(first.json().job_id).toBe(second.json().job_id);
-    expect(enqueueCampaignProcessMock).toHaveBeenCalledTimes(1);
+    // A replay never creates a second job. It does re-prime the queue for a job
+    // still `queued` (the first enqueue may have been lost), which BullMQ
+    // collapses because the campaign_job id is the BullMQ jobId — and even a
+    // genuine double-run re-emails nobody already marked `sent`.
+    const enqueuedIds = enqueueCampaignProcessMock.mock.calls.map(
+      (c) => (c[0] as { jobId: string }).jobId,
+    );
+    expect(new Set(enqueuedIds)).toEqual(new Set([first.json().job_id]));
+  });
+
+  it('marks the job failed when the enqueue throws, so it cannot wedge the active cap', async () => {
+    enqueueCampaignProcessMock.mockRejectedValueOnce(new Error('redis unavailable'));
+    const res = await post({ item_ids: [VALID_UUID], content: CONTENT });
+    expect(res.statusCode).toBe(503);
+
+    // `queued` counts against CAMPAIGN_EMAIL_MAX_ACTIVE_PER_ORG and the watchdog
+    // only reaps `processing`, so an un-enqueued row left `queued` would let
+    // repeated Redis blips permanently consume the org's cap.
+    const jobs = await store.listJobs(ORG, { channel: 'email' });
+    expect(jobs.ok && jobs.value.jobs[0]?.status).toBe('failed');
+    expect(jobs.ok && jobs.value.jobs[0]?.errorReason).toBe('enqueue_failed');
   });
 
   it('returns 400 UNKNOWN_PLACEHOLDER for a token outside the supported set', async () => {
