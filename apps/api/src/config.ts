@@ -399,6 +399,22 @@ export function campaignDumpServiceAccount(): string {
 }
 
 /**
+ * The Signals instance whose non-PII dump this deployment serves (#692).
+ *
+ * Read from the live environment at **call time**, mirroring
+ * {@link campaignDumpServiceAccount}: the dump route consults it per request and
+ * it must be independently settable across test cases in one Vitest worker,
+ * where the frozen `config` snapshot cannot change after first import.
+ *
+ * @returns The configured instance id, or `undefined` when unset or blank — the
+ *   route turns that into `503 DUMP_NOT_CONFIGURED`.
+ */
+export function campaignDumpInstanceId(): string | undefined {
+  const raw = process.env.CAMPAIGN_DUMP_INSTANCE_ID?.trim();
+  return raw && raw.length > 0 ? raw : undefined;
+}
+
+/**
  * CC recipient(s) for contact-support submissions.
  *
  * Read from the live environment at **call time** — mirrors
