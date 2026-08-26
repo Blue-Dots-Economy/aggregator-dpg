@@ -9,6 +9,7 @@ name: aggregator-dpg
 #   Infra    postgres (3 DBs), signals-redis, aggregator-redis,
 #            keycloak, minio (+init), mailpit
 #   signals-dpg   signals-bootstrap (one-shot: migrate+seed) -> signals-api -> signals-ui
+#   search        signals-search api + worker + TEI embeddings  (--profile search)
 #   aggregator-dpg   aggregator-api (auto-migrates) -> aggregator-web + aggregator-worker
 #
 # This file is for LOCAL DEV ONLY. It intentionally does NOT use the
@@ -44,6 +45,7 @@ name: aggregator-dpg
 #   MinIO S3 API             http://localhost:9000
 #   Postgres                 localhost:5432               (dbs: aggregator, signals, keycloak)
 #   signals-redis            localhost:5555               (password-protected)
+#   Signals Search API       http://localhost:3110        (opt-in: --profile search)
 #   aggregator-redis         localhost:6379
 #
 # Ports match each project's own setup guide (signals-dpg/SETUP.md,
@@ -417,6 +419,14 @@ services:
     restart: unless-stopped
     # Inherits the exact same env as the bootstrap step.
     environment: *signals-env
+    # signals-search wiring, ONLY when the developer opts in: copy
+    # .env.search.example -> .env.search. A separate optional file rather than
+    # entries in the map above because MATCH_SCORE_PROVIDER is a Zod enum and
+    # compose cannot omit a mapping key whose value is empty — a blank default
+    # would fail validation and break boot for everyone NOT running search.
+    env_file:
+      - path: .env.search
+        required: false
     ports:
       - "2742:2742"
     depends_on:
@@ -679,6 +689,96 @@ services:
         condition: service_healthy
       aggregator-redis:
         condition: service_healthy
+
+  # ───────────────────────────────────────────────────────────────────────
+  # signals-search — OPT-IN: `docker compose --profile search up -d`
+  #
+  # Mirrors signals-dpg/local-setup's `search` profile; see that repo's
+  # LOCAL_SETUP.md §7 for the full explanation of every setting here.
+  # ───────────────────────────────────────────────────────────────────────
+
+  # BAAI/bge-m3 baked into the image — no ~2.3 GB runtime download, no HF
+  # dependency. Public on GHCR, so no login. Same model production runs.
+  tei-embeddings:
+    profiles: ["search"]
+    image: ghcr.io/blue-dots-economy/tei-bge-m3:cpu-1.7-bge-m3
+    container_name: sd-tei-embeddings
+    restart: unless-stopped
+    command:
+      - "--model-id"
+      - "BAAI/bge-m3"
+      # MUST match the revision baked into the image (it runs HF_HUB_OFFLINE=1,
+      # loading snapshots/<revision> from disk); a mismatch fails to boot.
+      - "--revision"
+      - "${BGE_M3_REVISION:-5617a9f61b028005a4858fdac845db406aefb181}"
+      - "--port"
+      - "80"
+      # Required on CPU: at TEI's default 16384 bge-m3's fp32 warmup is
+      # OOM-killed even with 8 GB free, and the container just dies at startup.
+      - "--max-batch-tokens"
+      - "4096"
+    expose:
+      - "80"
+
+  signals-search-api:
+    profiles: ["search"]
+    image: ${SIGNALS_SEARCH_IMAGE:-ghcr.io/blue-dots-economy/signals-search:develop}
+    container_name: sd-signals-search-api
+    restart: unless-stopped
+    environment: &search-env
+      # The `signals` database specifically — this Postgres also hosts
+      # `aggregator` and `keycloak`. signals-search reads `apikey`, `items` and
+      # `item_search`; the wrong database gives 401s and an empty index.
+      DATABASE_URL: postgres://${POSTGRES_USER:-dpg}:${POSTGRES_PASSWORD}@postgres:5432/signals
+      REDIS_URL: redis://:${SIGNALS_REDIS_PASSWORD}@signals-redis:6379
+      # Must end in /v1 — the client requests `${EMBEDDING_BASE_URL}/embeddings`.
+      EMBEDDING_BASE_URL: http://tei-embeddings:80/v1
+      EMBEDDING_MODEL: BAAI/bge-m3
+      # Must equal the model's native dim AND item_search.embedding's
+      # vector(1024); the worker refuses to start otherwise.
+      EMBEDDING_DIM: "1024"
+      # A file, not a directory: directory mode resolves a duplicated `id`
+      # last-one-wins and can shadow the good config.
+      NETWORK_CONFIG_PATH: /networks/network.json
+      # item_search's DDL belongs to signals-dpg and signals-bootstrap has
+      # already created it; the worker only asserts it exists.
+      RUN_MIGRATIONS: "false"
+      API_PORT: "3100"
+      RERANK_DEFAULT: "false"
+    volumes:
+      # From the signals-dpg sibling checkout, so both services agree on which
+      # domains exist and which interactions are permitted.
+      - ../../signals-dpg/examples/schemas/blue_dot/network.json:/networks/network.json:ro
+    ports:
+      # 3110, NOT 3100 — the aggregator portal already owns 3100 on the host.
+      # The container still listens on 3100, so in-compose URLs are unaffected.
+      - "${SEARCH_API_PORT:-3110}:3100"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      signals-redis:
+        condition: service_healthy
+      signals-bootstrap:
+        condition: service_completed_successfully
+
+  signals-search-worker:
+    profiles: ["search"]
+    image: ${SIGNALS_SEARCH_IMAGE:-ghcr.io/blue-dots-economy/signals-search:develop}
+    container_name: sd-signals-search-worker
+    restart: unless-stopped
+    command: ["node", "dist/worker/main.js"]
+    environment:
+      <<: *search-env
+      WORKER_HEALTH_PORT: "3101"
+    volumes:
+      - ../../signals-dpg/examples/schemas/blue_dot/network.json:/networks/network.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      signals-redis:
+        condition: service_healthy
+      signals-bootstrap:
+        condition: service_completed_successfully
 
 volumes:
   sd-postgres-data:
