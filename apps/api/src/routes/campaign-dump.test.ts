@@ -1,8 +1,12 @@
 /**
  * Tests for GET /v1/campaign/dump — the whole-network non-PII dump download
- * (#692). Covers the auth matrix in both directions, the all-three-or-404 rule,
- * the two 503 branches, TTL propagation, and the invariant that the response
- * leaks no S3 credential.
+ * (#692). Covers the auth matrix in both directions (including the audit-log
+ * line each denial emits), the all-three-or-nothing rule (no partial `files`
+ * list AND no URL minted before every key is confirmed present), the two 503
+ * branches (each with its own `sub_operation` in the log), non-default TTL
+ * propagation with an earliest-of-three `expires_at`, and the invariant that a
+ * returned URL is exactly the value the signer issued — never constructed or
+ * decorated by the route.
  *
  * @module apps/api/routes/campaign-dump.test
  */
@@ -10,13 +14,14 @@ process.env.SIGNALSTACK_BASE_URL = 'http://signals.local';
 process.env.SIGNALSTACK_ADMIN_KEY = 'k';
 process.env.SIGNALSTACK_ACTING_ORG_ID = 'svc';
 process.env.CAMPAIGN_DUMP_INSTANCE_ID = 'blue_dot_up';
-process.env.CAMPAIGN_DUMP_URL_TTL_SECONDS = '600';
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
 import { _setNetworkConfig } from '../services/network-config.js';
+import { logger } from '../logger.js';
+import { config } from '../config.js';
 import { buildBlueDotConfig } from '@aggregator-dpg/network-config/testing';
 
 // S3 is mocked: these tests assert the route's contract, not the SDK.
@@ -111,6 +116,7 @@ describe('GET /v1/campaign/dump', () => {
     await app?.close();
     _setAccessTokenVerifier(null);
     _setNetworkConfig(null);
+    vi.restoreAllMocks();
   });
 
   /** Issues the request with the given bearer token, or none. */
@@ -122,7 +128,8 @@ describe('GET /v1/campaign/dump', () => {
     });
   }
 
-  it('returns all three files with pre-signed URLs for the system token', async () => {
+  it('returns all three files with pre-signed URLs for the system token, and logs the grant', async () => {
+    const infoSpy = vi.spyOn(logger, 'info');
     const res = await get('system');
     expect(res.statusCode).toBe(200);
     const body = res.json();
@@ -143,11 +150,38 @@ describe('GET /v1/campaign/dump', () => {
     for (const file of body.files) {
       expect(file.url).toContain('X-Amz-Signature');
     }
+
+    // The audit line is this whole-network, un-org-scoped route's only trail:
+    // assert it actually carries the identity and the objects served, not
+    // just that *some* info line fired.
+    expect(infoSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation: 'campaignDump.serve',
+        status: 'success',
+        subject: 'sa-uuid',
+        files: [
+          { key: KEYS.user, last_modified: '2026-08-26T00:30:58.000Z' },
+          { key: KEYS.items, last_modified: '2026-08-26T00:31:04.000Z' },
+          { key: KEYS.item_actions, last_modified: '2026-08-26T00:31:12.000Z' },
+        ],
+      }),
+      expect.any(String),
+    );
   });
 
-  it('rejects a coordinator token with 403', async () => {
+  it('rejects a coordinator token with 403 and logs the denial', async () => {
+    const warnSpy = vi.spyOn(logger, 'warn');
     const res = await get('coordinator');
     expect(res.statusCode).toBe(403);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation: 'campaignDump.serve',
+        status: 'failure',
+        code: 'FORBIDDEN',
+        reason: 'NOT_SYSTEM_CLIENT',
+      }),
+      expect.any(String),
+    );
   });
 
   it('rejects a portal/BFF service token with 403', async () => {
@@ -161,7 +195,7 @@ describe('GET /v1/campaign/dump', () => {
   });
 
   it.each(Object.entries(KEYS))(
-    'returns 404 DUMP_NOT_AVAILABLE and no partial file list when %s is missing',
+    'returns 404 DUMP_NOT_AVAILABLE and no partial file list when %s is missing, minting no URL at all',
     async (_table, missingKey) => {
       allObjectsPresent();
       const previous = headObjectMock.getMockImplementation()!;
@@ -174,48 +208,143 @@ describe('GET /v1/campaign/dump', () => {
       expect(body.error.code).toBe('DUMP_NOT_AVAILABLE');
       expect(body.error.fields.missing).toEqual([missingKey]);
       expect(body.files).toBeUndefined();
+      // Pins the ordering the all-three-or-none rule rests on: a route that
+      // signed first and checked `missing` after would still pass every
+      // assertion above while three live download URLs exist for a partial
+      // snapshot.
+      expect(signDownloadUrlMock).not.toHaveBeenCalled();
     },
   );
 
-  it('returns 503 DUMP_NOT_CONFIGURED when the instance id is unset', async () => {
-    delete process.env.CAMPAIGN_DUMP_INSTANCE_ID;
+  it('returns 404 DUMP_NOT_AVAILABLE listing every key when none of the objects exist yet', async () => {
+    // The likeliest real 404 state: a fresh environment where the
+    // signals-s3-export cron has never run, so all three keys are absent at
+    // once — not the single-key case the `it.each` above exercises.
+    headObjectMock.mockResolvedValue(null);
     const res = await get('system');
-    expect(res.statusCode).toBe(503);
-    expect(res.json().error.code).toBe('DUMP_NOT_CONFIGURED');
+    expect(res.statusCode).toBe(404);
+    const body = res.json();
+    expect(body.error.code).toBe('DUMP_NOT_AVAILABLE');
+    expect(body.error.fields.missing).toEqual([KEYS.user, KEYS.items, KEYS.item_actions]);
+    expect(body.files).toBeUndefined();
+    expect(signDownloadUrlMock).not.toHaveBeenCalled();
   });
 
-  it('returns 503 DUMP_STORAGE_UNAVAILABLE when a HEAD throws', async () => {
+  it('returns 503 DUMP_NOT_CONFIGURED when the instance id is unset, and logs the denial', async () => {
+    const warnSpy = vi.spyOn(logger, 'warn');
+    const previous = process.env.CAMPAIGN_DUMP_INSTANCE_ID;
+    delete process.env.CAMPAIGN_DUMP_INSTANCE_ID;
+    try {
+      const res = await get('system');
+      expect(res.statusCode).toBe(503);
+      expect(res.json().error.code).toBe('DUMP_NOT_CONFIGURED');
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          operation: 'campaignDump.serve',
+          status: 'failure',
+          code: 'DUMP_NOT_CONFIGURED',
+          reason: 'CAMPAIGN_DUMP_INSTANCE_ID_UNSET',
+          subject: 'sa-uuid',
+        }),
+        expect.any(String),
+      );
+    } finally {
+      if (previous !== undefined) process.env.CAMPAIGN_DUMP_INSTANCE_ID = previous;
+    }
+  });
+
+  it('returns 503 DUMP_STORAGE_UNAVAILABLE with no raw S3 message, and logs it as a HEAD failure', async () => {
+    const errorSpy = vi.spyOn(logger, 'error');
     headObjectMock.mockRejectedValue(new Error('connection reset'));
     const res = await get('system');
     expect(res.statusCode).toBe(503);
-    expect(res.json().error.code).toBe('DUMP_STORAGE_UNAVAILABLE');
+    const body = res.json();
+    expect(body.error.code).toBe('DUMP_STORAGE_UNAVAILABLE');
+    // The error split matters: the client sees the catalogue's generic
+    // detail, never the raw SDK message — that only reaches the log.
+    expect(body.error.detail).not.toContain('connection reset');
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation: 'campaignDump.serve',
+        status: 'failure',
+        sub_operation: 'headObject',
+        error: 'connection reset',
+      }),
+      expect.any(String),
+    );
   });
 
-  it('returns 503 DUMP_STORAGE_UNAVAILABLE when presigning throws', async () => {
+  it('returns 503 DUMP_STORAGE_UNAVAILABLE with no raw S3 message, and logs it as a presign failure', async () => {
+    const errorSpy = vi.spyOn(logger, 'error');
     signDownloadUrlMock.mockRejectedValue(new Error('presign failed'));
     const res = await get('system');
     expect(res.statusCode).toBe(503);
-    expect(res.json().error.code).toBe('DUMP_STORAGE_UNAVAILABLE');
+    const body = res.json();
+    expect(body.error.code).toBe('DUMP_STORAGE_UNAVAILABLE');
+    expect(body.error.detail).not.toContain('presign failed');
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation: 'campaignDump.serve',
+        status: 'failure',
+        sub_operation: 'signDownloadUrl',
+        error: 'presign failed',
+      }),
+      expect.any(String),
+    );
   });
 
-  it('presigns every key with the configured TTL and reports one shared expiry', async () => {
-    const res = await get('system');
-    expect(res.statusCode).toBe(200);
-    expect(signDownloadUrlMock).toHaveBeenCalledTimes(3);
-    for (const call of signDownloadUrlMock.mock.calls) {
-      expect(call[1]).toMatchObject({ ttlSeconds: 600 });
+  it('presigns every key with the configured TTL', async () => {
+    // `config` is a plain object (not `Object.freeze`d) read directly by the
+    // route at request time, so mutating it here is the reliable way to prove
+    // wiring: module-level `process.env.CAMPAIGN_DUMP_URL_TTL_SECONDS = ...`
+    // set before this file's imports does NOT reach the frozen `config`
+    // snapshot — `../app.js`'s (and so `../config.js`'s) module evaluation
+    // completes before this file's own top-level statements run, same as any
+    // ES module graph. A value equal to the schema default (600) would also
+    // pass this assertion whether the route were wired, hardcoded, or broken,
+    // so a non-default value is required to make the test able to fail.
+    const previousTtl = config.CAMPAIGN_DUMP_URL_TTL_SECONDS;
+    config.CAMPAIGN_DUMP_URL_TTL_SECONDS = 137;
+    try {
+      const res = await get('system');
+      expect(res.statusCode).toBe(200);
+      expect(signDownloadUrlMock).toHaveBeenCalledTimes(3);
+      for (const call of signDownloadUrlMock.mock.calls) {
+        expect(call[1]).toMatchObject({ ttlSeconds: 137 });
+      }
+    } finally {
+      config.CAMPAIGN_DUMP_URL_TTL_SECONDS = previousTtl;
     }
-    expect(res.json().expires_at).toBe('2026-08-26T00:46:12.000Z');
   });
 
-  it('leaks no S3 credential in the response', async () => {
-    process.env.S3_ACCESS_KEY_ID = 'AKIAEXAMPLEKEY';
-    process.env.S3_SECRET_ACCESS_KEY = 'super-secret-value';
+  it('reports the EARLIEST of the three presigned expiries, not an arbitrary one', async () => {
+    // The three presigns run concurrently and can genuinely disagree by a few
+    // ms; the route must report the earliest so `expires_at` never outlives
+    // one of the URLs it describes. Distinguishes `Math.min` from "whichever
+    // key resolved first" or "the first key in `DUMP_TABLES` order" — every
+    // mocked expiry here differs, and the middle one (`items`) is earliest.
+    const expiries: Record<string, string> = {
+      [KEYS.user]: '2026-08-26T00:50:00.000Z',
+      [KEYS.items]: '2026-08-26T00:40:00.000Z',
+      [KEYS.item_actions]: '2026-08-26T00:45:00.000Z',
+    };
+    signDownloadUrlMock.mockImplementation(async (key: string) => ({
+      url: `https://s3.public.example/${key}?X-Amz-Signature=abc`,
+      key,
+      expiresAt: expiries[key],
+    }));
     const res = await get('system');
     expect(res.statusCode).toBe(200);
-    expect(res.payload).not.toContain('AKIAEXAMPLEKEY');
-    expect(res.payload).not.toContain('super-secret-value');
-    delete process.env.S3_ACCESS_KEY_ID;
-    delete process.env.S3_SECRET_ACCESS_KEY;
+    expect(res.json().expires_at).toBe(expiries[KEYS.items]);
+  });
+
+  it('returns exactly the URL the signer issued, per key — the route never constructs or decorates one', async () => {
+    const res = await get('system');
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    for (const [table, key] of Object.entries(KEYS)) {
+      const file = body.files.find((f: { table: string }) => f.table === table);
+      expect(file.url).toBe(`https://s3.public.example/${key}?X-Amz-Signature=abc`);
+    }
   });
 });

@@ -11,7 +11,9 @@
  * This is the ONE campaign route with no org scoping — the caller is the
  * campaign manager's own service account, not a coordinator, and it needs every
  * aggregator's rows. The identity check in `requireCampaignSystemAuth` is
- * therefore the only control, and every call is logged.
+ * therefore the only control, so EVERY exit — success, a denied caller, and a
+ * misconfigured deployment, not just the happy path — emits one
+ * `campaignDump.serve` log line; that is this route's whole audit trail.
  *
  * The exporter writes three FIXED keys, overwriting them in place with no
  * manifest and no cross-object atomicity, so there is no run to resolve and no
@@ -23,12 +25,17 @@
  */
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { requireCampaignSystemAuth } from '../campaign/auth.js';
+import { requireCampaignSystemAuth, type CampaignSystemContext } from '../campaign/auth.js';
 import { getNetworkConfig } from '../services/network-config.js';
-import { dumpObjectKeys } from '../services/object-storage/dump-keys.js';
-import { headObject, signDownloadUrl } from '../services/object-storage/index.js';
+import { dumpObjectKeys, type DumpTable } from '../services/object-storage/dump-keys.js';
+import {
+  headObject,
+  signDownloadUrl,
+  type ObjectHead,
+  type SignedDownloadUrl,
+} from '../services/object-storage/index.js';
 import { campaignDumpInstanceId, config } from '../config.js';
-import { httpError } from '../errors/http-error.js';
+import { HttpError, httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 import { logger } from '../logger.js';
 
@@ -46,6 +53,18 @@ const dumpResponseSchema = z.object({
   expires_at: z.string(),
   files: z.array(dumpFileSchema),
 });
+
+/** One dump key paired with its resolved HEAD, before the presence gate. */
+interface DumpKeyHead {
+  table: DumpTable;
+  key: string;
+  head: ObjectHead | null;
+}
+
+/** {@link DumpKeyHead}, narrowed to a key confirmed present in the bucket. */
+interface PresentDumpKeyHead extends DumpKeyHead {
+  head: ObjectHead;
+}
 
 /**
  * Registers the campaign non-PII dump route.
@@ -70,10 +89,43 @@ export async function registerCampaignDumpRoutes(app: FastifyInstance): Promise<
     },
     async (req, reply) => {
       const started = Date.now();
-      const auth = await requireCampaignSystemAuth(req);
+
+      let auth: CampaignSystemContext;
+      try {
+        auth = await requireCampaignSystemAuth(req);
+      } catch (cause) {
+        // The identity check is this route's only control, so a denial is as
+        // audit-worthy as a success — log it before the generic error handler's
+        // undifferentiated line, with the fields that handler doesn't carry
+        // (`operation`, `latency_ms`).
+        if (cause instanceof HttpError) {
+          logger.warn(
+            {
+              operation: 'campaignDump.serve',
+              status: 'failure',
+              code: cause.code,
+              reason: cause.fields?.reason,
+              latency_ms: Date.now() - started,
+            },
+            'non-PII dump request denied',
+          );
+        }
+        throw cause;
+      }
 
       const instanceId = campaignDumpInstanceId();
       if (!instanceId) {
+        logger.warn(
+          {
+            operation: 'campaignDump.serve',
+            status: 'failure',
+            code: 'DUMP_NOT_CONFIGURED',
+            reason: 'CAMPAIGN_DUMP_INSTANCE_ID_UNSET',
+            subject: auth.subject,
+            latency_ms: Date.now() - started,
+          },
+          'non-PII dump request denied: instance not configured',
+        );
         throw httpError('DUMP_NOT_CONFIGURED', {
           fields: { reason: 'CAMPAIGN_DUMP_INSTANCE_ID_UNSET' },
         });
@@ -89,7 +141,8 @@ export async function registerCampaignDumpRoutes(app: FastifyInstance): Promise<
       // HEAD every object before signing anything: the response is
       // all-three-or-nothing, because a short `files` array would read as
       // success and the caller would silently import an incomplete snapshot.
-      let heads;
+      // No URL is minted until every key has cleared this gate.
+      let heads: DumpKeyHead[];
       try {
         heads = await Promise.all(keys.map(async (k) => ({ ...k, head: await headObject(k.key) })));
       } catch (cause) {
@@ -113,11 +166,25 @@ export async function registerCampaignDumpRoutes(app: FastifyInstance): Promise<
         throw httpError('DUMP_NOT_AVAILABLE', { fields: { missing } });
       }
 
+      // Narrow past the presence gate through a type guard rather than
+      // carrying `ObjectHead | null` (and `?? 0` / `?? null` defensive
+      // fallbacks) into the response build: a genuine 0-byte object (the
+      // exporter writes one for a zero-row table) must stay distinguishable
+      // from a missing one, and `contentLength` must not silently become 0
+      // for the wrong reason. The length check is unreachable given the
+      // `missing` gate above — it guards the narrowing itself, so a future
+      // refactor that separates the two checks fails loudly instead of
+      // shipping a corrupted response.
+      const present = heads.filter((h): h is PresentDumpKeyHead => h.head !== null);
+      if (present.length !== keys.length) {
+        throw new Error('campaignDump: head/key count mismatch after the presence gate');
+      }
+
       const ttlSeconds = config.CAMPAIGN_DUMP_URL_TTL_SECONDS;
-      let signed;
+      let signed: Array<PresentDumpKeyHead & { url: SignedDownloadUrl }>;
       try {
         signed = await Promise.all(
-          heads.map(async (h) => ({
+          present.map(async (h) => ({
             ...h,
             url: await signDownloadUrl(h.key, { ttlSeconds }),
           })),
@@ -129,8 +196,8 @@ export async function registerCampaignDumpRoutes(app: FastifyInstance): Promise<
       const files = signed.map((s) => ({
         table: s.table,
         key: s.key,
-        size_bytes: s.head?.contentLength ?? 0,
-        last_modified: s.head?.lastModified?.toISOString() ?? null,
+        size_bytes: s.head.contentLength,
+        last_modified: s.head.lastModified?.toISOString() ?? null,
         url: s.url.url,
       }));
 
@@ -156,7 +223,7 @@ export async function registerCampaignDumpRoutes(app: FastifyInstance): Promise<
       return reply.code(200).send({
         network,
         instance: instanceId,
-        expires_at: signed[0]!.url.expiresAt,
+        expires_at: earliestExpiry(signed),
         files,
       });
     },
@@ -164,10 +231,31 @@ export async function registerCampaignDumpRoutes(app: FastifyInstance): Promise<
 }
 
 /**
+ * The advertised expiry for the whole response.
+ *
+ * The three presigns run concurrently, so their `expiresAt` values can differ
+ * by however long the slowest one took. Reporting the earliest — never an
+ * arbitrary one of the three — guarantees the caller never sees an expiry that
+ * outlives one of the URLs it describes.
+ *
+ * @param signed - The three presigned objects.
+ * @returns The earliest `expiresAt`, as an ISO 8601 string.
+ */
+function earliestExpiry(signed: Array<{ url: SignedDownloadUrl }>): string {
+  const earliestMs = Math.min(...signed.map((s) => Date.parse(s.url.expiresAt)));
+  return new Date(earliestMs).toISOString();
+}
+
+/**
  * Logs an S3 transport failure and builds the 503 to throw.
  *
  * A missing object is not a transport failure — `headObject` returns `null` for
  * `NotFound`/`NoSuchKey`, which drives the 404 instead.
+ *
+ * The raw SDK message is logged here but never sent to the client: `cause` is
+ * attached to the thrown `HttpError` (log-only, per `HttpErrorOptions`) so the
+ * response carries only the catalogue's generic `DUMP_STORAGE_UNAVAILABLE`
+ * detail, never a raw S3 error string.
  *
  * @param subOperation - The storage call that failed.
  * @param cause - The thrown value.
@@ -194,5 +282,5 @@ function storageUnavailable(
     },
     'non-PII dump storage call failed',
   );
-  return httpError('DUMP_STORAGE_UNAVAILABLE', { detail: message });
+  return httpError('DUMP_STORAGE_UNAVAILABLE', { cause });
 }
