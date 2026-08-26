@@ -83,7 +83,11 @@ async function main(): Promise<void> {
       'campaignProcess',
       new Worker<CampaignProcessJob>(
         QueueName.CampaignProcess,
-        async (job) => processCampaignJob(job.data),
+        async (job) =>
+          processCampaignJob(job.data, {
+            attempt: job.attemptsMade + 1,
+            maxAttempts: job.opts.attempts ?? 1,
+          }),
         { connection, concurrency: config.CAMPAIGN_CONCURRENCY },
       ),
     ]);

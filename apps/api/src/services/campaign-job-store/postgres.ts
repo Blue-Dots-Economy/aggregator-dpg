@@ -60,7 +60,8 @@ export class PostgresCampaignJobStore extends CampaignJobStoreBase {
               .insert(campaignJob)
               .values(values)
               .onConflictDoNothing({
-                target: campaignJob.idempotencyKey,
+                // Must match the partial unique index, which is per tenant.
+                target: [campaignJob.signalstackOrgId, campaignJob.idempotencyKey],
                 where: sql`idempotency_key IS NOT NULL`,
               })
               .returning()
@@ -71,10 +72,17 @@ export class PostgresCampaignJobStore extends CampaignJobStoreBase {
         if (!row) {
           // Idempotency-key conflict — return the original job, add no items.
           created = false;
+          // Scope the replay lookup to the same tenant as the index, so a key
+          // reused by another org can never return that org's job.
           const existing = await tx
             .select()
             .from(campaignJob)
-            .where(eq(campaignJob.idempotencyKey, input.idempotencyKey!))
+            .where(
+              and(
+                eq(campaignJob.signalstackOrgId, input.signalstackOrgId),
+                eq(campaignJob.idempotencyKey, input.idempotencyKey!),
+              ),
+            )
             .limit(1);
           row = existing[0];
         }
@@ -231,6 +239,7 @@ export class PostgresCampaignJobStore extends CampaignJobStoreBase {
           content: row.content,
           requestedBy: row.requestedBy,
           requestId: row.requestId,
+          notifiedAt: row.notifiedAt,
           items: items.map(toItemView),
         },
       };

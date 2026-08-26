@@ -170,6 +170,8 @@ export interface ProcessingJobView {
   content: Record<string, unknown>;
   requestedBy: string;
   requestId: string | null;
+  /** Set once the channel's user-visible notification was sent. */
+  notifiedAt: Date | null;
   items: JobItemView[];
 }
 

@@ -66,8 +66,13 @@ export class InMemoryCampaignJobStore extends CampaignJobStoreBase {
   async createJob(
     input: CreateJobInput,
   ): Promise<StoreResult<{ job: JobRecord; created: boolean }>> {
-    if (input.idempotencyKey) {
-      const existingId = this.byIdempotencyKey.get(input.idempotencyKey);
+    // Keyed by org + key: idempotency is per tenant (see the partial unique
+    // index), so one org's key must never resolve another org's job.
+    const idemKey = input.idempotencyKey
+      ? `${input.signalstackOrgId}\u0000${input.idempotencyKey}`
+      : null;
+    if (idemKey) {
+      const existingId = this.byIdempotencyKey.get(idemKey);
       if (existingId) {
         const existing = this.jobs.get(existingId)!;
         return { ok: true, value: { job: this.toRecord(existing), created: false } };
@@ -104,7 +109,7 @@ export class InMemoryCampaignJobStore extends CampaignJobStoreBase {
         errorReason: null,
       })),
     );
-    if (input.idempotencyKey) this.byIdempotencyKey.set(input.idempotencyKey, id);
+    if (idemKey) this.byIdempotencyKey.set(idemKey, id);
     return { ok: true, value: { job: this.toRecord(row), created: true } };
   }
 
@@ -170,6 +175,7 @@ export class InMemoryCampaignJobStore extends CampaignJobStoreBase {
         content: job.content,
         requestedBy: job.requestedBy,
         requestId: job.requestId,
+        notifiedAt: null,
         items: (this.items.get(jobId) ?? []).map((i) => ({ ...i })),
       },
     };

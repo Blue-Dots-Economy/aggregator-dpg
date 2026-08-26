@@ -633,11 +633,20 @@ export const campaignJob = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
     // Stamped when the job reaches a terminal status.
     completedAt: timestamp('completed_at', { withTimezone: true }),
+    /**
+     * Stamped once the channel's user-visible notification has been sent (the
+     * export's pre-signed download email). A job retry must not re-send it:
+     * the recipient would get a second working link to the same PII.
+     */
+    notifiedAt: timestamp('notified_at', { withTimezone: true }),
   },
   (table) => [
-    // Request idempotency — unique only over rows that carry a key.
+    // Request idempotency — PER TENANT. A global unique key would let one org's
+    // key collide with another's: the insert would be swallowed by
+    // onConflictDoNothing, the caller would get the other org's job id back,
+    // and their export would silently never run.
     uniqueIndex('campaign_job_idempotency_key_unique')
-      .on(table.idempotencyKey)
+      .on(table.signalstackOrgId, table.idempotencyKey)
       .where(sql`idempotency_key IS NOT NULL`),
     // Tenant list (newest-first) + per-org active-job cap.
     index('campaign_job_org_status_idx').on(table.signalstackOrgId, table.status, table.createdAt),

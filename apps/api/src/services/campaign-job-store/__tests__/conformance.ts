@@ -52,7 +52,17 @@ export function runStoreConformance(
       expect(created).toBe(true);
       expect(job.status).toBe('queued');
       const view = unwrap(await store.getJob(job.id, input.signalstackOrgId));
-      expect(view!.counts).toEqual({ total: 2, pending: 2, resolved: 0, submitted: 0, sent: 0, skipped_not_owned: 0, skipped_no_contact: 0, duplicate_active: 0, failed: 0 });
+      expect(view!.counts).toEqual({
+        total: 2,
+        pending: 2,
+        resolved: 0,
+        submitted: 0,
+        sent: 0,
+        skipped_not_owned: 0,
+        skipped_no_contact: 0,
+        duplicate_active: 0,
+        failed: 0,
+      });
       expect(view!.metadata).toEqual([{ key: 'purpose', value: 'audit' }]);
     });
 
@@ -65,6 +75,22 @@ export function runStoreConformance(
       expect(second.job.id).toBe(first.job.id);
       const view = unwrap(await store.getJob(first.job.id, input.signalstackOrgId));
       expect(view!.counts.total).toBe(2);
+    });
+
+    it('scopes idempotencyKey per tenant: the same key in another org creates its own job', async () => {
+      const store = makeStore();
+      const key = `k-${randomUUID()}`;
+      const orgA = unwrap(await store.createJob(base({ idempotencyKey: key })));
+      const inputB = base({ idempotencyKey: key });
+      const orgB = unwrap(await store.createJob(inputB));
+
+      // Callers pick their own keys. A global unique index would let one org's
+      // key silently swallow another's request — and the 202 would hand back a
+      // job_id that org can never read (getJob is org-scoped), so their export
+      // would appear to vanish.
+      expect(orgB.created).toBe(true);
+      expect(orgB.job.id).not.toBe(orgA.job.id);
+      expect(unwrap(await store.getJob(orgB.job.id, inputB.signalstackOrgId))).not.toBeNull();
     });
   });
 
@@ -154,7 +180,12 @@ export function runStoreConformance(
       const { job } = unwrap(await store.createJob(input));
       unwrap(await store.markItem(job.id, input.items[0]!.itemId, 'resolved'));
       unwrap(
-        await store.markItem(job.id, input.items[1]!.itemId, 'skipped_not_owned', 'not_owned_by_org'),
+        await store.markItem(
+          job.id,
+          input.items[1]!.itemId,
+          'skipped_not_owned',
+          'not_owned_by_org',
+        ),
       );
       expect(unwrap(await store.rollUpStatus(job.id))).toBe('completed');
       const items = unwrap(await store.getJobItems(job.id, input.signalstackOrgId))!;

@@ -16,7 +16,8 @@ CREATE TABLE "campaign_job" (
 	"last_progress_at" timestamp with time zone,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"completed_at" timestamp with time zone
+	"completed_at" timestamp with time zone,
+	"notified_at" timestamp with time zone
 );
 --> statement-breakpoint
 CREATE TABLE "campaign_job_item" (
@@ -39,7 +40,7 @@ CREATE TABLE "campaign_job_item" (
 --> statement-breakpoint
 ALTER TABLE "campaign_job" ADD CONSTRAINT "campaign_job_aggregator_id_aggregators_id_fk" FOREIGN KEY ("aggregator_id") REFERENCES "public"."aggregators"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "campaign_job_item" ADD CONSTRAINT "campaign_job_item_job_id_campaign_job_id_fk" FOREIGN KEY ("job_id") REFERENCES "public"."campaign_job"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-CREATE UNIQUE INDEX "campaign_job_idempotency_key_unique" ON "campaign_job" USING btree ("idempotency_key") WHERE idempotency_key IS NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX "campaign_job_idempotency_key_unique" ON "campaign_job" USING btree ("signalstack_org_id","idempotency_key") WHERE idempotency_key IS NOT NULL;--> statement-breakpoint
 CREATE INDEX "campaign_job_org_status_idx" ON "campaign_job" USING btree ("signalstack_org_id","status","created_at");--> statement-breakpoint
 CREATE INDEX "campaign_job_status_progress_idx" ON "campaign_job" USING btree ("status","last_progress_at");--> statement-breakpoint
 CREATE INDEX "campaign_job_item_job_status_idx" ON "campaign_job_item" USING btree ("job_id","status");--> statement-breakpoint

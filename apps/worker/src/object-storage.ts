@@ -23,6 +23,14 @@ let cachedPresignerClient: S3Client | null = null;
 const S3_CONNECTION_TIMEOUT_MS = 5_000;
 /** Total attempts per request (1 initial + retries) using the SDK's backoff. */
 const S3_MAX_ATTEMPTS = 3;
+/**
+ * Wall-clock bound for a single upload attempt. The client itself sets only a
+ * connect timeout (a streaming GetObject must never be cut off mid-download),
+ * so an upload that connects and then stalls has nothing to stop it — the job
+ * would hold its worker slot until the queue's stall timeout. Uploads are
+ * bounded per-call instead, which leaves the shared GET path untouched.
+ */
+const S3_UPLOAD_TIMEOUT_MS = 60_000;
 
 function buildClient(endpoint: string | undefined): S3Client {
   return new S3Client({
@@ -87,6 +95,7 @@ export async function getCsvStream(s3Key: string): Promise<Readable> {
  * the Finaliser overwrite identical bytes.
  */
 export async function putObject(key: string, body: Buffer, contentType: string): Promise<void> {
+  const abort = AbortSignal.timeout(S3_UPLOAD_TIMEOUT_MS);
   await getClient().send(
     new PutObjectCommand({
       Bucket: config.S3_BUCKET,
@@ -94,6 +103,7 @@ export async function putObject(key: string, body: Buffer, contentType: string):
       Body: body,
       ContentType: contentType,
     }),
+    { abortSignal: abort },
   );
 }
 
