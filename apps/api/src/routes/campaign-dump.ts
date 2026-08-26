@@ -35,7 +35,7 @@ import {
   type SignedDownloadUrl,
 } from '../services/object-storage/index.js';
 import { campaignDumpInstanceId, config } from '../config.js';
-import { HttpError, httpError } from '../errors/http-error.js';
+import { httpError, type HttpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 import { logger } from '../logger.js';
 
@@ -79,7 +79,7 @@ export async function registerCampaignDumpRoutes(app: FastifyInstance): Promise<
         tags: ['campaign'],
         summary: 'Download the latest non-PII Signals dump',
         description:
-          'Returns a short-lived pre-signed URL for each of the three objects in the latest non-PII Signals snapshot (user, items, item_actions), so the caller needs no S3 credentials. Each URL expires after CAMPAIGN_DUMP_URL_TTL_SECONDS (default 600s); fetch and download promptly rather than caching it. Requires the campaign-manager SYSTEM token (client_credentials grant); a coordinator token is rejected. Whole-network and not org-scoped. The exporter overwrites the three objects in place with no cross-object atomicity, so each file carries its own last_modified: a caller that lands mid-run will see them disagree and should retry. Returns all three files or an error, never a partial list.',
+          'Returns a short-lived pre-signed URL for each of the three objects in the latest non-PII Signals snapshot (user, items, item_actions), so the caller needs no S3 credentials. Each URL expires after CAMPAIGN_DUMP_URL_TTL_SECONDS (default 600s); fetch promptly rather than caching it. Requires the campaign-manager SYSTEM token (client_credentials grant); a coordinator token is rejected. Whole-network and not org-scoped. The exporter overwrites the three objects in place with no cross-object atomicity, so each file carries its own last_modified: a caller that lands mid-run will see them disagree, meaning the snapshot is torn — treat it as such and re-fetch. Returns all three files or an error, never a partial list.',
         security: [{ bearerAuth: [] }],
         response: {
           200: dumpResponseSchema,
@@ -90,28 +90,29 @@ export async function registerCampaignDumpRoutes(app: FastifyInstance): Promise<
     async (req, reply) => {
       const started = Date.now();
 
-      let auth: CampaignSystemContext;
-      try {
-        auth = await requireCampaignSystemAuth(req);
-      } catch (cause) {
+      const authResult = await requireCampaignSystemAuth(req);
+      if (!authResult.ok) {
         // The identity check is this route's only control, so a denial is as
         // audit-worthy as a success — log it before the generic error handler's
         // undifferentiated line, with the fields that handler doesn't carry
-        // (`operation`, `latency_ms`).
-        if (cause instanceof HttpError) {
-          logger.warn(
-            {
-              operation: 'campaignDump.serve',
-              status: 'failure',
-              code: cause.code,
-              reason: cause.fields?.reason,
-              latency_ms: Date.now() - started,
-            },
-            'non-PII dump request denied',
-          );
-        }
-        throw cause;
+        // (`operation`, `latency_ms`, `request_id`). `subject` is present only
+        // when the token itself verified (the NOT_SYSTEM_CLIENT case) — see
+        // `CampaignSystemAuthResult`.
+        logger.warn(
+          {
+            operation: 'campaignDump.serve',
+            status: 'failure',
+            code: authResult.error.code,
+            reason: authResult.error.fields?.reason,
+            subject: authResult.subject,
+            request_id: req.id,
+            latency_ms: Date.now() - started,
+          },
+          'non-PII dump request denied',
+        );
+        throw authResult.error;
       }
+      const auth: CampaignSystemContext = authResult.context;
 
       const instanceId = campaignDumpInstanceId();
       if (!instanceId) {
@@ -122,6 +123,7 @@ export async function registerCampaignDumpRoutes(app: FastifyInstance): Promise<
             code: 'DUMP_NOT_CONFIGURED',
             reason: 'CAMPAIGN_DUMP_INSTANCE_ID_UNSET',
             subject: auth.subject,
+            request_id: req.id,
             latency_ms: Date.now() - started,
           },
           'non-PII dump request denied: instance not configured',
@@ -146,7 +148,7 @@ export async function registerCampaignDumpRoutes(app: FastifyInstance): Promise<
       try {
         heads = await Promise.all(keys.map(async (k) => ({ ...k, head: await headObject(k.key) })));
       } catch (cause) {
-        throw storageUnavailable('headObject', cause, auth.subject, started);
+        throw storageUnavailable('headObject', cause, auth.subject, req.id, started);
       }
 
       const missing = heads.filter((h) => h.head === null).map((h) => h.key);
@@ -159,6 +161,7 @@ export async function registerCampaignDumpRoutes(app: FastifyInstance): Promise<
             azp: auth.azp,
             subject: auth.subject,
             missing,
+            request_id: req.id,
             latency_ms: Date.now() - started,
           },
           'non-PII dump objects absent under the configured key root',
@@ -190,7 +193,7 @@ export async function registerCampaignDumpRoutes(app: FastifyInstance): Promise<
           })),
         );
       } catch (cause) {
-        throw storageUnavailable('signDownloadUrl', cause, auth.subject, started);
+        throw storageUnavailable('signDownloadUrl', cause, auth.subject, req.id, started);
       }
 
       const files = signed.map((s) => ({
@@ -220,12 +223,15 @@ export async function registerCampaignDumpRoutes(app: FastifyInstance): Promise<
         'non-PII dump download URLs issued',
       );
 
-      return reply.code(200).send({
-        network,
-        instance: instanceId,
-        expires_at: earliestExpiry(signed),
-        files,
-      });
+      return reply
+        .code(200)
+        .header('Cache-Control', 'no-store')
+        .send({
+          network,
+          instance: instanceId,
+          expires_at: earliestExpiry(signed),
+          files,
+        });
     },
   );
 }
@@ -260,6 +266,7 @@ function earliestExpiry(signed: Array<{ url: SignedDownloadUrl }>): string {
  * @param subOperation - The storage call that failed.
  * @param cause - The thrown value.
  * @param subject - Calling service-account subject, for the log line.
+ * @param requestId - The inbound request id, for the log line.
  * @param started - Request start time in ms, for `latency_ms`.
  * @returns The `DUMP_STORAGE_UNAVAILABLE` http error.
  */
@@ -267,8 +274,9 @@ function storageUnavailable(
   subOperation: string,
   cause: unknown,
   subject: string,
+  requestId: string,
   started: number,
-): Error {
+): HttpError {
   const message = cause instanceof Error ? cause.message : 'storage call failed';
   logger.error(
     {
@@ -278,6 +286,7 @@ function storageUnavailable(
       error: message,
       error_type: cause instanceof Error ? cause.constructor.name : typeof cause,
       subject,
+      request_id: requestId,
       latency_ms: Date.now() - started,
     },
     'non-PII dump storage call failed',

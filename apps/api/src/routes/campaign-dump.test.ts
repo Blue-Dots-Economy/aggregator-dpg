@@ -169,16 +169,22 @@ describe('GET /v1/campaign/dump', () => {
     );
   });
 
-  it('rejects a coordinator token with 403 and logs the denial', async () => {
+  it('rejects a coordinator token with 403 and logs the denial with the correlating subject and request id', async () => {
     const warnSpy = vi.spyOn(logger, 'warn');
     const res = await get('coordinator');
     expect(res.statusCode).toBe(403);
+    // The identity check is this route's only control, so the denial line
+    // must carry the same correlators the success line does: `subject` (the
+    // token verified — it just isn't the system account) and `request_id`,
+    // so a denied call is traceable in the logs exactly like a served one.
     expect(warnSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         operation: 'campaignDump.serve',
         status: 'failure',
         code: 'FORBIDDEN',
         reason: 'NOT_SYSTEM_CLIENT',
+        subject: 'human-uuid',
+        request_id: expect.any(String),
       }),
       expect.any(String),
     );
@@ -216,10 +222,11 @@ describe('GET /v1/campaign/dump', () => {
     },
   );
 
-  it('returns 404 DUMP_NOT_AVAILABLE listing every key when none of the objects exist yet', async () => {
+  it('returns 404 DUMP_NOT_AVAILABLE listing every key when none of the objects exist yet, and logs the denial with subject and request id', async () => {
     // The likeliest real 404 state: a fresh environment where the
     // signals-s3-export cron has never run, so all three keys are absent at
     // once — not the single-key case the `it.each` above exercises.
+    const warnSpy = vi.spyOn(logger, 'warn');
     headObjectMock.mockResolvedValue(null);
     const res = await get('system');
     expect(res.statusCode).toBe(404);
@@ -228,6 +235,16 @@ describe('GET /v1/campaign/dump', () => {
     expect(body.error.fields.missing).toEqual([KEYS.user, KEYS.items, KEYS.item_actions]);
     expect(body.files).toBeUndefined();
     expect(signDownloadUrlMock).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation: 'campaignDump.serve',
+        status: 'failure',
+        reason: 'objects_missing',
+        subject: 'sa-uuid',
+        request_id: expect.any(String),
+      }),
+      expect.any(String),
+    );
   });
 
   it('returns 503 DUMP_NOT_CONFIGURED when the instance id is unset, and logs the denial', async () => {
@@ -245,6 +262,7 @@ describe('GET /v1/campaign/dump', () => {
           code: 'DUMP_NOT_CONFIGURED',
           reason: 'CAMPAIGN_DUMP_INSTANCE_ID_UNSET',
           subject: 'sa-uuid',
+          request_id: expect.any(String),
         }),
         expect.any(String),
       );
@@ -269,6 +287,8 @@ describe('GET /v1/campaign/dump', () => {
         status: 'failure',
         sub_operation: 'headObject',
         error: 'connection reset',
+        subject: 'sa-uuid',
+        request_id: expect.any(String),
       }),
       expect.any(String),
     );
@@ -288,6 +308,8 @@ describe('GET /v1/campaign/dump', () => {
         status: 'failure',
         sub_operation: 'signDownloadUrl',
         error: 'presign failed',
+        subject: 'sa-uuid',
+        request_id: expect.any(String),
       }),
       expect.any(String),
     );

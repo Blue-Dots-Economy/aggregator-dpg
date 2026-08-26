@@ -98,60 +98,76 @@ describe('campaign auth', () => {
 
   describe('requireCampaignSystemAuth', () => {
     it('accepts the campaign-manager service-account token', async () => {
-      const ctx = await requireCampaignSystemAuth(req('system'));
-      expect(ctx).toEqual({
-        subject: 'sa-uuid',
-        azp: 'campaign-manager',
-        username: 'service-account-campaign-manager',
+      const result = await requireCampaignSystemAuth(req('system'));
+      expect(result).toEqual({
+        ok: true,
+        context: {
+          subject: 'sa-uuid',
+          azp: 'campaign-manager',
+          username: 'service-account-campaign-manager',
+        },
       });
     });
 
-    it('rejects a coordinator token on the same client with 403 — wrong username', async () => {
-      await expect(requireCampaignSystemAuth(req('coordinator'))).rejects.toMatchObject({
-        status: 403,
-        fields: { reason: 'NOT_SYSTEM_CLIENT' },
-      });
+    it('rejects a coordinator token on the same client with 403 — wrong username — and surfaces its subject', async () => {
+      const result = await requireCampaignSystemAuth(req('coordinator'));
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error('expected a denial');
+      expect(result.error).toMatchObject({ status: 403, fields: { reason: 'NOT_SYSTEM_CLIENT' } });
+      // The token itself verified — the identity is known even though the
+      // username match failed — so it must be surfaced for the route to log.
+      expect(result.subject).toBe('human-uuid');
     });
 
-    it('rejects a portal/BFF service token with 403 — wrong azp', async () => {
-      await expect(requireCampaignSystemAuth(req('portal'))).rejects.toMatchObject({
-        status: 403,
-        fields: { reason: 'AZP_NOT_ALLOWED' },
-      });
+    it('rejects a portal/BFF service token with 403 — wrong azp — with no subject to report', async () => {
+      const result = await requireCampaignSystemAuth(req('portal'));
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error('expected a denial');
+      expect(result.error).toMatchObject({ status: 403, fields: { reason: 'AZP_NOT_ALLOWED' } });
+      // A disallowed azp is rejected inside verifyToken, before a `sub` is
+      // ever extracted — never sent to the client, but also never generated.
+      expect(result.subject).toBeUndefined();
     });
 
-    it('rejects a missing token with 401', async () => {
-      await expect(requireCampaignSystemAuth(req())).rejects.toMatchObject({
-        status: 401,
-      });
+    it('rejects a missing token with 401 and no subject', async () => {
+      const result = await requireCampaignSystemAuth(req());
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error('expected a denial');
+      expect(result.error).toMatchObject({ status: 401 });
+      expect(result.subject).toBeUndefined();
     });
 
-    it('rejects an unverifiable token with 401', async () => {
-      await expect(requireCampaignSystemAuth(req('garbage'))).rejects.toMatchObject({
-        status: 401,
-      });
+    it('rejects an unverifiable token with 401 and no subject', async () => {
+      const result = await requireCampaignSystemAuth(req('garbage'));
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error('expected a denial');
+      expect(result.error).toMatchObject({ status: 401 });
+      expect(result.subject).toBeUndefined();
     });
 
-    it('rejects a token with no preferred_username claim at all', async () => {
-      await expect(requireCampaignSystemAuth(req('no-username'))).rejects.toMatchObject({
-        status: 403,
-        fields: { reason: 'NOT_SYSTEM_CLIENT' },
-      });
+    it('rejects a token with no preferred_username claim at all, surfacing its subject', async () => {
+      const result = await requireCampaignSystemAuth(req('no-username'));
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error('expected a denial');
+      expect(result.error).toMatchObject({ status: 403, fields: { reason: 'NOT_SYSTEM_CLIENT' } });
+      expect(result.subject).toBe('no-username-uuid');
     });
 
     it('accepts a service account even when it carries stray org attributes', async () => {
-      const ctx = await requireCampaignSystemAuth(req('misprovisioned'));
-      expect(ctx.username).toBe('service-account-campaign-manager');
+      const result = await requireCampaignSystemAuth(req('misprovisioned'));
+      if (!result.ok) throw new Error('expected success');
+      expect(result.context.username).toBe('service-account-campaign-manager');
     });
 
     it('does not disable the gate when the expected username is empty', async () => {
       process.env.CAMPAIGN_DUMP_SERVICE_ACCOUNT = '';
-      await expect(requireCampaignSystemAuth(req('coordinator'))).rejects.toMatchObject({
-        status: 403,
-        fields: { reason: 'NOT_SYSTEM_CLIENT' },
-      });
-      const ctx = await requireCampaignSystemAuth(req('system'));
-      expect(ctx.username).toBe('service-account-campaign-manager');
+      const denied = await requireCampaignSystemAuth(req('coordinator'));
+      expect(denied.ok).toBe(false);
+      if (denied.ok) throw new Error('expected a denial');
+      expect(denied.error).toMatchObject({ status: 403, fields: { reason: 'NOT_SYSTEM_CLIENT' } });
+      const result = await requireCampaignSystemAuth(req('system'));
+      if (!result.ok) throw new Error('expected success');
+      expect(result.context.username).toBe('service-account-campaign-manager');
     });
   });
 

@@ -21,7 +21,7 @@
 import type { FastifyRequest } from 'fastify';
 import { authenticate, authenticateAny, type AuthContext } from '../services/auth/access-token.js';
 import { campaignDumpServiceAccount, campaignManagerAllowedAzp } from '../config.js';
-import { httpError } from '../errors/http-error.js';
+import { httpError, type HttpError } from '../errors/http-error.js';
 
 /**
  * Authenticates a campaign request and returns the auth context, or throws the
@@ -83,6 +83,19 @@ export interface CampaignSystemContext {
 }
 
 /**
+ * Outcome of {@link requireCampaignSystemAuth}.
+ *
+ * A discriminated result rather than throw-only: the identity check IS this
+ * route's only control, so a denial is as audit-worthy as a success, and the
+ * caller needs the verified `subject` (when one was resolved) to log it
+ * before deciding what to throw. `subject` is present only when a token was
+ * successfully verified but failed the username match (`NOT_SYSTEM_CLIENT`)
+ * — a missing/unverifiable/wrong-`azp` token never reaches a `sub` claim.
+ */
+export type CampaignSystemAuthResult =
+  { ok: true; context: CampaignSystemContext } | { ok: false; error: HttpError; subject?: string };
+
+/**
  * Authenticates the campaign-manager SYSTEM caller for the whole-network
  * non-PII dump route (#692).
  *
@@ -95,35 +108,50 @@ export interface CampaignSystemContext {
  * user attribute, so a misprovisioned service account can carry one, and the
  * endpoint's safety must not depend on realm state this repo cannot test.
  *
+ * Returns a {@link CampaignSystemAuthResult} rather than throwing, so the
+ * route can emit its audit-log line — with the verified subject, when one
+ * is known — before raising the `UNAUTHORIZED`/`FORBIDDEN` error itself.
+ *
  * @param req - The inbound request carrying the Bearer token.
- * @returns The verified {@link CampaignSystemContext}.
- * @throws `UNAUTHORIZED` when the token is absent or unverifiable, or
- *   `FORBIDDEN` when its `azp` is not allow-listed or it is not the expected
- *   service account.
+ * @returns The verified context on success; on failure, the http error to
+ *   throw (`UNAUTHORIZED` when the token is absent/unverifiable, `FORBIDDEN`
+ *   when its `azp` is not allow-listed or it is not the expected service
+ *   account) plus the subject, when the token was itself valid.
  */
 export async function requireCampaignSystemAuth(
   req: FastifyRequest,
-): Promise<CampaignSystemContext> {
+): Promise<CampaignSystemAuthResult> {
   const result = await authenticateAny(req, { allowedAzp: campaignManagerAllowedAzp() });
   if (!result.ok) {
     // A wrong-client token is a 403 (the credential is valid, the client is not
-    // permitted here); a missing or unverifiable token is a 401.
+    // permitted here); a missing or unverifiable token is a 401. Neither case
+    // reaches a verified `sub`, so no subject is available to report.
     const isAzp = result.error.code === 'AZP_NOT_ALLOWED';
-    throw httpError(isAzp ? 'FORBIDDEN' : 'UNAUTHORIZED', {
-      detail: result.error.message,
-      fields: { reason: result.error.code },
-    });
+    return {
+      ok: false,
+      error: httpError(isAzp ? 'FORBIDDEN' : 'UNAUTHORIZED', {
+        detail: result.error.message,
+        fields: { reason: result.error.code },
+      }),
+    };
   }
   const expected = campaignDumpServiceAccount();
   if (result.context.preferredUsername !== expected) {
-    throw httpError('FORBIDDEN', {
-      detail: 'this route requires the campaign-manager system (client_credentials) token',
-      fields: { reason: 'NOT_SYSTEM_CLIENT' },
-    });
+    return {
+      ok: false,
+      subject: result.context.subject,
+      error: httpError('FORBIDDEN', {
+        detail: 'this route requires the campaign-manager system (client_credentials) token',
+        fields: { reason: 'NOT_SYSTEM_CLIENT' },
+      }),
+    };
   }
   return {
-    subject: result.context.subject,
-    azp: result.context.authorizedParty,
-    username: result.context.preferredUsername,
+    ok: true,
+    context: {
+      subject: result.context.subject,
+      azp: result.context.authorizedParty,
+      username: result.context.preferredUsername,
+    },
   };
 }
