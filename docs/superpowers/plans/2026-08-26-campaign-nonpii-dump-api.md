@@ -1552,7 +1552,26 @@ Expected: `ok: [... 'campaign-manager']` with no assertion error.
 
 Run: `grep -rn "CAMPAIGN_MANAGER_SECRET\|__AGGREGATOR_API_SECRET__" infra/keycloak/render-realm.sh`
 
-If `render-realm.sh` substitutes each placeholder explicitly rather than generically, add the new one there too, sourced from a `CAMPAIGN_MANAGER_CLIENT_SECRET` env var, and fail hard when unset — matching how the existing three behave. Mirror the new var into `apps/api/.env.example` and `infra/env.template`.
+`render-realm.sh` substitutes each placeholder explicitly, and it has **two tiers**:
+a fail-hard group (`:?` — `AGGREGATOR_{API,PORTAL,BFF}_SECRET`, each also wired into
+`docker-compose.yml`'s `keycloak` service) and a soft-defaulted group (`:=` —
+`SIGNALS_API_SECRET`, `SIGNALSTACK_CLIENT_SECRET`, `VOICE_DPG_SIGNALS_SECRET`),
+deliberately *not* wired into compose so "the standalone aggregator-only compose must
+keep booting unaffected by clients it doesn't use."
+
+**Put the new secret in the soft-defaulted tier.** `campaign-manager` is precisely such
+a client: only the external campaign manager and developers specifically testing campaign
+routes authenticate through it. Fail-hard would require wiring the var into
+`docker-compose.yml` as well, or Keycloak refuses to boot for every developer on the
+branch. A committed dev default is safe here because this realm file is local-dev only —
+the deployment Keycloak image and realm are owned by bluedots-automation, and nothing in
+`infra/keycloak/` is upstream of it.
+
+Do **not** modify `docker-compose.yml`. Mirror the naming and comment style of the three
+neighbouring soft-defaults, and document an optional override in the env files only if
+those three are documented there. Verify in both directions that every `__*_SECRET__`
+placeholder in `realm.json` has a substitution and that no literal secret remains — a
+leftover placeholder imports as a literal secret string.
 
 - [ ] **Step 5: Commit**
 
