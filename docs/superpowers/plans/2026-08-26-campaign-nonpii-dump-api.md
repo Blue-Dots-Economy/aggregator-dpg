@@ -307,11 +307,21 @@ This is the load-bearing task. The auth matrix in its tests **is** the specifica
 **Interfaces:**
 - Consumes: `campaignDumpServiceAccount()` and `campaignManagerAllowedAzp()` from Task 1 / existing config.
 - Produces:
+  - `class AzpNotAllowedError extends Error`
   - `authenticateAny(req: FastifyRequest, opts?: { allowedAzp?: readonly string[] }): Promise<AnyAuthResult>`
+  - `AnyAuthResult`'s error code union gains `'AZP_NOT_ALLOWED'`
   - `AnyAuthContext.preferredUsername?: string`
   - `interface CampaignSystemContext { subject: string; azp: string | undefined; username: string }`
   - `requireCampaignSystemAuth(req: FastifyRequest): Promise<CampaignSystemContext>`
   - `requireCampaignAuth` unchanged in signature; now also 403s a service-account token.
+
+**Controller ruling carried into this task.** The spec's error table requires
+**403** for a token whose `azp` is not allow-listed, but `authenticateAny`
+currently collapses that into `INVALID_TOKEN` — indistinguishable from a bad
+signature, which must be 401. Do **not** recover the distinction by string-matching
+`assertAllowedAzp`'s message; that couples the gate to a log string. Introduce a
+typed error instead, per Step 3 below. `authenticate()` keeps its present
+behaviour so the existing campaign routes' status codes do not shift.
 
 Why not `authenticate()`: it *requires* an `aggregator_id` claim and returns `MISSING_AGGREGATOR_ID` without one, and a correctly-provisioned service account has no such claim. `authenticateAny` handles those tokens but has no azp override — hence the additive option.
 
@@ -486,7 +496,62 @@ Expected: FAIL — `requireCampaignSystemAuth` is not exported from `../auth.js`
 
 - [ ] **Step 3: Extend `AnyAuthContext` and `authenticateAny`**
 
-In `apps/api/src/services/auth/access-token.ts`, add to the `AnyAuthContext` interface (after `clientId`):
+In `apps/api/src/services/auth/access-token.ts`, add the typed azp error above `verifyToken`:
+
+```typescript
+/**
+ * Thrown when a token's `azp` is not in the effective allow-list.
+ *
+ * A distinct type rather than a bare `Error` so callers can map a wrong-client
+ * token to 403 while a bad signature stays 401 — the two are otherwise
+ * indistinguishable once `verifyToken` has thrown.
+ */
+export class AzpNotAllowedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AzpNotAllowedError';
+  }
+}
+```
+
+In `assertAllowedAzp`, change only the thrown type — keep the message byte-for-byte
+so logs and existing assertions are unaffected:
+
+```typescript
+    throw new AzpNotAllowedError(
+      `token azp '${typeof azp === 'string' ? azp : 'absent'}' is not an allowed client`,
+    );
+```
+
+Widen the `AnyAuthResult` error union to include the new code:
+
+```typescript
+export type AnyAuthResult =
+  | { ok: true; context: AnyAuthContext }
+  | {
+      ok: false;
+      error: { code: 'MISSING_TOKEN' | 'INVALID_TOKEN' | 'AZP_NOT_ALLOWED'; message: string };
+    };
+```
+
+In `authenticateAny`'s catch block, distinguish the two:
+
+```typescript
+  } catch (err) {
+    return {
+      ok: false,
+      error: {
+        code: err instanceof AzpNotAllowedError ? 'AZP_NOT_ALLOWED' : 'INVALID_TOKEN',
+        message: err instanceof Error ? err.message : 'verify failed',
+      },
+    };
+  }
+```
+
+Leave `authenticate()`'s catch untouched — it still returns `INVALID_TOKEN` for an
+azp rejection, so the existing campaign routes' status codes do not change.
+
+Then add to the `AnyAuthContext` interface (after `clientId`):
 
 ```typescript
   /**
@@ -574,14 +639,12 @@ export async function requireCampaignSystemAuth(
 ): Promise<CampaignSystemContext> {
   const result = await authenticateAny(req, { allowedAzp: campaignManagerAllowedAzp() });
   if (!result.ok) {
-    // An azp rejection surfaces as INVALID_TOKEN from verifyToken, which is a
-    // 403 concern (wrong client) rather than a 401 (bad credential). Split them
-    // so a mis-scoped client gets an actionable status.
-    const isMissing = result.error.code === 'MISSING_TOKEN';
-    const isAzp = !isMissing && result.error.message.includes('is not an allowed client');
+    // A wrong-client token is a 403 (the credential is valid, the client is not
+    // permitted here); a missing or unverifiable token is a 401.
+    const isAzp = result.error.code === 'AZP_NOT_ALLOWED';
     throw httpError(isAzp ? 'FORBIDDEN' : 'UNAUTHORIZED', {
       detail: result.error.message,
-      fields: { reason: isAzp ? 'AZP_NOT_ALLOWED' : result.error.code },
+      fields: { reason: result.error.code },
     });
   }
   const expected = campaignDumpServiceAccount();
@@ -927,6 +990,11 @@ import { _setNetworkConfig } from '../services/network-config.js';
 import { buildBlueDotConfig } from '@aggregator-dpg/network-config/testing';
 
 // S3 is mocked: these tests assert the route's contract, not the SDK.
+//
+// The factory MUST also export signBulkUploadUrl and signErrorsCsvDownloadUrl.
+// vi.mock replaces the WHOLE module, and routes/bulk-uploads.ts imports those
+// two by name — omit them and buildApp() dies on a missing named export, which
+// surfaces as every test in this file failing for an unrelated reason.
 const { headObjectMock, signDownloadUrlMock } = vi.hoisted(() => ({
   headObjectMock: vi.fn(),
   signDownloadUrlMock: vi.fn(),
@@ -934,6 +1002,8 @@ const { headObjectMock, signDownloadUrlMock } = vi.hoisted(() => ({
 vi.mock('../services/object-storage/index.js', () => ({
   headObject: headObjectMock,
   signDownloadUrl: signDownloadUrlMock,
+  signBulkUploadUrl: vi.fn(),
+  signErrorsCsvDownloadUrl: vi.fn(),
 }));
 
 const KEYS = {
