@@ -50,8 +50,8 @@ s3://<bucket>/[<prefix>/]<network>/<instance_id>/
 └── item_actions.ndjson.gz
 ```
 
-`lib/s3.py`'s docstring is explicit: *"no date/run folders, no manifest; consumers
-always read the same keys."* The job only ever PUTs, so its IAM role needs just
+`lib/s3.py`'s docstring is explicit: _"no date/run folders, no manifest; consumers
+always read the same keys."_ The job only ever PUTs, so its IAM role needs just
 `s3:PutObject`. PR #3's description is stale relative to its own code.
 
 Consequences, all of which shrink the work:
@@ -72,10 +72,10 @@ previous objects were overwritten.
 `last_modified` and `size_bytes`, and the campaign manager decides what to do
 about a mismatch. Rejected alternatives:
 
-- *Detect and refuse* — compare the three `LastModified` values and 503 when they
+- _Detect and refuse_ — compare the three `LastModified` values and 503 when they
   span more than a threshold. Turns a silent data problem into a loud one, but it
   is a heuristic, not a guarantee.
-- *Fix it upstream* — ask adhoc-scripts to restore the run folders and pointer.
+- _Fix it upstream_ — ask adhoc-scripts to restore the run folders and pointer.
   The only true guarantee, but it blocks this work on another repo and reverses a
   decision that repo made deliberately.
 
@@ -90,15 +90,15 @@ S3 versioning on the bucket.
 
 Both grant types were exercised against a local realm and their claims decoded:
 
-| claim | `client_credentials` (system) | `password` (coordinator) |
-|---|---|---|
-| `azp` | `campaign-manager` | `campaign-manager` |
-| `preferred_username` | `service-account-campaign-manager` | the coordinator's email |
-| `sub` | UUID | UUID |
-| `sid` / `session_state` | absent | present |
-| `email` | absent | present |
-| `aggregator_id` | absent when correctly provisioned | present |
-| `signalstack_org_id` | absent when correctly provisioned | present |
+| claim                   | `client_credentials` (system)      | `password` (coordinator) |
+| ----------------------- | ---------------------------------- | ------------------------ |
+| `azp`                   | `campaign-manager`                 | `campaign-manager`       |
+| `preferred_username`    | `service-account-campaign-manager` | the coordinator's email  |
+| `sub`                   | UUID                               | UUID                     |
+| `sid` / `session_state` | absent                             | present                  |
+| `email`                 | absent                             | present                  |
+| `aggregator_id`         | absent when correctly provisioned  | present                  |
+| `signalstack_org_id`    | absent when correctly provisioned  | present                  |
 
 Two findings from this:
 
@@ -110,7 +110,7 @@ Two findings from this:
    run. It fails closed, so it is not a security hole. **Filed separately; this
    design must not copy that pattern.**
 2. **Absence of `aggregator_id` is not a safe discriminator.** It is a Keycloak
-   *user attribute*. If someone sets it on the service-account user — as the
+   _user attribute_. If someone sets it on the service-account user — as the
    current local realm has — the system token becomes indistinguishable from a
    coordinator token by that claim, and additionally satisfies
    `requireCampaignAuth` + `requireOrgId`, reaching the PII export. The security
@@ -162,7 +162,7 @@ records the coupling.
 ### Changes required
 
 `apps/api/src/services/auth/access-token.ts` — two additive changes.
-`authenticate()` cannot be used here because it *requires* an `aggregator_id`
+`authenticate()` cannot be used here because it _requires_ an `aggregator_id`
 claim, which a correctly-provisioned service account does not have.
 `authenticateAny()` handles such tokens but accepts no `azp` override.
 
@@ -234,13 +234,13 @@ manager sees whether the three files line up.
 
 ### Errors
 
-| status | code | when |
-|---|---|---|
-| 401 | `UNAUTHORIZED` | no token, bad signature, expired |
-| 403 | `FORBIDDEN` | `azp` not allow-listed, or not the service-account username |
-| 404 | `DUMP_NOT_AVAILABLE` | any of the three objects missing; `fields` names which |
-| 503 | `DUMP_NOT_CONFIGURED` | `CAMPAIGN_DUMP_INSTANCE_ID` unset |
-| 503 | `DUMP_STORAGE_UNAVAILABLE` | S3 HEAD or presign threw |
+| status | code                       | when                                                        |
+| ------ | -------------------------- | ----------------------------------------------------------- |
+| 401    | `UNAUTHORIZED`             | no token, bad signature, expired                            |
+| 403    | `FORBIDDEN`                | `azp` not allow-listed, or not the service-account username |
+| 404    | `DUMP_NOT_AVAILABLE`       | any of the three objects missing; `fields` names which      |
+| 503    | `DUMP_NOT_CONFIGURED`      | `CAMPAIGN_DUMP_INSTANCE_ID` unset                           |
+| 503    | `DUMP_STORAGE_UNAVAILABLE` | S3 HEAD or presign threw                                    |
 
 `DUMP_NOT_AVAILABLE`, `DUMP_NOT_CONFIGURED` and `DUMP_STORAGE_UNAVAILABLE` are new
 rows in `apps/api/src/errors/codes.ts`. The two 503s are distinct codes because
@@ -261,12 +261,12 @@ New vars in `apps/api/src/config.ts`, mirrored into **both** `apps/api/.env.exam
 and `infra/env.template` with a comment explaining why — the existing campaign
 vars there set that standard.
 
-| var | default | notes |
-|---|---|---|
-| `CAMPAIGN_DUMP_SERVICE_ACCOUNT` | `service-account-campaign-manager` | the gate; empty value falls back to the default, never disables |
-| `CAMPAIGN_DUMP_URL_TTL_SECONDS` | `600` | 10 minutes; a machine caller downloads immediately |
-| `CAMPAIGN_DUMP_PREFIX` | *(empty)* | optional containing prefix; empty means keys start at `<network>/` |
-| `CAMPAIGN_DUMP_INSTANCE_ID` | *(none)* | the Signals instance folder |
+| var                             | default                            | notes                                                              |
+| ------------------------------- | ---------------------------------- | ------------------------------------------------------------------ |
+| `CAMPAIGN_DUMP_SERVICE_ACCOUNT` | `service-account-campaign-manager` | the gate; empty value falls back to the default, never disables    |
+| `CAMPAIGN_DUMP_URL_TTL_SECONDS` | `600`                              | 10 minutes; a machine caller downloads immediately                 |
+| `CAMPAIGN_DUMP_PREFIX`          | _(empty)_                          | optional containing prefix; empty means keys start at `<network>/` |
+| `CAMPAIGN_DUMP_INSTANCE_ID`     | _(none)_                           | the Signals instance folder                                        |
 
 The bucket is the existing `S3_BUCKET`. One bucket everywhere: the cron repoints
 to the aggregator's bucket (being made private in bluedots-automation#163) with
@@ -282,7 +282,7 @@ is `[<prefix>/]<network>/<instance_id>`.
 `CAMPAIGN_DUMP_INSTANCE_ID` has no sensible default, and the whole API must not
 refuse to boot over a campaign var on deployments that do not use the campaign
 manager. It is therefore optional in the schema; the route returns 503
-`DUMP_NOT_CONFIGURED` when it is absent, and startup logs a warning.
+`DUMP_NOT_CONFIGURED` when it is absent.
 
 ## Object storage
 
@@ -335,15 +335,15 @@ not a transport failure — `headObject` already returns `null` for `NotFound` /
 
 The auth matrix is the specification, not an extra:
 
-| token | route | expected |
-|---|---|---|
-| system (`client_credentials`, correct username) | `/v1/campaign/dump` | 200 |
-| coordinator (password grant, real `signalstack_org_id`) | `/v1/campaign/dump` | 403 |
-| portal / BFF service token | `/v1/campaign/dump` | 403 (wrong `azp`) |
-| none | `/v1/campaign/dump` | 401 |
-| system | `/v1/campaign/export` | 403 (reverse direction) |
-| misprovisioned service account (has `aggregator_id`) | `/v1/campaign/export` | 403 |
-| misprovisioned service account | `/v1/campaign/dump` | 200 |
+| token                                                   | route                 | expected                |
+| ------------------------------------------------------- | --------------------- | ----------------------- |
+| system (`client_credentials`, correct username)         | `/v1/campaign/dump`   | 200                     |
+| coordinator (password grant, real `signalstack_org_id`) | `/v1/campaign/dump`   | 403                     |
+| portal / BFF service token                              | `/v1/campaign/dump`   | 403 (wrong `azp`)       |
+| none                                                    | `/v1/campaign/dump`   | 401                     |
+| system                                                  | `/v1/campaign/export` | 403 (reverse direction) |
+| misprovisioned service account (has `aggregator_id`)    | `/v1/campaign/export` | 403                     |
+| misprovisioned service account                          | `/v1/campaign/dump`   | 200                     |
 
 Also:
 
@@ -381,21 +381,31 @@ the realm.
 ## Cross-repo work
 
 **bluedots-automation**
+
+- **before handing EkStep the client secret**, confirm `KEYCLOAK_ALLOWED_AZP` is
+  set on every deployment and excludes `campaign-manager`. `access-token.ts`
+  disables the `azp` gate entirely when that var is unset (pre-existing
+  behaviour), but this is the first work that puts a realm _service-account_
+  credential into an external organisation's hands — an unset var would let it
+  pass `authenticateAny` on `POST /v1/aggregator-registrations`,
+  `POST /v1/orgs` and `GET /v1/orgs`
 - repoint the `signals-s3-export` cron at the aggregator bucket (#163), layout
   and export process unchanged, and confirm the prefix it writes
 - provision the deployed `campaign-manager` service account with no org attributes
 - **revoke the campaign manager's direct S3 IAM access** once this endpoint is live
 
 **campaign-manager (external / EkStep)**
+
 - switch from direct S3 reads to `GET /v1/campaign/dump`, using a
   `client_credentials` token on the existing `campaign-manager` client
-- use that credential *only* for this endpoint; the org-scoped routes continue to
+- use that credential _only_ for this endpoint; the org-scoped routes continue to
   use coordinator login tokens
 - fetch each pre-signed URL and download promptly — do not cache the URL past its
   TTL
 - decide how to handle a `last_modified` mismatch across the three files
 
 **aggregator-dpg, separately**
+
 - file the `aggregator-maintenance.ts:145` service-account check bug. Note that
   both `apps/api/CLAUDE.md` ("Service-account-only endpoints additionally gate on
   `subject.startsWith('service-account-')`") and the root `CLAUDE.md` describe
@@ -412,16 +422,17 @@ the realm.
 
 ## Deliberate deviations from issue #692
 
-| #692 says | this design | why |
-|---|---|---|
-| resolve via `latest_manifest.json` | HEAD three fixed keys | the exporter no longer writes a manifest |
-| validate the manifest with Zod | not applicable | no manifest |
-| add `getObjectText` | not needed | no manifest |
-| a run in progress is never served | skew is served, surfaced via `last_modified` | no atomic pointer upstream to enforce it |
-| separate `campaign-manager-system` client | one client, two grant types | avoids a second client and credential |
-| new `CAMPAIGN_DUMP_ALLOWED_AZP` | reuse `campaignManagerAllowedAzp()` | same client, same `azp` |
-| gate on the `service-account-` subject prefix | gate on `preferred_username` | `sub` is a UUID for service accounts too |
-| rate limit the route | no in-code limit | Kong owns rate limiting platform-wide |
-| `GET /v1/campaign/dump/latest` | `GET /v1/campaign/dump` | no history, so nothing to distinguish |
-| `run_id` / `generated_at` in the response | omitted | no manifest to source them from |
-| add `CAMPAIGN_DUMP_PREFIX` etc. | kept, plus `CAMPAIGN_DUMP_INSTANCE_ID` | the instance segment has no other source |
+| #692 says                                                        | this design                                  | why                                                                                                                                                                                                                                          |
+| ---------------------------------------------------------------- | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| resolve via `latest_manifest.json`                               | HEAD three fixed keys                        | the exporter no longer writes a manifest                                                                                                                                                                                                     |
+| validate the manifest with Zod                                   | not applicable                               | no manifest                                                                                                                                                                                                                                  |
+| add `getObjectText`                                              | not needed                                   | no manifest                                                                                                                                                                                                                                  |
+| a run in progress is never served                                | skew is served, surfaced via `last_modified` | no atomic pointer upstream to enforce it                                                                                                                                                                                                     |
+| separate `campaign-manager-system` client                        | one client, two grant types                  | avoids a second client and credential                                                                                                                                                                                                        |
+| new `CAMPAIGN_DUMP_ALLOWED_AZP`                                  | reuse `campaignManagerAllowedAzp()`          | same client, same `azp`                                                                                                                                                                                                                      |
+| gate on the `service-account-` subject prefix                    | gate on `preferred_username`                 | `sub` is a UUID for service accounts too                                                                                                                                                                                                     |
+| rate limit the route                                             | no in-code limit                             | Kong owns rate limiting platform-wide                                                                                                                                                                                                        |
+| `GET /v1/campaign/dump/latest`                                   | `GET /v1/campaign/dump`                      | no history, so nothing to distinguish                                                                                                                                                                                                        |
+| `run_id` / `generated_at` in the response                        | omitted                                      | no manifest to source them from                                                                                                                                                                                                              |
+| add `CAMPAIGN_DUMP_PREFIX` etc.                                  | kept, plus `CAMPAIGN_DUMP_INSTANCE_ID`       | the instance segment has no other source                                                                                                                                                                                                     |
+| startup logs a warning when `CAMPAIGN_DUMP_INSTANCE_ID` is unset | not built                                    | most deployments never use the campaign manager, so a permanent boot warning would be noise on all of them; a genuine misconfiguration surfaces the first time the caller hits the endpoint, and the 503's `hint` names the missing variable |
