@@ -220,6 +220,18 @@ const ConfigSchema = z.object({
   /** BullMQ attempts for a campaign-process job (retry count on transient failure). */
   CAMPAIGN_EXPORT_ATTEMPTS: z.coerce.number().int().positive().default(3),
 
+  // ─── Campaign voice channel (#577) ──────────────────────────────────────
+  /** Max `participant_ids` accepted per voice campaign request body (after de-dup). */
+  CAMPAIGN_VOICE_MAX_ITEMS: z.coerce.number().int().positive().default(500),
+  /** Ingress rate-limit window (seconds) for voice campaign submits, per org. */
+  CAMPAIGN_VOICE_SUBMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
+  /** Max voice campaign submits allowed per window, per org. */
+  CAMPAIGN_VOICE_SUBMIT_MAX: z.coerce.number().int().positive().default(10),
+  /** Max active (queued|processing) voice campaign jobs allowed per org at once. */
+  CAMPAIGN_VOICE_MAX_ACTIVE_PER_ORG: z.coerce.number().int().positive().default(3),
+  /** BullMQ attempts for a voice campaign job (retry count on transient failure). */
+  CAMPAIGN_VOICE_ATTEMPTS: z.coerce.number().int().positive().default(3),
+
   // ─── Approval links ───────────────────────────────────────────────────────
   /**
    * Lifetime of the admin approval/rejection links emailed on a new
