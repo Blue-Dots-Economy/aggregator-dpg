@@ -37,6 +37,17 @@ export class HttpError extends Error {
     if (options.fields !== undefined) this.fields = options.fields;
     Object.setPrototypeOf(this, HttpError.prototype);
   }
+
+  /**
+   * Alias for {@link status} under the name Fastify's own error handling
+   * convention uses, so a thrown `HttpError` can be asserted on directly
+   * (`rejects.toMatchObject({ statusCode })`) without going through a route.
+   *
+   * @returns The same numeric status as {@link status}.
+   */
+  get statusCode(): number {
+    return this.status;
+  }
 }
 
 /** Throws an HttpError from a catalogue key. Concise call site. */
