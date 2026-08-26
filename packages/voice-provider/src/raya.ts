@@ -12,9 +12,12 @@
  *
  * HTTP retry/timeout/typed-error shape is modelled on
  * `packages/signalstack-writer/src/http.ts`, with one addition: a `429`
- * honours the upstream `Retry-After` header (seconds) instead of the
- * computed exponential backoff, since Raya's own rate limit is what
- * triggered it.
+ * honours Raya's own signalled wait instead of the computed exponential
+ * backoff. Per Raya's actual `RateLimitError`/`ConcurrencyLimitError` shape
+ * that wait rides the JSON response body as `retry_after` (seconds) — Raya
+ * does NOT send an HTTP `Retry-After` header — so the body field is tried
+ * first, with the header kept only as a defensive fallback should that ever
+ * change.
  *
  * @module @aggregator-dpg/voice-provider
  */
@@ -69,6 +72,12 @@ export interface RayaVoiceProviderOptions {
   acquireSlot: () => Promise<void>;
   /** Optional override; defaults to global `fetch`. Lets tests inject a stub. */
   fetchImpl?: typeof fetch;
+  /**
+   * Sleep function used for retry backoff (including a `429`'s signalled
+   * wait); defaults to a real `setTimeout`-backed wait. Injectable so tests
+   * can assert the exact computed delay without a real wall-clock wait.
+   */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 export class RayaVoiceProvider extends VoiceProviderBase {
@@ -78,6 +87,7 @@ export class RayaVoiceProvider extends VoiceProviderBase {
   private readonly maxAttempts: number;
   private readonly acquireSlot: () => Promise<void>;
   private readonly fetchImpl: typeof fetch;
+  private readonly sleep: (ms: number) => Promise<void>;
 
   constructor(opts: RayaVoiceProviderOptions) {
     super();
@@ -90,6 +100,7 @@ export class RayaVoiceProvider extends VoiceProviderBase {
     this.maxAttempts = opts.maxAttempts ?? 3;
     this.acquireSlot = opts.acquireSlot;
     this.fetchImpl = opts.fetchImpl ?? fetch;
+    this.sleep = opts.sleep ?? defaultSleep;
   }
 
   /**
@@ -207,8 +218,11 @@ export class RayaVoiceProvider extends VoiceProviderBase {
    *
    * Retries on: a thrown transport error, an aborted (timed-out) request,
    * and a `429` or `5xx` response — up to {@link maxAttempts} total tries. A
-   * `429` honours the upstream `Retry-After` header (seconds) for the wait
-   * instead of the computed backoff, when present. A `401` maps to
+   * `429` honours Raya's signalled wait for the retry instead of the
+   * computed backoff, when present — preferring the JSON body's
+   * `retry_after` (seconds, Raya's actual `RateLimitError`/
+   * `ConcurrencyLimitError` shape) and falling back to an HTTP `Retry-After`
+   * header (see {@link resolveRetryAfterMs}). A `401` maps to
    * `AuthError` immediately (no retry — a bad key won't fix itself). Any
    * other `4xx` maps to `ValidationError` immediately (no retry — the
    * request itself is malformed). When every attempt is exhausted the
@@ -294,7 +308,7 @@ export class RayaVoiceProvider extends VoiceProviderBase {
 
       // 429 or 5xx — transient, retry within budget.
       if (attemptsMade < this.maxAttempts) {
-        const retryAfterMs = res.status === 429 ? parseRetryAfterMs(res) : undefined;
+        const retryAfterMs = res.status === 429 ? await resolveRetryAfterMs(res) : undefined;
         await this.backoff(attemptsMade, retryAfterMs);
         continue;
       }
@@ -311,17 +325,57 @@ export class RayaVoiceProvider extends VoiceProviderBase {
 
   /**
    * Sleeps before the next retry attempt. Uses `overrideMs` (from a `429`'s
-   * `Retry-After` header) when given; otherwise `200ms * 2^(attempt-1)`.
+   * signalled wait) when given; otherwise `200ms * 2^(attempt-1)`.
    */
   private backoff(attempt: number, overrideMs?: number): Promise<void> {
     const ms = overrideMs ?? 200 * 2 ** (attempt - 1);
     if (ms <= 0) return Promise.resolve();
-    return new Promise((resolve) => setTimeout(resolve, ms));
+    return this.sleep(ms);
   }
 }
 
-/** Parses a numeric-seconds `Retry-After` header into ms; `undefined` if absent/non-numeric. */
-function parseRetryAfterMs(res: Response): number | undefined {
+/**
+ * Default sleep implementation — a real `setTimeout`-backed wait, used when
+ * no `sleep` dependency is injected (i.e. outside of tests). Mirrors
+ * `./egress.js`'s `defaultSleep`.
+ *
+ * @param ms - Milliseconds to wait.
+ */
+function defaultSleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Resolves how long to wait before retrying a `429`, in ms.
+ *
+ * Prefers the JSON response body's `retry_after` field (seconds) — Raya's
+ * actual `RateLimitError`/`ConcurrencyLimitError` shape carries the wait
+ * there, and Raya does NOT send an HTTP `Retry-After` header. The header is
+ * checked only as a defensive fallback (e.g. a future Raya version, or an
+ * intermediary proxy adding one), and only when the body carried no usable
+ * `retry_after`. Returns `undefined` — falling through to the computed
+ * exponential backoff — when neither source yields a valid non-negative
+ * number.
+ *
+ * Consumes the response body (`res.text()`); callers must not read the body
+ * again from this `Response` afterwards.
+ *
+ * @param res - The `429` response.
+ * @returns The wait in ms, or `undefined` to use the computed backoff.
+ */
+async function resolveRetryAfterMs(res: Response): Promise<number | undefined> {
+  try {
+    const bodyText = await res.text();
+    if (bodyText) {
+      const parsed = JSON.parse(bodyText) as Record<string, unknown>;
+      const bodySeconds = parsed?.['retry_after'];
+      if (typeof bodySeconds === 'number' && Number.isFinite(bodySeconds) && bodySeconds >= 0) {
+        return bodySeconds * 1000;
+      }
+    }
+  } catch {
+    // Non-JSON or unreadable body — fall through to the header fallback.
+  }
   const header = res.headers.get('retry-after');
   if (!header) return undefined;
   const seconds = Number(header);

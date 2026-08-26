@@ -3,9 +3,9 @@
  * campaign voice channel (aggregator-dpg#577).
  *
  * Every test stubs `fetchImpl` (typed as `typeof fetch`) and `acquireSlot`
- * so no real network call or Redis egress gate is exercised. Retries use
- * `maxAttempts` + a `Retry-After: '0'` header so the suite runs fast without
- * needing fake timers.
+ * so no real network call or Redis egress gate is exercised. The 429-retry
+ * tests inject a fake `sleep` so the suite stays fast and can assert the
+ * exact computed wait deterministically, without needing fake timers.
  *
  * @module @aggregator-dpg/voice-provider
  */
@@ -160,10 +160,13 @@ describe('RayaVoiceProvider', () => {
     });
   });
 
-  it('retries a 429 honouring Retry-After, then succeeds', async () => {
+  it("retries a 429 honouring the JSON body retry_after — Raya's actual RateLimitError/ConcurrencyLimitError shape, which carries no Retry-After header", async () => {
+    const sleep = vi.fn().mockResolvedValue(undefined);
     const fetchImpl = vi
       .fn()
-      .mockResolvedValueOnce(jsonResponse(429, { message: 'rate limited' }, { 'retry-after': '0' }))
+      .mockResolvedValueOnce(
+        jsonResponse(429, { error: 'RateLimitError', message: 'rate limited', retry_after: 20 }),
+      )
       .mockResolvedValueOnce(jsonResponse(200, CREATE_OK_BODY))
       .mockResolvedValueOnce(jsonResponse(200, START_OK_BODY));
 
@@ -173,14 +176,65 @@ describe('RayaVoiceProvider', () => {
       maxAttempts: 3,
       acquireSlot: vi.fn().mockResolvedValue(undefined),
       fetchImpl: fetchImpl as unknown as typeof fetch,
+      sleep,
     });
 
     const result = await provider.dispatch(baseInput());
 
     expect(fetchImpl).toHaveBeenCalledTimes(3);
+    // 20s body retry_after → 20000ms wait, not the computed exponential backoff.
+    expect(sleep).toHaveBeenCalledTimes(1);
+    expect(sleep).toHaveBeenCalledWith(20000);
     expect(result.success).toBe(true);
     if (!result.success) return;
     expect(result.value.providerBatchRef).toBe('42');
+  });
+
+  it('falls back to the HTTP Retry-After header when the 429 body carries no retry_after', async () => {
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(429, { message: 'rate limited' }, { 'retry-after': '5' }))
+      .mockResolvedValueOnce(jsonResponse(200, CREATE_OK_BODY))
+      .mockResolvedValueOnce(jsonResponse(200, START_OK_BODY));
+
+    const provider = new RayaVoiceProvider({
+      baseUrl: 'https://raya.example.com/api',
+      apiKey: 'key-abc',
+      maxAttempts: 3,
+      acquireSlot: vi.fn().mockResolvedValue(undefined),
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      sleep,
+    });
+
+    const result = await provider.dispatch(baseInput());
+
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    expect(sleep).toHaveBeenCalledTimes(1);
+    expect(sleep).toHaveBeenCalledWith(5000);
+    expect(result.success).toBe(true);
+  });
+
+  it('prefers the body retry_after over the Retry-After header when both are present', async () => {
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(429, { retry_after: 3 }, { 'retry-after': '99' }))
+      .mockResolvedValueOnce(jsonResponse(200, CREATE_OK_BODY))
+      .mockResolvedValueOnce(jsonResponse(200, START_OK_BODY));
+
+    const provider = new RayaVoiceProvider({
+      baseUrl: 'https://raya.example.com/api',
+      apiKey: 'key-abc',
+      maxAttempts: 3,
+      acquireSlot: vi.fn().mockResolvedValue(undefined),
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      sleep,
+    });
+
+    await provider.dispatch(baseInput());
+
+    expect(sleep).toHaveBeenCalledWith(3000);
   });
 
   it('maps a 401 to AuthError without retrying', async () => {
