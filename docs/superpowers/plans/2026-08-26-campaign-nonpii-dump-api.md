@@ -957,11 +957,43 @@ explicit TTL, against the public endpoint."
 **Files:**
 - Create: `apps/api/src/routes/campaign-dump.ts`
 - Create: `apps/api/src/routes/campaign-dump.test.ts`
-- Modify: `apps/api/src/app.ts` (import beside `:40-42`; registration beside `:206-208`; tag description at `:158-159`)
+- Modify: `apps/api/src/config.ts` (the `campaignDumpInstanceId()` helper above)
+- Modify: `apps/api/src/app.ts` (import beside `:46-47`; registration beside `:229-230`; tag description at `:181-182`)
 
 **Interfaces:**
 - Consumes: `requireCampaignSystemAuth` (Task 3); `DUMP_TABLES`, `dumpObjectKeys`, `headObject`, `signDownloadUrl` (Task 4); the three error codes (Task 2); the config vars (Task 1); `getNetworkConfig` from `../services/network-config.js`.
-- Produces: `registerCampaignDumpRoutes(app: FastifyInstance): Promise<void>`.
+- Produces: `registerCampaignDumpRoutes(app: FastifyInstance): Promise<void>`, plus one call-time config helper (below).
+
+**Controller ruling carried into this task.** The route must NOT read
+`config.CAMPAIGN_DUMP_INSTANCE_ID` directly. `config` is parsed once and frozen at
+first import, so the `DUMP_NOT_CONFIGURED` test — which deletes the env var at
+runtime and expects 503 — could never pass against the frozen snapshot. Add a
+call-time helper in `apps/api/src/config.ts`, mirroring `campaignManagerAllowedAzp()`
+and `campaignDumpServiceAccount()`, which exist in that shape for exactly this
+reason:
+
+```typescript
+/**
+ * The Signals instance whose non-PII dump this deployment serves (#692).
+ *
+ * Read from the live environment at **call time**, mirroring
+ * {@link campaignDumpServiceAccount}: the dump route consults it per request and
+ * it must be independently settable across test cases in one Vitest worker,
+ * where the frozen `config` snapshot cannot change after first import.
+ *
+ * @returns The configured instance id, or `undefined` when unset or blank — the
+ *   route turns that into `503 DUMP_NOT_CONFIGURED`.
+ */
+export function campaignDumpInstanceId(): string | undefined {
+  const raw = process.env.CAMPAIGN_DUMP_INSTANCE_ID?.trim();
+  return raw && raw.length > 0 ? raw : undefined;
+}
+```
+
+Keep the `CAMPAIGN_DUMP_INSTANCE_ID` field in `ConfigSchema` — it documents and
+validates the var. `CAMPAIGN_DUMP_PREFIX` and `CAMPAIGN_DUMP_URL_TTL_SECONDS` stay
+on the frozen `config`; their tests set them before first import, so they need no
+helper.
 
 - [ ] **Step 1: Write the failing route tests**
 
@@ -1230,7 +1262,7 @@ import { requireCampaignSystemAuth } from '../campaign/auth.js';
 import { getNetworkConfig } from '../services/network-config.js';
 import { dumpObjectKeys } from '../services/object-storage/dump-keys.js';
 import { headObject, signDownloadUrl } from '../services/object-storage/index.js';
-import { config } from '../config.js';
+import { campaignDumpInstanceId, config } from '../config.js';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 import { logger } from '../logger.js';
@@ -1275,7 +1307,7 @@ export async function registerCampaignDumpRoutes(app: FastifyInstance): Promise<
       const started = Date.now();
       const auth = await requireCampaignSystemAuth(req);
 
-      const instanceId = config.CAMPAIGN_DUMP_INSTANCE_ID;
+      const instanceId = campaignDumpInstanceId();
       if (!instanceId) {
         throw httpError('DUMP_NOT_CONFIGURED', {
           fields: { reason: 'CAMPAIGN_DUMP_INSTANCE_ID_UNSET' },
