@@ -235,10 +235,11 @@ identity:
 
 **Rules**
 
-- **Syntax:** `{{token}}` (double curly braces). Surrounding whitespace is
-  tolerated: `{{ name }}` works.
+- **Syntax:** `{{token}}` (double curly braces). Inner whitespace is tolerated
+  and the token is matched case-insensitively, so `{{ name }}`, `{{Name}}` and
+  `{{LAST_NAME}}` all resolve normally — a capitalisation slip is not an error.
 - **Unknown token → `400 UNKNOWN_PLACEHOLDER`** at submit time (before the job is
-  created), naming the offending token. This catches typos like `{{Name}}` early.
+  created), naming the offending token — e.g. `{{city}}` or `{{programme}}`.
   `{{ … }}` is therefore reserved syntax in the subject and body.
 - **Missing value:** if a supported placeholder has no value for a participant
   (e.g. no name on file), it renders as an **empty string** — the email is still
