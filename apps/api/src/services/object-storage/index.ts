@@ -31,11 +31,22 @@ import { config } from '../../config.js';
 let cachedInternalClient: S3Client | null = null;
 let cachedPresignerClient: S3Client | null = null;
 
+/** Bound the TCP-connect phase so a black-holed endpoint fails fast. */
+const S3_CONNECTION_TIMEOUT_MS = 5_000;
+/** Total attempts per request (1 initial + retries) using the SDK's backoff. */
+const S3_MAX_ATTEMPTS = 3;
+
 function buildClient(endpoint: string | undefined): S3Client {
   return new S3Client({
     region: config.S3_REGION,
     ...(endpoint ? { endpoint } : {}),
     forcePathStyle: config.S3_FORCE_PATH_STYLE,
+    // Explicit retry + connect timeout per error-handling.md. Only the connect
+    // phase is bounded — not a request/body timeout — so a large streaming
+    // GetObject download is never aborted mid-stream. Mirrors
+    // apps/worker/src/object-storage.ts so the two agree.
+    maxAttempts: S3_MAX_ATTEMPTS,
+    requestHandler: { connectionTimeout: S3_CONNECTION_TIMEOUT_MS },
     ...(config.S3_ACCESS_KEY_ID && config.S3_SECRET_ACCESS_KEY
       ? {
           credentials: {
