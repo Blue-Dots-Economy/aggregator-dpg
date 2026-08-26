@@ -10,6 +10,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import {
+  ACTIVE_DEDUP_ITEM_STATUSES,
   ACTIVE_JOB_STATUSES,
   SKIPPED_ITEM_STATUSES,
   TERMINAL_ITEM_STATUSES,
@@ -44,6 +45,7 @@ interface JobRow {
   lastProgressAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
+  providerResponse: unknown | null;
 }
 
 interface ItemRow {
@@ -51,6 +53,7 @@ interface ItemRow {
   action: string | null;
   status: CampaignJobItemStatus;
   providerRef: string | null;
+  rayaBatchId: string | null;
   skipReason: string | null;
   errorReason: string | null;
 }
@@ -96,21 +99,48 @@ export class InMemoryCampaignJobStore extends CampaignJobStoreBase {
       lastProgressAt: null,
       createdAt: now,
       updatedAt: now,
+      providerResponse: null,
     };
     this.jobs.set(id, row);
+    const dupIds = this.activeDedupIds(input.items);
     this.items.set(
       id,
       input.items.map((i) => ({
         itemId: i.itemId,
         action: i.action,
-        status: 'pending' as const,
+        status: (i.action !== null && dupIds.has(i.itemId)
+          ? 'duplicate_active'
+          : 'pending') as CampaignJobItemStatus,
         providerRef: null,
+        rayaBatchId: null,
         skipReason: null,
         errorReason: null,
       })),
     );
     if (idemKey) this.byIdempotencyKey.set(idemKey, id);
     return { ok: true, value: { job: this.toRecord(row), created: true } };
+  }
+
+  /**
+   * Item ids (among the given batch) already active elsewhere — same
+   * `(itemId, action)` pair, any job, status in {@link ACTIVE_DEDUP_ITEM_STATUSES}.
+   * Mirrors the Postgres partial-unique-index predicate; null-action items are
+   * never included (export is never deduplicated).
+   */
+  private activeDedupIds(candidates: CreateJobInput['items']): Set<string> {
+    const dup = new Set<string>();
+    const pairs = candidates.filter((i) => i.action !== null);
+    if (pairs.length === 0) return dup;
+    for (const rows of this.items.values()) {
+      for (const row of rows) {
+        if (row.action === null) continue;
+        if (!ACTIVE_DEDUP_ITEM_STATUSES.includes(row.status)) continue;
+        if (pairs.some((p) => p.itemId === row.itemId && p.action === row.action)) {
+          dup.add(row.itemId);
+        }
+      }
+    }
+    return dup;
   }
 
   async countActiveJobs(
@@ -207,6 +237,32 @@ export class InMemoryCampaignJobStore extends CampaignJobStoreBase {
     return { ok: true, value: undefined };
   }
 
+  async markSubmitted(
+    jobId: string,
+    itemId: string,
+    args: { rayaBatchId: string; providerRef?: string },
+  ): Promise<StoreResult<void>> {
+    const rows = this.items.get(jobId);
+    const item = rows?.find((i) => i.itemId === itemId);
+    if (!item) return { ok: false, error: { code: 'NOT_FOUND', message: 'item not found' } };
+    // Forward-only: don't overwrite a terminal status.
+    if (!TERMINAL_ITEM.has(item.status)) {
+      item.status = 'submitted';
+      item.rayaBatchId = args.rayaBatchId;
+      if (args.providerRef !== undefined) item.providerRef = args.providerRef;
+      this.touch(jobId);
+    }
+    return { ok: true, value: undefined };
+  }
+
+  async setProviderResponse(jobId: string, response: unknown): Promise<StoreResult<void>> {
+    const job = this.jobs.get(jobId);
+    if (!job) return { ok: false, error: { code: 'NOT_FOUND', message: 'job not found' } };
+    job.providerResponse = response;
+    this.touch(jobId);
+    return { ok: true, value: undefined };
+  }
+
   async heartbeat(jobId: string): Promise<StoreResult<void>> {
     const job = this.jobs.get(jobId);
     if (!job) return { ok: false, error: { code: 'NOT_FOUND', message: 'job not found' } };
@@ -261,6 +317,7 @@ export class InMemoryCampaignJobStore extends CampaignJobStoreBase {
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
       counts: tally(this.items.get(row.id) ?? []),
+      providerResponse: row.providerResponse,
     };
   }
 }

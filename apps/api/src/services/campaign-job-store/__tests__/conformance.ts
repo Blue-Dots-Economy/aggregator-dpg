@@ -293,4 +293,108 @@ export function runStoreConformance(
       expect(unwrap(await store.claimStalledJobs(-1))).toContain(job.id);
     });
   });
+
+  describe('createJob dedup-on-create (voice)', () => {
+    it('creates a second active item for the same (item_id, action) as duplicate_active', async () => {
+      const store = makeStore();
+      // Reuse one org across both jobs — the dedup predicate is cross-job, not
+      // scoped by tenant, but the fixture should still read as one caller
+      // submitting the same item twice.
+      const org = `org-${randomUUID().slice(0, 8)}`;
+      const itemId = randomUUID();
+      const first = unwrap(
+        await store.createJob(
+          base({ signalstackOrgId: org, items: [{ itemId, action: 'voice_call' }] }),
+        ),
+      );
+      const firstItems = unwrap(await store.getJobItems(first.job.id, org))!;
+      expect(firstItems[0]!.status).toBe('pending');
+
+      const second = unwrap(
+        await store.createJob(
+          base({ signalstackOrgId: org, items: [{ itemId, action: 'voice_call' }] }),
+        ),
+      );
+      const secondItems = unwrap(await store.getJobItems(second.job.id, org))!;
+      expect(secondItems[0]!.status).toBe('duplicate_active');
+    });
+
+    it('does not dedup a null-action (export) item — it stays pending', async () => {
+      const store = makeStore();
+      const org = `org-${randomUUID().slice(0, 8)}`;
+      const itemId = randomUUID();
+      unwrap(
+        await store.createJob(base({ signalstackOrgId: org, items: [{ itemId, action: null }] })),
+      );
+      const second = unwrap(
+        await store.createJob(base({ signalstackOrgId: org, items: [{ itemId, action: null }] })),
+      );
+      const secondItems = unwrap(await store.getJobItems(second.job.id, org))!;
+      expect(secondItems[0]!.status).toBe('pending');
+    });
+
+    it('does not dedup against an item whose prior job already resolved it terminally', async () => {
+      const store = makeStore();
+      const org = `org-${randomUUID().slice(0, 8)}`;
+      const itemId = randomUUID();
+      const first = unwrap(
+        await store.createJob(
+          base({ signalstackOrgId: org, items: [{ itemId, action: 'voice_call' }] }),
+        ),
+      );
+      // Terminal — no longer "active" — so a fresh job may target it again.
+      unwrap(await store.markItem(first.job.id, itemId, 'failed', 'provider rejected'));
+
+      const second = unwrap(
+        await store.createJob(
+          base({ signalstackOrgId: org, items: [{ itemId, action: 'voice_call' }] }),
+        ),
+      );
+      const secondItems = unwrap(await store.getJobItems(second.job.id, org))!;
+      expect(secondItems[0]!.status).toBe('pending');
+    });
+  });
+
+  describe('markSubmitted + setProviderResponse', () => {
+    it('marks an item submitted with its Raya batch id + provider ref, visible via getJobItems', async () => {
+      const store = makeStore();
+      const input = base({ items: [{ itemId: randomUUID(), action: 'voice_call' }] });
+      const { job } = unwrap(await store.createJob(input));
+      const itemId = input.items[0]!.itemId;
+      unwrap(
+        await store.markSubmitted(job.id, itemId, {
+          rayaBatchId: 'raya-batch-1',
+          providerRef: 'call-ref-1',
+        }),
+      );
+      const items = unwrap(await store.getJobItems(job.id, input.signalstackOrgId))!;
+      const item = items.find((i) => i.itemId === itemId)!;
+      expect(item.status).toBe('submitted');
+      expect(item.rayaBatchId).toBe('raya-batch-1');
+      expect(item.providerRef).toBe('call-ref-1');
+    });
+
+    it('markSubmitted is forward-only — a terminal item is not overwritten', async () => {
+      const store = makeStore();
+      const input = base({ items: [{ itemId: randomUUID(), action: 'voice_call' }] });
+      const { job } = unwrap(await store.createJob(input));
+      const itemId = input.items[0]!.itemId;
+      unwrap(await store.markItem(job.id, itemId, 'failed', 'already failed'));
+      unwrap(await store.markSubmitted(job.id, itemId, { rayaBatchId: 'raya-batch-2' }));
+      const items = unwrap(await store.getJobItems(job.id, input.signalstackOrgId))!;
+      const item = items.find((i) => i.itemId === itemId)!;
+      expect(item.status).toBe('failed');
+      expect(item.rayaBatchId).toBeNull();
+    });
+
+    it('setProviderResponse writes the raw payload, visible via getJob', async () => {
+      const store = makeStore();
+      const input = base();
+      const { job } = unwrap(await store.createJob(input));
+      const payload = { batchId: 'raya-batch-1', status: 'accepted' };
+      unwrap(await store.setProviderResponse(job.id, payload));
+      const view = unwrap(await store.getJob(job.id, input.signalstackOrgId));
+      expect(view!.providerResponse).toEqual(payload);
+    });
+  });
 }

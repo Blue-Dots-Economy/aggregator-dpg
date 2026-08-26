@@ -69,6 +69,14 @@ export interface ProcessingJobItem {
   status: CampaignJobItemStatus;
 }
 
+/** Args for {@link markSubmitted}. */
+export interface MarkSubmittedArgs {
+  /** The Raya batch id this item was submitted under. */
+  rayaBatchId: string;
+  /** External id the submission produced, when the provider returns one synchronously. */
+  providerRef?: string;
+}
+
 export interface ProcessingJob {
   id: string;
   channel: CampaignChannel;
@@ -188,6 +196,55 @@ export async function markItem(
         sql.raw(`"campaign_job_item"."status" NOT IN (${TERMINAL_SQL_LIST})`),
       ),
     );
+}
+
+/**
+ * Records that an item was submitted to the voice provider. Sets `status` to
+ * `submitted`, stamps `raya_batch_id`, and optionally `provider_ref`.
+ * Forward-only: a no-op when the item is already in a terminal status (the
+ * same retry guard as {@link markItem}).
+ *
+ * @param jobId - The job the item belongs to.
+ * @param itemId - The item that was submitted.
+ * @param args - The Raya batch id, and optionally a provider ref returned
+ *   synchronously by the submission call.
+ */
+export async function markSubmitted(
+  jobId: string,
+  itemId: string,
+  args: MarkSubmittedArgs,
+): Promise<void> {
+  const now = new Date();
+  await getDb()
+    .update(campaignJobItem)
+    .set({
+      status: 'submitted',
+      rayaBatchId: args.rayaBatchId,
+      ...(args.providerRef !== undefined ? { providerRef: args.providerRef } : {}),
+      updatedAt: now,
+      completedAt: now, // 'submitted' is always a terminal status
+    })
+    .where(
+      and(
+        eq(campaignJobItem.jobId, jobId),
+        eq(campaignJobItem.itemId, itemId),
+        sql.raw(`"campaign_job_item"."status" NOT IN (${TERMINAL_SQL_LIST})`),
+      ),
+    );
+}
+
+/**
+ * Writes the raw provider response captured for a job (voice: the Raya
+ * create+start payload), so the campaign manager can render it verbatim.
+ *
+ * @param jobId - The job to stamp.
+ * @param response - Arbitrary provider payload, stored as-is.
+ */
+export async function setProviderResponse(jobId: string, response: unknown): Promise<void> {
+  await getDb()
+    .update(campaignJob)
+    .set({ providerResponse: response, updatedAt: new Date() })
+    .where(eq(campaignJob.id, jobId));
 }
 
 /** Stamps `last_progress_at = now()` (watchdog heartbeat). */

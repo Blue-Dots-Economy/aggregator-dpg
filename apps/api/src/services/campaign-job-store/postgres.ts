@@ -13,6 +13,7 @@ import { logger } from '../../logger.js';
 import { campaignJob, campaignJobItem } from '../../db/schema.js';
 import { getDb } from '../../db/client.js';
 import {
+  ACTIVE_DEDUP_ITEM_STATUSES,
   ACTIVE_JOB_STATUSES,
   SKIPPED_ITEM_STATUSES,
   TERMINAL_ITEM_STATUSES,
@@ -34,9 +35,15 @@ import {
   type StoreResult,
 } from './interface.js';
 
+/** Matches the `campaign_job_item_active_dedup` partial unique index predicate. */
+const ACTIVE_DEDUP_WHERE = sql`status IN ('pending','resolved','submitted') AND action IS NOT NULL`;
+
 const CURSOR_SEP = '__';
 
 type JobRow = typeof campaignJob.$inferSelect;
+
+/** The transaction handle type `getDb().transaction(async (tx) => ...)` passes. */
+type CampaignTx = Parameters<Parameters<ReturnType<typeof getDb>['transaction']>[0]>[0];
 
 export class PostgresCampaignJobStore extends CampaignJobStoreBase {
   async createJob(
@@ -89,14 +96,7 @@ export class PostgresCampaignJobStore extends CampaignJobStoreBase {
         if (!row) throw new Error('campaign job insert returned no row');
 
         if (created && input.items.length > 0) {
-          await tx.insert(campaignJobItem).values(
-            input.items.map((i) => ({
-              jobId: row!.id,
-              channel: input.channel,
-              itemId: i.itemId,
-              action: i.action,
-            })),
-          );
+          await this.insertJobItems(tx, row.id, input.channel, input.items);
         }
         return { row, created };
       });
@@ -114,6 +114,87 @@ export class PostgresCampaignJobStore extends CampaignJobStoreBase {
     } catch (err) {
       return dbError('createJob', err, start);
     }
+  }
+
+  /**
+   * Inserts one item row per input, applying dedup-on-create: an item whose
+   * `action` is non-null and already active (`pending`/`resolved`/`submitted`)
+   * for the same `(itemId, action)` pair in ANY job is inserted as
+   * `duplicate_active` instead of `pending`. Runs inside the caller's
+   * transaction.
+   *
+   * Race-safe: the pre-check SELECT can go stale before the INSERT runs, if
+   * another transaction commits the same `(itemId, action)` concurrently. The
+   * insert uses `ON CONFLICT ... DO NOTHING` on the active-dedup partial index
+   * so a raced row is silently skipped rather than aborting the whole
+   * statement; any item missing from the returned rows is retried once as
+   * `duplicate_active`, a status the index never covers, so the retry can't
+   * conflict again.
+   */
+  private async insertJobItems(
+    tx: CampaignTx,
+    jobId: string,
+    channel: CampaignChannel,
+    items: CreateJobInput['items'],
+  ): Promise<void> {
+    const dupIds = await this.activeDedupIds(tx, items);
+    const rowFor = (i: CreateJobInput['items'][number], status: CampaignJobItemStatus) => ({
+      jobId,
+      channel,
+      itemId: i.itemId,
+      action: i.action,
+      status,
+    });
+
+    const values = items.map((i) =>
+      rowFor(i, i.action !== null && dupIds.has(i.itemId) ? 'duplicate_active' : 'pending'),
+    );
+
+    const inserted = await tx
+      .insert(campaignJobItem)
+      .values(values)
+      .onConflictDoNothing({
+        target: [campaignJobItem.itemId, campaignJobItem.action],
+        where: ACTIVE_DEDUP_WHERE,
+      })
+      .returning({ itemId: campaignJobItem.itemId });
+
+    const insertedIds = new Set(inserted.map((r) => r.itemId));
+    const raced = items.filter(
+      (i) => i.action !== null && !dupIds.has(i.itemId) && !insertedIds.has(i.itemId),
+    );
+    if (raced.length > 0) {
+      await tx.insert(campaignJobItem).values(raced.map((i) => rowFor(i, 'duplicate_active')));
+    }
+  }
+
+  /** Item ids (from the batch) already active elsewhere for the same `(itemId, action)`. */
+  private async activeDedupIds(
+    tx: CampaignTx,
+    items: CreateJobInput['items'],
+  ): Promise<Set<string>> {
+    const dup = new Set<string>();
+    const byAction = new Map<string, string[]>();
+    for (const i of items) {
+      if (i.action === null) continue;
+      const ids = byAction.get(i.action) ?? [];
+      ids.push(i.itemId);
+      byAction.set(i.action, ids);
+    }
+    for (const [action, ids] of byAction) {
+      const rows = await tx
+        .select({ itemId: campaignJobItem.itemId })
+        .from(campaignJobItem)
+        .where(
+          and(
+            eq(campaignJobItem.action, action),
+            inArray(campaignJobItem.itemId, ids),
+            inArray(campaignJobItem.status, [...ACTIVE_DEDUP_ITEM_STATUSES]),
+          ),
+        );
+      for (const r of rows) dup.add(r.itemId);
+    }
+    return dup;
   }
 
   async countActiveJobs(
@@ -306,6 +387,50 @@ export class PostgresCampaignJobStore extends CampaignJobStoreBase {
     }
   }
 
+  async markSubmitted(
+    jobId: string,
+    itemId: string,
+    args: { rayaBatchId: string; providerRef?: string },
+  ): Promise<StoreResult<void>> {
+    const start = Date.now();
+    try {
+      const now = new Date();
+      await getDb()
+        .update(campaignJobItem)
+        .set({
+          status: 'submitted',
+          rayaBatchId: args.rayaBatchId,
+          ...(args.providerRef !== undefined ? { providerRef: args.providerRef } : {}),
+          updatedAt: now,
+          completedAt: now, // 'submitted' is always a terminal status
+        })
+        .where(
+          and(
+            eq(campaignJobItem.jobId, jobId),
+            eq(campaignJobItem.itemId, itemId),
+            // Forward-only: skip rows already in a terminal status.
+            sql.raw(`"campaign_job_item"."status" NOT IN (${terminalItemStatusSqlList()})`),
+          ),
+        );
+      return { ok: true, value: undefined };
+    } catch (err) {
+      return dbError('markSubmitted', err, start);
+    }
+  }
+
+  async setProviderResponse(jobId: string, response: unknown): Promise<StoreResult<void>> {
+    const start = Date.now();
+    try {
+      await getDb()
+        .update(campaignJob)
+        .set({ providerResponse: response, updatedAt: new Date() })
+        .where(eq(campaignJob.id, jobId));
+      return { ok: true, value: undefined };
+    } catch (err) {
+      return dbError('setProviderResponse', err, start);
+    }
+  }
+
   async heartbeat(jobId: string): Promise<StoreResult<void>> {
     const start = Date.now();
     try {
@@ -413,6 +538,7 @@ function toView(row: JobRow, counts: JobStatusCounts): JobView {
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     counts,
+    providerResponse: row.providerResponse,
   };
 }
 
@@ -422,6 +548,7 @@ function toItemView(row: typeof campaignJobItem.$inferSelect): JobItemView {
     action: row.action,
     status: row.status,
     providerRef: row.providerRef,
+    rayaBatchId: row.rayaBatchId,
     skipReason: row.skipReason,
     errorReason: row.errorReason,
   };

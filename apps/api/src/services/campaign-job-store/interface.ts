@@ -142,6 +142,8 @@ export interface JobItemView {
   status: CampaignJobItemStatus;
   /** External id this item produced (voice: Raya call id; email: message id). */
   providerRef: string | null;
+  /** Voice: the Raya batch id this item was submitted under. */
+  rayaBatchId: string | null;
   /** Why the item was skipped, when `status` is one of the skip terminals. */
   skipReason: string | null;
   errorReason: string | null;
@@ -158,6 +160,8 @@ export interface JobView {
   createdAt: Date;
   updatedAt: Date;
   counts: JobStatusCounts;
+  /** Raw provider response captured for the campaign manager (voice: Raya create+start payload). */
+  providerResponse: unknown | null;
 }
 
 /** Unscoped projection the worker loads to process a job (no tenant filter — the jobId comes from the trusted queue). */
@@ -219,6 +223,12 @@ export abstract class CampaignJobStoreBase {
    * Creates a job and its item rows in one transaction. Idempotent on
    * `idempotencyKey`: a replayed key returns the original job with
    * `created:false` (and enqueues nothing new — the caller checks the flag).
+   *
+   * Dedup-on-create: an item whose `action` is non-null and which is already
+   * active (`pending`/`resolved`/`submitted`) for the same `(itemId, action)`
+   * pair in ANY job is inserted as `duplicate_active` instead of `pending`, so
+   * a channel handler can never act on the same item twice concurrently.
+   * Items with a null `action` (export) are never deduplicated.
    */
   abstract createJob(
     input: CreateJobInput,
@@ -273,6 +283,31 @@ export abstract class CampaignJobStoreBase {
     reason?: string,
     providerRef?: string,
   ): Promise<StoreResult<void>>;
+
+  /**
+   * Records that an item was submitted to the voice provider. Sets `status`
+   * to `submitted`, stamps `rayaBatchId`, and optionally `providerRef`.
+   * Forward-only: a no-op when the item is already in a terminal status (the
+   * same retry guard as {@link markItem}).
+   *
+   * @param args.rayaBatchId - The Raya batch id this item was submitted under.
+   * @param args.providerRef - External id the submission produced, when the
+   *   provider returns one synchronously. Omitted values leave the column
+   *   untouched.
+   */
+  abstract markSubmitted(
+    jobId: string,
+    itemId: string,
+    args: { rayaBatchId: string; providerRef?: string },
+  ): Promise<StoreResult<void>>;
+
+  /**
+   * Writes the raw provider response captured for a job (voice: the Raya
+   * create+start payload), so the campaign manager can render it verbatim.
+   *
+   * @param response - Arbitrary provider payload, stored as-is.
+   */
+  abstract setProviderResponse(jobId: string, response: unknown): Promise<StoreResult<void>>;
 
   /** Stamps `last_progress_at = now()` (watchdog heartbeat). */
   abstract heartbeat(jobId: string): Promise<StoreResult<void>>;
