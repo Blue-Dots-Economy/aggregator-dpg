@@ -6,7 +6,10 @@
  * The matrix here is the specification for #692: the dump route has no org
  * scoping, so the calling identity is its only control, and BOTH directions
  * must hold — a coordinator token cannot reach the dump, and a system token
- * cannot reach the org-scoped PII routes.
+ * cannot reach the org-scoped PII routes. Each 403 case pins its
+ * `fields.reason` too, not just the status: several fixtures are 403 for
+ * different reasons (wrong azp vs. wrong username vs. no aggregator_id), and
+ * asserting status alone can't tell those apart or prove which gate fired.
  *
  * @module apps/api/campaign/__tests__/auth.test
  */
@@ -55,6 +58,16 @@ const PORTAL_SERVICE_CLAIMS = {
   preferred_username: 'service-account-aggregator-bff',
 };
 
+/**
+ * A campaign-manager-azp token with no `preferred_username` claim at all —
+ * the case `campaignDumpServiceAccount()`'s non-empty fallback exists to
+ * protect against (an empty expected value would otherwise match this).
+ */
+const NO_USERNAME_CLAIMS = {
+  sub: 'no-username-uuid',
+  azp: 'campaign-manager',
+};
+
 describe('campaign auth', () => {
   beforeEach(() => {
     _resetJwks();
@@ -70,6 +83,8 @@ describe('campaign auth', () => {
           return MISPROVISIONED_SYSTEM_CLAIMS;
         case 'portal':
           return PORTAL_SERVICE_CLAIMS;
+        case 'no-username':
+          return NO_USERNAME_CLAIMS;
         default:
           throw new Error('invalid token');
       }
@@ -91,27 +106,36 @@ describe('campaign auth', () => {
       });
     });
 
-    it('rejects a coordinator token on the same client with 403', async () => {
+    it('rejects a coordinator token on the same client with 403 — wrong username', async () => {
       await expect(requireCampaignSystemAuth(req('coordinator'))).rejects.toMatchObject({
-        statusCode: 403,
+        status: 403,
+        fields: { reason: 'NOT_SYSTEM_CLIENT' },
       });
     });
 
     it('rejects a portal/BFF service token with 403 — wrong azp', async () => {
       await expect(requireCampaignSystemAuth(req('portal'))).rejects.toMatchObject({
-        statusCode: 403,
+        status: 403,
+        fields: { reason: 'AZP_NOT_ALLOWED' },
       });
     });
 
     it('rejects a missing token with 401', async () => {
       await expect(requireCampaignSystemAuth(req())).rejects.toMatchObject({
-        statusCode: 401,
+        status: 401,
       });
     });
 
     it('rejects an unverifiable token with 401', async () => {
       await expect(requireCampaignSystemAuth(req('garbage'))).rejects.toMatchObject({
-        statusCode: 401,
+        status: 401,
+      });
+    });
+
+    it('rejects a token with no preferred_username claim at all', async () => {
+      await expect(requireCampaignSystemAuth(req('no-username'))).rejects.toMatchObject({
+        status: 403,
+        fields: { reason: 'NOT_SYSTEM_CLIENT' },
       });
     });
 
@@ -123,7 +147,8 @@ describe('campaign auth', () => {
     it('does not disable the gate when the expected username is empty', async () => {
       process.env.CAMPAIGN_DUMP_SERVICE_ACCOUNT = '';
       await expect(requireCampaignSystemAuth(req('coordinator'))).rejects.toMatchObject({
-        statusCode: 403,
+        status: 403,
+        fields: { reason: 'NOT_SYSTEM_CLIENT' },
       });
       const ctx = await requireCampaignSystemAuth(req('system'));
       expect(ctx.username).toBe('service-account-campaign-manager');
@@ -137,15 +162,17 @@ describe('campaign auth', () => {
       expect(ctx.signalstackOrgId).toBe('org_5d3b7fa4');
     });
 
-    it('rejects the system token with 403', async () => {
+    it('rejects the system token with 403 — the pre-existing missing-aggregator_id path, since a correctly-provisioned service account never reaches the new guard', async () => {
       await expect(requireCampaignAuth(req('system'))).rejects.toMatchObject({
-        statusCode: 403,
+        status: 403,
+        fields: { reason: 'MISSING_AGGREGATOR_ID' },
       });
     });
 
-    it('rejects a misprovisioned service account with 403 even though it has an org id', async () => {
+    it('rejects a misprovisioned service account with 403 even though it has an org id — the new reverse-direction guard', async () => {
       await expect(requireCampaignAuth(req('misprovisioned'))).rejects.toMatchObject({
-        statusCode: 403,
+        status: 403,
+        fields: { reason: 'SYSTEM_TOKEN_NOT_PERMITTED' },
       });
     });
   });

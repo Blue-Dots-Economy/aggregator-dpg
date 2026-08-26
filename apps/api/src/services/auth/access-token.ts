@@ -349,6 +349,9 @@ async function backfillSignalstackOrgId(ctx: AuthContext): Promise<void> {
  * @param opts.allowedAzp - Per-call `azp` allow-list that OVERRIDES the global
  *   `KEYCLOAK_ALLOWED_AZP`. Needed by the campaign dump route, whose client is
  *   deliberately excluded from the global list. Omitted ⇒ prior behaviour.
+ * @returns `ok: true` with the projected {@link AnyAuthContext} when the token
+ *   verifies; otherwise `ok: false` with a `MISSING_TOKEN`, `INVALID_TOKEN`, or
+ *   `AZP_NOT_ALLOWED` error code and message.
  */
 export async function authenticateAny(
   req: FastifyRequest,
