@@ -79,7 +79,7 @@ export async function registerCampaignDumpRoutes(app: FastifyInstance): Promise<
         tags: ['campaign'],
         summary: 'Download the latest non-PII Signals dump',
         description:
-          'Returns a short-lived pre-signed URL for each of the three objects in the latest non-PII Signals snapshot (user, items, item_actions), so the caller needs no S3 credentials. Requires the campaign-manager SYSTEM token (client_credentials grant); a coordinator token is rejected. Whole-network and not org-scoped. The exporter overwrites the three objects in place with no cross-object atomicity, so each file carries its own last_modified: a caller that lands mid-run will see them disagree and should retry. Returns all three files or an error, never a partial list.',
+          'Returns a short-lived pre-signed URL for each of the three objects in the latest non-PII Signals snapshot (user, items, item_actions), so the caller needs no S3 credentials. Each URL expires after CAMPAIGN_DUMP_URL_TTL_SECONDS (default 600s); fetch and download promptly rather than caching it. Requires the campaign-manager SYSTEM token (client_credentials grant); a coordinator token is rejected. Whole-network and not org-scoped. The exporter overwrites the three objects in place with no cross-object atomicity, so each file carries its own last_modified: a caller that lands mid-run will see them disagree and should retry. Returns all three files or an error, never a partial list.',
         security: [{ bearerAuth: [] }],
         response: {
           200: dumpResponseSchema,
