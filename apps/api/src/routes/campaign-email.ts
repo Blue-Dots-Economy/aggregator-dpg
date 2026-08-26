@@ -19,13 +19,13 @@
  * returns PII — recipient addresses are resolved server-side in the worker and
  * never leave the aggregator. Belongs to `@aggregator-dpg/api`.
  */
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { unknownPlaceholders } from '@aggregator-dpg/campaign-template';
 import { getCampaignJobStore } from '../services/campaign-job-store/index.js';
-import { enqueueCampaignProcess } from '../services/campaign-process-queue/index.js';
 import { campaignEnvelopeSchema, dedupeItemIds } from '../campaign/envelope.js';
 import { requireCampaignAuth, requireOrgId } from '../campaign/auth.js';
+import { submitCampaignJob, readIdempotencyKey } from '../campaign/submit.js';
 import { consume } from '../services/rate-limiter/index.js';
 import { config } from '../config.js';
 import { httpError } from '../errors/http-error.js';
@@ -118,10 +118,13 @@ export async function registerCampaignEmailRoutes(app: FastifyInstance): Promise
       }
 
       const idempotencyKey = readIdempotencyKey(req);
-      const created = await store.createJob({
+      const jobId = await submitCampaignJob({
+        req,
+        store,
+        channel: 'email',
         aggregatorId: auth.aggregatorId,
         signalstackOrgId: orgId,
-        channel: 'email',
+        itemIds,
         metadata: envelope.metadata,
         // The template lives on the job row, so a retried/replayed job re-reads
         // exactly what was submitted rather than trusting a queue payload.
@@ -129,62 +132,22 @@ export async function registerCampaignEmailRoutes(app: FastifyInstance): Promise
         // Audit trail only — the email channel resolves every recipient from
         // the decrypt, so this is never used as a destination.
         requestedBy: auth.email ?? auth.aggregatorId,
-        requestId: req.id,
         ...(idempotencyKey ? { idempotencyKey } : {}),
-        // `action: null` keeps email out of the item-level active-dedup
-        // predicate — dedup is ON for voice only (batch spec §3.2).
-        items: itemIds.map((id) => ({ itemId: id, action: null })),
+        // Retries are safe here: the worker's per-item terminal guard means a
+        // retried job re-emails nobody already marked `sent`.
+        attempts: config.CAMPAIGN_EMAIL_ATTEMPTS,
+        enqueueErrorCode: 'EMAIL_ENQUEUE_FAILED',
+        // `action` defaults to null, keeping email out of the item-level
+        // active-dedup predicate — dedup is ON for voice only (batch spec §3.2).
       });
-      if (!created.ok) throw httpError('INTERNAL', { detail: 'could not create campaign job' });
-
-      // Enqueue on first creation, and ALSO on a replay whose job is still
-      // `queued` — that means a previous enqueue never landed, and returning
-      // 202 again without re-queuing would promise a send that never runs.
-      // BullMQ de-duplicates on jobId, so a redundant add is a no-op, and the
-      // worker's per-item terminal guard means even a genuine double-run
-      // re-emails nobody already `sent`.
-      const needsEnqueue = created.value.created || created.value.job.status === 'queued';
-      if (needsEnqueue) {
-        try {
-          await enqueueCampaignProcess(
-            { jobId: created.value.job.id },
-            { attempts: config.CAMPAIGN_EMAIL_ATTEMPTS },
-          );
-        } catch (cause) {
-          // The row is already committed. Leaving it `queued` strands it: the
-          // watchdog only reaps `processing`, and `queued` counts against
-          // CAMPAIGN_EMAIL_MAX_ACTIVE_PER_ORG, so repeated Redis blips would
-          // permanently wedge the org's cap. Mark it failed so the state is
-          // truthful and the slot is released.
-          const reason = cause instanceof Error ? cause.message : 'failed to enqueue email';
-          const marked = await store.setJobStatus(created.value.job.id, 'failed', 'enqueue_failed');
-          if (!marked.ok) {
-            req.log.error({
-              operation: 'campaignEmail.enqueue',
-              status: 'failure',
-              job_id: created.value.job.id,
-              error: 'could not mark the un-enqueued job failed',
-            });
-          }
-          throw httpError('EMAIL_ENQUEUE_FAILED', { detail: reason });
-        }
-      }
 
       return reply.code(202).send({
         status: 'queued' as const,
         requested: itemIds.length,
-        job_id: created.value.job.id,
+        job_id: jobId,
         message:
           'Your campaign email has been queued. Poll GET /v1/campaign/email/{job_id} for per-recipient outcomes.',
       });
     },
   );
-}
-
-/** Reads the `Idempotency-Key` request header (Fastify lowercases header names). */
-function readIdempotencyKey(req: FastifyRequest): string | undefined {
-  const raw = req.headers['idempotency-key'];
-  const value = Array.isArray(raw) ? raw[0] : raw;
-  const trimmed = value?.trim();
-  return trimmed || undefined;
 }

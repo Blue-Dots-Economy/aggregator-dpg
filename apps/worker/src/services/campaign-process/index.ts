@@ -219,6 +219,49 @@ interface DecryptOptions {
 }
 
 /**
+ * Decrypts one chunk of items, or throws.
+ *
+ * @throws {Error} On a transient upstream failure (so BullMQ retries), or when
+ *   a contact projection comes back with no contact block — an older Signals
+ *   that strips it would otherwise make every recipient look address-less and
+ *   ship an all-empty export (cross-repo contract guard, Signals #521).
+ */
+async function decryptChunk(
+  job: ProcessingJob,
+  deps: CampaignJobDeps,
+  options: DecryptOptions,
+  chunk: string[],
+): Promise<SignalStackDecryptedProfiles> {
+  const query: SignalStackFetchDecryptedProfilesQuery = {
+    actingOrgId: job.signalstackOrgId,
+    itemIds: chunk,
+    // contact-only projection: no item_state (fields:[]), just the contact
+    // fields this channel needs, with provenance (Signals #521). The `full`
+    // export projection omits both keys.
+    ...(options.contact ? { fields: [], contact: options.contact } : {}),
+    ...(job.requestId ? { requestId: job.requestId } : {}),
+  };
+  const result = await deps.fetchDecryptedProfiles(query);
+  if (!result.success) {
+    throw new Error(
+      `campaign ${job.channel} decrypt failed: ${result.error.code}: ${result.error.message}`,
+    );
+  }
+
+  const { profiles } = result.value;
+  const contactBlockMissing =
+    options.contact !== null &&
+    profiles.length > 0 &&
+    !profiles.some((p) => p.contact !== undefined);
+  if (contactBlockMissing) {
+    throw new Error(
+      `campaign ${job.channel} decrypt returned no contact block — Signals participant/decrypt predates #521`,
+    );
+  }
+  return result.value;
+}
+
+/**
  * Decrypts the requested items in chunks, marking unowned ids
  * `skipped_not_owned` (and resolved ones `resolved` when asked) while beating
  * the heartbeat per chunk. Re-throws on a transient decrypt failure or the #521
@@ -230,37 +273,9 @@ async function decryptAndMarkItems(
   options: DecryptOptions,
 ): Promise<SignalStackDecryptedProfileRow[]> {
   const resolvedRows: SignalStackDecryptedProfileRow[] = [];
-  const contactOnly = options.contact !== null;
 
   for (const chunk of chunkArray(options.itemIds, deps.config.decryptChunk)) {
-    const query: SignalStackFetchDecryptedProfilesQuery = {
-      actingOrgId: job.signalstackOrgId,
-      itemIds: chunk,
-      // contact-only projection: no item_state (fields:[]), just the contact
-      // fields this channel needs, with provenance (Signals #521). The `full`
-      // export projection omits both keys.
-      ...(options.contact ? { fields: [], contact: options.contact } : {}),
-      ...(job.requestId ? { requestId: job.requestId } : {}),
-    };
-    const result = await deps.fetchDecryptedProfiles(query);
-    if (!result.success) {
-      // Transient upstream failure — re-throw so BullMQ retries (items marked so
-      // far persist; forward-only marks keep them on retry).
-      throw new Error(
-        `campaign ${job.channel} decrypt failed: ${result.error.code}: ${result.error.message}`,
-      );
-    }
-    const { profiles, skipped } = result.value;
-
-    // Cross-repo contract guard (Signals #521): a contact projection that comes
-    // back with no contact block means an older Signals stripped it — fail loud
-    // rather than ship an all-empty export or email every recipient as
-    // address-less.
-    if (contactOnly && profiles.length > 0 && !profiles.some((p) => p.contact !== undefined)) {
-      throw new Error(
-        `campaign ${job.channel} decrypt returned no contact block — Signals participant/decrypt predates #521`,
-      );
-    }
+    const { profiles, skipped } = await decryptChunk(job, deps, options, chunk);
 
     for (const p of profiles) {
       resolvedRows.push(p);

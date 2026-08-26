@@ -20,13 +20,13 @@
  * export via the request body. The route never returns PII — only `{ job_id }`.
  * Belongs to `@aggregator-dpg/api`.
  */
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
 import { getCampaignJobStore } from '../services/campaign-job-store/index.js';
-import { enqueueCampaignProcess } from '../services/campaign-process-queue/index.js';
 import { campaignEnvelopeSchema, dedupeItemIds } from '../campaign/envelope.js';
 import { requireCampaignAuth, requireOrgId } from '../campaign/auth.js';
+import { submitCampaignJob, readIdempotencyKey } from '../campaign/submit.js';
 import { consume } from '../services/rate-limiter/index.js';
 import { config } from '../config.js';
 import { httpError } from '../errors/http-error.js';
@@ -118,65 +118,28 @@ export async function registerCampaignExportRoutes(app: FastifyInstance): Promis
       }
 
       const idempotencyKey = readIdempotencyKey(req);
-      const created = await store.createJob({
+      const jobId = await submitCampaignJob({
+        req,
+        store,
+        channel: 'export',
         aggregatorId: auth.aggregatorId,
         signalstackOrgId: orgId,
-        channel: 'export',
+        itemIds,
         metadata: envelope.metadata,
         content: envelope.content,
         requestedBy: recipientEmail,
-        requestId: req.id,
         ...(idempotencyKey ? { idempotencyKey } : {}),
-        items: itemIds.map((id) => ({ itemId: id, action: null })),
+        attempts: config.CAMPAIGN_EXPORT_ATTEMPTS,
+        enqueueErrorCode: 'EXPORT_ENQUEUE_FAILED',
       });
-      if (!created.ok) throw httpError('INTERNAL', { detail: 'could not create campaign job' });
-
-      // Enqueue on first creation, and ALSO on a replay whose job is still
-      // `queued` — that means a previous enqueue never landed, and returning
-      // 202 again without re-queuing would promise an export that never runs.
-      // BullMQ de-duplicates on jobId, so a redundant add is a no-op.
-      const needsEnqueue = created.value.created || created.value.job.status === 'queued';
-      if (needsEnqueue) {
-        try {
-          await enqueueCampaignProcess(
-            { jobId: created.value.job.id },
-            { attempts: config.CAMPAIGN_EXPORT_ATTEMPTS },
-          );
-        } catch (cause) {
-          // The row is already committed. Leaving it `queued` strands it: the
-          // watchdog only reaps `processing`, and `queued` counts against
-          // CAMPAIGN_EXPORT_MAX_ACTIVE_PER_ORG, so repeated Redis blips would
-          // permanently wedge the org's cap. Mark it failed so the state is
-          // truthful and the slot is released.
-          const reason = cause instanceof Error ? cause.message : 'failed to enqueue export';
-          const marked = await store.setJobStatus(created.value.job.id, 'failed', 'enqueue_failed');
-          if (!marked.ok) {
-            req.log.error({
-              operation: 'campaignExport.enqueue',
-              status: 'failure',
-              job_id: created.value.job.id,
-              error: 'could not mark the un-enqueued job failed',
-            });
-          }
-          throw httpError('EXPORT_ENQUEUE_FAILED', { detail: reason });
-        }
-      }
 
       return reply.code(202).send({
         status: 'queued' as const,
         requested: itemIds.length,
-        job_id: created.value.job.id,
+        job_id: jobId,
         message:
           'Export request submitted. A secure, time-limited download link will be emailed to your registered address once the export is ready.',
       });
     },
   );
-}
-
-/** Reads the `Idempotency-Key` request header (Fastify lowercases header names). */
-function readIdempotencyKey(req: FastifyRequest): string | undefined {
-  const raw = req.headers['idempotency-key'];
-  const value = Array.isArray(raw) ? raw[0] : raw;
-  const trimmed = value?.trim();
-  return trimmed || undefined;
 }
