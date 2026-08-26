@@ -716,8 +716,27 @@ a 200 there proves only that the process is up. Run a real query:
 curl -sS -X POST http://localhost:3110/v1/search \
   -H 'content-type: application/json' \
   -H "x-api-key: $SIGNALS_SEARCH_API_KEY" \
-  -d '{"context":{"networkId":"blue_dot","domain":"seeker"},
-       "message":{"intent":{"text":"electrician in Ghaziabad"}}}'
+  -d '{
+        "context": {
+          "messageId": "local-smoke-1",
+          "networkId": "blue_dot",
+          "domain": "seeker",
+          "itemType": "job_1.0"
+        },
+        "message": { "intent": { "text": "electrician in Ghaziabad" } }
+      }'
+```
+
+All four `context` fields are **required** — omitting `messageId` or `itemType`
+gets you a `400 VALIDATION_ERROR`, not a 401, because validation runs before auth.
+`itemType` must be a type the mounted `network.json` actually declares for that
+domain.
+
+A `200` with a `message.items` array means the whole chain worked: apikey row →
+network config → embedder → pgvector index. Verified responses look like:
+
+```json
+{"context":{...},"message":{"items":[],"meta":{"total":0,"limit":20,"offset":0}}}
 ```
 
 TEI warms up for ~30-60s on CPU before it can serve; an empty `results` array
