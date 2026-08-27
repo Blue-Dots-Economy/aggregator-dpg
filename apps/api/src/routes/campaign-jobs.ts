@@ -82,11 +82,17 @@ export async function registerCampaignJobRoutes(
         response: {
           200: jobSummarySchema.extend({
             metadata: metadataSchema,
+            // Raw provider payload captured for the campaign manager (voice:
+            // the Raya create+start response). Curated to a PII-safe field
+            // whitelist by the writer — safe to return as-is.
+            provider_response: z.unknown().nullable(),
             items: z.array(
               z.object({
                 item_id: z.string(),
                 status: itemStatusSchema,
                 provider_ref: z.string().nullable(),
+                // Voice: the Raya batch id this item was submitted under.
+                raya_batch_id: z.string().nullable(),
                 skip_reason: z.string().nullable(),
                 error_reason: z.string().nullable(),
               }),
@@ -118,10 +124,12 @@ export async function registerCampaignJobRoutes(
         status: job.value.status,
         counts: job.value.counts,
         metadata: job.value.metadata,
+        provider_response: job.value.providerResponse,
         items: (items.value ?? []).map((i) => ({
           item_id: i.itemId,
           status: i.status,
           provider_ref: i.providerRef,
+          raya_batch_id: i.rayaBatchId,
           skip_reason: i.skipReason,
           error_reason: i.errorReason,
         })),
