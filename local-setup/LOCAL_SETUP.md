@@ -214,15 +214,16 @@ docker compose logs -f aggregator-api      # migrations + upstream calls
 
 **Everything else** — APIs, admin consoles & datastores, for debugging / direct access:
 
-| Service          | URL                         | Credentials / notes                                                                       |
-| ---------------- | --------------------------- | ----------------------------------------------------------------------------------------- |
-| Aggregator API   | http://localhost:4000       | — (`/health/live`)                                                                        |
-| Signals API      | http://localhost:2742       | apikey (`/reference` for Swagger)                                                         |
-| Keycloak admin   | http://localhost:8080/admin | `admin` / `KC_ADMIN_PASSWORD` from `.env`                                                 |
-| MinIO console    | http://localhost:9001       | `minioadmin` / `MINIO_ROOT_PASSWORD`                                                      |
-| Postgres         | localhost:5432              | `dpg` / `POSTGRES_PASSWORD` (one shared server; dbs: `aggregator`, `signals`, `keycloak`) |
-| signals-redis    | localhost:5555              | password-protected (`SIGNALS_REDIS_PASSWORD`)                                             |
-| aggregator-redis | localhost:6379              | —                                                                                         |
+| Service          | URL                         | Credentials / notes                                                                                             |
+| ---------------- | --------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| Aggregator API   | http://localhost:4000       | — (`/health/live`)                                                                                              |
+| Signals API      | http://localhost:2742       | apikey (`/reference` for Swagger)                                                                               |
+| Keycloak admin   | http://localhost:8080/admin | `admin` / `KC_ADMIN_PASSWORD` from `.env`                                                                       |
+| MinIO console    | http://localhost:9001       | `minioadmin` / `MINIO_ROOT_PASSWORD`                                                                            |
+| Postgres         | localhost:5432              | `dpg` / `POSTGRES_PASSWORD` (one shared server; dbs: `aggregator`, `signals`, `keycloak`)                       |
+| signals-redis    | localhost:5555              | password-protected (`SIGNALS_REDIS_PASSWORD`)                                                                   |
+| Signals Search   | http://localhost:3110       | opt-in `--profile search` (§10). **3110, not 3100** — the portal owns 3100. `POST /v1/search` needs `x-api-key` |
+| aggregator-redis | localhost:6379              | —                                                                                                               |
 
 > Ports mirror each project's own guide (`signals-dpg/SETUP.md`,
 > `aggregator-dpg/QUICKSTART.md`) so nothing conflicts conceptually. The one
@@ -551,7 +552,7 @@ Step 2 (`db:push:api` / `db:init:api` / `db:seed:services:api`) and Step 3
 
 | Symptom                                                                                                                                                               | Cause / fix                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `port is already allocated` on `up`                                                                                                                                   | Another local process holds one of the host ports (`5432`, `5555`, `6379`, `8080`, `5173`, `2742`, `3100`, `4000`, `8025`, `9000/9001`). Stop it, or edit the host-port mapping in `docker-compose.yml`. Host-native processes (e.g. a Homebrew Postgres on 5432) are NOT freed by stopping Docker containers.                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `port is already allocated` on `up`                                                                                                                                   | Another local process holds one of the host ports (`5432`, `5555`, `6379`, `8080`, `5173`, `2742`, `3100`, `3110` with `--profile search`, `4000`, `8025`, `9000/9001`). Stop it, or edit the host-port mapping in `docker-compose.yml`. Host-native processes (e.g. a Homebrew Postgres on 5432) are NOT freed by stopping Docker containers.                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | Browser can't reach `http://keycloak:8080` / login redirect fails                                                                                                     | Missing `127.0.0.1 keycloak` in `/etc/hosts` (§2.1). Re-add and retry.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | Login redirects to `/login?error=invalid_flow_cookie`                                                                                                                 | Portal is HTTP but cookies are Secure. The unified compose sets `COOKIE_SECURE=false`; if you changed it, revert and `docker compose up -d aggregator-web`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `403 MISSING_AGGREGATOR_ID` on the profile endpoint                                                                                                                   | Keycloak `aggregator_id` mapper missing. The unified realm bakes it in — if you swapped realms, re-import (`down -v` + `up`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
@@ -631,3 +632,114 @@ Step 2 (`db:push:api` / `db:init:api` / `db:seed:services:api`) and Step 3
   for the two-project layout.
 - `../CLAUDE.md` (aggregator-dpg repo root) — the authoritative agent/dev doc
   for this repo.
+
+---
+
+## 10. Optional — signals-search (relevance ranking + match score)
+
+Without this, discover returns results in **recency order** and match scores are
+unavailable. Adding it gives the aggregator flows relevance-ranked search from the
+same stack.
+
+> **The canonical documentation for signals-search's configuration lives in
+> `signals-dpg/local-setup/LOCAL_SETUP.md` §7** — the apikey-table auth, the
+> `network.json` requirements, the four-place embedding-dimension lock, and the
+> error-keyed troubleshooting table. It is deliberately not duplicated here; two
+> copies of that detail would drift. This section covers only what differs in the
+> unified stack.
+
+### 10.1 Bring it up
+
+```bash
+cd aggregator-dpg/local-setup
+cp .env.search.example .env.search      # then mint the apikey, §10.3
+docker compose --profile search up -d
+```
+
+Adds three services — `sd-signals-search-api`, `sd-signals-search-worker` and
+`sd-tei-embeddings`. Both images are **public on GHCR**: no `docker login`, and
+no `signals-search` checkout (unlike signals-dpg and aggregator-dpg, which this
+stack builds from source, signals-search is pulled prebuilt).
+
+> **Every `--profile search` command needs the flag**, `down` and `ps` included.
+
+> **On Apple Silicon / arm64 these run emulated.** Both images are amd64-only, so
+> the compose pins `platform: linux/amd64` — without it the pull fails with
+> `no matching manifest for linux/arm64/v8`. It works (bge-m3 serves a 1024-dim
+> embedding ~35s after start on an M-series host), just slower. Upstream TEI has
+> no arm64 build, so the embedder cannot be made native; the search app can, via
+> `SIGNALS_SEARCH_IMAGE=signals-search:local` + `SEARCH_PLATFORM=linux/arm64`.
+
+### 10.2 What differs from signals-dpg's own stack
+
+|                      | signals-dpg stack       | here                                                                                                                                                                                |
+| -------------------- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Search API host port | `3100`                  | **`3110`** — the aggregator portal already owns 3100. The container still listens on 3100, so in-compose URLs are unchanged.                                                        |
+| Database             | the single `postgresdb` | the **`signals`** database specifically; this Postgres also holds `aggregator` and `keycloak`. Pointing search at the wrong one gives `401`s (no `apikey` rows) and an empty index. |
+| Redis                | `redis`                 | `signals-redis` — signals-search shares the _signals_ Redis, because that is where the ingestion stream lives. Not `aggregator-redis`.                                              |
+| `network.json`       | `../examples/...`       | `../../signals-dpg/examples/schemas/blue_dot/network.json` — from the sibling checkout, so both services agree on domains and permitted interactions.                               |
+| Memory               | +3-4 GB                 | +3-4 GB **on top of an already ~11-container stack**. This guide's §2 asks for ≥6 GB; with search, budget **≥10 GB**.                                                               |
+
+### 10.3 The apikey and the two-var-set trap
+
+Identical to signals-dpg's §7.3/§7.4, and both apply here:
+
+```bash
+# Mint the service apikey (prints sk_signals_… on FIRST run only)
+docker compose run --rm signals-bootstrap sh -lc "pnpm --filter api db:seed:services"
+```
+
+Then in `.env.search` — note the **same URL under two different variable names**,
+because discover and match-score read separate config blocks:
+
+```bash
+SIGNALS_SEARCH_URL=http://signals-search-api:3100        # discover
+MATCH_SCORE_PROVIDER=signals_search                       # match score
+SIGNALS_SEARCH_ENDPOINT=http://signals-search-api:3100    # match score (same value!)
+SIGNALS_SEARCH_API_KEY=<raw key from above>
+```
+
+Use the **compose service name and container port** (`signals-search-api:3100`),
+not `localhost:3110` — that mapping is for your browser and curl, not for
+container-to-container calls.
+
+Setting only the first pair leaves every match-score call returning
+`503 MATCH_SCORE_NOT_CONFIGURED`; setting only the second leaves the UI showing
+"Showing basic matches — relevance ranking is temporarily unavailable".
+
+### 10.4 Smoke test
+
+`/health` is unauthenticated and checks neither the database nor the embedder, so
+a 200 there proves only that the process is up. Run a real query:
+
+```bash
+curl -sS -X POST http://localhost:3110/v1/search \
+  -H 'content-type: application/json' \
+  -H "x-api-key: $SIGNALS_SEARCH_API_KEY" \
+  -d '{
+        "context": {
+          "messageId": "local-smoke-1",
+          "networkId": "blue_dot",
+          "domain": "seeker",
+          "itemType": "job_1.0"
+        },
+        "message": { "intent": { "text": "electrician in Ghaziabad" } }
+      }'
+```
+
+All four `context` fields are **required** — omitting `messageId` or `itemType`
+gets you a `400 VALIDATION_ERROR`, not a 401, because validation runs before auth.
+`itemType` must be a type the mounted `network.json` actually declares for that
+domain.
+
+A `200` with a `message.items` array means the whole chain worked: apikey row →
+network config → embedder → pgvector index. Verified responses look like:
+
+```json
+{"context":{...},"message":{"items":[],"meta":{"total":0,"limit":20,"offset":0}}}
+```
+
+TEI warms up for ~30-60s on CPU before it can serve; an empty `results` array
+usually just means the worker's sweep has not backfilled yet (every 60s by
+default). If `sd-tei-embeddings` dies during startup, it is almost certainly
+memory — see signals-dpg's §6.1.
