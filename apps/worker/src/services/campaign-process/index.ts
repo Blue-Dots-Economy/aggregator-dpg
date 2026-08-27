@@ -104,8 +104,13 @@ export interface CampaignJobDeps {
 
 const TERMINAL_JOB = new Set<CampaignJobStatus>(TERMINAL_JOB_STATUSES);
 
-/** `campaign_job.error_reason` is a bounded column; keep the head of the message. */
-function truncateReason(reason: string): string {
+/**
+ * Keeps the head of an error message bounded. Shared across channel
+ * handlers in this folder (export's job-level `error_reason`, voice's
+ * item-level `error_reason`, which can otherwise carry an entire raw
+ * provider response body).
+ */
+export function truncateReason(reason: string): string {
   return reason.length > 500 ? `${reason.slice(0, 497)}...` : reason;
 }
 

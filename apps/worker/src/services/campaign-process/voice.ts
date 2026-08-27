@@ -13,11 +13,10 @@
  * Retry safety: `markSubmitted` writes `status: 'submitted'` and
  * `raya_batch_id` in the same statement, so the presence of a `raya_batch_id`
  * on any item is proof a prior attempt already created a batch at the
- * provider. Dispatching again in that case would create a SECOND batch and
- * call the same recipients twice — so this handler never re-dispatches — but
- * it does not simply no-op: any item still `resolved` (decrypted before the
- * crash, never persisted after) is resumed by marking it `submitted` under
- * the already-known batch id, best-effort. Without this, a `resolved` item
+ * provider. This handler never re-dispatches once that's true — but it does
+ * not simply no-op: any item still `resolved` (decrypted before the crash,
+ * never persisted after) is resumed by marking it `submitted` under the
+ * already-known batch id, best-effort. Without this, a `resolved` item
  * counts as "succeeded" in `deriveJobStatus`, so `runCampaignJob` would roll
  * the job straight to `completed`/`partial` in the SAME attempt — and since
  * the watchdog only reconciles `processing` jobs, that item would stay
@@ -29,11 +28,39 @@
  * (submitted/failed/skipped/duplicate_active) are never re-decrypted or
  * re-included in a new batch.
  *
+ * That guard only closes the window AFTER a `raya_batch_id` is durably
+ * written. `dispatch()` itself is two non-atomic HTTP calls (create, then
+ * start) with no client idempotency key, and its outcome is only persisted
+ * by this handler's own writes afterwards — so there remains a genuine,
+ * un-closeable crash window: if the worker process dies after `dispatch()`
+ * returns success but before the FIRST `markSubmitted`/`setProviderResponse`
+ * call commits, no item yet carries a `raya_batch_id`, the guard above does
+ * not engage, and a retry will call `dispatch()` again — creating a second
+ * batch and placing duplicate live calls to the same recipients. This is
+ * inherent to fire-and-record against a provider with no idempotency key,
+ * not a bug this handler can close from its own side.
+ *
+ * A *deterministic* dispatch failure (Raya rejects the create or start
+ * request itself — bad key, or a required start field the caller omitted,
+ * e.g. `max_concurrent_calls`/`selected_statuses`, aggregator-dpg#577 spec
+ * §8.1) is different: retrying the identical request would fail identically,
+ * and since create can succeed before start 400s, a BullMQ retry would mint
+ * a fresh orphan batch at Raya on every attempt. So `AuthError`/
+ * `ValidationError` from `dispatch()` are treated as TERMINAL — the
+ * dispatched items are marked `failed` with Raya's specific reason and the
+ * handler returns normally (no throw, no BullMQ retry, no orphan
+ * multiplication). Only a transient failure (`UpstreamError`: 5xx, network,
+ * exhausted retries) still throws to retry.
+ *
  * Never logs contact PII (name/phone/variables) — only counts and item ids.
  * Belongs to `@aggregator-dpg/worker`.
  */
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
-import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
+import {
+  AuthError,
+  ValidationError,
+  type BaseError,
+} from '@aggregator-dpg/shared-primitives/errors';
 import type {
   SignalStackDecryptedProfileRow,
   SignalStackDecryptedProfiles,
@@ -41,7 +68,7 @@ import type {
 } from '@aggregator-dpg/signalstack-writer/interface';
 import type { VoiceContact, VoiceProviderBase } from '@aggregator-dpg/voice-provider/interface';
 import { TERMINAL_ITEM_STATUSES, type ProcessingJob } from '../campaign-job-client.js';
-import { chunkArray, type CampaignJobDeps } from './index.js';
+import { chunkArray, truncateReason, type CampaignJobDeps } from './index.js';
 
 /** Voice collaborators — narrow so the handler is trivially faked (see the export twin, `ExportCollaborators`). */
 export interface VoiceCollaborators {
@@ -130,6 +157,37 @@ function flattenVariables(itemState: Record<string, unknown>): Record<string, st
     out[key] = typeof value === 'object' ? JSON.stringify(value) : String(value);
   }
   return out;
+}
+
+/**
+ * Builds a human-readable failure reason from a deterministic dispatch error
+ * (`AuthError`/`ValidationError`), preferring the specific message Raya's
+ * response body carries (e.g. `"max_concurrent_calls is required"`) over the
+ * adapter's generic `"raya /batch/{id}/start returned 400"` — so the
+ * campaign manager sees the real cause, not just an HTTP status summary.
+ * `raya.ts` attaches the raw response text as `error.details.body`; this
+ * best-effort-parses it as JSON and extracts a `message` field (Raya's
+ * observed error-body shape), falling back to the raw body text, then to
+ * just the adapter's own message if no body is present.
+ *
+ * @param error - The typed error from `VoiceProviderBase.dispatch`.
+ * @returns A reason string for `campaign_job_item.error_reason`, bounded by {@link truncateReason}.
+ */
+function describeDispatchFailure(error: BaseError): string {
+  const body = error.details?.['body'];
+  if (typeof body !== 'string' || body.length === 0) {
+    return truncateReason(error.message);
+  }
+  try {
+    const parsed = JSON.parse(body) as Record<string, unknown>;
+    const parsedMessage = parsed['message'];
+    if (typeof parsedMessage === 'string' && parsedMessage.length > 0) {
+      return truncateReason(`${error.message}: ${parsedMessage}`);
+    }
+  } catch {
+    // Non-JSON body — fall through to the raw body text.
+  }
+  return truncateReason(`${error.message}: ${body}`);
 }
 
 /**
@@ -256,9 +314,30 @@ export async function runVoiceForJob(job: ProcessingJob, deps: CampaignJobDeps):
     startOptions: voiceStartOptions(content),
   });
   if (!result.success) {
-    throw new Error(
-      `campaign voice dispatch failed: ${result.error.code}: ${result.error.message}`,
-    );
+    const error = result.error;
+    if (error instanceof AuthError || error instanceof ValidationError) {
+      // Deterministic client-side rejection — see the module note on why
+      // this is terminal rather than retried (create may already have
+      // succeeded before start 400'd; retrying would multiply orphan
+      // batches at Raya). No providerResponse is available on this path —
+      // dispatch() failed before returning one — so there's nothing to
+      // persist there beyond the per-item reason.
+      const reason = describeDispatchFailure(error);
+      for (const contact of contacts) {
+        await deps.client.markItem(job.id, contact.ref, 'failed', reason);
+      }
+      deps.log.warn({
+        ...base,
+        status: 'failed',
+        reason: 'dispatch_rejected',
+        error_code: error.code,
+        error_type: error.constructor.name,
+        dispatched: contacts.length,
+      });
+      return;
+    }
+    // Transient (UpstreamError: 5xx/network/exhausted retries) — retryable.
+    throw new Error(`campaign voice dispatch failed: ${error.code}: ${error.message}`);
   }
 
   await deps.client.setProviderResponse(job.id, result.value.providerResponse);

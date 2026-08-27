@@ -1,7 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { ok, err } from '@aggregator-dpg/shared-primitives/result';
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
-import { UpstreamError } from '@aggregator-dpg/shared-primitives/errors';
+import {
+  AuthError,
+  UpstreamError,
+  ValidationError,
+} from '@aggregator-dpg/shared-primitives/errors';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import type {
   SignalStackDecryptedProfileRow,
@@ -23,6 +27,20 @@ class FailingVoiceProvider extends VoiceProviderBase {
     _input: VoiceDispatchInput,
   ): Promise<Result<VoiceDispatchResult, BaseError>> {
     return err(new UpstreamError('raya down', { code: 'RAYA_DOWN' }));
+  }
+}
+
+/** Always fails dispatch() with a caller-supplied error — for the deterministic-vs-transient tests. */
+class ErroringVoiceProvider extends VoiceProviderBase {
+  readonly calls: VoiceDispatchInput[] = [];
+  constructor(private readonly error: BaseError) {
+    super();
+  }
+  override async dispatch(
+    input: VoiceDispatchInput,
+  ): Promise<Result<VoiceDispatchResult, BaseError>> {
+    this.calls.push(input);
+    return err(this.error);
   }
 }
 
@@ -396,6 +414,80 @@ describe('runVoiceForJob (via runCampaignJob)', () => {
     await expect(runCampaignJob('job-1', h.deps)).rejects.toThrow(/raya down/);
     expect(h.jobStatuses.at(-1)).toBe('failed');
     expect(h.pendingFails).toEqual(['job_failed']);
+  });
+
+  it('deterministic ValidationError (e.g. a Raya start-400): marks items failed with the specific reason, does NOT throw, and does not orphan-batch on a subsequent retry', async () => {
+    const h = harness(job());
+    const provider = new ErroringVoiceProvider(
+      new ValidationError('raya /batch/1/start returned 400', {
+        code: 'RAYA_BAD_REQUEST',
+        details: {
+          status: 400,
+          body: JSON.stringify({ message: 'max_concurrent_calls is required' }),
+        },
+      }),
+    );
+    h.deps.voice!.provider = provider;
+
+    // No throw — a deterministic 4xx is terminal, not retryable.
+    await expect(runCampaignJob('job-1', h.deps)).resolves.toBeUndefined();
+
+    expect(h.itemMarks).toContainEqual({
+      itemId: 'item-1',
+      status: 'failed',
+      err: expect.stringContaining('max_concurrent_calls is required'),
+    });
+    expect(h.itemMarks).toContainEqual({
+      itemId: 'item-2',
+      status: 'failed',
+      err: expect.stringContaining('max_concurrent_calls is required'),
+    });
+    expect(h.jobStatuses.at(-1)).toBe('failed');
+    expect(provider.calls).toHaveLength(1);
+
+    // Job is now terminal — a BullMQ-style re-run of the same jobId must not
+    // call dispatch() a second time (no orphan-batch multiplication).
+    await runCampaignJob('job-1', h.deps);
+    expect(provider.calls).toHaveLength(1);
+  });
+
+  it('deterministic AuthError (bad API key): marks items failed and does NOT throw', async () => {
+    const h = harness(job());
+    const provider = new ErroringVoiceProvider(
+      new AuthError('raya /batch returned 401', {
+        code: 'RAYA_UNAUTHORIZED',
+        details: { status: 401, body: JSON.stringify({ message: 'invalid api key' }) },
+      }),
+    );
+    h.deps.voice!.provider = provider;
+
+    await expect(runCampaignJob('job-1', h.deps)).resolves.toBeUndefined();
+
+    expect(h.itemMarks).toContainEqual({
+      itemId: 'item-1',
+      status: 'failed',
+      err: expect.stringContaining('invalid api key'),
+    });
+    expect(h.itemMarks).toContainEqual({
+      itemId: 'item-2',
+      status: 'failed',
+      err: expect.stringContaining('invalid api key'),
+    });
+    expect(h.jobStatuses.at(-1)).toBe('failed');
+    expect(provider.calls).toHaveLength(1);
+  });
+
+  it('transient UpstreamError still throws (retryable) and does NOT mark items failed', async () => {
+    const h = harness(job(), {}, { attempt: 1, maxAttempts: 3 });
+    const provider = new ErroringVoiceProvider(
+      new UpstreamError('raya down', { code: 'RAYA_UPSTREAM_ERROR' }),
+    );
+    h.deps.voice!.provider = provider;
+
+    await expect(runCampaignJob('job-1', h.deps)).rejects.toThrow(/raya down/);
+    expect(h.itemMarks.filter((m) => m.status === 'failed')).toHaveLength(0);
+    expect(h.jobStatuses).toEqual(['processing']); // never rolled up to terminal
+    expect(provider.calls).toHaveLength(1);
   });
 
   it('never logs contact PII', async () => {
