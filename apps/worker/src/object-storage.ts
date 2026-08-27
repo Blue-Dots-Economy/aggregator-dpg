@@ -63,7 +63,7 @@ export async function getCsvStream(s3Key: string): Promise<Readable> {
 
 /**
  * Uploads an artefact to S3. Used by the Finaliser to write
- * `bulk-uploads/{upload_id}/errors.csv` at a deterministic key — replays of
+ * `uploads/errors/{aggregator_id}/{upload_id}.csv` at a deterministic key — replays of
  * the Finaliser overwrite identical bytes.
  */
 export async function putObject(key: string, body: Buffer, contentType: string): Promise<void> {

@@ -4367,6 +4367,10 @@
                       "type": "string",
                       "nullable": true
                     },
+                    "qr_download_path": {
+                      "type": "string",
+                      "nullable": true
+                    },
                     "metrics": {
                       "type": "object",
                       "properties": {
@@ -4409,6 +4413,7 @@
                     "public_url",
                     "qr_url",
                     "qr_expires_at",
+                    "qr_download_path",
                     "metrics",
                     "created_at",
                     "updated_at"
@@ -4772,6 +4777,10 @@
                             "type": "string",
                             "nullable": true
                           },
+                          "qr_download_path": {
+                            "type": "string",
+                            "nullable": true
+                          },
                           "metrics": {
                             "type": "object",
                             "properties": {
@@ -4814,6 +4823,7 @@
                           "public_url",
                           "qr_url",
                           "qr_expires_at",
+                          "qr_download_path",
                           "metrics",
                           "created_at",
                           "updated_at"
@@ -5144,6 +5154,10 @@
                       "type": "string",
                       "nullable": true
                     },
+                    "qr_download_path": {
+                      "type": "string",
+                      "nullable": true
+                    },
                     "metrics": {
                       "type": "object",
                       "properties": {
@@ -5186,6 +5200,7 @@
                     "public_url",
                     "qr_url",
                     "qr_expires_at",
+                    "qr_download_path",
                     "metrics",
                     "created_at",
                     "updated_at"
@@ -5518,6 +5533,10 @@
                       "type": "string",
                       "nullable": true
                     },
+                    "qr_download_path": {
+                      "type": "string",
+                      "nullable": true
+                    },
                     "metrics": {
                       "type": "object",
                       "properties": {
@@ -5560,6 +5579,7 @@
                     "public_url",
                     "qr_url",
                     "qr_expires_at",
+                    "qr_download_path",
                     "metrics",
                     "created_at",
                     "updated_at"
@@ -5843,6 +5863,10 @@
                       "type": "string",
                       "nullable": true
                     },
+                    "qr_download_path": {
+                      "type": "string",
+                      "nullable": true
+                    },
                     "metrics": {
                       "type": "object",
                       "properties": {
@@ -5885,6 +5909,7 @@
                     "public_url",
                     "qr_url",
                     "qr_expires_at",
+                    "qr_download_path",
                     "metrics",
                     "created_at",
                     "updated_at"
@@ -6270,6 +6295,10 @@
                       "type": "string",
                       "nullable": true
                     },
+                    "qr_download_path": {
+                      "type": "string",
+                      "nullable": true
+                    },
                     "metrics": {
                       "type": "object",
                       "properties": {
@@ -6312,6 +6341,7 @@
                     "public_url",
                     "qr_url",
                     "qr_expires_at",
+                    "qr_download_path",
                     "metrics",
                     "created_at",
                     "updated_at"
@@ -6424,6 +6454,316 @@
             }
           },
           "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/links/{id}/qr": {
+      "get": {
+        "summary": "Mint a short-lived QR download URL",
+        "tags": [
+          "registration-links"
+        ],
+        "description": "Returns a freshly minted, short-lived pre-signed GET URL for the link's QR PNG. Minted per call rather than embedded in list responses, so the URL is seconds old when the browser follows it and no signed URL is ever serialised into a collection. Available only while the link is live and its QR has been generated. Responses are never cacheable.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "description": "Registration link id (UUID)."
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "link_id": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    },
+                    "expires_at": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "link_id",
+                    "url",
+                    "expires_at"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "404": {
             "description": "Default Response",
             "content": {
               "application/json": {

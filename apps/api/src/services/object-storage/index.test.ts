@@ -12,6 +12,7 @@
  * @module @aggregator-dpg/api
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { resolveSignedUrlTtls } from '@aggregator-dpg/shared-primitives/signed-url-ttl';
 
 const s3ClientCtorCalls: Array<Record<string, unknown>> = [];
 const sendMock = vi.fn();
@@ -52,14 +53,21 @@ const baseConfig = {
   S3_ACCESS_KEY_ID: undefined as string | undefined,
   S3_SECRET_ACCESS_KEY: undefined as string | undefined,
   S3_FORCE_PATH_STYLE: true,
-  BULK_UPLOAD_URL_TTL_SECONDS: 900,
+  SIGNED_URL_TTL_SECONDS: 600,
+  BULK_UPLOAD_URL_TTL_SECONDS: undefined as number | undefined,
+  ERRORS_CSV_DOWNLOAD_URL_TTL_SECONDS: undefined as number | undefined,
   BULK_UPLOAD_MAX_BYTES: 10 * 1024 * 1024,
-  QR_DOWNLOAD_URL_TTL_SECONDS: 600,
+  QR_DOWNLOAD_URL_TTL_SECONDS: undefined as number | undefined,
 };
 
 vi.mock('../../config.js', () => ({
   get config() {
     return mockConfig;
+  },
+  // Mirrors the real module: resolution of the canonical TTL and its per-class
+  // overrides happens in config, so the service only ever reads the result.
+  get signedUrlTtlSeconds() {
+    return resolveSignedUrlTtls(mockConfig);
   },
 }));
 
@@ -141,20 +149,20 @@ describe('object-storage', () => {
       const { signBulkUploadUrl } = await import('./index.js');
       getSignedUrlMock.mockResolvedValue('https://signed.example/upload?sig=1');
       const result = await signBulkUploadUrl({ uploadId: 'up-1', aggregatorId: 'agg-1' });
-      expect(result.key).toBe('bulk-uploads/agg-1/up-1/raw.csv');
+      expect(result.key).toBe('uploads/raw/agg-1/up-1.csv');
       expect(result.url).toBe('https://signed.example/upload?sig=1');
       expect(result.contentType).toBe('text/csv');
       expect(result.maxBytes).toBe(10 * 1024 * 1024);
     });
 
-    it('expiresAt reflects BULK_UPLOAD_URL_TTL_SECONDS from config', async () => {
+    it('expiresAt reflects the canonical signed-url TTL', async () => {
       const { signBulkUploadUrl } = await import('./index.js');
       getSignedUrlMock.mockResolvedValue('https://signed.example/upload');
       const before = Date.now();
       const result = await signBulkUploadUrl({ uploadId: 'up-1', aggregatorId: 'agg-1' });
       const expiresAt = new Date(result.expiresAt).getTime();
-      expect(expiresAt - before).toBeGreaterThanOrEqual(900_000 - 1000);
-      expect(expiresAt - before).toBeLessThan(900_000 + 5000);
+      expect(expiresAt - before).toBeGreaterThanOrEqual(600_000 - 1000);
+      expect(expiresAt - before).toBeLessThan(600_000 + 5000);
     });
   });
 
@@ -162,7 +170,7 @@ describe('object-storage', () => {
     it('returns etag (unquoted) and contentLength on success', async () => {
       const { headObject } = await import('./index.js');
       sendMock.mockResolvedValue({ ETag: '"quoted-etag"', ContentLength: 1234 });
-      const result = await headObject('bulk-uploads/agg-1/up-1/raw.csv');
+      const result = await headObject('uploads/raw/agg-1/up-1.csv');
       expect(result).toEqual({ etag: 'quoted-etag', contentLength: 1234 });
     });
 
@@ -227,9 +235,9 @@ describe('object-storage', () => {
     it('signs a GET url with a csv attachment disposition', async () => {
       const { signErrorsCsvDownloadUrl } = await import('./index.js');
       getSignedUrlMock.mockResolvedValue('https://signed.example/errors.csv');
-      const result = await signErrorsCsvDownloadUrl('bulk-uploads/agg-1/up-1/errors.csv');
+      const result = await signErrorsCsvDownloadUrl('uploads/errors/agg-1/up-1.csv');
       expect(result.url).toBe('https://signed.example/errors.csv');
-      expect(result.key).toBe('bulk-uploads/agg-1/up-1/errors.csv');
+      expect(result.key).toBe('uploads/errors/agg-1/up-1.csv');
       const [, command] = getSignedUrlMock.mock.calls[0] as [unknown, { input: unknown }];
       expect(command.input).toMatchObject({
         ResponseContentDisposition: 'attachment; filename="errors.csv"',
@@ -239,7 +247,7 @@ describe('object-storage', () => {
   });
 
   describe('signQrDownloadUrl', () => {
-    it('signs a GET url for a PNG using QR_DOWNLOAD_URL_TTL_SECONDS', async () => {
+    it('signs a GET url for a PNG using the QR download TTL', async () => {
       const { signQrDownloadUrl } = await import('./index.js');
       getSignedUrlMock.mockResolvedValue('https://signed.example/qr.png');
       const before = Date.now();
@@ -256,5 +264,55 @@ describe('object-storage', () => {
       expect(command.input).toMatchObject({ ResponseContentType: 'image/png' });
       expect(opts.expiresIn).toBe(600);
     });
+  });
+});
+
+// The three classes share one canonical TTL by default, which means a test that
+// only exercises the default cannot tell them apart: swapping
+// signedUrlTtlSeconds.errorsCsvDownload for .bulkUpload at the call site would
+// leave the suite green. These give each class a DISTINCT value so the wiring
+// itself is pinned — the bug this change fixes was exactly a call site reaching
+// for the wrong class (errors.csv borrowed the upload TTL).
+describe('per-class TTL wiring', () => {
+  const DISTINCT = {
+    SIGNED_URL_TTL_SECONDS: 600,
+    BULK_UPLOAD_URL_TTL_SECONDS: 1111,
+    ERRORS_CSV_DOWNLOAD_URL_TTL_SECONDS: 2222,
+    QR_DOWNLOAD_URL_TTL_SECONDS: 3333,
+  };
+
+  beforeEach(() => {
+    vi.resetModules();
+    sendMock.mockReset();
+    getSignedUrlMock.mockReset();
+    getSignedUrlMock.mockResolvedValue('https://signed.example.invalid/x');
+    mockConfig = { ...baseConfig, ...DISTINCT };
+  });
+
+  it('signs the upload PUT with the bulk-upload TTL', async () => {
+    const { signBulkUploadUrl } = await import('./index.js');
+    await signBulkUploadUrl({ uploadId: 'up-1', aggregatorId: 'agg-1' });
+    expect(getSignedUrlMock.mock.calls[0]?.[2]).toEqual({ expiresIn: 1111 });
+  });
+
+  it('signs the errors-CSV GET with the errors-CSV TTL, not the upload one', async () => {
+    const { signErrorsCsvDownloadUrl } = await import('./index.js');
+    await signErrorsCsvDownloadUrl('uploads/errors/agg-1/up-1.csv');
+    expect(getSignedUrlMock.mock.calls[0]?.[2]).toEqual({ expiresIn: 2222 });
+  });
+
+  it('signs the QR GET with the QR TTL', async () => {
+    const { signQrDownloadUrl } = await import('./index.js');
+    await signQrDownloadUrl('qr/agg-1/link-1.png');
+    expect(getSignedUrlMock.mock.calls[0]?.[2]).toEqual({ expiresIn: 3333 });
+  });
+
+  it('reports expiresAt from the same per-class TTL it signed with', async () => {
+    const { signQrDownloadUrl } = await import('./index.js');
+    const before = Date.now();
+    const result = await signQrDownloadUrl('qr/agg-1/link-1.png');
+    const delta = new Date(result.expiresAt).getTime() - before;
+    expect(delta).toBeGreaterThanOrEqual(3333 * 1000 - 1000);
+    expect(delta).toBeLessThan(3333 * 1000 + 5000);
   });
 });

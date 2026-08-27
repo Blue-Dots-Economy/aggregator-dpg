@@ -763,15 +763,27 @@ describe('GET /v1/links — list', () => {
     });
     expect(r.statusCode).toBe(200);
     const body = r.json() as {
-      items: Array<{ link_id: string; metrics: { total: number }; qr_url: string | null }>;
+      items: Array<{
+        link_id: string;
+        metrics: { total: number };
+        qr_url: string | null;
+        qr_download_path: string | null;
+      }>;
       total: number;
     };
     expect(body.total).toBe(2);
     const a = body.items.find((i) => i.link_id === 'link-a');
     expect(a?.metrics.total).toBe(10);
-    expect(a?.qr_url).toBe('https://s3.example.invalid/qr.png');
+    // The list no longer presigns: it hands back a stable path that mints on
+    // demand, so N links cost zero signatures and no expiring URL is
+    // serialised into a collection.
+    expect(a?.qr_url).toBeNull();
+    expect(a?.qr_download_path).toBe('/v1/links/link-a/qr');
+    expect(signQrDownloadUrlMock).not.toHaveBeenCalled();
     const b = body.items.find((i) => i.link_id === 'link-b');
     expect(b?.metrics.total).toBe(0);
+    // Draft: no QR published at all.
+    expect(b?.qr_download_path).toBeNull();
   });
 
   it('filters by status query param', async () => {
@@ -820,7 +832,7 @@ describe('GET /v1/links/:id — read', () => {
     expect(r.statusCode).toBe(403);
   });
 
-  it('200s a live link and lazily signs the QR URL from the stored key', async () => {
+  it('200s a live link with a QR download path and no presigned URL', async () => {
     store.seed([
       buildLink({
         id: 'link-live',
@@ -835,10 +847,18 @@ describe('GET /v1/links/:id — read', () => {
       headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
     });
     expect(r.statusCode).toBe(200);
-    const body = r.json() as { qr_url: string | null; public_url: string | null };
-    expect(body.qr_url).toBe('https://s3.example.invalid/qr.png');
+    const body = r.json() as {
+      qr_url: string | null;
+      qr_download_path: string | null;
+      public_url: string | null;
+    };
+    // Reads do not presign — the caller follows qr_download_path, which mints a
+    // URL that is seconds old rather than one that has been expiring since the
+    // page was rendered.
+    expect(body.qr_url).toBeNull();
+    expect(body.qr_download_path).toBe('/v1/links/link-live/qr');
     expect(body.public_url).toBe('http://localhost:3000/acme/live-read');
-    expect(signQrDownloadUrlMock).toHaveBeenCalledWith('qr/live-read.png');
+    expect(signQrDownloadUrlMock).not.toHaveBeenCalled();
   });
 });
 
@@ -1066,13 +1086,21 @@ describe('POST /v1/links/:id/activate', () => {
     expect(putObjectMock).toHaveBeenCalledTimes(1);
   });
 
-  it('reuses the existing qr_object_key when one is already stamped on a legacy draft', async () => {
+  // The key is DERIVED, never read from the row. Honouring a stored value would
+  // make activate a write-and-presign primitive for an arbitrary object: a
+  // tampered or mis-migrated qr_object_key would have putObject overwrite
+  // another tenant's object with a PNG and then hand the caller a presigned GET
+  // for it. This test previously asserted the opposite; it was codifying that.
+  //
+  // Nothing real regresses: the QR layout never changed, so a genuine legacy row
+  // already holds exactly qr/{aggregatorId}/{linkId}.png.
+  it('derives the qr_object_key on activate and ignores a foreign stored key', async () => {
     store.seed([
       buildLink({
         id: 'link-draft',
         slug: 'legacy',
         status: 'draft',
-        qrObjectKey: 'qr/legacy-key.png',
+        qrObjectKey: 'uploads/errors/some-other-aggregator/an-upload.csv',
       }),
     ]);
     await app.inject({
@@ -1080,7 +1108,17 @@ describe('POST /v1/links/:id/activate', () => {
       url: '/v1/links/link-draft/activate',
       headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
     });
-    expect(putObjectMock).toHaveBeenCalledWith('qr/legacy-key.png', expect.anything(), 'image/png');
+    expect(putObjectMock).toHaveBeenCalledWith(
+      `qr/${AGG_ID}/link-draft.png`,
+      expect.anything(),
+      'image/png',
+    );
+    // The foreign object must not be touched.
+    expect(putObjectMock).not.toHaveBeenCalledWith(
+      'uploads/errors/some-other-aggregator/an-upload.csv',
+      expect.anything(),
+      expect.anything(),
+    );
   });
 
   it('500 INTERNAL when QR PNG generation fails', async () => {

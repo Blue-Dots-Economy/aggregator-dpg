@@ -1034,7 +1034,74 @@ describe('bulk-uploads routes', () => {
       expect(signErrorsCsvDownloadUrlMock).not.toHaveBeenCalled();
     });
 
-    it('200s with a signed download URL + final counts on success', async () => {
+    // The allow-list carries the current tenant-prefixed layout as well as the
+    // legacy one. Both must sign; a key that is neither must not.
+    it('200s for the current tenant-prefixed errors key', async () => {
+      store.seed([
+        buildUpload({
+          id: 'upload-1',
+          aggregatorId: AGG_A,
+          status: 'completed',
+          errorsCsvS3Key: `uploads/errors/${AGG_A}/upload-1.csv`,
+        }),
+      ]);
+      onboardingRows = [{ batchId: 'upload-1', total: 5, passed: 3, failed: 2, skipped: 0 }];
+      const res = await app.inject({
+        method: 'GET',
+        url: '/v1/bulk-uploads/upload-1/errors.csv',
+        headers: AUTH('seeker-approved'),
+      });
+      expect(res.statusCode).toBe(200);
+      // Assert what the route asked to be signed, not what the stubbed signer
+      // echoed back: the stub returns a fixed key, so checking the response
+      // body here would only re-test the stub.
+      expect(signErrorsCsvDownloadUrlMock).toHaveBeenCalledWith(
+        `uploads/errors/${AGG_A}/upload-1.csv`,
+      );
+    });
+
+    // Guards the widening in the allow-list: another tenant's prefix is still
+    // the canonical layout, just not for THIS caller. If this ever 200s, the
+    // check has degenerated into "sign whatever the column says".
+    it('404s for a well-formed errors key belonging to another aggregator', async () => {
+      store.seed([
+        buildUpload({
+          id: 'upload-1',
+          aggregatorId: AGG_A,
+          status: 'completed',
+          errorsCsvS3Key: `uploads/errors/${AGG_B}/upload-1.csv`,
+        }),
+      ]);
+      const res = await app.inject({
+        method: 'GET',
+        url: '/v1/bulk-uploads/upload-1/errors.csv',
+        headers: AUTH('seeker-approved'),
+      });
+      expect(res.statusCode).toBe(404);
+      expect(signErrorsCsvDownloadUrlMock).not.toHaveBeenCalled();
+    });
+
+    // A QR object is in the same bucket and is a perfectly valid key — it is
+    // simply not an errors CSV. Signing it would be an arbitrary-object read.
+    it('404s for a valid key of a different object class', async () => {
+      store.seed([
+        buildUpload({
+          id: 'upload-1',
+          aggregatorId: AGG_A,
+          status: 'completed',
+          errorsCsvS3Key: `qr/${AGG_A}/some-link.png`,
+        }),
+      ]);
+      const res = await app.inject({
+        method: 'GET',
+        url: '/v1/bulk-uploads/upload-1/errors.csv',
+        headers: AUTH('seeker-approved'),
+      });
+      expect(res.statusCode).toBe(404);
+      expect(signErrorsCsvDownloadUrlMock).not.toHaveBeenCalled();
+    });
+
+    it('200s with a signed download URL + final counts on success (legacy key)', async () => {
       store.seed([
         buildUpload({
           id: 'upload-1',

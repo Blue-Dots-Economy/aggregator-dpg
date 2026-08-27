@@ -3,7 +3,7 @@
  *
  * Per onboarding-implementation.md §3.4:
  *   1. HSCAN bu:{id}:errors → stream into errors.csv on S3
- *      (key: bulk-uploads/{upload_id}/errors.csv).
+ *      (key: uploads/errors/{aggregator_id}/{upload_id}.csv).
  *   2. CSV format: original CSV header columns + error_category + error_reason.
  *   3. UPDATE bulk_uploads → status='completed', counters from Redis,
  *      errors_csv_s3_key, completed_at.
@@ -22,6 +22,7 @@ import Papa from 'papaparse';
 import { type BulkFinaliseJob, bulkRedisKeys } from '@aggregator-dpg/queue';
 import { schema, getDb } from '../db.js';
 import { getRedis } from '../services/redis.js';
+import { bulkUploadErrorsKey } from '@aggregator-dpg/shared-primitives/object-keys';
 import { putObject } from '../object-storage.js';
 import { logger } from '../logger.js';
 
@@ -121,7 +122,11 @@ export async function finaliseBulk(job: BulkFinaliseJob): Promise<FinaliseOutcom
       ];
     });
     const csvBody = Papa.unparse({ fields: csvHeader, data: csvRows });
-    errorsKey = `bulk-uploads/${job.uploadId}/errors.csv`;
+    // Tenant-prefixed and under the errors prefix, so bucket lifecycle rules
+    // can expire error reports on a different schedule from raw CSVs. Shared
+    // builder: the api validates the stored key against the same layout before
+    // it will presign a download.
+    errorsKey = bulkUploadErrorsKey(upload.aggregatorId, job.uploadId);
     try {
       await putObject(errorsKey, Buffer.from(csvBody, 'utf8'), 'text/csv');
     } catch (err) {

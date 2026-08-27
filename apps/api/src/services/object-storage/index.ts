@@ -17,7 +17,8 @@ import {
   S3Client,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { config } from '../../config.js';
+import { bulkUploadRawKey } from '@aggregator-dpg/shared-primitives/object-keys';
+import { config, signedUrlTtlSeconds } from '../../config.js';
 
 // Two S3 clients are kept on this module:
 //   - `getInternalClient()` uses S3_ENDPOINT (e.g. http://minio:9000 inside
@@ -87,16 +88,16 @@ export async function signBulkUploadUrl(opts: {
   uploadId: string;
   aggregatorId: string;
 }): Promise<SignedUploadUrl> {
-  const key = `bulk-uploads/${opts.aggregatorId}/${opts.uploadId}/raw.csv`;
+  const key = bulkUploadRawKey(opts.aggregatorId, opts.uploadId);
   const command = new PutObjectCommand({
     Bucket: config.S3_BUCKET,
     Key: key,
     ContentType: 'text/csv',
   });
   const url = await getSignedUrl(getPresignerClient(), command, {
-    expiresIn: config.BULK_UPLOAD_URL_TTL_SECONDS,
+    expiresIn: signedUrlTtlSeconds.bulkUpload,
   });
-  const expiresAt = new Date(Date.now() + config.BULK_UPLOAD_URL_TTL_SECONDS * 1000).toISOString();
+  const expiresAt = new Date(Date.now() + signedUrlTtlSeconds.bulkUpload * 1000).toISOString();
   return {
     url,
     key,
@@ -160,8 +161,13 @@ export interface SignedDownloadUrl {
 /**
  * Issues a pre-signed GET URL for a bulk-upload errors.csv artefact.
  *
- * Reuses BULK_UPLOAD_URL_TTL_SECONDS for download TTL — short enough that a
- * leaked URL has limited utility, long enough for a normal browser download.
+ * Carries its own TTL class (`errorsCsvDownload`) rather than borrowing the
+ * upload's: an operator lengthening the upload window for a slow link must not
+ * silently lengthen how long a leaked download URL stays live.
+ *
+ * @param key - Object key, already checked against the caller's signing
+ *   allow-list. This function does NOT authorize — never pass it a key taken
+ *   straight from a request or an unvalidated column.
  */
 export async function signErrorsCsvDownloadUrl(key: string): Promise<SignedDownloadUrl> {
   const command = new GetObjectCommand({
@@ -171,15 +177,23 @@ export async function signErrorsCsvDownloadUrl(key: string): Promise<SignedDownl
     ResponseContentType: 'text/csv',
   });
   const url = await getSignedUrl(getPresignerClient(), command, {
-    expiresIn: config.BULK_UPLOAD_URL_TTL_SECONDS,
+    expiresIn: signedUrlTtlSeconds.errorsCsvDownload,
   });
-  const expiresAt = new Date(Date.now() + config.BULK_UPLOAD_URL_TTL_SECONDS * 1000).toISOString();
+  const expiresAt = new Date(
+    Date.now() + signedUrlTtlSeconds.errorsCsvDownload * 1000,
+  ).toISOString();
   return { url, key, expiresAt };
 }
 
 /**
- * Issues a pre-signed GET URL for a QR PNG. Browsers can render the URL
- * directly in an <img> tag.
+ * Issues a pre-signed GET URL for a QR PNG.
+ *
+ * Minted per click by `GET /v1/links/:id/qr` and redirected to, so the URL is
+ * seconds old when the browser follows it. It is a bearer credential for that
+ * object: never persist it, never serialise it into a list response, never log
+ * it.
+ *
+ * @param key - Object key for a link the caller has been shown to own.
  */
 export async function signQrDownloadUrl(key: string): Promise<SignedDownloadUrl> {
   const command = new GetObjectCommand({
@@ -188,9 +202,9 @@ export async function signQrDownloadUrl(key: string): Promise<SignedDownloadUrl>
     ResponseContentType: 'image/png',
   });
   const url = await getSignedUrl(getPresignerClient(), command, {
-    expiresIn: config.QR_DOWNLOAD_URL_TTL_SECONDS,
+    expiresIn: signedUrlTtlSeconds.qrDownload,
   });
-  const expiresAt = new Date(Date.now() + config.QR_DOWNLOAD_URL_TTL_SECONDS * 1000).toISOString();
+  const expiresAt = new Date(Date.now() + signedUrlTtlSeconds.qrDownload * 1000).toISOString();
   return { url, key, expiresAt };
 }
 
