@@ -123,7 +123,13 @@ export async function runEmailForJob(job: ProcessingJob, deps: CampaignJobDeps):
     return;
   }
 
-  const rows = await decryptEmailItems(job, deps, email, content);
+  const rows = await decryptEmailItems(
+    job,
+    deps,
+    email,
+    content,
+    open.map((i) => i.itemId),
+  );
   if (rows.length === 0) {
     // Nothing owned to email; every id was marked `skipped_not_owned` above.
     deps.log.warn({
@@ -175,6 +181,7 @@ export async function runEmailForJob(job: ProcessingJob, deps: CampaignJobDeps):
  * @param deps - Injected collaborators (client, config, logger).
  * @param email - The email collaborators (already null-checked by the caller).
  * @param content - The validated message, whose placeholders drive the projection.
+ * @param openItemIds - The job's still-open item ids, decided by the caller.
  * @returns The resolved profile rows (owned items only).
  * @throws {Error} On a transient decrypt failure (so BullMQ retries), or when a
  *   contact projection comes back with no contact block at all — an older
@@ -186,6 +193,7 @@ async function decryptEmailItems(
   deps: CampaignJobDeps,
   email: EmailCollaborators,
   content: { subject: string; body_markdown: string },
+  openItemIds: string[],
 ): Promise<SignalStackDecryptedProfileRow[]> {
   const contact: ContactField[] = [
     ...new Set<ContactField>([
@@ -193,9 +201,6 @@ async function decryptEmailItems(
       ...requiredContactFields(content.subject, content.body_markdown),
     ]),
   ];
-  const openItemIds = job.items
-    .filter((i) => !TERMINAL_ITEM_STATUSES.includes(i.status))
-    .map((i) => i.itemId);
   const resolvedRows: SignalStackDecryptedProfileRow[] = [];
 
   for (const chunk of chunkArray(openItemIds, deps.config.decryptChunk)) {

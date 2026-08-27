@@ -78,6 +78,15 @@ out of the aggregator's general token allow-list, so a campaign-manager token is
 `signalstack_org_id` claim — it is **never** taken from a request header or body.
 A token without that claim is rejected with `403`.
 
+**Requesting aggregator.** The aggregator identified by the token's
+`aggregator_id` must be `active`, or the request is `403 AGGREGATOR_INACTIVE`.
+The job also records a `requested_by` — the token's own verified `email` claim,
+falling back to the aggregator's stored `contact_email` — purely as an audit
+trail. It is never a destination: this channel resolves every recipient from the
+decrypt. If neither resolves the request is `403 RECIPIENT_UNRESOLVED`, because
+the column is NOT NULL. All three campaign channels share this behaviour; it
+lives in `campaign/submit-job.ts`.
+
 **Ownership (which participants a caller may email).** Ownership is enforced by
 the participant store: the decrypt call is scoped to the caller's organisation, so
 it returns data **only** for participants that organisation onboarded. Any
@@ -149,16 +158,16 @@ Content-Type: application/json
 
 **Error responses**
 
-| HTTP  | `error.code`              | When                                                                                                                                     |
-| ----- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `400` | `SCHEMA_VALIDATION`       | Malformed body: non-UUID / empty `item_ids`, missing `content.subject`/`content.body_markdown`, over-long fields, or unknown keys.       |
-| `400` | `UNKNOWN_PLACEHOLDER`     | The subject or body contains a `{{token}}` outside the supported set (§5). Fail-closed, so a typo never ships to real inboxes.           |
-| `400` | `CAMPAIGN_TOO_MANY_ITEMS` | `item_ids` (after de-dup) exceeded `CAMPAIGN_EMAIL_MAX_ITEMS`. `error.fields` reports `max` and `received`.                              |
-| `401` | `UNAUTHORIZED`            | Token missing / malformed / bad signature or expiry, **or** the token's `azp` is not an allowed campaign-manager client.                 |
-| `403` | `FORBIDDEN`               | Token is valid but lacks the organisation claim (`MISSING_SIGNALSTACK_ORG`) or the aggregator claim (`MISSING_AGGREGATOR_ID`).           |
-| `429` | `CAMPAIGN_RATE_LIMITED`   | Ingress rate-limit for this org tripped (§8). `Retry-After` is set.                                                                      |
-| `429` | `CAMPAIGN_ACTIVE_LIMIT`   | The org already has `CAMPAIGN_EMAIL_MAX_ACTIVE_PER_ORG` email jobs in flight. Counted per channel — an export job never blocks an email. |
-| `503` | `EMAIL_ENQUEUE_FAILED`    | The job row was written but could not be queued (e.g. Redis unreachable). A `202` must mean durably queued, so this is surfaced.         |
+| HTTP  | `error.code`              | When                                                                                                                                                                                                                                                                   |
+| ----- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `400` | `SCHEMA_VALIDATION`       | Malformed body: non-UUID / empty `item_ids`, missing `content.subject`/`content.body_markdown`, over-long fields, or unknown keys.                                                                                                                                     |
+| `400` | `UNKNOWN_PLACEHOLDER`     | The subject or body contains a `{{token}}` outside the supported set (§5). Fail-closed, so a typo never ships to real inboxes.                                                                                                                                         |
+| `400` | `CAMPAIGN_TOO_MANY_ITEMS` | `item_ids` (after de-dup) exceeded `CAMPAIGN_EMAIL_MAX_ITEMS`. `error.fields` reports `max` and `received`.                                                                                                                                                            |
+| `401` | `UNAUTHORIZED`            | Token missing / malformed / bad signature or expiry, **or** the token's `azp` is not an allowed campaign-manager client.                                                                                                                                               |
+| `403` | `FORBIDDEN`               | Token is valid but lacks the organisation claim (`MISSING_SIGNALSTACK_ORG`) or the aggregator claim (`MISSING_AGGREGATOR_ID`); the requesting aggregator is not `active` (`AGGREGATOR_INACTIVE`); or no requester identity resolves (`RECIPIENT_UNRESOLVED` — see §3). |
+| `429` | `CAMPAIGN_RATE_LIMITED`   | Ingress rate-limit for this org tripped (§8). `Retry-After` is set.                                                                                                                                                                                                    |
+| `429` | `CAMPAIGN_ACTIVE_LIMIT`   | The org already has `CAMPAIGN_EMAIL_MAX_ACTIVE_PER_ORG` email jobs in flight. Counted per channel — an export job never blocks an email.                                                                                                                               |
+| `503` | `EMAIL_ENQUEUE_FAILED`    | The job row was written but could not be queued (e.g. Redis unreachable). A `202` must mean durably queued, so this is surfaced.                                                                                                                                       |
 
 ### `GET /v1/campaign/email/{job_id}`
 
@@ -297,17 +306,24 @@ mechanism. Instead:
 
 1. Authenticate the token and enforce the campaign-manager client gate (§3).
 2. Read the acting organisation from the token's `signalstack_org_id` claim
-   (`403` if absent).
-3. Validate the envelope + `content`, de-dup `item_ids` and enforce the per-request
-   cap; validate every placeholder against the supported set
-   (`400 UNKNOWN_PLACEHOLDER` on an unknown token).
+   (`403` if absent), check the aggregator is `active`, and resolve
+   `requested_by` (§3).
+3. Validate `content` — schema plus the placeholder allow-list
+   (`400 UNKNOWN_PLACEHOLDER` on an unknown token) — then de-dup `item_ids` and
+   enforce the per-request cap.
 4. Apply the ingress rate-limit and the per-org active-job cap (§8).
 5. In **one transaction**, insert the `campaign_job` row (channel `email`, the
    `content` block and `metadata` stored verbatim) plus one `campaign_job_item`
    row per recipient, honouring `Idempotency-Key`.
 6. Enqueue one `campaign-process` job carrying only the `job_id`, and return
-   **`202 { status, requested, job_id, message }`**. The API never decrypts or
-   sends.
+   **`202 { status, requested, job_id, message }`**. If that enqueue fails, the
+   committed row is marked `failed`/`enqueue_failed` before the `503`, so it
+   cannot sit `queued` forever against the org's active-job cap. The API never
+   decrypts or sends.
+
+Steps 1–6 are the shared flow in `campaign/submit-job.ts`, which export and
+voice also drive; this channel supplies its own `content` parser, per-channel
+config knobs, item `action` and error codes.
 
 **Phase 2 — Worker (asynchronous, the `campaign` role):**
 
@@ -375,7 +391,12 @@ worker process — all channels), plus the mail transport
   batch, and a skip never makes the job `partial`.
 - Per-recipient outcomes are reported to the caller via the poll endpoint,
   including the mailer's message id for a successful send.
-- A retried job never re-emails a recipient already `sent`.
+- A retried job never re-emails a recipient already `sent`. Note the converse:
+  an item recorded `failed` is terminal too, so a later retry of the same job
+  does not re-attempt it. That is deliberate — a mailer error can mean
+  "delivered but not acknowledged", so re-attempting risks the duplicate this
+  channel is built to avoid. The caller sees the `failed` item in the poll
+  output and can submit a fresh job for those ids.
 - The message is rendered on the server; the campaign-manager never receives any
   email address or other personal data.
 - A campaign-manager token cannot reach any other aggregator endpoint, and no
