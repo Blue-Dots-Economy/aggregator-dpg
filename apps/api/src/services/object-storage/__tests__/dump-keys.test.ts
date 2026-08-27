@@ -26,6 +26,18 @@ describe('dumpKeyRoot', () => {
       dumpKeyRoot({ prefix: '/signals-dumps/', network: 'blue_dot', instanceId: 'blue_dot_up' }),
     ).toBe('signals-dumps/blue_dot/blue_dot_up');
   });
+
+  it('collapses repeated slashes rather than emitting an empty key segment', () => {
+    expect(
+      dumpKeyRoot({ prefix: '//signals//dumps//', network: 'blue_dot', instanceId: 'blue_dot_up' }),
+    ).toBe('signals/dumps/blue_dot/blue_dot_up');
+  });
+
+  it('reduces a prefix of only slashes to nothing', () => {
+    expect(
+      dumpKeyRoot({ prefix: '/'.repeat(1_000), network: 'blue_dot', instanceId: 'blue_dot_up' }),
+    ).toBe('blue_dot/blue_dot_up');
+  });
 });
 
 describe('dumpObjectKeys', () => {
