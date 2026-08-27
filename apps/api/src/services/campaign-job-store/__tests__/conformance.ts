@@ -333,6 +333,29 @@ export function runStoreConformance(
       expect(secondItems[0]!.status).toBe('pending');
     });
 
+    it('the dedup scan skips over pre-existing null-action (export) rows without matching them', async () => {
+      // A prior export job's items have action:null. The dedup scan for a
+      // NEW voice-action item must walk past those rows (not dedup against
+      // them, and not error on them) while still checking against any
+      // non-null-action row for the same item id.
+      const store = makeStore();
+      const org = `org-${randomUUID().slice(0, 8)}`;
+      unwrap(await store.createJob(base({ signalstackOrgId: org }))); // export, action:null items
+
+      const voiceItemId = randomUUID();
+      const voice = unwrap(
+        await store.createJob(
+          base({
+            signalstackOrgId: org,
+            channel: 'voice',
+            items: [{ itemId: voiceItemId, action: 'voice_call' }],
+          }),
+        ),
+      );
+      const voiceItems = unwrap(await store.getJobItems(voice.job.id, org))!;
+      expect(voiceItems[0]!.status).toBe('pending');
+    });
+
     it('does not dedup against an item whose prior job already resolved it terminally', async () => {
       const store = makeStore();
       const org = `org-${randomUUID().slice(0, 8)}`;
@@ -395,6 +418,33 @@ export function runStoreConformance(
       unwrap(await store.setProviderResponse(job.id, payload));
       const view = unwrap(await store.getJob(job.id, input.signalstackOrgId));
       expect(view!.providerResponse).toEqual(payload);
+    });
+  });
+}
+
+/**
+ * NOT_FOUND edge cases for the two voice-only mutation methods. Split out
+ * from {@link runStoreConformance} because the Postgres impl doesn't check
+ * row existence before its UPDATE (an unmatched WHERE is a no-op `ok:true`,
+ * not `NOT_FOUND` — that's a real behavioural difference from the in-memory
+ * fake, which does check), so only the in-memory store runs this.
+ */
+export function runInMemoryNotFoundConformance(makeStore: () => CampaignJobStoreBase): void {
+  describe('markSubmitted + setProviderResponse — unknown ids', () => {
+    it('markSubmitted returns NOT_FOUND for an unknown job/item', async () => {
+      const store = makeStore();
+      const r = await store.markSubmitted('no-such-job', 'no-such-item', {
+        rayaBatchId: 'batch-x',
+      });
+      expect(r.ok).toBe(false);
+      expect(!r.ok && r.error.code).toBe('NOT_FOUND');
+    });
+
+    it('setProviderResponse returns NOT_FOUND for an unknown job', async () => {
+      const store = makeStore();
+      const r = await store.setProviderResponse('no-such-job', { any: 'payload' });
+      expect(r.ok).toBe(false);
+      expect(!r.ok && r.error.code).toBe('NOT_FOUND');
     });
   });
 }

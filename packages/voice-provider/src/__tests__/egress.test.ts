@@ -83,4 +83,39 @@ describe('acquireRayaSlot', () => {
     // re-check the count after the fail-closed wait.
     expect(redis.multi).toHaveBeenCalledTimes(1);
   });
+
+  it('treats a malformed multi-exec result (no numeric INCR reply) as count 0 and proceeds', async () => {
+    const redis = makeRedis([]);
+    // Not the [[err, value], ...] shape acquireRayaSlot expects — e.g. exec()
+    // resolved null (as ioredis does when a WATCH aborts the transaction).
+    redis.exec.mockResolvedValueOnce(null);
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    const now = () => Date.now();
+
+    await acquireRayaSlot({ redis: redis as never, windowSeconds: 20, max: 1, sleep, now });
+
+    // count falls back to 0, which is <= max, so the gate returns immediately.
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it('uses the real defaultSleep/Date.now when sleep/now are not injected', async () => {
+    vi.useFakeTimers();
+    try {
+      const redis = makeRedis([]);
+      redis.exec
+        .mockResolvedValueOnce([[null, 2]]) // over max
+        .mockResolvedValueOnce([[null, 1]]); // under max after the wait
+
+      const acquired = acquireRayaSlot({ redis: redis as never, windowSeconds: 20, max: 1 });
+      // Give the first `redis.multi().exec()` microtask a chance to resolve
+      // and reach the real `setTimeout`-backed sleep.
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(20_000);
+      await acquired;
+
+      expect(redis.multi).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

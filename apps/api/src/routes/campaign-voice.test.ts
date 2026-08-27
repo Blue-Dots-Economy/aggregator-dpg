@@ -16,7 +16,47 @@ import {
 import {
   InMemoryCampaignJobStore,
   _setCampaignJobStore,
+  type CreateJobInput,
 } from '../services/campaign-job-store/index.js';
+
+/**
+ * A campaign job store that can be told to fail specific operations, so tests
+ * can exercise the route's `!result.ok` branches without a real DB. Extends
+ * the in-memory fake (per testing.md — extend, don't reinvent) and delegates
+ * everything except the toggled method.
+ */
+class FailingCampaignJobStore extends InMemoryCampaignJobStore {
+  failCountActiveJobs = false;
+  failCreateJob = false;
+  failSetJobStatus = false;
+
+  override async countActiveJobs(
+    ...args: Parameters<InMemoryCampaignJobStore['countActiveJobs']>
+  ): ReturnType<InMemoryCampaignJobStore['countActiveJobs']> {
+    if (this.failCountActiveJobs) {
+      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: 'db down' } };
+    }
+    return super.countActiveJobs(...args);
+  }
+
+  override async createJob(
+    input: CreateJobInput,
+  ): ReturnType<InMemoryCampaignJobStore['createJob']> {
+    if (this.failCreateJob) {
+      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: 'db down' } };
+    }
+    return super.createJob(input);
+  }
+
+  override async setJobStatus(
+    ...args: Parameters<InMemoryCampaignJobStore['setJobStatus']>
+  ): ReturnType<InMemoryCampaignJobStore['setJobStatus']> {
+    if (this.failSetJobStatus) {
+      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: 'db down' } };
+    }
+    return super.setJobStatus(...args);
+  }
+}
 
 // The route only persists + enqueues; mock the queue so no real Redis is
 // touched and we can assert the payload / simulate an enqueue failure.
@@ -38,13 +78,13 @@ const VALID_UUID = '11111111-1111-1111-1111-111111111111';
 
 describe('POST /v1/campaign/voice', () => {
   let app: FastifyInstance;
-  let store: InMemoryCampaignJobStore;
+  let store: FailingCampaignJobStore;
 
   beforeEach(async () => {
     enqueueCampaignProcessMock.mockReset().mockResolvedValue(undefined);
     consumeMock.mockReset().mockResolvedValue({ allowed: true, count: 1, retryAfterSeconds: 0 });
 
-    store = new InMemoryCampaignJobStore();
+    store = new FailingCampaignJobStore();
     _setCampaignJobStore(store);
 
     const aggStore = new AggregatorStoreFake();
@@ -198,5 +238,120 @@ describe('POST /v1/campaign/voice', () => {
     const res = await post({ item_ids: [VALID_UUID], content: { agent_id: 'agent-123' } });
     expect(res.statusCode).toBe(503);
     expect(res.json().error.code).toBe('VOICE_ENQUEUE_FAILED');
+  });
+
+  it('returns 503 VOICE_ENQUEUE_FAILED with a generic detail when the rejection is not an Error', async () => {
+    // cause instanceof Error ? cause.message : 'failed to enqueue voice job'
+    enqueueCampaignProcessMock.mockRejectedValueOnce('redis socket hang up');
+    const res = await post({ item_ids: [VALID_UUID], content: { agent_id: 'agent-123' } });
+    expect(res.statusCode).toBe(503);
+    expect(res.json().error.detail).toBe('failed to enqueue voice job');
+  });
+
+  it('still returns 503 VOICE_ENQUEUE_FAILED (with the enqueue failure, not a masking one) when marking the job failed also fails', async () => {
+    enqueueCampaignProcessMock.mockRejectedValueOnce(new Error('redis unavailable'));
+    store.failSetJobStatus = true;
+    const res = await post({ item_ids: [VALID_UUID], content: { agent_id: 'agent-123' } });
+    expect(res.statusCode).toBe(503);
+    expect(res.json().error.code).toBe('VOICE_ENQUEUE_FAILED');
+    expect(res.json().error.detail).toBe('redis unavailable');
+  });
+
+  it('returns 403 FORBIDDEN AGGREGATOR_INACTIVE when the requesting aggregator is not active', async () => {
+    const aggStore = new AggregatorStoreFake();
+    aggStore.seed([
+      buildAggregator({ id: 'agg-1', contactEmail: 'aggregator@org.example', status: 'pending' }),
+    ]);
+    _setAggregatorStore(aggStore);
+
+    const res = await post({ item_ids: [VALID_UUID], content: { agent_id: 'agent-123' } });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error.fields.reason).toBe('AGGREGATOR_INACTIVE');
+    expect(enqueueCampaignProcessMock).not.toHaveBeenCalled();
+  });
+
+  it('returns 403 FORBIDDEN RECIPIENT_UNRESOLVED when the token has no email and the aggregator has no contact_email', async () => {
+    const aggStore = new AggregatorStoreFake();
+    aggStore.seed([buildAggregator({ id: 'agg-1', contactEmail: '', status: 'active' })]);
+    _setAggregatorStore(aggStore);
+    // The default 'good' verifier already omits an `email` claim.
+
+    const res = await post({ item_ids: [VALID_UUID], content: { agent_id: 'agent-123' } });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error.fields.reason).toBe('RECIPIENT_UNRESOLVED');
+    expect(enqueueCampaignProcessMock).not.toHaveBeenCalled();
+  });
+
+  it('returns 500 INTERNAL when the active-job count cannot be read', async () => {
+    store.failCountActiveJobs = true;
+    const res = await post({ item_ids: [VALID_UUID], content: { agent_id: 'agent-123' } });
+    expect(res.statusCode).toBe(500);
+    expect(res.json().error.code).toBe('INTERNAL');
+    expect(enqueueCampaignProcessMock).not.toHaveBeenCalled();
+  });
+
+  it('returns 500 INTERNAL when the job row cannot be created', async () => {
+    store.failCreateJob = true;
+    const res = await post({ item_ids: [VALID_UUID], content: { agent_id: 'agent-123' } });
+    expect(res.statusCode).toBe(500);
+    expect(res.json().error.code).toBe('INTERNAL');
+    expect(enqueueCampaignProcessMock).not.toHaveBeenCalled();
+  });
+
+  it('honours an Idempotency-Key header: a replay while the job is still queued re-enqueues it', async () => {
+    const res1 = await post(
+      { item_ids: [VALID_UUID], content: { agent_id: 'agent-123' } },
+      { 'idempotency-key': 'replay-key-1' },
+    );
+    expect(res1.statusCode).toBe(202);
+    const jobId = res1.json().job_id;
+
+    // The first enqueue never actually landed (simulated below by resetting
+    // the mock) — a replay of the same key must find the job still `queued`
+    // and enqueue again, not silently accept it as already-handled.
+    enqueueCampaignProcessMock.mockClear();
+    const res2 = await post(
+      { item_ids: [VALID_UUID], content: { agent_id: 'agent-123' } },
+      { 'idempotency-key': 'replay-key-1' },
+    );
+    expect(res2.statusCode).toBe(202);
+    expect(res2.json().job_id).toBe(jobId);
+    expect(enqueueCampaignProcessMock).toHaveBeenCalledTimes(1);
+    expect(enqueueCampaignProcessMock.mock.calls[0]![0]).toEqual({ jobId });
+  });
+
+  it('honours an Idempotency-Key header: a replay of an already-processing job does not re-enqueue', async () => {
+    const res1 = await post(
+      { item_ids: [VALID_UUID], content: { agent_id: 'agent-123' } },
+      { 'idempotency-key': 'replay-key-2' },
+    );
+    const jobId = res1.json().job_id;
+    // Simulate the worker having already picked the job up.
+    await store.setJobStatus(jobId, 'processing');
+
+    enqueueCampaignProcessMock.mockClear();
+    const res2 = await post(
+      { item_ids: [VALID_UUID], content: { agent_id: 'agent-123' } },
+      { 'idempotency-key': 'replay-key-2' },
+    );
+    expect(res2.statusCode).toBe(202);
+    expect(res2.json().job_id).toBe(jobId);
+    expect(enqueueCampaignProcessMock).not.toHaveBeenCalled();
+  });
+
+  it('treats a whitespace-only Idempotency-Key header as absent (no idempotency applied)', async () => {
+    const res1 = await post(
+      { item_ids: [VALID_UUID], content: { agent_id: 'agent-123' } },
+      { 'idempotency-key': '   ' },
+    );
+    const res2 = await post(
+      { item_ids: [VALID_UUID], content: { agent_id: 'agent-123' } },
+      { 'idempotency-key': '   ' },
+    );
+    expect(res1.statusCode).toBe(202);
+    expect(res2.statusCode).toBe(202);
+    // Two distinct jobs, not a dedup replay — the blank key was never applied.
+    expect(res1.json().job_id).not.toBe(res2.json().job_id);
+    expect(enqueueCampaignProcessMock).toHaveBeenCalledTimes(2);
   });
 });

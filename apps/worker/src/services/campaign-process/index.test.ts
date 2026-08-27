@@ -1,8 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { ok, err } from '@aggregator-dpg/shared-primitives/result';
-import { UpstreamError } from '@aggregator-dpg/shared-primitives/errors';
+import { ok, err, type Result } from '@aggregator-dpg/shared-primitives/result';
+import { UpstreamError, type BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import type { SignalStackDecryptedProfileRow } from '@aggregator-dpg/signalstack-writer/interface';
 import type { SendInput, SendOk, MailerResult } from '@aggregator-dpg/mailer/interface';
+import { VoiceProviderBase } from '@aggregator-dpg/voice-provider/interface';
+import type {
+  VoiceDispatchInput,
+  VoiceDispatchResult,
+} from '@aggregator-dpg/voice-provider/interface';
 import { deriveJobStatus, type ProcessingJob } from '../campaign-job-client.js';
 import { runCampaignJob, type CampaignJobDeps } from './index.js';
 
@@ -384,6 +389,58 @@ describe('runCampaignJob failure paths', () => {
     // Fail closed: a PII export is never redirected to the requester as a fallback.
     expect(h.mails).toHaveLength(0);
     expect(h.jobStatuses.at(-1)).toBe('failed');
+  });
+});
+
+describe('runCampaignJob (voice channel wiring)', () => {
+  // Not a re-test of runVoiceForJob's own behaviour (see
+  // campaign-process/voice.test.ts) — this exercises the actual
+  // `job.channel === 'voice'` branch in runCampaignJob itself, which no
+  // other test file drives (voice.test.ts calls runVoiceForJob directly).
+  class StubProvider extends VoiceProviderBase {
+    async dispatch(input: VoiceDispatchInput): Promise<Result<VoiceDispatchResult, BaseError>> {
+      return ok({
+        providerBatchRef: 'batch-1',
+        accepted: input.contacts.map((c) => c.ref),
+        rejected: [],
+        providerResponse: { create: {}, start: {} },
+      });
+    }
+  }
+
+  it('routes a voice job through runVoiceForJob and rolls up to completed', async () => {
+    const voiceJob = job({
+      channel: 'voice',
+      content: { agent_id: 'agent-1' },
+      items: [{ itemId: 'item-1', action: 'voice_call', status: 'pending', rayaBatchId: null }],
+    });
+    const h = harness(voiceJob);
+    const submitted: Array<{ jobId: string; itemId: string; rayaBatchId: string }> = [];
+    const providerResponses: Array<{ jobId: string; response: unknown }> = [];
+    const deps: CampaignJobDeps = {
+      ...h.deps,
+      client: {
+        ...h.deps.client,
+        markSubmitted: async (jobId, itemId, args) => {
+          submitted.push({ jobId, itemId, rayaBatchId: args.rayaBatchId });
+        },
+        setProviderResponse: async (jobId, response) => {
+          providerResponses.push({ jobId, response });
+        },
+      },
+      voice: {
+        fetchDecryptedProfiles: async () => ok({ profiles: [row()], skipped: [] }),
+        provider: new StubProvider(),
+      },
+    };
+
+    await runCampaignJob('job-1', deps);
+
+    expect(submitted).toEqual([{ jobId: 'job-1', itemId: 'item-1', rayaBatchId: 'batch-1' }]);
+    expect(providerResponses).toHaveLength(1);
+    // No mail/S3 side effects — the export path must not run for a voice job.
+    expect(h.mails).toHaveLength(0);
+    expect(h.puts).toHaveLength(0);
   });
 });
 

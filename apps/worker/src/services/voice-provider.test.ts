@@ -104,4 +104,18 @@ describe('getVoiceProvider', () => {
       max: 1,
     });
   });
+
+  it('_setVoiceProvider injects a fake, and resetting to undefined forces reconstruction', async () => {
+    const { getVoiceProvider, _setVoiceProvider } = await import('./voice-provider.js');
+
+    const fake = { __injected: true } as never;
+    _setVoiceProvider(fake);
+    expect(getVoiceProvider()).toBe(fake);
+    expect(buildVoiceProviderMock).not.toHaveBeenCalled();
+
+    _setVoiceProvider(undefined);
+    const rebuilt = getVoiceProvider();
+    expect(rebuilt).toEqual({ __fakeProvider: true });
+    expect(buildVoiceProviderMock).toHaveBeenCalledTimes(1);
+  });
 });

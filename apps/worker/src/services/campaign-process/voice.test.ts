@@ -509,4 +509,152 @@ describe('runVoiceForJob (via runCampaignJob)', () => {
     expect(serialized).not.toContain('Asha');
     expect(serialized).not.toContain('+910000000001');
   });
+
+  it('throws when deps.voice is not wired for a voice-channel job', async () => {
+    const h = harness(job());
+    // exactOptionalPropertyTypes forbids `voice: undefined` — omit the key
+    // entirely, matching how a real export-only deployment would build deps.
+    const { voice: _voice, ...rest } = h.deps;
+    await expect(runCampaignJob('job-1', rest)).rejects.toThrow(/voice collaborators/);
+  });
+
+  it('throws (BullMQ retry) when the decrypt call itself errors', async () => {
+    const h = harness(job(), {
+      fetchDecryptedProfiles: async () => err(new UpstreamError('signals down', { code: 'X' })),
+    });
+    await expect(runCampaignJob('job-1', h.deps)).rejects.toThrow(/decrypt/);
+    expect(h.jobStatuses).toEqual(['processing']); // never rolled up to terminal
+  });
+
+  it('throws when job.content is missing agent_id (a malformed row the API schema should have rejected)', async () => {
+    const h = harness(job({ content: {} }));
+    await expect(runCampaignJob('job-1', h.deps)).rejects.toThrow(/agent_id/);
+    expect(h.jobStatuses).toEqual(['processing']); // never rolled up to terminal
+  });
+
+  it('flattens item_state into string variables, dropping null/undefined entries', async () => {
+    const h = harness(
+      job({ items: [{ itemId: 'item-1', action: 'voice', status: 'pending', rayaBatchId: null }] }),
+      {
+        fetchDecryptedProfiles: async () =>
+          ok({
+            profiles: [
+              row({
+                item_id: 'item-1',
+                item_state: { role: 'Electrician', middle_name: null, nickname: undefined },
+              }),
+            ],
+            skipped: [],
+          }),
+      },
+    );
+    await runCampaignJob('job-1', h.deps);
+
+    const [contact] = h.provider.dispatches[0]!.contacts;
+    expect(contact!.variables).toEqual({ role: 'Electrician' });
+    expect(contact!.variables).not.toHaveProperty('middle_name');
+    expect(contact!.variables).not.toHaveProperty('nickname');
+  });
+
+  it('falls back to an empty name when the decrypted contact carries no name value', async () => {
+    const h = harness(
+      job({ items: [{ itemId: 'item-1', action: 'voice', status: 'pending', rayaBatchId: null }] }),
+      {
+        fetchDecryptedProfiles: async () =>
+          ok({
+            profiles: [
+              row({
+                item_id: 'item-1',
+                contact: { phone: { value: '+910000000001', source: 'item' } },
+              }),
+            ],
+            skipped: [],
+          }),
+      },
+    );
+    await runCampaignJob('job-1', h.deps);
+
+    const [contact] = h.provider.dispatches[0]!.contacts;
+    expect(contact!.name).toBe('');
+    expect(contact!.phone).toBe('+910000000001');
+  });
+
+  it('forwards every Raya start-option key present on the content to dispatch', async () => {
+    const h = harness(
+      job({
+        content: {
+          agent_id: 'agent-1',
+          schedule: { start: '2026-01-01T00:00:00Z' },
+          max_retries: 2,
+          retry_after_hrs: 4,
+          max_concurrent_calls: 5,
+          selected_statuses: ['no-answer'],
+        },
+      }),
+    );
+    await runCampaignJob('job-1', h.deps);
+
+    expect(h.provider.dispatches[0]!.startOptions).toEqual({
+      schedule: { start: '2026-01-01T00:00:00Z' },
+      max_retries: 2,
+      retry_after_hrs: 4,
+      max_concurrent_calls: 5,
+      selected_statuses: ['no-answer'],
+    });
+  });
+
+  it('describeDispatchFailure: falls back to the bare error message when the provider gives no response body', async () => {
+    const h = harness(job());
+    const provider = new ErroringVoiceProvider(
+      new AuthError('raya /batch returned 401', { code: 'RAYA_UNAUTHORIZED' }), // no `details`
+    );
+    h.deps.voice!.provider = provider;
+
+    await runCampaignJob('job-1', h.deps);
+
+    expect(h.itemMarks).toContainEqual({
+      itemId: 'item-1',
+      status: 'failed',
+      err: 'raya /batch returned 401',
+    });
+  });
+
+  it('describeDispatchFailure: falls back to the raw body text when the body is not JSON', async () => {
+    const h = harness(job());
+    const provider = new ErroringVoiceProvider(
+      new ValidationError('raya /batch/1/start returned 400', {
+        code: 'RAYA_BAD_REQUEST',
+        details: { status: 400, body: 'Bad Gateway' },
+      }),
+    );
+    h.deps.voice!.provider = provider;
+
+    await runCampaignJob('job-1', h.deps);
+
+    expect(h.itemMarks).toContainEqual({
+      itemId: 'item-1',
+      status: 'failed',
+      err: 'raya /batch/1/start returned 400: Bad Gateway',
+    });
+  });
+
+  it('describeDispatchFailure: falls back to the raw JSON body text when it carries no message field', async () => {
+    const body = JSON.stringify({ error: 'bad_request' });
+    const h = harness(job());
+    const provider = new ErroringVoiceProvider(
+      new ValidationError('raya /batch/1/start returned 400', {
+        code: 'RAYA_BAD_REQUEST',
+        details: { status: 400, body },
+      }),
+    );
+    h.deps.voice!.provider = provider;
+
+    await runCampaignJob('job-1', h.deps);
+
+    expect(h.itemMarks).toContainEqual({
+      itemId: 'item-1',
+      status: 'failed',
+      err: `raya /batch/1/start returned 400: ${body}`,
+    });
+  });
 });

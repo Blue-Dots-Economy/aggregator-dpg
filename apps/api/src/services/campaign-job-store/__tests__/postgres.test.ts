@@ -291,6 +291,20 @@ describe('PostgresCampaignJobStore', () => {
     expect(sets.some((s) => s.providerResponse === payload)).toBe(true);
   });
 
+  it('markSubmitted: maps a thrown DB error to DB_UNAVAILABLE', async () => {
+    queue(Promise.reject(new Error('connection reset')));
+    const r = await store.markSubmitted('job-1', 'a', { rayaBatchId: 'batch-1' });
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.error.code).toBe('DB_UNAVAILABLE');
+  });
+
+  it('setProviderResponse: maps a thrown DB error to DB_UNAVAILABLE', async () => {
+    queue(Promise.reject(new Error('connection reset')));
+    const r = await store.setProviderResponse('job-1', { any: 'payload' });
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.error.code).toBe('DB_UNAVAILABLE');
+  });
+
   it('rollUpStatus: derives + persists from counts', async () => {
     queue([{ status: 'resolved', n: 2 }], undefined); // countItems ; setJobStatus update
     const r = await store.rollUpStatus('job-1');
