@@ -18,7 +18,11 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { z } from 'zod';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
 import { getCampaignJobStore } from '../services/campaign-job-store/index.js';
-import type { CampaignChannel, CreateJobItemInput } from '../services/campaign-job-store/index.js';
+import type {
+  CampaignChannel,
+  CreateJobItemInput,
+  JobRecord,
+} from '../services/campaign-job-store/index.js';
 import { enqueueCampaignProcess } from '../services/campaign-process-queue/index.js';
 import { dedupeItemIds } from './envelope.js';
 import type { campaignEnvelopeSchema } from './envelope.js';
@@ -81,28 +85,7 @@ export async function submitCampaignJob(
 ): Promise<void> {
   const auth = await requireCampaignAuth(req);
   const orgId = requireOrgId(auth);
-
-  // The requesting aggregator must be active (fail fast, and it supplies the
-  // fallback requester/recipient email below).
-  const found = await getAggregatorStore().findById(auth.aggregatorId);
-  if (!found.ok || found.value?.status !== 'active') {
-    throw httpError('FORBIDDEN', {
-      detail: 'requesting aggregator is not active',
-      fields: { reason: 'AGGREGATOR_INACTIVE' },
-    });
-  }
-
-  // requested_by: the requesting user's own verified token email, falling
-  // back to the aggregator's stored contact_email — audit trail only, but the
-  // column is NOT NULL so it must resolve.
-  const requestedBy = auth.email ?? found.value.contactEmail;
-  if (!requestedBy) {
-    throw httpError('FORBIDDEN', {
-      detail:
-        'no requester identity — the token has no email claim and the aggregator has no contact_email',
-      fields: { reason: 'RECIPIENT_UNRESOLVED' },
-    });
-  }
+  const requestedBy = await resolveRequestedBy(auth.aggregatorId, auth.email);
 
   const envelope = req.body as z.infer<typeof campaignEnvelopeSchema>;
   const content = opts.parseContent(envelope.content);
@@ -149,33 +132,7 @@ export async function submitCampaignJob(
   });
   if (!created.ok) throw httpError('INTERNAL', { detail: 'could not create campaign job' });
 
-  // Enqueue on first creation, and ALSO on a replay whose job is still
-  // `queued` — that means a previous enqueue never landed, and returning 202
-  // again without re-queuing would promise a dispatch that never runs.
-  // BullMQ de-duplicates on jobId, so a redundant add is a no-op.
-  const needsEnqueue = created.value.created || created.value.job.status === 'queued';
-  if (needsEnqueue) {
-    try {
-      await enqueueCampaignProcess({ jobId: created.value.job.id }, { attempts: opts.attempts });
-    } catch (cause) {
-      // The row is already committed. Leaving it `queued` strands it: the
-      // watchdog only reaps `processing`, and `queued` counts against the
-      // per-org active cap, so repeated Redis blips would permanently wedge
-      // the org's cap. Mark it failed so the state is truthful and the slot
-      // is released.
-      const reason = cause instanceof Error ? cause.message : opts.enqueueFailedFallbackMessage;
-      const marked = await store.setJobStatus(created.value.job.id, 'failed', 'enqueue_failed');
-      if (!marked.ok) {
-        req.log.error({
-          operation: opts.logOperation,
-          status: 'failure',
-          job_id: created.value.job.id,
-          error: 'could not mark the un-enqueued job failed',
-        });
-      }
-      throw httpError(opts.enqueueFailedErrorCode, { detail: reason });
-    }
-  }
+  await enqueueWithCompensation(created.value.job, created.value.created, opts, req, store);
 
   await reply.code(202).send({
     status: 'queued' as const,
@@ -183,6 +140,100 @@ export async function submitCampaignJob(
     job_id: created.value.job.id,
     message: opts.successMessage,
   });
+}
+
+/**
+ * Verifies the requesting aggregator is active and resolves the
+ * `requested_by` audit-trail email — the token's own verified email claim,
+ * falling back to the aggregator's stored `contact_email`. Split out of
+ * {@link submitCampaignJob} to keep that function's cognitive complexity in
+ * check; behaviour (including both `FORBIDDEN` failure modes) is unchanged.
+ *
+ * @param aggregatorId - The requesting aggregator's id (from the auth token).
+ * @param tokenEmail - The token's own `email` claim, if present.
+ * @returns The resolved requester email.
+ * @throws The `FORBIDDEN` http error if the aggregator isn't active, or if no
+ *   requester identity resolves (no token email claim and no `contact_email`).
+ */
+async function resolveRequestedBy(
+  aggregatorId: string,
+  tokenEmail: string | undefined,
+): Promise<string> {
+  // The requesting aggregator must be active (fail fast, and it supplies the
+  // fallback requester/recipient email below).
+  const found = await getAggregatorStore().findById(aggregatorId);
+  if (!found.ok || found.value?.status !== 'active') {
+    throw httpError('FORBIDDEN', {
+      detail: 'requesting aggregator is not active',
+      fields: { reason: 'AGGREGATOR_INACTIVE' },
+    });
+  }
+
+  // requested_by: the requesting user's own verified token email, falling
+  // back to the aggregator's stored contact_email — audit trail only, but the
+  // column is NOT NULL so it must resolve.
+  const requestedBy = tokenEmail ?? found.value.contactEmail;
+  if (!requestedBy) {
+    throw httpError('FORBIDDEN', {
+      detail:
+        'no requester identity — the token has no email claim and the aggregator has no contact_email',
+      fields: { reason: 'RECIPIENT_UNRESOLVED' },
+    });
+  }
+  return requestedBy;
+}
+
+/**
+ * Enqueues the just-created (or idempotency-replayed) campaign job, and
+ * compensates if the enqueue call itself fails. Split out of
+ * {@link submitCampaignJob} to keep that function's cognitive complexity in
+ * check; behaviour is unchanged — see the module doc for the enqueue/replay/
+ * compensation contract this implements.
+ *
+ * @param job - The created/replayed job row (id + current status).
+ * @param wasCreated - Whether this call created the row (vs. an idempotency
+ *   replay of an existing one).
+ * @param opts - Channel-specific enqueue/error-code/log knobs.
+ * @param req - The Fastify request — used for structured logging only.
+ * @param store - The campaign job store, for the failure-compensation write.
+ * @throws The channel's `enqueueFailedErrorCode` http error if enqueueing
+ *   fails; the underlying job row is marked `failed` first so the org's
+ *   active-job slot isn't permanently stranded.
+ */
+async function enqueueWithCompensation(
+  job: JobRecord,
+  wasCreated: boolean,
+  opts: SubmitCampaignJobOptions,
+  req: FastifyRequest,
+  store: ReturnType<typeof getCampaignJobStore>,
+): Promise<void> {
+  // Enqueue on first creation, and ALSO on a replay whose job is still
+  // `queued` — that means a previous enqueue never landed, and returning 202
+  // again without re-queuing would promise a dispatch that never runs.
+  // BullMQ de-duplicates on jobId, so a redundant add is a no-op.
+  const needsEnqueue = wasCreated || job.status === 'queued';
+  if (!needsEnqueue) return;
+
+  try {
+    await enqueueCampaignProcess({ jobId: job.id }, { attempts: opts.attempts });
+  } catch (cause) {
+    // The row is already committed. Leaving it `queued` strands it: the
+    // watchdog only reaps `processing`, and `queued` counts against the
+    // per-org active cap, so repeated Redis blips would permanently wedge
+    // the org's cap. Mark it failed so the state is truthful and the slot
+    // is released.
+    const reason = cause instanceof Error ? cause.message : opts.enqueueFailedFallbackMessage;
+    const marked = await store.setJobStatus(job.id, 'failed', 'enqueue_failed');
+    if (!marked.ok) {
+      req.log.error({
+        operation: opts.logOperation,
+        status: 'failure',
+        job_id: job.id,
+        error: 'could not mark the un-enqueued job failed',
+      });
+    }
+    throw httpError(opts.enqueueFailedErrorCode, { detail: reason });
+  }
 }
 
 /** Reads the `Idempotency-Key` request header (Fastify lowercases header names). */

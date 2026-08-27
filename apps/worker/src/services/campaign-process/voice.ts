@@ -154,7 +154,9 @@ function flattenVariables(itemState: Record<string, unknown>): Record<string, st
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(itemState)) {
     if (value === null || value === undefined) continue;
-    out[key] = typeof value === 'object' ? JSON.stringify(value) : String(value);
+    if (typeof value === 'string') out[key] = value;
+    else if (typeof value === 'number' || typeof value === 'boolean') out[key] = String(value);
+    else out[key] = JSON.stringify(value);
   }
   return out;
 }
