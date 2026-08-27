@@ -13,8 +13,40 @@ import { describe, it, expect, vi } from 'vitest';
 import { RayaVoiceProvider } from '../raya.js';
 import type { VoiceDispatchInput } from '../interface.js';
 
+// Modelled on Raya's REAL `POST /batch` 200 response — it echoes the
+// submitted contact rows back in `data[]` (name/phone, PII) in addition to
+// the whitelisted bookkeeping fields. `data` must never reach
+// `providerResponse.create` — see the curation assertions below.
 const CREATE_OK_BODY = {
   status: 'success',
+  message: 'batch created',
+  batchId: 42,
+  totalRows: 1,
+  validRows: 1,
+  invalidRows: 0,
+  contactsInserted: 1,
+  data: [{ ref: 'i1', contact_name: 'Asha', contact_phone: '9000000001' }],
+};
+
+// Modelled on Raya's REAL `POST /batch/{id}/start` response — includes extra
+// fields beyond the persistence whitelist to prove curation drops them.
+const START_OK_BODY = {
+  id: 42,
+  status: 'Active',
+  total_contacts: 1,
+  completed_contacts: 0,
+  unanswered_contacts: 0,
+  schedule: null,
+  max_retries: 2,
+  concurrency: 5,
+  retry_after_hrs: 1,
+  webhook_url: 'https://internal.example.com/hooks/raya', // NOT whitelisted
+};
+
+/** The curated (whitelist-only) shape `providerResponse.create` must equal for {@link CREATE_OK_BODY}. */
+const CREATE_OK_CURATED = {
+  status: 'success',
+  message: 'batch created',
   batchId: 42,
   totalRows: 1,
   validRows: 1,
@@ -22,7 +54,18 @@ const CREATE_OK_BODY = {
   contactsInserted: 1,
 };
 
-const START_OK_BODY = { id: 42, status: 'Active', total_contacts: 1 };
+/** The curated (whitelist-only) shape `providerResponse.start` must equal for {@link START_OK_BODY}. */
+const START_OK_CURATED = {
+  id: 42,
+  status: 'Active',
+  total_contacts: 1,
+  completed_contacts: 0,
+  unanswered_contacts: 0,
+  schedule: null,
+  max_retries: 2,
+  concurrency: 5,
+  retry_after_hrs: 1,
+};
 
 function jsonResponse(
   status: number,
@@ -105,9 +148,62 @@ describe('RayaVoiceProvider', () => {
         providerBatchRef: '42',
         accepted: ['i1'],
         rejected: [],
-        providerResponse: { create: CREATE_OK_BODY, start: START_OK_BODY },
+        providerResponse: { create: CREATE_OK_CURATED, start: START_OK_CURATED },
       },
     });
+  });
+
+  it('persists only the curated whitelist — never the raw data[]/webhook_url payload', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, CREATE_OK_BODY))
+      .mockResolvedValueOnce(jsonResponse(200, START_OK_BODY));
+
+    const provider = new RayaVoiceProvider({
+      baseUrl: 'https://raya.example.com/api',
+      apiKey: 'key-abc',
+      acquireSlot: vi.fn().mockResolvedValue(undefined),
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    const result = await provider.dispatch(baseInput());
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+
+    const { create, start } = result.value.providerResponse as {
+      create: Record<string, unknown>;
+      start: Record<string, unknown>;
+    };
+    expect(Object.keys(create).sort()).toEqual(
+      [
+        'status',
+        'message',
+        'totalRows',
+        'validRows',
+        'invalidRows',
+        'batchId',
+        'contactsInserted',
+      ].sort(),
+    );
+    expect(Object.keys(start).sort()).toEqual(
+      [
+        'id',
+        'status',
+        'total_contacts',
+        'completed_contacts',
+        'unanswered_contacts',
+        'schedule',
+        'max_retries',
+        'concurrency',
+        'retry_after_hrs',
+      ].sort(),
+    );
+    // The raw payload's contact echo/private webhook must never survive curation.
+    const serialized = JSON.stringify(result.value.providerResponse);
+    expect(serialized).not.toContain('data');
+    expect(serialized).not.toContain('Asha');
+    expect(serialized).not.toContain('9000000001');
+    expect(serialized).not.toContain('webhook_url');
   });
 
   it('injects no defaults into the start body beyond the supplied startOptions keys', async () => {
@@ -129,12 +225,14 @@ describe('RayaVoiceProvider', () => {
     expect(JSON.parse(startInit.body as string)).toEqual({});
   });
 
-  it('maps a create-time row rejection to rejected and excludes it from accepted', async () => {
+  it('maps a create-time row rejection to rejected and excludes it from accepted, without leaking the rejected row PII into providerResponse', async () => {
     const createWithError = {
       ...CREATE_OK_BODY,
       validRows: 0,
       invalidRows: 1,
-      errors: [{ row: 1, field: 'contact_phone', value: 'bad', message: 'bad' }],
+      // Raya's real shape: `errors[].value` echoes the raw offending
+      // phone/name back — this must never survive into `providerResponse`.
+      errors: [{ row: 1, field: 'contact_phone', value: '9000000001', message: 'bad' }],
     };
     const fetchImpl = vi.fn().mockResolvedValueOnce(jsonResponse(200, createWithError));
 
@@ -155,9 +253,17 @@ describe('RayaVoiceProvider', () => {
         providerBatchRef: '42',
         accepted: [],
         rejected: [{ ref: 'i1', error: 'bad' }],
-        providerResponse: { create: createWithError, start: null },
+        providerResponse: {
+          create: { ...CREATE_OK_CURATED, validRows: 0, invalidRows: 1 },
+          start: null,
+        },
       },
     });
+    if (!result.success) return;
+    const serialized = JSON.stringify(result.value.providerResponse);
+    expect(serialized).not.toContain('9000000001');
+    expect(serialized).not.toContain('"errors"');
+    expect(serialized).not.toContain('"value"');
   });
 
   it("retries a 429 honouring the JSON body retry_after — Raya's actual RateLimitError/ConcurrencyLimitError shape, which carries no Retry-After header", async () => {

@@ -14,9 +14,20 @@
  * `raya_batch_id` in the same statement, so the presence of a `raya_batch_id`
  * on any item is proof a prior attempt already created a batch at the
  * provider. Dispatching again in that case would create a SECOND batch and
- * call the same recipients twice, so this handler no-ops instead of
- * re-running. Items already in a terminal status (submitted/failed/skipped/
- * duplicate_active) are never re-decrypted or re-included in a new batch.
+ * call the same recipients twice — so this handler never re-dispatches — but
+ * it does not simply no-op: any item still `resolved` (decrypted before the
+ * crash, never persisted after) is resumed by marking it `submitted` under
+ * the already-known batch id, best-effort. Without this, a `resolved` item
+ * counts as "succeeded" in `deriveJobStatus`, so `runCampaignJob` would roll
+ * the job straight to `completed`/`partial` in the SAME attempt — and since
+ * the watchdog only reconciles `processing` jobs, that item would stay
+ * `resolved` with no `raya_batch_id` forever. The resume is best-effort (it
+ * cannot know whether Raya actually accepted or rejected that specific
+ * contact — the accepted/rejected split from the crashed attempt's dispatch
+ * call was never persisted); the campaign manager polls Raya directly for
+ * the real per-contact outcome. Items already in a terminal status
+ * (submitted/failed/skipped/duplicate_active) are never re-decrypted or
+ * re-included in a new batch.
  *
  * Never logs contact PII (name/phone/variables) — only counts and item ids.
  * Belongs to `@aggregator-dpg/worker`.
@@ -193,9 +204,23 @@ export async function runVoiceForJob(job: ProcessingJob, deps: CampaignJobDeps):
   const base = { operation: 'campaign.voice', job_id: job.id, org_id: job.signalstackOrgId };
 
   // Retry-safety guard: a raya_batch_id proves a batch was already created on
-  // a prior attempt (see module note) — never dispatch a second one.
-  if (job.items.some((i) => i.rayaBatchId)) {
-    deps.log.info({ ...base, status: 'skipped', reason: 'batch_already_created' });
+  // a prior attempt (see module note) — never dispatch a second one. Resume
+  // the persist instead of a bare no-op: mark every item still `resolved`
+  // (decrypted but never persisted before the crash) submitted under the
+  // known batch, so it stops silently reading as "succeeded" with no
+  // raya_batch_id.
+  const existingBatchId = job.items.find((i) => i.rayaBatchId)?.rayaBatchId;
+  if (existingBatchId) {
+    const unresolved = job.items.filter((i) => i.status === 'resolved');
+    for (const item of unresolved) {
+      await deps.client.markSubmitted(job.id, item.itemId, { rayaBatchId: existingBatchId });
+    }
+    deps.log.info({
+      ...base,
+      status: 'skipped',
+      reason: 'batch_already_created',
+      resumed: unresolved.length,
+    });
     return;
   }
 

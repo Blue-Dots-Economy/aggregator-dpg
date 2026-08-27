@@ -86,6 +86,59 @@ describe('InMemoryVoiceProvider', () => {
     expect(second.value.accepted).toEqual(['i1']);
   });
 
+  it('curates providerResponse to the persistence whitelist — no name/phone/value/data leak through', async () => {
+    const p = new InMemoryVoiceProvider();
+    p.setReject('i1', 'invalid phone');
+    const r = await p.dispatch({
+      agentRef: 'a',
+      batchName: 'b',
+      contacts: [
+        { ref: 'i1', name: 'Rejected Person', phone: '9000000099', variables: {} },
+        { ref: 'i2', name: 'Accepted Person', phone: '9000000002', variables: {} },
+      ],
+      startOptions: { max_concurrent_calls: 5 },
+    });
+    if (!r.success) throw new Error('expected ok envelope');
+
+    const { create, start } = r.value.providerResponse as {
+      create: Record<string, unknown>;
+      start: Record<string, unknown>;
+    };
+    expect(Object.keys(create).sort()).toEqual(
+      [
+        'status',
+        'message',
+        'totalRows',
+        'validRows',
+        'invalidRows',
+        'batchId',
+        'contactsInserted',
+      ].sort(),
+    );
+    expect(Object.keys(start).sort()).toEqual(
+      [
+        'id',
+        'status',
+        'total_contacts',
+        'completed_contacts',
+        'unanswered_contacts',
+        'schedule',
+        'max_retries',
+        'concurrency',
+        'retry_after_hrs',
+      ].sort(),
+    );
+    const serialized = JSON.stringify(r.value.providerResponse);
+    expect(serialized).not.toContain('Rejected Person');
+    expect(serialized).not.toContain('Accepted Person');
+    expect(serialized).not.toContain('9000000099');
+    expect(serialized).not.toContain('9000000002');
+    expect(serialized).not.toContain('"data"');
+    expect(serialized).not.toContain('"errors"');
+    expect(serialized).not.toContain('"value"');
+    expect(serialized).not.toContain('webhook_url');
+  });
+
   it('stop and update return a not-implemented error (inherited from the base)', async () => {
     const p = new InMemoryVoiceProvider();
     const stopResult = await p.stop('batch-1');

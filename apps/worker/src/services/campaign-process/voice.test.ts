@@ -348,7 +348,36 @@ describe('runVoiceForJob (via runCampaignJob)', () => {
 
     expect(h.fetchQueries).toHaveLength(0);
     expect(h.provider.dispatches).toHaveLength(0);
+    // item-2 was never decrypted (still `pending`, not `resolved`) on the
+    // crashed attempt, so it's left alone rather than guessed at.
     expect(h.submitted).toHaveLength(0);
+  });
+
+  it('retry-safety resume: a mix of already-submitted + resolved items all end submitted under the known batch, with no second dispatch call', async () => {
+    const h = harness(
+      job({
+        items: [
+          { itemId: 'item-1', action: 'voice', status: 'submitted', rayaBatchId: 'batch-prior' },
+          { itemId: 'item-2', action: 'voice', status: 'resolved', rayaBatchId: null },
+          { itemId: 'item-3', action: 'voice', status: 'resolved', rayaBatchId: null },
+        ],
+      }),
+    );
+    await runCampaignJob('job-1', h.deps);
+
+    // No re-decrypt, no second batch created at the provider.
+    expect(h.fetchQueries).toHaveLength(0);
+    expect(h.provider.dispatches).toHaveLength(0);
+    // Every still-`resolved` item is resumed under the known batch id.
+    expect(h.submitted).toEqual(
+      expect.arrayContaining([
+        { itemId: 'item-2', rayaBatchId: 'batch-prior' },
+        { itemId: 'item-3', rayaBatchId: 'batch-prior' },
+      ]),
+    );
+    expect(h.submitted).toHaveLength(2);
+    // The already-submitted item-1 is untouched — forward-only guard, not re-marked.
+    expect(h.submitted.find((s) => s.itemId === 'item-1')).toBeUndefined();
   });
 
   it('throws (BullMQ retry) when the provider dispatch fails', async () => {
@@ -373,6 +402,18 @@ describe('runVoiceForJob (via runCampaignJob)', () => {
     const h = harness(job());
     await runCampaignJob('job-1', h.deps);
     const serialized = JSON.stringify([...h.logs.info, ...h.logs.warn, ...h.logs.error]);
+    expect(serialized).not.toContain('Asha');
+    expect(serialized).not.toContain('+910000000001');
+  });
+
+  it('never writes contact PII into the item-level store calls (markItem/markSubmitted)', async () => {
+    const h = harness(job());
+    h.provider.setReject('item-2', 'invalid phone number');
+    await runCampaignJob('job-1', h.deps);
+
+    // itemMarks/submitted only ever carry ids, statuses, and provider batch
+    // refs — never the decrypted name/phone that produced them.
+    const serialized = JSON.stringify([...h.itemMarks, ...h.submitted]);
     expect(serialized).not.toContain('Asha');
     expect(serialized).not.toContain('+910000000001');
   });

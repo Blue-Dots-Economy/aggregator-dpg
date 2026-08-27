@@ -19,6 +19,15 @@
  * first, with the header kept only as a defensive fallback should that ever
  * change.
  *
+ * `providerResponse` (persisted verbatim by the worker onto
+ * `campaign_job.provider_response` — a durable, campaign-manager-visible
+ * column) is built from a **curated whitelist**, never the raw upstream
+ * payload: Raya's real `POST /batch` response echoes the offending value
+ * back in `errors[].value` (a raw phone/name) and echoes `data[]` (the
+ * submitted contact rows) — both PII. {@link curateCreateResponse} and
+ * {@link curateStartResponse} strip everything outside their whitelist
+ * before it ever reaches {@link VoiceDispatchResult.providerResponse}.
+ *
  * @module @aggregator-dpg/voice-provider
  */
 
@@ -38,15 +47,97 @@ import {
   type VoiceDispatchResult,
 } from './interface.js';
 
-/** Raya's `POST /batch` response shape (only the fields this adapter reads). */
+/**
+ * Raya's `POST /batch` response shape (only the fields this adapter reads).
+ * `errors[].value` (the raw rejected phone/name) and `data[]` (an echo of the
+ * submitted contact rows) are read for accept/reject bookkeeping only — see
+ * {@link curateCreateResponse} for what actually gets persisted.
+ */
 interface RayaCreateBatchResponse {
   status?: unknown;
+  message?: unknown;
   batchId?: unknown;
   totalRows?: unknown;
   validRows?: unknown;
   invalidRows?: unknown;
   contactsInserted?: unknown;
   errors?: Array<{ row?: unknown; field?: unknown; value?: unknown; message?: unknown }>;
+  data?: unknown;
+}
+
+/** Raya's `POST /batch/{id}/start` response shape (only the fields this adapter reads). */
+interface RayaStartBatchResponse {
+  id?: unknown;
+  status?: unknown;
+  total_contacts?: unknown;
+  completed_contacts?: unknown;
+  unanswered_contacts?: unknown;
+  schedule?: unknown;
+  max_retries?: unknown;
+  concurrency?: unknown;
+  retry_after_hrs?: unknown;
+}
+
+/**
+ * Whitelist of `POST /batch` response fields safe to persist. Deliberately
+ * excludes `errors` (carries `errors[].value`, the raw rejected phone/name)
+ * and `data` (echoes the submitted contact rows) — see the module note.
+ */
+const CREATE_RESPONSE_PERSIST_KEYS = [
+  'status',
+  'message',
+  'totalRows',
+  'validRows',
+  'invalidRows',
+  'batchId',
+  'contactsInserted',
+] as const satisfies readonly (keyof RayaCreateBatchResponse)[];
+
+/** Whitelist of `POST /batch/{id}/start` response fields safe to persist. */
+const START_RESPONSE_PERSIST_KEYS = [
+  'id',
+  'status',
+  'total_contacts',
+  'completed_contacts',
+  'unanswered_contacts',
+  'schedule',
+  'max_retries',
+  'concurrency',
+  'retry_after_hrs',
+] as const satisfies readonly (keyof RayaStartBatchResponse)[];
+
+/**
+ * Curates the raw `POST /batch` response down to the persistence whitelist —
+ * never the full payload (see the module note on why `errors`/`data` are PII).
+ *
+ * @param payload - The raw parsed create-response body.
+ * @returns Only the whitelisted fields present on `payload`.
+ */
+function curateCreateResponse(payload: RayaCreateBatchResponse): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const key of CREATE_RESPONSE_PERSIST_KEYS) {
+    if (payload[key] !== undefined) out[key] = payload[key];
+  }
+  return out;
+}
+
+/**
+ * Curates the raw `POST /batch/{id}/start` response down to the persistence
+ * whitelist. `payload` is typed `unknown` at the call site (Raya's start
+ * response isn't otherwise parsed) so this validates shape defensively.
+ *
+ * @param payload - The raw parsed start-response body.
+ * @returns Only the whitelisted fields present on `payload`, or `{}` if
+ *   `payload` isn't an object.
+ */
+function curateStartResponse(payload: unknown): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (payload === null || typeof payload !== 'object') return out;
+  const record = payload as RayaStartBatchResponse;
+  for (const key of START_RESPONSE_PERSIST_KEYS) {
+    if (record[key] !== undefined) out[key] = record[key];
+  }
+  return out;
 }
 
 /** Configuration for {@link RayaVoiceProvider}. */
@@ -148,7 +239,7 @@ export class RayaVoiceProvider extends VoiceProviderBase {
         providerBatchRef,
         accepted,
         rejected,
-        providerResponse: { create: createPayload, start: null },
+        providerResponse: { create: curateCreateResponse(createPayload), start: null },
       });
     }
 
@@ -174,7 +265,10 @@ export class RayaVoiceProvider extends VoiceProviderBase {
       providerBatchRef,
       accepted,
       rejected,
-      providerResponse: { create: createPayload, start: startResult.value },
+      providerResponse: {
+        create: curateCreateResponse(createPayload),
+        start: curateStartResponse(startResult.value),
+      },
     });
   }
 
