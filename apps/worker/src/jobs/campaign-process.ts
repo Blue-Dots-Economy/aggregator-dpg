@@ -28,6 +28,13 @@ export interface CampaignAttempt {
 }
 
 /**
+ * Retry position assumed when a caller doesn't supply one — a single,
+ * final attempt. A shared constant rather than an inline object-literal
+ * default so the value isn't re-allocated per call (and per sonar S7737).
+ */
+const SINGLE_ATTEMPT: CampaignAttempt = { attempt: 1, maxAttempts: 1 };
+
+/**
  * Runs one campaign-process job.
  *
  * @param data - The enqueued payload — just the `campaign_job.id`.
@@ -35,7 +42,7 @@ export interface CampaignAttempt {
  */
 export async function processCampaignJob(
   data: CampaignProcessJob,
-  attempt: CampaignAttempt = { attempt: 1, maxAttempts: 1 },
+  attempt: CampaignAttempt = SINGLE_ATTEMPT,
 ): Promise<void> {
   const log = logger.child({ operation: 'campaign.process', job_id: data.jobId });
   const ss = getSignalStackWriter();
