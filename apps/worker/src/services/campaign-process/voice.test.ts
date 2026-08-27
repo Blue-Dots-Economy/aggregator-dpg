@@ -556,6 +556,38 @@ describe('runVoiceForJob (via runCampaignJob)', () => {
     expect(contact!.variables).not.toHaveProperty('nickname');
   });
 
+  it('JSON-stringifies object/array item_state values instead of coercing to "[object Object]"', async () => {
+    const h = harness(
+      job({ items: [{ itemId: 'item-1', action: 'voice', status: 'pending', rayaBatchId: null }] }),
+      {
+        fetchDecryptedProfiles: async () =>
+          ok({
+            profiles: [
+              row({
+                item_id: 'item-1',
+                item_state: {
+                  langs: ['hi', 'en'],
+                  address: { city: 'Ghaziabad', pin: '201001' },
+                  years_experience: 3,
+                },
+              }),
+            ],
+            skipped: [],
+          }),
+      },
+    );
+    await runCampaignJob('job-1', h.deps);
+
+    const [contact] = h.provider.dispatches[0]!.contacts;
+    expect(contact!.variables).toEqual({
+      langs: JSON.stringify(['hi', 'en']),
+      address: JSON.stringify({ city: 'Ghaziabad', pin: '201001' }),
+      years_experience: '3',
+    });
+    expect(contact!.variables['langs']).not.toBe('[object Object]');
+    expect(contact!.variables['address']).not.toBe('[object Object]');
+  });
+
   it('falls back to an empty name when the decrypted contact carries no name value', async () => {
     const h = harness(
       job({ items: [{ itemId: 'item-1', action: 'voice', status: 'pending', rayaBatchId: null }] }),

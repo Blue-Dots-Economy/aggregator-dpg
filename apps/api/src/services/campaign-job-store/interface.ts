@@ -160,8 +160,8 @@ export interface JobView {
   createdAt: Date;
   updatedAt: Date;
   counts: JobStatusCounts;
-  /** Raw provider response captured for the campaign manager (voice: Raya create+start payload). */
-  providerResponse: unknown | null;
+  /** Raw provider response captured for the campaign manager (voice: Raya create+start payload); `unknown` already includes `null`. */
+  providerResponse: unknown;
 }
 
 /** Unscoped projection the worker loads to process a job (no tenant filter — the jobId comes from the trusted queue). */

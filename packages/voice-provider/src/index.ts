@@ -44,21 +44,18 @@ export interface VoiceProviderConfig {
  * @throws {ConfigError} If `cfg.provider` names an unsupported provider.
  */
 export function getVoiceProvider(cfg: VoiceProviderConfig): VoiceProviderBase {
-  switch (cfg.provider) {
-    case 'raya':
-      return new RayaVoiceProvider({
-        baseUrl: cfg.baseUrl,
-        apiKey: cfg.apiKey,
-        timeoutMs: cfg.timeoutMs,
-        acquireSlot: cfg.acquireSlot,
-        ...(cfg.maxAttempts !== undefined ? { maxAttempts: cfg.maxAttempts } : {}),
-        ...(cfg.fetchImpl ? { fetchImpl: cfg.fetchImpl } : {}),
-      });
-    default: {
-      const exhaustive: never = cfg.provider;
-      throw new ConfigError(`unknown voice provider: ${String(exhaustive)}`);
-    }
+  if (cfg.provider === 'raya') {
+    return new RayaVoiceProvider({
+      baseUrl: cfg.baseUrl,
+      apiKey: cfg.apiKey,
+      timeoutMs: cfg.timeoutMs,
+      acquireSlot: cfg.acquireSlot,
+      ...(cfg.maxAttempts !== undefined ? { maxAttempts: cfg.maxAttempts } : {}),
+      ...(cfg.fetchImpl ? { fetchImpl: cfg.fetchImpl } : {}),
+    });
   }
+  const exhaustive: never = cfg.provider;
+  throw new ConfigError(`unknown voice provider: ${String(exhaustive)}`);
 }
 
 export { VoiceProviderBase } from './interface.js';

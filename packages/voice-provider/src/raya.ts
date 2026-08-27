@@ -294,13 +294,7 @@ export class RayaVoiceProvider extends VoiceProviderBase {
       const contact = input.contacts[row - 1];
       if (!contact || rejectedRefs.has(contact.ref)) continue;
       rejectedRefs.add(contact.ref);
-      const reason =
-        typeof e.message === 'string'
-          ? e.message
-          : typeof e.field === 'string'
-            ? e.field
-            : 'rejected';
-      rejected.push({ ref: contact.ref, error: reason });
+      rejected.push({ ref: contact.ref, error: resolveRejectionReason(e) });
     }
     const accepted = input.contacts.map((c) => c.ref).filter((ref) => !rejectedRefs.has(ref));
     return { accepted, rejected };
@@ -320,7 +314,10 @@ export class RayaVoiceProvider extends VoiceProviderBase {
    * `AuthError` immediately (no retry — a bad key won't fix itself). Any
    * other `4xx` maps to `ValidationError` immediately (no retry — the
    * request itself is malformed). When every attempt is exhausted the
-   * failure maps to `UpstreamError`.
+   * failure maps to `UpstreamError`. The per-attempt fetch and the
+   * response classification are split into {@link attemptFetch} and
+   * {@link classifyResponse} so this loop only orchestrates the retry
+   * decision.
    *
    * @param method - HTTP method.
    * @param path - Path appended to `baseUrl` (leading slash).
@@ -337,83 +334,55 @@ export class RayaVoiceProvider extends VoiceProviderBase {
 
     for (;;) {
       attemptsMade += 1;
-      const controller = this.timeoutMs ? new AbortController() : undefined;
-      const timer = controller ? setTimeout(() => controller.abort(), this.timeoutMs) : undefined;
-      let res: Response;
-      try {
-        res = await this.fetchImpl(url, {
-          method,
-          headers: { 'content-type': 'application/json', 'X-API-Key': this.apiKey },
-          body: JSON.stringify(body),
-          ...(controller ? { signal: controller.signal } : {}),
-        });
-      } catch (e) {
-        clearTimeout(timer);
-        const cause = e as Error;
-        const aborted = cause.name === 'AbortError';
+      const attempt = await this.attemptFetch(method, url, body);
+
+      if (!attempt.ok) {
         if (attemptsMade < this.maxAttempts) {
           await this.backoff(attemptsMade);
           continue;
         }
-        return err(
-          new UpstreamError(
-            aborted
-              ? `raya ${path} timed out after ${this.timeoutMs}ms`
-              : `raya ${path} transport failure: ${cause.message}`,
-            { cause, code: aborted ? 'RAYA_TIMEOUT' : 'RAYA_TRANSPORT_FAILED' },
-          ),
-        );
-      } finally {
-        if (timer) clearTimeout(timer);
+        return err(transportFailureError(path, this.timeoutMs, attempt));
       }
 
-      if (res.ok) {
-        try {
-          return ok((await res.json()) as T);
-        } catch (e) {
-          return err(
-            new UpstreamError('raya returned a malformed JSON body', {
-              cause: e,
-              code: 'RAYA_BAD_RESPONSE',
-            }),
-          );
-        }
-      }
-
-      if (res.status === 401) {
-        const bodyText = await safeReadText(res);
-        return err(
-          new AuthError(`raya ${path} returned 401`, {
-            code: 'RAYA_UNAUTHORIZED',
-            details: { status: res.status, body: bodyText },
-          }),
-        );
-      }
-
-      if (res.status !== 429 && res.status < 500) {
-        const bodyText = await safeReadText(res);
-        return err(
-          new ValidationError(`raya ${path} returned ${res.status}`, {
-            code: 'RAYA_BAD_REQUEST',
-            details: { status: res.status, body: bodyText },
-          }),
-        );
-      }
+      const outcome = await classifyResponse<T>(attempt.res, path);
+      if (outcome.kind === 'result') return outcome.result;
 
       // 429 or 5xx — transient, retry within budget.
       if (attemptsMade < this.maxAttempts) {
-        const retryAfterMs = res.status === 429 ? await resolveRetryAfterMs(res) : undefined;
-        await this.backoff(attemptsMade, retryAfterMs);
+        await this.backoff(attemptsMade, outcome.retryAfterMs);
         continue;
       }
+      return err(await exhaustedRetryError(path, attempt.res));
+    }
+  }
 
-      const bodyText = await safeReadText(res);
-      return err(
-        new UpstreamError(`raya ${path} returned ${res.status}`, {
-          code: 'RAYA_UPSTREAM_ERROR',
-          details: { status: res.status, body: bodyText },
-        }),
-      );
+  /**
+   * Issues one raw HTTP attempt with the per-attempt timeout, classifying a
+   * thrown/aborted request separately from a received `Response` so
+   * {@link request}'s retry loop doesn't have to.
+   *
+   * @param method - HTTP method.
+   * @param url - Full request URL.
+   * @param body - JSON request body.
+   * @returns The `Response` on success, or the classified transport failure
+   *   (including whether it was a timeout abort) on a thrown error.
+   */
+  private async attemptFetch(method: string, url: string, body: unknown): Promise<FetchAttempt> {
+    const controller = this.timeoutMs ? new AbortController() : undefined;
+    const timer = controller ? setTimeout(() => controller.abort(), this.timeoutMs) : undefined;
+    try {
+      const res = await this.fetchImpl(url, {
+        method,
+        headers: { 'content-type': 'application/json', 'X-API-Key': this.apiKey },
+        body: JSON.stringify(body),
+        ...(controller ? { signal: controller.signal } : {}),
+      });
+      return { ok: true, res };
+    } catch (e) {
+      const cause = e as Error;
+      return { ok: false, aborted: cause.name === 'AbortError', cause };
+    } finally {
+      if (timer) clearTimeout(timer);
     }
   }
 
@@ -426,6 +395,122 @@ export class RayaVoiceProvider extends VoiceProviderBase {
     if (ms <= 0) return Promise.resolve();
     return this.sleep(ms);
   }
+}
+
+/** Result of one raw `fetch` attempt inside {@link RayaVoiceProvider.request}'s retry loop. */
+type FetchAttempt = { ok: true; res: Response } | { ok: false; aborted: boolean; cause: Error };
+
+/** How {@link classifyResponse} tells {@link RayaVoiceProvider.request}'s retry loop what to do next. */
+type ResponseOutcome<T> =
+  { kind: 'result'; result: Result<T, BaseError> } | { kind: 'retry'; retryAfterMs?: number };
+
+/**
+ * Classifies one received `Response` from a Raya call: a 2xx parses to
+ * `ok`, a `401` maps to `AuthError`, any other non-`429` `4xx` maps to
+ * `ValidationError` — none of these are retried. A `429`/`5xx` is reported
+ * back as `{ kind: 'retry' }` (with the `429`'s signalled wait, if any) and
+ * left for the caller to decide whether attempts remain.
+ *
+ * @param res - The response to classify.
+ * @param path - The request path, for error messages.
+ * @returns Either the terminal `Result` to return, or a retry signal.
+ */
+async function classifyResponse<T>(res: Response, path: string): Promise<ResponseOutcome<T>> {
+  if (res.ok) {
+    try {
+      return { kind: 'result', result: ok((await res.json()) as T) };
+    } catch (e) {
+      return {
+        kind: 'result',
+        result: err(
+          new UpstreamError('raya returned a malformed JSON body', {
+            cause: e,
+            code: 'RAYA_BAD_RESPONSE',
+          }),
+        ),
+      };
+    }
+  }
+
+  if (res.status === 401) {
+    const bodyText = await safeReadText(res);
+    return {
+      kind: 'result',
+      result: err(
+        new AuthError(`raya ${path} returned 401`, {
+          code: 'RAYA_UNAUTHORIZED',
+          details: { status: res.status, body: bodyText },
+        }),
+      ),
+    };
+  }
+
+  if (res.status !== 429 && res.status < 500) {
+    const bodyText = await safeReadText(res);
+    return {
+      kind: 'result',
+      result: err(
+        new ValidationError(`raya ${path} returned ${res.status}`, {
+          code: 'RAYA_BAD_REQUEST',
+          details: { status: res.status, body: bodyText },
+        }),
+      ),
+    };
+  }
+
+  // 429 or 5xx — transient; the caller decides whether attempts remain.
+  const retryAfterMs = res.status === 429 ? await resolveRetryAfterMs(res) : undefined;
+  return retryAfterMs !== undefined ? { kind: 'retry', retryAfterMs } : { kind: 'retry' };
+}
+
+/**
+ * Builds the `UpstreamError` for a thrown/aborted fetch once retries are
+ * exhausted.
+ *
+ * @param path - The request path, for the error message.
+ * @param timeoutMs - The configured per-attempt timeout, for the message text.
+ * @param attempt - The failed attempt's classification.
+ */
+function transportFailureError(
+  path: string,
+  timeoutMs: number | undefined,
+  attempt: { aborted: boolean; cause: Error },
+): UpstreamError {
+  return new UpstreamError(
+    attempt.aborted
+      ? `raya ${path} timed out after ${timeoutMs}ms`
+      : `raya ${path} transport failure: ${attempt.cause.message}`,
+    { cause: attempt.cause, code: attempt.aborted ? 'RAYA_TIMEOUT' : 'RAYA_TRANSPORT_FAILED' },
+  );
+}
+
+/**
+ * Builds the `UpstreamError` for a `429`/`5xx` response once retries are
+ * exhausted.
+ *
+ * @param path - The request path, for the error message.
+ * @param res - The final failed response.
+ */
+async function exhaustedRetryError(path: string, res: Response): Promise<UpstreamError> {
+  const bodyText = await safeReadText(res);
+  return new UpstreamError(`raya ${path} returned ${res.status}`, {
+    code: 'RAYA_UPSTREAM_ERROR',
+    details: { status: res.status, body: bodyText },
+  });
+}
+
+/**
+ * Resolves the rejection reason text for one Raya `POST /batch` `errors[]`
+ * entry — extracted from a nested ternary so each branch is independently
+ * named. Prefers `message`, falls back to `field`, then a generic default.
+ *
+ * @param e - One entry from Raya's create-response `errors` array.
+ * @returns The reason string to store for the rejected contact.
+ */
+function resolveRejectionReason(e: { field?: unknown; message?: unknown }): string {
+  if (typeof e.message === 'string') return e.message;
+  if (typeof e.field === 'string') return e.field;
+  return 'rejected';
 }
 
 /**

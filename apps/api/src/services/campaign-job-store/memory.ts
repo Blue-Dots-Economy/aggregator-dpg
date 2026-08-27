@@ -45,7 +45,8 @@ interface JobRow {
   lastProgressAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
-  providerResponse: unknown | null;
+  /** `unknown` already includes `null` — see the matching field on `JobView`. */
+  providerResponse: unknown;
 }
 
 interface ItemRow {

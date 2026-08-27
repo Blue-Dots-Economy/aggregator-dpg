@@ -190,6 +190,60 @@ function describeDispatchFailure(error: BaseError): string {
   return truncateReason(`${error.message}: ${body}`);
 }
 
+/** Shared log fields stamped on every `campaign.voice` log line for one job. */
+interface VoiceLogBase {
+  operation: 'campaign.voice';
+  job_id: string;
+  org_id: string;
+}
+
+/**
+ * Handles a failed `dispatch()` call. A deterministic client-side rejection
+ * (`AuthError`/`ValidationError`) is terminal — see the module note on why
+ * retrying would multiply orphan batches at Raya: it marks every dispatched
+ * contact `failed` with Raya's specific reason and returns normally so the
+ * caller can return too (no throw, no BullMQ retry). Any other error
+ * (`UpstreamError`: 5xx/network/exhausted retries) is transient and is
+ * re-thrown so BullMQ retries the job.
+ *
+ * @param job - The job being processed.
+ * @param deps - Injected job-client + logger.
+ * @param contacts - The contacts included in the failed dispatch call.
+ * @param error - The typed error from `VoiceProviderBase.dispatch`.
+ * @param base - Shared log fields for this job (`operation`/`job_id`/`org_id`).
+ * @throws {Error} Re-throws (wrapped) for a transient dispatch failure.
+ */
+async function handleDispatchFailure(
+  job: ProcessingJob,
+  deps: CampaignJobDeps,
+  contacts: VoiceContact[],
+  error: BaseError,
+  base: VoiceLogBase,
+): Promise<void> {
+  if (!(error instanceof AuthError || error instanceof ValidationError)) {
+    // Transient (UpstreamError: 5xx/network/exhausted retries) — retryable.
+    throw new Error(`campaign voice dispatch failed: ${error.code}: ${error.message}`);
+  }
+  // Deterministic client-side rejection — see the module note on why this is
+  // terminal rather than retried (create may already have succeeded before
+  // start 400'd; retrying would multiply orphan batches at Raya). No
+  // providerResponse is available on this path — dispatch() failed before
+  // returning one — so there's nothing to persist there beyond the per-item
+  // reason.
+  const reason = describeDispatchFailure(error);
+  for (const contact of contacts) {
+    await deps.client.markItem(job.id, contact.ref, 'failed', reason);
+  }
+  deps.log.warn({
+    ...base,
+    status: 'failed',
+    reason: 'dispatch_rejected',
+    error_code: error.code,
+    error_type: error.constructor.name,
+    dispatched: contacts.length,
+  });
+}
+
 /**
  * Decrypts every still-open item on the job (chunked), marking each
  * `resolved`/`skipped_not_owned` as it goes and beating the heartbeat per
@@ -259,7 +313,11 @@ export async function runVoiceForJob(job: ProcessingJob, deps: CampaignJobDeps):
   if (!voice) {
     throw new Error('campaign voice channel requires voice collaborators (deps.voice)');
   }
-  const base = { operation: 'campaign.voice', job_id: job.id, org_id: job.signalstackOrgId };
+  const base: VoiceLogBase = {
+    operation: 'campaign.voice',
+    job_id: job.id,
+    org_id: job.signalstackOrgId,
+  };
 
   // Retry-safety guard: a raya_batch_id proves a batch was already created on
   // a prior attempt (see module note) — never dispatch a second one. Resume
@@ -314,30 +372,8 @@ export async function runVoiceForJob(job: ProcessingJob, deps: CampaignJobDeps):
     startOptions: voiceStartOptions(content),
   });
   if (!result.success) {
-    const error = result.error;
-    if (error instanceof AuthError || error instanceof ValidationError) {
-      // Deterministic client-side rejection — see the module note on why
-      // this is terminal rather than retried (create may already have
-      // succeeded before start 400'd; retrying would multiply orphan
-      // batches at Raya). No providerResponse is available on this path —
-      // dispatch() failed before returning one — so there's nothing to
-      // persist there beyond the per-item reason.
-      const reason = describeDispatchFailure(error);
-      for (const contact of contacts) {
-        await deps.client.markItem(job.id, contact.ref, 'failed', reason);
-      }
-      deps.log.warn({
-        ...base,
-        status: 'failed',
-        reason: 'dispatch_rejected',
-        error_code: error.code,
-        error_type: error.constructor.name,
-        dispatched: contacts.length,
-      });
-      return;
-    }
-    // Transient (UpstreamError: 5xx/network/exhausted retries) — retryable.
-    throw new Error(`campaign voice dispatch failed: ${error.code}: ${error.message}`);
+    await handleDispatchFailure(job, deps, contacts, result.error, base);
+    return;
   }
 
   await deps.client.setProviderResponse(job.id, result.value.providerResponse);

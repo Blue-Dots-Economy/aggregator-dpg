@@ -10,7 +10,10 @@
  * active-dedup guard arms and a collision with another live job surfaces as
  * `duplicate_active`) and enqueues a single `campaign-process` job carrying the
  * job id. The decrypt → Raya dispatch → persist work runs in `apps/worker` (the
- * `campaign` role) with BullMQ retry, writing item + job status back.
+ * `campaign` role) with BullMQ retry, writing item + job status back. The shared
+ * submit flow (auth → validate → rate-limit → cap → createJob → enqueue with
+ * enqueue-failure compensation → 202) lives in `../campaign/submit-job.ts`,
+ * parameterized here for the voice channel.
  *
  * `content` is the caller's Raya dispatch request — validated here against
  * `voiceContentSchema` (agent id, optional batch/variables/start-options) so a
@@ -24,15 +27,11 @@
  * `contact_email`) purely as an audit trail — the route never returns PII, only
  * `{ job_id }`. Belongs to `@aggregator-dpg/api`.
  */
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { getAggregatorStore } from '../services/aggregator-store/index.js';
-import { getCampaignJobStore } from '../services/campaign-job-store/index.js';
-import { enqueueCampaignProcess } from '../services/campaign-process-queue/index.js';
-import { campaignEnvelopeSchema, dedupeItemIds } from '../campaign/envelope.js';
+import { campaignEnvelopeSchema } from '../campaign/envelope.js';
 import { voiceContentSchema } from '../campaign/voice-content.js';
-import { requireCampaignAuth, requireOrgId } from '../campaign/auth.js';
-import { consume } from '../services/rate-limiter/index.js';
+import { submitCampaignJob } from '../campaign/submit-job.js';
 import { config } from '../config.js';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
@@ -65,132 +64,33 @@ export async function registerCampaignVoiceRoutes(app: FastifyInstance): Promise
       },
     },
     async (req, reply) => {
-      const auth = await requireCampaignAuth(req);
-      const orgId = requireOrgId(auth);
-
-      // The requesting aggregator must be active (fail fast, and it supplies the
-      // fallback requested_by email below).
-      const found = await getAggregatorStore().findById(auth.aggregatorId);
-      if (!found.ok || found.value?.status !== 'active') {
-        throw httpError('FORBIDDEN', {
-          detail: 'requesting aggregator is not active',
-          fields: { reason: 'AGGREGATOR_INACTIVE' },
-        });
-      }
-
-      // requested_by: the requesting user's own verified token email, falling
-      // back to the aggregator's stored contact_email — audit trail only (voice
-      // sends no email), but the column is NOT NULL so it must resolve.
-      const requestedBy = auth.email ?? found.value.contactEmail;
-      if (!requestedBy) {
-        throw httpError('FORBIDDEN', {
-          detail:
-            'no requester identity — the token has no email claim and the aggregator has no contact_email',
-          fields: { reason: 'RECIPIENT_UNRESOLVED' },
-        });
-      }
-
-      const envelope = req.body as z.infer<typeof campaignEnvelopeSchema>;
-
-      const contentParsed = voiceContentSchema.safeParse(envelope.content);
-      if (!contentParsed.success) {
-        throw httpError('SCHEMA_VALIDATION', {
-          detail: 'content failed voice dispatch schema validation',
-          fields: { issues: contentParsed.error.issues },
-        });
-      }
-      const content = contentParsed.data;
-
-      const itemIds = dedupeItemIds(envelope.item_ids);
-      if (itemIds.length > config.CAMPAIGN_VOICE_MAX_ITEMS) {
-        throw httpError('CAMPAIGN_VOICE_TOO_MANY_ITEMS', {
-          fields: { max: config.CAMPAIGN_VOICE_MAX_ITEMS, received: itemIds.length },
-        });
-      }
-
-      // Ingress rate-limit, per org. Fails open on a Redis blip (see consume).
-      const rl = await consume({
-        // Per-channel bucket: a voice burst must not throttle export/email.
-        namespace: 'campaign-submit-voice',
-        key: orgId,
-        windowSeconds: config.CAMPAIGN_VOICE_SUBMIT_WINDOW_SECONDS,
-        max: config.CAMPAIGN_VOICE_SUBMIT_MAX,
-      });
-      if (!rl.allowed) {
-        reply.header('retry-after', String(rl.retryAfterSeconds));
-        throw httpError('CAMPAIGN_RATE_LIMITED', { fields: { retry_after: rl.retryAfterSeconds } });
-      }
-
-      const store = getCampaignJobStore();
-
-      // Per-org active-job cap.
-      const active = await store.countActiveJobs(orgId, 'voice');
-      if (!active.ok) throw httpError('INTERNAL', { detail: 'could not read active job count' });
-      if (active.value >= config.CAMPAIGN_VOICE_MAX_ACTIVE_PER_ORG) {
-        throw httpError('CAMPAIGN_ACTIVE_LIMIT', {
-          fields: { max: config.CAMPAIGN_VOICE_MAX_ACTIVE_PER_ORG },
-        });
-      }
-
-      const idempotencyKey = readIdempotencyKey(req);
-      const created = await store.createJob({
-        aggregatorId: auth.aggregatorId,
-        signalstackOrgId: orgId,
+      await submitCampaignJob(req, reply, {
         channel: 'voice',
-        metadata: envelope.metadata,
-        content,
-        requestedBy,
-        requestId: req.id,
-        ...(idempotencyKey ? { idempotencyKey } : {}),
-        items: itemIds.map((id) => ({ itemId: id, action: 'voice_call' })),
-      });
-      if (!created.ok) throw httpError('INTERNAL', { detail: 'could not create campaign job' });
-
-      // Enqueue on first creation, and ALSO on a replay whose job is still
-      // `queued` — that means a previous enqueue never landed, and returning
-      // 202 again without re-queuing would promise a dispatch that never runs.
-      // BullMQ de-duplicates on jobId, so a redundant add is a no-op.
-      const needsEnqueue = created.value.created || created.value.job.status === 'queued';
-      if (needsEnqueue) {
-        try {
-          await enqueueCampaignProcess(
-            { jobId: created.value.job.id },
-            { attempts: config.CAMPAIGN_VOICE_ATTEMPTS },
-          );
-        } catch (cause) {
-          // The row is already committed. Leaving it `queued` strands it: the
-          // watchdog only reaps `processing`, and `queued` counts against
-          // CAMPAIGN_VOICE_MAX_ACTIVE_PER_ORG, so repeated Redis blips would
-          // permanently wedge the org's cap. Mark it failed so the state is
-          // truthful and the slot is released.
-          const reason = cause instanceof Error ? cause.message : 'failed to enqueue voice job';
-          const marked = await store.setJobStatus(created.value.job.id, 'failed', 'enqueue_failed');
-          if (!marked.ok) {
-            req.log.error({
-              operation: 'campaignVoice.enqueue',
-              status: 'failure',
-              job_id: created.value.job.id,
-              error: 'could not mark the un-enqueued job failed',
+        parseContent: (rawContent) => {
+          const contentParsed = voiceContentSchema.safeParse(rawContent);
+          if (!contentParsed.success) {
+            throw httpError('SCHEMA_VALIDATION', {
+              detail: 'content failed voice dispatch schema validation',
+              fields: { issues: contentParsed.error.issues },
             });
           }
-          throw httpError('VOICE_ENQUEUE_FAILED', { detail: reason });
-        }
-      }
-
-      return reply.code(202).send({
-        status: 'queued' as const,
-        requested: itemIds.length,
-        job_id: created.value.job.id,
-        message: 'Voice campaign request submitted. Poll the job status endpoint for progress.',
+          return contentParsed.data;
+        },
+        buildItem: (itemId) => ({ itemId, action: 'voice_call' }),
+        maxItems: config.CAMPAIGN_VOICE_MAX_ITEMS,
+        maxItemsErrorCode: 'CAMPAIGN_VOICE_TOO_MANY_ITEMS',
+        // Per-channel bucket: a voice burst must not throttle export/email.
+        rateLimitNamespace: 'campaign-submit-voice',
+        submitWindowSeconds: config.CAMPAIGN_VOICE_SUBMIT_WINDOW_SECONDS,
+        submitMax: config.CAMPAIGN_VOICE_SUBMIT_MAX,
+        maxActivePerOrg: config.CAMPAIGN_VOICE_MAX_ACTIVE_PER_ORG,
+        attempts: config.CAMPAIGN_VOICE_ATTEMPTS,
+        enqueueFailedErrorCode: 'VOICE_ENQUEUE_FAILED',
+        enqueueFailedFallbackMessage: 'failed to enqueue voice job',
+        logOperation: 'campaignVoice.enqueue',
+        successMessage:
+          'Voice campaign request submitted. Poll the job status endpoint for progress.',
       });
     },
   );
-}
-
-/** Reads the `Idempotency-Key` request header (Fastify lowercases header names). */
-function readIdempotencyKey(req: FastifyRequest): string | undefined {
-  const raw = req.headers['idempotency-key'];
-  const value = Array.isArray(raw) ? raw[0] : raw;
-  const trimmed = value?.trim();
-  return trimmed || undefined;
 }
