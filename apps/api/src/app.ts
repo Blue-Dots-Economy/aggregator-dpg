@@ -20,7 +20,13 @@ import {
   serializerCompiler,
   validatorCompiler,
 } from 'fastify-type-provider-zod';
-import { config, corsOrigins, apiReferenceEnabled } from './config.js';
+import {
+  config,
+  corsOrigins,
+  apiReferenceEnabled,
+  signalsUiUrlWarnings,
+  onboardingEnabledWarnings,
+} from './config.js';
 import { loggerOptions } from './logger.js';
 import { registerHealthRoutes } from './routes/health.js';
 import { registerAggregatorRegistrationRoutes } from './routes/aggregator-registrations.js';
@@ -37,6 +43,11 @@ import { registerOnboardingRoutes } from './routes/onboarding.js';
 import { registerDashboardRoutes } from './routes/dashboard.js';
 import { registerAggregatorConfigRoutes } from './routes/aggregator-config.js';
 import { registerSupportRoutes } from './routes/support.js';
+import { registerCampaignExportRoutes } from './routes/campaign-export.js';
+import { registerCampaignVoiceRoutes } from './routes/campaign-voice.js';
+import { registerCampaignEmailRoutes } from './routes/campaign-email.js';
+import { registerCampaignJobRoutes } from './routes/campaign-jobs.js';
+import { registerCampaignDumpRoutes } from './routes/campaign-dump.js';
 import { ERR } from './errors/codes.js';
 import { HttpError } from './errors/http-error.js';
 import { coerceToHttpError, toEnvelope, toLogPayload } from './errors/serialize.js';
@@ -69,6 +80,24 @@ export async function buildApp(): Promise<FastifyInstance> {
     },
     disableRequestLogging: true,
   });
+
+  // `SIGNALS_UI_URLS` is parsed at module load, before a logger exists (see
+  // config.ts's `ParsedSignalsUiUrls` doc comment) — surface any skipped
+  // entries here (the message itself names which entry was skipped and why)
+  // so a misconfigured env is visible in cluster logs instead of silently
+  // disabling the hand-off for one domain.
+  for (const warning of signalsUiUrlWarnings) {
+    app.log.warn({ operation: 'config.parseSignalsUiUrls', status: 'skipped' }, warning);
+  }
+
+  // Same hand-off for the `AGGREGATOR_ONBOARDING_ENABLED` allow-list (#637):
+  // parsed at module load, so its duplicate-entry and "set but names nothing"
+  // warnings can only be emitted here. The complementary check — a value that
+  // matches no *declared* registration mode — needs the resolved network
+  // config and lives in `services/network-config.ts`.
+  for (const warning of onboardingEnabledWarnings) {
+    app.log.warn({ operation: 'config.parseOnboardingEnabled', status: 'skipped' }, warning);
+  }
 
   await app.register(cors, {
     origin: corsOrigins.length === 0 || corsOrigins.includes('*') ? true : corsOrigins,
@@ -151,6 +180,11 @@ export async function buildApp(): Promise<FastifyInstance> {
           { name: 'onboarding', description: 'Single-participant onboarding (authenticated).' },
           { name: 'dashboard', description: 'Dashboard rollup + items proxy to signalstack.' },
           { name: 'support', description: 'Authenticated contact-support form submission.' },
+          {
+            name: 'campaign',
+            description:
+              'Campaign integrations — participant PII export (#579) and the non-PII dump download (#692).',
+          },
         ],
       },
       transform: jsonSchemaTransform,
@@ -196,6 +230,13 @@ export async function buildApp(): Promise<FastifyInstance> {
   await registerDashboardRoutes(app);
   await registerAggregatorConfigRoutes(app);
   await registerSupportRoutes(app);
+  await registerCampaignExportRoutes(app);
+  await registerCampaignJobRoutes(app, 'export');
+  await registerCampaignVoiceRoutes(app);
+  await registerCampaignJobRoutes(app, 'voice');
+  await registerCampaignEmailRoutes(app);
+  await registerCampaignJobRoutes(app, 'email');
+  await registerCampaignDumpRoutes(app);
 
   app.setErrorHandler((rawErr, req, reply) => {
     // Fastify schema validation error — promote to a typed HttpError so the

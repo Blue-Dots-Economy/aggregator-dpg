@@ -45,7 +45,7 @@ This document translates the Aggregator Product Note (Draft 2) into an engineeri
 | AG-2  | See connection activity per participant; prioritise follow-up |
 | AG-6  | Share an aggregated summary with Ecosystem Manager / funder   |
 
-**Out of scope for MVP** (tracked for later phases): AG-0a (self-service registration status tracking inside the app), AG-3/AG-4 (in-app connection notifications and direct outreach), AG-5 (Aggregator-of-Aggregators view), AG-7/AG-8 (natural-language queries and ad-hoc report generation), and the eight items in the PRD's Future Scope list (write-back of profile contact changes, unstructured bulk upload, credential issuance on bulk create, voice-call onboarding, lifecycle management, RBAC tiers).
+**Out of scope for MVP** (tracked for later phases): AG-0a (self-service registration status tracking inside the app), AG-3/AG-4 (in-app connection notifications and direct outreach), AG-5 (Aggregator-of-Aggregators view), AG-7/AG-8 (natural-language queries and ad-hoc report generation), and the eight items in the PRD's Future Scope list (write-back of profile contact changes, unstructured bulk upload, credential issuance on bulk create, inbound voice-call participant onboarding (a participant self-onboarding over a phone call — distinct from, and not to be confused with, the shipped campaign-voice **outreach** channel that dials existing participants), lifecycle management, RBAC tiers).
 
 ---
 

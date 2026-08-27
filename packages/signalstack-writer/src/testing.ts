@@ -15,6 +15,8 @@ import type { Result } from '@aggregator-dpg/shared-primitives/result';
 import { InMemorySignalStackWriter } from './memory.js';
 import { SignalStackTokenProviderBase } from './interface.js';
 import type {
+  SignalStackContactCanonical,
+  SignalStackContactValue,
   SignalStackDashboardPage,
   SignalStackDecryptedProfileRow,
   SignalStackOnboardParticipantInput,
@@ -102,6 +104,12 @@ export interface SignalStackProfileSeed {
   channel?: 'bulk' | 'link';
   /** Source workflow id; defaults to empty string. */
   source_id?: string;
+  /**
+   * Canonical contact block a decrypt `contact` projection resolves for this
+   * row (name/email/phone with provenance). Optional — unseeded fields resolve
+   * to `{ value: null, source: null }`.
+   */
+  contact?: Partial<Record<SignalStackContactCanonical, SignalStackContactValue>>;
 }
 
 /**
@@ -195,6 +203,7 @@ export class SignalStackWriterFake extends InMemorySignalStackWriter {
         acting_org_id: s.acting_org_id ?? '',
         channel: s.channel ?? 'bulk',
         source_id: s.source_id ?? '',
+        ...(s.contact !== undefined ? { contact: s.contact } : {}),
       });
     }
 

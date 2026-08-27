@@ -9,6 +9,7 @@ name: aggregator-dpg
 #   Infra    postgres (3 DBs), signals-redis, aggregator-redis,
 #            keycloak, minio (+init), mailpit
 #   signals-dpg   signals-bootstrap (one-shot: migrate+seed) -> signals-api -> signals-ui
+#   search        signals-search api + worker + TEI embeddings  (--profile search)
 #   aggregator-dpg   aggregator-api (auto-migrates) -> aggregator-web + aggregator-worker
 #
 # This file is for LOCAL DEV ONLY. It intentionally does NOT use the
@@ -44,6 +45,7 @@ name: aggregator-dpg
 #   MinIO S3 API             http://localhost:9000
 #   Postgres                 localhost:5432               (dbs: aggregator, signals, keycloak)
 #   signals-redis            localhost:5555               (password-protected)
+#   Signals Search API       http://localhost:3110        (opt-in: --profile search)
 #   aggregator-redis         localhost:6379
 #
 # Ports match each project's own setup guide (signals-dpg/SETUP.md,
@@ -417,6 +419,14 @@ services:
     restart: unless-stopped
     # Inherits the exact same env as the bootstrap step.
     environment: *signals-env
+    # signals-search wiring, ONLY when the developer opts in: copy
+    # .env.search.example -> .env.search. A separate optional file rather than
+    # entries in the map above because MATCH_SCORE_PROVIDER is a Zod enum and
+    # compose cannot omit a mapping key whose value is empty — a blank default
+    # would fail validation and break boot for everyone NOT running search.
+    env_file:
+      - path: .env.search
+        required: false
     ports:
       - "2742:2742"
     depends_on:
@@ -509,7 +519,6 @@ services:
       # Bulk-upload + QR onboarding tuning (match aggregator-dpg/docker-compose.yml).
       BULK_UPLOAD_URL_TTL_SECONDS: ${BULK_UPLOAD_URL_TTL_SECONDS:-900}
       BULK_UPLOAD_MAX_BYTES: ${BULK_UPLOAD_MAX_BYTES:-10485760}
-      QR_DOWNLOAD_URL_TTL_SECONDS: ${QR_DOWNLOAD_URL_TTL_SECONDS:-900}
       # Object storage -> MinIO (S3-compatible). Internal calls hit minio:9000;
       # browser-facing presigned URLs use localhost:9000.
       S3_REGION: ${S3_REGION:-us-east-1}
@@ -541,7 +550,12 @@ services:
     volumes:
       - ../config:/app/config:ro
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:4000/health/ready || exit 1"]
+      # CMD, not CMD-SHELL, and node rather than wget: the api image is a Docker
+      # Hardened Image with no /bin/sh and no wget, so CMD-SHELL fails with
+      # `exec: "/bin/sh": no such file or directory` and the container never
+      # reports healthy — which blocks every service that waits on it.
+      # node is PID 1 here and has global fetch (v24), so it needs nothing extra.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
       timeout: 3s
       retries: 15
@@ -627,6 +641,30 @@ services:
       S3_PUBLIC_ENDPOINT: http://localhost:9000
       S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
       S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      # Mailer — the campaign PII export (#579) emails the download link from the
+      # worker, so it needs the same mailer config as aggregator-api (Mailpit here).
+      MAIL_PROVIDER: smtp
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      SMTP_SECURE: "false"
+      SMTP_FROM: ${SMTP_FROM:-no-reply@bluedots.local}
+      SMTP_USER: ""
+      SMTP_PASSWORD: ""
+      # Campaign PII export tunables (#579).
+      EXPORT_URL_TTL_SECONDS: ${EXPORT_URL_TTL_SECONDS:-86400}
+      CAMPAIGN_CONCURRENCY: ${CAMPAIGN_CONCURRENCY:-2}
+      CAMPAIGN_EXPORT_MAX_ITEMS: ${CAMPAIGN_EXPORT_MAX_ITEMS:-500}
+      CAMPAIGN_EXPORT_SUBMIT_WINDOW_SECONDS: ${CAMPAIGN_EXPORT_SUBMIT_WINDOW_SECONDS:-60}
+      CAMPAIGN_EXPORT_SUBMIT_MAX: ${CAMPAIGN_EXPORT_SUBMIT_MAX:-10}
+      CAMPAIGN_EXPORT_MAX_ACTIVE_PER_ORG: ${CAMPAIGN_EXPORT_MAX_ACTIVE_PER_ORG:-3}
+      CAMPAIGN_EXPORT_ATTEMPTS: ${CAMPAIGN_EXPORT_ATTEMPTS:-3}
+      # Campaign email channel tunable (#578).
+      EMAIL_SEND_CONCURRENCY: ${EMAIL_SEND_CONCURRENCY:-5}
+      CAMPAIGN_DECRYPT_CHUNK: ${CAMPAIGN_DECRYPT_CHUNK:-500}
+      CAMPAIGN_EXPORT_FIELDS: ${CAMPAIGN_EXPORT_FIELDS:-contact}
+      CAMPAIGN_STALL_SECONDS: ${CAMPAIGN_STALL_SECONDS:-900}
+      CAMPAIGN_EXPORT_RECIPIENT: ${CAMPAIGN_EXPORT_RECIPIENT:-requester}
+      EXPORT_NETWORK_ADMIN_EMAIL: ${EXPORT_NETWORK_ADMIN_EMAIL:-}
       SCHEMA_ROOT_DIR: /app/config/${AGGREGATOR_NETWORK:-blue_dot}/schemas
       AGGREGATOR_CONFIG_PATH: /app/config/${AGGREGATOR_NETWORK:-blue_dot}/aggregator.config.yaml
       # Bulk-file processor caps + cron intervals (match aggregator-dpg/docker-compose.yml).
@@ -653,6 +691,119 @@ services:
         condition: service_healthy
       aggregator-redis:
         condition: service_healthy
+
+  # ───────────────────────────────────────────────────────────────────────
+  # signals-search — OPT-IN: `docker compose --profile search up -d`
+  #
+  # Mirrors signals-dpg/local-setup's `search` profile; see that repo's
+  # LOCAL_SETUP.md §7 for the full explanation of every setting here.
+  # ───────────────────────────────────────────────────────────────────────
+
+  # BAAI/bge-m3 baked into the image — no ~2.3 GB runtime download, no HF
+  # dependency. Public on GHCR, so no login. Same model production runs.
+  tei-embeddings:
+    profiles: ["search"]
+    image: ghcr.io/blue-dots-economy/tei-bge-m3:cpu-1.7-bge-m3
+    # Both published images are amd64-only: signals-search's CI does not set
+    # `platforms:`, so it publishes just the ubuntu-latest runner's arch, and
+    # upstream HuggingFace TEI publishes no arm64 cpu-* tag at all. Without this
+    # line, `docker pull` on an arm64 machine (Apple Silicon) fails outright with
+    # "no matching manifest for linux/arm64/v8" and the profile cannot start.
+    #
+    # Emulation is viable, and measured, not assumed: on an M-series host this
+    # image loads bge-m3 and serves a 1024-dim embedding ~35s after start, and is
+    # not OOM-killed. Expect embeddings to be slower than on amd64 — fine for
+    # local development, and there is no native alternative to switch to.
+    platform: linux/amd64
+    container_name: sd-tei-embeddings
+    restart: unless-stopped
+    command:
+      - "--model-id"
+      - "BAAI/bge-m3"
+      # MUST match the revision baked into the image (it runs HF_HUB_OFFLINE=1,
+      # loading snapshots/<revision> from disk); a mismatch fails to boot.
+      - "--revision"
+      - "${BGE_M3_REVISION:-5617a9f61b028005a4858fdac845db406aefb181}"
+      - "--port"
+      - "80"
+      # Required on CPU: at TEI's default 16384 bge-m3's fp32 warmup is
+      # OOM-killed even with 8 GB free, and the container just dies at startup.
+      - "--max-batch-tokens"
+      - "4096"
+    expose:
+      - "80"
+
+  signals-search-api:
+    profiles: ["search"]
+    image: ${SIGNALS_SEARCH_IMAGE:-ghcr.io/blue-dots-economy/signals-search:develop}
+    # amd64-only image (see the note on tei-embeddings). Overridable so a native
+    # build can be used instead of emulation on arm64:
+    #   SIGNALS_SEARCH_IMAGE=signals-search:local
+    #   SEARCH_PLATFORM=linux/arm64
+    # signals-search's Dockerfile builds cleanly on arm64, so that path is real.
+    platform: ${SEARCH_PLATFORM:-linux/amd64}
+    container_name: sd-signals-search-api
+    restart: unless-stopped
+    environment: &search-env
+      # The `signals` database specifically — this Postgres also hosts
+      # `aggregator` and `keycloak`. signals-search reads `apikey`, `items` and
+      # `item_search`; the wrong database gives 401s and an empty index.
+      DATABASE_URL: postgres://${POSTGRES_USER:-dpg}:${POSTGRES_PASSWORD}@postgres:5432/signals
+      REDIS_URL: redis://:${SIGNALS_REDIS_PASSWORD}@signals-redis:6379
+      # Must end in /v1 — the client requests `${EMBEDDING_BASE_URL}/embeddings`.
+      EMBEDDING_BASE_URL: http://tei-embeddings:80/v1
+      EMBEDDING_MODEL: BAAI/bge-m3
+      # Must equal the model's native dim AND item_search.embedding's
+      # vector(1024); the worker refuses to start otherwise.
+      EMBEDDING_DIM: "1024"
+      # A file, not a directory: directory mode resolves a duplicated `id`
+      # last-one-wins and can shadow the good config.
+      NETWORK_CONFIG_PATH: /networks/network.json
+      # item_search's DDL belongs to signals-dpg and signals-bootstrap has
+      # already created it; the worker only asserts it exists.
+      RUN_MIGRATIONS: "false"
+      API_PORT: "3100"
+      RERANK_DEFAULT: "false"
+    volumes:
+      # From the signals-dpg sibling checkout, so both services agree on which
+      # domains exist and which interactions are permitted.
+      - ../../signals-dpg/examples/schemas/blue_dot/network.json:/networks/network.json:ro
+    ports:
+      # 3110, NOT 3100 — the aggregator portal already owns 3100 on the host.
+      # The container still listens on 3100, so in-compose URLs are unaffected.
+      - "${SEARCH_API_PORT:-3110}:3100"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      signals-redis:
+        condition: service_healthy
+      signals-bootstrap:
+        condition: service_completed_successfully
+
+  signals-search-worker:
+    profiles: ["search"]
+    image: ${SIGNALS_SEARCH_IMAGE:-ghcr.io/blue-dots-economy/signals-search:develop}
+    # amd64-only image (see the note on tei-embeddings). Overridable so a native
+    # build can be used instead of emulation on arm64:
+    #   SIGNALS_SEARCH_IMAGE=signals-search:local
+    #   SEARCH_PLATFORM=linux/arm64
+    # signals-search's Dockerfile builds cleanly on arm64, so that path is real.
+    platform: ${SEARCH_PLATFORM:-linux/amd64}
+    container_name: sd-signals-search-worker
+    restart: unless-stopped
+    command: ["node", "dist/worker/main.js"]
+    environment:
+      <<: *search-env
+      WORKER_HEALTH_PORT: "3101"
+    volumes:
+      - ../../signals-dpg/examples/schemas/blue_dot/network.json:/networks/network.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      signals-redis:
+        condition: service_healthy
+      signals-bootstrap:
+        condition: service_completed_successfully
 
 volumes:
   sd-postgres-data:

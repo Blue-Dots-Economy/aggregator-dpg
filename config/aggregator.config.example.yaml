@@ -82,6 +82,36 @@ aggregator:
     presume_consent: false
     bulk_max_rows: 10000
 
+  # ── Registration modes ─────────────────────────────────────────────────────
+  # Per-link capture channels offered on the forms/QR page. The admin dropdown
+  # is rendered straight from these keys, so adding a channel needs no code
+  # change — and removing one stops it being offered on this deployment.
+  #
+  #   submission_shape      account_and_profile = identity + full profile form
+  #                         account_only        = identity capture only
+  #   public_hint_i18n_key  optional copy shown under the public form
+  #   signals_cta           whether this mode offers the Signals UI hand-off —
+  #                         today the pre-submit "Already Registered — Sign In"
+  #                         link; once #635 lands, that mode's post-submit
+  #                         redirect too. Optional; defaults to
+  #                         `submission_shape == account_and_profile`.
+  #
+  # The hand-off also needs the SIGNALS_UI_URLS env var, which maps each domain
+  # to its Signals UI login URL. Use the Signals UI page (normally
+  # <origin>/auth/login) — NOT a Keycloak authorization URL, which embeds
+  # one-time state/PKCE values and fails for every user.
+  registration_modes:
+    voice:
+      label_i18n_key: registration_mode.voice.label
+      submission_shape: account_only
+      public_hint_i18n_key: registration_mode.voice.hint
+      signals_cta: false
+    form:
+      label_i18n_key: registration_mode.form.label
+      submission_shape: account_and_profile
+      public_hint_i18n_key: null
+      signals_cta: true
+
   # ── Admin email recipients (registration approval notifications) ───────────
   admin_emails:
     - admin@bbmp.gov.in

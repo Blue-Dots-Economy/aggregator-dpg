@@ -32,9 +32,19 @@ const ConfigSchema = z.object({
    */
   DATABASE_URL: z.string().min(1, 'DATABASE_URL must be set'),
   REDIS_URL: z.string().default('redis://localhost:6379'),
+  /** Liveness endpoint port, see health.ts. */
+  HEALTH_PORT: z.coerce.number().int().positive().default(8080),
 
   // ─── Object storage ─────────────────────────────────────────────────────
   S3_ENDPOINT: z.string().optional(),
+  /**
+   * Browser-reachable S3 host used ONLY to mint pre-signed URLs (the export
+   * download link is clicked in a browser/email client, which cannot resolve
+   * the internal `S3_ENDPOINT` inside docker). Pre-signed URLs encode the
+   * endpoint, so they must be signed against the public host. Falls back to
+   * `S3_ENDPOINT` when unset (single-host dev). Mirrors the API's field.
+   */
+  S3_PUBLIC_ENDPOINT: z.string().optional(),
   S3_REGION: z.string().default('us-east-1'),
   S3_BUCKET: z.string().default('aggregator-bulk-uploads'),
   S3_ACCESS_KEY_ID: z.string().optional(),
@@ -115,6 +125,62 @@ const ConfigSchema = z.object({
    */
   KEYCLOAK_URL: z.string().optional(),
   KEYCLOAK_REALM: z.string().optional(),
+
+  // ─── Campaign PII export (aggregator-dpg#579) ───────────────────────────
+  // Recipient is the requesting aggregator's email, resolved by the API and
+  // carried on the job — not a worker env.
+  /**
+   * Pre-signed GET TTL (seconds) for the export CSV link. Default 1 day (86400).
+   * Keep in step with the S3 lifecycle rule that deletes the file at expiry
+   * (bluedots-automation `global.campaignExportExpiryDays` = this ÷ 86400), so
+   * the link and the file expire together.
+   */
+  EXPORT_URL_TTL_SECONDS: z.coerce.number().int().positive().default(86400),
+  /**
+   * How many campaign-process jobs this process runs in parallel, across every
+   * channel — one queue and one worker role serve export, email and voice.
+   * Default 2.
+   */
+  CAMPAIGN_CONCURRENCY: z.coerce.number().int().positive().default(2),
+  /** How many recipients a single email-channel campaign job sends in parallel. Default 5. */
+  EMAIL_SEND_CONCURRENCY: z.coerce.number().int().positive().default(5),
+  /** Items per Signals decrypt chunk (bounds request size + gives heartbeat cadence). */
+  CAMPAIGN_DECRYPT_CHUNK: z.coerce.number().int().positive().default(500),
+  /**
+   * Export field-set. `contact` = the three canonical contact fields
+   * (name/email/phone) only; `full` = the full decrypted item_state (variable
+   * columns). Default `contact`.
+   */
+  CAMPAIGN_EXPORT_FIELDS: z.enum(['contact', 'full']).default('contact'),
+  /**
+   * Who receives the export link. `requester` (default) sends it to the user
+   * who made the request (the job's `requested_by`, resolved from the verified
+   * token by the API). `network_admin` sends it to
+   * `EXPORT_NETWORK_ADMIN_EMAIL` instead — a deployment-level override, never
+   * caller-controlled.
+   */
+  CAMPAIGN_EXPORT_RECIPIENT: z.enum(['requester', 'network_admin']).default('requester'),
+  /** Recipient used when CAMPAIGN_EXPORT_RECIPIENT=network_admin. */
+  EXPORT_NETWORK_ADMIN_EMAIL: z.string().optional(),
+  /**
+   * A campaign job whose `last_progress_at` is older than this (seconds) is
+   * treated as stalled by the watchdog and failed. Default 900 (15 min).
+   */
+  CAMPAIGN_STALL_SECONDS: z.coerce.number().int().positive().default(900),
+
+  // ─── Campaign voice channel (#577) ──────────────────────────────────────
+  /** Voice campaign provider (currently only `raya` is supported). */
+  CAMPAIGN_VOICE_PROVIDER: z.enum(['raya']).default('raya'),
+  /** Raya API base URL. */
+  RAYA_BASE_URL: z.string().url().default('https://v1.getraya.app/api'),
+  /** Raya API key (asserted lazily when the voice provider runs). */
+  RAYA_API_KEY: z.string().min(1).optional(),
+  /** HTTP timeout for Raya API calls (milliseconds). */
+  RAYA_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
+  /** Rate-limit window for Raya outbound calls (seconds). */
+  RAYA_EGRESS_WINDOW_SECONDS: z.coerce.number().int().positive().default(20),
+  /** Max Raya calls allowed per window. */
+  RAYA_EGRESS_MAX: z.coerce.number().int().positive().default(1),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

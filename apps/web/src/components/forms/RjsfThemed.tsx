@@ -10,13 +10,15 @@ import type {
   FieldTemplateProps,
   ObjectFieldTemplateProps,
   ArrayFieldTemplateProps,
+  ArrayFieldItemTemplateProps,
   TitleFieldProps,
+  UiSchema,
   ValidatorType,
   RJSFSchema,
   GenericObjectType,
 } from '@rjsf/utils';
 import type { IChangeEvent } from '@rjsf/core';
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactElement } from 'react';
 import { useTranslations } from 'next-intl';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/Select';
 import { MultiSelect } from '../ui/MultiSelect';
@@ -253,6 +255,20 @@ function FieldTemplate(props: FieldTemplateProps) {
   );
 }
 
+/**
+ * Reads the `uiSchema` off one of `ObjectFieldTemplate`'s child slots.
+ *
+ * `properties[].content` is a `ReactElement`, and React 19's types default its
+ * `props` to `unknown` (React 18 defaulted them to `any`), so the shape has to
+ * be narrowed explicitly instead of being read straight off `.props`.
+ *
+ * @param content - The rendered child field element RJSF hands to the template.
+ * @returns The child's `uiSchema`, or `undefined` when it carries none.
+ */
+function childUiSchema(content: ReactElement): Record<string, unknown> | undefined {
+  return (content.props as { uiSchema?: Record<string, unknown> }).uiSchema;
+}
+
 function ObjectFieldTemplate(props: ObjectFieldTemplateProps) {
   const { properties, title, description, uiSchema } = props;
   const layout = (uiSchema?.['ui:layout'] as 'grid' | 'stack' | undefined) ?? 'grid';
@@ -263,10 +279,9 @@ function ObjectFieldTemplate(props: ObjectFieldTemplateProps) {
   const showTitle = explicitTitle !== '' && explicitTitle !== false && Boolean(title);
   // Drop child slots whose inner widget is `hidden` — otherwise an empty
   // wrapper div lands in the grid/stack and inflates the section height.
-  const visibleProperties = properties.filter((p) => {
-    const childUi = p.content.props.uiSchema as Record<string, unknown> | undefined;
-    return childUi?.['ui:widget'] !== 'hidden';
-  });
+  const visibleProperties = properties.filter(
+    (p) => childUiSchema(p.content)?.['ui:widget'] !== 'hidden',
+  );
   return (
     <div className="space-y-3">
       {showTitle && (
@@ -283,7 +298,7 @@ function ObjectFieldTemplate(props: ObjectFieldTemplateProps) {
         }
       >
         {visibleProperties.map((p) => {
-          const span = (p.content.props.uiSchema?.['ui:colSpan'] as 1 | 2 | undefined) ?? 1;
+          const span = (childUiSchema(p.content)?.['ui:colSpan'] as 1 | 2 | undefined) ?? 1;
           return (
             <div key={p.name} className={span === 2 ? 'md:col-span-2' : ''}>
               {p.content}
@@ -295,35 +310,67 @@ function ObjectFieldTemplate(props: ObjectFieldTemplateProps) {
   );
 }
 
+/**
+ * Reads the `itemLabel` ui option off an array field's own uiSchema.
+ *
+ * `ArrayFieldTemplate` sees this as `uiSchema`; `ArrayFieldItemTemplate` sees
+ * the same object as `parentUiSchema` (its own `uiSchema` is the *item's*), so
+ * both go through here to stay in step.
+ *
+ * @param uiSchema - The array field's uiSchema, if it declares one.
+ * @returns The configured item noun, defaulting to `entry`.
+ */
+function arrayItemLabel(uiSchema: UiSchema | undefined): string {
+  return (uiSchema?.['ui:options']?.['itemLabel'] as string | undefined) ?? 'entry';
+}
+
+/**
+ * Per-item chrome for array fields: an "<Item> N" heading and a Remove button,
+ * shown only once the array holds more than one entry.
+ *
+ * RJSF v6 renders array items through this template and hands
+ * `ArrayFieldTemplate` the finished elements, so the item-level markup that
+ * used to live inside the array template's `items.map()` belongs here now.
+ *
+ * @param props - v6 item props; uses `children`, `index`, `totalItems`,
+ *   `buttonsProps.hasRemove` / `.onRemoveItem`, and `parentUiSchema`.
+ * @returns One array row, with its header when the array has several rows.
+ */
+function ArrayFieldItemTemplate(props: ArrayFieldItemTemplateProps) {
+  const { children, index, totalItems, buttonsProps, parentUiSchema } = props;
+  const itemLabel = arrayItemLabel(parentUiSchema);
+  const multiple = totalItems > 1;
+  return (
+    <div className="space-y-2">
+      {multiple && (
+        <div className="flex items-center justify-between">
+          <span className="text-[12.5px] font-semibold text-ink-500">
+            {capitalise(itemLabel)} {index + 1}
+          </span>
+          {buttonsProps.hasRemove && (
+            <button
+              type="button"
+              onClick={buttonsProps.onRemoveItem}
+              className="text-[12.5px] text-rose-500 hover:text-rose-600"
+            >
+              Remove
+            </button>
+          )}
+        </div>
+      )}
+      {children}
+    </div>
+  );
+}
+
 function ArrayFieldTemplate(props: ArrayFieldTemplateProps) {
-  const { title, items, canAdd, onAddClick, uiSchema, formContext } = props;
-  void formContext;
-  const itemLabel = (uiSchema?.['ui:options']?.['itemLabel'] as string | undefined) ?? 'entry';
-  const multiple = items.length > 1;
+  const { title, items, canAdd, onAddClick, uiSchema } = props;
+  const itemLabel = arrayItemLabel(uiSchema);
   return (
     <div className="space-y-3">
       {title && <h3 className="font-display font-bold text-[15px] text-ink-900">{title}</h3>}
-      {items.map((item) => (
-        <div key={item.key} className="space-y-2">
-          {multiple && (
-            <div className="flex items-center justify-between">
-              <span className="text-[12.5px] font-semibold text-ink-500">
-                {capitalise(itemLabel)} {item.index + 1}
-              </span>
-              {item.hasRemove && (
-                <button
-                  type="button"
-                  onClick={item.onDropIndexClick(item.index)}
-                  className="text-[12.5px] text-rose-500 hover:text-rose-600"
-                >
-                  Remove
-                </button>
-              )}
-            </div>
-          )}
-          {item.children}
-        </div>
-      ))}
+      {/* v6 hands over already-rendered, already-keyed item elements. */}
+      {items}
       {canAdd && (
         <button
           type="button"
@@ -497,6 +544,7 @@ export function RjsfThemedForm<T extends GenericObjectType = GenericObjectType>(
           FieldTemplate,
           ObjectFieldTemplate,
           ArrayFieldTemplate,
+          ArrayFieldItemTemplate,
           TitleFieldTemplate: TitleField,
         }}
       />

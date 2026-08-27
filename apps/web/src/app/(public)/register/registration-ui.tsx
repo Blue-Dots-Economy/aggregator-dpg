@@ -12,8 +12,11 @@
  */
 
 import Link from 'next/link';
-import { useEffect, useRef, useState, type RefObject } from 'react';
+import { useEffect, useRef, useState, type RefObject, type JSX } from 'react';
+import { useTranslations } from 'next-intl';
+import type { IChangeEvent } from '@rjsf/core';
 import { I } from '../../../icons';
+import type { ConsentDoc } from '../../../components/consent/consent-docs';
 import type { SubmitState } from './registration-shared';
 
 /** Local form lifecycle shared by the coordinator + org registration forms. */
@@ -22,7 +25,12 @@ export interface RegistrationFormState {
   setState: (s: SubmitState) => void;
   canSubmit: boolean;
   setCanSubmit: (v: boolean) => void;
-  errorRef: RefObject<HTMLDivElement>;
+  /**
+   * React 19 folded `MutableRefObject` into `RefObject` and types
+   * `useRef<T>(null)` as `RefObject<T | null>` — `.current` genuinely is null
+   * until the error banner mounts, so the null belongs in the declared type.
+   */
+  errorRef: RefObject<HTMLDivElement | null>;
 }
 
 /**
@@ -42,6 +50,58 @@ export function useRegistrationFormState(): RegistrationFormState {
     }
   }, [state]);
   return { state, setState, canSubmit, setCanSubmit, errorRef };
+}
+
+/** The park-then-gate submit cycle shared by the coordinator + org forms. */
+export interface ConsentGateSubmit {
+  /** True while the blocking consent gate is open. */
+  gateOpen: boolean;
+  /** Opens/closes the gate — `false` on cancel and once consent is accepted. */
+  setGateOpen: (open: boolean) => void;
+  /** Form values parked at submit, replayed once consent is accepted. */
+  pendingRef: RefObject<Record<string, unknown> | null>;
+  /** RJSF `onSubmit`: parks the payload, then opens the gate. */
+  handleSubmit: (e: IChangeEvent<Record<string, unknown>>) => Promise<void>;
+}
+
+/**
+ * Holds the park-then-gate submit cycle both registration forms share.
+ *
+ * Neither form POSTs straight from `onSubmit`: consent is collected in the
+ * blocking `ConsentGate` first, so the values are parked in a ref for the
+ * caller's own accept handler to replay. When the consent copy failed to load
+ * (`consentDocs` is empty) the gate would render nothing at all and the form
+ * would be stuck with no way to finish or explain why — that case surfaces an
+ * error rather than opening a dead gate.
+ *
+ * @param consentDocs - Ordered consent documents; empty when loading failed.
+ * @param setState - Submit-lifecycle setter from {@link useRegistrationFormState}.
+ * @returns The gate flag, its setter, the parked payload, and the RJSF handler.
+ */
+export function useConsentGateSubmit(
+  consentDocs: ConsentDoc[],
+  setState: (s: SubmitState) => void,
+): ConsentGateSubmit {
+  const t = useTranslations('register');
+  const [gateOpen, setGateOpen] = useState(false);
+  const pendingRef = useRef<Record<string, unknown> | null>(null);
+
+  const handleSubmit = async (e: IChangeEvent<Record<string, unknown>>): Promise<void> => {
+    pendingRef.current = (e.formData ?? {}) as Record<string, unknown>;
+    if (consentDocs.length === 0) {
+      setState({
+        status: 'error',
+        title: t('consent.load_failed_title'),
+        detail: t('consent.load_failed_detail'),
+        code: 'CONSENT_UNAVAILABLE',
+        requestId: '',
+      });
+      return;
+    }
+    setGateOpen(true);
+  };
+
+  return { gateOpen, setGateOpen, pendingRef, handleSubmit };
 }
 
 export interface RegistrationSubmitButtonProps {
@@ -74,11 +134,18 @@ export function RegistrationSubmitButton({
       <button
         type="submit"
         disabled={disabled}
-        className={`w-full py-3 rounded-[12px] font-display font-bold text-[15px] text-white transition-all
+        // Same fix as ConsentGate's CTA: `text-white` here and
+        // `text-(--bd-primary-600)` in the disabled branch are both "text
+        // color" utilities, so which one actually renders depends on
+        // Tailwind's internal stylesheet order, not on their order in this
+        // string — here `text-white` was winning, leaving white-on-pale
+        // (effectively invisible) instead of the intended indigo label.
+        // Keeping one background + one text colour always, and only fading
+        // opacity when disabled, sidesteps that class-precedence trap
+        // entirely and matches the sibling Signals gate's CTA.
+        className={`w-full py-3 rounded-[12px] font-display font-bold text-[15px] text-white bg-(--bd-primary) transition-all
           ${
-            disabled
-              ? 'bg-(--bd-primary-100) text-(--bd-primary-600) cursor-not-allowed'
-              : 'bg-(--bd-primary) hover:bg-(--bd-primary-600) bd-shadow-lg'
+            disabled ? 'cursor-not-allowed opacity-60' : 'hover:bg-(--bd-primary-600) bd-shadow-lg'
           }`}
       >
         {submitting ? submittingLabel : label}
@@ -93,7 +160,7 @@ export interface RegistrationErrorBannerProps {
   /** Newline-separated error lines rendered as a bullet list. */
   detail: string;
   /** Focus/scroll target so the banner can be pulled into view on submit. */
-  errorRef: RefObject<HTMLDivElement>;
+  errorRef: RefObject<HTMLDivElement | null>;
   /** Raw Ajv dump shown behind a `<details>` for client-validation errors. */
   rawErrors?: string;
 }

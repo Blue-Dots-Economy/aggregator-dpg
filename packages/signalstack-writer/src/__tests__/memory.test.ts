@@ -758,4 +758,104 @@ describe('InMemorySignalStackWriter.fetchDecryptedProfiles', () => {
     if (result.success) return;
     expect(result.error.code).toBe('SIGNALSTACK_INPUT_INVALID');
   });
+
+  it('honours the fields projection (fields:[] → empty item_state) and returns the contact block', async () => {
+    const fake = new SignalStackWriterFake();
+    fake.seed({
+      profiles: [
+        {
+          item_id: 'item-1',
+          created_by: 'sys',
+          item_network: 'blue_dot',
+          item_domain: 'seeker',
+          item_type: 'profile_1.0',
+          acting_org_id: 'org-1',
+          item_state: { name: 'Asha', phone: '+910000000000' },
+          contact: {
+            name: { value: 'Asha', source: 'item' },
+            email: { value: 'asha@example.com', source: 'user' },
+          },
+        },
+      ],
+    });
+
+    const result = await fake.fetchDecryptedProfiles({
+      actingOrgId: 'org-1',
+      itemIds: ['item-1'],
+      fields: [],
+      contact: ['name', 'email', 'phone'],
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const row = result.value.profiles[0]!;
+    // fields:[] → item_state projected to nothing
+    expect(row.item_state).toEqual({});
+    // contact block present, matching the HTTP impl's shape
+    expect(row.contact).toEqual({
+      name: { value: 'Asha', source: 'item' },
+      email: { value: 'asha@example.com', source: 'user' },
+      // unseeded canonical field resolves to the "absent in both" shape
+      phone: { value: null, source: null },
+    });
+  });
+
+  it('projects to named fields and resolves contact:true to all three canonical fields', async () => {
+    const fake = new SignalStackWriterFake();
+    fake.seed({
+      profiles: [
+        {
+          item_id: 'item-1',
+          created_by: 'sys',
+          item_network: 'blue_dot',
+          item_domain: 'seeker',
+          item_type: 'profile_1.0',
+          acting_org_id: 'org-1',
+          item_state: { name: 'Asha', phone: '+910000000000', extra: 'drop-me' },
+          contact: { name: { value: 'Asha', source: 'item' } },
+        },
+      ],
+    });
+
+    const result = await fake.fetchDecryptedProfiles({
+      actingOrgId: 'org-1',
+      itemIds: ['item-1'],
+      fields: ['name'], // keep only 'name' (present); phone/extra dropped
+      contact: true, // → resolves all three canonical fields
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const row = result.value.profiles[0]!;
+    expect(row.item_state).toEqual({ name: 'Asha' });
+    expect(row.contact).toEqual({
+      name: { value: 'Asha', source: 'item' },
+      email: { value: null, source: null },
+      phone: { value: null, source: null },
+    });
+  });
+
+  it('omits the contact block when no contact projection is requested', async () => {
+    const fake = new SignalStackWriterFake();
+    fake.seed({
+      profiles: [
+        {
+          item_id: 'item-1',
+          created_by: 'sys',
+          item_network: 'blue_dot',
+          item_domain: 'seeker',
+          item_type: 'profile_1.0',
+          acting_org_id: 'org-1',
+          item_state: { name: 'Asha' },
+        },
+      ],
+    });
+
+    const result = await fake.fetchDecryptedProfiles({ actingOrgId: 'org-1', itemIds: ['item-1'] });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.profiles[0]!.contact).toBeUndefined();
+    // no fields projection → full item_state
+    expect(result.value.profiles[0]!.item_state).toEqual({ name: 'Asha' });
+  });
 });

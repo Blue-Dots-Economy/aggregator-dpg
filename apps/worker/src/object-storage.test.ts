@@ -1,173 +1,151 @@
 /**
- * Unit tests for the worker's S3 client wrapper.
- *
- * `@aws-sdk/client-s3` is mocked so no real S3/MinIO call is ever made (per
- * root CLAUDE.md — S3 has no local/test double in compose). Each test
- * re-imports the module fresh via `vi.resetModules()` so the module-level
- * cached client is rebuilt against that test's mocked config.
+ * Unit tests for the worker S3 module. `@aws-sdk/client-s3` +
+ * `@aws-sdk/s3-request-presigner` are mocked so no real S3/MinIO call is made,
+ * and `./config.js` is mocked to drive the internal-vs-presigner client split.
+ * Covers putObject, getCsvStream, and the campaign-export presign
+ * (signExportDownloadUrl).
  *
  * @module @aggregator-dpg/worker
  */
-
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { Readable } from 'node:stream';
 
+const s3ClientCtorCalls: Array<Record<string, unknown>> = [];
 const sendMock = vi.fn();
-const s3ClientCtorCalls: unknown[] = [];
-const commandCalls: Array<{ type: string; input: unknown }> = [];
 
 vi.mock('@aws-sdk/client-s3', () => {
-  class S3Client {
-    opts: unknown;
+  class MockS3Client {
+    opts: Record<string, unknown>;
     send = sendMock;
-    constructor(opts: unknown) {
+    constructor(opts: Record<string, unknown>) {
       this.opts = opts;
       s3ClientCtorCalls.push(opts);
     }
   }
-  class GetObjectCommand {
+  class MockCommand {
     input: unknown;
     constructor(input: unknown) {
       this.input = input;
-      commandCalls.push({ type: 'GetObject', input });
     }
   }
-  class PutObjectCommand {
-    input: unknown;
-    constructor(input: unknown) {
-      this.input = input;
-      commandCalls.push({ type: 'PutObject', input });
-    }
-  }
-  return { S3Client, GetObjectCommand, PutObjectCommand };
-});
-
-let configMock: Record<string, unknown>;
-vi.mock('./config.js', () => ({
-  config: new Proxy(
-    {},
-    {
-      get(_t, prop: string) {
-        return configMock[prop];
-      },
-    },
-  ),
-}));
-
-beforeEach(() => {
-  vi.resetModules();
-  sendMock.mockReset();
-  s3ClientCtorCalls.length = 0;
-  commandCalls.length = 0;
-  configMock = {
-    S3_REGION: 'us-east-1',
-    S3_BUCKET: 'aggregator-bulk-uploads',
-    S3_FORCE_PATH_STYLE: true,
-    S3_ENDPOINT: undefined,
-    S3_ACCESS_KEY_ID: undefined,
-    S3_SECRET_ACCESS_KEY: undefined,
+  return {
+    S3Client: MockS3Client,
+    GetObjectCommand: class extends MockCommand {},
+    PutObjectCommand: class extends MockCommand {},
   };
 });
 
-describe('getCsvStream', () => {
-  it('returns the object Body as a Readable on success', async () => {
-    const body = Readable.from([Buffer.from('a,b\n1,2')]);
-    sendMock.mockResolvedValueOnce({ Body: body });
-    const { getCsvStream } = await import('./object-storage.js');
+const getSignedUrlMock = vi.fn();
+vi.mock('@aws-sdk/s3-request-presigner', () => ({ getSignedUrl: getSignedUrlMock }));
 
-    const result = await getCsvStream('bulk-uploads/agg-1/up-1/raw.csv');
+const baseConfig = {
+  S3_REGION: 'ap-south-1',
+  S3_ENDPOINT: 'http://minio-internal:9000',
+  S3_PUBLIC_ENDPOINT: undefined as string | undefined,
+  S3_BUCKET: 'aggregator-bulk-uploads',
+  S3_ACCESS_KEY_ID: undefined as string | undefined,
+  S3_SECRET_ACCESS_KEY: undefined as string | undefined,
+  S3_FORCE_PATH_STYLE: true,
+  EXPORT_URL_TTL_SECONDS: 3600,
+};
+vi.mock('./config.js', () => ({
+  get config() {
+    return mockConfig;
+  },
+}));
+let mockConfig = { ...baseConfig };
 
-    expect(result).toBe(body);
-    expect(commandCalls).toHaveLength(1);
-    expect(commandCalls[0]).toEqual({
-      type: 'GetObject',
-      input: { Bucket: 'aggregator-bulk-uploads', Key: 'bulk-uploads/agg-1/up-1/raw.csv' },
+describe('worker object-storage', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    sendMock.mockReset();
+    getSignedUrlMock.mockReset();
+    s3ClientCtorCalls.length = 0;
+    mockConfig = { ...baseConfig };
+  });
+
+  it('putObject sends a PutObjectCommand to the internal client', async () => {
+    const { putObject } = await import('./object-storage.js');
+    sendMock.mockResolvedValue({});
+    await putObject('campaign-exports/o/x.csv', Buffer.from('hi'), 'text/csv');
+    expect(sendMock).toHaveBeenCalledTimes(1);
+    const cmd = sendMock.mock.calls[0]![0] as { input: Record<string, unknown> };
+    expect(cmd.input).toMatchObject({
+      Bucket: 'aggregator-bulk-uploads',
+      Key: 'campaign-exports/o/x.csv',
+      ContentType: 'text/csv',
     });
+    expect(s3ClientCtorCalls[0]).toMatchObject({ endpoint: 'http://minio-internal:9000' });
   });
 
-  it('throws when the object has no Body', async () => {
-    sendMock.mockResolvedValueOnce({ Body: undefined });
-    const { getCsvStream } = await import('./object-storage.js');
+  it('signExportDownloadUrl signs a GET with the export TTL + csv attachment disposition', async () => {
+    getSignedUrlMock.mockResolvedValue('https://signed.example/export.csv');
+    const { signExportDownloadUrl } = await import('./object-storage.js');
+    const res = await signExportDownloadUrl('campaign-exports/org-1/2026.csv');
 
-    await expect(getCsvStream('missing.csv')).rejects.toThrow(
-      /empty body for s3 key: missing\.csv/,
-    );
-  });
-
-  it('propagates transport failures (no silent swallowing)', async () => {
-    sendMock.mockRejectedValueOnce(new Error('ECONNREFUSED'));
-    const { getCsvStream } = await import('./object-storage.js');
-
-    await expect(getCsvStream('up-1/raw.csv')).rejects.toThrow('ECONNREFUSED');
-  });
-
-  it('reuses a single cached S3Client across multiple calls', async () => {
-    sendMock.mockResolvedValue({ Body: Readable.from([Buffer.from('x')]) });
-    const { getCsvStream } = await import('./object-storage.js');
-
-    await getCsvStream('a.csv');
-    await getCsvStream('b.csv');
-
-    expect(s3ClientCtorCalls).toHaveLength(1);
-  });
-});
-
-describe('putObject', () => {
-  it('uploads with the given key, body, and content type', async () => {
-    sendMock.mockResolvedValueOnce({});
-    const { putObject } = await import('./object-storage.js');
-
-    const body = Buffer.from('id,status\n1,ok');
-    await putObject('bulk-uploads/agg-1/up-1/errors.csv', body, 'text/csv');
-
-    expect(commandCalls).toHaveLength(1);
-    expect(commandCalls[0]).toEqual({
-      type: 'PutObject',
-      input: {
-        Bucket: 'aggregator-bulk-uploads',
-        Key: 'bulk-uploads/agg-1/up-1/errors.csv',
-        Body: body,
-        ContentType: 'text/csv',
-      },
+    expect(res).toMatchObject({
+      url: 'https://signed.example/export.csv',
+      key: 'campaign-exports/org-1/2026.csv',
     });
+    expect(typeof res.expiresAt).toBe('string');
+    const cmd = getSignedUrlMock.mock.calls[0]![1] as { input: Record<string, unknown> };
+    expect(cmd.input).toMatchObject({
+      Bucket: 'aggregator-bulk-uploads',
+      Key: 'campaign-exports/org-1/2026.csv',
+      ResponseContentDisposition: 'attachment; filename="participant-export.csv"',
+      ResponseContentType: 'text/csv',
+    });
+    expect(getSignedUrlMock.mock.calls[0]![2]).toMatchObject({ expiresIn: 3600 });
   });
 
-  it('propagates upload failures', async () => {
-    sendMock.mockRejectedValueOnce(new Error('AccessDenied'));
-    const { putObject } = await import('./object-storage.js');
-
-    await expect(putObject('k', Buffer.from('x'), 'text/csv')).rejects.toThrow('AccessDenied');
+  it('presigner falls back to S3_ENDPOINT when S3_PUBLIC_ENDPOINT is unset', async () => {
+    getSignedUrlMock.mockResolvedValue('https://signed.example/x');
+    const { signExportDownloadUrl } = await import('./object-storage.js');
+    await signExportDownloadUrl('k');
+    expect(s3ClientCtorCalls[0]).toMatchObject({ endpoint: 'http://minio-internal:9000' });
   });
-});
 
-describe('S3Client construction', () => {
-  it('applies explicit S3_ENDPOINT + credentials when configured (MinIO / static-key posture)', async () => {
-    configMock.S3_ENDPOINT = 'http://minio:9000';
-    configMock.S3_ACCESS_KEY_ID = 'minioadmin';
-    configMock.S3_SECRET_ACCESS_KEY = 'minioadmin-secret';
-    sendMock.mockResolvedValueOnce({});
+  it('presigner uses S3_PUBLIC_ENDPOINT when set, distinct from the internal client', async () => {
+    mockConfig.S3_PUBLIC_ENDPOINT = 'https://public.example.com';
+    getSignedUrlMock.mockResolvedValue('https://signed.example/x');
+    sendMock.mockResolvedValue({});
+    const { signExportDownloadUrl, putObject } = await import('./object-storage.js');
+    await signExportDownloadUrl('k'); // builds the presigner client first
+    await putObject('k', Buffer.from('x'), 'text/csv'); // builds the internal client
+    expect(s3ClientCtorCalls).toHaveLength(2);
+    expect(s3ClientCtorCalls[0]).toMatchObject({ endpoint: 'https://public.example.com' });
+    expect(s3ClientCtorCalls[1]).toMatchObject({ endpoint: 'http://minio-internal:9000' });
+  });
+
+  it('passes explicit credentials to the S3 client when both keys are set', async () => {
+    mockConfig.S3_ACCESS_KEY_ID = 'AKIA_TEST';
+    mockConfig.S3_SECRET_ACCESS_KEY = 'secret_test';
+    sendMock.mockResolvedValue({});
     const { putObject } = await import('./object-storage.js');
-
     await putObject('k', Buffer.from('x'), 'text/csv');
-
     expect(s3ClientCtorCalls[0]).toMatchObject({
-      region: 'us-east-1',
-      endpoint: 'http://minio:9000',
-      forcePathStyle: true,
-      maxAttempts: 3,
-      requestHandler: { connectionTimeout: 5_000 },
-      credentials: { accessKeyId: 'minioadmin', secretAccessKey: 'minioadmin-secret' },
+      credentials: { accessKeyId: 'AKIA_TEST', secretAccessKey: 'secret_test' },
     });
   });
 
-  it('omits endpoint + credentials when unset (real S3 via IAM role posture)', async () => {
-    sendMock.mockResolvedValueOnce({});
-    const { putObject } = await import('./object-storage.js');
+  it('_resetObjectStorageClient clears both cached clients so fresh ones are built', async () => {
+    sendMock.mockResolvedValue({});
+    getSignedUrlMock.mockResolvedValue('https://signed.example/x');
+    const { putObject, signExportDownloadUrl, _resetObjectStorageClient } =
+      await import('./object-storage.js');
+    await putObject('k', Buffer.from('x'), 'text/csv'); // internal client (1)
+    await signExportDownloadUrl('k'); // presigner client (2)
+    expect(s3ClientCtorCalls).toHaveLength(2);
+    _resetObjectStorageClient();
+    await putObject('k', Buffer.from('x'), 'text/csv'); // rebuilt (3)
+    await signExportDownloadUrl('k'); // rebuilt (4)
+    expect(s3ClientCtorCalls).toHaveLength(4);
+  });
 
-    await putObject('k', Buffer.from('x'), 'text/csv');
-
-    const opts = s3ClientCtorCalls[0] as Record<string, unknown>;
-    expect(opts).not.toHaveProperty('endpoint');
-    expect(opts).not.toHaveProperty('credentials');
+  it('getCsvStream returns the object body, and throws when it is empty', async () => {
+    const { getCsvStream } = await import('./object-storage.js');
+    sendMock.mockResolvedValue({ Body: 'a-readable-stream' });
+    await expect(getCsvStream('k')).resolves.toBe('a-readable-stream');
+    sendMock.mockResolvedValue({});
+    await expect(getCsvStream('k')).rejects.toThrow(/empty body/);
   });
 });

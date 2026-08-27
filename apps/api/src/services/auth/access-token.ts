@@ -72,6 +72,14 @@ export interface AnyAuthContext {
   authorizedParty?: string;
   /** Token's `client_id` claim (Keycloak emits this on service-account tokens). */
   clientId?: string;
+  /**
+   * `preferred_username` claim. Keycloak sets it to `service-account-<client>`
+   * for a client's service account and to the user's username for an end user,
+   * so it distinguishes a client_credentials token from a password-grant token
+   * on the SAME client — which `azp` cannot, and which the `sub` claim cannot
+   * either (it is a UUID in both cases).
+   */
+  preferredUsername?: string;
   /** Whether this token is bound to an end user (has `aggregator_id`). */
   isUser: boolean;
   aggregatorId?: string;
@@ -82,14 +90,23 @@ export type AnyAuthResult =
   | { ok: true; context: AnyAuthContext }
   | {
       ok: false;
-      error: { code: 'MISSING_TOKEN' | 'INVALID_TOKEN'; message: string };
+      error: { code: 'MISSING_TOKEN' | 'INVALID_TOKEN' | 'AZP_NOT_ALLOWED'; message: string };
     };
 
 /**
  * Verifies the Bearer token on a Fastify request and returns an
  * `AuthContext`.
+ *
+ * @param req - The Fastify request.
+ * @param opts.allowedAzp - Per-call `azp` allow-list that OVERRIDES the global
+ *   `KEYCLOAK_ALLOWED_AZP`. Use to scope a single endpoint to a specific client
+ *   (e.g. `/v1/campaign/export` accepts only `campaign-manager`, while the
+ *   global list excludes it so no other route accepts campaign-manager tokens).
  */
-export async function authenticate(req: FastifyRequest): Promise<AuthResult> {
+export async function authenticate(
+  req: FastifyRequest,
+  opts?: { allowedAzp?: readonly string[] },
+): Promise<AuthResult> {
   const header = req.headers.authorization;
   if (!header || !header.startsWith('Bearer ')) {
     return { ok: false, error: { code: 'MISSING_TOKEN', message: 'missing Bearer token' } };
@@ -101,7 +118,7 @@ export async function authenticate(req: FastifyRequest): Promise<AuthResult> {
 
   let payload: JWTPayload;
   try {
-    payload = await verifyToken(token);
+    payload = await verifyToken(token, opts?.allowedAzp);
   } catch (err) {
     return {
       ok: false,
@@ -125,11 +142,21 @@ export async function authenticate(req: FastifyRequest): Promise<AuthResult> {
       },
     };
   }
-  const ctx: AuthContext = {
-    userId: payload.sub,
-    aggregatorId,
-  };
+  return { ok: true, context: hydrateContext(payload.sub, aggregatorId, payload) };
+}
+
+/**
+ * Builds an {@link AuthContext} from a verified token's optional claims. Split
+ * out of {@link authenticate} so the guard logic there stays flat.
+ *
+ * @param userId - The token `sub`.
+ * @param aggregatorId - The resolved `aggregator_id`.
+ * @param payload - The verified JWT payload.
+ * @returns The populated auth context (optional fields set only when present).
+ */
+function hydrateContext(userId: string, aggregatorId: string, payload: JWTPayload): AuthContext {
   const claims = payload as Record<string, unknown>;
+  const ctx: AuthContext = { userId, aggregatorId };
   if (typeof claims.email === 'string') ctx.email = claims.email;
   if (typeof claims.email_verified === 'boolean') ctx.emailVerified = claims.email_verified;
   if (typeof claims.preferred_username === 'string') {
@@ -146,15 +173,13 @@ export async function authenticate(req: FastifyRequest): Promise<AuthResult> {
   if (decision === 'pending' || decision === 'approved' || decision === 'rejected') {
     ctx.decisionMade = decision;
   }
-  const aggregatorType = readStringOrFirst(claims.aggregator_type);
   // Accept any non-empty domain id — the network config (loaded at the
   // route layer) decides which values are valid for this deployment.
-  if (aggregatorType) {
-    ctx.aggregatorType = aggregatorType;
-  }
+  const aggregatorType = readStringOrFirst(claims.aggregator_type);
+  if (aggregatorType) ctx.aggregatorType = aggregatorType;
   const signalstackOrgId = readStringOrFirst(claims.signalstack_org_id);
   if (signalstackOrgId) ctx.signalstackOrgId = signalstackOrgId;
-  return { ok: true, context: ctx };
+  return ctx;
 }
 
 /**
@@ -319,8 +344,19 @@ async function backfillSignalstackOrgId(ctx: AuthContext): Promise<void> {
  *
  * The middleware succeeds for both end-user tokens and service tokens.
  * Handlers can branch on `context.isUser` if they need to behave differently.
+ *
+ * @param req - The Fastify request.
+ * @param opts.allowedAzp - Per-call `azp` allow-list that OVERRIDES the global
+ *   `KEYCLOAK_ALLOWED_AZP`. Needed by the campaign dump route, whose client is
+ *   deliberately excluded from the global list. Omitted ⇒ prior behaviour.
+ * @returns `ok: true` with the projected {@link AnyAuthContext} when the token
+ *   verifies; otherwise `ok: false` with a `MISSING_TOKEN`, `INVALID_TOKEN`, or
+ *   `AZP_NOT_ALLOWED` error code and message.
  */
-export async function authenticateAny(req: FastifyRequest): Promise<AnyAuthResult> {
+export async function authenticateAny(
+  req: FastifyRequest,
+  opts?: { allowedAzp?: readonly string[] },
+): Promise<AnyAuthResult> {
   const header = req.headers.authorization;
   if (!header || !header.startsWith('Bearer ')) {
     return { ok: false, error: { code: 'MISSING_TOKEN', message: 'missing Bearer token' } };
@@ -332,12 +368,12 @@ export async function authenticateAny(req: FastifyRequest): Promise<AnyAuthResul
 
   let payload: JWTPayload;
   try {
-    payload = await verifyToken(token);
+    payload = await verifyToken(token, opts?.allowedAzp);
   } catch (err) {
     return {
       ok: false,
       error: {
-        code: 'INVALID_TOKEN',
+        code: err instanceof AzpNotAllowedError ? 'AZP_NOT_ALLOWED' : 'INVALID_TOKEN',
         message: err instanceof Error ? err.message : 'verify failed',
       },
     };
@@ -353,6 +389,9 @@ export async function authenticateAny(req: FastifyRequest): Promise<AnyAuthResul
   };
   if (typeof claims.azp === 'string') ctx.authorizedParty = claims.azp;
   if (typeof claims.client_id === 'string') ctx.clientId = claims.client_id;
+  if (typeof claims.preferred_username === 'string') {
+    ctx.preferredUsername = claims.preferred_username;
+  }
   if (aggregatorId) ctx.aggregatorId = aggregatorId;
   if (typeof claims.email === 'string') ctx.email = claims.email;
   return { ok: true, context: ctx };
@@ -371,6 +410,20 @@ function readAggregatorId(payload: JWTPayload): string | undefined {
   if (typeof direct === 'string' && direct.length > 0) return direct;
   if (Array.isArray(direct) && typeof direct[0] === 'string') return direct[0];
   return undefined;
+}
+
+/**
+ * Thrown when a token's `azp` is not in the effective allow-list.
+ *
+ * A distinct type rather than a bare `Error` so callers can map a wrong-client
+ * token to 403 while a bad signature stays 401 — the two are otherwise
+ * indistinguishable once `verifyToken` has thrown.
+ */
+export class AzpNotAllowedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AzpNotAllowedError';
+  }
 }
 
 /**
@@ -396,7 +449,7 @@ function readAggregatorId(payload: JWTPayload): string | undefined {
  * @returns The verified JWT claim set.
  * @throws {Error} If verification fails, or `azp` is not in the allow-list.
  */
-async function verifyToken(token: string): Promise<JWTPayload> {
+async function verifyToken(token: string, azpAllow?: readonly string[]): Promise<JWTPayload> {
   let payload: JWTPayload;
   if (testOverride) {
     payload = await testOverride(token);
@@ -409,22 +462,24 @@ async function verifyToken(token: string): Promise<JWTPayload> {
     });
     payload = verified;
   }
-  assertAllowedAzp(payload);
+  assertAllowedAzp(payload, azpAllow);
   return payload;
 }
 
 /**
- * Rejects a token whose `azp` is not in the configured allow-list.
+ * Rejects a token whose `azp` is not in the allow-list.
  *
  * @param payload - The verified JWT claim set.
- * @throws {Error} If an allow-list is configured and `azp` is absent or not in it.
+ * @param override - Per-call allow-list; when provided it REPLACES the global
+ *   `KEYCLOAK_ALLOWED_AZP` (used to scope one endpoint to a specific client).
+ * @throws {Error} If an allow-list is in effect and `azp` is absent or not in it.
  */
-function assertAllowedAzp(payload: JWTPayload): void {
-  const allow = allowedAzp();
+function assertAllowedAzp(payload: JWTPayload, override?: readonly string[]): void {
+  const allow = override ?? allowedAzp();
   if (allow.length === 0) return; // gate disabled when unconfigured
   const azp = (payload as Record<string, unknown>).azp;
   if (typeof azp !== 'string' || !allow.includes(azp)) {
-    throw new Error(
+    throw new AzpNotAllowedError(
       `token azp '${typeof azp === 'string' ? azp : 'absent'}' is not an allowed client`,
     );
   }

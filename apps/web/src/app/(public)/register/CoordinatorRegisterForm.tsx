@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type JSX } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { RJSFSchema, UiSchema } from '@rjsf/utils';
-import type { IChangeEvent } from '@rjsf/core';
 import { useTranslations } from 'next-intl';
 import { RjsfThemedForm } from '../../../components/forms/RjsfThemed';
+import { ConsentGate } from '../../../components/consent/ConsentGate';
+import { toConsentDocs } from '../../../components/consent/consent-docs';
 import {
   Select,
   SelectContent,
@@ -18,6 +19,7 @@ import { jsonFetch } from '../../../services/http';
 import {
   humaniseValidationErrors,
   stampConsent,
+  stripConsentBlock,
   stripFormChrome,
   submitRegistration,
 } from './registration-shared';
@@ -25,6 +27,7 @@ import {
   RegistrationErrorBanner,
   RegistrationSubmitButton,
   RegistrationSuccessPanel,
+  useConsentGateSubmit,
   useRegistrationFormState,
 } from './registration-ui';
 import type { ConsentDocContent } from '../../../components/consent/consent-types';
@@ -38,9 +41,10 @@ export interface CoordinatorRegisterFormProps {
   orgHierarchyEnabled: boolean;
   /**
    * Versioned Terms/Privacy content for the aggregator (coordinator) audience.
-   * Passed as `formContext.consentContent` to the RJSF form so the
-   * {@link ConsentCheckboxWidget} can render clickable links. Omit (or pass
-   * `undefined`) when `loadConsentConfig` failed — widget degrades to plain text.
+   * Flattened via {@link toConsentDocs} into the ordered document list the
+   * blocking {@link ConsentGate} reads at submit time. Omit (or pass
+   * `undefined`) when `loadConsentConfig` failed — the gate then has nothing
+   * to show, so submit surfaces an error instead of opening it.
    */
   consentContent?: ConsentDocContent;
 }
@@ -75,10 +79,14 @@ export function CoordinatorRegisterForm({
   const { state, setState, canSubmit, setCanSubmit, errorRef } = useRegistrationFormState();
   const [formData, setFormData] = useState<Record<string, unknown>>(() => ({
     locations: [{ geo: { type: 'Point', coordinates: [0, 0] }, address: { addressCountry: 'IN' } }],
-    consent: stampConsent(undefined),
   }));
   // Selected parent org (spec §6.2). Empty until picked.
   const [orgId, setOrgId] = useState<string>('');
+  const consentDocs = useMemo(() => toConsentDocs(consentContent), [consentContent]);
+  const { gateOpen, setGateOpen, pendingRef, handleSubmit } = useConsentGateSubmit(
+    consentDocs,
+    setState,
+  );
 
   // Fetch the active-org list only when the hierarchy is on.
   const orgsQuery = useQuery({
@@ -101,7 +109,9 @@ export function CoordinatorRegisterForm({
     setFormData((prev) => (prev['name'] === next ? prev : { ...prev, name: next }));
   }, [orgHierarchyEnabled, selectedOrgName]);
 
-  const formSchema = useMemo(() => stripFormChrome(schema), [schema]);
+  const formSchema = useMemo(() => stripConsentBlock(stripFormChrome(schema)), [schema]);
+
+  const agreeLabel = `${t('consent.accept_prefix')}${t('consent.privacy_link')}${t('consent.and')}${t('consent.terms_link')}.`;
 
   // Flag-on: hide the free-text "Organisation Name" (`name`) — auto-filled from
   // the selected org. Flag-off keeps the flat form unchanged.
@@ -113,17 +123,15 @@ export function CoordinatorRegisterForm({
     };
   }, [uiSchema, orgHierarchyEnabled]);
 
-  const handleSubmit = async (
-    e: IChangeEvent<Record<string, unknown>>,
-    _event: FormEvent<HTMLFormElement>,
-  ): Promise<void> => {
+  /** Runs after the gate is accepted: stamps consent and posts. */
+  const submitWithConsent = async (): Promise<void> => {
+    setGateOpen(false);
     setState({ status: 'submitting' });
     const payload: Record<string, unknown> = {
-      ...(e.formData ?? {}),
-      consent: stampConsent(
-        (e.formData as Record<string, unknown> | undefined)?.consent as
-          Record<string, unknown> | undefined,
-      ),
+      // No `?? {}`: spreading null contributes nothing, so the fallback
+      // object was dead weight rather than a guard.
+      ...pendingRef.current,
+      consent: stampConsent({ value: true }),
     };
     // The API strips `org_id` before RJSF validation and stores it on
     // `aggregators.parent_org_id`. Sent only when the hierarchy is on; `name`
@@ -245,6 +253,14 @@ export function CoordinatorRegisterForm({
           </RjsfThemedForm>
         </>
       )}
+
+      <ConsentGate
+        open={gateOpen}
+        docs={consentDocs}
+        agreeLabel={agreeLabel}
+        onAccept={submitWithConsent}
+        onCancel={() => setGateOpen(false)}
+      />
     </div>
   );
 }

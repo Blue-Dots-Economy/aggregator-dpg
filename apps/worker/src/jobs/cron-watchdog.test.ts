@@ -15,7 +15,9 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 // ─── DB fake — one queue of results per call-site, consumed in source order ──
 
-let updateReturns: Array<Array<{ id: string }>> = [[], []];
+// Update call order in source: bulkUploads abandoned -> bulkUploads stuck ->
+// campaignJob stalled. One canned result per call, consumed in that order.
+let updateReturns: Array<Array<{ id: string }>> = [[], [], []];
 let deleteReturns: Array<Array<{ id: string }>> = [[], []];
 let updateShouldThrow: Error | null = null;
 let updateCallIdx = 0;
@@ -55,6 +57,7 @@ vi.mock('../db.js', () => ({
       lastProgressAt: 'lastProgressAt',
     },
     linkSubmissions: { id: 'id', rolledUpAt: 'rolledUpAt', createdAt: 'createdAt' },
+    campaignJob: { id: 'id', status: 'status', lastProgressAt: 'lastProgressAt' },
   },
 }));
 
@@ -64,14 +67,14 @@ const del = vi.fn(async (...keys: string[]) => keys.length);
 vi.mock('../services/redis.js', () => ({ getRedis: () => ({ del }) }));
 
 vi.mock('../config.js', () => ({
-  config: { LOG_LEVEL: 'silent', NODE_ENV: 'test' },
+  config: { LOG_LEVEL: 'silent', NODE_ENV: 'test', CAMPAIGN_STALL_SECONDS: 900 },
 }));
 
 const { runWatchdog } = await import('./cron-watchdog.js');
 
 beforeEach(() => {
   vi.clearAllMocks();
-  updateReturns = [[], []];
+  updateReturns = [[], [], []];
   deleteReturns = [[], []];
   updateShouldThrow = null;
   updateCallIdx = 0;
@@ -86,7 +89,13 @@ describe('runWatchdog — normal execution', () => {
 
     const res = await runWatchdog();
 
-    expect(res).toEqual({ abandoned: 2, stuck: 1, bulkPurged: 1, submissionsPurged: 2 });
+    expect(res).toEqual({
+      abandoned: 2,
+      stuck: 1,
+      campaignStalled: 0,
+      bulkPurged: 1,
+      submissionsPurged: 2,
+    });
     expect(updateSets[0]).toMatchObject({ status: 'failed', statusReason: 'upload_abandoned' });
     expect(updateSets[1]).toMatchObject({ status: 'failed', statusReason: 'processing_stuck' });
     expect(del).toHaveBeenCalledTimes(1);
@@ -96,13 +105,29 @@ describe('runWatchdog — normal execution', () => {
     expect(keys).toEqual(expect.arrayContaining(['bu:b1:lines', 'bu:s1:errors']));
   });
 
+  it('fails stalled campaign jobs with reason "stalled"', async () => {
+    // 3rd update call = campaignJob stalled sweep.
+    updateReturns = [[], [], [{ id: 'cj1' }, { id: 'cj2' }]];
+    const res = await runWatchdog();
+    expect(res.campaignStalled).toBe(2);
+    expect(updateSets[2]).toMatchObject({ status: 'failed', errorReason: 'stalled' });
+    // Campaign jobs don't own bulk Redis keys, so Redis is untouched.
+    expect(del).not.toHaveBeenCalled();
+  });
+
   it('does not touch Redis when there are no newly-terminal uploads', async () => {
     updateReturns = [[], []];
     deleteReturns = [[{ id: 'p1' }], []];
 
     const res = await runWatchdog();
 
-    expect(res).toEqual({ abandoned: 0, stuck: 0, bulkPurged: 1, submissionsPurged: 0 });
+    expect(res).toEqual({
+      abandoned: 0,
+      stuck: 0,
+      campaignStalled: 0,
+      bulkPurged: 1,
+      submissionsPurged: 0,
+    });
     expect(del).not.toHaveBeenCalled();
   });
 
@@ -124,12 +149,24 @@ describe('runWatchdog — normal execution', () => {
 
     const res = await runWatchdog();
 
-    expect(res).toEqual({ abandoned: 0, stuck: 0, bulkPurged: 2, submissionsPurged: 1 });
+    expect(res).toEqual({
+      abandoned: 0,
+      stuck: 0,
+      campaignStalled: 0,
+      bulkPurged: 2,
+      submissionsPurged: 1,
+    });
   });
 
   it('returns all-zero counts on a fully quiet run', async () => {
     const res = await runWatchdog();
-    expect(res).toEqual({ abandoned: 0, stuck: 0, bulkPurged: 0, submissionsPurged: 0 });
+    expect(res).toEqual({
+      abandoned: 0,
+      stuck: 0,
+      campaignStalled: 0,
+      bulkPurged: 0,
+      submissionsPurged: 0,
+    });
     expect(del).not.toHaveBeenCalled();
   });
 });

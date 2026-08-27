@@ -1,9 +1,9 @@
 /**
  * Registration links endpoints.
  *
- *   POST /v1/links/create              create a link + QR
+ *   POST /v1/links/create              create a link (QR is client-side, #650)
  *   GET  /v1/links                     list links scoped to aggregator
- *   GET  /v1/links/:id                 read a single link with QR URL
+ *   GET  /v1/links/:id                 read a single link
  *   POST /v1/links/:id/activate        flip a draft link to live (idempotent)
  *   POST /v1/links/:id/deactivate      retire a link (idempotent)
  *
@@ -13,17 +13,15 @@
 
 import { randomBytes } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import QRCode from 'qrcode';
 import { z } from 'zod';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { requireApproved, type AuthContext } from '../services/auth/access-token.js';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
 import { getRegistrationLinksStore } from '../services/registration-links-store/index.js';
 import type { RegistrationLink } from '../services/registration-links-store/index.js';
-import { putObject, signQrDownloadUrl } from '../services/object-storage/index.js';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
-import { config } from '../config.js';
+import { config, enabledRegistrationModes } from '../config.js';
 import { getDb } from '../db/client.js';
 import { onboarding } from '../db/schema.js';
 import { getNetworkConfig } from '../services/network-config.js';
@@ -191,7 +189,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
         tags: ['registration-links'],
         summary: 'Create a shareable registration link',
         description:
-          'Creates a QR / shareable registration link for the caller aggregator, scoped to a domain (seeker/provider). `domain` and `registration_mode` are validated against the active network config at request time. Drafts are metadata-only; status=live also mints the QR + public URL.',
+          'Creates a shareable registration link for the caller aggregator, scoped to a domain (seeker/provider). `domain` and `registration_mode` are validated against the active network config at request time. Drafts are metadata-only; status=live also mints the public URL. The QR is generated client-side from that URL (#650).',
         security: [{ bearerAuth: [] }],
         body: CreateLinkBodySchema,
         response: {
@@ -222,18 +220,34 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
       enforceAggregatorType(auth, body.domain);
 
       const declaredModes = Object.keys(networkCfg.aggregator.registration_modes ?? {});
+      // Second enforcement point for `AGGREGATOR_ONBOARDING_ENABLED` (#637).
+      // `GET /v1/aggregator-config` already hides a withheld mode from the
+      // admin dropdown, but that is a UI affordance — this is the gate, so the
+      // allow-list cannot be bypassed by calling the API directly. Unset ⇒
+      // `enabledModes` equals `declaredModes` and nothing below changes.
+      const enabledModes = enabledRegistrationModes(declaredModes);
       // Omitted mode preserves the legacy full-profile default: prefer the
-      // `form` key (DB column default) when the network declares it, else the
-      // first declared mode. Never silently downgrade an omitted link to an
-      // account_only channel.
+      // `form` key (DB column default) when it is available, else the first
+      // one. Chosen from the *enabled* list, never the declared list — an
+      // omitted mode must not fall back to a mode this deployment withholds.
+      // Note the fallback is *within* the enabled set, so on a deployment that
+      // withholds `form` (or a network that never declared it) an omitted mode
+      // resolves to `voice`, i.e. an account-only channel. Deliberate and
+      // pinned by test: creating a link is better than 400ing, and the caller
+      // gets the mode back in the response. The portal is unaffected — it
+      // always sends an explicit mode and blocks create while it is empty
+      // (`RegistrationLinksSection.tsx`) — so this is an API-contract nuance
+      // for non-web clients only.
       const modeKey =
         body.registration_mode ??
-        (declaredModes.includes('form') ? 'form' : declaredModes[0]) ??
+        (enabledModes.includes('form') ? 'form' : enabledModes[0]) ??
         'form';
-      if (!declaredModes.includes(modeKey)) {
+      if (!enabledModes.includes(modeKey)) {
         throw httpError('INVALID_REGISTRATION_MODE', {
-          detail: `registration_mode '${modeKey}' is not declared for this network`,
-          fields: { declared: declaredModes },
+          detail: declaredModes.includes(modeKey)
+            ? `registration_mode '${modeKey}' is not enabled for this deployment`
+            : `registration_mode '${modeKey}' is not declared for this network`,
+          fields: { declared: declaredModes, enabled: enabledModes },
         });
       }
       const store = getRegistrationLinksStore();
@@ -300,10 +314,11 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
       }
       const callerOrgSlug = aggLookup.value.orgSlug;
 
-      // QR + public URL are only minted when the link is published (status=live).
-      // Drafts are pure metadata — the slug may still change via PATCH, so
-      // generating a QR now would waste S3 work and risk publishing a stale
-      // image. Activation runs the QR pipeline.
+      // The public URL is only minted when the link is published (status=live).
+      // Drafts are pure metadata — the slug may still change via PATCH. The QR
+      // is no longer persisted (#650): it is a deterministic function of the
+      // public URL, generated client-side on demand, so activation does no S3
+      // work and never fails on an unreachable bucket.
       if (created.status === 'draft') {
         log.info({
           status: 'success',
@@ -311,62 +326,23 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
           link_id: created.id,
           slug: created.slug,
           domain: created.domain,
-          qr_object_key: null,
           link_status: 'draft',
         });
         return reply.code(201).send(await buildResponse(created, callerOrgSlug));
       }
 
-      // status === 'live' — eager activate-at-create path. Generate the QR
-      // PNG, upload to S3 keyed deterministically, then stamp qr_object_key.
+      // status === 'live' — eager activate-at-create path.
       const publicUrl = buildPublicUrl(callerOrgSlug, slug);
-      const qrKey = `qr/${auth.aggregatorId}/${created.id}.png`;
-      let qrPng: Buffer;
-      try {
-        qrPng = await QRCode.toBuffer(publicUrl, {
-          type: 'png',
-          errorCorrectionLevel: 'M',
-          margin: 1,
-          width: 512,
-        });
-      } catch (err) {
-        log.error({ status: 'failure', sub: 'qr.generate', error: (err as Error).message });
-        throw httpError('INTERNAL', { cause: err });
-      }
-      try {
-        await putObject(qrKey, qrPng, 'image/png');
-      } catch (err) {
-        log.error({ status: 'failure', sub: 's3.put', error: (err as Error).message });
-        throw httpError('INTERNAL', { cause: err });
-      }
-
-      const updated = await store.updateQrKey(created.id, auth.aggregatorId, qrKey);
-      if (!updated.ok) {
-        log.error({
-          status: 'failure',
-          sub: 'store.updateQrKey',
-          error: updated.error.code,
-        });
-        throw httpError('DB_UNAVAILABLE', { cause: new Error(updated.error.message) });
-      }
-
-      const qrSigned = await signQrDownloadUrl(qrKey);
 
       log.info({
         status: 'success',
         latency_ms: Date.now() - start,
-        link_id: updated.value.id,
-        slug: updated.value.slug,
-        domain: updated.value.domain,
-        qr_object_key: qrKey,
+        link_id: created.id,
+        slug: created.slug,
+        domain: created.domain,
       });
 
-      return reply.code(201).send(
-        await buildResponse(updated.value, callerOrgSlug, {
-          publicUrl,
-          qrSigned: { url: qrSigned.url, expiresAt: qrSigned.expiresAt },
-        }),
-      );
+      return reply.code(201).send(await buildResponse(created, callerOrgSlug, { publicUrl }));
     },
   );
 
@@ -593,7 +569,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
         tags: ['registration-links'],
         summary: 'Activate a registration link',
         description:
-          'Flips the link status to live so the public form accepts submissions; mints the QR PNG + public URL. Idempotent when already live; retired links cannot be reactivated (409).',
+          'Flips the link status to live so the public form accepts submissions and returns the public URL. Idempotent when already live; retired links cannot be reactivated (409).',
         security: [{ bearerAuth: [] }],
         params: LinkParamsSchema,
         response: {
@@ -631,56 +607,23 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
         throw httpError('CONFLICT', { detail: 'Retired links cannot be reactivated.' });
       }
 
-      // Mint the QR PNG at activation time — the draft slug is now frozen and
-      // the public URL it encodes will not change. If a qr_object_key already
-      // exists (e.g. legacy row from when drafts also got QRs) we reuse the key
-      // and overwrite the bytes; the key is deterministic.
+      // The draft slug is now frozen, so the public URL it encodes is final.
+      // No QR is minted or persisted (#650) — it is generated client-side from
+      // the public URL on demand, so activation no longer touches S3.
       const publicUrl = buildPublicUrl(orgSlug, found.value.slug);
-      const qrKey = found.value.qrObjectKey ?? `qr/${auth.aggregatorId}/${found.value.id}.png`;
-      let qrPng: Buffer;
-      try {
-        qrPng = await QRCode.toBuffer(publicUrl, {
-          type: 'png',
-          errorCorrectionLevel: 'M',
-          margin: 1,
-          width: 512,
-        });
-      } catch (err) {
-        log.error({ status: 'failure', sub: 'qr.generate', error: (err as Error).message });
-        throw httpError('INTERNAL', { cause: err });
-      }
-      try {
-        await putObject(qrKey, qrPng, 'image/png');
-      } catch (err) {
-        log.error({ status: 'failure', sub: 's3.put', error: (err as Error).message });
-        throw httpError('INTERNAL', { cause: err });
-      }
-
-      const qrStamped = await store.updateQrKey(linkId, auth.aggregatorId, qrKey);
-      if (!qrStamped.ok) {
-        throw httpError('DB_UNAVAILABLE', { cause: new Error(qrStamped.error.message) });
-      }
 
       const updated = await store.updateStatus(linkId, auth.aggregatorId, 'live');
       if (!updated.ok) {
         throw httpError('DB_UNAVAILABLE', { cause: new Error(updated.error.message) });
       }
 
-      const qrSigned = await signQrDownloadUrl(qrKey);
-
       log.info({
         status: 'success',
         latency_ms: Date.now() - start,
         previous_status: found.value.status,
-        qr_object_key: qrKey,
       });
 
-      return reply.send(
-        await buildResponse(updated.value, orgSlug, {
-          publicUrl,
-          qrSigned: { url: qrSigned.url, expiresAt: qrSigned.expiresAt },
-        }),
-      );
+      return reply.send(await buildResponse(updated.value, orgSlug, { publicUrl }));
     },
   );
 
@@ -759,14 +702,17 @@ async function resolveOrgSlug(aggregatorId: string): Promise<string> {
 
 interface ResponseOverrides {
   publicUrl?: string;
-  qrSigned?: { url: string; expiresAt: string };
   metrics?: LinkMetrics;
 }
 
 /**
- * Renders a registration link as the canonical API response shape. Lazily
- * presigns the QR URL when the row has a stored qr_object_key — keeps list
- * responses fresh without persisting short-lived URLs.
+ * Renders a registration link as the canonical API response shape. The public
+ * URL is re-minted per request from `org_slug` (never a persisted snapshot).
+ *
+ * `qr_url` / `qr_expires_at` are retained in the shape but always `null`
+ * (#650): the QR is now generated client-side on demand from `public_url`.
+ * The fields stay for one release so existing clients don't hard-break on a
+ * missing key; they will be dropped in a follow-up.
  *
  * @param orgSlug - The owning aggregator's `org_slug`. The public URL is
  *   namespaced under it (`<base>/<org_slug>/<link_slug>`), so we need it to
@@ -777,24 +723,15 @@ async function buildResponse(
   orgSlug: string,
   overrides: ResponseOverrides = {},
 ): Promise<Record<string, unknown>> {
-  // Drafts are metadata-only — the QR + public URL are minted at activation
-  // and never published while the row is still in draft. Retired links lose
-  // visibility of the QR for the same reason: the underlying poster is no
-  // longer authoritative.
+  // Drafts are metadata-only — the public URL is minted at activation and
+  // never published while the row is still in draft. Retired links lose
+  // visibility for the same reason: the underlying poster is no longer
+  // authoritative.
   const isPublished = row.status === 'live';
   const publicUrl = isPublished ? (overrides.publicUrl ?? buildPublicUrl(orgSlug, row.slug)) : null;
-  let qrUrl: string | null = null;
-  let qrExpiresAt: string | null = null;
-  if (isPublished) {
-    if (overrides.qrSigned) {
-      qrUrl = overrides.qrSigned.url;
-      qrExpiresAt = overrides.qrSigned.expiresAt;
-    } else if (row.qrObjectKey) {
-      const signed = await signQrDownloadUrl(row.qrObjectKey);
-      qrUrl = signed.url;
-      qrExpiresAt = signed.expiresAt;
-    }
-  }
+  // #650: QR is derived client-side from public_url — no server-side URL.
+  const qrUrl: string | null = null;
+  const qrExpiresAt: string | null = null;
   // `metrics` may be supplied by the caller when responding to a list (one
   // grouped SQL aggregation per request); otherwise fall back to a per-link
   // lookup so single-link reads still surface counters.
