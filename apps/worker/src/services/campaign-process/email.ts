@@ -83,31 +83,8 @@ export async function runEmailForJob(job: ProcessingJob, deps: CampaignJobDeps):
   };
   const start = Date.now();
 
-  const parsed = emailContentSchema.safeParse(job.content);
-  const unknownTokens = parsed.success
-    ? unknownPlaceholders(parsed.data.subject, parsed.data.body_markdown)
-    : [];
-  if (!parsed.success || unknownTokens.length > 0) {
-    // Deterministic — a retry cannot fix it. Fail every item that is still
-    // actionable so the roll-up marks the job `failed` instead of leaving it
-    // `processing` for the watchdog to re-queue forever.
-    deps.log.error({
-      ...base,
-      status: 'failure',
-      step: 'content',
-      reason: 'invalid_email_content',
-      error: parsed.success
-        ? `unknown_placeholders:${unknownTokens.join(',')}`
-        : parsed.error.issues.map((i) => i.path.join('.')).join(','),
-    });
-    for (const item of job.items) {
-      if (!TERMINAL_ITEM_STATUSES.includes(item.status)) {
-        await deps.client.markItem(job.id, item.itemId, 'failed', 'invalid_email_content');
-      }
-    }
-    return;
-  }
-  const content = parsed.data;
+  const content = await resolveStoredContent(job, deps, base);
+  if (!content) return;
 
   const open = job.items.filter((i) => !TERMINAL_ITEM_STATUSES.includes(i.status));
   if (open.length === 0) {
@@ -165,14 +142,95 @@ export async function runEmailForJob(job: ProcessingJob, deps: CampaignJobDeps):
   // transport blip, since `failed` is terminal and the retry skips it. Throwing
   // instead re-runs the job for exactly the items still open — recipients
   // already `sent` are excluded by the terminal guard above.
-  // Unknown retry position is treated as the LAST attempt here — the opposite
-  // of the job-level guard in `index.ts`, deliberately: marking a job terminal
-  // early abandons work, whereas NOT recording a per-item outcome strands that
-  // item `pending` with no reason. The job processor always injects `attempt`,
-  // so this only bites a caller that forgot to.
+  await settleTransientFailures(job, deps, base, summary, start);
+
+  const failed = summary.failed + summary.transient.length;
+  deps.log.info({
+    ...base,
+    status: failed > 0 ? 'partial' : 'success',
+    latency_ms: Date.now() - start,
+    sent: summary.sent,
+    skipped_no_contact: summary.skippedNoContact,
+    failed,
+  });
+}
+
+/**
+ * Re-validates the `content` block persisted on the job row.
+ *
+ * The row outlives the request that wrote it, so this re-asserts exactly what
+ * the API asserted at submit — the shared schema plus the placeholder
+ * allow-list. A failure here is deterministic (a retry would fail identically),
+ * so every still-actionable item is recorded `failed` and the job rolls up
+ * terminal instead of being left `processing` for the watchdog.
+ *
+ * @param job - The job being processed.
+ * @param deps - Injected client + logger.
+ * @param base - Shared log fields for this job.
+ * @returns The validated content, or `null` when the row is unusable (items
+ *   have already been failed by then).
+ */
+async function resolveStoredContent(
+  job: ProcessingJob,
+  deps: CampaignJobDeps,
+  base: Record<string, unknown>,
+): Promise<EmailContent | null> {
+  const parsed = emailContentSchema.safeParse(job.content);
+  const unknownTokens = parsed.success
+    ? unknownPlaceholders(parsed.data.subject, parsed.data.body_markdown)
+    : [];
+  if (parsed.success && unknownTokens.length === 0) return parsed.data;
+
+  deps.log.error({
+    ...base,
+    status: 'failure',
+    step: 'content',
+    reason: 'invalid_email_content',
+    error: parsed.success
+      ? `unknown_placeholders:${unknownTokens.join(',')}`
+      : parsed.error.issues.map((i) => i.path.join('.')).join(','),
+  });
+  for (const item of job.items) {
+    if (!TERMINAL_ITEM_STATUSES.includes(item.status)) {
+      await deps.client.markItem(job.id, item.itemId, 'failed', 'invalid_email_content');
+    }
+  }
+  return null;
+}
+
+/**
+ * Decides what a transient send failure means for this attempt.
+ *
+ * While attempts remain it throws, so BullMQ re-runs the job for exactly the
+ * recipients still open — recipients already `sent` are terminal and excluded.
+ * Writing `failed` instead would be terminal, losing a recipient to a
+ * one-second transport blip.
+ *
+ * An unknown retry position is treated as the LAST attempt — the opposite of
+ * the job-level guard in `index.ts`, deliberately: marking a job terminal early
+ * abandons work, whereas NOT recording a per-item outcome strands that item
+ * `pending` with no reason. The job processor always injects `attempt`, so this
+ * only bites a caller that forgot to.
+ *
+ * @param job - The job being processed.
+ * @param deps - Injected client, logger and retry position.
+ * @param base - Shared log fields for this job.
+ * @param summary - The send loop's outcome tally.
+ * @param start - Job start timestamp, for the latency field.
+ * @throws {Error} When transient failures remain and attempts are left.
+ */
+async function settleTransientFailures(
+  job: ProcessingJob,
+  deps: CampaignJobDeps,
+  base: Record<string, unknown>,
+  summary: EmailSendSummary,
+  start: number,
+): Promise<void> {
+  if (summary.transient.length === 0) return;
+
   const attempt = deps.attempt;
   const isFinalAttempt = attempt === undefined || attempt.attempt >= attempt.maxAttempts;
-  if (summary.transient.length > 0 && !isFinalAttempt) {
+  if (!isFinalAttempt) {
     deps.log.warn({
       ...base,
       status: 'failure',
@@ -188,21 +246,11 @@ export async function runEmailForJob(job: ProcessingJob, deps: CampaignJobDeps):
     );
   }
 
-  // Out of attempts (or an unknown retry position): record them terminally with
-  // the typed code so the caller sees a reason instead of a stranded item.
+  // Out of attempts: record them terminally with the typed code so the caller
+  // sees a reason instead of a stranded item.
   for (const t of summary.transient) {
     await deps.client.markItem(job.id, t.itemId, 'failed', t.code);
   }
-
-  const failed = summary.failed + summary.transient.length;
-  deps.log.info({
-    ...base,
-    status: failed > 0 ? 'partial' : 'success',
-    latency_ms: Date.now() - start,
-    sent: summary.sent,
-    skipped_no_contact: summary.skippedNoContact,
-    failed,
-  });
 }
 
 /**

@@ -25,6 +25,9 @@ export interface ErrorCatalogueEntry {
 
 import { SUPPORTED_PLACEHOLDERS } from '@aggregator-dpg/campaign-template';
 
+/** The supported placeholders, rendered as `{{token}}` for error hints. */
+const PLACEHOLDER_LIST = SUPPORTED_PLACEHOLDERS.map((token) => `{{${token}}}`).join(', ');
+
 export const ERR = {
   // ── Generic ─────────────────────────────────────────────────────────────
   INTERNAL: {
@@ -68,7 +71,7 @@ export const ERR = {
     status: 400,
     title: 'Unknown template placeholder',
     detail: 'The subject or body contains a placeholder that is not supported.',
-    hint: `Only the fixed set is allowed: ${SUPPORTED_PLACEHOLDERS.map((p) => `{{${p}}}`).join(', ')}. See response.error.fields.unknown for the offending tokens.`,
+    hint: `Only the fixed set is allowed: ${PLACEHOLDER_LIST}. See response.error.fields.unknown for the offending tokens.`,
   },
   CAMPAIGN_TOO_MANY_ITEMS: {
     code: 'CAMPAIGN_TOO_MANY_ITEMS',
