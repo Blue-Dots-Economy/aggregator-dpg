@@ -38,6 +38,12 @@ DST_DIR="/opt/keycloak/data/import"
 : "${SIGNALS_API_SECRET:=signals-api-local-dev-secret}"
 : "${SIGNALSTACK_CLIENT_SECRET:=aggregator-dpg-signals-local-dev-secret}"
 : "${VOICE_DPG_SIGNALS_SECRET:=voice-dpg-signals-local-dev-secret}"
+# campaign-manager client secret (#692). Soft-defaulted for the same reason as
+# the Signals-side group above: nothing in the default aggregator-only compose
+# authenticates through this client — it's for the external campaign-manager
+# system and developers specifically testing campaign routes — so booting the
+# standalone stack must not require inventing a secret for it.
+: "${CAMPAIGN_MANAGER_SECRET:=campaign-manager-local-dev-secret}"
 
 # SMTP placeholders. Empty values are valid: when SMTP_AUTH=false, Keycloak
 # ignores SMTP_USER/SMTP_PASSWORD even if they are empty strings.
@@ -77,6 +83,7 @@ AGGREGATOR_BFF_SECRET_ESC=$(escape "$AGGREGATOR_BFF_SECRET")
 SIGNALS_API_SECRET_ESC=$(escape "$SIGNALS_API_SECRET")
 SIGNALSTACK_CLIENT_SECRET_ESC=$(escape "$SIGNALSTACK_CLIENT_SECRET")
 VOICE_DPG_SIGNALS_SECRET_ESC=$(escape "$VOICE_DPG_SIGNALS_SECRET")
+CAMPAIGN_MANAGER_SECRET_ESC=$(escape "$CAMPAIGN_MANAGER_SECRET")
 
 for src in "$SRC_DIR"/*.json; do
   [ -f "$src" ] || continue
@@ -100,6 +107,7 @@ for src in "$SRC_DIR"/*.json; do
     -e "s|__SIGNALS_API_SECRET__|${SIGNALS_API_SECRET_ESC}|g" \
     -e "s|__SIGNALSTACK_CLIENT_SECRET__|${SIGNALSTACK_CLIENT_SECRET_ESC}|g" \
     -e "s|__VOICE_DPG_SIGNALS_SECRET__|${VOICE_DPG_SIGNALS_SECRET_ESC}|g" \
+    -e "s|__CAMPAIGN_MANAGER_SECRET__|${CAMPAIGN_MANAGER_SECRET_ESC}|g" \
     "$src" > "$dst"
   echo "rendered $(basename "$src") -> $dst (PUBLIC_BASE_URL=$PUBLIC_BASE_URL, SMTP=$SMTP_HOST:$SMTP_PORT auth=$SMTP_AUTH)"
 done

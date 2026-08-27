@@ -72,6 +72,14 @@ export interface AnyAuthContext {
   authorizedParty?: string;
   /** Token's `client_id` claim (Keycloak emits this on service-account tokens). */
   clientId?: string;
+  /**
+   * `preferred_username` claim. Keycloak sets it to `service-account-<client>`
+   * for a client's service account and to the user's username for an end user,
+   * so it distinguishes a client_credentials token from a password-grant token
+   * on the SAME client — which `azp` cannot, and which the `sub` claim cannot
+   * either (it is a UUID in both cases).
+   */
+  preferredUsername?: string;
   /** Whether this token is bound to an end user (has `aggregator_id`). */
   isUser: boolean;
   aggregatorId?: string;
@@ -82,7 +90,7 @@ export type AnyAuthResult =
   | { ok: true; context: AnyAuthContext }
   | {
       ok: false;
-      error: { code: 'MISSING_TOKEN' | 'INVALID_TOKEN'; message: string };
+      error: { code: 'MISSING_TOKEN' | 'INVALID_TOKEN' | 'AZP_NOT_ALLOWED'; message: string };
     };
 
 /**
@@ -336,8 +344,19 @@ async function backfillSignalstackOrgId(ctx: AuthContext): Promise<void> {
  *
  * The middleware succeeds for both end-user tokens and service tokens.
  * Handlers can branch on `context.isUser` if they need to behave differently.
+ *
+ * @param req - The Fastify request.
+ * @param opts.allowedAzp - Per-call `azp` allow-list that OVERRIDES the global
+ *   `KEYCLOAK_ALLOWED_AZP`. Needed by the campaign dump route, whose client is
+ *   deliberately excluded from the global list. Omitted ⇒ prior behaviour.
+ * @returns `ok: true` with the projected {@link AnyAuthContext} when the token
+ *   verifies; otherwise `ok: false` with a `MISSING_TOKEN`, `INVALID_TOKEN`, or
+ *   `AZP_NOT_ALLOWED` error code and message.
  */
-export async function authenticateAny(req: FastifyRequest): Promise<AnyAuthResult> {
+export async function authenticateAny(
+  req: FastifyRequest,
+  opts?: { allowedAzp?: readonly string[] },
+): Promise<AnyAuthResult> {
   const header = req.headers.authorization;
   if (!header || !header.startsWith('Bearer ')) {
     return { ok: false, error: { code: 'MISSING_TOKEN', message: 'missing Bearer token' } };
@@ -349,12 +368,12 @@ export async function authenticateAny(req: FastifyRequest): Promise<AnyAuthResul
 
   let payload: JWTPayload;
   try {
-    payload = await verifyToken(token);
+    payload = await verifyToken(token, opts?.allowedAzp);
   } catch (err) {
     return {
       ok: false,
       error: {
-        code: 'INVALID_TOKEN',
+        code: err instanceof AzpNotAllowedError ? 'AZP_NOT_ALLOWED' : 'INVALID_TOKEN',
         message: err instanceof Error ? err.message : 'verify failed',
       },
     };
@@ -370,6 +389,9 @@ export async function authenticateAny(req: FastifyRequest): Promise<AnyAuthResul
   };
   if (typeof claims.azp === 'string') ctx.authorizedParty = claims.azp;
   if (typeof claims.client_id === 'string') ctx.clientId = claims.client_id;
+  if (typeof claims.preferred_username === 'string') {
+    ctx.preferredUsername = claims.preferred_username;
+  }
   if (aggregatorId) ctx.aggregatorId = aggregatorId;
   if (typeof claims.email === 'string') ctx.email = claims.email;
   return { ok: true, context: ctx };
@@ -388,6 +410,20 @@ function readAggregatorId(payload: JWTPayload): string | undefined {
   if (typeof direct === 'string' && direct.length > 0) return direct;
   if (Array.isArray(direct) && typeof direct[0] === 'string') return direct[0];
   return undefined;
+}
+
+/**
+ * Thrown when a token's `azp` is not in the effective allow-list.
+ *
+ * A distinct type rather than a bare `Error` so callers can map a wrong-client
+ * token to 403 while a bad signature stays 401 — the two are otherwise
+ * indistinguishable once `verifyToken` has thrown.
+ */
+export class AzpNotAllowedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AzpNotAllowedError';
+  }
 }
 
 /**
@@ -443,7 +479,7 @@ function assertAllowedAzp(payload: JWTPayload, override?: readonly string[]): vo
   if (allow.length === 0) return; // gate disabled when unconfigured
   const azp = (payload as Record<string, unknown>).azp;
   if (typeof azp !== 'string' || !allow.includes(azp)) {
-    throw new Error(
+    throw new AzpNotAllowedError(
       `token azp '${typeof azp === 'string' ? azp : 'absent'}' is not an allowed client`,
     );
   }
