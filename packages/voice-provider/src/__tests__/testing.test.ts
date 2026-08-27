@@ -138,20 +138,4 @@ describe('InMemoryVoiceProvider', () => {
     expect(serialized).not.toContain('"value"');
     expect(serialized).not.toContain('webhook_url');
   });
-
-  it('stop and update return a not-implemented error (inherited from the base)', async () => {
-    const p = new InMemoryVoiceProvider();
-    const stopResult = await p.stop('batch-1');
-    const updateResult = await p.update('batch-1', {
-      agentRef: 'a',
-      batchName: 'b',
-      contacts: [],
-      startOptions: {},
-    });
-    expect(stopResult.success).toBe(false);
-    expect(updateResult.success).toBe(false);
-    if (stopResult.success || updateResult.success) return;
-    expect(stopResult.error.code).toBe('NOT_IMPLEMENTED');
-    expect(updateResult.error.code).toBe('NOT_IMPLEMENTED');
-  });
 });

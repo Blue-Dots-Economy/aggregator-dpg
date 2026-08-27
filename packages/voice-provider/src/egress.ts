@@ -49,11 +49,15 @@ export interface AcquireRayaSlotDeps {
  * sleeps until the next window boundary and retries.
  *
  * Fail-closed: if the Redis call itself errors (connection down, timeout),
- * the function cannot verify the current count, so it sleeps a full
- * `windowSeconds * 1000` ms and then returns — proceeding without further
- * retry. This bounds the caller's wait to one window even while Redis is
- * unavailable, while never letting an unverifiable count burst past the
- * provider's limit.
+ * OR `multi().exec()` resolves but the `INCR` result is missing, carries a
+ * per-command error tuple (ioredis resolves — never rejects — a pipelined
+ * command failure as `[Error, null]`), or isn't a number, the function
+ * cannot verify the current count, so it sleeps a full `windowSeconds *
+ * 1000` ms and then returns — proceeding without further retry. This bounds
+ * the caller's wait to one window even while Redis is unavailable or
+ * degraded, while never letting an unverifiable count burst past the
+ * provider's limit (an unverifiable result must never default to `count =
+ * 0`, which would grant an immediate slot instead of failing closed).
  *
  * @param deps - Redis client, window/max budget, and injectable sleep/clock.
  */
@@ -78,7 +82,19 @@ export async function acquireRayaSlot(deps: AcquireRayaSlotDeps): Promise<void> 
         .expire(key, deps.windowSeconds + 1)
         .exec();
       const incrEntry = execResult?.[0];
-      count = Array.isArray(incrEntry) && typeof incrEntry[1] === 'number' ? incrEntry[1] : 0;
+      const incrError = Array.isArray(incrEntry) ? incrEntry[0] : undefined;
+      const incrValue = Array.isArray(incrEntry) ? incrEntry[1] : undefined;
+      // `multi().exec()` RESOLVES (never rejects) even when a pipelined
+      // command itself failed (e.g. READONLY/OOM) — the failure surfaces as
+      // an `[Error, null]` tuple, not a thrown exception. A missing result,
+      // a missing/error'd INCR entry, or a non-numeric reply is exactly as
+      // unverifiable as a thrown Redis error — fail closed the same way
+      // rather than falling back to `count = 0` (an immediate grant).
+      if (incrError != null || typeof incrValue !== 'number') {
+        await sleep(deps.windowSeconds * 1000);
+        return;
+      }
+      count = incrValue;
     } catch {
       // Fail closed: we cannot verify the window's count, so wait out one
       // full window before letting the caller proceed rather than risk

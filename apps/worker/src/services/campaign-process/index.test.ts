@@ -3,7 +3,10 @@ import { ok, err, type Result } from '@aggregator-dpg/shared-primitives/result';
 import { UpstreamError, type BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import type { SignalStackDecryptedProfileRow } from '@aggregator-dpg/signalstack-writer/interface';
 import type { SendInput, SendOk, MailerResult } from '@aggregator-dpg/mailer/interface';
-import { VoiceProviderBase } from '@aggregator-dpg/voice-provider/interface';
+import {
+  VoiceProviderBase,
+  brandCuratedProviderResponse,
+} from '@aggregator-dpg/voice-provider/interface';
 import type {
   VoiceDispatchInput,
   VoiceDispatchResult,
@@ -40,7 +43,7 @@ function job(over: Partial<ProcessingJob> = {}): ProcessingJob {
     requestedBy: 'user@org.example',
     requestId: null,
     notifiedAt: null,
-    items: [{ itemId: 'item-1', action: null, status: 'pending', rayaBatchId: null }],
+    items: [{ itemId: 'item-1', action: null, status: 'pending', providerBatchRef: null }],
     ...over,
   };
 }
@@ -200,8 +203,8 @@ describe('runCampaignJob (export channel)', () => {
     const h = harness(
       job({
         items: [
-          { itemId: 'a', action: null, status: 'pending', rayaBatchId: null },
-          { itemId: 'b', action: null, status: 'pending', rayaBatchId: null },
+          { itemId: 'a', action: null, status: 'pending', providerBatchRef: null },
+          { itemId: 'b', action: null, status: 'pending', providerBatchRef: null },
         ],
       }),
       {
@@ -224,7 +227,7 @@ describe('runCampaignJob (export channel)', () => {
 
   it('completes with no email when every item is unowned (all skipped)', async () => {
     const h = harness(
-      job({ items: [{ itemId: 'a', action: null, status: 'pending', rayaBatchId: null }] }),
+      job({ items: [{ itemId: 'a', action: null, status: 'pending', providerBatchRef: null }] }),
       {
         fetchDecryptedProfiles: async () => ok({ profiles: [], skipped: ['a'] }),
       },
@@ -403,7 +406,10 @@ describe('runCampaignJob (voice channel wiring)', () => {
         providerBatchRef: 'batch-1',
         accepted: input.contacts.map((c) => c.ref),
         rejected: [],
-        providerResponse: { create: {}, start: {} },
+        providerResponse: {
+          create: brandCuratedProviderResponse({}),
+          start: brandCuratedProviderResponse({}),
+        },
       });
     }
   }
@@ -412,17 +418,19 @@ describe('runCampaignJob (voice channel wiring)', () => {
     const voiceJob = job({
       channel: 'voice',
       content: { agent_id: 'agent-1' },
-      items: [{ itemId: 'item-1', action: 'voice_call', status: 'pending', rayaBatchId: null }],
+      items: [
+        { itemId: 'item-1', action: 'voice_call', status: 'pending', providerBatchRef: null },
+      ],
     });
     const h = harness(voiceJob);
-    const submitted: Array<{ jobId: string; itemId: string; rayaBatchId: string }> = [];
+    const submitted: Array<{ jobId: string; itemId: string; providerBatchRef: string }> = [];
     const providerResponses: Array<{ jobId: string; response: unknown }> = [];
     const deps: CampaignJobDeps = {
       ...h.deps,
       client: {
         ...h.deps.client,
         markSubmitted: async (jobId, itemId, args) => {
-          submitted.push({ jobId, itemId, rayaBatchId: args.rayaBatchId });
+          submitted.push({ jobId, itemId, providerBatchRef: args.providerBatchRef });
         },
         setProviderResponse: async (jobId, response) => {
           providerResponses.push({ jobId, response });
@@ -436,7 +444,7 @@ describe('runCampaignJob (voice channel wiring)', () => {
 
     await runCampaignJob('job-1', deps);
 
-    expect(submitted).toEqual([{ jobId: 'job-1', itemId: 'item-1', rayaBatchId: 'batch-1' }]);
+    expect(submitted).toEqual([{ jobId: 'job-1', itemId: 'item-1', providerBatchRef: 'batch-1' }]);
     expect(providerResponses).toHaveLength(1);
     // No mail/S3 side effects — the export path must not run for a voice job.
     expect(h.mails).toHaveLength(0);

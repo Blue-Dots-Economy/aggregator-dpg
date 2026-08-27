@@ -61,7 +61,7 @@ export interface CampaignJobClient {
   setNotifiedAt(jobId: string): Promise<void>;
   /** Fails items still `pending` on a job that has run out of retries. */
   failPendingItems(jobId: string, errorReason: string): Promise<void>;
-  /** Voice: records that an item was submitted to the voice provider (sets `submitted` + `raya_batch_id`). */
+  /** Voice: records that an item was submitted to the voice provider (sets `submitted` + `providerBatchRef`, persisted in the `raya_batch_id` column). */
   markSubmitted(jobId: string, itemId: string, args: MarkSubmittedArgs): Promise<void>;
   /** Voice: stores the raw provider create+start response on the job, for the campaign manager to render. */
   setProviderResponse(jobId: string, response: unknown): Promise<void>;

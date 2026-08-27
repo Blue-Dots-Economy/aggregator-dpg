@@ -12,8 +12,6 @@
 
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
-import { err } from '@aggregator-dpg/shared-primitives/result';
-import { DomainError } from '@aggregator-dpg/shared-primitives/errors';
 
 /**
  * A single call-recipient row within a voice dispatch batch.
@@ -46,6 +44,39 @@ export interface VoiceDispatchInput {
 }
 
 /**
+ * Compile-time-only brand marking a provider response payload as already
+ * curated down to a PII-excluded persistence whitelist (see `raya.ts`'s
+ * `curateCreateResponse`/`curateStartResponse` and `testing.ts`'s twin
+ * `pickWhitelisted`). The brand carries no runtime value — it exists purely
+ * so `VoiceDispatchResult.providerResponse` can only ever hold data that
+ * passed through a provider's own curation step: a raw upstream payload
+ * (which may carry `errors[].value`/`data[]` PII, per the module note in
+ * `raya.ts`) doesn't type-check as this type, so it can't reach the
+ * worker's `setProviderResponse` call by accident. PII-exclusion becomes a
+ * compile-time guarantee at the provider boundary, not just a convention.
+ */
+declare const CURATED_PROVIDER_RESPONSE: unique symbol;
+export type CuratedProviderResponse<T = Record<string, unknown>> = T & {
+  readonly [CURATED_PROVIDER_RESPONSE]: true;
+};
+
+/**
+ * Brands an already-curated (whitelist-only) payload as safe to persist.
+ * The only sanctioned way to produce a {@link CuratedProviderResponse} —
+ * call this at the end of a provider's own curation helper (after every
+ * PII-bearing field has been stripped), never directly on a raw upstream
+ * payload.
+ *
+ * @param value - Already-curated (whitelist-only) data.
+ * @returns The same value, tagged at the type level as curated.
+ */
+export function brandCuratedProviderResponse<T extends Record<string, unknown>>(
+  value: T,
+): CuratedProviderResponse<T> {
+  return value as CuratedProviderResponse<T>;
+}
+
+/**
  * Result of a successful (or partially successful) {@link VoiceProviderBase.dispatch} call.
  */
 export interface VoiceDispatchResult {
@@ -55,8 +86,17 @@ export interface VoiceDispatchResult {
   accepted: string[];
   /** `ref` + reason for contacts the provider rejected at create time. */
   rejected: { ref: string; error: string }[];
-  /** Raw provider responses for the create and start calls, captured for audit/debugging. */
-  providerResponse: { create: unknown; start: unknown };
+  /**
+   * Curated provider responses for the create and start calls, captured for
+   * audit/debugging. Typed as {@link CuratedProviderResponse} — a provider
+   * adapter cannot assign a raw upstream payload here without an explicit
+   * (and clearly wrong) cast, so PII-exclusion at this boundary is enforced
+   * by the compiler, not just by convention.
+   */
+  providerResponse: {
+    create: CuratedProviderResponse;
+    start: CuratedProviderResponse | null;
+  };
 }
 
 /**
@@ -64,10 +104,10 @@ export interface VoiceDispatchResult {
  *
  * Concrete implementations (in-memory fake, real HTTP adapter) must extend
  * this class and implement every method with the exact same signature. The
- * `action` axis today only covers `dispatch` (create + start); `stop` and
- * `update` are declared for a future extension and currently return a
- * not-implemented error rather than being omitted, so callers can already
- * code against the full future surface.
+ * `action` axis today only covers `dispatch` (create + start) — nothing in
+ * this repo calls a stop/update action yet, so those aren't declared here;
+ * add them (with a real implementation, not a not-implemented stub) when a
+ * campaign-control action actually needs one.
  */
 export abstract class VoiceProviderBase {
   /**
@@ -78,35 +118,4 @@ export abstract class VoiceProviderBase {
    *   outcome, or Err if the batch could not be created at all.
    */
   abstract dispatch(input: VoiceDispatchInput): Promise<Result<VoiceDispatchResult, BaseError>>;
-
-  /**
-   * Stops an in-flight voice batch. Reserved for a future campaign-control
-   * action (the `action` axis today only covers `dispatch`) — the base
-   * implementation returns a not-implemented error so every current and
-   * future provider gets consistent behaviour without duplicating this
-   * stub. Override once the provider surface adds a stop endpoint.
-   *
-   * @param _providerBatchRef - The provider batch reference to stop.
-   * @returns Err(DomainError) with code `NOT_IMPLEMENTED`.
-   */
-  stop(_providerBatchRef: string): Promise<Result<void, BaseError>> {
-    return Promise.resolve(
-      err(new DomainError('stop is not implemented', { code: 'NOT_IMPLEMENTED' })),
-    );
-  }
-
-  /**
-   * Updates an in-flight voice batch's contacts or options. Reserved for a
-   * future campaign-control action — see {@link stop} for why the base
-   * class provides a default rather than each provider re-declaring it.
-   *
-   * @param _providerBatchRef - The provider batch reference to update.
-   * @param _input - The updated batch definition.
-   * @returns Err(DomainError) with code `NOT_IMPLEMENTED`.
-   */
-  update(_providerBatchRef: string, _input: VoiceDispatchInput): Promise<Result<void, BaseError>> {
-    return Promise.resolve(
-      err(new DomainError('update is not implemented', { code: 'NOT_IMPLEMENTED' })),
-    );
-  }
 }

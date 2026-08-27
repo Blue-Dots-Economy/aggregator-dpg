@@ -54,7 +54,7 @@ interface ItemRow {
   action: string | null;
   status: CampaignJobItemStatus;
   providerRef: string | null;
-  rayaBatchId: string | null;
+  providerBatchRef: string | null;
   skipReason: string | null;
   errorReason: string | null;
 }
@@ -113,7 +113,7 @@ export class InMemoryCampaignJobStore extends CampaignJobStoreBase {
           ? 'duplicate_active'
           : 'pending') as CampaignJobItemStatus,
         providerRef: null,
-        rayaBatchId: null,
+        providerBatchRef: null,
         skipReason: null,
         errorReason: null,
       })),
@@ -241,7 +241,7 @@ export class InMemoryCampaignJobStore extends CampaignJobStoreBase {
   async markSubmitted(
     jobId: string,
     itemId: string,
-    args: { rayaBatchId: string; providerRef?: string },
+    args: { providerBatchRef: string; providerRef?: string },
   ): Promise<StoreResult<void>> {
     const rows = this.items.get(jobId);
     const item = rows?.find((i) => i.itemId === itemId);
@@ -249,7 +249,7 @@ export class InMemoryCampaignJobStore extends CampaignJobStoreBase {
     // Forward-only: don't overwrite a terminal status.
     if (!TERMINAL_ITEM.has(item.status)) {
       item.status = 'submitted';
-      item.rayaBatchId = args.rayaBatchId;
+      item.providerBatchRef = args.providerBatchRef;
       if (args.providerRef !== undefined) item.providerRef = args.providerRef;
       this.touch(jobId);
     }

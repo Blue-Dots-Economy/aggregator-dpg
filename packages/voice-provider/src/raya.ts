@@ -26,7 +26,20 @@
  * back in `errors[].value` (a raw phone/name) and echoes `data[]` (the
  * submitted contact rows) — both PII. {@link curateCreateResponse} and
  * {@link curateStartResponse} strip everything outside their whitelist
- * before it ever reaches {@link VoiceDispatchResult.providerResponse}.
+ * before it ever reaches {@link VoiceDispatchResult.providerResponse}; the
+ * type-level {@link CuratedProviderResponse} brand (declared in
+ * `./interface.js`) makes this a compile-time guarantee, not just a
+ * convention — only these two curation helpers can produce a value typed to
+ * fit `VoiceDispatchResult.providerResponse`.
+ *
+ * `dispatch()` also (1) looks up an existing batch by deterministic name
+ * before creating one, reusing it instead of minting a duplicate on a
+ * transient start-failure retry (see the I4 note on {@link dispatch}), and
+ * (2) never reports more contacts as `accepted` than Raya itself confirms —
+ * an unmappable `errors[].row` or an accepted count exceeding
+ * `contactsInserted`/`validRows` demotes the excess to `rejected` rather
+ * than silently over-reporting success (see the I5 note on
+ * {@link splitAcceptedRejected}).
  *
  * @module @aggregator-dpg/voice-provider
  */
@@ -43,6 +56,8 @@ import { stripTrailingSlashes } from '@aggregator-dpg/shared-primitives/url';
 
 import {
   VoiceProviderBase,
+  brandCuratedProviderResponse,
+  type CuratedProviderResponse,
   type VoiceDispatchInput,
   type VoiceDispatchResult,
 } from './interface.js';
@@ -79,6 +94,15 @@ interface RayaStartBatchResponse {
 }
 
 /**
+ * Raya's `GET /batch` (list batches) response shape (only the fields this
+ * adapter reads) — used by {@link RayaVoiceProvider.findExistingBatch} (I4)
+ * to detect a batch a prior, transiently-failed attempt already created.
+ */
+interface RayaListBatchesResponse {
+  batches?: Array<{ id?: unknown; name?: unknown; agent_id?: unknown; total_contacts?: unknown }>;
+}
+
+/**
  * Whitelist of `POST /batch` response fields safe to persist. Deliberately
  * excludes `errors` (carries `errors[].value`, the raw rejected phone/name)
  * and `data` (echoes the submitted contact rows) — see the module note.
@@ -111,14 +135,14 @@ const START_RESPONSE_PERSIST_KEYS = [
  * never the full payload (see the module note on why `errors`/`data` are PII).
  *
  * @param payload - The raw parsed create-response body.
- * @returns Only the whitelisted fields present on `payload`.
+ * @returns Only the whitelisted fields present on `payload`, branded {@link CuratedProviderResponse}.
  */
-function curateCreateResponse(payload: RayaCreateBatchResponse): Record<string, unknown> {
+function curateCreateResponse(payload: RayaCreateBatchResponse): CuratedProviderResponse {
   const out: Record<string, unknown> = {};
   for (const key of CREATE_RESPONSE_PERSIST_KEYS) {
     if (payload[key] !== undefined) out[key] = payload[key];
   }
-  return out;
+  return brandCuratedProviderResponse(out);
 }
 
 /**
@@ -127,17 +151,18 @@ function curateCreateResponse(payload: RayaCreateBatchResponse): Record<string, 
  * response isn't otherwise parsed) so this validates shape defensively.
  *
  * @param payload - The raw parsed start-response body.
- * @returns Only the whitelisted fields present on `payload`, or `{}` if
- *   `payload` isn't an object.
+ * @returns Only the whitelisted fields present on `payload` (or `{}` if
+ *   `payload` isn't an object), branded {@link CuratedProviderResponse}.
  */
-function curateStartResponse(payload: unknown): Record<string, unknown> {
+function curateStartResponse(payload: unknown): CuratedProviderResponse {
   const out: Record<string, unknown> = {};
-  if (payload === null || typeof payload !== 'object') return out;
-  const record = payload as RayaStartBatchResponse;
-  for (const key of START_RESPONSE_PERSIST_KEYS) {
-    if (record[key] !== undefined) out[key] = record[key];
+  if (payload !== null && typeof payload === 'object') {
+    const record = payload as RayaStartBatchResponse;
+    for (const key of START_RESPONSE_PERSIST_KEYS) {
+      if (record[key] !== undefined) out[key] = record[key];
+    }
   }
-  return out;
+  return brandCuratedProviderResponse(out);
 }
 
 /** Configuration for {@link RayaVoiceProvider}. */
@@ -195,9 +220,18 @@ export class RayaVoiceProvider extends VoiceProviderBase {
   }
 
   /**
-   * Creates a Raya batch from `input.contacts`, then starts it — unless
-   * every contact was rejected at create time, in which case `start` is
-   * skipped entirely and `providerResponse.start` is `null`.
+   * Creates a Raya batch from `input.contacts` (or reuses one, per I4 below),
+   * then starts it — unless every contact was rejected/demoted, in which
+   * case `start` is skipped entirely and `providerResponse.start` is `null`.
+   *
+   * I4: before creating, looks up an existing batch with the same
+   * deterministic `input.batchName` for this agent via
+   * {@link findExistingBatch}. `dispatch()` is two non-atomic HTTP calls
+   * (create, then start) with no client idempotency key — if a prior attempt
+   * got a successful create but then hit a transient start failure (5xx,
+   * timeout), a naive retry would call create again and mint a second,
+   * orphaned batch at Raya while duplicate-dialling the same contacts. A hit
+   * reuses that batch's id and skips create entirely.
    *
    * @param input - The batch definition (agent, name, contacts, start options).
    * @returns Ok with the provider batch reference and per-contact
@@ -207,39 +241,68 @@ export class RayaVoiceProvider extends VoiceProviderBase {
   override async dispatch(
     input: VoiceDispatchInput,
   ): Promise<Result<VoiceDispatchResult, BaseError>> {
-    await this.acquireSlot();
-    const createResult = await this.request<RayaCreateBatchResponse>('POST', '/batch', {
-      agent_id: input.agentRef,
-      batch_name: input.batchName,
-      contacts: input.contacts.map((c) => ({
-        contact_name: c.name,
-        contact_phone: c.phone,
-        ...(c.countryCode ? { country_code: c.countryCode } : {}),
-        ref: c.ref,
-        ...c.variables,
-      })),
-    });
-    if (!createResult.success) return err(createResult.error);
-    const createPayload = createResult.value;
+    const existing = await this.findExistingBatch(input.agentRef, input.batchName);
 
-    if (typeof createPayload.batchId !== 'number') {
-      return err(
-        new UpstreamError('raya batch create returned unexpected payload', {
-          code: 'RAYA_BAD_RESPONSE',
-          details: { payload: createPayload },
-        }),
+    let providerBatchRef: string;
+    let accepted: string[];
+    let rejected: { ref: string; error: string }[];
+    let createResponse: CuratedProviderResponse;
+
+    if (existing) {
+      providerBatchRef = String(existing.batchId);
+      const demoted: { ref: string; error: string }[] = [];
+      // I5: we have no per-contact accept/reject detail from the reused
+      // batch's (now-unavailable) original create response — only its
+      // confirmed `total_contacts`. Never claim more contacts succeeded than
+      // that: demote the tail beyond it, same as the short-count guard below.
+      accepted = demoteExcess(
+        input.contacts.map((c) => c.ref),
+        existing.totalContacts,
+        'raya_batch_reused_short_count',
+        demoted,
       );
-    }
-    const providerBatchRef = String(createPayload.batchId);
+      rejected = demoted;
+      createResponse = brandCuratedProviderResponse({
+        status: 'reused',
+        message: 'existing batch reused after a transient start-call retry',
+        batchId: existing.batchId,
+        contactsInserted: existing.totalContacts,
+      });
+    } else {
+      await this.acquireSlot();
+      const createResult = await this.request<RayaCreateBatchResponse>('POST', '/batch', {
+        agent_id: input.agentRef,
+        batch_name: input.batchName,
+        contacts: input.contacts.map((c) => ({
+          contact_name: c.name,
+          contact_phone: c.phone,
+          ...(c.countryCode ? { country_code: c.countryCode } : {}),
+          ref: c.ref,
+          ...c.variables,
+        })),
+      });
+      if (!createResult.success) return err(createResult.error);
+      const createPayload = createResult.value;
 
-    const { accepted, rejected } = this.splitAcceptedRejected(input, createPayload.errors);
+      if (typeof createPayload.batchId !== 'number') {
+        return err(
+          new UpstreamError('raya batch create returned unexpected payload', {
+            code: 'RAYA_BAD_RESPONSE',
+            details: { payload: createPayload },
+          }),
+        );
+      }
+      providerBatchRef = String(createPayload.batchId);
+      ({ accepted, rejected } = this.splitAcceptedRejected(input, createPayload));
+      createResponse = curateCreateResponse(createPayload);
+    }
 
     if (accepted.length === 0) {
       return ok({
         providerBatchRef,
         accepted,
         rejected,
-        providerResponse: { create: curateCreateResponse(createPayload), start: null },
+        providerResponse: { create: createResponse, start: null },
       });
     }
 
@@ -266,37 +329,111 @@ export class RayaVoiceProvider extends VoiceProviderBase {
       accepted,
       rejected,
       providerResponse: {
-        create: curateCreateResponse(createPayload),
+        create: createResponse,
         start: curateStartResponse(startResult.value),
       },
     });
   }
 
   /**
+   * Looks up an already-created batch with the same deterministic name for
+   * this agent, via Raya's `GET /api/batch` (list batches) endpoint — see
+   * the I4 note on {@link dispatch}. That endpoint scopes results to one
+   * `agent_id` server-side but has no server-side name filter, so this
+   * fetches (newest-first, capped at 100 — the deterministic name is unique
+   * per job, so a match should be recent) and filters client-side by exact
+   * name match.
+   *
+   * Best-effort: if the list call itself fails (network, exhausted retries,
+   * unexpected shape), that's treated the same as "not found" rather than
+   * failing the whole dispatch — this lookup is a duplicate-avoidance
+   * optimisation layered on top of create+start, not a precondition for it.
+   *
+   * @param agentRef - The agent this batch belongs to.
+   * @param batchName - The deterministic batch name (`campaign-{job.id}`) to match.
+   * @returns The matching batch's id + confirmed contact count, or
+   *   `undefined` if none was found (including when the lookup itself failed).
+   */
+  private async findExistingBatch(
+    agentRef: string,
+    batchName: string,
+  ): Promise<{ batchId: number; totalContacts: number } | undefined> {
+    await this.acquireSlot();
+    const result = await this.request<RayaListBatchesResponse>(
+      'GET',
+      `/batch?agent_id=${encodeURIComponent(agentRef)}&limit=100&sort=desc`,
+      undefined,
+    );
+    if (!result.success) return undefined;
+    const batches = Array.isArray(result.value.batches) ? result.value.batches : [];
+    // The `agent_id` query param already scopes this server-side; the
+    // client-side check is a defensive belt-and-braces guard, not a
+    // substitute for it.
+    const match = batches.find((b) => b.name === batchName && b.agent_id === agentRef);
+    if (!match || typeof match.id !== 'number') return undefined;
+    const totalContacts = typeof match.total_contacts === 'number' ? match.total_contacts : 0;
+    return { batchId: match.id, totalContacts };
+  }
+
+  /**
    * Maps Raya's 1-based `errors[].row` back to the originating contact's
-   * `ref`. Rows outside the contacts array (upstream drift) are ignored
-   * rather than crashing the caller. A duplicate row is only counted once.
+   * `ref`, then cross-checks the resulting accepted count against Raya's own
+   * declared counts (I5) — three ways a naive "everything not explicitly
+   * rejected is accepted" default can over-report success, all guarded here:
+   *
+   *   1. A duplicate mapped row is only counted once (unchanged behaviour).
+   *   2. An unmappable `errors[].row` (0/1-based drift, or a global/rowless
+   *      error with no usable `row` at all) means Raya rejected something we
+   *      can't attribute to a specific contact. Rather than silently letting
+   *      those stay `accepted`, the tail of the accepted set (in dispatch
+   *      order) is demoted with `raya_unmapped_rejection` — we can't know
+   *      which contact(s) the unmapped error(s) actually refer to, so this is
+   *      the least-bad conservative choice: never claim more contacts
+   *      succeeded than Raya's own error count allows.
+   *   3. The accepted count still exceeds Raya's own `contactsInserted` (or
+   *      `validRows`, if `contactsInserted` is absent) — demoted with
+   *      `raya_short_count`.
    *
    * @param input - The dispatch input whose `contacts` order the rows index into.
-   * @param errorsRaw - The `errors` array from Raya's create response, if any.
+   * @param payload - Raya's create-response payload (`errors`, `contactsInserted`, `validRows`).
    * @returns The accepted vs. rejected contact refs.
    */
   private splitAcceptedRejected(
     input: VoiceDispatchInput,
-    errorsRaw: RayaCreateBatchResponse['errors'],
+    payload: RayaCreateBatchResponse,
   ): { accepted: string[]; rejected: { ref: string; error: string }[] } {
     const rejectedRefs = new Set<string>();
     const rejected: { ref: string; error: string }[] = [];
-    const errors = Array.isArray(errorsRaw) ? errorsRaw : [];
+    const errors = Array.isArray(payload.errors) ? payload.errors : [];
+    let unmappedCount = 0;
     for (const e of errors) {
       const row = typeof e.row === 'number' ? e.row : undefined;
-      if (row === undefined || row < 1 || row > input.contacts.length) continue;
+      if (row === undefined || row < 1 || row > input.contacts.length) {
+        unmappedCount += 1;
+        continue;
+      }
       const contact = input.contacts[row - 1];
       if (!contact || rejectedRefs.has(contact.ref)) continue;
       rejectedRefs.add(contact.ref);
       rejected.push({ ref: contact.ref, error: resolveRejectionReason(e) });
     }
-    const accepted = input.contacts.map((c) => c.ref).filter((ref) => !rejectedRefs.has(ref));
+
+    let accepted = input.contacts.map((c) => c.ref).filter((ref) => !rejectedRefs.has(ref));
+
+    if (unmappedCount > 0) {
+      accepted = demoteExcess(
+        accepted,
+        accepted.length - unmappedCount,
+        'raya_unmapped_rejection',
+        rejected,
+      );
+    }
+
+    const declaredAccepted = firstFiniteNumber(payload.contactsInserted, payload.validRows);
+    if (declaredAccepted !== undefined) {
+      accepted = demoteExcess(accepted, declaredAccepted, 'raya_short_count', rejected);
+    }
+
     return { accepted, rejected };
   }
 
@@ -511,6 +648,48 @@ function resolveRejectionReason(e: { field?: unknown; message?: unknown }): stri
   if (typeof e.message === 'string') return e.message;
   if (typeof e.field === 'string') return e.field;
   return 'rejected';
+}
+
+/**
+ * Moves the tail of `acceptedRefs` beyond `allowedCount` into `rejected`
+ * (with `reason`), mutating `rejected` in place. Shared by
+ * {@link RayaVoiceProvider.splitAcceptedRejected}'s two I5 demotion checks
+ * and {@link RayaVoiceProvider.dispatch}'s I4 batch-reuse path — never
+ * silently over-report `accepted` when the count can't be reconciled
+ * against what Raya itself confirms.
+ *
+ * @param acceptedRefs - The currently-accepted contact refs, in dispatch order.
+ * @param allowedCount - The maximum count that may legitimately stay accepted.
+ * @param reason - The rejection reason recorded for any demoted ref.
+ * @param rejected - Rejected-list accumulator; demoted refs are pushed here.
+ * @returns The (possibly shortened) accepted list.
+ */
+function demoteExcess(
+  acceptedRefs: string[],
+  allowedCount: number,
+  reason: string,
+  rejected: { ref: string; error: string }[],
+): string[] {
+  const safeAllowed = Math.max(0, allowedCount);
+  if (acceptedRefs.length <= safeAllowed) return acceptedRefs;
+  for (const ref of acceptedRefs.slice(safeAllowed)) {
+    rejected.push({ ref, error: reason });
+  }
+  return acceptedRefs.slice(0, safeAllowed);
+}
+
+/**
+ * Returns the first finite number among `values`, or `undefined` if none
+ * qualifies — used to prefer `contactsInserted` over `validRows` (or fall
+ * back) without a chain of individual type guards at each call site.
+ *
+ * @param values - Candidate values, tried in order.
+ */
+function firstFiniteNumber(...values: unknown[]): number | undefined {
+  for (const v of values) {
+    if (typeof v === 'number' && Number.isFinite(v)) return v;
+  }
+  return undefined;
 }
 
 /**

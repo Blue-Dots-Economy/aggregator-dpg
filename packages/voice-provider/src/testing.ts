@@ -27,6 +27,7 @@ import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 
 import {
   VoiceProviderBase,
+  brandCuratedProviderResponse,
   type VoiceDispatchInput,
   type VoiceDispatchResult,
 } from './interface.js';
@@ -163,8 +164,10 @@ export class InMemoryVoiceProvider extends VoiceProviderBase {
       accepted,
       rejected,
       providerResponse: {
-        create: pickWhitelisted(rawCreate, CREATE_RESPONSE_PERSIST_KEYS),
-        start: pickWhitelisted(rawStart, START_RESPONSE_PERSIST_KEYS),
+        create: brandCuratedProviderResponse(
+          pickWhitelisted(rawCreate, CREATE_RESPONSE_PERSIST_KEYS),
+        ),
+        start: brandCuratedProviderResponse(pickWhitelisted(rawStart, START_RESPONSE_PERSIST_KEYS)),
       },
     });
   }

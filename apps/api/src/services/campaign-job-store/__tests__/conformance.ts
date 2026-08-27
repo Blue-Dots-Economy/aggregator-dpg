@@ -386,14 +386,14 @@ export function runStoreConformance(
       const itemId = input.items[0]!.itemId;
       unwrap(
         await store.markSubmitted(job.id, itemId, {
-          rayaBatchId: 'raya-batch-1',
+          providerBatchRef: 'raya-batch-1',
           providerRef: 'call-ref-1',
         }),
       );
       const items = unwrap(await store.getJobItems(job.id, input.signalstackOrgId))!;
       const item = items.find((i) => i.itemId === itemId)!;
       expect(item.status).toBe('submitted');
-      expect(item.rayaBatchId).toBe('raya-batch-1');
+      expect(item.providerBatchRef).toBe('raya-batch-1');
       expect(item.providerRef).toBe('call-ref-1');
     });
 
@@ -403,11 +403,11 @@ export function runStoreConformance(
       const { job } = unwrap(await store.createJob(input));
       const itemId = input.items[0]!.itemId;
       unwrap(await store.markItem(job.id, itemId, 'failed', 'already failed'));
-      unwrap(await store.markSubmitted(job.id, itemId, { rayaBatchId: 'raya-batch-2' }));
+      unwrap(await store.markSubmitted(job.id, itemId, { providerBatchRef: 'raya-batch-2' }));
       const items = unwrap(await store.getJobItems(job.id, input.signalstackOrgId))!;
       const item = items.find((i) => i.itemId === itemId)!;
       expect(item.status).toBe('failed');
-      expect(item.rayaBatchId).toBeNull();
+      expect(item.providerBatchRef).toBeNull();
     });
 
     it('setProviderResponse writes the raw payload, visible via getJob', async () => {
@@ -434,7 +434,7 @@ export function runInMemoryNotFoundConformance(makeStore: () => CampaignJobStore
     it('markSubmitted returns NOT_FOUND for an unknown job/item', async () => {
       const store = makeStore();
       const r = await store.markSubmitted('no-such-job', 'no-such-item', {
-        rayaBatchId: 'batch-x',
+        providerBatchRef: 'batch-x',
       });
       expect(r.ok).toBe(false);
       expect(!r.ok && r.error.code).toBe('NOT_FOUND');

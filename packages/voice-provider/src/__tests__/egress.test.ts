@@ -84,18 +84,38 @@ describe('acquireRayaSlot', () => {
     expect(redis.multi).toHaveBeenCalledTimes(1);
   });
 
-  it('treats a malformed multi-exec result (no numeric INCR reply) as count 0 and proceeds', async () => {
+  it('fails closed on a malformed multi-exec result (no numeric INCR reply) instead of granting an immediate slot', async () => {
     const redis = makeRedis([]);
     // Not the [[err, value], ...] shape acquireRayaSlot expects — e.g. exec()
     // resolved null (as ioredis does when a WATCH aborts the transaction).
+    // C2: this must NOT default to count=0 (an immediate grant) — it's
+    // exactly as unverifiable as a thrown Redis error.
     redis.exec.mockResolvedValueOnce(null);
     const sleep = vi.fn().mockResolvedValue(undefined);
     const now = () => Date.now();
 
     await acquireRayaSlot({ redis: redis as never, windowSeconds: 20, max: 1, sleep, now });
 
-    // count falls back to 0, which is <= max, so the gate returns immediately.
-    expect(sleep).not.toHaveBeenCalled();
+    expect(sleep).toHaveBeenCalledTimes(1);
+    expect(sleep).toHaveBeenCalledWith(20000);
+  });
+
+  it('fails closed when multi().exec() resolves a per-command error tuple ([Error, null]) for INCR — C2', async () => {
+    const redis = makeRedis([]);
+    // ioredis RESOLVES (never rejects) a pipelined command failure like
+    // READONLY/OOM as an `[Error, null]` tuple inside the exec() array — the
+    // old code read `incrEntry[1]` (null, not a number) and fell back to
+    // `count = 0`, granting an immediate slot despite being unable to verify
+    // the window's count. Must sleep a full window instead, same as the
+    // thrown-error path.
+    redis.exec.mockResolvedValueOnce([[new Error('READONLY'), null]]);
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    const now = () => Date.now();
+
+    await acquireRayaSlot({ redis: redis as never, windowSeconds: 20, max: 1, sleep, now });
+
+    expect(sleep).toHaveBeenCalledTimes(1);
+    expect(sleep).toHaveBeenCalledWith(20000);
   });
 
   it('uses the real defaultSleep/Date.now when sleep/now are not injected', async () => {

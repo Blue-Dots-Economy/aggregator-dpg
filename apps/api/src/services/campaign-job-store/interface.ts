@@ -142,8 +142,12 @@ export interface JobItemView {
   status: CampaignJobItemStatus;
   /** External id this item produced (voice: Raya call id; email: message id). */
   providerRef: string | null;
-  /** Voice: the Raya batch id this item was submitted under. */
-  rayaBatchId: string | null;
+  /**
+   * The provider batch this item was submitted under (voice: the Raya batch
+   * id). Provider-generic field name — persisted in the `raya_batch_id`
+   * column (a storage detail; the column keeps its original name).
+   */
+  providerBatchRef: string | null;
   /** Why the item was skipped, when `status` is one of the skip terminals. */
   skipReason: string | null;
   errorReason: string | null;
@@ -286,11 +290,12 @@ export abstract class CampaignJobStoreBase {
 
   /**
    * Records that an item was submitted to the voice provider. Sets `status`
-   * to `submitted`, stamps `rayaBatchId`, and optionally `providerRef`.
+   * to `submitted`, stamps `providerBatchRef`, and optionally `providerRef`.
    * Forward-only: a no-op when the item is already in a terminal status (the
    * same retry guard as {@link markItem}).
    *
-   * @param args.rayaBatchId - The Raya batch id this item was submitted under.
+   * @param args.providerBatchRef - The provider batch id this item was
+   *   submitted under (voice: the Raya batch id).
    * @param args.providerRef - External id the submission produced, when the
    *   provider returns one synchronously. Omitted values leave the column
    *   untouched.
@@ -298,7 +303,7 @@ export abstract class CampaignJobStoreBase {
   abstract markSubmitted(
     jobId: string,
     itemId: string,
-    args: { rayaBatchId: string; providerRef?: string },
+    args: { providerBatchRef: string; providerRef?: string },
   ): Promise<StoreResult<void>>;
 
   /**

@@ -182,8 +182,11 @@ describe('campaign job client', () => {
 
   it('markSubmitted sets submitted + raya_batch_id (+ provider_ref when given)', async () => {
     queue(undefined);
-    await client.markSubmitted('job-1', 'a', { rayaBatchId: 'batch-1', providerRef: 'ref-1' });
+    await client.markSubmitted('job-1', 'a', { providerBatchRef: 'batch-1', providerRef: 'ref-1' });
     expect(
+      // The Drizzle `.set()` payload uses the column-mapped field name
+      // (`rayaBatchId`, unchanged) — `markSubmitted`'s `providerBatchRef` arg
+      // is mapped onto it, not passed through verbatim.
       sets.some(
         (s) => s.status === 'submitted' && s.rayaBatchId === 'batch-1' && s.providerRef === 'ref-1',
       ),
@@ -192,7 +195,7 @@ describe('campaign job client', () => {
 
   it('markSubmitted omits provider_ref from the update when not given', async () => {
     queue(undefined);
-    await client.markSubmitted('job-1', 'a', { rayaBatchId: 'batch-2' });
+    await client.markSubmitted('job-1', 'a', { providerBatchRef: 'batch-2' });
     const set = sets.at(-1)!;
     expect(set.status).toBe('submitted');
     expect('providerRef' in set).toBe(false);

@@ -11,16 +11,17 @@
  * contacts are submitted, Raya owns the downstream call outcome.
  *
  * Retry safety: `markSubmitted` writes `status: 'submitted'` and
- * `raya_batch_id` in the same statement, so the presence of a `raya_batch_id`
- * on any item is proof a prior attempt already created a batch at the
- * provider. This handler never re-dispatches once that's true — but it does
- * not simply no-op: any item still `resolved` (decrypted before the crash,
- * never persisted after) is resumed by marking it `submitted` under the
- * already-known batch id, best-effort. Without this, a `resolved` item
- * counts as "succeeded" in `deriveJobStatus`, so `runCampaignJob` would roll
- * the job straight to `completed`/`partial` in the SAME attempt — and since
- * the watchdog only reconciles `processing` jobs, that item would stay
- * `resolved` with no `raya_batch_id` forever. The resume is best-effort (it
+ * `providerBatchRef` (persisted in the `raya_batch_id` column) in the same
+ * statement, so the presence of a `providerBatchRef` on any item is proof a
+ * prior attempt already created a batch at the provider. This handler never
+ * re-dispatches once that's true — but it does not simply no-op: any item
+ * still `resolved` (decrypted before the crash, never persisted after) is
+ * resumed by marking it `submitted` under the already-known batch id,
+ * best-effort. Without this, a `resolved` item counts as "succeeded" in
+ * `deriveJobStatus`, so `runCampaignJob` would roll the job straight to
+ * `completed`/`partial` in the SAME attempt — and since the watchdog only
+ * reconciles `processing` jobs, that item would stay `resolved` with no
+ * `providerBatchRef` forever. The resume is best-effort (it
  * cannot know whether Raya actually accepted or rejected that specific
  * contact — the accepted/rejected split from the crashed attempt's dispatch
  * call was never persisted); the campaign manager polls Raya directly for
@@ -28,17 +29,26 @@
  * (submitted/failed/skipped/duplicate_active) are never re-decrypted or
  * re-included in a new batch.
  *
- * That guard only closes the window AFTER a `raya_batch_id` is durably
- * written. `dispatch()` itself is two non-atomic HTTP calls (create, then
- * start) with no client idempotency key, and its outcome is only persisted
- * by this handler's own writes afterwards — so there remains a genuine,
+ * That guard only closes the window AFTER a `providerBatchRef` is durably
+ * written — and only `markSubmitted` writes one (`setProviderResponse`
+ * never does), so the accepted-items `markSubmitted` loop deliberately runs
+ * BEFORE `setProviderResponse` (I3): the item writes close the retry-safety
+ * window as early as possible, so a crash between them and
+ * `setProviderResponse` still leaves the guard armed on retry (resume, not
+ * re-dispatch) — only the non-PII audit payload is left missing.
+ * `dispatch()` itself is two non-atomic HTTP calls (create, then start) with
+ * no client idempotency key, and its outcome is only persisted by this
+ * handler's own writes afterwards — so there remains a genuine,
  * un-closeable crash window: if the worker process dies after `dispatch()`
- * returns success but before the FIRST `markSubmitted`/`setProviderResponse`
- * call commits, no item yet carries a `raya_batch_id`, the guard above does
- * not engage, and a retry will call `dispatch()` again — creating a second
- * batch and placing duplicate live calls to the same recipients. This is
- * inherent to fire-and-record against a provider with no idempotency key,
- * not a bug this handler can close from its own side.
+ * returns success but before the FIRST `markSubmitted` call commits, no item
+ * yet carries a `providerBatchRef`, the guard above does not engage, and a
+ * retry will call `dispatch()` again — creating a second batch and placing
+ * duplicate live calls to the same recipients (I4 in `raya.ts`'s `dispatch()`
+ * narrows this further by reusing an already-created batch when one is
+ * found under the deterministic name, but the window between "create
+ * succeeded" and "the first local write commits" is inherent to
+ * fire-and-record against a provider with no idempotency key, not a bug
+ * this handler can close from its own side).
  *
  * A *deterministic* dispatch failure (Raya rejects the create or start
  * request itself — bad key, or a required start field the caller omitted,
@@ -168,28 +178,38 @@ function flattenVariables(itemState: Record<string, unknown>): Record<string, st
  * adapter's generic `"raya /batch/{id}/start returned 400"` — so the
  * campaign manager sees the real cause, not just an HTTP status summary.
  * `raya.ts` attaches the raw response text as `error.details.body`; this
- * best-effort-parses it as JSON and extracts a `message` field (Raya's
- * observed error-body shape), falling back to the raw body text, then to
- * just the adapter's own message if no body is present.
+ * best-effort-parses it as JSON and extracts the top-level `message` field
+ * (Raya's observed error-body shape).
+ *
+ * C1 (PII leak, fixed): the raw response body is NEVER included in the
+ * returned reason, whether or not it parses as JSON. A Raya 400 body can
+ * carry `errors[].value` (a raw rejected phone/name) and `data[]` (an echo
+ * of every submitted contact row) — both PII, and both would otherwise land
+ * in `campaign_job_item.error_reason`, a column the campaign manager reads
+ * verbatim. Only `error.message` (the adapter's own message) and, when
+ * present, the body's own top-level `message` field (a short, Raya-authored
+ * human reason — never itself a raw contact field) are ever used. If the
+ * body isn't JSON, or parses without a usable top-level `message`, this
+ * falls back to `error.message` alone — never the raw body text.
  *
  * @param error - The typed error from `VoiceProviderBase.dispatch`.
  * @returns A reason string for `campaign_job_item.error_reason`, bounded by {@link truncateReason}.
  */
 function describeDispatchFailure(error: BaseError): string {
   const body = error.details?.['body'];
-  if (typeof body !== 'string' || body.length === 0) {
-    return truncateReason(error.message);
-  }
-  try {
-    const parsed = JSON.parse(body) as Record<string, unknown>;
-    const parsedMessage = parsed['message'];
-    if (typeof parsedMessage === 'string' && parsedMessage.length > 0) {
-      return truncateReason(`${error.message}: ${parsedMessage}`);
+  if (typeof body === 'string' && body.length > 0) {
+    try {
+      const parsed = JSON.parse(body) as Record<string, unknown>;
+      const parsedMessage = parsed['message'];
+      if (typeof parsedMessage === 'string' && parsedMessage.length > 0) {
+        return truncateReason(`${error.message}: ${parsedMessage}`);
+      }
+    } catch {
+      // Non-JSON body — fall through. Never persist the raw body text below;
+      // it may carry `errors[].value`/`data[]` PII (see the module note).
     }
-  } catch {
-    // Non-JSON body — fall through to the raw body text.
   }
-  return truncateReason(`${error.message}: ${body}`);
+  return truncateReason(error.message);
 }
 
 /** Shared log fields stamped on every `campaign.voice` log line for one job. */
@@ -327,11 +347,11 @@ export async function runVoiceForJob(job: ProcessingJob, deps: CampaignJobDeps):
   // (decrypted but never persisted before the crash) submitted under the
   // known batch, so it stops silently reading as "succeeded" with no
   // raya_batch_id.
-  const existingBatchId = job.items.find((i) => i.rayaBatchId)?.rayaBatchId;
+  const existingBatchId = job.items.find((i) => i.providerBatchRef)?.providerBatchRef;
   if (existingBatchId) {
     const unresolved = job.items.filter((i) => i.status === 'resolved');
     for (const item of unresolved) {
-      await deps.client.markSubmitted(job.id, item.itemId, { rayaBatchId: existingBatchId });
+      await deps.client.markSubmitted(job.id, item.itemId, { providerBatchRef: existingBatchId });
     }
     deps.log.info({
       ...base,
@@ -378,13 +398,29 @@ export async function runVoiceForJob(job: ProcessingJob, deps: CampaignJobDeps):
     return;
   }
 
-  await deps.client.setProviderResponse(job.id, result.value.providerResponse);
+  // I3: stamp `markSubmitted` (which persists the retry-safety
+  // `providerBatchRef`) BEFORE `setProviderResponse`, the reverse of the
+  // previous ordering. `setProviderResponse` never writes a batch ref onto
+  // any item — only `markSubmitted` does, and that write is what the retry
+  // guard at the top of this function checks. With the old ordering, a
+  // crash after `setProviderResponse` committed but before the FIRST
+  // `markSubmitted` call left every item still without a batch ref, so a
+  // retry's guard wouldn't engage and `dispatch()` would run a second time,
+  // double-dialling every already-accepted contact. Doing the item writes
+  // first closes that window as early as possible; if the process then
+  // dies before `setProviderResponse` commits, the items are already
+  // correctly `submitted` and only the (non-PII, best-effort) audit payload
+  // is missing — a retry's guard now engages and resumes rather than
+  // re-dispatching.
   for (const ref of result.value.accepted) {
-    await deps.client.markSubmitted(job.id, ref, { rayaBatchId: result.value.providerBatchRef });
+    await deps.client.markSubmitted(job.id, ref, {
+      providerBatchRef: result.value.providerBatchRef,
+    });
   }
   for (const rejection of result.value.rejected) {
     await deps.client.markItem(job.id, rejection.ref, 'failed', rejection.error);
   }
+  await deps.client.setProviderResponse(job.id, result.value.providerResponse);
 
   deps.log.info({
     ...base,

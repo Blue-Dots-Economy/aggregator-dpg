@@ -264,11 +264,14 @@ describe('PostgresCampaignJobStore', () => {
   it('markSubmitted: sets submitted + raya_batch_id (+ provider_ref when given)', async () => {
     queue(undefined);
     const r = await store.markSubmitted('job-1', 'a', {
-      rayaBatchId: 'batch-1',
+      providerBatchRef: 'batch-1',
       providerRef: 'ref-1',
     });
     expect(r.ok).toBe(true);
     expect(
+      // The Drizzle `.set()` payload uses the column-mapped field name
+      // (`rayaBatchId`, unchanged) — the store-contract `providerBatchRef`
+      // arg is mapped onto it by `markSubmitted`, not passed through verbatim.
       sets.some(
         (s) => s.status === 'submitted' && s.rayaBatchId === 'batch-1' && s.providerRef === 'ref-1',
       ),
@@ -277,7 +280,7 @@ describe('PostgresCampaignJobStore', () => {
 
   it('markSubmitted: omits provider_ref from the update when not given', async () => {
     queue(undefined);
-    await store.markSubmitted('job-1', 'a', { rayaBatchId: 'batch-2' });
+    await store.markSubmitted('job-1', 'a', { providerBatchRef: 'batch-2' });
     const set = sets.at(-1)!;
     expect(set.status).toBe('submitted');
     expect('providerRef' in set).toBe(false);
@@ -293,7 +296,7 @@ describe('PostgresCampaignJobStore', () => {
 
   it('markSubmitted: maps a thrown DB error to DB_UNAVAILABLE', async () => {
     queue(Promise.reject(new Error('connection reset')));
-    const r = await store.markSubmitted('job-1', 'a', { rayaBatchId: 'batch-1' });
+    const r = await store.markSubmitted('job-1', 'a', { providerBatchRef: 'batch-1' });
     expect(r.ok).toBe(false);
     expect(!r.ok && r.error.code).toBe('DB_UNAVAILABLE');
   });

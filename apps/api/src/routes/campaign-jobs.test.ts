@@ -106,9 +106,9 @@ describe('campaign job status endpoints', () => {
     expect(failed.error_reason).toBe('not owned');
   });
 
-  it('GET /:job_id (voice) returns raya_batch_id per item and provider_response on the job', async () => {
+  it('GET /:job_id (voice) returns provider_batch_ref per item and provider_response on the job', async () => {
     const jobId = await seedJob(store, ORG, ['a'], 'voice');
-    await store.markSubmitted(jobId, 'a', { rayaBatchId: 'batch-1', providerRef: 'call-1' });
+    await store.markSubmitted(jobId, 'a', { providerBatchRef: 'batch-1', providerRef: 'call-1' });
     await store.setProviderResponse(jobId, { batch_id: 'batch-1', status: 'accepted' });
     await store.rollUpStatus(jobId);
 
@@ -122,7 +122,7 @@ describe('campaign job status endpoints', () => {
     expect(body.provider_response).toEqual({ batch_id: 'batch-1', status: 'accepted' });
     const item = body.items.find((i: { item_id: string }) => i.item_id === 'a');
     expect(item.status).toBe('submitted');
-    expect(item.raya_batch_id).toBe('batch-1');
+    expect(item.provider_batch_ref).toBe('batch-1');
   });
 
   it('GET /:job_id returns 403 for a job owned by another org', async () => {

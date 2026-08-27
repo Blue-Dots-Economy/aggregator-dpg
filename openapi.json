@@ -11106,7 +11106,7 @@
                             "type": "string",
                             "nullable": true
                           },
-                          "raya_batch_id": {
+                          "provider_batch_ref": {
                             "type": "string",
                             "nullable": true
                           },
@@ -11123,7 +11123,7 @@
                           "item_id",
                           "status",
                           "provider_ref",
-                          "raya_batch_id",
+                          "provider_batch_ref",
                           "skip_reason",
                           "error_reason"
                         ],
@@ -12006,7 +12006,7 @@
                             "type": "string",
                             "nullable": true
                           },
-                          "raya_batch_id": {
+                          "provider_batch_ref": {
                             "type": "string",
                             "nullable": true
                           },
@@ -12023,7 +12023,7 @@
                           "item_id",
                           "status",
                           "provider_ref",
-                          "raya_batch_id",
+                          "provider_batch_ref",
                           "skip_reason",
                           "error_reason"
                         ],

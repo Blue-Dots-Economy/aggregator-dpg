@@ -77,8 +77,8 @@ function job(over: Partial<ProcessingJob> = {}): ProcessingJob {
     requestId: null,
     notifiedAt: null,
     items: [
-      { itemId: 'item-1', action: 'voice', status: 'pending', rayaBatchId: null },
-      { itemId: 'item-2', action: 'voice', status: 'pending', rayaBatchId: null },
+      { itemId: 'item-1', action: 'voice', status: 'pending', providerBatchRef: null },
+      { itemId: 'item-2', action: 'voice', status: 'pending', providerBatchRef: null },
     ],
     ...over,
   };
@@ -87,7 +87,7 @@ function job(over: Partial<ProcessingJob> = {}): ProcessingJob {
 interface Harness {
   deps: CampaignJobDeps;
   itemMarks: Array<{ itemId: string; status: string; err?: string }>;
-  submitted: Array<{ itemId: string; rayaBatchId: string; providerRef?: string }>;
+  submitted: Array<{ itemId: string; providerBatchRef: string; providerRef?: string }>;
   providerResponses: unknown[];
   fetchQueries: SignalStackFetchDecryptedProfilesQuery[];
   heartbeats: () => number;
@@ -96,6 +96,8 @@ interface Harness {
   pendingFails: string[];
   provider: InMemoryVoiceProvider;
   logs: { info: object[]; warn: object[]; error: object[] };
+  /** I3: records `markSubmitted`/`setProviderResponse` call order for ordering assertions. */
+  callOrder: string[];
 }
 
 function harness(
@@ -111,6 +113,7 @@ function harness(
   const statusReasons: Array<string | undefined> = [];
   const pendingFails: string[] = [];
   const logs = { info: [] as object[], warn: [] as object[], error: [] as object[] };
+  const callOrder: string[] = [];
   let heartbeats = 0;
   const provider = new InMemoryVoiceProvider();
 
@@ -166,9 +169,10 @@ function harness(
         }
       },
       markSubmitted: async (_jobId, itemId, args) => {
+        callOrder.push(`markSubmitted:${itemId}`);
         submitted.push({
           itemId,
-          rayaBatchId: args.rayaBatchId,
+          providerBatchRef: args.providerBatchRef,
           ...(args.providerRef !== undefined ? { providerRef: args.providerRef } : {}),
         });
         const cur = itemStatus.get(itemId);
@@ -178,6 +182,7 @@ function harness(
         }
       },
       setProviderResponse: async (_jobId, response) => {
+        callOrder.push('setProviderResponse');
         providerResponses.push(response);
       },
       rollUpStatus: async () => {
@@ -233,6 +238,7 @@ function harness(
     pendingFails,
     provider,
     logs,
+    callOrder,
   };
 }
 
@@ -246,6 +252,14 @@ describe('runVoiceForJob (via runCampaignJob)', () => {
     expect(h.fetchQueries[0]!.fields).toEqual(['role']);
   });
 
+  it("I6: the decrypt query is scoped to the job's own signalstackOrgId (cross-org guard)", async () => {
+    const h = harness(job({ signalstackOrgId: 'org-owning-this-job' }));
+    await runCampaignJob('job-1', h.deps);
+
+    expect(h.fetchQueries).toHaveLength(1);
+    expect(h.fetchQueries[0]!.actingOrgId).toBe('org-owning-this-job');
+  });
+
   it('omits the fields key (full item_state) when content.variables is unset', async () => {
     const h = harness(job()); // default content: { agent_id: 'agent-1' } — no variables
     await runCampaignJob('job-1', h.deps);
@@ -256,7 +270,9 @@ describe('runVoiceForJob (via runCampaignJob)', () => {
 
   it('builds contacts with ref + flattened, JSON-stringified variables', async () => {
     const h = harness(
-      job({ items: [{ itemId: 'item-1', action: 'voice', status: 'pending', rayaBatchId: null }] }),
+      job({
+        items: [{ itemId: 'item-1', action: 'voice', status: 'pending', providerBatchRef: null }],
+      }),
     );
     await runCampaignJob('job-1', h.deps);
 
@@ -287,7 +303,9 @@ describe('runVoiceForJob (via runCampaignJob)', () => {
 
   it('marks an owned item with no phone skipped_no_contact and excludes it from the batch', async () => {
     const h = harness(
-      job({ items: [{ itemId: 'item-1', action: 'voice', status: 'pending', rayaBatchId: null }] }),
+      job({
+        items: [{ itemId: 'item-1', action: 'voice', status: 'pending', providerBatchRef: null }],
+      }),
       {
         fetchDecryptedProfiles: async () =>
           ok({
@@ -320,7 +338,7 @@ describe('runVoiceForJob (via runCampaignJob)', () => {
     await runCampaignJob('job-1', h.deps);
 
     expect(h.provider.dispatches).toHaveLength(1);
-    expect(h.submitted).toEqual([{ itemId: 'item-1', rayaBatchId: 'mem-batch-1' }]);
+    expect(h.submitted).toEqual([{ itemId: 'item-1', providerBatchRef: 'mem-batch-1' }]);
     expect(h.itemMarks).toContainEqual({
       itemId: 'item-2',
       status: 'failed',
@@ -339,11 +357,44 @@ describe('runVoiceForJob (via runCampaignJob)', () => {
     });
   });
 
+  it('I3: stamps markSubmitted (the retry-safety batch ref write) before the setProviderResponse audit write', async () => {
+    const h = harness(job());
+    await runCampaignJob('job-1', h.deps);
+
+    // Both accepted items' markSubmitted calls land before
+    // setProviderResponse — so a crash between them still leaves the
+    // retry-safety guard armed (some item already carries a batch ref).
+    expect(h.callOrder).toEqual([
+      'markSubmitted:item-1',
+      'markSubmitted:item-2',
+      'setProviderResponse',
+    ]);
+  });
+
+  it('I3: a setProviderResponse failure still leaves accepted items stamped submitted', async () => {
+    const h = harness(job());
+    h.deps.client.setProviderResponse = async () => {
+      throw new Error('audit write down');
+    };
+
+    await expect(runCampaignJob('job-1', h.deps)).rejects.toThrow(/audit write down/);
+
+    // The batch-ref writes already committed before the audit write failed —
+    // both items are submitted, so a retry's guard sees an existing batch
+    // ref and resumes rather than re-dispatching (see the module note).
+    expect(h.submitted).toEqual(
+      expect.arrayContaining([
+        { itemId: 'item-1', providerBatchRef: 'mem-batch-1' },
+        { itemId: 'item-2', providerBatchRef: 'mem-batch-1' },
+      ]),
+    );
+  });
+
   it('never decrypts or dispatches a duplicate_active item', async () => {
     const h = harness(
       job({
         items: [
-          { itemId: 'item-1', action: 'voice', status: 'duplicate_active', rayaBatchId: null },
+          { itemId: 'item-1', action: 'voice', status: 'duplicate_active', providerBatchRef: null },
         ],
       }),
     );
@@ -357,8 +408,13 @@ describe('runVoiceForJob (via runCampaignJob)', () => {
     const h = harness(
       job({
         items: [
-          { itemId: 'item-1', action: 'voice', status: 'submitted', rayaBatchId: 'batch-prior' },
-          { itemId: 'item-2', action: 'voice', status: 'pending', rayaBatchId: null },
+          {
+            itemId: 'item-1',
+            action: 'voice',
+            status: 'submitted',
+            providerBatchRef: 'batch-prior',
+          },
+          { itemId: 'item-2', action: 'voice', status: 'pending', providerBatchRef: null },
         ],
       }),
     );
@@ -375,9 +431,14 @@ describe('runVoiceForJob (via runCampaignJob)', () => {
     const h = harness(
       job({
         items: [
-          { itemId: 'item-1', action: 'voice', status: 'submitted', rayaBatchId: 'batch-prior' },
-          { itemId: 'item-2', action: 'voice', status: 'resolved', rayaBatchId: null },
-          { itemId: 'item-3', action: 'voice', status: 'resolved', rayaBatchId: null },
+          {
+            itemId: 'item-1',
+            action: 'voice',
+            status: 'submitted',
+            providerBatchRef: 'batch-prior',
+          },
+          { itemId: 'item-2', action: 'voice', status: 'resolved', providerBatchRef: null },
+          { itemId: 'item-3', action: 'voice', status: 'resolved', providerBatchRef: null },
         ],
       }),
     );
@@ -389,8 +450,8 @@ describe('runVoiceForJob (via runCampaignJob)', () => {
     // Every still-`resolved` item is resumed under the known batch id.
     expect(h.submitted).toEqual(
       expect.arrayContaining([
-        { itemId: 'item-2', rayaBatchId: 'batch-prior' },
-        { itemId: 'item-3', rayaBatchId: 'batch-prior' },
+        { itemId: 'item-2', providerBatchRef: 'batch-prior' },
+        { itemId: 'item-3', providerBatchRef: 'batch-prior' },
       ]),
     );
     expect(h.submitted).toHaveLength(2);
@@ -534,7 +595,9 @@ describe('runVoiceForJob (via runCampaignJob)', () => {
 
   it('flattens item_state into string variables, dropping null/undefined entries', async () => {
     const h = harness(
-      job({ items: [{ itemId: 'item-1', action: 'voice', status: 'pending', rayaBatchId: null }] }),
+      job({
+        items: [{ itemId: 'item-1', action: 'voice', status: 'pending', providerBatchRef: null }],
+      }),
       {
         fetchDecryptedProfiles: async () =>
           ok({
@@ -558,7 +621,9 @@ describe('runVoiceForJob (via runCampaignJob)', () => {
 
   it('JSON-stringifies object/array item_state values instead of coercing to "[object Object]"', async () => {
     const h = harness(
-      job({ items: [{ itemId: 'item-1', action: 'voice', status: 'pending', rayaBatchId: null }] }),
+      job({
+        items: [{ itemId: 'item-1', action: 'voice', status: 'pending', providerBatchRef: null }],
+      }),
       {
         fetchDecryptedProfiles: async () =>
           ok({
@@ -590,7 +655,9 @@ describe('runVoiceForJob (via runCampaignJob)', () => {
 
   it('falls back to an empty name when the decrypted contact carries no name value', async () => {
     const h = harness(
-      job({ items: [{ itemId: 'item-1', action: 'voice', status: 'pending', rayaBatchId: null }] }),
+      job({
+        items: [{ itemId: 'item-1', action: 'voice', status: 'pending', providerBatchRef: null }],
+      }),
       {
         fetchDecryptedProfiles: async () =>
           ok({
@@ -651,7 +718,7 @@ describe('runVoiceForJob (via runCampaignJob)', () => {
     });
   });
 
-  it('describeDispatchFailure: falls back to the raw body text when the body is not JSON', async () => {
+  it('describeDispatchFailure (C1): falls back to the bare error message when the body is not JSON — never the raw body text', async () => {
     const h = harness(job());
     const provider = new ErroringVoiceProvider(
       new ValidationError('raya /batch/1/start returned 400', {
@@ -666,11 +733,15 @@ describe('runVoiceForJob (via runCampaignJob)', () => {
     expect(h.itemMarks).toContainEqual({
       itemId: 'item-1',
       status: 'failed',
-      err: 'raya /batch/1/start returned 400: Bad Gateway',
+      err: 'raya /batch/1/start returned 400',
     });
+    // The raw body text must never reach the persisted reason.
+    expect(
+      h.itemMarks.find((m) => m.itemId === 'item-1' && m.status === 'failed')?.err,
+    ).not.toContain('Bad Gateway');
   });
 
-  it('describeDispatchFailure: falls back to the raw JSON body text when it carries no message field', async () => {
+  it('describeDispatchFailure (C1): falls back to the bare error message when the JSON body carries no top-level message field — never the raw body', async () => {
     const body = JSON.stringify({ error: 'bad_request' });
     const h = harness(job());
     const provider = new ErroringVoiceProvider(
@@ -686,7 +757,45 @@ describe('runVoiceForJob (via runCampaignJob)', () => {
     expect(h.itemMarks).toContainEqual({
       itemId: 'item-1',
       status: 'failed',
-      err: `raya /batch/1/start returned 400: ${body}`,
+      err: 'raya /batch/1/start returned 400',
     });
+    expect(
+      h.itemMarks.find((m) => m.itemId === 'item-1' && m.status === 'failed')?.err,
+    ).not.toContain('bad_request');
+  });
+
+  it('describeDispatchFailure (C1, PII leak): a Raya 400 body embedding a phone number and data[] never leaks into error_reason — only the parsed top-level message survives', async () => {
+    // Modelled on Raya's REAL `POST /batch` 400 shape: `errors[].value` echoes
+    // the raw rejected phone back, and `data[]` echoes the full submitted
+    // contact rows (name/phone) — both PII that must never reach
+    // campaign_job_item.error_reason, a column the campaign manager reads
+    // verbatim.
+    const rawBody = JSON.stringify({
+      status: 'error',
+      message: 'max_concurrent_calls is required',
+      errors: [
+        { row: 1, field: 'contact_phone', value: '+910000000001', message: 'invalid phone' },
+      ],
+      data: [{ ref: 'item-1', contact_name: 'Asha', contact_phone: '+910000000001' }],
+    });
+    const h = harness(job());
+    const provider = new ErroringVoiceProvider(
+      new ValidationError('raya /batch/1/start returned 400', {
+        code: 'RAYA_BAD_REQUEST',
+        details: { status: 400, body: rawBody },
+      }),
+    );
+    h.deps.voice!.provider = provider;
+
+    await runCampaignJob('job-1', h.deps);
+
+    const reason = h.itemMarks.find((m) => m.itemId === 'item-1' && m.status === 'failed')?.err;
+    expect(reason).toBe('raya /batch/1/start returned 400: max_concurrent_calls is required');
+    // Only error.message + the parsed top-level `message` survive — never
+    // the raw phone number or the raw body (errors[]/data[]).
+    expect(reason).not.toContain('+910000000001');
+    expect(reason).not.toContain('Asha');
+    expect(reason).not.toContain('errors');
+    expect(reason).not.toContain('data');
   });
 });

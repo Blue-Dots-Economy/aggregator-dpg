@@ -390,7 +390,7 @@ export class PostgresCampaignJobStore extends CampaignJobStoreBase {
   async markSubmitted(
     jobId: string,
     itemId: string,
-    args: { rayaBatchId: string; providerRef?: string },
+    args: { providerBatchRef: string; providerRef?: string },
   ): Promise<StoreResult<void>> {
     const start = Date.now();
     try {
@@ -399,7 +399,11 @@ export class PostgresCampaignJobStore extends CampaignJobStoreBase {
         .update(campaignJobItem)
         .set({
           status: 'submitted',
-          rayaBatchId: args.rayaBatchId,
+          // `rayaBatchId` here is the Drizzle column-mapped field name (see
+          // `db-schema/schema.ts` — the `raya_batch_id` column keeps its
+          // original name as a storage detail); `args.providerBatchRef` is
+          // the provider-generic store-contract field.
+          rayaBatchId: args.providerBatchRef,
           ...(args.providerRef !== undefined ? { providerRef: args.providerRef } : {}),
           updatedAt: now,
           completedAt: now, // 'submitted' is always a terminal status
@@ -548,7 +552,9 @@ function toItemView(row: typeof campaignJobItem.$inferSelect): JobItemView {
     action: row.action,
     status: row.status,
     providerRef: row.providerRef,
-    rayaBatchId: row.rayaBatchId,
+    // Map the Drizzle column-mapped field (`raya_batch_id`, unchanged) onto
+    // the provider-generic store-contract field.
+    providerBatchRef: row.rayaBatchId,
     skipReason: row.skipReason,
     errorReason: row.errorReason,
   };

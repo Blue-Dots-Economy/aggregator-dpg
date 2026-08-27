@@ -68,19 +68,20 @@ export interface ProcessingJobItem {
   action: string | null;
   status: CampaignJobItemStatus;
   /**
-   * Voice: the Raya batch id this item was submitted under, if any. Written
-   * atomically with `status: 'submitted'` by {@link markSubmitted} — its
-   * presence is the retry-safety signal the voice handler checks before
-   * dispatching, so a resumed job never creates a second batch at the
-   * provider.
+   * Provider-generic field name (voice: the Raya batch id) this item was
+   * submitted under, if any. Written atomically with `status: 'submitted'`
+   * by {@link markSubmitted} — its presence is the retry-safety signal the
+   * voice handler checks before dispatching, so a resumed job never creates
+   * a second batch at the provider. Persisted in the `raya_batch_id` column
+   * (a storage detail; the column keeps its original name).
    */
-  rayaBatchId: string | null;
+  providerBatchRef: string | null;
 }
 
 /** Args for {@link markSubmitted}. */
 export interface MarkSubmittedArgs {
-  /** The Raya batch id this item was submitted under. */
-  rayaBatchId: string;
+  /** The provider batch id this item was submitted under (voice: the Raya batch id). */
+  providerBatchRef: string;
   /** External id the submission produced, when the provider returns one synchronously. */
   providerRef?: string;
 }
@@ -152,7 +153,9 @@ export async function getJobForProcessing(jobId: string): Promise<ProcessingJob 
       itemId: i.itemId,
       action: i.action,
       status: i.status,
-      rayaBatchId: i.rayaBatchId,
+      // Map the Drizzle column-mapped field (`raya_batch_id`, unchanged)
+      // onto the provider-generic client field.
+      providerBatchRef: i.rayaBatchId,
     })),
   };
 }
@@ -213,14 +216,15 @@ export async function markItem(
 
 /**
  * Records that an item was submitted to the voice provider. Sets `status` to
- * `submitted`, stamps `raya_batch_id`, and optionally `provider_ref`.
- * Forward-only: a no-op when the item is already in a terminal status (the
- * same retry guard as {@link markItem}).
+ * `submitted`, stamps `providerBatchRef` (persisted in the `raya_batch_id`
+ * column), and optionally `provider_ref`. Forward-only: a no-op when the
+ * item is already in a terminal status (the same retry guard as
+ * {@link markItem}).
  *
  * @param jobId - The job the item belongs to.
  * @param itemId - The item that was submitted.
- * @param args - The Raya batch id, and optionally a provider ref returned
- *   synchronously by the submission call.
+ * @param args - The provider batch id (voice: the Raya batch id), and
+ *   optionally a provider ref returned synchronously by the submission call.
  */
 export async function markSubmitted(
   jobId: string,
@@ -232,7 +236,11 @@ export async function markSubmitted(
     .update(campaignJobItem)
     .set({
       status: 'submitted',
-      rayaBatchId: args.rayaBatchId,
+      // `rayaBatchId` here is the Drizzle column-mapped field name (see
+      // `db-schema/schema.ts` — the `raya_batch_id` column keeps its
+      // original name); `args.providerBatchRef` is the provider-generic
+      // client-contract field.
+      rayaBatchId: args.providerBatchRef,
       ...(args.providerRef !== undefined ? { providerRef: args.providerRef } : {}),
       updatedAt: now,
       completedAt: now, // 'submitted' is always a terminal status

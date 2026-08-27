@@ -91,8 +91,10 @@ export async function registerCampaignJobRoutes(
                 item_id: z.string(),
                 status: itemStatusSchema,
                 provider_ref: z.string().nullable(),
-                // Voice: the Raya batch id this item was submitted under.
-                raya_batch_id: z.string().nullable(),
+                // Provider-generic field (voice: the Raya batch id this item
+                // was submitted under). Persisted in the `raya_batch_id`
+                // column — a storage detail, not part of this public contract.
+                provider_batch_ref: z.string().nullable(),
                 skip_reason: z.string().nullable(),
                 error_reason: z.string().nullable(),
               }),
@@ -129,7 +131,7 @@ export async function registerCampaignJobRoutes(
           item_id: i.itemId,
           status: i.status,
           provider_ref: i.providerRef,
-          raya_batch_id: i.rayaBatchId,
+          provider_batch_ref: i.providerBatchRef,
           skip_reason: i.skipReason,
           error_reason: i.errorReason,
         })),
