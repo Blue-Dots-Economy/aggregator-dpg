@@ -102,7 +102,7 @@ export const ERR = {
     status: 503,
     title: 'Storage unavailable',
     detail: 'The dump could not be read from storage. Please retry shortly.',
-    hint: 'An S3 HEAD or presign call failed on a transport error (not a missing object — those return 404 DUMP_NOT_AVAILABLE). Check S3_ENDPOINT / S3_PUBLIC_ENDPOINT, credentials, and bucket reachability.',
+    hint: "An S3 HEAD or presign call failed on a transport error (not a missing object — those return 404 DUMP_NOT_AVAILABLE). Check S3_ENDPOINT / S3_PUBLIC_ENDPOINT, credentials, and bucket reachability. Two causes are NOT transient, so retrying will not clear them; the log line names which via `likely_cause`. S3_ACCESS_DENIED: the role lacks s3:ListBucket on the bucket, so a HEAD on a MISSING key returns 403 instead of 404 and an ordinary 'not published yet' cold start looks like an outage — infra/env.template requires that grant. S3_CREDENTIALS: presigning is local crypto, so a signDownloadUrl failure means missing or malformed credentials, not an S3 outage.",
   },
   CONSENT_REQUIRED: {
     code: 'CONSENT_REQUIRED',

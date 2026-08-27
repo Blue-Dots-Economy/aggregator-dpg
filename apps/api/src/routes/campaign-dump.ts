@@ -204,6 +204,26 @@ export async function registerCampaignDumpRoutes(app: FastifyInstance): Promise<
         url: s.url.url,
       }));
 
+      // `last_modified` is the caller's ONLY signal that the three objects came
+      // from different runs, so a null quietly removes the one control the
+      // torn-snapshot design depends on. S3 should always return LastModified
+      // on a successful HEAD; if it did not, say so rather than shipping a
+      // silent null.
+      const undated = files.filter((f) => f.last_modified === null).map((f) => f.table);
+      if (undated.length > 0) {
+        logger.warn(
+          {
+            operation: 'campaignDump.serve',
+            status: 'success',
+            reason: 'last_modified_absent',
+            tables: undated,
+            subject: auth.subject,
+            request_id: req.id,
+          },
+          'S3 HEAD returned no LastModified — the caller cannot detect a torn snapshot for these tables',
+        );
+      }
+
       // The only trail this whole-network, un-org-scoped, un-rate-limited read
       // leaves. Becomes an audit-log entry when #617 lands.
       logger.info(
@@ -288,8 +308,44 @@ function storageUnavailable(
       subject,
       request_id: requestId,
       latency_ms: Date.now() - started,
+      // Neither of these is transient, so the catalogue's "retry shortly" is
+      // wrong for them and the operator needs to know which they hit.
+      ...(isAccessDenied(cause) ? { likely_cause: 'S3_ACCESS_DENIED' } : {}),
+      ...(subOperation === 'signDownloadUrl' ? { likely_cause: 'S3_CREDENTIALS' } : {}),
     },
     'non-PII dump storage call failed',
   );
+  if (isAccessDenied(cause)) {
+    // A HEAD on a key the caller cannot list returns 403, not 404, so a bucket
+    // policy without `s3:ListBucket` turns the ordinary "not published yet"
+    // cold start into a 503 that never clears. Deliberately NOT remapped to
+    // 404: `infra/env.template` already requires `s3:ListBucket`, so a 403 here
+    // means the deployment has deviated from that policy — and reporting it as
+    // "not published yet" would hide a real IAM fault rather than surface it.
+    logger.error(
+      {
+        operation: 'campaignDump.serve',
+        status: 'failure',
+        sub_operation: subOperation,
+        reason: 'S3_ACCESS_DENIED',
+        subject,
+        request_id: requestId,
+      },
+      'S3 denied the dump object — check the role grants s3:ListBucket on the bucket (without it a MISSING key returns 403, not 404)',
+    );
+  }
   return httpError('DUMP_STORAGE_UNAVAILABLE', { cause });
+}
+
+/**
+ * Whether a thrown S3 error is an authorisation denial rather than an outage.
+ *
+ * @param cause - The value thrown by the S3 SDK.
+ * @returns `true` for `AccessDenied`/`Forbidden`/HTTP 403.
+ */
+function isAccessDenied(cause: unknown): boolean {
+  if (typeof cause !== 'object' || cause === null) return false;
+  const e = cause as { name?: unknown; $metadata?: { httpStatusCode?: unknown } };
+  const name = typeof e.name === 'string' ? e.name : '';
+  return name === 'AccessDenied' || name === 'Forbidden' || e.$metadata?.httpStatusCode === 403;
 }

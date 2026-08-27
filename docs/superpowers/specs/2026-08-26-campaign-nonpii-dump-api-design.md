@@ -382,6 +382,13 @@ the realm.
 
 **bluedots-automation**
 
+- **confirm the API's role grants `s3:ListBucket` on the bucket** (already required by
+  `infra/env.template`). Without it a HEAD on a _missing_ key returns `403 AccessDenied`
+  rather than `404`, so the ordinary "cron has not run yet" cold start surfaces as a
+  `503 DUMP_STORAGE_UNAVAILABLE` that never clears. The route deliberately does **not**
+  remap 403 to 404 — that would report a real IAM fault as "not published yet" — but it
+  logs `likely_cause: S3_ACCESS_DENIED` so the cause is actionable.
+
 - **before handing EkStep the client secret**, confirm `KEYCLOAK_ALLOWED_AZP` is
   set on every deployment and excludes `campaign-manager`. `access-token.ts`
   disables the `azp` gate entirely when that var is unset (pre-existing

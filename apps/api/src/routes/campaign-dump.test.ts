@@ -360,6 +360,64 @@ describe('GET /v1/campaign/dump', () => {
     expect(res.json().expires_at).toBe(expiries[KEYS.items]);
   });
 
+  it('serves a genuine zero-byte object rather than treating it as missing', async () => {
+    // The exporter writes an empty file for a zero-row table, so size_bytes 0
+    // is a legitimate success. Guards against a future
+    // `contentLength === 0 ? missing` shortcut shipping a false 404 green.
+    const previous = headObjectMock.getMockImplementation()!;
+    headObjectMock.mockImplementation(async (key: string) =>
+      key === KEYS.item_actions
+        ? { etag: 'e', contentLength: 0, lastModified: new Date('2026-08-26T00:31:12.000Z') }
+        : previous(key),
+    );
+    const res = await get('system');
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.files).toHaveLength(3);
+    const empty = body.files.find((f: { table: string }) => f.table === 'item_actions');
+    expect(empty.size_bytes).toBe(0);
+    expect(empty.url).toContain('X-Amz-Signature');
+  });
+
+  it('reports an S3 AccessDenied as a non-transient likely_cause, not a bare outage', async () => {
+    // Without s3:ListBucket a HEAD on a MISSING key returns 403, not 404, so an
+    // ordinary "not published yet" cold start would look like an outage. The
+    // status stays 503 deliberately — remapping to 404 would hide a real IAM
+    // fault — but the log must name the cause so it is actionable.
+    const errorSpy = vi.spyOn(logger, 'error');
+    const denied = Object.assign(new Error('Access Denied'), {
+      name: 'AccessDenied',
+      $metadata: { httpStatusCode: 403 },
+    });
+    headObjectMock.mockRejectedValue(denied);
+    const res = await get('system');
+    expect(res.statusCode).toBe(503);
+    expect(res.json().error.code).toBe('DUMP_STORAGE_UNAVAILABLE');
+    expect(res.json().error.detail).not.toContain('Access Denied');
+    const logged = errorSpy.mock.calls.map(([payload]) => payload as Record<string, unknown>);
+    expect(logged.some((p) => p.likely_cause === 'S3_ACCESS_DENIED')).toBe(true);
+    expect(logged.some((p) => p.reason === 'S3_ACCESS_DENIED')).toBe(true);
+  });
+
+  it('warns when a served object HEAD carries no LastModified', async () => {
+    // last_modified is the caller's only torn-snapshot signal, so a null
+    // silently removes it. Serve the file, but say so.
+    const warnSpy = vi.spyOn(logger, 'warn');
+    const previous = headObjectMock.getMockImplementation()!;
+    headObjectMock.mockImplementation(async (key: string) =>
+      key === KEYS.items ? { etag: 'e', contentLength: 201 } : previous(key),
+    );
+    const res = await get('system');
+    expect(res.statusCode).toBe(200);
+    expect(
+      res.json().files.find((f: { table: string }) => f.table === 'items').last_modified,
+    ).toBeNull();
+    const warned = warnSpy.mock.calls.map(([payload]) => payload as Record<string, unknown>);
+    const line = warned.find((p) => p.reason === 'last_modified_absent');
+    expect(line).toBeDefined();
+    expect(line!.tables).toEqual(['items']);
+  });
+
   it('returns exactly the URL the signer issued, per key — the route never constructs or decorates one', async () => {
     const res = await get('system');
     expect(res.statusCode).toBe(200);
