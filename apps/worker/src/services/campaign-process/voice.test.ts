@@ -346,6 +346,30 @@ describe('runVoiceForJob (via runCampaignJob)', () => {
     });
   });
 
+  it('perf follow-up: passes reuseExisting=false to dispatch on a first attempt (deps.attempt omitted)', async () => {
+    const h = harness(job());
+    await runCampaignJob('job-1', h.deps);
+
+    expect(h.provider.dispatches).toHaveLength(1);
+    expect(h.provider.dispatches[0]!.reuseExisting).toBe(false);
+  });
+
+  it('perf follow-up: passes reuseExisting=false to dispatch on attempt 1 of N', async () => {
+    const h = harness(job(), {}, { attempt: 1, maxAttempts: 3 });
+    await runCampaignJob('job-1', h.deps);
+
+    expect(h.provider.dispatches).toHaveLength(1);
+    expect(h.provider.dispatches[0]!.reuseExisting).toBe(false);
+  });
+
+  it('perf follow-up: passes reuseExisting=true to dispatch on a BullMQ retry (attempt > 1)', async () => {
+    const h = harness(job(), {}, { attempt: 2, maxAttempts: 3 });
+    await runCampaignJob('job-1', h.deps);
+
+    expect(h.provider.dispatches).toHaveLength(1);
+    expect(h.provider.dispatches[0]!.reuseExisting).toBe(true);
+  });
+
   it('stores the raw provider response on the job', async () => {
     const h = harness(job());
     await runCampaignJob('job-1', h.deps);

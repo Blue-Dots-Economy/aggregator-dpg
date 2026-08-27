@@ -41,6 +41,17 @@ export interface VoiceDispatchInput {
   contacts: VoiceContact[];
   /** Provider-specific start options (e.g. `max_concurrent_calls`, `selected_statuses`). */
   startOptions: Record<string, unknown>;
+  /**
+   * Set by the caller when this `dispatch()` is a BullMQ retry (`attempt >
+   * 1`), never on a first attempt. A concrete provider MAY use this as a
+   * hint to look up and reuse an already-created batch under `batchName`
+   * before creating a new one (see `raya.ts`'s I4 batch-reuse note) —
+   * guarding against a transient-start-failure retry minting a duplicate
+   * batch, without paying that lookup's latency/egress cost on the
+   * overwhelming-majority first-attempt path, where no such batch can
+   * exist yet. Omitted/`false` = do not attempt reuse.
+   */
+  reuseExisting?: boolean;
 }
 
 /**

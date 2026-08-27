@@ -392,6 +392,15 @@ export async function runVoiceForJob(job: ProcessingJob, deps: CampaignJobDeps):
     batchName: content.batch_name ?? `campaign-${job.id}`,
     contacts,
     startOptions: voiceStartOptions(content),
+    // I4 batch-reuse hint: only ask the provider to look up an existing
+    // batch on a BullMQ retry (attempt > 1) — on a first attempt no batch
+    // under this deterministic name can exist yet (job.id is unique), so
+    // paying that lookup's latency/egress cost there would only slow down
+    // the overwhelming-majority happy path to guard a retry-only crash
+    // window. Unknown attempt (no `deps.attempt` injected) is NOT treated
+    // as a retry, matching this module's other "unknown = not final"
+    // defaults.
+    reuseExisting: (deps.attempt?.attempt ?? 1) > 1,
   });
   if (!result.success) {
     await handleDispatchFailure(job, deps, contacts, result.error, base);

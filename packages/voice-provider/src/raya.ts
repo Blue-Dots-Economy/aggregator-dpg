@@ -32,10 +32,13 @@
  * convention — only these two curation helpers can produce a value typed to
  * fit `VoiceDispatchResult.providerResponse`.
  *
- * `dispatch()` also (1) looks up an existing batch by deterministic name
+ * `dispatch()` also (1) — ONLY when the caller signals a retry via
+ * `input.reuseExisting` — looks up an existing batch by deterministic name
  * before creating one, reusing it instead of minting a duplicate on a
- * transient start-failure retry (see the I4 note on {@link dispatch}), and
- * (2) never reports more contacts as `accepted` than Raya itself confirms —
+ * transient start-failure retry (see the I4 note on {@link dispatch}; the
+ * lookup is skipped outright on a first attempt, where it can only ever
+ * return "not found" but would still cost a full egress-gated round trip),
+ * and (2) never reports more contacts as `accepted` than Raya itself confirms —
  * an unmappable `errors[].row` or an accepted count exceeding
  * `contactsInserted`/`validRows` demotes the excess to `rejected` rather
  * than silently over-reporting success (see the I5 note on
@@ -224,16 +227,30 @@ export class RayaVoiceProvider extends VoiceProviderBase {
    * then starts it — unless every contact was rejected/demoted, in which
    * case `start` is skipped entirely and `providerResponse.start` is `null`.
    *
-   * I4: before creating, looks up an existing batch with the same
-   * deterministic `input.batchName` for this agent via
-   * {@link findExistingBatch}. `dispatch()` is two non-atomic HTTP calls
-   * (create, then start) with no client idempotency key — if a prior attempt
-   * got a successful create but then hit a transient start failure (5xx,
-   * timeout), a naive retry would call create again and mint a second,
-   * orphaned batch at Raya while duplicate-dialling the same contacts. A hit
-   * reuses that batch's id and skips create entirely.
+   * I4: when `input.reuseExisting` is true (the caller's signal that this is
+   * a BullMQ retry, not a first attempt), looks up an existing batch with
+   * the same deterministic `input.batchName` for this agent via
+   * {@link findExistingBatch} before creating. `dispatch()` is two
+   * non-atomic HTTP calls (create, then start) with no client idempotency
+   * key — if a prior attempt got a successful create but then hit a
+   * transient start failure (5xx, timeout), a naive retry would call create
+   * again and mint a second, orphaned batch at Raya while duplicate-dialling
+   * the same contacts. A hit reuses that batch's id and skips create
+   * entirely.
    *
-   * @param input - The batch definition (agent, name, contacts, start options).
+   * The lookup is SKIPPED (not just best-effort-swallowed) when
+   * `reuseExisting` is falsy — i.e. on every first attempt, the
+   * overwhelming majority of calls. On a first attempt no batch under this
+   * deterministic name can exist yet (the name embeds the job id, which is
+   * unique), so the lookup can only ever return "not found" there; paying
+   * its egress-gated latency (a 3rd `acquireSlot()` wait) on that path would
+   * roughly double the happy-path dispatch latency to guard a retry-only
+   * crash window. The item-level `providerBatchRef` resume guard in the
+   * worker's `voice.ts` already covers the create→first-`markSubmitted`
+   * crash window on retries independently of this lookup.
+   *
+   * @param input - The batch definition (agent, name, contacts, start
+   *   options, and the `reuseExisting` retry hint).
    * @returns Ok with the provider batch reference and per-contact
    *   accept/reject outcome, or Err if the create call itself failed (auth,
    *   validation, or an exhausted-retry upstream/transport failure).
@@ -241,7 +258,9 @@ export class RayaVoiceProvider extends VoiceProviderBase {
   override async dispatch(
     input: VoiceDispatchInput,
   ): Promise<Result<VoiceDispatchResult, BaseError>> {
-    const existing = await this.findExistingBatch(input.agentRef, input.batchName);
+    const existing = input.reuseExisting
+      ? await this.findExistingBatch(input.agentRef, input.batchName)
+      : undefined;
 
     let providerBatchRef: string;
     let accepted: string[];
