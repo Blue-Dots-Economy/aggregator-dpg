@@ -217,7 +217,12 @@ function harness(
       fetchDecryptedProfiles: opts.fetchDecryptedProfiles ?? defaultFetch,
       provider: opts.provider ?? provider,
     },
-    config: { decryptChunk: 500, fieldSet: 'contact', recipientMode: 'requester' },
+    config: {
+      decryptChunk: 500,
+      fieldSet: 'contact',
+      recipientMode: 'requester',
+      emailSendConcurrency: 5,
+    },
     log: {
       info: (o) => logs.info.push(o),
       warn: (o) => logs.warn.push(o),

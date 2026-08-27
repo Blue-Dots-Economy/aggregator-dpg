@@ -7,10 +7,9 @@
  * terminal status as it goes, and rolls the job status up from the item counts.
  *
  * The export channel is implemented here (decrypt → CSV → private S3 → email a
- * short-lived pre-signed link). The voice channel (aggregator-dpg#577)
- * dispatches through `./voice.js`'s `runVoiceForJob`. The email channel is
- * still a deliberate not-implemented stub — its PR (#578) fills it in on
- * this same engine.
+ * short-lived pre-signed link). The voice (aggregator-dpg#577) and email
+ * (#578) channels are self-contained modules this dispatches to —
+ * `./voice.ts`'s `runVoiceForJob` and `./email.ts`'s `runEmailForJob`.
  *
  * Failure semantics: a transient/infra failure (decrypt err(), the #521
  * contact-block guard, an S3 or mail rejection) re-throws so BullMQ retries and
@@ -37,6 +36,7 @@ import type {
   ProcessingJob,
 } from '../campaign-job-client.js';
 import { runVoiceForJob, type VoiceCollaborators } from './voice.js';
+import { runEmailForJob, type EmailCollaborators } from './email.js';
 
 /** Minimal structured logger surface (satisfied by the worker's pino child). */
 export interface CampaignLogger {
@@ -52,7 +52,13 @@ export interface CampaignJobClient {
     jobId: string,
     itemId: string,
     status: CampaignJobItemStatus,
-    errorReason?: string,
+    reason?: string,
+    /**
+     * External id this item produced (email: the mailer's message id). The
+     * implementation has always accepted it; the port exposes it so a channel
+     * can actually record one.
+     */
+    providerRef?: string,
   ): Promise<void>;
   heartbeat(jobId: string): Promise<void>;
   setJobStatus(jobId: string, status: CampaignJobStatus, errorReason?: string): Promise<void>;
@@ -89,6 +95,8 @@ export interface CampaignJobConfig {
   recipientMode: 'requester' | 'network_admin';
   /** Recipient used when `recipientMode` is `network_admin`. */
   networkAdminEmail?: string;
+  /** Recipients emailed in parallel within one email job (`EMAIL_SEND_CONCURRENCY`). */
+  emailSendConcurrency: number;
 }
 
 export interface CampaignJobDeps {
@@ -96,6 +104,8 @@ export interface CampaignJobDeps {
   export: ExportCollaborators;
   /** Voice-channel collaborators (decrypt + provider). Required only when `job.channel === 'voice'`. */
   voice?: VoiceCollaborators;
+  /** Email-channel collaborators (decrypt + mailer). Required only when `job.channel === 'email'`. */
+  email?: EmailCollaborators;
   config: CampaignJobConfig;
   log: CampaignLogger;
   /** Retry position, so the final attempt can record a terminal failure. */
@@ -150,8 +160,9 @@ export async function runCampaignJob(jobId: string, deps: CampaignJobDeps): Prom
       await runExportForJob(job, deps);
     } else if (job.channel === 'voice') {
       await runVoiceForJob(job, deps);
+    } else if (job.channel === 'email') {
+      await runEmailForJob(job, deps);
     } else {
-      // The email PR implements this on this same engine.
       throw new Error(`campaign channel not implemented: ${job.channel}`);
     }
     const status = await deps.client.rollUpStatus(jobId);

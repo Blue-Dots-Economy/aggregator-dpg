@@ -63,10 +63,15 @@ export async function processCampaignJob(
         return getVoiceProvider();
       },
     },
+    email: {
+      fetchDecryptedProfiles: (q) => ss.fetchDecryptedProfiles(q),
+      sendMail: (input) => getMailer().send(input),
+    },
     config: {
       decryptChunk: config.CAMPAIGN_DECRYPT_CHUNK,
       fieldSet: config.CAMPAIGN_EXPORT_FIELDS,
       recipientMode: config.CAMPAIGN_EXPORT_RECIPIENT,
+      emailSendConcurrency: config.EMAIL_SEND_CONCURRENCY,
       ...(config.EXPORT_NETWORK_ADMIN_EMAIL
         ? { networkAdminEmail: config.EXPORT_NETWORK_ADMIN_EMAIL }
         : {}),

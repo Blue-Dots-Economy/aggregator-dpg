@@ -213,6 +213,28 @@ export function runStoreConformance(
     });
   });
 
+  describe('email skip semantics (#578)', () => {
+    it('a recipient with no contact detail is a skip, not a failure', async () => {
+      const store = makeStore();
+      const input = base({ channel: 'email' });
+      const { job } = unwrap(await store.createJob(input));
+      unwrap(await store.markItem(job.id, input.items[0]!.itemId, 'sent'));
+      unwrap(
+        await store.markItem(
+          job.id,
+          input.items[1]!.itemId,
+          'skipped_no_contact',
+          'no_email_address',
+        ),
+      );
+      expect(unwrap(await store.rollUpStatus(job.id))).toBe('completed');
+      const items = unwrap(await store.getJobItems(job.id, input.signalstackOrgId))!;
+      const skipped = items.find((i) => i.itemId === input.items[1]!.itemId)!;
+      expect(skipped.skipReason).toBe('no_email_address');
+      expect(skipped.errorReason).toBeNull();
+    });
+  });
+
   describe('active-job cap', () => {
     it('counts only queued/processing jobs for the org', async () => {
       const store = makeStore();

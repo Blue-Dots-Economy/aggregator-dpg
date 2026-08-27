@@ -142,6 +142,8 @@ const ConfigSchema = z.object({
    * Default 2.
    */
   CAMPAIGN_CONCURRENCY: z.coerce.number().int().positive().default(2),
+  /** How many recipients a single email-channel campaign job sends in parallel. Default 5. */
+  EMAIL_SEND_CONCURRENCY: z.coerce.number().int().positive().default(5),
   /** Items per Signals decrypt chunk (bounds request size + gives heartbeat cadence). */
   CAMPAIGN_DECRYPT_CHUNK: z.coerce.number().int().positive().default(500),
   /**

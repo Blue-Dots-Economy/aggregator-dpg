@@ -24,11 +24,10 @@
  * Belongs to `@aggregator-dpg/api`.
  */
 import type { FastifyInstance } from 'fastify';
-import { z } from 'zod';
 import { campaignEnvelopeSchema } from '../campaign/envelope.js';
 import { submitCampaignJob } from '../campaign/submit-job.js';
+import { campaignSubmitResponses } from '../campaign/route-schema.js';
 import { config } from '../config.js';
-import { errorResponses } from '../errors/openapi.js';
 
 /**
  * Registers the campaign-export route.
@@ -46,15 +45,7 @@ export async function registerCampaignExportRoutes(app: FastifyInstance): Promis
           'Creates a durable campaign job that exports the participant contact fields (name/email/phone, each with profile/user provenance) for the given owned items to a private CSV, and emails a short-lived pre-signed download link to the requesting user. Body is the shared campaign envelope { item_ids, metadata[], content{} }. Send an Idempotency-Key header to make retries safe. Returns 202 { job_id }; poll GET /v1/campaign/export/{job_id} for status.',
         security: [{ bearerAuth: [] }],
         body: campaignEnvelopeSchema,
-        response: {
-          202: z.object({
-            status: z.literal('queued'),
-            requested: z.number().int(),
-            job_id: z.string().uuid(),
-            message: z.string(),
-          }),
-          ...errorResponses(400, 401, 403, 429, 503),
-        },
+        response: campaignSubmitResponses(),
       },
     },
     async (req, reply) => {

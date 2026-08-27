@@ -52,7 +52,7 @@ interface Harness {
   deps: CampaignJobDeps;
   puts: Array<{ key: string; body: Buffer; contentType: string }>;
   mails: SendInput[];
-  itemMarks: Array<{ itemId: string; status: string; err?: string }>;
+  itemMarks: Array<{ itemId: string; status: string; err?: string; ref?: string }>;
   heartbeats: () => number;
   jobStatuses: string[];
   logs: { info: object[]; warn: object[]; error: object[] };
@@ -90,12 +90,17 @@ function harness(
   const deps: CampaignJobDeps = {
     client: {
       getJobForProcessing: async () => theJob,
-      markItem: async (_jobId, itemId, status, errorReason) => {
-        itemMarks.push({ itemId, status, ...(errorReason ? { err: errorReason } : {}) });
+      markItem: async (_jobId, itemId, status, reason, providerRef) => {
+        itemMarks.push({
+          itemId,
+          status,
+          ...(reason ? { err: reason } : {}),
+          ...(providerRef ? { ref: providerRef } : {}),
+        });
         const cur = itemStatus.get(itemId);
         if (cur && !TERMINAL.includes(cur.status)) {
           cur.status = status;
-          cur.err = errorReason ?? null;
+          cur.err = reason ?? null;
         }
       },
       heartbeat: async () => {
@@ -161,7 +166,13 @@ function harness(
       },
       ...over,
     },
-    config: { decryptChunk: 500, fieldSet: 'contact', recipientMode: 'requester', ...config },
+    config: {
+      decryptChunk: 500,
+      fieldSet: 'contact',
+      recipientMode: 'requester',
+      emailSendConcurrency: 5,
+      ...config,
+    },
     log: {
       info: (o) => logs.info.push(o),
       warn: (o) => logs.warn.push(o),
@@ -447,6 +458,42 @@ describe('runCampaignJob (voice channel wiring)', () => {
     expect(submitted).toEqual([{ jobId: 'job-1', itemId: 'item-1', providerBatchRef: 'batch-1' }]);
     expect(providerResponses).toHaveLength(1);
     // No mail/S3 side effects — the export path must not run for a voice job.
+    expect(h.mails).toHaveLength(0);
+    expect(h.puts).toHaveLength(0);
+  });
+});
+
+describe('runCampaignJob (email channel wiring)', () => {
+  // Not a re-test of runEmailForJob's own behaviour (see
+  // campaign-process/email.test.ts) — this exercises the actual
+  // `job.channel === 'email'` branch in runCampaignJob itself, which no other
+  // test file drives (email.test.ts calls runEmailForJob directly).
+  it('routes an email job through runEmailForJob and rolls up to completed', async () => {
+    const emailJob = job({
+      channel: 'email',
+      content: { subject: 'Hi {{first_name}}', body_markdown: 'Hello {{name}}' },
+      items: [{ itemId: 'item-1', action: null, status: 'pending', providerBatchRef: null }],
+    });
+    const h = harness(emailJob);
+    const sent: SendInput[] = [];
+    const deps: CampaignJobDeps = {
+      ...h.deps,
+      email: {
+        fetchDecryptedProfiles: async () => ok({ profiles: [row()], skipped: [] }),
+        sendMail: async (input) => {
+          sent.push(input);
+          return { ok: true, value: { messageId: 'msg-1' } };
+        },
+      },
+    };
+
+    await runCampaignJob('job-1', deps);
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.subject).toBe('Hi Asha');
+    expect(h.itemMarks).toEqual([{ itemId: 'item-1', status: 'sent', ref: 'msg-1' }]);
+    expect(h.jobStatuses.at(-1)).toBe('completed');
+    // No export side effects — the export path must not run for an email job.
     expect(h.mails).toHaveLength(0);
     expect(h.puts).toHaveLength(0);
   });

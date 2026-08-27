@@ -23,6 +23,11 @@ export interface ErrorCatalogueEntry {
   readonly docs?: string;
 }
 
+import { SUPPORTED_PLACEHOLDERS } from '@aggregator-dpg/campaign-template';
+
+/** The supported placeholders, rendered as `{{token}}` for error hints. */
+const PLACEHOLDER_LIST = SUPPORTED_PLACEHOLDERS.map((token) => `{{${token}}}`).join(', ');
+
 export const ERR = {
   // ── Generic ─────────────────────────────────────────────────────────────
   INTERNAL: {
@@ -53,6 +58,20 @@ export const ERR = {
     title: 'Export could not be queued',
     detail: 'The export request could not be queued for processing. Please retry shortly.',
     hint: 'The BullMQ enqueue failed — most likely Redis is unreachable. Check REDIS_URL and the queue Redis. (Downstream export config — network-admin email, Signals creds — lives on the worker and is not preflighted here.)',
+  },
+  EMAIL_ENQUEUE_FAILED: {
+    code: 'EMAIL_ENQUEUE_FAILED',
+    status: 503,
+    title: 'Email could not be queued',
+    detail: 'The campaign email request could not be queued for processing. Please retry shortly.',
+    hint: 'The BullMQ enqueue failed — most likely Redis is unreachable. Check REDIS_URL and the queue Redis. (Mailer + Signals creds live on the worker and are not preflighted here.)',
+  },
+  UNKNOWN_PLACEHOLDER: {
+    code: 'UNKNOWN_PLACEHOLDER',
+    status: 400,
+    title: 'Unknown template placeholder',
+    detail: 'The subject or body contains a placeholder that is not supported.',
+    hint: `Only the fixed set is allowed: ${PLACEHOLDER_LIST}. See response.error.fields.unknown for the offending tokens.`,
   },
   CAMPAIGN_TOO_MANY_ITEMS: {
     code: 'CAMPAIGN_TOO_MANY_ITEMS',
