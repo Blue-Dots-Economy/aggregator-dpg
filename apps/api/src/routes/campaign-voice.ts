@@ -28,13 +28,12 @@
  * `{ job_id }`. Belongs to `@aggregator-dpg/api`.
  */
 import type { FastifyInstance } from 'fastify';
-import { z } from 'zod';
 import { campaignEnvelopeSchema } from '../campaign/envelope.js';
 import { voiceContentSchema } from '../campaign/voice-content.js';
 import { submitCampaignJob } from '../campaign/submit-job.js';
+import { campaignSubmitResponses } from '../campaign/route-schema.js';
 import { config } from '../config.js';
 import { httpError } from '../errors/http-error.js';
-import { errorResponses } from '../errors/openapi.js';
 
 /**
  * Registers the campaign-voice route.
@@ -52,15 +51,7 @@ export async function registerCampaignVoiceRoutes(app: FastifyInstance): Promise
           'Creates a durable campaign job that dispatches a Raya voice-call batch to the given owned items. Body is the shared campaign envelope { item_ids, metadata[], content{} } where content is the voice dispatch request (agent_id required; action is dispatch-only in v1). Send an Idempotency-Key header to make retries safe. Returns 202 { status, requested, job_id }; poll GET /v1/campaign/voice/{job_id} for status.',
         security: [{ bearerAuth: [] }],
         body: campaignEnvelopeSchema,
-        response: {
-          202: z.object({
-            status: z.literal('queued'),
-            requested: z.number().int(),
-            job_id: z.string().uuid(),
-            message: z.string(),
-          }),
-          ...errorResponses(400, 401, 403, 429, 503),
-        },
+        response: campaignSubmitResponses(),
       },
     },
     async (req, reply) => {

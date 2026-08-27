@@ -27,12 +27,11 @@
  * never leave the aggregator. Belongs to `@aggregator-dpg/api`.
  */
 import type { FastifyInstance } from 'fastify';
-import { z } from 'zod';
 import { campaignEnvelopeSchema } from '../campaign/envelope.js';
 import { parseEmailContent } from '../campaign/email-content.js';
 import { submitCampaignJob } from '../campaign/submit-job.js';
+import { campaignSubmitResponses } from '../campaign/route-schema.js';
 import { config } from '../config.js';
-import { errorResponses } from '../errors/openapi.js';
 
 /**
  * Registers the campaign-email route.
@@ -50,15 +49,7 @@ export async function registerCampaignEmailRoutes(app: FastifyInstance): Promise
           'Creates a durable campaign job that emails the given owned participants a shared message (subject + Markdown body, with an optional fixed set of {{placeholder}} tokens personalised per recipient). Body is the shared campaign envelope { item_ids, metadata[], content{subject, body_markdown, reply_to?} }. Recipient email addresses are resolved server-side and never returned. Send an Idempotency-Key header to make retries safe. Returns 202 { job_id }; poll GET /v1/campaign/email/{job_id} for per-recipient outcomes.',
         security: [{ bearerAuth: [] }],
         body: campaignEnvelopeSchema,
-        response: {
-          202: z.object({
-            status: z.literal('queued'),
-            requested: z.number().int(),
-            job_id: z.string().uuid(),
-            message: z.string(),
-          }),
-          ...errorResponses(400, 401, 403, 429, 503),
-        },
+        response: campaignSubmitResponses(),
       },
     },
     async (req, reply) => {
