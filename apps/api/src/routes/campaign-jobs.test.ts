@@ -106,6 +106,25 @@ describe('campaign job status endpoints', () => {
     expect(failed.error_reason).toBe('not owned');
   });
 
+  it('GET /:job_id (voice) returns provider_batch_ref per item and provider_response on the job', async () => {
+    const jobId = await seedJob(store, ORG, ['a'], 'voice');
+    await store.markSubmitted(jobId, 'a', { providerBatchRef: 'batch-1', providerRef: 'call-1' });
+    await store.setProviderResponse(jobId, { batch_id: 'batch-1', status: 'accepted' });
+    await store.rollUpStatus(jobId);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/campaign/voice/${jobId}`,
+      headers: auth,
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.provider_response).toEqual({ batch_id: 'batch-1', status: 'accepted' });
+    const item = body.items.find((i: { item_id: string }) => i.item_id === 'a');
+    expect(item.status).toBe('submitted');
+    expect(item.provider_batch_ref).toBe('batch-1');
+  });
+
   it('GET /:job_id returns 403 for a job owned by another org', async () => {
     const jobId = await seedJob(store, ORG, ['a']);
     const res = await app.inject({

@@ -61,6 +61,20 @@ export const ERR = {
     detail: 'The request asks for more items than a single campaign job allows.',
     hint: 'item_ids length (after de-dup) exceeded the channel cap (e.g. CAMPAIGN_EXPORT_MAX_ITEMS). Split the request or raise the cap.',
   },
+  CAMPAIGN_VOICE_TOO_MANY_ITEMS: {
+    code: 'CAMPAIGN_VOICE_TOO_MANY_ITEMS',
+    status: 400,
+    title: 'Too many items',
+    detail: 'The request asks for more items than a single voice campaign job allows.',
+    hint: 'item_ids length (after de-dup) exceeded CAMPAIGN_VOICE_MAX_ITEMS. Split the request or raise the cap.',
+  },
+  VOICE_ENQUEUE_FAILED: {
+    code: 'VOICE_ENQUEUE_FAILED',
+    status: 503,
+    title: 'Voice campaign could not be queued',
+    detail: 'The voice campaign request could not be queued for processing. Please retry shortly.',
+    hint: 'The BullMQ enqueue failed — most likely Redis is unreachable. Check REDIS_URL and the queue Redis. (Raya provider config lives on the worker and is not preflighted here.)',
+  },
   CAMPAIGN_RATE_LIMITED: {
     code: 'CAMPAIGN_RATE_LIMITED',
     status: 429,

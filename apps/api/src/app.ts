@@ -44,6 +44,7 @@ import { registerDashboardRoutes } from './routes/dashboard.js';
 import { registerAggregatorConfigRoutes } from './routes/aggregator-config.js';
 import { registerSupportRoutes } from './routes/support.js';
 import { registerCampaignExportRoutes } from './routes/campaign-export.js';
+import { registerCampaignVoiceRoutes } from './routes/campaign-voice.js';
 import { registerCampaignJobRoutes } from './routes/campaign-jobs.js';
 import { registerCampaignDumpRoutes } from './routes/campaign-dump.js';
 import { ERR } from './errors/codes.js';
@@ -230,6 +231,8 @@ export async function buildApp(): Promise<FastifyInstance> {
   await registerSupportRoutes(app);
   await registerCampaignExportRoutes(app);
   await registerCampaignJobRoutes(app, 'export');
+  await registerCampaignVoiceRoutes(app);
+  await registerCampaignJobRoutes(app, 'voice');
   await registerCampaignDumpRoutes(app);
 
   app.setErrorHandler((rawErr, req, reply) => {

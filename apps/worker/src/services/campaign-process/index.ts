@@ -7,9 +7,10 @@
  * terminal status as it goes, and rolls the job status up from the item counts.
  *
  * The export channel is implemented here (decrypt → CSV → private S3 → email a
- * short-lived pre-signed link). The email/voice channels are deliberate
- * not-implemented stubs — their PRs (#578/#577) fill them in on this same
- * engine.
+ * short-lived pre-signed link). The voice channel (aggregator-dpg#577)
+ * dispatches through `./voice.js`'s `runVoiceForJob`. The email channel is
+ * still a deliberate not-implemented stub — its PR (#578) fills it in on
+ * this same engine.
  *
  * Failure semantics: a transient/infra failure (decrypt err(), the #521
  * contact-block guard, an S3 or mail rejection) re-throws so BullMQ retries and
@@ -32,8 +33,10 @@ import { TERMINAL_JOB_STATUSES } from '../campaign-job-client.js';
 import type {
   CampaignJobItemStatus,
   CampaignJobStatus,
+  MarkSubmittedArgs,
   ProcessingJob,
 } from '../campaign-job-client.js';
+import { runVoiceForJob, type VoiceCollaborators } from './voice.js';
 
 /** Minimal structured logger surface (satisfied by the worker's pino child). */
 export interface CampaignLogger {
@@ -58,6 +61,10 @@ export interface CampaignJobClient {
   setNotifiedAt(jobId: string): Promise<void>;
   /** Fails items still `pending` on a job that has run out of retries. */
   failPendingItems(jobId: string, errorReason: string): Promise<void>;
+  /** Voice: records that an item was submitted to the voice provider (sets `submitted` + `providerBatchRef`, persisted in the `raya_batch_id` column). */
+  markSubmitted(jobId: string, itemId: string, args: MarkSubmittedArgs): Promise<void>;
+  /** Voice: stores the raw provider create+start response on the job, for the campaign manager to render. */
+  setProviderResponse(jobId: string, response: unknown): Promise<void>;
 }
 
 /** Export collaborators (decrypt/storage/mail) — narrow so the job is trivially faked. */
@@ -87,6 +94,8 @@ export interface CampaignJobConfig {
 export interface CampaignJobDeps {
   client: CampaignJobClient;
   export: ExportCollaborators;
+  /** Voice-channel collaborators (decrypt + provider). Required only when `job.channel === 'voice'`. */
+  voice?: VoiceCollaborators;
   config: CampaignJobConfig;
   log: CampaignLogger;
   /** Retry position, so the final attempt can record a terminal failure. */
@@ -95,8 +104,13 @@ export interface CampaignJobDeps {
 
 const TERMINAL_JOB = new Set<CampaignJobStatus>(TERMINAL_JOB_STATUSES);
 
-/** `campaign_job.error_reason` is a bounded column; keep the head of the message. */
-function truncateReason(reason: string): string {
+/**
+ * Keeps the head of an error message bounded. Shared across channel
+ * handlers in this folder (export's job-level `error_reason`, voice's
+ * item-level `error_reason`, which can otherwise carry an entire raw
+ * provider response body).
+ */
+export function truncateReason(reason: string): string {
   return reason.length > 500 ? `${reason.slice(0, 497)}...` : reason;
 }
 
@@ -134,8 +148,10 @@ export async function runCampaignJob(jobId: string, deps: CampaignJobDeps): Prom
   try {
     if (job.channel === 'export') {
       await runExportForJob(job, deps);
+    } else if (job.channel === 'voice') {
+      await runVoiceForJob(job, deps);
     } else {
-      // The email/voice PRs implement these on this same engine.
+      // The email PR implements this on this same engine.
       throw new Error(`campaign channel not implemented: ${job.channel}`);
     }
     const status = await deps.client.rollUpStatus(jobId);
@@ -317,8 +333,11 @@ function purposeOf(job: ProcessingJob): string | undefined {
   return p?.trim() ? p : undefined;
 }
 
-/** Splits an array into fixed-size chunks (never empty; last chunk may be short). */
-function chunkArray<T>(items: T[], size: number): T[][] {
+/**
+ * Splits an array into fixed-size chunks (never empty; last chunk may be
+ * short). Shared across channel handlers in this folder (export + voice).
+ */
+export function chunkArray<T>(items: T[], size: number): T[][] {
   if (items.length === 0) return [];
   const out: T[][] = [];
   for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));

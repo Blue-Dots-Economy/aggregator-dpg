@@ -1,8 +1,16 @@
 import { describe, it, expect } from 'vitest';
-import { ok, err } from '@aggregator-dpg/shared-primitives/result';
-import { UpstreamError } from '@aggregator-dpg/shared-primitives/errors';
+import { ok, err, type Result } from '@aggregator-dpg/shared-primitives/result';
+import { UpstreamError, type BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import type { SignalStackDecryptedProfileRow } from '@aggregator-dpg/signalstack-writer/interface';
 import type { SendInput, SendOk, MailerResult } from '@aggregator-dpg/mailer/interface';
+import {
+  VoiceProviderBase,
+  brandCuratedProviderResponse,
+} from '@aggregator-dpg/voice-provider/interface';
+import type {
+  VoiceDispatchInput,
+  VoiceDispatchResult,
+} from '@aggregator-dpg/voice-provider/interface';
 import { deriveJobStatus, type ProcessingJob } from '../campaign-job-client.js';
 import { runCampaignJob, type CampaignJobDeps } from './index.js';
 
@@ -35,7 +43,7 @@ function job(over: Partial<ProcessingJob> = {}): ProcessingJob {
     requestedBy: 'user@org.example',
     requestId: null,
     notifiedAt: null,
-    items: [{ itemId: 'item-1', action: null, status: 'pending' }],
+    items: [{ itemId: 'item-1', action: null, status: 'pending', providerBatchRef: null }],
     ...over,
   };
 }
@@ -111,6 +119,10 @@ function harness(
           }
         }
       },
+      // Not exercised by the export-channel tests in this file — see
+      // campaign-process/voice.test.ts for coverage of these two writers.
+      markSubmitted: async () => undefined,
+      setProviderResponse: async () => undefined,
       rollUpStatus: async () => {
         const counts = {
           total: 0,
@@ -191,8 +203,8 @@ describe('runCampaignJob (export channel)', () => {
     const h = harness(
       job({
         items: [
-          { itemId: 'a', action: null, status: 'pending' },
-          { itemId: 'b', action: null, status: 'pending' },
+          { itemId: 'a', action: null, status: 'pending', providerBatchRef: null },
+          { itemId: 'b', action: null, status: 'pending', providerBatchRef: null },
         ],
       }),
       {
@@ -214,9 +226,12 @@ describe('runCampaignJob (export channel)', () => {
   });
 
   it('completes with no email when every item is unowned (all skipped)', async () => {
-    const h = harness(job({ items: [{ itemId: 'a', action: null, status: 'pending' }] }), {
-      fetchDecryptedProfiles: async () => ok({ profiles: [], skipped: ['a'] }),
-    });
+    const h = harness(
+      job({ items: [{ itemId: 'a', action: null, status: 'pending', providerBatchRef: null }] }),
+      {
+        fetchDecryptedProfiles: async () => ok({ profiles: [], skipped: ['a'] }),
+      },
+    );
     await runCampaignJob('job-1', h.deps);
     // Nothing was owned, so nothing was exported — but the handler ran
     // correctly, so this is `completed` with counts telling the real story,
@@ -377,6 +392,63 @@ describe('runCampaignJob failure paths', () => {
     // Fail closed: a PII export is never redirected to the requester as a fallback.
     expect(h.mails).toHaveLength(0);
     expect(h.jobStatuses.at(-1)).toBe('failed');
+  });
+});
+
+describe('runCampaignJob (voice channel wiring)', () => {
+  // Not a re-test of runVoiceForJob's own behaviour (see
+  // campaign-process/voice.test.ts) — this exercises the actual
+  // `job.channel === 'voice'` branch in runCampaignJob itself, which no
+  // other test file drives (voice.test.ts calls runVoiceForJob directly).
+  class StubProvider extends VoiceProviderBase {
+    async dispatch(input: VoiceDispatchInput): Promise<Result<VoiceDispatchResult, BaseError>> {
+      return ok({
+        providerBatchRef: 'batch-1',
+        accepted: input.contacts.map((c) => c.ref),
+        rejected: [],
+        providerResponse: {
+          create: brandCuratedProviderResponse({}),
+          start: brandCuratedProviderResponse({}),
+        },
+      });
+    }
+  }
+
+  it('routes a voice job through runVoiceForJob and rolls up to completed', async () => {
+    const voiceJob = job({
+      channel: 'voice',
+      content: { agent_id: 'agent-1' },
+      items: [
+        { itemId: 'item-1', action: 'voice_call', status: 'pending', providerBatchRef: null },
+      ],
+    });
+    const h = harness(voiceJob);
+    const submitted: Array<{ jobId: string; itemId: string; providerBatchRef: string }> = [];
+    const providerResponses: Array<{ jobId: string; response: unknown }> = [];
+    const deps: CampaignJobDeps = {
+      ...h.deps,
+      client: {
+        ...h.deps.client,
+        markSubmitted: async (jobId, itemId, args) => {
+          submitted.push({ jobId, itemId, providerBatchRef: args.providerBatchRef });
+        },
+        setProviderResponse: async (jobId, response) => {
+          providerResponses.push({ jobId, response });
+        },
+      },
+      voice: {
+        fetchDecryptedProfiles: async () => ok({ profiles: [row()], skipped: [] }),
+        provider: new StubProvider(),
+      },
+    };
+
+    await runCampaignJob('job-1', deps);
+
+    expect(submitted).toEqual([{ jobId: 'job-1', itemId: 'item-1', providerBatchRef: 'batch-1' }]);
+    expect(providerResponses).toHaveLength(1);
+    // No mail/S3 side effects — the export path must not run for a voice job.
+    expect(h.mails).toHaveLength(0);
+    expect(h.puts).toHaveLength(0);
   });
 });
 

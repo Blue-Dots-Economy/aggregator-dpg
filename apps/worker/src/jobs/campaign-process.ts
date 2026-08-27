@@ -14,6 +14,7 @@ import { getMailer } from '@aggregator-dpg/mailer';
 import { logger } from '../logger.js';
 import { config } from '../config.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
+import { getVoiceProvider } from '../services/voice-provider.js';
 import { putObject, signExportDownloadUrl } from '../object-storage.js';
 import * as jobClient from '../services/campaign-job-client.js';
 import { runCampaignJob } from '../services/campaign-process/index.js';
@@ -50,6 +51,17 @@ export async function processCampaignJob(
       putObject,
       signDownloadUrl: signExportDownloadUrl,
       sendMail: (input) => getMailer().send(input),
+    },
+    voice: {
+      fetchDecryptedProfiles: (q) => ss.fetchDecryptedProfiles(q),
+      // A getter, not an eager call: this deps object is built for every
+      // campaign-process job regardless of channel, and getVoiceProvider()
+      // throws ConfigError when RAYA_API_KEY is unset. Deferring construction
+      // until the voice handler actually reads `.provider` means an
+      // export/email job never trips over a missing Raya key.
+      get provider() {
+        return getVoiceProvider();
+      },
     },
     config: {
       decryptChunk: config.CAMPAIGN_DECRYPT_CHUNK,

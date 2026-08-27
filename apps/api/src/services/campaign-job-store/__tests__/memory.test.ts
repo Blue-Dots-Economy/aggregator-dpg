@@ -6,6 +6,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { InMemoryCampaignJobStore } from '../memory.js';
-import { runStoreConformance } from './conformance.js';
+import { runStoreConformance, runInMemoryNotFoundConformance } from './conformance.js';
 
 runStoreConformance(() => new InMemoryCampaignJobStore(), { aggregatorId: randomUUID() });
+runInMemoryNotFoundConformance(() => new InMemoryCampaignJobStore());
