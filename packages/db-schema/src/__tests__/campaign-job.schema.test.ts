@@ -9,6 +9,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { getTableColumns } from 'drizzle-orm';
 import { getTableConfig } from 'drizzle-orm/pg-core';
 import {
   campaignJob,
@@ -99,6 +100,11 @@ describe('campaign_job columns', () => {
     const idem = indexes.find((i) => i.config.name === 'campaign_job_idempotency_key_unique');
     expect(idem!.config.unique).toBe(true);
     expect(idem!.config.where).toBeDefined();
+  });
+
+  it('campaign_job has a nullable provider_response jsonb', () => {
+    const cols = getTableColumns(campaignJob);
+    expect(cols.providerResponse).toBeDefined();
   });
 });
 

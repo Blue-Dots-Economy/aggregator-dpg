@@ -1,13 +1,25 @@
 /**
- * Unit tests for the campaign email send loop — the per-recipient half of the
- * email channel, isolated from the job engine.
+ * Unit tests for the campaign email channel: the whole handler
+ * (`runEmailForJob`) and the per-recipient send loop it drives.
  *
  * @module @aggregator-dpg/worker
  */
 import { describe, it, expect } from 'vitest';
-import type { SignalStackDecryptedProfileRow } from '@aggregator-dpg/signalstack-writer/interface';
+import { ok, err } from '@aggregator-dpg/shared-primitives/result';
+import { UpstreamError } from '@aggregator-dpg/shared-primitives/errors';
+import type {
+  SignalStackDecryptedProfileRow,
+  SignalStackFetchDecryptedProfilesQuery,
+} from '@aggregator-dpg/signalstack-writer/interface';
 import type { SendInput, SendOk, MailerResult } from '@aggregator-dpg/mailer/interface';
-import { sendCampaignEmails, type EmailSendDeps } from './email.js';
+import type { ProcessingJob } from '../campaign-job-client.js';
+import type { CampaignJobDeps } from './index.js';
+import {
+  runEmailForJob,
+  sendCampaignEmails,
+  type EmailCollaborators,
+  type EmailSendDeps,
+} from './email.js';
 
 function row(
   itemId: string,
@@ -141,5 +153,312 @@ describe('sendCampaignEmails', () => {
       failed: 0,
     });
     expect(h.sends).toHaveLength(0);
+  });
+});
+
+// ─── The channel handler end-to-end (runEmailForJob) ────────────────────────
+// The send loop above is covered in isolation; these drive the handler itself:
+// content validation, the terminal-item retry guard, the decrypt projection,
+// and the per-item status writes.
+
+function job(over: Partial<ProcessingJob> = {}): ProcessingJob {
+  return {
+    id: 'job-1',
+    channel: 'email',
+    status: 'processing',
+    signalstackOrgId: 'org-1',
+    metadata: [{ key: 'purpose', value: 'audit' }],
+    content: { subject: 'Hello {{first_name}}', body_markdown: 'Hi **{{name}}**, news.' },
+    requestedBy: 'user@org.example',
+    requestId: null,
+    notifiedAt: null,
+    providerResponse: null,
+    items: [{ itemId: 'item-1', action: null, status: 'pending', providerBatchRef: null }],
+    ...over,
+  } as ProcessingJob;
+}
+
+function profileRow(
+  itemId: string,
+  contact: SignalStackDecryptedProfileRow['contact'] = {
+    name: { value: 'Asha', source: 'item' },
+    email: { value: 'asha@example.com', source: 'user' },
+    phone: { value: '+910000000000', source: 'item' },
+  },
+): SignalStackDecryptedProfileRow {
+  return {
+    item_id: itemId,
+    item_network: 'blue_dot',
+    item_domain: 'seeker',
+    item_type: 'profile_1.0',
+    item_state: {},
+    ...(contact ? { contact } : {}),
+    created_at: '2026-08-01T00:00:00.000Z',
+    updated_at: '2026-08-01T00:00:00.000Z',
+  };
+}
+
+function pendingItem(itemId: string, status = 'pending') {
+  return { itemId, action: null, status, providerBatchRef: null } as ProcessingJob['items'][number];
+}
+
+interface JobHarness {
+  deps: CampaignJobDeps;
+  emails: SendInput[];
+  itemMarks: Array<{ itemId: string; status: string; err?: string; ref?: string }>;
+  queries: SignalStackFetchDecryptedProfilesQuery[];
+  heartbeats: () => number;
+  logs: { info: object[]; warn: object[]; error: object[] };
+}
+
+function jobHarness(theJob: ProcessingJob, over: Partial<EmailCollaborators> = {}): JobHarness {
+  const emails: SendInput[] = [];
+  const itemMarks: JobHarness['itemMarks'] = [];
+  const queries: SignalStackFetchDecryptedProfilesQuery[] = [];
+  const logs = { info: [] as object[], warn: [] as object[], error: [] as object[] };
+  let heartbeats = 0;
+
+  const deps: CampaignJobDeps = {
+    client: {
+      getJobForProcessing: async () => theJob,
+      markItem: async (_jobId, itemId, status, reason, providerRef) => {
+        itemMarks.push({
+          itemId,
+          status,
+          ...(reason ? { err: reason } : {}),
+          ...(providerRef ? { ref: providerRef } : {}),
+        });
+      },
+      heartbeat: async () => {
+        heartbeats++;
+      },
+      setJobStatus: async () => undefined,
+      rollUpStatus: async () => 'completed',
+      setNotifiedAt: async () => undefined,
+      failPendingItems: async () => undefined,
+      markSubmitted: async () => undefined,
+      setProviderResponse: async () => undefined,
+    },
+    export: {
+      fetchDecryptedProfiles: async () => ok({ profiles: [], skipped: [] }),
+      putObject: async () => undefined,
+      signDownloadUrl: async (key) => ({ url: `https://signed/${key}`, key, expiresAt: 'x' }),
+      sendMail: async () => ({ ok: true, value: { messageId: 'export-mail' } }),
+    },
+    email: {
+      fetchDecryptedProfiles: async (q) => {
+        queries.push(q);
+        return ok({ profiles: (q.itemIds ?? []).map((id) => profileRow(id)), skipped: [] });
+      },
+      sendMail: async (input): Promise<MailerResult<SendOk>> => {
+        emails.push(input);
+        return { ok: true, value: { messageId: `msg-${emails.length}` } };
+      },
+      ...over,
+    },
+    config: {
+      decryptChunk: 500,
+      fieldSet: 'contact',
+      recipientMode: 'requester',
+      emailSendConcurrency: 5,
+    },
+    log: {
+      info: (o) => logs.info.push(o),
+      warn: (o) => logs.warn.push(o),
+      error: (o) => logs.error.push(o),
+    },
+  };
+  return { deps, emails, itemMarks, queries, heartbeats: () => heartbeats, logs };
+}
+
+describe('runEmailForJob', () => {
+  it('emails every resolved recipient and records the message id', async () => {
+    const theJob = job({ items: [pendingItem('a'), pendingItem('b')] });
+    const h = jobHarness(theJob);
+    await runEmailForJob(theJob, h.deps);
+
+    expect(h.emails).toHaveLength(2);
+    expect(h.emails[0]!.subject).toBe('Hello Asha');
+    expect(h.emails[0]!.html).toContain('<strong>Asha</strong>');
+    // `sent` carries the mailer's message id as the item's provider ref.
+    expect(h.itemMarks).toContainEqual({ itemId: 'a', status: 'sent', ref: 'msg-1' });
+    expect(h.itemMarks).toContainEqual({ itemId: 'b', status: 'sent', ref: 'msg-2' });
+    expect(h.heartbeats()).toBeGreaterThanOrEqual(1);
+  });
+
+  it('passes Reply-To through from the job content when set', async () => {
+    const theJob = job({
+      content: { subject: 'S', body_markdown: 'B', reply_to: 'campaign@org.example' },
+    });
+    const h = jobHarness(theJob);
+    await runEmailForJob(theJob, h.deps);
+    expect(h.emails[0]!.replyTo).toBe('campaign@org.example');
+  });
+
+  it('requests only the contact fields the template references', async () => {
+    const noTokens = job({ content: { subject: 'Hi', body_markdown: 'No tokens here' } });
+    const h1 = jobHarness(noTokens);
+    await runEmailForJob(noTokens, h1.deps);
+    // No placeholders → only the address itself is needed.
+    expect(h1.queries[0]).toMatchObject({ fields: [], contact: ['email'] });
+
+    const withPhone = job({ content: { subject: 'Hi {{name}}', body_markdown: '{{phone}}' } });
+    const h2 = jobHarness(withPhone);
+    await runEmailForJob(withPhone, h2.deps);
+    expect(h2.queries[0]!.contact).toEqual(['email', 'name', 'phone']);
+  });
+
+  it('marks a recipient with no email address skipped_no_contact, not failed', async () => {
+    const theJob = job({ items: [pendingItem('a'), pendingItem('b')] });
+    const h = jobHarness(theJob, {
+      fetchDecryptedProfiles: async () =>
+        ok({
+          profiles: [profileRow('a'), profileRow('b', { name: { value: 'Ravi', source: 'item' } })],
+          skipped: [],
+        }),
+    });
+    await runEmailForJob(theJob, h.deps);
+
+    expect(h.emails).toHaveLength(1);
+    expect(h.itemMarks).toContainEqual({
+      itemId: 'b',
+      status: 'skipped_no_contact',
+      err: 'no_email_address',
+    });
+  });
+
+  it('marks an unowned id skipped_not_owned without emailing it', async () => {
+    const theJob = job({ items: [pendingItem('a'), pendingItem('b')] });
+    const h = jobHarness(theJob, {
+      fetchDecryptedProfiles: async () => ok({ profiles: [profileRow('a')], skipped: ['b'] }),
+    });
+    await runEmailForJob(theJob, h.deps);
+
+    expect(h.emails).toHaveLength(1);
+    expect(h.itemMarks).toContainEqual({
+      itemId: 'b',
+      status: 'skipped_not_owned',
+      err: 'not_owned_by_org',
+    });
+  });
+
+  it('records a per-recipient send failure without aborting the batch', async () => {
+    const theJob = job({ items: [pendingItem('a'), pendingItem('b')] });
+    let call = 0;
+    const h = jobHarness(theJob, {
+      sendMail: async (): Promise<MailerResult<SendOk>> => {
+        call += 1;
+        return call === 1
+          ? { ok: true, value: { messageId: 'msg-1' } }
+          : { ok: false, error: { code: 'TRANSPORT_FAILED', message: 'smtp refused' } };
+      },
+    });
+    await runEmailForJob(theJob, h.deps);
+
+    expect(h.itemMarks.filter((m) => m.status === 'sent')).toHaveLength(1);
+    expect(h.itemMarks).toContainEqual({
+      itemId: 'b',
+      status: 'failed',
+      err: 'TRANSPORT_FAILED: smtp refused',
+    });
+  });
+
+  it('never re-emails an item already sent when the job is retried', async () => {
+    // Attempt 2 of the same job: `a` was sent last time (terminal), `b` was not.
+    const theJob = job({ items: [pendingItem('a', 'sent'), pendingItem('b')] });
+    const h = jobHarness(theJob);
+    await runEmailForJob(theJob, h.deps);
+
+    expect(h.emails).toHaveLength(1);
+    // The retry must not even ask Signals about the already-sent item.
+    expect(h.queries[0]!.itemIds).toEqual(['b']);
+    expect(h.itemMarks.map((m) => m.itemId)).toEqual(['b']);
+  });
+
+  it('emails nobody when every item is already terminal (full retry)', async () => {
+    const theJob = job({ items: [pendingItem('a', 'sent')] });
+    const h = jobHarness(theJob);
+    await runEmailForJob(theJob, h.deps);
+
+    expect(h.emails).toHaveLength(0);
+    expect(h.itemMarks).toHaveLength(0);
+    expect(h.queries).toHaveLength(0);
+  });
+
+  it('fails the job items (not the process) when the stored content is malformed', async () => {
+    const theJob = job({ content: { subject: 'only a subject' } });
+    const h = jobHarness(theJob);
+    await runEmailForJob(theJob, h.deps);
+
+    // Deterministic — a retry cannot fix it, so the items reach a terminal
+    // status instead of the job being left `processing` for the watchdog.
+    expect(h.emails).toHaveLength(0);
+    expect(h.itemMarks).toEqual([
+      { itemId: 'item-1', status: 'failed', err: 'invalid_email_content' },
+    ]);
+    expect(h.logs.error).toHaveLength(1);
+  });
+
+  it('throws (so BullMQ retries) when the decrypt fails', async () => {
+    const theJob = job();
+    const h = jobHarness(theJob, {
+      fetchDecryptedProfiles: async () => err(new UpstreamError('signals down', { code: 'X' })),
+    });
+    await expect(runEmailForJob(theJob, h.deps)).rejects.toThrow(/email decrypt failed/);
+    expect(h.emails).toHaveLength(0);
+  });
+
+  it('throws when a contact projection returns no contact block (#521 guard)', async () => {
+    const theJob = job();
+    const h = jobHarness(theJob, {
+      // A row with NO contact block at all — what an older Signals returns.
+      // `profileRow`'s default would supply one, so build it explicitly.
+      fetchDecryptedProfiles: async () =>
+        ok({
+          profiles: [
+            {
+              item_id: 'item-1',
+              item_network: 'blue_dot',
+              item_domain: 'seeker',
+              item_type: 'profile_1.0',
+              item_state: {},
+              created_at: '2026-08-01T00:00:00.000Z',
+              updated_at: '2026-08-01T00:00:00.000Z',
+            },
+          ],
+          skipped: [],
+        }),
+    });
+    await expect(runEmailForJob(theJob, h.deps)).rejects.toThrow(/#521/);
+    expect(h.emails).toHaveLength(0);
+  });
+
+  it('logs a skip and sends nothing when no item is owned', async () => {
+    const theJob = job();
+    const h = jobHarness(theJob, {
+      fetchDecryptedProfiles: async () => ok({ profiles: [], skipped: ['item-1'] }),
+    });
+    await runEmailForJob(theJob, h.deps);
+
+    expect(h.emails).toHaveLength(0);
+    expect(JSON.stringify(h.logs.warn)).toContain('no_resolvable_items');
+  });
+
+  it('throws when the email collaborators are not wired', async () => {
+    const theJob = job();
+    const h = jobHarness(theJob);
+    const deps: CampaignJobDeps = { ...h.deps };
+    delete deps.email;
+    await expect(runEmailForJob(theJob, deps)).rejects.toThrow(/not wired/);
+  });
+
+  it('never logs the recipient address or other contact PII', async () => {
+    const theJob = job();
+    const h = jobHarness(theJob);
+    await runEmailForJob(theJob, h.deps);
+    const serialized = JSON.stringify([...h.logs.info, ...h.logs.warn, ...h.logs.error]);
+    expect(serialized).not.toContain('asha@example.com');
+    expect(serialized).not.toContain('+910000000000');
+    expect(serialized).not.toContain('Asha');
   });
 });

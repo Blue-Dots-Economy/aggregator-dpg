@@ -75,6 +75,20 @@ export const ERR = {
     detail: 'The request asks for more items than a single campaign job allows.',
     hint: 'item_ids length (after de-dup) exceeded the channel cap (e.g. CAMPAIGN_EXPORT_MAX_ITEMS). Split the request or raise the cap.',
   },
+  CAMPAIGN_VOICE_TOO_MANY_ITEMS: {
+    code: 'CAMPAIGN_VOICE_TOO_MANY_ITEMS',
+    status: 400,
+    title: 'Too many items',
+    detail: 'The request asks for more items than a single voice campaign job allows.',
+    hint: 'item_ids length (after de-dup) exceeded CAMPAIGN_VOICE_MAX_ITEMS. Split the request or raise the cap.',
+  },
+  VOICE_ENQUEUE_FAILED: {
+    code: 'VOICE_ENQUEUE_FAILED',
+    status: 503,
+    title: 'Voice campaign could not be queued',
+    detail: 'The voice campaign request could not be queued for processing. Please retry shortly.',
+    hint: 'The BullMQ enqueue failed — most likely Redis is unreachable. Check REDIS_URL and the queue Redis. (Raya provider config lives on the worker and is not preflighted here.)',
+  },
   CAMPAIGN_RATE_LIMITED: {
     code: 'CAMPAIGN_RATE_LIMITED',
     status: 429,
@@ -96,6 +110,27 @@ export const ERR = {
     title: 'Job not accessible',
     detail: 'That campaign job does not belong to your organisation.',
     hint: 'getJob/getJobItems is tenant-scoped by signalstack_org_id. Per the contract spec §5 an unknown or other-org job id is a 403, not a 404.',
+  },
+  DUMP_NOT_AVAILABLE: {
+    code: 'DUMP_NOT_AVAILABLE',
+    status: 404,
+    title: 'Dump not available',
+    detail: 'The non-PII dump has not been published yet. Please retry later.',
+    hint: 'One or more of the three expected objects is missing under the configured key root. Either the signals-s3-export cron has not run in this environment yet, or CAMPAIGN_DUMP_PREFIX / CAMPAIGN_DUMP_INSTANCE_ID does not match what it writes. See response.error.fields.missing for the absent keys.',
+  },
+  DUMP_NOT_CONFIGURED: {
+    code: 'DUMP_NOT_CONFIGURED',
+    status: 503,
+    title: 'Dump download not configured',
+    detail: 'The non-PII dump download is not configured on this deployment.',
+    hint: 'CAMPAIGN_DUMP_INSTANCE_ID is unset, so the key root cannot be resolved. Set it to the Signals instance this deployment serves (e.g. blue_dot_up).',
+  },
+  DUMP_STORAGE_UNAVAILABLE: {
+    code: 'DUMP_STORAGE_UNAVAILABLE',
+    status: 503,
+    title: 'Storage unavailable',
+    detail: 'The dump could not be read from storage. Please retry shortly.',
+    hint: "An S3 HEAD or presign call failed on a transport error (not a missing object — those return 404 DUMP_NOT_AVAILABLE). Check S3_ENDPOINT / S3_PUBLIC_ENDPOINT, credentials, and bucket reachability. Two causes are NOT transient, so retrying will not clear them; the log line names which via `likely_cause`. S3_ACCESS_DENIED: the role lacks s3:ListBucket on the bucket, so a HEAD on a MISSING key returns 403 instead of 404 and an ordinary 'not published yet' cold start looks like an outage — infra/env.template requires that grant. S3_CREDENTIALS: presigning is local crypto, so a signDownloadUrl failure means missing or malformed credentials, not an S3 outage.",
   },
   CONSENT_REQUIRED: {
     code: 'CONSENT_REQUIRED',

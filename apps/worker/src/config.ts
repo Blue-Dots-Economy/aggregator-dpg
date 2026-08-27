@@ -167,6 +167,20 @@ const ConfigSchema = z.object({
    * treated as stalled by the watchdog and failed. Default 900 (15 min).
    */
   CAMPAIGN_STALL_SECONDS: z.coerce.number().int().positive().default(900),
+
+  // ─── Campaign voice channel (#577) ──────────────────────────────────────
+  /** Voice campaign provider (currently only `raya` is supported). */
+  CAMPAIGN_VOICE_PROVIDER: z.enum(['raya']).default('raya'),
+  /** Raya API base URL. */
+  RAYA_BASE_URL: z.string().url().default('https://v1.getraya.app/api'),
+  /** Raya API key (asserted lazily when the voice provider runs). */
+  RAYA_API_KEY: z.string().min(1).optional(),
+  /** HTTP timeout for Raya API calls (milliseconds). */
+  RAYA_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
+  /** Rate-limit window for Raya outbound calls (seconds). */
+  RAYA_EGRESS_WINDOW_SECONDS: z.coerce.number().int().positive().default(20),
+  /** Max Raya calls allowed per window. */
+  RAYA_EGRESS_MAX: z.coerce.number().int().positive().default(1),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

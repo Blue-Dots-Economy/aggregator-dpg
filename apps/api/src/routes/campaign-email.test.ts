@@ -9,6 +9,11 @@ import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
 import {
+  AggregatorStoreFake,
+  buildAggregator,
+  _setAggregatorStore,
+} from '../services/aggregator-store/index.js';
+import {
   InMemoryCampaignJobStore,
   _setCampaignJobStore,
 } from '../services/campaign-job-store/index.js';
@@ -44,6 +49,14 @@ describe('POST /v1/campaign/email', () => {
     store = new InMemoryCampaignJobStore();
     _setCampaignJobStore(store);
 
+    // The shared submit flow resolves `requested_by` from the aggregator (and
+    // requires it to be active), so it has to exist for any 2xx path.
+    const aggStore = new AggregatorStoreFake();
+    aggStore.seed([
+      buildAggregator({ id: 'agg-1', contactEmail: 'aggregator@org.example', status: 'active' }),
+    ]);
+    _setAggregatorStore(aggStore);
+
     _resetJwks();
     process.env.KEYCLOAK_URL = 'http://kc.local';
     process.env.KEYCLOAK_REALM = 'aggregator';
@@ -66,6 +79,7 @@ describe('POST /v1/campaign/email', () => {
   afterEach(async () => {
     await app?.close();
     _setAccessTokenVerifier(null);
+    _setAggregatorStore(null);
     _setCampaignJobStore(null);
   });
 
@@ -143,6 +157,27 @@ describe('POST /v1/campaign/email', () => {
     const jobs = await store.listJobs(ORG, { channel: 'email' });
     expect(jobs.ok && jobs.value.jobs[0]?.status).toBe('failed');
     expect(jobs.ok && jobs.value.jobs[0]?.errorReason).toBe('enqueue_failed');
+  });
+
+  it('returns 403 AGGREGATOR_INACTIVE when the requesting aggregator is not active', async () => {
+    // Inherited from the shared submit flow: all three channels refuse to
+    // create work for an aggregator that is no longer active.
+    const aggStore = new AggregatorStoreFake();
+    aggStore.seed([
+      buildAggregator({ id: 'agg-1', contactEmail: 'aggregator@org.example', status: 'inactive' }),
+    ]);
+    _setAggregatorStore(aggStore);
+    const res = await post({ item_ids: [VALID_UUID], content: CONTENT });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error.fields.reason).toBe('AGGREGATOR_INACTIVE');
+    expect(enqueueCampaignProcessMock).not.toHaveBeenCalled();
+  });
+
+  it('records the requester email as requested_by (audit trail, never a destination)', async () => {
+    const res = await post({ item_ids: [VALID_UUID], content: CONTENT });
+    expect(res.statusCode).toBe(202);
+    const proc = await store.getJobForProcessing(res.json().job_id);
+    expect(proc.ok && proc.value?.requestedBy).toBe('user@sanketika.in');
   });
 
   it('returns 400 UNKNOWN_PLACEHOLDER for a token outside the supported set', async () => {
@@ -315,6 +350,11 @@ describe('GET /v1/campaign/email/{job_id}', () => {
   beforeEach(async () => {
     store = new InMemoryCampaignJobStore();
     _setCampaignJobStore(store);
+    const aggStore = new AggregatorStoreFake();
+    aggStore.seed([
+      buildAggregator({ id: 'agg-1', contactEmail: 'aggregator@org.example', status: 'active' }),
+    ]);
+    _setAggregatorStore(aggStore);
     _resetJwks();
     process.env.KEYCLOAK_URL = 'http://kc.local';
     process.env.KEYCLOAK_REALM = 'aggregator';
@@ -335,6 +375,7 @@ describe('GET /v1/campaign/email/{job_id}', () => {
   afterEach(async () => {
     await app?.close();
     _setAccessTokenVerifier(null);
+    _setAggregatorStore(null);
     _setCampaignJobStore(null);
   });
 

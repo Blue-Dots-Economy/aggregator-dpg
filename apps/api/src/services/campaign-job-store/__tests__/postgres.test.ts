@@ -17,6 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 let results: unknown[] = [];
 let idx = 0;
 const sets: Array<Record<string, unknown>> = [];
+const inserted: Array<Record<string, unknown>[]> = [];
 
 function stub(): unknown {
   return new Proxy(function () {}, {
@@ -31,6 +32,12 @@ function stub(): unknown {
       if (prop === 'set') {
         return (v: Record<string, unknown>) => {
           sets.push(v);
+          return stub();
+        };
+      }
+      if (prop === 'values') {
+        return (v: Record<string, unknown> | Record<string, unknown>[]) => {
+          inserted.push(Array.isArray(v) ? v : [v]);
           return stub();
         };
       }
@@ -86,14 +93,56 @@ describe('PostgresCampaignJobStore', () => {
   beforeEach(() => {
     store = new PostgresCampaignJobStore();
     sets.length = 0;
+    inserted.length = 0;
   });
   afterEach(() => vi.clearAllMocks());
 
   it('createJob: inserts job + items and returns created:true', async () => {
-    queue([jobRow], undefined); // insert job -> [row]; insert items -> (ignored)
+    // insert job -> [row]; null-action items skip the dedup select, so the
+    // next queued result is the item insert's `.returning()`.
+    queue([jobRow], [{ itemId: 'a' }]);
     const r = await store.createJob(baseInput);
     expect(r.ok && r.value.created).toBe(true);
     expect(r.ok && r.value.job.id).toBe('job-1');
+  });
+
+  it('createJob: a non-null-action item already active elsewhere is inserted duplicate_active', async () => {
+    const input = {
+      ...baseInput,
+      items: [
+        { itemId: 'a', action: null },
+        { itemId: 'dup', action: 'voice_call' },
+      ],
+    };
+    queue(
+      [jobRow], // insert job
+      [{ itemId: 'dup' }], // dedup select: 'dup' already active elsewhere
+      [{ itemId: 'a' }, { itemId: 'dup' }], // insert items (onConflictDoNothing) -> both land, no race
+    );
+    const r = await store.createJob(input);
+    expect(r.ok && r.value.created).toBe(true);
+    // insert #1 is the job row; insert #2 is the item batch.
+    const itemValues = inserted[1]!;
+    expect(itemValues.find((v) => v.itemId === 'a')?.status).toBe('pending');
+    expect(itemValues.find((v) => v.itemId === 'dup')?.status).toBe('duplicate_active');
+  });
+
+  it('createJob: a race on the fresh insert reclassifies the item duplicate_active and retries', async () => {
+    const input = {
+      ...baseInput,
+      items: [{ itemId: 'raced', action: 'voice_call' }],
+    };
+    queue(
+      [jobRow], // insert job
+      [], // dedup select: nothing active yet (per our pre-check)
+      [], // insert items (onConflictDoNothing) -> conflicted, nothing returned (raced)
+      undefined, // retry insert as duplicate_active
+    );
+    const r = await store.createJob(input);
+    expect(r.ok && r.value.created).toBe(true);
+    // insert #1 = job row, insert #2 = the fresh attempt, insert #3 = the retry.
+    expect(inserted[2]![0]!.status).toBe('duplicate_active');
+    expect(inserted[2]![0]!.itemId).toBe('raced');
   });
 
   it('createJob: idempotency conflict returns the original job, created:false', async () => {
@@ -210,6 +259,53 @@ describe('PostgresCampaignJobStore', () => {
     expect(sets.some((s) => s.status === 'resolved')).toBe(true);
     expect(sets.some((s) => s.lastProgressAt instanceof Date)).toBe(true);
     expect(sets.some((s) => s.status === 'completed' && s.errorReason === 'done')).toBe(true);
+  });
+
+  it('markSubmitted: sets submitted + raya_batch_id (+ provider_ref when given)', async () => {
+    queue(undefined);
+    const r = await store.markSubmitted('job-1', 'a', {
+      providerBatchRef: 'batch-1',
+      providerRef: 'ref-1',
+    });
+    expect(r.ok).toBe(true);
+    expect(
+      // The Drizzle `.set()` payload uses the column-mapped field name
+      // (`rayaBatchId`, unchanged) — the store-contract `providerBatchRef`
+      // arg is mapped onto it by `markSubmitted`, not passed through verbatim.
+      sets.some(
+        (s) => s.status === 'submitted' && s.rayaBatchId === 'batch-1' && s.providerRef === 'ref-1',
+      ),
+    ).toBe(true);
+  });
+
+  it('markSubmitted: omits provider_ref from the update when not given', async () => {
+    queue(undefined);
+    await store.markSubmitted('job-1', 'a', { providerBatchRef: 'batch-2' });
+    const set = sets.at(-1)!;
+    expect(set.status).toBe('submitted');
+    expect('providerRef' in set).toBe(false);
+  });
+
+  it('setProviderResponse: writes the raw payload', async () => {
+    queue(undefined);
+    const payload = { batchId: 'batch-1', status: 'accepted' };
+    const r = await store.setProviderResponse('job-1', payload);
+    expect(r.ok).toBe(true);
+    expect(sets.some((s) => s.providerResponse === payload)).toBe(true);
+  });
+
+  it('markSubmitted: maps a thrown DB error to DB_UNAVAILABLE', async () => {
+    queue(Promise.reject(new Error('connection reset')));
+    const r = await store.markSubmitted('job-1', 'a', { providerBatchRef: 'batch-1' });
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.error.code).toBe('DB_UNAVAILABLE');
+  });
+
+  it('setProviderResponse: maps a thrown DB error to DB_UNAVAILABLE', async () => {
+    queue(Promise.reject(new Error('connection reset')));
+    const r = await store.setProviderResponse('job-1', { any: 'payload' });
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.error.code).toBe('DB_UNAVAILABLE');
   });
 
   it('rollUpStatus: derives + persists from counts', async () => {

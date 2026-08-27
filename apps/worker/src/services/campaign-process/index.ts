@@ -6,16 +6,14 @@
  * job `processing`, dispatches to the per-channel handler, writes per-item
  * terminal status as it goes, and rolls the job status up from the item counts.
  *
- * Two channels are implemented here: export (decrypt → CSV → private S3 →
- * email a short-lived pre-signed link) and email (#578: decrypt → render the
- * Markdown template → per-recipient send, item status per recipient). Voice
- * (#577) is a deliberate not-implemented stub on this same engine.
+ * The export channel is implemented here (decrypt → CSV → private S3 → email a
+ * short-lived pre-signed link). The voice (aggregator-dpg#577) and email
+ * (#578) channels are self-contained modules this dispatches to —
+ * `./voice.ts`'s `runVoiceForJob` and `./email.ts`'s `runEmailForJob`.
  *
  * Failure semantics: a transient/infra failure (decrypt err(), the #521
  * contact-block guard, an S3 or mail rejection) re-throws so BullMQ retries and
- * the job is left `processing` — never falsely marked terminal, except on the
- * final attempt, where the real reason is recorded rather than lost to the
- * watchdog's generic `stalled`. Per-item
+ * the job is left `processing` — never falsely marked terminal. Per-item
  * "not found / not owned" is a terminal item failure (not a job failure); the
  * roll-up turns a mix into `partially_failed`. Never logs PII.
  * Belongs to `@aggregator-dpg/worker`.
@@ -29,16 +27,16 @@ import type {
 } from '@aggregator-dpg/signalstack-writer/interface';
 import type { SendInput, SendOk, MailerResult } from '@aggregator-dpg/mailer/interface';
 import { buildContactExportCsv, buildDecryptedProfilesCsv } from '@aggregator-dpg/profile-csv';
-import { requiredContactFields, type ContactField } from '@aggregator-dpg/campaign-template';
-import { z } from 'zod';
 import type { SignedDownloadUrl } from '../../object-storage.js';
-import { TERMINAL_ITEM_STATUSES, TERMINAL_JOB_STATUSES } from '../campaign-job-client.js';
-import { sendCampaignEmails } from './email.js';
+import { TERMINAL_JOB_STATUSES } from '../campaign-job-client.js';
 import type {
   CampaignJobItemStatus,
   CampaignJobStatus,
+  MarkSubmittedArgs,
   ProcessingJob,
 } from '../campaign-job-client.js';
+import { runVoiceForJob, type VoiceCollaborators } from './voice.js';
+import { runEmailForJob, type EmailCollaborators } from './email.js';
 
 /** Minimal structured logger surface (satisfied by the worker's pino child). */
 export interface CampaignLogger {
@@ -55,6 +53,11 @@ export interface CampaignJobClient {
     itemId: string,
     status: CampaignJobItemStatus,
     reason?: string,
+    /**
+     * External id this item produced (email: the mailer's message id). The
+     * implementation has always accepted it; the port exposes it so a channel
+     * can actually record one.
+     */
     providerRef?: string,
   ): Promise<void>;
   heartbeat(jobId: string): Promise<void>;
@@ -64,22 +67,19 @@ export interface CampaignJobClient {
   setNotifiedAt(jobId: string): Promise<void>;
   /** Fails items still `pending` on a job that has run out of retries. */
   failPendingItems(jobId: string, errorReason: string): Promise<void>;
+  /** Voice: records that an item was submitted to the voice provider (sets `submitted` + `providerBatchRef`, persisted in the `raya_batch_id` column). */
+  markSubmitted(jobId: string, itemId: string, args: MarkSubmittedArgs): Promise<void>;
+  /** Voice: stores the raw provider create+start response on the job, for the campaign manager to render. */
+  setProviderResponse(jobId: string, response: unknown): Promise<void>;
 }
 
-/** Signals decrypt — the one collaborator every channel needs. */
-export type FetchDecryptedProfiles = (
-  q: SignalStackFetchDecryptedProfilesQuery,
-) => Promise<Result<SignalStackDecryptedProfiles, BaseError>>;
-
-/** Export-only collaborators (storage + the link notification). */
+/** Export collaborators (decrypt/storage/mail) — narrow so the job is trivially faked. */
 export interface ExportCollaborators {
+  fetchDecryptedProfiles: (
+    q: SignalStackFetchDecryptedProfilesQuery,
+  ) => Promise<Result<SignalStackDecryptedProfiles, BaseError>>;
   putObject: (key: string, body: Buffer, contentType: string) => Promise<void>;
   signDownloadUrl: (key: string) => Promise<SignedDownloadUrl>;
-  sendMail: (input: SendInput) => Promise<MailerResult<SendOk>>;
-}
-
-/** Email-only collaborators (the participant-facing mailer). */
-export interface EmailCollaborators {
   sendMail: (input: SendInput) => Promise<MailerResult<SendOk>>;
 }
 
@@ -95,16 +95,17 @@ export interface CampaignJobConfig {
   recipientMode: 'requester' | 'network_admin';
   /** Recipient used when `recipientMode` is `network_admin`. */
   networkAdminEmail?: string;
-  /** Recipients emailed in parallel per email job (`EMAIL_SEND_CONCURRENCY`). */
+  /** Recipients emailed in parallel within one email job (`EMAIL_SEND_CONCURRENCY`). */
   emailSendConcurrency: number;
 }
 
 export interface CampaignJobDeps {
   client: CampaignJobClient;
-  /** Shared by every channel — each one starts from an ownership-scoped decrypt. */
-  fetchDecryptedProfiles: FetchDecryptedProfiles;
   export: ExportCollaborators;
-  email: EmailCollaborators;
+  /** Voice-channel collaborators (decrypt + provider). Required only when `job.channel === 'voice'`. */
+  voice?: VoiceCollaborators;
+  /** Email-channel collaborators (decrypt + mailer). Required only when `job.channel === 'email'`. */
+  email?: EmailCollaborators;
   config: CampaignJobConfig;
   log: CampaignLogger;
   /** Retry position, so the final attempt can record a terminal failure. */
@@ -113,11 +114,15 @@ export interface CampaignJobDeps {
 
 const TERMINAL_JOB = new Set<CampaignJobStatus>(TERMINAL_JOB_STATUSES);
 
-/** `campaign_job.error_reason` is a bounded column; keep the head of the message. */
-function truncateReason(reason: string): string {
+/**
+ * Keeps the head of an error message bounded. Shared across channel
+ * handlers in this folder (export's job-level `error_reason`, voice's
+ * item-level `error_reason`, which can otherwise carry an entire raw
+ * provider response body).
+ */
+export function truncateReason(reason: string): string {
   return reason.length > 500 ? `${reason.slice(0, 497)}...` : reason;
 }
-const TERMINAL_ITEM = new Set<CampaignJobItemStatus>(TERMINAL_ITEM_STATUSES);
 
 /**
  * Runs one campaign job by id.
@@ -153,10 +158,11 @@ export async function runCampaignJob(jobId: string, deps: CampaignJobDeps): Prom
   try {
     if (job.channel === 'export') {
       await runExportForJob(job, deps);
+    } else if (job.channel === 'voice') {
+      await runVoiceForJob(job, deps);
     } else if (job.channel === 'email') {
       await runEmailForJob(job, deps);
     } else {
-      // The voice PR (#577) implements its channel on this same engine.
       throw new Error(`campaign channel not implemented: ${job.channel}`);
     }
     const status = await deps.client.rollUpStatus(jobId);
@@ -201,85 +207,50 @@ export async function runCampaignJob(jobId: string, deps: CampaignJobDeps): Prom
   }
 }
 
-/** Per-call decrypt options — the channels differ in projection and marking. */
-interface DecryptOptions {
-  /** Item ids to decrypt (the caller filters out anything already terminal). */
-  itemIds: string[];
-  /**
-   * Contact projection to request, or `null` for the `full` export projection
-   * (whole `item_state`, no contact block).
-   */
-  contact: ContactField[] | null;
-  /**
-   * Mark every decrypted item `resolved`. True for export, whose success
-   * terminal IS "decrypted into the CSV"; false for email, which acts after the
-   * decrypt and writes `sent`/`failed` per recipient instead.
-   */
-  markResolved: boolean;
-}
-
 /**
- * Decrypts one chunk of items, or throws.
- *
- * @throws {Error} On a transient upstream failure (so BullMQ retries), or when
- *   a contact projection comes back with no contact block — an older Signals
- *   that strips it would otherwise make every recipient look address-less and
- *   ship an all-empty export (cross-repo contract guard, Signals #521).
- */
-async function decryptChunk(
-  job: ProcessingJob,
-  deps: CampaignJobDeps,
-  options: DecryptOptions,
-  chunk: string[],
-): Promise<SignalStackDecryptedProfiles> {
-  const query: SignalStackFetchDecryptedProfilesQuery = {
-    actingOrgId: job.signalstackOrgId,
-    itemIds: chunk,
-    // contact-only projection: no item_state (fields:[]), just the contact
-    // fields this channel needs, with provenance (Signals #521). The `full`
-    // export projection omits both keys.
-    ...(options.contact ? { fields: [], contact: options.contact } : {}),
-    ...(job.requestId ? { requestId: job.requestId } : {}),
-  };
-  const result = await deps.fetchDecryptedProfiles(query);
-  if (!result.success) {
-    throw new Error(
-      `campaign ${job.channel} decrypt failed: ${result.error.code}: ${result.error.message}`,
-    );
-  }
-
-  const { profiles } = result.value;
-  const contactBlockMissing =
-    options.contact !== null &&
-    profiles.length > 0 &&
-    !profiles.some((p) => p.contact !== undefined);
-  if (contactBlockMissing) {
-    throw new Error(
-      `campaign ${job.channel} decrypt returned no contact block — Signals participant/decrypt predates #521`,
-    );
-  }
-  return result.value;
-}
-
-/**
- * Decrypts the requested items in chunks, marking unowned ids
- * `skipped_not_owned` (and resolved ones `resolved` when asked) while beating
+ * Decrypts the job's items in chunks, marking each resolved/failed and beating
  * the heartbeat per chunk. Re-throws on a transient decrypt failure or the #521
  * contact-block guard (so BullMQ retries). Returns the resolved profile rows.
  */
 async function decryptAndMarkItems(
   job: ProcessingJob,
   deps: CampaignJobDeps,
-  options: DecryptOptions,
+  contactOnly: boolean,
 ): Promise<SignalStackDecryptedProfileRow[]> {
+  const itemIds = job.items.map((i) => i.itemId);
   const resolvedRows: SignalStackDecryptedProfileRow[] = [];
 
-  for (const chunk of chunkArray(options.itemIds, deps.config.decryptChunk)) {
-    const { profiles, skipped } = await decryptChunk(job, deps, options, chunk);
+  for (const chunk of chunkArray(itemIds, deps.config.decryptChunk)) {
+    const query: SignalStackFetchDecryptedProfilesQuery = {
+      actingOrgId: job.signalstackOrgId,
+      itemIds: chunk,
+      // contact-only projection: no item_state (fields:[]), just the canonical
+      // contact fields with provenance (Signals #521). `full` omits `fields`.
+      ...(contactOnly ? { fields: [], contact: ['name', 'email', 'phone'] } : {}),
+      ...(job.requestId ? { requestId: job.requestId } : {}),
+    };
+    const result = await deps.export.fetchDecryptedProfiles(query);
+    if (!result.success) {
+      // Transient upstream failure — re-throw so BullMQ retries (items marked so
+      // far persist; forward-only marks keep them on retry).
+      throw new Error(
+        `campaign export decrypt failed: ${result.error.code}: ${result.error.message}`,
+      );
+    }
+    const { profiles, skipped } = result.value;
+
+    // Cross-repo contract guard (Signals #521): a contact projection that comes
+    // back with no contact block means an older Signals stripped it — fail loud
+    // rather than ship an all-empty export.
+    if (contactOnly && profiles.length > 0 && !profiles.some((p) => p.contact !== undefined)) {
+      throw new Error(
+        'campaign export decrypt returned no contact block — Signals participant/decrypt predates #521',
+      );
+    }
 
     for (const p of profiles) {
       resolvedRows.push(p);
-      if (options.markResolved) await deps.client.markItem(job.id, p.item_id, 'resolved');
+      await deps.client.markItem(job.id, p.item_id, 'resolved');
     }
     for (const missing of skipped) {
       // Not a failure: the org simply doesn't own this item, so it is skipped
@@ -291,137 +262,10 @@ async function decryptAndMarkItems(
   return resolvedRows;
 }
 
-/**
- * The email channel's `content` block, as persisted on the job row. Re-validated
- * here rather than trusted: the row outlives the request that wrote it, and a
- * malformed template must fail the job's items deterministically instead of
- * rendering something unintended into a participant's inbox.
- */
-const emailContentSchema = z.object({
-  subject: z.string().min(1),
-  body_markdown: z.string().min(1),
-  reply_to: z.string().optional(),
-});
-
-/**
- * Runs the email channel for a job: decrypt the still-pending recipients →
- * render the submitted template → send per recipient → per-item terminal status.
- *
- * Retry-safe by construction: only items that are NOT already terminal are
- * decrypted and sent, so a BullMQ retry (attempts: CAMPAIGN_EMAIL_ATTEMPTS)
- * re-sends to nobody already marked `sent`. That is what buys durability
- * without the `attempts: 1` compromise.
- */
-async function runEmailForJob(job: ProcessingJob, deps: CampaignJobDeps): Promise<void> {
-  const base = {
-    operation: 'campaign.email',
-    job_id: job.id,
-    org_id: job.signalstackOrgId,
-    requested: job.items.length,
-  };
-  const start = Date.now();
-
-  const parsed = emailContentSchema.safeParse(job.content);
-  if (!parsed.success) {
-    // Deterministic — a retry cannot fix it. Fail every item that is still
-    // actionable so the roll-up marks the job `failed` instead of leaving it
-    // `processing` for the watchdog to re-queue forever.
-    deps.log.error({
-      ...base,
-      status: 'failure',
-      step: 'content',
-      reason: 'invalid_email_content',
-      error: parsed.error.issues.map((i) => i.path.join('.')).join(','),
-    });
-    for (const item of job.items) {
-      if (!TERMINAL_ITEM.has(item.status)) {
-        await deps.client.markItem(job.id, item.itemId, 'failed', 'invalid_email_content');
-      }
-    }
-    return;
-  }
-  const content = parsed.data;
-
-  // Retry guard: an item already `sent` (or skipped/failed) is terminal — never
-  // decrypt it again, never email it again. This is deliberately NOT the
-  // job-level `notified_at` guard the export channel uses: export sends ONE
-  // message per job, so a job-level stamp is enough, whereas this channel sends
-  // one per recipient and needs per-recipient resolution — a job that got
-  // halfway through its recipients must resume, not be skipped wholesale.
-  const pending = job.items.filter((i) => !TERMINAL_ITEM.has(i.status));
-  if (pending.length === 0) {
-    deps.log.info({
-      ...base,
-      status: 'skipped',
-      reason: 'all_items_terminal',
-      latency_ms: Date.now() - start,
-    });
-    return;
-  }
-
-  // Decrypt only what the template needs: the recipient email is always
-  // required; name/phone only when a placeholder references them.
-  const contact: ContactField[] = [
-    ...new Set<ContactField>([
-      'email',
-      ...requiredContactFields(content.subject, content.body_markdown),
-    ]),
-  ];
-  const rows = await decryptAndMarkItems(job, deps, {
-    itemIds: pending.map((i) => i.itemId),
-    contact,
-    // `sent` is the email channel's only success write (per recipient, below),
-    // so the intermediate `resolved` mark would be a wasted write per item.
-    markResolved: false,
-  });
-
-  if (rows.length === 0) {
-    // Nothing owned to email; every id was marked `skipped_not_owned` above.
-    deps.log.warn({
-      ...base,
-      status: 'skipped',
-      reason: 'no_resolvable_items',
-      latency_ms: Date.now() - start,
-      sent: 0,
-    });
-    return;
-  }
-
-  const summary = await sendCampaignEmails(
-    rows,
-    {
-      subject: content.subject,
-      bodyMarkdown: content.body_markdown,
-      ...(content.reply_to ? { replyTo: content.reply_to } : {}),
-    },
-    {
-      sendMail: deps.email.sendMail,
-      concurrency: deps.config.emailSendConcurrency,
-      markRecipient: (itemId, status, detail) =>
-        deps.client.markItem(job.id, itemId, status, detail?.reason, detail?.providerRef),
-      log: deps.log,
-    },
-  );
-  await deps.client.heartbeat(job.id);
-
-  deps.log.info({
-    ...base,
-    status: summary.failed > 0 ? 'partial' : 'success',
-    latency_ms: Date.now() - start,
-    sent: summary.sent,
-    skipped_no_contact: summary.skippedNoContact,
-    failed: summary.failed,
-  });
-}
-
 /** Runs the export channel for a job: chunked decrypt → item marks → CSV → S3 → email. */
 async function runExportForJob(job: ProcessingJob, deps: CampaignJobDeps): Promise<void> {
   const contactOnly = deps.config.fieldSet === 'contact';
-  const resolvedRows = await decryptAndMarkItems(job, deps, {
-    itemIds: job.items.map((i) => i.itemId),
-    contact: contactOnly ? ['name', 'email', 'phone'] : null,
-    markResolved: true,
-  });
+  const resolvedRows = await decryptAndMarkItems(job, deps, contactOnly);
 
   const base = {
     operation: 'campaign.export',
@@ -500,8 +344,11 @@ function purposeOf(job: ProcessingJob): string | undefined {
   return p?.trim() ? p : undefined;
 }
 
-/** Splits an array into fixed-size chunks (never empty; last chunk may be short). */
-function chunkArray<T>(items: T[], size: number): T[][] {
+/**
+ * Splits an array into fixed-size chunks (never empty; last chunk may be
+ * short). Shared across channel handlers in this folder (export + voice).
+ */
+export function chunkArray<T>(items: T[], size: number): T[][] {
   if (items.length === 0) return [];
   const out: T[][] = [];
   for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));

@@ -9,7 +9,10 @@
  * persists a `campaign_job` (+ one `campaign_job_item` per id) and enqueues a
  * single `campaign-process` job carrying the job id. The decrypt → CSV → S3 →
  * email-link work runs in `apps/worker` (the `campaign` role) with BullMQ
- * retry, writing item + job status back.
+ * retry, writing item + job status back. The shared submit flow (auth →
+ * validate → rate-limit → cap → createJob → enqueue with enqueue-failure
+ * compensation → 202) lives in `../campaign/submit-job.ts`, parameterized here
+ * for the export channel.
  *
  * Auth is a Keycloak Bearer token scoped to the campaign-manager client; the
  * caller's Signals org id is the token's `signalstack_org_id` claim. The
@@ -22,14 +25,9 @@
  */
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { getAggregatorStore } from '../services/aggregator-store/index.js';
-import { getCampaignJobStore } from '../services/campaign-job-store/index.js';
-import { campaignEnvelopeSchema, dedupeItemIds } from '../campaign/envelope.js';
-import { requireCampaignAuth, requireOrgId } from '../campaign/auth.js';
-import { submitCampaignJob, readIdempotencyKey } from '../campaign/submit.js';
-import { consume } from '../services/rate-limiter/index.js';
+import { campaignEnvelopeSchema } from '../campaign/envelope.js';
+import { submitCampaignJob } from '../campaign/submit-job.js';
 import { config } from '../config.js';
-import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 
 /**
@@ -60,84 +58,22 @@ export async function registerCampaignExportRoutes(app: FastifyInstance): Promis
       },
     },
     async (req, reply) => {
-      const auth = await requireCampaignAuth(req);
-      const orgId = requireOrgId(auth);
-
-      // The requesting aggregator must be active (fail fast, and it supplies the
-      // fallback recipient email below).
-      const found = await getAggregatorStore().findById(auth.aggregatorId);
-      if (!found.ok || found.value?.status !== 'active') {
-        throw httpError('FORBIDDEN', {
-          detail: 'requesting aggregator is not active',
-          fields: { reason: 'AGGREGATOR_INACTIVE' },
-        });
-      }
-
-      // Delivery recipient: the requesting user's own verified token email,
-      // falling back to the aggregator's stored contact_email. Stored as
-      // requested_by (server-set — the caller can't redirect the export).
-      const recipientEmail = auth.email ?? found.value.contactEmail;
-      if (!recipientEmail) {
-        throw httpError('FORBIDDEN', {
-          detail:
-            'no recipient email — the token has no email claim and the aggregator has no contact_email',
-          fields: { reason: 'RECIPIENT_UNRESOLVED' },
-        });
-      }
-
-      const envelope = req.body as z.infer<typeof campaignEnvelopeSchema>;
-      const itemIds = dedupeItemIds(envelope.item_ids);
-      if (itemIds.length > config.CAMPAIGN_EXPORT_MAX_ITEMS) {
-        throw httpError('CAMPAIGN_TOO_MANY_ITEMS', {
-          fields: { max: config.CAMPAIGN_EXPORT_MAX_ITEMS, received: itemIds.length },
-        });
-      }
-
-      // Ingress rate-limit, per org. Fails open on a Redis blip (see consume).
-      const rl = await consume({
-        // Per-channel bucket: an export burst must not throttle email/voice.
-        namespace: 'campaign-submit-export',
-        key: orgId,
-        windowSeconds: config.CAMPAIGN_EXPORT_SUBMIT_WINDOW_SECONDS,
-        max: config.CAMPAIGN_EXPORT_SUBMIT_MAX,
-      });
-      if (!rl.allowed) {
-        reply.header('retry-after', String(rl.retryAfterSeconds));
-        throw httpError('CAMPAIGN_RATE_LIMITED', { fields: { retry_after: rl.retryAfterSeconds } });
-      }
-
-      const store = getCampaignJobStore();
-
-      // Per-org active-job cap.
-      const active = await store.countActiveJobs(orgId, 'export');
-      if (!active.ok) throw httpError('INTERNAL', { detail: 'could not read active job count' });
-      if (active.value >= config.CAMPAIGN_EXPORT_MAX_ACTIVE_PER_ORG) {
-        throw httpError('CAMPAIGN_ACTIVE_LIMIT', {
-          fields: { max: config.CAMPAIGN_EXPORT_MAX_ACTIVE_PER_ORG },
-        });
-      }
-
-      const idempotencyKey = readIdempotencyKey(req);
-      const jobId = await submitCampaignJob({
-        req,
-        store,
+      await submitCampaignJob(req, reply, {
         channel: 'export',
-        aggregatorId: auth.aggregatorId,
-        signalstackOrgId: orgId,
-        itemIds,
-        metadata: envelope.metadata,
-        content: envelope.content,
-        requestedBy: recipientEmail,
-        ...(idempotencyKey ? { idempotencyKey } : {}),
+        parseContent: (rawContent) => rawContent as Record<string, unknown>,
+        buildItem: (itemId) => ({ itemId, action: null }),
+        maxItems: config.CAMPAIGN_EXPORT_MAX_ITEMS,
+        maxItemsErrorCode: 'CAMPAIGN_TOO_MANY_ITEMS',
+        // Per-channel bucket: an export burst must not throttle email/voice.
+        rateLimitNamespace: 'campaign-submit-export',
+        submitWindowSeconds: config.CAMPAIGN_EXPORT_SUBMIT_WINDOW_SECONDS,
+        submitMax: config.CAMPAIGN_EXPORT_SUBMIT_MAX,
+        maxActivePerOrg: config.CAMPAIGN_EXPORT_MAX_ACTIVE_PER_ORG,
         attempts: config.CAMPAIGN_EXPORT_ATTEMPTS,
-        enqueueErrorCode: 'EXPORT_ENQUEUE_FAILED',
-      });
-
-      return reply.code(202).send({
-        status: 'queued' as const,
-        requested: itemIds.length,
-        job_id: jobId,
-        message:
+        enqueueFailedErrorCode: 'EXPORT_ENQUEUE_FAILED',
+        enqueueFailedFallbackMessage: 'failed to enqueue export',
+        logOperation: 'campaignExport.enqueue',
+        successMessage:
           'Export request submitted. A secure, time-limited download link will be emailed to your registered address once the export is ready.',
       });
     },

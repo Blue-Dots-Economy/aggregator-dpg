@@ -639,6 +639,8 @@ export const campaignJob = pgTable(
      * the recipient would get a second working link to the same PII.
      */
     notifiedAt: timestamp('notified_at', { withTimezone: true }),
+    // voice: raw create+start provider responses, captured for the campaign manager
+    providerResponse: jsonb('provider_response'),
   },
   (table) => [
     // Request idempotency — PER TENANT. A global unique key would let one org's

@@ -39,6 +39,7 @@ on:
           - none
           - upsdm
           - up-gzb
+          - ka-dhwd
           - onetac
 
 concurrency:
@@ -190,7 +191,7 @@ jobs:
 
       - name: Upload Trivy image SARIF
         if: always() && steps.scanref.outputs.ref != ''
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4
         with:
           sarif_file: trivy-image.sarif
           # Per-brand category: this workflow builds one image per network/brand,

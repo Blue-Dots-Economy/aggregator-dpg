@@ -54,7 +54,13 @@ jobs:
       contents: read
       security-events: write
       packages: read
-    uses: Blue-Dots-Economy/bluedots-automation/.github/workflows/security-scan.yml@d4a1481df0843abcf8140d8bb69ee5a0bed0615f  # main 2026-08-20
+    # Pinned to a full commit SHA (githubactions:S7637). `@feature` was a
+    # MUTABLE branch ref, so main was silently running whatever that branch
+    # happened to hold — and Sonar counts it as a vulnerability, which is what
+    # put main's Security Rating on New Code at C. This SHA is bluedots-automation
+    # `main`, which is the ref signals-dpg/docs/operations/security-scanning-a2-callers.md
+    # prescribes for callers; bump it deliberately when that workflow changes.
+    uses: Blue-Dots-Economy/bluedots-automation/.github/workflows/security-scan.yml@d4a1481df0843abcf8140d8bb69ee5a0bed0615f # main
     with:
       language: ts
       node-version: "24"   # matches engines.node (>=24) and ci.yml

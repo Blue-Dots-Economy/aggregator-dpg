@@ -2,8 +2,8 @@
  * `campaign-process` job processor (aggregator-dpg#579).
  *
  * Builds the real collaborators from the worker's environment (job DB client,
- * Signals client, S3, mailer) for every channel and delegates to the pure
- * `runCampaignJob` orchestrator, which dispatches on the job's channel. A missing Signals client (terminal misconfiguration) fails the
+ * Signals client, S3, mailer) and delegates to the pure `runCampaignJob`
+ * orchestrator. A missing Signals client (terminal misconfiguration) fails the
  * job so BullMQ surfaces it; any other collaborator rejection propagates so
  * BullMQ retries — except on the last attempt, where the orchestrator records
  * a terminal `failed` with the real reason instead of stranding the job in
@@ -14,6 +14,7 @@ import { getMailer } from '@aggregator-dpg/mailer';
 import { logger } from '../logger.js';
 import { config } from '../config.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
+import { getVoiceProvider } from '../services/voice-provider.js';
 import { putObject, signExportDownloadUrl } from '../object-storage.js';
 import * as jobClient from '../services/campaign-job-client.js';
 import { runCampaignJob } from '../services/campaign-process/index.js';
@@ -45,13 +46,25 @@ export async function processCampaignJob(
 
   await runCampaignJob(data.jobId, {
     client: jobClient,
-    fetchDecryptedProfiles: (q) => ss.fetchDecryptedProfiles(q),
     export: {
+      fetchDecryptedProfiles: (q) => ss.fetchDecryptedProfiles(q),
       putObject,
       signDownloadUrl: signExportDownloadUrl,
       sendMail: (input) => getMailer().send(input),
     },
+    voice: {
+      fetchDecryptedProfiles: (q) => ss.fetchDecryptedProfiles(q),
+      // A getter, not an eager call: this deps object is built for every
+      // campaign-process job regardless of channel, and getVoiceProvider()
+      // throws ConfigError when RAYA_API_KEY is unset. Deferring construction
+      // until the voice handler actually reads `.provider` means an
+      // export/email job never trips over a missing Raya key.
+      get provider() {
+        return getVoiceProvider();
+      },
+    },
     email: {
+      fetchDecryptedProfiles: (q) => ss.fetchDecryptedProfiles(q),
       sendMail: (input) => getMailer().send(input),
     },
     config: {

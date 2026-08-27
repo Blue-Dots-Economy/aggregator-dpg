@@ -269,6 +269,47 @@ describe('POST /v1/campaign/export', () => {
     expect(active.ok && active.value).toBe(0);
   });
 
+  // Reverse direction of the #692 auth split, asserted at the REAL route rather
+  // than only against the requireCampaignAuth helper: the campaign-manager
+  // SYSTEM token shares this client's azp, so nothing but the guard stops it
+  // reaching participant PII here. Two shapes, because they fail on different
+  // checks and a refactor could plausibly break one and not the other.
+  it('rejects the campaign-manager system token (correctly provisioned: no aggregator_id)', async () => {
+    _setAccessTokenVerifier(async (token) => {
+      if (token === 'good') {
+        return {
+          sub: 'sa-uuid',
+          azp: 'campaign-manager',
+          preferred_username: 'service-account-campaign-manager',
+        };
+      }
+      throw new Error('invalid');
+    });
+    const res = await post({ item_ids: [VALID_UUID] });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error.fields.reason).toBe('MISSING_AGGREGATOR_ID');
+  });
+
+  it('rejects a MISPROVISIONED system token that does carry org claims', async () => {
+    // The state a real realm was found in: org attributes set on the
+    // service-account user. Only the preferred_username guard stops this one.
+    _setAccessTokenVerifier(async (token) => {
+      if (token === 'good') {
+        return {
+          sub: 'sa-uuid',
+          azp: 'campaign-manager',
+          preferred_username: 'service-account-campaign-manager',
+          aggregator_id: 'agg-1',
+          signalstack_org_id: 'org_5d3b7fa4-x',
+        };
+      }
+      throw new Error('invalid');
+    });
+    const res = await post({ item_ids: [VALID_UUID] });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error.fields.reason).toBe('SYSTEM_TOKEN_NOT_PERMITTED');
+  });
+
   it('re-enqueues an idempotency replay whose job is still queued', async () => {
     const headers = { 'Idempotency-Key': 'replay-key-1' };
     const first = await post({ item_ids: [VALID_UUID] }, headers);

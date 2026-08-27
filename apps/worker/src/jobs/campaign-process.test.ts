@@ -26,7 +26,6 @@ vi.mock('../config.js', () => ({
     CAMPAIGN_EXPORT_FIELDS: 'contact',
     CAMPAIGN_EXPORT_RECIPIENT: 'network_admin',
     EXPORT_NETWORK_ADMIN_EMAIL: 'admin@network.example',
-    EMAIL_SEND_CONCURRENCY: 5,
   },
 }));
 
@@ -54,21 +53,12 @@ describe('processCampaignJob', () => {
     expect(deps.config.fieldSet).toBe('contact');
     expect(deps.config.recipientMode).toBe('network_admin');
     expect(deps.config.networkAdminEmail).toBe('admin@network.example');
-    expect(typeof deps.fetchDecryptedProfiles).toBe('function');
+    expect(typeof deps.export.fetchDecryptedProfiles).toBe('function');
     expect(typeof deps.client.getJobForProcessing).toBe('function');
-    // Both channels get their collaborators — the job dispatches on the row.
-    expect(typeof deps.export.putObject).toBe('function');
-    expect(typeof deps.email.sendMail).toBe('function');
-    expect(deps.config.emailSendConcurrency).toBe(5);
-  });
-
-  it('threads the BullMQ retry position through to the orchestrator', async () => {
-    getWriterMock.mockReturnValue({ fetchDecryptedProfiles: vi.fn() });
-    runCampaignJobMock.mockResolvedValue(undefined);
-
-    await processCampaignJob({ jobId: 'job-1' }, { attempt: 3, maxAttempts: 3 });
-
-    const [, deps] = runCampaignJobMock.mock.calls[0]!;
-    expect(deps.attempt).toEqual({ attempt: 3, maxAttempts: 3 });
+    expect(typeof deps.voice.fetchDecryptedProfiles).toBe('function');
+    // `provider` is a getter that defers to getVoiceProvider() — asserting the
+    // descriptor exists (without invoking it) avoids tripping the
+    // RAYA_API_KEY ConfigError this mocked config doesn't carry.
+    expect(Object.getOwnPropertyDescriptor(deps.voice, 'provider')?.get).toBeInstanceOf(Function);
   });
 });
