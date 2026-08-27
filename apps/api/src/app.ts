@@ -46,6 +46,7 @@ import { registerSupportRoutes } from './routes/support.js';
 import { registerCampaignExportRoutes } from './routes/campaign-export.js';
 import { registerCampaignVoiceRoutes } from './routes/campaign-voice.js';
 import { registerCampaignJobRoutes } from './routes/campaign-jobs.js';
+import { registerCampaignDumpRoutes } from './routes/campaign-dump.js';
 import { ERR } from './errors/codes.js';
 import { HttpError } from './errors/http-error.js';
 import { coerceToHttpError, toEnvelope, toLogPayload } from './errors/serialize.js';
@@ -180,7 +181,8 @@ export async function buildApp(): Promise<FastifyInstance> {
           { name: 'support', description: 'Authenticated contact-support form submission.' },
           {
             name: 'campaign',
-            description: 'Campaign integrations — participant PII export (#579).',
+            description:
+              'Campaign integrations — participant PII export (#579) and the non-PII dump download (#692).',
           },
         ],
       },
@@ -231,6 +233,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await registerCampaignJobRoutes(app, 'export');
   await registerCampaignVoiceRoutes(app);
   await registerCampaignJobRoutes(app, 'voice');
+  await registerCampaignDumpRoutes(app);
 
   app.setErrorHandler((rawErr, req, reply) => {
     // Fastify schema validation error — promote to a typed HttpError so the

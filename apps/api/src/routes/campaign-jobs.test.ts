@@ -194,4 +194,52 @@ describe('campaign job status endpoints', () => {
     const res = await app.inject({ method: 'GET', url: '/v1/campaign/export' });
     expect(res.statusCode).toBe(401);
   });
+
+  // Reverse direction of the #692 auth split at the REAL poll routes. The job
+  // list and detail are org-scoped reads of campaign data, so the system token
+  // must be refused here too — not just on the submit route.
+  it('GET / rejects the campaign-manager system token (403)', async () => {
+    _setAccessTokenVerifier(async (token) => {
+      if (token === 'good') {
+        return {
+          sub: 'sa-uuid',
+          azp: 'campaign-manager',
+          preferred_username: 'service-account-campaign-manager',
+          aggregator_id: 'agg-1',
+          signalstack_org_id: ORG,
+        };
+      }
+      throw new Error('invalid');
+    });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/campaign/export',
+      headers: { authorization: 'Bearer good' },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error.fields.reason).toBe('SYSTEM_TOKEN_NOT_PERMITTED');
+  });
+
+  it('GET /:job_id rejects the campaign-manager system token (403)', async () => {
+    const jobId = await seedJob(store, ORG, ['11111111-1111-1111-1111-111111111111']);
+    _setAccessTokenVerifier(async (token) => {
+      if (token === 'good') {
+        return {
+          sub: 'sa-uuid',
+          azp: 'campaign-manager',
+          preferred_username: 'service-account-campaign-manager',
+          aggregator_id: 'agg-1',
+          signalstack_org_id: ORG,
+        };
+      }
+      throw new Error('invalid');
+    });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/campaign/export/${jobId}`,
+      headers: { authorization: 'Bearer good' },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error.fields.reason).toBe('SYSTEM_TOKEN_NOT_PERMITTED');
+  });
 });

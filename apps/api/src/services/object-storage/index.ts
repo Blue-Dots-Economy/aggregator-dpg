@@ -31,11 +31,22 @@ import { config } from '../../config.js';
 let cachedInternalClient: S3Client | null = null;
 let cachedPresignerClient: S3Client | null = null;
 
+/** Bound the TCP-connect phase so a black-holed endpoint fails fast. */
+const S3_CONNECTION_TIMEOUT_MS = 5_000;
+/** Total attempts per request (1 initial + retries) using the SDK's backoff. */
+const S3_MAX_ATTEMPTS = 3;
+
 function buildClient(endpoint: string | undefined): S3Client {
   return new S3Client({
     region: config.S3_REGION,
     ...(endpoint ? { endpoint } : {}),
     forcePathStyle: config.S3_FORCE_PATH_STYLE,
+    // Explicit retry + connect timeout per error-handling.md. Only the connect
+    // phase is bounded — not a request/body timeout — so a large streaming
+    // GetObject download is never aborted mid-stream. Mirrors
+    // apps/worker/src/object-storage.ts so the two agree.
+    maxAttempts: S3_MAX_ATTEMPTS,
+    requestHandler: { connectionTimeout: S3_CONNECTION_TIMEOUT_MS },
     ...(config.S3_ACCESS_KEY_ID && config.S3_SECRET_ACCESS_KEY
       ? {
           credentials: {
@@ -109,6 +120,13 @@ export async function signBulkUploadUrl(opts: {
 export interface ObjectHead {
   etag: string;
   contentLength: number;
+  /**
+   * S3 `LastModified`. Absent only if S3 omits it. The non-PII dump route
+   * reports this per object: the exporter overwrites the three keys in place
+   * with no cross-object atomicity, so these timestamps are how a consumer
+   * detects that it has caught a run mid-flight.
+   */
+  lastModified?: Date;
 }
 
 /**
@@ -126,6 +144,7 @@ export async function headObject(key: string): Promise<ObjectHead | null> {
     return {
       etag: result.ETag.replaceAll('"', ''),
       contentLength: typeof result.ContentLength === 'number' ? result.ContentLength : 0,
+      ...(result.LastModified ? { lastModified: result.LastModified } : {}),
     };
   } catch (err: unknown) {
     const code = typeof err === 'object' && err !== null && 'name' in err ? String(err.name) : '';
@@ -176,6 +195,36 @@ export async function signErrorsCsvDownloadUrl(key: string): Promise<SignedDownl
     expiresIn: config.BULK_UPLOAD_URL_TTL_SECONDS,
   });
   const expiresAt = new Date(Date.now() + config.BULK_UPLOAD_URL_TTL_SECONDS * 1000).toISOString();
+  return { url, key, expiresAt };
+}
+
+/**
+ * Issues a pre-signed GET URL for an arbitrary object key.
+ *
+ * The generic counterpart to the artefact-specific presigners above: the
+ * non-PII dump route (#692) signs keys it derives from config rather than from
+ * a stored row, so it needs an explicit TTL and no baked-in content headers.
+ * Signed against the PUBLIC endpoint client — the campaign manager is outside
+ * the cluster, and a pre-signed URL encodes the host it was signed for.
+ *
+ * @param key - The S3 object key to grant GET access to.
+ * @param opts.ttlSeconds - URL lifetime in seconds.
+ * @param opts.contentType - Optional response Content-Type override.
+ * @param opts.contentDisposition - Optional response Content-Disposition.
+ * @returns The signed URL with its key and ISO 8601 expiry.
+ */
+export async function signDownloadUrl(
+  key: string,
+  opts: { ttlSeconds: number; contentType?: string; contentDisposition?: string },
+): Promise<SignedDownloadUrl> {
+  const command = new GetObjectCommand({
+    Bucket: config.S3_BUCKET,
+    Key: key,
+    ...(opts.contentType ? { ResponseContentType: opts.contentType } : {}),
+    ...(opts.contentDisposition ? { ResponseContentDisposition: opts.contentDisposition } : {}),
+  });
+  const url = await getSignedUrl(getPresignerClient(), command, { expiresIn: opts.ttlSeconds });
+  const expiresAt = new Date(Date.now() + opts.ttlSeconds * 1000).toISOString();
   return { url, key, expiresAt };
 }
 
