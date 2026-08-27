@@ -128,3 +128,20 @@ updates:
       docker:
         patterns: ["*"]
         update-types: ["minor", "patch"]
+
+    ignore:
+      # Hold base-image bumps that cross a RELEASE CHANNEL. signals-dpg took
+      # exactly this after the dhi.io registry config reached main and the first
+      # two docker PRs it produced (signals-dpg#618, #619) both crossed one.
+      #
+      # node: even majors are LTS. 24 is Active LTS to 2028-04-30; 26 only
+      # becomes LTS on 2026-10-28. A major here also has to move all 8 FROM
+      # lines plus ci.yml's node-version and engines together, so it is a
+      # deliberate PR rather than a bump. Patches/minors on 24 still land.
+      - dependency-name: "dhi.io/node"
+        update-types: ["version-update:semver-major"]
+      # busybox has no stable/mainline split, so only the major is held — it is
+      # the tiny non-root shim in the keycloak image and a major is worth a
+      # deliberate look rather than an automatic merge.
+      - dependency-name: "dhi.io/busybox"
+        update-types: ["version-update:semver-major"]

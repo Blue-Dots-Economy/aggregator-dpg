@@ -39,6 +39,7 @@ on:
           - none
           - upsdm
           - up-gzb
+          - ka-dhwd
           - onetac
 
 concurrency:
