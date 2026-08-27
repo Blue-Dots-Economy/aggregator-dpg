@@ -87,15 +87,31 @@ export function placeholderValues(contact: {
   email?: string | null;
   phone?: string | null;
 }): PlaceholderValues {
-  const name = contact.name?.trim() ?? '';
+  const name = stripControlChars(contact.name?.trim() ?? '');
   const parts = name.split(/\s+/).filter(Boolean);
   return {
     name,
     first_name: parts[0] ?? '',
     last_name: parts.slice(1).join(' '),
-    email: contact.email ?? '',
-    phone: contact.phone ?? '',
+    email: stripControlChars(contact.email ?? ''),
+    phone: stripControlChars(contact.phone ?? ''),
   };
+}
+
+/**
+ * Removes ASCII control characters from a participant-derived value.
+ *
+ * The subject line is inserted into a mail header, where a stray CR/LF would be
+ * a header-injection surface; the mail library sanitises too, but a value that
+ * can never legitimately contain a control character should not carry one this
+ * far. Applied to every placeholder value, so the body is covered as well.
+ *
+ * @param value - The raw stored value.
+ * @returns The value with control characters removed.
+ */
+function stripControlChars(value: string): string {
+   
+  return value.replace(/[\u0000-\u001f\u007f]/g, '');
 }
 
 /**

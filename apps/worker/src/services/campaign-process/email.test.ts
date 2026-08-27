@@ -47,6 +47,7 @@ interface Harness {
   sends: SendInput[];
   marks: Array<{ itemId: string; status: string; reason?: string; ref?: string }>;
   maxInFlight: () => number;
+  heartbeats: () => number;
 }
 
 function harness(over: Partial<Pick<EmailSendDeps, 'sendMail' | 'concurrency'>> = {}): Harness {
@@ -54,6 +55,7 @@ function harness(over: Partial<Pick<EmailSendDeps, 'sendMail' | 'concurrency'>> 
   const marks: Harness['marks'] = [];
   let inFlight = 0;
   let maxInFlight = 0;
+  let heartbeats = 0;
 
   const deps: EmailSendDeps = {
     sendMail: async (input): Promise<MailerResult<SendOk>> => {
@@ -66,6 +68,9 @@ function harness(over: Partial<Pick<EmailSendDeps, 'sendMail' | 'concurrency'>> 
       return { ok: true, value: { messageId: `msg-${sends.length}` } };
     },
     concurrency: 5,
+    heartbeat: async () => {
+      heartbeats += 1;
+    },
     markRecipient: async (itemId, status, detail) => {
       marks.push({
         itemId,
@@ -77,7 +82,7 @@ function harness(over: Partial<Pick<EmailSendDeps, 'sendMail' | 'concurrency'>> 
     log: { info: () => undefined },
     ...over,
   };
-  return { deps, sends, marks, maxInFlight: () => maxInFlight };
+  return { deps, sends, marks, maxInFlight: () => maxInFlight, heartbeats: () => heartbeats };
 }
 
 describe('sendCampaignEmails', () => {
@@ -85,7 +90,7 @@ describe('sendCampaignEmails', () => {
     const h = harness();
     const summary = await sendCampaignEmails([row('a')], TEMPLATE, h.deps);
 
-    expect(summary).toEqual({ sent: 1, skippedNoContact: 0, failed: 0 });
+    expect(summary).toEqual({ sent: 1, skippedNoContact: 0, failed: 0, transient: [] });
     expect(h.sends[0]!.to).toBe('a@example.com');
     expect(h.sends[0]!.subject).toBe('Hi Asha');
     expect(h.marks).toEqual([{ itemId: 'a', status: 'sent', ref: 'msg-1' }]);
@@ -108,32 +113,84 @@ describe('sendCampaignEmails', () => {
       TEMPLATE,
       h.deps,
     );
-    expect(summary).toEqual({ sent: 0, skippedNoContact: 1, failed: 0 });
+    expect(summary).toEqual({ sent: 0, skippedNoContact: 1, failed: 0, transient: [] });
     expect(h.sends).toHaveLength(0);
     expect(h.marks).toEqual([
       { itemId: 'a', status: 'skipped_no_contact', reason: 'no_email_address' },
     ]);
   });
 
-  it('records a send failure and keeps going through the rest of the batch', async () => {
+  it('records a permanently rejected address as failed, with the code only', async () => {
     let call = 0;
     const h = harness({
       sendMail: async (): Promise<MailerResult<SendOk>> => {
         call += 1;
         return call === 1
-          ? { ok: false, error: { code: 'TRANSPORT_FAILED', message: 'smtp refused' } }
+          ? {
+              ok: false,
+              // The provider's message quotes the address — exactly what must
+              // not reach the item row or the poll API.
+              error: {
+                code: 'INVALID_RECIPIENT',
+                message: '550 5.1.1 <a@example.com>: Recipient address rejected',
+              },
+            }
           : { ok: true, value: { messageId: 'msg-ok' } };
       },
     });
     const summary = await sendCampaignEmails([row('a'), row('b')], TEMPLATE, h.deps);
 
-    expect(summary).toEqual({ sent: 1, skippedNoContact: 0, failed: 1 });
-    expect(h.marks).toContainEqual({
-      itemId: 'a',
-      status: 'failed',
-      reason: 'TRANSPORT_FAILED: smtp refused',
-    });
+    expect(summary.sent).toBe(1);
+    expect(summary.failed).toBe(1);
+    expect(summary.transient).toEqual([]);
+    // Only the typed code is persisted — no address, no provider text.
+    expect(h.marks).toContainEqual({ itemId: 'a', status: 'failed', reason: 'INVALID_RECIPIENT' });
+    const persisted = JSON.stringify(h.marks);
+    expect(persisted).not.toContain('a@example.com');
+    expect(persisted).not.toContain('550');
     expect(h.marks).toContainEqual({ itemId: 'b', status: 'sent', ref: 'msg-ok' });
+  });
+
+  it('reports a transient send failure without writing it to the item row', async () => {
+    let call = 0;
+    const h = harness({
+      sendMail: async (): Promise<MailerResult<SendOk>> => {
+        call += 1;
+        return call === 1
+          ? { ok: false, error: { code: 'TRANSPORT_FAILED', message: 'smtp timeout' } }
+          : { ok: true, value: { messageId: 'msg-ok' } };
+      },
+    });
+    const summary = await sendCampaignEmails([row('a'), row('b')], TEMPLATE, h.deps);
+
+    // `failed` is terminal, so a transient error must NOT be written here — the
+    // caller decides from the job's retry position.
+    expect(summary.transient).toEqual([{ itemId: 'a', code: 'TRANSPORT_FAILED' }]);
+    expect(summary.failed).toBe(0);
+    expect(h.marks.map((m) => m.itemId)).toEqual(['b']);
+  });
+
+  it('records a render failure terminally rather than burning every attempt', async () => {
+    const h = harness();
+    const summary = await sendCampaignEmails(
+      [row('a')],
+      // A body that makes the Markdown renderer throw is hard to construct, so
+      // drive the same branch by making the template itself invalid input.
+      { subject: 'S', bodyMarkdown: null as unknown as string },
+      h.deps,
+    );
+    expect(summary.failed).toBe(1);
+    expect(h.marks).toEqual([{ itemId: 'a', status: 'failed', reason: 'render_failed' }]);
+    expect(h.sends).toHaveLength(0);
+  });
+
+  it('beats the heartbeat during a long batch', async () => {
+    const h = harness({ concurrency: 4 });
+    const rows = Array.from({ length: 50 }, (_, i) => row(`r${i}`));
+    await sendCampaignEmails(rows, TEMPLATE, h.deps);
+    // 50 recipients at one heartbeat per 25 → the watchdog sees progress
+    // instead of flagging an actively-sending job `stalled`.
+    expect(h.heartbeats()).toBeGreaterThanOrEqual(2);
   });
 
   it('never exceeds the configured send concurrency', async () => {
@@ -151,6 +208,7 @@ describe('sendCampaignEmails', () => {
       sent: 0,
       skippedNoContact: 0,
       failed: 0,
+      transient: [],
     });
     expect(h.sends).toHaveLength(0);
   });
@@ -211,7 +269,11 @@ interface JobHarness {
   logs: { info: object[]; warn: object[]; error: object[] };
 }
 
-function jobHarness(theJob: ProcessingJob, over: Partial<EmailCollaborators> = {}): JobHarness {
+function jobHarness(
+  theJob: ProcessingJob,
+  over: Partial<EmailCollaborators> = {},
+  attempt?: CampaignJobDeps['attempt'],
+): JobHarness {
   const emails: SendInput[] = [];
   const itemMarks: JobHarness['itemMarks'] = [];
   const queries: SignalStackFetchDecryptedProfilesQuery[] = [];
@@ -267,6 +329,7 @@ function jobHarness(theJob: ProcessingJob, over: Partial<EmailCollaborators> = {
       warn: (o) => logs.warn.push(o),
       error: (o) => logs.error.push(o),
     },
+    ...(attempt ? { attempt } : {}),
   };
   return { deps, emails, itemMarks, queries, heartbeats: () => heartbeats, logs };
 }
@@ -327,6 +390,98 @@ describe('runEmailForJob', () => {
     });
   });
 
+  it('scopes the decrypt to the job org (cross-org PII guard)', async () => {
+    const theJob = job({ signalstackOrgId: 'org-scoped-check' });
+    const h = jobHarness(theJob);
+    await runEmailForJob(theJob, h.deps);
+    // A regression that dropped or hardcoded this would leak another org's PII.
+    expect(h.queries[0]!.actingOrgId).toBe('org-scoped-check');
+  });
+
+  it('fails an id Signals returns in neither profiles nor skipped', async () => {
+    const theJob = job({ items: [pendingItem('a'), pendingItem('ghost')] });
+    const h = jobHarness(theJob, {
+      // `ghost` is simply absent from both lists.
+      fetchDecryptedProfiles: async () => ok({ profiles: [profileRow('a')], skipped: [] }),
+    });
+    await runEmailForJob(theJob, h.deps);
+
+    // Left `pending` it would strand the job until the watchdog stamped a
+    // generic `stalled`, with no per-item reason.
+    expect(h.itemMarks).toContainEqual({
+      itemId: 'ghost',
+      status: 'failed',
+      err: 'decrypt_missing',
+    });
+  });
+
+  it('retries the job on a transient send error while attempts remain', async () => {
+    const theJob = job({ items: [pendingItem('a'), pendingItem('b')] });
+    let call = 0;
+    const h = jobHarness(
+      theJob,
+      {
+        sendMail: async (): Promise<MailerResult<SendOk>> => {
+          call += 1;
+          return call === 1
+            ? { ok: true, value: { messageId: 'msg-1' } }
+            : { ok: false, error: { code: 'TRANSPORT_FAILED', message: 'smtp timeout' } };
+        },
+      },
+      { attempt: 1, maxAttempts: 3 },
+    );
+
+    await expect(runEmailForJob(theJob, h.deps)).rejects.toThrow(/transiently/);
+    // The successful recipient is still recorded, so the retry skips it...
+    expect(h.itemMarks).toContainEqual({ itemId: 'a', status: 'sent', ref: 'msg-1' });
+    // ...and the transient one is left open rather than terminally `failed`.
+    expect(h.itemMarks.some((m) => m.itemId === 'b')).toBe(false);
+  });
+
+  it('records a transient send error terminally on the final attempt', async () => {
+    const theJob = job({ items: [pendingItem('a')] });
+    const h = jobHarness(
+      theJob,
+      {
+        sendMail: async (): Promise<MailerResult<SendOk>> => ({
+          ok: false,
+          error: { code: 'TRANSPORT_FAILED', message: 'smtp timeout' },
+        }),
+      },
+      { attempt: 3, maxAttempts: 3 },
+    );
+
+    await runEmailForJob(theJob, h.deps);
+    // Out of retries: record the typed code so the caller sees a reason rather
+    // than an item stuck `pending`.
+    expect(h.itemMarks).toContainEqual({ itemId: 'a', status: 'failed', err: 'TRANSPORT_FAILED' });
+  });
+
+  it('fails the items when the stored content has an unknown placeholder', async () => {
+    // The API rejects these at submit; the worker re-asserts the same guarantee
+    // against the persisted row rather than rendering a literal token.
+    const theJob = job({ content: { subject: 'Hi {{city}}', body_markdown: 'b' } });
+    const h = jobHarness(theJob);
+    await runEmailForJob(theJob, h.deps);
+
+    expect(h.emails).toHaveLength(0);
+    expect(h.itemMarks).toEqual([
+      { itemId: 'item-1', status: 'failed', err: 'invalid_email_content' },
+    ]);
+  });
+
+  it('fails the items when the stored reply_to is not an email (canonical schema)', async () => {
+    const theJob = job({
+      content: { subject: 'S', body_markdown: 'b', reply_to: 'not-an-email' },
+    });
+    const h = jobHarness(theJob);
+    await runEmailForJob(theJob, h.deps);
+    expect(h.emails).toHaveLength(0);
+    expect(h.itemMarks).toEqual([
+      { itemId: 'item-1', status: 'failed', err: 'invalid_email_content' },
+    ]);
+  });
+
   it('marks an unowned id skipped_not_owned without emailing it', async () => {
     const theJob = job({ items: [pendingItem('a'), pendingItem('b')] });
     const h = jobHarness(theJob, {
@@ -342,7 +497,7 @@ describe('runEmailForJob', () => {
     });
   });
 
-  it('records a per-recipient send failure without aborting the batch', async () => {
+  it('records a per-recipient send failure without aborting the batch (last attempt)', async () => {
     const theJob = job({ items: [pendingItem('a'), pendingItem('b')] });
     let call = 0;
     const h = jobHarness(theJob, {
@@ -356,11 +511,10 @@ describe('runEmailForJob', () => {
     await runEmailForJob(theJob, h.deps);
 
     expect(h.itemMarks.filter((m) => m.status === 'sent')).toHaveLength(1);
-    expect(h.itemMarks).toContainEqual({
-      itemId: 'b',
-      status: 'failed',
-      err: 'TRANSPORT_FAILED: smtp refused',
-    });
+    // No retry position injected ⇒ treated as the last attempt, so the failure
+    // is recorded terminally — with the typed code only, never the provider's
+    // message (which routinely quotes the address).
+    expect(h.itemMarks).toContainEqual({ itemId: 'b', status: 'failed', err: 'TRANSPORT_FAILED' });
   });
 
   it('never re-emails an item already sent when the job is retried', async () => {

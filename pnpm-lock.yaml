@@ -454,6 +454,9 @@ importers:
       sanitize-html:
         specifier: ^2.14.0
         version: 2.17.7
+      zod:
+        specifier: ^3.24.0
+        version: 3.25.76
     devDependencies:
       '@aggregator-dpg/tsconfig':
         specifier: workspace:*

@@ -1,34 +1,19 @@
 /**
- * Email campaign content schema and placeholder validation.
+ * Email campaign content validation at the API boundary.
  *
- * Defines the shape of the email channel's `content` block — the only part of
- * the shared campaign envelope that varies by channel — plus the fail-closed
- * placeholder check that runs before any job row is created.
+ * The schema itself is shared with the worker
+ * (`@aggregator-dpg/campaign-template/content`) so both sides of the channel
+ * assert the same thing; this module adds the submit-time placeholder check,
+ * which only the API can do usefully — it must fail the request before a job
+ * row exists.
  *
  * @module @aggregator-dpg/api
  */
-import { z } from 'zod';
 import { unknownPlaceholders } from '@aggregator-dpg/campaign-template';
+import { emailContentSchema, type EmailContent } from '@aggregator-dpg/campaign-template/content';
 import { httpError } from '../errors/http-error.js';
 
-/**
- * Schema for the email campaign request content.
- *
- * Subject and Markdown body are required and length-bounded; `reply_to` is the
- * only caller-settable header (the `From` address is always the aggregator's
- * configured sender). Rejects unknown top-level keys via `.strict()`, so a
- * misspelled field is a client error rather than a silently ignored one.
- */
-export const emailContentSchema = z
-  .object({
-    subject: z.string().trim().min(1).max(200),
-    body_markdown: z.string().min(1).max(20000),
-    reply_to: z.string().email().optional(),
-  })
-  .strict();
-
-/** Inferred type from {@link emailContentSchema}. */
-export type EmailContent = z.infer<typeof emailContentSchema>;
+export { emailContentSchema, type EmailContent };
 
 /**
  * Validates the envelope's raw `content` as an email message.

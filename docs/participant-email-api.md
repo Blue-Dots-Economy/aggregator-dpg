@@ -205,13 +205,13 @@ returns `403` (never a `404` that would confirm the id exists).
 
 **Per-item statuses**
 
-| Status               | Meaning                                                                      |
-| -------------------- | ---------------------------------------------------------------------------- |
-| `pending`            | Not yet acted on (job still queued/processing).                              |
-| `sent`               | The mailer accepted the message; `provider_ref` holds its message id.        |
-| `skipped_no_contact` | The participant has no email address on file. Not a failure.                 |
-| `skipped_not_owned`  | The caller's org does not own this item. Not a failure.                      |
-| `failed`             | The send was attempted and the mailer rejected it (`error_reason` says why). |
+| Status               | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `pending`            | Not yet acted on (job still queued/processing).                                                                                                                                                                                                                                                                                                                                                                          |
+| `sent`               | The mailer accepted the message; `provider_ref` holds its message id.                                                                                                                                                                                                                                                                                                                                                    |
+| `skipped_no_contact` | The participant has no email address on file. Not a failure.                                                                                                                                                                                                                                                                                                                                                             |
+| `skipped_not_owned`  | The caller's org does not own this item. Not a failure.                                                                                                                                                                                                                                                                                                                                                                  |
+| `failed`             | The send was attempted and the mailer rejected it, the template could not be rendered, or Signals did not account for the id. `error_reason` carries a **fixed code** — `INVALID_RECIPIENT`, `TRANSPORT_FAILED`, `AUTH_FAILED`, `render_failed`, `decrypt_missing` or `invalid_email_content`. Never the provider's own message: that routinely quotes the rejected address, and this field is returned by the poll API. |
 
 **Job status** is derived from those counts, never stored as a counter:
 `processing` while any item is pending, then `completed` (no failures — skips are
@@ -296,7 +296,13 @@ mechanism. Instead:
 - Basic formatting — **bold**, paragraphs / blank-line spacing, bulleted lists,
   and links — renders correctly in email clients from the generated HTML.
 - Rendering + sanitising live in `packages/campaign-template` (a Markdown renderer
-  plus an HTML sanitiser), isolated from the route and the worker.
+  plus an HTML sanitiser), isolated from the route and the worker. The `content`
+  **schema** lives there too (`/content`), so the API's submit-time validation
+  and the worker's re-validation of the persisted row assert exactly the same
+  thing — including the placeholder allow-list, which the worker re-checks
+  before rendering.
+- A template that cannot be rendered is treated as deterministic: the recipient
+  is recorded `failed`/`render_failed` rather than retried three times.
 
 ---
 
@@ -332,25 +338,46 @@ config knobs, item `action` and error codes.
    **scoped to the acting organisation** so only owned participants resolve
    (unowned ids → `skipped_not_owned`). Only the contact fields the message uses
    are requested, in `CAMPAIGN_DECRYPT_CHUNK`-sized chunks with a heartbeat per
-   chunk.
+   chunk. Each chunk is reconciled against what came back: an id Signals returns
+   in neither list is recorded `failed`/`decrypt_missing` rather than left
+   `pending`, so every item always reaches a terminal status.
 9. **Render** the Markdown → sanitised HTML once.
 10. **Per recipient:** resolve the email (none → `skipped_no_contact`); substitute
     placeholders; send via the aggregator's mailer (SES/SMTP) with
     `EMAIL_SEND_CONCURRENCY` in flight; write the item's terminal status —
-    `sent` (+ the mailer message id as `provider_ref`) or `failed` (+ reason). A
-    per-recipient failure never aborts the rest of the batch.
+    `sent` (+ the mailer message id as `provider_ref`) or `failed` (+ a fixed
+    code). A per-recipient failure never aborts the rest of the batch. The
+    watchdog heartbeat also fires periodically **during** the loop, so a long
+    batch at bounded concurrency is not false-flagged `stalled` while emails are
+    actively going out.
 11. Roll the job status up from the item counts. Structured logs carry counts and
     item ids only — **no personal data is logged**.
 
 ### Retries and duplicate sends
 
 The job retries like every other campaign job (`CAMPAIGN_EMAIL_ATTEMPTS`,
-default 3, exponential backoff) — it is **not** `attempts: 1`. Duplicate sends
-are prevented by the **per-item terminal-status guard** instead: an item already
-`sent` (or skipped/failed) is terminal, so a retried job neither decrypts nor
-re-emails it, and the item write is forward-only in the store. That gives
-durability against a transient decrypt/Redis/mailer blip **and** no duplicate
-emails, rather than trading one for the other.
+default 3, exponential backoff) — it is **not** `attempts: 1`. An item already
+`sent` is terminal, so a retried job neither decrypts nor re-emails it, and the
+item write is forward-only in the store.
+
+**A per-recipient send failure is classified before anything is written:**
+
+| Mailer outcome                     | What happens                                                                                                                                                                                                               |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `INVALID_RECIPIENT`                | Permanent — the address itself is the problem. Recorded `failed` immediately; no retry could help.                                                                                                                         |
+| `TRANSPORT_FAILED` / `AUTH_FAILED` | Transient. **Not** written to the item row while attempts remain: the job throws after the batch finishes, so BullMQ retries it for exactly the recipients still open. On the final attempt the code is recorded `failed`. |
+
+That ordering matters: `failed` is a terminal status, so writing it on attempt 1
+would lose a recipient to a one-second transport blip. Throwing _after_ the loop
+(rather than from inside it) means every recipient that did succeed is recorded
+`sent` first and is therefore excluded from the retry.
+
+**Delivery is at-least-once, per recipient.** The mailer send and the `sent`
+status write are two steps; a crash — or a failed status write — between them
+leaves the item open and the retry sends again. Neither SMTP nor SES offers an
+idempotency key that would close that window, so it is documented rather than
+claimed away. The window is small and the alternative (never retrying) loses
+recipients outright.
 
 Two failure modes are deliberately distinguished:
 
@@ -391,12 +418,13 @@ worker process — all channels), plus the mail transport
   batch, and a skip never makes the job `partial`.
 - Per-recipient outcomes are reported to the caller via the poll endpoint,
   including the mailer's message id for a successful send.
-- A retried job never re-emails a recipient already `sent`. Note the converse:
-  an item recorded `failed` is terminal too, so a later retry of the same job
-  does not re-attempt it. That is deliberate — a mailer error can mean
-  "delivered but not acknowledged", so re-attempting risks the duplicate this
-  channel is built to avoid. The caller sees the `failed` item in the poll
-  output and can submit a fresh job for those ids.
+- A retried job never re-emails a recipient already `sent` — verified live: a
+  4-recipient job that hit a transport error retried twice and the successful
+  recipient's mail was sent exactly once.
+- A transport-level failure is retried while attempts remain, and only recorded
+  `failed` once they run out (§7).
+- No `error_reason` or log line ever carries a recipient address or the mail
+  provider's own message.
 - The message is rendered on the server; the campaign-manager never receives any
   email address or other personal data.
 - A campaign-manager token cannot reach any other aggregator endpoint, and no

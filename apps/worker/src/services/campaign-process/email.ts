@@ -8,13 +8,17 @@
  * status. Structured the way `voice.ts` is: `index.ts` owns the job lifecycle
  * and dispatches here on `job.channel`.
  *
- * Retry-safe by construction rather than by suppressing retries: items already
- * in a terminal status are excluded from the decrypt request entirely, so a
- * BullMQ retry (`CAMPAIGN_EMAIL_ATTEMPTS`, default 3) re-emails nobody already
- * marked `sent`. This is deliberately NOT the job-level `notified_at` guard the
- * export channel uses — export sends ONE message per job, so a job-level stamp
- * suffices, whereas this channel sends one per recipient and a job that got
- * halfway through must resume rather than be skipped wholesale.
+ * Delivery is **at-least-once, per recipient**. Items already in a terminal
+ * status are excluded from the decrypt request entirely, so a BullMQ retry
+ * (`CAMPAIGN_EMAIL_ATTEMPTS`, default 3) re-emails nobody already marked
+ * `sent` — but the mailer send and the `sent` write are two steps, so a crash
+ * (or a failed status write) between them leaves the item open and the retry
+ * sends again. SMTP and SES offer no idempotency key to close that window, so
+ * it is accepted and documented rather than hidden. This is deliberately NOT
+ * the job-level `notified_at` guard the export channel uses — export sends ONE
+ * message per job, so a job-level stamp suffices, whereas this channel sends
+ * one per recipient and a job that got halfway through must resume rather than
+ * be skipped wholesale.
  *
  * Unlike the export and voice channels this one does not mark decrypted items
  * `resolved`: `sent` is its only success write, so the intermediate mark would
@@ -23,7 +27,6 @@
  * Never logs PII — the per-recipient trace carries the item id and status only,
  * never the resolved address. Belongs to `@aggregator-dpg/worker`.
  */
-import { z } from 'zod';
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import type {
@@ -35,8 +38,10 @@ import type { SendInput, SendOk, MailerResult } from '@aggregator-dpg/mailer/int
 import {
   placeholderValues,
   requiredContactFields,
+  unknownPlaceholders,
   type ContactField,
 } from '@aggregator-dpg/campaign-template';
+import { emailContentSchema, type EmailContent } from '@aggregator-dpg/campaign-template/content';
 import { renderEmail } from '@aggregator-dpg/campaign-template/render';
 import { TERMINAL_ITEM_STATUSES, type ProcessingJob } from '../campaign-job-client.js';
 import { chunkArray, type CampaignJobDeps } from './index.js';
@@ -48,19 +53,6 @@ export interface EmailCollaborators {
   ) => Promise<Result<SignalStackDecryptedProfiles, BaseError>>;
   sendMail: (input: SendInput) => Promise<MailerResult<SendOk>>;
 }
-
-/**
- * The email channel's `content` block as persisted on the job row.
- *
- * Re-validated here rather than trusted: the row outlives the request that
- * wrote it, and a malformed template must fail the job's items deterministically
- * instead of rendering something unintended into a participant's inbox.
- */
-const emailContentSchema = z.object({
-  subject: z.string().min(1),
-  body_markdown: z.string().min(1),
-  reply_to: z.string().optional(),
-});
 
 /** The message the caller submitted (the job row's `content` block). */
 export interface EmailTemplate {
@@ -92,7 +84,10 @@ export async function runEmailForJob(job: ProcessingJob, deps: CampaignJobDeps):
   const start = Date.now();
 
   const parsed = emailContentSchema.safeParse(job.content);
-  if (!parsed.success) {
+  const unknownTokens = parsed.success
+    ? unknownPlaceholders(parsed.data.subject, parsed.data.body_markdown)
+    : [];
+  if (!parsed.success || unknownTokens.length > 0) {
     // Deterministic — a retry cannot fix it. Fail every item that is still
     // actionable so the roll-up marks the job `failed` instead of leaving it
     // `processing` for the watchdog to re-queue forever.
@@ -101,7 +96,9 @@ export async function runEmailForJob(job: ProcessingJob, deps: CampaignJobDeps):
       status: 'failure',
       step: 'content',
       reason: 'invalid_email_content',
-      error: parsed.error.issues.map((i) => i.path.join('.')).join(','),
+      error: parsed.success
+        ? `unknown_placeholders:${unknownTokens.join(',')}`
+        : parsed.error.issues.map((i) => i.path.join('.')).join(','),
     });
     for (const item of job.items) {
       if (!TERMINAL_ITEM_STATUSES.includes(item.status)) {
@@ -154,18 +151,57 @@ export async function runEmailForJob(job: ProcessingJob, deps: CampaignJobDeps):
       concurrency: deps.config.emailSendConcurrency,
       markRecipient: (itemId, status, detail) =>
         deps.client.markItem(job.id, itemId, status, detail?.reason, detail?.providerRef),
+      // A long batch at bounded concurrency can otherwise exceed
+      // CAMPAIGN_STALL_SECONDS while emails are actively going out, and the
+      // watchdog would flag a healthy job `stalled` mid-flight.
+      heartbeat: () => deps.client.heartbeat(job.id),
       log: deps.log,
     },
   );
   await deps.client.heartbeat(job.id);
 
+  // A transient send error is NOT written terminal while attempts remain:
+  // marking it `failed` on attempt 1 would lose that recipient to a one-second
+  // transport blip, since `failed` is terminal and the retry skips it. Throwing
+  // instead re-runs the job for exactly the items still open — recipients
+  // already `sent` are excluded by the terminal guard above.
+  // Unknown retry position is treated as the LAST attempt here — the opposite
+  // of the job-level guard in `index.ts`, deliberately: marking a job terminal
+  // early abandons work, whereas NOT recording a per-item outcome strands that
+  // item `pending` with no reason. The job processor always injects `attempt`,
+  // so this only bites a caller that forgot to.
+  const attempt = deps.attempt;
+  const isFinalAttempt = attempt === undefined || attempt.attempt >= attempt.maxAttempts;
+  if (summary.transient.length > 0 && !isFinalAttempt) {
+    deps.log.warn({
+      ...base,
+      status: 'failure',
+      reason: 'transient_send_errors',
+      latency_ms: Date.now() - start,
+      sent: summary.sent,
+      transient: summary.transient.length,
+      attempt: attempt?.attempt,
+      max_attempts: attempt?.maxAttempts,
+    });
+    throw new Error(
+      `campaign email: ${summary.transient.length} recipient(s) failed transiently, retrying the job`,
+    );
+  }
+
+  // Out of attempts (or an unknown retry position): record them terminally with
+  // the typed code so the caller sees a reason instead of a stranded item.
+  for (const t of summary.transient) {
+    await deps.client.markItem(job.id, t.itemId, 'failed', t.code);
+  }
+
+  const failed = summary.failed + summary.transient.length;
   deps.log.info({
     ...base,
-    status: summary.failed > 0 ? 'partial' : 'success',
+    status: failed > 0 ? 'partial' : 'success',
     latency_ms: Date.now() - start,
     sent: summary.sent,
     skipped_no_contact: summary.skippedNoContact,
-    failed: summary.failed,
+    failed,
   });
 }
 
@@ -192,7 +228,7 @@ async function decryptEmailItems(
   job: ProcessingJob,
   deps: CampaignJobDeps,
   email: EmailCollaborators,
-  content: { subject: string; body_markdown: string },
+  content: EmailContent,
   openItemIds: string[],
 ): Promise<SignalStackDecryptedProfileRow[]> {
   const contact: ContactField[] = [
@@ -234,6 +270,18 @@ async function decryptEmailItems(
       // (and never leaked). Skips don't make the job `partial`.
       await deps.client.markItem(job.id, missing, 'skipped_not_owned', 'not_owned_by_org');
     }
+
+    // Every requested id must come back in exactly one of the two lists. An id
+    // in neither would otherwise stay `pending` forever: the job never rolls up
+    // terminal, and ~15 min later the watchdog stamps a generic `stalled` with
+    // no per-item reason. Account for it explicitly instead.
+    const accounted = new Set([...profiles.map((p) => p.item_id), ...skipped]);
+    for (const id of chunk) {
+      if (!accounted.has(id)) {
+        await deps.client.markItem(job.id, id, 'failed', 'decrypt_missing');
+      }
+    }
+
     await deps.client.heartbeat(job.id);
   }
   return resolvedRows;
@@ -242,11 +290,23 @@ async function decryptEmailItems(
 /** Per-recipient outcome the caller persists as the item's terminal status. */
 export type EmailRecipientStatus = 'sent' | 'skipped_no_contact' | 'failed';
 
+/**
+ * Mailer error codes that will never succeed for this recipient however many
+ * times we try — the address itself is the problem. Everything else (transport,
+ * auth) is treated as transient and left for the job's next attempt.
+ */
+const PERMANENT_SEND_ERRORS: ReadonlySet<string> = new Set(['INVALID_RECIPIENT']);
+
+/** How many recipients to send between watchdog heartbeats inside the loop. */
+const HEARTBEAT_EVERY = 25;
+
 /** Injected collaborators — narrow types so the loop is trivially faked. */
 export interface EmailSendDeps {
   sendMail: (input: SendInput) => Promise<MailerResult<SendOk>>;
   /** How many recipients to send in parallel (`EMAIL_SEND_CONCURRENCY`). */
   concurrency: number;
+  /** Beats the job's watchdog heartbeat periodically during a long batch. */
+  heartbeat?: () => Promise<void>;
   /**
    * Records one recipient's terminal outcome. `providerRef` is the mailer's
    * message id, present only on `sent`.
@@ -263,7 +323,14 @@ export interface EmailSendDeps {
 export interface EmailSendSummary {
   sent: number;
   skippedNoContact: number;
+  /** Recipients whose failure is terminal — the address will never work. */
   failed: number;
+  /**
+   * Recipients whose send failed transiently. Deliberately NOT written to the
+   * item row here: the caller decides, from the job's retry position, whether
+   * to retry the job or record them `failed`.
+   */
+  transient: Array<{ itemId: string; code: string }>;
 }
 
 /**
@@ -283,7 +350,8 @@ export async function sendCampaignEmails(
   template: EmailTemplate,
   deps: EmailSendDeps,
 ): Promise<EmailSendSummary> {
-  const summary: EmailSendSummary = { sent: 0, skippedNoContact: 0, failed: 0 };
+  const summary: EmailSendSummary = { sent: 0, skippedNoContact: 0, failed: 0, transient: [] };
+  let done = 0;
 
   await mapWithConcurrency([...rows], deps.concurrency, async (profile) => {
     const email = profile.contact?.email?.value ?? '';
@@ -300,11 +368,24 @@ export async function sendCampaignEmails(
         email: profile.contact?.email?.value ?? null,
         phone: profile.contact?.phone?.value ?? null,
       });
-      const rendered = renderEmail({
-        subject: template.subject,
-        bodyMarkdown: template.bodyMarkdown,
-        values,
-      });
+      let rendered;
+      try {
+        rendered = renderEmail({
+          subject: template.subject,
+          bodyMarkdown: template.bodyMarkdown,
+          values,
+        });
+      } catch {
+        // Deterministic: the same template will fail the same way on a retry,
+        // so record it terminally rather than burning every attempt. The
+        // exception itself is not persisted — it can quote the template.
+        summary.failed += 1;
+        status = 'failed';
+        await deps.markRecipient(profile.item_id, status, { reason: 'render_failed' });
+        deps.log.info({ operation: 'campaign.email.recipient', item_id: profile.item_id, status });
+        return;
+      }
+
       const res = await deps.sendMail({
         to: email,
         subject: rendered.subject,
@@ -316,17 +397,28 @@ export async function sendCampaignEmails(
         summary.sent += 1;
         status = 'sent';
         await deps.markRecipient(profile.item_id, status, { providerRef: res.value.messageId });
-      } else {
+      } else if (PERMANENT_SEND_ERRORS.has(res.error.code)) {
+        // Only the typed code is persisted. The provider's message routinely
+        // quotes the rejected address (`550 5.1.1 <someone@example.com> ...`),
+        // and this reason is returned by the poll API, which must never carry
+        // a recipient address.
         summary.failed += 1;
         status = 'failed';
-        await deps.markRecipient(profile.item_id, status, {
-          reason: `${res.error.code}: ${res.error.message}`,
-        });
+        await deps.markRecipient(profile.item_id, status, { reason: res.error.code });
+      } else {
+        // Transient: leave the item open and let the caller decide (see
+        // EmailSendSummary.transient).
+        summary.transient.push({ itemId: profile.item_id, code: res.error.code });
+        status = 'failed';
       }
     }
 
-    // Per-recipient trace — item_id + status only, never the resolved email.
+    // Per-recipient trace — item_id + status only, never the resolved email
+    // and never the provider's message.
     deps.log.info({ operation: 'campaign.email.recipient', item_id: profile.item_id, status });
+
+    done += 1;
+    if (deps.heartbeat && done % HEARTBEAT_EVERY === 0) await deps.heartbeat();
   });
 
   return summary;

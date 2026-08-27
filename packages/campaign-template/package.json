@@ -11,6 +11,10 @@
     "./render": {
       "import": "./dist/render.js",
       "types": "./dist/render.d.ts"
+    },
+    "./content": {
+      "import": "./dist/content.js",
+      "types": "./dist/content.d.ts"
     }
   },
   "scripts": {
@@ -21,7 +25,8 @@
   },
   "dependencies": {
     "marked": "^14.1.4",
-    "sanitize-html": "^2.14.0"
+    "sanitize-html": "^2.14.0",
+    "zod": "^3.24.0"
   },
   "devDependencies": {
     "@aggregator-dpg/tsconfig": "workspace:*",
