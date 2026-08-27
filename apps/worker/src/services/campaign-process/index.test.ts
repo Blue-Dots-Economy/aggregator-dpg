@@ -35,7 +35,7 @@ function job(over: Partial<ProcessingJob> = {}): ProcessingJob {
     requestedBy: 'user@org.example',
     requestId: null,
     notifiedAt: null,
-    items: [{ itemId: 'item-1', action: null, status: 'pending' }],
+    items: [{ itemId: 'item-1', action: null, status: 'pending', rayaBatchId: null }],
     ...over,
   };
 }
@@ -111,6 +111,10 @@ function harness(
           }
         }
       },
+      // Not exercised by the export-channel tests in this file — see
+      // campaign-process/voice.test.ts for coverage of these two writers.
+      markSubmitted: async () => undefined,
+      setProviderResponse: async () => undefined,
       rollUpStatus: async () => {
         const counts = {
           total: 0,
@@ -191,8 +195,8 @@ describe('runCampaignJob (export channel)', () => {
     const h = harness(
       job({
         items: [
-          { itemId: 'a', action: null, status: 'pending' },
-          { itemId: 'b', action: null, status: 'pending' },
+          { itemId: 'a', action: null, status: 'pending', rayaBatchId: null },
+          { itemId: 'b', action: null, status: 'pending', rayaBatchId: null },
         ],
       }),
       {
@@ -214,9 +218,12 @@ describe('runCampaignJob (export channel)', () => {
   });
 
   it('completes with no email when every item is unowned (all skipped)', async () => {
-    const h = harness(job({ items: [{ itemId: 'a', action: null, status: 'pending' }] }), {
-      fetchDecryptedProfiles: async () => ok({ profiles: [], skipped: ['a'] }),
-    });
+    const h = harness(
+      job({ items: [{ itemId: 'a', action: null, status: 'pending', rayaBatchId: null }] }),
+      {
+        fetchDecryptedProfiles: async () => ok({ profiles: [], skipped: ['a'] }),
+      },
+    );
     await runCampaignJob('job-1', h.deps);
     // Nothing was owned, so nothing was exported — but the handler ran
     // correctly, so this is `completed` with counts telling the real story,

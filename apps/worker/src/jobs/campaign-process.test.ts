@@ -55,5 +55,10 @@ describe('processCampaignJob', () => {
     expect(deps.config.networkAdminEmail).toBe('admin@network.example');
     expect(typeof deps.export.fetchDecryptedProfiles).toBe('function');
     expect(typeof deps.client.getJobForProcessing).toBe('function');
+    expect(typeof deps.voice.fetchDecryptedProfiles).toBe('function');
+    // `provider` is a getter that defers to getVoiceProvider() — asserting the
+    // descriptor exists (without invoking it) avoids tripping the
+    // RAYA_API_KEY ConfigError this mocked config doesn't carry.
+    expect(Object.getOwnPropertyDescriptor(deps.voice, 'provider')?.get).toBeInstanceOf(Function);
   });
 });

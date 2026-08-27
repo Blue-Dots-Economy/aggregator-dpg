@@ -67,6 +67,14 @@ export interface ProcessingJobItem {
   itemId: string;
   action: string | null;
   status: CampaignJobItemStatus;
+  /**
+   * Voice: the Raya batch id this item was submitted under, if any. Written
+   * atomically with `status: 'submitted'` by {@link markSubmitted} — its
+   * presence is the retry-safety signal the voice handler checks before
+   * dispatching, so a resumed job never creates a second batch at the
+   * provider.
+   */
+  rayaBatchId: string | null;
 }
 
 /** Args for {@link markSubmitted}. */
@@ -140,7 +148,12 @@ export async function getJobForProcessing(jobId: string): Promise<ProcessingJob 
     requestedBy: row.requestedBy,
     requestId: row.requestId,
     notifiedAt: row.notifiedAt,
-    items: items.map((i) => ({ itemId: i.itemId, action: i.action, status: i.status })),
+    items: items.map((i) => ({
+      itemId: i.itemId,
+      action: i.action,
+      status: i.status,
+      rayaBatchId: i.rayaBatchId,
+    })),
   };
 }
 

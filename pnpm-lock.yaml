@@ -353,6 +353,9 @@ importers:
       '@aggregator-dpg/signalstack-writer':
         specifier: workspace:*
         version: link:../../packages/signalstack-writer
+      '@aggregator-dpg/voice-provider':
+        specifier: workspace:*
+        version: link:../../packages/voice-provider
       '@aws-sdk/client-s3':
         specifier: ^3.1116.0
         version: 3.1116.0
