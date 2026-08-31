@@ -45,6 +45,7 @@
     "submitting": "Submitting…",
     "validation_error_title": "Please fix the highlighted fields",
     "page_title": "Aggregator Registration",
+    "owner_page_title": "Register as aggregator owner",
     "tab_coordinator": "Register as Coordinator",
     "tab_org": "Register Organisation",
     "org_selector_label": "Organisation",

@@ -4,56 +4,49 @@ import { type JSX } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import type { RJSFSchema } from '@rjsf/utils';
-import { BlueDotsLogo } from '../../../components/ui/BlueDotsLogo';
-import { BrandPanel } from '../../../components/login/BrandPanel';
-import { I } from '../../../icons';
+import { BlueDotsLogo } from '../../../../components/ui/BlueDotsLogo';
+import { BrandPanel } from '../../../../components/login/BrandPanel';
+import { I } from '../../../../icons';
 import { useTranslations } from 'next-intl';
-import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
-import { CoordinatorRegisterForm } from './CoordinatorRegisterForm';
-import type { ConsentDocContent } from '../../../components/consent/consent-types';
+import {
+  useAggregatorConfig,
+  DEFAULT_AGGREGATOR_CONFIG,
+} from '../../../../hooks/useAggregatorConfig';
+import { OrgRegisterForm } from '../OrgRegisterForm';
+import type { ConsentDocContent } from '../../../../components/consent/consent-types';
 
-export interface RegisterViewProps {
+export interface OwnerRegisterViewProps {
+  /** Org-registration JSON Schema loaded by the owner server route. */
   schema: RJSFSchema;
+  /** RJSF UI schema for the org form. */
   uiSchema: Record<string, unknown>;
   /**
-   * True when `ORG_HIERARCHY_ENABLED` is on — the coordinator form then shows
-   * the required parent-org selector. Owner/organisation registration is no
-   * longer a tab here; it lives on the `/register/owner` deep link (#619).
+   * Versioned Terms/Privacy content for the org audience. `null` when
+   * `loadConsentConfig` failed — the widget degrades to plain text.
    */
-  orgHierarchyEnabled?: boolean;
-  /**
-   * Versioned Terms/Privacy content for the coordinator (aggregator) form.
-   * Forwarded to {@link CoordinatorRegisterForm} as `consentContent`, which
-   * flattens it via `toConsentDocs` for the blocking `ConsentGate`.
-   * `null` when `loadConsentConfig` failed — the form then surfaces an error
-   * on submit instead of opening an empty gate.
-   */
-  aggregatorConsentContent?: ConsentDocContent | null;
+  orgConsentContent?: ConsentDocContent | null;
 }
 
 /**
- * Public coordinator registration page: brand panel + header + the single
- * coordinator form.
+ * Owner (organisation) registration page reached only via the `/register/owner`
+ * deep link (#619) — not linked from the public `/register` page. Reuses the
+ * same brand-panel chrome as {@link RegisterView} and renders
+ * {@link OrgRegisterForm}. The route that renders this view has already
+ * asserted the org-hierarchy flag and the presence of the org schema, so this
+ * view assumes the owner flow is live.
  *
- * Owner (organisation) registration used to be a second tab here; as of #619 it
- * is removed from the public page and served only via the `/register/owner`
- * deep link. The `orgHierarchyEnabled` flag now only toggles the coordinator
- * form's parent-org selector — there are no tabs.
- *
- * @param props - Coordinator schema/UI schema, the org-hierarchy flag (for the
- *   org selector), and the aggregator consent content.
- * @returns The registration page body.
+ * @param props - The org schema/UI schema and org consent content.
+ * @returns The owner registration page body.
  */
-export function RegisterView({
+export function OwnerRegisterView({
   schema,
   uiSchema,
-  orgHierarchyEnabled = false,
-  aggregatorConsentContent,
-}: RegisterViewProps): JSX.Element {
+  orgConsentContent,
+}: OwnerRegisterViewProps): JSX.Element {
   const t = useTranslations('register');
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
   const brand = cfg.brand.short_name;
-  const headingTitle = (schema.title as string | undefined) ?? 'Aggregator Registration';
+  const headingTitle = (schema.title as string | undefined) ?? t('owner_page_title');
 
   return (
     <div className="h-screen w-full flex overflow-hidden">
@@ -113,17 +106,12 @@ export function RegisterView({
           </h1>
           <p className="text-[14px] text-ink-500 mt-2">{t('heading_tagline')}</p>
 
-          <CoordinatorRegisterForm
+          <OrgRegisterForm
             schema={schema}
             uiSchema={uiSchema}
-            orgHierarchyEnabled={orgHierarchyEnabled}
-            {...(aggregatorConsentContent ? { consentContent: aggregatorConsentContent } : {})}
+            {...(orgConsentContent ? { consentContent: orgConsentContent } : {})}
           />
 
-          {/* Once the blocking ConsentGate closes, nothing else on this page
-              links to the read-only /privacy or /terms pages (§4.1's
-              LegalDocumentView) — reuses the existing consent.*_link copy
-              rather than adding new strings, since the words are identical. */}
           <div className="mt-8 flex items-center justify-center gap-3 text-[12.5px] text-ink-500">
             <Link href="/privacy" className="underline-offset-2 hover:text-ink-900 hover:underline">
               {t('consent.privacy_link')}
