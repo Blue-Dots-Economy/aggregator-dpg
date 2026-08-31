@@ -419,6 +419,37 @@ export const ERR = {
     hint: 'Coordinator submit/approval against an org whose status != active (spec §6.2 re-validate).',
   },
 
+  // ── Coordinator invites (#700) ────────────────────────────────────────────
+  INVITE_INVALID: {
+    code: 'INVITE_INVALID',
+    status: 400,
+    title: 'Invalid invite',
+    detail: 'This invitation link is not valid. Ask your organisation owner for a fresh invite.',
+    hint: 'invite-token signature/audience/claims/role verify failed, or the invite row is missing.',
+  },
+  INVITE_EXPIRED: {
+    code: 'INVITE_EXPIRED',
+    status: 410,
+    title: 'Invite expired',
+    detail: 'This invitation has expired. Ask your organisation owner to send a fresh invite.',
+    hint: 'invite-token exp elapsed (INVITE_TOKEN_TTL_SECONDS). Recovery is the owner re-mint path (§6).',
+  },
+  INVITE_EMAIL_MISMATCH: {
+    code: 'INVITE_EMAIL_MISMATCH',
+    status: 403,
+    title: 'Invite is for a different email',
+    detail:
+      'This invitation was sent to a different email address. Register with the email the invite was sent to.',
+    hint: 'Submitted contact.email != invite email claim (normalised). Email binding enforced on submit (§4.4.3).',
+  },
+  INVITE_ALREADY_USED: {
+    code: 'INVITE_ALREADY_USED',
+    status: 409,
+    title: 'Invite already used',
+    detail: 'This invitation has already been used. If you already registered, sign in instead.',
+    hint: 'Invite row not pending (consumed/revoked/expired) or the pending→consumed CAS lost a race (§4.4.6).',
+  },
+
   // ── Bulk uploads ────────────────────────────────────────────────────────
   BULK_UPLOAD_NOT_READY: {
     code: 'BULK_UPLOAD_NOT_READY',

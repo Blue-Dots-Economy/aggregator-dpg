@@ -37,6 +37,8 @@ import { getRegistrationValidator } from '../services/registration-validator.js'
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
 import { getAggregatorProfileStore } from '../services/aggregator-profile-store/index.js';
 import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js';
+import { getRegistrationInvitesStore } from '../services/registration-invites-store/index.js';
+import { verifyInviteToken } from '../services/invite-token.js';
 import { getIdpAdmin } from '../services/idp-admin/index.js';
 import { sendAdminReviewEmail } from '../services/registration-notify.js';
 import { orgHierarchyEnabled } from '../config.js';
@@ -62,6 +64,9 @@ const SLUG_RETRIES = 3;
 // presence/shape against the flag + the org store.
 const CoordinatorRegistrationBodySchema = RegistrationPayloadSchema.extend({
   org_id: z.string().optional(),
+  // Coordinator invite token (#700). When present it supersedes `org_id`: the
+  // org is taken from the token claim and the invite is consumed on submit.
+  invite: z.string().optional(),
 });
 
 /**
@@ -80,6 +85,7 @@ const AGGREGATOR_COLUMN_BACKED_KEYS: ReadonlySet<string> = new Set([
   'locations',
   'consent',
   'org_id',
+  'invite',
 ]);
 
 /**
@@ -153,7 +159,11 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
       // `org_id` is an org-hierarchy field outside the form's JSON Schema
       // contract; strip it before Ajv so the schema in `config/` stays the
       // single authority for the form shape.
-      const { org_id: _orgIdField, ...formBody } = req.body as Record<string, unknown>;
+      const {
+        org_id: _orgIdField,
+        invite: _inviteField,
+        ...formBody
+      } = req.body as Record<string, unknown>;
 
       // JSON Schema is the authoritative contract — keeps the form rules in
       // `config/` rather than code.
@@ -207,30 +217,94 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
             fields: { retry_after_seconds: rl.retryAfterSeconds },
           });
         }
-        const reqOrgId = (req.body as { org_id?: string }).org_id;
-        if (!reqOrgId) {
-          throw httpError('SCHEMA_VALIDATION', {
-            detail: 'org_id is required when the organisation hierarchy is enabled.',
-          });
-        }
         const orgStore = getAggregatorOrgStore();
-        const org = await orgStore.findById(reqOrgId);
-        if (!org.ok) {
-          throw httpError('DB_UNAVAILABLE', {
-            cause: new Error(org.error.message),
-            fields: { sub_operation: 'orgStore.findById' },
-          });
+        const reqInvite = (req.body as { invite?: string }).invite;
+
+        // Invite-bound path (#700): when the submission carries an invite token
+        // it supersedes the org selector. The org comes from the CLAIM, the
+        // recipient email is enforced, and the invite is claimed (CAS) before
+        // anything is created. The token is a bearer credential — every check
+        // below re-validates against the DB and never trusts a hidden field.
+        if (reqInvite) {
+          const verified = await verifyInviteToken(reqInvite);
+          if (!verified.ok) {
+            throw httpError(
+              verified.error.code === 'EXPIRED' ? 'INVITE_EXPIRED' : 'INVITE_INVALID',
+            );
+          }
+          // Email binding (§4.4.3): submitted email must equal the claim. Zod
+          // already lowercased `contact.email`; normalise the claim to match.
+          if (contact.email !== verified.email.trim().toLowerCase()) {
+            throw httpError('INVITE_EMAIL_MISMATCH', { fields: { email: contact.email } });
+          }
+          const inviteStore = getRegistrationInvitesStore();
+          const row = await inviteStore.findByJti(verified.jti);
+          if (!row.ok) {
+            throw httpError('DB_UNAVAILABLE', {
+              cause: new Error(row.error.message),
+              fields: { sub_operation: 'inviteStore.findByJti' },
+            });
+          }
+          if (!row.value || row.value.status !== 'pending') {
+            throw httpError('INVITE_ALREADY_USED', { fields: { email: contact.email } });
+          }
+          // Re-validate the org from the CLAIM independently (§4.4.4).
+          const org = await orgStore.findById(verified.org);
+          if (!org.ok) {
+            throw httpError('DB_UNAVAILABLE', {
+              cause: new Error(org.error.message),
+              fields: { sub_operation: 'orgStore.findById' },
+            });
+          }
+          if (!org.value || org.value.status !== 'active') {
+            throw httpError('TARGET_ORG_INACTIVE');
+          }
+          const ownerMatch = await orgStore.findByOwnerEmail(contact.email);
+          if (ownerMatch.ok && ownerMatch.value) {
+            throw httpError('OWNER_ALREADY_REGISTERED', { fields: { email: contact.email } });
+          }
+          // CAS `pending → consumed` BEFORE creating anything (§4.4.6). A lost
+          // race renders already-used rather than double-creating; a downstream
+          // soft-fail leaves it consumed (recovery is the owner re-mint path).
+          const consumed = await inviteStore.consume(verified.jti);
+          if (!consumed.ok) {
+            throw httpError('DB_UNAVAILABLE', {
+              cause: new Error(consumed.error.message),
+              fields: { sub_operation: 'inviteStore.consume' },
+            });
+          }
+          if (consumed.value === null) {
+            throw httpError('INVITE_ALREADY_USED', { fields: { email: contact.email } });
+          }
+          // Stamp `parent_org_id` from the CLAIM (§4.4.5) so the approval path's
+          // parent_org_id ↔ token binding can never mismatch.
+          parentOrgId = verified.org;
+        } else {
+          // Interim selector path: coordinator picks an active org (spec §6.2).
+          const reqOrgId = (req.body as { org_id?: string }).org_id;
+          if (!reqOrgId) {
+            throw httpError('SCHEMA_VALIDATION', {
+              detail: 'org_id is required when the organisation hierarchy is enabled.',
+            });
+          }
+          const org = await orgStore.findById(reqOrgId);
+          if (!org.ok) {
+            throw httpError('DB_UNAVAILABLE', {
+              cause: new Error(org.error.message),
+              fields: { sub_operation: 'orgStore.findById' },
+            });
+          }
+          // Covers bootstrap (no active org) and an org that went inactive/rejected.
+          if (!org.value || org.value.status !== 'active') {
+            throw httpError('TARGET_ORG_INACTIVE');
+          }
+          // Owner-also-coordinator (spec A4): a distinct, machine-readable error.
+          const ownerMatch = await orgStore.findByOwnerEmail(contact.email);
+          if (ownerMatch.ok && ownerMatch.value) {
+            throw httpError('OWNER_ALREADY_REGISTERED', { fields: { email: contact.email } });
+          }
+          parentOrgId = reqOrgId;
         }
-        // Covers bootstrap (no active org) and an org that went inactive/rejected.
-        if (!org.value || org.value.status !== 'active') {
-          throw httpError('TARGET_ORG_INACTIVE');
-        }
-        // Owner-also-coordinator (spec A4): a distinct, machine-readable error.
-        const ownerMatch = await orgStore.findByOwnerEmail(contact.email);
-        if (ownerMatch.ok && ownerMatch.value) {
-          throw httpError('OWNER_ALREADY_REGISTERED', { fields: { email: contact.email } });
-        }
-        parentOrgId = reqOrgId;
       }
 
       // Pre-check email + phone uniqueness in both stores. The DB

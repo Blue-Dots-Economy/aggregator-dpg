@@ -285,6 +285,16 @@ const ConfigSchema = z.object({
     .default(7 * 24 * 60 * 60),
 
   /**
+   * Coordinator-invite token lifetime (#700). Default 14 days. Bounds how long
+   * an emailed invite remains usable before the owner must re-mint.
+   */
+  INVITE_TOKEN_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(14 * 24 * 60 * 60),
+
+  /**
    * Extra grace beyond the approval-token TTL before a still-pending
    * registration is eligible for cleanup. Default 24h.
    */
