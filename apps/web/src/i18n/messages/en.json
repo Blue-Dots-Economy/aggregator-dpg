@@ -553,7 +553,7 @@
   },
   "auth": {
     "welcome_heading": "Welcome back.",
-    "welcome_sub": "Sign in or register your organisation to get started.",
+    "welcome_sub": "Sign in to your account to continue.",
     "existing_title": "Existing user — Sign in",
     "existing_sub": "Continue with email or mobile via {brand} SSO",
     "register_title": "Become a member",

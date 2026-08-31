@@ -14,13 +14,14 @@ export interface LoginViewProps {
 }
 
 /**
- * Public login page.
+ * Public login page — sign-in only.
  *
- * Two cards:
+ * One card:
  *   - "Existing user — Sign in"  → BFF login → Keycloak
- *   - "Become a member"          → /register page (RJSF-driven form)
  *
- * No credentials are collected on this page.
+ * No credentials are collected here, and registration is intentionally NOT
+ * linked from this page (#619): coordinator/owner registration is served via
+ * deep links (`/register`, `/register/owner`), not advertised on the homepage.
  */
 export function LoginView({ returnTo, error }: LoginViewProps): JSX.Element {
   const t = useTranslations('auth');
@@ -28,9 +29,6 @@ export function LoginView({ returnTo, error }: LoginViewProps): JSX.Element {
   const brand = cfg.brand.short_name;
   const goSignIn = (): void => {
     window.location.href = `/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`;
-  };
-  const goRegister = (): void => {
-    window.location.href = '/register';
   };
 
   return (
@@ -105,7 +103,7 @@ export function LoginView({ returnTo, error }: LoginViewProps): JSX.Element {
           ) : null}
 
           <div className="fade-up">
-            <Welcome onSignIn={goSignIn} onRegister={goRegister} brand={brand} t={t} />
+            <Welcome onSignIn={goSignIn} brand={brand} t={t} />
           </div>
         </div>
       </div>
@@ -144,17 +142,19 @@ function humanizeError(code: string, t: TFunction): string {
 
 interface WelcomeProps {
   onSignIn: () => void;
-  onRegister: () => void;
   brand: string;
   t: TFunction;
 }
 
 /**
- * Two-card welcome surface: existing user sign-in vs new member registration.
+ * Sign-in welcome surface — a single "Existing user — Sign in" card.
  *
- * @param props - Callbacks for each card and translation function.
+ * Registration is not offered here (#619): coordinator/owner sign-up is served
+ * via deep links, not from the login homepage.
+ *
+ * @param props - Sign-in callback, brand name, and translation function.
  */
-function Welcome({ onSignIn, onRegister, brand, t }: WelcomeProps): JSX.Element {
+function Welcome({ onSignIn, brand, t }: WelcomeProps): JSX.Element {
   return (
     <div>
       <h2 className="font-display font-bold text-[28px] text-ink-900 tracking-tight leading-tight">
@@ -189,35 +189,6 @@ function Welcome({ onSignIn, onRegister, brand, t }: WelcomeProps): JSX.Element 
             <I.arrowR size={14} />
           </div>
         </button>
-
-        <button
-          type="button"
-          onClick={onRegister}
-          className="group w-full flex items-center justify-between gap-4 p-4 pr-5 rounded-[14px] border text-left transition-all
-                     border-(--bd-border) hover:border-ink-300 hover:bg-ink-50/60"
-        >
-          <div className="flex items-center gap-3.5">
-            <div className="w-9 h-9 rounded-[10px] flex items-center justify-center bg-ink-100 group-hover:bg-white transition-colors">
-              <I.spark size={16} className="text-ink-600" />
-            </div>
-            <div>
-              <div className="font-display font-bold text-[15px] text-ink-900">
-                {t('register_title')}
-              </div>
-              <div className="text-[12.5px] text-ink-400 mt-0.5">
-                {t('register_sub', { brand })}
-              </div>
-            </div>
-          </div>
-          <div className="w-8 h-8 rounded-full flex items-center justify-center bg-ink-100 text-ink-500 group-hover:bg-ink-900 group-hover:text-white transition-all shrink-0">
-            <I.arrowR size={14} />
-          </div>
-        </button>
-      </div>
-
-      <div className="mt-5 text-[12px] text-ink-400 flex items-start gap-2">
-        <span className="w-1 h-1 rounded-full bg-ink-300 mt-1.5 shrink-0" />
-        {t('review_notice', { brand })}
       </div>
     </div>
   );
