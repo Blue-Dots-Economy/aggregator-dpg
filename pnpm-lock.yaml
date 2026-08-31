@@ -449,8 +449,8 @@ importers:
   packages/campaign-template:
     dependencies:
       marked:
-        specifier: ^14.1.4
-        version: 14.1.4
+        specifier: ^18.0.11
+        version: 18.0.11
       sanitize-html:
         specifier: ^2.14.0
         version: 2.17.7
@@ -4954,9 +4954,9 @@ packages:
       vue:
         optional: true
 
-  marked@14.1.4:
-    resolution: {integrity: sha512-vkVZ8ONmUdPnjCKc5uTRvmkRbx4EAi2OkTOXmfTDhZz3OFqMNBM1oTTWwTr4HY4uAEojhzPf+Fy8F1DWa3Sndg==}
-    engines: {node: '>= 18'}
+  marked@18.0.11:
+    resolution: {integrity: sha512-HnslJfsZkRPBDJRHvVtAaWlZHEpSu7u8LgQuJCELjRKuWR+hpq4A7sLq3p8HaI9ypVoXDXxV34CsQJEe1+J5Aw==}
+    engines: {node: '>= 20'}
     hasBin: true
 
   math-intrinsics@1.1.0:
@@ -10409,7 +10409,7 @@ snapshots:
     optionalDependencies:
       react: 19.2.8
 
-  marked@14.1.4: {}
+  marked@18.0.11: {}
 
   math-intrinsics@1.1.0: {}
 
