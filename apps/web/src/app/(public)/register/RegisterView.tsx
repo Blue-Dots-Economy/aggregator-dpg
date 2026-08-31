@@ -43,7 +43,7 @@ export function RegisterView({
   uiSchema,
   orgHierarchyEnabled = false,
   aggregatorConsentContent,
-}: RegisterViewProps): JSX.Element {
+}: Readonly<RegisterViewProps>): JSX.Element {
   const headingTitle = (schema.title as string | undefined) ?? 'Aggregator Registration';
 
   return (

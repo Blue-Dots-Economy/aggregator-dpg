@@ -26,7 +26,10 @@ export interface RegisterPageShellProps {
  * @param props - The page heading and the form to render.
  * @returns The registration page body.
  */
-export function RegisterPageShell({ heading, children }: RegisterPageShellProps): JSX.Element {
+export function RegisterPageShell({
+  heading,
+  children,
+}: Readonly<RegisterPageShellProps>): JSX.Element {
   const t = useTranslations('register');
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
   const brand = cfg.brand.short_name;

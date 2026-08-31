@@ -33,7 +33,7 @@ export function OwnerRegisterView({
   schema,
   uiSchema,
   orgConsentContent,
-}: OwnerRegisterViewProps): JSX.Element {
+}: Readonly<OwnerRegisterViewProps>): JSX.Element {
   const t = useTranslations('register');
   const headingTitle = (schema.title as string | undefined) ?? t('owner_page_title');
 
