@@ -1,3 +1,4 @@
+import type { JSX } from 'react';
 import { loadBulkAttestation } from '../../../../lib/bulk-attestation.server';
 import { BulkUploadsClient } from '../_components/BulkUploadsClient';
 

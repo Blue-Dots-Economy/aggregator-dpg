@@ -24,6 +24,15 @@ Both `/register` and `/profile` call `loadRegistrationSchema()`, which loads `re
 
 `x-updatable` is a custom JSON Schema keyword read directly off `schema.properties[key]['x-updatable'] === true` (`collectUpdatableFields`, `ProfileFormView.tsx:76-79`) to build the "Request an update" panel — **purely config-driven**, no code change needed to add/remove which fields show as updatable. Note the panel is currently UI-only local state (`requestSent` just flips a banner) — there's no backend call behind "Request an update" yet; don't assume one exists when tracing a bug report about it.
 
+## The public registration flow is more than the form — four config-gated surfaces wrap it
+
+`(public)/register` (self-serve) and `[org]/[slug]` (`PublicRegistrationView`, per-link) surround the RJSF form with surfaces that only appear when config enables them; don't assume the form is the whole flow:
+
+- **Pre-form "Already Registered — Sign In" chooser** (#652) — on first open, whenever the Signals hand-off is configured for this domain/mode, the participant chooses **Register** or is sent to the Signals UI to sign in (`SignalsSignInCta`). Config-gated by the same `signals_cta` rule as the hand-off.
+- **Post-submit hand-off to the Signals UI** (#654) — on a successful full-profile submission the view redirects to the per-domain Signals login URL from the api's `SIGNALS_UI_URLS` map (parsed + URL-validated at api boot, frozen, surfaced via `/v1/aggregator-config`); no in-app "registration complete" dead-end.
+- **On-demand registration QR** (#650) — a link's QR is **derived client-side** in the browser from the public URL (`components/ui/QrCode.tsx`), with no S3 round-trip; the server no longer persists a `qr_object_key`, and legacy rows that still have one return `qr_url: null`.
+- **Scroll-gated consent** (#636) — the consent modal only enables acceptance once the participant has scrolled each document to the end (`components/consent/read-progress.ts`), with a small fractional-pixel slack so momentum/overscroll still trips the gate.
+
 ## Consent content has no API round-trip
 
 `(public)/register/page.tsx` loads consent **server-side** via `@aggregator-dpg/config-loader/fs`'s `loadConsentConfig(network, brand)`, extracts each audience's `current_version` doc, and passes typed `ConsentDocContent` as props through `RegisterView` → forms → `ConsentModal`/`MarkdownContent`. Failure degrades to `null` (forms fall back to plain-text labels) rather than throwing — this resolves once per server render, no client-side caching/loading state to reason about.

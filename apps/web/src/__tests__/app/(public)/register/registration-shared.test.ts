@@ -13,6 +13,7 @@ import {
   stripFormChrome,
   submitRegistration,
   stampConsent,
+  stripConsentBlock,
 } from '@/app/(public)/register/registration-shared';
 
 describe('titleCase', () => {
@@ -301,5 +302,40 @@ describe('stampConsent', () => {
     expect(consent['accepted_terms']).toBe(true);
     expect(consent['given_at']).toBeDefined();
     expect(consent['valid_till']).toBeDefined();
+  });
+});
+
+describe('stripConsentBlock', () => {
+  const schema = {
+    type: 'object',
+    required: ['name', 'contact', 'consent'],
+    properties: {
+      name: { type: 'string' },
+      contact: { type: 'object' },
+      consent: { type: 'object', required: ['value'], properties: { value: { type: 'boolean' } } },
+    },
+  } as const;
+
+  it('removes the consent property and its required entry', () => {
+    const out = stripConsentBlock(schema as never);
+    expect(out.properties).not.toHaveProperty('consent');
+    expect(out.required).toEqual(['name', 'contact']);
+  });
+
+  it('leaves every other field untouched', () => {
+    const out = stripConsentBlock(schema as never);
+    expect(out.properties).toHaveProperty('name');
+    expect(out.type).toBe('object');
+  });
+
+  it('does not mutate the schema it was given', () => {
+    stripConsentBlock(schema as never);
+    expect(schema.properties).toHaveProperty('consent');
+    expect(schema.required).toContain('consent');
+  });
+
+  it('is a no-op on a schema with no consent block', () => {
+    const bare = { type: 'object', required: ['name'], properties: { name: { type: 'string' } } };
+    expect(stripConsentBlock(bare as never)).toEqual(bare);
   });
 });

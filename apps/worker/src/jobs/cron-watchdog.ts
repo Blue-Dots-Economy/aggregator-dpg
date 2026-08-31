@@ -16,6 +16,7 @@ import { and, eq, inArray, isNotNull, lt } from 'drizzle-orm';
 import { bulkRedisKeys } from '@aggregator-dpg/queue';
 import { getDb, schema } from '../db.js';
 import { getRedis } from '../services/redis.js';
+import { config } from '../config.js';
 import { logger } from '../logger.js';
 
 const RETENTION_DAYS = 90;
@@ -26,6 +27,7 @@ const INFLIGHT_STATUSES = ['file_validating', 'row_processing', 'finalising'] as
 export interface WatchdogOutcome {
   abandoned: number;
   stuck: number;
+  campaignStalled: number;
   bulkPurged: number;
   submissionsPurged: number;
 }
@@ -57,6 +59,24 @@ export async function runWatchdog(): Promise<WatchdogOutcome> {
       ),
     )
     .returning({ id: schema.bulkUploads.id });
+
+  // Campaign async-job watchdog: a `processing` job whose heartbeat
+  // (`last_progress_at`) has gone stale is failed out with `stalled` so the
+  // caller's poll surfaces it instead of hanging on a dead worker. The item
+  // rows keep whatever terminal status they reached; only the job roll-up is
+  // forced. Retention of the exported CSV is an external S3 lifecycle rule.
+  const campaignStalledAt = new Date(Date.now() - config.CAMPAIGN_STALL_SECONDS * 1000);
+  const campaignStalled = await getDb()
+    .update(schema.campaignJob)
+    .set({ status: 'failed', errorReason: 'stalled', updatedAt: new Date() })
+    .where(
+      and(
+        eq(schema.campaignJob.status, 'processing'),
+        isNotNull(schema.campaignJob.lastProgressAt),
+        lt(schema.campaignJob.lastProgressAt, campaignStalledAt),
+      ),
+    )
+    .returning({ id: schema.campaignJob.id });
 
   // Actively purge the Redis working set (incl. the PII-bearing `:lines` and
   // `:errors` keys) for uploads we just marked failed — the happy-path DEL in
@@ -99,6 +119,7 @@ export async function runWatchdog(): Promise<WatchdogOutcome> {
     latency_ms: Date.now() - start,
     abandoned: abandoned.length,
     stuck: stuck.length,
+    campaign_stalled: campaignStalled.length,
     redis_keys_purged: redisKeysPurged,
     bulk_purged: bulkPurged.length,
     submissions_purged: submissionsPurged.length,
@@ -107,6 +128,7 @@ export async function runWatchdog(): Promise<WatchdogOutcome> {
   return {
     abandoned: abandoned.length,
     stuck: stuck.length,
+    campaignStalled: campaignStalled.length,
     bulkPurged: bulkPurged.length,
     submissionsPurged: submissionsPurged.length,
   };

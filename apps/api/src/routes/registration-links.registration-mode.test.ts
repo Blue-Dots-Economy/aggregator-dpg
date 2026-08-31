@@ -8,6 +8,9 @@
  *   - create rejects a non-snake_case mode value with 400 SCHEMA_VALIDATION
  *   - PATCH rejects any `registration_mode` in the body (UpdateLinkBodySchema
  *     is .strict(); this pins that as a regression)
+ *   - create honours the `AGGREGATOR_ONBOARDING_ENABLED` allow-list (#637):
+ *     a withheld mode is rejected even when called directly, and an omitted
+ *     mode never falls back to one
  *
  * The blue_dot test fixture declares two modes: `voice` (account_only) and
  * `form` (account_and_profile). Uses a tracking stub for the registration-links
@@ -16,7 +19,6 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
-import QRCode from 'qrcode';
 import { buildApp } from '../app.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
 import {
@@ -37,21 +39,25 @@ import {
   type StoreResult,
 } from '../services/registration-links-store/index.js';
 import type { UpdateDraftInput } from '../services/registration-links-store/interface.js';
+import type * as ObjectStorageModule from '../services/object-storage/index.js';
 import { _setDbClients } from '../db/client.js';
 
-// Hoisted so the vi.mock factory can reference them (mocks are hoisted above
-// module code). registration-links.ts has no test-injection singleton for
-// object storage, so we mock the module directly — same pattern used in
-// bulk-uploads.test.ts.
-const { putObjectMock, signQrDownloadUrlMock } = vi.hoisted(() => ({
-  putObjectMock: vi.fn(),
-  signQrDownloadUrlMock: vi.fn(),
-}));
-
-vi.mock('../services/object-storage/index.js', () => ({
-  putObject: putObjectMock,
-  signQrDownloadUrl: signQrDownloadUrlMock,
-}));
+// #650 regression guard: the QR is no longer persisted — create/activate must
+// never touch object storage. Force the QR write primitives to REJECT (while
+// keeping the real bulk-upload helpers via importActual, so buildApp's other
+// routes still boot). If a putObject/signQrDownloadUrl call is ever
+// reintroduced into the link routes, the "S3 independence" tests below fail.
+vi.mock('../services/object-storage/index.js', async (importActual) => {
+  const actual = await importActual<typeof ObjectStorageModule>();
+  const rejectS3 = () =>
+    Promise.reject(new Error('S3 must not be on the link create/activate path'));
+  return {
+    ...actual,
+    putObject: vi.fn(rejectS3),
+    // Removed in #650; re-declared as a rejecting stub in case it's re-added.
+    signQrDownloadUrl: vi.fn(rejectS3),
+  };
+});
 
 const AGG_ID = '11111111-1111-1111-1111-111111111111';
 const ORG_ID = 'org-signalstack-1';
@@ -95,9 +101,6 @@ class TrackingRegistrationLinksStore extends RegistrationLinksStoreBase {
   }
   async findByOrgAndSlug(): Promise<StoreResult<RegistrationLink | null>> {
     return { ok: true, value: null };
-  }
-  async updateQrKey(): Promise<StoreResult<RegistrationLink>> {
-    return { ok: false, error: { code: 'DB_UNAVAILABLE', message: 'stub' } };
   }
   async updateDraft(): Promise<StoreResult<RegistrationLink>> {
     return { ok: false, error: { code: 'DB_UNAVAILABLE', message: 'stub' } };
@@ -225,6 +228,113 @@ describe('POST /v1/links/create — registration_mode', () => {
   });
 });
 
+describe('POST /v1/links/create — AGGREGATOR_ONBOARDING_ENABLED gate (#637)', () => {
+  let app: FastifyInstance;
+  let store: TrackingRegistrationLinksStore;
+  const original = process.env.AGGREGATOR_ONBOARDING_ENABLED;
+
+  beforeEach(async () => {
+    ({ app, store } = await bootApp());
+  });
+  afterEach(async () => {
+    await app?.close();
+    _setAccessTokenVerifier(null);
+    _setAggregatorStore(null);
+    _setRegistrationLinksStore(null);
+    _setNetworkConfig(null);
+    _setDbClients(null, null);
+    if (original === undefined) delete process.env.AGGREGATOR_ONBOARDING_ENABLED;
+    else process.env.AGGREGATOR_ONBOARDING_ENABLED = original;
+  });
+
+  const create = (payload: Record<string, unknown>) =>
+    app.inject({
+      method: 'POST',
+      url: '/v1/links/create',
+      headers: { authorization: `Bearer ${AUTH_TOKEN}` },
+      payload,
+    });
+
+  it('rejects a withheld mode with 400 INVALID_REGISTRATION_MODE', async () => {
+    // The config endpoint already hides `voice` from the dropdown, but the
+    // gate has to hold for a caller hitting the API directly.
+    process.env.AGGREGATOR_ONBOARDING_ENABLED = 'form';
+    const r = await create({ domain: 'seeker', registration_mode: 'voice' });
+    expect(r.statusCode).toBe(400);
+    expect(r.json().error.code).toBe('INVALID_REGISTRATION_MODE');
+    expect(store.creates).toHaveLength(0);
+  });
+
+  it('still creates an enabled mode with the var set', async () => {
+    process.env.AGGREGATOR_ONBOARDING_ENABLED = 'form';
+    const r = await create({ domain: 'seeker', registration_mode: 'form' });
+    expect(r.statusCode).toBe(201);
+    expect(r.json().registration_mode).toBe('form');
+    expect(store.creates[0]!.registrationMode).toBe('form');
+  });
+
+  it('keeps both modes creatable when the var lists them all', async () => {
+    process.env.AGGREGATOR_ONBOARDING_ENABLED = 'form,voice';
+    const r = await create({ domain: 'seeker', registration_mode: 'voice' });
+    expect(r.statusCode).toBe(201);
+    expect(r.json().registration_mode).toBe('voice');
+  });
+
+  it('never falls back to a withheld mode when the mode is omitted', async () => {
+    // `form` is withheld here, so the omitted-mode fallback must not land on
+    // it; it picks the first *enabled* mode instead.
+    process.env.AGGREGATOR_ONBOARDING_ENABLED = 'voice';
+    const r = await create({ domain: 'seeker' });
+    expect(r.statusCode).toBe(201);
+    expect(r.json().registration_mode).toBe('voice');
+    expect(store.creates[0]!.registrationMode).toBe('voice');
+  });
+
+  it('still prefers form for an omitted mode when form is enabled', async () => {
+    process.env.AGGREGATOR_ONBOARDING_ENABLED = 'form';
+    const r = await create({ domain: 'seeker' });
+    expect(r.statusCode).toBe(201);
+    expect(r.json().registration_mode).toBe('form');
+  });
+
+  it('rejects every mode — including an omitted one — when nothing is enabled', async () => {
+    // An all-typo allow-list. Loud 400s, not a silent fall-open to all modes.
+    process.env.AGGREGATOR_ONBOARDING_ENABLED = 'frm';
+    const omitted = await create({ domain: 'seeker' });
+    expect(omitted.statusCode).toBe(400);
+    expect(omitted.json().error.code).toBe('INVALID_REGISTRATION_MODE');
+    const explicit = await create({ domain: 'seeker', registration_mode: 'form' });
+    expect(explicit.statusCode).toBe(400);
+    expect(store.creates).toHaveLength(0);
+  });
+
+  it('surfaces the declared and the enabled mode lists on the error', async () => {
+    process.env.AGGREGATOR_ONBOARDING_ENABLED = 'form';
+    const r = await create({ domain: 'seeker', registration_mode: 'voice' });
+    const err = r.json().error as { detail: string; fields: Record<string, unknown> };
+    // "not enabled" rather than "not declared" — the operator needs to know
+    // this is a deployment setting, not a missing YAML entry.
+    expect(err.detail).toContain('not enabled');
+    expect(err.fields.declared).toEqual(['voice', 'form']);
+    expect(err.fields.enabled).toEqual(['form']);
+  });
+
+  it('leaves an undeclared mode reported as undeclared, not as withheld', async () => {
+    process.env.AGGREGATOR_ONBOARDING_ENABLED = 'form';
+    const r = await create({ domain: 'seeker', registration_mode: 'kiosk' });
+    expect(r.statusCode).toBe(400);
+    expect((r.json().error as { detail: string }).detail).toContain('not declared');
+  });
+
+  it('behaves exactly as before when the var is unset', async () => {
+    delete process.env.AGGREGATOR_ONBOARDING_ENABLED;
+    const voice = await create({ domain: 'seeker', registration_mode: 'voice' });
+    expect(voice.statusCode).toBe(201);
+    const omitted = await create({ domain: 'seeker' });
+    expect(omitted.json().registration_mode).toBe('form');
+  });
+});
+
 describe('PATCH /v1/links/:id — registration_mode immutability', () => {
   let app: FastifyInstance;
 
@@ -348,22 +458,6 @@ class FullRegistrationLinksStore extends RegistrationLinksStoreBase {
 
   async findByOrgAndSlug(): Promise<StoreResult<RegistrationLink | null>> {
     return { ok: true, value: null };
-  }
-
-  async updateQrKey(
-    id: string,
-    aggregatorId: string,
-    qrObjectKey: string,
-  ): Promise<StoreResult<RegistrationLink>> {
-    const fail = this.take('updateQrKey');
-    if (fail) return { ok: false, error: fail };
-    const row = this.rows.get(id);
-    if (!row || row.aggregatorId !== aggregatorId) {
-      return { ok: false, error: { code: 'NOT_FOUND', message: 'not found' } };
-    }
-    const updated = { ...row, qrObjectKey, updatedAt: new Date() };
-    this.rows.set(id, updated);
-    return { ok: true, value: updated };
   }
 
   async updateDraft(
@@ -511,12 +605,6 @@ async function bootFullApp(opts: {
   _setAggregatorStore(aggregatorStore);
   _setRegistrationLinksStore(opts.store);
   _setDbClients(null, buildMetricsDb(opts.metricsRows ?? []) as never);
-
-  putObjectMock.mockReset().mockResolvedValue(undefined);
-  signQrDownloadUrlMock.mockReset().mockResolvedValue({
-    url: 'https://s3.example.invalid/qr.png',
-    expiresAt: '2026-08-01T01:00:00.000Z',
-  });
 
   return buildApp();
 }
@@ -671,10 +759,9 @@ describe('POST /v1/links/create — full lifecycle', () => {
     expect(body.status).toBe('draft');
     expect(body.qr_url).toBeNull();
     expect(body.public_url).toBeNull();
-    expect(putObjectMock).not.toHaveBeenCalled();
   });
 
-  it('201s a live link, minting the QR PNG + public URL', async () => {
+  it('201s a live link with a public URL and no server-side QR (#650)', async () => {
     const r = await app.inject({
       method: 'POST',
       url: '/v1/links/create',
@@ -685,45 +772,8 @@ describe('POST /v1/links/create — full lifecycle', () => {
     const body = r.json() as { status: string; qr_url: string | null; public_url: string | null };
     expect(body.status).toBe('live');
     expect(body.public_url).toBe('http://localhost:3000/acme/live-one');
-    expect(body.qr_url).toBe('https://s3.example.invalid/qr.png');
-    expect(putObjectMock).toHaveBeenCalledTimes(1);
-  });
-
-  it('500 INTERNAL when QR PNG generation fails', async () => {
-    const spy = vi.spyOn(QRCode, 'toBuffer').mockRejectedValueOnce(new Error('qr boom'));
-    const r = await app.inject({
-      method: 'POST',
-      url: '/v1/links/create',
-      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
-      payload: { domain: 'seeker', slug: 'live-two', status: 'live' },
-    });
-    expect(r.statusCode).toBe(500);
-    expect(r.json().error.code).toBe('INTERNAL');
-    spy.mockRestore();
-  });
-
-  it('500 INTERNAL when the S3 PUT fails', async () => {
-    putObjectMock.mockRejectedValueOnce(new Error('s3 down'));
-    const r = await app.inject({
-      method: 'POST',
-      url: '/v1/links/create',
-      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
-      payload: { domain: 'seeker', slug: 'live-three', status: 'live' },
-    });
-    expect(r.statusCode).toBe(500);
-    expect(r.json().error.code).toBe('INTERNAL');
-  });
-
-  it('503 DB_UNAVAILABLE when stamping the qr_object_key fails', async () => {
-    store.failOnce('updateQrKey', { code: 'DB_UNAVAILABLE', message: 'db down' });
-    const r = await app.inject({
-      method: 'POST',
-      url: '/v1/links/create',
-      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
-      payload: { domain: 'seeker', slug: 'live-four', status: 'live' },
-    });
-    expect(r.statusCode).toBe(503);
-    expect(r.json().error.code).toBe('DB_UNAVAILABLE');
+    // QR is derived client-side from public_url — never returned by the API.
+    expect(body.qr_url).toBeNull();
   });
 });
 
@@ -769,7 +819,8 @@ describe('GET /v1/links — list', () => {
     expect(body.total).toBe(2);
     const a = body.items.find((i) => i.link_id === 'link-a');
     expect(a?.metrics.total).toBe(10);
-    expect(a?.qr_url).toBe('https://s3.example.invalid/qr.png');
+    // #650: a legacy row with a stored qr_object_key still returns qr_url null.
+    expect(a?.qr_url).toBeNull();
     const b = body.items.find((i) => i.link_id === 'link-b');
     expect(b?.metrics.total).toBe(0);
   });
@@ -820,12 +871,13 @@ describe('GET /v1/links/:id — read', () => {
     expect(r.statusCode).toBe(403);
   });
 
-  it('200s a live link and lazily signs the QR URL from the stored key', async () => {
+  it('200s a live link with the public URL and no server-side QR (#650)', async () => {
     store.seed([
       buildLink({
         id: 'link-live',
         slug: 'live-read',
         status: 'live',
+        // Legacy row: a key may still be stored, but the read never signs it.
         qrObjectKey: 'qr/live-read.png',
       }),
     ]);
@@ -835,10 +887,15 @@ describe('GET /v1/links/:id — read', () => {
       headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
     });
     expect(r.statusCode).toBe(200);
-    const body = r.json() as { qr_url: string | null; public_url: string | null };
-    expect(body.qr_url).toBe('https://s3.example.invalid/qr.png');
+    const body = r.json() as {
+      qr_url: string | null;
+      qr_expires_at: string | null;
+      public_url: string | null;
+    };
+    expect(body.qr_url).toBeNull();
+    // The legacy sibling field is hard-null too (no presigned URL to expire).
+    expect(body.qr_expires_at).toBeNull();
     expect(body.public_url).toBe('http://localhost:3000/acme/live-read');
-    expect(signQrDownloadUrlMock).toHaveBeenCalledWith('qr/live-read.png');
   });
 });
 
@@ -1029,7 +1086,7 @@ describe('POST /v1/links/:id/activate', () => {
     expect(r.statusCode).toBe(403);
   });
 
-  it('is idempotent (200, no QR/S3 work) when already live', async () => {
+  it('is idempotent (200) when already live', async () => {
     store.seed([buildLink({ id: 'link-live', status: 'live', qrObjectKey: 'qr/x.png' })]);
     const r = await app.inject({
       method: 'POST',
@@ -1037,7 +1094,6 @@ describe('POST /v1/links/:id/activate', () => {
       headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
     });
     expect(r.statusCode).toBe(200);
-    expect(putObjectMock).not.toHaveBeenCalled();
   });
 
   it('409 CONFLICT when the link is retired', async () => {
@@ -1051,7 +1107,7 @@ describe('POST /v1/links/:id/activate', () => {
     expect(r.json().error.code).toBe('CONFLICT');
   });
 
-  it('200s activating a draft, minting a fresh QR PNG', async () => {
+  it('200s activating a draft — live with public URL, no server-side QR (#650)', async () => {
     store.seed([buildLink({ id: 'link-draft', slug: 'to-activate', status: 'draft' })]);
     const r = await app.inject({
       method: 'POST',
@@ -1062,59 +1118,7 @@ describe('POST /v1/links/:id/activate', () => {
     const body = r.json() as { status: string; public_url: string | null; qr_url: string | null };
     expect(body.status).toBe('live');
     expect(body.public_url).toBe('http://localhost:3000/acme/to-activate');
-    expect(body.qr_url).toBe('https://s3.example.invalid/qr.png');
-    expect(putObjectMock).toHaveBeenCalledTimes(1);
-  });
-
-  it('reuses the existing qr_object_key when one is already stamped on a legacy draft', async () => {
-    store.seed([
-      buildLink({
-        id: 'link-draft',
-        slug: 'legacy',
-        status: 'draft',
-        qrObjectKey: 'qr/legacy-key.png',
-      }),
-    ]);
-    await app.inject({
-      method: 'POST',
-      url: '/v1/links/link-draft/activate',
-      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
-    });
-    expect(putObjectMock).toHaveBeenCalledWith('qr/legacy-key.png', expect.anything(), 'image/png');
-  });
-
-  it('500 INTERNAL when QR PNG generation fails', async () => {
-    store.seed([buildLink({ id: 'link-draft', status: 'draft' })]);
-    const spy = vi.spyOn(QRCode, 'toBuffer').mockRejectedValueOnce(new Error('qr boom'));
-    const r = await app.inject({
-      method: 'POST',
-      url: '/v1/links/link-draft/activate',
-      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
-    });
-    expect(r.statusCode).toBe(500);
-    spy.mockRestore();
-  });
-
-  it('500 INTERNAL when the S3 PUT fails', async () => {
-    store.seed([buildLink({ id: 'link-draft', status: 'draft' })]);
-    putObjectMock.mockRejectedValueOnce(new Error('s3 down'));
-    const r = await app.inject({
-      method: 'POST',
-      url: '/v1/links/link-draft/activate',
-      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
-    });
-    expect(r.statusCode).toBe(500);
-  });
-
-  it('503 DB_UNAVAILABLE when stamping the qr_object_key fails', async () => {
-    store.seed([buildLink({ id: 'link-draft', status: 'draft' })]);
-    store.failOnce('updateQrKey', { code: 'DB_UNAVAILABLE', message: 'db down' });
-    const r = await app.inject({
-      method: 'POST',
-      url: '/v1/links/link-draft/activate',
-      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
-    });
-    expect(r.statusCode).toBe(503);
+    expect(body.qr_url).toBeNull();
   });
 
   it('503 DB_UNAVAILABLE when the status flip fails', async () => {
@@ -1126,6 +1130,49 @@ describe('POST /v1/links/:id/activate', () => {
       headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
     });
     expect(r.statusCode).toBe(503);
+  });
+});
+
+// #650: object storage is mocked to REJECT for this whole file (see the
+// vi.mock at the top). These assert the central promise deterministically:
+// activation is independent of S3 — a create-live and a draft activation both
+// succeed even though every object-storage write would throw. If a QR→S3 write
+// is reintroduced into either path, these fail with 500 INTERNAL.
+describe('S3 independence (#650)', () => {
+  let app: FastifyInstance;
+  let store: FullRegistrationLinksStore;
+
+  beforeEach(async () => {
+    store = new FullRegistrationLinksStore();
+    app = await bootFullApp({ store });
+  });
+  afterEach(async () => teardownFullApp(app));
+
+  it('creates a live link with S3 unreachable — 201, qr_url null', async () => {
+    const r = await app.inject({
+      method: 'POST',
+      url: '/v1/links/create',
+      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
+      payload: { domain: 'seeker', slug: 'live-nos3', status: 'live' },
+    });
+    expect(r.statusCode).toBe(201);
+    const body = r.json() as { status: string; qr_url: string | null; public_url: string | null };
+    expect(body.status).toBe('live');
+    expect(body.public_url).toBe('http://localhost:3000/acme/live-nos3');
+    expect(body.qr_url).toBeNull();
+  });
+
+  it('activates a draft with S3 unreachable — 200, qr_url null', async () => {
+    store.seed([buildLink({ id: 'link-draft', slug: 'act-nos3', status: 'draft' })]);
+    const r = await app.inject({
+      method: 'POST',
+      url: '/v1/links/link-draft/activate',
+      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
+    });
+    expect(r.statusCode).toBe(200);
+    const body = r.json() as { status: string; qr_url: string | null };
+    expect(body.status).toBe('live');
+    expect(body.qr_url).toBeNull();
   });
 });
 

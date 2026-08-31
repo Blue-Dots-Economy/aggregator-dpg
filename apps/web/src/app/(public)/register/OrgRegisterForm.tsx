@@ -1,13 +1,15 @@
 'use client';
 
-import { useMemo, useState, type FormEvent } from 'react';
+import { useMemo, useState, type JSX } from 'react';
 import type { RJSFSchema, UiSchema } from '@rjsf/utils';
-import type { IChangeEvent } from '@rjsf/core';
 import { useTranslations } from 'next-intl';
 import { RjsfThemedForm } from '../../../components/forms/RjsfThemed';
+import { ConsentGate } from '../../../components/consent/ConsentGate';
+import { toConsentDocs } from '../../../components/consent/consent-docs';
 import {
   humaniseValidationErrors,
   stampConsent,
+  stripConsentBlock,
   stripFormChrome,
   submitRegistration,
 } from './registration-shared';
@@ -15,6 +17,7 @@ import {
   RegistrationErrorBanner,
   RegistrationSubmitButton,
   RegistrationSuccessPanel,
+  useConsentGateSubmit,
   useRegistrationFormState,
 } from './registration-ui';
 import type { ConsentDocContent } from '../../../components/consent/consent-types';
@@ -25,11 +28,11 @@ export interface OrgRegisterFormProps {
   /** RJSF UI schema for the org form. */
   uiSchema: Record<string, unknown>;
   /**
-   * Versioned Terms/Privacy content for the org audience.
-   * Passed as `formContext.consentContent` to the RJSF form so the
-   * {@link ConsentCheckboxWidget} can render clickable links.
-   * Omit (or pass `undefined`) when `loadConsentConfig` failed — widget
-   * degrades gracefully to plain text labels.
+   * Versioned Terms/Privacy content for the org audience. Flattened via
+   * {@link toConsentDocs} into the ordered document list the blocking
+   * {@link ConsentGate} reads at submit time. Omit (or pass `undefined`)
+   * when `loadConsentConfig` failed — the gate then has nothing to show, so
+   * submit surfaces an error instead of opening it.
    */
   consentContent?: ConsentDocContent;
 }
@@ -50,24 +53,26 @@ export function OrgRegisterForm({
 }: OrgRegisterFormProps): JSX.Element {
   const t = useTranslations('register');
   const { state, setState, canSubmit, setCanSubmit, errorRef } = useRegistrationFormState();
-  const [formData, setFormData] = useState<Record<string, unknown>>(() => ({
-    consent: stampConsent(undefined),
-  }));
+  const [formData, setFormData] = useState<Record<string, unknown>>({});
+  const consentDocs = useMemo(() => toConsentDocs(consentContent), [consentContent]);
+  const { gateOpen, setGateOpen, pendingRef, handleSubmit } = useConsentGateSubmit(
+    consentDocs,
+    setState,
+  );
 
-  const formSchema = useMemo(() => stripFormChrome(schema), [schema]);
+  const formSchema = useMemo(() => stripConsentBlock(stripFormChrome(schema)), [schema]);
 
-  const handleSubmit = async (
-    e: IChangeEvent<Record<string, unknown>>,
-    _event: FormEvent<HTMLFormElement>,
-  ): Promise<void> => {
+  const agreeLabel = `${t('consent.accept_prefix')}${t('consent.privacy_link')}${t('consent.and')}${t('consent.terms_link')}.`;
+
+  /** Runs after the gate is accepted: stamps consent and posts. */
+  const submitWithConsent = async (): Promise<void> => {
+    setGateOpen(false);
     setState({ status: 'submitting' });
-    const payload = {
-      ...(e.formData ?? {}),
-      consent: stampConsent(
-        (e.formData as Record<string, unknown> | undefined)?.consent as
-          | Record<string, unknown>
-          | undefined,
-      ),
+    const payload: Record<string, unknown> = {
+      // No `?? {}`: spreading null contributes nothing, so the fallback
+      // object was dead weight rather than a guard.
+      ...pendingRef.current,
+      consent: stampConsent({ value: true }),
     };
     const result = await submitRegistration('/api/org/register', payload);
     setState(
@@ -122,6 +127,14 @@ export function OrgRegisterForm({
           submittingLabel={t('submitting')}
         />
       </RjsfThemedForm>
+
+      <ConsentGate
+        open={gateOpen}
+        docs={consentDocs}
+        agreeLabel={agreeLabel}
+        onAccept={submitWithConsent}
+        onCancel={() => setGateOpen(false)}
+      />
     </div>
   );
 }

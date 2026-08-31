@@ -28,7 +28,11 @@
 #
 # Or simpler — pass `--build-arg-file config/<network>/keycloak.env`.
 
-FROM busybox:1.38
+# Docker Hardened Image. Same busybox 1.38, but it runs as `nonroot` (uid 65532)
+# instead of root — which is the whole point, since this init container runs
+# inside the Keycloak pod. busybox still provides sh/cp/mkdir/ls/printf, so both
+# the RUN below and the CMD keep working.
+FROM dhi.io/busybox:1.38-alpine
 
 ARG NETWORK=blue_dot
 ARG BRAND_SHORT_NAME=Aggregator
@@ -100,7 +104,10 @@ ARG SIGNALS_HERO_TITLE_TAIL=""
 ARG SIGNALS_HERO_SUBTITLE="Sign in to discover and connect across the network."
 
 # Theme source — read from the repo's checked-in theme tree.
-COPY infra/keycloak/themes /custom
+# --chown is required, not cosmetic: COPY lands files as uid 0, but this image's
+# default user is 65532, so the RUN below (which rewrites theme.properties inside
+# /custom) would fail with EACCES without it.
+COPY --chown=65532:65532 infra/keycloak/themes /custom
 
 # Overwrite theme.properties so brand vars are baked literals, not
 # `${env.VAR:default}` placeholders. Removes the runtime env dependence
@@ -169,12 +176,22 @@ RUN { \
     && grep -qF -- 'parent=otp' /custom/signals/login/theme.properties
 
 # Init-container entrypoint: copy the themes into the shared volume the main
-# Keycloak container mounts at /opt/keycloak/themes, then exit. Using
-# `cp -aT` so symlinks (e.g. ../themes/...) and timestamps survive.
+# Keycloak container mounts at /opt/keycloak/themes, then exit. Using `cp -rT`
+# — there are no symlinks in this tree (`find infra/keycloak/themes -type l`
+# is empty), so `-a`'s symlink-preservation buys nothing here and was the sole
+# reason `cp` emitted the ownership/permissions warnings below on every boot.
 #
 # Stages the WHOLE tree, not just `otp`: `signals` (which the signals-ui client
 # selects via its `login_theme` attribute) sits alongside it, and copying only
 # `otp` would leave that override pointing at a theme absent from disk. Both are
 # listed so a missing one fails the init container loudly instead of silently
 # falling back to the realm default.
-CMD ["sh", "-c", "set -e; mkdir -p /shared; cp -aT /custom /shared && ls /shared/otp/login /shared/signals/login >/dev/null && echo 'themes staged at /shared: otp, signals'"]
+#
+# ONE THING THIS DEPENDS ON, now that the image runs as nonroot (uid 65532):
+# the Keycloak pod's `fsGroup` MUST be set. The kubelet then group-owns the
+# shared emptyDir and adds that group to this process, which is the only
+# reason uid 65532 can write into it. Verified against the current
+# `fsGroup: 0`: exits 0, stages 42 files. Without an fsGroup the volume is
+# root-owned 0755 and this fails with `cp: can't create directory
+# '/shared/otp': Permission denied` and exit 1 — i.e. Keycloak never starts.
+CMD ["sh", "-c", "set -e; mkdir -p /shared; cp -rT /custom /shared && ls /shared/otp/login /shared/signals/login >/dev/null && echo 'themes staged at /shared: otp, signals'"]

@@ -46,4 +46,40 @@ describe('useAggregatorConfig', () => {
     const { result } = renderHook(() => useAggregatorConfig(), { wrapper });
     await waitFor(() => expect(result.current.isError).toBe(true));
   });
+
+  it('logs the failure instead of silently degrading to the default payload', async () => {
+    // Callers keep rendering off DEFAULT_AGGREGATOR_CONFIG on failure, which
+    // means a config-endpoint outage looks identical to a deployment with no
+    // branding configured — and every config-gated surface (the #652 Signals
+    // hand-off chooser, the consent/birth-year gates) quietly turns off. The
+    // log is the only thing that makes that visible.
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      vi.mocked(jsonFetch).mockRejectedValue(new Error('network down'));
+      const { result } = renderHook(() => useAggregatorConfig(), { wrapper });
+      await waitFor(() => expect(result.current.isError).toBe(true));
+      await waitFor(() => expect(spy).toHaveBeenCalled());
+      const [message, meta] = spy.mock.calls.at(-1)!;
+      expect(String(message)).toContain('aggregator-config');
+      expect(meta).toMatchObject({
+        operation: 'aggregator-config.fetch',
+        status: 'failure',
+        error: 'network down',
+      });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('logs nothing on the success path', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      vi.mocked(jsonFetch).mockResolvedValue({ brand: {}, domains: [] });
+      const { result } = renderHook(() => useAggregatorConfig(), { wrapper });
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
 });

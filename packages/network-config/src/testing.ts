@@ -70,11 +70,13 @@ function buildConfig(
           label_i18n_key: 'registration_mode.voice.label',
           submission_shape: 'account_only',
           public_hint_i18n_key: 'registration_mode.voice.hint',
+          signals_cta: false,
         },
         form: {
           label_i18n_key: 'registration_mode.form.label',
           submission_shape: 'account_and_profile',
           public_hint_i18n_key: null,
+          signals_cta: true,
         },
       },
     },

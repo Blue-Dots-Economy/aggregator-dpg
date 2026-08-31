@@ -6,8 +6,10 @@
  * call is ever made. `../../config.js` is also mocked so each test controls
  * the S3 endpoint/credential permutations deterministically. Covers the
  * internal-vs-presigner client split, credential injection, the
- * NotFound/NoSuchKey → null mapping on `headObject`, and the transport-error
- * rethrow path.
+ * NotFound/NoSuchKey → null mapping on `headObject`, the transport-error
+ * rethrow path, `signDownloadUrl` signing against the PUBLIC endpoint client
+ * with the caller's TTL, and `ObjectHead.lastModified` being present/absent
+ * per the SDK response.
  *
  * @module @aggregator-dpg/api
  */
@@ -54,7 +56,6 @@ const baseConfig = {
   S3_FORCE_PATH_STYLE: true,
   BULK_UPLOAD_URL_TTL_SECONDS: 900,
   BULK_UPLOAD_MAX_BYTES: 10 * 1024 * 1024,
-  QR_DOWNLOAD_URL_TTL_SECONDS: 600,
 };
 
 vi.mock('../../config.js', () => ({
@@ -238,23 +239,47 @@ describe('object-storage', () => {
     });
   });
 
-  describe('signQrDownloadUrl', () => {
-    it('signs a GET url for a PNG using QR_DOWNLOAD_URL_TTL_SECONDS', async () => {
-      const { signQrDownloadUrl } = await import('./index.js');
-      getSignedUrlMock.mockResolvedValue('https://signed.example/qr.png');
+  describe('signDownloadUrl', () => {
+    it('signs against S3_PUBLIC_ENDPOINT, not the internal S3_ENDPOINT', async () => {
+      mockConfig.S3_PUBLIC_ENDPOINT = 'https://public.example.com';
+      const { signDownloadUrl } = await import('./index.js');
+      getSignedUrlMock.mockResolvedValue('https://signed.example/dump-key');
+      const result = await signDownloadUrl('blue_dot/blue_dot_up/user.ndjson.gz', {
+        ttlSeconds: 600,
+      });
+      expect(result.url).toBe('https://signed.example/dump-key');
+      expect(result.key).toBe('blue_dot/blue_dot_up/user.ndjson.gz');
+      // The client the URL was signed against — never the internal endpoint —
+      // is what determines the host baked into the presigned URL.
+      expect(s3ClientCtorCalls).toHaveLength(1);
+      expect(s3ClientCtorCalls[0]).toMatchObject({ endpoint: 'https://public.example.com' });
+    });
+
+    it("expiresAt tracks the caller's ttlSeconds, not a hardcoded default", async () => {
+      const { signDownloadUrl } = await import('./index.js');
+      getSignedUrlMock.mockResolvedValue('https://signed.example/dump-key');
       const before = Date.now();
-      const result = await signQrDownloadUrl('qr/agg-1/link-1.png');
-      expect(result.url).toBe('https://signed.example/qr.png');
+      const result = await signDownloadUrl('k', { ttlSeconds: 137 });
       const expiresAt = new Date(result.expiresAt).getTime();
-      expect(expiresAt - before).toBeGreaterThanOrEqual(600_000 - 1000);
-      expect(expiresAt - before).toBeLessThan(600_000 + 5000);
-      const [, command, opts] = getSignedUrlMock.mock.calls[0] as [
-        unknown,
-        { input: Record<string, unknown> },
-        { expiresIn: number },
-      ];
-      expect(command.input).toMatchObject({ ResponseContentType: 'image/png' });
-      expect(opts.expiresIn).toBe(600);
+      expect(expiresAt - before).toBeGreaterThanOrEqual(137_000 - 1000);
+      expect(expiresAt - before).toBeLessThan(137_000 + 5000);
+    });
+  });
+
+  describe('headObject lastModified', () => {
+    it('surfaces LastModified when the SDK provides it', async () => {
+      const { headObject } = await import('./index.js');
+      const lastModified = new Date('2026-08-26T00:30:58.000Z');
+      sendMock.mockResolvedValue({ ETag: '"e"', ContentLength: 10, LastModified: lastModified });
+      const result = await headObject('k');
+      expect(result?.lastModified).toEqual(lastModified);
+    });
+
+    it('omits lastModified when the SDK response has no LastModified', async () => {
+      const { headObject } = await import('./index.js');
+      sendMock.mockResolvedValue({ ETag: '"e"', ContentLength: 10 });
+      const result = await headObject('k');
+      expect(result).not.toHaveProperty('lastModified');
     });
   });
 });

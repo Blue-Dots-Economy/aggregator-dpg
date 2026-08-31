@@ -34,7 +34,7 @@ import { ERR } from '../errors/codes.js';
 import { formatApprovalTtl } from '../services/approval-token.js';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
 import { getIdpAdmin } from '../services/idp-admin/index.js';
-import { getMailer } from '../services/mailer/index.js';
+import { getMailer } from '@aggregator-dpg/mailer';
 import { getSignalStackWriter } from '../services/signalstack.js';
 import { getNetworkConfig } from '../services/network-config.js';
 import {
