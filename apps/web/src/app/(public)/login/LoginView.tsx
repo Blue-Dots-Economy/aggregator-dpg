@@ -152,7 +152,7 @@ interface WelcomeProps {
  *
  * @param props - Sign-in callback, brand name, and translation function.
  */
-function Welcome({ onSignIn, brand, t }: WelcomeProps): JSX.Element {
+function Welcome({ onSignIn, brand, t }: Readonly<WelcomeProps>): JSX.Element {
   return (
     <div>
       <h2 className="font-display font-bold text-[28px] text-ink-900 tracking-tight leading-tight">
