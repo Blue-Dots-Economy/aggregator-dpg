@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { renderAdminReview } from './admin-review.js';
 import { renderApplicantApproved } from './applicant-approved.js';
 import { renderApplicantRejected } from './applicant-rejected.js';
+import { renderOrgOwnerApproved } from './org-owner-approved.js';
 
 describe('admin-review template', () => {
   it('renders applicant fields and action links', () => {
@@ -91,5 +92,53 @@ describe('applicant-rejected template', () => {
     });
     expect(out.html).toContain('Insufficient documentation');
     expect(out.text).toContain('Insufficient documentation');
+  });
+});
+
+describe('org-owner-approved template', () => {
+  it('renders the org name and owner email, with no sign-in CTA (#699)', () => {
+    const out = renderOrgOwnerApproved({
+      orgName: 'Joint Facilitation Centre',
+      ownerEmail: 'owner@jfc.org',
+    });
+    expect(out.subject).toContain('Joint Facilitation Centre');
+    expect(out.subject).toContain('approved');
+    expect(out.html).toContain('Joint Facilitation Centre');
+    expect(out.html).toContain('owner@jfc.org');
+    expect(out.text).toContain('Joint Facilitation Centre');
+    // Owner KC user stays disabled — the email must NOT invite sign-in.
+    expect(out.html).not.toContain('Sign in');
+    expect(out.html).not.toContain('/login');
+  });
+
+  it('omits the invite CTA when no invite link is provided (standalone ship)', () => {
+    const out = renderOrgOwnerApproved({
+      orgName: 'Acme Org',
+      ownerEmail: 'a@acme.org',
+    });
+    expect(out.html).not.toContain('Invite your coordinators');
+    expect(out.html).toContain('follow-up');
+    expect(out.text).toContain('follow-up');
+  });
+
+  it('renders the invite CTA when an invite link is provided (#701)', () => {
+    const out = renderOrgOwnerApproved({
+      orgName: 'Acme Org',
+      ownerEmail: 'a@acme.org',
+      inviteUrl: 'https://portal.example.org/register/owner/invite?token=abc',
+    });
+    expect(out.html).toContain('Invite your coordinators');
+    expect(out.html).toContain('https://portal.example.org/register/owner/invite?token=abc');
+    expect(out.text).toContain('https://portal.example.org/register/owner/invite?token=abc');
+  });
+
+  it('escapes user-controlled fields', () => {
+    const out = renderOrgOwnerApproved({
+      orgName: '<script>alert(1)</script> & Co',
+      ownerEmail: 'x@y.in',
+    });
+    expect(out.html).not.toContain('<script>alert');
+    expect(out.html).toContain('&lt;script&gt;');
+    expect(out.html).toContain('&amp; Co');
   });
 });

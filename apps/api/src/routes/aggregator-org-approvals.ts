@@ -29,6 +29,8 @@ import { getIdpAdmin } from '../services/idp-admin/index.js';
 import { formatApprovalTtl } from '../services/approval-token.js';
 import { renderConfirmPage, renderResultPage } from '../views/approval-pages.js';
 import { mintApprovalTokenPair } from '../services/registration-notify.js';
+import { getMailer } from '@aggregator-dpg/mailer';
+import { renderOrgOwnerApproved } from '../services/email-templates/index.js';
 import {
   sendHtml,
   sendPage,
@@ -240,6 +242,33 @@ export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance):
             );
           }
         }
+      }
+
+      // Notify the owner their organisation is live (#699). Soft-fail: the org
+      // is already active (CAS committed above), so a mail failure logs and
+      // continues — same posture as the role/group mirror right above. No
+      // sign-in CTA (the owner KC user stays disabled); the coordinator-invite
+      // link (#701) is omitted until that subsystem ships.
+      const ownerMail = renderOrgOwnerApproved({
+        orgName: lookup.value.displayName,
+        ownerEmail: lookup.value.ownerEmail,
+      });
+      const ownerSend = await getMailer().send({
+        to: lookup.value.ownerEmail,
+        subject: ownerMail.subject,
+        html: ownerMail.html,
+        text: ownerMail.text,
+      });
+      if (!ownerSend.ok) {
+        log.warn(
+          {
+            status: 'failure',
+            sub_operation: 'mailer.send.orgOwnerApproved',
+            code: ownerSend.error.code,
+            cause: ownerSend.error.message,
+          },
+          'org-approved email delivery failed (org is active; owner not notified)',
+        );
       }
 
       log.info({ status: 'success', decision: 'approve', new_status: 'active' }, 'org approved');

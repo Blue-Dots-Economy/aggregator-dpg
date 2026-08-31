@@ -78,6 +78,14 @@ describe('aggregator-org-approvals routes', () => {
     // owner would clear Keycloak's OTP step. Role is still assigned for later.
     expect(kc.ok && kc.value?.enabled).toBe(false);
     expect(idp.rolesOf(owner.value.id)).toContain('org_owner');
+    // Owner is notified their org is live (#699) — no sign-in CTA (owner
+    // stays disabled), and no coordinator-invite link yet (#701).
+    expect(mailer.outbox.length).toBe(1);
+    const ownerMsg = mailer.outbox[0];
+    if (!ownerMsg) throw new Error('expected an owner email in the outbox');
+    expect(ownerMsg.to).toBe('owner@x.org');
+    expect(ownerMsg.subject).toContain('approved');
+    expect(ownerMsg.html).not.toContain('Sign in');
   });
 
   it('double-clicked approve commits once (atomic single-use guard)', async () => {
