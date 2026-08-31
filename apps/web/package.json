@@ -27,7 +27,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "ioredis": "^6.0.0",
-    "jose": "^5.9.6",
+    "jose": "^6.2.10",
     "lucide-react": "^1.31.0",
     "next": "^15.5.22",
     "next-intl": "^4.13.6",
