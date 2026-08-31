@@ -24,8 +24,8 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "@aws-sdk/client-sesv2": "^3.1101.0",
-    "nodemailer": "^9.0.4"
+    "@aws-sdk/client-sesv2": "^3.1120.0",
+    "nodemailer": "^9.0.6"
   },
   "devDependencies": {
     "@aggregator-dpg/tsconfig": "workspace:*",
