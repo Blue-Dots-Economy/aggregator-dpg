@@ -34,6 +34,7 @@ import type { ConsentDocContent } from '../consent/consent-types';
 import { BlueDotsLogo } from '../ui/BlueDotsLogo';
 import { useThemeMode } from '../../lib/theme-mode';
 import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../hooks/useAggregatorConfig';
+import { LanguageSwitcher } from '../shell/LanguageSwitcher';
 import { I } from '../../icons';
 
 export type LegalDoc = 'privacy' | 'terms';
@@ -444,9 +445,10 @@ export function LegalDocumentView({
   );
 
   // How close to the top of the viewport a heading must have scrolled to
-  // count as "passed" — matches the `scroll-mt-6` (24px) offset headings
-  // already carry, plus a little slack for the reading column's own top
-  // padding.
+  // count as "passed" — the `scroll-mt-20` (80px) offset headings carry so an
+  // anchor lands them clear of the sticky app bar, plus a little slack, so the
+  // highlighted entry is the one actually sitting at the top of the *readable*
+  // area rather than one still hidden behind the bar.
   const READING_LINE_PX = 96;
 
   // How long to wait, after the most recent scroll event, before treating a
@@ -634,70 +636,96 @@ export function LegalDocumentView({
   }
 
   return (
-    <div className="min-h-svh bg-(--bd-bg) px-6 py-12">
-      <div className="mx-auto max-w-5xl">
-        {/* App bar: the brand logo (this page previously had no branding at
-            all, which is what made it look foreign next to the rest of the
-            app), a way back to sign-in (someone can land here mid-signup
-            with no other path back), and a theme toggle — composed from the
-            same pieces the rest of the app's public pages (login/register)
-            use for branding, plus a toggle mirroring `Topbar`'s own, rather
-            than a portal shell built for an authenticated session:
-            `Sidebar` (the app's real logo bar) pulls in `useAuth` for the
-            signed-in user menu, none of which means anything on a public,
-            unauthenticated legal page. No language switcher here — the
-            `(public)` route group's own layout already floats one
-            top-right for every route in it, this one included. The back
-            link's label drops below `sm` (icon-only) so the logo plus
-            theme toggle never wrap the row and overlap the content
-            underneath at narrow widths. */}
-        <div className="mb-8 flex min-h-14 flex-wrap items-center gap-3 border-b border-(--bd-border) pb-4">
-          {cfg.brand.logo?.default ? (
-            <Image
-              src={cfg.brand.logo.default}
-              alt={cfg.brand.short_name}
-              width={160}
-              height={40}
-              priority
-              className="h-9 w-auto shrink-0 object-contain object-left"
-            />
-          ) : (
-            <div className="flex min-w-0 shrink-0 items-center gap-2.5">
-              <BlueDotsLogo size={36} />
-              <span className="truncate font-display text-[15px] font-bold leading-tight text-ink-900">
-                {cfg.brand.short_name}
-              </span>
-            </div>
-          )}
+    <div className="min-h-svh bg-(--bd-bg)">
+      {/* App bar: the brand logo (this page previously had no branding at all,
+          which is what made it look foreign next to the rest of the app), a
+          way back to sign-in (someone can land here mid-signup with no other
+          path back), and the language + theme controls — composed from the
+          same pieces the rest of the app uses (`LanguageSwitcher` and a toggle
+          mirroring `Topbar`'s own) rather than a portal shell built for an
+          authenticated session: `Sidebar` (the app's real logo bar) pulls in
+          `useAuth` for the signed-in user menu, none of which means anything
+          on a public, unauthenticated legal page.
 
-          <Link
-            href="/login"
-            aria-label={t('back_to_sign_in')}
-            className="inline-flex shrink-0 items-center gap-1.5 text-sm font-semibold text-ink-500 transition-colors hover:text-(--bd-primary-600)"
-          >
-            <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-            <span className="hidden sm:inline">{t('back_to_sign_in')}</span>
-          </Link>
+          Deliberately a real bar, matching the sibling Signals-DPG page:
+          - a direct child of the page root, NOT of the `max-w-5xl` column, so
+            it spans the viewport instead of ending mid-screen with the reading
+            column's own width;
+          - `sticky top-0`, so it stays put while the document scrolls;
+          - an opaque `bg-(--bd-card)`, so the reading column passes behind it
+            invisibly rather than showing through;
+          - a fixed `h-14`, which is what lets the contents rail park itself
+            exactly under it via `md:top-14` without the two measurements
+            drifting apart. Nothing in the row wraps at any width — the back
+            link's label drops below `sm` (icon-only) — so there is no row for
+            a min-height to grow for.
 
-          {/* Language switching is already provided for every `(public)`
-              route — including this one — by that route group's own
-              layout (a fixed top-right control); adding a second instance
-              here would just duplicate it. Only the theme toggle is new. */}
+          Both controls live here, in one group at the trailing edge, exactly
+          as `Topbar` pairs them for the authenticated app. The language
+          switcher used to come from the `(public)` route group's own layout as
+          a *fixed* top-right control, floating clear of this bar; that layout
+          also pins the light theme for `/login` and `/register`, which quietly
+          made the theme toggle below a no-op. Both are why `/privacy` and
+          `/terms` now sit outside that group. */}
+      <header className="sticky top-0 z-40 flex h-14 items-center gap-3 border-b border-(--bd-border) bg-(--bd-card) px-4 sm:px-6">
+        {cfg.brand.logo?.default ? (
+          <Image
+            src={cfg.brand.logo.default}
+            alt={cfg.brand.short_name}
+            width={160}
+            height={40}
+            priority
+            className="h-9 w-auto shrink-0 object-contain object-left"
+          />
+        ) : (
+          <div className="flex min-w-0 shrink-0 items-center gap-2.5">
+            <BlueDotsLogo size={36} />
+            <span className="truncate font-display text-[15px] font-bold leading-tight text-ink-900">
+              {cfg.brand.short_name}
+            </span>
+          </div>
+        )}
+
+        <Link
+          href="/login"
+          aria-label={t('back_to_sign_in')}
+          className="inline-flex shrink-0 items-center gap-1.5 text-sm font-semibold text-ink-500 transition-colors hover:text-(--bd-primary-600)"
+        >
+          <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+          <span className="hidden sm:inline">{t('back_to_sign_in')}</span>
+        </Link>
+
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          <LanguageSwitcher />
           <button
             type="button"
             onClick={toggleTheme}
             title={mode === 'dark' ? themeT('switch_to_light') : themeT('switch_to_dark')}
             aria-label={themeT('toggle_aria')}
-            className="ml-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] border border-(--bd-border) bg-(--bd-card) text-(--bd-fg-muted) transition-colors hover:bg-(--bd-border-soft) hover:text-(--bd-fg)"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] border border-(--bd-border) bg-(--bd-card) text-(--bd-fg-muted) transition-colors hover:bg-(--bd-border-soft) hover:text-(--bd-fg)"
           >
             {mode === 'dark' ? <I.sun size={16} /> : <I.moon size={16} />}
           </button>
         </div>
+      </header>
 
+      <div className="mx-auto max-w-5xl px-6 py-8">
         <div className="grid gap-8 md:grid-cols-[240px_1fr] md:gap-10">
           <nav
             aria-label={t('contents_label')}
-            className="md:sticky md:top-6 md:h-fit md:self-start md:border-r md:border-(--bd-border) md:pr-6"
+            // `md:top-14` parks the rail directly under the sticky app bar
+            // (`h-14`) rather than under the viewport top, where the bar was
+            // covering its first entries.
+            //
+            // `max-h` + `overflow-y-auto` are what make it usable at all, and
+            // they replace `md:h-fit`, which asked for the opposite: this rail
+            // carries three audiences x two documents x ~12 sections, so it is
+            // far taller than the viewport on every network. Sized to its
+            // content and pinned, its tail simply sat below the fold with no
+            // way — wheel, drag or keyboard — to reach it.
+            // `overscroll-contain` stops a wheel that reaches the rail's end
+            // from carrying on into the page behind it.
+            className="md:sticky md:top-14 md:max-h-[calc(100svh-3.5rem)] md:self-start md:overflow-y-auto md:overscroll-contain md:border-r md:border-(--bd-border) md:py-6 md:pr-6"
           >
             {groups.map((group, gi) => (
               <div key={group.audience} className="mb-6">
@@ -732,7 +760,10 @@ export function LegalDocumentView({
                       tells the reader they've crossed from, say, "For
                       participants" into "For aggregators" — there is
                       nothing else on the page marking that jump. */}
-                  <h2 id={audienceHeadingId} className="mb-6 text-2xl font-bold text-ink-900">
+                  <h2
+                    id={audienceHeadingId}
+                    className="mb-6 scroll-mt-20 text-2xl font-bold text-ink-900"
+                  >
                     {group.label}
                   </h2>
 
@@ -740,8 +771,23 @@ export function LegalDocumentView({
                     const entry = group.content[d];
                     const { preamble } = splitByDoc[d][gi]!;
                     const sections = sectionsByDoc[d][gi]!;
+                    const isFirstDoc = d === DOC_ORDER[0];
                     return (
-                      <div key={d} className="scroll-mt-6">
+                      // Each audience carries two documents back to back, and
+                      // a document's own `<h3>` title was the only thing
+                      // marking where one ended and the next began — Privacy's
+                      // closing "Contact Us" ran straight into Terms of Use
+                      // with nothing between them. This is the same rule the
+                      // audience boundary above uses, one level down: a rule
+                      // and generous space before every document but the
+                      // first.
+                      <div
+                        key={d}
+                        className={cn(
+                          'scroll-mt-20',
+                          !isFirstDoc && 'mt-10 border-t border-(--bd-border) pt-8',
+                        )}
+                      >
                         {/* This document's own title, rendered where its
                             content begins — for every document, including
                             the first. The leading `## <title>` heading was
@@ -753,7 +799,7 @@ export function LegalDocumentView({
                             content. */}
                         <h3
                           id={docIds[group.audience]![d]}
-                          className="mt-2 mb-1 scroll-mt-6 text-xl font-bold text-ink-900"
+                          className="mt-2 mb-1 scroll-mt-20 text-xl font-bold text-ink-900"
                         >
                           {entry.title}
                         </h3>
@@ -768,7 +814,7 @@ export function LegalDocumentView({
                             <div key={section.id}>
                               <h2
                                 id={section.id}
-                                className="mt-8 mb-2 scroll-mt-6 text-lg font-bold text-ink-900"
+                                className="mt-8 mb-2 scroll-mt-20 text-lg font-bold text-ink-900"
                               >
                                 {section.heading}
                               </h2>
@@ -778,7 +824,7 @@ export function LegalDocumentView({
                             <div key={section.id}>
                               <h3
                                 id={section.id}
-                                className="mt-6 mb-2 scroll-mt-6 text-base font-semibold text-ink-900"
+                                className="mt-6 mb-2 scroll-mt-20 text-base font-semibold text-ink-900"
                               >
                                 {section.heading}
                               </h3>

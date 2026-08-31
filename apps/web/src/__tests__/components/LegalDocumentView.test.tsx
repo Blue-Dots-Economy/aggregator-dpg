@@ -475,6 +475,79 @@ describe('<LegalDocumentView />', () => {
   });
 });
 
+// jsdom has no layout engine — it computes no scroll heights and honours no
+// `position: sticky` — so these assert the utility classes that produce the
+// behaviour rather than the behaviour itself. That is a real limit: they prove
+// the classes are present, not that the rail scrolls. They exist because every
+// defect below shipped once, and each was a single class (or a single element's
+// placement) away from correct.
+describe('<LegalDocumentView /> app bar and rail geometry', () => {
+  it('pins the app bar to the top of the viewport, opaquely', () => {
+    // It used to be a plain in-flow div that scrolled away, and the reading
+    // column showed through anything translucent behind it.
+    const { container } = renderView('privacy', groups);
+    const bar = container.querySelector('header');
+    expect(bar?.className).toContain('sticky');
+    expect(bar?.className).toContain('top-0');
+    expect(bar?.className).toContain('bg-(--bd-card)');
+  });
+
+  it('puts the app bar outside the reading column so it spans the viewport', () => {
+    // Nested inside `max-w-5xl` it ended mid-screen, indented from the top
+    // corner — the sibling Signals page spans the full width.
+    const { container } = renderView('privacy', groups);
+    const bar = container.querySelector('header');
+    expect(bar?.parentElement?.className).not.toContain('max-w-5xl');
+    expect(bar?.closest('.max-w-5xl')).toBeNull();
+  });
+
+  it('renders both the language and the theme control in the app bar', () => {
+    // The language switcher used to float separately from the route group's
+    // layout, clear of the bar entirely.
+    const { container } = renderView('privacy', groups);
+    const bar = container.querySelector('header');
+    expect(within(bar as HTMLElement).getByRole('button', { name: /theme/i })).toBeInTheDocument();
+    expect(bar?.querySelector('[aria-label="Language"]')).not.toBeNull();
+  });
+
+  it('bounds the rail and lets it scroll on its own', () => {
+    // Three audiences x two documents x ~12 sections is taller than any
+    // viewport; `md:h-fit` left its tail unreachable.
+    renderView('privacy', groups);
+    const rail = screen.getByRole('navigation', { name: 'Contents' });
+    expect(rail.className).toMatch(/md:max-h-/);
+    expect(rail.className).toContain('md:overflow-y-auto');
+    expect(rail.className).not.toContain('md:h-fit');
+  });
+
+  it('offsets the rail by the app bar height so the bar does not cover it', () => {
+    renderView('privacy', groups);
+    expect(screen.getByRole('navigation', { name: 'Contents' }).className).toContain('md:top-14');
+  });
+
+  it('offsets every anchor target clear of the app bar', () => {
+    // Without a scroll-margin at least the bar's height, an anchor lands its
+    // heading underneath the bar.
+    renderView('privacy', groups);
+    for (const name of ['For participants', 'Overview', 'Retention']) {
+      expect(screen.getAllByRole('heading', { name })[0]!.className).toContain('scroll-mt-20');
+    }
+  });
+
+  it('rules off each document after the first, so one does not run into the next', () => {
+    // Privacy's last section ran straight into the Terms title with nothing
+    // between them.
+    renderView('privacy', groups);
+    const termsTitle = screen.getAllByRole('heading', { name: 'Terms of Service' })[0]!;
+    // The document wrapper, which carries the boundary.
+    expect(termsTitle.parentElement?.className).toContain('border-t');
+    const privacyTitle = screen.getAllByRole('heading', { name: 'Privacy Policy' })[0]!;
+    // ...and the first document in an audience must NOT carry one, or it
+    // would double up with the audience boundary just above it.
+    expect(privacyTitle.parentElement?.className).not.toContain('border-t');
+  });
+});
+
 describe('<LegalDocumentView /> arrival landing', () => {
   it('does nothing on /privacy with no hash — privacy is already the top of the page', () => {
     const scrollIntoView = vi.fn();

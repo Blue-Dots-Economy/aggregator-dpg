@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
-import { LegalDocumentView } from '../../../components/legal/LegalDocumentView';
-import { loadLegalGroups } from '../../../components/legal/load-legal-groups.server';
+import { LegalDocumentView } from '../../components/legal/LegalDocumentView';
+import { loadLegalGroups } from '../../components/legal/load-legal-groups.server';
 
 export const metadata: Metadata = { title: 'Privacy Policy' };
 export const dynamic = 'force-dynamic';
