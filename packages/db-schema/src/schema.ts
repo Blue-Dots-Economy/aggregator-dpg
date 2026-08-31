@@ -98,6 +98,20 @@ export const linkSubmissionOutcomeEnum = pgEnum('link_submission_outcome', [
 
 export const onboardingSourceEnum = pgEnum('onboarding_source', ['bulk', 'link']);
 
+/**
+ * Lifecycle of a targeted coordinator invite (#700). `pending` is the only
+ * live state; `consumed` (registered), `revoked` (owner/org cancelled), and
+ * `expired` are terminal. The partial-unique index on
+ * `registration_invites` keys off `status = 'pending'` so exactly one live
+ * invite exists per (org, email).
+ */
+export const registrationInviteStatusEnum = pgEnum('registration_invite_status', [
+  'pending',
+  'consumed',
+  'revoked',
+  'expired',
+]);
+
 // ─── Campaign async-job engine (#579) ────────────────────────────────────────
 // Durable job model shared by every campaign channel (export/email/voice). A
 // request becomes one `campaign_job` row plus one `campaign_job_item` row per
@@ -278,6 +292,44 @@ export const aggregatorOrgs = pgTable(
       .where(sql`status IN ('pending','active')`),
   }),
 );
+
+// ─── registration_invites (#700) ─────────────────────────────────────────────
+// Targeted coordinator invites. A row is required (unlike approval tokens,
+// which get single-use for free by re-checking Keycloak `enabled`) because an
+// invitee has no Keycloak user yet — the row is what buys single-use,
+// revocation, and leak attribution. The invite JWT's `sub` is this row's `jti`.
+
+export const registrationInvites = pgTable(
+  'registration_invites',
+  {
+    jti: uuid('jti').primaryKey().defaultRandom(),
+    /** Only `coordinator` in this phase; column keeps the door open for others. */
+    role: text('role').notNull().default('coordinator'),
+    parentOrgId: uuid('parent_org_id')
+      .notNull()
+      .references(() => aggregatorOrgs.id, { onDelete: 'cascade' }),
+    /** Normalised (lowercased, trimmed) — enforced against the submitted email. */
+    email: text('email').notNull(),
+    status: registrationInviteStatusEnum('status').notNull().default('pending'),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    /** The minting owner/admin subject — audit + leak attribution (§7). */
+    createdBy: text('created_by').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    consumedAt: timestamp('consumed_at', { withTimezone: true }),
+  },
+  (table) => ({
+    parentOrgIdx: index('registration_invites_parent_org_idx').on(table.parentOrgId),
+    // One live invite per (org, email): a re-invite refreshes rather than
+    // duplicates. Partial unique over pending rows only, so a consumed/revoked/
+    // expired invite never blocks re-inviting the same address.
+    pendingUnique: uniqueIndex('registration_invites_pending_unique')
+      .on(table.parentOrgId, table.email)
+      .where(sql`status = 'pending'`),
+  }),
+);
+
+export type RegistrationInviteRow = typeof registrationInvites.$inferSelect;
+export type NewRegistrationInviteRow = typeof registrationInvites.$inferInsert;
 
 // ─── aggregator_profile ──────────────────────────────────────────────────────
 
