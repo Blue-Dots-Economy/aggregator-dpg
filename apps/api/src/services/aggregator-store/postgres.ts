@@ -252,8 +252,23 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
     contextId: string,
     start: number,
   ): StoreResult<never> {
-    const code = (err as { code?: string }).code;
-    const constraint = (err as { constraint?: string }).constraint ?? '';
+    // Drizzle wraps the driver error: SQLSTATE `code` + `constraint` live on the
+    // pg driver error, which Drizzle exposes as `.cause` (its own `.message` is
+    // just the query text). Read the top-level err first, then fall back to
+    // `.cause`, so a unique/check violation maps to a clean 409 rather than a
+    // misleading 503 DB_UNAVAILABLE.
+    const cause = (err as { cause?: unknown }).cause;
+    const pick = (k: 'code' | 'constraint'): string | undefined => {
+      const top = (err as Record<string, unknown>)[k];
+      if (typeof top === 'string') return top;
+      const nested =
+        typeof cause === 'object' && cause !== null
+          ? (cause as Record<string, unknown>)[k]
+          : undefined;
+      return typeof nested === 'string' ? nested : undefined;
+    };
+    const code = pick('code');
+    const constraint = pick('constraint') ?? '';
     const message = (err as Error).message ?? 'unknown';
 
     if (code === PG_UNIQUE_VIOLATION) {

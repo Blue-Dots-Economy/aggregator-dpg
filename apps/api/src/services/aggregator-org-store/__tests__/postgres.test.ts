@@ -160,6 +160,49 @@ describe('PostgresAggregatorOrgStore.create', () => {
     expect(result.error.code).toBe('DUPLICATE_SLUG');
   });
 
+  it('maps a display-name violation wrapped by Drizzle (constraint on .cause) to DUPLICATE_NAME', async () => {
+    // Real Drizzle shape: outer `.message` is the query text; the pg driver
+    // error (SQLSTATE 23505 + `constraint`) is on `.cause`. Regression guard
+    // for the 503-instead-of-409 misclassification.
+    const db = makeFakeDb(() => {
+      const pgErr = Object.assign(
+        new Error(
+          'duplicate key value violates unique constraint "aggregator_orgs_display_name_active_unique"',
+        ),
+        { code: '23505', constraint: 'aggregator_orgs_display_name_active_unique' },
+      );
+      throw Object.assign(new Error('Failed query: insert into "aggregator_orgs" ...'), {
+        cause: pgErr,
+      });
+    });
+    _setDbClients(null, db as never);
+    const store = new PostgresAggregatorOrgStore();
+
+    const result = await store.create(makeInput());
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('DUPLICATE_NAME');
+  });
+
+  it('maps a slug violation wrapped by Drizzle (constraint on .cause) to DUPLICATE_SLUG', async () => {
+    const db = makeFakeDb(() => {
+      const pgErr = Object.assign(new Error('duplicate key value ...'), {
+        code: '23505',
+        constraint: 'aggregator_orgs_slug_active_unique',
+      });
+      throw Object.assign(new Error('Failed query: insert into "aggregator_orgs" ...'), {
+        cause: pgErr,
+      });
+    });
+    _setDbClients(null, db as never);
+    const store = new PostgresAggregatorOrgStore();
+
+    const result = await store.create(makeInput());
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('DUPLICATE_SLUG');
+  });
+
   it('maps any other driver error to DB_UNAVAILABLE', async () => {
     const db = makeFakeDb(() => {
       throw new Error('connection reset');

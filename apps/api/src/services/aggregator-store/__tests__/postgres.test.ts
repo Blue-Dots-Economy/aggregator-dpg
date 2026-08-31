@@ -218,6 +218,27 @@ describe('PostgresAggregatorStore.create', () => {
     expect(result.error.code).toBe('DUPLICATE_SLUG');
   });
 
+  it('maps a Drizzle-wrapped unique violation (code/constraint on .cause) to DUPLICATE_SLUG', async () => {
+    // Real Drizzle shape: outer error is the query text; SQLSTATE + constraint
+    // are on `.cause`. Regression guard for the 503-instead-of-409 bug.
+    const db = makeFakeDb(() => {
+      const pgErr = Object.assign(new Error('duplicate key'), {
+        code: '23505',
+        constraint: 'aggregators_org_slug_key',
+      });
+      throw Object.assign(new Error('Failed query: insert into "aggregators" ...'), {
+        cause: pgErr,
+      });
+    });
+    _setDbClients(null, db as never);
+    const store = new PostgresAggregatorStore();
+
+    const result = await store.create(makeInput());
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('DUPLICATE_SLUG');
+  });
+
   it('maps a check violation to CHECK_VIOLATION', async () => {
     const db = makeFakeDb(() => {
       throw Object.assign(new Error('check failed'), {

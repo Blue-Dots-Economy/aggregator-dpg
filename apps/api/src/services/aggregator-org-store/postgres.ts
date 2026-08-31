@@ -156,14 +156,24 @@ function toDomain(row: typeof aggregatorOrgs.$inferSelect): AggregatorOrg {
 }
 
 function mapInsertError(e: unknown): OrgStoreResult<never> {
-  const msg = (e as Error).message ?? '';
-  if (msg.includes('aggregator_orgs_display_name_active_unique')) {
+  // Drizzle wraps the driver error: its own `.message` is the query text
+  // ("Failed query: insert into …"), NOT the Postgres detail. The constraint
+  // name + SQLSTATE (23505 = unique_violation) live on the wrapped `.cause`
+  // (the `pg` driver error). Inspect both so a unique violation maps to a
+  // clean 409 (DUPLICATE_NAME/SLUG) instead of a misleading 503 DB_UNAVAILABLE.
+  const cause = (e as { cause?: unknown }).cause;
+  const constraint =
+    typeof cause === 'object' && cause !== null && 'constraint' in cause
+      ? String((cause as { constraint?: unknown }).constraint ?? '')
+      : '';
+  const text = `${(e as Error).message ?? ''} ${(cause as Error | undefined)?.message ?? ''} ${constraint}`;
+  if (text.includes('aggregator_orgs_display_name_active_unique')) {
     return errResult('DUPLICATE_NAME', 'organisation name already in use');
   }
-  if (msg.includes('aggregator_orgs_slug_active_unique')) {
+  if (text.includes('aggregator_orgs_slug_active_unique')) {
     return errResult('DUPLICATE_SLUG', 'slug already in use');
   }
-  return errResult('DB_UNAVAILABLE', msg);
+  return errResult('DB_UNAVAILABLE', (e as Error).message ?? 'insert failed');
 }
 
 function errResult<T>(code: OrgStoreError['code'], message: string): OrgStoreResult<T> {
