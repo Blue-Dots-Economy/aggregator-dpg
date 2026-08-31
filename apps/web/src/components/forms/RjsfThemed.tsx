@@ -110,7 +110,14 @@ function SelectWidget(props: WidgetProps) {
           // Room for the clear button, which is overlaid rather than nested:
           // the trigger is itself a <button>, and a button inside a button is
           // invalid HTML that browsers resolve by dropping the inner one.
-          className={clearable ? 'pr-11' : undefined}
+          //
+          // The padding goes on the VALUE span, not on the trigger. Padding
+          // the trigger moves the chevron inward too (it is the flex row's
+          // last child), which put the clear button *outside* the chevron at
+          // the very edge of the field. The value span is the flex-1 child, so
+          // padding it reserves the button's space between a long label and a
+          // chevron that hasn't moved.
+          className={clearable ? '[&>span]:pr-7' : undefined}
         >
           {/* `||`, not `??`: RJSF passes `placeholder: ''` (not undefined) when
               a field declares no `ui:placeholder`, so the nullish fallback
@@ -138,6 +145,8 @@ function SelectWidget(props: WidgetProps) {
           onClick={() => onChange(options['emptyValue'])}
           aria-label={t('clear_selection')}
           title={t('clear_selection')}
+          // `right-8` clears the chevron (px-3 padding + a 16px icon = 28px)
+          // without depending on the trigger's own padding.
           className="absolute inset-y-0 right-8 my-auto flex h-6 w-6 items-center justify-center rounded-md text-(--bd-fg-muted) transition-colors hover:bg-(--bd-border-soft) hover:text-(--bd-fg) focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-(--bd-primary-50)"
         >
           <X className="h-3.5 w-3.5" aria-hidden="true" />
