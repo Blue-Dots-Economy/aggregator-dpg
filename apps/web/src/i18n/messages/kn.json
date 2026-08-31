@@ -10,7 +10,8 @@
   "form": {
     "select_placeholder": "ಆಯ್ಕೆಮಾಡಿ…",
     "comma_separated": "ಅಲ್ಪವಿರಾಮದಿಂದ ಬೇರ್ಪಡಿಸಿದ ಮೌಲ್ಯಗಳು",
-    "select_options": "ಆಯ್ಕೆಗಳನ್ನು ಆರಿಸಿ…"
+    "select_options": "ಆಯ್ಕೆಗಳನ್ನು ಆರಿಸಿ…",
+    "clear_selection": "ಆಯ್ಕೆಯನ್ನು ತೆರವುಗೊಳಿಸಿ"
   },
   "status_pill": {
     "active": "ಸಕ್ರಿಯ",

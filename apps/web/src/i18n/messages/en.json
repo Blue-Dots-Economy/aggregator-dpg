@@ -10,7 +10,8 @@
   "form": {
     "select_placeholder": "Select…",
     "comma_separated": "Comma-separated values",
-    "select_options": "Select options…"
+    "select_options": "Select options…",
+    "clear_selection": "Clear selection"
   },
   "status_pill": {
     "active": "Active",

@@ -20,6 +20,7 @@ import type {
 import type { IChangeEvent } from '@rjsf/core';
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactElement } from 'react';
 import { useTranslations } from 'next-intl';
+import { X } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/Select';
 import { MultiSelect } from '../ui/MultiSelect';
 import { resolveVisibleSchema, stripShowIf } from '../../lib/show-if';
@@ -78,28 +79,71 @@ function SelectWidget(props: WidgetProps) {
   const t = useTranslations('form');
   const enumOptions =
     (options['enumOptions'] as { value: unknown; label: string }[] | undefined) ?? [];
-  // shadcn Select disallows the empty-string sentinel as a value; map
-  // empty selection to a controlled `undefined` instead and surface the
-  // placeholder via SelectValue.
-  const current = value !== undefined && value !== null && value !== '' ? String(value) : undefined;
+  // shadcn Select disallows the empty-string sentinel as an *item* value, but
+  // Radix's Root treats `value=""` as "no selection" and renders the
+  // placeholder (`shouldShowPlaceholder`), so `''` is exactly the right reset.
+  //
+  // Always passing `value` — rather than the previous conditional spread that
+  // omitted the prop when empty — keeps the Select controlled for its whole
+  // life. Dropping the prop mid-life handed control back to Radix's internal
+  // state, which still held the old selection: the field then showed neither
+  // the cleared placeholder nor, reliably, the old label. That went unnoticed
+  // while nothing could clear a value; the button below is what reaches it.
+  const current = value !== undefined && value !== null && value !== '' ? String(value) : '';
+  // Once a value was picked there was no way back to empty: every dropdown
+  // entry sets a value, and re-picking the current one just re-sets it. That
+  // left an optional field permanently answered on the strength of one
+  // mis-click. Only shown where clearing is actually allowed and possible —
+  // an optional field that currently holds something and isn't locked.
+  const clearable = !required && current !== '' && !disabled && !readonly;
   return (
-    <Select
-      {...(current !== undefined ? { value: current } : {})}
-      onValueChange={(v) => onChange(v === '' ? options['emptyValue'] : v)}
-      disabled={Boolean(disabled || readonly)}
-      required={Boolean(required)}
-    >
-      <SelectTrigger id={id} {...(required ? { 'aria-required': true } : {})}>
-        <SelectValue placeholder={placeholder ?? t('select_placeholder')} />
-      </SelectTrigger>
-      <SelectContent>
-        {enumOptions.map((opt) => (
-          <SelectItem key={String(opt.value)} value={String(opt.value)}>
-            {opt.label}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+    <div className="relative">
+      <Select
+        value={current}
+        onValueChange={(v) => onChange(v === '' ? options['emptyValue'] : v)}
+        disabled={Boolean(disabled || readonly)}
+        required={Boolean(required)}
+      >
+        <SelectTrigger
+          id={id}
+          {...(required ? { 'aria-required': true } : {})}
+          // Room for the clear button, which is overlaid rather than nested:
+          // the trigger is itself a <button>, and a button inside a button is
+          // invalid HTML that browsers resolve by dropping the inner one.
+          className={clearable ? 'pr-11' : undefined}
+        >
+          {/* `||`, not `??`: RJSF passes `placeholder: ''` (not undefined) when
+              a field declares no `ui:placeholder`, so the nullish fallback
+              never fired and every empty select rendered a blank box with no
+              "Select…" hint at all. Radix already knew the field was empty
+              (`data-placeholder` was set); it was handed an empty string to
+              show. Pre-existing, and newly reachable: clearing a field would
+              otherwise land the reader on that same blank box. */}
+          <SelectValue placeholder={placeholder || t('select_placeholder')} />
+        </SelectTrigger>
+        <SelectContent>
+          {enumOptions.map((opt) => (
+            <SelectItem key={String(opt.value)} value={String(opt.value)}>
+              {opt.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {clearable && (
+        <button
+          type="button"
+          // `emptyValue`, not a bare `undefined`, so this matches what the
+          // text and textarea widgets already send when emptied — RJSF then
+          // drops the key from formData rather than storing an empty string.
+          onClick={() => onChange(options['emptyValue'])}
+          aria-label={t('clear_selection')}
+          title={t('clear_selection')}
+          className="absolute inset-y-0 right-8 my-auto flex h-6 w-6 items-center justify-center rounded-md text-(--bd-fg-muted) transition-colors hover:bg-(--bd-border-soft) hover:text-(--bd-fg) focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-(--bd-primary-50)"
+        >
+          <X className="h-3.5 w-3.5" aria-hidden="true" />
+        </button>
+      )}
+    </div>
   );
 }
 

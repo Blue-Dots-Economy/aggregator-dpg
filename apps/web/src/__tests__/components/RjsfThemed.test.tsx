@@ -183,6 +183,69 @@ describe('<RjsfThemedForm /> widgets', () => {
     expect(lastCall.formData.fruit).toBe('banana');
   });
 
+  it('SelectWidget: an optional field with a value offers a clear button that empties it', async () => {
+    const schema: RJSFSchema = {
+      type: 'object',
+      properties: {
+        fruit: { type: 'string', enum: ['apple', 'banana'], title: 'Fruit' },
+      },
+    };
+    const onDataChange = vi.fn();
+    renderControlled({ schema, initialData: { fruit: 'banana' }, onDataChange });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Clear selection' }));
+
+    // The key is dropped, not set to an empty string — `emptyValue` is
+    // `undefined` here, which is what makes the field genuinely unanswered.
+    const last = onDataChange.mock.calls[onDataChange.mock.calls.length - 1]![0];
+    expect(last.fruit).toBeUndefined();
+    expect(screen.getByRole('combobox')).toHaveTextContent('Select…');
+  });
+
+  it('SelectWidget: an empty select shows the "Select…" placeholder', () => {
+    // RJSF passes `placeholder: ''` rather than undefined, so the widget's
+    // fallback has to be a truthiness check — with `??` every empty select
+    // rendered a blank box.
+    const schema: RJSFSchema = {
+      type: 'object',
+      properties: { fruit: { type: 'string', enum: ['apple', 'banana'], title: 'Fruit' } },
+    };
+    renderThemed({ schema, formData: {}, onChange: vi.fn() });
+    expect(screen.getByRole('combobox')).toHaveTextContent('Select…');
+  });
+
+  it('SelectWidget: offers no clear button when the field is empty, required, or disabled', () => {
+    const optional: RJSFSchema = {
+      type: 'object',
+      properties: { fruit: { type: 'string', enum: ['apple', 'banana'], title: 'Fruit' } },
+    };
+
+    // Empty: there is nothing to clear, so the button would be dead chrome.
+    const empty = renderThemed({ schema: optional, formData: {}, onChange: vi.fn() });
+    expect(screen.queryByRole('button', { name: 'Clear selection' })).not.toBeInTheDocument();
+    empty.unmount();
+
+    // Required: emptying it is not a state the field is allowed to hold, so
+    // offering the button would invite a validation error rather than a choice.
+    const requiredSchema: RJSFSchema = { ...optional, required: ['fruit'] };
+    const req = renderThemed({
+      schema: requiredSchema,
+      formData: { fruit: 'banana' },
+      onChange: vi.fn(),
+    });
+    expect(screen.queryByRole('button', { name: 'Clear selection' })).not.toBeInTheDocument();
+    req.unmount();
+
+    // Disabled: the whole widget is locked.
+    renderThemed({
+      schema: optional,
+      formData: { fruit: 'banana' },
+      onChange: vi.fn(),
+      disabled: true,
+    });
+    expect(screen.queryByRole('button', { name: 'Clear selection' })).not.toBeInTheDocument();
+  });
+
   it('CommaSeparatedArrayWidget: splits typed text into a trimmed string array on blur', () => {
     const schema: RJSFSchema = {
       type: 'object',

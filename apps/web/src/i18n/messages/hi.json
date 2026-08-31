@@ -10,7 +10,8 @@
   "form": {
     "select_placeholder": "चुनें…",
     "comma_separated": "अल्पविराम से अलग किए गए मान",
-    "select_options": "विकल्प चुनें…"
+    "select_options": "विकल्प चुनें…",
+    "clear_selection": "चयन हटाएँ"
   },
   "status_pill": {
     "active": "सक्रिय",
