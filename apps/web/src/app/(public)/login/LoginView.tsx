@@ -52,29 +52,27 @@ export function LoginView({ returnTo, error }: LoginViewProps): JSX.Element {
         />
 
         <div className="w-full max-w-[440px] relative z-10">
-          <div className="flex items-center gap-3.5 mb-7">
+          <div className="flex items-center gap-3 mb-7">
             {cfg.brand.logo?.default ? (
               <Image
                 src={cfg.brand.logo.default}
                 alt={brand}
-                width={220}
-                height={56}
+                width={150}
+                height={40}
                 priority
-                className="h-12 w-auto object-contain object-left"
+                className="h-10 w-auto object-contain object-left"
               />
             ) : (
-              <>
-                <BlueDotsLogo size={56} />
-                <div>
-                  <div className="font-display font-bold text-[20px] text-ink-900 leading-none tracking-tight">
-                    {brand}
-                  </div>
-                  <div className="text-[12.5px] text-ink-400 leading-none mt-1.5">
-                    Aggregator Portal
-                  </div>
-                </div>
-              </>
+              <span className="flex items-center gap-2.5">
+                <BlueDotsLogo size={40} />
+                <span className="font-display font-bold text-[20px] text-ink-900 leading-none tracking-tight">
+                  {brand}
+                </span>
+              </span>
             )}
+            <span className="inline-flex items-center rounded-full bg-(--bd-primary-50) px-3 py-1.5 text-[13px] font-semibold text-(--bd-primary-600) whitespace-nowrap">
+              Aggregator Portal
+            </span>
           </div>
 
           {error ? (
