@@ -9,6 +9,8 @@ export interface OwnerInviteViewProps {
 }
 
 interface MintSummary {
+  /** True when the grant was expired and a fresh link was re-mailed (nothing minted). */
+  recovered: boolean;
   sent: number;
   resent: number;
   invalid: Array<{ email: string; reason: string }>;
@@ -18,8 +20,7 @@ type ViewState =
   | { status: 'idle' }
   | { status: 'submitting' }
   | { status: 'result'; summary: MintSummary }
-  | { status: 'expired' } // grant expired — offer recovery
-  | { status: 'recovery_sent' }
+  | { status: 'recovery_sent' } // grant was expired → fresh link re-mailed
   | { status: 'invalid_grant' }
   | { status: 'error'; message: string };
 
@@ -83,14 +84,14 @@ export function OwnerInviteView({ grant }: Readonly<OwnerInviteViewProps>): JSX.
     }
     if (res.ok) {
       const summary = (await res.json()) as MintSummary;
-      setState({ status: 'result', summary });
-      setRaw('');
+      // An expired grant re-mails a fresh link and mints nothing (recovery is
+      // folded into the mint endpoint — no separate call).
+      setState(summary.recovered ? { status: 'recovery_sent' } : { status: 'result', summary });
+      if (!summary.recovered) setRaw('');
       return;
     }
     const code = await readErrorCode(res);
-    if (res.status === 410 || code === 'GRANT_EXPIRED') {
-      setState({ status: 'expired' });
-    } else if (code === 'GRANT_INVALID') {
+    if (code === 'GRANT_INVALID') {
       setState({ status: 'invalid_grant' });
     } else if (res.status === 429) {
       setState({
@@ -99,24 +100,6 @@ export function OwnerInviteView({ grant }: Readonly<OwnerInviteViewProps>): JSX.
       });
     } else {
       setState({ status: 'error', message: 'Could not send invites. Please try again.' });
-    }
-  }
-
-  async function requestFreshLink(): Promise<void> {
-    setState({ status: 'submitting' });
-    try {
-      const res = await fetch('/api/invites/grant/renew', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ grant }),
-      });
-      setState(
-        res.ok
-          ? { status: 'recovery_sent' }
-          : { status: 'error', message: 'Could not send a fresh link. Please try again.' },
-      );
-    } catch {
-      setState({ status: 'error', message: 'Network error. Please try again.' });
     }
   }
 
@@ -129,25 +112,10 @@ export function OwnerInviteView({ grant }: Readonly<OwnerInviteViewProps>): JSX.
           </Banner>
         ) : null}
 
-        {state.status === 'expired' ? (
-          <div className="space-y-3">
-            <Banner tone="warn">
-              This invite-management link has expired. Request a fresh link and we&apos;ll email it
-              to your registered address.
-            </Banner>
-            <button
-              type="button"
-              onClick={requestFreshLink}
-              className="rounded-[10px] bg-(--bd-primary) px-4 py-2.5 text-[14px] font-semibold text-white"
-            >
-              Email me a fresh link
-            </button>
-          </div>
-        ) : null}
-
         {state.status === 'recovery_sent' ? (
-          <Banner tone="success">
-            A fresh invite-management link is on its way to your registered email address.
+          <Banner tone="warn">
+            This invite-management link had expired, so we&apos;ve emailed a fresh one to your
+            registered address. Open that link and try again.
           </Banner>
         ) : null}
 

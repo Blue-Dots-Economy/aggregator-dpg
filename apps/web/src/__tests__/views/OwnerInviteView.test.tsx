@@ -46,7 +46,7 @@ describe('<OwnerInviteView />', () => {
   it('mints invites and renders the summary', async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValue(jsonResponse(200, { sent: 2, resent: 1, invalid: [] }));
+      .mockResolvedValue(jsonResponse(200, { recovered: false, sent: 2, resent: 1, invalid: [] }));
     vi.stubGlobal('fetch', fetchMock);
 
     renderView();
@@ -63,23 +63,19 @@ describe('<OwnerInviteView />', () => {
     expect(body.recipients).toEqual([{ email: 'a@x.org' }, { email: 'b@x.org', name: 'Bee' }]);
   });
 
-  it('offers recovery on an expired grant, then confirms the fresh link was sent', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(jsonResponse(410, { error: { code: 'GRANT_EXPIRED' } }))
-      .mockResolvedValueOnce(jsonResponse(200, { ok: true }));
-    vi.stubGlobal('fetch', fetchMock);
-
+  it('shows the recovery banner when an expired grant re-mails a fresh link (recovered:true)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(jsonResponse(200, { recovered: true, sent: 0, resent: 0, invalid: [] })),
+    );
     renderView();
     fireEvent.change(screen.getByPlaceholderText(/asha@org\.in/i), {
       target: { value: 'a@x.org' },
     });
     fireEvent.click(screen.getByRole('button', { name: /send/i }));
-
-    const recover = await screen.findByRole('button', { name: /fresh link/i });
-    fireEvent.click(recover);
-    await waitFor(() => expect(screen.getByText(/on its way/i)).toBeInTheDocument());
-    expect(fetchMock).toHaveBeenLastCalledWith('/api/invites/grant/renew', expect.anything());
+    await waitFor(() => expect(screen.getByText(/had expired/i)).toBeInTheDocument());
   });
 
   it('shows an invalid-grant banner on GRANT_INVALID', async () => {

@@ -116,11 +116,19 @@ describe('invite mint routes', () => {
     expect(body.invalid[0]?.reason).toBe('duplicate_in_batch');
   });
 
-  it('rejects an expired grant (410)', async () => {
+  it('recovers an expired grant: re-mails a fresh link to the registered owner, mints nothing', async () => {
     const grant = await grantFor(ORG_ID, -1);
     const res = await mint({ grant, recipients: [{ email: 'a@x.org' }] });
-    expect(res.statusCode).toBe(410);
-    expect((res.json() as { error: { code: string } }).error.code).toBe('GRANT_EXPIRED');
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { recovered: boolean; sent: number };
+    expect(body.recovered).toBe(true);
+    expect(body.sent).toBe(0);
+    // No invite minted; a fresh grant link mailed to the REGISTERED owner.
+    const a = await invites.findPendingByOrgAndEmail(ORG_ID, 'a@x.org');
+    expect(a.ok && a.value).toBeNull();
+    expect(mailer.outbox.length).toBe(1);
+    expect(mailer.outbox[0]?.to).toBe('owner@jfc.org');
+    expect(mailer.outbox[0]?.html).toContain('/register/invite?grant=');
   });
 
   it('rejects an invalid grant (400)', async () => {
@@ -149,19 +157,5 @@ describe('invite mint routes', () => {
     const grant = await grantFor();
     const res = await mint({ grant, recipients: [{ email: 'a@x.org' }] });
     expect(res.statusCode).toBe(429);
-  });
-
-  it('grant/renew emails a fresh grant to the REGISTERED owner, even for an expired grant', async () => {
-    const grant = await grantFor(ORG_ID, -1);
-    const res = await app.inject({
-      method: 'POST',
-      url: '/admin/v1/invites/grant/renew',
-      payload: { grant },
-    });
-    expect(res.statusCode).toBe(200);
-    expect(mailer.outbox.length).toBe(1);
-    expect(mailer.outbox[0]?.to).toBe('owner@jfc.org');
-    // The refreshed grant link is carried in the email.
-    expect(mailer.outbox[0]?.html).toContain('/register/invite?grant=');
   });
 });

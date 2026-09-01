@@ -1,18 +1,20 @@
 /**
- * Coordinator-invite mint + grant-recovery endpoints (#700 mint, #701 recovery).
+ * Coordinator-invite mint endpoint (#700 mint, #701 recovery folded in).
  *
  * Flag-gated by `ORG_HIERARCHY_ENABLED`: not registered when the flag is off.
  *
- *   POST /admin/v1/invites            body { grant, recipients[] }
- *     Authed by the owner GRANT token (the owner cannot log in). Mints one
- *     14-day invite per recipient (refreshing an already-pending address),
- *     emails each, and returns { sent, resent, invalid[] }. Per-org rate
- *     limited — the mandatory mitigation against a leaked grant (§7.2).
- *
- *   POST /admin/v1/invites/grant/renew   body { grant }
- *     Recovery for an expired-but-signature-valid grant. Mints a fresh grant
- *     and emails it to the org's REGISTERED owner address (never a
- *     request-supplied one), so recovery is not a mail-redirection primitive.
+ *   POST /admin/v1/invites   body { grant, recipients[] }
+ *     Authed by the owner GRANT token (the owner cannot log in). Three outcomes,
+ *     all keyed off the grant:
+ *       - valid grant  → mint one 14-day invite per recipient (refreshing an
+ *         already-pending address), email each, return
+ *         { recovered:false, sent, resent, invalid[] }. Per-org rate limited —
+ *         the mandatory mitigation against a leaked grant (§7.2).
+ *       - EXPIRED grant (signature valid) → mint NOTHING; re-mail a fresh grant
+ *         to the org's REGISTERED owner address (never a request-supplied one),
+ *         return { recovered:true, sent:0, resent:0, invalid:[] }. This folds
+ *         the old /grant/renew recovery into the one endpoint.
+ *       - invalid grant → GRANT_INVALID.
  *
  * Mint logic lives here, not in a page handler, so a future console is a second
  * caller rather than a rewrite (§4.3). Belongs to `@aggregator-dpg/api`.
@@ -45,9 +47,9 @@ const MintBodySchema = z.object({
   recipients: z.array(RecipientSchema).min(1).max(500),
 });
 
-const RenewBodySchema = z.object({ grant: z.string().min(1) });
-
 const MintResponseSchema = z.object({
+  /** True when the grant was expired and a fresh grant link was re-mailed (nothing minted). */
+  recovered: z.boolean(),
   sent: z.number().int(),
   resent: z.number().int(),
   invalid: z.array(z.object({ email: z.string(), reason: z.string() })),
@@ -69,10 +71,9 @@ function grantUrl(token: string): string {
 }
 
 /**
- * Registers the invite mint + grant-recovery routes. No-op when the org
- * hierarchy is disabled.
+ * Registers the invite mint route. No-op when the org hierarchy is disabled.
  *
- * @param app - Fastify instance to attach the routes to.
+ * @param app - Fastify instance to attach the route to.
  */
 export async function registerInviteRoutes(app: FastifyInstance): Promise<void> {
   if (!orgHierarchyEnabled()) return;
@@ -84,18 +85,20 @@ export async function registerInviteRoutes(app: FastifyInstance): Promise<void> 
         tags: ['invites'],
         summary: 'Mint coordinator invites (owner grant-authed)',
         description:
-          'Authed by the owner grant token. Mints/refreshes one 14-day invite per recipient, emails each, and returns a per-recipient summary. Per-org rate limited. Only registered when ORG_HIERARCHY_ENABLED=true.',
+          'Authed by the owner grant token. A valid grant mints/refreshes one 14-day invite per recipient and emails each. An expired grant mints nothing and re-mails a fresh grant to the registered owner (recovery). Per-org rate limited. Only registered when ORG_HIERARCHY_ENABLED=true.',
         body: MintBodySchema,
-        response: { 200: MintResponseSchema, ...errorResponses(400, 409, 410, 429, 503) },
+        response: { 200: MintResponseSchema, ...errorResponses(400, 409, 429, 503) },
       },
     },
     async (req: FastifyRequest, reply: FastifyReply) => {
       const log = req.log.child({ operation: 'invites.mint' });
       const body = req.body as z.infer<typeof MintBodySchema>;
 
-      const grant = await verifyGrantToken(body.grant);
+      // Accept an expired-but-signature-valid grant so recovery can run here; a
+      // bad signature / wrong audience still fails as GRANT_INVALID.
+      const grant = await verifyGrantToken(body.grant, { allowExpired: true });
       if (!grant.ok) {
-        throw httpError(grant.error.code === 'EXPIRED' ? 'GRANT_EXPIRED' : 'GRANT_INVALID');
+        throw httpError('GRANT_INVALID');
       }
       const orgId = grant.org;
 
@@ -110,6 +113,38 @@ export async function registerInviteRoutes(app: FastifyInstance): Promise<void> 
       // Grant is implicitly revoked once the org leaves active (§5.2).
       if (!org.value || org.value.status !== 'active') {
         throw httpError('TARGET_ORG_INACTIVE');
+      }
+
+      // Expired grant → recovery: re-mail a fresh grant to the REGISTERED owner
+      // address (never a request input), mint nothing.
+      if (grant.expired) {
+        const fresh = await mintGrantToken({ org: orgId, ttlSec: config.GRANT_TOKEN_TTL_SECONDS });
+        const mail = renderOrgOwnerApproved({
+          orgName: org.value.displayName,
+          ownerEmail: org.value.ownerEmail,
+          inviteUrl: grantUrl(fresh.token),
+        });
+        const send = await getMailer().send({
+          to: org.value.ownerEmail,
+          subject: mail.subject,
+          html: mail.html,
+          text: mail.text,
+        });
+        if (!send.ok) {
+          log.warn(
+            {
+              status: 'failure',
+              sub_operation: 'mailer.send.grantRecovery',
+              code: send.error.code,
+            },
+            'fresh-grant email delivery failed',
+          );
+        }
+        log.info(
+          { status: 'success', org_id: orgId, recovered: true },
+          'expired grant — fresh link re-mailed',
+        );
+        return reply.status(200).send({ recovered: true, sent: 0, resent: 0, invalid: [] });
       }
 
       // Rate limit the whole batch against the per-org window (§7.2).
@@ -217,68 +252,7 @@ export async function registerInviteRoutes(app: FastifyInstance): Promise<void> 
         { status: 'success', org_id: orgId, sent, resent, invalid: invalid.length },
         'invites minted',
       );
-      return reply.status(200).send({ sent, resent, invalid });
-    },
-  );
-
-  app.post(
-    '/admin/v1/invites/grant/renew',
-    {
-      schema: {
-        tags: ['invites'],
-        summary: 'Email a fresh owner grant link (expired-grant recovery)',
-        description:
-          "Accepts an expired-but-signature-valid grant, mints a fresh one, and emails it to the org's REGISTERED owner address (never a request-supplied one). Only registered when ORG_HIERARCHY_ENABLED=true.",
-        body: RenewBodySchema,
-        response: { 200: z.object({ ok: z.literal(true) }), ...errorResponses(400, 409, 503) },
-      },
-    },
-    async (req: FastifyRequest, reply: FastifyReply) => {
-      const log = req.log.child({ operation: 'invites.grantRenew' });
-      const body = req.body as z.infer<typeof RenewBodySchema>;
-
-      // Accept expired grants here — that's the whole point of recovery — but a
-      // bad signature / wrong audience still fails.
-      const grant = await verifyGrantToken(body.grant, { allowExpired: true });
-      if (!grant.ok) {
-        throw httpError('GRANT_INVALID');
-      }
-      const orgStore = getAggregatorOrgStore();
-      const org = await orgStore.findById(grant.org);
-      if (!org.ok) {
-        throw httpError('DB_UNAVAILABLE', {
-          cause: new Error(org.error.message),
-          fields: { sub_operation: 'orgStore.findById' },
-        });
-      }
-      if (!org.value || org.value.status !== 'active') {
-        throw httpError('TARGET_ORG_INACTIVE');
-      }
-
-      const { token } = await mintGrantToken({
-        org: grant.org,
-        ttlSec: config.GRANT_TOKEN_TTL_SECONDS,
-      });
-      const mail = renderOrgOwnerApproved({
-        orgName: org.value.displayName,
-        ownerEmail: org.value.ownerEmail,
-        inviteUrl: grantUrl(token),
-      });
-      // Emailed to the REGISTERED owner address on file, not any request input.
-      const send = await getMailer().send({
-        to: org.value.ownerEmail,
-        subject: mail.subject,
-        html: mail.html,
-        text: mail.text,
-      });
-      if (!send.ok) {
-        log.warn(
-          { status: 'failure', sub_operation: 'mailer.send.grantRenew', code: send.error.code },
-          'fresh-grant email delivery failed',
-        );
-      }
-      log.info({ status: 'success', org_id: grant.org }, 'fresh grant emailed to registered owner');
-      return reply.status(200).send({ ok: true });
+      return reply.status(200).send({ recovered: false, sent, resent, invalid });
     },
   );
 }
