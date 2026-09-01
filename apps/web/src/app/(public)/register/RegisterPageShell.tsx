@@ -12,6 +12,12 @@ import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/u
 export interface RegisterPageShellProps {
   /** Page heading rendered above the form (the coordinator/owner title). */
   heading: string;
+  /**
+   * Sub-heading under the title. Omit to use the default registration tagline;
+   * pass `null` to render no tagline (e.g. the invite surfaces, which carry
+   * their own intro copy).
+   */
+  tagline?: string | null;
   /** The registration form (coordinator or org). */
   children: ReactNode;
 }
@@ -28,6 +34,7 @@ export interface RegisterPageShellProps {
  */
 export function RegisterPageShell({
   heading,
+  tagline,
   children,
 }: Readonly<RegisterPageShellProps>): JSX.Element {
   const t = useTranslations('register');
@@ -90,7 +97,9 @@ export function RegisterPageShell({
           <h1 className="font-display font-bold text-[28px] text-ink-900 tracking-tight leading-tight mt-3">
             {heading}
           </h1>
-          <p className="text-[14px] text-ink-500 mt-2">{t('heading_tagline')}</p>
+          {tagline === null ? null : (
+            <p className="text-[14px] text-ink-500 mt-2">{tagline ?? t('heading_tagline')}</p>
+          )}
 
           {children}
 

@@ -217,8 +217,9 @@ export function CoordinatorRegisterForm({
       ) : (
         <>
           {inviteMode ? (
-            <output className="mb-4 block rounded-[10px] border border-ink-200 bg-white px-4 py-3 text-[13.5px] text-ink-600">
-              Registering as a coordinator under <strong>{selectedOrgName}</strong>.
+            <output className="mb-5 block text-[13.5px] text-ink-500">
+              Registering as a coordinator under{' '}
+              <span className="font-semibold text-ink-800">{selectedOrgName}</span>
             </output>
           ) : null}
           {!inviteMode && orgHierarchyEnabled ? (

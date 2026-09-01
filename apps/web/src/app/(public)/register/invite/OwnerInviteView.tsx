@@ -25,11 +25,18 @@ type ViewState =
   | { status: 'error'; message: string };
 
 interface InviteRow {
+  /** Stable client-side id for the React key (rows are reorderable/removable). */
+  id: string;
   name: string;
   email: string;
 }
 
-const EMPTY_ROW: InviteRow = { name: '', email: '' };
+let rowSeq = 0;
+/** Builds a fresh empty row with a stable id (avoids array-index keys). */
+function newRow(): InviteRow {
+  rowSeq += 1;
+  return { id: `row-${rowSeq}`, name: '', email: '' };
+}
 
 /**
  * Owner invite-management surface (#701). One Name + Email pair per coordinator,
@@ -41,7 +48,7 @@ const EMPTY_ROW: InviteRow = { name: '', email: '' };
  * @returns The invite-management page body.
  */
 export function OwnerInviteView({ grant }: Readonly<OwnerInviteViewProps>): JSX.Element {
-  const [rows, setRows] = useState<InviteRow[]>([{ ...EMPTY_ROW }]);
+  const [rows, setRows] = useState<InviteRow[]>([newRow()]);
   const [state, setState] = useState<ViewState>({ status: 'idle' });
 
   // Only rows with an email are sent; the optional name greets the recipient.
@@ -64,7 +71,7 @@ export function OwnerInviteView({ grant }: Readonly<OwnerInviteViewProps>): JSX.
     setRows((prev) => prev.map((r, i) => (i === index ? { ...r, [field]: value } : r)));
   }
   function addRow(): void {
-    setRows((prev) => [...prev, { ...EMPTY_ROW }]);
+    setRows((prev) => [...prev, newRow()]);
   }
   function removeRow(index: number): void {
     setRows((prev) => (prev.length === 1 ? prev : prev.filter((_, i) => i !== index)));
@@ -88,7 +95,7 @@ export function OwnerInviteView({ grant }: Readonly<OwnerInviteViewProps>): JSX.
       // An expired grant re-mails a fresh link and mints nothing (recovery is
       // folded into the mint endpoint — no separate call).
       setState(summary.recovered ? { status: 'recovery_sent' } : { status: 'result', summary });
-      if (!summary.recovered) setRows([{ ...EMPTY_ROW }]);
+      if (!summary.recovered) setRows([newRow()]);
       return;
     }
     const code = await readErrorCode(res);
@@ -105,7 +112,7 @@ export function OwnerInviteView({ grant }: Readonly<OwnerInviteViewProps>): JSX.
   }
 
   return (
-    <RegisterPageShell heading="Invite your coordinators">
+    <RegisterPageShell heading="Invite your coordinators" tagline={null}>
       <div className="mt-6">
         {state.status === 'invalid_grant' ? (
           <Banner tone="error">
@@ -135,7 +142,7 @@ export function OwnerInviteView({ grant }: Readonly<OwnerInviteViewProps>): JSX.
 
             <div className="space-y-3">
               {rows.map((row, i) => (
-                <div key={i} className="flex items-start gap-2">
+                <div key={row.id} className="flex items-start gap-2">
                   <div className="grid flex-1 gap-2 sm:grid-cols-2">
                     <input
                       type="email"
@@ -198,12 +205,14 @@ function ResultPanel({
   summary,
   onAgain,
 }: Readonly<{ summary: MintSummary; onAgain: () => void }>): JSX.Element {
+  // Only surface the counts that matter — a clean "N sent", plus already-invited
+  // / invalid parts only when non-zero.
+  const parts = [`${summary.sent} sent`];
+  if (summary.resent > 0) parts.push(`${summary.resent} already invited`);
+  if (summary.invalid.length > 0) parts.push(`${summary.invalid.length} invalid`);
   return (
     <div className="space-y-3">
-      <Banner tone="success">
-        {summary.sent} sent · {summary.resent} already invited (re-sent) · {summary.invalid.length}{' '}
-        invalid
-      </Banner>
+      <Banner tone="success">{parts.join(' · ')}</Banner>
       {summary.invalid.length > 0 ? (
         <ul className="rounded-[10px] border border-ink-200 bg-white px-4 py-3 text-[13px] text-ink-600">
           {summary.invalid.map((i) => (

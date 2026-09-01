@@ -133,7 +133,7 @@ export function CoordinatorInviteView({
 
   const headingTitle = (schema.title as string | undefined) ?? 'Aggregator Registration';
   return (
-    <RegisterPageShell heading={headingTitle}>
+    <RegisterPageShell heading={headingTitle} tagline={null}>
       <CoordinatorRegisterForm
         schema={schema}
         uiSchema={uiSchema}
