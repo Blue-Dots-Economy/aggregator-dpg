@@ -58,7 +58,7 @@ export function renderOrgOwnerApproved(v: OrgOwnerApprovedVars): {
   ${ctaButton('Invite your coordinators', v.inviteUrl, 'primary')}
 </div>
 <p style="margin:0 0 22px;font-size:14px;color:#475069;line-height:1.55;">
-  You don't need an account and you can't sign in — you manage your coordinators entirely from the button above. Keep this email so you can find it again; the link works for 90 days, and you can request a fresh one if it stops working.
+  You don't need an account and you can't sign in — you manage your coordinators entirely from the button above. Keep this email so you can find it again; the link works for 90 days. If it ever stops working, just open it and send again — we'll email you a fresh link automatically.
 </p>`
     : `<p style="margin:0 0 22px;font-size:14px;color:#475069;line-height:1.55;">
   Coordinators join only when you invite them. You'll be able to invite them by email shortly — we'll send you the invite link in a follow-up message.
@@ -83,7 +83,7 @@ Your organisation is now live on ${brand.long_name} (registered with ${v.ownerEm
 
 ${
   v.inviteUrl
-    ? `Coordinators can only join ${v.orgName} when you invite them. Invite them by email — each person gets their own one-time invite:\n${v.inviteUrl}\n\nYou don't need an account and you can't sign in — you manage your coordinators entirely from that link. Keep this email; the link works for 90 days, and you can request a fresh one if it stops working.`
+    ? `Coordinators can only join ${v.orgName} when you invite them. Invite them by email — each person gets their own one-time invite:\n${v.inviteUrl}\n\nYou don't need an account and you can't sign in — you manage your coordinators entirely from that link. Keep this email; the link works for 90 days. If it ever stops working, just open it and send again and we'll email you a fresh link automatically.`
     : `Coordinators join only when you invite them. You'll be able to invite them by email shortly — we'll send you the invite link in a follow-up message.`
 }
 

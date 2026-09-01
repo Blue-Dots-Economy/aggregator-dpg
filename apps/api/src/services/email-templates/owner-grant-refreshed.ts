@@ -45,7 +45,7 @@ export function renderOwnerGrantRefreshed(v: OwnerGrantRefreshedVars): {
   ${ctaButton('Open your invite page', v.inviteUrl, 'primary')}
 </div>
 <p style="margin:0 0 22px;font-size:14px;color:#475069;line-height:1.55;">
-  You don't need to sign in — you manage your coordinators entirely from this link. Keep this email so you can find it again.
+  You don't need to sign in — you manage your coordinators entirely from this link. Keep this email so you can find it again; if it ever stops working, just open it and send again and we'll email you a fresh one automatically.
 </p>
 <p style="margin:0;font-size:12px;color:#7c84a6;line-height:1.55;">
   Didn't request this? You can safely ignore this email — the link only works for your organisation.
@@ -58,7 +58,7 @@ You asked for a fresh link to invite coordinators for ${v.orgName} on ${brand.lo
 
 Open your invite page: ${v.inviteUrl}
 
-You don't need to sign in — you manage your coordinators entirely from this link. Keep this email so you can find it again.
+You don't need to sign in — you manage your coordinators entirely from this link. Keep this email so you can find it again; if it ever stops working, just open it and send again and we'll email you a fresh one automatically.
 
 Didn't request this? You can safely ignore this email — the link only works for your organisation.
 
