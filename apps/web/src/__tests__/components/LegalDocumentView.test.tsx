@@ -50,6 +50,12 @@ function renderView(hash: string, groups: LegalGroup[]) {
 // Illustrative fixture used by most tests below — general rendering behaviour
 // (rail groups, anchors, version display, no-checkbox, empty state) that does
 // not turn on the leading-title-heading trap.
+//
+// The audience keys here are arbitrary: this component renders whatever groups
+// it is handed and knows nothing about which audiences exist. `participant` is
+// deliberately kept as the first group even though production no longer
+// publishes one (see `load-legal-groups.server`) — nothing in these tests
+// should depend on the real audience list.
 const groups: LegalGroup[] = [
   {
     audience: 'participant',

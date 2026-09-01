@@ -21,8 +21,6 @@ import type { ParticipantConsent } from '../../../components/consent/consent-typ
  * Shared page backdrop for every state of the public registration page —
  * chooser, form, loading placeholder and the account-only surface.
  */
-import { LegalLinksFooter } from '../../../components/legal/LegalLinksFooter';
-
 const PAGE_BACKGROUND =
   'radial-gradient(1200px 600px at 50% -10%, var(--bd-tint-primary), transparent 70%), #FBFCFE';
 
@@ -1092,7 +1090,6 @@ export function PublicRegistrationView({
               />
             </>
           )}
-          <LegalLinksFooter variant="separated" className="mt-6" />
         </div>
         {consentGateElement}
       </div>
@@ -1407,8 +1404,6 @@ export function PublicRegistrationView({
             )}
           </div>
         </div>
-
-        <LegalLinksFooter variant="separated" className="mt-6" />
       </div>
       {consentGateElement}
     </div>
