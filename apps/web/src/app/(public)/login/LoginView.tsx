@@ -103,6 +103,13 @@ export function LoginView({ returnTo, error }: LoginViewProps): JSX.Element {
           <div className="fade-up">
             <Welcome onSignIn={goSignIn} brand={brand} t={t} />
           </div>
+
+          {/* Invite-only recovery line (#701): registration is not linked from
+              here, so a mis-shared/expired invite would otherwise leave a
+              legitimate coordinator with no route. Point them at their org. */}
+          <p className="mt-6 text-[12.5px] text-ink-400">
+            Need access? Contact your organisation administrator for an invitation.
+          </p>
         </div>
       </div>
     </div>

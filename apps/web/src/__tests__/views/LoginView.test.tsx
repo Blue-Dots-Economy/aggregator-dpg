@@ -54,6 +54,8 @@ describe('<LoginView />', () => {
     // Registration is not linked from the login homepage anymore (#619).
     expect(screen.queryByText(messages.auth.register_title)).toBeNull();
     expect(screen.queryByRole('alert')).toBeNull();
+    // Invite-only recovery line (#701) points a mis-linked coordinator at their org.
+    expect(screen.getByText(/contact your organisation administrator/i)).toBeInTheDocument();
   });
 
   it('navigates to the BFF login route with the returnTo param on sign-in click', () => {
