@@ -70,7 +70,7 @@ export class InMemoryRegistrationInvitesStore extends RegistrationInvitesStoreBa
     input: RefreshInviteInput,
   ): Promise<InviteStoreResult<RegistrationInvite>> {
     const row = this.store.get(jti);
-    if (row === undefined || row.status !== 'pending') {
+    if (row?.status !== 'pending') {
       return { ok: false, error: { code: 'NOT_FOUND', message: jti } };
     }
     row.expiresAt = input.expiresAt;
@@ -80,7 +80,7 @@ export class InMemoryRegistrationInvitesStore extends RegistrationInvitesStoreBa
 
   async consume(jti: string): Promise<InviteStoreResult<RegistrationInvite | null>> {
     const row = this.store.get(jti);
-    if (row === undefined || row.status !== 'pending') return { ok: true, value: null };
+    if (row?.status !== 'pending') return { ok: true, value: null };
     row.status = 'consumed';
     row.consumedAt = new Date();
     return { ok: true, value: { ...row } };
@@ -88,7 +88,7 @@ export class InMemoryRegistrationInvitesStore extends RegistrationInvitesStoreBa
 
   async revoke(jti: string): Promise<InviteStoreResult<RegistrationInvite | null>> {
     const row = this.store.get(jti);
-    if (row === undefined || row.status !== 'pending') return { ok: true, value: null };
+    if (row?.status !== 'pending') return { ok: true, value: null };
     row.status = 'revoked';
     return { ok: true, value: { ...row } };
   }

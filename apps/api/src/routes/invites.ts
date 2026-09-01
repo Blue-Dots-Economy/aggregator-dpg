@@ -242,7 +242,7 @@ export async function registerInviteRoutes(app: FastifyInstance): Promise<void> 
       // Grant is implicitly revoked once the org leaves active (§5.2). Bind to a
       // local so TS narrows it non-null for the rest of the handler.
       const orgRow = org.value;
-      if (!orgRow || orgRow.status !== 'active') {
+      if (orgRow?.status !== 'active') {
         throw httpError('TARGET_ORG_INACTIVE');
       }
 
