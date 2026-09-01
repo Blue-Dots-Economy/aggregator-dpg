@@ -40,17 +40,17 @@
     "@changesets/cli": "^2.31.1",
     "@commitlint/cli": "^21.2.2",
     "@commitlint/config-conventional": "^21.2.2",
-    "dependency-cruiser": "^17.3.10",
-    "eslint": "^10.8.1",
+    "dependency-cruiser": "^18.2.0",
+    "eslint": "^10.9.1",
     "eslint-import-resolver-typescript": "^4.4.5",
     "eslint-plugin-import-x": "^4.17.1",
     "eslint-plugin-jsx-a11y": "^6.10.2",
     "globals": "^17.11.0",
     "husky": "^9.1.7",
-    "lint-staged": "^17.3.0",
+    "lint-staged": "^17.4.1",
     "prettier": "^3.9.6",
     "tsx": "^4.23.12",
-    "turbo": "^2.10.10",
-    "typescript-eslint": "^8.67.0"
+    "turbo": "^2.10.12",
+    "typescript-eslint": "^8.68.0"
   }
 }

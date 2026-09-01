@@ -79,6 +79,38 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "@tailwindcss/postcss"
         update-types: ["version-update:semver-major"]
+      # @vitejs/plugin-react v6 peers on `vite ^8`, and the vite in this tree is
+      # not ours to choose — it arrives transitively through vitest 3, whose major
+      # is held above. #711 proposed v6 and died at test start with
+      # ERR_PACKAGE_PATH_NOT_EXPORTED on `vite/internal`, because plugin-react 6
+      # resolved against vite 7.3.6. This is the same lockstep shape as
+      # vitest/@vitest/coverage-v8: the plugin major can only move after vite does.
+      # 5.2.0 is taken instead (it peers on `^4 || ^5 || ^6 || ^7 || ^8`, so it is
+      # good both today and after a vite 8 move) and only the v6 major is held.
+      - dependency-name: "@vitejs/plugin-react"
+        update-types: ["version-update:semver-major"]
+      # openid-client v6 is an API rewrite, not a bump — the class-based surface
+      # (`Issuer`, `Client`, `generators`, `custom`) is gone in favour of functions
+      # over a Configuration object, so apps/web/src/lib/oidc/keycloak.ts does not
+      # typecheck against it at all (#716). Tracked in #724. Held rather than done
+      # in passing because it is the live Keycloak login path: green CI does not
+      # prove it, it needs a real authorization-code + PKCE round trip, and the
+      # epic/keycloak-iam branch may rewrite this adapter anyway.
+      - dependency-name: "openid-client"
+        update-types: ["version-update:semver-major"]
+      # fastify-type-provider-zod v7 requires zod v4 — it imports `safeEncode` from
+      # `zod/v4/core`, which does not exist under zod 3, so apps/api fails at module
+      # load and every API test dies (#714). zod's own major is held WITH it, and
+      # must be: `zod` is declared in nine manifests here, and letting one of them
+      # move alone would put two incompatible copies of zod in the tree — v3 and v4
+      # schema objects are not interchangeable across a package boundary, and that
+      # surfaces as a runtime type error rather than a build failure (the same
+      # duplicate-copy trap as the ioredis/bullmq typing in #585). Both move
+      # together in #725.
+      - dependency-name: "fastify-type-provider-zod"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "zod"
+        update-types: ["version-update:semver-major"]
 
   # GitHub Actions — keeps CI workflow action versions current
   - package-ecosystem: "github-actions"
