@@ -7,6 +7,7 @@ import { BlueDotsLogo } from '../../../components/ui/BlueDotsLogo';
 import { BrandPanel } from '../../../components/login/BrandPanel';
 import { I } from '../../../icons';
 import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
+import { LegalLinksFooter } from '../../../components/legal/LegalLinksFooter';
 
 export interface LoginViewProps {
   returnTo: string;
@@ -38,7 +39,7 @@ export function LoginView({ returnTo, error }: LoginViewProps): JSX.Element {
       <BrandPanel />
 
       <div
-        className="flex-1 min-w-0 h-screen flex items-center justify-center px-6 py-8 relative overflow-y-auto"
+        className="flex-1 min-w-0 h-screen flex flex-col px-6 py-8 relative overflow-y-auto"
         style={{ background: '#FBFCFE' }}
       >
         <div
@@ -53,61 +54,75 @@ export function LoginView({ returnTo, error }: LoginViewProps): JSX.Element {
           }}
         />
 
-        <div className="w-full max-w-[440px] relative z-10">
-          <div className="flex items-center gap-3.5 mb-7">
-            {cfg.brand.logo?.default ? (
-              <Image
-                src={cfg.brand.logo.default}
-                alt={brand}
-                width={220}
-                height={56}
-                priority
-                className="h-12 w-auto object-contain object-left"
-              />
-            ) : (
-              <>
-                <BlueDotsLogo size={56} />
-                <div>
-                  <div className="font-display font-bold text-[20px] text-ink-900 leading-none tracking-tight">
-                    {brand}
+        {/* `flex-1` + centring here, rather than on the pane, so the card is
+            still optically centred while the footer below it is pinned to the
+            foot of the pane. */}
+        <div className="flex-1 flex items-center justify-center relative z-10">
+          <div className="w-full max-w-[440px]">
+            <div className="flex items-center gap-3.5 mb-7">
+              {cfg.brand.logo?.default ? (
+                <Image
+                  src={cfg.brand.logo.default}
+                  alt={brand}
+                  width={220}
+                  height={56}
+                  priority
+                  className="h-12 w-auto object-contain object-left"
+                />
+              ) : (
+                <>
+                  <BlueDotsLogo size={56} />
+                  <div>
+                    <div className="font-display font-bold text-[20px] text-ink-900 leading-none tracking-tight">
+                      {brand}
+                    </div>
+                    <div className="text-[12.5px] text-ink-400 leading-none mt-1.5">
+                      Aggregator Portal
+                    </div>
                   </div>
-                  <div className="text-[12.5px] text-ink-400 leading-none mt-1.5">
-                    Aggregator Portal
-                  </div>
+                </>
+              )}
+            </div>
+
+            {error ? (
+              error === 'session_expired' ? (
+                <div
+                  role="alert"
+                  className="mb-5 rounded-[10px] border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-800"
+                >
+                  {t('session_expired')}
                 </div>
-              </>
-            )}
-          </div>
+              ) : error === 'org_no_portal' ? (
+                <div
+                  role="alert"
+                  className="mb-5 rounded-[10px] border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-800"
+                >
+                  {t('org_no_portal')}
+                </div>
+              ) : (
+                <div
+                  role="alert"
+                  className="mb-5 rounded-[10px] border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-700"
+                >
+                  {t('signin_failed', { reason: humanizeError(error, t) })}
+                </div>
+              )
+            ) : null}
 
-          {error ? (
-            error === 'session_expired' ? (
-              <div
-                role="alert"
-                className="mb-5 rounded-[10px] border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-800"
-              >
-                {t('session_expired')}
-              </div>
-            ) : error === 'org_no_portal' ? (
-              <div
-                role="alert"
-                className="mb-5 rounded-[10px] border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-800"
-              >
-                {t('org_no_portal')}
-              </div>
-            ) : (
-              <div
-                role="alert"
-                className="mb-5 rounded-[10px] border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-700"
-              >
-                {t('signin_failed', { reason: humanizeError(error, t) })}
-              </div>
-            )
-          ) : null}
-
-          <div className="fade-up">
-            <Welcome onSignIn={goSignIn} onRegister={goRegister} brand={brand} t={t} />
+            <div className="fade-up">
+              <Welcome onSignIn={goSignIn} onRegister={goRegister} brand={brand} t={t} />
+            </div>
           </div>
         </div>
+
+        {/* At the foot of the pane, not trailing the card's own content — the
+            same place the sibling Signals portal keeps it. Signing in from here
+            is the act of agreeing, so the line belongs on the page; it just
+            isn't part of the sign-in card. */}
+        <LegalLinksFooter
+          variant="sentence"
+          className="relative z-10 mx-auto w-full max-w-[440px] pt-8"
+        />
       </div>
     </div>
   );

@@ -631,6 +631,7 @@
     "version_only": "ಆವೃತ್ತಿ {version}",
     "unavailable": "ಕಾನೂನು ದಾಖಲೆಗಳು ಪ್ರಸ್ತುತ ಲಭ್ಯವಿಲ್ಲ. ದಯವಿಟ್ಟು ನಂತರ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
     "back_to_sign_in": "ಸೈನ್ ಇನ್‌ಗೆ ಹಿಂತಿರುಗಿ",
-    "contents_label": "ಪರಿವಿಡಿ"
+    "contents_label": "ಪರಿವಿಡಿ",
+    "agree_sentence": "ಮುಂದುವರಿಯುವ ಮೂಲಕ ನೀವು <privacy>ಗೌಪ್ಯತಾ ನೀತಿ</privacy> ಮತ್ತು <terms>ನಿಯಮಗಳಿಗೆ</terms> ಸಮ್ಮತಿಸುತ್ತೀರಿ."
   }
 }

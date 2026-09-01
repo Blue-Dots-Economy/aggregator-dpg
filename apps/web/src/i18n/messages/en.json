@@ -631,6 +631,7 @@
     "version_only": "Version {version}",
     "unavailable": "Legal documents are currently unavailable. Please try again later.",
     "back_to_sign_in": "Back to sign in",
-    "contents_label": "Contents"
+    "contents_label": "Contents",
+    "agree_sentence": "By continuing you agree to the <privacy>Privacy Policy</privacy> and <terms>Terms</terms>."
   }
 }

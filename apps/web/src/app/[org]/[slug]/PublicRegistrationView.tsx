@@ -1,7 +1,6 @@
 'use client';
 
 import Image from 'next/image';
-import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import type { RJSFSchema, UiSchema } from '@rjsf/utils';
 import type { IChangeEvent } from '@rjsf/core';
@@ -22,38 +21,10 @@ import type { ParticipantConsent } from '../../../components/consent/consent-typ
  * Shared page backdrop for every state of the public registration page —
  * chooser, form, loading placeholder and the account-only surface.
  */
+import { LegalLinksFooter } from '../../../components/legal/LegalLinksFooter';
+
 const PAGE_BACKGROUND =
   'radial-gradient(1200px 600px at 50% -10%, var(--bd-tint-primary), transparent 70%), #FBFCFE';
-
-/**
- * Small in-page footer linking to the read-only `/privacy` and `/terms`
- * pages (§4.1's `LegalDocumentView`). Once the blocking `ConsentGate` closes
- * (accepted or cancelled), nothing else on this page links there — a
- * registrant who wants to re-read what they agreed to, or a chooser/error
- * state that never reached the gate at all, otherwise has no in-product
- * path to either document. Reuses `register.consent.privacy_link` /
- * `terms_link` rather than adding new strings: the copy ("Privacy Policy" /
- * "Terms of Service") is identical, just no longer embedded in a sentence.
- *
- * @param props - The `register` namespace translator, threaded down rather
- *   than calling `useTranslations` again for two strings.
- * @returns The footer link row.
- */
-function FooterLegalLinks({
-  tRegister,
-}: Readonly<{ tRegister: (key: string) => string }>): JSX.Element {
-  return (
-    <div className="mt-6 flex items-center justify-center gap-3 text-[12.5px] text-ink-500">
-      <Link href="/privacy" className="underline-offset-2 hover:text-ink-900 hover:underline">
-        {tRegister('consent.privacy_link')}
-      </Link>
-      <span aria-hidden="true">·</span>
-      <Link href="/terms" className="underline-offset-2 hover:text-ink-900 hover:underline">
-        {tRegister('consent.terms_link')}
-      </Link>
-    </div>
-  );
-}
 
 export interface PublicRegistrationViewProps {
   org: string;
@@ -1121,7 +1092,7 @@ export function PublicRegistrationView({
               />
             </>
           )}
-          <FooterLegalLinks tRegister={tRegister} />
+          <LegalLinksFooter variant="separated" className="mt-6" />
         </div>
         {consentGateElement}
       </div>
@@ -1437,7 +1408,7 @@ export function PublicRegistrationView({
           </div>
         </div>
 
-        <FooterLegalLinks tRegister={tRegister} />
+        <LegalLinksFooter variant="separated" className="mt-6" />
       </div>
       {consentGateElement}
     </div>
