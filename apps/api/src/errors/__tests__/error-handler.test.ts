@@ -40,7 +40,7 @@ describe('global error handler envelope', () => {
       };
     };
     expect(body.error.code).toBe('PHONE_EXISTS');
-    expect(body.error.title).toBe('Phone already registered');
+    expect(body.error.title).toBe('Phone already in use');
     expect(body.error.detail).toBeTruthy();
     expect(body.error.requestId).toMatch(/^req-/);
     expect(body.error.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);

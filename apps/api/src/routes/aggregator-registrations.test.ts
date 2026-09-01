@@ -279,8 +279,8 @@ describe('POST /v1/aggregator-registrations/create', () => {
     expect(res.statusCode).toBe(409);
     const body = res.json() as { error: { code: string; title: string; detail: string } };
     expect(body.error.code).toBe('USER_EXISTS');
-    expect(body.error.title).toBe('Email already registered');
-    expect(body.error.detail).toContain('already exists');
+    expect(body.error.title).toBe('Email already in use');
+    expect(body.error.detail).toContain('already registered');
   });
 
   it('returns 409 when the phone is already used by another user', async () => {
@@ -301,7 +301,7 @@ describe('POST /v1/aggregator-registrations/create', () => {
     expect(res.statusCode).toBe(409);
     const body = res.json() as { error: { code: string; title: string; requestId: string } };
     expect(body.error.code).toBe('PHONE_EXISTS');
-    expect(body.error.title).toBe('Phone already registered');
+    expect(body.error.title).toBe('Phone already in use');
     expect(body.error.requestId).toMatch(/^req-/);
   });
 
