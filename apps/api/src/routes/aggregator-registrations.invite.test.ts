@@ -5,7 +5,11 @@ process.env.ORG_HIERARCHY_ENABLED = 'true';
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
-import { AggregatorStoreFake, _setAggregatorStore } from '../services/aggregator-store/index.js';
+import {
+  AggregatorStoreFake,
+  buildAggregator,
+  _setAggregatorStore,
+} from '../services/aggregator-store/index.js';
 import {
   AggregatorProfileStoreFake,
   _setAggregatorProfileStore,
@@ -185,6 +189,24 @@ describe('coordinator submit with an invite token (#700)', () => {
     const res = await post({ ...validBody, invite: token });
     expect(res.statusCode).toBe(409);
     expect((res.json() as { error: { code: string } }).error.code).toBe('TARGET_ORG_INACTIVE');
+  });
+
+  it('does not burn the invite when a downstream check fails (H4)', async () => {
+    // Seed a conflicting phone so the submit fails on the phone pre-check —
+    // after the invite validations but before any provisioning. The invite must
+    // stay pending so the coordinator can retry, not lose their one-time link.
+    aggregatorStore.seed([
+      buildAggregator({
+        contactPhone: '+919876543210',
+        contactEmail: 'other@x.org',
+        contact: { name: 'X', phone: '+919876543210', email: 'other@x.org' },
+      }),
+    ]);
+    const token = await seedInviteAndToken();
+    const res = await post({ ...validBody, invite: token });
+    expect(res.statusCode).toBe(409);
+    const inv = await invites.findByJti('inv-1');
+    expect(inv.ok && inv.value?.status).toBe('pending');
   });
 
   it('a double-submit with the same invite loses the CAS on the second call', async () => {

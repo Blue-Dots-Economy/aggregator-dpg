@@ -207,6 +207,11 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
       // Org-hierarchy gate (spec §6.2). When enabled, a coordinator must select
       // an *active* org; the link lives in `aggregators.parent_org_id`.
       let parentOrgId: string | null = null;
+      // Invite to claim (#700). Set in the invite path; the pending→consumed CAS
+      // runs only AFTER the registration fully provisions (below), so a duplicate
+      // phone / transient error never burns the coordinator's one-time invite.
+      // Reuse is still blocked: the invite is email-bound and the email is unique.
+      let inviteJti: string | null = null;
       if (orgHierarchyEnabled()) {
         // Rate limit per (ip, email) (spec A6).
         const rl = await checkSubmitRate(`${req.ip}|${contact.email}`);
@@ -263,21 +268,13 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
           if (ownerMatch.ok && ownerMatch.value) {
             throw httpError('OWNER_ALREADY_REGISTERED', { fields: { email: contact.email } });
           }
-          // CAS `pending → consumed` BEFORE creating anything (§4.4.6). A lost
-          // race renders already-used rather than double-creating; a downstream
-          // soft-fail leaves it consumed (recovery is the owner re-mint path).
-          const consumed = await inviteStore.consume(verified.jti);
-          if (!consumed.ok) {
-            throw httpError('DB_UNAVAILABLE', {
-              cause: new Error(consumed.error.message),
-              fields: { sub_operation: 'inviteStore.consume' },
-            });
-          }
-          if (consumed.value === null) {
-            throw httpError('INVITE_ALREADY_USED', { fields: { email: contact.email } });
-          }
-          // Stamp `parent_org_id` from the CLAIM (§4.4.5) so the approval path's
-          // parent_org_id ↔ token binding can never mismatch.
+          // Defer the pending→consumed CAS until the registration has fully
+          // provisioned (§4.4.6, revised): the read-only pre-checks above +
+          // the DB's unique email/phone constraints already block a
+          // double-create, so consuming here would only burn the invite on an
+          // ordinary user error (duplicate phone) or a transient failure. Stamp
+          // `parent_org_id` from the CLAIM so the approval binding can't mismatch.
+          inviteJti = verified.jti;
           parentOrgId = verified.org;
         } else {
           // Interim selector path: coordinator picks an active org (spec §6.2).
@@ -488,6 +485,24 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
           cause: kcResult.error,
           fields: { sub_operation: 'idp.createUser', rolled_back: true },
         });
+      }
+
+      // Registration is fully provisioned — now claim the invite (#700). Runs
+      // last so nothing above can burn the coordinator's one-time invite; a
+      // failure here is best-effort (the row already exists and the email is
+      // unique, so the invite can't be reused even if it stays pending).
+      if (inviteJti) {
+        const consumed = await getRegistrationInvitesStore().consume(inviteJti);
+        if (!consumed.ok || consumed.value === null) {
+          log.warn(
+            {
+              status: 'failure',
+              sub_operation: 'inviteStore.consume',
+              aggregator_id: aggregatorId,
+            },
+            'invite consume after successful registration did not commit (registration stands)',
+          );
+        }
       }
 
       await sendAdminReviewEmail(

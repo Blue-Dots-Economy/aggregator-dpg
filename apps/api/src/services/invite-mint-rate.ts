@@ -17,12 +17,39 @@ export interface InviteMintRateResult {
 }
 
 type Checker = (orgId: string, count: number) => Promise<InviteMintRateResult>;
+type IpChecker = (ip: string) => Promise<InviteMintRateResult>;
 
 let override: Checker | null = null;
+let ipOverride: IpChecker | null = null;
 
-/** Test helper — replace the checker (null restores the Redis-backed default). */
+/** Test helper — replace the per-org checker (null restores the Redis default). */
 export function _setInviteMintRateChecker(c: Checker | null): void {
   override = c;
+}
+
+/** Test helper — replace the per-IP checker (null restores the Redis default). */
+export function _setInviteIpRateChecker(c: IpChecker | null): void {
+  ipOverride = c;
+}
+
+/**
+ * Coarse per-IP throttle for the mint endpoint, run before the (cheap) grant
+ * verify — matches every other public surface. Fail-open (a DoS guard, not the
+ * anti-abuse control; the per-org limit is the fail-closed one). Reuses the
+ * public-submit window/max config.
+ *
+ * @param ip - The caller IP.
+ * @returns Whether the call is allowed + retry-after seconds.
+ */
+export async function checkInviteIpRate(ip: string): Promise<InviteMintRateResult> {
+  if (ipOverride) return ipOverride(ip);
+  const r = await consume({
+    namespace: 'invite-mint-ip',
+    key: ip,
+    windowSeconds: config.PUBLIC_SUBMIT_RATE_WINDOW_SECONDS,
+    max: config.PUBLIC_SUBMIT_RATE_MAX_PER_WINDOW,
+  });
+  return { allowed: r.allowed, retryAfterSeconds: r.retryAfterSeconds };
 }
 
 /**
@@ -45,6 +72,9 @@ export async function checkInviteMintRate(
     windowSeconds: config.INVITE_MINT_RATE_WINDOW_SECONDS,
     max: config.INVITE_MINT_RATE_MAX_PER_WINDOW,
     cost: count,
+    // Anti-abuse control for a leaked grant — a downed Redis must not silently
+    // remove it (§7.2). Fail closed.
+    failClosed: true,
   });
   return { allowed: r.allowed, retryAfterSeconds: r.retryAfterSeconds };
 }

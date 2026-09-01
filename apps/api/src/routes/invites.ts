@@ -27,7 +27,7 @@ import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js
 import { getRegistrationInvitesStore } from '../services/registration-invites-store/index.js';
 import { mintInviteToken } from '../services/invite-token.js';
 import { mintGrantToken, verifyGrantToken } from '../services/grant-token.js';
-import { checkInviteMintRate } from '../services/invite-mint-rate.js';
+import { checkInviteMintRate, checkInviteIpRate } from '../services/invite-mint-rate.js';
 import { formatApprovalTtl } from '../services/approval-token.js';
 import { getMailer } from '@aggregator-dpg/mailer';
 import {
@@ -44,7 +44,11 @@ const RecipientSchema = z.object({
 
 const MintBodySchema = z.object({
   grant: z.string().min(1),
-  recipients: z.array(RecipientSchema).min(1).max(500),
+  // Per-request cap aligned with the default per-org window max
+  // (INVITE_MINT_RATE_MAX_PER_WINDOW) so one full batch fits the window rather
+  // than always tripping the limit. Deployments raise both together for bigger
+  // bulk sends.
+  recipients: z.array(RecipientSchema).min(1).max(100),
 });
 
 const MintResponseSchema = z.object({
@@ -223,6 +227,18 @@ export async function registerInviteRoutes(app: FastifyInstance): Promise<void> 
       const log = req.log.child({ operation: 'invites.mint' });
       const body = req.body as z.infer<typeof MintBodySchema>;
 
+      // M4: per-IP throttle before the (cheap) grant verify — matches every
+      // other public surface. Fail-open (a coarse DoS guard, not the anti-abuse
+      // control; the per-org limit below is the fail-closed one).
+      const ipRl = await checkInviteIpRate(req.ip);
+      if (!ipRl.allowed) {
+        void reply.header('Retry-After', String(ipRl.retryAfterSeconds));
+        throw httpError('RATE_LIMITED', {
+          detail: `Retry in ${ipRl.retryAfterSeconds}s.`,
+          fields: { retry_after_seconds: ipRl.retryAfterSeconds },
+        });
+      }
+
       // Accept an expired-but-signature-valid grant so recovery can run here; a
       // bad signature / wrong audience still fails as GRANT_INVALID.
       const grant = await verifyGrantToken(body.grant, { allowExpired: true });
@@ -244,6 +260,19 @@ export async function registerInviteRoutes(app: FastifyInstance): Promise<void> 
       const orgRow = org.value;
       if (orgRow?.status !== 'active') {
         throw httpError('TARGET_ORG_INACTIVE');
+      }
+
+      // H1: the per-org limit covers BOTH the recovery email and the mint batch,
+      // so a leaked/expired grant can't loop the recovery path to send unbounded
+      // mail. Recovery costs one slot (one email); a mint costs one per recipient.
+      const cost = grant.expired ? 1 : body.recipients.length;
+      const rl = await checkInviteMintRate(orgId, cost);
+      if (!rl.allowed) {
+        void reply.header('Retry-After', String(rl.retryAfterSeconds));
+        throw httpError('RATE_LIMITED', {
+          detail: `Retry in ${rl.retryAfterSeconds}s.`,
+          fields: { retry_after_seconds: rl.retryAfterSeconds },
+        });
       }
 
       // Expired grant → recovery: re-mail a fresh grant to the REGISTERED owner
@@ -276,16 +305,6 @@ export async function registerInviteRoutes(app: FastifyInstance): Promise<void> 
           'expired grant — fresh link re-mailed',
         );
         return reply.status(200).send({ recovered: true, sent: 0, resent: 0, invalid: [] });
-      }
-
-      // Rate limit the whole batch against the per-org window (§7.2).
-      const rl = await checkInviteMintRate(orgId, body.recipients.length);
-      if (!rl.allowed) {
-        void reply.header('Retry-After', String(rl.retryAfterSeconds));
-        throw httpError('RATE_LIMITED', {
-          detail: `Retry in ${rl.retryAfterSeconds}s.`,
-          fields: { retry_after_seconds: rl.retryAfterSeconds },
-        });
       }
 
       const summary = await mintBatch({

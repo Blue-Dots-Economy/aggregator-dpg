@@ -11,6 +11,12 @@ import { logger } from '../../logger.js';
 import { aggregators } from '../../db/schema.js';
 import { getDb } from '../../db/client.js';
 import {
+  PG_UNIQUE_VIOLATION,
+  PG_CHECK_VIOLATION,
+  pgErrorCode,
+  pgConstraint,
+} from '../../db/pg-error.js';
+import {
   AggregatorStoreBase,
   type Aggregator,
   type CreateAggregatorInput,
@@ -21,9 +27,6 @@ import {
   type UpdateAggregatorPatch,
 } from './interface.js';
 import type { AggregatorStatus } from '@aggregator-dpg/shared-primitives/aggregator';
-
-const PG_UNIQUE_VIOLATION = '23505';
-const PG_CHECK_VIOLATION = '23514';
 
 export class PostgresAggregatorStore extends AggregatorStoreBase {
   async create(input: CreateAggregatorInput): Promise<StoreResult<Aggregator>> {
@@ -252,23 +255,12 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
     contextId: string,
     start: number,
   ): StoreResult<never> {
-    // Drizzle wraps the driver error: SQLSTATE `code` + `constraint` live on the
-    // pg driver error, which Drizzle exposes as `.cause` (its own `.message` is
-    // just the query text). Read the top-level err first, then fall back to
-    // `.cause`, so a unique/check violation maps to a clean 409 rather than a
-    // misleading 503 DB_UNAVAILABLE.
-    const cause = (err as { cause?: unknown }).cause;
-    const pick = (k: 'code' | 'constraint'): string | undefined => {
-      const top = (err as Record<string, unknown>)[k];
-      if (typeof top === 'string') return top;
-      const nested =
-        typeof cause === 'object' && cause !== null
-          ? (cause as Record<string, unknown>)[k]
-          : undefined;
-      return typeof nested === 'string' ? nested : undefined;
-    };
-    const code = pick('code');
-    const constraint = pick('constraint') ?? '';
+    // SQLSTATE `code` + `constraint` come from the shared pg-error helpers,
+    // which walk Drizzle's `.cause` chain (the top-level `.message` is only the
+    // query text). Gating on the code maps a unique/check violation to a clean
+    // 409 rather than a misleading 503.
+    const code = pgErrorCode(err);
+    const constraint = pgConstraint(err) ?? '';
     const message = (err as Error).message ?? 'unknown';
 
     if (code === PG_UNIQUE_VIOLATION) {

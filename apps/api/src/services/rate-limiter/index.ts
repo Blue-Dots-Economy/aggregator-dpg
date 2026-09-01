@@ -51,6 +51,13 @@ export interface RateLimitOptions {
    * request count.
    */
   cost?: number;
+  /**
+   * On a Redis error, deny instead of the default allow. Use for anti-abuse
+   * controls where a downed Redis must NOT silently remove the limit (e.g. the
+   * invite-mint bucket — a leaked grant would otherwise become unbounded). The
+   * public-submit limiter keeps the default fail-open posture.
+   */
+  failClosed?: boolean;
 }
 
 export interface RateLimitResult {
@@ -83,6 +90,10 @@ export async function consume(options: RateLimitOptions): Promise<RateLimitResul
     const incrEntry = pipelineRes?.[0];
     const count = Array.isArray(incrEntry) && typeof incrEntry[1] === 'number' ? incrEntry[1] : 0;
     if (count > options.max) {
+      // Refund the slots this denied call just consumed so a rejected request
+      // (e.g. an over-cap bulk mint) doesn't poison the window and lock out
+      // later smaller requests. Best-effort — a failed refund only over-counts.
+      await redis.decrby(fullKey, cost).catch(() => undefined);
       const retryAfterSeconds = Math.max(
         1,
         windowStart + options.windowSeconds - Math.floor(now / 1000),
@@ -96,9 +107,14 @@ export async function consume(options: RateLimitOptions): Promise<RateLimitResul
       status: 'failure',
       error: (err as Error).message,
       namespace: options.namespace,
+      fail_closed: options.failClosed ?? false,
     });
-    // Fail open on Redis blips — better to accept traffic than to lock the
-    // public endpoint behind an opaque 5xx.
+    // Default: fail open on Redis blips (public submit — better to accept
+    // traffic than 5xx). Anti-abuse callers set failClosed so a downed Redis
+    // can't silently remove the limit.
+    if (options.failClosed) {
+      return { allowed: false, count: 0, retryAfterSeconds: options.windowSeconds };
+    }
     return { allowed: true, count: 0, retryAfterSeconds: 0 };
   }
 }

@@ -16,7 +16,10 @@ import {
 } from '../services/registration-invites-store/index.js';
 import { FakeMailer, _setMailer } from '@aggregator-dpg/mailer';
 import { mintGrantToken, _resetGrantTokenKey } from '../services/grant-token.js';
-import { _setInviteMintRateChecker } from '../services/invite-mint-rate.js';
+import {
+  _setInviteMintRateChecker,
+  _setInviteIpRateChecker,
+} from '../services/invite-mint-rate.js';
 
 const ORG_ID = '00000000-0000-0000-0000-0000000000d1';
 
@@ -50,6 +53,7 @@ describe('invite mint routes', () => {
     _setRegistrationInvitesStore(invites);
     _setMailer(mailer);
     _setInviteMintRateChecker(async () => ({ allowed: true, retryAfterSeconds: 0 }));
+    _setInviteIpRateChecker(async () => ({ allowed: true, retryAfterSeconds: 0 }));
 
     app = await buildApp();
   });
@@ -60,6 +64,7 @@ describe('invite mint routes', () => {
     _setRegistrationInvitesStore(null);
     _setMailer(null);
     _setInviteMintRateChecker(null);
+    _setInviteIpRateChecker(null);
   });
 
   async function grantFor(org = ORG_ID, ttlSec?: number): Promise<string> {
@@ -171,6 +176,22 @@ describe('invite mint routes', () => {
     _setInviteMintRateChecker(async () => ({ allowed: false, retryAfterSeconds: 30 }));
     const grant = await grantFor();
     const res = await mint({ grant, recipients: [{ email: 'a@x.org' }] });
+    expect(res.statusCode).toBe(429);
+  });
+
+  it('rate-limits the expired-grant recovery path too (H1)', async () => {
+    // Per-org limit is checked BEFORE the recovery branch, so a looped expired
+    // grant can't send unbounded mail. Denied → 429, no email sent.
+    _setInviteMintRateChecker(async () => ({ allowed: false, retryAfterSeconds: 30 }));
+    const grant = await grantFor(ORG_ID, -1);
+    const res = await mint({ grant, recipients: [{ email: 'a@x.org' }] });
+    expect(res.statusCode).toBe(429);
+    expect(mailer.outbox.length).toBe(0);
+  });
+
+  it('returns 429 when the per-IP throttle trips, before touching the grant (M4)', async () => {
+    _setInviteIpRateChecker(async () => ({ allowed: false, retryAfterSeconds: 15 }));
+    const res = await mint({ grant: 'anything', recipients: [{ email: 'a@x.org' }] });
     expect(res.statusCode).toBe(429);
   });
 });

@@ -11,6 +11,7 @@
 import { and, eq, lt, type SQL } from 'drizzle-orm';
 import { aggregatorOrgs } from '../../db/schema.js';
 import { getDb } from '../../db/client.js';
+import { PG_UNIQUE_VIOLATION, pgErrorCode, pgConstraint } from '../../db/pg-error.js';
 import {
   AggregatorOrgStoreBase,
   type AggregatorOrg,
@@ -156,22 +157,18 @@ function toDomain(row: typeof aggregatorOrgs.$inferSelect): AggregatorOrg {
 }
 
 function mapInsertError(e: unknown): OrgStoreResult<never> {
-  // Drizzle wraps the driver error: its own `.message` is the query text
-  // ("Failed query: insert into …"), NOT the Postgres detail. The constraint
-  // name + SQLSTATE (23505 = unique_violation) live on the wrapped `.cause`
-  // (the `pg` driver error). Inspect both so a unique violation maps to a
-  // clean 409 (DUPLICATE_NAME/SLUG) instead of a misleading 503 DB_UNAVAILABLE.
-  const cause = (e as { cause?: unknown }).cause;
-  const causeObj =
-    typeof cause === 'object' && cause !== null ? (cause as Record<string, unknown>) : {};
-  const constraint = typeof causeObj['constraint'] === 'string' ? causeObj['constraint'] : '';
-  const causeMsg = typeof causeObj['message'] === 'string' ? causeObj['message'] : '';
-  const text = `${(e as Error).message ?? ''} ${causeMsg} ${constraint}`;
-  if (text.includes('aggregator_orgs_display_name_active_unique')) {
-    return errResult('DUPLICATE_NAME', 'organisation name already in use');
-  }
-  if (text.includes('aggregator_orgs_slug_active_unique')) {
-    return errResult('DUPLICATE_SLUG', 'slug already in use');
+  // Only a genuine unique-violation (SQLSTATE 23505) maps to a 409 — gate on the
+  // code first so a connection failure on a query that happens to mention a
+  // constraint name isn't misreported as a duplicate. The constraint name lives
+  // on the wrapped `.cause`; both come from the shared pg-error helpers.
+  if (pgErrorCode(e) === PG_UNIQUE_VIOLATION) {
+    const constraint = pgConstraint(e) ?? '';
+    if (constraint.includes('aggregator_orgs_display_name_active_unique')) {
+      return errResult('DUPLICATE_NAME', 'organisation name already in use');
+    }
+    if (constraint.includes('aggregator_orgs_slug_active_unique')) {
+      return errResult('DUPLICATE_SLUG', 'slug already in use');
+    }
   }
   return errResult('DB_UNAVAILABLE', (e as Error).message ?? 'insert failed');
 }
