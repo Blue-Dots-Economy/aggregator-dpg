@@ -31,6 +31,9 @@ interface InviteRow {
   email: string;
 }
 
+/** Max invites per submission — mirrors the API's recipients cap (MintBodySchema). */
+const MAX_INVITES = 100;
+
 let rowSeq = 0;
 /** Builds a fresh empty row with a stable id (avoids array-index keys). */
 function newRow(): InviteRow {
@@ -71,7 +74,7 @@ export function OwnerInviteView({ grant }: Readonly<OwnerInviteViewProps>): JSX.
     setRows((prev) => prev.map((r, i) => (i === index ? { ...r, [field]: value } : r)));
   }
   function addRow(): void {
-    setRows((prev) => [...prev, newRow()]);
+    setRows((prev) => (prev.length >= MAX_INVITES ? prev : [...prev, newRow()]));
   }
   function removeRow(index: number): void {
     setRows((prev) => (prev.length === 1 ? prev : prev.filter((_, i) => i !== index)));
@@ -176,13 +179,18 @@ export function OwnerInviteView({ grant }: Readonly<OwnerInviteViewProps>): JSX.
               ))}
             </div>
 
-            <button
-              type="button"
-              onClick={addRow}
-              className="mt-3 text-[13.5px] font-semibold text-(--bd-primary-600) hover:underline"
-            >
-              + Add another
-            </button>
+            <div className="mt-3 flex items-center gap-3">
+              {rows.length < MAX_INVITES ? (
+                <button
+                  type="button"
+                  onClick={addRow}
+                  className="text-[13.5px] font-semibold text-(--bd-primary-600) hover:underline"
+                >
+                  + Add another
+                </button>
+              ) : null}
+              <span className="text-[12.5px] text-ink-400">Up to {MAX_INVITES} at a time.</span>
+            </div>
 
             <div className="mt-5 flex items-center gap-3">
               <button
