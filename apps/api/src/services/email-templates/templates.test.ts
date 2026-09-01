@@ -3,6 +3,7 @@ import { renderAdminReview } from './admin-review.js';
 import { renderApplicantApproved } from './applicant-approved.js';
 import { renderApplicantRejected } from './applicant-rejected.js';
 import { renderCoordinatorInvite } from './coordinator-invite.js';
+import { renderOwnerGrantRefreshed } from './owner-grant-refreshed.js';
 import { renderOrgOwnerApproved } from './org-owner-approved.js';
 
 describe('admin-review template', () => {
@@ -145,29 +146,52 @@ describe('org-owner-approved template', () => {
 });
 
 describe('coordinator-invite template', () => {
-  it('renders org, invite link, and expiry; personal greeting when name given', () => {
+  it('names the org + inviter, the role, the link, and an absolute expiry', () => {
     const out = renderCoordinatorInvite({
       orgName: 'Joint Facilitation Centre',
+      inviterEmail: 'owner@jfc.org',
       inviteUrl: 'https://portal.example.org/register/coordinator?invite=abc',
-      expiresInText: '14 days',
+      expiresOn: '15 Sep 2026',
       recipientName: 'Asha',
     });
     expect(out.subject).toContain('Joint Facilitation Centre');
     expect(out.html).toContain('Joint Facilitation Centre');
-    expect(out.html).toContain('https://portal.example.org/register/coordinator?invite=abc');
-    expect(out.html).toContain('14 days');
+    // Sender identity — who invited them.
+    expect(out.html).toContain('owner@jfc.org');
+    // Role context + post-register expectation.
+    expect(out.html).toContain('as a coordinator');
+    expect(out.html).toContain('reviews your request');
+    // Absolute expiry, not a relative "in N days".
+    expect(out.html).toContain('15 Sep 2026');
     expect(out.html).toContain('Hi Asha,');
     expect(out.text).toContain('https://portal.example.org/register/coordinator?invite=abc');
+    expect(out.text).toContain('owner@jfc.org');
   });
 
   it('falls back to a generic greeting without a name, and escapes fields', () => {
     const out = renderCoordinatorInvite({
       orgName: '<b>Org</b> & Co',
+      inviterEmail: 'o@x.in',
       inviteUrl: 'https://x/invite',
-      expiresInText: '14 days',
+      expiresOn: '15 Sep 2026',
     });
     expect(out.html).toContain('Hello,');
     expect(out.html).not.toContain('<b>Org</b>');
     expect(out.html).toContain('&lt;b&gt;Org&lt;/b&gt; &amp; Co');
+  });
+});
+
+describe('owner-grant-refreshed template', () => {
+  it('reads as a fresh link (not a duplicate approval), no sign-in', () => {
+    const out = renderOwnerGrantRefreshed({
+      orgName: 'Acme Org',
+      inviteUrl: 'https://portal.example.org/register/invite?grant=xyz',
+    });
+    expect(out.subject).toContain('new invite link');
+    expect(out.subject).toContain('Acme Org');
+    expect(out.html).toContain('previous link had expired');
+    expect(out.html).toContain('https://portal.example.org/register/invite?grant=xyz');
+    expect(out.html).not.toContain('is approved');
+    expect(out.html).not.toContain('Sign in');
   });
 });

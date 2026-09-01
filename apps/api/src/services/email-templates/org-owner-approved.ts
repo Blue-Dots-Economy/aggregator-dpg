@@ -47,17 +47,21 @@ export function renderOrgOwnerApproved(v: OrgOwnerApprovedVars): {
   const brand = getEmailBrand();
   const subject = `${brand.short_name}: ${v.orgName} is approved`;
 
-  // The invite block is rendered only when the grant link exists (#701).
-  // Until then, tell the owner invites are coming — no CTA, no sign-in link.
+  // Coordinators join ONLY when the owner invites them (#700 removed self-serve
+  // registration) — so the CTA is the owner's next action, not a passive notice.
+  // The block only renders when the grant link exists; until then it's a heads-up.
   const inviteHtml = v.inviteUrl
-    ? `<div style="margin:0 0 18px;">
+    ? `<p style="margin:0 0 14px;font-size:14px;color:#475069;line-height:1.55;">
+  Coordinators can only join <strong>${escapeHtml(v.orgName)}</strong> when you invite them. Invite them by email below — each person gets their own one-time invite.
+</p>
+<div style="margin:0 0 18px;">
   ${ctaButton('Invite your coordinators', v.inviteUrl, 'primary')}
 </div>
 <p style="margin:0 0 22px;font-size:14px;color:#475069;line-height:1.55;">
-  Use the button above to invite your coordinators by email. Each person gets their own one-time invite.
+  You don't need an account and you can't sign in — you manage your coordinators entirely from the button above. Keep this email so you can find it again; the link works for 90 days, and you can request a fresh one if it stops working.
 </p>`
     : `<p style="margin:0 0 22px;font-size:14px;color:#475069;line-height:1.55;">
-  You'll soon be able to invite your coordinators by email — we'll send you the invite link in a follow-up message.
+  Coordinators join only when you invite them. You'll be able to invite them by email shortly — we'll send you the invite link in a follow-up message.
 </p>`;
 
   const body = `
@@ -65,7 +69,7 @@ export function renderOrgOwnerApproved(v: OrgOwnerApprovedVars): {
   ${escapeHtml(v.orgName)} is approved.
 </h1>
 <p style="margin:0 0 14px;font-size:14px;color:#475069;line-height:1.55;">
-  Your organisation is now live on ${escapeHtml(brand.long_name)} (registered with <strong>${escapeHtml(v.ownerEmail)}</strong>). Coordinators can now be registered under it.
+  Your organisation is now live on ${escapeHtml(brand.long_name)} (registered with <strong>${escapeHtml(v.ownerEmail)}</strong>).
 </p>
 ${inviteHtml}
 <p style="margin:0;font-size:12px;color:#7c84a6;line-height:1.55;">
@@ -75,12 +79,12 @@ ${inviteHtml}
 
   const text = `${v.orgName} is approved.
 
-Your organisation is now live on ${brand.long_name} (registered with ${v.ownerEmail}). Coordinators can now be registered under it.
+Your organisation is now live on ${brand.long_name} (registered with ${v.ownerEmail}).
 
 ${
   v.inviteUrl
-    ? `Invite your coordinators by email — each person gets their own one-time invite:\n${v.inviteUrl}`
-    : `You'll soon be able to invite your coordinators by email — we'll send you the invite link in a follow-up message.`
+    ? `Coordinators can only join ${v.orgName} when you invite them. Invite them by email — each person gets their own one-time invite:\n${v.inviteUrl}\n\nYou don't need an account and you can't sign in — you manage your coordinators entirely from that link. Keep this email; the link works for 90 days, and you can request a fresh one if it stops working.`
+    : `Coordinators join only when you invite them. You'll be able to invite them by email shortly — we'll send you the invite link in a follow-up message.`
 }
 
 Questions? Reply to this email and the ${brand.short_name} team will help.

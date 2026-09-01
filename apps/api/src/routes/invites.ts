@@ -28,11 +28,10 @@ import { getRegistrationInvitesStore } from '../services/registration-invites-st
 import { mintInviteToken } from '../services/invite-token.js';
 import { mintGrantToken, verifyGrantToken } from '../services/grant-token.js';
 import { checkInviteMintRate, checkInviteIpRate } from '../services/invite-mint-rate.js';
-import { formatApprovalTtl } from '../services/approval-token.js';
 import { getMailer } from '@aggregator-dpg/mailer';
 import {
   renderCoordinatorInvite,
-  renderOrgOwnerApproved,
+  renderOwnerGrantRefreshed,
 } from '../services/email-templates/index.js';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
@@ -73,6 +72,15 @@ function inviteUrl(token: string): string {
 /** Builds the owner invite-management URL carrying a grant token. */
 function grantUrl(token: string): string {
   return `${config.PUBLIC_PORTAL_URL}/register/invite?grant=${encodeURIComponent(token)}`;
+}
+
+/** Formats an absolute expiry date for the invite email (e.g. "15 Sep 2026"). */
+function formatExpiryDate(d: Date): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  }).format(d);
 }
 
 /** One recipient outcome after resolving its invite row. */
@@ -131,9 +139,10 @@ interface MintBatchDeps {
   mailer: ReturnType<typeof getMailer>;
   orgId: string;
   orgName: string;
+  /** The inviting org's contact (owner email) — sender identity in the email. */
+  inviterEmail: string;
   recipients: z.infer<typeof MintBodySchema>['recipients'];
   ttlSec: number;
-  expiresInText: string;
   createdBy: string;
   log: FastifyBaseLogger;
 }
@@ -147,7 +156,7 @@ interface MintBatchDeps {
  * @returns Per-batch counts + the invalid list.
  */
 async function mintBatch(deps: MintBatchDeps): Promise<MintSummary> {
-  const { invites, mailer, orgId, orgName, recipients, ttlSec, expiresInText, createdBy, log } =
+  const { invites, mailer, orgId, orgName, inviterEmail, recipients, ttlSec, createdBy, log } =
     deps;
   let sent = 0;
   let resent = 0;
@@ -177,8 +186,9 @@ async function mintBatch(deps: MintBatchDeps): Promise<MintSummary> {
     const { token } = await mintInviteToken({ jti: resolved.jti, org: orgId, email });
     const mail = renderCoordinatorInvite({
       orgName,
+      inviterEmail,
       inviteUrl: inviteUrl(token),
-      expiresInText,
+      expiresOn: formatExpiryDate(expiresAt),
       ...(recipient.name ? { recipientName: recipient.name } : {}),
     });
     const send = await mailer.send({
@@ -279,9 +289,8 @@ export async function registerInviteRoutes(app: FastifyInstance): Promise<void> 
       // address (never a request input), mint nothing.
       if (grant.expired) {
         const fresh = await mintGrantToken({ org: orgId, ttlSec: config.GRANT_TOKEN_TTL_SECONDS });
-        const mail = renderOrgOwnerApproved({
+        const mail = renderOwnerGrantRefreshed({
           orgName: orgRow.displayName,
-          ownerEmail: orgRow.ownerEmail,
           inviteUrl: grantUrl(fresh.token),
         });
         const send = await getMailer().send({
@@ -312,9 +321,9 @@ export async function registerInviteRoutes(app: FastifyInstance): Promise<void> 
         mailer: getMailer(),
         orgId,
         orgName: orgRow.displayName,
+        inviterEmail: orgRow.ownerEmail,
         recipients: body.recipients,
         ttlSec: config.INVITE_TOKEN_TTL_SECONDS,
-        expiresInText: formatApprovalTtl(config.INVITE_TOKEN_TTL_SECONDS),
         createdBy: `grant:${orgId}`,
         log,
       });
