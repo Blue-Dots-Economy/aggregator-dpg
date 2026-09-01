@@ -68,6 +68,12 @@ export function OwnerInviteView({ grant }: Readonly<OwnerInviteViewProps>): JSX.
   const [state, setState] = useState<ViewState>({ status: 'idle' });
   const recipients = useMemo(() => parseRecipients(raw), [raw]);
   const canSubmit = recipients.length > 0 && state.status !== 'submitting';
+  // Precompute the button label so the JSX has no nested ternary (S3358).
+  const plural = recipients.length === 1 ? '' : 's';
+  const sendLabel =
+    state.status === 'submitting'
+      ? 'Sending…'
+      : `Send ${recipients.length || ''} invite${plural}`.trim();
 
   async function submit(): Promise<void> {
     setState({ status: 'submitting' });
@@ -128,8 +134,8 @@ export function OwnerInviteView({ grant }: Readonly<OwnerInviteViewProps>): JSX.
         {state.status === 'idle' || state.status === 'submitting' ? (
           <>
             <p className="text-[14px] text-ink-500 mb-3">
-              Enter one email address per line. Optionally add a name after a comma (
-              <code>asha@org.in, Asha</code>). Each person gets their own one-time invite.
+              Enter one email address per line. Optionally add a name after a comma — for example
+              &ldquo;asha@org.in, Asha&rdquo;. Each person gets their own one-time invite.
             </p>
             <textarea
               value={raw}
@@ -146,9 +152,7 @@ export function OwnerInviteView({ grant }: Readonly<OwnerInviteViewProps>): JSX.
                 onClick={submit}
                 className="rounded-[10px] bg-(--bd-primary) px-5 py-2.5 text-[14px] font-semibold text-white disabled:opacity-50"
               >
-                {state.status === 'submitting'
-                  ? 'Sending…'
-                  : `Send ${recipients.length || ''} invite${recipients.length === 1 ? '' : 's'}`.trim()}
+                {sendLabel}
               </button>
             </div>
           </>
@@ -172,7 +176,7 @@ function ResultPanel({
         <ul className="rounded-[10px] border border-ink-200 bg-white px-4 py-3 text-[13px] text-ink-600">
           {summary.invalid.map((i) => (
             <li key={`${i.email}:${i.reason}`}>
-              {i.email} — {i.reason.replace(/_/g, ' ')}
+              {i.email} — {i.reason.replaceAll('_', ' ')}
             </li>
           ))}
         </ul>
@@ -188,20 +192,22 @@ function ResultPanel({
   );
 }
 
+const TONE_CLS: Record<'success' | 'warn' | 'error', string> = {
+  success: 'border-emerald-200 bg-emerald-50 text-emerald-800',
+  warn: 'border-amber-200 bg-amber-50 text-amber-800',
+  error: 'border-red-200 bg-red-50 text-red-700',
+};
+
 function Banner({
   tone,
   children,
 }: Readonly<{ tone: 'success' | 'warn' | 'error'; children: ReactNode }>): JSX.Element {
-  const cls =
-    tone === 'success'
-      ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-      : tone === 'warn'
-        ? 'border-amber-200 bg-amber-50 text-amber-800'
-        : 'border-red-200 bg-red-50 text-red-700';
   return (
-    <div role="status" className={`mb-4 rounded-[10px] border px-4 py-3 text-[13.5px] ${cls}`}>
+    <output
+      className={`mb-4 block rounded-[10px] border px-4 py-3 text-[13.5px] ${TONE_CLS[tone]}`}
+    >
       {children}
-    </div>
+    </output>
   );
 }
 

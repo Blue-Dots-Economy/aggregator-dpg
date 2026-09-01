@@ -27,7 +27,7 @@ interface OwnerInvitePageProps {
  * The grant is NOT verified here — the mint POST is the gate, so an expired
  * grant lands on the recovery action rather than a dead 404.
  */
-export default async function OwnerInvitePage({ searchParams }: OwnerInvitePageProps) {
+export default async function OwnerInvitePage({ searchParams }: Readonly<OwnerInvitePageProps>) {
   const session = await getSession();
   if (session) redirect('/dashboard');
   if (!isOrgHierarchyEnabled()) notFound();

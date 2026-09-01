@@ -317,15 +317,16 @@ export const registrationInvites = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     consumedAt: timestamp('consumed_at', { withTimezone: true }),
   },
-  (table) => ({
-    parentOrgIdx: index('registration_invites_parent_org_idx').on(table.parentOrgId),
+  // Array form (not the deprecated object-return extraConfig).
+  (table) => [
+    index('registration_invites_parent_org_idx').on(table.parentOrgId),
     // One live invite per (org, email): a re-invite refreshes rather than
     // duplicates. Partial unique over pending rows only, so a consumed/revoked/
     // expired invite never blocks re-inviting the same address.
-    pendingUnique: uniqueIndex('registration_invites_pending_unique')
+    uniqueIndex('registration_invites_pending_unique')
       .on(table.parentOrgId, table.email)
       .where(sql`status = 'pending'`),
-  }),
+  ],
 );
 
 export type RegistrationInviteRow = typeof registrationInvites.$inferSelect;

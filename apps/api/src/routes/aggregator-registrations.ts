@@ -245,7 +245,7 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
               fields: { sub_operation: 'inviteStore.findByJti' },
             });
           }
-          if (!row.value || row.value.status !== 'pending') {
+          if (row.value?.status !== 'pending') {
             throw httpError('INVITE_ALREADY_USED', { fields: { email: contact.email } });
           }
           // Re-validate the org from the CLAIM independently (§4.4.4).
@@ -256,7 +256,7 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
               fields: { sub_operation: 'orgStore.findById' },
             });
           }
-          if (!org.value || org.value.status !== 'active') {
+          if (org.value?.status !== 'active') {
             throw httpError('TARGET_ORG_INACTIVE');
           }
           const ownerMatch = await orgStore.findByOwnerEmail(contact.email);
@@ -295,7 +295,7 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
             });
           }
           // Covers bootstrap (no active org) and an org that went inactive/rejected.
-          if (!org.value || org.value.status !== 'active') {
+          if (org.value?.status !== 'active') {
             throw httpError('TARGET_ORG_INACTIVE');
           }
           // Owner-also-coordinator (spec A4): a distinct, machine-readable error.

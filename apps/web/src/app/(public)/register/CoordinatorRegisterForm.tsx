@@ -217,13 +217,11 @@ export function CoordinatorRegisterForm({
       ) : (
         <>
           {inviteMode ? (
-            <div
-              className="mb-4 rounded-[10px] border border-ink-200 bg-white px-4 py-3 text-[13.5px] text-ink-600"
-              role="status"
-            >
+            <output className="mb-4 block rounded-[10px] border border-ink-200 bg-white px-4 py-3 text-[13.5px] text-ink-600">
               Registering as a coordinator under <strong>{selectedOrgName}</strong>.
-            </div>
-          ) : orgHierarchyEnabled ? (
+            </output>
+          ) : null}
+          {!inviteMode && orgHierarchyEnabled ? (
             <div className="form-group mb-4">
               <label className="bd-label" htmlFor="coordinator-org">
                 {t('org_selector_label')}

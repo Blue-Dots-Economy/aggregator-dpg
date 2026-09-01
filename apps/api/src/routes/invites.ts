@@ -20,7 +20,7 @@
  * caller rather than a rewrite (§4.3). Belongs to `@aggregator-dpg/api`.
  */
 
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest, FastifyBaseLogger } from 'fastify';
 import { z } from 'zod';
 import { config, orgHierarchyEnabled } from '../config.js';
 import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js';
@@ -57,8 +57,9 @@ const MintResponseSchema = z.object({
 
 // Conservative RFC-5322-lite check; the real gate is deliverability (a bad
 // address simply never registers). Prevents obvious garbage lines from the
-// bulk textarea becoming invite rows.
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// bulk textarea becoming invite rows. Domain labels are `[^\s@.]+` separated by
+// dots so the pattern is unambiguous (linear — no catastrophic backtracking).
+const EMAIL_RE = /^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/;
 
 /** Builds the coordinator registration URL carrying an invite token. */
 function inviteUrl(token: string): string {
@@ -68,6 +69,134 @@ function inviteUrl(token: string): string {
 /** Builds the owner invite-management URL carrying a grant token. */
 function grantUrl(token: string): string {
   return `${config.PUBLIC_PORTAL_URL}/register/invite?grant=${encodeURIComponent(token)}`;
+}
+
+/** One recipient outcome after resolving its invite row. */
+interface ResolvedInvite {
+  jti: string;
+  refreshed: boolean;
+}
+
+/**
+ * Resolves the invite row for one (org, email): refreshes an existing pending
+ * invite, else creates a new one (falling back to refresh on a partial-unique
+ * race). Returns the `jti` + whether it was a refresh, or `null` on a store error.
+ *
+ * @param invites - The invites store.
+ * @param orgId - Parent org id.
+ * @param email - Normalised recipient email.
+ * @param expiresAt - New expiry to stamp.
+ * @param createdBy - Minting subject for audit.
+ * @returns The resolved invite, or `null` when the store failed.
+ */
+async function resolveInviteJti(
+  invites: ReturnType<typeof getRegistrationInvitesStore>,
+  orgId: string,
+  email: string,
+  expiresAt: Date,
+  createdBy: string,
+): Promise<ResolvedInvite | null> {
+  const existing = await invites.findPendingByOrgAndEmail(orgId, email);
+  if (!existing.ok) return null;
+  if (existing.value) {
+    const refreshed = await invites.refresh(existing.value.jti, { expiresAt, createdBy });
+    return refreshed.ok ? { jti: refreshed.value.jti, refreshed: true } : null;
+  }
+  const created = await invites.create({ parentOrgId: orgId, email, expiresAt, createdBy });
+  if (created.ok) return { jti: created.value.jti, refreshed: false };
+  if (created.error.code === 'DUPLICATE_PENDING') {
+    const again = await invites.findPendingByOrgAndEmail(orgId, email);
+    if (again.ok && again.value) {
+      const refreshed = await invites.refresh(again.value.jti, { expiresAt, createdBy });
+      return refreshed.ok ? { jti: refreshed.value.jti, refreshed: true } : null;
+    }
+  }
+  return null;
+}
+
+/** Result of minting a batch of recipients. */
+interface MintSummary {
+  sent: number;
+  resent: number;
+  invalid: Array<{ email: string; reason: string }>;
+}
+
+/** Inputs for {@link mintBatch}. */
+interface MintBatchDeps {
+  invites: ReturnType<typeof getRegistrationInvitesStore>;
+  mailer: ReturnType<typeof getMailer>;
+  orgId: string;
+  orgName: string;
+  recipients: z.infer<typeof MintBodySchema>['recipients'];
+  ttlSec: number;
+  expiresInText: string;
+  createdBy: string;
+  log: FastifyBaseLogger;
+}
+
+/**
+ * Mints/refreshes and emails an invite per recipient, bucketing invalid and
+ * duplicate-in-batch addresses. A failed email is logged and still counted as
+ * sent (the row exists; the owner can re-invite to retry delivery).
+ *
+ * @param deps - Store, mailer, org, recipients, and token settings.
+ * @returns Per-batch counts + the invalid list.
+ */
+async function mintBatch(deps: MintBatchDeps): Promise<MintSummary> {
+  const { invites, mailer, orgId, orgName, recipients, ttlSec, expiresInText, createdBy, log } =
+    deps;
+  let sent = 0;
+  let resent = 0;
+  const invalid: MintSummary['invalid'] = [];
+  // De-dupe within the batch so one address can't consume two slots / two emails.
+  const seen = new Set<string>();
+
+  for (const recipient of recipients) {
+    const email = recipient.email.trim().toLowerCase();
+    if (!EMAIL_RE.test(email)) {
+      invalid.push({ email: recipient.email, reason: 'invalid_email' });
+      continue;
+    }
+    if (seen.has(email)) {
+      invalid.push({ email: recipient.email, reason: 'duplicate_in_batch' });
+      continue;
+    }
+    seen.add(email);
+
+    const expiresAt = new Date(Date.now() + ttlSec * 1000);
+    const resolved = await resolveInviteJti(invites, orgId, email, expiresAt, createdBy);
+    if (!resolved) {
+      invalid.push({ email: recipient.email, reason: 'store_error' });
+      continue;
+    }
+
+    const { token } = await mintInviteToken({ jti: resolved.jti, org: orgId, email });
+    const mail = renderCoordinatorInvite({
+      orgName,
+      inviteUrl: inviteUrl(token),
+      expiresInText,
+      ...(recipient.name ? { recipientName: recipient.name } : {}),
+    });
+    const send = await mailer.send({
+      to: email,
+      subject: mail.subject,
+      html: mail.html,
+      text: mail.text,
+    });
+    if (!send.ok) {
+      log.warn(
+        {
+          status: 'failure',
+          sub_operation: 'mailer.send.coordinatorInvite',
+          code: send.error.code,
+        },
+        'coordinator-invite email delivery failed (invite minted)',
+      );
+    }
+    if (resolved.refreshed) resent += 1;
+    else sent += 1;
+  }
+  return { sent, resent, invalid };
 }
 
 /**
@@ -110,8 +239,10 @@ export async function registerInviteRoutes(app: FastifyInstance): Promise<void> 
           fields: { sub_operation: 'orgStore.findById' },
         });
       }
-      // Grant is implicitly revoked once the org leaves active (§5.2).
-      if (!org.value || org.value.status !== 'active') {
+      // Grant is implicitly revoked once the org leaves active (§5.2). Bind to a
+      // local so TS narrows it non-null for the rest of the handler.
+      const orgRow = org.value;
+      if (!orgRow || orgRow.status !== 'active') {
         throw httpError('TARGET_ORG_INACTIVE');
       }
 
@@ -120,12 +251,12 @@ export async function registerInviteRoutes(app: FastifyInstance): Promise<void> 
       if (grant.expired) {
         const fresh = await mintGrantToken({ org: orgId, ttlSec: config.GRANT_TOKEN_TTL_SECONDS });
         const mail = renderOrgOwnerApproved({
-          orgName: org.value.displayName,
-          ownerEmail: org.value.ownerEmail,
+          orgName: orgRow.displayName,
+          ownerEmail: orgRow.ownerEmail,
           inviteUrl: grantUrl(fresh.token),
         });
         const send = await getMailer().send({
-          to: org.value.ownerEmail,
+          to: orgRow.ownerEmail,
           subject: mail.subject,
           html: mail.html,
           text: mail.text,
@@ -157,102 +288,22 @@ export async function registerInviteRoutes(app: FastifyInstance): Promise<void> 
         });
       }
 
-      const invites = getRegistrationInvitesStore();
-      const mailer = getMailer();
-      const ttlSec = config.INVITE_TOKEN_TTL_SECONDS;
-      const expiresInText = formatApprovalTtl(ttlSec);
-      const createdBy = `grant:${orgId}`;
-
-      let sent = 0;
-      let resent = 0;
-      const invalid: Array<{ email: string; reason: string }> = [];
-      // De-dupe within the batch so one address can't consume two slots / two
-      // emails from a single paste.
-      const seen = new Set<string>();
-
-      for (const recipient of body.recipients) {
-        const email = recipient.email.trim().toLowerCase();
-        if (!EMAIL_RE.test(email)) {
-          invalid.push({ email: recipient.email, reason: 'invalid_email' });
-          continue;
-        }
-        if (seen.has(email)) {
-          invalid.push({ email: recipient.email, reason: 'duplicate_in_batch' });
-          continue;
-        }
-        seen.add(email);
-
-        const expiresAt = new Date(Date.now() + ttlSec * 1000);
-        // Existing pending invite for this address → refresh (re-invite),
-        // otherwise create. A create race on the partial-unique index falls
-        // back to refresh so a concurrent paste can't error.
-        const existing = await invites.findPendingByOrgAndEmail(orgId, email);
-        if (!existing.ok) {
-          invalid.push({ email: recipient.email, reason: 'store_error' });
-          continue;
-        }
-        let jti: string | null = null;
-        let wasRefresh = false;
-        if (existing.value) {
-          const refreshed = await invites.refresh(existing.value.jti, { expiresAt, createdBy });
-          if (refreshed.ok) {
-            jti = refreshed.value.jti;
-            wasRefresh = true;
-          }
-        } else {
-          const created = await invites.create({ parentOrgId: orgId, email, expiresAt, createdBy });
-          if (created.ok) {
-            jti = created.value.jti;
-          } else if (created.error.code === 'DUPLICATE_PENDING') {
-            const again = await invites.findPendingByOrgAndEmail(orgId, email);
-            if (again.ok && again.value) {
-              const refreshed = await invites.refresh(again.value.jti, { expiresAt, createdBy });
-              if (refreshed.ok) {
-                jti = refreshed.value.jti;
-                wasRefresh = true;
-              }
-            }
-          }
-        }
-        if (!jti) {
-          invalid.push({ email: recipient.email, reason: 'store_error' });
-          continue;
-        }
-
-        const { token } = await mintInviteToken({ jti, org: orgId, email });
-        const mail = renderCoordinatorInvite({
-          orgName: org.value.displayName,
-          inviteUrl: inviteUrl(token),
-          expiresInText,
-          ...(recipient.name ? { recipientName: recipient.name } : {}),
-        });
-        const send = await mailer.send({
-          to: email,
-          subject: mail.subject,
-          html: mail.html,
-          text: mail.text,
-        });
-        if (!send.ok) {
-          // The invite row exists; only delivery failed. Log and count it as
-          // sent — the owner can re-invite to retry delivery.
-          log.warn(
-            {
-              status: 'failure',
-              sub_operation: 'mailer.send.coordinatorInvite',
-              code: send.error.code,
-            },
-            'coordinator-invite email delivery failed (invite minted)',
-          );
-        }
-        if (wasRefresh) resent += 1;
-        else sent += 1;
-      }
-
+      const summary = await mintBatch({
+        invites: getRegistrationInvitesStore(),
+        mailer: getMailer(),
+        orgId,
+        orgName: orgRow.displayName,
+        recipients: body.recipients,
+        ttlSec: config.INVITE_TOKEN_TTL_SECONDS,
+        expiresInText: formatApprovalTtl(config.INVITE_TOKEN_TTL_SECONDS),
+        createdBy: `grant:${orgId}`,
+        log,
+      });
       log.info(
-        { status: 'success', org_id: orgId, sent, resent, invalid: invalid.length },
+        { status: 'success', org_id: orgId, ...summary, invalid: summary.invalid.length },
         'invites minted',
       );
-      return reply.status(200).send({ recovered: false, sent, resent, invalid });
+      return reply.status(200).send({ recovered: false, ...summary });
     },
   );
 }

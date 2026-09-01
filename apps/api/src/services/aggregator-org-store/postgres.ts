@@ -162,11 +162,11 @@ function mapInsertError(e: unknown): OrgStoreResult<never> {
   // (the `pg` driver error). Inspect both so a unique violation maps to a
   // clean 409 (DUPLICATE_NAME/SLUG) instead of a misleading 503 DB_UNAVAILABLE.
   const cause = (e as { cause?: unknown }).cause;
-  const constraint =
-    typeof cause === 'object' && cause !== null && 'constraint' in cause
-      ? String((cause as { constraint?: unknown }).constraint ?? '')
-      : '';
-  const text = `${(e as Error).message ?? ''} ${(cause as Error | undefined)?.message ?? ''} ${constraint}`;
+  const causeObj =
+    typeof cause === 'object' && cause !== null ? (cause as Record<string, unknown>) : {};
+  const constraint = typeof causeObj['constraint'] === 'string' ? causeObj['constraint'] : '';
+  const causeMsg = typeof causeObj['message'] === 'string' ? causeObj['message'] : '';
+  const text = `${(e as Error).message ?? ''} ${causeMsg} ${constraint}`;
   if (text.includes('aggregator_orgs_display_name_active_unique')) {
     return errResult('DUPLICATE_NAME', 'organisation name already in use');
   }

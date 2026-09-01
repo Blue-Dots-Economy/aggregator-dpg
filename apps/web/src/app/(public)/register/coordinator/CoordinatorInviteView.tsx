@@ -42,7 +42,7 @@ function decodeInviteClaims(token: string): InviteClaims | null {
   try {
     const part = token.split('.')[1];
     if (!part) return null;
-    const b64 = part.replace(/-/g, '+').replace(/_/g, '/');
+    const b64 = part.replaceAll('-', '+').replaceAll('_', '/');
     const json = atob(b64.padEnd(Math.ceil(b64.length / 4) * 4, '='));
     const claims = JSON.parse(json) as Partial<InviteClaims>;
     if (typeof claims.org !== 'string' || typeof claims.email !== 'string') return null;
@@ -151,11 +151,8 @@ function Notice({
   children,
 }: Readonly<{ children: JSX.Element | string | (JSX.Element | string)[] }>): JSX.Element {
   return (
-    <div
-      role="status"
-      className="mt-6 rounded-[10px] border border-amber-200 bg-amber-50 px-4 py-3 text-[13.5px] text-amber-800"
-    >
+    <output className="mt-6 block rounded-[10px] border border-amber-200 bg-amber-50 px-4 py-3 text-[13.5px] text-amber-800">
       {children}
-    </div>
+    </output>
   );
 }

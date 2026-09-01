@@ -27,7 +27,9 @@ interface CoordinatorInvitePageProps {
  * the submit endpoint is the security gate — it verifies the signature,
  * enforces the email binding, and consumes the invite.
  */
-export default async function CoordinatorInvitePage({ searchParams }: CoordinatorInvitePageProps) {
+export default async function CoordinatorInvitePage({
+  searchParams,
+}: Readonly<CoordinatorInvitePageProps>) {
   const session = await getSession();
   if (session) redirect('/dashboard');
 

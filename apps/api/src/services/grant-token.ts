@@ -112,29 +112,41 @@ export async function verifyGrantToken(
     }
     return { ok: true, org: payload.sub, expired: false };
   } catch (err) {
-    if (err instanceof joseErrors.JWTExpired) {
-      if (opts.allowExpired) {
-        // jose verifies the signature before `exp`, so a JWTExpired throw proves
-        // the signature was genuine — decoding the payload here is safe.
-        const payload = decodeJwt(token);
-        if (!payload.sub) {
-          return { ok: false, error: { code: 'INVALID', message: 'missing sub in expired grant' } };
-        }
-        return { ok: true, org: payload.sub, expired: true };
-      }
-      return { ok: false, error: { code: 'EXPIRED', message: 'grant expired' } };
-    }
-    if (err instanceof joseErrors.JWTInvalid || err instanceof joseErrors.JWSInvalid) {
-      return { ok: false, error: { code: 'MALFORMED', message: err.message } };
-    }
-    if (err instanceof joseErrors.JWSSignatureVerificationFailed) {
-      return { ok: false, error: { code: 'INVALID', message: 'signature failed' } };
-    }
-    return {
-      ok: false,
-      error: { code: 'INVALID', message: err instanceof Error ? err.message : 'verify failed' },
-    };
+    return mapVerifyError(err, token, opts.allowExpired ?? false);
   }
+}
+
+/**
+ * Maps a jose verify error to a {@link VerifyGrantResult}, applying the
+ * expired-grant recovery path when allowed. Split out of {@link verifyGrantToken}
+ * to keep that function's control flow flat.
+ *
+ * @param err - The thrown jose error.
+ * @param token - The original token (for the safe expired-payload decode).
+ * @param allowExpired - Whether an expired-but-signed grant is acceptable.
+ * @returns The verify result.
+ */
+function mapVerifyError(err: unknown, token: string, allowExpired: boolean): VerifyGrantResult {
+  if (err instanceof joseErrors.JWTExpired) {
+    if (!allowExpired) return { ok: false, error: { code: 'EXPIRED', message: 'grant expired' } };
+    // jose verifies the signature before `exp`, so a JWTExpired throw proves the
+    // signature was genuine — decoding the payload here is safe.
+    const payload = decodeJwt(token);
+    if (!payload.sub) {
+      return { ok: false, error: { code: 'INVALID', message: 'missing sub in expired grant' } };
+    }
+    return { ok: true, org: payload.sub, expired: true };
+  }
+  if (err instanceof joseErrors.JWTInvalid || err instanceof joseErrors.JWSInvalid) {
+    return { ok: false, error: { code: 'MALFORMED', message: err.message } };
+  }
+  if (err instanceof joseErrors.JWSSignatureVerificationFailed) {
+    return { ok: false, error: { code: 'INVALID', message: 'signature failed' } };
+  }
+  return {
+    ok: false,
+    error: { code: 'INVALID', message: err instanceof Error ? err.message : 'verify failed' },
+  };
 }
 
 /** Test helper — clears the cached key so env changes take effect. */
