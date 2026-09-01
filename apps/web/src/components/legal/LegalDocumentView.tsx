@@ -5,11 +5,16 @@
  * organisations) — in one continuous scroll, with a contents rail beside the
  * reading column.
  *
- * `/privacy` and `/terms` render the exact same page; the route only decides
- * which document the reader lands on (see the arrival effect below). Nothing
- * in the rail navigates to another route any more — every entry, at both the
+ * One route, `/legal`, holds every document. `/privacy` and `/terms` used to
+ * be two routes rendering this same component and differing only in where they
+ * landed the reader; they are now redirects to `/legal#privacy` and
+ * `/legal#terms`, so an already-shared link still arrives at the right
+ * section. Where the reader lands is therefore decided by the URL fragment
+ * alone — nothing about this page varies by route any more.
+ *
+ * Nothing in the rail navigates to another route: every entry, at both the
  * document level and the section level, is a same-page anchor, because every
- * document already lives on the page.
+ * document lives on the page.
  *
  * The aggregator carries three separate sets of consent documents (unlike
  * the sibling Signals-DPG repo's single audience), so the rail keeps its
@@ -60,9 +65,14 @@ interface RenderableSection extends LegalSection {
 
 /**
  * Structural id for one audience's one document heading — built from the
- * audience key and the document key, never from document content. This is
- * what the rail's document-level entry links to, and what a route arrival
- * with no hash scrolls to.
+ * audience key and the document key, never from document content. This is what
+ * the rail's document-level entry links to.
+ *
+ * The FIRST group's two documents are special-cased to the bare document key
+ * (`privacy` / `terms`) by `assignPageAnchorIds`, because those are the ids
+ * `/legal#privacy` and `/legal#terms` address. `#privacy` means "the privacy
+ * notice", and with three audiences on the page the one a reader wants is the
+ * first — participants', the audience the shared links are for.
  */
 function docHeadingId(audience: string, doc: LegalDoc): string {
   return `${audience}-${doc}`;
@@ -205,13 +215,18 @@ function assignPageAnchorIds(
   }
 
   const docIds: Record<string, Record<LegalDoc, string>> = {};
-  for (const group of groups) {
+  groups.forEach((group, gi) => {
     const perDoc = {} as Record<LegalDoc, string>;
     for (const d of DOC_ORDER) {
-      perDoc[d] = reserve(docHeadingId(group.audience, d));
+      // The first group's documents take the bare `privacy` / `terms` ids —
+      // the fragments `/privacy` and `/terms` redirect to. Reserved first, and
+      // before any section id, so a section heading that slugifies to
+      // "privacy" becomes `privacy-2` rather than taking a fragment out from
+      // under a link that has already been shared.
+      perDoc[d] = reserve(gi === 0 ? d : docHeadingId(group.audience, d));
     }
     docIds[group.audience] = perDoc;
-  }
+  });
 
   const sectionsByDoc = Object.fromEntries(
     DOC_ORDER.map((d) => [d, [] as RenderableSection[][]]),
@@ -368,18 +383,16 @@ function formatVersionLabel(
  * audience then document, and the reading column holding every audience's
  * both documents in one continuous scroll.
  *
- * @param props.doc - Which document this route lands the reader on:
- *   `privacy` or `terms`. Every document, for every audience, renders on the
- *   page either way.
+ * Takes no `doc`: which section the reader lands on comes from the URL
+ * fragment, and every document renders either way.
+ *
  * @param props.groups - One entry per audience whose consent content loaded;
  *   an audience whose content failed to load is simply absent here (see
  *   `load-legal-groups.server.ts`) rather than throwing.
  */
 export function LegalDocumentView({
-  doc,
   groups,
 }: Readonly<{
-  doc: LegalDoc;
   groups: LegalGroup[];
 }>): JSX.Element {
   const t = useTranslations('legal');
@@ -557,40 +570,54 @@ export function LegalDocumentView({
 
   // Deep-link / arrival landing. The target is either the hash (deep link,
   // e.g. `/terms#grievances`) or, absent a hash, the first audience group's
-  // heading for the routed document — unless that document is already the
-  // first one on the page (`/privacy` with no hash), in which case it is
-  // already at the top and there is nothing to scroll to.
+  // Arrival landing. The fragment is the only thing that decides where an
+  // arrival lands — `#privacy`, `#terms`, or any section id — and `hashchange`
+  // is listened for so a footer link to `/legal#terms` scrolls even when the
+  // reader is already on the page and the browser therefore performs no
+  // navigation.
   //
   // No-hash arrival never highlights a section on its own: every document
   // opens with intro prose before its first heading, so the scroll-spy has
   // nothing "passed" at scroll-top and highlights nothing. Rather than land
-  // with the rail showing no pill at all, default the highlight to the
-  // routed document's own first section within the first (topmost)
-  // audience group — the same fallback `computeActiveId` uses once real
-  // scrolling starts — not simply the first section on the page, which
-  // would always be Privacy's even when the route is `/terms`.
+  // with the rail showing no pill at all, default the highlight to the first
+  // group's first document's first section — the same fallback
+  // `computeActiveId` uses once real scrolling starts.
   useEffect(() => {
     if (groups.length === 0) return;
-    const hashId =
-      typeof window !== 'undefined' && window.location.hash
-        ? decodeURIComponent(window.location.hash.slice(1))
-        : null;
 
-    if (hashId) {
-      if (document.getElementById(hashId)) scrollAndPin(hashId, hashId);
-      return;
-    }
+    function landOnHash() {
+      const hashId =
+        typeof window !== 'undefined' && window.location.hash
+          ? decodeURIComponent(window.location.hash.slice(1))
+          : null;
 
-    const fallbackDocId = docIds[groups[0]!.audience]?.[doc];
-    const fallbackPillId = pillFallbackId(0, doc);
-    if (doc !== DOC_ORDER[0] && fallbackDocId) {
-      scrollAndPin(fallbackDocId, fallbackPillId ?? fallbackDocId);
-    } else if (fallbackPillId) {
+      if (hashId) {
+        if (!document.getElementById(hashId)) return;
+        // A fragment naming a document scrolls to that document but pills its
+        // first section: there is no rail entry for a bare document heading to
+        // highlight, so pinning one would show no pill at all.
+        let pillId = hashId;
+        groups.forEach((group, gi) => {
+          for (const d of DOC_ORDER) {
+            if (docIds[group.audience]?.[d] === hashId) {
+              pillId = pillFallbackId(gi, d) ?? hashId;
+            }
+          }
+        });
+        scrollAndPin(hashId, pillId);
+        return;
+      }
+
       // Already at the top — nothing to scroll to, so no pin needed either.
-      setActiveSectionId(fallbackPillId);
+      const fallbackPillId = pillFallbackId(0, DOC_ORDER[0]!);
+      if (fallbackPillId) setActiveSectionId(fallbackPillId);
     }
-    // Deliberately keyed on `doc`/`groups.length`, not on every id recomputation.
-  }, [doc, groups.length, docIds, pillFallbackId, scrollAndPin]);
+
+    landOnHash();
+    window.addEventListener('hashchange', landOnHash);
+    return () => window.removeEventListener('hashchange', landOnHash);
+    // Deliberately keyed on `groups.length`, not on every id recomputation.
+  }, [groups.length, groups, docIds, pillFallbackId, scrollAndPin]);
 
   // Scroll-spy proper: recomputes the active id on scroll/resize, unless a
   // click or arrival scroll currently has it pinned (see `scrollAndPin`).

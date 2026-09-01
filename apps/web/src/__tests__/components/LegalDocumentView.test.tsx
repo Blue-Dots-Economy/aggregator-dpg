@@ -33,10 +33,16 @@ function Wrapper({ children }: { children: ReactNode }) {
   );
 }
 
-function renderView(doc: 'privacy' | 'terms', groups: LegalGroup[]) {
+/**
+ * Renders the page as if arrived at `/legal${hash}`. There is one route now, so
+ * what used to be "which document is this route for" is the fragment — set on
+ * `window.location` before mount, the way a real arrival presents it.
+ */
+function renderView(hash: string, groups: LegalGroup[]) {
+  window.location.hash = hash;
   return render(
     <Wrapper>
-      <LegalDocumentView doc={doc} groups={groups} />
+      <LegalDocumentView groups={groups} />
     </Wrapper>,
   );
 }
@@ -65,7 +71,7 @@ const groups: LegalGroup[] = [
 
 describe('<LegalDocumentView />', () => {
   it('renders a rail group per audience', () => {
-    renderView('privacy', groups);
+    renderView('', groups);
     // Each audience's label now renders twice — once in the rail, once as
     // the reading column's audience-boundary heading (see the "audience
     // boundary is legible" fix) — so this scopes to the rail specifically.
@@ -75,7 +81,7 @@ describe('<LegalDocumentView />', () => {
   });
 
   it('links each extracted section as a same-page anchor', () => {
-    renderView('privacy', groups);
+    renderView('', groups);
     expect(screen.getByRole('link', { name: 'Retention' })).toHaveAttribute('href', '#retention');
   });
 
@@ -84,7 +90,7 @@ describe('<LegalDocumentView />', () => {
   // since both of participant's documents (and both of aggregator's) share a
   // version number.
   it('shows the version for each audience and each document', () => {
-    renderView('privacy', groups);
+    renderView('', groups);
     expect(screen.getAllByText(/Version 1/)).toHaveLength(2);
     expect(screen.getAllByText(/Version 2/)).toHaveLength(2);
   });
@@ -96,7 +102,7 @@ describe('<LegalDocumentView />', () => {
   // title heading right where its content begins, sourced from the `title`
   // field.
   it("renders each document's own title where its content begins, for every document", () => {
-    renderView('privacy', groups);
+    renderView('', groups);
     expect(screen.getAllByRole('heading', { name: 'Privacy Policy' })).toHaveLength(2);
     expect(screen.getAllByRole('heading', { name: 'Terms of Service' })).toHaveLength(2);
   });
@@ -104,18 +110,18 @@ describe('<LegalDocumentView />', () => {
   // Regression for the sibling defect: nothing in the reading column marked
   // where one audience's documents ended and the next audience's began.
   it('makes the audience boundary legible in the reading column', () => {
-    renderView('privacy', groups);
+    renderView('', groups);
     expect(screen.getByRole('heading', { name: 'For participants' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'For aggregators' })).toBeInTheDocument();
   });
 
   it('captures no consent — there is no checkbox anywhere on the page', () => {
-    renderView('terms', groups);
+    renderView('#terms', groups);
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
   });
 
   it('renders a helpful empty state when no consent content loaded', () => {
-    renderView('privacy', []);
+    renderView('', []);
     expect(screen.getByRole('status')).toBeInTheDocument();
   });
 
@@ -126,7 +132,7 @@ describe('<LegalDocumentView />', () => {
   // every "Privacy Policy" heading matches the route equally — the fix is
   // that the route must not drive any document-level styling at all.
   it('does not tint every same-named document heading — the route no longer drives document styling', () => {
-    renderView('privacy', groups);
+    renderView('', groups);
     const privacyLinks = screen.getAllByRole('link', { name: 'Privacy Policy' });
     expect(privacyLinks).toHaveLength(2);
     // Identical classes — no "current document" tint on either.
@@ -142,7 +148,7 @@ describe('<LegalDocumentView />', () => {
   // renders every document at once, so the attribute is dropped from the
   // document heading entirely — the section pill is the one live indicator.
   it('never puts aria-current on a document-heading anchor, on either route', () => {
-    renderView('privacy', groups);
+    renderView('', groups);
     for (const link of screen.getAllByRole('link', { name: /Privacy Policy|Terms of Service/ })) {
       expect(link).not.toHaveAttribute('aria-current');
     }
@@ -154,7 +160,7 @@ describe('<LegalDocumentView />', () => {
   // every entry is perfectly clickable. Every document row must look the
   // same regardless of which document (or route) is "current".
   it('does not dim the other document — every document row looks the same', () => {
-    renderView('privacy', groups);
+    renderView('', groups);
     const privacyLink = screen.getAllByRole('link', { name: 'Privacy Policy' })[0]!;
     const termsLink = screen.getAllByRole('link', { name: 'Terms of Service' })[0]!;
     expect(privacyLink.className).toBe(termsLink.className);
@@ -169,14 +175,14 @@ describe('<LegalDocumentView />', () => {
   // specifically, not the section pill, which is expected to differ between
   // the two routes' different arrival positions.
   it('styles every document row identically on /privacy and /terms', () => {
-    const { unmount } = renderView('privacy', groups);
+    const { unmount } = renderView('', groups);
     const privacyClasses = screen
       .getAllByRole('link', { name: /Privacy Policy|Terms of Service/ })
       .map((link) => link.className)
       .sort();
     unmount();
 
-    renderView('terms', groups);
+    renderView('#terms', groups);
     const termsClasses = screen
       .getAllByRole('link', { name: /Privacy Policy|Terms of Service/ })
       .map((link) => link.className)
@@ -192,12 +198,14 @@ describe('<LegalDocumentView />', () => {
   // document-heading anchors never do, regardless of scroll position (see
   // the dedicated test above).
   it('links to the other document as a same-page anchor, not a route', () => {
-    renderView('privacy', groups);
+    renderView('', groups);
     const otherLinks = screen.getAllByRole('link', { name: 'Terms of Service' });
     expect(otherLinks).toHaveLength(2);
+    // The FIRST group's documents own the bare `#terms` fragment — that is
+    // what `/terms` redirects to. Later groups keep their audience-scoped ids.
     expect(otherLinks.map((l) => l.getAttribute('href')).sort()).toEqual([
       '#aggregator-terms',
-      '#participant-terms',
+      '#terms',
     ]);
     for (const link of otherLinks) {
       expect(link).not.toHaveAttribute('aria-current');
@@ -205,12 +213,12 @@ describe('<LegalDocumentView />', () => {
   });
 
   it('uses the i18n contents label for the rail, not a hardcoded string', () => {
-    renderView('privacy', groups);
+    renderView('', groups);
     expect(screen.getByRole('navigation', { name: 'Contents' })).toBeInTheDocument();
   });
 
   it('has a back-to-sign-in link', () => {
-    renderView('privacy', groups);
+    renderView('', groups);
     expect(screen.getByRole('link', { name: /Back to sign in/i })).toHaveAttribute(
       'href',
       '/login',
@@ -221,7 +229,7 @@ describe('<LegalDocumentView />', () => {
     const scrollIntoView = vi.fn();
     Element.prototype.scrollIntoView =
       scrollIntoView as unknown as typeof Element.prototype.scrollIntoView;
-    renderView('privacy', groups);
+    renderView('', groups);
 
     const link = screen.getByRole('link', { name: 'Retention' });
     fireEvent.click(link);
@@ -234,7 +242,7 @@ describe('<LegalDocumentView />', () => {
     const scrollIntoView = vi.fn();
     Element.prototype.scrollIntoView =
       scrollIntoView as unknown as typeof Element.prototype.scrollIntoView;
-    renderView('privacy', groups);
+    renderView('', groups);
 
     const [termsHeader] = screen.getAllByRole('link', { name: 'Terms of Service' });
     fireEvent.click(termsHeader!);
@@ -269,7 +277,7 @@ describe('<LegalDocumentView />', () => {
   ];
 
   it('does not repeat the document title as a second heading or as the rail’s first section', () => {
-    renderView('privacy', realShapeGroups);
+    renderView('', realShapeGroups);
     // Exactly one heading reads "Privacy Policy" — the page's own <h1>, not a
     // duplicated <h2> for the leading `## Privacy Policy` in the markdown.
     expect(screen.getAllByRole('heading', { name: 'Privacy Policy' })).toHaveLength(1);
@@ -297,13 +305,13 @@ describe('<LegalDocumentView />', () => {
         },
       },
     ];
-    renderView('privacy', overviewGroups);
+    renderView('', overviewGroups);
     expect(screen.getByRole('heading', { name: 'Overview' })).toHaveAttribute('id', 'overview');
     expect(screen.getByRole('link', { name: 'Overview' })).toHaveAttribute('href', '#overview');
   });
 
   it('renders the heading it links to, so the anchor actually lands', () => {
-    renderView('privacy', realShapeGroups);
+    renderView('', realShapeGroups);
     const heading = screen.getByRole('heading', { name: 'Retention' });
     expect(heading).toHaveAttribute('id', 'retention');
   });
@@ -327,7 +335,7 @@ describe('<LegalDocumentView />', () => {
         },
       },
     ];
-    renderView('privacy', noSubsectionGroups);
+    renderView('', noSubsectionGroups);
     expect(screen.getByText('Just a paragraph, no subsections at all.')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Privacy Policy' })).toBeInTheDocument();
   });
@@ -352,7 +360,7 @@ describe('<LegalDocumentView />', () => {
         },
       },
     ];
-    renderView('privacy', deepNestingGroups);
+    renderView('', deepNestingGroups);
     expect(screen.getByRole('heading', { name: 'A section' })).toBeInTheDocument();
     expect(screen.getByText('deepest text')).toBeInTheDocument();
   });
@@ -400,7 +408,7 @@ describe('<LegalDocumentView />', () => {
   ];
 
   it('gives colliding section ids across audiences a unique suffix so anchors do not clash', () => {
-    renderView('privacy', collidingGroups);
+    renderView('', collidingGroups);
     const headings = screen.getAllByRole('heading', { name: 'Grievances' });
     const ids = headings.map((h) => h.id);
     expect(new Set(ids).size).toBe(ids.length);
@@ -421,7 +429,7 @@ describe('<LegalDocumentView />', () => {
   // audience's document block too, now that every audience's every document
   // shares one page and one id namespace.
   it('each audience group’s rail link resolves to that same audience’s heading, not another’s', () => {
-    const { container } = renderView('privacy', collidingGroups);
+    const { container } = renderView('', collidingGroups);
     const nav = screen.getByRole('navigation', { name: 'Contents' });
 
     for (const [label, audience] of [
@@ -469,8 +477,12 @@ describe('<LegalDocumentView />', () => {
       const docMatches = container.querySelectorAll(`#${CSS.escape(docTargetId)}`);
       expect(docMatches).toHaveLength(1);
       expect(readingSection.contains(docMatches[0]!)).toBe(true);
-      // Structural, not content-derived — carries the audience key itself.
-      expect(docTargetId).toBe(`${audience}-privacy`);
+      // Structural, not content-derived. The first group's is the bare
+      // document key (the fragment `/privacy` redirects to); the rest carry
+      // their audience key.
+      expect(docTargetId).toBe(
+        audience === groups[0]!.audience ? 'privacy' : `${audience}-privacy`,
+      );
     }
   });
 });
@@ -481,11 +493,46 @@ describe('<LegalDocumentView />', () => {
 // the classes are present, not that the rail scrolls. They exist because every
 // defect below shipped once, and each was a single class (or a single element's
 // placement) away from correct.
+// The two paths operators have already shared over SMS and email (#637) now
+// redirect into this page with a fragment, so those fragments have to resolve
+// to the first audience's documents — the audience those links are for.
+describe('<LegalDocumentView /> fragments the redirects target', () => {
+  it("anchors the first audience's documents at the bare #privacy and #terms", () => {
+    const { container } = renderView('', groups);
+    expect(container.querySelector('#privacy')).not.toBeNull();
+    expect(container.querySelector('#terms')).not.toBeNull();
+    // Scoped to the first group, not just present somewhere on the page.
+    const firstGroup = screen.getByRole('region', { name: 'For participants' });
+    expect(firstGroup.contains(container.querySelector('#privacy'))).toBe(true);
+    expect(firstGroup.contains(container.querySelector('#terms'))).toBe(true);
+  });
+
+  it('keeps a section that slugifies to a document name from stealing its id', () => {
+    // A "Privacy" section would otherwise take `#privacy` out from under a
+    // link that has already been shared.
+    const collidingGroups: LegalGroup[] = [
+      {
+        audience: 'participant',
+        label: 'For participants',
+        content: {
+          privacy: { version: 1, title: 'Privacy Policy', content: '## Overview\n### Privacy\nx' },
+          terms: { version: 1, title: 'Terms of Service', content: '## Overview' },
+        },
+      },
+    ];
+    const { container } = renderView('', collidingGroups);
+
+    const docHeading = container.querySelector('#privacy');
+    expect(docHeading?.textContent).toBe('Privacy Policy');
+    expect(screen.getByRole('link', { name: 'Privacy' })).toHaveAttribute('href', '#privacy-2');
+  });
+});
+
 describe('<LegalDocumentView /> app bar and rail geometry', () => {
   it('pins the app bar to the top of the viewport, opaquely', () => {
     // It used to be a plain in-flow div that scrolled away, and the reading
     // column showed through anything translucent behind it.
-    const { container } = renderView('privacy', groups);
+    const { container } = renderView('', groups);
     const bar = container.querySelector('header');
     expect(bar?.className).toContain('sticky');
     expect(bar?.className).toContain('top-0');
@@ -495,7 +542,7 @@ describe('<LegalDocumentView /> app bar and rail geometry', () => {
   it('puts the app bar outside the reading column so it spans the viewport', () => {
     // Nested inside `max-w-5xl` it ended mid-screen, indented from the top
     // corner — the sibling Signals page spans the full width.
-    const { container } = renderView('privacy', groups);
+    const { container } = renderView('', groups);
     const bar = container.querySelector('header');
     expect(bar?.parentElement?.className).not.toContain('max-w-5xl');
     expect(bar?.closest('.max-w-5xl')).toBeNull();
@@ -504,7 +551,7 @@ describe('<LegalDocumentView /> app bar and rail geometry', () => {
   it('renders both the language and the theme control in the app bar', () => {
     // The language switcher used to float separately from the route group's
     // layout, clear of the bar entirely.
-    const { container } = renderView('privacy', groups);
+    const { container } = renderView('', groups);
     const bar = container.querySelector('header');
     expect(within(bar as HTMLElement).getByRole('button', { name: /theme/i })).toBeInTheDocument();
     expect(bar?.querySelector('[aria-label="Language"]')).not.toBeNull();
@@ -513,7 +560,7 @@ describe('<LegalDocumentView /> app bar and rail geometry', () => {
   it('bounds the rail and lets it scroll on its own', () => {
     // Three audiences x two documents x ~12 sections is taller than any
     // viewport; `md:h-fit` left its tail unreachable.
-    renderView('privacy', groups);
+    renderView('', groups);
     const rail = screen.getByRole('navigation', { name: 'Contents' });
     expect(rail.className).toMatch(/md:max-h-/);
     expect(rail.className).toContain('md:overflow-y-auto');
@@ -521,14 +568,14 @@ describe('<LegalDocumentView /> app bar and rail geometry', () => {
   });
 
   it('offsets the rail by the app bar height so the bar does not cover it', () => {
-    renderView('privacy', groups);
+    renderView('', groups);
     expect(screen.getByRole('navigation', { name: 'Contents' }).className).toContain('md:top-14');
   });
 
   it('offsets every anchor target clear of the app bar', () => {
     // Without a scroll-margin at least the bar's height, an anchor lands its
     // heading underneath the bar.
-    renderView('privacy', groups);
+    renderView('', groups);
     for (const name of ['For participants', 'Overview', 'Retention']) {
       expect(screen.getAllByRole('heading', { name })[0]!.className).toContain('scroll-mt-20');
     }
@@ -537,7 +584,7 @@ describe('<LegalDocumentView /> app bar and rail geometry', () => {
   it('rules off each document after the first, so one does not run into the next', () => {
     // Privacy's last section ran straight into the Terms title with nothing
     // between them.
-    renderView('privacy', groups);
+    renderView('', groups);
     const termsTitle = screen.getAllByRole('heading', { name: 'Terms of Service' })[0]!;
     // The document wrapper, which carries the boundary.
     expect(termsTitle.parentElement?.className).toContain('border-t');
@@ -553,7 +600,7 @@ describe('<LegalDocumentView /> arrival landing', () => {
     const scrollIntoView = vi.fn();
     Element.prototype.scrollIntoView =
       scrollIntoView as unknown as typeof Element.prototype.scrollIntoView;
-    renderView('privacy', groups);
+    renderView('', groups);
     expect(scrollIntoView).not.toHaveBeenCalled();
   });
 
@@ -561,7 +608,7 @@ describe('<LegalDocumentView /> arrival landing', () => {
     const scrollIntoView = vi.fn();
     Element.prototype.scrollIntoView =
       scrollIntoView as unknown as typeof Element.prototype.scrollIntoView;
-    renderView('terms', groups);
+    renderView('#terms', groups);
     expect(scrollIntoView).toHaveBeenCalled();
   });
 
@@ -592,7 +639,7 @@ describe('<LegalDocumentView /> arrival landing', () => {
   ];
 
   it('pills the first section on arrival at /privacy', () => {
-    renderView('privacy', BOTH_HAVE_SECTIONS);
+    renderView('', BOTH_HAVE_SECTIONS);
     expect(screen.getByRole('link', { name: 'Retention' })).toHaveAttribute('aria-current', 'true');
     expect(screen.getByRole('link', { name: 'Governing law' })).not.toHaveAttribute('aria-current');
   });
@@ -601,7 +648,7 @@ describe('<LegalDocumentView /> arrival landing', () => {
     const scrollIntoView = vi.fn();
     Element.prototype.scrollIntoView =
       scrollIntoView as unknown as typeof Element.prototype.scrollIntoView;
-    renderView('terms', BOTH_HAVE_SECTIONS);
+    renderView('#terms', BOTH_HAVE_SECTIONS);
     expect(screen.getByRole('link', { name: 'Governing law' })).toHaveAttribute(
       'aria-current',
       'true',
@@ -665,7 +712,7 @@ describe('<LegalDocumentView /> click pins the highlight through its scroll', ()
 
   it('keeps the clicked short "Sharing" section highlighted through a misleading mid-scroll read, and after settling', () => {
     vi.useFakeTimers();
-    renderView('privacy', SHORT_SECTION_GROUPS);
+    renderView('', SHORT_SECTION_GROUPS);
 
     const sharingLink = screen.getByRole('link', { name: 'Sharing' });
     fireEvent.click(sharingLink);
@@ -674,7 +721,7 @@ describe('<LegalDocumentView /> click pins the highlight through its scroll', ()
     // Mid-flight: geometry momentarily suggests "Third" has also passed the
     // reading line (the short-section overshoot). A spy with no pin would
     // jump to it right here.
-    mockTop('org-privacy', 0);
+    mockTop('privacy', 0);
     mockTop('first', -50);
     mockTop('sharing', 10);
     mockTop('third', 50);
