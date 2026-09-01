@@ -59,7 +59,7 @@ describe('<OwnerInviteView />', () => {
     });
     clickSend();
 
-    await waitFor(() => expect(screen.getByText(/2 sent/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/2 invites sent/)).toBeInTheDocument());
     const [, opts] = fetchMock.mock.calls[0] as [string, RequestInit];
     const body = JSON.parse(String(opts.body)) as { grant: string; recipients: unknown[] };
     expect(body.grant).toBe('grant-jwt');
@@ -129,7 +129,7 @@ describe('<OwnerInviteView />', () => {
     renderView();
     typeEmail('a@x.org');
     clickSend();
-    await waitFor(() => expect(screen.getByText(/1 invalid/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/couldn.t be invited/i)).toBeInTheDocument());
     expect(screen.getByText(/bad — invalid email/i)).toBeInTheDocument();
   });
 });

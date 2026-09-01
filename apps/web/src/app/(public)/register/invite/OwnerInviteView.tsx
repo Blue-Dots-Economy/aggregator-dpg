@@ -217,23 +217,50 @@ function ResultPanel({
   summary,
   onAgain,
 }: Readonly<{ summary: MintSummary; onAgain: () => void }>): JSX.Element {
-  // Only surface the counts that matter — a clean "N sent", plus already-invited
-  // / invalid parts only when non-zero.
-  const parts = [`${summary.sent} sent`];
-  if (summary.resent > 0) parts.push(`${summary.resent} already invited`);
-  if (summary.invalid.length > 0) parts.push(`${summary.invalid.length} invalid`);
+  const total = summary.sent + summary.resent;
+  const n = (c: number, w: string): string => `${c} ${w}${c === 1 ? '' : 's'}`;
+
+  let headline = 'No new invites sent';
+  if (summary.sent > 0) headline = `${n(summary.sent, 'invite')} sent`;
+  else if (summary.resent > 0) headline = `${n(summary.resent, 'invite')} re-sent`;
+
   return (
-    <div className="space-y-3">
-      <Banner tone="success">{parts.join(' · ')}</Banner>
+    <div className="space-y-4">
+      <div className="rounded-[12px] border border-emerald-200 bg-emerald-50 px-5 py-4">
+        <div className="flex items-center gap-2.5">
+          <span
+            aria-hidden
+            className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500 text-[13px] font-bold text-white"
+          >
+            ✓
+          </span>
+          <p className="text-[15px] font-semibold text-emerald-900">{headline}</p>
+        </div>
+        {total > 0 ? (
+          <p className="mt-2 text-[13.5px] text-emerald-800">
+            Each coordinator got an email with their own one-time link to register.
+            {summary.resent > 0 && summary.sent > 0
+              ? ` ${n(summary.resent, 'address')} already had a pending invite — we re-sent it.`
+              : ''}
+          </p>
+        ) : null}
+      </div>
+
       {summary.invalid.length > 0 ? (
-        <ul className="rounded-[10px] border border-ink-200 bg-white px-4 py-3 text-[13px] text-ink-600">
-          {summary.invalid.map((i) => (
-            <li key={`${i.email}:${i.reason}`}>
-              {i.email} — {i.reason.replaceAll('_', ' ')}
-            </li>
-          ))}
-        </ul>
+        <div className="rounded-[10px] border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-800">
+          <p className="font-semibold">
+            {n(summary.invalid.length, 'address')} couldn&apos;t be invited:
+          </p>
+          <ul className="mt-1 space-y-0.5">
+            {summary.invalid.map((i) => (
+              <li key={`${i.email}:${i.reason}`}>
+                {i.email} — {i.reason.replaceAll('_', ' ')}
+              </li>
+            ))}
+          </ul>
+        </div>
       ) : null}
+
       <button
         type="button"
         onClick={onAgain}
