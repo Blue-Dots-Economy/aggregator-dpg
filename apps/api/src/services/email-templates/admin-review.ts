@@ -19,6 +19,12 @@ export interface AdminReviewVars {
   entityLabel?: string;
   state?: string | undefined;
   about?: string | undefined;
+  /**
+   * The email the coordinator was INVITED at (#701). When set and different
+   * from `applicantEmail`, the review highlights that they're registering with a
+   * different address than invited — so the approver can sanity-check it.
+   */
+  invitedEmail?: string | undefined;
   /** Pre-built deep links — already include the signed token + intent. */
   approveUrl: string;
   rejectUrl: string;
@@ -54,6 +60,12 @@ export function renderAdminReview(v: AdminReviewVars): {
   const aboutBlock = v.about
     ? `<div style="margin-top:16px;padding:14px;background:#f7f8fb;border-radius:10px;font-size:13px;color:#0b1020;line-height:1.5;">${escapeHtml(v.about)}</div>`
     : '';
+  // Highlight when the coordinator registered with a different email than the
+  // one they were invited at (#701) — the approver should sanity-check it.
+  const emailMismatch = Boolean(v.invitedEmail && v.invitedEmail !== v.applicantEmail);
+  const invitedRow = emailMismatch
+    ? `<tr><td style="padding:6px 0;color:#b45309;width:140px;">Invited email</td><td style="padding:6px 0;color:#b45309;">${escapeHtml(v.invitedEmail as string)} <span style="color:#7c84a6;">— they're registering with a different email (above)</span></td></tr>`
+    : '';
 
   const body = `
 <h1 style="font-size:20px;font-weight:700;letter-spacing:-0.01em;margin:0 0 8px;color:#0b1020;text-transform:capitalize;">New ${escapeHtml(label)} registration</h1>
@@ -66,6 +78,7 @@ export function renderAdminReview(v: AdminReviewVars): {
   <tr><td style="padding:6px 0;color:#475069;">Type</td><td style="padding:6px 0;color:#0b1020;text-transform:capitalize;">${escapeHtml(label)}</td></tr>
   <tr><td style="padding:6px 0;color:#475069;">Contact</td><td style="padding:6px 0;color:#0b1020;">${escapeHtml(v.applicantName)}</td></tr>
   <tr><td style="padding:6px 0;color:#475069;">Email</td><td style="padding:6px 0;color:#0b1020;">${escapeHtml(v.applicantEmail)}</td></tr>
+  ${invitedRow}
   <tr><td style="padding:6px 0;color:#475069;">Phone</td><td style="padding:6px 0;color:#0b1020;">${escapeHtml(v.applicantPhone)}</td></tr>
   ${stateRow}
   <tr><td style="padding:6px 0;color:#475069;">Submitted</td><td style="padding:6px 0;color:#0b1020;">${escapeHtml(submitted)}</td></tr>
@@ -91,7 +104,7 @@ Association: ${v.association}
 Type:        ${label}
 Contact:     ${v.applicantName}
 Email:       ${v.applicantEmail}
-Phone:       ${v.applicantPhone}
+${emailMismatch ? `Invited email: ${v.invitedEmail} (registering with a different email)\n` : ''}Phone:       ${v.applicantPhone}
 ${v.state ? `State:       ${v.state}\n` : ''}Submitted:   ${submitted}
 Reference:   ${v.registrationId}
 ${v.about ? `\nAbout:\n${v.about}\n` : ''}

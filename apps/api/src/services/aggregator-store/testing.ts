@@ -80,6 +80,7 @@ export function buildAggregator(overrides: Partial<Aggregator> = {}): Aggregator
     updatedAt: createdAt,
     signalstackOrgId: null,
     parentOrgId: null,
+    inviteEmail: null,
     ...overrides,
   };
 }

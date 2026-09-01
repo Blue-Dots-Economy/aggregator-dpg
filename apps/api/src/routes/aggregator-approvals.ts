@@ -133,6 +133,7 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
           intent: effectiveIntent,
           token,
           applicantEmail: lookup.kcUser.email,
+          ...(lookup.aggregator.inviteEmail ? { invitedEmail: lookup.aggregator.inviteEmail } : {}),
           association: lookup.aggregator.name,
           // For aggregator actors `type` is null. Surface `actor_type`
           // instead so the admin page always shows something meaningful.

@@ -63,6 +63,7 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
       updatedAt: now,
       signalstackOrgId: null,
       parentOrgId: input.parentOrgId ?? null,
+      inviteEmail: input.inviteEmail ?? null,
     };
     this.indexInsert(row);
     return { ok: true, value: row };

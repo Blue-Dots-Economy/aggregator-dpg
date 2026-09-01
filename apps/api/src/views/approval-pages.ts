@@ -282,6 +282,12 @@ export interface ConfirmPageVars {
   aggregatorType: string;
   postUrl: string;
   /**
+   * The email the coordinator was invited at (#701). When set and different
+   * from `applicantEmail`, the page flags that they registered with a different
+   * address than invited, so the approver can sanity-check it.
+   */
+  invitedEmail?: string | undefined;
+  /**
    * Human-readable link lifetime (e.g. "7 days"), derived from the
    * configured approval-token TTL via `formatApprovalTtl`. Must match the
    * wording in the admin review email.
@@ -321,6 +327,14 @@ export function renderConfirmPage(v: ConfirmPageVars): string {
             <div class="meta-label">Email</div>
             <div class="meta-value">${escape(v.applicantEmail)}</div>
           </div>
+          ${
+            v.invitedEmail && v.invitedEmail !== v.applicantEmail
+              ? `<div class="meta-row">
+            <div class="meta-label" style="color:#b45309;">Invited email</div>
+            <div class="meta-value" style="color:#b45309;">${escape(v.invitedEmail)} — registering with a different email</div>
+          </div>`
+              : ''
+          }
           <div class="meta-row">
             <div class="meta-label">Name</div>
             <div class="meta-value">${escape(v.association)}</div>

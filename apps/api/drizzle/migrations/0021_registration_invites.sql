@@ -39,3 +39,8 @@ CREATE INDEX IF NOT EXISTS "registration_invites_parent_org_idx"
 -- duplicates. Partial unique over pending rows only.
 CREATE UNIQUE INDEX IF NOT EXISTS "registration_invites_pending_unique"
   ON "registration_invites" ("parent_org_id", "email") WHERE "status" = 'pending';
+
+-- aggregators.invite_email (#701): the email a coordinator was INVITED at, kept
+-- for provenance when they register with a different address (they may). May
+-- differ from contact_email; surfaced to the approving owner. Additive/nullable.
+ALTER TABLE "aggregators" ADD COLUMN IF NOT EXISTS "invite_email" text;

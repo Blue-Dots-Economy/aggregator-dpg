@@ -143,19 +143,14 @@ export function CoordinatorRegisterForm({
   // the selected org. Flag-off keeps the flat form unchanged.
   const formUiSchema = useMemo<Record<string, unknown>>(() => {
     if (!orgHierarchyEnabled && !inviteMode) return uiSchema;
-    const next: Record<string, unknown> = {
+    // Hide the org-name field (inherited from the org); the invited email is
+    // prefilled but stays editable (#701) — a coordinator may register with a
+    // different address, and the owner sees the mismatch at approval.
+    return {
       ...uiSchema,
       name: { ...((uiSchema['name'] as Record<string, unknown>) ?? {}), 'ui:widget': 'hidden' },
     };
-    // Invite mode: the bound email is prefilled and must not be edited (the API
-    // enforces the match anyway — this just prevents a mistype + a wasted trip).
-    if (inviteMode) {
-      const contactUi = (uiSchema['contact'] as Record<string, unknown>) ?? {};
-      const contactEmailUi = (contactUi['email'] as Record<string, unknown>) ?? {};
-      next['contact'] = { ...contactUi, email: { ...contactEmailUi, 'ui:readonly': true } };
-    }
-    return next;
-  }, [uiSchema, orgHierarchyEnabled, inviteMode]);
+  }, [uiSchema, orgHierarchyEnabled]);
 
   /** Runs after the gate is accepted: stamps consent and posts. */
   const submitWithConsent = async (): Promise<void> => {
@@ -219,7 +214,8 @@ export function CoordinatorRegisterForm({
           {inviteMode ? (
             <output className="mb-5 block text-[13.5px] text-ink-500">
               Registering as a coordinator under{' '}
-              <span className="font-semibold text-ink-800">{selectedOrgName}</span>
+              <span className="font-semibold text-ink-800">{selectedOrgName}</span>. Your invited
+              email is filled in — you can change it if you&apos;d rather use a different one.
             </output>
           ) : null}
           {!inviteMode && orgHierarchyEnabled ? (

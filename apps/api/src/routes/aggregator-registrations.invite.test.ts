@@ -134,20 +134,28 @@ describe('coordinator submit with an invite token (#700)', () => {
     const id = (res.json() as { aggregator_id: string }).aggregator_id;
     const stored = await aggregatorStore.findById(id);
     expect(stored.ok && stored.value?.parentOrgId).toBe(ORG_ID);
+    expect(stored.ok && stored.value?.inviteEmail).toBe(INVITE_EMAIL);
     // Invite is now consumed (single-use).
     const inv = await invites.findByJti('inv-1');
     expect(inv.ok && inv.value?.status).toBe('consumed');
   });
 
-  it('rejects a submitted email that does not match the invite (403)', async () => {
+  it('allows registering with a different email and records the invited one (#701)', async () => {
     const token = await seedInviteAndToken();
     const res = await post({
       ...validBody,
-      contact: { ...validBody.contact, email: 'someone-else@trrain.org' },
+      contact: { ...validBody.contact, email: 'my-own@trrain.org' },
       invite: token,
     });
-    expect(res.statusCode).toBe(403);
-    expect((res.json() as { error: { code: string } }).error.code).toBe('INVITE_EMAIL_MISMATCH');
+    expect(res.statusCode).toBe(201);
+    const id = (res.json() as { aggregator_id: string }).aggregator_id;
+    const stored = await aggregatorStore.findById(id);
+    // Registered with the entered email; invited email kept as provenance.
+    expect(stored.ok && stored.value?.contact.email).toBe('my-own@trrain.org');
+    expect(stored.ok && stored.value?.inviteEmail).toBe(INVITE_EMAIL);
+    // Invite still consumed (single-use holds).
+    const inv = await invites.findByJti('inv-1');
+    expect(inv.ok && inv.value?.status).toBe('consumed');
   });
 
   it('rejects an expired invite (410)', async () => {

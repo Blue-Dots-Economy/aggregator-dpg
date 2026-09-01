@@ -210,8 +210,11 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
       // Invite to claim (#700). Set in the invite path; the pending→consumed CAS
       // runs only AFTER the registration fully provisions (below), so a duplicate
       // phone / transient error never burns the coordinator's one-time invite.
-      // Reuse is still blocked: the invite is email-bound and the email is unique.
       let inviteJti: string | null = null;
+      // Email the invite was addressed to (#701). A coordinator MAY register with
+      // a different email than they were invited at; we keep the invited address
+      // for provenance so the approving owner can see who was originally targeted.
+      let inviteEmailClaim: string | null = null;
       if (orgHierarchyEnabled()) {
         // Rate limit per (ip, email) (spec A6).
         const rl = await checkSubmitRate(`${req.ip}|${contact.email}`);
@@ -237,11 +240,11 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
               verified.error.code === 'EXPIRED' ? 'INVITE_EXPIRED' : 'INVITE_INVALID',
             );
           }
-          // Email binding (§4.4.3): submitted email must equal the claim. Zod
-          // already lowercased `contact.email`; normalise the claim to match.
-          if (contact.email !== verified.email.trim().toLowerCase()) {
-            throw httpError('INVITE_EMAIL_MISMATCH', { fields: { email: contact.email } });
-          }
+          // The coordinator may register with a different email than the invite
+          // was sent to (#701) — the invited address is kept as provenance and
+          // surfaced to the approving owner, not enforced. The invite itself is
+          // still the gate (valid + pending + org active + single-use).
+          inviteEmailClaim = verified.email.trim().toLowerCase();
           const inviteStore = getRegistrationInvitesStore();
           const row = await inviteStore.findByJti(verified.jti);
           if (!row.ok) {
@@ -336,6 +339,7 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
             applicantName: existing.name,
             applicantEmail: existing.contact.email,
             applicantPhone: existing.contactPhone,
+            ...(existing.inviteEmail ? { invitedEmail: existing.inviteEmail } : {}),
             ...(await resolveOwnerRouting(existing.parentOrgId)),
           },
           log,
@@ -406,6 +410,7 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
         locations: body.locations,
         consent: serverConsent,
         parentOrgId,
+        inviteEmail: inviteEmailClaim,
         profile: buildAggregatorProfile(body as unknown as Record<string, unknown>),
         profileRef: resolveProfileRef('registration.v1.json'),
       });
@@ -511,6 +516,7 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
           applicantName: body.name,
           applicantEmail: contact.email,
           applicantPhone: phoneE164,
+          ...(inviteEmailClaim ? { invitedEmail: inviteEmailClaim } : {}),
           ...(await resolveOwnerRouting(parentOrgId)),
         },
         log,
@@ -631,6 +637,8 @@ async function createAggregatorWithSlug(
     locations: ReturnType<typeof RegistrationPayloadSchema.parse>['locations'];
     consent: ReturnType<typeof RegistrationPayloadSchema.parse>['consent'];
     parentOrgId: string | null;
+    /** Invited email (#701) — provenance when registered via an invite. */
+    inviteEmail: string | null;
     profile: Record<string, unknown>;
     /** `null` when no registration schema resolved — variant unknown. */
     profileRef: string | null;
@@ -651,6 +659,7 @@ async function createAggregatorWithSlug(
       createdBy: 'self',
       updatedBy: 'self',
       parentOrgId: extras.parentOrgId,
+      inviteEmail: extras.inviteEmail,
       profile: extras.profile,
       profileRef: extras.profileRef,
     });

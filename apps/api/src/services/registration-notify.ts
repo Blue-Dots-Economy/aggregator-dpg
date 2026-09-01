@@ -20,6 +20,8 @@ export interface AdminReviewNotifyInput {
   applicantName: string;
   applicantEmail: string;
   applicantPhone: string;
+  /** Invited email (#701) — highlighted to the approver when it differs. */
+  invitedEmail?: string | undefined;
   /**
    * Parent org id (spec §9). When set, it is minted into the approve/reject
    * tokens as the `org` claim so the decision handler can bind the decision to
@@ -91,6 +93,8 @@ export interface ReviewEmailInput {
   applicantName: string;
   applicantEmail: string;
   applicantPhone: string;
+  /** Invited email (#701) — highlighted when it differs from applicantEmail. */
+  invitedEmail?: string | undefined;
   /** Resolved recipient list (network admins, or an org owner). */
   recipients: string[];
   /** Optional `org` token claim (coordinator-under-org flow). */
@@ -120,6 +124,7 @@ export async function sendReviewEmail(
     applicantName: input.applicantName,
     applicantEmail: input.applicantEmail,
     applicantPhone: input.applicantPhone,
+    ...(input.invitedEmail ? { invitedEmail: input.invitedEmail } : {}),
     association: input.applicantName,
     ...(input.entityLabel ? { entityLabel: input.entityLabel } : {}),
     approveUrl: `${base}?token=${encodeURIComponent(approveToken)}&intent=approve`,
@@ -167,6 +172,7 @@ export async function sendAdminReviewEmail(
       applicantName: input.applicantName,
       applicantEmail: input.applicantEmail,
       applicantPhone: input.applicantPhone,
+      ...(input.invitedEmail ? { invitedEmail: input.invitedEmail } : {}),
       recipients: input.recipientEmail ? [input.recipientEmail] : parseAdminEmails(),
       ...(input.org ? { org: input.org } : {}),
       // Stated explicitly rather than left to the `aggregator` default: this

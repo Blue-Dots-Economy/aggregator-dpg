@@ -232,6 +232,12 @@ export const aggregators = pgTable(
     parentOrgId: uuid('parent_org_id').references(
       (): typeof aggregatorOrgs.id => aggregatorOrgs.id,
     ),
+
+    // The email a coordinator was INVITED at (#701), when they registered via an
+    // invite. May differ from `contact_email` (they can register with their own
+    // address) — kept for provenance so the approving owner can see who was
+    // originally targeted. NULL for non-invite / flat registrations.
+    inviteEmail: text('invite_email'),
   },
   (table) => ({
     // Auth-path lookups: phone/email are the credential identifiers a user

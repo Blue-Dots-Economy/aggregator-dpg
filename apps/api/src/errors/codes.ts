@@ -435,14 +435,6 @@ export const ERR = {
     detail: 'This invitation has expired. Ask your organisation owner to send a fresh invite.',
     hint: 'invite-token exp elapsed (INVITE_TOKEN_TTL_SECONDS). Recovery is the owner re-mint path (§6).',
   },
-  INVITE_EMAIL_MISMATCH: {
-    code: 'INVITE_EMAIL_MISMATCH',
-    status: 403,
-    title: 'Invite is for a different email',
-    detail:
-      'This invitation was sent to a different email address. Register with the email the invite was sent to.',
-    hint: 'Submitted contact.email != invite email claim (normalised). Email binding enforced on submit (§4.4.3).',
-  },
   INVITE_ALREADY_USED: {
     code: 'INVITE_ALREADY_USED',
     status: 409,

@@ -54,6 +54,27 @@ describe('admin-review template', () => {
     expect(out.html).toContain('New organisation registration');
     expect(out.subject).toContain('organisation registration');
   });
+
+  it('highlights when the coordinator registered with a different email than invited (#701)', () => {
+    const base = {
+      registrationId: 'reg-1',
+      applicantName: 'Asha',
+      applicantEmail: 'my-own@x.org',
+      applicantPhone: '+919876543210',
+      association: 'JFC',
+      approveUrl: 'http://x',
+      rejectUrl: 'http://y',
+      submittedAt: new Date('2026-04-30T10:00:00Z'),
+      expiresInText: '7 days',
+    };
+    const differ = renderAdminReview({ ...base, invitedEmail: 'invited@x.org' });
+    expect(differ.html).toContain('Invited email');
+    expect(differ.html).toContain('invited@x.org');
+    expect(differ.text).toContain('invited@x.org');
+    // When invited == registered (or omitted), no highlight.
+    const same = renderAdminReview({ ...base, invitedEmail: 'my-own@x.org' });
+    expect(same.html).not.toContain('Invited email');
+  });
 });
 
 describe('applicant-approved template', () => {
