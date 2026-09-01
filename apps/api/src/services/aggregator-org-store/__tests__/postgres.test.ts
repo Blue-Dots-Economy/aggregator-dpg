@@ -78,6 +78,7 @@ function makeRow(overrides: Partial<AggregatorOrg> = {}): AggregatorOrg {
     status: 'pending',
     createdAt,
     updatedAt: createdAt,
+    rejectedAt: null,
     ...overrides,
   };
 }

@@ -411,6 +411,14 @@ export const ERR = {
       'An organisation with this name is already registered or pending. Please choose a different name.',
     hint: 'aggregator_orgs partial-unique display_name (case-insensitive) collision over non-terminal rows.',
   },
+  REGISTRATION_COOLING: {
+    code: 'REGISTRATION_COOLING',
+    status: 409,
+    title: 'Please try again later',
+    detail:
+      'A recent registration with these details was declined. You can register again after the cooling period.',
+    hint: 'A rejected record for this email/phone/owner_email exists and now - rejected_at < REGISTRATION_COOLING_MINUTES. See response.error.fields.retry_after for the ISO timestamp.',
+  },
   TARGET_ORG_INACTIVE: {
     code: 'TARGET_ORG_INACTIVE',
     status: 409,

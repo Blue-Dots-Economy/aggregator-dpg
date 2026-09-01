@@ -119,7 +119,12 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
     try {
       const [row] = await getDb()
         .update(aggregatorOrgs)
-        .set({ status: next, updatedAt: new Date() })
+        // Stamp rejected_at (write-once) on the reject transition only (#726).
+        .set({
+          status: next,
+          updatedAt: new Date(),
+          ...(next === 'inactive' ? { rejectedAt: new Date() } : {}),
+        })
         .where(and(eq(aggregatorOrgs.id, id), eq(aggregatorOrgs.status, 'pending')))
         .returning();
       return { ok: true, value: row ? toDomain(row) : null };
@@ -153,6 +158,7 @@ function toDomain(row: typeof aggregatorOrgs.$inferSelect): AggregatorOrg {
     status: row.status,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+    rejectedAt: row.rejectedAt,
   };
 }
 

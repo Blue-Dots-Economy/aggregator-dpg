@@ -323,6 +323,13 @@ const ConfigSchema = z.object({
     .positive()
     .default(24 * 60 * 60 * 1000),
 
+  /**
+   * Cooling window (in MINUTES) after a rejection before the same owner/
+   * coordinator may re-register (#726). Default 720 (12h). In minutes for
+   * granularity; override via env.
+   */
+  REGISTRATION_COOLING_MINUTES: z.coerce.number().int().positive().default(720),
+
   // ─── Schema loader ──────────────────────────────────────────────────────
   /** Absolute or relative path to `config/schemas/`. Used by link-submit Ajv. */
   SCHEMA_ROOT_DIR: z.string().default('./config/schemas'),

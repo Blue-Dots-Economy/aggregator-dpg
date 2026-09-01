@@ -67,6 +67,12 @@ export interface Aggregator {
    * sees who was originally targeted. `null` for non-invite registrations.
    */
   inviteEmail: string | null;
+  /**
+   * Write-once rejection timestamp (#726). Set when a pending registration is
+   * rejected (status → inactive); drives the re-registration cooling window.
+   * `null` until/unless rejected.
+   */
+  rejectedAt: Date | null;
 }
 
 export interface CreateAggregatorInput {
@@ -111,6 +117,8 @@ export interface UpdateAggregatorPatch {
   consent?: ConsentRecord;
   status?: AggregatorStatus;
   parentOrgId?: string | null;
+  /** Write-once rejection stamp (#726) — set only on the reject transition. */
+  rejectedAt?: Date | null;
   updatedBy: string;
 }
 

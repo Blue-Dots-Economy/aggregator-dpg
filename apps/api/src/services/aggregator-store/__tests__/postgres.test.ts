@@ -101,6 +101,7 @@ function makeRow(overrides: Partial<Aggregator> = {}): Aggregator {
     signalstackOrgId: null,
     parentOrgId: null,
     inviteEmail: null,
+    rejectedAt: null,
     ...overrides,
   };
 }

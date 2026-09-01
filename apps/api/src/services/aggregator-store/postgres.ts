@@ -169,6 +169,7 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
     if (patch.consent !== undefined) updates['consent'] = patch.consent;
     if (patch.status !== undefined) updates['status'] = patch.status;
     if (patch.parentOrgId !== undefined) updates['parentOrgId'] = patch.parentOrgId;
+    if (patch.rejectedAt !== undefined) updates['rejectedAt'] = patch.rejectedAt;
 
     try {
       const rows = await getDb()
@@ -334,5 +335,6 @@ function toDomain(row: typeof aggregators.$inferSelect): Aggregator {
     signalstackOrgId: row.signalstackOrgId,
     parentOrgId: row.parentOrgId,
     inviteEmail: row.inviteEmail,
+    rejectedAt: row.rejectedAt,
   };
 }

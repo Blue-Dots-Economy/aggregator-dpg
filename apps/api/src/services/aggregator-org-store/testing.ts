@@ -47,6 +47,7 @@ export function buildAggregatorOrg(overrides: Partial<AggregatorOrg> = {}): Aggr
     status: 'pending',
     createdAt,
     updatedAt: createdAt,
+    rejectedAt: null,
     ...overrides,
   };
 }

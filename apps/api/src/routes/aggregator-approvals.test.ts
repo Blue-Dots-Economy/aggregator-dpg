@@ -857,8 +857,9 @@ describe('admin approval routes', () => {
     expect(dbAfter.ok && dbAfter.value?.status).toBe('active');
   });
 
-  it('reject returns 503 without side effects when updateStatus fails', async () => {
-    aggregatorStore.updateStatus = async () => ({
+  it('reject returns 503 without side effects when the status write fails', async () => {
+    // Reject now stamps write-once rejected_at via update() (#726), not updateStatus.
+    aggregatorStore.update = async () => ({
       ok: false,
       error: { code: 'DB_UNAVAILABLE', message: 'db down' },
     });

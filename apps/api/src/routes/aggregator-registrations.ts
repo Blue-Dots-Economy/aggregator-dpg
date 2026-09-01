@@ -35,6 +35,7 @@ import { RegistrationPayloadSchema } from '@aggregator-dpg/shared-primitives/agg
 import type { BecknContact } from '@aggregator-dpg/shared-primitives/aggregator';
 import { getRegistrationValidator } from '../services/registration-validator.js';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
+import type { Aggregator } from '../services/aggregator-store/interface.js';
 import { getAggregatorProfileStore } from '../services/aggregator-profile-store/index.js';
 import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js';
 import { getRegistrationInvitesStore } from '../services/registration-invites-store/index.js';
@@ -42,6 +43,7 @@ import { verifyInviteToken } from '../services/invite-token.js';
 import { getIdpAdmin } from '../services/idp-admin/index.js';
 import { sendAdminReviewEmail } from '../services/registration-notify.js';
 import { orgHierarchyEnabled } from '../config.js';
+import { coolingRetryAfter } from '../services/registration-cooling.js';
 import { checkSubmitRate } from '../services/submit-rate.js';
 import { loadConsentConfig } from '@aggregator-dpg/config-loader/fs';
 import { getConsentLedger } from '../services/consent-ledger/index.js';
@@ -136,6 +138,42 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
     async (req: FastifyRequest, reply: FastifyReply) => {
       const log = req.log.child({ operation: 'aggregator-registration.create' });
       const start = Date.now();
+
+      // Re-send the review link for an existing recoverable record without
+      // touching its fields. Shared by the still-pending reclaim path and the
+      // rejected-then-cooling-elapsed revive path (#726): both re-use the SAME
+      // row and re-mint the link to the reviewer using STORED values — the
+      // anonymous submit carries no proof of identity, so honouring the
+      // resubmitted name/phone would let a stranger hijack the record.
+      const reclaimReview = async (row: Aggregator): Promise<FastifyReply> => {
+        await sendAdminReviewEmail(
+          {
+            aggregatorId: row.id,
+            applicantName: row.name,
+            applicantEmail: row.contact.email,
+            applicantPhone: row.contactPhone,
+            ...(row.inviteEmail ? { invitedEmail: row.inviteEmail } : {}),
+            ...(await resolveOwnerRouting(row.parentOrgId)),
+          },
+          log,
+        );
+        log.info(
+          {
+            status: 'success',
+            latency_ms: Date.now() - start,
+            aggregator_id: row.id,
+            reclaim: true,
+          },
+          'registration re-submitted — review link re-sent (no field change)',
+        );
+        // v1 records consent only on fresh registration, not on reclaim (deliberate).
+        return reply.status(200).send({
+          aggregator_id: row.id,
+          org_slug: row.orgSlug,
+          status: 'pending',
+          message: 'Registration re-submitted. A fresh approval link has been sent for review.',
+        });
+      };
 
       // Every backend API requires a Bearer token. Registration is reached
       // anonymously by the user, so the BFF attaches a Keycloak service-
@@ -320,48 +358,37 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
       }
       if (dbEmail.value !== null) {
         const existing = dbEmail.value;
-        // Recovery is limited to a still-PENDING record AND only re-sends the
-        // review link — it never writes the resubmitted name/phone/type/consent.
-        // The public submit carries no proof of identity (anonymous BFF service
-        // token), so overwriting on an email match alone would let anyone hijack
-        // a pending record (swap in their own OTP phone, re-route the link).
-        // Re-mint uses the STORED values and the link goes to the reviewer, not
-        // the caller — so a resubmit by a stranger changes nothing and leaks
-        // nothing to them. Active/rejected records → 409 (recover via re-register
-        // after the stale-prune job clears them).
+        if (existing.status === 'inactive') {
+          // Rejected record (#726): block re-registration until the cooling
+          // window elapses, measured from the write-once `rejected_at`. Once it
+          // lapses, revive the SAME row to pending (clearing `rejected_at`) and
+          // re-send the review link — the disabled KC user is left intact for
+          // the approval step, so nothing is deleted or re-created.
+          const retryAfter = coolingRetryAfter(existing.rejectedAt, existing.updatedAt);
+          if (retryAfter) {
+            throw httpError('REGISTRATION_COOLING', {
+              fields: { email: contact.email, retry_after: retryAfter },
+            });
+          }
+          const revived = await aggregatorStore.update(existing.id, {
+            status: 'pending',
+            rejectedAt: null,
+            updatedBy: 'self',
+          });
+          if (!revived.ok) {
+            throw httpError('DB_UNAVAILABLE', {
+              cause: new Error(revived.error.message),
+              fields: { sub_operation: 'aggregatorStore.reviveRejected' },
+            });
+          }
+          return reclaimReview(existing);
+        }
         if (existing.status !== 'pending') {
+          // active / retired — a live account owns this email.
           throw httpError('USER_EXISTS', { fields: { email: contact.email } });
         }
-
-        await sendAdminReviewEmail(
-          {
-            aggregatorId: existing.id,
-            applicantName: existing.name,
-            applicantEmail: existing.contact.email,
-            applicantPhone: existing.contactPhone,
-            ...(existing.inviteEmail ? { invitedEmail: existing.inviteEmail } : {}),
-            ...(await resolveOwnerRouting(existing.parentOrgId)),
-          },
-          log,
-        );
-
-        log.info(
-          {
-            status: 'success',
-            latency_ms: Date.now() - start,
-            aggregator_id: existing.id,
-            reclaim: true,
-          },
-          'pending registration re-submitted — review link re-sent (no field change)',
-        );
-
-        // v1 records consent only on fresh registration, not on reclaim (deliberate).
-        return reply.status(200).send({
-          aggregator_id: existing.id,
-          org_slug: existing.orgSlug,
-          status: 'pending',
-          message: 'Registration re-submitted. A fresh approval link has been sent for review.',
-        });
+        // Still pending → re-send the review link, no field change.
+        return reclaimReview(existing);
       }
 
       const dbPhone = await aggregatorStore.findByContactPhone(phoneE164);
@@ -372,6 +399,31 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
         });
       }
       if (dbPhone.value !== null) {
+        const existingPhone = dbPhone.value;
+        if (existingPhone.status === 'inactive') {
+          // Same cooling window (#726) on the phone identity — reached only when
+          // the email didn't match any row but a rejected record owns this
+          // number. Within the window → 409; elapsed → revive that row and
+          // re-send its review link (reuse, no delete).
+          const retryAfter = coolingRetryAfter(existingPhone.rejectedAt, existingPhone.updatedAt);
+          if (retryAfter) {
+            throw httpError('REGISTRATION_COOLING', {
+              fields: { phone: phoneE164, retry_after: retryAfter },
+            });
+          }
+          const revived = await aggregatorStore.update(existingPhone.id, {
+            status: 'pending',
+            rejectedAt: null,
+            updatedBy: 'self',
+          });
+          if (!revived.ok) {
+            throw httpError('DB_UNAVAILABLE', {
+              cause: new Error(revived.error.message),
+              fields: { sub_operation: 'aggregatorStore.reviveRejected' },
+            });
+          }
+          return reclaimReview(existingPhone);
+        }
         throw httpError('PHONE_EXISTS', { fields: { phone: phoneE164 } });
       }
 

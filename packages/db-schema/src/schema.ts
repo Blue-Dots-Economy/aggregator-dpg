@@ -238,6 +238,12 @@ export const aggregators = pgTable(
     // address) — kept for provenance so the approving owner can see who was
     // originally targeted. NULL for non-invite / flat registrations.
     inviteEmail: text('invite_email'),
+
+    // Write-once timestamp of rejection (#726). Set exactly once when a
+    // pending registration is rejected (status → inactive); never mutated
+    // after. Powers the re-registration cooling window without depending on the
+    // mutable `updated_at`. NULL until/unless rejected.
+    rejectedAt: timestamp('rejected_at', { withTimezone: true }),
   },
   (table) => ({
     // Auth-path lookups: phone/email are the credential identifiers a user
@@ -280,6 +286,8 @@ export const aggregatorOrgs = pgTable(
     status: aggregatorStatusEnum('status').notNull().default('pending'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    // Write-once rejection timestamp (#726) — see the aggregators note above.
+    rejectedAt: timestamp('rejected_at', { withTimezone: true }),
   },
   (table) => ({
     // Active-org dropdown + owner lookup are plain SQL (spec A2/A5).

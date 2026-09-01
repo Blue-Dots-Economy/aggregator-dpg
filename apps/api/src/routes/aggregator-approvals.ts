@@ -458,7 +458,13 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
       // Reject path — DB status → 'inactive', KC user stays disabled.
       // Rejection reason is logged for audit but not persisted (no column
       // yet; revisit when an aggregator_decision_audit table lands).
-      const dbUpdate = await store.updateStatus(aggregatorId, 'inactive', 'admin');
+      // Stamp rejected_at (write-once) so the submit-path cooling window
+      // (#726) measures from the actual reject, not the mutable updated_at.
+      const dbUpdate = await store.update(aggregatorId, {
+        status: 'inactive',
+        rejectedAt: new Date(),
+        updatedBy: 'admin',
+      });
       if (!dbUpdate.ok) {
         log.error(
           {
