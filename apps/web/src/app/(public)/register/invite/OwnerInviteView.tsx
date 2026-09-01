@@ -24,56 +24,51 @@ type ViewState =
   | { status: 'invalid_grant' }
   | { status: 'error'; message: string };
 
-interface Recipient {
+interface InviteRow {
+  name: string;
   email: string;
-  name?: string;
 }
 
-/**
- * Parses the bulk textarea into recipients — one `email` or `email, name` per
- * line. Blank lines are skipped; the optional name (after the first comma) is
- * used only to greet the recipient in the invite email.
- *
- * @param raw - The textarea contents.
- * @returns The parsed recipient list.
- */
-function parseRecipients(raw: string): Recipient[] {
-  const out: Recipient[] = [];
-  for (const line of raw.split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    const comma = trimmed.indexOf(',');
-    if (comma === -1) {
-      out.push({ email: trimmed });
-    } else {
-      const email = trimmed.slice(0, comma).trim();
-      const name = trimmed.slice(comma + 1).trim();
-      out.push(name ? { email, name } : { email });
-    }
-  }
-  return out;
-}
+const EMPTY_ROW: InviteRow = { name: '', email: '' };
 
 /**
- * Owner invite-management surface (#701). A bulk textarea mints N coordinator
- * invites in one submission and reports a per-recipient summary
- * (sent / already-invited / invalid). An expired grant lands on a recovery
- * action that re-mails a fresh link to the registered owner address.
+ * Owner invite-management surface (#701). One Name + Email pair per coordinator,
+ * with "add another" to invite several in one go. Mints N invites and reports a
+ * per-recipient summary (sent / already-invited / invalid). An expired grant
+ * lands on a recovery banner (a fresh link is re-mailed to the registered owner).
  *
  * @param props - The grant token from the deep link.
  * @returns The invite-management page body.
  */
 export function OwnerInviteView({ grant }: Readonly<OwnerInviteViewProps>): JSX.Element {
-  const [raw, setRaw] = useState('');
+  const [rows, setRows] = useState<InviteRow[]>([{ ...EMPTY_ROW }]);
   const [state, setState] = useState<ViewState>({ status: 'idle' });
-  const recipients = useMemo(() => parseRecipients(raw), [raw]);
+
+  // Only rows with an email are sent; the optional name greets the recipient.
+  const recipients = useMemo(
+    () =>
+      rows
+        .map((r) => ({ email: r.email.trim(), name: r.name.trim() }))
+        .filter((r) => r.email.length > 0)
+        .map((r) => (r.name ? { email: r.email, name: r.name } : { email: r.email })),
+    [rows],
+  );
   const canSubmit = recipients.length > 0 && state.status !== 'submitting';
-  // Precompute the button label so the JSX has no nested ternary (S3358).
   const plural = recipients.length === 1 ? '' : 's';
   const sendLabel =
     state.status === 'submitting'
       ? 'Sending…'
       : `Send ${recipients.length || ''} invite${plural}`.trim();
+
+  function updateRow(index: number, field: keyof InviteRow, value: string): void {
+    setRows((prev) => prev.map((r, i) => (i === index ? { ...r, [field]: value } : r)));
+  }
+  function addRow(): void {
+    setRows((prev) => [...prev, { ...EMPTY_ROW }]);
+  }
+  function removeRow(index: number): void {
+    setRows((prev) => (prev.length === 1 ? prev : prev.filter((_, i) => i !== index)));
+  }
 
   async function submit(): Promise<void> {
     setState({ status: 'submitting' });
@@ -93,7 +88,7 @@ export function OwnerInviteView({ grant }: Readonly<OwnerInviteViewProps>): JSX.
       // An expired grant re-mails a fresh link and mints nothing (recovery is
       // folded into the mint endpoint — no separate call).
       setState(summary.recovered ? { status: 'recovery_sent' } : { status: 'result', summary });
-      if (!summary.recovered) setRaw('');
+      if (!summary.recovered) setRows([{ ...EMPTY_ROW }]);
       return;
     }
     const code = await readErrorCode(res);
@@ -133,19 +128,56 @@ export function OwnerInviteView({ grant }: Readonly<OwnerInviteViewProps>): JSX.
 
         {state.status === 'idle' || state.status === 'submitting' ? (
           <>
-            <p className="text-[14px] text-ink-500 mb-3">
-              Enter one email address per line. Optionally add a name after a comma — for example
-              &ldquo;asha@org.in, Asha&rdquo;. Each person gets their own one-time invite.
+            <p className="text-[14px] text-ink-500 mb-4">
+              Add a coordinator&apos;s email (and optionally their name). Each person gets their own
+              one-time invite. Use &ldquo;Add another&rdquo; to invite more than one.
             </p>
-            <textarea
-              value={raw}
-              onChange={(e) => setRaw(e.target.value)}
-              rows={8}
-              spellCheck={false}
-              placeholder={'asha@org.in, Asha\nravi@org.in'}
-              className="w-full rounded-[12px] border border-ink-200 bg-white px-3.5 py-3 text-[14px] font-mono focus:border-(--bd-primary) focus:outline-none"
-            />
-            <div className="mt-4 flex items-center gap-3">
+
+            <div className="space-y-3">
+              {rows.map((row, i) => (
+                <div key={i} className="flex items-start gap-2">
+                  <div className="grid flex-1 gap-2 sm:grid-cols-2">
+                    <input
+                      type="email"
+                      inputMode="email"
+                      aria-label={`Coordinator email ${i + 1}`}
+                      placeholder="email@org.in"
+                      value={row.email}
+                      onChange={(e) => updateRow(i, 'email', e.target.value)}
+                      className="rounded-[10px] border border-ink-200 bg-white px-3.5 py-2.5 text-[14px] focus:border-(--bd-primary) focus:outline-none"
+                    />
+                    <input
+                      type="text"
+                      aria-label={`Coordinator name ${i + 1} (optional)`}
+                      placeholder="Name (optional)"
+                      value={row.name}
+                      onChange={(e) => updateRow(i, 'name', e.target.value)}
+                      className="rounded-[10px] border border-ink-200 bg-white px-3.5 py-2.5 text-[14px] focus:border-(--bd-primary) focus:outline-none"
+                    />
+                  </div>
+                  {rows.length > 1 ? (
+                    <button
+                      type="button"
+                      aria-label={`Remove coordinator ${i + 1}`}
+                      onClick={() => removeRow(i)}
+                      className="mt-1 rounded-[8px] px-2 py-1.5 text-[18px] leading-none text-ink-400 hover:bg-ink-50 hover:text-ink-600"
+                    >
+                      ×
+                    </button>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              onClick={addRow}
+              className="mt-3 text-[13.5px] font-semibold text-(--bd-primary-600) hover:underline"
+            >
+              + Add another
+            </button>
+
+            <div className="mt-5 flex items-center gap-3">
               <button
                 type="button"
                 disabled={!canSubmit}

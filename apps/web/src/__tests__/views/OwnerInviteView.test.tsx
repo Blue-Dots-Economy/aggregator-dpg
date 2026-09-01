@@ -1,8 +1,9 @@
 /**
- * View test: <OwnerInviteView /> — the org-owner bulk invite surface (#701).
+ * View test: <OwnerInviteView /> — the org-owner invite surface (#701).
  *
- * Covers the bulk-mint happy path (summary render), the expired-grant recovery
- * action, and the invalid-grant banner. `fetch` is stubbed per case.
+ * Covers the Name+Email rows + "Add another" bulk mint (summary render), the
+ * expired-grant recovery banner, invalid-grant, rate-limit, network error, and
+ * the invalid-row list. `fetch` is stubbed per case.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
@@ -28,39 +29,49 @@ function renderView() {
 }
 
 function jsonResponse(status: number, body: unknown): Response {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    json: async () => body,
-  } as Response;
+  return { ok: status >= 200 && status < 300, status, json: async () => body } as Response;
+}
+
+/** Fills the email field of row `idx` (default first). */
+function typeEmail(value: string, idx = 0): void {
+  fireEvent.change(screen.getAllByPlaceholderText('email@org.in')[idx]!, { target: { value } });
+}
+function clickSend(): void {
+  fireEvent.click(screen.getByRole('button', { name: /send/i }));
 }
 
 describe('<OwnerInviteView />', () => {
-  beforeEach(() => {
-    vi.restoreAllMocks();
-  });
-  afterEach(() => {
-    vi.clearAllMocks();
-  });
+  beforeEach(() => vi.restoreAllMocks());
+  afterEach(() => vi.clearAllMocks());
 
-  it('mints invites and renders the summary', async () => {
+  it('mints invites from Name+Email rows and renders the summary', async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValue(jsonResponse(200, { recovered: false, sent: 2, resent: 1, invalid: [] }));
+      .mockResolvedValue(jsonResponse(200, { recovered: false, sent: 2, resent: 0, invalid: [] }));
     vi.stubGlobal('fetch', fetchMock);
 
     renderView();
-    fireEvent.change(screen.getByPlaceholderText(/asha@org\.in/i), {
-      target: { value: 'a@x.org\nb@x.org, Bee' },
+    typeEmail('a@x.org');
+    fireEvent.click(screen.getByRole('button', { name: /add another/i }));
+    typeEmail('b@x.org', 1);
+    fireEvent.change(screen.getAllByPlaceholderText('Name (optional)')[1]!, {
+      target: { value: 'Bee' },
     });
-    fireEvent.click(screen.getByRole('button', { name: /send/i }));
+    clickSend();
 
     await waitFor(() => expect(screen.getByText(/2 sent/)).toBeInTheDocument());
-    // Body carried the grant + parsed recipients.
     const [, opts] = fetchMock.mock.calls[0] as [string, RequestInit];
     const body = JSON.parse(String(opts.body)) as { grant: string; recipients: unknown[] };
     expect(body.grant).toBe('grant-jwt');
     expect(body.recipients).toEqual([{ email: 'a@x.org' }, { email: 'b@x.org', name: 'Bee' }]);
+  });
+
+  it('removes a row with the × control', async () => {
+    renderView();
+    fireEvent.click(screen.getByRole('button', { name: /add another/i }));
+    expect(screen.getAllByPlaceholderText('email@org.in')).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button', { name: /remove coordinator 2/i }));
+    expect(screen.getAllByPlaceholderText('email@org.in')).toHaveLength(1);
   });
 
   it('shows the recovery banner when an expired grant re-mails a fresh link (recovered:true)', async () => {
@@ -71,10 +82,8 @@ describe('<OwnerInviteView />', () => {
         .mockResolvedValue(jsonResponse(200, { recovered: true, sent: 0, resent: 0, invalid: [] })),
     );
     renderView();
-    fireEvent.change(screen.getByPlaceholderText(/asha@org\.in/i), {
-      target: { value: 'a@x.org' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: /send/i }));
+    typeEmail('a@x.org');
+    clickSend();
     await waitFor(() => expect(screen.getByText(/had expired/i)).toBeInTheDocument());
   });
 
@@ -84,30 +93,24 @@ describe('<OwnerInviteView />', () => {
       vi.fn().mockResolvedValue(jsonResponse(400, { error: { code: 'GRANT_INVALID' } })),
     );
     renderView();
-    fireEvent.change(screen.getByPlaceholderText(/asha@org\.in/i), {
-      target: { value: 'a@x.org' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: /send/i }));
+    typeEmail('a@x.org');
+    clickSend();
     await waitFor(() => expect(screen.getByText(/not valid/i)).toBeInTheDocument());
   });
 
   it('shows a rate-limit message on 429', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(429, {})));
     renderView();
-    fireEvent.change(screen.getByPlaceholderText(/asha@org\.in/i), {
-      target: { value: 'a@x.org' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: /send/i }));
+    typeEmail('a@x.org');
+    clickSend();
     await waitFor(() => expect(screen.getByText(/too many invites/i)).toBeInTheDocument());
   });
 
   it('shows a network-error message when fetch rejects', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
     renderView();
-    fireEvent.change(screen.getByPlaceholderText(/asha@org\.in/i), {
-      target: { value: 'a@x.org' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: /send/i }));
+    typeEmail('a@x.org');
+    clickSend();
     await waitFor(() => expect(screen.getByText(/network error/i)).toBeInTheDocument());
   });
 
@@ -124,10 +127,8 @@ describe('<OwnerInviteView />', () => {
       ),
     );
     renderView();
-    fireEvent.change(screen.getByPlaceholderText(/asha@org\.in/i), {
-      target: { value: 'a@x.org' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: /send/i }));
+    typeEmail('a@x.org');
+    clickSend();
     await waitFor(() => expect(screen.getByText(/1 invalid/)).toBeInTheDocument());
     expect(screen.getByText(/bad — invalid email/i)).toBeInTheDocument();
   });
