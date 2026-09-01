@@ -204,16 +204,17 @@ export const ERR = {
   USER_EXISTS: {
     code: 'USER_EXISTS',
     status: 409,
-    title: 'Email already registered',
-    detail: 'An account with this email already exists. Use a different email or sign in instead.',
+    title: 'Email already in use',
+    detail:
+      'This email is already registered. Please use a different email, or sign in if it’s yours.',
     hint: 'Pre-check at idp.findByEmail returned non-null. Stale or duplicate KC user.',
   },
   PHONE_EXISTS: {
     code: 'PHONE_EXISTS',
     status: 409,
-    title: 'Phone already registered',
+    title: 'Phone already in use',
     detail:
-      'A user with this mobile number already exists. Use a different number or sign in instead.',
+      'This mobile number is already registered. Please use a different number, or sign in if it’s yours.',
     hint: 'idp.findByAttribute(phoneNumber) returned non-null. Phone is OTP login key — must be unique.',
   },
   INVALID_PHONE: {
