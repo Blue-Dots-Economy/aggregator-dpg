@@ -57,7 +57,7 @@ export function renderCoordinatorInvite(v: CoordinatorInviteVars): {
   This invite is personal to this email address and expires on <strong>${escapeHtml(v.expiresOn)}</strong>. Register with the email address this message was sent to.
 </p>
 <p style="margin:0 0 22px;font-size:14px;color:#475069;line-height:1.55;">
-  After you register, ${escapeHtml(v.orgName)} reviews your request and you'll get a confirmation email. Questions? Contact your organisation at ${escapeHtml(v.inviterEmail)}.
+  After you register, ${escapeHtml(v.orgName)} reviews your request and you'll get a confirmation email.
 </p>
 <p style="margin:0;font-size:12px;color:#7c84a6;line-height:1.55;">
   Didn't expect this? You can ignore this email — no account is created until you register.
@@ -72,7 +72,7 @@ Register as a coordinator: ${v.inviteUrl}
 
 This invite is personal to this email address and expires on ${v.expiresOn}. Register with the email address this message was sent to.
 
-After you register, ${v.orgName} reviews your request and you'll get a confirmation email. Questions? Contact your organisation at ${v.inviterEmail}.
+After you register, ${v.orgName} reviews your request and you'll get a confirmation email.
 
 Didn't expect this? You can ignore this email — no account is created until you register.
 
