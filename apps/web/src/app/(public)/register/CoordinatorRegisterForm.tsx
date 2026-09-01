@@ -47,6 +47,18 @@ export interface CoordinatorRegisterFormProps {
    * to show, so submit surfaces an error instead of opening it.
    */
   consentContent?: ConsentDocContent;
+  /**
+   * Invite mode (#701). When set, this is an invite-bound registration: the org
+   * selector is replaced by the fixed inviting org, the bound email is
+   * prefilled + locked, and the submission carries `invite` (not `org_id`) so
+   * the API validates + consumes the invite. The server re-validates
+   * everything — these props are UX only.
+   */
+  inviteToken?: string;
+  /** The inviting org's display name (invite mode) — fills the hidden `name`. */
+  lockedOrgName?: string;
+  /** The invite's bound email (invite mode) — prefilled + read-only. */
+  lockedEmail?: string;
 }
 
 /** One active-org option for the coordinator dropdown (`GET /api/orgs`). */
@@ -71,14 +83,21 @@ export function CoordinatorRegisterForm({
   uiSchema,
   orgHierarchyEnabled,
   consentContent,
+  inviteToken,
+  lockedOrgName,
+  lockedEmail,
 }: CoordinatorRegisterFormProps): JSX.Element {
   const t = useTranslations('register');
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
   const brand = cfg.brand.short_name;
+  // Invite mode: org is fixed by the invite, so no selector / no org list.
+  const inviteMode = Boolean(inviteToken);
 
   const { state, setState, canSubmit, setCanSubmit, errorRef } = useRegistrationFormState();
   const [formData, setFormData] = useState<Record<string, unknown>>(() => ({
     locations: [{ geo: { type: 'Point', coordinates: [0, 0] }, address: { addressCountry: 'IN' } }],
+    // Prefill the invite-bound email so it can't be mistyped (also locked below).
+    ...(lockedEmail ? { contact: { email: lockedEmail } } : {}),
   }));
   // Selected parent org (spec §6.2). Empty until picked.
   const [orgId, setOrgId] = useState<string>('');
@@ -92,22 +111,29 @@ export function CoordinatorRegisterForm({
   const orgsQuery = useQuery({
     queryKey: ['active-orgs'],
     queryFn: () => jsonFetch<{ orgs: OrgOption[] }>('/api/orgs'),
-    enabled: orgHierarchyEnabled,
+    enabled: orgHierarchyEnabled && !inviteMode,
     staleTime: 30_000,
   });
   const orgs = orgsQuery.data?.orgs ?? [];
   const noOrgsYet =
-    orgHierarchyEnabled && orgsQuery.isSuccess && !orgsQuery.isError && orgs.length === 0;
-  // The record inherits the selected org's display name (the name field hides).
-  const selectedOrgName = orgs.find((o) => o.id === orgId)?.display_name ?? '';
+    orgHierarchyEnabled &&
+    !inviteMode &&
+    orgsQuery.isSuccess &&
+    !orgsQuery.isError &&
+    orgs.length === 0;
+  // The record inherits its org's display name (the name field hides). In invite
+  // mode the org is fixed by the invite; otherwise it's the selected dropdown org.
+  const selectedOrgName = inviteMode
+    ? (lockedOrgName ?? '')
+    : (orgs.find((o) => o.id === orgId)?.display_name ?? '');
 
-  // Keep the hidden required `name` in sync with the chosen org so the validity
-  // gate passes without the coordinator typing an organisation name.
+  // Keep the hidden required `name` in sync with the org so the validity gate
+  // passes without the coordinator typing an organisation name.
   useEffect(() => {
-    if (!orgHierarchyEnabled) return;
+    if (!orgHierarchyEnabled && !inviteMode) return;
     const next = selectedOrgName || undefined;
     setFormData((prev) => (prev['name'] === next ? prev : { ...prev, name: next }));
-  }, [orgHierarchyEnabled, selectedOrgName]);
+  }, [orgHierarchyEnabled, inviteMode, selectedOrgName]);
 
   const formSchema = useMemo(() => stripConsentBlock(stripFormChrome(schema)), [schema]);
 
@@ -116,12 +142,20 @@ export function CoordinatorRegisterForm({
   // Flag-on: hide the free-text "Organisation Name" (`name`) — auto-filled from
   // the selected org. Flag-off keeps the flat form unchanged.
   const formUiSchema = useMemo<Record<string, unknown>>(() => {
-    if (!orgHierarchyEnabled) return uiSchema;
-    return {
+    if (!orgHierarchyEnabled && !inviteMode) return uiSchema;
+    const next: Record<string, unknown> = {
       ...uiSchema,
       name: { ...((uiSchema['name'] as Record<string, unknown>) ?? {}), 'ui:widget': 'hidden' },
     };
-  }, [uiSchema, orgHierarchyEnabled]);
+    // Invite mode: the bound email is prefilled and must not be edited (the API
+    // enforces the match anyway — this just prevents a mistype + a wasted trip).
+    if (inviteMode) {
+      const contactUi = (uiSchema['contact'] as Record<string, unknown>) ?? {};
+      const contactEmailUi = (contactUi['email'] as Record<string, unknown>) ?? {};
+      next['contact'] = { ...contactUi, email: { ...contactEmailUi, 'ui:readonly': true } };
+    }
+    return next;
+  }, [uiSchema, orgHierarchyEnabled, inviteMode]);
 
   /** Runs after the gate is accepted: stamps consent and posts. */
   const submitWithConsent = async (): Promise<void> => {
@@ -133,10 +167,13 @@ export function CoordinatorRegisterForm({
       ...pendingRef.current,
       consent: stampConsent({ value: true }),
     };
-    // The API strips `org_id` before RJSF validation and stores it on
-    // `aggregators.parent_org_id`. Sent only when the hierarchy is on; `name`
-    // is the selected org's name (the field is hidden).
-    if (orgHierarchyEnabled && orgId) {
+    // The API strips `org_id`/`invite` before RJSF validation and stores the
+    // resolved org on `aggregators.parent_org_id`. In invite mode the org comes
+    // from the token claim (never `org_id`); otherwise from the dropdown.
+    if (inviteMode) {
+      payload['invite'] = inviteToken;
+      payload['name'] = selectedOrgName;
+    } else if (orgHierarchyEnabled && orgId) {
       payload['org_id'] = orgId;
       payload['name'] = selectedOrgName;
     }
@@ -179,7 +216,14 @@ export function CoordinatorRegisterForm({
         </div>
       ) : (
         <>
-          {orgHierarchyEnabled ? (
+          {inviteMode ? (
+            <div
+              className="mb-4 rounded-[10px] border border-ink-200 bg-white px-4 py-3 text-[13.5px] text-ink-600"
+              role="status"
+            >
+              Registering as a coordinator under <strong>{selectedOrgName}</strong>.
+            </div>
+          ) : orgHierarchyEnabled ? (
             <div className="form-group mb-4">
               <label className="bd-label" htmlFor="coordinator-org">
                 {t('org_selector_label')}
@@ -246,7 +290,7 @@ export function CoordinatorRegisterForm({
           >
             <RegistrationSubmitButton
               submitting={state.status === 'submitting'}
-              canSubmit={canSubmit && !(orgHierarchyEnabled && !orgId)}
+              canSubmit={canSubmit && !(orgHierarchyEnabled && !inviteMode && !orgId)}
               label={t('submit')}
               submittingLabel={t('submitting')}
             />
