@@ -144,9 +144,9 @@ describe('POST /v1/aggregator-registrations/create', () => {
     if (!first) throw new Error('no mail captured');
     expect(first.to).toEqual(['reviewer@bluedots.local']);
     expect(first.subject).toContain('TRRAIN');
-    expect(first.html).toContain('intent=approve');
-    expect(first.html).toContain('intent=reject');
+    // One review link (no per-intent URLs) → the read page carries both actions.
     expect(first.html).toContain('/admin/v1/aggregator-registrations/read/');
+    expect(first.html).not.toContain('intent=');
 
     // Consent ledger should have one row for the aggregator
     const ledgerRows = consentLedger.list();
@@ -384,7 +384,7 @@ describe('POST /v1/aggregator-registrations/create', () => {
     expect(body.status).toBe('pending');
     // A fresh admin-review email was re-sent.
     expect(mailer.outbox.length).toBe(1);
-    expect(mailer.outbox[0]?.html).toContain('intent=approve');
+    expect(mailer.outbox[0]?.html).toContain('/admin/v1/aggregator-registrations/read/');
   });
 
   it('returns 409 for a rejected (inactive) registration on resubmit (recover via prune)', async () => {
