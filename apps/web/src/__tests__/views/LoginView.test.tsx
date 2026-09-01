@@ -58,6 +58,18 @@ describe('<LoginView />', () => {
     expect(screen.getByText(/contact your organisation administrator/i)).toBeInTheDocument();
   });
 
+  it('tells the reader what continuing commits them to, and links both documents', () => {
+    // The page had no legal line at all, though signing in from it IS the act
+    // of agreeing — the sibling Signals login has always carried one.
+    renderView();
+    expect(screen.getByText(/By continuing you agree to the/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Privacy Policy' })).toHaveAttribute(
+      'href',
+      '/legal#privacy',
+    );
+    expect(screen.getByRole('link', { name: 'Terms' })).toHaveAttribute('href', '/legal#terms');
+  });
+
   it('navigates to the BFF login route with the returnTo param on sign-in click', () => {
     renderView({ returnTo: '/dashboard/onboarding' });
     screen.getByText(messages.auth.existing_title).closest('button')!.click();

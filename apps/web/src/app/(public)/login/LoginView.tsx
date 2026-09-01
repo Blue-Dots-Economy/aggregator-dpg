@@ -7,6 +7,7 @@ import { BlueDotsLogo } from '../../../components/ui/BlueDotsLogo';
 import { BrandPanel } from '../../../components/login/BrandPanel';
 import { I } from '../../../icons';
 import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
+import { LegalLinksFooter } from '../../../components/legal/LegalLinksFooter';
 
 export interface LoginViewProps {
   returnTo: string;
@@ -36,7 +37,7 @@ export function LoginView({ returnTo, error }: LoginViewProps): JSX.Element {
       <BrandPanel />
 
       <div
-        className="flex-1 min-w-0 h-screen flex items-center justify-center px-6 py-8 relative overflow-y-auto"
+        className="flex-1 min-w-0 h-screen flex flex-col px-6 py-8 relative overflow-y-auto"
         style={{ background: '#FBFCFE' }}
       >
         <div
@@ -51,66 +52,80 @@ export function LoginView({ returnTo, error }: LoginViewProps): JSX.Element {
           }}
         />
 
-        <div className="w-full max-w-[440px] relative z-10">
-          <div className="flex items-center gap-3 mb-7">
-            {cfg.brand.logo?.default ? (
-              <Image
-                src={cfg.brand.logo.default}
-                alt={brand}
-                width={150}
-                height={40}
-                priority
-                className="h-10 w-auto object-contain object-left"
-              />
-            ) : (
-              <span className="flex items-center gap-2.5">
-                <BlueDotsLogo size={40} />
-                <span className="font-display font-bold text-[20px] text-ink-900 leading-none tracking-tight">
-                  {brand}
+        {/* `flex-1` + centring here, rather than on the pane, so the card is
+            still optically centred while the footer below it is pinned to the
+            foot of the pane. */}
+        <div className="flex-1 flex items-center justify-center relative z-10">
+          <div className="w-full max-w-[440px]">
+            <div className="flex items-center gap-3 mb-7">
+              {cfg.brand.logo?.default ? (
+                <Image
+                  src={cfg.brand.logo.default}
+                  alt={brand}
+                  width={150}
+                  height={40}
+                  priority
+                  className="h-10 w-auto object-contain object-left"
+                />
+              ) : (
+                <span className="flex items-center gap-2.5">
+                  <BlueDotsLogo size={40} />
+                  <span className="font-display font-bold text-[20px] text-ink-900 leading-none tracking-tight">
+                    {brand}
+                  </span>
                 </span>
+              )}
+              <span className="inline-flex items-center rounded-full bg-(--bd-primary-50) px-3 py-1.5 text-[13px] font-semibold text-(--bd-primary-600) whitespace-nowrap">
+                Aggregator Portal
               </span>
-            )}
-            <span className="inline-flex items-center rounded-full bg-(--bd-primary-50) px-3 py-1.5 text-[13px] font-semibold text-(--bd-primary-600) whitespace-nowrap">
-              Aggregator Portal
-            </span>
+            </div>
+
+            {error ? (
+              error === 'session_expired' ? (
+                <div
+                  role="alert"
+                  className="mb-5 rounded-[10px] border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-800"
+                >
+                  {t('session_expired')}
+                </div>
+              ) : error === 'org_no_portal' ? (
+                <div
+                  role="alert"
+                  className="mb-5 rounded-[10px] border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-800"
+                >
+                  {t('org_no_portal')}
+                </div>
+              ) : (
+                <div
+                  role="alert"
+                  className="mb-5 rounded-[10px] border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-700"
+                >
+                  {t('signin_failed', { reason: humanizeError(error, t) })}
+                </div>
+              )
+            ) : null}
+
+            <div className="fade-up">
+              <Welcome onSignIn={goSignIn} brand={brand} t={t} />
+            </div>
+
+            {/* Invite-only recovery line (#701): registration is not linked from
+                here, so a mis-shared/expired invite would otherwise leave a
+                legitimate coordinator with no route. Point them at their org. */}
+            <p className="mt-6 text-[12.5px] text-ink-400">
+              Need access? Contact your organisation administrator for an invitation.
+            </p>
           </div>
-
-          {error ? (
-            error === 'session_expired' ? (
-              <div
-                role="alert"
-                className="mb-5 rounded-[10px] border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-800"
-              >
-                {t('session_expired')}
-              </div>
-            ) : error === 'org_no_portal' ? (
-              <div
-                role="alert"
-                className="mb-5 rounded-[10px] border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-800"
-              >
-                {t('org_no_portal')}
-              </div>
-            ) : (
-              <div
-                role="alert"
-                className="mb-5 rounded-[10px] border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-700"
-              >
-                {t('signin_failed', { reason: humanizeError(error, t) })}
-              </div>
-            )
-          ) : null}
-
-          <div className="fade-up">
-            <Welcome onSignIn={goSignIn} brand={brand} t={t} />
-          </div>
-
-          {/* Invite-only recovery line (#701): registration is not linked from
-              here, so a mis-shared/expired invite would otherwise leave a
-              legitimate coordinator with no route. Point them at their org. */}
-          <p className="mt-6 text-[12.5px] text-ink-400">
-            Need access? Contact your organisation administrator for an invitation.
-          </p>
         </div>
+
+        {/* At the foot of the pane, not trailing the card's own content — the
+            same place the sibling Signals portal keeps it. Signing in from here
+            is the act of agreeing, so the line belongs on the page; it just
+            isn't part of the sign-in card. */}
+        <LegalLinksFooter
+          variant="sentence"
+          className="relative z-10 mx-auto w-full max-w-[440px] pt-8"
+        />
       </div>
     </div>
   );

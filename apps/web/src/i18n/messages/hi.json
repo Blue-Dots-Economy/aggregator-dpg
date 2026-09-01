@@ -10,7 +10,8 @@
   "form": {
     "select_placeholder": "चुनें…",
     "comma_separated": "अल्पविराम से अलग किए गए मान",
-    "select_options": "विकल्प चुनें…"
+    "select_options": "विकल्प चुनें…",
+    "clear_selection": "चयन हटाएँ"
   },
   "status_pill": {
     "active": "सक्रिय",
@@ -624,13 +625,13 @@
   "legal": {
     "privacy_title": "गोपनीयता नीति",
     "terms_title": "सेवा की शर्तें",
-    "audience_participant": "प्रतिभागियों के लिए",
     "audience_aggregator": "एग्रीगेटर्स के लिए",
     "audience_org": "संगठनों के लिए",
     "version_effective": "संस्करण {version} · प्रभावी {date}",
     "version_only": "संस्करण {version}",
     "unavailable": "कानूनी दस्तावेज़ इस समय अनुपलब्ध हैं। कृपया बाद में पुनः प्रयास करें।",
     "back_to_sign_in": "साइन इन पर वापस जाएं",
-    "contents_label": "विषय-सूची"
+    "contents_label": "विषय-सूची",
+    "agree_sentence": "जारी रखकर आप <privacy>गोपनीयता नीति</privacy> और <terms>शर्तों</terms> से सहमत होते हैं।"
   }
 }
