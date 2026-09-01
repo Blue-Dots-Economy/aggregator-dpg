@@ -45,6 +45,12 @@ export interface RateLimitOptions {
   windowSeconds: number;
   /** Maximum events allowed per window. */
   max: number;
+  /**
+   * Slots this call consumes. Default 1. A bulk operation (e.g. minting N
+   * invites in one request) passes N so the window bounds total events, not
+   * request count.
+   */
+  cost?: number;
 }
 
 export interface RateLimitResult {
@@ -68,9 +74,10 @@ export async function consume(options: RateLimitOptions): Promise<RateLimitResul
     // calls — without TTL the bucket would never reset. Re-applying
     // EXPIRE on every hit is a no-op cost-wise (single Redis op) and
     // keeps the key alive while traffic is active in-window.
+    const cost = Math.max(1, Math.floor(options.cost ?? 1));
     const pipelineRes = await redis
       .multi()
-      .incr(fullKey)
+      .incrby(fullKey, cost)
       .expire(fullKey, options.windowSeconds + 1)
       .exec();
     const incrEntry = pipelineRes?.[0];

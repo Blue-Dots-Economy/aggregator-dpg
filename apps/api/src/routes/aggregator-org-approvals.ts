@@ -31,6 +31,7 @@ import { renderConfirmPage, renderResultPage } from '../views/approval-pages.js'
 import { mintApprovalTokenPair } from '../services/registration-notify.js';
 import { getMailer } from '@aggregator-dpg/mailer';
 import { renderOrgOwnerApproved } from '../services/email-templates/index.js';
+import { mintGrantToken } from '../services/grant-token.js';
 import {
   sendHtml,
   sendPage,
@@ -247,11 +248,16 @@ export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance):
       // Notify the owner their organisation is live (#699). Soft-fail: the org
       // is already active (CAS committed above), so a mail failure logs and
       // continues — same posture as the role/group mirror right above. No
-      // sign-in CTA (the owner KC user stays disabled); the coordinator-invite
-      // link (#701) is omitted until that subsystem ships.
+      // sign-in CTA (the owner KC user stays disabled); the email carries the
+      // 90-day grant link to the invite-management page (#701).
+      const grant = await mintGrantToken({
+        org: orgId,
+        ttlSec: config.GRANT_TOKEN_TTL_SECONDS,
+      });
       const ownerMail = renderOrgOwnerApproved({
         orgName: lookup.value.displayName,
         ownerEmail: lookup.value.ownerEmail,
+        inviteUrl: `${config.PUBLIC_PORTAL_URL}/register/invite?grant=${encodeURIComponent(grant.token)}`,
       });
       const ownerSend = await getMailer().send({
         to: lookup.value.ownerEmail,

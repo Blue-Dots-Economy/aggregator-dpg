@@ -449,6 +449,20 @@ export const ERR = {
     detail: 'This invitation has already been used. If you already registered, sign in instead.',
     hint: 'Invite row not pending (consumed/revoked/expired) or the pending→consumed CAS lost a race (§4.4.6).',
   },
+  GRANT_INVALID: {
+    code: 'GRANT_INVALID',
+    status: 400,
+    title: 'Invalid link',
+    detail: 'This invite-management link is not valid. Use the link from your approval email.',
+    hint: 'grant-token signature/audience/sub verify failed (aggregator-grant).',
+  },
+  GRANT_EXPIRED: {
+    code: 'GRANT_EXPIRED',
+    status: 410,
+    title: 'Link expired',
+    detail: 'This invite-management link has expired. Request a fresh link to continue.',
+    hint: 'grant-token exp elapsed (GRANT_TOKEN_TTL_SECONDS). Recovery re-mails a fresh grant to the registered owner (§6).',
+  },
 
   // ── Bulk uploads ────────────────────────────────────────────────────────
   BULK_UPLOAD_NOT_READY: {

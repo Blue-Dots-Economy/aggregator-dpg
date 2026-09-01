@@ -295,6 +295,23 @@ const ConfigSchema = z.object({
     .default(14 * 24 * 60 * 60),
 
   /**
+   * Org-owner grant-token lifetime (#701). Default 90 days — long, because the
+   * owner cannot log in and the grant is their only route back to the mint page.
+   */
+  GRANT_TOKEN_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(90 * 24 * 60 * 60),
+
+  // ─── Rate limit (per-org invite mint, #700 §7.2) ────────────────────────
+  // Bounds how many invites one org can mint per window — the mandatory
+  // mitigation that stops a leaked grant becoming a platform-branded spam
+  // amplifier. Follows the PUBLIC_SUBMIT_RATE shape.
+  INVITE_MINT_RATE_WINDOW_SECONDS: z.coerce.number().int().positive().default(3600),
+  INVITE_MINT_RATE_MAX_PER_WINDOW: z.coerce.number().int().positive().default(100),
+
+  /**
    * Extra grace beyond the approval-token TTL before a still-pending
    * registration is eligible for cleanup. Default 24h.
    */

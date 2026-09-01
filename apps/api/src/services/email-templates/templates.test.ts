@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { renderAdminReview } from './admin-review.js';
 import { renderApplicantApproved } from './applicant-approved.js';
 import { renderApplicantRejected } from './applicant-rejected.js';
+import { renderCoordinatorInvite } from './coordinator-invite.js';
 import { renderOrgOwnerApproved } from './org-owner-approved.js';
 
 describe('admin-review template', () => {
@@ -140,5 +141,33 @@ describe('org-owner-approved template', () => {
     expect(out.html).not.toContain('<script>alert');
     expect(out.html).toContain('&lt;script&gt;');
     expect(out.html).toContain('&amp; Co');
+  });
+});
+
+describe('coordinator-invite template', () => {
+  it('renders org, invite link, and expiry; personal greeting when name given', () => {
+    const out = renderCoordinatorInvite({
+      orgName: 'Joint Facilitation Centre',
+      inviteUrl: 'https://portal.example.org/register/coordinator?invite=abc',
+      expiresInText: '14 days',
+      recipientName: 'Asha',
+    });
+    expect(out.subject).toContain('Joint Facilitation Centre');
+    expect(out.html).toContain('Joint Facilitation Centre');
+    expect(out.html).toContain('https://portal.example.org/register/coordinator?invite=abc');
+    expect(out.html).toContain('14 days');
+    expect(out.html).toContain('Hi Asha,');
+    expect(out.text).toContain('https://portal.example.org/register/coordinator?invite=abc');
+  });
+
+  it('falls back to a generic greeting without a name, and escapes fields', () => {
+    const out = renderCoordinatorInvite({
+      orgName: '<b>Org</b> & Co',
+      inviteUrl: 'https://x/invite',
+      expiresInText: '14 days',
+    });
+    expect(out.html).toContain('Hello,');
+    expect(out.html).not.toContain('<b>Org</b>');
+    expect(out.html).toContain('&lt;b&gt;Org&lt;/b&gt; &amp; Co');
   });
 });

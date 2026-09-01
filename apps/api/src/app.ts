@@ -33,6 +33,7 @@ import { registerAggregatorRegistrationRoutes } from './routes/aggregator-regist
 import { registerAggregatorMaintenanceRoutes } from './routes/aggregator-maintenance.js';
 import { registerAggregatorOrgRoutes } from './routes/aggregator-orgs.js';
 import { registerAggregatorOrgApprovalRoutes } from './routes/aggregator-org-approvals.js';
+import { registerInviteRoutes } from './routes/invites.js';
 import { registerAggregatorApprovalRoutes } from './routes/aggregator-approvals.js';
 import { registerAggregatorProfileRoutes } from './routes/aggregator-profile.js';
 import { registerBulkUploadsRoutes } from './routes/bulk-uploads.js';
@@ -220,6 +221,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await registerAggregatorMaintenanceRoutes(app);
   await registerAggregatorOrgRoutes(app);
   await registerAggregatorOrgApprovalRoutes(app);
+  await registerInviteRoutes(app);
   await registerAggregatorApprovalRoutes(app);
   await registerAggregatorProfileRoutes(app);
   await registerBulkUploadsRoutes(app);
