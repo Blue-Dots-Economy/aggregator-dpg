@@ -31,7 +31,7 @@
     "@aggregator-dpg/db-schema": "workspace:*",
     "@aggregator-dpg/shared-primitives": "workspace:*",
     "drizzle-orm": "^0.45.2",
-    "pino": "^9.5.0",
+    "pino": "^10.3.1",
     "zod": "^3.24.0"
   },
   "devDependencies": {
