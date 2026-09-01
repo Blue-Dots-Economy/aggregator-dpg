@@ -14,7 +14,7 @@ import { config } from '../config.js';
  * Computes the cooling-window verdict for a rejected registration row.
  *
  * @param rejectedAt - Write-once reject timestamp; falls back to `updatedAt`
- *   for rows rejected before migration 0022 stamped the column.
+ *   for rows rejected before migration 0021 stamped the column.
  * @param updatedAt - The row's last-updated timestamp (fallback reference).
  * @returns ISO retry-after timestamp while still cooling, or `null` once the
  *   window has elapsed and re-registration is permitted.

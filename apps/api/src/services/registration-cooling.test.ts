@@ -18,7 +18,7 @@ describe('coolingRetryAfter (#726)', () => {
     expect(coolingRetryAfter(rejectedAt, rejectedAt)).toBeNull();
   });
 
-  it('falls back to updatedAt when rejectedAt is null (pre-0022 rows)', () => {
+  it('falls back to updatedAt when rejectedAt is null (pre-0021 rows)', () => {
     const updatedAt = new Date(Date.now() - 60 * 1000);
     const result = coolingRetryAfter(null, updatedAt);
     expect(result).not.toBeNull();

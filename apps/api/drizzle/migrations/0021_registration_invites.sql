@@ -44,3 +44,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS "registration_invites_pending_unique"
 -- for provenance when they register with a different address (they may). May
 -- differ from contact_email; surfaced to the approving owner. Additive/nullable.
 ALTER TABLE "aggregators" ADD COLUMN IF NOT EXISTS "invite_email" text;
+
+-- rejected_at cooling window (#726): write-once timestamp of rejection on both
+-- registration tables. Set exactly once when a pending registration is rejected
+-- (status → inactive); never mutated after. Powers the re-registration cooling
+-- window without depending on the mutable updated_at. Additive + nullable.
+ALTER TABLE "aggregators" ADD COLUMN IF NOT EXISTS "rejected_at" timestamp with time zone;
+ALTER TABLE "aggregator_orgs" ADD COLUMN IF NOT EXISTS "rejected_at" timestamp with time zone;
