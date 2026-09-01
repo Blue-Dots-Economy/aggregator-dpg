@@ -152,6 +152,21 @@ describe('invite mint routes', () => {
     expect((res.json() as { error: { code: string } }).error.code).toBe('TARGET_ORG_INACTIVE');
   });
 
+  it('buckets store_error when the invites store fails to resolve a row', async () => {
+    // Force the store to fail so resolveInviteJti returns null → store_error.
+    class FailingInvites extends RegistrationInvitesStoreFake {
+      override async findPendingByOrgAndEmail() {
+        return { ok: false as const, error: { code: 'DB_UNAVAILABLE' as const, message: 'x' } };
+      }
+    }
+    _setRegistrationInvitesStore(new FailingInvites());
+    const grant = await grantFor();
+    const res = await mint({ grant, recipients: [{ email: 'a@x.org' }] });
+    const body = res.json() as { sent: number; invalid: Array<{ reason: string }> };
+    expect(body.sent).toBe(0);
+    expect(body.invalid[0]?.reason).toBe('store_error');
+  });
+
   it('returns 429 when the per-org rate limit trips', async () => {
     _setInviteMintRateChecker(async () => ({ allowed: false, retryAfterSeconds: 30 }));
     const grant = await grantFor();

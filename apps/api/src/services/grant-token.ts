@@ -14,25 +14,20 @@
  * registered owner address (never a request-supplied one).
  */
 
-import { SignJWT, jwtVerify, decodeJwt, errors as joseErrors } from 'jose';
+import { SignJWT, decodeJwt, errors as joseErrors } from 'jose';
+import {
+  TOKEN_ALG,
+  TOKEN_ISSUER,
+  getTokenKey,
+  isJwtLike,
+  verifyJwt,
+  mapJoseError,
+  _resetTokenKeyCache,
+} from './token-common.js';
 
-const ALG = 'HS256';
-const ISSUER = 'aggregator-api';
 const AUDIENCE = 'aggregator-grant';
 /** 90 days — overridable via `ttlSec` (`GRANT_TOKEN_TTL_SECONDS`). */
 const DEFAULT_TTL_SEC = 90 * 24 * 60 * 60;
-
-let cachedKey: Uint8Array | null = null;
-
-function getKey(): Uint8Array {
-  if (cachedKey) return cachedKey;
-  const raw = process.env.APPROVAL_TOKEN_SECRET;
-  if (!raw || raw.length < 32) {
-    throw new Error('APPROVAL_TOKEN_SECRET must be set and at least 32 chars');
-  }
-  cachedKey = new TextEncoder().encode(raw);
-  return cachedKey;
-}
 
 export interface MintGrantInput {
   /** `parent_org_id` the grant admits its holder to invite coordinators for. */
@@ -57,13 +52,13 @@ export async function mintGrantToken(input: MintGrantInput): Promise<MintGrantRe
   const ttl = input.ttlSec ?? DEFAULT_TTL_SEC;
   const expiresAt = new Date(Date.now() + ttl * 1000);
   const token = await new SignJWT({})
-    .setProtectedHeader({ alg: ALG })
+    .setProtectedHeader({ alg: TOKEN_ALG })
     .setSubject(input.org)
-    .setIssuer(ISSUER)
+    .setIssuer(TOKEN_ISSUER)
     .setAudience(AUDIENCE)
     .setIssuedAt()
     .setExpirationTime(Math.floor(expiresAt.getTime() / 1000))
-    .sign(getKey());
+    .sign(getTokenKey());
   return { token, expiresAt };
 }
 
@@ -98,15 +93,11 @@ export async function verifyGrantToken(
   token: string,
   opts: { allowExpired?: boolean } = {},
 ): Promise<VerifyGrantResult> {
-  if (!token || typeof token !== 'string' || !token.includes('.')) {
+  if (!isJwtLike(token)) {
     return { ok: false, error: { code: 'MALFORMED', message: 'token is not a JWT' } };
   }
   try {
-    const { payload } = await jwtVerify(token, getKey(), {
-      issuer: ISSUER,
-      audience: AUDIENCE,
-      algorithms: [ALG],
-    });
+    const payload = await verifyJwt(token, AUDIENCE);
     if (!payload.sub) {
       return { ok: false, error: { code: 'INVALID', message: 'missing sub claim' } };
     }
@@ -127,8 +118,7 @@ export async function verifyGrantToken(
  * @returns The verify result.
  */
 function mapVerifyError(err: unknown, token: string, allowExpired: boolean): VerifyGrantResult {
-  if (err instanceof joseErrors.JWTExpired) {
-    if (!allowExpired) return { ok: false, error: { code: 'EXPIRED', message: 'grant expired' } };
+  if (err instanceof joseErrors.JWTExpired && allowExpired) {
     // jose verifies the signature before `exp`, so a JWTExpired throw proves the
     // signature was genuine — decoding the payload here is safe.
     const payload = decodeJwt(token);
@@ -137,19 +127,11 @@ function mapVerifyError(err: unknown, token: string, allowExpired: boolean): Ver
     }
     return { ok: true, org: payload.sub, expired: true };
   }
-  if (err instanceof joseErrors.JWTInvalid || err instanceof joseErrors.JWSInvalid) {
-    return { ok: false, error: { code: 'MALFORMED', message: err.message } };
-  }
-  if (err instanceof joseErrors.JWSSignatureVerificationFailed) {
-    return { ok: false, error: { code: 'INVALID', message: 'signature failed' } };
-  }
-  return {
-    ok: false,
-    error: { code: 'INVALID', message: err instanceof Error ? err.message : 'verify failed' },
-  };
+  // Expired (recovery not allowed) → EXPIRED; everything else via the shared map.
+  return { ok: false, error: mapJoseError(err) };
 }
 
 /** Test helper — clears the cached key so env changes take effect. */
 export function _resetGrantTokenKey(): void {
-  cachedKey = null;
+  _resetTokenKeyCache();
 }

@@ -180,4 +180,88 @@ describe('PostgresRegistrationInvitesStore error mapping', () => {
     if (res.ok) return;
     expect(res.error.code).toBe('DB_UNAVAILABLE');
   });
+
+  // A raw `registration_invites` row as Drizzle's inferSelect returns it.
+  function rawRow(overrides: Record<string, unknown> = {}) {
+    return {
+      jti: 'jti-1',
+      role: 'coordinator',
+      parentOrgId: ORG,
+      email: 'a@x.org',
+      status: 'pending',
+      expiresAt: new Date('2027-01-01'),
+      createdBy: 'owner',
+      createdAt: new Date('2026-08-01'),
+      consumedAt: null,
+      ...overrides,
+    };
+  }
+
+  function withDb(resolve: () => unknown): PostgresRegistrationInvitesStore {
+    _setDbClients(null, makeFakeDb(resolve) as never);
+    return new PostgresRegistrationInvitesStore();
+  }
+
+  it('create returns the mapped row on success', async () => {
+    const res = await withDb(() => [rawRow({ jti: 'j-new' })]).create({
+      parentOrgId: ORG,
+      email: 'a@x.org',
+      expiresAt: new Date('2027-01-01'),
+      createdBy: 'owner',
+    });
+    expect(res.ok && res.value.jti).toBe('j-new');
+  });
+
+  it('create returns DB_UNAVAILABLE when no row comes back', async () => {
+    const res = await withDb(() => []).create({
+      parentOrgId: ORG,
+      email: 'a@x.org',
+      expiresAt: new Date('2027-01-01'),
+      createdBy: 'owner',
+    });
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.error.code).toBe('DB_UNAVAILABLE');
+  });
+
+  it('findByJti maps a found row / null / DB error', async () => {
+    expect((await withDb(() => [rawRow({ jti: 'j-9' })]).findByJti('j-9')).ok).toBe(true);
+    const found = await withDb(() => [rawRow({ jti: 'j-9' })]).findByJti('j-9');
+    expect(found.ok && found.value?.jti).toBe('j-9');
+    const missing = await withDb(() => []).findByJti('nope');
+    expect(missing.ok && missing.value).toBeNull();
+    const err = await withDb(() => {
+      throw new Error('boom');
+    }).findByJti('x');
+    expect(err.ok).toBe(false);
+  });
+
+  it('findPendingByOrgAndEmail maps a found row', async () => {
+    const res = await withDb(() => [rawRow()]).findPendingByOrgAndEmail(ORG, 'a@x.org');
+    expect(res.ok && res.value?.email).toBe('a@x.org');
+  });
+
+  it('refresh returns the row on success and NOT_FOUND when no row matched', async () => {
+    const ok = await withDb(() => [rawRow({ createdBy: 'owner2' })]).refresh('jti-1', {
+      expiresAt: new Date('2028-01-01'),
+      createdBy: 'owner2',
+    });
+    expect(ok.ok && ok.value.createdBy).toBe('owner2');
+    const nf = await withDb(() => []).refresh('jti-1', {
+      expiresAt: new Date('2028-01-01'),
+      createdBy: 'owner2',
+    });
+    expect(nf.ok).toBe(false);
+    if (nf.ok) return;
+    expect(nf.error.code).toBe('NOT_FOUND');
+  });
+
+  it('consume/revoke return the row on a winning CAS and null otherwise', async () => {
+    const consumed = await withDb(() => [rawRow({ status: 'consumed' })]).consume('jti-1');
+    expect(consumed.ok && consumed.value?.status).toBe('consumed');
+    const lost = await withDb(() => []).consume('jti-1');
+    expect(lost.ok && lost.value).toBeNull();
+    const revoked = await withDb(() => [rawRow({ status: 'revoked' })]).revoke('jti-1');
+    expect(revoked.ok && revoked.value?.status).toBe('revoked');
+  });
 });

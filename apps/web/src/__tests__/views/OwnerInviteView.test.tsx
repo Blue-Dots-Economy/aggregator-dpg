@@ -90,4 +90,45 @@ describe('<OwnerInviteView />', () => {
     fireEvent.click(screen.getByRole('button', { name: /send/i }));
     await waitFor(() => expect(screen.getByText(/not valid/i)).toBeInTheDocument());
   });
+
+  it('shows a rate-limit message on 429', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(429, {})));
+    renderView();
+    fireEvent.change(screen.getByPlaceholderText(/asha@org\.in/i), {
+      target: { value: 'a@x.org' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /send/i }));
+    await waitFor(() => expect(screen.getByText(/too many invites/i)).toBeInTheDocument());
+  });
+
+  it('shows a network-error message when fetch rejects', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+    renderView();
+    fireEvent.change(screen.getByPlaceholderText(/asha@org\.in/i), {
+      target: { value: 'a@x.org' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /send/i }));
+    await waitFor(() => expect(screen.getByText(/network error/i)).toBeInTheDocument());
+  });
+
+  it('lists invalid rows in the result summary', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        jsonResponse(200, {
+          recovered: false,
+          sent: 1,
+          resent: 0,
+          invalid: [{ email: 'bad', reason: 'invalid_email' }],
+        }),
+      ),
+    );
+    renderView();
+    fireEvent.change(screen.getByPlaceholderText(/asha@org\.in/i), {
+      target: { value: 'a@x.org' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /send/i }));
+    await waitFor(() => expect(screen.getByText(/1 invalid/)).toBeInTheDocument());
+    expect(screen.getByText(/bad — invalid email/i)).toBeInTheDocument();
+  });
 });
