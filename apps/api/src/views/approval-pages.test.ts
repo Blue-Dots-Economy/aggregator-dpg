@@ -11,7 +11,6 @@ describe('setApprovalBrand', () => {
     });
     const html = renderConfirmPage({
       aggregatorId: 'agg-1',
-      intent: 'approve',
       token: 'tok',
       applicantEmail: 'a@b.com',
       association: 'Acme',
@@ -20,6 +19,9 @@ describe('setApprovalBrand', () => {
       expiresInText: '1 hour',
     });
     expect(html).toContain('Test Network');
+    // One link, both actions: the review page carries Approve + Reject.
+    expect(html).toContain('name="decision" value="approve"');
+    expect(html).toContain('name="decision" value="reject"');
     // Restore the default runtime brand so later tests in the suite (which
     // rely on DEFAULT_BRAND when no override is passed) are unaffected.
     setApprovalBrand({

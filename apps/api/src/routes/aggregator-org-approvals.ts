@@ -28,7 +28,7 @@ import type { AggregatorOrg } from '../services/aggregator-org-store/index.js';
 import { getIdpAdmin } from '../services/idp-admin/index.js';
 import { formatApprovalTtl } from '../services/approval-token.js';
 import { renderConfirmPage, renderResultPage } from '../views/approval-pages.js';
-import { mintApprovalTokenPair } from '../services/registration-notify.js';
+import { mintReviewToken } from '../services/registration-notify.js';
 import { getMailer } from '@aggregator-dpg/mailer';
 import { renderOrgOwnerApproved } from '../services/email-templates/index.js';
 import { mintGrantToken } from '../services/grant-token.js';
@@ -88,7 +88,7 @@ export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance):
       reply: FastifyReply,
     ) => {
       const orgId = req.params.id;
-      const { token, intent } = req.query;
+      const { token } = req.query;
 
       if (!token) return sendPage(reply, missingTokenPage());
 
@@ -128,17 +128,16 @@ export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance):
       const prior = orgDecidedView(lookup.value.status);
       if (prior) return sendHtml(reply, 200, renderResultPage(prior));
 
-      const effectiveIntent = intent === 'reject' ? 'reject' : 'approve';
       return sendHtml(
         reply,
         200,
         renderConfirmPage({
           aggregatorId: orgId,
-          intent: effectiveIntent,
           token,
           applicantEmail: lookup.value.ownerEmail,
           association: lookup.value.displayName,
           aggregatorType: 'organisation',
+          entityLabel: 'organisation',
           postUrl: `${config.PUBLIC_API_URL}/admin/v1/orgs/decision/${orgId}`,
           expiresInText: formatApprovalTtl(config.APPROVAL_TOKEN_TTL_SECONDS),
         }),
@@ -317,20 +316,19 @@ export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance):
       const prior = orgDecidedView(lookup.value.status);
       if (prior) return sendHtml(reply, 200, renderResultPage(prior));
 
-      // Mint a fresh token pair so the approve/reject POST validates, then land
-      // the admin on the confirm page directly.
-      const { approveToken, rejectToken } = await mintApprovalTokenPair(orgId);
-      const effectiveIntent = verified.intent === 'reject' ? 'reject' : 'approve';
+      // Mint a fresh review token, then land the admin on the review page
+      // directly (approve/reject chosen there).
+      const freshToken = await mintReviewToken(orgId);
       return sendHtml(
         reply,
         200,
         renderConfirmPage({
           aggregatorId: orgId,
-          intent: effectiveIntent,
-          token: effectiveIntent === 'reject' ? rejectToken : approveToken,
+          token: freshToken,
           applicantEmail: lookup.value.ownerEmail,
           association: lookup.value.displayName,
           aggregatorType: 'organisation',
+          entityLabel: 'organisation',
           postUrl: `${config.PUBLIC_API_URL}/admin/v1/orgs/decision/${orgId}`,
           expiresInText: formatApprovalTtl(config.APPROVAL_TOKEN_TTL_SECONDS),
         }),

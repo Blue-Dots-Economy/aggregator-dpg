@@ -42,7 +42,7 @@ import {
   renderApplicantRejected,
 } from '../services/email-templates/index.js';
 import { renderConfirmPage, renderResultPage } from '../views/approval-pages.js';
-import { mintApprovalTokenPair } from '../services/registration-notify.js';
+import { mintReviewToken } from '../services/registration-notify.js';
 import { sendHtml, sendPage, missingTokenPage, verifyTokenForId } from './approval-shared.js';
 import type { Aggregator } from '../services/aggregator-store/index.js';
 import { KC_ATTR } from '../services/idp-admin/index.js';
@@ -84,7 +84,7 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
       reply: FastifyReply,
     ) => {
       const aggregatorId = req.params.id;
-      const { token, intent } = req.query;
+      const { token } = req.query;
 
       if (!token) return sendPage(reply, missingTokenPage());
 
@@ -115,7 +115,6 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
         }
         return sendPage(reply, verified.page);
       }
-      const effectiveIntent = isIntent(intent) ? intent : verified.intent;
 
       const lookup = await loadAggregatorAndUser(aggregatorId);
       if (!lookup.ok) return sendHtml(reply, lookup.status, lookup.html);
@@ -130,7 +129,6 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
         200,
         renderConfirmPage({
           aggregatorId,
-          intent: effectiveIntent,
           token,
           applicantEmail: lookup.kcUser.email,
           ...(lookup.aggregator.inviteEmail ? { invitedEmail: lookup.aggregator.inviteEmail } : {}),
@@ -567,19 +565,18 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
         return sendHtml(reply, 200, renderResultPage(alreadyDecidedView(prior)));
       }
 
-      // Mint a fresh token pair, preserving the original org binding (so the
+      // Mint a fresh review token, preserving the original org binding (so the
       // decision handler's parent_org_id check still passes), and land the
-      // reviewer on the confirm page directly.
-      const { approveToken, rejectToken } = await mintApprovalTokenPair(aggregatorId, verified.org);
-      const effectiveIntent = verified.intent === 'reject' ? 'reject' : 'approve';
+      // reviewer on the review page directly.
+      const freshToken = await mintReviewToken(aggregatorId, verified.org);
       return sendHtml(
         reply,
         200,
         renderConfirmPage({
           aggregatorId,
-          intent: effectiveIntent,
-          token: effectiveIntent === 'reject' ? rejectToken : approveToken,
+          token: freshToken,
           applicantEmail: lookup.kcUser.email,
+          ...(lookup.aggregator.inviteEmail ? { invitedEmail: lookup.aggregator.inviteEmail } : {}),
           association: lookup.aggregator.name,
           aggregatorType: lookup.aggregator.type ?? lookup.aggregator.actorType,
           postUrl: `${config.PUBLIC_API_URL}/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
@@ -689,10 +686,6 @@ async function loadAggregatorAndUser(aggregatorId: string): Promise<LookupOk | L
     };
   }
   return { ok: true, aggregator: stored.value, kcUser: kc.value };
-}
-
-function isIntent(v: unknown): v is 'approve' | 'reject' {
-  return v === 'approve' || v === 'reject';
 }
 
 /**

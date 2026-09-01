@@ -16,8 +16,7 @@ describe('admin-review template', () => {
       association: 'TRRAIN',
       state: 'Karnataka',
       about: 'Skilling NGO based in Hubli',
-      approveUrl: 'http://localhost:4000/admin/v1/.../approve?token=A',
-      rejectUrl: 'http://localhost:4000/admin/v1/.../reject?token=R',
+      reviewUrl: 'http://localhost:4000/admin/v1/reg-1/read?token=REVIEW',
       submittedAt: new Date('2026-04-30T10:00:00Z'),
       expiresInText: '7 days',
     });
@@ -28,8 +27,8 @@ describe('admin-review template', () => {
     expect(out.html).toContain('Asha Rao');
     expect(out.html).toContain('asha@trrain.org');
     expect(out.html).toContain('Karnataka');
-    expect(out.html).toContain('approve?token=A');
-    expect(out.html).toContain('reject?token=R');
+    expect(out.html).toContain('token=REVIEW');
+    expect(out.html).toContain('Review registration');
     expect(out.html).toContain('expires in 7 days');
     expect(out.text).toContain('asha@trrain.org');
   });
@@ -42,8 +41,7 @@ describe('admin-review template', () => {
       applicantPhone: '+919876543210',
       association: 'X & Y',
       entityLabel: 'organisation',
-      approveUrl: 'http://x',
-      rejectUrl: 'http://y',
+      reviewUrl: 'http://x/review',
       submittedAt: new Date(),
       expiresInText: '7 days',
     });
@@ -62,8 +60,7 @@ describe('admin-review template', () => {
       applicantEmail: 'my-own@x.org',
       applicantPhone: '+919876543210',
       association: 'JFC',
-      approveUrl: 'http://x',
-      rejectUrl: 'http://y',
+      reviewUrl: 'http://x/review',
       submittedAt: new Date('2026-04-30T10:00:00Z'),
       expiresInText: '7 days',
     };

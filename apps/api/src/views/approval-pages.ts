@@ -275,11 +275,12 @@ function shell(opts: ShellOptions, body: string): string {
 
 export interface ConfirmPageVars {
   aggregatorId: string;
-  intent: 'approve' | 'reject';
   token: string;
   applicantEmail: string;
   association: string;
   aggregatorType: string;
+  /** Noun for the heading/title, e.g. `organisation`. Defaults to `aggregator`. */
+  entityLabel?: string;
   postUrl: string;
   /**
    * The email the coordinator was invited at (#701). When set and different
@@ -298,28 +299,22 @@ export interface ConfirmPageVars {
 
 export function renderConfirmPage(v: ConfirmPageVars): string {
   const brand = pickBrand(v.brand);
-  const isApprove = v.intent === 'approve';
-  const verb = isApprove ? 'Approve' : 'Reject';
-  const accentClass = isApprove ? 'accent-primary' : 'accent-danger';
-  const submitClass = isApprove ? 'btn-primary' : 'btn-danger';
-  const pillClass = isApprove ? 'pill-info' : 'pill-error';
-  const pillText = isApprove ? 'Pending approval' : 'Pending rejection';
-  const description = isApprove
-    ? 'Confirm to enable this aggregator account. The applicant receives a welcome email with sign-in instructions.'
-    : 'Confirm to decline this application. The applicant receives a courteous notification with the reason you provide below.';
-
-  const reasonField = !isApprove
-    ? `<label for="reason-input">Reason (sent to the applicant)</label>
-       <textarea id="reason-input" name="reason" placeholder="A brief explanation helps the applicant understand the decision."></textarea>`
-    : '';
+  const entity = v.entityLabel ?? 'aggregator';
+  const invitedRow =
+    v.invitedEmail && v.invitedEmail !== v.applicantEmail
+      ? `<div class="meta-row">
+            <div class="meta-label" style="color:#b45309;">Invited email</div>
+            <div class="meta-value" style="color:#b45309;">${escape(v.invitedEmail)} — registering with a different email</div>
+          </div>`
+      : '';
 
   const body = `
     <div class="card">
-      <div class="accent-bar ${accentClass}"></div>
+      <div class="accent-bar accent-primary"></div>
       <div class="card-header">
-        <span class="pill ${pillClass}">${escape(pillText)}</span>
-        <h1 style="margin-top:14px;">${escape(verb)} aggregator application</h1>
-        <p class="lead">${escape(description)}</p>
+        <span class="pill pill-info">Pending review</span>
+        <h1 style="margin-top:14px;text-transform:capitalize;">Review ${escape(entity)} application</h1>
+        <p class="lead">Approve to enable this account (the applicant gets a welcome email), or reject with a brief reason (sent to the applicant).</p>
       </div>
       <div class="card-body">
         <div class="meta">
@@ -327,14 +322,7 @@ export function renderConfirmPage(v: ConfirmPageVars): string {
             <div class="meta-label">Email</div>
             <div class="meta-value">${escape(v.applicantEmail)}</div>
           </div>
-          ${
-            v.invitedEmail && v.invitedEmail !== v.applicantEmail
-              ? `<div class="meta-row">
-            <div class="meta-label" style="color:#b45309;">Invited email</div>
-            <div class="meta-value" style="color:#b45309;">${escape(v.invitedEmail)} — registering with a different email</div>
-          </div>`
-              : ''
-          }
+          ${invitedRow}
           <div class="meta-row">
             <div class="meta-label">Name</div>
             <div class="meta-value">${escape(v.association)}</div>
@@ -348,39 +336,29 @@ export function renderConfirmPage(v: ConfirmPageVars): string {
             <div class="meta-value mono">${escape(v.aggregatorId)}</div>
           </div>
         </div>
-        <form method="POST" action="${escape(v.postUrl)}">
+
+        <!-- Approve: single button, no reason needed. -->
+        <form method="POST" action="${escape(v.postUrl)}" style="margin:0 0 20px;">
           <input type="hidden" name="token" value="${escape(v.token)}" />
-          <input type="hidden" name="decision" value="${escape(v.intent)}" />
-          ${reasonField}
+          <input type="hidden" name="decision" value="approve" />
+          <button type="submit" class="btn-primary">Approve</button>
         </form>
-      </div>
-      <div class="card-footer">
-        <form method="POST" action="${escape(v.postUrl)}" style="margin:0;display:inline;">
+
+        <!-- Reject: its own form carries the reason textarea (no JS mirror). -->
+        <form method="POST" action="${escape(v.postUrl)}" style="margin:0;">
           <input type="hidden" name="token" value="${escape(v.token)}" />
-          <input type="hidden" name="decision" value="${escape(v.intent)}" />
-          ${!isApprove ? `<input type="hidden" name="reason" id="reason-mirror" />` : ''}
-          <button type="submit" class="${submitClass}">${escape(verb)}</button>
+          <input type="hidden" name="decision" value="reject" />
+          <label for="reason-input">Reason (only if rejecting — sent to the applicant)</label>
+          <textarea id="reason-input" name="reason" placeholder="A brief explanation helps the applicant understand the decision."></textarea>
+          <button type="submit" class="btn-danger" style="margin-top:10px;">Reject</button>
         </form>
       </div>
     </div>
     <p class="footer-note">
-      This decision is final once submitted. Approval links are single-use and expire in ${escape(v.expiresInText)}.
+      This decision is final once submitted. The review link is single-use and expires in ${escape(v.expiresInText)}.
     </p>
-    ${
-      !isApprove
-        ? `<script>
-             // Mirror the textarea value into the actual submitting form so the
-             // visible textarea inside the card body reaches the server.
-             document.querySelector('form[action$="decision"]').addEventListener('submit', function (e) {
-               var ta = document.getElementById('reason-input');
-               var mirror = document.getElementById('reason-mirror');
-               if (ta && mirror) mirror.value = ta.value;
-             });
-           </script>`
-        : ''
-    }
   `;
-  return shell({ title: `${verb} aggregator`, brand }, body);
+  return shell({ title: `Review ${entity}`, brand }, body);
 }
 
 export interface ResultPageVars {

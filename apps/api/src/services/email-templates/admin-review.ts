@@ -25,9 +25,9 @@ export interface AdminReviewVars {
    * different address than invited — so the approver can sanity-check it.
    */
   invitedEmail?: string | undefined;
-  /** Pre-built deep links — already include the signed token + intent. */
-  approveUrl: string;
-  rejectUrl: string;
+  /** Pre-built review deep link — includes the signed token. Approve/reject is
+   * chosen on the page it opens (one link, both actions). */
+  reviewUrl: string;
   submittedAt: Date;
   /**
    * Human-readable link lifetime (e.g. "7 days"), derived from the
@@ -86,15 +86,13 @@ export function renderAdminReview(v: AdminReviewVars): {
 </table>
 ${aboutBlock}
 
-<div style="margin-top:28px;display:flex;gap:10px;">
-  ${ctaButton('Review and approve', v.approveUrl, 'primary')}
-  &nbsp;&nbsp;
-  ${ctaButton('Review and reject', v.rejectUrl, 'danger')}
+<div style="margin-top:28px;">
+  ${ctaButton('Review registration', v.reviewUrl, 'primary')}
 </div>
 
 <p style="margin:22px 0 0;font-size:12px;color:#7c84a6;line-height:1.5;">
-  Each link opens a confirmation page. Decisions are final once confirmed.
-  The link is single-use and expires in ${escapeHtml(v.expiresInText)}.
+  The link opens a review page where you can approve or reject. The decision is
+  final once submitted. The link is single-use and expires in ${escapeHtml(v.expiresInText)}.
 </p>
 `;
 
@@ -108,10 +106,9 @@ ${emailMismatch ? `Invited email: ${v.invitedEmail} (registering with a differen
 ${v.state ? `State:       ${v.state}\n` : ''}Submitted:   ${submitted}
 Reference:   ${v.registrationId}
 ${v.about ? `\nAbout:\n${v.about}\n` : ''}
-Approve: ${v.approveUrl}
-Reject:  ${v.rejectUrl}
+Review (approve or reject): ${v.reviewUrl}
 
-Each link opens a confirmation page. Single-use, expires in ${v.expiresInText}.
+The link opens a review page where you approve or reject. Single-use, expires in ${v.expiresInText}.
 `;
 
   return { subject, html: renderShell({ preheader: subject, bodyHtml: body }), text };

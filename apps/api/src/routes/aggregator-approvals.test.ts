@@ -107,29 +107,20 @@ describe('admin approval routes', () => {
     _setAggregatorOrgStore(null);
   });
 
-  it('GET /read/:id renders the confirmation page when no decision yet', async () => {
+  it('GET /read/:id renders the single review page with both actions', async () => {
     const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
     const res = await app.inject({
       method: 'GET',
-      url: `/admin/v1/aggregator-registrations/read/${aggregatorId}?token=${encodeURIComponent(token)}&intent=approve`,
+      url: `/admin/v1/aggregator-registrations/read/${aggregatorId}?token=${encodeURIComponent(token)}`,
     });
     expect(res.statusCode).toBe(200);
     expect(res.headers['content-type']).toContain('text/html');
-    expect(res.body).toContain('Approve aggregator application');
+    // One link → a review page carrying BOTH approve and reject.
+    expect(res.body).toContain('Review aggregator application');
+    expect(res.body).toContain('name="decision" value="approve"');
+    expect(res.body).toContain('name="decision" value="reject"');
     expect(res.body).toContain('asha@trrain.org');
     expect(res.body).toContain(`/admin/v1/aggregator-registrations/decision/${aggregatorId}`);
-  });
-
-  it('GET /read/:id renders the reject confirm page (reason field + mirror script)', async () => {
-    const { token } = await mintApprovalToken({ aggregatorId, intent: 'reject' });
-    const res = await app.inject({
-      method: 'GET',
-      url: `/admin/v1/aggregator-registrations/read/${aggregatorId}?token=${encodeURIComponent(token)}&intent=reject`,
-    });
-    expect(res.statusCode).toBe(200);
-    expect(res.body).toContain('Reject aggregator application');
-    expect(res.body).toContain('Reason (sent to the applicant)');
-    expect(res.body).toContain('reason-mirror');
   });
 
   it('GET /read/:id shows already-approved when aggregator.status=active', async () => {
