@@ -202,6 +202,37 @@ describe('<RjsfThemedForm /> widgets', () => {
     expect(screen.getByRole('combobox')).toHaveTextContent('Select…');
   });
 
+  it('SelectWidget: round-trips a numeric enum as a number, not a string', async () => {
+    // Radix addresses items by string. Keying them on `String(opt.value)` and
+    // handing that back would store "2" for a `type: number` field, which then
+    // fails schema validation. Options are addressed by INDEX instead — the
+    // same helpers the sibling Signals widget uses, so the two portals
+    // round-trip a given schema identically. No non-string enum exists in this
+    // repo's config trees today; this pins the behaviour before one does.
+    const schema: RJSFSchema = {
+      type: 'object',
+      properties: { grade: { type: 'number', enum: [1, 2, 3], title: 'Grade' } },
+    };
+    const onDataChange = vi.fn();
+    renderControlled({ schema, onDataChange });
+
+    fireEvent.click(screen.getByRole('combobox'));
+    fireEvent.click(await screen.findByRole('option', { name: '2' }));
+
+    const last = onDataChange.mock.calls[onDataChange.mock.calls.length - 1]![0];
+    expect(last.grade).toBe(2);
+    expect(last.grade).not.toBe('2');
+  });
+
+  it('SelectWidget: shows the selected label for a value that is not a string', () => {
+    const schema: RJSFSchema = {
+      type: 'object',
+      properties: { grade: { type: 'number', enum: [1, 2, 3], title: 'Grade' } },
+    };
+    renderThemed({ schema, formData: { grade: 3 }, onChange: vi.fn() });
+    expect(screen.getByRole('combobox')).toHaveTextContent('3');
+  });
+
   it('SelectWidget: an empty select shows the "Select…" placeholder', () => {
     // RJSF passes `placeholder: ''` rather than undefined, so the widget's
     // fallback has to be a truthiness check — with `??` every empty select

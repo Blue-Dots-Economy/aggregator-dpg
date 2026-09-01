@@ -12,13 +12,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const { loadLegalGroups } = vi.hoisted(() => ({ loadLegalGroups: vi.fn() }));
 vi.mock('@/components/legal/load-legal-groups.server', () => ({ loadLegalGroups }));
 
-const { permanentRedirect } = vi.hoisted(() => ({
-  permanentRedirect: vi.fn((url: string) => {
+const { redirect } = vi.hoisted(() => ({
+  redirect: vi.fn((url: string) => {
     // Mirrors Next's own behaviour: it throws, so nothing after it runs.
     throw new Error(`NEXT_REDIRECT:${url}`);
   }),
 }));
-vi.mock('next/navigation', () => ({ permanentRedirect }));
+vi.mock('next/navigation', () => ({ redirect }));
 
 import LegalPage from '@/app/legal/page';
 import PrivacyRedirect from '@/app/privacy/page';
@@ -43,6 +43,8 @@ describe('legal routes', () => {
     ['/terms', TermsRedirect, '/legal#terms'],
   ])('%s redirects to %s', (_from, Component, to) => {
     expect(() => Component()).toThrow(`NEXT_REDIRECT:${to}`);
-    expect(permanentRedirect).toHaveBeenCalledWith(to);
+    // A 307, not a 308: a permanent redirect is cached indefinitely, which
+    // would make the `/legal` naming call irreversible in practice.
+    expect(redirect).toHaveBeenCalledWith(to);
   });
 });

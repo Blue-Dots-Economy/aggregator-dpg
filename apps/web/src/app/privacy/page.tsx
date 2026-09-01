@@ -1,4 +1,4 @@
-import { permanentRedirect } from 'next/navigation';
+import { redirect } from 'next/navigation';
 
 /**
  * Both consent documents live on `/legal` now. This path is one of the two
@@ -6,11 +6,15 @@ import { permanentRedirect } from 'next/navigation';
  * keeps working — as a redirect that carries the reader to the privacy section
  * of that page.
  *
- * `permanentRedirect` (308) rather than a temporary one: the move is not going
- * to be undone, so clients and search engines may as well remember it instead
- * of re-asking on every visit. The fragment survives — a browser keeps the one
- * it is given in `Location`.
+ * A 307, deliberately not `permanentRedirect`'s 308: a 308 is cached by
+ * browsers indefinitely and never revalidated, so restoring this route later
+ * would not restore the behaviour of anyone who had already hit it once. The
+ * `/legal` naming stays a cheap call to reverse only while this redirect is
+ * temporary — promote it to 308 once nobody wants these paths back.
+ *
+ * The fragment survives either way: a browser keeps the one it is given in
+ * `Location`.
  */
 export default function PrivacyRedirect(): never {
-  permanentRedirect('/legal#privacy');
+  redirect('/legal#privacy');
 }

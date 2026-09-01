@@ -4,7 +4,9 @@ import Form from '@rjsf/core';
 import type { FormProps } from '@rjsf/core';
 import { customizeValidator } from '@rjsf/validator-ajv8';
 import Ajv2020 from 'ajv/dist/2020';
+import { enumOptionsIndexForValue, enumOptionsValueForIndex } from '@rjsf/utils';
 import type {
+  EnumOptionsType,
   RegistryWidgetsType,
   WidgetProps,
   FieldTemplateProps,
@@ -77,11 +79,20 @@ function TextareaWidget(props: WidgetProps) {
 function SelectWidget(props: WidgetProps) {
   const { id, value, required, disabled, readonly, onChange, options, placeholder } = props;
   const t = useTranslations('form');
-  const enumOptions =
-    (options['enumOptions'] as { value: unknown; label: string }[] | undefined) ?? [];
+  const enumOptions = (options['enumOptions'] as EnumOptionsType[] | undefined) ?? [];
+  // Options are addressed by INDEX, not by `String(value)`. Radix's API is
+  // string-only, so stringifying the value itself would hand `"true"` or `"1"`
+  // back to `onChange` for a boolean or numeric enum and store the wrong type.
+  // RJSF ships the index helpers for exactly this, and the sibling
+  // Signals-DPG widget uses the same pair — the two portals must round-trip a
+  // given schema identically. No non-string enum exists in this repo's config
+  // trees today (checked: zero across every `config/**/*.json`), so this is
+  // insurance rather than a live fix.
+  //
   // shadcn Select disallows the empty-string sentinel as an *item* value, but
   // Radix's Root treats `value=""` as "no selection" and renders the
-  // placeholder (`shouldShowPlaceholder`), so `''` is exactly the right reset.
+  // placeholder (`shouldShowPlaceholder`), so `''` is exactly the right reset —
+  // and no index ever stringifies to it.
   //
   // Always passing `value` — rather than the previous conditional spread that
   // omitted the prop when empty — keeps the Select controlled for its whole
@@ -89,7 +100,7 @@ function SelectWidget(props: WidgetProps) {
   // state, which still held the old selection: the field then showed neither
   // the cleared placeholder nor, reliably, the old label. That went unnoticed
   // while nothing could clear a value; the button below is what reaches it.
-  const current = value !== undefined && value !== null && value !== '' ? String(value) : '';
+  const current = (enumOptionsIndexForValue(value, enumOptions, false) as string) ?? '';
   // Once a value was picked there was no way back to empty: every dropdown
   // entry sets a value, and re-picking the current one just re-sets it. That
   // left an optional field permanently answered on the strength of one
@@ -100,7 +111,9 @@ function SelectWidget(props: WidgetProps) {
     <div className="relative">
       <Select
         value={current}
-        onValueChange={(v) => onChange(v === '' ? options['emptyValue'] : v)}
+        onValueChange={(index) =>
+          onChange(enumOptionsValueForIndex(index, enumOptions, options['emptyValue']))
+        }
         disabled={Boolean(disabled || readonly)}
         required={Boolean(required)}
       >
@@ -117,6 +130,12 @@ function SelectWidget(props: WidgetProps) {
           // the very edge of the field. The value span is the flex-1 child, so
           // padding it reserves the button's space between a long label and a
           // chevron that hasn't moved.
+          //
+          // Signals-DPG's widget does the same thing with
+          // `*:data-[slot=select-value]:pr-7`, because its `ui/select`
+          // primitive tags the value with a `data-slot`. This one has no such
+          // tag, so it matches any direct `<span>` child of the trigger —
+          // today that is only the value (the chevron is an `asChild` svg).
           className={clearable ? '[&>span]:pr-7' : undefined}
         >
           {/* `||`, not `??`: RJSF passes `placeholder: ''` (not undefined) when
@@ -129,8 +148,8 @@ function SelectWidget(props: WidgetProps) {
           <SelectValue placeholder={placeholder || t('select_placeholder')} />
         </SelectTrigger>
         <SelectContent>
-          {enumOptions.map((opt) => (
-            <SelectItem key={String(opt.value)} value={String(opt.value)}>
+          {enumOptions.map((opt, index) => (
+            <SelectItem key={`${index}-${opt.label}`} value={String(index)}>
               {opt.label}
             </SelectItem>
           ))}
