@@ -31,8 +31,12 @@ interface InviteRow {
   email: string;
 }
 
-/** Max invites per submission — mirrors the API's recipients cap (MintBodySchema). */
-const MAX_INVITES = 100;
+/**
+ * Max invites per submission — mirrors the API's recipients cap
+ * (INVITE_MINT_MAX_RECIPIENTS). Configurable via NEXT_PUBLIC_INVITE_MAX_RECIPIENTS
+ * (set it to the same value as the API); defaults to 10.
+ */
+const MAX_INVITES = Number(process.env.NEXT_PUBLIC_INVITE_MAX_RECIPIENTS) || 10;
 
 let rowSeq = 0;
 /** Builds a fresh empty row with a stable id (avoids array-index keys). */

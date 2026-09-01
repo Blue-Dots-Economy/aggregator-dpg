@@ -43,11 +43,10 @@ const RecipientSchema = z.object({
 
 const MintBodySchema = z.object({
   grant: z.string().min(1),
-  // Per-request cap aligned with the default per-org window max
-  // (INVITE_MINT_RATE_MAX_PER_WINDOW) so one full batch fits the window rather
-  // than always tripping the limit. Deployments raise both together for bigger
-  // bulk sends.
-  recipients: z.array(RecipientSchema).min(1).max(100),
+  // Per-request recipient cap — configurable (INVITE_MINT_MAX_RECIPIENTS,
+  // default 10). Keep it ≤ the per-org window max so one full batch fits the
+  // rate window rather than tripping the limit.
+  recipients: z.array(RecipientSchema).min(1).max(config.INVITE_MINT_MAX_RECIPIENTS),
 });
 
 const MintResponseSchema = z.object({

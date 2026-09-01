@@ -310,6 +310,8 @@ const ConfigSchema = z.object({
   // amplifier. Follows the PUBLIC_SUBMIT_RATE shape.
   INVITE_MINT_RATE_WINDOW_SECONDS: z.coerce.number().int().positive().default(3600),
   INVITE_MINT_RATE_MAX_PER_WINDOW: z.coerce.number().int().positive().default(100),
+  /** Max recipients per single mint request (#701). Default 10. */
+  INVITE_MINT_MAX_RECIPIENTS: z.coerce.number().int().positive().default(10),
 
   /**
    * Extra grace beyond the approval-token TTL before a still-pending

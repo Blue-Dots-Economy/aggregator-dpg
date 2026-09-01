@@ -72,9 +72,6 @@ export function renderOrgOwnerApproved(v: OrgOwnerApprovedVars): {
   Your organisation is now live on ${escapeHtml(brand.long_name)} (registered with <strong>${escapeHtml(v.ownerEmail)}</strong>).
 </p>
 ${inviteHtml}
-<p style="margin:0;font-size:12px;color:#7c84a6;line-height:1.55;">
-  Questions? Reply to this email and the ${escapeHtml(brand.short_name)} team will help.
-</p>
 `;
 
   const text = `${v.orgName} is approved.
@@ -86,8 +83,6 @@ ${
     ? `Coordinators can only join ${v.orgName} when you invite them. Invite them by email — each person gets their own one-time invite:\n${v.inviteUrl}\n\nYou don't need an account and you can't sign in — you manage your coordinators entirely from that link. Keep this email; the link works for 90 days. If it ever stops working, just open it and send again and we'll email you a fresh link automatically.`
     : `Coordinators join only when you invite them. You'll be able to invite them by email shortly — we'll send you the invite link in a follow-up message.`
 }
-
-Questions? Reply to this email and the ${brand.short_name} team will help.
 `;
 
   return { subject, html: renderShell({ preheader: subject, bodyHtml: body }), text };
