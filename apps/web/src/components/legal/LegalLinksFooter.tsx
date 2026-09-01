@@ -22,6 +22,27 @@ import type { JSX, ReactNode } from 'react';
 const LINK_CLASS =
   'font-medium text-(--bd-primary-600) underline underline-offset-2 transition-opacity hover:opacity-80';
 
+/**
+ * Tag renderers for the `agree_sentence` message, so the translated copy can
+ * place each link where its own grammar needs it.
+ *
+ * Declared at module scope rather than inside the component: they close over
+ * nothing from a render, and defined inline they read as a fresh component
+ * definition on every render (Sonar S6478).
+ */
+const SENTENCE_LINKS = {
+  privacy: (chunks: ReactNode) => (
+    <Link href="/legal#privacy" className={LINK_CLASS}>
+      {chunks}
+    </Link>
+  ),
+  terms: (chunks: ReactNode) => (
+    <Link href="/legal#terms" className={LINK_CLASS}>
+      {chunks}
+    </Link>
+  ),
+};
+
 interface LegalLinksFooterProps {
   /**
    * `sentence` — "By continuing you agree to the Privacy Policy and Terms.",
@@ -70,18 +91,7 @@ export function LegalLinksFooter({
           sentence differs by language, and only the translator can decide that.
           Hindi and Kannada both put the verb last, so a hardcoded
           "prefix + link + and + link" would read wrong in each. */}
-      {t.rich('agree_sentence', {
-        privacy: (chunks: ReactNode) => (
-          <Link href="/legal#privacy" className={LINK_CLASS}>
-            {chunks}
-          </Link>
-        ),
-        terms: (chunks: ReactNode) => (
-          <Link href="/legal#terms" className={LINK_CLASS}>
-            {chunks}
-          </Link>
-        ),
-      })}
+      {t.rich('agree_sentence', SENTENCE_LINKS)}
     </p>
   );
 }
