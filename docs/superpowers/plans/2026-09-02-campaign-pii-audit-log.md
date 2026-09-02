@@ -679,7 +679,7 @@ git commit -m "test(audit): add in-memory audit writer fake and conformance suit
  * Only ever INSERTs. There is no update or delete here, and none should be
  * added — see the interface module doc.
  */
-import { campaignPiiAudit } from '@aggregator-dpg/db-schema';
+import { campaignPiiAudit } from '@aggregator-dpg/db-schema/schema';
 import { ok, err } from '@aggregator-dpg/shared-primitives/result';
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
 import { UpstreamError, type BaseError } from '@aggregator-dpg/shared-primitives/errors';
