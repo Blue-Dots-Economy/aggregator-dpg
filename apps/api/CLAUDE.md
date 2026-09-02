@@ -83,16 +83,27 @@ clients poll every 5-10s.
   the watchdog's stalled-job sweep (`jobs/cron-watchdog.ts`, see below) —
   from `rollUpStatus`/`countItems`'s item-status tally
   (`services/campaign-job-client.ts`), never re-queried separately.
-  `toAuditCounts()` (same file) does the mapping; **`skipped_count`
-  aggregates three item statuses that are deliberate no-ops rather than a
-  release** — `skipped_not_owned`, `skipped_no_contact`, and
-  `duplicate_active` — never split across the fixed audit columns.
-  `recipient_ref`/`destination` are an OPERATOR address and the deterministic
-  S3 export key respectively (`resolveExportRecipient`/`exportObjectKey`,
-  `campaign-process/index.ts`) — both helpers are shared between the send
-  path and the audit write so the two cannot drift, and both are left unset
-  for voice/email (an operator address must never be attributed to a channel
-  that never released one).
+  `toAuditCounts()` (same file) does the mapping:
+  - **`resolved_count` ← `resolved + submitted`.** Voice items terminate at
+    `submitted`, never `resolved` or `sent` — handing a contact to Raya IS
+    the release, so it must be counted. Without this, a fully successful
+    voice campaign would audit as `outcome: 'succeeded'` with every count at
+    zero, which reads as "measured, and nothing happened" rather than "not
+    measured" — worse than leaving the columns null. This mirrors
+    `deriveJobStatus`'s own `succeeded = resolved + submitted + sent`
+    grouping, so the counts and the derived status agree about what counts
+    as a release. `sent_count` stays strictly confirmed-delivered (export/
+    email's own success write).
+  - **`skipped_count` aggregates three item statuses that are deliberate
+    no-ops rather than a release** — `skipped_not_owned`,
+    `skipped_no_contact`, and `duplicate_active` — never split across the
+    fixed audit columns.
+    `recipient_ref`/`destination` are an OPERATOR address and the deterministic
+    S3 export key respectively (`resolveExportRecipient`/`exportObjectKey`,
+    `campaign-process/index.ts`) — both helpers are shared between the send
+    path and the audit write so the two cannot drift, and both are left unset
+    for voice/email (an operator address must never be attributed to a channel
+    that never released one).
 - **The stalled-job watchdog also writes a `completed` row** (#617
   follow-up): `jobs/cron-watchdog.ts`'s stall sweep force-fails a
   `processing` job whose heartbeat went stale, which is a terminal
@@ -100,11 +111,12 @@ clients poll every 5-10s.
   after already releasing data to some participants, which is exactly the
   case with the least room for a missing completion record. That row has
   `outcome: 'failed'`, `error_code: 'stalled'`, and the counts above, plus
-  `destination` for an export-channel job (the S3 key is a pure function of
-  `signalstack_org_id`/`job.id`, so it needs no extra plumbing). It
-  deliberately never sets `recipient_ref` — the sweep's query only loads
-  `channel`/`signalstack_org_id` (already free on that `UPDATE`), not
-  `requested_by`, so there is nothing safe to recompute it from.
+  (export channel only) `destination` and `recipient_ref` — the sweep's
+  `.returning()` also selects `requested_by` (alongside `channel`/
+  `signalstack_org_id`), so it recomputes `recipient_ref` with the exact same
+  `resolveExportRecipient` helper a normal export completion uses, against
+  the worker's own export-recipient config. Still an operator address, never
+  a participant's.
 
 Find gaps (audit rows that should exist and do not):
 
