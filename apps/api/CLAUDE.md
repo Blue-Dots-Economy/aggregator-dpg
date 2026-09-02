@@ -75,6 +75,36 @@ clients poll every 5-10s.
   delete or read. That absence IS the append-only guarantee; do not add one.
 - Writes are **best effort**: they happen after the operation is already durable
   and never fail a campaign.
+- The `completed` row carries the four outcome-count columns
+  (`resolved_count`, `skipped_count`, `failed_count`, `sent_count`), plus
+  (export channel only) `recipient_ref` and `destination`. All are populated
+  at every point that writes a `completed` row — the worker's success
+  roll-up and final-attempt-failure paths (`campaign-process/index.ts`), and
+  the watchdog's stalled-job sweep (`jobs/cron-watchdog.ts`, see below) —
+  from `rollUpStatus`/`countItems`'s item-status tally
+  (`services/campaign-job-client.ts`), never re-queried separately.
+  `toAuditCounts()` (same file) does the mapping; **`skipped_count`
+  aggregates three item statuses that are deliberate no-ops rather than a
+  release** — `skipped_not_owned`, `skipped_no_contact`, and
+  `duplicate_active` — never split across the fixed audit columns.
+  `recipient_ref`/`destination` are an OPERATOR address and the deterministic
+  S3 export key respectively (`resolveExportRecipient`/`exportObjectKey`,
+  `campaign-process/index.ts`) — both helpers are shared between the send
+  path and the audit write so the two cannot drift, and both are left unset
+  for voice/email (an operator address must never be attributed to a channel
+  that never released one).
+- **The stalled-job watchdog also writes a `completed` row** (#617
+  follow-up): `jobs/cron-watchdog.ts`'s stall sweep force-fails a
+  `processing` job whose heartbeat went stale, which is a terminal
+  transition per §6 of the design doc — the worker may have died mid-run
+  after already releasing data to some participants, which is exactly the
+  case with the least room for a missing completion record. That row has
+  `outcome: 'failed'`, `error_code: 'stalled'`, and the counts above, plus
+  `destination` for an export-channel job (the S3 key is a pure function of
+  `signalstack_org_id`/`job.id`, so it needs no extra plumbing). It
+  deliberately never sets `recipient_ref` — the sweep's query only loads
+  `channel`/`signalstack_org_id` (already free on that `UPDATE`), not
+  `requested_by`, so there is nothing safe to recompute it from.
 
 Find gaps (audit rows that should exist and do not):
 
@@ -88,6 +118,20 @@ WHERE a.id IS NULL;
 
 The mirror check (every `completed` has a `requested`) must exclude
 `channel = 'dump'`, which legitimately has no `requested` row.
+
+The reverse gap — a job that reached a terminal status but never got its
+`completed` row — is exactly the anomaly the watchdog fix above closes;
+`campaign_job` never has `channel = 'dump'` rows, so no exclusion is needed
+here:
+
+```sql
+SELECT j.id, j.channel, j.status, j.created_at
+FROM campaign_job j
+LEFT JOIN campaign_pii_audit a
+  ON a.correlation_id = j.id AND a.event = 'completed'
+WHERE j.status IN ('completed', 'partial', 'failed')
+  AND a.id IS NULL;
+```
 
 ## Tests
 
