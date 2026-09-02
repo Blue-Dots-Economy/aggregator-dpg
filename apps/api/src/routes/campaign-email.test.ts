@@ -17,6 +17,8 @@ import {
   InMemoryCampaignJobStore,
   _setCampaignJobStore,
 } from '../services/campaign-job-store/index.js';
+import { _setCampaignAuditWriter } from '../services/campaign-audit/index.js';
+import { CampaignAuditWriterFake } from '@aggregator-dpg/campaign-audit/testing';
 
 // The route only validates + persists + enqueues; mock the queue so no real
 // Redis is touched and we can assert the payload / force an enqueue failure.
@@ -41,6 +43,7 @@ const CONTENT = { subject: 'Hello {{first_name}}', body_markdown: 'Hi **{{name}}
 describe('POST /v1/campaign/email', () => {
   let app: FastifyInstance;
   let store: InMemoryCampaignJobStore;
+  let auditFake: CampaignAuditWriterFake;
 
   beforeEach(async () => {
     enqueueCampaignProcessMock.mockReset().mockResolvedValue(undefined);
@@ -48,6 +51,9 @@ describe('POST /v1/campaign/email', () => {
 
     store = new InMemoryCampaignJobStore();
     _setCampaignJobStore(store);
+
+    auditFake = new CampaignAuditWriterFake();
+    _setCampaignAuditWriter(auditFake);
 
     // The shared submit flow resolves `requested_by` from the aggregator (and
     // requires it to be active), so it has to exist for any 2xx path.
@@ -81,6 +87,7 @@ describe('POST /v1/campaign/email', () => {
     _setAccessTokenVerifier(null);
     _setAggregatorStore(null);
     _setCampaignJobStore(null);
+    _setCampaignAuditWriter(null);
   });
 
   function post(payload: unknown, headers: Record<string, string> = {}) {
@@ -178,6 +185,31 @@ describe('POST /v1/campaign/email', () => {
     expect(res.statusCode).toBe(202);
     const proc = await store.getJobForProcessing(res.json().job_id);
     expect(proc.ok && proc.value?.requestedBy).toBe('user@sanketika.in');
+  });
+
+  it('audits `email` on the requested row even for a plain announcement with no placeholders (#617)', async () => {
+    // This is the case that used to record `pii_fields = {}` — reading as
+    // "nothing released" while every recipient's address went to the mail
+    // provider.
+    const res = await post({
+      item_ids: [VALID_UUID],
+      content: { subject: 'Program update', body_markdown: 'No placeholders here.' },
+    });
+    expect(res.statusCode).toBe(202);
+    const rows = auditFake.rows.filter((r) => r.kind === 'requested');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.piiFields).toEqual(['email']);
+  });
+
+  it('audits both `email` and `name` when the template uses a name placeholder', async () => {
+    const res = await post({
+      item_ids: [VALID_UUID],
+      content: { subject: 'Hi {{first_name}}', body_markdown: 'Hello there.' },
+    });
+    expect(res.statusCode).toBe(202);
+    const rows = auditFake.rows.filter((r) => r.kind === 'requested');
+    expect(rows).toHaveLength(1);
+    expect(new Set(rows[0]!.piiFields)).toEqual(new Set(['email', 'name']));
   });
 
   it('returns 400 UNKNOWN_PLACEHOLDER for a token outside the supported set', async () => {

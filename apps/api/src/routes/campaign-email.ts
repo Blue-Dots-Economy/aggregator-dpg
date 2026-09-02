@@ -57,10 +57,20 @@ export async function registerCampaignEmailRoutes(app: FastifyInstance): Promise
       await submitCampaignJob(req, reply, {
         channel: 'email',
         parseContent: parseEmailContent,
-        // Reuse the same placeholder→field mapping the worker uses to decide
-        // what to decrypt, so the audit row never drifts from reality (#617).
-        piiFields: (content) =>
-          requiredContactFields(content.subject as string, content.body_markdown as string),
+        // `email` is unconditional: every send releases the recipient address
+        // to the mail provider, even a plain announcement with no
+        // placeholders. `requiredContactFields()` only reports the OPTIONAL
+        // extras a template's `{{placeholder}}`s pull in (`name`, `phone`).
+        // Mirrors the worker's own contact projection in
+        // `apps/worker/src/services/campaign-process/email.ts`
+        // (`decryptEmailItems`) field for field, so the audit row states what
+        // was actually released and the two genuinely cannot drift (#617).
+        piiFields: (content) => [
+          ...new Set([
+            'email',
+            ...requiredContactFields(content.subject as string, content.body_markdown as string),
+          ]),
+        ],
         // `action: null` keeps email out of the item-level active-dedup
         // predicate — dedup is ON for voice only (batch spec §3.2).
         buildItem: (itemId) => ({ itemId, action: null }),
