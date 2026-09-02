@@ -54,35 +54,39 @@ export function renderAdminReview(v: AdminReviewVars): {
     hour: '2-digit',
     minute: '2-digit',
   })} IST`;
+  // Highlight when the coordinator registered with a different email than the
+  // one they were invited at (#701) — the approver should sanity-check it.
+  const emailMismatch = Boolean(v.invitedEmail && v.invitedEmail !== v.applicantEmail);
+
   // Rows are data, not markup: the bordered container needs to know which row
   // is last (no divider under it), which is unmanageable when every row is a
-  // hand-written <tr>. Optional rows simply drop out of the list.
+  // hand-written <tr>. One literal with conditional spreads, so optional rows
+  // drop out in place and the order stays readable top to bottom.
   const rows: Array<{ label: string; value: string; style?: string }> = [
     { label: 'Association', value: escapeHtml(v.association) },
     { label: 'Type', value: escapeHtml(label), style: 'text-transform:capitalize;' },
     { label: 'Contact', value: escapeHtml(v.applicantName) },
     { label: 'Email', value: escapeHtml(v.applicantEmail) },
+    ...(emailMismatch
+      ? [
+          {
+            label: 'Invited email',
+            value:
+              `${escapeHtml(v.invitedEmail as string)} ` +
+              `<span style="color:#7c84a6;">— they're registering with a different email (above)</span>`,
+            style: 'color:#b45309;',
+          },
+        ]
+      : []),
+    { label: 'Phone', value: escapeHtml(v.applicantPhone) },
+    ...(v.state ? [{ label: 'State', value: escapeHtml(v.state) }] : []),
+    { label: 'Submitted', value: escapeHtml(submitted) },
+    {
+      label: 'Reference',
+      value: escapeHtml(v.registrationId),
+      style: 'font-family:monospace;font-size:12px;',
+    },
   ];
-  // Highlight when the coordinator registered with a different email than the
-  // one they were invited at (#701) — the approver should sanity-check it.
-  const emailMismatch = Boolean(v.invitedEmail && v.invitedEmail !== v.applicantEmail);
-  if (emailMismatch) {
-    rows.push({
-      label: 'Invited email',
-      value:
-        `${escapeHtml(v.invitedEmail as string)} ` +
-        `<span style="color:#7c84a6;">— they're registering with a different email (above)</span>`,
-      style: 'color:#b45309;',
-    });
-  }
-  rows.push({ label: 'Phone', value: escapeHtml(v.applicantPhone) });
-  if (v.state) rows.push({ label: 'State', value: escapeHtml(v.state) });
-  rows.push({ label: 'Submitted', value: escapeHtml(submitted) });
-  rows.push({
-    label: 'Reference',
-    value: escapeHtml(v.registrationId),
-    style: 'font-family:monospace;font-size:12px;',
-  });
 
   const rowsHtml = rows
     .map((r, i) => {
