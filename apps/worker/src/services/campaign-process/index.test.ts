@@ -470,6 +470,30 @@ describe('runCampaignJob completed audit (#617)', () => {
     expect(h.jobStatuses.at(-1)).toBe('completed');
   });
 
+  it('writes NO completed row when rollUpStatus reports a non-terminal status (#617 SHOULD-FIX 2)', async () => {
+    // `deriveJobStatus` returns `processing` (not terminal) when an item is
+    // still `pending`. No currently-reachable handler leaves the job in that
+    // state on a normal return (the reviewer found this latent, not live),
+    // so this forces it directly at the client boundary to prove the guard
+    // itself — rather than relying on a real handler code path that may not
+    // exist today.
+    const audit = new CampaignAuditWriterFake();
+    const h = harness(job(), {}, {}, undefined, audit);
+    h.deps.client.rollUpStatus = async () => 'processing';
+
+    await runCampaignJob('job-1', h.deps);
+
+    expect(audit.rows.filter((r) => r.kind === 'completed')).toHaveLength(0);
+    expect(h.logs.warn).toContainEqual(
+      expect.objectContaining({
+        operation: 'campaign.process',
+        status: 'skipped',
+        reason: 'non_terminal_after_handler',
+        job_status: 'processing',
+      }),
+    );
+  });
+
   it('logs at error and does not throw when the writer resolves err(...)', async () => {
     const errors: object[] = [];
     const audit: CampaignAuditWriterBase = {

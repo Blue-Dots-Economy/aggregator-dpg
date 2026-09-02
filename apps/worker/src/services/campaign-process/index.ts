@@ -171,25 +171,44 @@ export async function runCampaignJob(jobId: string, deps: CampaignJobDeps): Prom
     const status = await deps.client.rollUpStatus(jobId);
 
     // Terminal: the job has an outcome, so record it. Best effort (#617).
-    // `rollUpStatus` derives from item counts and can itself land on `failed`
-    // (e.g. every item unowned) without this branch ever throwing, so the
-    // mapping must check for `failed` explicitly rather than defaulting to
-    // `succeeded` for anything that isn't `partial`.
-    const outcome: AuditOutcome =
-      status === 'partial' ? 'partial' : status === 'failed' ? 'failed' : 'succeeded';
-    await safeAuditWorker(
-      () =>
-        deps.audit?.recordCompleted({
-          correlationId: jobId,
-          channel: job.channel,
-          actorOrgId: job.signalstackOrgId,
-          outcome,
-          completedAt: new Date(),
-        }) ?? Promise.resolve(undefined),
-      deps,
-      jobId,
-      job.channel,
-    );
+    // `rollUpStatus` → `deriveJobStatus` returns `processing` — NOT
+    // terminal — when an item is still `pending` (e.g. a handler that
+    // returned normally without resolving every item). Writing a
+    // completed/succeeded row for a job the watchdog may later fail would
+    // leave two contradictory records of the same campaign, so the write is
+    // gated on `status` actually being one of `TERMINAL_JOB_STATUSES`
+    // (#617 SHOULD-FIX 2) — no currently-reachable handler leaves a pending
+    // item on a normal return, so this guards a latent path, not a live one.
+    if (TERMINAL_JOB.has(status)) {
+      // `rollUpStatus` derives from item counts and can itself land on `failed`
+      // (e.g. every item unowned) without this branch ever throwing, so the
+      // mapping must check for `failed` explicitly rather than defaulting to
+      // `succeeded` for anything that isn't `partial`.
+      const outcome: AuditOutcome =
+        status === 'partial' ? 'partial' : status === 'failed' ? 'failed' : 'succeeded';
+      await safeAuditWorker(
+        () =>
+          deps.audit?.recordCompleted({
+            correlationId: jobId,
+            channel: job.channel,
+            actorOrgId: job.signalstackOrgId,
+            outcome,
+            completedAt: new Date(),
+          }) ?? Promise.resolve(undefined),
+        deps,
+        jobId,
+        job.channel,
+      );
+    } else {
+      deps.log.warn({
+        operation: 'campaign.process',
+        status: 'skipped',
+        reason: 'non_terminal_after_handler',
+        job_id: jobId,
+        channel: job.channel,
+        job_status: status,
+      });
+    }
 
     deps.log.info({
       operation: 'campaign.process',
