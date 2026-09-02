@@ -255,7 +255,7 @@ docker exec aggregator-postgres psql -U aggregator -d audit_check -c "\d campaig
 docker exec aggregator-postgres psql -U aggregator -d postgres -c 'DROP DATABASE audit_check;'
 ```
 
-Expected: the table creates with **28 columns** and **3 indexes**, no errors.
+Expected: the table creates with **29 columns** and **3 indexes** (plus the implicit primary-key index), no errors.
 
 - [ ] **Step 8: Commit**
 
