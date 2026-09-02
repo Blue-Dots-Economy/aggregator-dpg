@@ -64,7 +64,9 @@ export async function registerCampaignEmailRoutes(app: FastifyInstance): Promise
         // Mirrors the worker's own contact projection in
         // `apps/worker/src/services/campaign-process/email.ts`
         // (`decryptEmailItems`) field for field, so the audit row states what
-        // was actually released and the two genuinely cannot drift (#617).
+        // was actually released (#617). Only `requiredContactFields()` is
+        // shared; this `['email', ...]` wrapper is duplicated there, so the
+        // two CAN drift — change both together, or extract a shared helper.
         piiFields: (content) => [
           ...new Set([
             'email',
