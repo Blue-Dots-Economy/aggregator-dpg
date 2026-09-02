@@ -30,7 +30,10 @@ export function renderApplicantRejected(v: ApplicantRejectedVars): {
   const brand = getEmailBrand();
   const label = v.entityLabel ?? 'aggregator';
   const subject = `Update on your ${brand.short_name} ${label} application`;
+  // Two greetings, not one: the HTML body needs the name escaped, the plain-text
+  // part must not be (an apostrophe would arrive as &#39;).
   const greeting = v.contactName ? `Hi ${escapeHtml(v.contactName)},` : 'Hi there,';
+  const textGreeting = v.contactName ? `Hi ${v.contactName},` : 'Hi there,';
   const reasonBlock = v.reason
     ? `<div style="margin:18px 0 0;padding:14px;background:#fef2f2;border:1px solid #fecaca;border-radius:10px;font-size:13.5px;color:#7f1d1d;line-height:1.55;">
          <strong>Reason:</strong> ${escapeHtml(v.reason)}
@@ -52,17 +55,12 @@ ${reasonBlock}
   If you believe this was a mistake, reply to this email with additional context and our team will take a second look.
 </p>
 `;
-  const text = `${v.contactName ? `Hi ${v.contactName},` : 'Hi there,'}
+  const reasonText = v.reason ? `\n\nReason: ${v.reason}` : '';
+  const text = `${textGreeting}
 
 Thanks for applying to onboard ${v.association} as a ${brand.short_name} ${label}.
 
-After review, we are unable to approve your application at this time.${
-    v.reason
-      ? `
-
-Reason: ${v.reason}`
-      : ''
-  }
+After review, we are unable to approve your application at this time.${reasonText}
 
 If you believe this was a mistake, reply to this email with additional context and our team will take a second look.
 `;
