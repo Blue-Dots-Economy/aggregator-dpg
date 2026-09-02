@@ -1,0 +1,73 @@
+/**
+ * Isolated `safeAudit` coverage for its `err(BaseError)` branch (#617).
+ *
+ * `CampaignAuditWriterFake` (used by `submit-job.audit.test.ts`) only ever
+ * THROWS on failure — by its own design, to exercise the "harsher" call-site
+ * failure mode. But `PostgresCampaignAuditWriter` never throws: every one of
+ * its methods catches the DB error internally and resolves
+ * `err(UpstreamError)` (see `@aggregator-dpg/campaign-audit`'s `postgres.ts`).
+ * That resolved-`err` path is the one a real deployment actually hits, so it
+ * needs its own direct test rather than relying on the throwing fake to
+ * stand in for it.
+ */
+import { describe, it, expect, vi } from 'vitest';
+import { err, ok } from '@aggregator-dpg/shared-primitives/result';
+import { UpstreamError } from '@aggregator-dpg/shared-primitives/errors';
+import { logger } from '../../logger.js';
+import { safeAudit } from './index.js';
+
+describe('safeAudit', () => {
+  it('does not throw and logs at error when the writer resolves err(...)', async () => {
+    const errorSpy = vi.spyOn(logger, 'error');
+    const cause = new UpstreamError('campaign audit insert failed', {
+      code: 'CAMPAIGN_AUDIT_INSERT_FAILED',
+    });
+
+    await expect(
+      safeAudit(() => Promise.resolve(err(cause)), {
+        operation: 'campaignAudit.requested',
+        correlation_id: 'job-1',
+        channel: 'export',
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation: 'campaignAudit.requested',
+        correlation_id: 'job-1',
+        channel: 'export',
+        status: 'failure',
+        error: 'campaign audit insert failed',
+      }),
+    );
+  });
+
+  it('does not log when the writer resolves ok(...)', async () => {
+    const errorSpy = vi.spyOn(logger, 'error');
+
+    await safeAudit(() => Promise.resolve(ok(undefined)), {
+      operation: 'campaignAudit.requested',
+      correlation_id: 'job-2',
+      channel: 'export',
+    });
+
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it('still logs at error, and does not throw, when the writer itself throws', async () => {
+    const errorSpy = vi.spyOn(logger, 'error');
+
+    await expect(
+      safeAudit(
+        () => {
+          throw new Error('writer exploded');
+        },
+        { operation: 'campaignAudit.requested', correlation_id: 'job-3', channel: 'export' },
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'failure', error: 'writer exploded' }),
+    );
+  });
+});
