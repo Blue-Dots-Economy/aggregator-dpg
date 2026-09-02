@@ -123,6 +123,19 @@ export class PostgresRegistrationInvitesStore extends RegistrationInvitesStoreBa
     return this.casTerminal('inviteStore.revoke', jti, 'revoked', false);
   }
 
+  async release(jti: string): Promise<InviteStoreResult<RegistrationInvite | null>> {
+    try {
+      const rows = await getDb()
+        .update(registrationInvites)
+        .set({ status: 'pending', consumedAt: null })
+        .where(and(eq(registrationInvites.jti, jti), eq(registrationInvites.status, 'consumed')))
+        .returning();
+      return { ok: true, value: rows[0] ? toDomain(rows[0]) : null };
+    } catch (err) {
+      return this.mapDbError('inviteStore.release', err, Date.now());
+    }
+  }
+
   /**
    * Shared CAS `pending → next` used by consume/revoke. Returns the row on a
    * winning swap, `null` when the invite was not pending.

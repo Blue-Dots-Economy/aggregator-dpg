@@ -145,6 +145,8 @@ export type StoreError =
   | { code: 'DUPLICATE_SLUG'; message: string }
   | { code: 'DUPLICATE_PHONE'; message: string }
   | { code: 'DUPLICATE_EMAIL'; message: string }
+  /** Unique violation on a constraint this layer does not recognise (#718 review). */
+  | { code: 'DUPLICATE'; message: string }
   | { code: 'CHECK_VIOLATION'; message: string }
   | { code: 'DB_UNAVAILABLE'; message: string };
 

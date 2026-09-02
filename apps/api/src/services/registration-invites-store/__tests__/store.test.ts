@@ -106,6 +106,35 @@ describe('InMemoryRegistrationInvitesStore', () => {
     expect(rev2.ok && rev2.value).toBeNull();
   });
 
+  it('release undoes a claim (consumed → pending) and only ever a consumed one', async () => {
+    const s = new InMemoryRegistrationInvitesStore();
+    const c = await s.create(input);
+    if (!c.ok) throw new Error('seed');
+    await s.consume(c.value.jti);
+    const back = await s.release(c.value.jti);
+    expect(back.ok && back.value?.status).toBe('pending');
+    expect(back.ok && back.value?.consumedAt).toBeNull();
+    // Reusable after the compensation — that is the whole point (H4).
+    const again = await s.consume(c.value.jti);
+    expect(again.ok && again.value?.status).toBe('consumed');
+    // Releasing a pending row is a no-op, so a double-release can't un-consume
+    // a claim some OTHER request is holding.
+    await s.release(c.value.jti);
+    const second = await s.release(c.value.jti);
+    expect(second.ok && second.value).toBeNull();
+  });
+
+  it('release never resurrects a revoked invite', async () => {
+    const s = new InMemoryRegistrationInvitesStore();
+    const c = await s.create(input);
+    if (!c.ok) throw new Error('seed');
+    await s.revoke(c.value.jti);
+    const back = await s.release(c.value.jti);
+    expect(back.ok && back.value).toBeNull();
+    const row = await s.findByJti(c.value.jti);
+    expect(row.ok && row.value?.status).toBe('revoked');
+  });
+
   it('fake.seed() sets exact row state', async () => {
     const s = new RegistrationInvitesStoreFake();
     s.seed([buildRegistrationInvite({ jti: 'seeded', status: 'pending' })]);
@@ -263,5 +292,12 @@ describe('PostgresRegistrationInvitesStore error mapping', () => {
     expect(lost.ok && lost.value).toBeNull();
     const revoked = await withDb(() => [rawRow({ status: 'revoked' })]).revoke('jti-1');
     expect(revoked.ok && revoked.value?.status).toBe('revoked');
+  });
+
+  it('release returns the row on a winning CAS and null otherwise', async () => {
+    const released = await withDb(() => [rawRow({ status: 'pending' })]).release('jti-1');
+    expect(released.ok && released.value?.status).toBe('pending');
+    const lost = await withDb(() => []).release('jti-1');
+    expect(lost.ok && lost.value).toBeNull();
   });
 });

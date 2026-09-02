@@ -266,9 +266,14 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
     const message = (err as Error).message ?? 'unknown';
 
     if (code === PG_UNIQUE_VIOLATION) {
-      let storeCode: StoreError['code'] = 'DUPLICATE_SLUG';
+      // Match each constraint explicitly. Defaulting the unknown case to
+      // DUPLICATE_SLUG told the user "that name is already taken" for whatever
+      // unique index a later migration happens to add (#718 review); the
+      // constraint name is logged below either way.
+      let storeCode: StoreError['code'] = 'DUPLICATE';
       if (constraint.includes('contact_phone')) storeCode = 'DUPLICATE_PHONE';
       else if (constraint.includes('contact_email')) storeCode = 'DUPLICATE_EMAIL';
+      else if (constraint.includes('slug')) storeCode = 'DUPLICATE_SLUG';
       logger.warn({
         operation: op,
         status: 'failure',

@@ -139,458 +139,471 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
       const log = req.log.child({ operation: 'aggregator-registration.create' });
       const start = Date.now();
 
-      // Re-send the review link for an existing recoverable record without
-      // touching its fields. Shared by the still-pending reclaim path and the
-      // rejected-then-cooling-elapsed revive path (#726): both re-use the SAME
-      // row and re-mint the link to the reviewer using STORED values — the
-      // anonymous submit carries no proof of identity, so honouring the
-      // resubmitted name/phone would let a stranger hijack the record.
-      const reclaimReview = async (row: Aggregator): Promise<FastifyReply> => {
+      // Invite claimed by THIS request (#700). The pending→consumed CAS runs
+      // BEFORE anything is created, so the invite — not a best-effort check — is
+      // the volume bound on a forwarded link. `inviteCommitted` flips only once
+      // the registration has fully provisioned; any other exit (throw, or a
+      // reclaim that creates nothing) gives the invite back via the compensating
+      // `release()` in the `finally` below, so H4 still holds: an ordinary user
+      // error such as a duplicate phone never burns a one-time link.
+      let inviteJti: string | null = null;
+      let inviteCommitted = false;
+      try {
+        // Re-send the review link for an existing recoverable record without
+        // touching its fields. Shared by the still-pending reclaim path and the
+        // rejected-then-cooling-elapsed revive path (#726): both re-use the SAME
+        // row and re-mint the link to the reviewer using STORED values — the
+        // anonymous submit carries no proof of identity, so honouring the
+        // resubmitted name/phone would let a stranger hijack the record.
+        const reclaimReview = async (row: Aggregator): Promise<FastifyReply> => {
+          await sendAdminReviewEmail(
+            {
+              aggregatorId: row.id,
+              applicantName: row.name,
+              applicantEmail: row.contact.email,
+              applicantPhone: row.contactPhone,
+              ...(row.inviteEmail ? { invitedEmail: row.inviteEmail } : {}),
+              ...(await resolveOwnerRouting(row.parentOrgId)),
+            },
+            log,
+          );
+          log.info(
+            {
+              status: 'success',
+              latency_ms: Date.now() - start,
+              aggregator_id: row.id,
+              reclaim: true,
+            },
+            'registration re-submitted — review link re-sent (no field change)',
+          );
+          // v1 records consent only on fresh registration, not on reclaim (deliberate).
+          return reply.status(200).send({
+            aggregator_id: row.id,
+            org_slug: row.orgSlug,
+            status: 'pending',
+            message: 'Registration re-submitted. A fresh approval link has been sent for review.',
+          });
+        };
+
+        // Every backend API requires a Bearer token. Registration is reached
+        // anonymously by the user, so the BFF attaches a Keycloak service-
+        // account token (client_credentials grant on the `aggregator-bff`
+        // confidential client). `authenticateAny` only checks the JWT
+        // signature + issuer/exp; it does not require an `aggregator_id`
+        // claim because the caller is a service principal, not a user.
+        const auth = await authenticateAny(req);
+        if (!auth.ok) {
+          throw httpError('UNAUTHORIZED', {
+            detail: auth.error.message,
+            fields: { reason: auth.error.code },
+          });
+        }
+
+        // `schema.body` already validated against `RegistrationPayloadSchema`
+        // (the zod validator compiler replaces `req.body` with the parse
+        // output), so the typed body can be consumed directly here.
+        const body = req.body as z.infer<typeof RegistrationPayloadSchema>;
+
+        // `org_id` is an org-hierarchy field outside the form's JSON Schema
+        // contract; strip it before Ajv so the schema in `config/` stays the
+        // single authority for the form shape.
+        const {
+          org_id: _orgIdField,
+          invite: _inviteField,
+          ...formBody
+        } = req.body as Record<string, unknown>;
+
+        // JSON Schema is the authoritative contract — keeps the form rules in
+        // `config/` rather than code.
+        const validate = await getRegistrationValidator();
+        if (!validate(formBody)) {
+          throw httpError('SCHEMA_VALIDATION', {
+            detail: 'Payload failed JSON Schema validation.',
+            fields: { issues: validate.errors ?? [] },
+          });
+        }
+        const phoneResult = normalisePhone(body.contact.phone);
+        if (!phoneResult.ok) {
+          throw httpError('INVALID_PHONE', {
+            detail: phoneResult.error.message,
+            // Key it `phone` (not `input`) so the logger's `*.phone` redact path
+            // masks the raw number if this error is ever logged.
+            fields: { phone: body.contact.phone },
+          });
+        }
+        const phoneE164 = phoneResult.value;
+        // Persist the normalised E.164 representation so DB queries + Keycloak
+        // attribute reads agree on a single canonical form.
+        const contact: BecknContact = {
+          ...body.contact,
+          // Zod has already lowercased the email via the transform — keep it.
+          phone: phoneE164,
+        };
+
+        const aggregatorStore = getAggregatorStore();
+        const profileStore = getAggregatorProfileStore();
+        const idp = getIdpAdmin();
+
+        // Server-stamp the consent timestamp so the recorded value reflects
+        // when the API actually accepted the registration, not whatever the
+        // client clock reported. `valid_till` stays caller-supplied but is
+        // clamped to a hard ceiling so a misbehaving form can not store a
+        // 1000-year consent window. Computed early so it is in scope for both
+        // the reclaim path and the new-registration path below.
+        const serverConsent = stampConsent(body.consent);
+
+        // Org-hierarchy gate (spec §6.2). When enabled, a coordinator must select
+        // an *active* org; the link lives in `aggregators.parent_org_id`.
+        let parentOrgId: string | null = null;
+        // Email the invite was addressed to (#701). A coordinator MAY register with
+        // a different email than they were invited at; we keep the invited address
+        // for provenance so the approving owner can see who was originally targeted.
+        let inviteEmailClaim: string | null = null;
+        if (orgHierarchyEnabled()) {
+          // Rate limit per (ip, email) (spec A6).
+          const rl = await checkSubmitRate(`${req.ip}|${contact.email}`);
+          if (!rl.allowed) {
+            void reply.header('Retry-After', String(rl.retryAfterSeconds));
+            throw httpError('RATE_LIMITED', {
+              detail: `Retry in ${rl.retryAfterSeconds}s.`,
+              fields: { retry_after_seconds: rl.retryAfterSeconds },
+            });
+          }
+          const orgStore = getAggregatorOrgStore();
+          const reqInvite = (req.body as { invite?: string }).invite;
+
+          // Invite-bound path (#700): when the submission carries an invite token
+          // it supersedes the org selector. The org comes from the CLAIM, the
+          // recipient email is enforced, and the invite is claimed (CAS) before
+          // anything is created. The token is a bearer credential — every check
+          // below re-validates against the DB and never trusts a hidden field.
+          if (reqInvite) {
+            const verified = await verifyInviteToken(reqInvite);
+            if (!verified.ok) {
+              throw httpError(
+                verified.error.code === 'EXPIRED' ? 'INVITE_EXPIRED' : 'INVITE_INVALID',
+              );
+            }
+            // The coordinator may register with a different email than the invite
+            // was sent to (#701) — the invited address is kept as provenance and
+            // surfaced to the approving owner, not enforced. The invite itself is
+            // still the gate (valid + pending + org active + single-use).
+            inviteEmailClaim = verified.email.trim().toLowerCase();
+            const inviteStore = getRegistrationInvitesStore();
+            // Re-validate the org from the CLAIM independently (§4.4.4).
+            const org = await orgStore.findById(verified.org);
+            if (!org.ok) {
+              throw httpError('DB_UNAVAILABLE', {
+                cause: new Error(org.error.message),
+                fields: { sub_operation: 'orgStore.findById' },
+              });
+            }
+            if (org.value?.status !== 'active') {
+              throw httpError('TARGET_ORG_INACTIVE');
+            }
+            const ownerMatch = await orgStore.findByOwnerEmail(contact.email);
+            if (ownerMatch.ok && ownerMatch.value) {
+              throw httpError('OWNER_ALREADY_REGISTERED', { fields: { email: contact.email } });
+            }
+            // Claim the invite HERE, before anything is created (§4.4.6). A
+            // read-only pre-check cannot bound volume: between the read and a
+            // deferred CAS this handler creates the aggregator, records consent
+            // and calls Keycloak over the network, so N concurrent submits on one
+            // forwarded link each passed the read and each created a registration.
+            // The unique email/phone constraints only collide when the racers
+            // share both, and #701 deliberately leaves the invited email
+            // non-enforcing — so the attacker picks distinct ones. Losing this CAS
+            // is authoritative, not a warning. Stamp `parent_org_id` from the
+            // CLAIM so the approval binding can't mismatch.
+            const claimed = await inviteStore.consume(verified.jti);
+            if (!claimed.ok) {
+              throw httpError('DB_UNAVAILABLE', {
+                cause: new Error(claimed.error.message),
+                fields: { sub_operation: 'inviteStore.consume' },
+              });
+            }
+            if (claimed.value === null) {
+              throw httpError('INVITE_ALREADY_USED', { fields: { email: contact.email } });
+            }
+            inviteJti = verified.jti;
+            parentOrgId = verified.org;
+          } else {
+            // Interim selector path: coordinator picks an active org (spec §6.2).
+            const reqOrgId = (req.body as { org_id?: string }).org_id;
+            if (!reqOrgId) {
+              throw httpError('SCHEMA_VALIDATION', {
+                detail: 'org_id is required when the organisation hierarchy is enabled.',
+              });
+            }
+            const org = await orgStore.findById(reqOrgId);
+            if (!org.ok) {
+              throw httpError('DB_UNAVAILABLE', {
+                cause: new Error(org.error.message),
+                fields: { sub_operation: 'orgStore.findById' },
+              });
+            }
+            // Covers bootstrap (no active org) and an org that went inactive/rejected.
+            if (org.value?.status !== 'active') {
+              throw httpError('TARGET_ORG_INACTIVE');
+            }
+            // Owner-also-coordinator (spec A4): a distinct, machine-readable error.
+            const ownerMatch = await orgStore.findByOwnerEmail(contact.email);
+            if (ownerMatch.ok && ownerMatch.value) {
+              throw httpError('OWNER_ALREADY_REGISTERED', { fields: { email: contact.email } });
+            }
+            parentOrgId = reqOrgId;
+          }
+        }
+
+        // Pre-check email + phone uniqueness in both stores. The DB
+        // generated-column UNIQUEs (contact_phone / contact_email) and Keycloak
+        // attribute lookups together give us a deterministic 409 instead of a
+        // race between `aggregators` and Keycloak.
+        const dbEmail = await aggregatorStore.findByContactEmail(contact.email);
+        if (!dbEmail.ok) {
+          throw httpError('DB_UNAVAILABLE', {
+            cause: new Error(dbEmail.error.message),
+            fields: { sub_operation: 'aggregatorStore.findByContactEmail' },
+          });
+        }
+        if (dbEmail.value !== null) {
+          const existing = dbEmail.value;
+          if (existing.status === 'inactive') {
+            // Rejected record (#726): block re-registration until the cooling
+            // window elapses, measured from the write-once `rejected_at`. Once it
+            // lapses, revive the SAME row to pending (clearing `rejected_at`) and
+            // re-send the review link — the disabled KC user is left intact for
+            // the approval step, so nothing is deleted or re-created.
+            const retryAfter = coolingRetryAfter(existing.rejectedAt, existing.updatedAt);
+            if (retryAfter) {
+              throw httpError('REGISTRATION_COOLING', {
+                fields: { email: contact.email, retry_after: retryAfter },
+              });
+            }
+            const revived = await aggregatorStore.update(existing.id, {
+              status: 'pending',
+              rejectedAt: null,
+              updatedBy: 'self',
+            });
+            if (!revived.ok) {
+              throw httpError('DB_UNAVAILABLE', {
+                cause: new Error(revived.error.message),
+                fields: { sub_operation: 'aggregatorStore.reviveRejected' },
+              });
+            }
+            return reclaimReview(existing);
+          }
+          if (existing.status !== 'pending') {
+            // active / retired — a live account owns this email.
+            throw httpError('USER_EXISTS', { fields: { email: contact.email } });
+          }
+          // Still pending → re-send the review link, no field change.
+          return reclaimReview(existing);
+        }
+
+        const dbPhone = await aggregatorStore.findByContactPhone(phoneE164);
+        if (!dbPhone.ok) {
+          throw httpError('DB_UNAVAILABLE', {
+            cause: new Error(dbPhone.error.message),
+            fields: { sub_operation: 'aggregatorStore.findByContactPhone' },
+          });
+        }
+        if (dbPhone.value !== null) {
+          const existingPhone = dbPhone.value;
+          if (existingPhone.status === 'inactive') {
+            // Same cooling window (#726) on the phone identity — reached only when
+            // the email didn't match any row but a rejected record owns this
+            // number. Within the window → 409; elapsed → revive that row and
+            // re-send its review link (reuse, no delete).
+            const retryAfter = coolingRetryAfter(existingPhone.rejectedAt, existingPhone.updatedAt);
+            if (retryAfter) {
+              throw httpError('REGISTRATION_COOLING', {
+                fields: { phone: phoneE164, retry_after: retryAfter },
+              });
+            }
+            const revived = await aggregatorStore.update(existingPhone.id, {
+              status: 'pending',
+              rejectedAt: null,
+              updatedBy: 'self',
+            });
+            if (!revived.ok) {
+              throw httpError('DB_UNAVAILABLE', {
+                cause: new Error(revived.error.message),
+                fields: { sub_operation: 'aggregatorStore.reviveRejected' },
+              });
+            }
+            return reclaimReview(existingPhone);
+          }
+          throw httpError('PHONE_EXISTS', { fields: { phone: phoneE164 } });
+        }
+
+        const kcEmail = await idp.findByEmail(contact.email);
+        if (!kcEmail.ok) {
+          throw httpError('IDP_UNAVAILABLE', {
+            cause: kcEmail.error,
+            fields: { sub_operation: 'idp.findByEmail' },
+          });
+        }
+        if (kcEmail.value !== null) {
+          throw httpError('USER_EXISTS', { fields: { email: contact.email } });
+        }
+
+        // Phone is the OTP-login identity for the portal — Keycloak's OTP
+        // authenticator looks users up by the `phoneNumber` attribute. If two
+        // users share the same number, the authenticator picks the first
+        // match deterministically, which can route a login attempt to a
+        // disabled (pending or rejected) account and surface "account
+        // disabled". Enforce phone uniqueness here so that never happens.
+        const kcPhone = await idp.findByAttribute(KC_ATTR.PHONE_NUMBER, phoneE164);
+        if (!kcPhone.ok) {
+          throw httpError('IDP_UNAVAILABLE', {
+            cause: kcPhone.error,
+            fields: { sub_operation: 'idp.findByAttribute.phoneNumber' },
+          });
+        }
+        if (kcPhone.value !== null) {
+          throw httpError('PHONE_EXISTS', { fields: { phone: phoneE164 } });
+        }
+
+        const aggregator = await createAggregatorWithSlug(aggregatorStore, body.name, {
+          type: body.type,
+          url: body.url ?? null,
+          contact,
+          locations: body.locations,
+          consent: serverConsent,
+          parentOrgId,
+          inviteEmail: inviteEmailClaim,
+          profile: buildAggregatorProfile(body as unknown as Record<string, unknown>),
+          profileRef: resolveProfileRef('registration.v1.json'),
+        });
+        if (!aggregator.ok) {
+          const code = mapStoreCreateError(aggregator.error.code);
+          throw httpError(code, { cause: new Error(aggregator.error.message) });
+        }
+        const { id: aggregatorId, orgSlug } = aggregator.value;
+
+        // Record registration consent BEFORE provisioning the profile + Keycloak
+        // user, so a consent-write failure rolls back cleanly (just the aggregator
+        // row, no external side effects). Fail-closed: never leave an aggregator
+        // without a consent record. Network/brand come from resolveActiveNetwork()
+        // so the recorded version matches what the web layer displayed.
+        const { network: activeNetwork, brand: activeBrand } = resolveActiveNetwork();
+        const consentRecorded = await recordAggregatorConsent({
+          aggregatorId,
+          network: activeNetwork,
+          brand: activeBrand,
+          log,
+        });
+        if (!consentRecorded) {
+          await aggregatorStore.deleteById(aggregatorId);
+          throw httpError('CONSENT_WRITE_FAILED', {
+            fields: { sub_operation: 'recordAggregatorConsent', rolled_back: true },
+          });
+        }
+
+        const profile = await profileStore.create({
+          aggregatorId,
+          createdBy: 'self',
+          updatedBy: 'self',
+        });
+        if (!profile.ok) {
+          await aggregatorStore.deleteById(aggregatorId);
+          throw httpError('DB_UNAVAILABLE', {
+            cause: new Error(profile.error.message),
+            fields: { sub_operation: 'profileStore.create', rolled_back: true },
+          });
+        }
+
+        // Keycloak carries four attributes:
+        //   - aggregator_id    reverse pointer to Postgres
+        //   - aggregator_type  participant focus, used by single-type enforcement
+        //   - phoneNumber      OTP login authenticator
+        //   - decision_made    login gate
+        // Slug, association, and decision metadata live in Postgres.
+        const kcAttributes: Record<string, string> = {
+          [KC_ATTR.AGGREGATOR_ID]: aggregatorId,
+          [KC_ATTR.AGGREGATOR_TYPE]: body.type,
+          [KC_ATTR.PHONE_NUMBER]: phoneE164,
+          [KC_ATTR.DECISION_MADE]: 'pending',
+        };
+
+        // Split the Beckn `contact.name` into first / last for Keycloak. The
+        // signup form already collects the full name, so we don't ask for it
+        // again via an UPDATE_PROFILE required action on first login.
+        const { firstName, lastName } = splitName(contact.name);
+        const kcResult = await idp.createUser({
+          email: contact.email,
+          username: contact.email,
+          phone: phoneE164,
+          enabled: false,
+          firstName,
+          lastName,
+          attributes: kcAttributes,
+        });
+        if (!kcResult.ok) {
+          await aggregatorStore.deleteById(aggregatorId);
+          if (kcResult.error.code === 'USER_EXISTS') {
+            throw httpError('USER_EXISTS', {
+              cause: kcResult.error,
+              fields: { email: contact.email, rolled_back: true },
+            });
+          }
+          throw httpError('IDP_UNAVAILABLE', {
+            cause: kcResult.error,
+            fields: { sub_operation: 'idp.createUser', rolled_back: true },
+          });
+        }
+
+        // Registration is fully provisioned, so the claim taken above stands: stop
+        // the `finally` from handing the invite back (#700).
+        inviteCommitted = true;
+
         await sendAdminReviewEmail(
           {
-            aggregatorId: row.id,
-            applicantName: row.name,
-            applicantEmail: row.contact.email,
-            applicantPhone: row.contactPhone,
-            ...(row.inviteEmail ? { invitedEmail: row.inviteEmail } : {}),
-            ...(await resolveOwnerRouting(row.parentOrgId)),
+            aggregatorId,
+            applicantName: body.name,
+            applicantEmail: contact.email,
+            applicantPhone: phoneE164,
+            ...(inviteEmailClaim ? { invitedEmail: inviteEmailClaim } : {}),
+            ...(await resolveOwnerRouting(parentOrgId)),
           },
           log,
         );
+
         log.info(
           {
             status: 'success',
             latency_ms: Date.now() - start,
-            aggregator_id: row.id,
-            reclaim: true,
+            aggregator_id: aggregatorId,
+            org_slug: orgSlug,
+            keycloak_user_id: kcResult.value.id,
           },
-          'registration re-submitted — review link re-sent (no field change)',
+          'aggregator registration submitted',
         );
-        // v1 records consent only on fresh registration, not on reclaim (deliberate).
-        return reply.status(200).send({
-          aggregator_id: row.id,
-          org_slug: row.orgSlug,
-          status: 'pending',
-          message: 'Registration re-submitted. A fresh approval link has been sent for review.',
-        });
-      };
 
-      // Every backend API requires a Bearer token. Registration is reached
-      // anonymously by the user, so the BFF attaches a Keycloak service-
-      // account token (client_credentials grant on the `aggregator-bff`
-      // confidential client). `authenticateAny` only checks the JWT
-      // signature + issuer/exp; it does not require an `aggregator_id`
-      // claim because the caller is a service principal, not a user.
-      const auth = await authenticateAny(req);
-      if (!auth.ok) {
-        throw httpError('UNAUTHORIZED', {
-          detail: auth.error.message,
-          fields: { reason: auth.error.code },
-        });
-      }
-
-      // `schema.body` already validated against `RegistrationPayloadSchema`
-      // (the zod validator compiler replaces `req.body` with the parse
-      // output), so the typed body can be consumed directly here.
-      const body = req.body as z.infer<typeof RegistrationPayloadSchema>;
-
-      // `org_id` is an org-hierarchy field outside the form's JSON Schema
-      // contract; strip it before Ajv so the schema in `config/` stays the
-      // single authority for the form shape.
-      const {
-        org_id: _orgIdField,
-        invite: _inviteField,
-        ...formBody
-      } = req.body as Record<string, unknown>;
-
-      // JSON Schema is the authoritative contract — keeps the form rules in
-      // `config/` rather than code.
-      const validate = await getRegistrationValidator();
-      if (!validate(formBody)) {
-        throw httpError('SCHEMA_VALIDATION', {
-          detail: 'Payload failed JSON Schema validation.',
-          fields: { issues: validate.errors ?? [] },
-        });
-      }
-      const phoneResult = normalisePhone(body.contact.phone);
-      if (!phoneResult.ok) {
-        throw httpError('INVALID_PHONE', {
-          detail: phoneResult.error.message,
-          // Key it `phone` (not `input`) so the logger's `*.phone` redact path
-          // masks the raw number if this error is ever logged.
-          fields: { phone: body.contact.phone },
-        });
-      }
-      const phoneE164 = phoneResult.value;
-      // Persist the normalised E.164 representation so DB queries + Keycloak
-      // attribute reads agree on a single canonical form.
-      const contact: BecknContact = {
-        ...body.contact,
-        // Zod has already lowercased the email via the transform — keep it.
-        phone: phoneE164,
-      };
-
-      const aggregatorStore = getAggregatorStore();
-      const profileStore = getAggregatorProfileStore();
-      const idp = getIdpAdmin();
-
-      // Server-stamp the consent timestamp so the recorded value reflects
-      // when the API actually accepted the registration, not whatever the
-      // client clock reported. `valid_till` stays caller-supplied but is
-      // clamped to a hard ceiling so a misbehaving form can not store a
-      // 1000-year consent window. Computed early so it is in scope for both
-      // the reclaim path and the new-registration path below.
-      const serverConsent = stampConsent(body.consent);
-
-      // Org-hierarchy gate (spec §6.2). When enabled, a coordinator must select
-      // an *active* org; the link lives in `aggregators.parent_org_id`.
-      let parentOrgId: string | null = null;
-      // Invite to claim (#700). Set in the invite path; the pending→consumed CAS
-      // runs only AFTER the registration fully provisions (below), so a duplicate
-      // phone / transient error never burns the coordinator's one-time invite.
-      let inviteJti: string | null = null;
-      // Email the invite was addressed to (#701). A coordinator MAY register with
-      // a different email than they were invited at; we keep the invited address
-      // for provenance so the approving owner can see who was originally targeted.
-      let inviteEmailClaim: string | null = null;
-      if (orgHierarchyEnabled()) {
-        // Rate limit per (ip, email) (spec A6).
-        const rl = await checkSubmitRate(`${req.ip}|${contact.email}`);
-        if (!rl.allowed) {
-          void reply.header('Retry-After', String(rl.retryAfterSeconds));
-          throw httpError('RATE_LIMITED', {
-            detail: `Retry in ${rl.retryAfterSeconds}s.`,
-            fields: { retry_after_seconds: rl.retryAfterSeconds },
-          });
-        }
-        const orgStore = getAggregatorOrgStore();
-        const reqInvite = (req.body as { invite?: string }).invite;
-
-        // Invite-bound path (#700): when the submission carries an invite token
-        // it supersedes the org selector. The org comes from the CLAIM, the
-        // recipient email is enforced, and the invite is claimed (CAS) before
-        // anything is created. The token is a bearer credential — every check
-        // below re-validates against the DB and never trusts a hidden field.
-        if (reqInvite) {
-          const verified = await verifyInviteToken(reqInvite);
-          if (!verified.ok) {
-            throw httpError(
-              verified.error.code === 'EXPIRED' ? 'INVITE_EXPIRED' : 'INVITE_INVALID',
-            );
-          }
-          // The coordinator may register with a different email than the invite
-          // was sent to (#701) — the invited address is kept as provenance and
-          // surfaced to the approving owner, not enforced. The invite itself is
-          // still the gate (valid + pending + org active + single-use).
-          inviteEmailClaim = verified.email.trim().toLowerCase();
-          const inviteStore = getRegistrationInvitesStore();
-          const row = await inviteStore.findByJti(verified.jti);
-          if (!row.ok) {
-            throw httpError('DB_UNAVAILABLE', {
-              cause: new Error(row.error.message),
-              fields: { sub_operation: 'inviteStore.findByJti' },
-            });
-          }
-          if (row.value?.status !== 'pending') {
-            throw httpError('INVITE_ALREADY_USED', { fields: { email: contact.email } });
-          }
-          // Re-validate the org from the CLAIM independently (§4.4.4).
-          const org = await orgStore.findById(verified.org);
-          if (!org.ok) {
-            throw httpError('DB_UNAVAILABLE', {
-              cause: new Error(org.error.message),
-              fields: { sub_operation: 'orgStore.findById' },
-            });
-          }
-          if (org.value?.status !== 'active') {
-            throw httpError('TARGET_ORG_INACTIVE');
-          }
-          const ownerMatch = await orgStore.findByOwnerEmail(contact.email);
-          if (ownerMatch.ok && ownerMatch.value) {
-            throw httpError('OWNER_ALREADY_REGISTERED', { fields: { email: contact.email } });
-          }
-          // Defer the pending→consumed CAS until the registration has fully
-          // provisioned (§4.4.6, revised): the read-only pre-checks above +
-          // the DB's unique email/phone constraints already block a
-          // double-create, so consuming here would only burn the invite on an
-          // ordinary user error (duplicate phone) or a transient failure. Stamp
-          // `parent_org_id` from the CLAIM so the approval binding can't mismatch.
-          inviteJti = verified.jti;
-          parentOrgId = verified.org;
-        } else {
-          // Interim selector path: coordinator picks an active org (spec §6.2).
-          const reqOrgId = (req.body as { org_id?: string }).org_id;
-          if (!reqOrgId) {
-            throw httpError('SCHEMA_VALIDATION', {
-              detail: 'org_id is required when the organisation hierarchy is enabled.',
-            });
-          }
-          const org = await orgStore.findById(reqOrgId);
-          if (!org.ok) {
-            throw httpError('DB_UNAVAILABLE', {
-              cause: new Error(org.error.message),
-              fields: { sub_operation: 'orgStore.findById' },
-            });
-          }
-          // Covers bootstrap (no active org) and an org that went inactive/rejected.
-          if (org.value?.status !== 'active') {
-            throw httpError('TARGET_ORG_INACTIVE');
-          }
-          // Owner-also-coordinator (spec A4): a distinct, machine-readable error.
-          const ownerMatch = await orgStore.findByOwnerEmail(contact.email);
-          if (ownerMatch.ok && ownerMatch.value) {
-            throw httpError('OWNER_ALREADY_REGISTERED', { fields: { email: contact.email } });
-          }
-          parentOrgId = reqOrgId;
-        }
-      }
-
-      // Pre-check email + phone uniqueness in both stores. The DB
-      // generated-column UNIQUEs (contact_phone / contact_email) and Keycloak
-      // attribute lookups together give us a deterministic 409 instead of a
-      // race between `aggregators` and Keycloak.
-      const dbEmail = await aggregatorStore.findByContactEmail(contact.email);
-      if (!dbEmail.ok) {
-        throw httpError('DB_UNAVAILABLE', {
-          cause: new Error(dbEmail.error.message),
-          fields: { sub_operation: 'aggregatorStore.findByContactEmail' },
-        });
-      }
-      if (dbEmail.value !== null) {
-        const existing = dbEmail.value;
-        if (existing.status === 'inactive') {
-          // Rejected record (#726): block re-registration until the cooling
-          // window elapses, measured from the write-once `rejected_at`. Once it
-          // lapses, revive the SAME row to pending (clearing `rejected_at`) and
-          // re-send the review link — the disabled KC user is left intact for
-          // the approval step, so nothing is deleted or re-created.
-          const retryAfter = coolingRetryAfter(existing.rejectedAt, existing.updatedAt);
-          if (retryAfter) {
-            throw httpError('REGISTRATION_COOLING', {
-              fields: { email: contact.email, retry_after: retryAfter },
-            });
-          }
-          const revived = await aggregatorStore.update(existing.id, {
-            status: 'pending',
-            rejectedAt: null,
-            updatedBy: 'self',
-          });
-          if (!revived.ok) {
-            throw httpError('DB_UNAVAILABLE', {
-              cause: new Error(revived.error.message),
-              fields: { sub_operation: 'aggregatorStore.reviveRejected' },
-            });
-          }
-          return reclaimReview(existing);
-        }
-        if (existing.status !== 'pending') {
-          // active / retired — a live account owns this email.
-          throw httpError('USER_EXISTS', { fields: { email: contact.email } });
-        }
-        // Still pending → re-send the review link, no field change.
-        return reclaimReview(existing);
-      }
-
-      const dbPhone = await aggregatorStore.findByContactPhone(phoneE164);
-      if (!dbPhone.ok) {
-        throw httpError('DB_UNAVAILABLE', {
-          cause: new Error(dbPhone.error.message),
-          fields: { sub_operation: 'aggregatorStore.findByContactPhone' },
-        });
-      }
-      if (dbPhone.value !== null) {
-        const existingPhone = dbPhone.value;
-        if (existingPhone.status === 'inactive') {
-          // Same cooling window (#726) on the phone identity — reached only when
-          // the email didn't match any row but a rejected record owns this
-          // number. Within the window → 409; elapsed → revive that row and
-          // re-send its review link (reuse, no delete).
-          const retryAfter = coolingRetryAfter(existingPhone.rejectedAt, existingPhone.updatedAt);
-          if (retryAfter) {
-            throw httpError('REGISTRATION_COOLING', {
-              fields: { phone: phoneE164, retry_after: retryAfter },
-            });
-          }
-          const revived = await aggregatorStore.update(existingPhone.id, {
-            status: 'pending',
-            rejectedAt: null,
-            updatedBy: 'self',
-          });
-          if (!revived.ok) {
-            throw httpError('DB_UNAVAILABLE', {
-              cause: new Error(revived.error.message),
-              fields: { sub_operation: 'aggregatorStore.reviveRejected' },
-            });
-          }
-          return reclaimReview(existingPhone);
-        }
-        throw httpError('PHONE_EXISTS', { fields: { phone: phoneE164 } });
-      }
-
-      const kcEmail = await idp.findByEmail(contact.email);
-      if (!kcEmail.ok) {
-        throw httpError('IDP_UNAVAILABLE', {
-          cause: kcEmail.error,
-          fields: { sub_operation: 'idp.findByEmail' },
-        });
-      }
-      if (kcEmail.value !== null) {
-        throw httpError('USER_EXISTS', { fields: { email: contact.email } });
-      }
-
-      // Phone is the OTP-login identity for the portal — Keycloak's OTP
-      // authenticator looks users up by the `phoneNumber` attribute. If two
-      // users share the same number, the authenticator picks the first
-      // match deterministically, which can route a login attempt to a
-      // disabled (pending or rejected) account and surface "account
-      // disabled". Enforce phone uniqueness here so that never happens.
-      const kcPhone = await idp.findByAttribute(KC_ATTR.PHONE_NUMBER, phoneE164);
-      if (!kcPhone.ok) {
-        throw httpError('IDP_UNAVAILABLE', {
-          cause: kcPhone.error,
-          fields: { sub_operation: 'idp.findByAttribute.phoneNumber' },
-        });
-      }
-      if (kcPhone.value !== null) {
-        throw httpError('PHONE_EXISTS', { fields: { phone: phoneE164 } });
-      }
-
-      const aggregator = await createAggregatorWithSlug(aggregatorStore, body.name, {
-        type: body.type,
-        url: body.url ?? null,
-        contact,
-        locations: body.locations,
-        consent: serverConsent,
-        parentOrgId,
-        inviteEmail: inviteEmailClaim,
-        profile: buildAggregatorProfile(body as unknown as Record<string, unknown>),
-        profileRef: resolveProfileRef('registration.v1.json'),
-      });
-      if (!aggregator.ok) {
-        const code = mapStoreCreateError(aggregator.error.code);
-        throw httpError(code, { cause: new Error(aggregator.error.message) });
-      }
-      const { id: aggregatorId, orgSlug } = aggregator.value;
-
-      // Record registration consent BEFORE provisioning the profile + Keycloak
-      // user, so a consent-write failure rolls back cleanly (just the aggregator
-      // row, no external side effects). Fail-closed: never leave an aggregator
-      // without a consent record. Network/brand come from resolveActiveNetwork()
-      // so the recorded version matches what the web layer displayed.
-      const { network: activeNetwork, brand: activeBrand } = resolveActiveNetwork();
-      const consentRecorded = await recordAggregatorConsent({
-        aggregatorId,
-        network: activeNetwork,
-        brand: activeBrand,
-        log,
-      });
-      if (!consentRecorded) {
-        await aggregatorStore.deleteById(aggregatorId);
-        throw httpError('CONSENT_WRITE_FAILED', {
-          fields: { sub_operation: 'recordAggregatorConsent', rolled_back: true },
-        });
-      }
-
-      const profile = await profileStore.create({
-        aggregatorId,
-        createdBy: 'self',
-        updatedBy: 'self',
-      });
-      if (!profile.ok) {
-        await aggregatorStore.deleteById(aggregatorId);
-        throw httpError('DB_UNAVAILABLE', {
-          cause: new Error(profile.error.message),
-          fields: { sub_operation: 'profileStore.create', rolled_back: true },
-        });
-      }
-
-      // Keycloak carries four attributes:
-      //   - aggregator_id    reverse pointer to Postgres
-      //   - aggregator_type  participant focus, used by single-type enforcement
-      //   - phoneNumber      OTP login authenticator
-      //   - decision_made    login gate
-      // Slug, association, and decision metadata live in Postgres.
-      const kcAttributes: Record<string, string> = {
-        [KC_ATTR.AGGREGATOR_ID]: aggregatorId,
-        [KC_ATTR.AGGREGATOR_TYPE]: body.type,
-        [KC_ATTR.PHONE_NUMBER]: phoneE164,
-        [KC_ATTR.DECISION_MADE]: 'pending',
-      };
-
-      // Split the Beckn `contact.name` into first / last for Keycloak. The
-      // signup form already collects the full name, so we don't ask for it
-      // again via an UPDATE_PROFILE required action on first login.
-      const { firstName, lastName } = splitName(contact.name);
-      const kcResult = await idp.createUser({
-        email: contact.email,
-        username: contact.email,
-        phone: phoneE164,
-        enabled: false,
-        firstName,
-        lastName,
-        attributes: kcAttributes,
-      });
-      if (!kcResult.ok) {
-        await aggregatorStore.deleteById(aggregatorId);
-        if (kcResult.error.code === 'USER_EXISTS') {
-          throw httpError('USER_EXISTS', {
-            cause: kcResult.error,
-            fields: { email: contact.email, rolled_back: true },
-          });
-        }
-        throw httpError('IDP_UNAVAILABLE', {
-          cause: kcResult.error,
-          fields: { sub_operation: 'idp.createUser', rolled_back: true },
-        });
-      }
-
-      // Registration is fully provisioned — now claim the invite (#700). Runs
-      // last so nothing above can burn the coordinator's one-time invite; a
-      // failure here is best-effort (the row already exists and the email is
-      // unique, so the invite can't be reused even if it stays pending).
-      if (inviteJti) {
-        const consumed = await getRegistrationInvitesStore().consume(inviteJti);
-        if (!consumed.ok || consumed.value === null) {
-          log.warn(
-            {
-              status: 'failure',
-              sub_operation: 'inviteStore.consume',
-              aggregator_id: aggregatorId,
-            },
-            'invite consume after successful registration did not commit (registration stands)',
-          );
-        }
-      }
-
-      await sendAdminReviewEmail(
-        {
-          aggregatorId,
-          applicantName: body.name,
-          applicantEmail: contact.email,
-          applicantPhone: phoneE164,
-          ...(inviteEmailClaim ? { invitedEmail: inviteEmailClaim } : {}),
-          ...(await resolveOwnerRouting(parentOrgId)),
-        },
-        log,
-      );
-
-      log.info(
-        {
-          status: 'success',
-          latency_ms: Date.now() - start,
+        return reply.status(201).send({
           aggregator_id: aggregatorId,
           org_slug: orgSlug,
-          keycloak_user_id: kcResult.value.id,
-        },
-        'aggregator registration submitted',
-      );
-
-      return reply.status(201).send({
-        aggregator_id: aggregatorId,
-        org_slug: orgSlug,
-        status: 'pending',
-        message: 'Registration submitted. You will receive credentials by email after approval.',
-      });
+          status: 'pending',
+          message: 'Registration submitted. You will receive credentials by email after approval.',
+        });
+      } finally {
+        // Compensating release (#718 review). Reached on every exit that did not
+        // create a registration — a thrown error, or a reclaim that only re-sends
+        // the review link — so the coordinator keeps their one-time link. Scoped
+        // CAS `consumed → pending`: it can only give back the claim THIS request
+        // took. Only a mid-request process death leaves an invite consumed with
+        // no registration, which the owner resolves by re-minting.
+        if (inviteJti && !inviteCommitted) {
+          const released = await getRegistrationInvitesStore().release(inviteJti);
+          if (!released.ok || released.value === null) {
+            log.warn(
+              { status: 'failure', sub_operation: 'inviteStore.release', invite_jti: inviteJti },
+              'invite release after an incomplete registration did not commit',
+            );
+          }
+        }
+      }
     },
   );
 }
@@ -765,12 +778,17 @@ function mapStoreCreateError(
     | 'DUPLICATE_SLUG'
     | 'DUPLICATE_PHONE'
     | 'DUPLICATE_EMAIL'
+    | 'DUPLICATE'
     | 'CHECK_VIOLATION'
     | 'DB_UNAVAILABLE',
 ): ErrorCode {
   switch (code) {
     case 'DUPLICATE_SLUG':
       return 'DUPLICATE_SLUG';
+    // An unrecognised unique violation is a real conflict, but not one this
+    // layer can name — don't dress it up as a taken slug (#718 review).
+    case 'DUPLICATE':
+      return 'CONFLICT';
     case 'DUPLICATE_PHONE':
       return 'PHONE_EXISTS';
     case 'DUPLICATE_EMAIL':

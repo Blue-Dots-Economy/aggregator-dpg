@@ -87,4 +87,11 @@ export abstract class RegistrationInvitesStoreBase {
    * invite was not pending. Idempotent from the caller's view.
    */
   abstract revoke(jti: string): Promise<InviteStoreResult<RegistrationInvite | null>>;
+  /**
+   * Compensating CAS `consumed → pending`, undoing a claim whose registration
+   * never completed (#718 review). Scoped to `consumed` so a revoked or expired
+   * invite can never be resurrected, and returns `null` when the row was not
+   * consumed — the caller treats that as "nothing to give back".
+   */
+  abstract release(jti: string): Promise<InviteStoreResult<RegistrationInvite | null>>;
 }

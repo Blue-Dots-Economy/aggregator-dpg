@@ -92,4 +92,12 @@ export class InMemoryRegistrationInvitesStore extends RegistrationInvitesStoreBa
     row.status = 'revoked';
     return { ok: true, value: { ...row } };
   }
+
+  async release(jti: string): Promise<InviteStoreResult<RegistrationInvite | null>> {
+    const row = this.store.get(jti);
+    if (row?.status !== 'consumed') return { ok: true, value: null };
+    row.status = 'pending';
+    row.consumedAt = null;
+    return { ok: true, value: { ...row } };
+  }
 }

@@ -228,4 +228,60 @@ describe('coordinator submit with an invite token (#700)', () => {
     expect(second.statusCode).toBe(409);
     expect((second.json() as { error: { code: string } }).error.code).toBe('INVITE_ALREADY_USED');
   });
+
+  // The volume bound #700 exists for (#718 review). Sequential submits only
+  // prove the invite is no longer pending on the second call; the hole was
+  // CONCURRENT submits, which all passed a read-only pre-check and each created
+  // a registration. Distinct emails/phones on purpose: the unique constraints
+  // are what the old code leaned on, and #701 leaves the invited email
+  // non-enforcing, so an attacker is free to vary both.
+  it('bounds CONCURRENT submits on one invite to a single registration', async () => {
+    const token = await seedInviteAndToken();
+    const bodyFor = (n: number) => ({
+      ...validBody,
+      name: `TRRAIN ${n}`,
+      contact: { name: `Person ${n}`, phone: `+91987654321${n}`, email: `p${n}@x.org` },
+      invite: token,
+    });
+    const rs = await Promise.all([1, 2, 3, 4, 5].map((n) => post(bodyFor(n))));
+    expect(rs.filter((r) => r.statusCode === 201)).toHaveLength(1);
+    // Every loser is authoritatively rejected, not silently allowed through.
+    const losers = rs.filter((r) => r.statusCode !== 201);
+    expect(losers).toHaveLength(4);
+    for (const r of losers) {
+      expect(r.statusCode).toBe(409);
+      expect((r.json() as { error: { code: string } }).error.code).toBe('INVITE_ALREADY_USED');
+    }
+    // Only the winner's row exists — the other four created nothing.
+    const created = await Promise.all(
+      [1, 2, 3, 4, 5].map((n) => aggregatorStore.findByContactEmail(`p${n}@x.org`)),
+    );
+    expect(created.filter((r) => r.ok && r.value !== null)).toHaveLength(1);
+    const inv = await invites.findByJti('inv-1');
+    expect(inv.ok && inv.value?.status).toBe('consumed');
+  });
+
+  it('releases the claim when provisioning fails, so the invite stays usable (H4)', async () => {
+    const token = await seedInviteAndToken();
+    // Occupy the phone so the submit fails AFTER the invite has been claimed.
+    aggregatorStore.seed([
+      buildAggregator({
+        contact: { name: 'Other', phone: validBody.contact.phone, email: 'other@x.org' },
+      }),
+    ]);
+    const res = await post({ ...validBody, invite: token });
+    expect(res.statusCode).toBe(409);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('PHONE_EXISTS');
+    // Compensated back to pending — the coordinator's one-time link survives.
+    const inv = await invites.findByJti('inv-1');
+    expect(inv.ok && inv.value?.status).toBe('pending');
+    expect(inv.ok && inv.value?.consumedAt).toBeNull();
+    // ...and it still works once the collision is gone.
+    aggregatorStore.reset();
+    orgStore.seed([
+      buildAggregatorOrg({ id: ORG_ID, slug: 'o', status: 'active', ownerEmail: 'owner@o.org' }),
+    ]);
+    const retry = await post({ ...validBody, invite: token });
+    expect(retry.statusCode).toBe(201);
+  });
 });
