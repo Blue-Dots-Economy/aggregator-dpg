@@ -12,6 +12,11 @@
 
 ## Global Constraints
 
+- **`Result` discriminates on `success`, not `ok`.** `ok<T>(v)` returns `{ success: true, value }`
+  and `err<E>(e)` returns `{ success: false, error }` (`shared-primitives/result`). The `.ok` shape
+  belongs to `packages/mailer`'s unrelated local `MailerResult` — do not copy it. Assert
+  `expect(r.success)`.
+
 - **Never write a participant PII value.** Field _names_ and counts only. Actor and recipient are operator identities. Enforced by the property test in Task 7.
 - **The writer interface exposes no update, delete, or read.** That is the append-only guarantee; do not add one "for convenience".
 - **Audit failures never fail a campaign.** Every call site wraps the call, logs at `error`, and continues. Never rethrow.
@@ -583,20 +588,24 @@ export function runAuditWriterConformance(makeWriter: () => CampaignAuditWriterB
     it('accepts a requested row', async () => {
       const w = makeWriter();
       const r = await w.recordRequested(buildRequestedAudit());
-      expect(r.ok).toBe(true);
+      expect(r.success).toBe(true);
     });
 
     it('accepts a completed row for the same correlation id', async () => {
       const w = makeWriter();
       const id = '00000000-0000-4000-8000-0000000000aa';
-      expect((await w.recordRequested(buildRequestedAudit({ correlationId: id }))).ok).toBe(true);
-      expect((await w.recordCompleted(buildCompletedAudit({ correlationId: id }))).ok).toBe(true);
+      expect((await w.recordRequested(buildRequestedAudit({ correlationId: id }))).success).toBe(
+        true,
+      );
+      expect((await w.recordCompleted(buildCompletedAudit({ correlationId: id }))).success).toBe(
+        true,
+      );
     });
 
     it('accepts a dump row with no org', async () => {
       const w = makeWriter();
       const r = await w.recordDumpAccess(buildDumpAudit());
-      expect(r.ok).toBe(true);
+      expect(r.success).toBe(true);
     });
 
     it('exposes no mutation surface', () => {
@@ -821,7 +830,7 @@ describe('PostgresCampaignAuditWriter', () => {
     const values = vi.fn().mockRejectedValue(new Error('db down'));
     const db = { insert: () => ({ values }) } as never;
     const r = await new PostgresCampaignAuditWriter(db).recordRequested(buildRequestedAudit());
-    expect(r.ok).toBe(false);
+    expect(r.success).toBe(false);
   });
 });
 ```
