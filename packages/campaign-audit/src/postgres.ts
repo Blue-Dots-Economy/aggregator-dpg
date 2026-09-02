@@ -6,6 +6,7 @@
  *
  * @module @aggregator-dpg/campaign-audit/postgres
  */
+import { sql } from 'drizzle-orm';
 import { campaignPiiAudit } from '@aggregator-dpg/db-schema/schema';
 import { ok, err } from '@aggregator-dpg/shared-primitives/result';
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
@@ -17,9 +18,30 @@ import {
   type DumpAuditInput,
 } from './interface.js';
 
-/** Minimal shape this writer needs — avoids coupling to a concrete Drizzle client type. */
+/** The subset of an insert builder this writer needs (shared by {@link AuditDb} and {@link AuditTx}). */
+type AuditInsertable = (table: typeof campaignPiiAudit) => {
+  values: (row: unknown) => Promise<unknown>;
+};
+
+/**
+ * The transaction handle passed to the callback given to {@link AuditDb.transaction}.
+ * Needs `execute` (to issue `SET LOCAL statement_timeout`) alongside `insert`.
+ */
+export interface AuditTx {
+  execute: (query: ReturnType<typeof sql>) => Promise<unknown>;
+  insert: AuditInsertable;
+}
+
+/**
+ * Minimal shape this writer needs — avoids coupling to a concrete Drizzle
+ * client type. `transaction` is optional: it is only invoked when the writer
+ * is constructed with a `statementTimeoutMs` (see the constructor), so a
+ * caller (e.g. an existing unit-test stub) that only ever exercises the
+ * no-timeout path never needs to implement it.
+ */
 export interface AuditDb {
-  insert: (table: typeof campaignPiiAudit) => { values: (row: unknown) => Promise<unknown> };
+  insert: AuditInsertable;
+  transaction?: <T>(fn: (tx: AuditTx) => Promise<T>) => Promise<T>;
 }
 
 /**
@@ -34,8 +56,21 @@ export class PostgresCampaignAuditWriter extends CampaignAuditWriterBase {
   /**
    * @param db - Minimal Drizzle-like handle used only to INSERT rows into
    *   `campaign_pii_audit`.
+   * @param statementTimeoutMs - When set, every insert runs inside a
+   *   transaction with `SET LOCAL statement_timeout` pinned to this bound
+   *   (#617 SHOULD-FIX 1). A `Promise.race` alone can only make the *caller*
+   *   stop waiting — it does not cancel the in-flight query, so a stall (e.g.
+   *   something holding an exclusive lock on this table) leaves the
+   *   underlying pooled connection checked out indefinitely. A real
+   *   statement timeout makes Postgres itself cancel the query, which is
+   *   what actually frees the connection. Omit to insert directly with no
+   *   per-statement bound (existing behaviour, still used by callers that
+   *   don't need it, e.g. this package's own unit tests).
    */
-  constructor(private readonly db: AuditDb) {
+  constructor(
+    private readonly db: AuditDb,
+    private readonly statementTimeoutMs?: number,
+  ) {
     super();
   }
 
@@ -140,7 +175,21 @@ export class PostgresCampaignAuditWriter extends CampaignAuditWriterBase {
    */
   private async insert(row: Record<string, unknown>): Promise<Result<void, BaseError>> {
     try {
-      await this.db.insert(campaignPiiAudit).values(row);
+      if (this.statementTimeoutMs !== undefined && this.db.transaction) {
+        const timeoutMs = this.statementTimeoutMs;
+        await this.db.transaction(async (tx) => {
+          // `SET LOCAL` only takes effect for the current transaction and is
+          // reset automatically at COMMIT/ROLLBACK — safe on a pooled
+          // connection with no explicit reset needed. The value is our own
+          // internal, non-user-controlled constant, so a literal (rather than
+          // a bind parameter, which Postgres' SET command doesn't accept) is
+          // safe here.
+          await tx.execute(sql.raw(`SET LOCAL statement_timeout = '${timeoutMs}ms'`));
+          await tx.insert(campaignPiiAudit).values(row);
+        });
+      } else {
+        await this.db.insert(campaignPiiAudit).values(row);
+      }
       return ok(undefined);
     } catch (cause) {
       return err(

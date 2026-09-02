@@ -54,6 +54,22 @@ describe('safeAudit', () => {
     expect(errorSpy).not.toHaveBeenCalled();
   });
 
+  it('clears its internal timeout timer once the write settles, so it never lingers past the call (#617 cheap item)', async () => {
+    vi.useFakeTimers();
+    try {
+      await safeAudit(() => Promise.resolve(ok(undefined)), {
+        operation: 'campaignAudit.requested',
+        correlation_id: 'job-timer',
+        channel: 'export',
+      });
+      // An uncleared race timer would still be scheduled here even though the
+      // write already settled — that's exactly the leak this guards against.
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('still logs at error, and does not throw, when the writer itself throws', async () => {
     const errorSpy = vi.spyOn(logger, 'error');
 
