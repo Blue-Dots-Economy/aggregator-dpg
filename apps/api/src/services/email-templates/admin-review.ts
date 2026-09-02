@@ -4,7 +4,7 @@
  * confirmation page rendered by the API.
  */
 
-import { ctaButton, escapeHtml, renderShell } from './shared.js';
+import { ctaButtonFull, escapeHtml, pill, renderShell } from './shared.js';
 
 export interface AdminReviewVars {
   registrationId: string;
@@ -54,43 +54,70 @@ export function renderAdminReview(v: AdminReviewVars): {
     hour: '2-digit',
     minute: '2-digit',
   })} IST`;
-  const stateRow = v.state
-    ? `<tr><td style="padding:6px 0;color:#475069;width:140px;">State</td><td style="padding:6px 0;color:#0b1020;">${escapeHtml(v.state)}</td></tr>`
-    : '';
-  const aboutBlock = v.about
-    ? `<div style="margin-top:16px;padding:14px;background:#f7f8fb;border-radius:10px;font-size:13px;color:#0b1020;line-height:1.5;">${escapeHtml(v.about)}</div>`
-    : '';
+  // Rows are data, not markup: the bordered container needs to know which row
+  // is last (no divider under it), which is unmanageable when every row is a
+  // hand-written <tr>. Optional rows simply drop out of the list.
+  const rows: Array<{ label: string; value: string; style?: string }> = [
+    { label: 'Association', value: escapeHtml(v.association) },
+    { label: 'Type', value: escapeHtml(label), style: 'text-transform:capitalize;' },
+    { label: 'Contact', value: escapeHtml(v.applicantName) },
+    { label: 'Email', value: escapeHtml(v.applicantEmail) },
+  ];
   // Highlight when the coordinator registered with a different email than the
   // one they were invited at (#701) — the approver should sanity-check it.
   const emailMismatch = Boolean(v.invitedEmail && v.invitedEmail !== v.applicantEmail);
-  const invitedRow = emailMismatch
-    ? `<tr><td style="padding:6px 0;color:#b45309;width:140px;">Invited email</td><td style="padding:6px 0;color:#b45309;">${escapeHtml(v.invitedEmail as string)} <span style="color:#7c84a6;">— they're registering with a different email (above)</span></td></tr>`
+  if (emailMismatch) {
+    rows.push({
+      label: 'Invited email',
+      value:
+        `${escapeHtml(v.invitedEmail as string)} ` +
+        `<span style="color:#7c84a6;">— they're registering with a different email (above)</span>`,
+      style: 'color:#b45309;',
+    });
+  }
+  rows.push({ label: 'Phone', value: escapeHtml(v.applicantPhone) });
+  if (v.state) rows.push({ label: 'State', value: escapeHtml(v.state) });
+  rows.push({ label: 'Submitted', value: escapeHtml(submitted) });
+  rows.push({
+    label: 'Reference',
+    value: escapeHtml(v.registrationId),
+    style: 'font-family:monospace;font-size:12px;',
+  });
+
+  const rowsHtml = rows
+    .map((r, i) => {
+      const divider = i === rows.length - 1 ? '' : 'border-bottom:1px solid #eaecf2;';
+      return (
+        `<tr>` +
+        `<td style="padding:12px 16px;color:#475069;width:132px;vertical-align:top;${divider}">${escapeHtml(r.label)}</td>` +
+        `<td style="padding:12px 16px;color:#0b1020;${r.style ?? ''}${divider}">${r.value}</td>` +
+        `</tr>`
+      );
+    })
+    .join('');
+
+  const aboutBlock = v.about
+    ? `<div style="margin-top:16px;padding:14px;background:#f7f8fb;border-radius:10px;font-size:13px;color:#0b1020;line-height:1.5;">${escapeHtml(v.about)}</div>`
     : '';
 
   const body = `
-<h1 style="font-size:20px;font-weight:700;letter-spacing:-0.01em;margin:0 0 8px;color:#0b1020;text-transform:capitalize;">New ${escapeHtml(label)} registration</h1>
-<p style="margin:0 0 18px;font-size:14px;color:#475069;line-height:1.5;">
-  ${escapeHtml(v.association)} has submitted an ${escapeHtml(label)} registration. Review and approve or reject below.
+${pill('Action required', 'action')}
+<h1 style="font-size:22px;font-weight:700;letter-spacing:-0.015em;margin:0 0 10px;color:#0b1020;text-transform:capitalize;">New ${escapeHtml(label)} registration</h1>
+<p style="margin:0 0 20px;font-size:14.5px;color:#475069;line-height:1.55;">
+  <strong style="color:#0b1020;">${escapeHtml(v.association)}</strong> has submitted an ${escapeHtml(label)} registration. Review and approve or reject below.
 </p>
 
-<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="font-size:13.5px;">
-  <tr><td style="padding:6px 0;color:#475069;width:140px;">Association</td><td style="padding:6px 0;color:#0b1020;">${escapeHtml(v.association)}</td></tr>
-  <tr><td style="padding:6px 0;color:#475069;">Type</td><td style="padding:6px 0;color:#0b1020;text-transform:capitalize;">${escapeHtml(label)}</td></tr>
-  <tr><td style="padding:6px 0;color:#475069;">Contact</td><td style="padding:6px 0;color:#0b1020;">${escapeHtml(v.applicantName)}</td></tr>
-  <tr><td style="padding:6px 0;color:#475069;">Email</td><td style="padding:6px 0;color:#0b1020;">${escapeHtml(v.applicantEmail)}</td></tr>
-  ${invitedRow}
-  <tr><td style="padding:6px 0;color:#475069;">Phone</td><td style="padding:6px 0;color:#0b1020;">${escapeHtml(v.applicantPhone)}</td></tr>
-  ${stateRow}
-  <tr><td style="padding:6px 0;color:#475069;">Submitted</td><td style="padding:6px 0;color:#0b1020;">${escapeHtml(submitted)}</td></tr>
-  <tr><td style="padding:6px 0;color:#475069;">Reference</td><td style="padding:6px 0;color:#0b1020;font-family:monospace;font-size:12px;">${escapeHtml(v.registrationId)}</td></tr>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"
+  style="font-size:13.5px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;border-collapse:separate;overflow:hidden;">
+  ${rowsHtml}
 </table>
 ${aboutBlock}
 
-<div style="margin-top:28px;">
-  ${ctaButton('Review registration', v.reviewUrl, 'primary')}
+<div style="margin-top:26px;">
+  ${ctaButtonFull('Review registration', v.reviewUrl, 'primary')}
 </div>
 
-<p style="margin:22px 0 0;font-size:12px;color:#7c84a6;line-height:1.5;">
+<p style="margin:20px 0 0;font-size:12px;color:#7c84a6;line-height:1.5;">
   The link opens a review page where you can approve or reject. The decision is
   final once submitted. The link is single-use and expires in ${escapeHtml(v.expiresInText)}.
 </p>
