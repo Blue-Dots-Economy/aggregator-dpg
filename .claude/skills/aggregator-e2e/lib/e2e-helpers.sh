@@ -8,6 +8,10 @@
 # $E2E_TAG so `e2e_cleanup` can find them again. Nothing here edits a tracked
 # file or a `.env` — the stack is configured with inline env vars so a run can
 # never leave the developer's config mutated.
+#
+# Style note: positional parameters are assigned to named locals on entry and
+# every function ends with an explicit `return`, so the control flow stays
+# readable and the exit status is never an accident of the last command.
 
 set -uo pipefail
 
@@ -27,11 +31,22 @@ export NETWORK="${AGGREGATOR_NETWORK:-blue_dot}"
 export E2E_TAG="${E2E_TAG:-e2e-$(date +%s)}"
 
 # `curl` against the stack: -k because the local cert is self-signed.
-c() { curl -sk "$@"; }
-# Status code only.
-code() { curl -sk -o /dev/null -w '%{http_code}' "$@"; }
+c() {
+  curl -sk "$@"
+  return $?
+}
 
-psql_q() { docker exec "$PG_CONTAINER" psql -U aggregator -d aggregator -tAc "$1"; }
+# Status code only.
+code() {
+  curl -sk -o /dev/null -w '%{http_code}' "$@"
+  return $?
+}
+
+psql_q() {
+  local query="$1"
+  docker exec "$PG_CONTAINER" psql -U aggregator -d aggregator -tAc "$query"
+  return $?
+}
 
 # --------------------------------------------------------------------- reporting
 
@@ -42,8 +57,10 @@ E2E_RESULTS=()
 
 # ok <name> <actual> <expected>  — records a pass/fail line.
 ok() {
-  local name="$1" actual="$2" expected="$3"
-  if [ "$actual" = "$expected" ]; then
+  local name="$1"
+  local actual="$2"
+  local expected="$3"
+  if [[ "$actual" == "$expected" ]]; then
     E2E_PASS=$((E2E_PASS + 1))
     E2E_RESULTS+=("PASS | $name | $actual")
     echo "  PASS  $name ($actual)"
@@ -52,13 +69,17 @@ ok() {
     E2E_RESULTS+=("FAIL | $name | got $actual want $expected")
     echo "  FAIL  $name — got $actual, want $expected"
   fi
+  return 0
 }
 
 # skip <name> <why> — for a flow whose precondition is genuinely absent.
 skip() {
+  local name="$1"
+  local why="$2"
   E2E_SKIP=$((E2E_SKIP + 1))
-  E2E_RESULTS+=("SKIP | $1 | $2")
-  echo "  SKIP  $1 — $2"
+  E2E_RESULTS+=("SKIP | $name | $why")
+  echo "  SKIP  $name — $why"
+  return 0
 }
 
 e2e_report() {
@@ -68,7 +89,8 @@ e2e_report() {
   echo "-------------------------------------------------------"
   echo "PASS=$E2E_PASS  FAIL=$E2E_FAIL  SKIP=$E2E_SKIP"
   echo "======================================================="
-  [ "$E2E_FAIL" -eq 0 ]
+  [[ "$E2E_FAIL" -eq 0 ]]
+  return $?
 }
 
 # ------------------------------------------------------------------ stack launch
@@ -78,28 +100,32 @@ e2e_report() {
 # compose reads `${ORG_HIERARCHY_ENABLED:-false}` for BOTH api and web — the two
 # must agree, and doing it inline leaves the developer's .env untouched.
 stack_up() {
-  docker info >/dev/null 2>&1 || {
+  if ! docker info >/dev/null 2>&1; then
     echo "Docker is not running. Start Docker Desktop, then re-run." >&2
     return 1
-  }
+  fi
   ( cd "$REPO_ROOT" && AGGREGATOR_NETWORK="$NETWORK" ORG_HIERARCHY_ENABLED=true pnpm stack:up )
+  return $?
 }
 
 # nginx crash-loops if it boots before the web container's DNS resolves, and it
 # comes back with a 502 on /auth. One restart fixes it; this is not a retry loop
 # hiding a real failure, it is the documented startup race.
 fix_nginx_race() {
-  if [ "$(code "$BASE_URL/auth/realms/bluedots")" != "200" ]; then
+  if [[ "$(code "$BASE_URL/auth/realms/bluedots")" != "200" ]]; then
     ( cd "$REPO_ROOT" && docker compose restart nginx >/dev/null 2>&1 )
     sleep 5
   fi
+  return 0
 }
 
 # Blocks until every dependency the suite needs is actually answering.
 wait_for_stack() {
   local i
   for i in $(seq 1 90); do
-    if [ "$(code "$API_URL/health/ready")" = "200" ]; then break; fi
+    if [[ "$(code "$API_URL/health/ready")" == "200" ]]; then
+      break
+    fi
     sleep 2
   done
   fix_nginx_race
@@ -108,6 +134,7 @@ wait_for_stack() {
   echo "keycloak realm -> $(code "$BASE_URL/auth/realms/bluedots")"
   echo "mailpit        -> $(code "$MAILPIT_URL/api/v1/messages")"
   echo "config network -> $(c "$API_URL/v1/aggregator-config" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);console.log((j.network&&j.network.id)||j.network_id)}catch(e){console.log("UNPARSEABLE")}})')"
+  return 0
 }
 
 # ------------------------------------------------------------------------- mail
@@ -116,11 +143,16 @@ wait_for_stack() {
 # the dev overlay points the api, worker AND Keycloak at it, so every address is
 # deliverable and nothing escapes to a real inbox.
 
-mail_clear() { c -X DELETE "$MAILPIT_URL/api/v1/messages" >/dev/null; }
+mail_clear() {
+  c -X DELETE "$MAILPIT_URL/api/v1/messages" >/dev/null
+  return 0
+}
 
-# mail_wait_for <to-substring> [timeout-s] — newest matching message ID.
+# mail_wait_for <to-or-subject-substring> [timeout-s] — newest matching message ID.
 mail_wait_for() {
-  local needle="$1" timeout="${2:-40}" i id
+  local needle="$1"
+  local timeout="${2:-40}"
+  local i id
   for i in $(seq 1 "$timeout"); do
     id=$(c "$MAILPIT_URL/api/v1/messages?limit=60" |
       node -e '
@@ -133,25 +165,37 @@ mail_wait_for() {
             if(m) console.log(m.ID);
           }catch(e){}
         })' "$needle")
-    [ -n "$id" ] && { echo "$id"; return 0; }
+    if [[ -n "$id" ]]; then
+      echo "$id"
+      return 0
+    fi
     sleep 1
   done
   return 1
 }
 
-mail_body() { c "$MAILPIT_URL/api/v1/message/$1" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);process.stdout.write((j.Text||"")+"\n"+(j.HTML||""))})'; }
+mail_body() {
+  local id="$1"
+  c "$MAILPIT_URL/api/v1/message/$id" |
+    node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);process.stdout.write((j.Text||"")+"\n"+(j.HTML||""))})'
+  return 0
+}
 
 # mail_newest_recipient — address the newest message actually went to. Use this
 # when a routing rule decides the recipient (see mail_extract_review_url).
 mail_newest_recipient() {
   c "$MAILPIT_URL/api/v1/messages?limit=1" |
     node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const m=JSON.parse(s).messages[0];console.log(m.To[0].Address)}catch(e){}})'
+  return 0
 }
 
 # mail_extract_otp <to> — the 6-digit code from a Keycloak OTP mail.
 mail_extract_otp() {
-  local id; id=$(mail_wait_for "$1") || return 1
+  local to="$1"
+  local id
+  id=$(mail_wait_for "$to") || return 1
   mail_body "$id" | grep -oE '\b[0-9]{6}\b' | head -1
+  return 0
 }
 
 # mail_extract_review_url <to> — the signed review link from a review mail.
@@ -163,17 +207,24 @@ mail_extract_otp() {
 # never arrived" when it arrived at a different address — use
 # `mail_newest_recipient` if you don't know which.
 mail_extract_review_url() {
-  local id; id=$(mail_wait_for "$1") || return 1
+  local to="$1"
+  local id
+  id=$(mail_wait_for "$to") || return 1
   mail_body "$id" |
     grep -oE 'https?://[^"[:space:]<]+/admin/v1/[a-z-]+/read/[0-9a-f-]+\?token=[^"[:space:]<&]+' |
     head -1
+  return 0
 }
 
 # mail_extract_link <to> <path-substring> — generic signed-link puller
 # (invite links, grant links, registration links).
 mail_extract_link() {
-  local id; id=$(mail_wait_for "$1") || return 1
-  mail_body "$id" | grep -oE "https?://[^\"[:space:]<]*$2[^\"[:space:]<]*" | head -1
+  local to="$1"
+  local path="$2"
+  local id
+  id=$(mail_wait_for "$to") || return 1
+  mail_body "$id" | grep -oE "https?://[^\"[:space:]<]*${path}[^\"[:space:]<]*" | head -1
+  return 0
 }
 
 # --------------------------------------------------------------------- seeding
@@ -182,18 +233,23 @@ mail_extract_link() {
 # can't register without an ACTIVE org; an invite can't exist without an owner).
 # Seeding those directly keeps a failure in flow A from cascading into a
 # misleading failure in flow B. Each row is tagged with $E2E_TAG.
+#
+# Prefer driving the real UI/API when the flow itself is under test — seed only
+# the preconditions.
 
 # seed_active_org — prints the new org UUID.
 seed_active_org() {
   psql_q "INSERT INTO aggregator_orgs (slug, display_name, owner_email, status)
           VALUES ('$E2E_TAG-org', 'E2E Org $E2E_TAG', '$E2E_TAG-owner@example.org', 'active')
           RETURNING id;" | head -1 | tr -d '[:space:]'
+  return 0
 }
 
-# seed_invite <org-id> [email] — prints an invite token (mints via the api's own
-# signer so the token is byte-identical to a production one).
+# seed_invite <org-id> [email] — prints JTI= and TOKEN= for a pending invite,
+# minted with the api's own signer so the token is byte-identical to production.
 seed_invite() {
-  local org="$1" email="${2:-$E2E_TAG-coord@example.org}"
+  local org="$1"
+  local email="${2:-$E2E_TAG-coord@example.org}"
   local script="$REPO_ROOT/apps/api/src/__e2e_mint_invite.ts"
   cat > "$script" <<'TS'
 /** Generated by the aggregator-e2e skill. Removed by `e2e_cleanup`. */
@@ -214,25 +270,29 @@ console.log('JTI=' + c.value.jti);
 console.log('TOKEN=' + token);
 process.exit(0);
 TS
-  # Runs against the CONTAINER Postgres over the published dev-overlay port, so
-  # the token is signed with the same secret the running api verifies with.
+  # `pnpm exec` runs the workspace's own pinned tsx. Deliberately NOT `npx`,
+  # which will fetch and execute a package (and its lifecycle scripts) from the
+  # network if the binary happens to be missing.
   ( cd "$REPO_ROOT/apps/api" &&
     SEED_ORG_ID="$org" SEED_EMAIL="$email" \
     AGGREGATOR_NETWORK="$NETWORK" ORG_HIERARCHY_ENABLED=true \
     INSTANCE_ENV=development NODE_ENV=development \
-    npx tsx --env-file=.env src/__e2e_mint_invite.ts 2>/dev/null | grep -E '^(JTI|TOKEN)=' )
+    pnpm exec tsx --env-file=.env src/__e2e_mint_invite.ts 2>/dev/null |
+    grep -E '^(JTI|TOKEN)=' )
   rm -f "$script"
+  return 0
 }
 
 # ------------------------------------------------------------------- cleanup
 
 e2e_cleanup() {
-  rm -f "$REPO_ROOT/apps/api/src/__e2e_mint_invite.ts"
   local org_ids
+  rm -f "$REPO_ROOT/apps/api/src/__e2e_mint_invite.ts"
   org_ids=$(psql_q "SELECT id FROM aggregator_orgs WHERE slug LIKE '$E2E_TAG%' OR owner_email LIKE '$E2E_TAG%';")
   psql_q "DELETE FROM aggregators WHERE contact_email LIKE '$E2E_TAG%' OR name LIKE 'E2E %$E2E_TAG%';" >/dev/null
   psql_q "DELETE FROM registration_invites WHERE email LIKE '$E2E_TAG%';" >/dev/null
   psql_q "DELETE FROM aggregator_orgs WHERE slug LIKE '$E2E_TAG%' OR owner_email LIKE '$E2E_TAG%';" >/dev/null
   echo "cleaned rows tagged $E2E_TAG (orgs: $(echo "$org_ids" | tr '\n' ' '))"
   echo "NOTE: Keycloak users created by the run stay in the local dev realm."
+  return 0
 }
