@@ -218,6 +218,62 @@ describe('aggregator-orgs routes', () => {
     expect(mailer.outbox.length).toBe(1);
   });
 
+  it('returns 409 REGISTRATION_COOLING for a rejected org inside the cooling window', async () => {
+    orgStore.seed([
+      buildAggregatorOrg({
+        id: 'o-cooling',
+        slug: 'enable-india-rej1',
+        ownerEmail: 'ravi@enable.org',
+        status: 'inactive',
+        rejectedAt: new Date(), // just rejected → still cooling
+      }),
+    ]);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: orgBody,
+    });
+    expect(res.statusCode).toBe(409);
+    const err = res.json() as { error: { code: string; fields?: { retry_after?: string } } };
+    expect(err.error.code).toBe('REGISTRATION_COOLING');
+    expect(err.error.fields?.retry_after).toBeTruthy();
+    const stored = await orgStore.findById('o-cooling');
+    expect(stored.ok && stored.value?.status).toBe('inactive');
+    expect(mailer.outbox.length).toBe(0);
+  });
+
+  it('revives a rejected org once the cooling window has elapsed', async () => {
+    orgStore.seed([
+      buildAggregatorOrg({
+        id: 'o-revive',
+        slug: 'enable-india-rej2',
+        displayName: 'Old Name',
+        ownerEmail: 'ravi@enable.org',
+        status: 'inactive',
+        rejectedAt: new Date(Date.now() - 13 * 60 * 60 * 1000), // 13h ago > 12h default
+      }),
+    ]);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: orgBody,
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { org_id: string; status: string };
+    expect(body.org_id).toBe('o-revive');
+    expect(body.status).toBe('pending');
+    const stored = await orgStore.findById('o-revive');
+    if (stored.ok) {
+      expect(stored.value?.status).toBe('pending');
+      expect(stored.value?.rejectedAt).toBeNull();
+      // No field overwrite on revive.
+      expect(stored.value?.displayName).toBe('Old Name');
+    }
+    expect(mailer.outbox.length).toBe(1);
+  });
+
   it('rejects a resubmit against an ACTIVE org owner with OWNER_ALREADY_REGISTERED', async () => {
     orgStore.seed([
       buildAggregatorOrg({

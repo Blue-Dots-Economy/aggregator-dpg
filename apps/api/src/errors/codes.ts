@@ -204,16 +204,17 @@ export const ERR = {
   USER_EXISTS: {
     code: 'USER_EXISTS',
     status: 409,
-    title: 'Email already registered',
-    detail: 'An account with this email already exists. Use a different email or sign in instead.',
+    title: 'Email already in use',
+    detail:
+      'This email is already registered. Please use a different email, or sign in if it’s yours.',
     hint: 'Pre-check at idp.findByEmail returned non-null. Stale or duplicate KC user.',
   },
   PHONE_EXISTS: {
     code: 'PHONE_EXISTS',
     status: 409,
-    title: 'Phone already registered',
+    title: 'Phone already in use',
     detail:
-      'A user with this mobile number already exists. Use a different number or sign in instead.',
+      'This mobile number is already registered. Please use a different number, or sign in if it’s yours.',
     hint: 'idp.findByAttribute(phoneNumber) returned non-null. Phone is OTP login key — must be unique.',
   },
   INVALID_PHONE: {
@@ -410,6 +411,14 @@ export const ERR = {
       'An organisation with this name is already registered or pending. Please choose a different name.',
     hint: 'aggregator_orgs partial-unique display_name (case-insensitive) collision over non-terminal rows.',
   },
+  REGISTRATION_COOLING: {
+    code: 'REGISTRATION_COOLING',
+    status: 409,
+    title: 'Please try again later',
+    detail:
+      'A recent registration with these details was declined. You can register again after the cooling period.',
+    hint: 'A rejected record for this email/phone/owner_email exists and now - rejected_at < REGISTRATION_COOLING_MINUTES. See response.error.fields.retry_after for the ISO timestamp.',
+  },
   TARGET_ORG_INACTIVE: {
     code: 'TARGET_ORG_INACTIVE',
     status: 409,
@@ -417,6 +426,43 @@ export const ERR = {
     detail:
       'The selected organisation is not accepting coordinators. Contact the organisation owner.',
     hint: 'Coordinator submit/approval against an org whose status != active (spec §6.2 re-validate).',
+  },
+
+  // ── Coordinator invites (#700) ────────────────────────────────────────────
+  INVITE_INVALID: {
+    code: 'INVITE_INVALID',
+    status: 400,
+    title: 'Invalid invite',
+    detail: 'This invitation link is not valid. Ask your organisation owner for a fresh invite.',
+    hint: 'invite-token signature/audience/claims/role verify failed, or the invite row is missing.',
+  },
+  INVITE_EXPIRED: {
+    code: 'INVITE_EXPIRED',
+    status: 410,
+    title: 'Invite expired',
+    detail: 'This invitation has expired. Ask your organisation owner to send a fresh invite.',
+    hint: 'invite-token exp elapsed (INVITE_TOKEN_TTL_SECONDS). Recovery is the owner re-mint path (§6).',
+  },
+  INVITE_ALREADY_USED: {
+    code: 'INVITE_ALREADY_USED',
+    status: 409,
+    title: 'Invite already used',
+    detail: 'This invitation has already been used. If you already registered, sign in instead.',
+    hint: 'Invite row not pending (consumed/revoked/expired) or the pending→consumed CAS lost a race (§4.4.6).',
+  },
+  GRANT_INVALID: {
+    code: 'GRANT_INVALID',
+    status: 400,
+    title: 'Invalid link',
+    detail: 'This invite-management link is not valid. Use the link from your approval email.',
+    hint: 'grant-token signature/audience/sub verify failed (aggregator-grant).',
+  },
+  GRANT_EXPIRED: {
+    code: 'GRANT_EXPIRED',
+    status: 410,
+    title: 'Link expired',
+    detail: 'This invite-management link has expired. Request a fresh link to continue.',
+    hint: 'grant-token exp elapsed (GRANT_TOKEN_TTL_SECONDS). Recovery re-mails a fresh grant to the registered owner (§6).',
   },
 
   // ── Bulk uploads ────────────────────────────────────────────────────────

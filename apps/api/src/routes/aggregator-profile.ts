@@ -485,6 +485,7 @@ function mapAggregatorUpdateError(
     | 'DUPLICATE_SLUG'
     | 'DUPLICATE_PHONE'
     | 'DUPLICATE_EMAIL'
+    | 'DUPLICATE'
     | 'CHECK_VIOLATION'
     | 'DB_UNAVAILABLE',
 ): Parameters<typeof httpError>[0] {
@@ -499,6 +500,10 @@ function mapAggregatorUpdateError(
       return 'SCHEMA_VALIDATION';
     case 'DUPLICATE_SLUG':
       return 'DUPLICATE_SLUG';
+    // An unrecognised unique violation is a real conflict, but not one this
+    // layer can name — don't dress it up as a taken slug (#718 review).
+    case 'DUPLICATE':
+      return 'CONFLICT';
     default:
       return 'DB_UNAVAILABLE';
   }

@@ -47,6 +47,7 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
       status: 'pending',
       createdAt: now,
       updatedAt: now,
+      rejectedAt: null,
     };
     this.byId.set(row.id, row);
     return { ok: true, value: row };
@@ -100,6 +101,7 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
       ownerKcSub: patch.ownerKcSub !== undefined ? patch.ownerKcSub : existing.ownerKcSub,
       kcGroupId: patch.kcGroupId !== undefined ? patch.kcGroupId : existing.kcGroupId,
       status: patch.status ?? existing.status,
+      rejectedAt: patch.rejectedAt !== undefined ? patch.rejectedAt : existing.rejectedAt,
       updatedAt: new Date(),
     };
     this.byId.set(id, next);
@@ -121,7 +123,13 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
     const existing = this.byId.get(id);
     if (!existing) return err('NOT_FOUND', id);
     if (existing.status !== 'pending') return { ok: true, value: null };
-    const updated: AggregatorOrg = { ...existing, status: next, updatedAt: new Date() };
+    const updated: AggregatorOrg = {
+      ...existing,
+      status: next,
+      updatedAt: new Date(),
+      // Stamp rejected_at (write-once) on reject only (#726).
+      ...(next === 'inactive' ? { rejectedAt: new Date() } : {}),
+    };
     this.byId.set(id, updated);
     return { ok: true, value: updated };
   }

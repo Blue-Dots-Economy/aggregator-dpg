@@ -25,7 +25,7 @@ export function renderApplicantApproved(v: ApplicantApprovedVars): {
   Welcome to ${escapeHtml(brand.short_name)}, ${escapeHtml(v.contactName)}.
 </h1>
 <p style="margin:0 0 14px;font-size:14px;color:#475069;line-height:1.55;">
-  Your application for <strong>${escapeHtml(v.association)}</strong> has been approved. You can sign in to the ${escapeHtml(brand.long_name)} now.
+  Your application for <strong>${escapeHtml(v.association)}</strong> has been approved. You can sign in to ${escapeHtml(brand.long_name)} now.
 </p>
 <p style="margin:0 0 22px;font-size:14px;color:#475069;line-height:1.55;">
   Use the email or mobile number you registered (<strong>${escapeHtml(v.identifier)}</strong>) — we'll send a one-time code to verify it.
@@ -39,11 +39,15 @@ export function renderApplicantApproved(v: ApplicantApprovedVars): {
 `;
   const text = `Welcome to ${brand.short_name}, ${v.contactName}.
 
-Your application for ${v.association} has been approved. You can sign in to the ${brand.long_name} now.
+Your application for ${v.association} has been approved. You can sign in to ${brand.long_name} now.
 
 Use the email or mobile number you registered (${v.identifier}) — we'll send a one-time code to verify it.
 
 Sign in: ${v.signInUrl}
+
+Trouble signing in? Reply to this email and the ${brand.short_name} team will help.
+
+Sent by ${brand.long_name}.
 `;
 
   return { subject, html: renderShell({ preheader: subject, bodyHtml: body }), text };

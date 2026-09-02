@@ -47,12 +47,15 @@ describe('<LoginView />', () => {
     vi.clearAllMocks();
   });
 
-  it('renders the welcome heading and both cards with no error banner', () => {
+  it('renders the sign-in card with no error banner and no register entry (#619)', () => {
     renderView();
     expect(screen.getByText(messages.auth.welcome_heading)).toBeInTheDocument();
     expect(screen.getByText(messages.auth.existing_title)).toBeInTheDocument();
-    expect(screen.getByText(messages.auth.register_title)).toBeInTheDocument();
+    // Registration is not linked from the login homepage anymore (#619).
+    expect(screen.queryByText(messages.auth.register_title)).toBeNull();
     expect(screen.queryByRole('alert')).toBeNull();
+    // Invite-only recovery line (#701) points a mis-linked coordinator at their org.
+    expect(screen.getByText(/contact your organisation administrator/i)).toBeInTheDocument();
   });
 
   it('tells the reader what continuing commits them to, and links both documents', () => {
@@ -73,12 +76,6 @@ describe('<LoginView />', () => {
     expect(window.location.href).toBe(
       `/api/auth/login?returnTo=${encodeURIComponent('/dashboard/onboarding')}`,
     );
-  });
-
-  it('navigates to /register on the "Become a member" click', () => {
-    renderView();
-    screen.getByText(messages.auth.register_title).closest('button')!.click();
-    expect(window.location.href).toBe('/register');
   });
 
   it('renders the session_expired banner', () => {

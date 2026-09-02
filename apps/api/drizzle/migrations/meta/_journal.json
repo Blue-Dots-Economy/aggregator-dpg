@@ -148,6 +148,13 @@
       "when": 1787757637000,
       "tag": "0020_campaign_provider_response",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1788200000000,
+      "tag": "0021_registration_invites",
+      "breakpoints": true
     }
   ]
 }
