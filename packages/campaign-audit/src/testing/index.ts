@@ -36,18 +36,42 @@ export class CampaignAuditWriterFake extends CampaignAuditWriterBase {
   /** When set, every method throws this instead of writing a row. */
   failWith: Error | null = null;
 
+  /**
+   * Captures a `requested` row in `rows`, tagged `kind: 'requested'`.
+   *
+   * Throws `failWith` instead of recording anything when it is set.
+   *
+   * @param input - The requested-audit fields to capture.
+   * @returns `ok(undefined)` once the row has been pushed onto `rows`.
+   */
   override async recordRequested(input: RequestedAuditInput): Promise<Result<void, BaseError>> {
     if (this.failWith) throw this.failWith;
     this.rows.push({ kind: 'requested', ...input });
     return ok(undefined);
   }
 
+  /**
+   * Captures a `completed` row in `rows`, tagged `kind: 'completed'`.
+   *
+   * Throws `failWith` instead of recording anything when it is set.
+   *
+   * @param input - The completed-audit fields to capture.
+   * @returns `ok(undefined)` once the row has been pushed onto `rows`.
+   */
   override async recordCompleted(input: CompletedAuditInput): Promise<Result<void, BaseError>> {
     if (this.failWith) throw this.failWith;
     this.rows.push({ kind: 'completed', ...input });
     return ok(undefined);
   }
 
+  /**
+   * Captures a `dump` row in `rows`, tagged `kind: 'dump'`.
+   *
+   * Throws `failWith` instead of recording anything when it is set.
+   *
+   * @param input - The dump-audit fields to capture.
+   * @returns `ok(undefined)` once the row has been pushed onto `rows`.
+   */
   override async recordDumpAccess(input: DumpAuditInput): Promise<Result<void, BaseError>> {
     if (this.failWith) throw this.failWith;
     this.rows.push({ kind: 'dump', ...input });
