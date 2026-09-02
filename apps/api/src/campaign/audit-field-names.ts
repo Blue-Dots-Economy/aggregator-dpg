@@ -45,7 +45,7 @@
  * identifier grammar (no dots, no leading digits) — kept narrow on purpose
  * so it stays easy to reason about at this boundary.
  */
-const FIELD_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const FIELD_NAME_PATTERN = /^[A-Za-z_]\w*$/;
 
 /** Result of {@link sanitizeAuditFieldNames}. */
 export interface SanitizedAuditFieldNames {

@@ -39,8 +39,7 @@ const CAMPAIGN_AUDIT_TIMEOUT_MS = 2000;
  * @returns The singleton audit writer.
  */
 export function getCampaignAuditWriter(): CampaignAuditWriterBase {
-  if (!writer)
-    writer = new PostgresCampaignAuditWriter(getDb() as never, CAMPAIGN_AUDIT_TIMEOUT_MS);
+  writer ??= new PostgresCampaignAuditWriter(getDb() as never, CAMPAIGN_AUDIT_TIMEOUT_MS);
   return writer;
 }
 

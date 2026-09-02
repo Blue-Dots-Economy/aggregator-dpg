@@ -25,7 +25,7 @@ let writer: CampaignAuditWriterBase | null = null;
  * @returns The singleton audit writer.
  */
 export function getCampaignAuditWriter(): CampaignAuditWriterBase {
-  if (!writer) writer = new PostgresCampaignAuditWriter(getDb() as never);
+  writer ??= new PostgresCampaignAuditWriter(getDb() as never);
   return writer;
 }
 
