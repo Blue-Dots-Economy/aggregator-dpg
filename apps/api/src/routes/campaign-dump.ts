@@ -13,7 +13,14 @@
  * aggregator's rows. The identity check in `requireCampaignSystemAuth` is
  * therefore the only control, so EVERY exit — success, a denied caller, and a
  * misconfigured deployment, not just the happy path — emits one
- * `campaignDump.serve` log line; that is this route's whole audit trail.
+ * `campaignDump.serve` log line. Once identity is verified, every outcome
+ * (served or failed) additionally writes exactly one row to the append-only
+ * `campaign_pii_audit` table (aggregator-dpg#617), best-effort via
+ * `safeAudit` — that row, not this log line, is the durable/queryable trail
+ * compliance reads. It carries no `actorOrgId`: the caller's token has no org
+ * claim, and this route serves the whole network, so an org would misrepresent
+ * the access. An outright denial (bad/missing/wrong-client token) is not
+ * audited there, only logged — no row is possible without a verified actor.
  *
  * The exporter writes three FIXED keys, overwriting them in place with no
  * manifest and no cross-object atomicity, so there is no run to resolve and no
@@ -23,6 +30,7 @@
  *
  * @module apps/api/routes/campaign-dump
  */
+import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireCampaignSystemAuth, type CampaignSystemContext } from '../campaign/auth.js';
@@ -35,9 +43,10 @@ import {
   type SignedDownloadUrl,
 } from '../services/object-storage/index.js';
 import { campaignDumpInstanceId, config } from '../config.js';
-import { httpError, type HttpError } from '../errors/http-error.js';
+import { httpError, HttpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 import { logger } from '../logger.js';
+import { getCampaignAuditWriter, safeAudit } from '../services/campaign-audit/index.js';
 
 const dumpFileSchema = z.object({
   table: z.string(),
@@ -114,144 +123,201 @@ export async function registerCampaignDumpRoutes(app: FastifyInstance): Promise<
       }
       const auth: CampaignSystemContext = authResult.context;
 
-      const instanceId = campaignDumpInstanceId();
-      if (!instanceId) {
-        logger.warn(
-          {
-            operation: 'campaignDump.serve',
-            status: 'failure',
-            code: 'DUMP_NOT_CONFIGURED',
-            reason: 'CAMPAIGN_DUMP_INSTANCE_ID_UNSET',
-            subject: auth.subject,
-            request_id: req.id,
-            latency_ms: Date.now() - started,
-          },
-          'non-PII dump request denied: instance not configured',
-        );
-        throw httpError('DUMP_NOT_CONFIGURED', {
-          fields: { reason: 'CAMPAIGN_DUMP_INSTANCE_ID_UNSET' },
+      // The dump is synchronous and has no job to borrow a correlation id
+      // from, so one is minted per request (#617); it ties this request's
+      // single audit row together whether the request succeeds or fails.
+      const dumpCorrelationId = randomUUID();
+      const traceId = req.headers['x-request-id'] as string | undefined;
+
+      try {
+        const instanceId = campaignDumpInstanceId();
+        if (!instanceId) {
+          logger.warn(
+            {
+              operation: 'campaignDump.serve',
+              status: 'failure',
+              code: 'DUMP_NOT_CONFIGURED',
+              reason: 'CAMPAIGN_DUMP_INSTANCE_ID_UNSET',
+              subject: auth.subject,
+              request_id: req.id,
+              latency_ms: Date.now() - started,
+            },
+            'non-PII dump request denied: instance not configured',
+          );
+          throw httpError('DUMP_NOT_CONFIGURED', {
+            fields: { reason: 'CAMPAIGN_DUMP_INSTANCE_ID_UNSET' },
+          });
+        }
+
+        const network = (await getNetworkConfig()).network.id;
+        const keys = dumpObjectKeys({
+          prefix: config.CAMPAIGN_DUMP_PREFIX,
+          network,
+          instanceId,
         });
-      }
 
-      const network = (await getNetworkConfig()).network.id;
-      const keys = dumpObjectKeys({
-        prefix: config.CAMPAIGN_DUMP_PREFIX,
-        network,
-        instanceId,
-      });
+        // HEAD every object before signing anything: the response is
+        // all-three-or-nothing, because a short `files` array would read as
+        // success and the caller would silently import an incomplete snapshot.
+        // No URL is minted until every key has cleared this gate.
+        let heads: DumpKeyHead[];
+        try {
+          heads = await Promise.all(
+            keys.map(async (k) => ({ ...k, head: await headObject(k.key) })),
+          );
+        } catch (cause) {
+          throw storageUnavailable('headObject', cause, auth.subject, req.id, started);
+        }
 
-      // HEAD every object before signing anything: the response is
-      // all-three-or-nothing, because a short `files` array would read as
-      // success and the caller would silently import an incomplete snapshot.
-      // No URL is minted until every key has cleared this gate.
-      let heads: DumpKeyHead[];
-      try {
-        heads = await Promise.all(keys.map(async (k) => ({ ...k, head: await headObject(k.key) })));
-      } catch (cause) {
-        throw storageUnavailable('headObject', cause, auth.subject, req.id, started);
-      }
+        const missing = heads.filter((h) => h.head === null).map((h) => h.key);
+        if (missing.length > 0) {
+          logger.warn(
+            {
+              operation: 'campaignDump.serve',
+              status: 'failure',
+              reason: 'objects_missing',
+              azp: auth.azp,
+              subject: auth.subject,
+              missing,
+              request_id: req.id,
+              latency_ms: Date.now() - started,
+            },
+            'non-PII dump objects absent under the configured key root',
+          );
+          throw httpError('DUMP_NOT_AVAILABLE', { fields: { missing } });
+        }
 
-      const missing = heads.filter((h) => h.head === null).map((h) => h.key);
-      if (missing.length > 0) {
-        logger.warn(
-          {
-            operation: 'campaignDump.serve',
-            status: 'failure',
-            reason: 'objects_missing',
-            azp: auth.azp,
-            subject: auth.subject,
-            missing,
-            request_id: req.id,
-            latency_ms: Date.now() - started,
-          },
-          'non-PII dump objects absent under the configured key root',
-        );
-        throw httpError('DUMP_NOT_AVAILABLE', { fields: { missing } });
-      }
+        // Narrow past the presence gate through a type guard rather than
+        // carrying `ObjectHead | null` (and `?? 0` / `?? null` defensive
+        // fallbacks) into the response build: a genuine 0-byte object (the
+        // exporter writes one for a zero-row table) must stay distinguishable
+        // from a missing one, and `contentLength` must not silently become 0
+        // for the wrong reason. The length check is unreachable given the
+        // `missing` gate above — it guards the narrowing itself, so a future
+        // refactor that separates the two checks fails loudly instead of
+        // shipping a corrupted response.
+        const present = heads.filter((h): h is PresentDumpKeyHead => h.head !== null);
+        if (present.length !== keys.length) {
+          throw new Error('campaignDump: head/key count mismatch after the presence gate');
+        }
 
-      // Narrow past the presence gate through a type guard rather than
-      // carrying `ObjectHead | null` (and `?? 0` / `?? null` defensive
-      // fallbacks) into the response build: a genuine 0-byte object (the
-      // exporter writes one for a zero-row table) must stay distinguishable
-      // from a missing one, and `contentLength` must not silently become 0
-      // for the wrong reason. The length check is unreachable given the
-      // `missing` gate above — it guards the narrowing itself, so a future
-      // refactor that separates the two checks fails loudly instead of
-      // shipping a corrupted response.
-      const present = heads.filter((h): h is PresentDumpKeyHead => h.head !== null);
-      if (present.length !== keys.length) {
-        throw new Error('campaignDump: head/key count mismatch after the presence gate');
-      }
+        const ttlSeconds = config.CAMPAIGN_DUMP_URL_TTL_SECONDS;
+        let signed: Array<PresentDumpKeyHead & { url: SignedDownloadUrl }>;
+        try {
+          signed = await Promise.all(
+            present.map(async (h) => ({
+              ...h,
+              url: await signDownloadUrl(h.key, { ttlSeconds }),
+            })),
+          );
+        } catch (cause) {
+          throw storageUnavailable('signDownloadUrl', cause, auth.subject, req.id, started);
+        }
 
-      const ttlSeconds = config.CAMPAIGN_DUMP_URL_TTL_SECONDS;
-      let signed: Array<PresentDumpKeyHead & { url: SignedDownloadUrl }>;
-      try {
-        signed = await Promise.all(
-          present.map(async (h) => ({
-            ...h,
-            url: await signDownloadUrl(h.key, { ttlSeconds }),
-          })),
-        );
-      } catch (cause) {
-        throw storageUnavailable('signDownloadUrl', cause, auth.subject, req.id, started);
-      }
+        const files = signed.map((s) => ({
+          table: s.table,
+          key: s.key,
+          size_bytes: s.head.contentLength,
+          last_modified: s.head.lastModified?.toISOString() ?? null,
+          url: s.url.url,
+        }));
 
-      const files = signed.map((s) => ({
-        table: s.table,
-        key: s.key,
-        size_bytes: s.head.contentLength,
-        last_modified: s.head.lastModified?.toISOString() ?? null,
-        url: s.url.url,
-      }));
+        // `last_modified` is the caller's ONLY signal that the three objects came
+        // from different runs, so a null quietly removes the one control the
+        // torn-snapshot design depends on. S3 should always return LastModified
+        // on a successful HEAD; if it did not, say so rather than shipping a
+        // silent null.
+        const undated = files.filter((f) => f.last_modified === null).map((f) => f.table);
+        if (undated.length > 0) {
+          logger.warn(
+            {
+              operation: 'campaignDump.serve',
+              status: 'success',
+              reason: 'last_modified_absent',
+              tables: undated,
+              subject: auth.subject,
+              request_id: req.id,
+            },
+            'S3 HEAD returned no LastModified — the caller cannot detect a torn snapshot for these tables',
+          );
+        }
 
-      // `last_modified` is the caller's ONLY signal that the three objects came
-      // from different runs, so a null quietly removes the one control the
-      // torn-snapshot design depends on. S3 should always return LastModified
-      // on a successful HEAD; if it did not, say so rather than shipping a
-      // silent null.
-      const undated = files.filter((f) => f.last_modified === null).map((f) => f.table);
-      if (undated.length > 0) {
-        logger.warn(
+        // The primary trail this whole-network, un-org-scoped,
+        // un-rate-limited read leaves — kept alongside the append-only
+        // `campaign_pii_audit` row (#617) written just below, which is the
+        // durable/queryable copy compliance reads from directly.
+        logger.info(
           {
             operation: 'campaignDump.serve',
             status: 'success',
-            reason: 'last_modified_absent',
-            tables: undated,
+            azp: auth.azp,
             subject: auth.subject,
+            username: auth.username,
+            network,
+            instance: instanceId,
+            ttl_seconds: ttlSeconds,
+            files: files.map((f) => ({ key: f.key, last_modified: f.last_modified })),
             request_id: req.id,
+            latency_ms: Date.now() - started,
           },
-          'S3 HEAD returned no LastModified — the caller cannot detect a torn snapshot for these tables',
+          'non-PII dump download URLs issued',
         );
+
+        // Best-effort audit row (#617) — never blocks or fails the response;
+        // see `../services/campaign-audit/index.ts`. No `actorOrgId`: this
+        // route is whole-network by design and the caller's token carries no
+        // org claim, so one must never be fabricated here (see
+        // `DumpAuditInput`).
+        await safeAudit(
+          () =>
+            getCampaignAuditWriter().recordDumpAccess({
+              correlationId: dumpCorrelationId,
+              actorUserId: auth.subject,
+              ...(auth.azp ? { actorAzp: auth.azp } : {}),
+              outcome: 'succeeded',
+              completedAt: new Date(),
+              destination: `${config.S3_BUCKET}/${config.CAMPAIGN_DUMP_PREFIX}`,
+              network,
+              instance: instanceId,
+              endpoint: 'GET /v1/campaign/dump',
+              requestIp: req.ip,
+              ...(traceId ? { traceId } : {}),
+              details: { files: files.length, bytes: files.reduce((n, f) => n + f.size_bytes, 0) },
+            }),
+          { operation: 'campaignAudit.dump', correlation_id: dumpCorrelationId, channel: 'dump' },
+        );
+
+        return reply
+          .code(200)
+          .header('Cache-Control', 'no-store')
+          .send({
+            network,
+            instance: instanceId,
+            expires_at: earliestExpiry(signed),
+            files,
+          });
+      } catch (cause) {
+        // Every failure past this point in the request is audited too — the
+        // identity check above is the route's control, but once it has
+        // passed, a failed attempt to serve the dump is as much a PII-adjacent
+        // access event as a served one (#617).
+        await safeAudit(
+          () =>
+            getCampaignAuditWriter().recordDumpAccess({
+              correlationId: dumpCorrelationId,
+              actorUserId: auth.subject,
+              ...(auth.azp ? { actorAzp: auth.azp } : {}),
+              outcome: 'failed',
+              completedAt: new Date(),
+              endpoint: 'GET /v1/campaign/dump',
+              requestIp: req.ip,
+              ...(traceId ? { traceId } : {}),
+              ...(cause instanceof HttpError ? { errorCode: cause.code } : {}),
+            }),
+          { operation: 'campaignAudit.dump', correlation_id: dumpCorrelationId, channel: 'dump' },
+        );
+        throw cause;
       }
-
-      // The only trail this whole-network, un-org-scoped, un-rate-limited read
-      // leaves. Becomes an audit-log entry when #617 lands.
-      logger.info(
-        {
-          operation: 'campaignDump.serve',
-          status: 'success',
-          azp: auth.azp,
-          subject: auth.subject,
-          username: auth.username,
-          network,
-          instance: instanceId,
-          ttl_seconds: ttlSeconds,
-          files: files.map((f) => ({ key: f.key, last_modified: f.last_modified })),
-          request_id: req.id,
-          latency_ms: Date.now() - started,
-        },
-        'non-PII dump download URLs issued',
-      );
-
-      return reply
-        .code(200)
-        .header('Cache-Control', 'no-store')
-        .send({
-          network,
-          instance: instanceId,
-          expires_at: earliestExpiry(signed),
-          files,
-        });
     },
   );
 }
