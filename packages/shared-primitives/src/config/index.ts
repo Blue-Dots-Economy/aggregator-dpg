@@ -64,10 +64,18 @@ export const signalStackConfigFields = {
  * columns). The api reads the SAME key to record `pii_fields` on the
  * `campaign_pii_audit` `requested` row. Kept here and spread into both
  * `ConfigSchema`s — rather than declared separately in each — so the two
- * processes can never diverge: if they did, the audit log would misreport
- * which PII actually left the system (e.g. worker=`full`, api=`contact` would
- * log `[name,email,phone]` while the export shipped the entire item_state),
- * which defeats the audit's purpose.
+ * processes validate and default the value identically.
+ *
+ * That guarantees the two processes CANNOT DISAGREE ON THE MEANING of a given
+ * value (e.g. no risk of one enum drifting from the other's allowed values or
+ * default). It does NOT guarantee they see the SAME value at runtime: each
+ * process reads `process.env.CAMPAIGN_EXPORT_FIELDS` independently, so if the
+ * deployment (compose file, Helm values, etc.) sets the env var for one
+ * process's container but not the other's, they will silently default/resolve
+ * differently and the audit log will misreport which PII actually left the
+ * system (e.g. worker=`full`, api=`contact` would log `[name,email,phone]`
+ * while the export shipped the entire item_state). Operators must set this
+ * variable on BOTH the api and worker containers.
  */
 export const campaignExportConfigFields = {
   /**
