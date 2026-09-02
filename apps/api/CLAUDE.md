@@ -40,6 +40,55 @@ Streaming CSV parsing is entirely `apps/worker`'s job (see `apps/worker/CLAUDE.m
 
 A Signals `409 PROFILE_LIMIT_REACHED` is mapped to `SIGNALSTACK_PROFILE_LIMIT_REACHED` and categorised as `limit_reached` (not `system_error`) in `errors.csv`, and surfaced on registration links. Note that `onboard` is **no longer idempotent** — it always inserts, bounded only by the profile cap.
 
+## Campaign PII audit log (#617)
+
+`campaign_pii_audit` is **append-only** and records every campaign action that
+**releases data** — export, voice, email, and the non-PII dump. Status/list GETs
+are deliberately NOT audited: the rule is data release, not API traffic, and
+clients poll every 5-10s.
+
+- A campaign writes **two** rows sharing `correlation_id = campaign_job.id`:
+  `requested` from the API, `completed` from the worker on terminal status.
+  A dump writes **one**. That row's `actor_org_id` is never set at all —
+  `DumpAuditInput` (`packages/campaign-audit/src/interface.ts`) has no such
+  field, and `PostgresCampaignAuditWriter.recordDumpAccess` (`postgres.ts`)
+  omits the key from the insert rather than passing an explicit `null` — the
+  column stores NULL as a result. That NULL is meaningful: it marks a
+  whole-network, un-org-scoped access, and must never be backfilled with a
+  guessed org.
+- `event` is the phase, `outcome` is the result. `outcome` is NULL on
+  `requested` rows.
+- `piiFields` (on the `requested` row) carries **field NAMES and counts
+  only, never values** — see the interface's module doc
+  (`packages/campaign-audit/src/interface.ts:8-9`). The voice channel is the
+  one place this needed active enforcement: `content.variables` is
+  caller-supplied free text (not a schema-validated field-name list), so
+  before it is copied into `piiFields` it passes through
+  `apps/api/src/campaign/audit-field-names.ts`'s
+  `sanitizeAuditFieldNames`/`auditFieldNameEntries`, which keeps only
+  identifier-shaped strings and replaces everything else with a single
+  `+N redacted (non-identifier)` count — never the raw value. Known residual
+  gap: a single-word ASCII value (e.g. a first name with no space) is
+  indistinguishable from a real field name by that filter and passes through
+  unredacted; don't rely on it to catch that case.
+- The writer (`@aggregator-dpg/campaign-audit`) is **write-only** — no update,
+  delete or read. That absence IS the append-only guarantee; do not add one.
+- Writes are **best effort**: they happen after the operation is already durable
+  and never fail a campaign.
+
+Find gaps (audit rows that should exist and do not):
+
+```sql
+SELECT j.id, j.channel, j.status, j.created_at
+FROM campaign_job j
+LEFT JOIN campaign_pii_audit a
+  ON a.correlation_id = j.id AND a.event = 'requested'
+WHERE a.id IS NULL;
+```
+
+The mirror check (every `completed` has a `requested`) must exclude
+`channel = 'dump'`, which legitimately has no `requested` row.
+
 ## Tests
 
 Mixed convention within this app: most route/service files have a sibling `*.test.ts` (e.g. `aggregator-approvals.test.ts`), but several service subpackages use a `__tests__/` folder instead (`services/idp-admin/__tests__/`, `services/aggregator-store/__tests__/`). Either is fine here; match whichever convention the file you're touching already uses. One `.integration.test.ts` exists (`services/idp-admin/keycloak.integration.test.ts`), excluded from `pnpm -w test` per the repo-wide rule.
