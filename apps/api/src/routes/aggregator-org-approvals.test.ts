@@ -131,6 +131,58 @@ describe('aggregator-org-approvals routes', () => {
     expect(stored.ok && stored.value?.status).toBe('inactive');
   });
 
+  it('reject notifies the owner and includes the reason', async () => {
+    const orgId = '00000000-0000-0000-0000-0000000000b1';
+    orgStore.seed([
+      buildAggregatorOrg({
+        id: orgId,
+        slug: 'notify',
+        status: 'pending',
+        displayName: 'Notify Org',
+        ownerEmail: 'owner@notify.org',
+      }),
+    ]);
+    const { token } = await mintApprovalToken({ aggregatorId: orgId, intent: 'reject' });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/orgs/decision/${orgId}`,
+      payload: { token, decision: 'reject', reason: 'Registration details do not match.' },
+    });
+    expect(res.statusCode).toBe(200);
+    // The org reject path used to change status silently while the result page
+    // claimed the applicant had been notified.
+    expect(mailer.outbox.length).toBe(1);
+    const sent = mailer.outbox[0]!;
+    expect(sent.to).toBe('owner@notify.org');
+    expect(sent.html).toContain('Registration details do not match.');
+    // Wording is org-specific, not the coordinator default.
+    expect(sent.subject).toContain('organisation');
+    // The page names the address it actually mailed.
+    expect(res.body).toContain('owner@notify.org');
+  });
+
+  it('reject still notifies when no reason is given', async () => {
+    const orgId = '00000000-0000-0000-0000-0000000000b2';
+    orgStore.seed([
+      buildAggregatorOrg({
+        id: orgId,
+        slug: 'noreason',
+        status: 'pending',
+        ownerEmail: 'owner@noreason.org',
+      }),
+    ]);
+    const { token } = await mintApprovalToken({ aggregatorId: orgId, intent: 'reject' });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/orgs/decision/${orgId}`,
+      payload: { token, decision: 'reject' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(mailer.outbox.length).toBe(1);
+    // No reason block, and no stray "Reason:" label with nothing after it.
+    expect(mailer.outbox[0]!.html).not.toContain('Reason:');
+  });
+
   it('GET read page renders the confirm page for a pending org', async () => {
     const orgId = '00000000-0000-0000-0000-0000000000a4';
     orgStore.seed([

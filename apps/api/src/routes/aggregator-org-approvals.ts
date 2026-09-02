@@ -30,7 +30,10 @@ import { formatApprovalTtl } from '../services/approval-token.js';
 import { renderConfirmPage, renderResultPage } from '../views/approval-pages.js';
 import { mintReviewToken } from '../services/registration-notify.js';
 import { getMailer } from '@aggregator-dpg/mailer';
-import { renderOrgOwnerApproved } from '../services/email-templates/index.js';
+import {
+  renderApplicantRejected,
+  renderOrgOwnerApproved,
+} from '../services/email-templates/index.js';
 import { mintGrantToken } from '../services/grant-token.js';
 import {
   sendHtml,
@@ -45,6 +48,8 @@ import {
 const OrgDecisionBodySchema = z.object({
   token: z.string().min(1),
   decision: z.enum(['approve', 'reject']),
+  /** Same cap as the coordinator decision route; surfaced to the applicant. */
+  reason: z.string().max(2000).optional(),
 });
 
 const OrgApprovalParamsSchema = z.object({ id: z.string() });
@@ -189,14 +194,54 @@ export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance):
 
       if (parsed.data.decision === 'reject') {
         await orgStore.reject(orgId);
-        log.info({ status: 'success', decision: 'reject', new_status: 'inactive' }, 'org rejected');
+        // Notify the owner, mirroring the coordinator reject path. The CAS above
+        // has already committed, so a mail failure logs and continues rather
+        // than un-rejecting a decided application — same posture as the
+        // org-approved mail below. No owner name is stored on the org row (the
+        // name given at registration only builds the Keycloak user), so the
+        // template greets without one.
+        const rejectedMail = renderApplicantRejected({
+          association: lookup.value.displayName,
+          entityLabel: 'organisation',
+          ...(parsed.data.reason ? { reason: parsed.data.reason } : {}),
+        });
+        const rejectSend = await getMailer().send({
+          to: lookup.value.ownerEmail,
+          subject: rejectedMail.subject,
+          html: rejectedMail.html,
+          text: rejectedMail.text,
+        });
+        if (!rejectSend.ok) {
+          log.warn(
+            {
+              status: 'failure',
+              sub_operation: 'mailer.send.orgRejected',
+              code: rejectSend.error.code,
+              cause: rejectSend.error.message,
+            },
+            'org-rejected email delivery failed (org is inactive; owner not notified)',
+          );
+        }
+        // The reason is logged for audit but not persisted — there is no column
+        // for it on either table yet (same gap as the coordinator path).
+        log.info(
+          {
+            status: 'success',
+            decision: 'reject',
+            new_status: 'inactive',
+            reason: parsed.data.reason ?? null,
+          },
+          'org rejected',
+        );
         return sendHtml(
           reply,
           200,
           renderResultPage({
             status: 'success',
             title: 'Organisation rejected',
-            message: 'The applicant has been notified.',
+            message: rejectSend.ok
+              ? `${lookup.value.ownerEmail} has been notified.`
+              : 'The organisation was rejected, but the notification email could not be delivered.',
           }),
         );
       }
