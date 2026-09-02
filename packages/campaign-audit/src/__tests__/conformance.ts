@@ -1,6 +1,13 @@
 /**
- * Behaviour every writer must share. Run against the fake here, and against the
- * real Postgres writer in its integration test, so the two cannot drift.
+ * Behaviour every writer must share.
+ *
+ * Currently exercised only against {@link CampaignAuditWriterFake}, via
+ * `fake.test.ts` — `PostgresCampaignAuditWriter` has its own narrower unit
+ * tests (`postgres.test.ts`, mocked `AuditDb`) but is NOT run through this
+ * suite against a real Postgres instance. A real-database integration test
+ * that runs this same suite against `PostgresCampaignAuditWriter` is deferred
+ * to a follow-up issue (#617 final review, cheap item) — until it exists, the
+ * fake and the real writer are not proven to behave identically.
  *
  * @module @aggregator-dpg/campaign-audit/__tests__/conformance
  */

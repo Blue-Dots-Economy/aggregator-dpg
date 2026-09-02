@@ -1,6 +1,6 @@
-CREATE TYPE "campaign_audit_event" AS ENUM('requested', 'completed');--> statement-breakpoint
-CREATE TYPE "campaign_audit_channel" AS ENUM('export', 'email', 'voice', 'dump');--> statement-breakpoint
-CREATE TYPE "campaign_audit_outcome" AS ENUM('succeeded', 'partial', 'failed');--> statement-breakpoint
+CREATE TYPE "public"."campaign_audit_event" AS ENUM('requested', 'completed');--> statement-breakpoint
+CREATE TYPE "public"."campaign_audit_channel" AS ENUM('export', 'email', 'voice', 'dump');--> statement-breakpoint
+CREATE TYPE "public"."campaign_audit_outcome" AS ENUM('succeeded', 'partial', 'failed');--> statement-breakpoint
 CREATE TABLE "campaign_pii_audit" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"correlation_id" uuid NOT NULL,
