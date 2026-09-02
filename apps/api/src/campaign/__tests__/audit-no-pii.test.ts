@@ -33,6 +33,19 @@
  * no body), so its assertion is structural: `details` may only hold the
  * fixed, non-PII shape `{ files, bytes }` (see `DumpAuditInput.details`).
  *
+ * Fix-round-1 additions (review of the first version of this file found the
+ * guarantee false for voice): a voice-channel case drives PII through
+ * `content.variables`, the one channel-specific input that WAS spread
+ * verbatim into `piiFields` before `../audit-field-names.ts` existed — see
+ * that module's doc for the underlying defect and fix. All PII assertions
+ * are now case-insensitive (`content.name.toLowerCase()` would otherwise
+ * slip past a case-sensitive `.not.toContain`). Substring matching has an
+ * inherent blind spot this file does NOT chase: a truncated or otherwise
+ * transformed copy of a PII value (e.g. `content.name.slice(0, 6)`) will not
+ * be caught by any string-containment check, case-insensitive or not — this
+ * test proves the sanctioned fields stay free of PII, not that no partial
+ * fragment of one could ever appear.
+ *
  * @module apps/api/campaign/audit-no-pii.test
  */
 process.env.SIGNALSTACK_BASE_URL = 'http://signals.local';
@@ -169,6 +182,16 @@ describe('audit rows never contain a participant PII value (#617)', () => {
     });
   }
 
+  /** Submits a coordinator-scoped voice-dispatch request carrying `payload`. */
+  function submitVoice(payload: unknown) {
+    return app.inject({
+      method: 'POST',
+      url: '/v1/campaign/voice',
+      headers: { authorization: 'Bearer coordinator' },
+      payload: payload as object,
+    });
+  }
+
   /** Issues the dump request with the system service-account token. */
   function getDump() {
     return app.inject({
@@ -181,6 +204,20 @@ describe('audit rows never contain a participant PII value (#617)', () => {
   /** Every string reachable anywhere in a captured row, recursively. */
   function serialise(rows: AuditRow[]): string {
     return JSON.stringify(rows);
+  }
+
+  /**
+   * Asserts none of {@link PII}'s values appear anywhere in `rows`, matched
+   * case-insensitively (a lower/upper-cased copy of a PII value must be
+   * caught, not just an exact-case one). See the module doc for the
+   * substring-matching limitation this does NOT cover (truncated/transformed
+   * fragments).
+   */
+  function assertNoPii(rows: AuditRow[]): void {
+    const serialised = serialise(rows).toLowerCase();
+    for (const value of PII) {
+      expect(serialised).not.toContain(value.toLowerCase());
+    }
   }
 
   it('never puts a request-supplied PII value into the requested audit row, however the caller carries it', async () => {
@@ -205,10 +242,7 @@ describe('audit rows never contain a participant PII value (#617)', () => {
     expect(res.statusCode).toBe(202);
     expect(audit.rows.filter((r) => r.kind === 'requested')).toHaveLength(1);
 
-    const serialised = serialise(audit.rows);
-    for (const value of PII) {
-      expect(serialised).not.toContain(value);
-    }
+    assertNoPii(audit.rows);
     // The row must still carry its legitimate, sanctioned `purpose` pass
     // through — this test is about the UNsanctioned channels, not about
     // `purpose` itself being empty.
@@ -227,10 +261,7 @@ describe('audit rows never contain a participant PII value (#617)', () => {
     const rows = audit.rows.filter((r) => r.kind === 'dump');
     expect(rows).toHaveLength(1);
 
-    const serialised = serialise(audit.rows);
-    for (const value of PII) {
-      expect(serialised).not.toContain(value);
-    }
+    assertNoPii(audit.rows);
 
     const details = (rows[0] as { details?: Record<string, unknown> }).details;
     expect(details && Object.keys(details).sort()).toEqual(['bytes', 'files']);
@@ -246,9 +277,38 @@ describe('audit rows never contain a participant PII value (#617)', () => {
     expect(rows).toHaveLength(1);
     expect((rows[0] as { outcome?: string }).outcome).toBe('failed');
 
-    const serialised = serialise(audit.rows);
-    for (const value of PII) {
-      expect(serialised).not.toContain(value);
-    }
+    assertNoPii(audit.rows);
+  });
+
+  it('never puts a request-supplied PII value into the voice audit row, even via content.variables (fix-round-1)', async () => {
+    // Before `../audit-field-names.ts` existed, `campaign-voice.ts` spread
+    // `content.variables` straight into `piiFields` — a live contract
+    // violation, since `voiceContentSchema` leaves `variables` as
+    // unvalidated free text. This drives PII through exactly that field
+    // (plus the same content/metadata vectors the export case above covers)
+    // and would fail against the pre-fix `piiFields`.
+    const res = await submitVoice({
+      item_ids: [VALID_UUID],
+      metadata: [
+        { key: 'purpose', value: 'quarterly outreach audit' },
+        { key: 'contact_note', value: `${PII[0]} <${PII[1]}> ${PII[2]}` },
+      ],
+      content: {
+        agent_id: 'agent-123',
+        variables: ['role', PII[0], PII[1], PII[2]],
+      },
+    });
+    expect(res.statusCode).toBe(202);
+    const rows = audit.rows.filter((r) => r.kind === 'requested');
+    expect(rows).toHaveLength(1);
+
+    assertNoPii(audit.rows);
+
+    // The row must still carry the identifier-shaped variable name AND a
+    // truthful count of what was redacted — this isn't just "PII absent",
+    // it's "the row still says how many fields were released".
+    const piiFields = (rows[0] as { piiFields?: string[] }).piiFields ?? [];
+    expect(piiFields).toContain('role');
+    expect(piiFields).toContain('+3 redacted (non-identifier)');
   });
 });
