@@ -345,6 +345,32 @@ describe('worker completed-audit rows never contain a decrypted participant PII 
       assertNoPii(audit.rows);
     });
 
+    it('records a non-zero resolvedCount for a fully successful voice job (#617 follow-up)', async () => {
+      // Voice items terminate at `submitted` — never `resolved` or `sent`
+      // (see `decryptVoiceItems`/`markSubmitted` in `./voice.ts`). Before
+      // rolling `submitted` into `resolvedCount`, this exact scenario — every
+      // contact accepted by the provider — produced a `completed` row with
+      // EVERY outcome count at zero: indistinguishable from "nothing was
+      // released" even though every phone number went to Raya. This harness
+      // (unlike the simpler export-focused one in `index.test.ts`) correctly
+      // models the forward-only `resolved -> submitted` transition, so it is
+      // the one that can actually prove this.
+      const audit = new CampaignAuditWriterFake();
+      const deps = buildDeps(voiceJob(), { voice: successfulVoiceCollaborators(), audit });
+
+      await runCampaignJob('job-voice-pii', deps);
+
+      const rows = audit.rows.filter((r) => r.kind === 'completed');
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        outcome: 'succeeded',
+        resolvedCount: 1,
+        sentCount: 0,
+        failedCount: 0,
+        skippedCount: 0,
+      });
+    });
+
     it('holds on the final-attempt failure path, even though PII was already decrypted', async () => {
       const audit = new CampaignAuditWriterFake();
       const deps = buildDeps(voiceJob(), {

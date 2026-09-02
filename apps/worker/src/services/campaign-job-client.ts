@@ -325,6 +325,17 @@ export interface AuditCounts {
  * Maps a job's item-status tally onto the `completed` audit row's outcome
  * counts (#617).
  *
+ * `resolvedCount` aggregates `resolved` (export: decrypted, ready to ship)
+ * AND `submitted` (voice: handed to Raya). Voice items terminate at
+ * `submitted`, never `resolved` or `sent` — handing a contact to the
+ * provider IS the release, so it must be counted, or a fully successful
+ * voice campaign would audit as `outcome: 'succeeded'` with every count at
+ * zero, which reads as "measured and nothing happened" rather than "not
+ * measured". `sentCount` stays strictly confirmed-delivered (the export and
+ * email channels' own success write). This mirrors `deriveJobStatus`'s own
+ * `succeeded = resolved + submitted + sent` grouping, so the counts and the
+ * derived status agree about what counts as a release.
+ *
  * `skippedCount` aggregates every status that is a deliberate no-op rather
  * than a release: `skipped_not_owned` (the org doesn't own the item),
  * `skipped_no_contact` (owned, but no usable contact field), and
@@ -337,7 +348,7 @@ export interface AuditCounts {
  */
 export function toAuditCounts(counts: JobStatusCounts): AuditCounts {
   return {
-    resolvedCount: counts.resolved,
+    resolvedCount: counts.resolved + counts.submitted,
     skippedCount: counts.skipped_not_owned + counts.skipped_no_contact + counts.duplicate_active,
     failedCount: counts.failed,
     sentCount: counts.sent,

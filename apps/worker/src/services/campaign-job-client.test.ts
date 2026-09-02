@@ -235,6 +235,31 @@ describe('campaign job client', () => {
     });
   });
 
+  it('toAuditCounts rolls submitted (voice: handed to the provider) into resolvedCount, not sentCount', () => {
+    // A fully successful voice job: every item terminates at `submitted`,
+    // never `resolved` or `sent`. Before this fix, `resolvedCount` would be
+    // computed from `resolved` alone and every count would land at zero —
+    // indistinguishable from "nothing happened" even though every contact
+    // was handed to Raya.
+    const counts = {
+      total: 3,
+      pending: 0,
+      resolved: 0,
+      submitted: 3,
+      sent: 0,
+      skipped_not_owned: 0,
+      skipped_no_contact: 0,
+      duplicate_active: 0,
+      failed: 0,
+    };
+    expect(client.toAuditCounts(counts)).toEqual({
+      resolvedCount: 3,
+      skippedCount: 0,
+      failedCount: 0,
+      sentCount: 0,
+    });
+  });
+
   it('claimStalledJobs returns ids', async () => {
     queue([{ id: 'job-1' }]);
     expect(await client.claimStalledJobs(900)).toEqual(['job-1']);
