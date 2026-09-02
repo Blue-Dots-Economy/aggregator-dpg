@@ -227,37 +227,7 @@ export async function runCampaignJob(jobId: string, deps: CampaignJobDeps): Prom
     // gated on `status` actually being one of `TERMINAL_JOB_STATUSES`
     // (#617 SHOULD-FIX 2) — no currently-reachable handler leaves a pending
     // item on a normal return, so this guards a latent path, not a live one.
-    if (TERMINAL_JOB.has(status)) {
-      // `rollUpStatus` derives from item counts and can itself land on `failed`
-      // (e.g. every item unowned) without this branch ever throwing, so the
-      // mapping must check for `failed` explicitly rather than defaulting to
-      // `succeeded` for anything that isn't `partial`.
-      const outcome: AuditOutcome =
-        status === 'partial' ? 'partial' : status === 'failed' ? 'failed' : 'succeeded';
-      await safeAudit(
-        () =>
-          deps.audit?.recordCompleted({
-            correlationId: jobId,
-            channel: job.channel,
-            actorOrgId: job.signalstackOrgId,
-            outcome,
-            completedAt: new Date(),
-            ...toAuditCounts(counts),
-            ...exportAuditExtras(job, deps.config),
-          }) ?? Promise.resolve(undefined),
-        deps.log,
-        { operation: 'campaignAudit.completed', job_id: jobId, channel: job.channel },
-      );
-    } else {
-      deps.log.warn({
-        operation: 'campaign.process',
-        status: 'skipped',
-        reason: 'non_terminal_after_handler',
-        job_id: jobId,
-        channel: job.channel,
-        job_status: status,
-      });
-    }
+    await recordSuccessPathAudit(job, deps, status, counts);
 
     deps.log.info({
       operation: 'campaign.process',
@@ -293,33 +263,126 @@ export async function runCampaignJob(jobId: string, deps: CampaignJobDeps): Prom
     // resolve items still `pending` (never reached, so never marked) so the
     // derived counts add up to the requested total.
     if (isFinalAttempt) {
-      await deps.client.failPendingItems(jobId, 'job_failed');
-      await deps.client.setJobStatus(jobId, 'failed', truncateReason(reason));
-
-      // Terminal (out of retries): record the failure. Best effort (#617).
-      // `rollUpStatus` was never reached on this path (the handler threw
-      // before getting there), so the counts are read fresh here — after
-      // `failPendingItems` above, so they reflect every item's true final
-      // status rather than leaving the still-`pending` ones uncounted.
-      const counts = await deps.client.countItems(jobId);
-      await safeAudit(
-        () =>
-          deps.audit?.recordCompleted({
-            correlationId: jobId,
-            channel: job.channel,
-            actorOrgId: job.signalstackOrgId,
-            outcome: 'failed',
-            completedAt: new Date(),
-            errorCode: err instanceof Error ? err.constructor.name : 'unknown',
-            ...toAuditCounts(counts),
-            ...exportAuditExtras(job, deps.config),
-          }) ?? Promise.resolve(undefined),
-        deps.log,
-        { operation: 'campaignAudit.completed', job_id: jobId, channel: job.channel },
-      );
+      await finalizeFailedJob(job, deps, reason, err);
     }
     throw err;
   }
+}
+
+/**
+ * Maps a rolled-up job status to the `completed` audit row's `outcome`.
+ *
+ * Deliberately a three-way check, not a `partial`-vs-everything-else
+ * two-way one: `rollUpStatus` derives `status` purely from item counts and
+ * can itself land on `failed` (e.g. every item came back unowned) without
+ * ever throwing. An earlier two-way version of this mapping defaulted
+ * anything that wasn't `partial` to `succeeded`, so that all-unowned job was
+ * misclassified as a success in the audit row — a bug this three-way form
+ * fixes by checking `failed` explicitly rather than folding it into the
+ * fallback.
+ *
+ * @param status - The job's rolled-up terminal status.
+ * @returns The audit outcome to record on the `completed` row.
+ */
+function deriveAuditOutcome(status: CampaignJobStatus): AuditOutcome {
+  if (status === 'partial') return 'partial';
+  if (status === 'failed') return 'failed';
+  return 'succeeded';
+}
+
+/**
+ * Records the success-path `completed` audit row, or — when the roll-up left
+ * the job non-terminal (#617 SHOULD-FIX 2; see the doc comment at the
+ * `runCampaignJob` call site) — logs a warning instead of writing one.
+ * Extracted from `runCampaignJob` so this terminal-audit step reads as one
+ * unit rather than adding its own branching to the orchestrator
+ * (`typescript:S3776`). Best-effort: routed through {@link safeAudit}, so a
+ * writer failure is logged and never thrown.
+ *
+ * @param job - The job just processed.
+ * @param deps - The job's collaborators/config/logger/audit writer.
+ * @param status - The job's rolled-up status, from `rollUpStatus`.
+ * @param counts - The job's rolled-up item-status counts.
+ */
+async function recordSuccessPathAudit(
+  job: ProcessingJob,
+  deps: CampaignJobDeps,
+  status: CampaignJobStatus,
+  counts: JobStatusCounts,
+): Promise<void> {
+  if (!TERMINAL_JOB.has(status)) {
+    deps.log.warn({
+      operation: 'campaign.process',
+      status: 'skipped',
+      reason: 'non_terminal_after_handler',
+      job_id: job.id,
+      channel: job.channel,
+      job_status: status,
+    });
+    return;
+  }
+
+  await safeAudit(
+    () =>
+      deps.audit?.recordCompleted({
+        correlationId: job.id,
+        channel: job.channel,
+        actorOrgId: job.signalstackOrgId,
+        outcome: deriveAuditOutcome(status),
+        completedAt: new Date(),
+        ...toAuditCounts(counts),
+        ...exportAuditExtras(job, deps.config),
+      }) ?? Promise.resolve(undefined),
+    deps.log,
+    { operation: 'campaignAudit.completed', job_id: job.id, channel: job.channel },
+  );
+}
+
+/**
+ * Finalizes a job that has exhausted its retries: force-fails any items
+ * still `pending`, marks the job `failed` with the real reason, and records
+ * the `failed` `completed` audit row. Extracted from `runCampaignJob`'s
+ * catch block (`typescript:S3776`) but kept as a single function — not split
+ * further — because the three steps must run in this exact order:
+ * `failPendingItems` strictly before `countItems`, so the counts reflect
+ * every item's true final status rather than leaving the still-`pending`
+ * ones uncounted (see {@link CampaignJobClient.countItems}'s doc comment),
+ * and the best-effort audit write last, after the job's own terminal state
+ * is already durable.
+ *
+ * @param job - The job being failed.
+ * @param deps - The job's collaborators/config/logger/audit writer.
+ * @param reason - The failure reason already extracted by the caller (untruncated).
+ * @param err - The original thrown error, for the audit row's `errorCode`.
+ */
+async function finalizeFailedJob(
+  job: ProcessingJob,
+  deps: CampaignJobDeps,
+  reason: string,
+  err: unknown,
+): Promise<void> {
+  await deps.client.failPendingItems(job.id, 'job_failed');
+  await deps.client.setJobStatus(job.id, 'failed', truncateReason(reason));
+
+  // `rollUpStatus` was never reached on this path (the handler threw before
+  // getting there), so the counts are read fresh here — after
+  // `failPendingItems` above, so they reflect every item's true final status.
+  const counts = await deps.client.countItems(job.id);
+  await safeAudit(
+    () =>
+      deps.audit?.recordCompleted({
+        correlationId: job.id,
+        channel: job.channel,
+        actorOrgId: job.signalstackOrgId,
+        outcome: 'failed',
+        completedAt: new Date(),
+        errorCode: err instanceof Error ? err.constructor.name : 'unknown',
+        ...toAuditCounts(counts),
+        ...exportAuditExtras(job, deps.config),
+      }) ?? Promise.resolve(undefined),
+    deps.log,
+    { operation: 'campaignAudit.completed', job_id: job.id, channel: job.channel },
+  );
 }
 
 /**
