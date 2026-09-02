@@ -12,6 +12,7 @@
     "test:coverage": "vitest run --coverage --passWithNoTests"
   },
   "dependencies": {
+    "@aggregator-dpg/campaign-audit": "workspace:*",
     "@aggregator-dpg/campaign-template": "workspace:*",
     "@aggregator-dpg/db-schema": "workspace:*",
     "@aggregator-dpg/mailer": "workspace:*",

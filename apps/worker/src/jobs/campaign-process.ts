@@ -15,6 +15,7 @@ import { logger } from '../logger.js';
 import { config } from '../config.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
 import { getVoiceProvider } from '../services/voice-provider.js';
+import { getCampaignAuditWriter } from '../services/campaign-audit.js';
 import { putObject, signExportDownloadUrl } from '../object-storage.js';
 import * as jobClient from '../services/campaign-job-client.js';
 import { runCampaignJob } from '../services/campaign-process/index.js';
@@ -85,5 +86,6 @@ export async function processCampaignJob(
     },
     log,
     attempt,
+    audit: getCampaignAuditWriter(),
   });
 }

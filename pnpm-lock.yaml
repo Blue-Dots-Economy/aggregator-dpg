@@ -332,6 +332,9 @@ importers:
 
   apps/worker:
     dependencies:
+      '@aggregator-dpg/campaign-audit':
+        specifier: workspace:*
+        version: link:../../packages/campaign-audit
       '@aggregator-dpg/campaign-template':
         specifier: workspace:*
         version: link:../../packages/campaign-template

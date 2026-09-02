@@ -20,6 +20,7 @@
  */
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
+import type { CampaignAuditWriterBase, AuditOutcome } from '@aggregator-dpg/campaign-audit';
 import type {
   SignalStackFetchDecryptedProfilesQuery,
   SignalStackDecryptedProfiles,
@@ -110,6 +111,8 @@ export interface CampaignJobDeps {
   log: CampaignLogger;
   /** Retry position, so the final attempt can record a terminal failure. */
   attempt?: { attempt: number; maxAttempts: number };
+  /** Audit writer (#617). Optional so existing tests need no change. */
+  audit?: CampaignAuditWriterBase;
 }
 
 const TERMINAL_JOB = new Set<CampaignJobStatus>(TERMINAL_JOB_STATUSES);
@@ -166,6 +169,28 @@ export async function runCampaignJob(jobId: string, deps: CampaignJobDeps): Prom
       throw new Error(`campaign channel not implemented: ${job.channel}`);
     }
     const status = await deps.client.rollUpStatus(jobId);
+
+    // Terminal: the job has an outcome, so record it. Best effort (#617).
+    // `rollUpStatus` derives from item counts and can itself land on `failed`
+    // (e.g. every item unowned) without this branch ever throwing, so the
+    // mapping must check for `failed` explicitly rather than defaulting to
+    // `succeeded` for anything that isn't `partial`.
+    const outcome: AuditOutcome =
+      status === 'partial' ? 'partial' : status === 'failed' ? 'failed' : 'succeeded';
+    await safeAuditWorker(
+      () =>
+        deps.audit?.recordCompleted({
+          correlationId: jobId,
+          channel: job.channel,
+          actorOrgId: job.signalstackOrgId,
+          outcome,
+          completedAt: new Date(),
+        }) ?? Promise.resolve(undefined),
+      deps,
+      jobId,
+      job.channel,
+    );
+
     deps.log.info({
       operation: 'campaign.process',
       status: 'success',
@@ -202,8 +227,69 @@ export async function runCampaignJob(jobId: string, deps: CampaignJobDeps): Prom
     if (isFinalAttempt) {
       await deps.client.failPendingItems(jobId, 'job_failed');
       await deps.client.setJobStatus(jobId, 'failed', truncateReason(reason));
+
+      // Terminal (out of retries): record the failure. Best effort (#617).
+      await safeAuditWorker(
+        () =>
+          deps.audit?.recordCompleted({
+            correlationId: jobId,
+            channel: job.channel,
+            actorOrgId: job.signalstackOrgId,
+            outcome: 'failed',
+            completedAt: new Date(),
+            errorCode: err instanceof Error ? err.constructor.name : 'unknown',
+          }) ?? Promise.resolve(undefined),
+        deps,
+        jobId,
+        job.channel,
+      );
     }
     throw err;
+  }
+}
+
+/**
+ * Runs an audit write so it cannot affect the job (#617).
+ *
+ * No timeout here: unlike the API's `safeAudit`, there is no HTTP response
+ * waiting on this call — by the time this runs the job has already reached
+ * its terminal status. Handles both of the writer's failure modes: a thrown
+ * exception (e.g. the in-memory test fake's `failWith`) and a resolved
+ * `err(BaseError)` Result (`PostgresCampaignAuditWriter`'s normal failure
+ * path — an insert failure there does not throw). Neither is ever rethrown;
+ * both are logged at `error`.
+ *
+ * @param fn - Thunk that performs the audit write (`deps.audit?.recordCompleted`,
+ *   pre-resolved to `Promise.resolve(undefined)` when no writer is configured).
+ * @param deps - Job deps, for the structured logger.
+ * @param jobId - The `campaign_job.id` this write is for.
+ * @param channel - The job's channel, for the log line.
+ */
+async function safeAuditWorker(
+  fn: () => Promise<Result<void, BaseError> | undefined>,
+  deps: CampaignJobDeps,
+  jobId: string,
+  channel: string,
+): Promise<void> {
+  try {
+    const result = await fn();
+    if (result && !result.success) {
+      deps.log.error({
+        operation: 'campaignAudit.completed',
+        status: 'failure',
+        job_id: jobId,
+        channel,
+        error: result.error.message,
+      });
+    }
+  } catch (cause) {
+    deps.log.error({
+      operation: 'campaignAudit.completed',
+      status: 'failure',
+      job_id: jobId,
+      channel,
+      error: cause instanceof Error ? cause.message : String(cause),
+    });
   }
 }
 

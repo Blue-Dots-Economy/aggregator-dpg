@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { ok, err, type Result } from '@aggregator-dpg/shared-primitives/result';
 import { UpstreamError, type BaseError } from '@aggregator-dpg/shared-primitives/errors';
+import { CampaignAuditWriterFake } from '@aggregator-dpg/campaign-audit/testing';
+import type { CampaignAuditWriterBase } from '@aggregator-dpg/campaign-audit';
 import type { SignalStackDecryptedProfileRow } from '@aggregator-dpg/signalstack-writer/interface';
 import type { SendInput, SendOk, MailerResult } from '@aggregator-dpg/mailer/interface';
 import {
@@ -67,6 +69,7 @@ function harness(
   over: Partial<CampaignJobDeps['export']> = {},
   config: Partial<CampaignJobDeps['config']> = {},
   attempt?: CampaignJobDeps['attempt'],
+  audit?: CampaignAuditWriterBase,
 ): Harness {
   const puts: Harness['puts'] = [];
   const mails: SendInput[] = [];
@@ -179,6 +182,7 @@ function harness(
       error: (o) => logs.error.push(o),
     },
     ...(attempt ? { attempt } : {}),
+    ...(audit ? { audit } : {}),
   };
   return {
     deps,
@@ -403,6 +407,89 @@ describe('runCampaignJob failure paths', () => {
     // Fail closed: a PII export is never redirected to the requester as a fallback.
     expect(h.mails).toHaveLength(0);
     expect(h.jobStatuses.at(-1)).toBe('failed');
+  });
+});
+
+describe('runCampaignJob completed audit (#617)', () => {
+  it('writes one completed audit row when the job reaches a terminal status', async () => {
+    const audit = new CampaignAuditWriterFake();
+    const h = harness(job(), {}, {}, undefined, audit);
+    await runCampaignJob('job-1', h.deps);
+
+    const rows = audit.rows.filter((r) => r.kind === 'completed');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.correlationId).toBe('job-1');
+    expect(rows[0]!.outcome).toBe('succeeded');
+    expect(rows[0]!.actorOrgId).toBe('org-1');
+  });
+
+  it('writes NO completed row for a retryable mid-sequence failure', async () => {
+    const audit = new CampaignAuditWriterFake();
+    const h = harness(
+      job(),
+      {
+        putObject: async () => {
+          throw new Error('s3 down');
+        },
+      },
+      {},
+      { attempt: 1, maxAttempts: 3 },
+      audit,
+    );
+
+    await expect(runCampaignJob('job-1', h.deps)).rejects.toThrow('s3 down');
+    // Not terminal — BullMQ will retry, so there is no outcome to record yet.
+    expect(audit.rows.filter((r) => r.kind === 'completed')).toHaveLength(0);
+  });
+
+  it('writes one failed audit row on the final attempt', async () => {
+    const audit = new CampaignAuditWriterFake();
+    const h = harness(
+      job(),
+      {
+        putObject: async () => {
+          throw new Error('s3 down');
+        },
+      },
+      {},
+      { attempt: 3, maxAttempts: 3 },
+      audit,
+    );
+
+    await expect(runCampaignJob('job-1', h.deps)).rejects.toThrow('s3 down');
+    const rows = audit.rows.filter((r) => r.kind === 'completed');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.outcome).toBe('failed');
+  });
+
+  it('still completes the job when the audit write throws', async () => {
+    const audit = new CampaignAuditWriterFake();
+    audit.failWith = new Error('audit down');
+    const h = harness(job(), {}, {}, undefined, audit);
+    await expect(runCampaignJob('job-1', h.deps)).resolves.toBeUndefined();
+    expect(h.jobStatuses.at(-1)).toBe('completed');
+  });
+
+  it('logs at error and does not throw when the writer resolves err(...)', async () => {
+    const errors: object[] = [];
+    const audit: CampaignAuditWriterBase = {
+      recordRequested: async () => ok(undefined),
+      recordCompleted: async () =>
+        err(new UpstreamError('insert failed', { code: 'CAMPAIGN_AUDIT_INSERT_FAILED' })),
+      recordDumpAccess: async () => ok(undefined),
+    } as CampaignAuditWriterBase;
+    const h = harness(job(), {}, {}, undefined, audit);
+    h.deps.log.error = (o) => errors.push(o);
+
+    await expect(runCampaignJob('job-1', h.deps)).resolves.toBeUndefined();
+    expect(h.jobStatuses.at(-1)).toBe('completed');
+    expect(errors).toContainEqual(
+      expect.objectContaining({
+        operation: 'campaignAudit.completed',
+        status: 'failure',
+        error: 'insert failed',
+      }),
+    );
   });
 });
 
