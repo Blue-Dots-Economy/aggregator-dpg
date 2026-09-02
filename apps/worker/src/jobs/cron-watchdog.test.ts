@@ -321,6 +321,59 @@ describe('runWatchdog — stalled-campaign completed audit row (#617 follow-up)'
     });
   });
 
+  it('force-fails leftover pending items before counting, so the counts sum to the job total (#617 follow-up)', async () => {
+    // A stalled job means the worker died mid-run — leftover `pending` items
+    // are the NORMAL case, not an edge case. `pending` maps to no audit
+    // column at all, so without `failPendingItems` running first, a 10-item
+    // job that stalled after resolving 3 would silently audit `resolvedCount:
+    // 3` with the other 7 vanishing — indistinguishable from a job that only
+    // ever had 3 items. This fixture models the state AFTER
+    // `failPendingItems` has already run (what was 7 `pending` is now 7
+    // `failed`), and separately proves the call itself happened.
+    updateReturns = [
+      [],
+      [],
+      [
+        {
+          id: 'cj1',
+          channel: 'export',
+          signalstackOrgId: 'org-1',
+          requestedBy: 'user@org-1.example',
+        },
+      ],
+    ];
+    selectReturns = [
+      [
+        { status: 'resolved', n: 3 },
+        { status: 'failed', n: 7 },
+      ],
+    ];
+
+    await runWatchdog();
+
+    // Proves `failPendingItems` actually ran: a 4th `.update().set()` call
+    // beyond the 3 standard sweep updates (bulkUploads abandoned / stuck /
+    // campaignJob stalled) — `failPendingItems` sets the same
+    // `{status: 'failed', errorReason: 'stalled'}` shape on campaign_job_item.
+    expect(updateSets).toHaveLength(4);
+    expect(updateSets[3]).toMatchObject({ status: 'failed', errorReason: 'stalled' });
+
+    const row = audit.rows[0] as {
+      resolvedCount?: number;
+      sentCount?: number;
+      skippedCount?: number;
+      failedCount?: number;
+    };
+    expect(row).toMatchObject({ resolvedCount: 3, failedCount: 7, sentCount: 0, skippedCount: 0 });
+    const total =
+      (row.resolvedCount ?? 0) +
+      (row.sentCount ?? 0) +
+      (row.skippedCount ?? 0) +
+      (row.failedCount ?? 0);
+    // The job's real total (10) — nothing vanished into an uncounted `pending` bucket.
+    expect(total).toBe(10);
+  });
+
   it('sets destination + recipientRef for an export-channel stalled job, and omits both for voice/email', async () => {
     updateReturns = [
       [],
