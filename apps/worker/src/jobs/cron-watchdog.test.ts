@@ -26,11 +26,9 @@ import { CampaignAuditWriterFake } from '@aggregator-dpg/campaign-audit/testing'
 
 // Update call order in source: bulkUploads abandoned -> bulkUploads stuck ->
 // campaignJob stalled. One canned result per call, consumed in that order.
-let updateReturns: Array<Array<{ id: string; channel?: string; signalstackOrgId?: string }>> = [
-  [],
-  [],
-  [],
-];
+let updateReturns: Array<
+  Array<{ id: string; channel?: string; signalstackOrgId?: string; requestedBy?: string }>
+> = [[], [], []];
 let deleteReturns: Array<Array<{ id: string }>> = [[], []];
 let updateShouldThrow: Error | null = null;
 let updateCallIdx = 0;
@@ -94,6 +92,7 @@ vi.mock('../db.js', () => ({
       lastProgressAt: 'lastProgressAt',
       channel: 'channel',
       signalstackOrgId: 'signalstackOrgId',
+      requestedBy: 'requestedBy',
     },
   },
 }));
@@ -104,7 +103,16 @@ const del = vi.fn(async (...keys: string[]) => keys.length);
 vi.mock('../services/redis.js', () => ({ getRedis: () => ({ del }) }));
 
 vi.mock('../config.js', () => ({
-  config: { LOG_LEVEL: 'silent', NODE_ENV: 'test', CAMPAIGN_STALL_SECONDS: 900 },
+  config: {
+    LOG_LEVEL: 'silent',
+    NODE_ENV: 'test',
+    CAMPAIGN_STALL_SECONDS: 900,
+    // `requester` by default so `resolveExportRecipient` falls back to the
+    // job's own `requestedBy` — the common case; the `network_admin` case is
+    // exercised by overriding these two directly in the tests that need it.
+    CAMPAIGN_EXPORT_RECIPIENT: 'requester',
+    EXPORT_NETWORK_ADMIN_EMAIL: undefined,
+  },
 }));
 
 const { runWatchdog } = await import('./cron-watchdog.js');
@@ -157,8 +165,18 @@ describe('runWatchdog — normal execution', () => {
       [],
       [],
       [
-        { id: 'cj1', channel: 'export', signalstackOrgId: 'org-1' },
-        { id: 'cj2', channel: 'voice', signalstackOrgId: 'org-2' },
+        {
+          id: 'cj1',
+          channel: 'export',
+          signalstackOrgId: 'org-1',
+          requestedBy: 'user@org-1.example',
+        },
+        {
+          id: 'cj2',
+          channel: 'voice',
+          signalstackOrgId: 'org-2',
+          requestedBy: 'user@org-2.example',
+        },
       ],
     ];
     const res = await runWatchdog();
@@ -233,7 +251,18 @@ describe('runWatchdog — failure propagation', () => {
 
 describe('runWatchdog — stalled-campaign completed audit row (#617 follow-up)', () => {
   it('writes one completed row per stalled job, with outcome failed and errorCode stalled', async () => {
-    updateReturns = [[], [], [{ id: 'cj1', channel: 'export', signalstackOrgId: 'org-1' }]];
+    updateReturns = [
+      [],
+      [],
+      [
+        {
+          id: 'cj1',
+          channel: 'export',
+          signalstackOrgId: 'org-1',
+          requestedBy: 'user@org-1.example',
+        },
+      ],
+    ];
     selectReturns = [
       [
         { status: 'resolved', n: 2 },
@@ -252,11 +281,24 @@ describe('runWatchdog — stalled-campaign completed audit row (#617 follow-up)'
       actorOrgId: 'org-1',
       outcome: 'failed',
       errorCode: 'stalled',
+      // The operator (requester) address, never a participant's.
+      recipientRef: 'user@org-1.example',
     });
   });
 
   it('populates the outcome counts from countItems, mapped the same way as the worker paths', async () => {
-    updateReturns = [[], [], [{ id: 'cj1', channel: 'export', signalstackOrgId: 'org-1' }]];
+    updateReturns = [
+      [],
+      [],
+      [
+        {
+          id: 'cj1',
+          channel: 'export',
+          signalstackOrgId: 'org-1',
+          requestedBy: 'user@org-1.example',
+        },
+      ],
+    ];
     selectReturns = [
       [
         { status: 'resolved', n: 2 },
@@ -279,13 +321,23 @@ describe('runWatchdog — stalled-campaign completed audit row (#617 follow-up)'
     });
   });
 
-  it('sets destination for an export-channel stalled job, and omits it for voice/email', async () => {
+  it('sets destination + recipientRef for an export-channel stalled job, and omits both for voice/email', async () => {
     updateReturns = [
       [],
       [],
       [
-        { id: 'cj-export', channel: 'export', signalstackOrgId: 'org-1' },
-        { id: 'cj-voice', channel: 'voice', signalstackOrgId: 'org-2' },
+        {
+          id: 'cj-export',
+          channel: 'export',
+          signalstackOrgId: 'org-1',
+          requestedBy: 'user@org-1.example',
+        },
+        {
+          id: 'cj-voice',
+          channel: 'voice',
+          signalstackOrgId: 'org-2',
+          requestedBy: 'user@org-2.example',
+        },
       ],
     ];
     selectReturns = [[], []];
@@ -294,11 +346,46 @@ describe('runWatchdog — stalled-campaign completed audit row (#617 follow-up)'
 
     const exportRow = audit.rows.find((r) => r.correlationId === 'cj-export')!;
     const voiceRow = audit.rows.find((r) => r.correlationId === 'cj-voice')!;
-    expect(exportRow).toMatchObject({ destination: 'campaign-exports/org-1/cj-export.csv' });
+    expect(exportRow).toMatchObject({
+      destination: 'campaign-exports/org-1/cj-export.csv',
+      // Same operator address a normal export completion would carry —
+      // recomputed via `resolveExportRecipient`, never a participant's.
+      recipientRef: 'user@org-1.example',
+    });
     expect('destination' in voiceRow).toBe(false);
-    // The sweep never learns `requestedBy`, so it can't safely recompute an
-    // operator recipient — left unset rather than guessed (see the module doc).
-    expect('recipientRef' in exportRow).toBe(false);
+    expect('recipientRef' in voiceRow).toBe(false);
+  });
+
+  it('uses the configured network-admin address for recipientRef when CAMPAIGN_EXPORT_RECIPIENT=network_admin', async () => {
+    const configModule = await import('../config.js');
+    const original = { ...configModule.config };
+    Object.assign(configModule.config, {
+      CAMPAIGN_EXPORT_RECIPIENT: 'network_admin',
+      EXPORT_NETWORK_ADMIN_EMAIL: 'admin@network.example',
+    });
+    try {
+      updateReturns = [
+        [],
+        [],
+        [
+          {
+            id: 'cj-export',
+            channel: 'export',
+            signalstackOrgId: 'org-1',
+            // Deliberately different from the admin address, to prove the
+            // admin override — not the requester — wins.
+            requestedBy: 'requester@org-1.example',
+          },
+        ],
+      ];
+      selectReturns = [[]];
+
+      await runWatchdog();
+
+      expect(audit.rows[0]).toMatchObject({ recipientRef: 'admin@network.example' });
+    } finally {
+      Object.assign(configModule.config, original);
+    }
   });
 
   it('still audits every other stalled job when the item-count read throws for one', async () => {
@@ -306,8 +393,18 @@ describe('runWatchdog — stalled-campaign completed audit row (#617 follow-up)'
       [],
       [],
       [
-        { id: 'cj1', channel: 'export', signalstackOrgId: 'org-1' },
-        { id: 'cj2', channel: 'email', signalstackOrgId: 'org-2' },
+        {
+          id: 'cj1',
+          channel: 'export',
+          signalstackOrgId: 'org-1',
+          requestedBy: 'user@org-1.example',
+        },
+        {
+          id: 'cj2',
+          channel: 'email',
+          signalstackOrgId: 'org-2',
+          requestedBy: 'user@org-2.example',
+        },
       ],
     ];
     // First job's countItems() throws; the second's succeeds — proves one
@@ -327,7 +424,18 @@ describe('runWatchdog — stalled-campaign completed audit row (#617 follow-up)'
   it('does not abort the sweep or the retention pass when the audit writer resolves err(...)', async () => {
     const { err } = await import('@aggregator-dpg/shared-primitives/result');
     const { UpstreamError } = await import('@aggregator-dpg/shared-primitives/errors');
-    updateReturns = [[], [], [{ id: 'cj1', channel: 'export', signalstackOrgId: 'org-1' }]];
+    updateReturns = [
+      [],
+      [],
+      [
+        {
+          id: 'cj1',
+          channel: 'export',
+          signalstackOrgId: 'org-1',
+          requestedBy: 'user@org-1.example',
+        },
+      ],
+    ];
     deleteReturns = [[{ id: 'old-1' }], [{ id: 'old-sub' }]];
     selectReturns = [[]];
     _setCampaignAuditWriter({
@@ -345,7 +453,18 @@ describe('runWatchdog — stalled-campaign completed audit row (#617 follow-up)'
   });
 
   it('does not abort the sweep or the retention pass when the audit writer throws', async () => {
-    updateReturns = [[], [], [{ id: 'cj1', channel: 'export', signalstackOrgId: 'org-1' }]];
+    updateReturns = [
+      [],
+      [],
+      [
+        {
+          id: 'cj1',
+          channel: 'export',
+          signalstackOrgId: 'org-1',
+          requestedBy: 'user@org-1.example',
+        },
+      ],
+    ];
     deleteReturns = [[{ id: 'old-1' }], [{ id: 'old-sub' }]];
     selectReturns = [[]];
     audit.failWith = new Error('audit db down');

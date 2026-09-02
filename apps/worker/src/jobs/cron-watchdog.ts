@@ -31,7 +31,7 @@ import {
   safeAudit,
   type SafeAuditLogger,
 } from '../services/campaign-audit.js';
-import { exportObjectKey } from '../services/campaign-process/index.js';
+import { exportObjectKey, resolveExportRecipient } from '../services/campaign-process/index.js';
 
 const RETENTION_DAYS = 90;
 const STUCK_INFLIGHT_MINUTES = 30;
@@ -94,9 +94,13 @@ export async function runWatchdog(): Promise<WatchdogOutcome> {
       id: schema.campaignJob.id,
       // Free on this UPDATE (already loaded for the WHERE/SET), and exactly
       // what the `completed` audit row (#617 follow-up) needs: `channel` to
-      // record which surface stalled, `signalstackOrgId` for `actorOrgId`.
+      // record which surface stalled, `signalstackOrgId` for `actorOrgId`,
+      // `requestedBy` so an export-channel row can recompute the same
+      // operator `recipientRef` a normal completion carries (never a
+      // participant address — see `resolveExportRecipient`).
       channel: schema.campaignJob.channel,
       signalstackOrgId: schema.campaignJob.signalstackOrgId,
+      requestedBy: schema.campaignJob.requestedBy,
     });
 
   // Terminal transition, so — per #617 §6 — it must get a `completed` audit
@@ -170,6 +174,7 @@ interface StalledCampaignJob {
   id: string;
   channel: CampaignChannel;
   signalstackOrgId: string;
+  requestedBy: string;
 }
 
 /**
@@ -187,14 +192,12 @@ interface StalledCampaignJob {
  *    handles both of the writer's failure shapes (a thrown exception and a
  *    resolved `err(BaseError)`) and never rethrows.
  *
- * `recipientRef` is deliberately left unset: unlike the two write points in
- * `campaign-process/index.ts`, this sweep's `.returning()` only carries
- * `channel`/`signalstackOrgId` (the two columns already loaded for the
- * `UPDATE`'s `WHERE`/`SET`) — not `requestedBy`, which `resolveExportRecipient`
- * needs. Selecting it here just for this rarer path was judged not worth
- * widening the sweep's row shape; if that changes, thread it through the
- * same `resolveExportRecipient` helper `campaign-process/index.ts` uses, not
- * a re-derived copy.
+ * `recipientRef` (export channel only) is recomputed with the same
+ * `resolveExportRecipient` helper `campaign-process/index.ts` uses, from the
+ * job's `requestedBy` (now included in the sweep's `.returning()`, alongside
+ * `channel`/`signalstackOrgId`) and the worker's own export-recipient config
+ * — an operator address (the requester, or the deployment's network admin),
+ * never a participant's, exactly as on a normal export completion.
  *
  * @param stalledJob - One row from the campaign-stall sweep's `.returning()`.
  * @param log - The watchdog's structured logger.
@@ -227,11 +230,40 @@ async function auditStalledJob(
         errorCode: 'stalled',
         completedAt: new Date(),
         ...(counts ? toAuditCounts(counts) : {}),
-        ...(stalledJob.channel === 'export'
-          ? { destination: exportObjectKey(stalledJob.signalstackOrgId, stalledJob.id) }
-          : {}),
+        ...exportAuditExtras(stalledJob),
       }),
     log,
     { operation: 'campaignAudit.completed', job_id: stalledJob.id, channel: stalledJob.channel },
   );
+}
+
+/**
+ * Export-channel-only `completed`-audit extras for a stalled job: the same
+ * `recipientRef`/`destination` a normal export completion carries
+ * (`campaign-process/index.ts`'s `exportAuditExtras`), derived here from the
+ * sweep's own `.returning()` row and the worker's export-recipient config.
+ * Returns `{}` for voice/email, so neither field is ever set for a channel
+ * that never released to an operator address or wrote to S3.
+ *
+ * @param stalledJob - One row from the campaign-stall sweep's `.returning()`.
+ * @returns `{ recipientRef, destination }` for `channel === 'export'`; `{}` otherwise.
+ */
+function exportAuditExtras(stalledJob: StalledCampaignJob): {
+  recipientRef?: string;
+  destination?: string;
+} {
+  if (stalledJob.channel !== 'export') return {};
+  const recipientRef = resolveExportRecipient(
+    { requestedBy: stalledJob.requestedBy },
+    {
+      recipientMode: config.CAMPAIGN_EXPORT_RECIPIENT,
+      ...(config.EXPORT_NETWORK_ADMIN_EMAIL
+        ? { networkAdminEmail: config.EXPORT_NETWORK_ADMIN_EMAIL }
+        : {}),
+    },
+  );
+  return {
+    ...(recipientRef !== undefined ? { recipientRef } : {}),
+    destination: exportObjectKey(stalledJob.signalstackOrgId, stalledJob.id),
+  };
 }
