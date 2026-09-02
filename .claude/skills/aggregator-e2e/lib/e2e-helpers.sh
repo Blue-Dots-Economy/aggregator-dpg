@@ -9,6 +9,10 @@
 # file or a `.env` — the stack is configured with inline env vars so a run can
 # never leave the developer's config mutated.
 #
+# Portability note: no `seq`, `timeout`, or other optional coreutils — this file
+# gets sourced into whatever interactive shell the developer has, and a reshaped
+# PATH (nvm, asdf) can leave those missing. Arithmetic `for (( ))` loops instead.
+#
 # Style note: positional parameters are assigned to named locals on entry and
 # every function ends with an explicit `return`, so the control flow stays
 # readable and the exit status is never an accident of the last command.
@@ -122,7 +126,7 @@ fix_nginx_race() {
 # Blocks until every dependency the suite needs is actually answering.
 wait_for_stack() {
   local i
-  for i in $(seq 1 90); do
+  for (( i = 0; i < 90; i++ )); do
     if [[ "$(code "$API_URL/health/ready")" == "200" ]]; then
       break
     fi
@@ -153,7 +157,7 @@ mail_wait_for() {
   local needle="$1"
   local timeout="${2:-40}"
   local i id
-  for i in $(seq 1 "$timeout"); do
+  for (( i = 0; i < timeout; i++ )); do
     id=$(c "$MAILPIT_URL/api/v1/messages?limit=60" |
       node -e '
         let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{

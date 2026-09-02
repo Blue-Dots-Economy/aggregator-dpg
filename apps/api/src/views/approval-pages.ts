@@ -76,6 +76,21 @@ const SUCCESS_BG = '#dcfce7';
 const INFO = '#1e40af';
 const INFO_BG = '#dbeafe';
 
+/**
+ * Inline decision icons. Inlined rather than linked so the page stays a single
+ * self-contained response — these views are opened from an email client, often
+ * on a network where a second request for an asset is not a given.
+ */
+const ICON_CHECK =
+  '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+  'stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<polyline points="20 6 9 17 4 12"></polyline></svg>';
+
+const ICON_X =
+  '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+  'stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+
 interface ShellOptions {
   title: string;
   brand: PageBrand;
@@ -209,6 +224,54 @@ function shell(opts: ShellOptions, body: string): string {
     background: #fff; color: ${INK_900}; border: 1px solid ${BORDER};
   }
   .btn-secondary:hover { background: ${SURFACE_SOFT}; }
+  /* Decision row: the two outcomes sit side by side so the page offers exactly
+     two choices. The reason field lives in the reject dialog, not inline —
+     rendering a textarea next to Approve made the page read as a form to fill
+     in before either action.
+
+     A 2-column grid rather than flex, with display:contents on the wrapping
+     form, so both buttons are direct grid items. Otherwise Approve sits inside
+     its own form box and Reject doesn't, which is what made the two sit at
+     different widths and heights. Equal columns also mirrors the review
+     email's full-width CTA instead of two differently-sized pills. */
+  .actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    align-items: stretch;
+    margin-top: 22px;
+  }
+  .actions form { margin: 0; display: contents; }
+  /* Icon + label centred as one unit, so the two buttons read as a matched
+     pair however different the label widths are. */
+  .actions button {
+    width: 100%; padding: 14px 20px; border-radius: 12px;
+    display: inline-flex; align-items: center; justify-content: center; gap: 9px;
+    font-size: 15px;
+  }
+  .actions button svg { flex: none; }
+  /* Reject is outlined rather than solid: destructive, but not the visual
+     equal of the primary action on a page where approve is the common case. */
+  .btn-danger-outline {
+    background: #fff; color: ${DANGER};
+    border: 1px solid ${DANGER_BORDER};
+  }
+  .btn-danger-outline:hover { background: ${DANGER_BG}; border-color: ${DANGER}; }
+  @media (max-width: 420px) {
+    .actions { grid-template-columns: 1fr; }
+  }
+  dialog.modal {
+    border: 0; border-radius: 16px; padding: 26px;
+    max-width: 460px; width: calc(100% - 40px);
+    box-shadow: 0 24px 60px rgba(15, 23, 42, 0.22);
+    color: ${INK_900};
+  }
+  dialog.modal::backdrop { background: rgba(15, 23, 42, 0.45); }
+  dialog.modal h2 { margin: 0; font-size: 19px; font-weight: 700; letter-spacing: -0.01em; }
+  dialog.modal .modal-lead { margin: 8px 0 0; font-size: 13.5px; color: ${INK_500}; }
+  dialog.modal label { margin-top: 16px; }
+  dialog.modal textarea { margin: 0; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
   .pill {
     display: inline-flex; align-items: center; gap: 6px;
     padding: 4px 10px; border-radius: 999px;
@@ -337,26 +400,71 @@ export function renderConfirmPage(v: ConfirmPageVars): string {
           </div>
         </div>
 
-        <!-- Approve: single button, no reason needed. -->
-        <form method="POST" action="${escape(v.postUrl)}" style="margin:0 0 20px;">
-          <input type="hidden" name="token" value="${escape(v.token)}" />
-          <input type="hidden" name="decision" value="approve" />
-          <button type="submit" class="btn-primary">Approve</button>
-        </form>
+        <!--
+          Two outcomes, two buttons. Approve posts straight away; Reject opens a
+          dialog that collects the reason, so the reason field is only present
+          when it is relevant. Each decision keeps its own form and its own
+          hidden token, so nothing is shared or mirrored between them.
+        -->
+        <div class="actions">
+          <form method="POST" action="${escape(v.postUrl)}">
+            <input type="hidden" name="token" value="${escape(v.token)}" />
+            <input type="hidden" name="decision" value="approve" />
+            <button type="submit" class="btn-primary">${ICON_CHECK}Approve</button>
+          </form>
+          <button type="button" class="btn-danger-outline" id="reject-open" hidden>${ICON_X}Reject</button>
+        </div>
 
-        <!-- Reject: its own form carries the reason textarea (no JS mirror). -->
-        <form method="POST" action="${escape(v.postUrl)}" style="margin:0;">
-          <input type="hidden" name="token" value="${escape(v.token)}" />
-          <input type="hidden" name="decision" value="reject" />
-          <label for="reason-input">Reason (only if rejecting — sent to the applicant)</label>
-          <textarea id="reason-input" name="reason" placeholder="A brief explanation helps the applicant understand the decision."></textarea>
-          <button type="submit" class="btn-danger" style="margin-top:10px;">Reject</button>
-        </form>
+        <dialog class="modal" id="reject-modal" aria-labelledby="reject-title">
+          <form method="POST" action="${escape(v.postUrl)}">
+            <input type="hidden" name="token" value="${escape(v.token)}" />
+            <input type="hidden" name="decision" value="reject" />
+            <h2 id="reject-title">Reject this application?</h2>
+            <p class="modal-lead">This is final once submitted. The reason below is emailed to the applicant.</p>
+            <label for="reason-input">Reason (sent to the applicant)</label>
+            <textarea id="reason-input" name="reason" maxlength="2000"
+              placeholder="A brief explanation helps the applicant understand the decision."></textarea>
+            <div class="modal-actions">
+              <button type="button" class="btn-secondary" id="reject-cancel">Cancel</button>
+              <button type="submit" class="btn-danger">Reject application</button>
+            </div>
+          </form>
+        </dialog>
+
+        <!--
+          Without JS the dialog can never be opened, so reject has to stay
+          reachable inline. The scripted button starts hidden and the script
+          un-hides it, which means exactly one reject affordance is ever
+          visible — no duplicate buttons if the script fails to run.
+        -->
+        <noscript>
+          <form method="POST" action="${escape(v.postUrl)}" style="margin:20px 0 0;">
+            <input type="hidden" name="token" value="${escape(v.token)}" />
+            <input type="hidden" name="decision" value="reject" />
+            <label for="reason-input-nojs">Reason (sent to the applicant)</label>
+            <textarea id="reason-input-nojs" name="reason" maxlength="2000"
+              placeholder="A brief explanation helps the applicant understand the decision."></textarea>
+            <button type="submit" class="btn-danger" style="margin-top:10px;">Reject</button>
+          </form>
+        </noscript>
       </div>
     </div>
     <p class="footer-note">
       This decision is final once submitted. The review link is single-use and expires in ${escape(v.expiresInText)}.
     </p>
+    <script>
+      (function () {
+        var dialog = document.getElementById('reject-modal');
+        var open = document.getElementById('reject-open');
+        var cancel = document.getElementById('reject-cancel');
+        // Only take over if the browser actually supports <dialog>; otherwise
+        // leave the button hidden and let the <noscript> path stand in.
+        if (!dialog || !open || typeof dialog.showModal !== 'function') return;
+        open.hidden = false;
+        open.addEventListener('click', function () { dialog.showModal(); });
+        if (cancel) cancel.addEventListener('click', function () { dialog.close(); });
+      })();
+    </script>
   `;
   return shell({ title: `Review ${entity}`, brand }, body);
 }
