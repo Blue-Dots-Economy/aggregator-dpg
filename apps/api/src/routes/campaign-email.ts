@@ -27,6 +27,7 @@
  * never leave the aggregator. Belongs to `@aggregator-dpg/api`.
  */
 import type { FastifyInstance } from 'fastify';
+import { requiredContactFields } from '@aggregator-dpg/campaign-template';
 import { campaignEnvelopeSchema } from '../campaign/envelope.js';
 import { parseEmailContent } from '../campaign/email-content.js';
 import { submitCampaignJob } from '../campaign/submit-job.js';
@@ -56,6 +57,10 @@ export async function registerCampaignEmailRoutes(app: FastifyInstance): Promise
       await submitCampaignJob(req, reply, {
         channel: 'email',
         parseContent: parseEmailContent,
+        // Reuse the same placeholder→field mapping the worker uses to decide
+        // what to decrypt, so the audit row never drifts from reality (#617).
+        piiFields: (content) =>
+          requiredContactFields(content.subject as string, content.body_markdown as string),
         // `action: null` keeps email out of the item-level active-dedup
         // predicate — dedup is ON for voice only (batch spec §3.2).
         buildItem: (itemId) => ({ itemId, action: null }),

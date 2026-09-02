@@ -67,6 +67,14 @@ export async function registerCampaignVoiceRoutes(app: FastifyInstance): Promise
           }
           return contentParsed.data;
         },
+        // `variables` are additional participant fields the caller told Raya
+        // to substitute into the call script — released alongside the fixed
+        // name/phone the dispatch itself requires (#617).
+        piiFields: (content) => [
+          'name',
+          'phone',
+          ...((content.variables as string[] | undefined) ?? []),
+        ],
         buildItem: (itemId) => ({ itemId, action: 'voice_call' }),
         maxItems: config.CAMPAIGN_VOICE_MAX_ITEMS,
         maxItemsErrorCode: 'CAMPAIGN_VOICE_TOO_MANY_ITEMS',

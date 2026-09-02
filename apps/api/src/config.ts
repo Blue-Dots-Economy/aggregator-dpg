@@ -219,6 +219,15 @@ const ConfigSchema = z.object({
   CAMPAIGN_EXPORT_MAX_ACTIVE_PER_ORG: z.coerce.number().int().positive().default(3),
   /** BullMQ attempts for an export campaign-process job (retry count on transient failure). */
   CAMPAIGN_EXPORT_ATTEMPTS: z.coerce.number().int().positive().default(3),
+  /**
+   * Field set the export worker releases per row — `contact` is name/email/phone
+   * only, `full` is the whole item_state (variable columns). Mirrors the
+   * worker's own `CAMPAIGN_EXPORT_FIELDS` (`apps/worker/src/config.ts`); both
+   * processes must be set to the same value in a given deployment. The API
+   * only reads this to record the correct `piiFields` on the audit `requested`
+   * row (#617) — it does not otherwise affect request handling.
+   */
+  CAMPAIGN_EXPORT_FIELDS: z.enum(['contact', 'full']).default('contact'),
 
   // ─── Campaign voice channel (#577) ──────────────────────────────────────
   /** Max `participant_ids` accepted per voice campaign request body (after de-dup). */
