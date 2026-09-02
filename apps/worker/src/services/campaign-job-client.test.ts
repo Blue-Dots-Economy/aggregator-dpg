@@ -208,9 +208,31 @@ describe('campaign job client', () => {
     expect(sets.some((s) => s.providerResponse === payload)).toBe(true);
   });
 
-  it('rollUpStatus derives + persists', async () => {
+  it('rollUpStatus derives + persists, returning both the status and the counts it derived from', async () => {
     queue([{ status: 'resolved', n: 2 }], undefined);
-    expect(await client.rollUpStatus('job-1')).toBe('completed');
+    const result = await client.rollUpStatus('job-1');
+    expect(result.status).toBe('completed');
+    expect(result.counts).toMatchObject({ total: 2, resolved: 2 });
+  });
+
+  it('toAuditCounts aggregates the three skip statuses into skippedCount', () => {
+    const counts = {
+      total: 6,
+      pending: 0,
+      resolved: 1,
+      submitted: 0,
+      sent: 1,
+      skipped_not_owned: 1,
+      skipped_no_contact: 1,
+      duplicate_active: 1,
+      failed: 1,
+    };
+    expect(client.toAuditCounts(counts)).toEqual({
+      resolvedCount: 1,
+      skippedCount: 3,
+      failedCount: 1,
+      sentCount: 1,
+    });
   });
 
   it('claimStalledJobs returns ids', async () => {

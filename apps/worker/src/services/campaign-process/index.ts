@@ -29,13 +29,16 @@ import type {
 import type { SendInput, SendOk, MailerResult } from '@aggregator-dpg/mailer/interface';
 import { buildContactExportCsv, buildDecryptedProfilesCsv } from '@aggregator-dpg/profile-csv';
 import type { SignedDownloadUrl } from '../../object-storage.js';
-import { TERMINAL_JOB_STATUSES } from '../campaign-job-client.js';
+import { TERMINAL_JOB_STATUSES, toAuditCounts } from '../campaign-job-client.js';
 import type {
   CampaignJobItemStatus,
   CampaignJobStatus,
+  JobStatusCounts,
   MarkSubmittedArgs,
   ProcessingJob,
+  RollUpResult,
 } from '../campaign-job-client.js';
+import { safeAudit } from '../campaign-audit.js';
 import { runVoiceForJob, type VoiceCollaborators } from './voice.js';
 import { runEmailForJob, type EmailCollaborators } from './email.js';
 
@@ -63,7 +66,7 @@ export interface CampaignJobClient {
   ): Promise<void>;
   heartbeat(jobId: string): Promise<void>;
   setJobStatus(jobId: string, status: CampaignJobStatus, errorReason?: string): Promise<void>;
-  rollUpStatus(jobId: string): Promise<CampaignJobStatus>;
+  rollUpStatus(jobId: string): Promise<RollUpResult>;
   /** Marks the job's user-visible notification as sent; a retry must not re-send. */
   setNotifiedAt(jobId: string): Promise<void>;
   /** Fails items still `pending` on a job that has run out of retries. */
@@ -72,6 +75,14 @@ export interface CampaignJobClient {
   markSubmitted(jobId: string, itemId: string, args: MarkSubmittedArgs): Promise<void>;
   /** Voice: stores the raw provider create+start response on the job, for the campaign manager to render. */
   setProviderResponse(jobId: string, response: unknown): Promise<void>;
+  /**
+   * The job's current item-status tally. Used on the final-attempt failure
+   * path (#617) to populate the `completed` audit row's outcome counts —
+   * `rollUpStatus` is not called there (the handler threw before reaching
+   * it), so this is queried directly, after `failPendingItems` has already
+   * resolved every still-`pending` item.
+   */
+  countItems(jobId: string): Promise<JobStatusCounts>;
 }
 
 /** Export collaborators (decrypt/storage/mail) — narrow so the job is trivially faked. */
@@ -116,6 +127,39 @@ export interface CampaignJobDeps {
 }
 
 const TERMINAL_JOB = new Set<CampaignJobStatus>(TERMINAL_JOB_STATUSES);
+
+/**
+ * Resolves the export channel's download-link recipient — an OPERATOR
+ * address (the deployment's network admin, or the job's requester), never a
+ * participant's. Shared by the send path (`runExportForJob`) and the
+ * `completed` audit write's `recipientRef` (#617) so the two cannot drift.
+ *
+ * @param job - The job being processed (only `requestedBy` is read).
+ * @param config - The job's recipient-mode config.
+ * @returns The recipient address, or `undefined` when `network_admin` mode
+ *   has no configured address (the caller then fails the job separately).
+ */
+export function resolveExportRecipient(
+  job: Pick<ProcessingJob, 'requestedBy'>,
+  config: Pick<CampaignJobConfig, 'recipientMode' | 'networkAdminEmail'>,
+): string | undefined {
+  return config.recipientMode === 'network_admin' ? config.networkAdminEmail : job.requestedBy;
+}
+
+/**
+ * The deterministic S3 object key for a job's export CSV. Shared by the
+ * upload path (`runExportForJob`) and the `completed` audit write's
+ * `destination` (#617) so the two cannot drift. Deterministic per job (not
+ * timestamped) so a BullMQ retry overwrites the same object rather than
+ * leaving an orphaned copy of participant PII behind.
+ *
+ * @param orgId - The job's `signalstack_org_id`.
+ * @param jobId - The `campaign_job.id`.
+ * @returns The object key, e.g. `campaign-exports/org-1/job-1.csv`.
+ */
+export function exportObjectKey(orgId: string, jobId: string): string {
+  return `campaign-exports/${orgId}/${jobId}.csv`;
+}
 
 /**
  * Keeps the head of an error message bounded. Shared across channel
@@ -168,7 +212,7 @@ export async function runCampaignJob(jobId: string, deps: CampaignJobDeps): Prom
     } else {
       throw new Error(`campaign channel not implemented: ${job.channel}`);
     }
-    const status = await deps.client.rollUpStatus(jobId);
+    const { status, counts } = await deps.client.rollUpStatus(jobId);
 
     // Terminal: the job has an outcome, so record it. Best effort (#617).
     // `rollUpStatus` → `deriveJobStatus` returns `processing` — NOT
@@ -186,7 +230,7 @@ export async function runCampaignJob(jobId: string, deps: CampaignJobDeps): Prom
       // `succeeded` for anything that isn't `partial`.
       const outcome: AuditOutcome =
         status === 'partial' ? 'partial' : status === 'failed' ? 'failed' : 'succeeded';
-      await safeAuditWorker(
+      await safeAudit(
         () =>
           deps.audit?.recordCompleted({
             correlationId: jobId,
@@ -194,10 +238,11 @@ export async function runCampaignJob(jobId: string, deps: CampaignJobDeps): Prom
             actorOrgId: job.signalstackOrgId,
             outcome,
             completedAt: new Date(),
+            ...toAuditCounts(counts),
+            ...exportAuditExtras(job, deps),
           }) ?? Promise.resolve(undefined),
-        deps,
-        jobId,
-        job.channel,
+        deps.log,
+        { operation: 'campaignAudit.completed', job_id: jobId, channel: job.channel },
       );
     } else {
       deps.log.warn({
@@ -248,7 +293,12 @@ export async function runCampaignJob(jobId: string, deps: CampaignJobDeps): Prom
       await deps.client.setJobStatus(jobId, 'failed', truncateReason(reason));
 
       // Terminal (out of retries): record the failure. Best effort (#617).
-      await safeAuditWorker(
+      // `rollUpStatus` was never reached on this path (the handler threw
+      // before getting there), so the counts are read fresh here — after
+      // `failPendingItems` above, so they reflect every item's true final
+      // status rather than leaving the still-`pending` ones uncounted.
+      const counts = await deps.client.countItems(jobId);
+      await safeAudit(
         () =>
           deps.audit?.recordCompleted({
             correlationId: jobId,
@@ -257,10 +307,11 @@ export async function runCampaignJob(jobId: string, deps: CampaignJobDeps): Prom
             outcome: 'failed',
             completedAt: new Date(),
             errorCode: err instanceof Error ? err.constructor.name : 'unknown',
+            ...toAuditCounts(counts),
+            ...exportAuditExtras(job, deps),
           }) ?? Promise.resolve(undefined),
-        deps,
-        jobId,
-        job.channel,
+        deps.log,
+        { operation: 'campaignAudit.completed', job_id: jobId, channel: job.channel },
       );
     }
     throw err;
@@ -268,48 +319,29 @@ export async function runCampaignJob(jobId: string, deps: CampaignJobDeps): Prom
 }
 
 /**
- * Runs an audit write so it cannot affect the job (#617).
+ * Export-channel-only `completed`-audit extras: the download-link recipient
+ * and the deterministic S3 destination (#617). Both are pure functions of
+ * data already on the job/config — never re-derived differently at each
+ * call site, so the send path and the audit write cannot drift (see
+ * {@link resolveExportRecipient}, {@link exportObjectKey}). Returns `{}` for
+ * voice/email, so `recordCompleted`'s `recipientRef`/`destination` stay
+ * unset — an operator address must never be attributed to a channel that
+ * never released one.
  *
- * No timeout here: unlike the API's `safeAudit`, there is no HTTP response
- * waiting on this call — by the time this runs the job has already reached
- * its terminal status. Handles both of the writer's failure modes: a thrown
- * exception (e.g. the in-memory test fake's `failWith`) and a resolved
- * `err(BaseError)` Result (`PostgresCampaignAuditWriter`'s normal failure
- * path — an insert failure there does not throw). Neither is ever rethrown;
- * both are logged at `error`.
- *
- * @param fn - Thunk that performs the audit write (`deps.audit?.recordCompleted`,
- *   pre-resolved to `Promise.resolve(undefined)` when no writer is configured).
- * @param deps - Job deps, for the structured logger.
- * @param jobId - The `campaign_job.id` this write is for.
- * @param channel - The job's channel, for the log line.
+ * @param job - The job being processed.
+ * @param deps - Job deps, for the export recipient-mode config.
+ * @returns `{ recipientRef, destination }` for `channel === 'export'`; `{}` otherwise.
  */
-async function safeAuditWorker(
-  fn: () => Promise<Result<void, BaseError> | undefined>,
+function exportAuditExtras(
+  job: ProcessingJob,
   deps: CampaignJobDeps,
-  jobId: string,
-  channel: string,
-): Promise<void> {
-  try {
-    const result = await fn();
-    if (result && !result.success) {
-      deps.log.error({
-        operation: 'campaignAudit.completed',
-        status: 'failure',
-        job_id: jobId,
-        channel,
-        error: result.error.message,
-      });
-    }
-  } catch (cause) {
-    deps.log.error({
-      operation: 'campaignAudit.completed',
-      status: 'failure',
-      job_id: jobId,
-      channel,
-      error: cause instanceof Error ? cause.message : String(cause),
-    });
-  }
+): { recipientRef?: string; destination?: string } {
+  if (job.channel !== 'export') return {};
+  const recipientRef = resolveExportRecipient(job, deps.config);
+  return {
+    ...(recipientRef !== undefined ? { recipientRef } : {}),
+    destination: exportObjectKey(job.signalstackOrgId, job.id),
+  };
 }
 
 /**
@@ -392,12 +424,11 @@ async function runExportForJob(job: ProcessingJob, deps: CampaignJobDeps): Promi
   // Deterministic per job: a retry overwrites the same object rather than
   // leaving an orphaned CSV of participant PII behind at a timestamped key
   // (which nothing would ever clean up before its lifecycle expiry).
-  const key = `campaign-exports/${job.signalstackOrgId}/${job.id}.csv`;
+  const key = exportObjectKey(job.signalstackOrgId, job.id);
   await deps.export.putObject(key, Buffer.from(csv, 'utf8'), 'text/csv');
   const signed = await deps.export.signDownloadUrl(key);
 
-  const recipient =
-    deps.config.recipientMode === 'network_admin' ? deps.config.networkAdminEmail : job.requestedBy;
+  const recipient = resolveExportRecipient(job, deps.config);
   if (!recipient) {
     throw new Error(
       `campaign export has no recipient for mode "${deps.config.recipientMode}" ` +

@@ -13,8 +13,39 @@ import type {
   VoiceDispatchInput,
   VoiceDispatchResult,
 } from '@aggregator-dpg/voice-provider/interface';
-import { deriveJobStatus, type ProcessingJob } from '../campaign-job-client.js';
-import { runCampaignJob, type CampaignJobDeps } from './index.js';
+import {
+  deriveJobStatus,
+  type JobStatusCounts,
+  type ProcessingJob,
+} from '../campaign-job-client.js';
+import {
+  exportObjectKey,
+  resolveExportRecipient,
+  runCampaignJob,
+  type CampaignJobDeps,
+} from './index.js';
+
+/** Tallies the harness's in-memory item-status map into a real {@link JobStatusCounts} shape. */
+function tallyItemStatus(
+  itemStatus: Map<string, { status: string; err: string | null }>,
+): JobStatusCounts {
+  const counts: JobStatusCounts = {
+    total: 0,
+    pending: 0,
+    resolved: 0,
+    submitted: 0,
+    sent: 0,
+    skipped_not_owned: 0,
+    skipped_no_contact: 0,
+    duplicate_active: 0,
+    failed: 0,
+  };
+  for (const v of itemStatus.values()) {
+    counts.total++;
+    counts[v.status as keyof Omit<JobStatusCounts, 'total'>]++;
+  }
+  return counts;
+}
 
 function row(over: Partial<SignalStackDecryptedProfileRow> = {}): SignalStackDecryptedProfileRow {
   return {
@@ -131,26 +162,13 @@ function harness(
       // campaign-process/voice.test.ts for coverage of these two writers.
       markSubmitted: async () => undefined,
       setProviderResponse: async () => undefined,
+      countItems: async () => tallyItemStatus(itemStatus),
       rollUpStatus: async () => {
-        const counts = {
-          total: 0,
-          pending: 0,
-          resolved: 0,
-          submitted: 0,
-          sent: 0,
-          skipped_not_owned: 0,
-          skipped_no_contact: 0,
-          duplicate_active: 0,
-          failed: 0,
-        };
-        for (const v of itemStatus.values()) {
-          counts.total++;
-          counts[v.status as 'pending' | 'resolved' | 'submitted' | 'failed']++;
-        }
+        const counts = tallyItemStatus(itemStatus);
         const status = deriveJobStatus(counts);
         jobStatuses.push(status);
         if (theJob) theJob.status = status;
-        return status;
+        return { status, counts };
       },
     },
     export: {
@@ -423,6 +441,114 @@ describe('runCampaignJob completed audit (#617)', () => {
     expect(rows[0]!.actorOrgId).toBe('org-1');
   });
 
+  it('populates the outcome counts, recipientRef and destination on the export success row (#617 follow-up)', async () => {
+    const audit = new CampaignAuditWriterFake();
+    const h = harness(job(), {}, {}, undefined, audit);
+    await runCampaignJob('job-1', h.deps);
+
+    const row = audit.rows.find((r) => r.kind === 'completed')!;
+    expect(row).toMatchObject({
+      resolvedCount: 1,
+      skippedCount: 0,
+      failedCount: 0,
+      sentCount: 0,
+      recipientRef: 'user@org.example',
+      destination: 'campaign-exports/org-1/job-1.csv',
+    });
+    // The recipient is the same helper the send path itself uses — never a
+    // participant address (#617 follow-up).
+    expect(resolveExportRecipient(job(), h.deps.config)).toBe(row.recipientRef);
+    expect(exportObjectKey('org-1', 'job-1')).toBe(row.destination);
+  });
+
+  it('aggregates skipped_not_owned into skippedCount on the export success row', async () => {
+    const audit = new CampaignAuditWriterFake();
+    const h = harness(
+      job({
+        items: [
+          { itemId: 'a', action: null, status: 'pending', providerBatchRef: null },
+          { itemId: 'b', action: null, status: 'pending', providerBatchRef: null },
+        ],
+      }),
+      {
+        fetchDecryptedProfiles: async () =>
+          ok({ profiles: [row({ item_id: 'a' })], skipped: ['b'] }),
+      },
+      {},
+      undefined,
+      audit,
+    );
+    await runCampaignJob('job-1', h.deps);
+
+    const completed = audit.rows.find((r) => r.kind === 'completed')!;
+    expect(completed).toMatchObject({ resolvedCount: 1, skippedCount: 1, failedCount: 0 });
+  });
+
+  it('populates counts, recipientRef and destination on the export final-attempt-failure row', async () => {
+    const audit = new CampaignAuditWriterFake();
+    const h = harness(
+      job(),
+      {
+        putObject: async () => {
+          throw new Error('s3 down');
+        },
+      },
+      {},
+      { attempt: 3, maxAttempts: 3 },
+      audit,
+    );
+
+    await expect(runCampaignJob('job-1', h.deps)).rejects.toThrow('s3 down');
+    const row = audit.rows.find((r) => r.kind === 'completed')!;
+    // decryptAndMarkItems resolved the one item before the S3 write blew up;
+    // failPendingItems then has nothing left pending to fail.
+    expect(row).toMatchObject({
+      resolvedCount: 1,
+      failedCount: 0,
+      recipientRef: 'user@org.example',
+      destination: 'campaign-exports/org-1/job-1.csv',
+    });
+  });
+
+  it('never sets recipientRef or destination on a voice/email completed row', async () => {
+    const audit = new CampaignAuditWriterFake();
+    const voiceJob = job({
+      channel: 'voice',
+      content: { agent_id: 'agent-1' },
+      items: [
+        { itemId: 'item-1', action: 'voice_call', status: 'pending', providerBatchRef: null },
+      ],
+    });
+    const h = harness(voiceJob, {}, {}, undefined, audit);
+    const deps: CampaignJobDeps = {
+      ...h.deps,
+      voice: {
+        fetchDecryptedProfiles: async () => ok({ profiles: [row()], skipped: [] }),
+        provider: new (class extends VoiceProviderBase {
+          async dispatch(
+            input: VoiceDispatchInput,
+          ): Promise<Result<VoiceDispatchResult, BaseError>> {
+            return ok({
+              providerBatchRef: 'batch-1',
+              accepted: input.contacts.map((c) => c.ref),
+              rejected: [],
+              providerResponse: {
+                create: brandCuratedProviderResponse({}),
+                start: brandCuratedProviderResponse({}),
+              },
+            });
+          }
+        })(),
+      },
+    };
+
+    await runCampaignJob('job-1', deps);
+
+    const completed = audit.rows.find((r) => r.kind === 'completed')!;
+    expect('recipientRef' in completed).toBe(false);
+    expect('destination' in completed).toBe(false);
+  });
+
   it('writes NO completed row for a retryable mid-sequence failure', async () => {
     const audit = new CampaignAuditWriterFake();
     const h = harness(
@@ -479,7 +605,20 @@ describe('runCampaignJob completed audit (#617)', () => {
     // exist today.
     const audit = new CampaignAuditWriterFake();
     const h = harness(job(), {}, {}, undefined, audit);
-    h.deps.client.rollUpStatus = async () => 'processing';
+    h.deps.client.rollUpStatus = async () => ({
+      status: 'processing',
+      counts: {
+        total: 1,
+        pending: 1,
+        resolved: 0,
+        submitted: 0,
+        sent: 0,
+        skipped_not_owned: 0,
+        skipped_no_contact: 0,
+        duplicate_active: 0,
+        failed: 0,
+      },
+    });
 
     await runCampaignJob('job-1', h.deps);
 

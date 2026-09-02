@@ -293,11 +293,55 @@ export async function setJobStatus(
     .where(eq(campaignJob.id, jobId));
 }
 
-/** Derives + persists the job's roll-up status from its item counts. */
-export async function rollUpStatus(jobId: string): Promise<CampaignJobStatus> {
-  const status = deriveJobStatus(await countItems(jobId));
+/** `rollUpStatus`'s return shape: the derived status plus the tally it was derived from (#617). */
+export interface RollUpResult {
+  status: CampaignJobStatus;
+  counts: JobStatusCounts;
+}
+
+/**
+ * Derives + persists the job's roll-up status from its item counts.
+ *
+ * Returns the counts alongside the status (rather than the status alone) so
+ * a caller that needs both — the `completed` audit write (#617) is the
+ * motivating case — does not have to issue a second `countItems` query.
+ */
+export async function rollUpStatus(jobId: string): Promise<RollUpResult> {
+  const counts = await countItems(jobId);
+  const status = deriveJobStatus(counts);
   await setJobStatus(jobId, status);
-  return status;
+  return { status, counts };
+}
+
+/** The `completed` audit row's outcome-count columns (#617 §3). */
+export interface AuditCounts {
+  resolvedCount: number;
+  skippedCount: number;
+  failedCount: number;
+  sentCount: number;
+}
+
+/**
+ * Maps a job's item-status tally onto the `completed` audit row's outcome
+ * counts (#617).
+ *
+ * `skippedCount` aggregates every status that is a deliberate no-op rather
+ * than a release: `skipped_not_owned` (the org doesn't own the item),
+ * `skipped_no_contact` (owned, but no usable contact field), and
+ * `duplicate_active` (de-duplicated against an already-active send). None of
+ * those three ever reached a participant, so they are counted together as
+ * "skipped" rather than split across the fixed audit-row columns.
+ *
+ * @param counts - The job's item-status tally (`countItems`/`rollUpStatus`).
+ * @returns The four outcome-count fields the audit row's `CompletedAuditInput` accepts.
+ */
+export function toAuditCounts(counts: JobStatusCounts): AuditCounts {
+  return {
+    resolvedCount: counts.resolved,
+    skippedCount: counts.skipped_not_owned + counts.skipped_no_contact + counts.duplicate_active,
+    failedCount: counts.failed,
+    sentCount: counts.sent,
+  };
 }
 
 /**

@@ -56,10 +56,36 @@ import type {
   VoiceDispatchResult,
 } from '@aggregator-dpg/voice-provider/interface';
 import { InMemoryVoiceProvider } from '@aggregator-dpg/voice-provider/testing';
-import { deriveJobStatus, type ProcessingJob } from '../campaign-job-client.js';
+import {
+  deriveJobStatus,
+  type JobStatusCounts,
+  type ProcessingJob,
+} from '../campaign-job-client.js';
 import { runCampaignJob, type CampaignJobDeps } from './index.js';
 import type { EmailCollaborators } from './email.js';
 import type { VoiceCollaborators } from './voice.js';
+
+/** Tallies the harness's in-memory item-status map into a real {@link JobStatusCounts} shape. */
+function tallyItemStatus(
+  itemStatus: Map<string, { status: string; err: string | null }>,
+): JobStatusCounts {
+  const counts: JobStatusCounts = {
+    total: 0,
+    pending: 0,
+    resolved: 0,
+    submitted: 0,
+    sent: 0,
+    skipped_not_owned: 0,
+    skipped_no_contact: 0,
+    duplicate_active: 0,
+    failed: 0,
+  };
+  for (const v of itemStatus.values()) {
+    counts.total++;
+    counts[v.status as keyof Omit<JobStatusCounts, 'total'>]++;
+  }
+  return counts;
+}
 
 /**
  * Distinctive decrypted-participant values seeded on every fake row in this
@@ -147,25 +173,12 @@ function buildDeps(
       setJobStatus: async (_jobId, status) => {
         theJob.status = status;
       },
+      countItems: async () => tallyItemStatus(itemStatus),
       rollUpStatus: async () => {
-        const counts = {
-          total: 0,
-          pending: 0,
-          resolved: 0,
-          submitted: 0,
-          sent: 0,
-          skipped_not_owned: 0,
-          skipped_no_contact: 0,
-          duplicate_active: 0,
-          failed: 0,
-        };
-        for (const v of itemStatus.values()) {
-          counts.total++;
-          counts[v.status as keyof typeof counts]++;
-        }
+        const counts = tallyItemStatus(itemStatus);
         const status = deriveJobStatus(counts);
         theJob.status = status;
-        return status;
+        return { status, counts };
       },
       setNotifiedAt: async () => undefined,
       failPendingItems: async (_jobId, reason) => {
