@@ -144,9 +144,9 @@ describe('POST /v1/aggregator-registrations/create', () => {
     if (!first) throw new Error('no mail captured');
     expect(first.to).toEqual(['reviewer@bluedots.local']);
     expect(first.subject).toContain('TRRAIN');
-    expect(first.html).toContain('intent=approve');
-    expect(first.html).toContain('intent=reject');
+    // One review link (no per-intent URLs) → the read page carries both actions.
     expect(first.html).toContain('/admin/v1/aggregator-registrations/read/');
+    expect(first.html).not.toContain('intent=');
 
     // Consent ledger should have one row for the aggregator
     const ledgerRows = consentLedger.list();
@@ -279,8 +279,8 @@ describe('POST /v1/aggregator-registrations/create', () => {
     expect(res.statusCode).toBe(409);
     const body = res.json() as { error: { code: string; title: string; detail: string } };
     expect(body.error.code).toBe('USER_EXISTS');
-    expect(body.error.title).toBe('Email already registered');
-    expect(body.error.detail).toContain('already exists');
+    expect(body.error.title).toBe('Email already in use');
+    expect(body.error.detail).toContain('already registered');
   });
 
   it('returns 409 when the phone is already used by another user', async () => {
@@ -301,7 +301,7 @@ describe('POST /v1/aggregator-registrations/create', () => {
     expect(res.statusCode).toBe(409);
     const body = res.json() as { error: { code: string; title: string; requestId: string } };
     expect(body.error.code).toBe('PHONE_EXISTS');
-    expect(body.error.title).toBe('Phone already registered');
+    expect(body.error.title).toBe('Phone already in use');
     expect(body.error.requestId).toMatch(/^req-/);
   });
 
@@ -334,7 +334,10 @@ describe('POST /v1/aggregator-registrations/create', () => {
     idp.createUser = originalCreate;
   });
 
-  async function seedPending(overrides?: { status?: 'pending' | 'inactive' | 'active' }) {
+  async function seedPending(overrides?: {
+    status?: 'pending' | 'inactive' | 'active';
+    rejectedAt?: Date;
+  }) {
     const created = await aggregatorStore.create({
       orgSlug: 'trrain-aaaa',
       actorType: 'aggregator',
@@ -353,7 +356,14 @@ describe('POST /v1/aggregator-registrations/create', () => {
     });
     if (!created.ok) throw new Error('seed failed');
     const id = created.value.id;
-    if (overrides?.status && overrides.status !== 'pending') {
+    if (overrides?.status === 'inactive') {
+      // Mirror the reject path: stamp write-once rejected_at (#726).
+      await aggregatorStore.update(id, {
+        status: 'inactive',
+        rejectedAt: overrides.rejectedAt ?? new Date(),
+        updatedBy: 'admin',
+      });
+    } else if (overrides?.status && overrides.status !== 'pending') {
       await aggregatorStore.updateStatus(id, overrides.status, 'admin');
     }
     await idp.createUser({
@@ -384,10 +394,10 @@ describe('POST /v1/aggregator-registrations/create', () => {
     expect(body.status).toBe('pending');
     // A fresh admin-review email was re-sent.
     expect(mailer.outbox.length).toBe(1);
-    expect(mailer.outbox[0]?.html).toContain('intent=approve');
+    expect(mailer.outbox[0]?.html).toContain('/admin/v1/aggregator-registrations/read/');
   });
 
-  it('returns 409 for a rejected (inactive) registration on resubmit (recover via prune)', async () => {
+  it('returns 409 REGISTRATION_COOLING for a rejected registration inside the cooling window', async () => {
     const id = await seedPending({ status: 'inactive' });
     const res = await app.inject({
       method: 'POST',
@@ -395,12 +405,39 @@ describe('POST /v1/aggregator-registrations/create', () => {
       headers: AUTH_HEADER,
       payload: validBody,
     });
-    // Rejected records are not reclaimable — re-registration only after the
-    // stale-prune job clears the old row.
+    // Just-rejected → still cooling (#726): blocked with a retry_after hint.
     expect(res.statusCode).toBe(409);
-    expect((res.json() as { error: { code: string } }).error.code).toBe('USER_EXISTS');
+    const err = res.json() as { error: { code: string; fields?: { retry_after?: string } } };
+    expect(err.error.code).toBe('REGISTRATION_COOLING');
+    expect(err.error.fields?.retry_after).toBeTruthy();
+    // Row untouched — no revive, no email.
     const stored = await aggregatorStore.findById(id);
     if (stored.ok) expect(stored.value?.status).toBe('inactive');
+    expect(mailer.outbox.length).toBe(0);
+  });
+
+  it('revives a rejected registration once the cooling window has elapsed', async () => {
+    const elapsed = new Date(Date.now() - 13 * 60 * 60 * 1000); // 13h ago > 12h default
+    const id = await seedPending({ status: 'inactive', rejectedAt: elapsed });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/aggregator-registrations/create',
+      headers: AUTH_HEADER,
+      payload: validBody,
+    });
+    // Cooling elapsed → the SAME row is revived to pending and the review link
+    // re-sent (reuse, not delete). rejected_at is cleared.
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { aggregator_id: string; status: string };
+    expect(body.aggregator_id).toBe(id);
+    expect(body.status).toBe('pending');
+    const stored = await aggregatorStore.findById(id);
+    if (stored.ok) {
+      expect(stored.value?.status).toBe('pending');
+      expect(stored.value?.rejectedAt).toBeNull();
+    }
+    expect(mailer.outbox.length).toBe(1);
+    expect(mailer.outbox[0]?.html).toContain('/admin/v1/aggregator-registrations/read/');
   });
 
   it('still returns 409 when the email belongs to an active aggregator', async () => {

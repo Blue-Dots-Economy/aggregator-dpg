@@ -109,6 +109,50 @@ export function ctaButton(
   return `<a href="${href}" style="display:inline-block;background:${bg};color:#ffffff;text-decoration:none;padding:12px 22px;border-radius:10px;font-weight:600;font-size:14px;">${escapeHtml(label)}</a>`;
 }
 
+/**
+ * Status pill shown above an email heading (e.g. "Action required"). Uses a
+ * table cell rather than a styled span: Outlook drops padding on inline
+ * elements, which would collapse the pill into plain text.
+ *
+ * @param label - Short pill text; upper-cased for emphasis by the caller's CSS.
+ * @param tone - `info` for neutral notices, `action` for anything needing a reply.
+ * @returns HTML for the pill.
+ */
+export function pill(label: string, tone: 'info' | 'action' = 'info'): string {
+  const bg = tone === 'action' ? '#dbeafe' : '#f1f5f9';
+  const fg = tone === 'action' ? '#1d4ed8' : '#475069';
+  return (
+    `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 14px;">` +
+    `<tr><td style="background:${bg};color:${fg};border-radius:999px;padding:6px 14px;` +
+    `font-size:11.5px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;">` +
+    `${escapeHtml(label)}</td></tr></table>`
+  );
+}
+
+/**
+ * Full-width CTA. The inline-block `ctaButton` shrink-wraps its label, which
+ * reads as an afterthought when it is the one action the mail exists for.
+ *
+ * @param label - Button text.
+ * @param href - Target URL; already signed/encoded by the caller.
+ * @param color - `primary` uses the brand colour, `danger` red.
+ * @returns HTML for a full-width button row.
+ */
+export function ctaButtonFull(
+  label: string,
+  href: string,
+  color: 'primary' | 'danger' = 'primary',
+): string {
+  const bg = color === 'danger' ? '#dc2626' : getEmailBrand().primary_color;
+  return (
+    `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">` +
+    `<tr><td align="center" style="background:${bg};border-radius:12px;">` +
+    `<a href="${href}" style="display:block;padding:15px 22px;color:#ffffff;` +
+    `text-decoration:none;font-weight:700;font-size:15px;">${escapeHtml(label)} &rarr;</a>` +
+    `</td></tr></table>`
+  );
+}
+
 export function escapeHtml(s: string): string {
   return s
     .replaceAll('&', '&amp;')

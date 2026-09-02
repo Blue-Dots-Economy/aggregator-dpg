@@ -100,36 +100,28 @@ describe('parseAdminEmails', () => {
   });
 });
 
-describe('mintApprovalTokenPair', () => {
+describe('mintReviewToken', () => {
   beforeEach(() => {
     mockMintApprovalToken.mockReset();
   });
 
-  it('mints approve + reject tokens with the configured TTL', async () => {
-    mockMintApprovalToken
-      .mockResolvedValueOnce({ token: 'approve-tok', expiresAt: new Date() })
-      .mockResolvedValueOnce({ token: 'reject-tok', expiresAt: new Date() });
-    const { mintApprovalTokenPair } = await import('./registration-notify.js');
-    const result = await mintApprovalTokenPair('agg-1');
-    expect(result).toEqual({ approveToken: 'approve-tok', rejectToken: 'reject-tok' });
+  it('mints a single review token with the configured TTL', async () => {
+    mockMintApprovalToken.mockResolvedValueOnce({ token: 'review-tok', expiresAt: new Date() });
+    const { mintReviewToken } = await import('./registration-notify.js');
+    const token = await mintReviewToken('agg-1');
+    expect(token).toBe('review-tok');
+    expect(mockMintApprovalToken).toHaveBeenCalledTimes(1);
     expect(mockMintApprovalToken).toHaveBeenNthCalledWith(1, {
       aggregatorId: 'agg-1',
       intent: 'approve',
       ttlSec: 604800,
     });
-    expect(mockMintApprovalToken).toHaveBeenNthCalledWith(2, {
-      aggregatorId: 'agg-1',
-      intent: 'reject',
-      ttlSec: 604800,
-    });
   });
 
-  it('includes the org claim on both tokens when provided', async () => {
-    mockMintApprovalToken
-      .mockResolvedValueOnce({ token: 'a', expiresAt: new Date() })
-      .mockResolvedValueOnce({ token: 'r', expiresAt: new Date() });
-    const { mintApprovalTokenPair } = await import('./registration-notify.js');
-    await mintApprovalTokenPair('agg-1', 'org-1');
+  it('includes the org claim when provided', async () => {
+    mockMintApprovalToken.mockResolvedValueOnce({ token: 'a', expiresAt: new Date() });
+    const { mintReviewToken } = await import('./registration-notify.js');
+    await mintReviewToken('agg-1', 'org-1');
     expect(mockMintApprovalToken).toHaveBeenNthCalledWith(1, {
       aggregatorId: 'agg-1',
       intent: 'approve',
@@ -140,8 +132,8 @@ describe('mintApprovalTokenPair', () => {
 
   it('throws HttpError TOKEN_MINT_FAILED when minting throws', async () => {
     mockMintApprovalToken.mockRejectedValueOnce(new Error('signing key missing'));
-    const { mintApprovalTokenPair } = await import('./registration-notify.js');
-    await expect(mintApprovalTokenPair('agg-1')).rejects.toMatchObject({
+    const { mintReviewToken } = await import('./registration-notify.js');
+    await expect(mintReviewToken('agg-1')).rejects.toMatchObject({
       code: 'TOKEN_MINT_FAILED',
     });
   });
@@ -162,7 +154,7 @@ describe('sendReviewEmail', () => {
     });
   });
 
-  it('builds approve/reject urls under the read path and sends to all recipients', async () => {
+  it('builds the review url under the read path and sends to all recipients', async () => {
     const send = vi.fn().mockResolvedValue({ ok: true, value: { messageId: 'm-1' } });
     mockGetMailer.mockReturnValue({ send });
     const { sendReviewEmail } = await import('./registration-notify.js');
@@ -179,14 +171,12 @@ describe('sendReviewEmail', () => {
       },
       log,
     );
-    const renderArgs = mockRenderAdminReview.mock.calls[0]?.[0] as {
-      approveUrl: string;
-      rejectUrl: string;
-    };
-    expect(renderArgs.approveUrl).toBe(
-      'https://api.example.com/admin/v1/aggregator-registrations/read/agg-1?token=approve-tok&intent=approve',
+    const renderArgs = mockRenderAdminReview.mock.calls[0]?.[0] as { reviewUrl: string };
+    expect(renderArgs.reviewUrl).toBe(
+      'https://api.example.com/admin/v1/aggregator-registrations/read/agg-1?token=approve-tok',
     );
-    expect(renderArgs.rejectUrl).toContain('intent=reject');
+    // One link, both actions — no intent in the URL.
+    expect(renderArgs.reviewUrl).not.toContain('intent=');
     expect(send).toHaveBeenCalledWith({
       to: ['admin@bluedots.local'],
       subject: 'Review needed',

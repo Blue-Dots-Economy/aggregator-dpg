@@ -61,6 +61,18 @@ export interface Aggregator {
    * hierarchy is enabled.
    */
   parentOrgId: string | null;
+  /**
+   * Email the coordinator was invited at (#701), when registered via an invite.
+   * May differ from `contact.email`; kept for provenance so the approving owner
+   * sees who was originally targeted. `null` for non-invite registrations.
+   */
+  inviteEmail: string | null;
+  /**
+   * Write-once rejection timestamp (#726). Set when a pending registration is
+   * rejected (status → inactive); drives the re-registration cooling window.
+   * `null` until/unless rejected.
+   */
+  rejectedAt: Date | null;
 }
 
 export interface CreateAggregatorInput {
@@ -76,6 +88,8 @@ export interface CreateAggregatorInput {
   updatedBy: string;
   /** Optional parent org id (spec §5.2). Defaults to null when omitted. */
   parentOrgId?: string | null;
+  /** Invited email (#701) — provenance when registered via an invite. */
+  inviteEmail?: string | null;
   /**
    * Schema-driven registration fields with no column of their own. Defaults to
    * `{}` when omitted — the typed fields above stay authoritative for
@@ -103,6 +117,8 @@ export interface UpdateAggregatorPatch {
   consent?: ConsentRecord;
   status?: AggregatorStatus;
   parentOrgId?: string | null;
+  /** Write-once rejection stamp (#726) — set only on the reject transition. */
+  rejectedAt?: Date | null;
   updatedBy: string;
 }
 
@@ -129,6 +145,8 @@ export type StoreError =
   | { code: 'DUPLICATE_SLUG'; message: string }
   | { code: 'DUPLICATE_PHONE'; message: string }
   | { code: 'DUPLICATE_EMAIL'; message: string }
+  /** Unique violation on a constraint this layer does not recognise (#718 review). */
+  | { code: 'DUPLICATE'; message: string }
   | { code: 'CHECK_VIOLATION'; message: string }
   | { code: 'DB_UNAVAILABLE'; message: string };
 

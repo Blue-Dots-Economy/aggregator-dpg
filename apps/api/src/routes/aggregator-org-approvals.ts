@@ -28,7 +28,13 @@ import type { AggregatorOrg } from '../services/aggregator-org-store/index.js';
 import { getIdpAdmin } from '../services/idp-admin/index.js';
 import { formatApprovalTtl } from '../services/approval-token.js';
 import { renderConfirmPage, renderResultPage } from '../views/approval-pages.js';
-import { mintApprovalTokenPair } from '../services/registration-notify.js';
+import { mintReviewToken } from '../services/registration-notify.js';
+import { getMailer } from '@aggregator-dpg/mailer';
+import {
+  renderApplicantRejected,
+  renderOrgOwnerApproved,
+} from '../services/email-templates/index.js';
+import { mintGrantToken } from '../services/grant-token.js';
 import {
   sendHtml,
   sendPage,
@@ -42,6 +48,8 @@ import {
 const OrgDecisionBodySchema = z.object({
   token: z.string().min(1),
   decision: z.enum(['approve', 'reject']),
+  /** Same cap as the coordinator decision route; surfaced to the applicant. */
+  reason: z.string().max(2000).optional(),
 });
 
 const OrgApprovalParamsSchema = z.object({ id: z.string() });
@@ -85,7 +93,7 @@ export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance):
       reply: FastifyReply,
     ) => {
       const orgId = req.params.id;
-      const { token, intent } = req.query;
+      const { token } = req.query;
 
       if (!token) return sendPage(reply, missingTokenPage());
 
@@ -125,17 +133,16 @@ export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance):
       const prior = orgDecidedView(lookup.value.status);
       if (prior) return sendHtml(reply, 200, renderResultPage(prior));
 
-      const effectiveIntent = intent === 'reject' ? 'reject' : 'approve';
       return sendHtml(
         reply,
         200,
         renderConfirmPage({
           aggregatorId: orgId,
-          intent: effectiveIntent,
           token,
           applicantEmail: lookup.value.ownerEmail,
           association: lookup.value.displayName,
           aggregatorType: 'organisation',
+          entityLabel: 'organisation',
           postUrl: `${config.PUBLIC_API_URL}/admin/v1/orgs/decision/${orgId}`,
           expiresInText: formatApprovalTtl(config.APPROVAL_TOKEN_TTL_SECONDS),
         }),
@@ -187,14 +194,54 @@ export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance):
 
       if (parsed.data.decision === 'reject') {
         await orgStore.reject(orgId);
-        log.info({ status: 'success', decision: 'reject', new_status: 'inactive' }, 'org rejected');
+        // Notify the owner, mirroring the coordinator reject path. The CAS above
+        // has already committed, so a mail failure logs and continues rather
+        // than un-rejecting a decided application — same posture as the
+        // org-approved mail below. No owner name is stored on the org row (the
+        // name given at registration only builds the Keycloak user), so the
+        // template greets without one.
+        const rejectedMail = renderApplicantRejected({
+          association: lookup.value.displayName,
+          entityLabel: 'organisation',
+          ...(parsed.data.reason ? { reason: parsed.data.reason } : {}),
+        });
+        const rejectSend = await getMailer().send({
+          to: lookup.value.ownerEmail,
+          subject: rejectedMail.subject,
+          html: rejectedMail.html,
+          text: rejectedMail.text,
+        });
+        if (!rejectSend.ok) {
+          log.warn(
+            {
+              status: 'failure',
+              sub_operation: 'mailer.send.orgRejected',
+              code: rejectSend.error.code,
+              cause: rejectSend.error.message,
+            },
+            'org-rejected email delivery failed (org is inactive; owner not notified)',
+          );
+        }
+        // The reason is logged for audit but not persisted — there is no column
+        // for it on either table yet (same gap as the coordinator path).
+        log.info(
+          {
+            status: 'success',
+            decision: 'reject',
+            new_status: 'inactive',
+            reason: parsed.data.reason ?? null,
+          },
+          'org rejected',
+        );
         return sendHtml(
           reply,
           200,
           renderResultPage({
             status: 'success',
             title: 'Organisation rejected',
-            message: 'The applicant has been notified.',
+            message: rejectSend.ok
+              ? `${lookup.value.ownerEmail} has been notified.`
+              : 'The organisation was rejected, but the notification email could not be delivered.',
           }),
         );
       }
@@ -242,6 +289,38 @@ export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance):
         }
       }
 
+      // Notify the owner their organisation is live (#699). Soft-fail: the org
+      // is already active (CAS committed above), so a mail failure logs and
+      // continues — same posture as the role/group mirror right above. No
+      // sign-in CTA (the owner KC user stays disabled); the email carries the
+      // 90-day grant link to the invite-management page (#701).
+      const grant = await mintGrantToken({
+        org: orgId,
+        ttlSec: config.GRANT_TOKEN_TTL_SECONDS,
+      });
+      const ownerMail = renderOrgOwnerApproved({
+        orgName: lookup.value.displayName,
+        ownerEmail: lookup.value.ownerEmail,
+        inviteUrl: `${config.PUBLIC_PORTAL_URL}/register/invite?grant=${encodeURIComponent(grant.token)}`,
+      });
+      const ownerSend = await getMailer().send({
+        to: lookup.value.ownerEmail,
+        subject: ownerMail.subject,
+        html: ownerMail.html,
+        text: ownerMail.text,
+      });
+      if (!ownerSend.ok) {
+        log.warn(
+          {
+            status: 'failure',
+            sub_operation: 'mailer.send.orgOwnerApproved',
+            code: ownerSend.error.code,
+            cause: ownerSend.error.message,
+          },
+          'org-approved email delivery failed (org is active; owner not notified)',
+        );
+      }
+
       log.info({ status: 'success', decision: 'approve', new_status: 'active' }, 'org approved');
       return sendHtml(
         reply,
@@ -282,20 +361,19 @@ export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance):
       const prior = orgDecidedView(lookup.value.status);
       if (prior) return sendHtml(reply, 200, renderResultPage(prior));
 
-      // Mint a fresh token pair so the approve/reject POST validates, then land
-      // the admin on the confirm page directly.
-      const { approveToken, rejectToken } = await mintApprovalTokenPair(orgId);
-      const effectiveIntent = verified.intent === 'reject' ? 'reject' : 'approve';
+      // Mint a fresh review token, then land the admin on the review page
+      // directly (approve/reject chosen there).
+      const freshToken = await mintReviewToken(orgId);
       return sendHtml(
         reply,
         200,
         renderConfirmPage({
           aggregatorId: orgId,
-          intent: effectiveIntent,
-          token: effectiveIntent === 'reject' ? rejectToken : approveToken,
+          token: freshToken,
           applicantEmail: lookup.value.ownerEmail,
           association: lookup.value.displayName,
           aggregatorType: 'organisation',
+          entityLabel: 'organisation',
           postUrl: `${config.PUBLIC_API_URL}/admin/v1/orgs/decision/${orgId}`,
           expiresInText: formatApprovalTtl(config.APPROVAL_TOKEN_TTL_SECONDS),
         }),

@@ -1,12 +1,15 @@
 /**
  * Regression test for aggregator-dpg#617 (final-review cheap item):
- * `0021_campaign_pii_audit.sql`'s `CREATE TYPE` statements must be
+ * `0022_campaign_pii_audit.sql`'s `CREATE TYPE` statements must be
  * schema-qualified (`"public"."name"`), matching every other hand-authored
  * migration in this repo (e.g. `0019_...sql`) — an unqualified `CREATE TYPE
  * "name"` still works (it resolves via `search_path`), but is inconsistent
  * with the rest of the migration history for no reason.
  *
- * @module apps/api/__tests__/migration-0021-schema-qualified
+ * Renumbered from 0021 to 0022 when merging `feature` (which landed
+ * `0021_registration_invites` first) — see aggregator-dpg#729.
+ *
+ * @module apps/api/__tests__/migration-0022-schema-qualified
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -18,9 +21,9 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '../../../..');
 const migrationsDir = path.join(repoRoot, 'apps', 'api', 'drizzle', 'migrations');
 
-describe('0021_campaign_pii_audit.sql CREATE TYPE statements are schema-qualified', () => {
+describe('0022_campaign_pii_audit.sql CREATE TYPE statements are schema-qualified', () => {
   it('every CREATE TYPE line names "public" explicitly', () => {
-    const sql = readFileSync(path.join(migrationsDir, '0021_campaign_pii_audit.sql'), 'utf8');
+    const sql = readFileSync(path.join(migrationsDir, '0022_campaign_pii_audit.sql'), 'utf8');
     const createTypeLines = sql.split('\n').filter((l) => l.startsWith('CREATE TYPE'));
     expect(createTypeLines.length).toBeGreaterThan(0);
     for (const line of createTypeLines) {
