@@ -80,7 +80,11 @@ export interface CampaignJobClient {
    * path (#617) to populate the `completed` audit row's outcome counts —
    * `rollUpStatus` is not called there (the handler threw before reaching
    * it), so this is queried directly, after `failPendingItems` has already
-   * resolved every still-`pending` item.
+   * resolved every still-`pending` item. The stalled-job watchdog
+   * (`jobs/cron-watchdog.ts`) follows the identical order against its own
+   * `countItems`/`failPendingItems` imports — the two terminal paths that
+   * were never a normal handler return must both force every item terminal
+   * before counting, or their counts silently undercount.
    */
   countItems(jobId: string): Promise<JobStatusCounts>;
 }
@@ -239,7 +243,7 @@ export async function runCampaignJob(jobId: string, deps: CampaignJobDeps): Prom
             outcome,
             completedAt: new Date(),
             ...toAuditCounts(counts),
-            ...exportAuditExtras(job, deps),
+            ...exportAuditExtras(job, deps.config),
           }) ?? Promise.resolve(undefined),
         deps.log,
         { operation: 'campaignAudit.completed', job_id: jobId, channel: job.channel },
@@ -308,7 +312,7 @@ export async function runCampaignJob(jobId: string, deps: CampaignJobDeps): Prom
             completedAt: new Date(),
             errorCode: err instanceof Error ? err.constructor.name : 'unknown',
             ...toAuditCounts(counts),
-            ...exportAuditExtras(job, deps),
+            ...exportAuditExtras(job, deps.config),
           }) ?? Promise.resolve(undefined),
         deps.log,
         { operation: 'campaignAudit.completed', job_id: jobId, channel: job.channel },
@@ -322,22 +326,32 @@ export async function runCampaignJob(jobId: string, deps: CampaignJobDeps): Prom
  * Export-channel-only `completed`-audit extras: the download-link recipient
  * and the deterministic S3 destination (#617). Both are pure functions of
  * data already on the job/config — never re-derived differently at each
- * call site, so the send path and the audit write cannot drift (see
+ * call site, so no writer can drift from another (see
  * {@link resolveExportRecipient}, {@link exportObjectKey}). Returns `{}` for
  * voice/email, so `recordCompleted`'s `recipientRef`/`destination` stay
  * unset — an operator address must never be attributed to a channel that
  * never released one.
  *
- * @param job - The job being processed.
- * @param deps - Job deps, for the export recipient-mode config.
+ * SHARED, not a per-caller copy: this is the one place either field is
+ * computed. Both terminal-write call sites in this module (the success
+ * roll-up and the final-attempt-failure path) and the stalled-job watchdog's
+ * sweep (`jobs/cron-watchdog.ts`) call this same function — a hand-maintained
+ * twin here was the exact shape of bug that already hit this branch once
+ * (the email `piiFields` duplication), so this is exported specifically to
+ * be reused rather than reimplemented.
+ *
+ * @param job - The minimal job fields any caller can supply — a full
+ *   {@link ProcessingJob} or the watchdog's narrower stalled-job row both
+ *   satisfy this.
+ * @param config - The export recipient-mode config.
  * @returns `{ recipientRef, destination }` for `channel === 'export'`; `{}` otherwise.
  */
-function exportAuditExtras(
-  job: ProcessingJob,
-  deps: CampaignJobDeps,
+export function exportAuditExtras(
+  job: Pick<ProcessingJob, 'channel' | 'signalstackOrgId' | 'id' | 'requestedBy'>,
+  config: Pick<CampaignJobConfig, 'recipientMode' | 'networkAdminEmail'>,
 ): { recipientRef?: string; destination?: string } {
   if (job.channel !== 'export') return {};
-  const recipientRef = resolveExportRecipient(job, deps.config);
+  const recipientRef = resolveExportRecipient(job, config);
   return {
     ...(recipientRef !== undefined ? { recipientRef } : {}),
     destination: exportObjectKey(job.signalstackOrgId, job.id),

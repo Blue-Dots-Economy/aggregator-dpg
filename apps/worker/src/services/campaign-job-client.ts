@@ -160,7 +160,19 @@ export async function getJobForProcessing(jobId: string): Promise<ProcessingJob 
   };
 }
 
-/** Item-status tally for a job (derived, never a stored counter). */
+/**
+ * Item-status tally for a job (derived, never a stored counter).
+ *
+ * Both callers that feed this into the `completed` audit row's counts
+ * (#617) call `failPendingItems` first, so by the time this runs, no item is
+ * left `pending` — every requested item is accounted for in a real bucket
+ * rather than silently missing from every count: `campaign-process/index.ts`
+ * does it on the final-attempt-failure path (`rollUpStatus` is not reached
+ * there), and `jobs/cron-watchdog.ts`'s stalled-job sweep does it before
+ * auditing a force-failed job, since `stalled` means the worker died
+ * mid-run — leftover `pending` items are the NORMAL case there, not an edge
+ * case.
+ */
 export async function countItems(jobId: string): Promise<JobStatusCounts> {
   const rows = await getDb()
     .select({ status: campaignJobItem.status, n: count() })
