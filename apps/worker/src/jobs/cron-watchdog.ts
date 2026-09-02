@@ -10,6 +10,9 @@
  *
  * S3 lifecycle (raw CSVs + errors.csv) is configured externally on the
  * bucket; the worker does not delete S3 objects.
+ *
+ * The campaign-stall sweep additionally writes a `completed` PII-audit row
+ * for every job it force-fails (#617 follow-up) — see {@link auditStalledJob}.
  */
 
 import { and, eq, inArray, isNotNull, lt } from 'drizzle-orm';
@@ -18,6 +21,17 @@ import { getDb, schema } from '../db.js';
 import { getRedis } from '../services/redis.js';
 import { config } from '../config.js';
 import { logger } from '../logger.js';
+import {
+  countItems,
+  toAuditCounts,
+  type CampaignChannel,
+} from '../services/campaign-job-client.js';
+import {
+  getCampaignAuditWriter,
+  safeAudit,
+  type SafeAuditLogger,
+} from '../services/campaign-audit.js';
+import { exportObjectKey } from '../services/campaign-process/index.js';
 
 const RETENTION_DAYS = 90;
 const STUCK_INFLIGHT_MINUTES = 30;
@@ -76,7 +90,24 @@ export async function runWatchdog(): Promise<WatchdogOutcome> {
         lt(schema.campaignJob.lastProgressAt, campaignStalledAt),
       ),
     )
-    .returning({ id: schema.campaignJob.id });
+    .returning({
+      id: schema.campaignJob.id,
+      // Free on this UPDATE (already loaded for the WHERE/SET), and exactly
+      // what the `completed` audit row (#617 follow-up) needs: `channel` to
+      // record which surface stalled, `signalstackOrgId` for `actorOrgId`.
+      channel: schema.campaignJob.channel,
+      signalstackOrgId: schema.campaignJob.signalstackOrgId,
+    });
+
+  // Terminal transition, so — per #617 §6 — it must get a `completed` audit
+  // row: this is the case where the worker died mid-run, possibly after
+  // already releasing data to some participants, and it is the one terminal
+  // path that previously left the job's `requested` row with no matching
+  // `completed` row, forever. Best-effort per job: one job's audit failure
+  // must never skip the rest, nor the retention sweep below.
+  for (const stalledJob of campaignStalled) {
+    await auditStalledJob(stalledJob, log);
+  }
 
   // Actively purge the Redis working set (incl. the PII-bearing `:lines` and
   // `:errors` keys) for uploads we just marked failed — the happy-path DEL in
@@ -132,4 +163,75 @@ export async function runWatchdog(): Promise<WatchdogOutcome> {
     bulkPurged: bulkPurged.length,
     submissionsPurged: submissionsPurged.length,
   };
+}
+
+/** Shape of one row from the campaign-stall sweep's `.returning()`. */
+interface StalledCampaignJob {
+  id: string;
+  channel: CampaignChannel;
+  signalstackOrgId: string;
+}
+
+/**
+ * Writes the `completed` PII-audit row for one job the stall sweep just
+ * force-failed (#617 follow-up).
+ *
+ * Two independent best-effort layers, neither of which can propagate a
+ * failure out of this function (and so can never abort the sweep loop or the
+ * retention pass after it):
+ *
+ * 1. The item-count read (`countItems`) is wrapped in its own try/catch — a
+ *    failure there still lets the audit row go out, just without counts,
+ *    rather than skipping the row entirely.
+ * 2. The audit write itself goes through {@link safeAudit}, which already
+ *    handles both of the writer's failure shapes (a thrown exception and a
+ *    resolved `err(BaseError)`) and never rethrows.
+ *
+ * `recipientRef` is deliberately left unset: unlike the two write points in
+ * `campaign-process/index.ts`, this sweep's `.returning()` only carries
+ * `channel`/`signalstackOrgId` (the two columns already loaded for the
+ * `UPDATE`'s `WHERE`/`SET`) — not `requestedBy`, which `resolveExportRecipient`
+ * needs. Selecting it here just for this rarer path was judged not worth
+ * widening the sweep's row shape; if that changes, thread it through the
+ * same `resolveExportRecipient` helper `campaign-process/index.ts` uses, not
+ * a re-derived copy.
+ *
+ * @param stalledJob - One row from the campaign-stall sweep's `.returning()`.
+ * @param log - The watchdog's structured logger.
+ */
+async function auditStalledJob(
+  stalledJob: StalledCampaignJob,
+  log: SafeAuditLogger,
+): Promise<void> {
+  let counts: Awaited<ReturnType<typeof countItems>> | undefined;
+  try {
+    counts = await countItems(stalledJob.id);
+  } catch (cause) {
+    log.error({
+      operation: 'campaignAudit.completed',
+      status: 'failure',
+      job_id: stalledJob.id,
+      channel: stalledJob.channel,
+      reason: 'counts_unavailable',
+      error: cause instanceof Error ? cause.message : String(cause),
+    });
+  }
+
+  await safeAudit(
+    () =>
+      getCampaignAuditWriter().recordCompleted({
+        correlationId: stalledJob.id,
+        channel: stalledJob.channel,
+        actorOrgId: stalledJob.signalstackOrgId,
+        outcome: 'failed',
+        errorCode: 'stalled',
+        completedAt: new Date(),
+        ...(counts ? toAuditCounts(counts) : {}),
+        ...(stalledJob.channel === 'export'
+          ? { destination: exportObjectKey(stalledJob.signalstackOrgId, stalledJob.id) }
+          : {}),
+      }),
+    log,
+    { operation: 'campaignAudit.completed', job_id: stalledJob.id, channel: stalledJob.channel },
+  );
 }
