@@ -124,4 +124,32 @@ describe('campaign submit — requested audit row (#617)', () => {
     });
     expect(auditFake.rows).toHaveLength(0);
   });
+
+  it('caps an oversized x-request-id header at 200 chars before it reaches the audit row (#617 cheap item)', async () => {
+    const oversized = 'x'.repeat(500);
+    const res = await post({ item_ids: [VALID_UUID], content: {} }, { 'x-request-id': oversized });
+    expect(res.statusCode).toBe(202);
+    const rows = auditFake.rows.filter((r) => r.kind === 'requested');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.traceId).toHaveLength(200);
+    expect(rows[0]!.traceId).toBe(oversized.slice(0, 200));
+  });
+
+  it('writes exactly one requested row on first submit, and NONE on an identical idempotency-key replay (#617 SHOULD-FIX 3)', async () => {
+    const body = { item_ids: [VALID_UUID], content: {} };
+    const headers = { 'idempotency-key': 'replay-key-1' };
+
+    const first = await post(body, headers);
+    expect(first.statusCode).toBe(202);
+    expect(auditFake.rows.filter((r) => r.kind === 'requested')).toHaveLength(1);
+
+    const second = await post(body, headers);
+    expect(second.statusCode).toBe(202);
+    // Same job, not a second one.
+    expect(second.json().job_id).toBe(first.json().job_id);
+    // The replay must not add a second `requested` row for the same
+    // correlation_id — that would double-count "how many people did org X
+    // touch" queries.
+    expect(auditFake.rows.filter((r) => r.kind === 'requested')).toHaveLength(1);
+  });
 });

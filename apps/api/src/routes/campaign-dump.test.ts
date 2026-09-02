@@ -450,6 +450,20 @@ describe('GET /v1/campaign/dump', () => {
       expect((row as { actorUserId?: string }).actorUserId).toBe('sa-uuid');
     });
 
+    it('caps an oversized x-request-id header at 200 chars before it reaches the audit row (#617 cheap item)', async () => {
+      const oversized = 'y'.repeat(500);
+      const res = await app.inject({
+        method: 'GET',
+        url: '/v1/campaign/dump',
+        headers: { authorization: 'Bearer system', 'x-request-id': oversized },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(auditFake.rows).toHaveLength(1);
+      const row = auditFake.rows[0] as { traceId?: string };
+      expect(row.traceId).toHaveLength(200);
+      expect(row.traceId).toBe(oversized.slice(0, 200));
+    });
+
     it('records a failed dump access when a storage call throws, without altering the 503 response', async () => {
       headObjectMock.mockRejectedValueOnce(new Error('s3 down'));
       const res = await get('system');

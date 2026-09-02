@@ -148,30 +148,42 @@ export async function submitCampaignJob(
   // enqueued above, so nothing here can prevent the campaign from running.
   // `exactOptionalPropertyTypes` means an optional field must be OMITTED
   // rather than set to `undefined`, so each one is conditionally spread.
-  const purpose = metadataValue(envelope.metadata, 'purpose');
-  const traceId = req.headers['x-request-id'] as string | undefined;
-  await safeAudit(
-    () =>
-      getCampaignAuditWriter().recordRequested({
-        correlationId: created.value.job.id,
+  //
+  // Only on first creation, never on an idempotency replay (#617 SHOULD-FIX
+  // 3): `created.value.created === false` means `createJob` found an existing
+  // row for this Idempotency-Key and returned it unchanged (its
+  // `onConflictDoNothing`) — no new release happened, so a second `requested`
+  // row here would double-count "how many people did org X touch" queries,
+  // and if the retry body differs from the original, it would describe a
+  // release that never actually occurred.
+  if (created.value.created) {
+    const purpose = metadataValue(envelope.metadata, 'purpose');
+    // Caller-supplied header — cap it so an oversized value can't bloat the
+    // audit row (#617 cheap item).
+    const traceId = (req.headers['x-request-id'] as string | undefined)?.slice(0, 200);
+    await safeAudit(
+      () =>
+        getCampaignAuditWriter().recordRequested({
+          correlationId: created.value.job.id,
+          channel: opts.channel,
+          actorUserId: auth.userId,
+          actorOrgId: orgId,
+          ...(auth.azp ? { actorAzp: auth.azp } : {}),
+          piiFields: opts.piiFields(content),
+          itemCount: itemIds.length,
+          requestedAt: new Date(),
+          ...(purpose ? { purpose } : {}),
+          endpoint: `POST /v1/campaign/${opts.channel}`,
+          requestIp: req.ip,
+          ...(traceId ? { traceId } : {}),
+        }),
+      {
+        operation: 'campaignAudit.requested',
+        correlation_id: created.value.job.id,
         channel: opts.channel,
-        actorUserId: auth.userId,
-        actorOrgId: orgId,
-        ...(auth.azp ? { actorAzp: auth.azp } : {}),
-        piiFields: opts.piiFields(content),
-        itemCount: itemIds.length,
-        requestedAt: new Date(),
-        ...(purpose ? { purpose } : {}),
-        endpoint: `POST /v1/campaign/${opts.channel}`,
-        requestIp: req.ip,
-        ...(traceId ? { traceId } : {}),
-      }),
-    {
-      operation: 'campaignAudit.requested',
-      correlation_id: created.value.job.id,
-      channel: opts.channel,
-    },
-  );
+      },
+    );
+  }
 
   await reply.code(202).send({
     status: 'queued' as const,

@@ -127,7 +127,9 @@ export async function registerCampaignDumpRoutes(app: FastifyInstance): Promise<
       // from, so one is minted per request (#617); it ties this request's
       // single audit row together whether the request succeeds or fails.
       const dumpCorrelationId = randomUUID();
-      const traceId = req.headers['x-request-id'] as string | undefined;
+      // Caller-supplied header — cap it so an oversized value can't bloat the
+      // audit row (#617 cheap item).
+      const traceId = (req.headers['x-request-id'] as string | undefined)?.slice(0, 200);
 
       try {
         const instanceId = campaignDumpInstanceId();
