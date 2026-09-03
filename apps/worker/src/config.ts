@@ -7,6 +7,7 @@ import { z } from 'zod';
 import {
   assertSignalStackClientIdentity,
   assertTlsPosture,
+  campaignExportConfigFields,
   signalStackConfigFields,
 } from '@aggregator-dpg/shared-primitives/config';
 
@@ -146,12 +147,11 @@ const ConfigSchema = z.object({
   EMAIL_SEND_CONCURRENCY: z.coerce.number().int().positive().default(5),
   /** Items per Signals decrypt chunk (bounds request size + gives heartbeat cadence). */
   CAMPAIGN_DECRYPT_CHUNK: z.coerce.number().int().positive().default(500),
-  /**
-   * Export field-set. `contact` = the three canonical contact fields
-   * (name/email/phone) only; `full` = the full decrypted item_state (variable
-   * columns). Default `contact`.
-   */
-  CAMPAIGN_EXPORT_FIELDS: z.enum(['contact', 'full']).default('contact'),
+  // Shared with the api (@aggregator-dpg/shared-primitives/config) so the two
+  // processes can never disagree on what an export releases — the worker
+  // reads this to actually perform the export; the api reads the same key to
+  // record `piiFields` on the campaign_pii_audit `requested` row (#617).
+  ...campaignExportConfigFields,
   /**
    * Who receives the export link. `requester` (default) sends it to the user
    * who made the request (the job's `requested_by`, resolved from the verified

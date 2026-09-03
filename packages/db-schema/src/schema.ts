@@ -160,6 +160,32 @@ export const campaignJobItemStatusEnum = pgEnum('campaign_job_item_status', [
 /** Which campaign channel a job belongs to; picks the worker handler. */
 export const campaignChannelEnum = pgEnum('campaign_channel', ['export', 'email', 'voice']);
 
+/**
+ * Which phase of a campaign's life this audit row records. NOT the outcome —
+ * see `campaignAuditOutcomeEnum`. A campaign produces two rows (`requested`,
+ * then `completed`) sharing a correlation id; a dump produces one `completed`.
+ */
+export const campaignAuditEventEnum = pgEnum('campaign_audit_event', ['requested', 'completed']);
+
+/**
+ * The audited action. Wider than `campaignChannelEnum` because the non-PII dump
+ * is audited too — it releases the whole-network snapshot, and is the only
+ * action with no org scoping at all.
+ */
+export const campaignAuditChannelEnum = pgEnum('campaign_audit_channel', [
+  'export',
+  'email',
+  'voice',
+  'dump',
+]);
+
+/** Result of a completed action. NULL on `requested` rows — nothing has happened yet. */
+export const campaignAuditOutcomeEnum = pgEnum('campaign_audit_outcome', [
+  'succeeded',
+  'partial',
+  'failed',
+]);
+
 // ─── aggregators ─────────────────────────────────────────────────────────────
 
 export const aggregators = pgTable(
@@ -766,6 +792,85 @@ export const campaignJobItem = pgTable(
     uniqueIndex('campaign_job_item_active_dedup')
       .on(table.itemId, table.action)
       .where(sql`status IN ('pending','resolved','submitted') AND action IS NOT NULL`),
+  ],
+);
+
+/**
+ * Append-only audit of every campaign action that RELEASES DATA (#617).
+ *
+ * Deliberately separate from `campaign_job` / `campaign_job_item`: those are
+ * mutable, derive counts and are subject to cleanup; this is immutable and
+ * outlives them, including the exported S3 object which auto-deletes. Joined by
+ * `correlation_id = campaign_job.id`.
+ *
+ * NEVER stores a participant PII value — field NAMES and counts only. The only
+ * identities here are operators (the coordinator, the export-link recipient).
+ *
+ * Status/list GET routes are NOT audited: the rule is data release, not API
+ * traffic. Clients poll every 5-10s, which would bury the real events.
+ */
+export const campaignPiiAudit = pgTable(
+  'campaign_pii_audit',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    // = campaign_job.id. For a dump there is no job, so a uuid is generated per
+    // request; the column stays NOT NULL and still groups the row.
+    correlationId: uuid('correlation_id').notNull(),
+    event: campaignAuditEventEnum('event').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+
+    // ── Who ────────────────────────────────────────────────────────────────
+    actorUserId: text('actor_user_id'),
+    // NULL for a dump, and that null is MEANINGFUL: it is the signature of a
+    // whole-network access by the system account, which has no org.
+    actorOrgId: text('actor_org_id'),
+    actorAzp: text('actor_azp'),
+    // Export-link recipient — an operator address, never a participant's.
+    recipientRef: text('recipient_ref'),
+
+    // ── What ───────────────────────────────────────────────────────────────
+    channel: campaignAuditChannelEnum('channel').notNull(),
+    // PII field NAMES, never values. Empty array on a dump asserts positively
+    // that no PII field was released ("none, and we checked" vs null's "unknown").
+    piiFields: text('pii_fields').array(),
+    itemCount: integer('item_count'),
+
+    // ── When ───────────────────────────────────────────────────────────────
+    requestedAt: timestamp('requested_at', { withTimezone: true }),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+
+    // ── Where ──────────────────────────────────────────────────────────────
+    destination: text('destination'),
+    network: text('network'),
+    instance: text('instance'),
+    requestIp: text('request_ip'),
+
+    // ── Why ────────────────────────────────────────────────────────────────
+    purpose: text('purpose'),
+    // Consent storage/gating is specced separately; present but unused.
+    consentRef: text('consent_ref'),
+
+    // ── How ────────────────────────────────────────────────────────────────
+    endpoint: text('endpoint'),
+    traceId: text('trace_id'),
+    outcome: campaignAuditOutcomeEnum('outcome'),
+    errorCode: text('error_code'),
+
+    // ── How many ───────────────────────────────────────────────────────────
+    requestedCount: integer('requested_count'),
+    resolvedCount: integer('resolved_count'),
+    skippedCount: integer('skipped_count'),
+    failedCount: integer('failed_count'),
+    sentCount: integer('sent_count'),
+
+    // Non-PII extras. A dump carries { files, bytes } here rather than adding
+    // dump-only columns.
+    details: jsonb('details').$type<Record<string, unknown>>(),
+  },
+  (table) => [
+    index('campaign_pii_audit_org_created_idx').on(table.actorOrgId, table.createdAt),
+    index('campaign_pii_audit_correlation_idx').on(table.correlationId),
+    index('campaign_pii_audit_channel_created_idx').on(table.channel, table.createdAt),
   ],
 );
 

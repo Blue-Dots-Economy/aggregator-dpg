@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { ok, err, type Result } from '@aggregator-dpg/shared-primitives/result';
 import { UpstreamError, type BaseError } from '@aggregator-dpg/shared-primitives/errors';
+import { CampaignAuditWriterFake } from '@aggregator-dpg/campaign-audit/testing';
+import type { CampaignAuditWriterBase } from '@aggregator-dpg/campaign-audit';
 import type { SignalStackDecryptedProfileRow } from '@aggregator-dpg/signalstack-writer/interface';
 import type { SendInput, SendOk, MailerResult } from '@aggregator-dpg/mailer/interface';
 import {
@@ -11,8 +13,39 @@ import type {
   VoiceDispatchInput,
   VoiceDispatchResult,
 } from '@aggregator-dpg/voice-provider/interface';
-import { deriveJobStatus, type ProcessingJob } from '../campaign-job-client.js';
-import { runCampaignJob, type CampaignJobDeps } from './index.js';
+import {
+  deriveJobStatus,
+  type JobStatusCounts,
+  type ProcessingJob,
+} from '../campaign-job-client.js';
+import {
+  exportObjectKey,
+  resolveExportRecipient,
+  runCampaignJob,
+  type CampaignJobDeps,
+} from './index.js';
+
+/** Tallies the harness's in-memory item-status map into a real {@link JobStatusCounts} shape. */
+function tallyItemStatus(
+  itemStatus: Map<string, { status: string; err: string | null }>,
+): JobStatusCounts {
+  const counts: JobStatusCounts = {
+    total: 0,
+    pending: 0,
+    resolved: 0,
+    submitted: 0,
+    sent: 0,
+    skipped_not_owned: 0,
+    skipped_no_contact: 0,
+    duplicate_active: 0,
+    failed: 0,
+  };
+  for (const v of itemStatus.values()) {
+    counts.total++;
+    counts[v.status as keyof Omit<JobStatusCounts, 'total'>]++;
+  }
+  return counts;
+}
 
 function row(over: Partial<SignalStackDecryptedProfileRow> = {}): SignalStackDecryptedProfileRow {
   return {
@@ -67,6 +100,7 @@ function harness(
   over: Partial<CampaignJobDeps['export']> = {},
   config: Partial<CampaignJobDeps['config']> = {},
   attempt?: CampaignJobDeps['attempt'],
+  audit?: CampaignAuditWriterBase,
 ): Harness {
   const puts: Harness['puts'] = [];
   const mails: SendInput[] = [];
@@ -128,26 +162,13 @@ function harness(
       // campaign-process/voice.test.ts for coverage of these two writers.
       markSubmitted: async () => undefined,
       setProviderResponse: async () => undefined,
+      countItems: async () => tallyItemStatus(itemStatus),
       rollUpStatus: async () => {
-        const counts = {
-          total: 0,
-          pending: 0,
-          resolved: 0,
-          submitted: 0,
-          sent: 0,
-          skipped_not_owned: 0,
-          skipped_no_contact: 0,
-          duplicate_active: 0,
-          failed: 0,
-        };
-        for (const v of itemStatus.values()) {
-          counts.total++;
-          counts[v.status as 'pending' | 'resolved' | 'submitted' | 'failed']++;
-        }
+        const counts = tallyItemStatus(itemStatus);
         const status = deriveJobStatus(counts);
         jobStatuses.push(status);
         if (theJob) theJob.status = status;
-        return status;
+        return { status, counts };
       },
     },
     export: {
@@ -179,6 +200,7 @@ function harness(
       error: (o) => logs.error.push(o),
     },
     ...(attempt ? { attempt } : {}),
+    ...(audit ? { audit } : {}),
   };
   return {
     deps,
@@ -403,6 +425,234 @@ describe('runCampaignJob failure paths', () => {
     // Fail closed: a PII export is never redirected to the requester as a fallback.
     expect(h.mails).toHaveLength(0);
     expect(h.jobStatuses.at(-1)).toBe('failed');
+  });
+});
+
+describe('runCampaignJob completed audit (#617)', () => {
+  it('writes one completed audit row when the job reaches a terminal status', async () => {
+    const audit = new CampaignAuditWriterFake();
+    const h = harness(job(), {}, {}, undefined, audit);
+    await runCampaignJob('job-1', h.deps);
+
+    const rows = audit.rows.filter((r) => r.kind === 'completed');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.correlationId).toBe('job-1');
+    expect(rows[0]!.outcome).toBe('succeeded');
+    expect(rows[0]!.actorOrgId).toBe('org-1');
+  });
+
+  it('populates the outcome counts, recipientRef and destination on the export success row (#617 follow-up)', async () => {
+    const audit = new CampaignAuditWriterFake();
+    const h = harness(job(), {}, {}, undefined, audit);
+    await runCampaignJob('job-1', h.deps);
+
+    const row = audit.rows.find((r) => r.kind === 'completed')!;
+    expect(row).toMatchObject({
+      resolvedCount: 1,
+      skippedCount: 0,
+      failedCount: 0,
+      sentCount: 0,
+      recipientRef: 'user@org.example',
+      destination: 'campaign-exports/org-1/job-1.csv',
+    });
+    // The recipient is the same helper the send path itself uses — never a
+    // participant address (#617 follow-up).
+    expect(resolveExportRecipient(job(), h.deps.config)).toBe(row.recipientRef);
+    expect(exportObjectKey('org-1', 'job-1')).toBe(row.destination);
+  });
+
+  it('aggregates skipped_not_owned into skippedCount on the export success row', async () => {
+    const audit = new CampaignAuditWriterFake();
+    const h = harness(
+      job({
+        items: [
+          { itemId: 'a', action: null, status: 'pending', providerBatchRef: null },
+          { itemId: 'b', action: null, status: 'pending', providerBatchRef: null },
+        ],
+      }),
+      {
+        fetchDecryptedProfiles: async () =>
+          ok({ profiles: [row({ item_id: 'a' })], skipped: ['b'] }),
+      },
+      {},
+      undefined,
+      audit,
+    );
+    await runCampaignJob('job-1', h.deps);
+
+    const completed = audit.rows.find((r) => r.kind === 'completed')!;
+    expect(completed).toMatchObject({ resolvedCount: 1, skippedCount: 1, failedCount: 0 });
+  });
+
+  it('populates counts, recipientRef and destination on the export final-attempt-failure row', async () => {
+    const audit = new CampaignAuditWriterFake();
+    const h = harness(
+      job(),
+      {
+        putObject: async () => {
+          throw new Error('s3 down');
+        },
+      },
+      {},
+      { attempt: 3, maxAttempts: 3 },
+      audit,
+    );
+
+    await expect(runCampaignJob('job-1', h.deps)).rejects.toThrow('s3 down');
+    const row = audit.rows.find((r) => r.kind === 'completed')!;
+    // decryptAndMarkItems resolved the one item before the S3 write blew up;
+    // failPendingItems then has nothing left pending to fail.
+    expect(row).toMatchObject({
+      resolvedCount: 1,
+      failedCount: 0,
+      recipientRef: 'user@org.example',
+      destination: 'campaign-exports/org-1/job-1.csv',
+    });
+  });
+
+  it('never sets recipientRef or destination on a voice/email completed row', async () => {
+    const audit = new CampaignAuditWriterFake();
+    const voiceJob = job({
+      channel: 'voice',
+      content: { agent_id: 'agent-1' },
+      items: [
+        { itemId: 'item-1', action: 'voice_call', status: 'pending', providerBatchRef: null },
+      ],
+    });
+    const h = harness(voiceJob, {}, {}, undefined, audit);
+    const deps: CampaignJobDeps = {
+      ...h.deps,
+      voice: {
+        fetchDecryptedProfiles: async () => ok({ profiles: [row()], skipped: [] }),
+        provider: new (class extends VoiceProviderBase {
+          async dispatch(
+            input: VoiceDispatchInput,
+          ): Promise<Result<VoiceDispatchResult, BaseError>> {
+            return ok({
+              providerBatchRef: 'batch-1',
+              accepted: input.contacts.map((c) => c.ref),
+              rejected: [],
+              providerResponse: {
+                create: brandCuratedProviderResponse({}),
+                start: brandCuratedProviderResponse({}),
+              },
+            });
+          }
+        })(),
+      },
+    };
+
+    await runCampaignJob('job-1', deps);
+
+    const completed = audit.rows.find((r) => r.kind === 'completed')!;
+    expect('recipientRef' in completed).toBe(false);
+    expect('destination' in completed).toBe(false);
+  });
+
+  it('writes NO completed row for a retryable mid-sequence failure', async () => {
+    const audit = new CampaignAuditWriterFake();
+    const h = harness(
+      job(),
+      {
+        putObject: async () => {
+          throw new Error('s3 down');
+        },
+      },
+      {},
+      { attempt: 1, maxAttempts: 3 },
+      audit,
+    );
+
+    await expect(runCampaignJob('job-1', h.deps)).rejects.toThrow('s3 down');
+    // Not terminal — BullMQ will retry, so there is no outcome to record yet.
+    expect(audit.rows.filter((r) => r.kind === 'completed')).toHaveLength(0);
+  });
+
+  it('writes one failed audit row on the final attempt', async () => {
+    const audit = new CampaignAuditWriterFake();
+    const h = harness(
+      job(),
+      {
+        putObject: async () => {
+          throw new Error('s3 down');
+        },
+      },
+      {},
+      { attempt: 3, maxAttempts: 3 },
+      audit,
+    );
+
+    await expect(runCampaignJob('job-1', h.deps)).rejects.toThrow('s3 down');
+    const rows = audit.rows.filter((r) => r.kind === 'completed');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.outcome).toBe('failed');
+  });
+
+  it('still completes the job when the audit write throws', async () => {
+    const audit = new CampaignAuditWriterFake();
+    audit.failWith = new Error('audit down');
+    const h = harness(job(), {}, {}, undefined, audit);
+    await expect(runCampaignJob('job-1', h.deps)).resolves.toBeUndefined();
+    expect(h.jobStatuses.at(-1)).toBe('completed');
+  });
+
+  it('writes NO completed row when rollUpStatus reports a non-terminal status (#617 SHOULD-FIX 2)', async () => {
+    // `deriveJobStatus` returns `processing` (not terminal) when an item is
+    // still `pending`. No currently-reachable handler leaves the job in that
+    // state on a normal return (the reviewer found this latent, not live),
+    // so this forces it directly at the client boundary to prove the guard
+    // itself — rather than relying on a real handler code path that may not
+    // exist today.
+    const audit = new CampaignAuditWriterFake();
+    const h = harness(job(), {}, {}, undefined, audit);
+    h.deps.client.rollUpStatus = async () => ({
+      status: 'processing',
+      counts: {
+        total: 1,
+        pending: 1,
+        resolved: 0,
+        submitted: 0,
+        sent: 0,
+        skipped_not_owned: 0,
+        skipped_no_contact: 0,
+        duplicate_active: 0,
+        failed: 0,
+      },
+    });
+
+    await runCampaignJob('job-1', h.deps);
+
+    expect(audit.rows.filter((r) => r.kind === 'completed')).toHaveLength(0);
+    expect(h.logs.warn).toContainEqual(
+      expect.objectContaining({
+        operation: 'campaign.process',
+        status: 'skipped',
+        reason: 'non_terminal_after_handler',
+        job_status: 'processing',
+      }),
+    );
+  });
+
+  it('logs at error and does not throw when the writer resolves err(...)', async () => {
+    const errors: object[] = [];
+    const audit: CampaignAuditWriterBase = {
+      recordRequested: async () => ok(undefined),
+      recordCompleted: async () =>
+        err(new UpstreamError('insert failed', { code: 'CAMPAIGN_AUDIT_INSERT_FAILED' })),
+      recordDumpAccess: async () => ok(undefined),
+    } as CampaignAuditWriterBase;
+    const h = harness(job(), {}, {}, undefined, audit);
+    h.deps.log.error = (o) => errors.push(o);
+
+    await expect(runCampaignJob('job-1', h.deps)).resolves.toBeUndefined();
+    expect(h.jobStatuses.at(-1)).toBe('completed');
+    expect(errors).toContainEqual(
+      expect.objectContaining({
+        operation: 'campaignAudit.completed',
+        status: 'failure',
+        error: 'insert failed',
+      }),
+    );
   });
 });
 

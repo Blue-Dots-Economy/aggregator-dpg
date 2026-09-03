@@ -7,9 +7,11 @@
  * item-id dedup/cap → ingress rate-limit → per-org active-job cap → createJob
  * → enqueue (re-enqueuing a `queued` idempotency replay) → enqueue-failure
  * compensation (mark the job `failed` so it doesn't strand the org's active
- * slot) → `202`. This module owns that shared flow; each route supplies its
- * channel-specific knobs (config keys, error codes, content shape, item
- * action, log/message text) via {@link SubmitCampaignJobOptions} and stays
+ * slot) → best-effort `requested` audit write (#617, never blocks or fails the
+ * request — see `../services/campaign-audit/index.ts`) → `202`. This module
+ * owns that shared flow; each route supplies its channel-specific knobs
+ * (config keys, error codes, content shape, item action, PII field names,
+ * log/message text) via {@link SubmitCampaignJobOptions} and stays
  * responsible only for its own Fastify route schema/response shape.
  *
  * @module @aggregator-dpg/api
@@ -24,12 +26,13 @@ import type {
   JobRecord,
 } from '../services/campaign-job-store/index.js';
 import { enqueueCampaignProcess } from '../services/campaign-process-queue/index.js';
-import { dedupeItemIds } from './envelope.js';
+import { dedupeItemIds, metadataValue } from './envelope.js';
 import type { campaignEnvelopeSchema } from './envelope.js';
 import { requireCampaignAuth, requireOrgId } from './auth.js';
 import { consume } from '../services/rate-limiter/index.js';
 import { httpError } from '../errors/http-error.js';
 import type { ErrorCode } from '../errors/codes.js';
+import { getCampaignAuditWriter, safeAudit } from '../services/campaign-audit/index.js';
 
 /** Channel-specific knobs consumed by {@link submitCampaignJob}. */
 export interface SubmitCampaignJobOptions {
@@ -66,6 +69,13 @@ export interface SubmitCampaignJobOptions {
   logOperation: string;
   /** `message` field of the `202` response body. */
   successMessage: string;
+  /**
+   * PII field NAMES this channel will release, derived from the parsed
+   * `content`. Names only — never values (#617). Recorded on the audit
+   * `requested` row so compliance knows what a job was authorized to release
+   * without the audit log itself ever holding a participant value.
+   */
+  piiFields: (content: Record<string, unknown>) => string[];
 }
 
 /**
@@ -133,6 +143,47 @@ export async function submitCampaignJob(
   if (!created.ok) throw httpError('INTERNAL', { detail: 'could not create campaign job' });
 
   await enqueueWithCompensation(created.value.job, created.value.created, opts, req, store);
+
+  // Audit the request (#617). Best effort — the job is already committed and
+  // enqueued above, so nothing here can prevent the campaign from running.
+  // `exactOptionalPropertyTypes` means an optional field must be OMITTED
+  // rather than set to `undefined`, so each one is conditionally spread.
+  //
+  // Only on first creation, never on an idempotency replay (#617 SHOULD-FIX
+  // 3): `created.value.created === false` means `createJob` found an existing
+  // row for this Idempotency-Key and returned it unchanged (its
+  // `onConflictDoNothing`) — no new release happened, so a second `requested`
+  // row here would double-count "how many people did org X touch" queries,
+  // and if the retry body differs from the original, it would describe a
+  // release that never actually occurred.
+  if (created.value.created) {
+    const purpose = metadataValue(envelope.metadata, 'purpose');
+    // Caller-supplied header — cap it so an oversized value can't bloat the
+    // audit row (#617 cheap item).
+    const traceId = (req.headers['x-request-id'] as string | undefined)?.slice(0, 200);
+    await safeAudit(
+      () =>
+        getCampaignAuditWriter().recordRequested({
+          correlationId: created.value.job.id,
+          channel: opts.channel,
+          actorUserId: auth.userId,
+          actorOrgId: orgId,
+          ...(auth.azp ? { actorAzp: auth.azp } : {}),
+          piiFields: opts.piiFields(content),
+          itemCount: itemIds.length,
+          requestedAt: new Date(),
+          ...(purpose ? { purpose } : {}),
+          endpoint: `POST /v1/campaign/${opts.channel}`,
+          requestIp: req.ip,
+          ...(traceId ? { traceId } : {}),
+        }),
+      {
+        operation: 'campaignAudit.requested',
+        correlation_id: created.value.job.id,
+        channel: opts.channel,
+      },
+    );
+  }
 
   await reply.code(202).send({
     status: 'queued' as const,

@@ -519,6 +519,11 @@ services:
       # Bulk-upload + QR onboarding tuning (match aggregator-dpg/docker-compose.yml).
       BULK_UPLOAD_URL_TTL_SECONDS: ${BULK_UPLOAD_URL_TTL_SECONDS:-900}
       BULK_UPLOAD_MAX_BYTES: ${BULK_UPLOAD_MAX_BYTES:-10485760}
+      # Must match the aggregator-worker's CAMPAIGN_EXPORT_FIELDS below
+      # (#617): the API derives the export audit row's `pii_fields` from this
+      # same variable, so a mismatched value here understates what the worker
+      # actually releases.
+      CAMPAIGN_EXPORT_FIELDS: ${CAMPAIGN_EXPORT_FIELDS:-contact}
       # Object storage -> MinIO (S3-compatible). Internal calls hit minio:9000;
       # browser-facing presigned URLs use localhost:9000.
       S3_REGION: ${S3_REGION:-us-east-1}

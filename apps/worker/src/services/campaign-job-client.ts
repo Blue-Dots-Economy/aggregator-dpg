@@ -160,7 +160,19 @@ export async function getJobForProcessing(jobId: string): Promise<ProcessingJob 
   };
 }
 
-/** Item-status tally for a job (derived, never a stored counter). */
+/**
+ * Item-status tally for a job (derived, never a stored counter).
+ *
+ * Both callers that feed this into the `completed` audit row's counts
+ * (#617) call `failPendingItems` first, so by the time this runs, no item is
+ * left `pending` — every requested item is accounted for in a real bucket
+ * rather than silently missing from every count: `campaign-process/index.ts`
+ * does it on the final-attempt-failure path (`rollUpStatus` is not reached
+ * there), and `jobs/cron-watchdog.ts`'s stalled-job sweep does it before
+ * auditing a force-failed job, since `stalled` means the worker died
+ * mid-run — leftover `pending` items are the NORMAL case there, not an edge
+ * case.
+ */
 export async function countItems(jobId: string): Promise<JobStatusCounts> {
   const rows = await getDb()
     .select({ status: campaignJobItem.status, n: count() })
@@ -293,11 +305,66 @@ export async function setJobStatus(
     .where(eq(campaignJob.id, jobId));
 }
 
-/** Derives + persists the job's roll-up status from its item counts. */
-export async function rollUpStatus(jobId: string): Promise<CampaignJobStatus> {
-  const status = deriveJobStatus(await countItems(jobId));
+/** `rollUpStatus`'s return shape: the derived status plus the tally it was derived from (#617). */
+export interface RollUpResult {
+  status: CampaignJobStatus;
+  counts: JobStatusCounts;
+}
+
+/**
+ * Derives + persists the job's roll-up status from its item counts.
+ *
+ * Returns the counts alongside the status (rather than the status alone) so
+ * a caller that needs both — the `completed` audit write (#617) is the
+ * motivating case — does not have to issue a second `countItems` query.
+ */
+export async function rollUpStatus(jobId: string): Promise<RollUpResult> {
+  const counts = await countItems(jobId);
+  const status = deriveJobStatus(counts);
   await setJobStatus(jobId, status);
-  return status;
+  return { status, counts };
+}
+
+/** The `completed` audit row's outcome-count columns (#617 §3). */
+export interface AuditCounts {
+  resolvedCount: number;
+  skippedCount: number;
+  failedCount: number;
+  sentCount: number;
+}
+
+/**
+ * Maps a job's item-status tally onto the `completed` audit row's outcome
+ * counts (#617).
+ *
+ * `resolvedCount` aggregates `resolved` (export: decrypted, ready to ship)
+ * AND `submitted` (voice: handed to Raya). Voice items terminate at
+ * `submitted`, never `resolved` or `sent` — handing a contact to the
+ * provider IS the release, so it must be counted, or a fully successful
+ * voice campaign would audit as `outcome: 'succeeded'` with every count at
+ * zero, which reads as "measured and nothing happened" rather than "not
+ * measured". `sentCount` stays strictly confirmed-delivered (the export and
+ * email channels' own success write). This mirrors `deriveJobStatus`'s own
+ * `succeeded = resolved + submitted + sent` grouping, so the counts and the
+ * derived status agree about what counts as a release.
+ *
+ * `skippedCount` aggregates every status that is a deliberate no-op rather
+ * than a release: `skipped_not_owned` (the org doesn't own the item),
+ * `skipped_no_contact` (owned, but no usable contact field), and
+ * `duplicate_active` (de-duplicated against an already-active send). None of
+ * those three ever reached a participant, so they are counted together as
+ * "skipped" rather than split across the fixed audit-row columns.
+ *
+ * @param counts - The job's item-status tally (`countItems`/`rollUpStatus`).
+ * @returns The four outcome-count fields the audit row's `CompletedAuditInput` accepts.
+ */
+export function toAuditCounts(counts: JobStatusCounts): AuditCounts {
+  return {
+    resolvedCount: counts.resolved + counts.submitted,
+    skippedCount: counts.skipped_not_owned + counts.skipped_no_contact + counts.duplicate_active,
+    failedCount: counts.failed,
+    sentCount: counts.sent,
+  };
 }
 
 /**

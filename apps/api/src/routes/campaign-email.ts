@@ -27,6 +27,7 @@
  * never leave the aggregator. Belongs to `@aggregator-dpg/api`.
  */
 import type { FastifyInstance } from 'fastify';
+import { requiredContactFields } from '@aggregator-dpg/campaign-template';
 import { campaignEnvelopeSchema } from '../campaign/envelope.js';
 import { parseEmailContent } from '../campaign/email-content.js';
 import { submitCampaignJob } from '../campaign/submit-job.js';
@@ -56,6 +57,22 @@ export async function registerCampaignEmailRoutes(app: FastifyInstance): Promise
       await submitCampaignJob(req, reply, {
         channel: 'email',
         parseContent: parseEmailContent,
+        // `email` is unconditional: every send releases the recipient address
+        // to the mail provider, even a plain announcement with no
+        // placeholders. `requiredContactFields()` only reports the OPTIONAL
+        // extras a template's `{{placeholder}}`s pull in (`name`, `phone`).
+        // Mirrors the worker's own contact projection in
+        // `apps/worker/src/services/campaign-process/email.ts`
+        // (`decryptEmailItems`) field for field, so the audit row states what
+        // was actually released (#617). Only `requiredContactFields()` is
+        // shared; this `['email', ...]` wrapper is duplicated there, so the
+        // two CAN drift — change both together, or extract a shared helper.
+        piiFields: (content) => [
+          ...new Set([
+            'email',
+            ...requiredContactFields(content.subject as string, content.body_markdown as string),
+          ]),
+        ],
         // `action: null` keeps email out of the item-level active-dedup
         // predicate — dedup is ON for voice only (batch spec §3.2).
         buildItem: (itemId) => ({ itemId, action: null }),

@@ -10,6 +10,7 @@ import { z } from 'zod';
 import {
   assertSignalStackClientIdentity,
   assertTlsPosture,
+  campaignExportConfigFields,
   signalStackConfigFields,
 } from '@aggregator-dpg/shared-primitives/config';
 
@@ -219,6 +220,11 @@ const ConfigSchema = z.object({
   CAMPAIGN_EXPORT_MAX_ACTIVE_PER_ORG: z.coerce.number().int().positive().default(3),
   /** BullMQ attempts for an export campaign-process job (retry count on transient failure). */
   CAMPAIGN_EXPORT_ATTEMPTS: z.coerce.number().int().positive().default(3),
+  // Shared with the worker (@aggregator-dpg/shared-primitives/config) so the
+  // two processes can never disagree on what an export releases — the API
+  // only reads this to record `piiFields` on the audit `requested` row
+  // (#617); the worker reads it to actually perform the export.
+  ...campaignExportConfigFields,
 
   // ─── Campaign voice channel (#577) ──────────────────────────────────────
   /** Max `participant_ids` accepted per voice campaign request body (after de-dup). */

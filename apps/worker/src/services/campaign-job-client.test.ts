@@ -208,9 +208,56 @@ describe('campaign job client', () => {
     expect(sets.some((s) => s.providerResponse === payload)).toBe(true);
   });
 
-  it('rollUpStatus derives + persists', async () => {
+  it('rollUpStatus derives + persists, returning both the status and the counts it derived from', async () => {
     queue([{ status: 'resolved', n: 2 }], undefined);
-    expect(await client.rollUpStatus('job-1')).toBe('completed');
+    const result = await client.rollUpStatus('job-1');
+    expect(result.status).toBe('completed');
+    expect(result.counts).toMatchObject({ total: 2, resolved: 2 });
+  });
+
+  it('toAuditCounts aggregates the three skip statuses into skippedCount', () => {
+    const counts = {
+      total: 6,
+      pending: 0,
+      resolved: 1,
+      submitted: 0,
+      sent: 1,
+      skipped_not_owned: 1,
+      skipped_no_contact: 1,
+      duplicate_active: 1,
+      failed: 1,
+    };
+    expect(client.toAuditCounts(counts)).toEqual({
+      resolvedCount: 1,
+      skippedCount: 3,
+      failedCount: 1,
+      sentCount: 1,
+    });
+  });
+
+  it('toAuditCounts rolls submitted (voice: handed to the provider) into resolvedCount, not sentCount', () => {
+    // A fully successful voice job: every item terminates at `submitted`,
+    // never `resolved` or `sent`. Before this fix, `resolvedCount` would be
+    // computed from `resolved` alone and every count would land at zero —
+    // indistinguishable from "nothing happened" even though every contact
+    // was handed to Raya.
+    const counts = {
+      total: 3,
+      pending: 0,
+      resolved: 0,
+      submitted: 3,
+      sent: 0,
+      skipped_not_owned: 0,
+      skipped_no_contact: 0,
+      duplicate_active: 0,
+      failed: 0,
+    };
+    expect(client.toAuditCounts(counts)).toEqual({
+      resolvedCount: 3,
+      skippedCount: 0,
+      failedCount: 0,
+      sentCount: 0,
+    });
   });
 
   it('claimStalledJobs returns ids', async () => {
