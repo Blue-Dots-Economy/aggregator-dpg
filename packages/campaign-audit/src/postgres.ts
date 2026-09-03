@@ -18,9 +18,19 @@ import {
   type DumpAuditInput,
 } from './interface.js';
 
+/**
+ * The exact row shape Drizzle expects for a `campaign_pii_audit` INSERT,
+ * derived from {@link campaignPiiAudit} itself so the seam cannot drift from
+ * the real table: a typo'd or renamed key in one of this file's three
+ * `insert()` call sites is now a compile error instead of a silently
+ * inserted `NULL` (#617 review-round-2). Previously this seam used `unknown`,
+ * which erased that checking entirely.
+ */
+type AuditRow = typeof campaignPiiAudit.$inferInsert;
+
 /** The subset of an insert builder this writer needs (shared by {@link AuditDb} and {@link AuditTx}). */
 type AuditInsertable = (table: typeof campaignPiiAudit) => {
-  values: (row: unknown) => Promise<unknown>;
+  values: (row: AuditRow) => Promise<unknown>;
 };
 
 /**
@@ -169,11 +179,12 @@ export class PostgresCampaignAuditWriter extends CampaignAuditWriterBase {
    * Shared INSERT path for all three public methods. Never reads, updates,
    * or deletes — that absence is the append-only guarantee.
    *
-   * @param row - Fully-shaped `campaign_pii_audit` row to insert.
+   * @param row - Fully-shaped `campaign_pii_audit` row to insert, typed
+   *   against the real table via {@link AuditRow}.
    * @returns `ok(void)` on success; `err(UpstreamError)` wrapping the thrown
    *   cause if the insert fails.
    */
-  private async insert(row: Record<string, unknown>): Promise<Result<void, BaseError>> {
+  private async insert(row: AuditRow): Promise<Result<void, BaseError>> {
     try {
       if (this.statementTimeoutMs !== undefined && this.db.transaction) {
         const timeoutMs = this.statementTimeoutMs;

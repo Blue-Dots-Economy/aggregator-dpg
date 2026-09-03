@@ -36,10 +36,16 @@ const CAMPAIGN_AUDIT_TIMEOUT_MS = 2000;
  * constructing the Postgres-backed implementation (writing to
  * `campaign_pii_audit`) on first use.
  *
+ * `getDb()` (a `NodePgDatabase<typeof schema>`) is passed to
+ * `PostgresCampaignAuditWriter` with no cast: it satisfies `AuditDb`
+ * structurally now that the writer's insert seam is typed against
+ * `campaignPiiAudit.$inferInsert` (#617 review-round-2) rather than
+ * `unknown` — an `as never` here previously erased that check.
+ *
  * @returns The singleton audit writer.
  */
 export function getCampaignAuditWriter(): CampaignAuditWriterBase {
-  writer ??= new PostgresCampaignAuditWriter(getDb() as never, CAMPAIGN_AUDIT_TIMEOUT_MS);
+  writer ??= new PostgresCampaignAuditWriter(getDb(), CAMPAIGN_AUDIT_TIMEOUT_MS);
   return writer;
 }
 

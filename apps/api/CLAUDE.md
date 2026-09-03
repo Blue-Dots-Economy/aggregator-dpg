@@ -68,11 +68,16 @@ clients poll every 5-10s.
   before it is copied into `piiFields` it passes through
   `apps/api/src/campaign/audit-field-names.ts`'s
   `sanitizeAuditFieldNames`/`auditFieldNameEntries`, which keeps only
-  identifier-shaped strings and replaces everything else with a single
-  `+N redacted (non-identifier)` count — never the raw value. Known residual
-  gap: a single-word ASCII value (e.g. a first name with no space) is
-  indistinguishable from a real field name by that filter and passes through
-  unredacted; don't rely on it to catch that case.
+  identifier-shaped strings, each at most `MAX_FIELD_NAME_LENGTH` (64) chars,
+  and at most `MAX_FIELD_NAME_COUNT` (50) of them per row, replacing whatever
+  it drops with a count — `+N redacted (non-identifier)` for shape failures,
+  `+N redacted (too long)` for an over-length entry, `+N redacted (over
+limit)` once the count cap is reached — three distinct markers, never
+  folded together, so each count means what it says and never the raw value
+  itself. Known residual gap: a single-word ASCII value up to 64 characters
+  (e.g. a first name with no space) is indistinguishable from a real field
+  name by that filter and passes through unredacted; don't rely on it to
+  catch that case.
 - The writer (`@aggregator-dpg/campaign-audit`) is **write-only** — no update,
   delete or read. That absence IS the append-only guarantee; do not add one.
 - Writes are **best effort**: they happen after the operation is already durable
@@ -106,6 +111,16 @@ clients poll every 5-10s.
     path and the audit write so the two cannot drift, and both are left unset
     for voice/email (an operator address must never be attributed to a channel
     that never released one).
+- **`error_code` is dual-purpose — not a stable enumeration.** Depending on
+  which code path wrote the row it holds either a genuine error code (the
+  dump route's `503 DUMP_NOT_CONFIGURED`, or the watchdog's `stalled` below)
+  or a raw exception class name (`err.constructor.name`,
+  `campaign-process/index.ts`'s worker-completion write) — usually the
+  literal string `Error`, since most thrown errors in this codebase are
+  plain `Error`s rather than a named subclass. Renaming the column (e.g. to
+  `error_class`) was considered and rejected: dump rows carry a real error
+  code, so that name would be wrong for every one of those. Query this
+  column expecting free text, not a fixed set of values.
 - **The stalled-job watchdog also writes a `completed` row** (#617
   follow-up): `jobs/cron-watchdog.ts`'s stall sweep force-fails a
   `processing` job whose heartbeat went stale, which is a terminal
