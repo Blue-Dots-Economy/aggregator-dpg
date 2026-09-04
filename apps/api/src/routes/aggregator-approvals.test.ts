@@ -132,6 +132,39 @@ describe('admin approval routes', () => {
     expect(res.body).toContain('Too many attempts');
   });
 
+  it('POST /decision/:id returns a 429 HTML page when the verify rate limit is exceeded', async () => {
+    _setApprovalVerifyRateChecker(async () => ({
+      allowed: false,
+      retryAfterSeconds: 30,
+    }));
+    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
+      payload: { token, decision: 'approve' },
+    });
+    expect(res.statusCode).toBe(429);
+    expect(res.body).toContain('Too many attempts');
+    // The limit fires before any decision is applied.
+    const dbAfter = await aggregatorStore.findById(aggregatorId);
+    if (dbAfter.ok && dbAfter.value) expect(dbAfter.value.status).toBe('pending');
+  });
+
+  it('POST /renew/:id returns a 429 HTML page when the verify rate limit is exceeded', async () => {
+    _setApprovalVerifyRateChecker(async () => ({
+      allowed: false,
+      retryAfterSeconds: 30,
+    }));
+    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/renew/${aggregatorId}`,
+      payload: { token },
+    });
+    expect(res.statusCode).toBe(429);
+    expect(res.body).toContain('Too many attempts');
+  });
+
   it('GET /read/:id renders the single review page with both actions', async () => {
     const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
     const res = await app.inject({
