@@ -127,6 +127,45 @@ export function emailMessageOverridePaths(env: NodeJS.ProcessEnv = process.env):
 }
 
 /**
+ * Reads one override layer, distinguishing "absent" from "broken".
+ *
+ * A missing layer is the common case and silent. Anything else (EACCES,
+ * EISDIR, …) is a misconfiguration, and staying quiet about it would
+ * contradict this module's own rule that a typo must not masquerade as a
+ * landed edit: an unknown KEY already warns, so an unreadable FILE cannot be
+ * quieter.
+ *
+ * @param file - Absolute path to the layer.
+ * @param isInstanceOverride - Whether this is `EMAIL_MESSAGES_PATH`.
+ * @returns File contents, or `null` when the layer is absent or skippable.
+ * @throws {Error} If `EMAIL_MESSAGES_PATH` exists but cannot be read — an
+ *   operator set that path deliberately, so a broken one is a boot failure
+ *   rather than a warning nobody reads.
+ */
+async function readOverrideLayer(
+  file: string,
+  isInstanceOverride: boolean,
+): Promise<string | null> {
+  try {
+    return await readFile(file, 'utf8');
+  } catch (cause) {
+    const code = (cause as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') return null; // absent layer — the common case
+    if (isInstanceOverride) {
+      throw new Error(`EMAIL_MESSAGES_PATH is set but unreadable: ${file} (${code})`, { cause });
+    }
+    logger.warn({
+      operation: 'emailMessages.loadOverrides',
+      status: 'failure',
+      file,
+      error: code ?? 'UNKNOWN',
+      reason: 'unreadable',
+    });
+    return null;
+  }
+}
+
+/**
  * Merges the override layers over the bundled defaults.
  *
  * Called once from the server boot path. A missing override file is normal —
@@ -146,30 +185,8 @@ export async function loadEmailMessageOverrides(
   const instanceOverride = env.EMAIL_MESSAGES_PATH?.trim();
 
   for (const file of emailMessageOverridePaths(env)) {
-    let text: string;
-    try {
-      text = await readFile(file, 'utf8');
-    } catch (cause) {
-      const code = (cause as NodeJS.ErrnoException).code;
-      if (code === 'ENOENT') continue; // absent layer — the common case
-      // Anything else (EACCES, EISDIR, …) is a misconfiguration, not an
-      // absence. Staying silent here would contradict this module's own rule
-      // that a typo must not masquerade as a landed edit — an unknown KEY
-      // already warns, so an unreadable FILE cannot be quieter.
-      if (file === instanceOverride) {
-        // Set deliberately by an operator, so a broken path is a boot failure
-        // rather than a warning nobody reads.
-        throw new Error(`EMAIL_MESSAGES_PATH is set but unreadable: ${file} (${code})`, { cause });
-      }
-      logger.warn({
-        operation: 'emailMessages.loadOverrides',
-        status: 'failure',
-        file,
-        error: code ?? 'UNKNOWN',
-        reason: 'unreadable',
-      });
-      continue;
-    }
+    const text = await readOverrideLayer(file, file === instanceOverride);
+    if (text === null) continue;
     const parsed = parseProperties(text);
     if (parsed.malformedLines.length > 0) {
       logger.warn({
