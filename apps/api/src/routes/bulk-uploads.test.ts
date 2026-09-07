@@ -374,6 +374,71 @@ describe('bulk-uploads routes', () => {
   // ── GET /v1/bulk-uploads/template ───────────────────────────────────────
 
   describe('GET /v1/bulk-uploads/template', () => {
+    // ── format=xlsx (#564) ───────────────────────────────────────────────
+    // The workbook exists to prevent upload errors CSV cannot describe, so the
+    // assertions that matter are that it is a real workbook, that it is derived
+    // from the SCHEMA rather than the curated CSV sample, and that its columns
+    // still match what the parser accepts.
+
+    it('returns a workbook for format=xlsx', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/v1/bulk-uploads/template?participant_type=seeker&format=xlsx',
+        headers: AUTH('seeker-approved'),
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.headers['content-type']).toContain(
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      );
+      expect(res.headers['content-disposition']).toContain('seeker-template.xlsx');
+      // An .xlsx is a ZIP: the magic bytes prove bytes survived the response
+      // path rather than being decoded as text somewhere.
+      expect(res.rawPayload.subarray(0, 2).toString('latin1')).toBe('PK');
+    });
+
+    it('ignores the curated CSV sample for xlsx, generating from the schema', async () => {
+      // Curated samples rot — the shipped up-gzb/provider.csv still carries a
+      // column the schema dropped — and a dropdown is only trustworthy if it
+      // comes from the schema in force.
+      readBulkSampleMock.mockResolvedValueOnce('name,phone\nStale,0000000000\n');
+      const res = await app.inject({
+        method: 'GET',
+        url: '/v1/bulk-uploads/template?participant_type=seeker&format=xlsx',
+        headers: AUTH('seeker-approved'),
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.rawPayload.subarray(0, 2).toString('latin1')).toBe('PK');
+      expect(res.rawPayload.toString('latin1')).not.toContain('Stale');
+    });
+
+    it('still serves CSV when format is omitted', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/v1/bulk-uploads/template?participant_type=seeker',
+        headers: AUTH('seeker-approved'),
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.headers['content-type']).toContain('text/csv');
+    });
+
+    it('rejects an unknown format rather than silently serving CSV', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/v1/bulk-uploads/template?participant_type=seeker&format=pdf',
+        headers: AUTH('seeker-approved'),
+      });
+      expect(res.statusCode).toBe(400);
+    });
+
+    it('enforces aggregator type on the xlsx path too', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/v1/bulk-uploads/template?participant_type=provider&format=xlsx',
+        headers: AUTH('seeker-approved'),
+      });
+      expect(res.statusCode).toBe(403);
+    });
+
     it('401s without a token', async () => {
       const res = await app.inject({
         method: 'GET',

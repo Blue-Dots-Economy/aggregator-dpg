@@ -79,7 +79,14 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
 
   const acceptFile = (f: File) => {
     if (!/\.csv$/i.test(f.name)) {
-      setUploadError('Only .csv files are accepted.');
+      // Naming the fix matters now that we hand out an .xlsx template (#564):
+      // filling the workbook and uploading it directly is the obvious mistake,
+      // and "Only .csv files are accepted" does not say what to do about it.
+      setUploadError(
+        /\.xlsx?$/i.test(f.name)
+          ? 'This is an Excel file. Open it and use File → Save As (or Export) → CSV, then upload the .csv.'
+          : 'Only .csv files are accepted.',
+      );
       return;
     }
     setPickedFile(f);
@@ -131,8 +138,9 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
     }
   };
 
-  const downloadTemplate = () => {
-    window.location.href = `/api/bulk-uploads/template?participant_type=${participantType}`;
+  const downloadTemplate = (format: 'csv' | 'xlsx' = 'csv') => {
+    const suffix = format === 'xlsx' ? '&format=xlsx' : '';
+    window.location.href = `/api/bulk-uploads/template?participant_type=${participantType}${suffix}`;
   };
 
   return (
@@ -164,10 +172,23 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
               </div>
             )}
           </div>
+          {/*
+           * Excel first: it carries the dropdowns, the required-column marking
+           * and the delimiter note, so it is the format that prevents the
+           * errors #564 is about. CSV stays for anyone generating the file from
+           * their own system, and is what the upload path accepts either way.
+           */}
           <button
             type="button"
-            onClick={downloadTemplate}
+            onClick={() => downloadTemplate('xlsx')}
             className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-primary-600 hover:underline"
+          >
+            <I.download size={14} /> {t('csv.download_template_xlsx')}
+          </button>
+          <button
+            type="button"
+            onClick={() => downloadTemplate('csv')}
+            className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-ink-400 hover:underline"
           >
             <I.download size={14} /> {t('csv.download_template')}
           </button>
