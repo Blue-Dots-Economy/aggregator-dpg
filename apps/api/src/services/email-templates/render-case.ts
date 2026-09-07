@@ -26,9 +26,9 @@ import {
   paraSmall,
   renderShell,
 } from './shared.js';
-import { caseTokenTypes, getEmailCase, type BlockSpec } from './email-cases.js';
+import { caseTokenTypes, getEmailCase, type BlockSpec, type EmailCaseDef } from './email-cases.js';
 import { getMessage } from './messages.js';
-import { substitute, toPlainText } from './substitute.js';
+import { substitute, toPlainText, type TokenTypes } from './substitute.js';
 
 /** Token values for one render. `undefined` means "not supplied". */
 export type CaseValues = Readonly<Record<string, string | undefined>>;
@@ -84,6 +84,74 @@ function chooseKey(spec: BlockSpec, values: CaseValues): string | undefined {
 }
 
 /**
+ * Resolves the case's derived tokens to already-substituted HTML.
+ *
+ * A derived token is a copy-key alternation used mid-sentence rather than as
+ * its own block, so it is declared `html` in the registry and inserted raw.
+ *
+ * @param caseId - Case prefix.
+ * @param def - Case definition.
+ * @param values - Token values, brand tokens included.
+ * @param types - Declared token types.
+ * @returns Token name → rendered fragment, for tokens whose alternation matched.
+ */
+function resolveDerivedTokens(
+  caseId: string,
+  def: EmailCaseDef,
+  values: CaseValues,
+  types: TokenTypes,
+): Record<string, string> {
+  const derived: Record<string, string> = {};
+  for (const [token, alternatives] of Object.entries(def.derivedTokens ?? {})) {
+    const spec: BlockSpec = { block: 'para', key: alternatives[0]!.key, oneOf: alternatives };
+    const key = chooseKey(spec, values);
+    if (key) derived[token] = substitute(getMessage(`${caseId}.${key}`), values, types);
+  }
+  return derived;
+}
+
+/** One block's contribution to the two bodies. */
+interface RenderedBlock {
+  html: string;
+  text: string;
+}
+
+/**
+ * Renders one layout block, or nothing when it does not apply.
+ *
+ * @param spec - Block spec from the case layout.
+ * @param values - Token values, brand and derived tokens included.
+ * @param copy - Resolves a copy key to its substituted fragment.
+ * @returns The block's HTML and text, or null when it is skipped.
+ * @throws {Error} If the layout names a block kind this renderer lacks.
+ */
+function renderBlock(
+  spec: BlockSpec,
+  values: CaseValues,
+  copy: (key: string) => string,
+): RenderedBlock | null {
+  if (!blockApplies(spec, values)) return null;
+  const key = chooseKey(spec, values);
+  if (key === undefined) return null;
+  const fragment = copy(key);
+
+  if (spec.block === 'cta') {
+    // A CTA with no href would render `<a href="">`; drop it instead.
+    const href = spec.href ? values[spec.href] : undefined;
+    if (href === undefined || href === '') return null;
+    const label = toPlainText(fragment);
+    return {
+      html: ctaRow(ctaButton(label, href, spec.tone ?? 'primary')),
+      text: `${label}: ${href}`,
+    };
+  }
+
+  const render = BLOCK_RENDERERS[spec.block];
+  if (!render) throw new Error(`unknown block kind: ${spec.block}`);
+  return { html: render(fragment), text: toPlainText(fragment) };
+}
+
+/**
  * Renders one externalised email case.
  *
  * @param caseId - Registry key, e.g. `applicant_approved`.
@@ -98,56 +166,30 @@ export function renderCase(caseId: string, values: CaseValues): RenderedEmail {
   const brand = getEmailBrand();
   const types = caseTokenTypes(caseId);
 
-  const all: CaseValues = {
+  const base: CaseValues = {
     brandShort: brand.short_name,
     brandLong: brand.long_name,
     ...values,
   };
+  const all: CaseValues = { ...base, ...resolveDerivedTokens(caseId, def, base, types) };
 
-  // Derived tokens are alternations resolved to already-substituted HTML, so
-  // they are declared `html` in the registry and inserted raw.
-  const derived: Record<string, string> = {};
-  for (const [token, alternatives] of Object.entries(def.derivedTokens ?? {})) {
-    const key = chooseKey({ block: 'para', key: alternatives[0]!.key, oneOf: alternatives }, all);
-    if (key) derived[token] = substitute(getMessage(`${caseId}.${key}`), all, types);
-  }
-  const withDerived: CaseValues = { ...all, ...derived };
-
-  const copy = (key: string): string =>
-    substitute(getMessage(`${caseId}.${key}`), withDerived, types);
-
-  const subject = toPlainText(copy(def.subjectKey ?? 'subject'));
+  const copy = (key: string): string => substitute(getMessage(`${caseId}.${key}`), all, types);
 
   const htmlBlocks: string[] = [];
   const textBlocks: string[] = [];
-
   for (const spec of def.layout) {
-    if (!blockApplies(spec, withDerived)) continue;
-    const key = chooseKey(spec, withDerived);
-    if (key === undefined) continue;
-    const fragment = copy(key);
-
-    if (spec.block === 'cta') {
-      const href = spec.href ? withDerived[spec.href] : undefined;
-      if (href === undefined) continue;
-      const label = toPlainText(fragment);
-      htmlBlocks.push(ctaRow(ctaButton(label, href, spec.tone ?? 'primary')));
-      textBlocks.push(`${label}: ${href}`);
-      continue;
-    }
-
-    const render = BLOCK_RENDERERS[spec.block];
-    if (!render) throw new Error(`unknown block kind: ${spec.block}`);
-    htmlBlocks.push(render(fragment));
-    textBlocks.push(toPlainText(fragment));
+    const block = renderBlock(spec, all, copy);
+    if (!block) continue;
+    htmlBlocks.push(block.html);
+    textBlocks.push(block.text);
   }
 
+  const subject = toPlainText(copy(def.subjectKey ?? 'subject'));
   const signOff = def.signOff === false ? '' : `\nSent by ${brand.long_name}.\n`;
-  const text = `${textBlocks.join('\n\n')}\n${signOff}`;
 
   return {
     subject,
     html: renderShell({ preheader: subject, bodyHtml: htmlBlocks.join('\n') }),
-    text,
+    text: `${textBlocks.join('\n\n')}\n${signOff}`,
   };
 }

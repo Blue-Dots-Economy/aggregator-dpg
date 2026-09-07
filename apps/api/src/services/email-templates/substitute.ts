@@ -63,6 +63,15 @@ export function tokensUsed(template: string): string[] {
 }
 
 /**
+ * The copy files' entire tag vocabulary, as an explicit allow-list.
+ *
+ * The attribute run is bounded (`{0,200}`) and excludes `<`/`>` so the pattern
+ * cannot backtrack super-linearly — a generic `<[^>]+>` is O(n^2) on
+ * unterminated input.
+ */
+const ALLOWED_TAG_RE = /<\/?(?:b|strong|i|em|a|br)(?:\s[^<>]{0,200})?\/?>/gi;
+
+/**
  * Converts a copy fragment to its plain-text equivalent.
  *
  * Externalised copy is authored once as an HTML fragment and the text part is
@@ -70,8 +79,12 @@ export function tokensUsed(template: string): string[] {
  * before (the HTML body and the text body were maintained separately and one
  * shipped a support line the other lacked).
  *
- * Only the small tag vocabulary the copy files are allowed to use is handled:
- * `<b>`, `<strong>`, `<i>`, `<em>`, `<a>`. Anything else is stripped.
+ * Only the tag vocabulary the copy files are allowed to use is recognised —
+ * `<b> <strong> <i> <em> <a> <br>` — matched by an explicit allow-list rather
+ * than a generic `<[^>]+>` strip. Two reasons: a catch-all backtracks
+ * super-linearly on unterminated input (`<aaaa…` with no `>`), and a tag
+ * outside the vocabulary should stay VISIBLE in the text part so copy using a
+ * disallowed tag looks wrong instead of silently losing content.
  *
  * @param html - Copy fragment, already substituted.
  * @returns Plain-text rendering with entities decoded.
@@ -79,8 +92,7 @@ export function tokensUsed(template: string): string[] {
 export function toPlainText(html: string): string {
   return (
     html
-      .replaceAll(/<br\s*\/?>/gi, '\n')
-      .replaceAll(/<[^>]+>/g, '')
+      .replaceAll(ALLOWED_TAG_RE, (tag) => (tag.toLowerCase().startsWith('<br') ? '\n' : ''))
       .replaceAll('&nbsp;', ' ')
       .replaceAll('&quot;', '"')
       .replaceAll('&#39;', "'")
