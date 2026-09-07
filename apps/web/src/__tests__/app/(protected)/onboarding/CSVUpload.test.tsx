@@ -286,15 +286,15 @@ describe('<CSVUpload />', () => {
     });
 
     renderUpload();
-    await user.click(screen.getByText('Download CSV template'));
-    expect(window.location.href).toBe('/api/bulk-uploads/template?participant_type=seeker');
-
-    // Excel is the guided path (#564): dropdowns, required marking, delimiter
-    // note. Same endpoint, one extra param, so the two cannot diverge.
+    // The workbook is the only template offered: it carries the dropdowns and
+    // the required-column marking, and a bare CSV alongside it would just be
+    // the version with no guidance. The endpoint still defaults to CSV for API
+    // callers.
     await user.click(screen.getByText('Download Excel template'));
     expect(window.location.href).toBe(
       '/api/bulk-uploads/template?participant_type=seeker&format=xlsx',
     );
+    expect(screen.queryByText('Download CSV template')).not.toBeInTheDocument();
 
     Object.defineProperty(window, 'location', {
       writable: true,
