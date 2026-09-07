@@ -4,11 +4,24 @@
  *
  * Belongs to `@aggregator-dpg/api`. Distinct from `org-owner-approved` on
  * purpose: the owner did NOT just get approved (that may have been 90+ days
- * ago), they asked for a new link — so reusing the approval email would read as
- * a duplicate or a phishing attempt. No sign-in CTA (the owner has no account).
+ * ago), they asked for a new link — so reusing the approval email would read
+ * as a duplicate or a phishing attempt. No sign-in CTA (the owner has no
+ * account). Copy lives under the `owner_grant_refreshed.*` keys.
  */
 
-import { ctaButton, escapeHtml, getEmailBrand, renderShell } from './shared.js';
+import {
+  ctaButton,
+  ctaRow,
+  getEmailBrand,
+  heading,
+  note,
+  para,
+  paraLast,
+  renderShell,
+} from './shared.js';
+import { caseTokenTypes } from './email-cases.js';
+import { getMessage } from './messages.js';
+import { substitute, toPlainText } from './substitute.js';
 
 /**
  * Template inputs for the owner grant-refreshed email.
@@ -32,35 +45,39 @@ export function renderOwnerGrantRefreshed(v: OwnerGrantRefreshedVars): {
   text: string;
 } {
   const brand = getEmailBrand();
-  const subject = `Your new invite link for ${v.orgName}`;
+  const types = caseTokenTypes('owner_grant_refreshed');
+  const values = {
+    brandShort: brand.short_name,
+    brandLong: brand.long_name,
+    orgName: v.orgName,
+  };
+  const copy = (key: string): string =>
+    substitute(getMessage(`owner_grant_refreshed.${key}`), values, types);
 
-  const body = `
-<h1 style="font-size:22px;font-weight:700;letter-spacing:-0.01em;margin:0 0 12px;color:#0b1020;">
-  Here's your new invite link.
-</h1>
-<p style="margin:0 0 14px;font-size:14px;color:#475069;line-height:1.55;">
-  You asked for a fresh link to invite coordinators for <strong>${escapeHtml(v.orgName)}</strong> on ${escapeHtml(brand.long_name)}. Your previous link had expired — this one replaces it and works for the next 90 days.
-</p>
-<div style="margin:0 0 18px;">
-  ${ctaButton('Open your invite page', v.inviteUrl, 'primary')}
-</div>
-<p style="margin:0 0 22px;font-size:14px;color:#475069;line-height:1.55;">
-  You don't need to sign in — you manage your coordinators entirely from this link. Keep this email so you can find it again; if it ever stops working, just open it and send again and we'll email you a fresh one automatically.
-</p>
-<p style="margin:0;font-size:12px;color:#7c84a6;line-height:1.55;">
-  Didn't request this? You can safely ignore this email — the link only works for your organisation.
-</p>
-`;
+  const subject = toPlainText(copy('subject'));
+  const headingHtml = copy('heading');
+  const introHtml = copy('intro');
+  const ctaLabel = toPlainText(copy('cta'));
+  const noteHtml = copy('note');
+  const footnoteHtml = copy('footnote');
 
-  const text = `Here's your new invite link.
+  const body = [
+    heading(headingHtml),
+    para(introHtml),
+    ctaRow(ctaButton(ctaLabel, v.inviteUrl, 'primary')),
+    paraLast(noteHtml),
+    note(footnoteHtml),
+  ].join('\n');
 
-You asked for a fresh link to invite coordinators for ${v.orgName} on ${brand.long_name}. Your previous link had expired — this one replaces it and works for the next 90 days.
+  const text = `${toPlainText(headingHtml)}
 
-Open your invite page: ${v.inviteUrl}
+${toPlainText(introHtml)}
 
-You don't need to sign in — you manage your coordinators entirely from this link. Keep this email so you can find it again; if it ever stops working, just open it and send again and we'll email you a fresh one automatically.
+${ctaLabel}: ${v.inviteUrl}
 
-Didn't request this? You can safely ignore this email — the link only works for your organisation.
+${toPlainText(noteHtml)}
+
+${toPlainText(footnoteHtml)}
 
 Sent by ${brand.long_name}.
 `;

@@ -161,3 +161,42 @@ export function escapeHtml(s: string): string {
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#39;');
 }
+
+// ── Block helpers ───────────────────────────────────────────────────────────
+// Externalised copy (see `messages.ts`) must not carry inline CSS: an operator
+// editing a properties file should be writing a sentence, not a style
+// attribute. These helpers own the styling so the copy files stay readable,
+// and they are the only place a body block's look is defined.
+
+/** Standard body paragraph. `html` must already be escaped or code-generated. */
+export function para(html: string): string {
+  return `<p style="margin:0 0 14px;font-size:14px;color:${BRAND_INK_500};line-height:1.55;">\n  ${html}\n</p>`;
+}
+
+/** Body paragraph with the wider bottom margin used before a footnote. */
+export function paraLast(html: string): string {
+  return `<p style="margin:0 0 22px;font-size:14px;color:${BRAND_INK_500};line-height:1.55;">\n  ${html}\n</p>`;
+}
+
+/** Top-of-body heading. */
+export function heading(html: string): string {
+  return `<h1 style="font-size:22px;font-weight:700;letter-spacing:-0.01em;margin:0 0 12px;color:${BRAND_INK};">\n  ${html}\n</h1>`;
+}
+
+/** Small grey closing note. */
+export function note(html: string): string {
+  return `<p style="margin:0;font-size:12px;color:#7c84a6;line-height:1.55;">\n  ${html}\n</p>`;
+}
+
+/** Warning callout — used for a rejection reason. */
+export function callout(html: string): string {
+  return (
+    `<div style="margin:18px 0 0;padding:14px;background:#fef2f2;border:1px solid #fecaca;` +
+    `border-radius:10px;font-size:13.5px;color:#7f1d1d;line-height:1.55;">${html}</div>`
+  );
+}
+
+/** Wraps a CTA button in its own row. */
+export function ctaRow(buttonHtml: string): string {
+  return `<div style="margin:0 0 18px;">\n  ${buttonHtml}\n</div>`;
+}

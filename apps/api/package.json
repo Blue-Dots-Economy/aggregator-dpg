@@ -5,7 +5,7 @@
   "type": "module",
   "main": "dist/server.js",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && mkdir -p dist/services/email-templates && cp src/services/email-templates/messages.default.properties dist/services/email-templates/messages.default.properties",
     "dev": "tsx watch src/server.ts",
     "start": "node dist/server.js",
     "lint": "eslint --no-warn-ignored .",

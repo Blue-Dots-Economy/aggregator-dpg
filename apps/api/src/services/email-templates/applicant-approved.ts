@@ -1,51 +1,84 @@
 /**
- * Applicant-approved email — sent on `approve`. Welcomes the user and
- * points them at the portal sign-in page. Uses OTP login, so no password
- * is included.
+ * Applicant-approved email — sent on `approve`. Welcomes the user and points
+ * them at the portal sign-in page. Uses OTP login, so no password is included.
+ *
+ * Belongs to `@aggregator-dpg/api`. Copy lives in the properties layers (see
+ * `messages.ts`) under the `applicant_approved.*` keys; this module owns only
+ * the block structure and the plain-text derivation.
  */
 
-import { ctaButton, escapeHtml, getEmailBrand, renderShell } from './shared.js';
+import {
+  ctaButton,
+  ctaRow,
+  getEmailBrand,
+  heading,
+  note,
+  para,
+  paraLast,
+  renderShell,
+} from './shared.js';
+import { caseTokenTypes } from './email-cases.js';
+import { getMessage } from './messages.js';
+import { substitute, toPlainText } from './substitute.js';
 
+/**
+ * Template inputs for the applicant-approved email.
+ */
 export interface ApplicantApprovedVars {
   contactName: string;
   association: string;
-  identifier: string; // email or phone the user registered with
+  /** Email or phone the user registered with. */
+  identifier: string;
   signInUrl: string;
 }
 
+/**
+ * Renders the applicant-approved email (subject + HTML + plain-text parts).
+ *
+ * @param v - Contact name, association, registered identifier, sign-in URL.
+ * @returns The `subject`, `html`, and `text` parts ready for the mailer.
+ */
 export function renderApplicantApproved(v: ApplicantApprovedVars): {
   subject: string;
   html: string;
   text: string;
 } {
   const brand = getEmailBrand();
-  const subject = `Your ${brand.short_name} aggregator account is approved`;
-  const body = `
-<h1 style="font-size:22px;font-weight:700;letter-spacing:-0.01em;margin:0 0 12px;color:#0b1020;">
-  Welcome to ${escapeHtml(brand.short_name)}, ${escapeHtml(v.contactName)}.
-</h1>
-<p style="margin:0 0 14px;font-size:14px;color:#475069;line-height:1.55;">
-  Your application for <strong>${escapeHtml(v.association)}</strong> has been approved. You can sign in to ${escapeHtml(brand.long_name)} now.
-</p>
-<p style="margin:0 0 22px;font-size:14px;color:#475069;line-height:1.55;">
-  Use the email or mobile number you registered (<strong>${escapeHtml(v.identifier)}</strong>) — we'll send a one-time code to verify it.
-</p>
-<div style="margin:0 0 18px;">
-  ${ctaButton(`Sign in to ${brand.short_name}`, v.signInUrl, 'primary')}
-</div>
-<p style="margin:0;font-size:12px;color:#7c84a6;line-height:1.55;">
-  Trouble signing in? Reply to this email and the ${escapeHtml(brand.short_name)} team will help.
-</p>
-`;
-  const text = `Welcome to ${brand.short_name}, ${v.contactName}.
+  const types = caseTokenTypes('applicant_approved');
+  const values = {
+    brandShort: brand.short_name,
+    brandLong: brand.long_name,
+    contactName: v.contactName,
+    association: v.association,
+    identifier: v.identifier,
+  };
+  const copy = (key: string): string =>
+    substitute(getMessage(`applicant_approved.${key}`), values, types);
 
-Your application for ${v.association} has been approved. You can sign in to ${brand.long_name} now.
+  const subject = toPlainText(copy('subject'));
+  const headingHtml = copy('heading');
+  const introHtml = copy('intro');
+  const identifierHtml = copy('identifier');
+  const ctaLabel = toPlainText(copy('cta'));
+  const footnoteHtml = copy('footnote');
 
-Use the email or mobile number you registered (${v.identifier}) — we'll send a one-time code to verify it.
+  const body = [
+    heading(headingHtml),
+    para(introHtml),
+    paraLast(identifierHtml),
+    ctaRow(ctaButton(ctaLabel, v.signInUrl, 'primary')),
+    note(footnoteHtml),
+  ].join('\n');
 
-Sign in: ${v.signInUrl}
+  const text = `${toPlainText(headingHtml)}
 
-Trouble signing in? Reply to this email and the ${brand.short_name} team will help.
+${toPlainText(introHtml)}
+
+${toPlainText(identifierHtml)}
+
+${ctaLabel}: ${v.signInUrl}
+
+${toPlainText(footnoteHtml)}
 
 Sent by ${brand.long_name}.
 `;

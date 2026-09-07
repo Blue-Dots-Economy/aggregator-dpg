@@ -1,22 +1,27 @@
 /**
- * Org-owner approved email — sent when the network admin approves an
- * organisation in the org → coordinator hierarchy (#699).
+ * Org-owner approved email (#699) — tells the org owner their organisation is
+ * live. No sign-in CTA: the owner's Keycloak user stays disabled by design
+ * (org-owner console login is deferred), so the invite link is their only
+ * action.
  *
- * Belongs to `@aggregator-dpg/api`. This is the notification an approved org
- * owner receives telling them their organisation is live; today the approval
- * path sends nothing, so owners hear nothing after approval — this template
- * closes that gap and is the carrier for the coordinator-invite link once it
- * exists.
- *
- * Deliberately carries **no sign-in CTA**: on approval the owner's Keycloak
- * user is left disabled (org-owner console login is deferred), so a sign-in
- * link would be a dead end / fail the OTP step. Email is the owner's only
- * interaction surface until the org console ships. When the coordinator-invite
- * grant link lands (#701) it is passed as `inviteUrl` and rendered as the sole
- * CTA; until then the "you're live" notification ships on its own.
+ * Belongs to `@aggregator-dpg/api`. Copy lives under the
+ * `org_owner_approved.*` keys. The tail has two variants rather than one
+ * conditional string: with the grant link, and before the invite subsystem is
+ * reachable for this deployment.
  */
 
-import { ctaButton, escapeHtml, getEmailBrand, renderShell } from './shared.js';
+import {
+  ctaButton,
+  ctaRow,
+  getEmailBrand,
+  heading,
+  para,
+  paraLast,
+  renderShell,
+} from './shared.js';
+import { caseTokenTypes } from './email-cases.js';
+import { getMessage } from './messages.js';
+import { substitute, toPlainText } from './substitute.js';
 
 /**
  * Template inputs for the org-owner approved email.
@@ -45,44 +50,45 @@ export function renderOrgOwnerApproved(v: OrgOwnerApprovedVars): {
   text: string;
 } {
   const brand = getEmailBrand();
-  const subject = `${brand.short_name}: ${v.orgName} is approved`;
+  const types = caseTokenTypes('org_owner_approved');
+  const values = {
+    brandShort: brand.short_name,
+    brandLong: brand.long_name,
+    orgName: v.orgName,
+    ownerEmail: v.ownerEmail,
+  };
+  const copy = (key: string): string =>
+    substitute(getMessage(`org_owner_approved.${key}`), values, types);
 
-  // Coordinators join ONLY when the owner invites them (#700 removed self-serve
-  // registration) — so the CTA is the owner's next action, not a passive notice.
-  // The block only renders when the grant link exists; until then it's a heads-up.
-  const inviteHtml = v.inviteUrl
-    ? `<p style="margin:0 0 14px;font-size:14px;color:#475069;line-height:1.55;">
-  Coordinators can only join <strong>${escapeHtml(v.orgName)}</strong> when you invite them. Invite them by email below — each person gets their own one-time invite.
-</p>
-<div style="margin:0 0 18px;">
-  ${ctaButton('Invite your coordinators', v.inviteUrl, 'primary')}
-</div>
-<p style="margin:0 0 22px;font-size:14px;color:#475069;line-height:1.55;">
-  You don't need an account and you can't sign in — you manage your coordinators entirely from the button above. Keep this email so you can find it again; the link works for 90 days. If it ever stops working, just open it and send again — we'll email you a fresh link automatically.
-</p>`
-    : `<p style="margin:0 0 22px;font-size:14px;color:#475069;line-height:1.55;">
-  Coordinators join only when you invite them. You'll be able to invite them by email shortly — we'll send you the invite link in a follow-up message.
-</p>`;
+  const subject = toPlainText(copy('subject'));
+  const headingHtml = copy('heading');
+  const introHtml = copy('intro');
 
-  const body = `
-<h1 style="font-size:22px;font-weight:700;letter-spacing:-0.01em;margin:0 0 12px;color:#0b1020;">
-  ${escapeHtml(v.orgName)} is approved.
-</h1>
-<p style="margin:0 0 14px;font-size:14px;color:#475069;line-height:1.55;">
-  Your organisation is now live on ${escapeHtml(brand.long_name)} (registered with <strong>${escapeHtml(v.ownerEmail)}</strong>).
-</p>
-${inviteHtml}
-`;
+  const tailHtml: string[] = [];
+  const tailText: string[] = [];
+  if (v.inviteUrl) {
+    const leadHtml = copy('invite_lead');
+    const ctaLabel = toPlainText(copy('cta'));
+    const noteHtml = copy('invite_note');
+    tailHtml.push(
+      para(leadHtml),
+      ctaRow(ctaButton(ctaLabel, v.inviteUrl, 'primary')),
+      paraLast(noteHtml),
+    );
+    tailText.push(`${toPlainText(leadHtml)}\n${ctaLabel}: ${v.inviteUrl}`, toPlainText(noteHtml));
+  } else {
+    const pendingHtml = copy('invite_pending');
+    tailHtml.push(paraLast(pendingHtml));
+    tailText.push(toPlainText(pendingHtml));
+  }
 
-  const text = `${v.orgName} is approved.
+  const body = [heading(headingHtml), para(introHtml), ...tailHtml].join('\n');
 
-Your organisation is now live on ${brand.long_name} (registered with ${v.ownerEmail}).
+  const text = `${toPlainText(headingHtml)}
 
-${
-  v.inviteUrl
-    ? `Coordinators can only join ${v.orgName} when you invite them. Invite them by email — each person gets their own one-time invite:\n${v.inviteUrl}\n\nYou don't need an account and you can't sign in — you manage your coordinators entirely from that link. Keep this email; the link works for 90 days. If it ever stops working, just open it and send again and we'll email you a fresh link automatically.`
-    : `Coordinators join only when you invite them. You'll be able to invite them by email shortly — we'll send you the invite link in a follow-up message.`
-}
+${toPlainText(introHtml)}
+
+${tailText.join('\n\n')}
 `;
 
   return { subject, html: renderShell({ preheader: subject, bodyHtml: body }), text };

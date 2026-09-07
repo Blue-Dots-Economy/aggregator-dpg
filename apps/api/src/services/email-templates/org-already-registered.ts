@@ -12,9 +12,23 @@
  * Always addressed to the owner email ON FILE, never the address that was
  * submitted — the org form is anonymous, so mailing the submitted address
  * would hand a stranger the org's invite credential.
+ *
+ * Copy lives under the `org_already_registered.*` keys.
  */
 
-import { ctaButton, escapeHtml, getEmailBrand, renderShell } from './shared.js';
+import {
+  ctaButton,
+  ctaRow,
+  getEmailBrand,
+  heading,
+  note,
+  para,
+  paraLast,
+  renderShell,
+} from './shared.js';
+import { caseTokenTypes } from './email-cases.js';
+import { getMessage } from './messages.js';
+import { substitute, toPlainText } from './substitute.js';
 
 /**
  * Template inputs for the organisation-already-registered email.
@@ -31,8 +45,8 @@ export interface OrgAlreadyRegisteredVars {
 /**
  * Formats an absolute expiry date for the email (e.g. "15 Sep 2026").
  *
- * A duration ("expires in 90 days") is meaningless by the time someone reads a
- * mail they kept, so the wire value is a fixed date.
+ * A duration ("expires in 90 days") is meaningless by the time someone reads
+ * a mail they kept, so the wire value is a fixed date.
  */
 function formatExpiryDate(d: Date): string {
   return new Intl.DateTimeFormat('en-GB', {
@@ -54,41 +68,44 @@ export function renderOrgAlreadyRegistered(v: OrgAlreadyRegisteredVars): {
   text: string;
 } {
   const brand = getEmailBrand();
-  const subject = `${v.orgName} is already registered`;
-  const expiresOn = formatExpiryDate(v.expiresAt);
+  const types = caseTokenTypes('org_already_registered');
+  const values = {
+    brandShort: brand.short_name,
+    brandLong: brand.long_name,
+    orgName: v.orgName,
+    expiresOn: formatExpiryDate(v.expiresAt),
+  };
+  const copy = (key: string): string =>
+    substitute(getMessage(`org_already_registered.${key}`), values, types);
 
-  const body = `
-<h1 style="font-size:22px;font-weight:700;letter-spacing:-0.01em;margin:0 0 12px;color:#0b1020;">
-  Your organisation is already registered.
-</h1>
-<p style="margin:0 0 14px;font-size:14px;color:#475069;line-height:1.55;">
-  Someone just tried to register <strong>${escapeHtml(v.orgName)}</strong> on ${escapeHtml(brand.long_name)}. It is already approved and live, so there is nothing more to do — you do not need to register again.
-</p>
-<p style="margin:0 0 14px;font-size:14px;color:#475069;line-height:1.55;">
-  If that was you because you were looking for your coordinator invitation link, here it is.
-</p>
-<div style="margin:0 0 18px;">
-  ${ctaButton('Invite coordinators', v.inviteUrl, 'primary')}
-</div>
-<p style="margin:0 0 22px;font-size:14px;color:#475069;line-height:1.55;">
-  You do not need to sign in — you invite and manage your coordinators entirely from this link. It works until <strong>${escapeHtml(expiresOn)}</strong>. Keep this email so you can find it again.
-</p>
-<p style="margin:0;font-size:12px;color:#7c84a6;line-height:1.55;">
-  Didn't try to register? You can safely ignore this email — nothing changed, and the link only works for your organisation.
-</p>
-`;
+  const subject = toPlainText(copy('subject'));
+  const headingHtml = copy('heading');
+  const introHtml = copy('intro');
+  const reasonHtml = copy('reason');
+  const ctaLabel = toPlainText(copy('cta'));
+  const noteHtml = copy('note');
+  const footnoteHtml = copy('footnote');
 
-  const text = `Your organisation is already registered.
+  const body = [
+    heading(headingHtml),
+    para(introHtml),
+    para(reasonHtml),
+    ctaRow(ctaButton(ctaLabel, v.inviteUrl, 'primary')),
+    paraLast(noteHtml),
+    note(footnoteHtml),
+  ].join('\n');
 
-Someone just tried to register ${v.orgName} on ${brand.long_name}. It is already approved and live, so there is nothing more to do — you do not need to register again.
+  const text = `${toPlainText(headingHtml)}
 
-If that was you because you were looking for your coordinator invitation link, here it is.
+${toPlainText(introHtml)}
 
-Invite coordinators: ${v.inviteUrl}
+${toPlainText(reasonHtml)}
 
-You do not need to sign in — you invite and manage your coordinators entirely from this link. It works until ${expiresOn}. Keep this email so you can find it again.
+${ctaLabel}: ${v.inviteUrl}
 
-Didn't try to register? You can safely ignore this email — nothing changed, and the link only works for your organisation.
+${toPlainText(noteHtml)}
+
+${toPlainText(footnoteHtml)}
 
 Sent by ${brand.long_name}.
 `;
