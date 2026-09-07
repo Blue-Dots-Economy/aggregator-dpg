@@ -11,6 +11,7 @@
 import { and, eq, lt, type SQL } from 'drizzle-orm';
 import { aggregatorOrgs } from '../../db/schema.js';
 import { getDb } from '../../db/client.js';
+import { PG_UNIQUE_VIOLATION, pgErrorCode, pgConstraint } from '../../db/pg-error.js';
 import {
   AggregatorOrgStoreBase,
   type AggregatorOrg,
@@ -118,7 +119,12 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
     try {
       const [row] = await getDb()
         .update(aggregatorOrgs)
-        .set({ status: next, updatedAt: new Date() })
+        // Stamp rejected_at (write-once) on the reject transition only (#726).
+        .set({
+          status: next,
+          updatedAt: new Date(),
+          ...(next === 'inactive' ? { rejectedAt: new Date() } : {}),
+        })
         .where(and(eq(aggregatorOrgs.id, id), eq(aggregatorOrgs.status, 'pending')))
         .returning();
       return { ok: true, value: row ? toDomain(row) : null };
@@ -152,18 +158,25 @@ function toDomain(row: typeof aggregatorOrgs.$inferSelect): AggregatorOrg {
     status: row.status,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+    rejectedAt: row.rejectedAt,
   };
 }
 
 function mapInsertError(e: unknown): OrgStoreResult<never> {
-  const msg = (e as Error).message ?? '';
-  if (msg.includes('aggregator_orgs_display_name_active_unique')) {
-    return errResult('DUPLICATE_NAME', 'organisation name already in use');
+  // Only a genuine unique-violation (SQLSTATE 23505) maps to a 409 — gate on the
+  // code first so a connection failure on a query that happens to mention a
+  // constraint name isn't misreported as a duplicate. The constraint name lives
+  // on the wrapped `.cause`; both come from the shared pg-error helpers.
+  if (pgErrorCode(e) === PG_UNIQUE_VIOLATION) {
+    const constraint = pgConstraint(e) ?? '';
+    if (constraint.includes('aggregator_orgs_display_name_active_unique')) {
+      return errResult('DUPLICATE_NAME', 'organisation name already in use');
+    }
+    if (constraint.includes('aggregator_orgs_slug_active_unique')) {
+      return errResult('DUPLICATE_SLUG', 'slug already in use');
+    }
   }
-  if (msg.includes('aggregator_orgs_slug_active_unique')) {
-    return errResult('DUPLICATE_SLUG', 'slug already in use');
-  }
-  return errResult('DB_UNAVAILABLE', msg);
+  return errResult('DB_UNAVAILABLE', (e as Error).message ?? 'insert failed');
 }
 
 function errResult<T>(code: OrgStoreError['code'], message: string): OrgStoreResult<T> {

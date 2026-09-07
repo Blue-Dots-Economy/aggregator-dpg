@@ -63,6 +63,8 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
       updatedAt: now,
       signalstackOrgId: null,
       parentOrgId: input.parentOrgId ?? null,
+      inviteEmail: input.inviteEmail ?? null,
+      rejectedAt: null,
     };
     this.indexInsert(row);
     return { ok: true, value: row };
@@ -147,6 +149,7 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
       consent: patch.consent ?? existing.consent,
       status: patch.status ?? existing.status,
       parentOrgId: patch.parentOrgId !== undefined ? patch.parentOrgId : existing.parentOrgId,
+      rejectedAt: patch.rejectedAt !== undefined ? patch.rejectedAt : existing.rejectedAt,
       updatedBy: patch.updatedBy,
       updatedAt: new Date(),
     };

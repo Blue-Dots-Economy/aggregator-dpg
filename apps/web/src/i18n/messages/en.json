@@ -10,7 +10,8 @@
   "form": {
     "select_placeholder": "Select…",
     "comma_separated": "Comma-separated values",
-    "select_options": "Select options…"
+    "select_options": "Select options…",
+    "clear_selection": "Clear selection"
   },
   "status_pill": {
     "active": "Active",
@@ -45,6 +46,7 @@
     "submitting": "Submitting…",
     "validation_error_title": "Please fix the highlighted fields",
     "page_title": "Aggregator Registration",
+    "owner_page_title": "Register as aggregator owner",
     "tab_coordinator": "Register as Coordinator",
     "tab_org": "Register Organisation",
     "org_selector_label": "Organisation",
@@ -552,7 +554,7 @@
   },
   "auth": {
     "welcome_heading": "Welcome back.",
-    "welcome_sub": "Sign in or register your organisation to get started.",
+    "welcome_sub": "Sign in to your account to continue.",
     "existing_title": "Existing user — Sign in",
     "existing_sub": "Continue with email or mobile via {brand} SSO",
     "register_title": "Become a member",
@@ -623,13 +625,13 @@
   "legal": {
     "privacy_title": "Privacy Policy",
     "terms_title": "Terms of Service",
-    "audience_participant": "For participants",
     "audience_aggregator": "For aggregators",
     "audience_org": "For organisations",
     "version_effective": "Version {version} · Effective {date}",
     "version_only": "Version {version}",
     "unavailable": "Legal documents are currently unavailable. Please try again later.",
     "back_to_sign_in": "Back to sign in",
-    "contents_label": "Contents"
+    "contents_label": "Contents",
+    "agree_sentence": "By continuing you agree to the <privacy>Privacy Policy</privacy> and <terms>Terms</terms>."
   }
 }

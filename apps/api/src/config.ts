@@ -10,6 +10,7 @@ import { z } from 'zod';
 import {
   assertSignalStackClientIdentity,
   assertTlsPosture,
+  campaignExportConfigFields,
   signalStackConfigFields,
 } from '@aggregator-dpg/shared-primitives/config';
 
@@ -219,6 +220,11 @@ const ConfigSchema = z.object({
   CAMPAIGN_EXPORT_MAX_ACTIVE_PER_ORG: z.coerce.number().int().positive().default(3),
   /** BullMQ attempts for an export campaign-process job (retry count on transient failure). */
   CAMPAIGN_EXPORT_ATTEMPTS: z.coerce.number().int().positive().default(3),
+  // Shared with the worker (@aggregator-dpg/shared-primitives/config) so the
+  // two processes can never disagree on what an export releases — the API
+  // only reads this to record `piiFields` on the audit `requested` row
+  // (#617); the worker reads it to actually perform the export.
+  ...campaignExportConfigFields,
 
   // ─── Campaign voice channel (#577) ──────────────────────────────────────
   /** Max `participant_ids` accepted per voice campaign request body (after de-dup). */
@@ -285,6 +291,46 @@ const ConfigSchema = z.object({
     .default(7 * 24 * 60 * 60),
 
   /**
+   * Coordinator-invite token lifetime (#700). Default 14 days. Bounds how long
+   * an emailed invite remains usable before the owner must re-mint.
+   */
+  INVITE_TOKEN_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(14 * 24 * 60 * 60),
+
+  /**
+   * Org-owner grant-token lifetime (#701). Default 90 days — long, because the
+   * owner cannot log in and the grant is their only route back to the mint page.
+   */
+  GRANT_TOKEN_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(90 * 24 * 60 * 60),
+
+  // ─── Rate limit (per-org invite mint, #700 §7.2) ────────────────────────
+  // Bounds how many invites one org can mint per window — the mandatory
+  // mitigation that stops a leaked grant becoming a platform-branded spam
+  // amplifier. Follows the PUBLIC_SUBMIT_RATE shape.
+  INVITE_MINT_RATE_WINDOW_SECONDS: z.coerce.number().int().positive().default(3600),
+  INVITE_MINT_RATE_MAX_PER_WINDOW: z.coerce.number().int().positive().default(100),
+  /** Max recipients per single mint request (#701). Default 10. */
+  INVITE_MINT_MAX_RECIPIENTS: z.coerce.number().int().positive().default(10),
+
+  /**
+   * Window + cap for re-sending an approved org's coordinator-invite link when
+   * its owner re-submits the registration form. Keyed on the STORED owner
+   * email alone, so rotating IPs cannot buy a fresh bucket, and fail-closed —
+   * each admitted call mints another independent 90-day grant, so a downed
+   * Redis must not remove the cap. Deliberately tight: this is a recovery
+   * action a real owner takes once, not a routine request.
+   */
+  ORG_INVITE_RESEND_RATE_WINDOW_SECONDS: z.coerce.number().int().positive().default(3600),
+  ORG_INVITE_RESEND_RATE_MAX_PER_WINDOW: z.coerce.number().int().positive().default(3),
+
+  /**
    * Extra grace beyond the approval-token TTL before a still-pending
    * registration is eligible for cleanup. Default 24h.
    */
@@ -293,6 +339,13 @@ const ConfigSchema = z.object({
     .int()
     .positive()
     .default(24 * 60 * 60 * 1000),
+
+  /**
+   * Cooling window (in MINUTES) after a rejection before the same owner/
+   * coordinator may re-register (#726). Default 720 (12h). In minutes for
+   * granularity; override via env.
+   */
+  REGISTRATION_COOLING_MINUTES: z.coerce.number().int().positive().default(720),
 
   // ─── Schema loader ──────────────────────────────────────────────────────
   /** Absolute or relative path to `config/schemas/`. Used by link-submit Ajv. */

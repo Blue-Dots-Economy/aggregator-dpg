@@ -31,6 +31,8 @@ export interface AggregatorOrg {
   status: AggregatorStatus;
   createdAt: Date;
   updatedAt: Date;
+  /** Write-once rejection timestamp (#726) — drives the cooling window. */
+  rejectedAt: Date | null;
 }
 
 export interface CreateOrgInput {
@@ -52,6 +54,8 @@ export interface UpdateOrgPatch {
   ownerKcSub?: string | null;
   kcGroupId?: string | null;
   status?: AggregatorStatus;
+  /** Write-once reject timestamp (#726); set to `null` to revive after cooling. */
+  rejectedAt?: Date | null;
 }
 
 export type OrgStoreError =

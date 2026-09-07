@@ -78,6 +78,7 @@ function makeRow(overrides: Partial<AggregatorOrg> = {}): AggregatorOrg {
     status: 'pending',
     createdAt,
     updatedAt: createdAt,
+    rejectedAt: null,
     ...overrides,
   };
 }
@@ -130,11 +131,12 @@ describe('PostgresAggregatorOrgStore.create', () => {
     expect(result.error.code).toBe('DB_UNAVAILABLE');
   });
 
-  it('maps a display-name unique violation to DUPLICATE_NAME', async () => {
+  it('maps a display-name unique violation (SQLSTATE 23505 + constraint) to DUPLICATE_NAME', async () => {
     const db = makeFakeDb(() => {
-      throw new Error(
-        'duplicate key value violates unique constraint "aggregator_orgs_display_name_active_unique"',
-      );
+      throw Object.assign(new Error('duplicate key'), {
+        code: '23505',
+        constraint: 'aggregator_orgs_display_name_active_unique',
+      });
     });
     _setDbClients(null, db as never);
     const store = new PostgresAggregatorOrgStore();
@@ -145,11 +147,73 @@ describe('PostgresAggregatorOrgStore.create', () => {
     expect(result.error.code).toBe('DUPLICATE_NAME');
   });
 
-  it('maps a slug unique violation to DUPLICATE_SLUG', async () => {
+  it('maps a slug unique violation (SQLSTATE 23505 + constraint) to DUPLICATE_SLUG', async () => {
     const db = makeFakeDb(() => {
-      throw new Error(
-        'duplicate key value violates unique constraint "aggregator_orgs_slug_active_unique"',
+      throw Object.assign(new Error('duplicate key'), {
+        code: '23505',
+        constraint: 'aggregator_orgs_slug_active_unique',
+      });
+    });
+    _setDbClients(null, db as never);
+    const store = new PostgresAggregatorOrgStore();
+
+    const result = await store.create(makeInput());
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('DUPLICATE_SLUG');
+  });
+
+  it('does NOT misreport a connection error whose query text names a constraint (M2)', async () => {
+    // No SQLSTATE 23505 → must be DB_UNAVAILABLE even though the message text
+    // mentions the unique index (Drizzle puts the query text on `.message`).
+    const db = makeFakeDb(() => {
+      throw Object.assign(
+        new Error('Failed query: insert ... aggregator_orgs_display_name_active_unique ...'),
+        { cause: new Error('connection terminated') },
       );
+    });
+    _setDbClients(null, db as never);
+    const store = new PostgresAggregatorOrgStore();
+
+    const result = await store.create(makeInput());
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('DB_UNAVAILABLE');
+  });
+
+  it('maps a display-name violation wrapped by Drizzle (constraint on .cause) to DUPLICATE_NAME', async () => {
+    // Real Drizzle shape: outer `.message` is the query text; the pg driver
+    // error (SQLSTATE 23505 + `constraint`) is on `.cause`. Regression guard
+    // for the 503-instead-of-409 misclassification.
+    const db = makeFakeDb(() => {
+      const pgErr = Object.assign(
+        new Error(
+          'duplicate key value violates unique constraint "aggregator_orgs_display_name_active_unique"',
+        ),
+        { code: '23505', constraint: 'aggregator_orgs_display_name_active_unique' },
+      );
+      throw Object.assign(new Error('Failed query: insert into "aggregator_orgs" ...'), {
+        cause: pgErr,
+      });
+    });
+    _setDbClients(null, db as never);
+    const store = new PostgresAggregatorOrgStore();
+
+    const result = await store.create(makeInput());
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('DUPLICATE_NAME');
+  });
+
+  it('maps a slug violation wrapped by Drizzle (constraint on .cause) to DUPLICATE_SLUG', async () => {
+    const db = makeFakeDb(() => {
+      const pgErr = Object.assign(new Error('duplicate key value ...'), {
+        code: '23505',
+        constraint: 'aggregator_orgs_slug_active_unique',
+      });
+      throw Object.assign(new Error('Failed query: insert into "aggregator_orgs" ...'), {
+        cause: pgErr,
+      });
     });
     _setDbClients(null, db as never);
     const store = new PostgresAggregatorOrgStore();

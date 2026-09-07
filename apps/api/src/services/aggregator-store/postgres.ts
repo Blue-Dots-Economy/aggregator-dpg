@@ -11,6 +11,12 @@ import { logger } from '../../logger.js';
 import { aggregators } from '../../db/schema.js';
 import { getDb } from '../../db/client.js';
 import {
+  PG_UNIQUE_VIOLATION,
+  PG_CHECK_VIOLATION,
+  pgErrorCode,
+  pgConstraint,
+} from '../../db/pg-error.js';
+import {
   AggregatorStoreBase,
   type Aggregator,
   type CreateAggregatorInput,
@@ -21,9 +27,6 @@ import {
   type UpdateAggregatorPatch,
 } from './interface.js';
 import type { AggregatorStatus } from '@aggregator-dpg/shared-primitives/aggregator';
-
-const PG_UNIQUE_VIOLATION = '23505';
-const PG_CHECK_VIOLATION = '23514';
 
 export class PostgresAggregatorStore extends AggregatorStoreBase {
   async create(input: CreateAggregatorInput): Promise<StoreResult<Aggregator>> {
@@ -43,6 +46,7 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
           createdBy: input.createdBy,
           updatedBy: input.updatedBy,
           parentOrgId: input.parentOrgId ?? null,
+          inviteEmail: input.inviteEmail ?? null,
           profile: input.profile ?? {},
           profileRef: input.profileRef ?? null,
         })
@@ -165,6 +169,7 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
     if (patch.consent !== undefined) updates['consent'] = patch.consent;
     if (patch.status !== undefined) updates['status'] = patch.status;
     if (patch.parentOrgId !== undefined) updates['parentOrgId'] = patch.parentOrgId;
+    if (patch.rejectedAt !== undefined) updates['rejectedAt'] = patch.rejectedAt;
 
     try {
       const rows = await getDb()
@@ -252,14 +257,23 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
     contextId: string,
     start: number,
   ): StoreResult<never> {
-    const code = (err as { code?: string }).code;
-    const constraint = (err as { constraint?: string }).constraint ?? '';
+    // SQLSTATE `code` + `constraint` come from the shared pg-error helpers,
+    // which walk Drizzle's `.cause` chain (the top-level `.message` is only the
+    // query text). Gating on the code maps a unique/check violation to a clean
+    // 409 rather than a misleading 503.
+    const code = pgErrorCode(err);
+    const constraint = pgConstraint(err) ?? '';
     const message = (err as Error).message ?? 'unknown';
 
     if (code === PG_UNIQUE_VIOLATION) {
-      let storeCode: StoreError['code'] = 'DUPLICATE_SLUG';
+      // Match each constraint explicitly. Defaulting the unknown case to
+      // DUPLICATE_SLUG told the user "that name is already taken" for whatever
+      // unique index a later migration happens to add (#718 review); the
+      // constraint name is logged below either way.
+      let storeCode: StoreError['code'] = 'DUPLICATE';
       if (constraint.includes('contact_phone')) storeCode = 'DUPLICATE_PHONE';
       else if (constraint.includes('contact_email')) storeCode = 'DUPLICATE_EMAIL';
+      else if (constraint.includes('slug')) storeCode = 'DUPLICATE_SLUG';
       logger.warn({
         operation: op,
         status: 'failure',
@@ -325,5 +339,7 @@ function toDomain(row: typeof aggregators.$inferSelect): Aggregator {
     updatedAt: row.updatedAt,
     signalstackOrgId: row.signalstackOrgId,
     parentOrgId: row.parentOrgId,
+    inviteEmail: row.inviteEmail,
+    rejectedAt: row.rejectedAt,
   };
 }

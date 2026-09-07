@@ -98,6 +98,20 @@ export const linkSubmissionOutcomeEnum = pgEnum('link_submission_outcome', [
 
 export const onboardingSourceEnum = pgEnum('onboarding_source', ['bulk', 'link']);
 
+/**
+ * Lifecycle of a targeted coordinator invite (#700). `pending` is the only
+ * live state; `consumed` (registered), `revoked` (owner/org cancelled), and
+ * `expired` are terminal. The partial-unique index on
+ * `registration_invites` keys off `status = 'pending'` so exactly one live
+ * invite exists per (org, email).
+ */
+export const registrationInviteStatusEnum = pgEnum('registration_invite_status', [
+  'pending',
+  'consumed',
+  'revoked',
+  'expired',
+]);
+
 // ─── Campaign async-job engine (#579) ────────────────────────────────────────
 // Durable job model shared by every campaign channel (export/email/voice). A
 // request becomes one `campaign_job` row plus one `campaign_job_item` row per
@@ -145,6 +159,32 @@ export const campaignJobItemStatusEnum = pgEnum('campaign_job_item_status', [
 
 /** Which campaign channel a job belongs to; picks the worker handler. */
 export const campaignChannelEnum = pgEnum('campaign_channel', ['export', 'email', 'voice']);
+
+/**
+ * Which phase of a campaign's life this audit row records. NOT the outcome —
+ * see `campaignAuditOutcomeEnum`. A campaign produces two rows (`requested`,
+ * then `completed`) sharing a correlation id; a dump produces one `completed`.
+ */
+export const campaignAuditEventEnum = pgEnum('campaign_audit_event', ['requested', 'completed']);
+
+/**
+ * The audited action. Wider than `campaignChannelEnum` because the non-PII dump
+ * is audited too — it releases the whole-network snapshot, and is the only
+ * action with no org scoping at all.
+ */
+export const campaignAuditChannelEnum = pgEnum('campaign_audit_channel', [
+  'export',
+  'email',
+  'voice',
+  'dump',
+]);
+
+/** Result of a completed action. NULL on `requested` rows — nothing has happened yet. */
+export const campaignAuditOutcomeEnum = pgEnum('campaign_audit_outcome', [
+  'succeeded',
+  'partial',
+  'failed',
+]);
 
 // ─── aggregators ─────────────────────────────────────────────────────────────
 
@@ -218,6 +258,18 @@ export const aggregators = pgTable(
     parentOrgId: uuid('parent_org_id').references(
       (): typeof aggregatorOrgs.id => aggregatorOrgs.id,
     ),
+
+    // The email a coordinator was INVITED at (#701), when they registered via an
+    // invite. May differ from `contact_email` (they can register with their own
+    // address) — kept for provenance so the approving owner can see who was
+    // originally targeted. NULL for non-invite / flat registrations.
+    inviteEmail: text('invite_email'),
+
+    // Write-once timestamp of rejection (#726). Set exactly once when a
+    // pending registration is rejected (status → inactive); never mutated
+    // after. Powers the re-registration cooling window without depending on the
+    // mutable `updated_at`. NULL until/unless rejected.
+    rejectedAt: timestamp('rejected_at', { withTimezone: true }),
   },
   (table) => ({
     // Auth-path lookups: phone/email are the credential identifiers a user
@@ -260,6 +312,8 @@ export const aggregatorOrgs = pgTable(
     status: aggregatorStatusEnum('status').notNull().default('pending'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    // Write-once rejection timestamp (#726) — see the aggregators note above.
+    rejectedAt: timestamp('rejected_at', { withTimezone: true }),
   },
   (table) => ({
     // Active-org dropdown + owner lookup are plain SQL (spec A2/A5).
@@ -278,6 +332,45 @@ export const aggregatorOrgs = pgTable(
       .where(sql`status IN ('pending','active')`),
   }),
 );
+
+// ─── registration_invites (#700) ─────────────────────────────────────────────
+// Targeted coordinator invites. A row is required (unlike approval tokens,
+// which get single-use for free by re-checking Keycloak `enabled`) because an
+// invitee has no Keycloak user yet — the row is what buys single-use,
+// revocation, and leak attribution. The invite JWT's `sub` is this row's `jti`.
+
+export const registrationInvites = pgTable(
+  'registration_invites',
+  {
+    jti: uuid('jti').primaryKey().defaultRandom(),
+    /** Only `coordinator` in this phase; column keeps the door open for others. */
+    role: text('role').notNull().default('coordinator'),
+    parentOrgId: uuid('parent_org_id')
+      .notNull()
+      .references(() => aggregatorOrgs.id, { onDelete: 'cascade' }),
+    /** Normalised (lowercased, trimmed) — enforced against the submitted email. */
+    email: text('email').notNull(),
+    status: registrationInviteStatusEnum('status').notNull().default('pending'),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    /** The minting owner/admin subject — audit + leak attribution (§7). */
+    createdBy: text('created_by').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    consumedAt: timestamp('consumed_at', { withTimezone: true }),
+  },
+  // Array form (not the deprecated object-return extraConfig).
+  (table) => [
+    index('registration_invites_parent_org_idx').on(table.parentOrgId),
+    // One live invite per (org, email): a re-invite refreshes rather than
+    // duplicates. Partial unique over pending rows only, so a consumed/revoked/
+    // expired invite never blocks re-inviting the same address.
+    uniqueIndex('registration_invites_pending_unique')
+      .on(table.parentOrgId, table.email)
+      .where(sql`status = 'pending'`),
+  ],
+);
+
+export type RegistrationInviteRow = typeof registrationInvites.$inferSelect;
+export type NewRegistrationInviteRow = typeof registrationInvites.$inferInsert;
 
 // ─── aggregator_profile ──────────────────────────────────────────────────────
 
@@ -699,6 +792,85 @@ export const campaignJobItem = pgTable(
     uniqueIndex('campaign_job_item_active_dedup')
       .on(table.itemId, table.action)
       .where(sql`status IN ('pending','resolved','submitted') AND action IS NOT NULL`),
+  ],
+);
+
+/**
+ * Append-only audit of every campaign action that RELEASES DATA (#617).
+ *
+ * Deliberately separate from `campaign_job` / `campaign_job_item`: those are
+ * mutable, derive counts and are subject to cleanup; this is immutable and
+ * outlives them, including the exported S3 object which auto-deletes. Joined by
+ * `correlation_id = campaign_job.id`.
+ *
+ * NEVER stores a participant PII value — field NAMES and counts only. The only
+ * identities here are operators (the coordinator, the export-link recipient).
+ *
+ * Status/list GET routes are NOT audited: the rule is data release, not API
+ * traffic. Clients poll every 5-10s, which would bury the real events.
+ */
+export const campaignPiiAudit = pgTable(
+  'campaign_pii_audit',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    // = campaign_job.id. For a dump there is no job, so a uuid is generated per
+    // request; the column stays NOT NULL and still groups the row.
+    correlationId: uuid('correlation_id').notNull(),
+    event: campaignAuditEventEnum('event').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+
+    // ── Who ────────────────────────────────────────────────────────────────
+    actorUserId: text('actor_user_id'),
+    // NULL for a dump, and that null is MEANINGFUL: it is the signature of a
+    // whole-network access by the system account, which has no org.
+    actorOrgId: text('actor_org_id'),
+    actorAzp: text('actor_azp'),
+    // Export-link recipient — an operator address, never a participant's.
+    recipientRef: text('recipient_ref'),
+
+    // ── What ───────────────────────────────────────────────────────────────
+    channel: campaignAuditChannelEnum('channel').notNull(),
+    // PII field NAMES, never values. Empty array on a dump asserts positively
+    // that no PII field was released ("none, and we checked" vs null's "unknown").
+    piiFields: text('pii_fields').array(),
+    itemCount: integer('item_count'),
+
+    // ── When ───────────────────────────────────────────────────────────────
+    requestedAt: timestamp('requested_at', { withTimezone: true }),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+
+    // ── Where ──────────────────────────────────────────────────────────────
+    destination: text('destination'),
+    network: text('network'),
+    instance: text('instance'),
+    requestIp: text('request_ip'),
+
+    // ── Why ────────────────────────────────────────────────────────────────
+    purpose: text('purpose'),
+    // Consent storage/gating is specced separately; present but unused.
+    consentRef: text('consent_ref'),
+
+    // ── How ────────────────────────────────────────────────────────────────
+    endpoint: text('endpoint'),
+    traceId: text('trace_id'),
+    outcome: campaignAuditOutcomeEnum('outcome'),
+    errorCode: text('error_code'),
+
+    // ── How many ───────────────────────────────────────────────────────────
+    requestedCount: integer('requested_count'),
+    resolvedCount: integer('resolved_count'),
+    skippedCount: integer('skipped_count'),
+    failedCount: integer('failed_count'),
+    sentCount: integer('sent_count'),
+
+    // Non-PII extras. A dump carries { files, bytes } here rather than adding
+    // dump-only columns.
+    details: jsonb('details').$type<Record<string, unknown>>(),
+  },
+  (table) => [
+    index('campaign_pii_audit_org_created_idx').on(table.actorOrgId, table.createdAt),
+    index('campaign_pii_audit_correlation_idx').on(table.correlationId),
+    index('campaign_pii_audit_channel_created_idx').on(table.channel, table.createdAt),
   ],
 );
 

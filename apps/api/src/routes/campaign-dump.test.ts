@@ -23,6 +23,8 @@ import { _setNetworkConfig } from '../services/network-config.js';
 import { logger } from '../logger.js';
 import { config } from '../config.js';
 import { buildBlueDotConfig } from '@aggregator-dpg/network-config/testing';
+import { _setCampaignAuditWriter } from '../services/campaign-audit/index.js';
+import { CampaignAuditWriterFake } from '@aggregator-dpg/campaign-audit/testing';
 
 // S3 is mocked: these tests assert the route's contract, not the SDK.
 //
@@ -67,6 +69,7 @@ function allObjectsPresent(): void {
 
 describe('GET /v1/campaign/dump', () => {
   let app: FastifyInstance;
+  let auditFake: CampaignAuditWriterFake;
 
   beforeEach(async () => {
     headObjectMock.mockReset();
@@ -76,6 +79,9 @@ describe('GET /v1/campaign/dump', () => {
       expiresAt: '2026-08-26T00:46:12.000Z',
     }));
     allObjectsPresent();
+
+    auditFake = new CampaignAuditWriterFake();
+    _setCampaignAuditWriter(auditFake);
 
     _setNetworkConfig(buildBlueDotConfig());
     _resetJwks();
@@ -116,6 +122,7 @@ describe('GET /v1/campaign/dump', () => {
     await app?.close();
     _setAccessTokenVerifier(null);
     _setNetworkConfig(null);
+    _setCampaignAuditWriter(null);
     vi.restoreAllMocks();
   });
 
@@ -426,5 +433,58 @@ describe('GET /v1/campaign/dump', () => {
       const file = body.files.find((f: { table: string }) => f.table === table);
       expect(file.url).toBe(`https://s3.public.example/${key}?X-Amz-Signature=abc`);
     }
+  });
+
+  describe('dump audit row (#617)', () => {
+    it('writes exactly one audit row with no org, and outcome succeeded', async () => {
+      const res = await get('system');
+      expect(res.statusCode).toBe(200);
+
+      expect(auditFake.rows).toHaveLength(1);
+      const row = auditFake.rows[0]!;
+      expect(row.kind).toBe('dump');
+      // A dump is synchronous and whole-network: one row, and the absent org is
+      // the signature of that.
+      expect((row as { actorOrgId?: string }).actorOrgId).toBeUndefined();
+      expect((row as { outcome?: string }).outcome).toBe('succeeded');
+      expect((row as { actorUserId?: string }).actorUserId).toBe('sa-uuid');
+    });
+
+    it('caps an oversized x-request-id header at 200 chars before it reaches the audit row (#617 cheap item)', async () => {
+      const oversized = 'y'.repeat(500);
+      const res = await app.inject({
+        method: 'GET',
+        url: '/v1/campaign/dump',
+        headers: { authorization: 'Bearer system', 'x-request-id': oversized },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(auditFake.rows).toHaveLength(1);
+      const row = auditFake.rows[0] as { traceId?: string };
+      expect(row.traceId).toHaveLength(200);
+      expect(row.traceId).toBe(oversized.slice(0, 200));
+    });
+
+    it('records a failed dump access when a storage call throws, without altering the 503 response', async () => {
+      headObjectMock.mockRejectedValueOnce(new Error('s3 down'));
+      const res = await get('system');
+      expect(res.statusCode).toBe(503);
+      expect(auditFake.rows).toHaveLength(1);
+      expect((auditFake.rows[0] as { outcome?: string }).outcome).toBe('failed');
+    });
+
+    it('still returns 200 with the URLs when the audit writer throws', async () => {
+      // The write must never fail or alter the response (#617) — prove it with
+      // the fake's harsher failure mode (throw), not just a resolved err().
+      auditFake.failWith = new Error('audit down');
+      const res = await get('system');
+      expect(res.statusCode).toBe(200);
+      expect(res.json().files).toHaveLength(3);
+    });
+
+    it('does not write an audit row for a denied (non-system) caller', async () => {
+      const res = await get('coordinator');
+      expect(res.statusCode).toBe(403);
+      expect(auditFake.rows).toHaveLength(0);
+    });
   });
 });

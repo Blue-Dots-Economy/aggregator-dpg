@@ -10,7 +10,8 @@
   "form": {
     "select_placeholder": "ಆಯ್ಕೆಮಾಡಿ…",
     "comma_separated": "ಅಲ್ಪವಿರಾಮದಿಂದ ಬೇರ್ಪಡಿಸಿದ ಮೌಲ್ಯಗಳು",
-    "select_options": "ಆಯ್ಕೆಗಳನ್ನು ಆರಿಸಿ…"
+    "select_options": "ಆಯ್ಕೆಗಳನ್ನು ಆರಿಸಿ…",
+    "clear_selection": "ಆಯ್ಕೆಯನ್ನು ತೆರವುಗೊಳಿಸಿ"
   },
   "status_pill": {
     "active": "ಸಕ್ರಿಯ",
@@ -45,6 +46,7 @@
     "submitting": "ಸಲ್ಲಿಸಲಾಗುತ್ತಿದೆ…",
     "validation_error_title": "ದಯವಿಟ್ಟು ಗುರುತಿಸಲಾದ ಕ್ಷೇತ್ರಗಳನ್ನು ಸರಿಪಡಿಸಿ",
     "page_title": "ಅಗ್ರಿಗೇಟರ್ ನೋಂದಣಿ",
+    "owner_page_title": "ಅಗ್ರಿಗೇಟರ್ ಮಾಲೀಕರಾಗಿ ನೋಂದಾಯಿಸಿ",
     "tab_coordinator": "ಸಂಯೋಜಕರಾಗಿ ನೋಂದಾಯಿಸಿ",
     "tab_org": "ಸಂಸ್ಥೆಯನ್ನು ನೋಂದಾಯಿಸಿ",
     "org_selector_label": "ಸಂಸ್ಥೆ",
@@ -552,7 +554,7 @@
   },
   "auth": {
     "welcome_heading": "ಮರಳಿ ಸ್ವಾಗತ.",
-    "welcome_sub": "ಪ್ರಾರಂಭಿಸಲು ಸೈನ್ ಇನ್ ಮಾಡಿ ಅಥವಾ ನಿಮ್ಮ ಸಂಸ್ಥೆಯನ್ನು ನೋಂದಾಯಿಸಿ.",
+    "welcome_sub": "ಮುಂದುವರಿಸಲು ನಿಮ್ಮ ಖಾತೆಗೆ ಸೈನ್ ಇನ್ ಮಾಡಿ.",
     "existing_title": "ಅಸ್ತಿತ್ವದಲ್ಲಿರುವ ಬಳಕೆದಾರ — ಸೈನ್ ಇನ್",
     "existing_sub": "{brand} SSO ಮೂಲಕ ಇಮೇಲ್ ಅಥವಾ ಮೊಬೈಲ್‌ನಿಂದ ಮುಂದುವರಿಯಿರಿ",
     "register_title": "ಸದಸ್ಯರಾಗಿ",
@@ -623,13 +625,13 @@
   "legal": {
     "privacy_title": "ಗೌಪ್ಯತಾ ನೀತಿ",
     "terms_title": "ಸೇವಾ ನಿಯಮಗಳು",
-    "audience_participant": "ಭಾಗವಹಿಸುವವರಿಗಾಗಿ",
     "audience_aggregator": "ಅಗ್ರಿಗೇಟರ್‌ಗಳಿಗಾಗಿ",
     "audience_org": "ಸಂಸ್ಥೆಗಳಿಗಾಗಿ",
     "version_effective": "ಆವೃತ್ತಿ {version} · ಜಾರಿ ದಿನಾಂಕ {date}",
     "version_only": "ಆವೃತ್ತಿ {version}",
     "unavailable": "ಕಾನೂನು ದಾಖಲೆಗಳು ಪ್ರಸ್ತುತ ಲಭ್ಯವಿಲ್ಲ. ದಯವಿಟ್ಟು ನಂತರ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
     "back_to_sign_in": "ಸೈನ್ ಇನ್‌ಗೆ ಹಿಂತಿರುಗಿ",
-    "contents_label": "ಪರಿವಿಡಿ"
+    "contents_label": "ಪರಿವಿಡಿ",
+    "agree_sentence": "ಮುಂದುವರಿಯುವ ಮೂಲಕ ನೀವು <privacy>ಗೌಪ್ಯತಾ ನೀತಿ</privacy> ಮತ್ತು <terms>ನಿಯಮಗಳಿಗೆ</terms> ಸಮ್ಮತಿಸುತ್ತೀರಿ."
   }
 }

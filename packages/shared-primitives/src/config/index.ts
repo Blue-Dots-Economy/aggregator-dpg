@@ -1,12 +1,14 @@
 /**
  * Config primitives shared by the api and worker processes.
  *
- * Each process parses its own Zod `ConfigSchema` from `process.env`, but the
- * SignalStack outward-push fields (api-key + Keycloak bearer credential) and the
- * TLS-posture guard are identical across processes — kept here as the single
- * source of truth so the two can't drift (both call the same signals instance
- * as the same service identity, and the same D7 TLS enforcement runs
- * everywhere).
+ * Each process parses its own Zod `ConfigSchema` from `process.env`, but some
+ * fields must be identical across processes — kept here as the single source
+ * of truth so the two can't drift: the SignalStack outward-push fields
+ * (api-key + Keycloak bearer credential, both call the same signals instance
+ * as the same service identity), the D7 TLS-posture guard (same enforcement
+ * everywhere), and the campaign export field-set (#617 — the worker performs
+ * the export the api-side audit log describes, so a divergent copy would let
+ * the audit misreport what actually left the system).
  *
  * @module @aggregator-dpg/shared-primitives/config
  */
@@ -51,6 +53,36 @@ export const signalStackConfigFields = {
    * unset. Must match across processes.
    */
   SIGNALSTACK_ORG_SLUG: z.string().optional(),
+} as const;
+
+/**
+ * Campaign export field-set, shared by the api and worker processes (#617).
+ *
+ * The worker reads `CAMPAIGN_EXPORT_FIELDS` to decide what a campaign export
+ * actually releases (`contact` = the three canonical contact fields —
+ * name/email/phone — only; `full` = the whole decrypted item_state, variable
+ * columns). The api reads the SAME key to record `pii_fields` on the
+ * `campaign_pii_audit` `requested` row. Kept here and spread into both
+ * `ConfigSchema`s — rather than declared separately in each — so the two
+ * processes validate and default the value identically.
+ *
+ * That guarantees the two processes CANNOT DISAGREE ON THE MEANING of a given
+ * value (e.g. no risk of one enum drifting from the other's allowed values or
+ * default). It does NOT guarantee they see the SAME value at runtime: each
+ * process reads `process.env.CAMPAIGN_EXPORT_FIELDS` independently, so if the
+ * deployment (compose file, Helm values, etc.) sets the env var for one
+ * process's container but not the other's, they will silently default/resolve
+ * differently and the audit log will misreport which PII actually left the
+ * system (e.g. worker=`full`, api=`contact` would log `[name,email,phone]`
+ * while the export shipped the entire item_state). Operators must set this
+ * variable on BOTH the api and worker containers.
+ */
+export const campaignExportConfigFields = {
+  /**
+   * `contact` = name/email/phone only; `full` = the whole decrypted
+   * item_state (variable columns). Default `contact`.
+   */
+  CAMPAIGN_EXPORT_FIELDS: z.enum(['contact', 'full']).default('contact'),
 } as const;
 
 /** Minimal shape `assertTlsPosture` reads — any process `Config` satisfies it. */

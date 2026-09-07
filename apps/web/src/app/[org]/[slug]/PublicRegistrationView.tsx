@@ -1,7 +1,6 @@
 'use client';
 
 import Image from 'next/image';
-import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import type { RJSFSchema, UiSchema } from '@rjsf/utils';
 import type { IChangeEvent } from '@rjsf/core';
@@ -24,36 +23,6 @@ import type { ParticipantConsent } from '../../../components/consent/consent-typ
  */
 const PAGE_BACKGROUND =
   'radial-gradient(1200px 600px at 50% -10%, var(--bd-tint-primary), transparent 70%), #FBFCFE';
-
-/**
- * Small in-page footer linking to the read-only `/privacy` and `/terms`
- * pages (§4.1's `LegalDocumentView`). Once the blocking `ConsentGate` closes
- * (accepted or cancelled), nothing else on this page links there — a
- * registrant who wants to re-read what they agreed to, or a chooser/error
- * state that never reached the gate at all, otherwise has no in-product
- * path to either document. Reuses `register.consent.privacy_link` /
- * `terms_link` rather than adding new strings: the copy ("Privacy Policy" /
- * "Terms of Service") is identical, just no longer embedded in a sentence.
- *
- * @param props - The `register` namespace translator, threaded down rather
- *   than calling `useTranslations` again for two strings.
- * @returns The footer link row.
- */
-function FooterLegalLinks({
-  tRegister,
-}: Readonly<{ tRegister: (key: string) => string }>): JSX.Element {
-  return (
-    <div className="mt-6 flex items-center justify-center gap-3 text-[12.5px] text-ink-500">
-      <Link href="/privacy" className="underline-offset-2 hover:text-ink-900 hover:underline">
-        {tRegister('consent.privacy_link')}
-      </Link>
-      <span aria-hidden="true">·</span>
-      <Link href="/terms" className="underline-offset-2 hover:text-ink-900 hover:underline">
-        {tRegister('consent.terms_link')}
-      </Link>
-    </div>
-  );
-}
 
 export interface PublicRegistrationViewProps {
   org: string;
@@ -294,6 +263,12 @@ export function PublicRegistrationView({
   // resubmitted once the gate is accepted (the accept callback has no event
   // to read formData from).
   const pendingValuesRef = useRef<Record<string, unknown> | null>(null);
+  /**
+   * Effective year of birth for the submit the gate is holding. Paired with
+   * {@link pendingValuesRef} because the account-only surface owns that value
+   * in its own state — see `performSubmit`'s `birthYear` parameter.
+   */
+  const pendingYobRef = useRef<string | null>(null);
   // Year of birth → derived age (§4.4 snapshot: no birthdate stored). Drives
   // the U18 branch and the compliance `age`, independent of the profile's own
   // `age` schema field. A minor still submits, but without consent — the API
@@ -680,12 +655,24 @@ export function PublicRegistrationView({
    * calls this in the same tick it calls `setConsentAccepted(true)`, and that
    * state update is not visible to this closure until the next render.
    *
+   * `birthYear` is passed in for the same class of reason: the account-only
+   * surface collects it in its OWN local state and only ever exposes it inside
+   * the submitted payload, so this component's `yearOfBirth` is empty on that
+   * path. Stamping the closure's value overwrote the submitted one with `''`,
+   * the API then derived no age, and Signals rejected the push with
+   * `AGE_REQUIRED` on any guardian-gated domain — i.e. every domain that shows
+   * the field at all. `handleSubmit` already resolves the effective year for
+   * its minor check; that same value is threaded through here so one submit
+   * cannot disagree with itself about the registrant's age.
+   *
    * @param values - RJSF formData (or the minimal-identity payload).
    * @param consentGiven - Whether to stamp consent_terms/privacy/profile true.
+   * @param birthYear - Effective year of birth for this submit, already resolved.
    */
   const performSubmit = async (
     values: Record<string, unknown>,
     consentGiven: boolean,
+    birthYear: string,
   ): Promise<void> => {
     setLookup(null);
     setState({ status: 'submitting' });
@@ -719,7 +706,7 @@ export function PublicRegistrationView({
                   ...(isAccountOnly ? {} : { consent_profile: consentGiven }),
                 }
               : {}),
-            ...(showBirthYear ? { year_of_birth: yearOfBirth.trim() } : {}),
+            ...(showBirthYear ? { year_of_birth: birthYear.trim() } : {}),
           }),
         },
       );
@@ -828,19 +815,23 @@ export function PublicRegistrationView({
         return;
       }
       pendingValuesRef.current = values;
+      // Held alongside the values for the same reason: on the account-only
+      // surface the year lives nowhere this component can read it back from
+      // once the gate closes.
+      pendingYobRef.current = yobForSubmit;
       setGateOpen(true);
       setState({ status: 'idle' });
       return;
     }
 
-    await performSubmit(values, consentAccepted);
+    await performSubmit(values, consentAccepted, yobForSubmit);
   };
 
   /** Accepting the gate: records consent, closes it, and resubmits. */
   const handleGateAccept = (): void => {
     setGateOpen(false);
     setConsentAccepted(true);
-    void performSubmit(pendingValuesRef.current ?? {}, true);
+    void performSubmit(pendingValuesRef.current ?? {}, true, pendingYobRef.current ?? yearOfBirth);
   };
 
   // Single gate instance shared by both form surfaces — the account-only
@@ -1036,6 +1027,9 @@ export function PublicRegistrationView({
             // never "carry it to a different person".
             setConsentAccepted(false);
             setYearOfBirth('');
+            // Same risk, held in a ref rather than state: a stale pending year
+            // must not be able to reach person #2's submit.
+            pendingYobRef.current = null;
             // Cancel the #635 hand-off: a field operator registering people
             // back-to-back must not be bounced to Signals. Nulling the state
             // also beats an already-queued final tick, whose updater bails on
@@ -1121,7 +1115,6 @@ export function PublicRegistrationView({
               />
             </>
           )}
-          <FooterLegalLinks tRegister={tRegister} />
         </div>
         {consentGateElement}
       </div>
@@ -1436,8 +1429,6 @@ export function PublicRegistrationView({
             )}
           </div>
         </div>
-
-        <FooterLegalLinks tRegister={tRegister} />
       </div>
       {consentGateElement}
     </div>

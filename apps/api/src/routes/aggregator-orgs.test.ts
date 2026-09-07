@@ -22,6 +22,7 @@ import { ConsentLedgerFake } from '@aggregator-dpg/consent-ledger/testing';
 import { _setConsentLedger } from '../services/consent-ledger/index.js';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import { _setSubmitRateChecker } from '../services/submit-rate.js';
+import { _setOrgInviteResendRateChecker } from '../services/org-invite-resend-rate.js';
 import type * as ConfigLoaderFs from '@aggregator-dpg/config-loader/fs';
 
 const { loadConsentConfigMock } = vi.hoisted(() => ({ loadConsentConfigMock: vi.fn() }));
@@ -54,6 +55,8 @@ describe('aggregator-orgs routes', () => {
     consentLedger = new ConsentLedgerFake();
 
     _setSubmitRateChecker(null);
+    // Allow by default; the throttle cases override per-test.
+    _setOrgInviteResendRateChecker(async () => ({ allowed: true, retryAfterSeconds: 0 }));
     loadConsentConfigMock.mockReset();
     const actualLoader = await vi.importActual<typeof ConfigLoaderFs>(
       '@aggregator-dpg/config-loader/fs',
@@ -82,6 +85,7 @@ describe('aggregator-orgs routes', () => {
     _setConsentLedger(null);
     _setAccessTokenVerifier(null);
     _setSubmitRateChecker(null);
+    _setOrgInviteResendRateChecker(null);
   });
 
   const orgBody = {
@@ -218,13 +222,14 @@ describe('aggregator-orgs routes', () => {
     expect(mailer.outbox.length).toBe(1);
   });
 
-  it('rejects a resubmit against an ACTIVE org owner with OWNER_ALREADY_REGISTERED', async () => {
+  it('returns 409 REGISTRATION_COOLING for a rejected org inside the cooling window', async () => {
     orgStore.seed([
       buildAggregatorOrg({
-        id: 'o-active-owner',
-        slug: 'enable-india-live',
+        id: 'o-cooling',
+        slug: 'enable-india-rej1',
         ownerEmail: 'ravi@enable.org',
-        status: 'active',
+        status: 'inactive',
+        rejectedAt: new Date(), // just rejected → still cooling
       }),
     ]);
     const res = await app.inject({
@@ -233,8 +238,245 @@ describe('aggregator-orgs routes', () => {
       headers: AUTH_HEADER,
       payload: orgBody,
     });
+    expect(res.statusCode).toBe(409);
+    const err = res.json() as { error: { code: string; fields?: { retry_after?: string } } };
+    expect(err.error.code).toBe('REGISTRATION_COOLING');
+    expect(err.error.fields?.retry_after).toBeTruthy();
+    const stored = await orgStore.findById('o-cooling');
+    expect(stored.ok && stored.value?.status).toBe('inactive');
+    expect(mailer.outbox.length).toBe(0);
+  });
+
+  it('revives a rejected org once the cooling window has elapsed', async () => {
+    orgStore.seed([
+      buildAggregatorOrg({
+        id: 'o-revive',
+        slug: 'enable-india-rej2',
+        displayName: 'Old Name',
+        ownerEmail: 'ravi@enable.org',
+        status: 'inactive',
+        rejectedAt: new Date(Date.now() - 13 * 60 * 60 * 1000), // 13h ago > 12h default
+      }),
+    ]);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: orgBody,
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { org_id: string; status: string };
+    expect(body.org_id).toBe('o-revive');
+    expect(body.status).toBe('pending');
+    const stored = await orgStore.findById('o-revive');
+    if (stored.ok) {
+      expect(stored.value?.status).toBe('pending');
+      expect(stored.value?.rejectedAt).toBeNull();
+      // No field overwrite on revive.
+      expect(stored.value?.displayName).toBe('Old Name');
+    }
+    expect(mailer.outbox.length).toBe(1);
+  });
+
+  it('re-sends the coordinator invite link when the org is already ACTIVE', async () => {
+    orgStore.seed([
+      buildAggregatorOrg({
+        id: 'o-active-owner',
+        slug: 'enable-india-live',
+        displayName: 'Old Name',
+        ownerEmail: 'active-owner@enable.org',
+        status: 'active',
+      }),
+    ]);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: { ...orgBody, owner: { ...orgBody.owner, email: 'active-owner@enable.org' } },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { org_id: string; status: string; message: string };
+    expect(body.org_id).toBe('o-active-owner');
+    expect(body.status).toBe('active');
+    expect(body.message).toMatch(/already registered/i);
+    // The invite link is the whole point of the mail.
+    expect(mailer.outbox.length).toBe(1);
+    expect(mailer.outbox[0]?.subject).toMatch(/already registered/i);
+    expect(mailer.outbox[0]?.html).toContain('/register/invite?grant=');
+    // Nothing about the row changes — no takeover via an anonymous resubmit.
+    const stored = await orgStore.findById('o-active-owner');
+    expect(stored.ok && stored.value?.displayName).toBe('Old Name');
+    expect(stored.ok && stored.value?.status).toBe('active');
+  });
+
+  it('throttles the invite resend per OWNER address and mints nothing', async () => {
+    // Each admitted resend mints another independent 90-day grant, so the cap
+    // has to be enforced before minting — not just before mailing.
+    orgStore.seed([
+      buildAggregatorOrg({
+        id: 'o-active-throttled',
+        slug: 'enable-india-live6',
+        ownerEmail: 'throttled@enable.org',
+        status: 'active',
+      }),
+    ]);
+    const seen: string[] = [];
+    _setOrgInviteResendRateChecker(async (email) => {
+      seen.push(email);
+      return { allowed: false, retryAfterSeconds: 900 };
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: { ...orgBody, owner: { ...orgBody.owner, email: 'throttled@enable.org' } },
+    });
+    expect(res.statusCode).toBe(429);
+    expect(res.headers['retry-after']).toBe('900');
+    const err = res.json() as {
+      error: { code: string; fields?: { retry_after_seconds?: number } };
+    };
+    expect(err.error.code).toBe('RATE_LIMITED');
+    expect(err.error.fields?.retry_after_seconds).toBe(900);
+    // No mail, and therefore no grant.
+    expect(mailer.outbox.length).toBe(0);
+    // Keyed on the STORED owner address, so a caller cannot pick a fresh bucket.
+    expect(seen).toEqual(['throttled@enable.org']);
+  });
+
+  it('keys the resend bucket on the STORED address, not the submitted one', async () => {
+    // The org form is anonymous. Keying on submitted input would let an
+    // attacker rotate the payload email and get an unused bucket every time.
+    orgStore.seed([
+      buildAggregatorOrg({
+        id: 'o-active-keyed',
+        slug: 'enable-india-live7',
+        ownerEmail: 'stored-owner@enable.org',
+        status: 'active',
+      }),
+    ]);
+    const seen: string[] = [];
+    _setOrgInviteResendRateChecker(async (email) => {
+      seen.push(email);
+      return { allowed: true, retryAfterSeconds: 0 };
+    });
+    await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: { ...orgBody, owner: { ...orgBody.owner, email: 'stored-owner@enable.org' } },
+    });
+    expect(seen).toEqual(['stored-owner@enable.org']);
+  });
+
+  it('mails the STORED owner address, never the resubmitted one', async () => {
+    // The org form is anonymous. Honouring the submitted address would hand a
+    // stranger a 90-day credential that mints coordinator invites for this org.
+    orgStore.seed([
+      buildAggregatorOrg({
+        id: 'o-active-hijack',
+        slug: 'enable-india-live2',
+        ownerEmail: 'real-owner@enable.org',
+        status: 'active',
+      }),
+    ]);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: { ...orgBody, owner: { ...orgBody.owner, email: 'real-owner@enable.org' } },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(mailer.outbox.length).toBe(1);
+    expect(mailer.outbox[0]?.to).toContain('real-owner@enable.org');
+  });
+
+  it('still rejects a resubmit against a RETIRED org with OWNER_ALREADY_REGISTERED', async () => {
+    // A dead org must never be handed a working credential.
+    orgStore.seed([
+      buildAggregatorOrg({
+        id: 'o-retired-owner',
+        slug: 'enable-india-dead',
+        ownerEmail: 'retired-owner@enable.org',
+        status: 'retired',
+      }),
+    ]);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: { ...orgBody, owner: { ...orgBody.owner, email: 'retired-owner@enable.org' } },
+    });
+    expect(res.statusCode).toBe(409);
     const body = res.json() as { error?: { code?: string } };
     expect(body.error?.code).toBe('OWNER_ALREADY_REGISTERED');
+    expect(mailer.outbox.length).toBe(0);
+  });
+
+  it('does not claim delivery when the invite mail fails', async () => {
+    // The owner in this branch is one who never got the first email; telling
+    // them a second is on its way when the send just failed leaves them
+    // waiting instead of contacting support.
+    orgStore.seed([
+      buildAggregatorOrg({
+        id: 'o-active-nolie',
+        slug: 'enable-india-live4',
+        ownerEmail: 'active-nolie@enable.org',
+        status: 'active',
+      }),
+    ]);
+    mailer.failOnce({ code: 'TRANSPORT_FAILED', message: 'smtp down' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: { ...orgBody, owner: { ...orgBody.owner, email: 'active-nolie@enable.org' } },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { mail_sent: boolean; message: string };
+    expect(body.mail_sent).toBe(false);
+    expect(body.message).toMatch(/could not be emailed/i);
+    expect(body.message).not.toMatch(/has been sent/i);
+  });
+
+  it('reports mail_sent true on the happy path', async () => {
+    orgStore.seed([
+      buildAggregatorOrg({
+        id: 'o-active-sent',
+        slug: 'enable-india-live5',
+        ownerEmail: 'active-sent@enable.org',
+        status: 'active',
+      }),
+    ]);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: { ...orgBody, owner: { ...orgBody.owner, email: 'active-sent@enable.org' } },
+    });
+    expect((res.json() as { mail_sent: boolean }).mail_sent).toBe(true);
+  });
+
+  it('still answers 200 for an ACTIVE org when the invite mail cannot be delivered', async () => {
+    // Soft-fail, matching the approval path: the org is live either way, so a
+    // mail outage must not surface as a registration failure.
+    orgStore.seed([
+      buildAggregatorOrg({
+        id: 'o-active-mailfail',
+        slug: 'enable-india-live3',
+        ownerEmail: 'active-mailfail@enable.org',
+        status: 'active',
+      }),
+    ]);
+    mailer.failOnce({ code: 'TRANSPORT_FAILED', message: 'smtp down' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: { ...orgBody, owner: { ...orgBody.owner, email: 'active-mailfail@enable.org' } },
+    });
+    expect(res.statusCode).toBe(200);
+    expect((res.json() as { status: string }).status).toBe('active');
   });
 
   it('rejects a second org with a case-insensitively matching name (ORG_NAME_TAKEN, 409)', async () => {

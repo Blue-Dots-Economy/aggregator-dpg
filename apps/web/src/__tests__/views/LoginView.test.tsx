@@ -47,12 +47,27 @@ describe('<LoginView />', () => {
     vi.clearAllMocks();
   });
 
-  it('renders the welcome heading and both cards with no error banner', () => {
+  it('renders the sign-in card with no error banner and no register entry (#619)', () => {
     renderView();
     expect(screen.getByText(messages.auth.welcome_heading)).toBeInTheDocument();
     expect(screen.getByText(messages.auth.existing_title)).toBeInTheDocument();
-    expect(screen.getByText(messages.auth.register_title)).toBeInTheDocument();
+    // Registration is not linked from the login homepage anymore (#619).
+    expect(screen.queryByText(messages.auth.register_title)).toBeNull();
     expect(screen.queryByRole('alert')).toBeNull();
+    // Invite-only recovery line (#701) points a mis-linked coordinator at their org.
+    expect(screen.getByText(/contact your organisation administrator/i)).toBeInTheDocument();
+  });
+
+  it('tells the reader what continuing commits them to, and links both documents', () => {
+    // The page had no legal line at all, though signing in from it IS the act
+    // of agreeing — the sibling Signals login has always carried one.
+    renderView();
+    expect(screen.getByText(/By continuing you agree to the/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Privacy Policy' })).toHaveAttribute(
+      'href',
+      '/legal#privacy',
+    );
+    expect(screen.getByRole('link', { name: 'Terms' })).toHaveAttribute('href', '/legal#terms');
   });
 
   it('navigates to the BFF login route with the returnTo param on sign-in click', () => {
@@ -61,12 +76,6 @@ describe('<LoginView />', () => {
     expect(window.location.href).toBe(
       `/api/auth/login?returnTo=${encodeURIComponent('/dashboard/onboarding')}`,
     );
-  });
-
-  it('navigates to /register on the "Become a member" click', () => {
-    renderView();
-    screen.getByText(messages.auth.register_title).closest('button')!.click();
-    expect(window.location.href).toBe('/register');
   });
 
   it('renders the session_expired banner', () => {

@@ -30,6 +30,7 @@
 import type { FastifyInstance } from 'fastify';
 import { campaignEnvelopeSchema } from '../campaign/envelope.js';
 import { voiceContentSchema } from '../campaign/voice-content.js';
+import { auditFieldNameEntries } from '../campaign/audit-field-names.js';
 import { submitCampaignJob } from '../campaign/submit-job.js';
 import { campaignSubmitResponses } from '../campaign/route-schema.js';
 import { config } from '../config.js';
@@ -67,6 +68,20 @@ export async function registerCampaignVoiceRoutes(app: FastifyInstance): Promise
           }
           return contentParsed.data;
         },
+        // `variables` are additional participant fields the caller told Raya
+        // to substitute into the call script — released alongside the fixed
+        // name/phone the dispatch itself requires (#617). `variables` is
+        // caller-controlled free text (`voiceContentSchema` deliberately
+        // leaves it unvalidated — see `../campaign/audit-field-names.ts`),
+        // so it is NOT spread into the audit row verbatim: only the
+        // identifier-shaped entries are recorded by name, and anything else
+        // is folded into a redaction count instead of ever landing a
+        // participant value in `campaign_pii_audit` (#617 fix-round-1).
+        piiFields: (content) => [
+          'name',
+          'phone',
+          ...auditFieldNameEntries((content.variables as string[] | undefined) ?? []),
+        ],
         buildItem: (itemId) => ({ itemId, action: 'voice_call' }),
         maxItems: config.CAMPAIGN_VOICE_MAX_ITEMS,
         maxItemsErrorCode: 'CAMPAIGN_VOICE_TOO_MANY_ITEMS',

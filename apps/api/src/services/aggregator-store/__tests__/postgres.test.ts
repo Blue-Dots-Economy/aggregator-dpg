@@ -100,6 +100,8 @@ function makeRow(overrides: Partial<Aggregator> = {}): Aggregator {
     updatedAt: createdAt,
     signalstackOrgId: null,
     parentOrgId: null,
+    inviteEmail: null,
+    rejectedAt: null,
     ...overrides,
   };
 }
@@ -207,6 +209,27 @@ describe('PostgresAggregatorStore.create', () => {
       throw Object.assign(new Error('duplicate key'), {
         code: '23505',
         constraint: 'aggregators_org_slug_key',
+      });
+    });
+    _setDbClients(null, db as never);
+    const store = new PostgresAggregatorStore();
+
+    const result = await store.create(makeInput());
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('DUPLICATE_SLUG');
+  });
+
+  it('maps a Drizzle-wrapped unique violation (code/constraint on .cause) to DUPLICATE_SLUG', async () => {
+    // Real Drizzle shape: outer error is the query text; SQLSTATE + constraint
+    // are on `.cause`. Regression guard for the 503-instead-of-409 bug.
+    const db = makeFakeDb(() => {
+      const pgErr = Object.assign(new Error('duplicate key'), {
+        code: '23505',
+        constraint: 'aggregators_org_slug_key',
+      });
+      throw Object.assign(new Error('Failed query: insert into "aggregators" ...'), {
+        cause: pgErr,
       });
     });
     _setDbClients(null, db as never);

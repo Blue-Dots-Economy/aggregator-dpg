@@ -20,6 +20,8 @@ export interface AdminReviewNotifyInput {
   applicantName: string;
   applicantEmail: string;
   applicantPhone: string;
+  /** Invited email (#701) — highlighted to the approver when it differs. */
+  invitedEmail?: string | undefined;
   /**
    * Parent org id (spec §9). When set, it is minted into the approve/reject
    * tokens as the `org` claim so the decision handler can bind the decision to
@@ -56,27 +58,22 @@ export function parseAdminEmails(): string[] {
 }
 
 /**
- * Mint the approve + reject token pair for a review link.
+ * Mint a single review token for the approve/reject page. One link now drives
+ * both decisions — the action is chosen on the page and read from the form, so
+ * the token carries no intent (the `intent` claim is set but ignored downstream).
  *
  * @param subjectId - The record id bound as the token subject (aggregator or org id).
  * @param org - Optional parent-org id minted as the `org` claim (coordinator flow).
- * @returns The signed approve + reject tokens.
- * @throws {HttpError} `TOKEN_MINT_FAILED` if either JWT cannot be minted.
+ * @returns The signed review token.
+ * @throws {HttpError} `TOKEN_MINT_FAILED` if the JWT cannot be minted.
  */
-export async function mintApprovalTokenPair(
-  subjectId: string,
-  org?: string,
-): Promise<{ approveToken: string; rejectToken: string }> {
+export async function mintReviewToken(subjectId: string, org?: string): Promise<string> {
   const ttlSec = config.APPROVAL_TOKEN_TTL_SECONDS;
   const orgClaim = org ? { org } : {};
   try {
-    const approveToken = (
+    return (
       await mintApprovalToken({ aggregatorId: subjectId, intent: 'approve', ttlSec, ...orgClaim })
     ).token;
-    const rejectToken = (
-      await mintApprovalToken({ aggregatorId: subjectId, intent: 'reject', ttlSec, ...orgClaim })
-    ).token;
-    return { approveToken, rejectToken };
   } catch (err) {
     throw httpError('TOKEN_MINT_FAILED', { cause: err });
   }
@@ -91,6 +88,8 @@ export interface ReviewEmailInput {
   applicantName: string;
   applicantEmail: string;
   applicantPhone: string;
+  /** Invited email (#701) — highlighted when it differs from applicantEmail. */
+  invitedEmail?: string | undefined;
   /** Resolved recipient list (network admins, or an org owner). */
   recipients: string[];
   /** Optional `org` token claim (coordinator-under-org flow). */
@@ -113,17 +112,17 @@ export async function sendReviewEmail(
   input: ReviewEmailInput,
   log: FastifyBaseLogger,
 ): Promise<void> {
-  const { approveToken, rejectToken } = await mintApprovalTokenPair(input.subjectId, input.org);
+  const token = await mintReviewToken(input.subjectId, input.org);
   const base = `${config.PUBLIC_API_URL}/admin/v1/${input.readPath}/read/${input.subjectId}`;
   const reviewMail = renderAdminReview({
     registrationId: input.subjectId,
     applicantName: input.applicantName,
     applicantEmail: input.applicantEmail,
     applicantPhone: input.applicantPhone,
+    ...(input.invitedEmail ? { invitedEmail: input.invitedEmail } : {}),
     association: input.applicantName,
     ...(input.entityLabel ? { entityLabel: input.entityLabel } : {}),
-    approveUrl: `${base}?token=${encodeURIComponent(approveToken)}&intent=approve`,
-    rejectUrl: `${base}?token=${encodeURIComponent(rejectToken)}&intent=reject`,
+    reviewUrl: `${base}?token=${encodeURIComponent(token)}`,
     submittedAt: new Date(),
     expiresInText: formatApprovalTtl(config.APPROVAL_TOKEN_TTL_SECONDS),
   });
@@ -167,6 +166,7 @@ export async function sendAdminReviewEmail(
       applicantName: input.applicantName,
       applicantEmail: input.applicantEmail,
       applicantPhone: input.applicantPhone,
+      ...(input.invitedEmail ? { invitedEmail: input.invitedEmail } : {}),
       recipients: input.recipientEmail ? [input.recipientEmail] : parseAdminEmails(),
       ...(input.org ? { org: input.org } : {}),
       // Stated explicitly rather than left to the `aggregator` default: this

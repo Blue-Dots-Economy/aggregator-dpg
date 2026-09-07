@@ -20,13 +20,14 @@ vi.mock('@aggregator-dpg/queue', () => ({
 }));
 
 function makeRedis(execResult: unknown) {
-  const incr = vi.fn().mockReturnThis();
+  const incrby = vi.fn().mockReturnThis();
   const expire = vi.fn().mockReturnThis();
   const exec = vi.fn().mockResolvedValue(execResult);
-  const multi = vi.fn(() => ({ incr, expire, exec }));
+  const multi = vi.fn(() => ({ incrby, expire, exec }));
+  const decrby = vi.fn().mockResolvedValue(0);
   const on = vi.fn();
   const quit = vi.fn().mockResolvedValue(undefined);
-  return { multi, incr, expire, exec, on, quit };
+  return { multi, incrby, expire, exec, decrby, on, quit };
 }
 
 describe('rate-limiter consume', () => {
@@ -62,6 +63,8 @@ describe('rate-limiter consume', () => {
     expect(result.count).toBe(6);
     expect(result.retryAfterSeconds).toBeGreaterThanOrEqual(1);
     expect(result.retryAfterSeconds).toBeLessThanOrEqual(60);
+    // Refund the slots the denied call consumed so the window isn't poisoned.
+    expect(redis.decrby).toHaveBeenCalledWith(expect.stringContaining('rl:link-submit'), 1);
   });
 
   it('allows exactly at the max boundary (count === max)', async () => {
@@ -108,11 +111,23 @@ describe('rate-limiter consume', () => {
     mockCreateRedisConnection.mockReturnValue(redis);
     const { consume } = await import('./index.js');
     await consume({ namespace: 'ns1', key: 'k1', windowSeconds: 60, max: 5 });
-    const [incrKey] = redis.incr.mock.calls[0] as [string];
+    const [incrKey, cost] = redis.incrby.mock.calls[0] as [string, number];
     expect(incrKey.startsWith('rl:ns1:k1:')).toBe(true);
+    expect(cost).toBe(1);
     const [expireKey, ttl] = redis.expire.mock.calls[0] as [string, number];
     expect(expireKey).toBe(incrKey);
     expect(ttl).toBe(61);
+  });
+
+  it('consumes `cost` slots at once (bulk mint)', async () => {
+    const redis = makeRedis([[null, 3]]);
+    mockCreateRedisConnection.mockReturnValue(redis);
+    const { consume } = await import('./index.js');
+    const r = await consume({ namespace: 'ns', key: 'k', windowSeconds: 60, max: 5, cost: 3 });
+    const [, cost] = redis.incrby.mock.calls[0] as [string, number];
+    expect(cost).toBe(3);
+    expect(r.allowed).toBe(true);
+    expect(r.count).toBe(3);
   });
 
   it('fails open (allowed=true, count=0) and logs a warning when Redis throws', async () => {
@@ -127,6 +142,22 @@ describe('rate-limiter consume', () => {
       max: 5,
     });
     expect(result).toEqual({ allowed: true, count: 0, retryAfterSeconds: 0 });
+  });
+
+  it('fails CLOSED (allowed=false) on a Redis error when failClosed is set', async () => {
+    const redis = makeRedis(undefined);
+    redis.exec.mockRejectedValue(new Error('ECONNREFUSED'));
+    mockCreateRedisConnection.mockReturnValue(redis);
+    const { consume } = await import('./index.js');
+    const result = await consume({
+      namespace: 'invite-mint',
+      key: 'org-1',
+      windowSeconds: 3600,
+      max: 100,
+      failClosed: true,
+    });
+    expect(result.allowed).toBe(false);
+    expect(result.retryAfterSeconds).toBe(3600);
   });
 
   it('reuses the cached Redis connection across calls', async () => {

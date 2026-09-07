@@ -55,6 +55,12 @@ export interface AuthContext {
   lastName?: string;
   phoneNumber?: string;
   phoneNumberVerified?: boolean;
+  /**
+   * `azp` claim — the client that requested the token. Validated by the azp
+   * gate (see {@link assertAllowedAzp}), but not previously projected onto
+   * this context; recorded as the audit log's actor client (#617).
+   */
+  azp?: string;
 }
 
 export type AuthError =
@@ -162,6 +168,7 @@ function hydrateContext(userId: string, aggregatorId: string, payload: JWTPayloa
   if (typeof claims.preferred_username === 'string') {
     ctx.preferredUsername = claims.preferred_username;
   }
+  if (typeof claims.azp === 'string') ctx.azp = claims.azp;
   if (typeof claims.given_name === 'string') ctx.firstName = claims.given_name;
   if (typeof claims.family_name === 'string') ctx.lastName = claims.family_name;
   const phone = readStringOrFirst(claims.phone_number ?? claims.phoneNumber);

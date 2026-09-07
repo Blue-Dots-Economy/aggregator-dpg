@@ -12,6 +12,7 @@
     "test:coverage": "vitest run --coverage --passWithNoTests"
   },
   "dependencies": {
+    "@aggregator-dpg/campaign-audit": "workspace:*",
     "@aggregator-dpg/campaign-template": "workspace:*",
     "@aggregator-dpg/db-schema": "workspace:*",
     "@aggregator-dpg/mailer": "workspace:*",
@@ -23,17 +24,17 @@
     "@aggregator-dpg/shared-primitives": "workspace:*",
     "@aggregator-dpg/signalstack-writer": "workspace:*",
     "@aggregator-dpg/voice-provider": "workspace:*",
-    "@aws-sdk/client-s3": "^3.1116.0",
-    "@aws-sdk/s3-request-presigner": "^3.1116.0",
+    "@aws-sdk/client-s3": "^3.1126.0",
+    "@aws-sdk/s3-request-presigner": "^3.1126.0",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
-    "bullmq": "^6.2.0",
+    "bullmq": "^6.3.1",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
     "ioredis": "^6.0.0",
-    "papaparse": "^5.6.0",
+    "papaparse": "^5.7.0",
     "pg": "^8.23.0",
-    "pino": "^9.5.0",
+    "pino": "^10.3.1",
     "zod": "^3.24.1"
   },
   "devDependencies": {
@@ -42,7 +43,7 @@
     "@types/papaparse": "^5.3.15",
     "@types/pg": "^8.21.0",
     "@vitest/coverage-v8": "^3.2.7",
-    "tsx": "^4.23.12",
+    "tsx": "^4.23.13",
     "typescript": "^6.0.3",
     "vitest": "^3.2.7"
   }

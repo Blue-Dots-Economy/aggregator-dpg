@@ -52,6 +52,10 @@ export async function registerCampaignExportRoutes(app: FastifyInstance): Promis
       await submitCampaignJob(req, reply, {
         channel: 'export',
         parseContent: (rawContent) => rawContent as Record<string, unknown>,
+        // Deployment config, not caller input: the export worker's own field
+        // set (CAMPAIGN_EXPORT_FIELDS) decides what a row actually releases.
+        piiFields: () =>
+          config.CAMPAIGN_EXPORT_FIELDS === 'full' ? ['full'] : ['name', 'email', 'phone'],
         buildItem: (itemId) => ({ itemId, action: null }),
         maxItems: config.CAMPAIGN_EXPORT_MAX_ITEMS,
         maxItemsErrorCode: 'CAMPAIGN_TOO_MANY_ITEMS',

@@ -109,34 +109,22 @@ describe('RegisterPage (server component)', () => {
     loadConsentConfig.mockRejectedValue(new Error('file not found'));
     const el = await RegisterPage();
     expect(el.props.aggregatorConsentContent).toBeNull();
-    expect(el.props.orgConsentContent).toBeNull();
     expect(loggerWarn).toHaveBeenCalledWith(
       expect.objectContaining({ operation: 'loadConsentContent', status: 'failure' }),
     );
   });
 
-  it('loads the org schema and enables the flag when ORG_HIERARCHY_ENABLED=true', async () => {
+  it('forwards orgHierarchyEnabled=true but never loads/passes the org schema (owner deep link handles it)', async () => {
     process.env.ORG_HIERARCHY_ENABLED = 'true';
     loadConsentConfig.mockResolvedValue(consentCfg());
-    readFile.mockImplementation((path: string) => {
-      if (path.includes('org-registration.v1.ui.json')) return Promise.resolve('{}');
-      return Promise.resolve(JSON.stringify({ title: 'Org', properties: {} }));
-    });
 
     const el = await RegisterPage();
-    expect(el.props.orgHierarchyEnabled).toBe(true);
-    expect(el.props.orgSchema).toEqual({ title: 'Org', properties: {} });
-    expect(el.props.orgUiSchema).toEqual({});
-  });
-
-  it('degrades to coordinator-only when the org schema files are missing', async () => {
-    process.env.ORG_HIERARCHY_ENABLED = 'true';
-    loadConsentConfig.mockResolvedValue(consentCfg());
-    readFile.mockRejectedValue(new Error('ENOENT'));
-
-    const el = await RegisterPage();
+    // #619: owner registration moved to /register/owner — the coordinator page
+    // no longer reads or forwards the org schema.
     expect(el.props.orgHierarchyEnabled).toBe(true);
     expect(el.props.orgSchema).toBeUndefined();
+    expect(el.props.orgConsentContent).toBeUndefined();
+    expect(readFile).not.toHaveBeenCalled();
   });
 
   it('does not attempt to load the org schema when the flag is off', async () => {
