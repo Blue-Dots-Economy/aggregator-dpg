@@ -100,13 +100,45 @@ export function renderShell(opts: ShellOptions): string {
 /**
  * Renders a primary CTA button.
  */
+/** Schemes a CTA may link to. Anything else is a phishing vector in email. */
+const SAFE_HREF_SCHEMES: ReadonlySet<string> = new Set(['http:', 'https:']);
+
+/**
+ * Validates and escapes a CTA destination for use in an `href` attribute.
+ *
+ * The button helpers are the ONE place a URL reaches HTML without passing
+ * through `substitute`, so the token type declared in the registry does not
+ * apply to it — which is exactly why the check belongs here rather than at
+ * each call site. Without it, an href sourced from a form field or a database
+ * column would give attribute breakout plus `javascript:` in an email.
+ *
+ * @param href - Destination URL.
+ * @returns The URL, escaped for attribute context.
+ * @throws {Error} If the URL is unparseable or its scheme is not http(s).
+ *   Every current href is code-built from config, so a failure here is a
+ *   programming error and should be loud rather than silently unlinked.
+ */
+function safeHref(href: string): string {
+  let scheme: string;
+  try {
+    scheme = new URL(href).protocol;
+  } catch {
+    throw new Error(`unsafe CTA href (unparseable): ${href.slice(0, 60)}`);
+  }
+  if (!SAFE_HREF_SCHEMES.has(scheme)) {
+    throw new Error(`unsafe CTA href scheme: ${scheme}`);
+  }
+  // `&` becomes `&amp;` — correct for an attribute value; clients decode it.
+  return escapeHtml(href);
+}
+
 export function ctaButton(
   label: string,
   href: string,
   color: 'primary' | 'danger' = 'primary',
 ): string {
   const bg = color === 'danger' ? '#dc2626' : getEmailBrand().primary_color;
-  return `<a href="${href}" style="display:inline-block;background:${bg};color:#ffffff;text-decoration:none;padding:12px 22px;border-radius:10px;font-weight:600;font-size:14px;">${escapeHtml(label)}</a>`;
+  return `<a href="${safeHref(href)}" style="display:inline-block;background:${bg};color:#ffffff;text-decoration:none;padding:12px 22px;border-radius:10px;font-weight:600;font-size:14px;">${escapeHtml(label)}</a>`;
 }
 
 /**
@@ -147,7 +179,7 @@ export function ctaButtonFull(
   return (
     `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">` +
     `<tr><td align="center" style="background:${bg};border-radius:12px;">` +
-    `<a href="${href}" style="display:block;padding:15px 22px;color:#ffffff;` +
+    `<a href="${safeHref(href)}" style="display:block;padding:15px 22px;color:#ffffff;` +
     `text-decoration:none;font-weight:700;font-size:15px;">${escapeHtml(label)} &rarr;</a>` +
     `</td></tr></table>`
   );

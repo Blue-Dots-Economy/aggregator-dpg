@@ -240,12 +240,18 @@ export async function registerAggregatorOrgRoutes(app: FastifyInstance): Promise
           },
           'org already active — coordinator invite link re-sent to the owner on file',
         );
+        // Never claim delivery that did not happen: the whole point of this
+        // branch is an owner who never received the first email, so telling
+        // them a second one is on its way when the send just failed leaves
+        // them waiting instead of contacting support.
         return reply.status(200).send({
           org_id: row.id,
           slug: row.slug,
           status: 'active',
-          message:
-            'This organisation is already registered. The coordinator invitation link has been sent to the owner email on file.',
+          mail_sent: send.ok,
+          message: send.ok
+            ? 'This organisation is already registered. The coordinator invitation link has been sent to the owner email on file.'
+            : 'This organisation is already registered, but the coordinator invitation link could not be emailed just now. Please try again shortly, or contact support.',
         });
       };
 

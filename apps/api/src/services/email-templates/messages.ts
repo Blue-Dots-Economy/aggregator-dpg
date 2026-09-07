@@ -35,7 +35,8 @@ import path from 'node:path';
 import { resolveConfigRoot, resolveActiveNetwork } from '@aggregator-dpg/network-config/paths';
 import { logger } from '../../logger.js';
 import { parseProperties } from './parse-properties.js';
-import { requiredMessageKeys } from './email-cases.js';
+import { EMAIL_CASE_IDS, caseKeys, caseTokenTypes, requiredMessageKeys } from './email-cases.js';
+import { tokensUsed } from './substitute.js';
 
 /** Relative location of a copy layer inside its config directory. */
 const MESSAGES_FILE = path.join('emails', 'messages.properties');
@@ -142,12 +143,32 @@ export async function loadEmailMessageOverrides(
   const merged = new Map(loadDefaults(env));
   let overridden = 0;
 
+  const instanceOverride = env.EMAIL_MESSAGES_PATH?.trim();
+
   for (const file of emailMessageOverridePaths(env)) {
     let text: string;
     try {
       text = await readFile(file, 'utf8');
-    } catch {
-      continue; // absent layer — the common case
+    } catch (cause) {
+      const code = (cause as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT') continue; // absent layer — the common case
+      // Anything else (EACCES, EISDIR, …) is a misconfiguration, not an
+      // absence. Staying silent here would contradict this module's own rule
+      // that a typo must not masquerade as a landed edit — an unknown KEY
+      // already warns, so an unreadable FILE cannot be quieter.
+      if (file === instanceOverride) {
+        // Set deliberately by an operator, so a broken path is a boot failure
+        // rather than a warning nobody reads.
+        throw new Error(`EMAIL_MESSAGES_PATH is set but unreadable: ${file} (${code})`, { cause });
+      }
+      logger.warn({
+        operation: 'emailMessages.loadOverrides',
+        status: 'failure',
+        file,
+        error: code ?? 'UNKNOWN',
+        reason: 'unreadable',
+      });
+      continue;
     }
     const parsed = parseProperties(text);
     if (parsed.malformedLines.length > 0) {
@@ -192,6 +213,25 @@ export function assertMessagesComplete(): void {
   const missing = requiredMessageKeys().filter((k) => !active.has(k));
   if (missing.length > 0) {
     throw new Error(`email copy is missing ${missing.length} key(s): ${missing.join(', ')}`);
+  }
+
+  // Keys alone are not enough. An override layer may keep a key but drop a
+  // `{{token}}` out of it — the CTA button survives (its href comes from the
+  // layout, not the copy), yet body text that carried the link loses it with
+  // no signal. Walking the registry is nearly free once the keys are known.
+  const undeclared: string[] = [];
+  for (const caseId of EMAIL_CASE_IDS) {
+    const declared = new Set(Object.keys(caseTokenTypes(caseId)));
+    for (const key of caseKeys(caseId)) {
+      for (const token of tokensUsed(active.get(`${caseId}.${key}`) ?? '')) {
+        if (!declared.has(token)) undeclared.push(`${caseId}.${key}: {{${token}}}`);
+      }
+    }
+  }
+  if (undeclared.length > 0) {
+    throw new Error(
+      `email copy uses ${undeclared.length} undeclared token(s): ${undeclared.join(', ')}`,
+    );
   }
 }
 

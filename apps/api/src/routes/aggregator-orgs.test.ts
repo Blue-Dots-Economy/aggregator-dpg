@@ -280,7 +280,7 @@ describe('aggregator-orgs routes', () => {
         id: 'o-active-owner',
         slug: 'enable-india-live',
         displayName: 'Old Name',
-        ownerEmail: 'ravi@enable.org',
+        ownerEmail: 'active-owner@enable.org',
         status: 'active',
       }),
     ]);
@@ -288,7 +288,7 @@ describe('aggregator-orgs routes', () => {
       method: 'POST',
       url: '/v1/orgs/create',
       headers: AUTH_HEADER,
-      payload: orgBody,
+      payload: { ...orgBody, owner: { ...orgBody.owner, email: 'active-owner@enable.org' } },
     });
     expect(res.statusCode).toBe(200);
     const body = res.json() as { org_id: string; status: string; message: string };
@@ -333,7 +333,7 @@ describe('aggregator-orgs routes', () => {
       buildAggregatorOrg({
         id: 'o-retired-owner',
         slug: 'enable-india-dead',
-        ownerEmail: 'ravi@enable.org',
+        ownerEmail: 'retired-owner@enable.org',
         status: 'retired',
       }),
     ]);
@@ -341,12 +341,56 @@ describe('aggregator-orgs routes', () => {
       method: 'POST',
       url: '/v1/orgs/create',
       headers: AUTH_HEADER,
-      payload: orgBody,
+      payload: { ...orgBody, owner: { ...orgBody.owner, email: 'retired-owner@enable.org' } },
     });
     expect(res.statusCode).toBe(409);
     const body = res.json() as { error?: { code?: string } };
     expect(body.error?.code).toBe('OWNER_ALREADY_REGISTERED');
     expect(mailer.outbox.length).toBe(0);
+  });
+
+  it('does not claim delivery when the invite mail fails', async () => {
+    // The owner in this branch is one who never got the first email; telling
+    // them a second is on its way when the send just failed leaves them
+    // waiting instead of contacting support.
+    orgStore.seed([
+      buildAggregatorOrg({
+        id: 'o-active-nolie',
+        slug: 'enable-india-live4',
+        ownerEmail: 'active-nolie@enable.org',
+        status: 'active',
+      }),
+    ]);
+    mailer.failOnce({ code: 'TRANSPORT_FAILED', message: 'smtp down' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: { ...orgBody, owner: { ...orgBody.owner, email: 'active-nolie@enable.org' } },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { mail_sent: boolean; message: string };
+    expect(body.mail_sent).toBe(false);
+    expect(body.message).toMatch(/could not be emailed/i);
+    expect(body.message).not.toMatch(/has been sent/i);
+  });
+
+  it('reports mail_sent true on the happy path', async () => {
+    orgStore.seed([
+      buildAggregatorOrg({
+        id: 'o-active-sent',
+        slug: 'enable-india-live5',
+        ownerEmail: 'active-sent@enable.org',
+        status: 'active',
+      }),
+    ]);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: { ...orgBody, owner: { ...orgBody.owner, email: 'active-sent@enable.org' } },
+    });
+    expect((res.json() as { mail_sent: boolean }).mail_sent).toBe(true);
   });
 
   it('still answers 200 for an ACTIVE org when the invite mail cannot be delivered', async () => {
@@ -356,7 +400,7 @@ describe('aggregator-orgs routes', () => {
       buildAggregatorOrg({
         id: 'o-active-mailfail',
         slug: 'enable-india-live3',
-        ownerEmail: 'ravi@enable.org',
+        ownerEmail: 'active-mailfail@enable.org',
         status: 'active',
       }),
     ]);
@@ -365,7 +409,7 @@ describe('aggregator-orgs routes', () => {
       method: 'POST',
       url: '/v1/orgs/create',
       headers: AUTH_HEADER,
-      payload: orgBody,
+      payload: { ...orgBody, owner: { ...orgBody.owner, email: 'active-mailfail@enable.org' } },
     });
     expect(res.statusCode).toBe(200);
     expect((res.json() as { status: string }).status).toBe('active');

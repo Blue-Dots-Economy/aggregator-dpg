@@ -110,4 +110,35 @@ describe('renderCase — the one conversion', () => {
     });
     expect(out.html).not.toContain('<a href=""');
   });
+
+  it('escapes the CTA href — it never passes through substitute()', () => {
+    // The registry declares inviteUrl as `text`, but the CTA path bypasses
+    // substitution entirely, so the escaping has to happen in the button
+    // helper. An `&` in a query string must arrive as `&amp;`.
+    const out = renderCase('owner_grant_refreshed', {
+      orgName: 'Acme',
+      inviteUrl: 'https://portal.test/i?grant=a&next=b',
+    });
+    expect(out.html).toContain('href="https://portal.test/i?grant=a&amp;next=b"');
+    expect(out.html).not.toContain('grant=a&next=b"');
+  });
+
+  it('refuses a non-http(s) CTA href rather than emitting it', () => {
+    // Attribute breakout plus `javascript:` in an email is a phishing vector.
+    expect(() =>
+      renderCase('owner_grant_refreshed', {
+        orgName: 'Acme',
+        inviteUrl: 'javascript:alert(1)',
+      }),
+    ).toThrow(/unsafe CTA href scheme/);
+  });
+
+  it('refuses an unparseable CTA href', () => {
+    expect(() =>
+      renderCase('owner_grant_refreshed', {
+        orgName: 'Acme',
+        inviteUrl: '" onmouseover="alert(1)',
+      }),
+    ).toThrow(/unsafe CTA href/);
+  });
 });

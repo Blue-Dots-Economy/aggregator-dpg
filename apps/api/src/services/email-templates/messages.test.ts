@@ -117,6 +117,18 @@ describe('message lookup', () => {
     expect(getMessage('applicant_approved.subject')).toBe('applicant_approved.subject');
   });
 
+  it('assertMessagesComplete rejects an override that drops a declared token', () => {
+    // Keys present, token missing: the CTA button survives (its href comes
+    // from the layout) but body copy that carried the link loses it silently.
+    const full = new Map<string, string>();
+    for (const caseId of EMAIL_CASE_IDS) {
+      for (const key of caseKeys(caseId)) full.set(`${caseId}.${key}`, 'x');
+    }
+    full.set('owner_grant_refreshed.intro', 'Link for {{notADeclaredToken}}');
+    _setEmailMessages(full);
+    expect(() => assertMessagesComplete()).toThrow(/undeclared token/);
+  });
+
   it('assertMessagesComplete fails loudly on a hole', () => {
     _setEmailMessages(new Map([['applicant_approved.subject', 'x']]));
     expect(() => assertMessagesComplete()).toThrow(/missing \d+ key/);

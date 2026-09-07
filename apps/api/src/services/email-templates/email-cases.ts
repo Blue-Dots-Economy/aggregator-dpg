@@ -143,7 +143,9 @@ export const EMAIL_CASES: Readonly<Record<string, EmailCaseDef>> = {
       { block: 'para', key: 'intro' },
       // With the grant link: lead, button, then the standing note.
       { block: 'para', key: 'invite_lead', requires: ['inviteUrl'] },
-      { block: 'cta', key: 'cta', href: 'inviteUrl', requires: ['inviteUrl'] },
+      // No `requires` needed: the cta branch already drops a block whose href
+      // token is unset. Stated here because the two neighbours below do need it.
+      { block: 'cta', key: 'cta', href: 'inviteUrl' },
       { block: 'paraLast', key: 'invite_note', requires: ['inviteUrl'] },
       // Without it: a heads-up that the link follows.
       { block: 'paraLast', key: 'invite_pending', absent: ['inviteUrl'] },
