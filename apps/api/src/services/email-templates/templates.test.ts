@@ -4,6 +4,7 @@ import { renderApplicantApproved } from './applicant-approved.js';
 import { renderApplicantRejected } from './applicant-rejected.js';
 import { renderCoordinatorInvite } from './coordinator-invite.js';
 import { renderOwnerGrantRefreshed } from './owner-grant-refreshed.js';
+import { renderOrgAlreadyRegistered } from './org-already-registered.js';
 import { renderOrgOwnerApproved } from './org-owner-approved.js';
 
 describe('admin-review template', () => {
@@ -211,5 +212,44 @@ describe('owner-grant-refreshed template', () => {
     expect(out.html).toContain('https://portal.example.org/register/invite?grant=xyz');
     expect(out.html).not.toContain('is approved');
     expect(out.html).not.toContain('Sign in');
+  });
+});
+
+describe('org-already-registered template', () => {
+  it('acknowledges the re-registration attempt and carries the invite CTA', () => {
+    const out = renderOrgAlreadyRegistered({
+      orgName: 'Acme Org',
+      inviteUrl: 'https://portal.example.org/register/invite?grant=xyz',
+      expiresAt: new Date('2026-12-15T00:00:00Z'),
+    });
+    expect(out.subject).toBe('Acme Org is already registered');
+    // Must read as a reply to their own attempt, not as unprompted mail.
+    expect(out.html).toContain('just tried to register');
+    expect(out.html).toContain('Invite coordinators');
+    expect(out.html).toContain('https://portal.example.org/register/invite?grant=xyz');
+    // No sign-in CTA — the owner has no account.
+    expect(out.html).not.toContain('Sign in');
+    expect(out.text).toContain('https://portal.example.org/register/invite?grant=xyz');
+  });
+
+  it('renders an absolute expiry date, never a duration', () => {
+    const out = renderOrgAlreadyRegistered({
+      orgName: 'Acme Org',
+      inviteUrl: 'https://portal.example.org/register/invite?grant=xyz',
+      expiresAt: new Date('2026-12-15T00:00:00Z'),
+    });
+    expect(out.html).toContain('15 Dec 2026');
+    expect(out.text).toContain('15 Dec 2026');
+    expect(out.html).not.toContain('90 days');
+  });
+
+  it('escapes user-controlled fields', () => {
+    const out = renderOrgAlreadyRegistered({
+      orgName: '<script>alert(1)</script>',
+      inviteUrl: 'https://portal.example.org/register/invite?grant=xyz',
+      expiresAt: new Date('2026-12-15T00:00:00Z'),
+    });
+    expect(out.html).not.toContain('<script>alert(1)</script>');
+    expect(out.html).toContain('&lt;script&gt;');
   });
 });

@@ -274,11 +274,12 @@ describe('aggregator-orgs routes', () => {
     expect(mailer.outbox.length).toBe(1);
   });
 
-  it('rejects a resubmit against an ACTIVE org owner with OWNER_ALREADY_REGISTERED', async () => {
+  it('re-sends the coordinator invite link when the org is already ACTIVE', async () => {
     orgStore.seed([
       buildAggregatorOrg({
         id: 'o-active-owner',
         slug: 'enable-india-live',
+        displayName: 'Old Name',
         ownerEmail: 'ravi@enable.org',
         status: 'active',
       }),
@@ -289,8 +290,85 @@ describe('aggregator-orgs routes', () => {
       headers: AUTH_HEADER,
       payload: orgBody,
     });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { org_id: string; status: string; message: string };
+    expect(body.org_id).toBe('o-active-owner');
+    expect(body.status).toBe('active');
+    expect(body.message).toMatch(/already registered/i);
+    // The invite link is the whole point of the mail.
+    expect(mailer.outbox.length).toBe(1);
+    expect(mailer.outbox[0]?.subject).toMatch(/already registered/i);
+    expect(mailer.outbox[0]?.html).toContain('/register/invite?grant=');
+    // Nothing about the row changes — no takeover via an anonymous resubmit.
+    const stored = await orgStore.findById('o-active-owner');
+    expect(stored.ok && stored.value?.displayName).toBe('Old Name');
+    expect(stored.ok && stored.value?.status).toBe('active');
+  });
+
+  it('mails the STORED owner address, never the resubmitted one', async () => {
+    // The org form is anonymous. Honouring the submitted address would hand a
+    // stranger a 90-day credential that mints coordinator invites for this org.
+    orgStore.seed([
+      buildAggregatorOrg({
+        id: 'o-active-hijack',
+        slug: 'enable-india-live2',
+        ownerEmail: 'real-owner@enable.org',
+        status: 'active',
+      }),
+    ]);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: { ...orgBody, owner: { ...orgBody.owner, email: 'real-owner@enable.org' } },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(mailer.outbox.length).toBe(1);
+    expect(mailer.outbox[0]?.to).toContain('real-owner@enable.org');
+  });
+
+  it('still rejects a resubmit against a RETIRED org with OWNER_ALREADY_REGISTERED', async () => {
+    // A dead org must never be handed a working credential.
+    orgStore.seed([
+      buildAggregatorOrg({
+        id: 'o-retired-owner',
+        slug: 'enable-india-dead',
+        ownerEmail: 'ravi@enable.org',
+        status: 'retired',
+      }),
+    ]);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: orgBody,
+    });
+    expect(res.statusCode).toBe(409);
     const body = res.json() as { error?: { code?: string } };
     expect(body.error?.code).toBe('OWNER_ALREADY_REGISTERED');
+    expect(mailer.outbox.length).toBe(0);
+  });
+
+  it('still answers 200 for an ACTIVE org when the invite mail cannot be delivered', async () => {
+    // Soft-fail, matching the approval path: the org is live either way, so a
+    // mail outage must not surface as a registration failure.
+    orgStore.seed([
+      buildAggregatorOrg({
+        id: 'o-active-mailfail',
+        slug: 'enable-india-live3',
+        ownerEmail: 'ravi@enable.org',
+        status: 'active',
+      }),
+    ]);
+    mailer.failOnce({ code: 'TRANSPORT_FAILED', message: 'smtp down' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: orgBody,
+    });
+    expect(res.statusCode).toBe(200);
+    expect((res.json() as { status: string }).status).toBe('active');
   });
 
   it('rejects a second org with a case-insensitively matching name (ORG_NAME_TAKEN, 409)', async () => {
