@@ -59,6 +59,9 @@
     "org_success_heading": "Organisation submitted",
     "org_success_slug": "Organisation reference:",
     "org_success_review": "Our team will review your organisation. You'll be notified once it's approved, after which coordinators can register under it.",
+    "org_exists_heading": "Organisation already registered",
+    "org_exists_link_sent": "This organisation is already approved and live, so there's nothing more to do. We've emailed the coordinator invitation link to the owner address on file — check that inbox, including spam.",
+    "org_exists_mail_failed": "This organisation is already approved and live, so there's nothing more to do. We couldn't email the coordinator invitation link just now — please try again shortly, or contact support.",
     "consent": {
       "accept_prefix": "I have read and accept the ",
       "terms_link": "Terms of Service",

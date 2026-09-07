@@ -75,20 +75,34 @@ export function OrgRegisterForm({
       consent: stampConsent({ value: true }),
     };
     const result = await submitRegistration('/api/org/register', payload);
-    setState(
-      result.ok
-        ? { status: 'done', refId: String(result.body['slug'] ?? '') }
-        : { status: 'error', ...result.error },
-    );
+    if (!result.ok) {
+      setState({ status: 'error', ...result.error });
+      return;
+    }
+    // A 201 is a new pending registration; a 200 with status 'active' means the
+    // org already existed and its owner was mailed the invite link instead.
+    const alreadyRegistered = result.body['status'] === 'active';
+    setState({
+      status: 'done',
+      refId: String(result.body['slug'] ?? ''),
+      outcome: alreadyRegistered ? 'already_registered' : 'pending',
+      mailSent: result.body['mail_sent'] !== false,
+    });
   };
 
   if (state.status === 'done') {
+    const already = state.outcome === 'already_registered';
+    const message = already
+      ? state.mailSent === false
+        ? t('org_exists_mail_failed')
+        : t('org_exists_link_sent')
+      : t('org_success_review');
     return (
       <RegistrationSuccessPanel
-        heading={t('org_success_heading')}
+        heading={already ? t('org_exists_heading') : t('org_success_heading')}
         refLabel={t('org_success_slug')}
         refId={state.refId}
-        message={t('org_success_review')}
+        message={message}
       />
     );
   }
