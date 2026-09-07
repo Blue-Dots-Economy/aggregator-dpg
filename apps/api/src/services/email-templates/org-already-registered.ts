@@ -13,22 +13,10 @@
  * submitted — the org form is anonymous, so mailing the submitted address
  * would hand a stranger the org's invite credential.
  *
- * Copy lives under the `org_already_registered.*` keys.
+ * Copy lives under `org_already_registered.*`.
  */
 
-import {
-  ctaButton,
-  ctaRow,
-  getEmailBrand,
-  heading,
-  note,
-  para,
-  paraLast,
-  renderShell,
-} from './shared.js';
-import { caseTokenTypes } from './email-cases.js';
-import { getMessage } from './messages.js';
-import { substitute, toPlainText } from './substitute.js';
+import { renderCase, type RenderedEmail } from './render-case.js';
 
 /**
  * Template inputs for the organisation-already-registered email.
@@ -57,58 +45,15 @@ function formatExpiryDate(d: Date): string {
 }
 
 /**
- * Renders the organisation-already-registered email (subject + HTML + text).
+ * Renders the organisation-already-registered email.
  *
  * @param v - Organisation name, invite-management link, and the grant expiry.
  * @returns The `subject`, `html`, and `text` parts ready for the mailer.
  */
-export function renderOrgAlreadyRegistered(v: OrgAlreadyRegisteredVars): {
-  subject: string;
-  html: string;
-  text: string;
-} {
-  const brand = getEmailBrand();
-  const types = caseTokenTypes('org_already_registered');
-  const values = {
-    brandShort: brand.short_name,
-    brandLong: brand.long_name,
+export function renderOrgAlreadyRegistered(v: OrgAlreadyRegisteredVars): RenderedEmail {
+  return renderCase('org_already_registered', {
     orgName: v.orgName,
+    inviteUrl: v.inviteUrl,
     expiresOn: formatExpiryDate(v.expiresAt),
-  };
-  const copy = (key: string): string =>
-    substitute(getMessage(`org_already_registered.${key}`), values, types);
-
-  const subject = toPlainText(copy('subject'));
-  const headingHtml = copy('heading');
-  const introHtml = copy('intro');
-  const reasonHtml = copy('reason');
-  const ctaLabel = toPlainText(copy('cta'));
-  const noteHtml = copy('note');
-  const footnoteHtml = copy('footnote');
-
-  const body = [
-    heading(headingHtml),
-    para(introHtml),
-    para(reasonHtml),
-    ctaRow(ctaButton(ctaLabel, v.inviteUrl, 'primary')),
-    paraLast(noteHtml),
-    note(footnoteHtml),
-  ].join('\n');
-
-  const text = `${toPlainText(headingHtml)}
-
-${toPlainText(introHtml)}
-
-${toPlainText(reasonHtml)}
-
-${ctaLabel}: ${v.inviteUrl}
-
-${toPlainText(noteHtml)}
-
-${toPlainText(footnoteHtml)}
-
-Sent by ${brand.long_name}.
-`;
-
-  return { subject, html: renderShell({ preheader: subject, bodyHtml: body }), text };
+  });
 }

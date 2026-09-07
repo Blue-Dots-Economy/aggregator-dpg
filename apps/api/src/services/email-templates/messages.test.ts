@@ -7,7 +7,7 @@ import {
   emailMessageOverridePaths,
   _setEmailMessages,
 } from './messages.js';
-import { EMAIL_CASES, EMAIL_CASE_IDS, caseTokenTypes, requiredMessageKeys } from './email-cases.js';
+import { EMAIL_CASE_IDS, caseKeys, caseTokenTypes, requiredMessageKeys } from './email-cases.js';
 
 afterEach(() => {
   _setEmailMessages(null);
@@ -88,7 +88,7 @@ describe('email case registry', () => {
     const problems: string[] = [];
     for (const caseId of EMAIL_CASE_IDS) {
       const declared = new Set(Object.keys(caseTokenTypes(caseId)));
-      for (const key of EMAIL_CASES[caseId]!.keys) {
+      for (const key of caseKeys(caseId)) {
         for (const token of tokensUsed(getMessage(`${caseId}.${key}`))) {
           if (!declared.has(token)) problems.push(`${caseId}.${key}: {{${token}}}`);
         }
@@ -97,8 +97,13 @@ describe('email case registry', () => {
     expect(problems).toEqual([]);
   });
 
-  it('requiredMessageKeys covers every case', () => {
+  it('derives every key from the layout, so a layout key cannot go undefined', () => {
+    // caseKeys() walks the layout (including oneOf alternatives and derived
+    // tokens); assertMessagesComplete() then checks each against the defaults.
     expect(requiredMessageKeys().length).toBeGreaterThan(EMAIL_CASE_IDS.length);
+    for (const caseId of EMAIL_CASE_IDS) {
+      expect(caseKeys(caseId)).toContain('subject');
+    }
   });
 
   it('rejects an unknown case rather than silently escaping everything', () => {

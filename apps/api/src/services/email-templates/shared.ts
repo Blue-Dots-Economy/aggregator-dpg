@@ -200,3 +200,8 @@ export function callout(html: string): string {
 export function ctaRow(buttonHtml: string): string {
   return `<div style="margin:0 0 18px;">\n  ${buttonHtml}\n</div>`;
 }
+
+/** Smaller closing paragraph — used for the rejection appeal line. */
+export function paraSmall(html: string): string {
+  return `<p style="margin:18px 0 0;font-size:13.5px;color:${BRAND_INK_500};line-height:1.55;">\n  ${html}\n</p>`;
+}
