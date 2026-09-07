@@ -32,6 +32,7 @@ import { mintGrantToken } from '../services/grant-token.js';
 import { normalisePhone } from '@aggregator-dpg/shared-primitives/phone';
 import { splitName } from '../services/name.js';
 import { checkSubmitRate } from '../services/submit-rate.js';
+import { checkOrgInviteResendRate } from '../services/org-invite-resend-rate.js';
 import { slugFromName } from '../services/slug.js';
 import { authenticateAny } from '../services/auth/access-token.js';
 import { httpError } from '../errors/http-error.js';
@@ -204,6 +205,29 @@ export async function registerAggregatorOrgRoutes(app: FastifyInstance): Promise
       // org is live either way, so a mail outage must not surface as a
       // registration failure. Nothing about the row is touched.
       const resendOwnerInvite = async (row: AggregatorOrg): Promise<FastifyReply> => {
+        // Bound per OWNER ADDRESS, fail-closed, before anything is minted.
+        // The route's inherited submit limiter is keyed `ip|email` and fails
+        // open, so rotating IPs buys a fresh bucket and a Redis outage removes
+        // the cap entirely — neither is acceptable on a path where every
+        // admitted call produces another independent 90-day credential.
+        const resendRate = await checkOrgInviteResendRate(row.ownerEmail);
+        if (!resendRate.allowed) {
+          void reply.header('Retry-After', String(resendRate.retryAfterSeconds));
+          log.warn(
+            {
+              status: 'skipped',
+              org_id: row.id,
+              reason: 'resend_rate_limited',
+              retry_after_seconds: resendRate.retryAfterSeconds,
+            },
+            'invite-link resend throttled for this owner address',
+          );
+          throw httpError('RATE_LIMITED', {
+            detail: `Retry in ${resendRate.retryAfterSeconds}s.`,
+            fields: { retry_after_seconds: resendRate.retryAfterSeconds },
+          });
+        }
+
         const grant = await mintGrantToken({
           org: row.id,
           ttlSec: config.GRANT_TOKEN_TTL_SECONDS,

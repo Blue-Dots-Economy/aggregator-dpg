@@ -22,6 +22,7 @@ import { ConsentLedgerFake } from '@aggregator-dpg/consent-ledger/testing';
 import { _setConsentLedger } from '../services/consent-ledger/index.js';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import { _setSubmitRateChecker } from '../services/submit-rate.js';
+import { _setOrgInviteResendRateChecker } from '../services/org-invite-resend-rate.js';
 import type * as ConfigLoaderFs from '@aggregator-dpg/config-loader/fs';
 
 const { loadConsentConfigMock } = vi.hoisted(() => ({ loadConsentConfigMock: vi.fn() }));
@@ -54,6 +55,8 @@ describe('aggregator-orgs routes', () => {
     consentLedger = new ConsentLedgerFake();
 
     _setSubmitRateChecker(null);
+    // Allow by default; the throttle cases override per-test.
+    _setOrgInviteResendRateChecker(async () => ({ allowed: true, retryAfterSeconds: 0 }));
     loadConsentConfigMock.mockReset();
     const actualLoader = await vi.importActual<typeof ConfigLoaderFs>(
       '@aggregator-dpg/config-loader/fs',
@@ -82,6 +85,7 @@ describe('aggregator-orgs routes', () => {
     _setConsentLedger(null);
     _setAccessTokenVerifier(null);
     _setSubmitRateChecker(null);
+    _setOrgInviteResendRateChecker(null);
   });
 
   const orgBody = {
@@ -303,6 +307,66 @@ describe('aggregator-orgs routes', () => {
     const stored = await orgStore.findById('o-active-owner');
     expect(stored.ok && stored.value?.displayName).toBe('Old Name');
     expect(stored.ok && stored.value?.status).toBe('active');
+  });
+
+  it('throttles the invite resend per OWNER address and mints nothing', async () => {
+    // Each admitted resend mints another independent 90-day grant, so the cap
+    // has to be enforced before minting — not just before mailing.
+    orgStore.seed([
+      buildAggregatorOrg({
+        id: 'o-active-throttled',
+        slug: 'enable-india-live6',
+        ownerEmail: 'throttled@enable.org',
+        status: 'active',
+      }),
+    ]);
+    const seen: string[] = [];
+    _setOrgInviteResendRateChecker(async (email) => {
+      seen.push(email);
+      return { allowed: false, retryAfterSeconds: 900 };
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: { ...orgBody, owner: { ...orgBody.owner, email: 'throttled@enable.org' } },
+    });
+    expect(res.statusCode).toBe(429);
+    expect(res.headers['retry-after']).toBe('900');
+    const err = res.json() as {
+      error: { code: string; fields?: { retry_after_seconds?: number } };
+    };
+    expect(err.error.code).toBe('RATE_LIMITED');
+    expect(err.error.fields?.retry_after_seconds).toBe(900);
+    // No mail, and therefore no grant.
+    expect(mailer.outbox.length).toBe(0);
+    // Keyed on the STORED owner address, so a caller cannot pick a fresh bucket.
+    expect(seen).toEqual(['throttled@enable.org']);
+  });
+
+  it('keys the resend bucket on the STORED address, not the submitted one', async () => {
+    // The org form is anonymous. Keying on submitted input would let an
+    // attacker rotate the payload email and get an unused bucket every time.
+    orgStore.seed([
+      buildAggregatorOrg({
+        id: 'o-active-keyed',
+        slug: 'enable-india-live7',
+        ownerEmail: 'stored-owner@enable.org',
+        status: 'active',
+      }),
+    ]);
+    const seen: string[] = [];
+    _setOrgInviteResendRateChecker(async (email) => {
+      seen.push(email);
+      return { allowed: true, retryAfterSeconds: 0 };
+    });
+    await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: { ...orgBody, owner: { ...orgBody.owner, email: 'stored-owner@enable.org' } },
+    });
+    expect(seen).toEqual(['stored-owner@enable.org']);
   });
 
   it('mails the STORED owner address, never the resubmitted one', async () => {

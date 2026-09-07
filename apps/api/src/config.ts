@@ -320,6 +320,17 @@ const ConfigSchema = z.object({
   INVITE_MINT_MAX_RECIPIENTS: z.coerce.number().int().positive().default(10),
 
   /**
+   * Window + cap for re-sending an approved org's coordinator-invite link when
+   * its owner re-submits the registration form. Keyed on the STORED owner
+   * email alone, so rotating IPs cannot buy a fresh bucket, and fail-closed —
+   * each admitted call mints another independent 90-day grant, so a downed
+   * Redis must not remove the cap. Deliberately tight: this is a recovery
+   * action a real owner takes once, not a routine request.
+   */
+  ORG_INVITE_RESEND_RATE_WINDOW_SECONDS: z.coerce.number().int().positive().default(3600),
+  ORG_INVITE_RESEND_RATE_MAX_PER_WINDOW: z.coerce.number().int().positive().default(3),
+
+  /**
    * Extra grace beyond the approval-token TTL before a still-pending
    * registration is eligible for cleanup. Default 24h.
    */
