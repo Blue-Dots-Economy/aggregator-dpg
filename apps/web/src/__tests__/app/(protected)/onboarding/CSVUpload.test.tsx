@@ -146,6 +146,16 @@ describe('<CSVUpload />', () => {
     expect(screen.queryByText('roster.txt')).not.toBeInTheDocument();
   });
 
+  it('tells an operator who uploads the Excel template to export it as CSV', () => {
+    // Handing out an .xlsx makes this the obvious mistake, and "Only .csv files
+    // are accepted" does not say how to fix it.
+    renderUpload();
+    const input = document.getElementById('csv-file-input') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [new File(['x'], 'seeker-template.xlsx')] } });
+    expect(screen.getByText(/Save As.*CSV/i)).toBeInTheDocument();
+    expect(screen.queryByText('Only .csv files are accepted.')).not.toBeInTheDocument();
+  });
+
   it('accepts a .csv file via the file input and shows a removable chip', async () => {
     const user = userEvent.setup();
     renderUpload();
@@ -276,8 +286,15 @@ describe('<CSVUpload />', () => {
     });
 
     renderUpload();
-    await user.click(screen.getByText('Download template'));
+    await user.click(screen.getByText('Download CSV template'));
     expect(window.location.href).toBe('/api/bulk-uploads/template?participant_type=seeker');
+
+    // Excel is the guided path (#564): dropdowns, required marking, delimiter
+    // note. Same endpoint, one extra param, so the two cannot diverge.
+    await user.click(screen.getByText('Download Excel template'));
+    expect(window.location.href).toBe(
+      '/api/bulk-uploads/template?participant_type=seeker&format=xlsx',
+    );
 
     Object.defineProperty(window, 'location', {
       writable: true,
