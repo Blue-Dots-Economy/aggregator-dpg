@@ -13,6 +13,8 @@ description: Run modes and env layout for the local/VM stack — hybrid dev vs d
 
 Replace `localhost` and `keycloak` everywhere in `.env` with the VM hostname/IP, and update the `aggregator-portal` client's **Valid Redirect URIs** + **Web Origins** in the Keycloak admin console.
 
+**`CONFIG_ROOT` must resolve, or the API will not boot.** Email copy is read from `config/emails/messages.properties` at startup and validated for completeness, so a wrong `CONFIG_ROOT` — or a bind mount shadowing the image's own `config/` copy with an incomplete tree — crash-loops the container instead of failing one endpoint. That is deliberate (blank emails are worse than a loud stop), but it makes the config path a boot dependency rather than a request-path one. The error names the file and the variable: `email copy defaults not found at <path> — check CONFIG_ROOT and that config/ is present`. Same class of mistake as a stale `AGGREGATOR_CONFIG_PATH`, with a wider blast radius.
+
 ## Stack commands
 
 `make setup` is a one-shot that copies `infra/env.template` → `.env` (chmod 600) and adds `127.0.0.1 keycloak` to `/etc/hosts`. `pnpm stack:setup` / `stack:up` are the cross-platform equivalents (Windows-friendly; `make` not required), and the same script covers `stack:down | stack:reset | stack:logs | stack:ps | stack:psql | stack:rebuild-web`.

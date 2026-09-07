@@ -100,13 +100,45 @@ export function renderShell(opts: ShellOptions): string {
 /**
  * Renders a primary CTA button.
  */
+/** Schemes a CTA may link to. Anything else is a phishing vector in email. */
+const SAFE_HREF_SCHEMES: ReadonlySet<string> = new Set(['http:', 'https:']);
+
+/**
+ * Validates and escapes a CTA destination for use in an `href` attribute.
+ *
+ * The button helpers are the ONE place a URL reaches HTML without passing
+ * through `substitute`, so the token type declared in the registry does not
+ * apply to it — which is exactly why the check belongs here rather than at
+ * each call site. Without it, an href sourced from a form field or a database
+ * column would give attribute breakout plus `javascript:` in an email.
+ *
+ * @param href - Destination URL.
+ * @returns The URL, escaped for attribute context.
+ * @throws {Error} If the URL is unparseable or its scheme is not http(s).
+ *   Every current href is code-built from config, so a failure here is a
+ *   programming error and should be loud rather than silently unlinked.
+ */
+function safeHref(href: string): string {
+  let scheme: string;
+  try {
+    scheme = new URL(href).protocol;
+  } catch {
+    throw new Error(`unsafe CTA href (unparseable): ${href.slice(0, 60)}`);
+  }
+  if (!SAFE_HREF_SCHEMES.has(scheme)) {
+    throw new Error(`unsafe CTA href scheme: ${scheme}`);
+  }
+  // `&` becomes `&amp;` — correct for an attribute value; clients decode it.
+  return escapeHtml(href);
+}
+
 export function ctaButton(
   label: string,
   href: string,
   color: 'primary' | 'danger' = 'primary',
 ): string {
   const bg = color === 'danger' ? '#dc2626' : getEmailBrand().primary_color;
-  return `<a href="${href}" style="display:inline-block;background:${bg};color:#ffffff;text-decoration:none;padding:12px 22px;border-radius:10px;font-weight:600;font-size:14px;">${escapeHtml(label)}</a>`;
+  return `<a href="${safeHref(href)}" style="display:inline-block;background:${bg};color:#ffffff;text-decoration:none;padding:12px 22px;border-radius:10px;font-weight:600;font-size:14px;">${escapeHtml(label)}</a>`;
 }
 
 /**
@@ -147,7 +179,7 @@ export function ctaButtonFull(
   return (
     `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">` +
     `<tr><td align="center" style="background:${bg};border-radius:12px;">` +
-    `<a href="${href}" style="display:block;padding:15px 22px;color:#ffffff;` +
+    `<a href="${safeHref(href)}" style="display:block;padding:15px 22px;color:#ffffff;` +
     `text-decoration:none;font-weight:700;font-size:15px;">${escapeHtml(label)} &rarr;</a>` +
     `</td></tr></table>`
   );
@@ -160,4 +192,48 @@ export function escapeHtml(s: string): string {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#39;');
+}
+
+// ── Block helpers ───────────────────────────────────────────────────────────
+// Externalised copy (see `messages.ts`) must not carry inline CSS: an operator
+// editing a properties file should be writing a sentence, not a style
+// attribute. These helpers own the styling so the copy files stay readable,
+// and they are the only place a body block's look is defined.
+
+/** Standard body paragraph. `html` must already be escaped or code-generated. */
+export function para(html: string): string {
+  return `<p style="margin:0 0 14px;font-size:14px;color:${BRAND_INK_500};line-height:1.55;">\n  ${html}\n</p>`;
+}
+
+/** Body paragraph with the wider bottom margin used before a footnote. */
+export function paraLast(html: string): string {
+  return `<p style="margin:0 0 22px;font-size:14px;color:${BRAND_INK_500};line-height:1.55;">\n  ${html}\n</p>`;
+}
+
+/** Top-of-body heading. */
+export function heading(html: string): string {
+  return `<h1 style="font-size:22px;font-weight:700;letter-spacing:-0.01em;margin:0 0 12px;color:${BRAND_INK};">\n  ${html}\n</h1>`;
+}
+
+/** Small grey closing note. */
+export function note(html: string): string {
+  return `<p style="margin:0;font-size:12px;color:#7c84a6;line-height:1.55;">\n  ${html}\n</p>`;
+}
+
+/** Warning callout — used for a rejection reason. */
+export function callout(html: string): string {
+  return (
+    `<div style="margin:18px 0 0;padding:14px;background:#fef2f2;border:1px solid #fecaca;` +
+    `border-radius:10px;font-size:13.5px;color:#7f1d1d;line-height:1.55;">${html}</div>`
+  );
+}
+
+/** Wraps a CTA button in its own row. */
+export function ctaRow(buttonHtml: string): string {
+  return `<div style="margin:0 0 18px;">\n  ${buttonHtml}\n</div>`;
+}
+
+/** Smaller closing paragraph — used for the rejection appeal line. */
+export function paraSmall(html: string): string {
+  return `<p style="margin:18px 0 0;font-size:13.5px;color:${BRAND_INK_500};line-height:1.55;">\n  ${html}\n</p>`;
 }

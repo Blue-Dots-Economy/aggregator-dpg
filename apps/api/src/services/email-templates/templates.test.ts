@@ -4,6 +4,7 @@ import { renderApplicantApproved } from './applicant-approved.js';
 import { renderApplicantRejected } from './applicant-rejected.js';
 import { renderCoordinatorInvite } from './coordinator-invite.js';
 import { renderOwnerGrantRefreshed } from './owner-grant-refreshed.js';
+import { renderOrgAlreadyRegistered } from './org-already-registered.js';
 import { renderOrgOwnerApproved } from './org-owner-approved.js';
 
 describe('admin-review template', () => {
@@ -211,5 +212,43 @@ describe('owner-grant-refreshed template', () => {
     expect(out.html).toContain('https://portal.example.org/register/invite?grant=xyz');
     expect(out.html).not.toContain('is approved');
     expect(out.html).not.toContain('Sign in');
+  });
+});
+
+describe('org-already-registered template', () => {
+  it('acknowledges the re-registration attempt and carries the invite CTA', () => {
+    const out = renderOrgAlreadyRegistered({
+      orgName: 'Acme Org',
+      inviteUrl: 'https://portal.example.org/register/invite?grant=xyz',
+    });
+    expect(out.subject).toBe('Acme Org is already registered');
+    // Must read as a reply to their own attempt, not as unprompted mail.
+    expect(out.html).toContain('just tried to register');
+    expect(out.html).toContain('Invite coordinators');
+    expect(out.html).toContain('https://portal.example.org/register/invite?grant=xyz');
+    // No sign-in CTA — the owner has no account.
+    expect(out.html).not.toContain('Sign in');
+    expect(out.text).toContain('https://portal.example.org/register/invite?grant=xyz');
+  });
+
+  it('quotes no expiry — neither a date nor a duration', () => {
+    // The link's lifetime is deliberately not advertised here: an owner who
+    // needs a working link just re-registers and gets a fresh one, so a date
+    // only invites "is my link dead yet?" support traffic.
+    const out = renderOrgAlreadyRegistered({
+      orgName: 'Acme Org',
+      inviteUrl: 'https://portal.example.org/register/invite?grant=xyz',
+    });
+    expect(out.html).not.toMatch(/works until|expires|90 days/i);
+    expect(out.text).not.toMatch(/works until|expires|90 days/i);
+  });
+
+  it('escapes user-controlled fields', () => {
+    const out = renderOrgAlreadyRegistered({
+      orgName: '<script>alert(1)</script>',
+      inviteUrl: 'https://portal.example.org/register/invite?grant=xyz',
+    });
+    expect(out.html).not.toContain('<script>alert(1)</script>');
+    expect(out.html).toContain('&lt;script&gt;');
   });
 });
