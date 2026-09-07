@@ -28,7 +28,7 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "zod": "^3.24.0"
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "@aggregator-dpg/tsconfig": "workspace:*",

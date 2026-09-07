@@ -146,7 +146,7 @@ importers:
         version: 5.12.1
       fastify-type-provider-zod:
         specifier: ^4.0.2
-        version: 4.0.2(fastify@5.12.1)(zod@3.25.76)
+        version: 4.0.2(fastify@5.12.1)(zod@4.5.4)
       ioredis:
         specifier: ^5.11.1
         version: 5.11.1
@@ -166,8 +166,8 @@ importers:
         specifier: ^13.1.3
         version: 13.1.3
       zod:
-        specifier: ^3.24.1
-        version: 3.25.76
+        specifier: ^4.5.4
+        version: 4.5.4
     devDependencies:
       '@aggregator-dpg/tsconfig':
         specifier: workspace:*
@@ -402,8 +402,8 @@ importers:
         specifier: ^10.3.1
         version: 10.3.1
       zod:
-        specifier: ^3.24.1
-        version: 3.25.76
+        specifier: ^4.5.4
+        version: 4.5.4
     devDependencies:
       '@aggregator-dpg/tsconfig':
         specifier: workspace:*
@@ -436,8 +436,8 @@ importers:
         specifier: workspace:*
         version: link:../shared-primitives
       zod:
-        specifier: ^3.24.0
-        version: 3.25.76
+        specifier: ^4.5.4
+        version: 4.5.4
     devDependencies:
       '@aggregator-dpg/tsconfig':
         specifier: workspace:*
@@ -464,8 +464,8 @@ importers:
         specifier: ^0.45.2
         version: 0.45.2(@types/pg@8.23.1)(pg@8.23.0)
       zod:
-        specifier: ^3.24.0
-        version: 3.25.76
+        specifier: ^4.5.4
+        version: 4.5.4
     devDependencies:
       '@aggregator-dpg/tsconfig':
         specifier: workspace:*
@@ -492,8 +492,8 @@ importers:
         specifier: ^2.14.0
         version: 2.17.7
       zod:
-        specifier: ^3.24.0
-        version: 3.25.76
+        specifier: ^4.5.4
+        version: 4.5.4
     devDependencies:
       '@aggregator-dpg/tsconfig':
         specifier: workspace:*
@@ -523,8 +523,8 @@ importers:
         specifier: ^5.4.1
         version: 5.4.1
       zod:
-        specifier: ^3.24.0
-        version: 3.25.76
+        specifier: ^4.5.4
+        version: 4.5.4
     devDependencies:
       '@aggregator-dpg/tsconfig':
         specifier: workspace:*
@@ -560,8 +560,8 @@ importers:
         specifier: ^10.3.1
         version: 10.3.1
       zod:
-        specifier: ^3.24.0
-        version: 3.25.76
+        specifier: ^4.5.4
+        version: 4.5.4
     devDependencies:
       '@aggregator-dpg/tsconfig':
         specifier: workspace:*
@@ -641,8 +641,8 @@ importers:
         specifier: ^2.9.0
         version: 2.9.0
       zod:
-        specifier: ^3.24.0
-        version: 3.25.76
+        specifier: ^4.5.4
+        version: 4.5.4
     devDependencies:
       '@aggregator-dpg/tsconfig':
         specifier: workspace:*
@@ -763,8 +763,8 @@ importers:
   packages/schema-service:
     dependencies:
       zod:
-        specifier: ^3.24.0
-        version: 3.25.76
+        specifier: ^4.5.4
+        version: 4.5.4
     devDependencies:
       '@aggregator-dpg/tsconfig':
         specifier: workspace:*
@@ -788,8 +788,8 @@ importers:
   packages/shared-primitives:
     dependencies:
       zod:
-        specifier: ^3.24.0
-        version: 3.25.76
+        specifier: ^4.5.4
+        version: 4.5.4
     devDependencies:
       '@aggregator-dpg/tsconfig':
         specifier: workspace:*
@@ -6369,11 +6369,8 @@ packages:
     peerDependencies:
       zod: ^3.25.28 || ^4
 
-  zod@3.25.76:
-    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
-
-  zod@4.4.3:
-    resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
+  zod@4.5.4:
+    resolution: {integrity: sha512-sC95tT5iHHH9gtpj6A81kh+NEaRAUFN+qlUPDUbRfOMvNf5QCBqsb3WgvnpVtK5Y+4UfA6KqufotuTvMGiTlsA==}
 
   zwitch@2.0.4:
     resolution: {integrity: sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A==}
@@ -8116,7 +8113,7 @@ snapshots:
       '@scalar/helpers': 0.11.1
       nanoid: 5.1.16
       type-fest: 5.8.0
-      zod: 4.4.3
+      zod: 4.5.4
 
   '@scalar/validation@0.6.3': {}
 
@@ -9630,12 +9627,12 @@ snapshots:
 
   fastify-plugin@6.0.0: {}
 
-  fastify-type-provider-zod@4.0.2(fastify@5.12.1)(zod@3.25.76):
+  fastify-type-provider-zod@4.0.2(fastify@5.12.1)(zod@4.5.4):
     dependencies:
       '@fastify/error': 4.2.0
       fastify: 5.12.1
-      zod: 3.25.76
-      zod-to-json-schema: 3.25.2(zod@3.25.76)
+      zod: 4.5.4
+      zod-to-json-schema: 3.25.2(zod@4.5.4)
 
   fastify@5.12.1:
     dependencies:
@@ -12230,12 +12227,10 @@ snapshots:
 
   yocto-queue@0.1.0: {}
 
-  zod-to-json-schema@3.25.2(zod@3.25.76):
+  zod-to-json-schema@3.25.2(zod@4.5.4):
     dependencies:
-      zod: 3.25.76
+      zod: 4.5.4
 
-  zod@3.25.76: {}
-
-  zod@4.4.3: {}
+  zod@4.5.4: {}
 
   zwitch@2.0.4: {}

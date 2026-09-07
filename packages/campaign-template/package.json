@@ -26,7 +26,7 @@
   "dependencies": {
     "marked": "^18.0.11",
     "sanitize-html": "^2.14.0",
-    "zod": "^3.24.0"
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "@aggregator-dpg/tsconfig": "workspace:*",

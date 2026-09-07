@@ -31,7 +31,7 @@
     "@aggregator-dpg/db-schema": "workspace:*",
     "@aggregator-dpg/shared-primitives": "workspace:*",
     "drizzle-orm": "^0.45.2",
-    "zod": "^3.24.0"
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "@aggregator-dpg/tsconfig": "workspace:*",
