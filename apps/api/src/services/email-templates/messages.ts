@@ -7,22 +7,24 @@
  *
  * Per-key precedence, lowest first:
  *
- *   1. bundled defaults (`messages.default.properties`, complete)
+ *   1. `config/emails/messages.properties` — aggregator-level default, complete
  *   2. `config/<network>/emails/messages.properties`
  *   3. `config/<network>/<brand>/emails/messages.properties`
  *   4. `EMAIL_MESSAGES_PATH` — per-instance escape hatch, wins over all
  *
+ * Every layer lives in `config/`, none in the source tree: email copy is
+ * deployment content, the same as the consent documents and the form schemas
+ * beside it, so changing a sentence is a config edit rather than a release.
+ *
  * Layers 2-4 are PARTIAL: a file lists only the keys it changes and everything
- * else falls through. Layer 1 must be complete, which
- * {@link assertMessagesComplete} enforces at boot — a hole there is a build
- * defect, not a deployment choice.
+ * else falls through. Layer 1 must be COMPLETE, which
+ * {@link assertMessagesComplete} enforces at boot.
  *
  * Lookup is SYNCHRONOUS by design. The templates are sync functions called
  * from request handlers, and making them async would ripple through every call
- * site for no benefit. The bundled defaults are read once, lazily, with
- * `readFileSync` (a small file shipped next to this module); the override
- * layers are merged in at boot by {@link loadEmailMessageOverrides}, the same
- * shape as `setEmailBrand`.
+ * site for no benefit. The default layer is read once, lazily, with
+ * `readFileSync`; the override layers are merged in at boot by
+ * {@link loadEmailMessageOverrides}, the same shape as `setEmailBrand`.
  *
  * @module @aggregator-dpg/api
  */
@@ -30,34 +32,53 @@
 import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { resolveConfigDir, resolveActiveNetwork } from '@aggregator-dpg/network-config/paths';
+import { resolveConfigRoot, resolveActiveNetwork } from '@aggregator-dpg/network-config/paths';
 import { logger } from '../../logger.js';
 import { parseProperties } from './parse-properties.js';
 import { requiredMessageKeys } from './email-cases.js';
 
-const DEFAULTS_PATH = path.join(
-  path.dirname(fileURLToPath(import.meta.url)),
-  'messages.default.properties',
-);
+/** Relative location of a copy layer inside its config directory. */
+const MESSAGES_FILE = path.join('emails', 'messages.properties');
+
+/**
+ * Absolute path to the aggregator-level default layer.
+ *
+ * @param env - Env-var bag; defaults to `process.env`.
+ * @returns `<config root>/emails/messages.properties`.
+ */
+function defaultsPath(env: NodeJS.ProcessEnv = process.env): string {
+  return path.join(resolveConfigRoot(env), MESSAGES_FILE);
+}
 
 let messages: Map<string, string> | null = null;
 
 /**
  * Reads and parses the bundled defaults.
  *
+ * @param env - Env-var bag; defaults to `process.env`.
  * @returns Parsed default entries.
- * @throws {Error} If the bundled file is missing — it ships with the module,
- *   so absence means a broken build, and failing here beats sending blanks.
+ * @throws {Error} If the file is missing. It is checked into `config/`, so
+ *   absence means a broken image or a wrong `CONFIG_ROOT` — failing here beats
+ *   sending blank emails.
  */
-function loadDefaults(): Map<string, string> {
-  const text = readFileSync(DEFAULTS_PATH, 'utf8');
+function loadDefaults(env: NodeJS.ProcessEnv = process.env): Map<string, string> {
+  const file = defaultsPath(env);
+  let text: string;
+  try {
+    text = readFileSync(file, 'utf8');
+  } catch (cause) {
+    throw new Error(
+      `email copy defaults not found at ${file} — check CONFIG_ROOT and that config/ is present`,
+      { cause },
+    );
+  }
   const parsed = parseProperties(text);
   if (parsed.malformedLines.length > 0) {
-    // Bundled file — malformed lines are our own defect, so this is an error.
+    // The default layer is ours to keep valid, so this is an error not a warn.
     logger.error({
       operation: 'emailMessages.loadDefaults',
       status: 'failure',
+      file,
       malformed_lines: parsed.malformedLines,
     });
   }
@@ -93,10 +114,12 @@ export function getMessage(key: string): string {
  * @returns Absolute paths, in the order they must be merged.
  */
 export function emailMessageOverridePaths(env: NodeJS.ProcessEnv = process.env): string[] {
-  const configDir = resolveConfigDir(env);
+  const root = resolveConfigRoot(env);
   const { network, brand } = resolveActiveNetwork(env);
-  const paths = [path.join(configDir, network, 'emails', 'messages.properties')];
-  if (brand) paths.push(path.join(configDir, network, brand, 'emails', 'messages.properties'));
+  // Built from the config ROOT, not `resolveConfigDir` — that already descends
+  // into the network, so joining it again doubles the segment.
+  const paths = [path.join(root, network, MESSAGES_FILE)];
+  if (brand) paths.push(path.join(root, network, brand, MESSAGES_FILE));
   const instance = env.EMAIL_MESSAGES_PATH?.trim();
   if (instance) paths.push(instance);
   return paths;
@@ -116,7 +139,7 @@ export function emailMessageOverridePaths(env: NodeJS.ProcessEnv = process.env):
 export async function loadEmailMessageOverrides(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<number> {
-  const merged = new Map(loadDefaults());
+  const merged = new Map(loadDefaults(env));
   let overridden = 0;
 
   for (const file of emailMessageOverridePaths(env)) {

@@ -126,21 +126,45 @@ describe('message lookup', () => {
 describe('override path precedence', () => {
   it('orders network, then brand, then the instance escape hatch', () => {
     const paths = emailMessageOverridePaths({
+      CONFIG_ROOT: '/cfg',
       AGGREGATOR_NETWORK: 'blue_dot',
       AGGREGATOR_BRAND: 'up-gzb',
       EMAIL_MESSAGES_PATH: '/etc/aggregator/messages.properties',
     } as NodeJS.ProcessEnv);
-    expect(paths).toHaveLength(3);
-    expect(paths[0]).toContain('blue_dot/emails/messages.properties');
-    expect(paths[1]).toContain('blue_dot/up-gzb/emails/messages.properties');
-    expect(paths[2]).toBe('/etc/aggregator/messages.properties');
+    // Exact equality, not `toContain`: an earlier version built these from
+    // `resolveConfigDir`, which already descends into the network, so the
+    // segment was doubled (`/cfg/blue_dot/blue_dot/...`) and a substring
+    // assertion passed anyway.
+    expect(paths).toEqual([
+      '/cfg/blue_dot/emails/messages.properties',
+      '/cfg/blue_dot/up-gzb/emails/messages.properties',
+      '/etc/aggregator/messages.properties',
+    ]);
   });
 
   it('omits the brand layer when no brand is set', () => {
     const paths = emailMessageOverridePaths({
+      CONFIG_ROOT: '/cfg',
       AGGREGATOR_NETWORK: 'purple_dot',
     } as NodeJS.ProcessEnv);
-    expect(paths).toHaveLength(1);
-    expect(paths[0]).toContain('purple_dot/emails/messages.properties');
+    expect(paths).toEqual(['/cfg/purple_dot/emails/messages.properties']);
+  });
+
+  it('never repeats the network segment', () => {
+    for (const env of [
+      { CONFIG_ROOT: '/cfg', AGGREGATOR_NETWORK: 'blue_dot' },
+      { CONFIG_ROOT: '/cfg', AGGREGATOR_NETWORK: 'blue_dot', AGGREGATOR_BRAND: 'up-gzb' },
+    ] as NodeJS.ProcessEnv[]) {
+      for (const p of emailMessageOverridePaths(env)) {
+        expect(p.split('/').filter((seg) => seg === 'blue_dot')).toHaveLength(1);
+      }
+    }
+  });
+
+  it('reads the aggregator-level default from the config root', () => {
+    // Loaded from config/emails/messages.properties via CONFIG_ROOT, which the
+    // vitest config points at the repo's own config/.
+    expect(() => assertMessagesComplete()).not.toThrow();
+    expect(getMessage('applicant_approved.subject')).toContain('approved');
   });
 });
