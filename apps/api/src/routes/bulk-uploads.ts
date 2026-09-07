@@ -82,15 +82,17 @@ async function loadParticipantSchema(participantType: string): Promise<JsonSchem
 }
 
 /**
- * Query shape for the CSV template download. Valid `participant_type` values
- * are network-config driven (e.g. seeker/provider), so the schema stays an
- * open string and the handler validates against the live config.
+ * Query shape for the template download. Valid `participant_type` values are
+ * network-config driven (e.g. seeker/provider), so the schema stays an open
+ * string and the handler validates against the live config.
  */
 const TemplateQuerySchema = z.object({
   participant_type: z
     .string()
     .optional()
-    .describe('Participant domain id declared by the active network (e.g. seeker, provider).'),
+    .describe(
+      'Participant domain id declared by the active network (e.g. seeker, provider). Required for format=csv; ignored for format=xlsx, which covers every domain.',
+    ),
   /**
    * `csv` (default) keeps the existing behaviour byte-for-byte, including the
    * curated shipped sample. `xlsx` returns a workbook that carries the guidance
@@ -216,9 +218,9 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
     {
       schema: {
         tags: ['bulk-uploads'],
-        summary: 'Download CSV template for a domain',
+        summary: 'Download the bulk-upload template (CSV or XLSX)',
         description:
-          "Returns a CSV template (text/csv) with the header row + sample row for the requested ?participant_type= (seeker/provider). Array-typed fields use the network's csv_array_delimiter. Responds with a text/csv attachment on 200 (no JSON body).",
+          "?format=csv (default) returns a CSV template (text/csv) with the header row + sample row for the requested ?participant_type= (seeker/provider). ?format=xlsx returns one workbook covering every domain the network serves — a sample sheet, a fill-in sheet with dropdowns and an allowed-values sheet per type — and ignores ?participant_type=. Array-typed fields use the network's csv_array_delimiter. Responds with a file attachment on 200 (no JSON body).",
         security: [{ bearerAuth: [] }],
         querystring: TemplateQuerySchema,
         response: {
@@ -228,30 +230,39 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
     },
     async (req, reply) => {
       const auth = await requireAuth(req);
-      const query = req.query as { participant_type?: string };
-      const participantType = query.participant_type;
-      const validTypes = await getValidParticipantTypes();
-      if (!participantType || !validTypes.has(participantType)) {
-        throw httpError('SCHEMA_VALIDATION', {
-          detail: `participant_type must be one of: ${[...validTypes].join(', ')}.`,
-          fields: { participant_type: 'invalid' },
-        });
-      }
-      enforceAggregatorType(auth, participantType as string);
-
       const format = (req.query as { format?: 'csv' | 'xlsx' }).format ?? 'csv';
+      const validTypes = await getValidParticipantTypes();
 
-      // XLSX is ALWAYS generated from the live schema — deliberately not served
-      // from `bulk-samples/`. A committed workbook would rot exactly as the
-      // shipped CSVs have (up-gzb/provider.csv still carries a `title` column
-      // the schema dropped, so every row in it now fails validation), and the
-      // dropdowns are only trustworthy if they come from the schema in force.
+      // XLSX covers EVERY domain the network serves in one workbook — a sheet
+      // group per type, matching the reference workbook on #564 — so it takes
+      // no `participant_type` and the type gate does not apply to it. That is
+      // safe: the workbook is derived purely from the participant schemas,
+      // which are public config-as-code (the portal already serves them
+      // anonymously for registration), and the gate that actually matters
+      // still stands on POST /v1/bulk-uploads, where rows get attributed to an
+      // aggregator. A seeker coordinator seeing the provider columns cannot
+      // upload provider rows.
+      //
+      // The workbook is ALWAYS generated from the live schemas, deliberately
+      // not served from `bulk-samples/`. A committed workbook would rot
+      // exactly as the shipped CSVs have (up-gzb/provider.csv still carries a
+      // `title` column the schema dropped, so every row in it now fails
+      // validation), and the dropdowns are only trustworthy if they come from
+      // the schema in force.
       if (format === 'xlsx') {
-        const xlsxSchema = await loadParticipantSchema(participantType as string);
         const cfgForXlsx = await getNetworkConfig();
-        const workbook = await buildXlsxTemplate(xlsxSchema, {
+        const domains = await Promise.all(
+          [...validTypes].map(async (id) => ({
+            id,
+            schema: await loadParticipantSchema(id),
+            // Names the phone/email columns so their sample cells are realistic
+            // rather than "Example Mobile Number" — see XlsxDomain.identity.
+            identity: cfgForXlsx.domains[id]?.identity,
+          })),
+        );
+        const workbook = await buildXlsxTemplate(domains, {
+          network: cfgForXlsx.network.id,
           arrayDelimiter: cfgForXlsx.aggregator.network.csv_array_delimiter,
-          participantType: participantType as string,
         });
         void auth; // authenticated for audit; workbook content is schema-derived only
         return reply
@@ -259,9 +270,22 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
             'Content-Type',
             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
           )
-          .header('Content-Disposition', `attachment; filename="${participantType}-template.xlsx"`)
+          .header(
+            'Content-Disposition',
+            `attachment; filename="${cfgForXlsx.network.id}-bulk-template.xlsx"`,
+          )
           .send(workbook);
       }
+
+      const query = req.query as { participant_type?: string };
+      const participantType = query.participant_type;
+      if (!participantType || !validTypes.has(participantType)) {
+        throw httpError('SCHEMA_VALIDATION', {
+          detail: `participant_type must be one of: ${[...validTypes].join(', ')}.`,
+          fields: { participant_type: 'invalid' },
+        });
+      }
+      enforceAggregatorType(auth, participantType as string);
 
       // Prefer a curated, data-complete sample CSV shipped with the active
       // network config (config/<network>/bulk-samples/<type>.csv) — real, valid

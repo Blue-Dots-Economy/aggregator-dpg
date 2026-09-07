@@ -138,9 +138,13 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
     }
   };
 
-  const downloadTemplate = (format: 'csv' | 'xlsx' = 'csv') => {
-    const suffix = format === 'xlsx' ? '&format=xlsx' : '';
-    window.location.href = `/api/bulk-uploads/template?participant_type=${participantType}${suffix}`;
+  const downloadTemplate = () => {
+    // Workbook only. It carries the dropdowns, the required-column marking and
+    // the delimiter note, so it is the format that prevents the errors #564 is
+    // about — offering a bare CSV alongside it just invites the version with no
+    // guidance. `GET /v1/bulk-uploads/template` still defaults to CSV for API
+    // callers that generate their own file.
+    window.location.href = `/api/bulk-uploads/template?participant_type=${participantType}&format=xlsx`;
   };
 
   return (
@@ -172,25 +176,12 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
               </div>
             )}
           </div>
-          {/*
-           * Excel first: it carries the dropdowns, the required-column marking
-           * and the delimiter note, so it is the format that prevents the
-           * errors #564 is about. CSV stays for anyone generating the file from
-           * their own system, and is what the upload path accepts either way.
-           */}
           <button
             type="button"
-            onClick={() => downloadTemplate('xlsx')}
+            onClick={downloadTemplate}
             className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-primary-600 hover:underline"
           >
             <I.download size={14} /> {t('csv.download_template_xlsx')}
-          </button>
-          <button
-            type="button"
-            onClick={() => downloadTemplate('csv')}
-            className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-ink-400 hover:underline"
-          >
-            <I.download size={14} /> {t('csv.download_template')}
           </button>
         </div>
       </div>

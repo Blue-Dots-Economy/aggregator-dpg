@@ -11,6 +11,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
+import ExcelJS from 'exceljs';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
@@ -390,7 +391,8 @@ describe('bulk-uploads routes', () => {
       expect(res.headers['content-type']).toContain(
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       );
-      expect(res.headers['content-disposition']).toContain('seeker-template.xlsx');
+      // Named for the network, not the type: one workbook carries every domain.
+      expect(res.headers['content-disposition']).toContain('blue_dot-bulk-template.xlsx');
       // An .xlsx is a ZIP: the magic bytes prove bytes survived the response
       // path rather than being decoded as text somewhere.
       expect(res.rawPayload.subarray(0, 2).toString('latin1')).toBe('PK');
@@ -430,13 +432,49 @@ describe('bulk-uploads routes', () => {
       expect(res.statusCode).toBe(400);
     });
 
-    it('enforces aggregator type on the xlsx path too', async () => {
+    it('serves the whole-network workbook regardless of the registered type', async () => {
+      // The workbook covers every domain in one file (the reference workbook on
+      // #564), so the type gate does not apply to it: its content is derived
+      // purely from the participant schemas, which are public config-as-code.
+      // The gate that matters still stands on POST /v1/bulk-uploads, where rows
+      // get attributed to an aggregator.
       const res = await app.inject({
         method: 'GET',
         url: '/v1/bulk-uploads/template?participant_type=provider&format=xlsx',
         headers: AUTH('seeker-approved'),
       });
-      expect(res.statusCode).toBe(403);
+      expect(res.statusCode).toBe(200);
+      expect(res.rawPayload.subarray(0, 2).toString('latin1')).toBe('PK');
+    });
+
+    it('needs no participant_type for xlsx, since it covers every domain', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/v1/bulk-uploads/template?format=xlsx',
+        headers: AUTH('seeker-approved'),
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.headers['content-disposition']).toContain('blue_dot-bulk-template.xlsx');
+    });
+
+    it('carries a sheet group for EVERY domain the network serves', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/v1/bulk-uploads/template?format=xlsx',
+        headers: AUTH('seeker-approved'),
+      });
+      const wb = new ExcelJS.Workbook();
+      await wb.xlsx.load(res.rawPayload as unknown as ExcelJS.Buffer);
+      expect(wb.worksheets.map((s) => s.name)).toEqual([
+        'Instructions',
+        'Lists',
+        'sample_blue_dot_seekers',
+        'blue_dot_seekers_data',
+        'enumerated_seeker',
+        'sample_blue_dot_providers',
+        'blue_dot_providers_data',
+        'enumerated_provider',
+      ]);
     });
 
     it('401s without a token', async () => {
