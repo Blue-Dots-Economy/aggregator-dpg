@@ -15,6 +15,10 @@ import { closeCampaignProcessQueue } from './services/campaign-process-queue/ind
 import { getNetworkConfig } from './services/network-config.js';
 import { setApprovalBrand } from './views/approval-pages.js';
 import { setEmailBrand } from './services/email-templates/shared.js';
+import {
+  loadEmailMessageOverrides,
+  assertMessagesComplete,
+} from './services/email-templates/messages.js';
 
 async function main(): Promise<void> {
   if (config.RUN_MIGRATIONS_ON_BOOT) {
@@ -48,6 +52,19 @@ async function main(): Promise<void> {
   } catch (err) {
     logger.warn({ err }, 'approval brand seed failed — falling back to default');
   }
+
+  // Externalised email copy: merge the network/brand/instance override layers
+  // over the bundled defaults, then assert every key a case declares exists.
+  // Overrides are best-effort (a missing layer is normal, an unreadable one is
+  // logged and skipped) but a hole in the DEFAULTS is a build defect, so the
+  // completeness check is allowed to stop boot rather than send blank emails.
+  const overridden = await loadEmailMessageOverrides();
+  assertMessagesComplete();
+  logger.info({
+    operation: 'emailMessages.init',
+    status: 'success',
+    overridden_keys: overridden,
+  });
 
   const shutdown = (signal: string) => async () => {
     logger.info({ signal }, 'shutting down');

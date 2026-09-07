@@ -12,7 +12,7 @@ import type {
   SignalStackFetchDecryptedProfilesQuery,
 } from '@aggregator-dpg/signalstack-writer/interface';
 import type { SendInput, SendOk, MailerResult } from '@aggregator-dpg/mailer/interface';
-import type { ProcessingJob } from '../campaign-job-client.js';
+import type { JobStatusCounts, ProcessingJob } from '../campaign-job-client.js';
 import type { CampaignJobDeps } from './index.js';
 import {
   runEmailForJob,
@@ -41,6 +41,19 @@ function row(
 }
 
 const TEMPLATE = { subject: 'Hi {{first_name}}', bodyMarkdown: 'Hello {{name}}' };
+
+/** Zero item-status tally — `jobHarness`'s `rollUpStatus`/`countItems` never drive an assertion in this file (that's `index.test.ts`'s job). */
+const ZERO_COUNTS: JobStatusCounts = {
+  total: 0,
+  pending: 0,
+  resolved: 0,
+  submitted: 0,
+  sent: 0,
+  skipped_not_owned: 0,
+  skipped_no_contact: 0,
+  duplicate_active: 0,
+  failed: 0,
+};
 
 interface Harness {
   deps: EmailSendDeps;
@@ -295,11 +308,12 @@ function jobHarness(
         heartbeats++;
       },
       setJobStatus: async () => undefined,
-      rollUpStatus: async () => 'completed',
+      rollUpStatus: async () => ({ status: 'completed', counts: ZERO_COUNTS }),
       setNotifiedAt: async () => undefined,
       failPendingItems: async () => undefined,
       markSubmitted: async () => undefined,
       setProviderResponse: async () => undefined,
+      countItems: async () => ZERO_COUNTS,
     },
     export: {
       fetchDecryptedProfiles: async () => ok({ profiles: [], skipped: [] }),

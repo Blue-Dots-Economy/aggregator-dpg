@@ -13,8 +13,10 @@ Service-account-only endpoints additionally gate on `subject.startsWith('service
 `AggregatorStatus = 'pending' | 'active' | 'inactive' | 'retired'` (`packages/db-schema/src/schema-types.ts:17`) is a bare type union in code with no transition diagram anywhere. In practice:
 
 - **Approve** (`pending → active`) is CAS-guarded: `aggregatorStore.approveFromPending()` (`services/aggregator-store/postgres.ts:189`) does `UPDATE ... WHERE id=? AND status='pending'` — a concurrent double-approve is a no-op on the second call, not a double-provision.
-- **Reject** uses a plain `updateStatus` write (no CAS) — safe because rejection has no provisioning side effects to double-fire; a `prior = decisionFromStatus(...)` read-then-check guard runs before either branch regardless.
+- **Reject** (`pending → inactive`) uses a plain `store.update(...)` write (no CAS) — safe because rejection has no provisioning side effects to double-fire; a `prior = decisionFromStatus(...)` read-then-check guard runs before either branch regardless. The reject write also stamps a **write-once `rejected_at`** timestamp (coordinator via the `update` patch, org via `casFromPending` on the `inactive` transition) — see the cooling window below.
 - `retired` exists in the type but its transition path isn't in the approval routes above — check `aggregator-maintenance.ts` before assuming where it's set.
+
+**Rejection cooling window (#726).** A rejected coordinator/org cannot re-register until `REGISTRATION_COOLING_MINUTES` (default `720` = 12h) has elapsed since `rejected_at`. The window is measured from the **write-once `rejected_at`**, never the mutable `updated_at` (any later write would move it — the race we designed around). On the public submit path (`aggregator-registrations.ts` email+phone, `aggregator-orgs.ts` owner_email) a rejected match within the window → `409 REGISTRATION_COOLING` with `error.fields.retry_after` (ISO); once elapsed the **same row is revived** to `pending` (`rejected_at` cleared) and the review link re-sent — the disabled Keycloak user/group stay intact, nothing is deleted or re-created. The shared verdict helper is `services/registration-cooling.ts` (`coolingRetryAfter`), imported by both routes so they can't drift. `rejected_at` is `NULL` for rows rejected before migration `0021`; the helper falls back to `updated_at` for those.
 
 ## Consent-ledger write is fail-closed and ordered before provisioning
 
@@ -39,6 +41,126 @@ Streaming CSV parsing is entirely `apps/worker`'s job (see `apps/worker/CLAUDE.m
 `signalstack-writer` forwards an optional `requestId` as the `x-request-id` header from request-scoped call sites (dashboard, public-lookup, registration-links, approvals) so a trace correlates across services. The worker `onboard`/login-backfill paths have no request context and don't propagate it (known follow-up).
 
 A Signals `409 PROFILE_LIMIT_REACHED` is mapped to `SIGNALSTACK_PROFILE_LIMIT_REACHED` and categorised as `limit_reached` (not `system_error`) in `errors.csv`, and surfaced on registration links. Note that `onboard` is **no longer idempotent** — it always inserts, bounded only by the profile cap.
+
+## Campaign PII audit log (#617)
+
+`campaign_pii_audit` is **append-only** and records every campaign action that
+**releases data** — export, voice, email, and the non-PII dump. Status/list GETs
+are deliberately NOT audited: the rule is data release, not API traffic, and
+clients poll every 5-10s.
+
+- A campaign writes **two** rows sharing `correlation_id = campaign_job.id`:
+  `requested` from the API, `completed` from the worker on terminal status.
+  A dump writes **one**. That row's `actor_org_id` is never set at all —
+  `DumpAuditInput` (`packages/campaign-audit/src/interface.ts`) has no such
+  field, and `PostgresCampaignAuditWriter.recordDumpAccess` (`postgres.ts`)
+  omits the key from the insert rather than passing an explicit `null` — the
+  column stores NULL as a result. That NULL is meaningful: it marks a
+  whole-network, un-org-scoped access, and must never be backfilled with a
+  guessed org.
+- `event` is the phase, `outcome` is the result. `outcome` is NULL on
+  `requested` rows.
+- `piiFields` (on the `requested` row) carries **field NAMES and counts
+  only, never values** — see the interface's module doc
+  (`packages/campaign-audit/src/interface.ts:8-9`). The voice channel is the
+  one place this needed active enforcement: `content.variables` is
+  caller-supplied free text (not a schema-validated field-name list), so
+  before it is copied into `piiFields` it passes through
+  `apps/api/src/campaign/audit-field-names.ts`'s
+  `sanitizeAuditFieldNames`/`auditFieldNameEntries`, which keeps only
+  identifier-shaped strings, each at most `MAX_FIELD_NAME_LENGTH` (64) chars,
+  and at most `MAX_FIELD_NAME_COUNT` (50) of them per row, replacing whatever
+  it drops with a count — `+N redacted (non-identifier)` for shape failures,
+  `+N redacted (too long)` for an over-length entry, `+N redacted (over
+limit)` once the count cap is reached — three distinct markers, never
+  folded together, so each count means what it says and never the raw value
+  itself. Known residual gap: a single-word ASCII value up to 64 characters
+  (e.g. a first name with no space) is indistinguishable from a real field
+  name by that filter and passes through unredacted; don't rely on it to
+  catch that case.
+- The writer (`@aggregator-dpg/campaign-audit`) is **write-only** — no update,
+  delete or read. That absence IS the append-only guarantee; do not add one.
+- Writes are **best effort**: they happen after the operation is already durable
+  and never fail a campaign.
+- The `completed` row carries the four outcome-count columns
+  (`resolved_count`, `skipped_count`, `failed_count`, `sent_count`), plus
+  (export channel only) `recipient_ref` and `destination`. All are populated
+  at every point that writes a `completed` row — the worker's success
+  roll-up and final-attempt-failure paths (`campaign-process/index.ts`), and
+  the watchdog's stalled-job sweep (`jobs/cron-watchdog.ts`, see below) —
+  from `rollUpStatus`/`countItems`'s item-status tally
+  (`services/campaign-job-client.ts`), never re-queried separately.
+  `toAuditCounts()` (same file) does the mapping:
+  - **`resolved_count` ← `resolved + submitted`.** Voice items terminate at
+    `submitted`, never `resolved` or `sent` — handing a contact to Raya IS
+    the release, so it must be counted. Without this, a fully successful
+    voice campaign would audit as `outcome: 'succeeded'` with every count at
+    zero, which reads as "measured, and nothing happened" rather than "not
+    measured" — worse than leaving the columns null. This mirrors
+    `deriveJobStatus`'s own `succeeded = resolved + submitted + sent`
+    grouping, so the counts and the derived status agree about what counts
+    as a release. `sent_count` stays strictly confirmed-delivered (export/
+    email's own success write).
+  - **`skipped_count` aggregates three item statuses that are deliberate
+    no-ops rather than a release** — `skipped_not_owned`,
+    `skipped_no_contact`, and `duplicate_active` — never split across the
+    fixed audit columns.
+    `recipient_ref`/`destination` are an OPERATOR address and the deterministic
+    S3 export key respectively (`resolveExportRecipient`/`exportObjectKey`,
+    `campaign-process/index.ts`) — both helpers are shared between the send
+    path and the audit write so the two cannot drift, and both are left unset
+    for voice/email (an operator address must never be attributed to a channel
+    that never released one).
+- **`error_code` is dual-purpose — not a stable enumeration.** Depending on
+  which code path wrote the row it holds either a genuine error code (the
+  dump route's `503 DUMP_NOT_CONFIGURED`, or the watchdog's `stalled` below)
+  or a raw exception class name (`err.constructor.name`,
+  `campaign-process/index.ts`'s worker-completion write) — usually the
+  literal string `Error`, since most thrown errors in this codebase are
+  plain `Error`s rather than a named subclass. Renaming the column (e.g. to
+  `error_class`) was considered and rejected: dump rows carry a real error
+  code, so that name would be wrong for every one of those. Query this
+  column expecting free text, not a fixed set of values.
+- **The stalled-job watchdog also writes a `completed` row** (#617
+  follow-up): `jobs/cron-watchdog.ts`'s stall sweep force-fails a
+  `processing` job whose heartbeat went stale, which is a terminal
+  transition per §6 of the design doc — the worker may have died mid-run
+  after already releasing data to some participants, which is exactly the
+  case with the least room for a missing completion record. That row has
+  `outcome: 'failed'`, `error_code: 'stalled'`, and the counts above, plus
+  (export channel only) `destination` and `recipient_ref` — the sweep's
+  `.returning()` also selects `requested_by` (alongside `channel`/
+  `signalstack_org_id`), so it recomputes `recipient_ref` with the exact same
+  `resolveExportRecipient` helper a normal export completion uses, against
+  the worker's own export-recipient config. Still an operator address, never
+  a participant's.
+
+Find gaps (audit rows that should exist and do not):
+
+```sql
+SELECT j.id, j.channel, j.status, j.created_at
+FROM campaign_job j
+LEFT JOIN campaign_pii_audit a
+  ON a.correlation_id = j.id AND a.event = 'requested'
+WHERE a.id IS NULL;
+```
+
+The mirror check (every `completed` has a `requested`) must exclude
+`channel = 'dump'`, which legitimately has no `requested` row.
+
+The reverse gap — a job that reached a terminal status but never got its
+`completed` row — is exactly the anomaly the watchdog fix above closes;
+`campaign_job` never has `channel = 'dump'` rows, so no exclusion is needed
+here:
+
+```sql
+SELECT j.id, j.channel, j.status, j.created_at
+FROM campaign_job j
+LEFT JOIN campaign_pii_audit a
+  ON a.correlation_id = j.id AND a.event = 'completed'
+WHERE j.status IN ('completed', 'partial', 'failed')
+  AND a.id IS NULL;
+```
 
 ## Tests
 

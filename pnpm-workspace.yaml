@@ -40,3 +40,16 @@ overrides:
   'postcss@<8.5.26': 8.5.26
   'sharp@<0.35.0': 0.35.0
   '@babel/core@<7.29.6': 7.29.6
+
+  # fast-uri 3.1.5 and 4.1.2 → four HIGH SSRF / host-confusion advisories:
+  # CVE-2026-75899, CVE-2026-75931, CVE-2026-75975, CVE-2026-76172. Fixed in
+  # 2.4.5 / 3.1.6 / 4.1.3. It arrives via fastify/ajv, is declared nowhere here,
+  # and so cannot be raised by Dependabot.
+  #
+  # Both major lines are in this tree and are floored SEPARATELY — collapsing
+  # them onto one version is the same duplicate/cross-major trap as ioredis
+  # above. The replacement is an exact version, not `'>=3.1.6'`: an open-ended
+  # `>=` is not bounded by the selector's major, so the 3.x floor silently
+  # pulled that copy up to 4.1.4 when first tried in signals-dpg.
+  'fast-uri@>=3.0.0 <3.1.6': 3.1.7
+  'fast-uri@>=4.0.0 <4.1.3': 4.1.4

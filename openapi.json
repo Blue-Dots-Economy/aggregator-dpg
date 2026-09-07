@@ -292,6 +292,9 @@
                   },
                   "org_id": {
                     "type": "string"
+                  },
+                  "invite": {
+                    "type": "string"
                   }
                 },
                 "required": [

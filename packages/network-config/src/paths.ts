@@ -68,10 +68,26 @@ export function resolveConsentSourceOverride(env: ConfigPathEnv = process.env): 
  * @returns Absolute directory path for the active network/brand config.
  */
 export function resolveConfigDir(env: ConfigPathEnv = process.env): string {
-  const root = env.CONFIG_ROOT?.trim() || '/app/config';
+  const root = resolveConfigRoot(env);
   const net = env.AGGREGATOR_NETWORK?.trim() || 'blue_dot';
   const brand = env.AGGREGATOR_BRAND?.trim();
   return brand ? path.join(root, net, brand) : path.join(root, net);
+}
+
+/**
+ * Resolves the config ROOT — the directory holding every network folder plus
+ * the aggregator-level defaults that sit beside them.
+ *
+ * Distinct from {@link resolveConfigDir}, which descends into the active
+ * network (and brand). Anything layering a root-level default under a
+ * network-level override needs the root, and joining the network onto
+ * `resolveConfigDir`'s result would double that segment.
+ *
+ * @param env - Env-var bag; defaults to `process.env`.
+ * @returns Absolute path to the config root. Default: `/app/config`.
+ */
+export function resolveConfigRoot(env: ConfigPathEnv = process.env): string {
+  return env.CONFIG_ROOT?.trim() || '/app/config';
 }
 
 /**

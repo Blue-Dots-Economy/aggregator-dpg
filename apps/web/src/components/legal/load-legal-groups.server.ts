@@ -1,19 +1,23 @@
 /**
- * Assembles the three audience groups (`participant`, `aggregator`, `org`)
- * `/privacy` and `/terms` need for their contents rail.
+ * Assembles the audience groups `/legal` needs for its contents rail: the
+ * aggregator's own operator policy, and the organisation one.
  *
- * Each audience is loaded independently — one loader call for participant
- * content, one for the aggregator/org config — so a missing or malformed
- * operator policy can never take down the participant one, and vice versa.
- * An audience whose content fails to load is simply omitted from the
- * returned list rather than throwing.
+ * **No participant group.** A participant never registers through this portal
+ * — they register through a public QR form, which shows them their own
+ * documents inline in its consent gate, and their standing copy lives in the
+ * Signals portal. Publishing the participant documents here as well meant a
+ * page that mixed two unrelated audiences, and (once `/legal` became the one
+ * page) that the FIRST group a reader met was for people who never visit.
+ *
+ * The two remaining audiences load from one config call, and a failure returns
+ * an empty list rather than throwing: a config problem must render a message,
+ * not a stack trace.
  *
  * @module apps/web/src/components/legal/load-legal-groups.server
  */
 import 'server-only';
 import { getTranslations } from 'next-intl/server';
 import { loadConsentConfig } from '@aggregator-dpg/config-loader/fs';
-import { loadParticipantConsent } from '../../lib/participant-consent.server';
 import { logger } from '../../lib/logger';
 import type { ConsentDocContent } from '../consent/consent-types';
 import type { LegalGroup } from './LegalDocumentView';
@@ -39,27 +43,6 @@ function pickCurrent(doc: AudienceDoc): ConsentDocContent['terms'] {
     content: found.content,
     effective_from: found.effective_from,
   };
-}
-
-/**
- * Loads the participant audience group from the interim Signals-copied
- * `consent.json` (see `participant-consent.server`). Returns `null` when the
- * file is absent or malformed — the page then simply omits this group.
- */
-async function loadParticipantGroup(label: string): Promise<LegalGroup | null> {
-  try {
-    const content = await loadParticipantConsent();
-    if (!content) return null;
-    return { audience: 'participant', label, content };
-  } catch (err) {
-    logger.warn({
-      operation: 'loadLegalGroups',
-      audience: 'participant',
-      status: 'failure',
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return null;
-  }
 }
 
 /**
@@ -109,22 +92,16 @@ async function loadAggregatorOrgGroups(labels: {
 }
 
 /**
- * Loads every audience's consent content for the public `/privacy` and
- * `/terms` pages, in participant → aggregator → org order.
+ * Loads the operator audiences' consent content for `/legal`, in aggregator →
+ * org order.
  *
- * @returns The audiences whose content loaded successfully; empty when
- *   every audience failed (the view then renders a `role="status"` message
- *   instead of a blank page).
+ * @returns Both audiences, or an empty list when the config failed to load
+ *   (the view then renders a `role="status"` message instead of a blank page).
  */
 export async function loadLegalGroups(): Promise<LegalGroup[]> {
   const t = await getTranslations('legal');
-  const [participant, aggregatorOrg] = await Promise.all([
-    loadParticipantGroup(t('audience_participant')),
-    loadAggregatorOrgGroups({
-      aggregator: t('audience_aggregator'),
-      org: t('audience_org'),
-    }),
-  ]);
-
-  return [...(participant ? [participant] : []), ...aggregatorOrg];
+  return loadAggregatorOrgGroups({
+    aggregator: t('audience_aggregator'),
+    org: t('audience_org'),
+  });
 }

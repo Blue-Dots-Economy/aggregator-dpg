@@ -72,4 +72,30 @@ describe('InMemoryAggregatorOrgStore', () => {
     expect(patched.ok && patched.value.kcGroupId).toBe('grp-1');
     expect(patched.ok && patched.value.ownerKcSub).toBe('kc-1');
   });
+
+  it('reject stamps write-once rejected_at; approve leaves it null (#726)', async () => {
+    const store = new InMemoryAggregatorOrgStore();
+    const rej = await store.create({ slug: 'r', displayName: 'R', ownerEmail: 'r@x.org' });
+    const app = await store.create({ slug: 'p', displayName: 'P', ownerEmail: 'p@x.org' });
+    if (!rej.ok || !app.ok) return;
+    expect(rej.value.rejectedAt).toBeNull();
+
+    const rejected = await store.reject(rej.value.id);
+    expect(rejected.ok && rejected.value?.status).toBe('inactive');
+    expect(rejected.ok && rejected.value?.rejectedAt).toBeInstanceOf(Date);
+
+    const approved = await store.approve(app.value.id);
+    expect(approved.ok && approved.value?.status).toBe('active');
+    expect(approved.ok && approved.value?.rejectedAt).toBeNull();
+  });
+
+  it('update can revive a rejected org by clearing rejected_at (#726)', async () => {
+    const store = new InMemoryAggregatorOrgStore();
+    const a = await store.create({ slug: 'a', displayName: 'A', ownerEmail: 'a@x.org' });
+    if (!a.ok) return;
+    await store.reject(a.value.id);
+    const revived = await store.update(a.value.id, { status: 'pending', rejectedAt: null });
+    expect(revived.ok && revived.value.status).toBe('pending');
+    expect(revived.ok && revived.value.rejectedAt).toBeNull();
+  });
 });
