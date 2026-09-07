@@ -19,6 +19,7 @@ import {
 import { IdpAdminFake, _setIdpAdmin } from '../services/idp-admin/index.js';
 import { FakeMailer, _setMailer } from '@aggregator-dpg/mailer';
 import { _resetTokenKey, mintApprovalToken } from '../services/approval-token.js';
+import { _setApprovalVerifyRateChecker } from '../services/approval-verify-rate.js';
 import { _setSignalStackWriter } from '../services/signalstack.js';
 import { _setNetworkConfig } from '../services/network-config.js';
 import { buildBlueDotConfig } from '@aggregator-dpg/network-config/testing';
@@ -40,6 +41,13 @@ describe('admin approval routes', () => {
 
   beforeEach(async () => {
     _resetTokenKey();
+    // The approval-verify limiter is fail-closed, so without an override it
+    // would deny every request when Redis is unavailable in the test env.
+    // Default to always-allow; the rate-limit test overrides this to deny.
+    _setApprovalVerifyRateChecker(async () => ({
+      allowed: true,
+      retryAfterSeconds: 0,
+    }));
     process.env.APPROVAL_TOKEN_SECRET = 'k'.repeat(48);
     process.env.PUBLIC_API_URL = 'http://api.local';
     process.env.PUBLIC_PORTAL_URL = 'http://portal.local';
@@ -98,6 +106,7 @@ describe('admin approval routes', () => {
 
   afterAll(async () => {
     await app?.close();
+    _setApprovalVerifyRateChecker(null);
     _setAggregatorStore(null);
     _setAggregatorProfileStore(null);
     _setIdpAdmin(null);
@@ -105,6 +114,55 @@ describe('admin approval routes', () => {
     _setSignalStackWriter(null);
     _setNetworkConfig(null);
     _setAggregatorOrgStore(null);
+  });
+
+  it('GET /read/:id returns a 429 HTML page when the verify rate limit is exceeded', async () => {
+    _setApprovalVerifyRateChecker(async () => ({
+      allowed: false,
+      retryAfterSeconds: 42,
+    }));
+    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/admin/v1/aggregator-registrations/read/${aggregatorId}?token=${encodeURIComponent(token)}`,
+    });
+    expect(res.statusCode).toBe(429);
+    expect(res.headers['content-type']).toContain('text/html');
+    expect(res.headers['retry-after']).toBe('42');
+    expect(res.body).toContain('Too many attempts');
+  });
+
+  it('POST /decision/:id returns a 429 HTML page when the verify rate limit is exceeded', async () => {
+    _setApprovalVerifyRateChecker(async () => ({
+      allowed: false,
+      retryAfterSeconds: 30,
+    }));
+    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
+      payload: { token, decision: 'approve' },
+    });
+    expect(res.statusCode).toBe(429);
+    expect(res.body).toContain('Too many attempts');
+    // The limit fires before any decision is applied.
+    const dbAfter = await aggregatorStore.findById(aggregatorId);
+    if (dbAfter.ok && dbAfter.value) expect(dbAfter.value.status).toBe('pending');
+  });
+
+  it('POST /renew/:id returns a 429 HTML page when the verify rate limit is exceeded', async () => {
+    _setApprovalVerifyRateChecker(async () => ({
+      allowed: false,
+      retryAfterSeconds: 30,
+    }));
+    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/renew/${aggregatorId}`,
+      payload: { token },
+    });
+    expect(res.statusCode).toBe(429);
+    expect(res.body).toContain('Too many attempts');
   });
 
   it('GET /read/:id renders the single review page with both actions', async () => {
