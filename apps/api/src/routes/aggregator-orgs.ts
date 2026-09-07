@@ -211,7 +211,6 @@ export async function registerAggregatorOrgRoutes(app: FastifyInstance): Promise
         const mail = renderOrgAlreadyRegistered({
           orgName: row.displayName,
           inviteUrl: `${config.PUBLIC_PORTAL_URL}/register/invite?grant=${encodeURIComponent(grant.token)}`,
-          expiresAt: grant.expiresAt,
         });
         const send = await getMailer().send({
           to: row.ownerEmail,

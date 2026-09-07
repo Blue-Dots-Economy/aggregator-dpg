@@ -107,7 +107,6 @@ describe('renderCase — the one conversion', () => {
     // Guards against a button rendering with an empty href.
     const out = renderCase('org_already_registered', {
       orgName: 'Acme',
-      expiresOn: '15 Sep 2026',
     });
     expect(out.html).not.toContain('<a href=""');
   });

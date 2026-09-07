@@ -26,34 +26,17 @@ export interface OrgAlreadyRegisteredVars {
   orgName: string;
   /** The invite-management page URL carrying the grant token. */
   inviteUrl: string;
-  /** Absolute expiry of the grant token; rendered as a date, not a duration. */
-  expiresAt: Date;
-}
-
-/**
- * Formats an absolute expiry date for the email (e.g. "15 Sep 2026").
- *
- * A duration ("expires in 90 days") is meaningless by the time someone reads
- * a mail they kept, so the wire value is a fixed date.
- */
-function formatExpiryDate(d: Date): string {
-  return new Intl.DateTimeFormat('en-GB', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  }).format(d);
 }
 
 /**
  * Renders the organisation-already-registered email.
  *
- * @param v - Organisation name, invite-management link, and the grant expiry.
+ * @param v - Organisation name and the invite-management link.
  * @returns The `subject`, `html`, and `text` parts ready for the mailer.
  */
 export function renderOrgAlreadyRegistered(v: OrgAlreadyRegisteredVars): RenderedEmail {
   return renderCase('org_already_registered', {
     orgName: v.orgName,
     inviteUrl: v.inviteUrl,
-    expiresOn: formatExpiryDate(v.expiresAt),
   });
 }

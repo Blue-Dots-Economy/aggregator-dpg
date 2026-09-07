@@ -162,7 +162,7 @@ export const EMAIL_CASES: Readonly<Record<string, EmailCaseDef>> = {
   },
 
   org_already_registered: {
-    tokens: { orgName: 'text', expiresOn: 'text', inviteUrl: 'text' },
+    tokens: { orgName: 'text', inviteUrl: 'text' },
     layout: [
       { block: 'heading', key: 'heading' },
       { block: 'para', key: 'intro' },

@@ -220,7 +220,6 @@ describe('org-already-registered template', () => {
     const out = renderOrgAlreadyRegistered({
       orgName: 'Acme Org',
       inviteUrl: 'https://portal.example.org/register/invite?grant=xyz',
-      expiresAt: new Date('2026-12-15T00:00:00Z'),
     });
     expect(out.subject).toBe('Acme Org is already registered');
     // Must read as a reply to their own attempt, not as unprompted mail.
@@ -232,22 +231,22 @@ describe('org-already-registered template', () => {
     expect(out.text).toContain('https://portal.example.org/register/invite?grant=xyz');
   });
 
-  it('renders an absolute expiry date, never a duration', () => {
+  it('quotes no expiry — neither a date nor a duration', () => {
+    // The link's lifetime is deliberately not advertised here: an owner who
+    // needs a working link just re-registers and gets a fresh one, so a date
+    // only invites "is my link dead yet?" support traffic.
     const out = renderOrgAlreadyRegistered({
       orgName: 'Acme Org',
       inviteUrl: 'https://portal.example.org/register/invite?grant=xyz',
-      expiresAt: new Date('2026-12-15T00:00:00Z'),
     });
-    expect(out.html).toContain('15 Dec 2026');
-    expect(out.text).toContain('15 Dec 2026');
-    expect(out.html).not.toContain('90 days');
+    expect(out.html).not.toMatch(/works until|expires|90 days/i);
+    expect(out.text).not.toMatch(/works until|expires|90 days/i);
   });
 
   it('escapes user-controlled fields', () => {
     const out = renderOrgAlreadyRegistered({
       orgName: '<script>alert(1)</script>',
       inviteUrl: 'https://portal.example.org/register/invite?grant=xyz',
-      expiresAt: new Date('2026-12-15T00:00:00Z'),
     });
     expect(out.html).not.toContain('<script>alert(1)</script>');
     expect(out.html).toContain('&lt;script&gt;');
