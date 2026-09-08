@@ -449,6 +449,69 @@ function writeValuesSheet(
 }
 
 /**
+ * Blank for a conditional column this row's controller value does not unlock.
+ *
+ * A filled-in conditional that does not apply is the wrong example — it teaches
+ * an operator to populate a column the schema will reject.
+ *
+ * @param plan - The column.
+ * @param pins - Controller values fixed for this row.
+ * @returns `''` when the column does not apply, else undefined to fall through.
+ */
+function conditionalCell(plan: ColumnPlan, pins: ReadonlyMap<string, string>): string | undefined {
+  if (plan.showIfField === undefined) return undefined;
+  const controllerValue = pins.get(plan.showIfField);
+  if (controllerValue === undefined) return '';
+  if (plan.showIfValues.length > 0 && !plan.showIfValues.includes(controllerValue)) return '';
+  return undefined;
+}
+
+/**
+ * Per-row name / phone / email, so the sample rows read as distinct people
+ * rather than a dozen copies of one.
+ *
+ * Config names these columns (`ResolvedDomain.identity`); nothing is guessed
+ * from field names.
+ *
+ * @param plan - The column.
+ * @param rowIndex - Zero-based sample row index.
+ * @param identity - The domain's identity selectors, when configured.
+ * @returns The cell value, or undefined when this is not an identity column.
+ */
+function identityCell(
+  plan: ColumnPlan,
+  rowIndex: number,
+  identity?: XlsxTemplateOptions['identity'],
+): string | undefined {
+  if (identity === undefined) return undefined;
+  if (plan.name === identity.name) return `Sample Person ${rowIndex + 1}`;
+  if (plan.name === identity.phone) return `98765${String(10000 + rowIndex).slice(-5)}`;
+  if (plan.name === identity.email) return `person${rowIndex + 1}@example.com`;
+  return undefined;
+}
+
+/**
+ * Next value of a closed set, rotated by row, so each is demonstrated somewhere
+ * rather than every row repeating the first option.
+ *
+ * Controllers are excluded: their value is pinned per row to drive the
+ * conditional branches, which is a stronger claim on the cell than rotation.
+ *
+ * @param plan - The column.
+ * @param rowIndex - Zero-based sample row index.
+ * @param controllers - Columns that other columns are conditional on.
+ * @returns The rotated value, or undefined when rotation does not apply.
+ */
+function rotatedCell(
+  plan: ColumnPlan,
+  rowIndex: number,
+  controllers: ReadonlyMap<string, string[]>,
+): string | undefined {
+  if (plan.allowed.length <= 1 || controllers.has(plan.name)) return undefined;
+  return plan.allowed[rowIndex % plan.allowed.length];
+}
+
+/**
  * Generates sample rows that demonstrate every conditional branch.
  *
  * One row cannot show that `stipendMin` applies to an Internship while
@@ -480,31 +543,12 @@ function sampleRows(
   }
 
   /** One cell, given the controller values pinned for this row. */
-  const cell = (plan: ColumnPlan, pins: Map<string, string>, rowIndex: number): string => {
-    const pinned = pins.get(plan.name);
-    if (pinned !== undefined) return pinned;
-
-    if (plan.showIfField !== undefined) {
-      const controllerValue = pins.get(plan.showIfField);
-      // Blank unless this row's controller value actually unlocks the field —
-      // a filled-in conditional that does not apply is the wrong example.
-      if (controllerValue === undefined) return '';
-      if (plan.showIfValues.length > 0 && !plan.showIfValues.includes(controllerValue)) return '';
-    }
-    // Per-row identity values, so the rows read as distinct people rather than
-    // fourteen copies of one. Config names these columns, nothing is guessed.
-    if (identity !== undefined) {
-      if (plan.name === identity.name) return `Sample Person ${rowIndex + 1}`;
-      if (plan.name === identity.phone) return `98765${String(10000 + rowIndex).slice(-5)}`;
-      if (plan.name === identity.email) return `person${rowIndex + 1}@example.com`;
-    }
-    // Rotate a closed set's values across rows so each is demonstrated
-    // somewhere, rather than every row repeating the first option.
-    if (plan.allowed.length > 1 && !controllers.has(plan.name)) {
-      return plan.allowed[rowIndex % plan.allowed.length] as string;
-    }
-    return exampleValue(plan.name, plan.prop, arrayDelimiter);
-  };
+  const cell = (plan: ColumnPlan, pins: Map<string, string>, rowIndex: number): string =>
+    pins.get(plan.name) ??
+    conditionalCell(plan, pins) ??
+    identityCell(plan, rowIndex, identity) ??
+    rotatedCell(plan, rowIndex, controllers) ??
+    exampleValue(plan.name, plan.prop, arrayDelimiter);
 
   const pinSets: Array<Map<string, string>> = [];
   for (const [field, values] of controllers) {
@@ -737,7 +781,7 @@ export function columnLetter(index: number): string {
   let out = '';
   while (n > 0) {
     const rem = (n - 1) % 26;
-    out = String.fromCharCode(65 + rem) + out;
+    out = String.fromCodePoint(65 + rem) + out;
     n = Math.floor((n - 1) / 26);
   }
   return out;

@@ -264,7 +264,6 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
             identity: cfgForXlsx.domains[participantType as string]?.identity,
           },
         );
-        void auth; // authenticated for audit; workbook content is schema-derived only
         return reply
           .header(
             'Content-Type',
@@ -279,7 +278,6 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
       const csv = buildCsvTemplate(csvSchema, {
         arrayDelimiter: cfg.aggregator.network.csv_array_delimiter,
       });
-      void auth; // authenticated for audit; csv content is schema-derived only
       return reply
         .header('Content-Type', 'text/csv; charset=utf-8')
         .header('Content-Disposition', `attachment; filename="${participantType}-template.csv"`)
