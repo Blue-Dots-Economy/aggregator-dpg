@@ -533,6 +533,43 @@ function sampleRows(
   arrayDelimiter: string,
   identity?: XlsxTemplateOptions['identity'],
 ): string[][] {
+  const controllers = collectControllers(plans);
+
+  /** One cell, given the controller values pinned for this row. */
+  const cell = (plan: ColumnPlan, pins: ReadonlyMap<string, string>, rowIndex: number): string =>
+    pins.get(plan.name) ??
+    conditionalCell(plan, pins) ??
+    identityCell(plan, rowIndex, identity) ??
+    rotatedCell(plan, rowIndex, controllers) ??
+    exampleValue(plan.name, plan.prop, arrayDelimiter);
+
+  // The signature ignores the identity columns: those vary by row index by
+  // construction, so including them would make every row look unique and the
+  // duplicate filter would never fire.
+  const identityColumns = new Set(
+    identity === undefined ? [] : [identity.name, identity.phone, identity.email],
+  );
+  const signature = (pins: ReadonlyMap<string, string>): string =>
+    plans
+      .filter((plan) => !identityColumns.has(plan.name))
+      .map((plan) => cell(plan, pins, 0))
+      .join('');
+
+  const distinct = dedupeBy(buildPinSets(controllers), signature);
+  return distinct.map((pins, i) => plans.map((plan) => cell(plan, pins, i)));
+}
+
+/**
+ * Maps each controller field to its allowed values.
+ *
+ * A controller is a column that other columns declare `x-show-if` against, and
+ * only one with a closed set can drive sample rows — there is nothing to
+ * enumerate otherwise.
+ *
+ * @param plans - Column plans.
+ * @returns Controller field name to its allowed values.
+ */
+function collectControllers(plans: readonly ColumnPlan[]): ReadonlyMap<string, string[]> {
   const controllers = new Map<string, string[]>();
   for (const plan of plans) {
     if (plan.showIfField === undefined || controllers.has(plan.showIfField)) continue;
@@ -541,50 +578,54 @@ function sampleRows(
       controllers.set(plan.showIfField, controller.allowed);
     }
   }
+  return controllers;
+}
 
-  /** One cell, given the controller values pinned for this row. */
-  const cell = (plan: ColumnPlan, pins: Map<string, string>, rowIndex: number): string =>
-    pins.get(plan.name) ??
-    conditionalCell(plan, pins) ??
-    identityCell(plan, rowIndex, identity) ??
-    rotatedCell(plan, rowIndex, controllers) ??
-    exampleValue(plan.name, plan.prop, arrayDelimiter);
-
-  const pinSets: Array<Map<string, string>> = [];
+/**
+ * One pin set per controller value — the shape of the sample sheet.
+ *
+ * Each pin set fixes a single controller to a single value, so the row it
+ * renders demonstrates exactly one conditional branch. Capped at
+ * {@link MAX_SAMPLE_ROWS}: on a wide schema the product of every controller and
+ * value runs to dozens of rows, and a sample sheet nobody scrolls to the end of
+ * teaches nothing.
+ *
+ * @param controllers - Controller fields and their allowed values.
+ * @returns Pin sets, in controller declaration order.
+ */
+function buildPinSets(
+  controllers: ReadonlyMap<string, string[]>,
+): Array<ReadonlyMap<string, string>> {
+  const pinSets: Array<ReadonlyMap<string, string>> = [];
   for (const [field, values] of controllers) {
     for (const value of values) {
-      if (pinSets.length >= MAX_SAMPLE_ROWS) break;
+      if (pinSets.length >= MAX_SAMPLE_ROWS) return pinSets;
       pinSets.push(new Map([[field, value]]));
     }
-    if (pinSets.length >= MAX_SAMPLE_ROWS) break;
   }
   // A schema with no conditionals still deserves worked examples.
-  if (pinSets.length === 0) pinSets.push(new Map(), new Map());
+  return pinSets.length > 0 ? pinSets : [new Map(), new Map()];
+}
 
-  // Drop pin sets that would render the same row twice. Pinning controller A
-  // leaves controller B at its first value, so the row pinning B's first value
-  // is a duplicate of the row pinning A's first value — a wasted line in a
-  // sheet whose whole job is showing DIFFERENT cases. The signature ignores the
-  // identity columns because those vary by row index by construction and would
-  // make every row look unique.
-  const identityColumns = new Set(
-    identity === undefined ? [] : [identity.name, identity.phone, identity.email],
-  );
-  const signature = (pins: Map<string, string>): string =>
-    plans
-      .filter((plan) => !identityColumns.has(plan.name))
-      .map((plan) => cell(plan, pins, 0))
-      .join('');
-
+/**
+ * Drops entries whose key repeats one already seen, keeping the first.
+ *
+ * Pinning controller A leaves controller B at its first value, so the row
+ * pinning B's first value renders identically to the row pinning A's — a wasted
+ * line in a sheet whose whole job is showing DIFFERENT cases.
+ *
+ * @param items - Items in the order they should be kept.
+ * @param key - Derives the comparison key for an item.
+ * @returns The items with later duplicates removed.
+ */
+function dedupeBy<T>(items: readonly T[], key: (item: T) => string): T[] {
   const seen = new Set<string>();
-  const distinct = pinSets.filter((pins) => {
-    const key = signature(pins);
-    if (seen.has(key)) return false;
-    seen.add(key);
+  return items.filter((item) => {
+    const k = key(item);
+    if (seen.has(k)) return false;
+    seen.add(k);
     return true;
   });
-
-  return distinct.map((pins, i) => plans.map((plan) => cell(plan, pins, i)));
 }
 
 /**
