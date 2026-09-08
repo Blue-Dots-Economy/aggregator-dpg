@@ -53,7 +53,14 @@ export interface IdClaims {
 }
 
 export interface LogoutUrlInput {
-  idToken: string;
+  /**
+   * Ends the IdP session without Keycloak's "Do you want to log out?" prompt.
+   * Omit it when no token is held — the cross-app switch path rejects before a
+   * session exists (#753), so it must fall back to `client_id` and let the IdP
+   * confirm. Confirming is the honest outcome there: one realm serves both
+   * DPGs, so switching account here also ends the Signals session.
+   */
+  idToken?: string | undefined;
   postLogoutRedirectUri: string;
 }
 

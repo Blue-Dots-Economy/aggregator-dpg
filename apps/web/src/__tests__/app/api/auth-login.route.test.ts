@@ -81,6 +81,68 @@ describe('GET /api/auth/login', () => {
     expect(res.status).toBe(302);
   });
 
+  describe('?switch=1 — sign in with a different account (#753)', () => {
+    /**
+     * The escape link must END the realm session. `prompt=login` only
+     * re-authenticates the CURRENT user, so naming a different one made
+     * Keycloak throw USER_CONFLICT, reported as `invalid_user_credentials` and
+     * shown to the user as "Invalid username or password" — on a flow that
+     * never asks for a password.
+     */
+    it('redirects to the end-session endpoint, not the authorization endpoint', async () => {
+      const buildLogoutUrl = vi.fn(async () => 'https://kc.test/logout?client_id=x');
+      const buildAuthorizationUrl = vi.fn(async () => 'https://kc.test/auth?client_id=x');
+      mockGetOidcAdapter.mockReturnValue({
+        buildAuthorizationUrl,
+        exchangeCode: vi.fn(),
+        refresh: vi.fn(),
+        buildLogoutUrl,
+      } as never);
+
+      const res = await GET(new NextRequest('http://localhost/api/auth/login?switch=1'));
+
+      expect(res.status).toBe(302);
+      expect(res.headers.get('location')).toBe('https://kc.test/logout?client_id=x');
+      // Regression guard: the old behaviour built an auth URL with prompt=login.
+      expect(buildAuthorizationUrl).not.toHaveBeenCalled();
+    });
+
+    it('omits idToken so the adapter falls back to client_id', async () => {
+      const buildLogoutUrl = vi.fn(async () => 'https://kc.test/logout');
+      mockGetOidcAdapter.mockReturnValue({
+        buildAuthorizationUrl: vi.fn(),
+        exchangeCode: vi.fn(),
+        refresh: vi.fn(),
+        buildLogoutUrl,
+      } as never);
+
+      await GET(new NextRequest('http://localhost/api/auth/login?switch=1'));
+
+      // The gate rejects before a session exists, so there is no token to hint
+      // with; passing a stale or fabricated one would be worse than confirming.
+      const arg = buildLogoutUrl.mock.calls[0]?.[0] as { idToken?: string };
+      expect(arg.idToken).toBeUndefined();
+      expect(arg).toHaveProperty('postLogoutRedirectUri');
+    });
+
+    it('carries the banner reason in a cookie and starts no OIDC flow', async () => {
+      mockGetOidcAdapter.mockReturnValue({
+        buildAuthorizationUrl: vi.fn(),
+        exchangeCode: vi.fn(),
+        refresh: vi.fn(),
+        buildLogoutUrl: vi.fn(async () => 'https://kc.test/logout'),
+      } as never);
+
+      const res = await GET(new NextRequest('http://localhost/api/auth/login?switch=1'));
+
+      const setCookie = res.headers.get('set-cookie') ?? '';
+      // Keycloak strips query strings from post_logout_redirect_uri.
+      expect(setCookie).toContain('bd_logout_reason=account_switch');
+      // No code is exchanged on this leg, so a flow cookie would only go stale.
+      expect(setCookie).not.toContain('oidc_flow=');
+    });
+  });
+
   it('throws when OIDC_REDIRECT_URI is not configured', async () => {
     delete process.env.OIDC_REDIRECT_URI;
     const req = new NextRequest('http://localhost/api/auth/login');

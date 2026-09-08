@@ -566,6 +566,7 @@
     "session_expired": "Your session expired. Sign in again to continue.",
     "org_no_portal": "Organisation accounts can't sign in to the portal yet. Organisation owners manage approvals through the links emailed to them. Only coordinators can sign in here.",
     "signals_account_no_portal": "You're signed in as a Signals account. The coordinator portal needs a coordinator account.",
+    "account_switch": "You've been signed out. Sign in with the coordinator account you want to use.",
     "no_portal_access": "This account can't access the coordinator portal. If you have a coordinator account, sign in with that instead.",
     "switch_account": "Sign in with a different account",
     "signin_failed": "Sign-in failed: {reason}. Please try again.",

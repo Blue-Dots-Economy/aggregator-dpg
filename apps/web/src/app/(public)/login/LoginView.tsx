@@ -90,7 +90,8 @@ export function LoginView({ returnTo, error }: LoginViewProps): JSX.Element {
                 </div>
               ) : error === 'org_no_portal' ||
                 error === 'signals_account_no_portal' ||
-                error === 'no_portal_access' ? (
+                error === 'no_portal_access' ||
+                error === 'account_switch' ? (
                 <div
                   role="alert"
                   className="mb-5 rounded-[10px] border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-800"
@@ -100,8 +101,10 @@ export function LoginView({ returnTo, error }: LoginViewProps): JSX.Element {
                       is not for them. The other two are signed in as the wrong
                       account, so they need a way to switch; a plain link back to
                       /login would silently reuse the same realm SSO session and
-                      return them here, which is why this forces a fresh prompt. */}
-                  {error !== 'org_no_portal' ? (
+                      return them here, which is why this ends the realm session
+                      first. `account_switch` is the landing state AFTER that
+                      logout, so it must not offer the link again. */}
+                  {error !== 'org_no_portal' && error !== 'account_switch' ? (
                     <a
                       href="/api/auth/login?switch=1"
                       className="mt-2 block font-semibold underline underline-offset-2"

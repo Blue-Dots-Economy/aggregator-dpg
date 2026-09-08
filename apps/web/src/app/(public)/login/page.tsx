@@ -43,6 +43,9 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
     'org_no_portal',
     'signals_account_no_portal',
     'no_portal_access',
+    // Set by `/api/auth/login?switch=1` after it ends the realm session, so the
+    // banner explains why the user is back here signed out (#753).
+    'account_switch',
   ]);
   // Precedence, most specific first: an expired session, then a portal-gate
   // refusal handed back by the layout, then whatever the callback put on the

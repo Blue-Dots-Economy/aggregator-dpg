@@ -92,7 +92,8 @@ export class IdentityProviderFake extends IdentityProviderAdapter {
 
   async buildLogoutUrl(input: LogoutUrlInput): Promise<string> {
     const url = new URL(`${FAKE_ISSUER}/logout`);
-    url.searchParams.set('id_token_hint', input.idToken);
+    if (input.idToken) url.searchParams.set('id_token_hint', input.idToken);
+    else url.searchParams.set('client_id', 'fake-client');
     url.searchParams.set('post_logout_redirect_uri', input.postLogoutRedirectUri);
     return url.toString();
   }
