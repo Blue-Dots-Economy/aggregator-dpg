@@ -276,7 +276,11 @@ class HttpDashboardService implements DashboardService {
       parseFilenameFromContentDisposition(disposition) ?? `profiles-${input.domain}.csv`;
     // Absent header, or a non-numeric one, means "no count available" rather
     // than zero — the caller must not report "0 withheld" it did not measure.
-    const rawSkipped = Number(res.headers.get('x-export-skipped-count'));
+    // `Number` coerces both `null` (absent header) and `''` (present but empty)
+    // to 0, not NaN, so neither can be fed to it directly — either would be
+    // reported as a measured zero by every export that sends no count.
+    const rawHeader = res.headers.get('x-export-skipped-count')?.trim();
+    const rawSkipped = rawHeader ? Number(rawHeader) : Number.NaN;
     const skippedCount = Number.isInteger(rawSkipped) && rawSkipped >= 0 ? rawSkipped : undefined;
     return { blob, filename, ...(skippedCount === undefined ? {} : { skippedCount }) };
   }
