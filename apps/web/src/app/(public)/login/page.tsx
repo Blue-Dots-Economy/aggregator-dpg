@@ -45,14 +45,15 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
     'signals_account_no_portal',
     'no_portal_access',
   ]);
-  const error =
-    reason === 'expired'
-      ? 'session_expired'
-      : reason && PORTAL_GATE_REASONS.has(reason)
-        ? reason
-        : typeof params.error === 'string'
-          ? params.error
-          : null;
+  // Precedence, most specific first: an expired session, then a portal-gate
+  // refusal handed back by the layout, then whatever the callback put on the
+  // query string.
+  function resolveError(): string | null {
+    if (reason === 'expired') return 'session_expired';
+    if (reason && PORTAL_GATE_REASONS.has(reason)) return reason;
+    return typeof params.error === 'string' ? params.error : null;
+  }
+  const error = resolveError();
 
   return <LoginView returnTo={returnTo} error={error} />;
 }

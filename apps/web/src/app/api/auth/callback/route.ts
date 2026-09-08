@@ -109,12 +109,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // screen can say what happened instead of assuming everyone here is an
     // org owner (#753).
     const population = classifyNonCoordinator(tokens.accessToken, signalsRealmRoles());
-    const reason =
-      population === 'signals_participant'
-        ? 'signals_account_no_portal'
-        : population === 'org_owner'
-          ? 'org_no_portal'
-          : 'no_portal_access';
+    const reason = PORTAL_GATE_REASON[population];
     log.warn(
       {
         code: 'NO_AGGREGATOR_ID',
@@ -149,6 +144,19 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   res.cookies.set(OIDC_FLOW_COOKIE, '', clearCookieOptions());
   return res;
 }
+
+/**
+ * Login-screen reason code for each population the coordinator gate turns away.
+ *
+ * A lookup rather than a chain of conditionals: the three cases are a closed
+ * set that mirrors `classifyNonCoordinator`, so keeping them as one table makes
+ * a missing case a type error instead of a silently wrong message.
+ */
+const PORTAL_GATE_REASON: Record<ReturnType<typeof classifyNonCoordinator>, string> = {
+  signals_participant: 'signals_account_no_portal',
+  org_owner: 'org_no_portal',
+  unknown: 'no_portal_access',
+};
 
 function failure(req: NextRequest, reason: string): NextResponse {
   const target = absoluteUrl(req, `/login?error=${encodeURIComponent(reason)}`);
