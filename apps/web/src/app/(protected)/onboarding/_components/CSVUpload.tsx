@@ -79,14 +79,7 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
 
   const acceptFile = (f: File) => {
     if (!/\.csv$/i.test(f.name)) {
-      // Naming the fix matters now that we hand out an .xlsx template (#564):
-      // filling the workbook and uploading it directly is the obvious mistake,
-      // and "Only .csv files are accepted" does not say what to do about it.
-      setUploadError(
-        /\.xlsx?$/i.test(f.name)
-          ? 'This is an Excel file. Open it and use File → Save As (or Export) → CSV, then upload the .csv.'
-          : 'Only .csv files are accepted.',
-      );
+      setUploadError('Only .csv files are accepted.');
       return;
     }
     setPickedFile(f);
@@ -139,12 +132,7 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
   };
 
   const downloadTemplate = () => {
-    // Workbook only. It carries the dropdowns, the required-column marking and
-    // the delimiter note, so it is the format that prevents the errors #564 is
-    // about — offering a bare CSV alongside it just invites the version with no
-    // guidance. `GET /v1/bulk-uploads/template` still defaults to CSV for API
-    // callers that generate their own file.
-    window.location.href = `/api/bulk-uploads/template?participant_type=${participantType}&format=xlsx`;
+    window.location.href = `/api/bulk-uploads/template?participant_type=${participantType}`;
   };
 
   return (
@@ -181,7 +169,7 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
             onClick={downloadTemplate}
             className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-primary-600 hover:underline"
           >
-            <I.download size={14} /> {t('csv.download_template_xlsx')}
+            <I.download size={14} /> {t('csv.download_template')}
           </button>
         </div>
       </div>

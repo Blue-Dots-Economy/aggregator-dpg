@@ -287,7 +287,7 @@
     "csv": {
       "title": "Add participants",
       "subtitle": "Bulk upload via CSV — fastest way to import existing rosters.",
-      "download_template_xlsx": "Download Excel template",
+      "download_template": "Download template",
       "drag_prompt": "Drag your CSV here or",
       "browse": "click to browse",
       "hint": ".csv only · UTF-8 encoded · uploaded as {type}s",

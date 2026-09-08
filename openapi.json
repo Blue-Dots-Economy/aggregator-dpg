@@ -2339,11 +2339,11 @@
     },
     "/v1/bulk-uploads/template": {
       "get": {
-        "summary": "Download the bulk-upload template (CSV or XLSX)",
+        "summary": "Download CSV template for a domain",
         "tags": [
           "bulk-uploads"
         ],
-        "description": "Both formats are generated from the participant schema resolved out of network.json for ?participant_type= (seeker/provider), and both are gated on the caller's registered aggregator_type. ?format=csv (default) returns text/csv: the header row plus one example row. ?format=xlsx returns a four-tab workbook for that type — instructions, allowed values, worked sample rows and an empty grid with dropdowns on every closed-set column. Array-typed fields use the network's csv_array_delimiter. Responds with a file attachment on 200 (no JSON body).",
+        "description": "Returns a CSV template (text/csv) with the header row + sample row for the requested ?participant_type= (seeker/provider). Array-typed fields use the network's csv_array_delimiter. Responds with a text/csv attachment on 200 (no JSON body).",
         "parameters": [
           {
             "schema": {
@@ -2353,19 +2353,6 @@
             "name": "participant_type",
             "required": false,
             "description": "Participant domain id declared by the active network (e.g. seeker, provider)."
-          },
-          {
-            "schema": {
-              "type": "string",
-              "enum": [
-                "csv",
-                "xlsx"
-              ]
-            },
-            "in": "query",
-            "name": "format",
-            "required": false,
-            "description": "Template format. Defaults to csv."
           }
         ],
         "security": [

@@ -20,7 +20,6 @@
  */
 
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import type { JsonSchema } from '@aggregator-dpg/schema-loader/interface';
 import { z } from 'zod';
 import { and, eq, inArray } from 'drizzle-orm';
 import { requireApproved, type AuthContext } from '../services/auth/access-token.js';
@@ -35,7 +34,7 @@ import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 import { getSchemaLoader } from '../services/schema-loader/index.js';
 import { buildCsvTemplate } from '../services/csv-template/index.js';
-import { buildXlsxTemplate } from '../services/xlsx-template/index.js';
+import { readBulkSample } from '../services/csv-template/bulk-sample.js';
 import { getNetworkConfig } from '../services/network-config.js';
 import { loadConsentConfig } from '@aggregator-dpg/config-loader/fs';
 import { getConsentLedger } from '../services/consent-ledger/index.js';
@@ -56,48 +55,15 @@ async function getValidParticipantTypes(): Promise<Set<string>> {
 }
 
 /**
- * Loads the participant schema behind a template request.
- *
- * Extracted because both template formats need the same schema and the same
- * failure handling — a missing schema is an INTERNAL, not a 404, since the
- * participant type was already validated against the live network config.
- *
- * @param participantType - Already-validated participant domain id.
- * @returns The participant JSON Schema.
- * @throws {HttpError} INTERNAL when the schema cannot be loaded.
- */
-async function loadParticipantSchema(participantType: string): Promise<JsonSchema> {
-  const result = await getSchemaLoader().getSchema({
-    id: `participant-${participantType}`,
-    version: 'v1',
-  });
-  if (!result.success) {
-    throw httpError('INTERNAL', {
-      detail: 'Participant schema unavailable.',
-      cause: new Error(result.error.message),
-    });
-  }
-  return result.value;
-}
-
-/**
- * Query shape for the template download. Valid `participant_type` values are
- * network-config driven (e.g. seeker/provider), so the schema stays an open
- * string and the handler validates against the live config.
+ * Query shape for the CSV template download. Valid `participant_type` values
+ * are network-config driven (e.g. seeker/provider), so the schema stays an
+ * open string and the handler validates against the live config.
  */
 const TemplateQuerySchema = z.object({
   participant_type: z
     .string()
     .optional()
     .describe('Participant domain id declared by the active network (e.g. seeker, provider).'),
-  /**
-   * `csv` (default) returns the header + one example row — the shape an API
-   * caller generating its own file needs. `xlsx` returns the four-tab workbook
-   * for the same type, carrying the guidance a CSV cannot: dropdowns on
-   * closed-set columns, required/conditional marking, worked sample rows and
-   * the array delimiter (#564). The upload path still accepts `.csv` only.
-   */
-  format: z.enum(['csv', 'xlsx']).optional().describe('Template format. Defaults to csv.'),
 });
 
 /**
@@ -215,9 +181,9 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
     {
       schema: {
         tags: ['bulk-uploads'],
-        summary: 'Download the bulk-upload template (CSV or XLSX)',
+        summary: 'Download CSV template for a domain',
         description:
-          "Both formats are generated from the participant schema resolved out of network.json for ?participant_type= (seeker/provider), and both are gated on the caller's registered aggregator_type. ?format=csv (default) returns text/csv: the header row plus one example row. ?format=xlsx returns a four-tab workbook for that type — instructions, allowed values, worked sample rows and an empty grid with dropdowns on every closed-set column. Array-typed fields use the network's csv_array_delimiter. Responds with a file attachment on 200 (no JSON body).",
+          "Returns a CSV template (text/csv) with the header row + sample row for the requested ?participant_type= (seeker/provider). Array-typed fields use the network's csv_array_delimiter. Responds with a text/csv attachment on 200 (no JSON body).",
         security: [{ bearerAuth: [] }],
         querystring: TemplateQuerySchema,
         response: {
@@ -227,11 +193,9 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
     },
     async (req, reply) => {
       const auth = await requireAuth(req);
-      const format = (req.query as { format?: 'csv' | 'xlsx' }).format ?? 'csv';
-      const validTypes = await getValidParticipantTypes();
-
       const query = req.query as { participant_type?: string };
       const participantType = query.participant_type;
+      const validTypes = await getValidParticipantTypes();
       if (!participantType || !validTypes.has(participantType)) {
         throw httpError('SCHEMA_VALIDATION', {
           detail: `participant_type must be one of: ${[...validTypes].join(', ')}.`,
@@ -240,43 +204,31 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
       }
       enforceAggregatorType(auth, participantType as string);
 
-      // Both formats are generated from the live schemas resolved out of
-      // `network.json`. Nothing is served from a committed artifact: the
-      // shipped `bulk-samples/*.csv` were deleted because they had rotted into
-      // templates the parser rejects (against live ka-dhwd: 24 columns vs the
-      // schema's 36, and 18 of 20 seeker rows failing on stale enum values). A
-      // schema edit now reaches the operator on the next boot with no code
-      // change and nothing to regenerate by hand.
-      //
-      // One workbook per participant type, not one covering every domain: a
-      // coordinator is scoped to a single type, so this is four tabs rather
-      // than every domain the network serves, and the type gate above applies
-      // to the workbook exactly as it does to the CSV.
-      if (format === 'xlsx') {
-        const cfgForXlsx = await getNetworkConfig();
-        const workbook = await buildXlsxTemplate(
-          await loadParticipantSchema(participantType as string),
-          participantType as string,
-          {
-            arrayDelimiter: cfgForXlsx.aggregator.network.csv_array_delimiter,
-            // Names the phone/email columns so their sample cells are realistic
-            // rather than "Example Mobile Number" — see XlsxTemplateOptions.
-            identity: cfgForXlsx.domains[participantType as string]?.identity,
-          },
-        );
-        void auth; // authenticated for audit; workbook content is schema-derived only
+      // Prefer a curated, data-complete sample CSV shipped with the active
+      // network config (config/<network>/bulk-samples/<type>.csv) — real, valid
+      // rows an operator can edit in place beat a synthesised one-row template.
+      // Fall back to the schema-generated template when none is shipped.
+      const sample = await readBulkSample(participantType as string);
+      if (sample !== null) {
+        void auth; // authenticated for audit; curated sample is static content
         return reply
-          .header(
-            'Content-Type',
-            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-          )
-          .header('Content-Disposition', `attachment; filename="${participantType}-template.xlsx"`)
-          .send(workbook);
+          .header('Content-Type', 'text/csv; charset=utf-8')
+          .header('Content-Disposition', `attachment; filename="${participantType}-template.csv"`)
+          .send(sample);
       }
 
-      const csvSchema = await loadParticipantSchema(participantType as string);
+      const schemaResult = await getSchemaLoader().getSchema({
+        id: `participant-${participantType}`,
+        version: 'v1',
+      });
+      if (!schemaResult.success) {
+        throw httpError('INTERNAL', {
+          detail: 'Participant schema unavailable.',
+          cause: new Error(schemaResult.error.message),
+        });
+      }
       const cfg = await getNetworkConfig();
-      const csv = buildCsvTemplate(csvSchema, {
+      const csv = buildCsvTemplate(schemaResult.value, {
         arrayDelimiter: cfg.aggregator.network.csv_array_delimiter,
       });
       void auth; // authenticated for audit; csv content is schema-derived only

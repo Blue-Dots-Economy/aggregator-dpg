@@ -480,8 +480,8 @@ export async function pushToSignalStack(
   //     the row still lands and the minor accepts terms in the Signals app.
   //
   // `year_of_birth` / `age` are the same well-known participant keys the link
-  // flow reads; the participant schema declares `age` as a column, so the
-  // generated CSV/XLSX templates carry it.
+  // flow reads; the bulk `seeker` schema ships an `age` column
+  // (`config/<network>/bulk-samples/seeker.csv`).
   const { ageNum, compliance } = deriveAgeAndConsent(job.payload, presumeConsent);
   const result = await ss.onboard({
     actingOrgId: signalstackOrgId,
