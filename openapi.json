@@ -2339,11 +2339,11 @@
     },
     "/v1/bulk-uploads/template": {
       "get": {
-        "summary": "Download CSV template for a domain",
+        "summary": "Download the bulk-upload template (CSV or XLSX)",
         "tags": [
           "bulk-uploads"
         ],
-        "description": "Returns a CSV template (text/csv) with the header row + sample row for the requested ?participant_type= (seeker/provider). Array-typed fields use the network's csv_array_delimiter. Responds with a text/csv attachment on 200 (no JSON body).",
+        "description": "?format=csv (default) returns a CSV template (text/csv) with the header row + sample row for the requested ?participant_type= (seeker/provider). ?format=xlsx returns one workbook covering every domain the network serves — a sample sheet, a fill-in sheet with dropdowns and an allowed-values sheet per type — and ignores ?participant_type=. Array-typed fields use the network's csv_array_delimiter. Responds with a file attachment on 200 (no JSON body).",
         "parameters": [
           {
             "schema": {
@@ -2352,7 +2352,20 @@
             "in": "query",
             "name": "participant_type",
             "required": false,
-            "description": "Participant domain id declared by the active network (e.g. seeker, provider)."
+            "description": "Participant domain id declared by the active network (e.g. seeker, provider). Required for format=csv; ignored for format=xlsx, which covers every domain."
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "csv",
+                "xlsx"
+              ]
+            },
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "description": "Template format. Defaults to csv."
           }
         ],
         "security": [
@@ -8143,323 +8156,6 @@
             }
           },
           "403": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string"
-                        },
-                        "title": {
-                          "type": "string"
-                        },
-                        "detail": {
-                          "type": "string"
-                        },
-                        "docs": {
-                          "type": "string"
-                        },
-                        "fields": {
-                          "type": "object",
-                          "additionalProperties": {}
-                        },
-                        "requestId": {
-                          "type": "string"
-                        },
-                        "timestamp": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "title",
-                        "detail",
-                        "requestId",
-                        "timestamp"
-                      ],
-                      "additionalProperties": true
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": true
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/dashboard/items": {
-      "get": {
-        "summary": "List participants for the caller aggregator (paginated)",
-        "tags": [
-          "dashboard"
-        ],
-        "description": "Returns every signalstack profile tagged with the caller aggregator_id, scoped to the requested domain, with lifecycle tile counts. Used by /blue-dots to render the participant table. The 200 payload is proxied verbatim from signalstack, so no response schema is pinned (avoids a deep zod re-parse of large item lists on every reply).",
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            },
-            "in": "query",
-            "name": "domain",
-            "required": true
-          },
-          {
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 200,
-              "default": 50
-            },
-            "in": "query",
-            "name": "limit",
-            "required": false
-          },
-          {
-            "schema": {
-              "type": "integer",
-              "minimum": 0,
-              "default": 0
-            },
-            "in": "query",
-            "name": "offset",
-            "required": false
-          },
-          {
-            "schema": {
-              "type": "string",
-              "enum": [
-                "draft",
-                "live",
-                "paused",
-                "account_only"
-              ]
-            },
-            "in": "query",
-            "name": "lifecycle",
-            "required": false
-          }
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "responses": {
-          "400": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string"
-                        },
-                        "title": {
-                          "type": "string"
-                        },
-                        "detail": {
-                          "type": "string"
-                        },
-                        "docs": {
-                          "type": "string"
-                        },
-                        "fields": {
-                          "type": "object",
-                          "additionalProperties": {}
-                        },
-                        "requestId": {
-                          "type": "string"
-                        },
-                        "timestamp": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "title",
-                        "detail",
-                        "requestId",
-                        "timestamp"
-                      ],
-                      "additionalProperties": true
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": true
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string"
-                        },
-                        "title": {
-                          "type": "string"
-                        },
-                        "detail": {
-                          "type": "string"
-                        },
-                        "docs": {
-                          "type": "string"
-                        },
-                        "fields": {
-                          "type": "object",
-                          "additionalProperties": {}
-                        },
-                        "requestId": {
-                          "type": "string"
-                        },
-                        "timestamp": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "title",
-                        "detail",
-                        "requestId",
-                        "timestamp"
-                      ],
-                      "additionalProperties": true
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": true
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string"
-                        },
-                        "title": {
-                          "type": "string"
-                        },
-                        "detail": {
-                          "type": "string"
-                        },
-                        "docs": {
-                          "type": "string"
-                        },
-                        "fields": {
-                          "type": "object",
-                          "additionalProperties": {}
-                        },
-                        "requestId": {
-                          "type": "string"
-                        },
-                        "timestamp": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "title",
-                        "detail",
-                        "requestId",
-                        "timestamp"
-                      ],
-                      "additionalProperties": true
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": true
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string"
-                        },
-                        "title": {
-                          "type": "string"
-                        },
-                        "detail": {
-                          "type": "string"
-                        },
-                        "docs": {
-                          "type": "string"
-                        },
-                        "fields": {
-                          "type": "object",
-                          "additionalProperties": {}
-                        },
-                        "requestId": {
-                          "type": "string"
-                        },
-                        "timestamp": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "title",
-                        "detail",
-                        "requestId",
-                        "timestamp"
-                      ],
-                      "additionalProperties": true
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": true
-                }
-              }
-            }
-          },
-          "503": {
             "description": "Default Response",
             "content": {
               "application/json": {

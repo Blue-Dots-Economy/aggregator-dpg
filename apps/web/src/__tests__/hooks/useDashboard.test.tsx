@@ -14,24 +14,12 @@ vi.mock('@/services/dashboard.service', () => ({
   },
 }));
 
-const { useOppProviders, useDashboard } = await import('@/hooks/useDashboard');
+const { useDashboard } = await import('@/hooks/useDashboard');
 
 function wrapper({ children }: { children: ReactNode }) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
 }
-
-describe('useOppProviders', () => {
-  afterEach(() => {
-    vi.mocked(dashboardService.oppProviders).mockReset();
-  });
-
-  it('useOppProviders resolves', async () => {
-    vi.mocked(dashboardService.oppProviders).mockResolvedValue([]);
-    const { result } = renderHook(() => useOppProviders(), { wrapper });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-  });
-});
 
 describe('useDashboard', () => {
   afterEach(() => {

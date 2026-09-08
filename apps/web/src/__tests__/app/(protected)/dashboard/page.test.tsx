@@ -7,7 +7,7 @@
  * pagination, refresh) is exercised through the one default export,
  * `DashboardPageRoot`.
  *
- * Data + config hooks (`useDashboard`, `useOppProviders`, `useAggregatorConfig`,
+ * Data + config hooks (`useDashboard`, `useAggregatorConfig`,
  * `useProfileRaw`) and the two service modules the page calls directly
  * (`dashboardService`, `DASHBOARD_BULK_ACTIONS`) are mocked as black boxes per
  * their exported shapes — no real network/BFF calls. `Topbar` and `Sidebar`-
@@ -90,10 +90,8 @@ vi.mock('@/components/shell/Topbar', () => ({
 }));
 
 const mockUseDashboard = vi.fn();
-const mockUseOppProviders = vi.fn();
 vi.mock('@/hooks/useDashboard', () => ({
   useDashboard: (...args: unknown[]) => mockUseDashboard(...args),
-  useOppProviders: (...args: unknown[]) => mockUseOppProviders(...args),
 }));
 
 // `vi.hoisted` so these fixtures exist before the (hoisted) `vi.mock` factory
@@ -250,7 +248,6 @@ describe('<DashboardPageRoot />', () => {
     nav.resetSearchParams();
     mockUseAggregatorConfig.mockReturnValue({ data: CFG_FIXTURE });
     mockUseProfileRaw.mockReturnValue({ data: { type: 'seeker' } });
-    mockUseOppProviders.mockReturnValue({ data: [], isLoading: false, isError: false });
     mockUseDashboard.mockReturnValue({
       data: dashboardPageFixture(),
       isLoading: false,
