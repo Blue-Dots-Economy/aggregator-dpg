@@ -45,8 +45,9 @@ describe('coordinator submit with ORG_HIERARCHY_ENABLED', () => {
     _resetJwks();
     // Permissive by default, NOT `null`. `null` restores the Redis-backed
     // limiter, whose bucket is keyed `ip|email` — constant across this file —
-    // so submits past the window cap 429 and which tests fail depends on the
-    // wall clock. Cases that assert throttling install their own denier.
+    // so the fourth submit in the file 429s and which tests fail depends on
+    // the wall-clock window. The one case that asserts throttling installs its
+    // own denying checker.
     _setSubmitRateChecker(async () => ({ allowed: true, retryAfterSeconds: 0 }));
     process.env.APPROVAL_TOKEN_SECRET = 'k'.repeat(48);
     process.env.ADMIN_EMAILS = 'reviewer@bluedots.local';
