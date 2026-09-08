@@ -350,6 +350,15 @@ describe('buildXlsxTemplate', () => {
 
   // ── Robustness ───────────────────────────────────────────────────────────
 
+  it('opens on the grid, so "Save As CSV" exports the right sheet', async () => {
+    // Save As exports the ACTIVE sheet. Opening on Instructions would hand an
+    // operator who saves straight away a CSV of the instructions, which fails
+    // the upload on a header mismatch.
+    const wb = await build();
+    const gridIndex = wb.worksheets.findIndex((s) => s.name === TAB_GRID);
+    expect(wb.views[0]?.activeTab).toBe(gridIndex);
+  });
+
   it('leaves every sheet unprotected', async () => {
     // No sheet protection anywhere. An operator who wants to widen a column,
     // annotate the guidance or delete the sample rows they have already read

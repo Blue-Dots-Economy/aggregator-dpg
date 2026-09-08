@@ -234,6 +234,23 @@ export async function buildXlsxTemplate(
   writeSampleSheet(wb, plans, arrayDelimiter, identity);
   writeGridSheet(wb, gridName, plans, byName, ranges, arrayDelimiter);
 
+  // Open on the grid, not on tab 1. "File > Save As > CSV" exports the ACTIVE
+  // sheet, so a workbook that opens on Instructions hands an operator who saves
+  // straight away a CSV of the instructions — which then fails the upload on a
+  // header mismatch. Found by actually round-tripping the file through a
+  // spreadsheet app rather than assuming.
+  wb.views = [
+    {
+      activeTab: wb.worksheets.findIndex((sheet) => sheet.name === gridName),
+      firstSheet: 0,
+      visibility: 'visible',
+      x: 0,
+      y: 0,
+      width: 28000,
+      height: 18000,
+    },
+  ];
+
   // exceljs declares its own `Buffer` interface, structurally unrelated to
   // Node's, so the cast goes through `unknown`. The value IS a Node Buffer.
   return (await wb.xlsx.writeBuffer()) as unknown as Buffer;
