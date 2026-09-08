@@ -35,7 +35,6 @@ import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 import { getSchemaLoader } from '../services/schema-loader/index.js';
 import { buildCsvTemplate } from '../services/csv-template/index.js';
-import { readBulkSample } from '../services/csv-template/bulk-sample.js';
 import { buildXlsxTemplate } from '../services/xlsx-template/index.js';
 import { getNetworkConfig } from '../services/network-config.js';
 import { loadConsentConfig } from '@aggregator-dpg/config-loader/fs';
@@ -94,11 +93,12 @@ const TemplateQuerySchema = z.object({
       'Participant domain id declared by the active network (e.g. seeker, provider). Required for format=csv; ignored for format=xlsx, which covers every domain.',
     ),
   /**
-   * `csv` (default) keeps the existing behaviour byte-for-byte, including the
-   * curated shipped sample. `xlsx` returns a workbook that carries the guidance
-   * a CSV cannot — dropdowns on closed-set columns, required/optional marking
-   * and the array delimiter (#564) — for an operator to fill in and export back
-   * to CSV. The upload path still accepts `.csv` only.
+   * `csv` (default) returns the header + one example row for a single
+   * participant type — the shape an API caller generating its own file needs.
+   * `xlsx` returns a workbook covering every served domain, carrying the
+   * guidance a CSV cannot: dropdowns on closed-set columns, required/optional
+   * marking and the array delimiter (#564). Both are generated from the live
+   * schemas. The upload path still accepts `.csv` only.
    */
   format: z.enum(['csv', 'xlsx']).optional().describe('Template format. Defaults to csv.'),
 });
@@ -243,12 +243,13 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
       // aggregator. A seeker coordinator seeing the provider columns cannot
       // upload provider rows.
       //
-      // The workbook is ALWAYS generated from the live schemas, deliberately
-      // not served from `bulk-samples/`. A committed workbook would rot
-      // exactly as the shipped CSVs have (up-gzb/provider.csv still carries a
-      // `title` column the schema dropped, so every row in it now fails
-      // validation), and the dropdowns are only trustworthy if they come from
-      // the schema in force.
+      // Both formats are generated from the live schemas resolved out of
+      // `network.json`. Nothing is served from a committed artifact any more:
+      // the shipped `bulk-samples/*.csv` were deleted because they had rotted
+      // into templates the parser rejects (against live ka-dhwd: 24 columns
+      // vs the schema's 36, and 18 of 20 seeker rows failing on stale enum
+      // values). A schema edit now reaches the operator on the next boot with
+      // no code change and nothing to regenerate by hand.
       if (format === 'xlsx') {
         const cfgForXlsx = await getNetworkConfig();
         const domains = await Promise.all(
@@ -286,19 +287,6 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
         });
       }
       enforceAggregatorType(auth, participantType as string);
-
-      // Prefer a curated, data-complete sample CSV shipped with the active
-      // network config (config/<network>/bulk-samples/<type>.csv) — real, valid
-      // rows an operator can edit in place beat a synthesised one-row template.
-      // Fall back to the schema-generated template when none is shipped.
-      const sample = await readBulkSample(participantType as string);
-      if (sample !== null) {
-        void auth; // authenticated for audit; curated sample is static content
-        return reply
-          .header('Content-Type', 'text/csv; charset=utf-8')
-          .header('Content-Disposition', `attachment; filename="${participantType}-template.csv"`)
-          .send(sample);
-      }
 
       const csvSchema = await loadParticipantSchema(participantType as string);
       const cfg = await getNetworkConfig();

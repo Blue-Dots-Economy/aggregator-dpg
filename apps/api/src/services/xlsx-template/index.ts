@@ -30,12 +30,14 @@
  *
  * ## Why generated, never shipped as a binary
  *
- * `config/<network>/bulk-samples/*.csv` is served verbatim for CSV. A committed
- * workbook would be the same idea and would rot the same way. Those CSVs
- * already have: against the live ka-dhwd schemas, 18 of 20 seeker rows fail on
- * outdated enum values and all 20 provider rows fail on a `title` column the
- * schema dropped. Sample rows are therefore derived from the schema in force,
- * so the workbook cannot demonstrate something the parser rejects.
+ * This repo used to ship `config/<network>/bulk-samples/*.csv` and serve them
+ * verbatim. They rotted: against the live ka-dhwd schemas those files carried
+ * 24 columns to the schema's 36, 18 of 20 seeker rows failed on outdated enum
+ * values, and every provider row failed on a `title` column the schema had
+ * dropped. They are deleted, and a committed workbook would have been the same
+ * mistake in a harder-to-inspect format. Every column, dropdown and sample row
+ * here comes from the schema resolved out of `network.json` at boot, so the
+ * template cannot demonstrate something the parser rejects.
  *
  * ## Columns come from the CSV generator
  *
