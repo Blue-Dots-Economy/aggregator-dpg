@@ -685,4 +685,108 @@ describe('POST /v1/dashboard/export/profiles', () => {
     expect(body.error.code).toBe('INTERNAL');
     expect(body.error.detail).toContain('Signalstack profile decrypt failed');
   });
+
+  it('drops ids the caller does not own and reports the count, without erroring', async () => {
+    // Signals scopes the decrypt to the acting org and returns unowned ids in
+    // `skipped`. The route must NOT turn that into a 4xx — a status keyed to ids
+    // that exist under another aggregator would confirm they exist.
+    const onboarded = await writer.onboard({
+      actingOrgId: ORG_A,
+      name: 'Velu',
+      phoneNumber: '+919876801011',
+      terms_accepted: true,
+      privacy_accepted: true,
+      channel: 'link',
+      source_id: 'link-1',
+      network: 'blue_dot',
+      domain: 'seeker',
+      item_type: 'profile_1.0',
+      profile: { name: 'Velu Murugan', phone: '+919876801011' },
+    });
+    if (!onboarded.success) throw new Error('seed failed');
+    const ownedId = onboarded.value.profile_item_id;
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/dashboard/export/profiles',
+      headers: {
+        authorization: 'Bearer agg-a-approved-with-org',
+        'content-type': 'application/json',
+      },
+      payload: { item_ids: [ownedId, 'someone-elses-item', 'nonexistent'], domain: 'seeker' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['x-export-skipped-count']).toBe('2');
+    // Only the owned row is in the CSV; the other two leave no trace.
+    expect(res.body).toContain('Velu Murugan');
+    expect(res.body).not.toContain('someone-elses-item');
+    expect(res.body).not.toContain('nonexistent');
+  });
+
+  it('reports a zero skipped count when every requested id is owned', async () => {
+    const onboarded = await writer.onboard({
+      actingOrgId: ORG_A,
+      name: 'Asha',
+      phoneNumber: '+919876801012',
+      terms_accepted: true,
+      privacy_accepted: true,
+      channel: 'link',
+      source_id: 'link-1',
+      network: 'blue_dot',
+      domain: 'seeker',
+      item_type: 'profile_1.0',
+      profile: { name: 'Asha Rao', phone: '+919876801012' },
+    });
+    if (!onboarded.success) throw new Error('seed failed');
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/dashboard/export/profiles',
+      headers: {
+        authorization: 'Bearer agg-a-approved-with-org',
+        'content-type': 'application/json',
+      },
+      payload: { item_ids: [onboarded.value.profile_item_id], domain: 'seeker' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['x-export-skipped-count']).toBe('0');
+  });
+
+  it('deduplicates item_ids before forwarding them to signalstack', async () => {
+    // Duplicates never changed the CSV (signals dedupes its own requested set)
+    // but they did consume the EXPORT_MAX_ITEM_IDS budget.
+    const onboarded = await writer.onboard({
+      actingOrgId: ORG_A,
+      name: 'Dup',
+      phoneNumber: '+919876801013',
+      terms_accepted: true,
+      privacy_accepted: true,
+      channel: 'link',
+      source_id: 'link-1',
+      network: 'blue_dot',
+      domain: 'seeker',
+      item_type: 'profile_1.0',
+      profile: { name: 'Dup Once', phone: '+919876801013' },
+    });
+    if (!onboarded.success) throw new Error('seed failed');
+    const id = onboarded.value.profile_item_id;
+    const spy = vi.spyOn(writer, 'fetchDecryptedProfiles');
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/dashboard/export/profiles',
+      headers: {
+        authorization: 'Bearer agg-a-approved-with-org',
+        'content-type': 'application/json',
+      },
+      payload: { item_ids: [id, id, id], domain: 'seeker' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(spy).toHaveBeenCalledWith(expect.objectContaining({ itemIds: [id] }));
+    // A deduped request is fully owned, so nothing is reported as withheld.
+    expect(res.headers['x-export-skipped-count']).toBe('0');
+  });
 });

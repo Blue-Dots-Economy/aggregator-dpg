@@ -25,7 +25,7 @@ export type SignalStackOnboardChannel = 'bulk' | 'link';
 
 /**
  * Echo of one profile row stored in signalstack's `items` table. Returned
- * by the `listItemsByAggregator` read endpoint (the participant onboard
+ * by the aggregator dashboard read endpoints (the participant onboard
  * endpoint returns the slimmer {@link SignalStackOnboardParticipantResult}
  * shape).
  */
@@ -130,7 +130,7 @@ export interface SignalStackOnboardParticipantInput {
  *
  * Slim shape: signalstack returns only the identifiers it minted plus the
  * server-side timestamp. The caller's audit log captures this verbatim;
- * `listItemsByAggregator` is the canonical read path for the full row.
+ * `fetchDecryptedProfiles` is the canonical read path for the full row.
  */
 export interface SignalStackOnboardParticipantResult {
   user_id: string;

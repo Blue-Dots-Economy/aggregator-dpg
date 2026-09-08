@@ -317,9 +317,17 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
       }
 
       const actingOrgId = await resolveActingOrgId(auth, log);
+
+      // Deduplicate before forwarding. Signals dedupes its own `requested` set,
+      // so duplicates never changed the CSV — but they did consume the
+      // EXPORT_MAX_ITEM_IDS budget, which made the bound far weaker than it
+      // looks (1000 copies of one id passed validation). Order is preserved so
+      // the CSV row order still follows the request.
+      const requestedIds = [...new Set(item_ids)];
+
       const result = await ss.fetchDecryptedProfiles({
         actingOrgId,
-        itemIds: item_ids,
+        itemIds: requestedIds,
         requestId: req.id,
       });
       if (!result.success) {
@@ -339,19 +347,47 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
       const csv = buildDecryptedProfilesCsv(rows);
       const filename = `profiles-${domain}-${new Date().toISOString().slice(0, 10)}.csv`;
 
+      // Ownership is enforced by Signals, which scopes the decrypt to
+      // `onboardedByOrgId = actingOrgId` AND the acting org's configured
+      // domains, returning every id that fails either test in `skipped` with no
+      // distinction (so the response cannot confirm an id exists elsewhere).
+      //
+      // A non-empty `skipped` therefore means this caller asked for at least one
+      // id it does not own. On a PII decrypt path that is worth surfacing rather
+      // than burying in a success field: the legitimate UI only ever submits ids
+      // it just listed for this aggregator, so a non-zero count is either a
+      // client bug or someone probing ids. Counts only — never the ids, and
+      // never `item_state`.
+      const skippedCount = result.value.skipped.length;
+      if (skippedCount > 0) {
+        log.warn({
+          status: 'success',
+          sub: 'decrypt.unowned_ids_requested',
+          domain,
+          requested: requestedIds.length,
+          returned: rows.length,
+          skipped: skippedCount,
+        });
+      }
+
       // Do NOT log item_state values (PII). Counts only.
       log.info({
         status: 'success',
         latency_ms: Date.now() - start,
         domain,
-        requested: item_ids.length,
+        requested: requestedIds.length,
         returned: rows.length,
-        skipped: result.value.skipped.length,
+        skipped: skippedCount,
         bytes: csv.length,
       });
 
+      // Withheld rows are dropped from the CSV, not rejected — a 403/404 keyed
+      // to ids that exist elsewhere would leak their existence. Report the
+      // COUNT so the drop is visible to the caller instead of silent (the UI can
+      // say "N records were not exported"); the count alone identifies nothing.
       return reply
         .header('Content-Type', 'text/csv; charset=utf-8')
+        .header('X-Export-Skipped-Count', String(skippedCount))
         .header('Content-Disposition', `attachment; filename="${filename.replaceAll('"', '')}"`)
         .send(csv);
     },
