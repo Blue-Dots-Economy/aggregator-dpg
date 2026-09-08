@@ -101,4 +101,26 @@ describe('buildCsvTemplate', () => {
     const { header, example } = parse(buildCsvTemplate(SEEKER_SCHEMA));
     expect(example[header.indexOf('disability_type')]).toBe('Low Vision|Blindness');
   });
+
+  // The digit run is `min` characters long whether or not a leading character
+  // class fixed the first one. Asserting the exact strings pins that length: a
+  // run one character short or long fails the pattern it was derived from, and
+  // the operator copies a cell `bulk-row-process` rejects.
+  it.each([
+    ['^[0-9]{10}$', '9876543210'],
+    ['^[6-9][0-9]{9}$', '6987654321'],
+    ['^\\+91[0-9]{10}$', '+919876543210'],
+    ['^[0-9]{6}$', '987654'],
+  ])('derives a %s example that satisfies its own pattern', (pattern, expected) => {
+    const { header, example } = parse(
+      buildCsvTemplate({
+        type: 'object',
+        required: ['value'],
+        properties: { value: { type: 'string', title: 'Value', pattern } },
+      }),
+    );
+    const cell = example[header.indexOf('value')] ?? '';
+    expect(cell).toBe(expected);
+    expect(new RegExp(pattern).test(cell)).toBe(true);
+  });
 });

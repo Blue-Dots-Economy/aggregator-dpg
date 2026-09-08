@@ -164,18 +164,17 @@ function patternExample(pattern: string | undefined): string | undefined {
     );
   if (!m) return undefined;
 
-  const prefix = (m[1] ?? '').replace('\\+', '+');
+  const prefix = (m[1] ?? '').replace(String.raw`\+`, '+');
   const firstDigit = m[2];
   const min = Number(m[3]);
   const runLength = firstDigit === undefined ? min : min + 1;
   const digits = '9876543210';
   if (runLength > digits.length * 4) return undefined;
 
+  // `min` characters either way: with no leading class the whole run is `min`
+  // long, and with one the class supplies the first and `min` more follow it.
   const body =
-    (firstDigit ?? '') +
-    digits
-      .repeat(Math.ceil(runLength / digits.length))
-      .slice(0, firstDigit === undefined ? min : min);
+    (firstDigit ?? '') + digits.repeat(Math.ceil(runLength / digits.length)).slice(0, min);
   const candidate = prefix + body;
 
   // The whole reason this function is allowed to guess: verify before emitting.

@@ -479,19 +479,18 @@ function writeValuesSheet(
 
   /** Adds one column's row, shaded to match the grid's header colour. */
   const addRow = (plan: ColumnPlan): void => {
+    // Comma-separated unless the column really does take several values: on a
+    // single-value column the delimiter reads as an instruction to join them,
+    // which is the one thing that column does not accept.
+    const separator = plan.isArray ? `${arrayDelimiter} ` : ', ';
     const row = sheet.addRow({
       name: plan.name,
       label: plan.label,
       required: plan.required ? 'Yes' : 'No',
       multi: plan.isArray ? `Yes — join with ${arrayDelimiter}` : 'No',
       when: onlyWhen(plan, byName) || 'Always',
-      // Comma-separated unless the column really does take several values: on a
-      // single-value column the delimiter reads as an instruction to join them,
-      // which is the one thing that column does not accept.
       allowed:
-        plan.allowed.length > 0
-          ? plan.allowed.join(plan.isArray ? `${arrayDelimiter} ` : ', ')
-          : (plan.description ?? 'Free text'),
+        plan.allowed.length > 0 ? plan.allowed.join(separator) : (plan.description ?? 'Free text'),
     });
     row.alignment = { vertical: 'top', wrapText: true };
     row.getCell('name').font = { bold: plan.required };
@@ -599,15 +598,16 @@ function identityCell(
 ): string | undefined {
   if (identity === undefined) return undefined;
 
-  const candidate =
-    plan.name === identity.name
-      ? { value: `Sample ${plan.label} ${rowIndex + 1}`, format: undefined }
-      : plan.name === identity.phone
-        ? { value: `98765${String(10000 + rowIndex).slice(-5)}`, format: undefined }
-        : plan.name === identity.email
-          ? { value: `person${rowIndex + 1}@example.com`, format: 'email' }
-          : undefined;
-  if (candidate === undefined) return undefined;
+  let candidate: { value: string; format?: string };
+  if (plan.name === identity.name) {
+    candidate = { value: `Sample ${plan.label} ${rowIndex + 1}` };
+  } else if (plan.name === identity.phone) {
+    candidate = { value: `98765${String(10000 + rowIndex).slice(-5)}` };
+  } else if (plan.name === identity.email) {
+    candidate = { value: `person${rowIndex + 1}@example.com`, format: 'email' };
+  } else {
+    return undefined;
+  }
 
   return fitsColumn(plan, candidate.value, candidate.format) ? candidate.value : undefined;
 }
@@ -969,11 +969,15 @@ function headerNote(
   // used to get "join them with |" AND "Pick one of: …", which contradict each
   // other about the same cell.
   const pick = plan.isArray ? 'Pick one or more of' : 'Pick one of';
+  const joinHint = plan.isArray ? ` — join them with "${arrayDelimiter}".` : '';
+  const alsoJoinHint = plan.isArray
+    ? ` More than one is allowed — join them with "${arrayDelimiter}".`
+    : '';
   if (plan.allowed.length > 0) {
     lines.push(
       plan.allowed.length <= 10
-        ? `${pick}: ${plan.allowed.join(', ')}${plan.isArray ? ` — join them with "${arrayDelimiter}".` : ''}`
-        : `${plan.allowed.length} values to choose from — use the dropdown, or see "${VALUES_SHEET}".${plan.isArray ? ` More than one is allowed — join them with "${arrayDelimiter}".` : ''}`,
+        ? `${pick}: ${plan.allowed.join(', ')}${joinHint}`
+        : `${plan.allowed.length} values to choose from — use the dropdown, or see "${VALUES_SHEET}".${alsoJoinHint}`,
     );
   } else if (plan.isArray) {
     lines.push(`More than one value allowed — join them with "${arrayDelimiter}".`);
