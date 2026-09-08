@@ -70,11 +70,18 @@ export function parseEnabledLocales(raw: string | undefined | null): Locale[] {
  * `NEXT_PUBLIC_ENABLED_LANGUAGES` is still honoured as a fallback so existing
  * deployments keep working through the rename; remove it once they have moved.
  *
+ * `||`, NOT `??`: the var is routinely present-but-empty rather than absent.
+ * Compose passes `ENABLED_LANGUAGES: ${ENABLED_LANGUAGES:-}`, which sets it to
+ * an empty string when the operator's `.env` omits it — and `''` is not
+ * nullish, so `??` would accept it and the legacy name would never be read.
+ * That made the fallback dead code on every container path, which is the one
+ * path deployments actually use.
+ *
  * @returns The enabled locales, in display order.
  */
 export function getEnabledLocales(): Locale[] {
   return parseEnabledLocales(
-    process.env.ENABLED_LANGUAGES ?? process.env.NEXT_PUBLIC_ENABLED_LANGUAGES,
+    process.env.ENABLED_LANGUAGES || process.env.NEXT_PUBLIC_ENABLED_LANGUAGES,
   );
 }
 

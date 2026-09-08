@@ -21,10 +21,14 @@ export const metadata: Metadata = {
  * The legacy `NEXT_PUBLIC_` name is still honoured so existing deployments keep
  * working through the rename.
  *
+ * `||`, NOT `??` — see the same note on `getEnabledLocales`: compose sets this
+ * to an empty string when the operator's `.env` omits it, and `''` is not
+ * nullish, so `??` would swallow the legacy name.
+ *
  * @returns The configured cap, or `DEFAULT_MAX_INVITES` when unset or invalid.
  */
 function resolveMaxInvites(): number {
-  const raw = process.env.INVITE_MAX_RECIPIENTS ?? process.env.NEXT_PUBLIC_INVITE_MAX_RECIPIENTS;
+  const raw = process.env.INVITE_MAX_RECIPIENTS || process.env.NEXT_PUBLIC_INVITE_MAX_RECIPIENTS;
   const parsed = Number(raw);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : DEFAULT_MAX_INVITES;
 }

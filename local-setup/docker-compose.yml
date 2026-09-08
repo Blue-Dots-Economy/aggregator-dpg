@@ -591,9 +591,13 @@ services:
       HOSTNAME: "0.0.0.0"
       API_BASE_URL: http://aggregator-api:4000
       # Switchable UI languages — resolved server-side per request, so a restart
-      # is enough to change them (no image rebuild).
-      ENABLED_LANGUAGES: ${ENABLED_LANGUAGES:-en,kn,hi}
-      INVITE_MAX_RECIPIENTS: ${INVITE_MAX_RECIPIENTS:-10}
+      # is enough to change them (no image rebuild). No literal defaults: they
+      # would mask the legacy-name fallback below. See the root compose file.
+      ENABLED_LANGUAGES: ${ENABLED_LANGUAGES:-}
+      INVITE_MAX_RECIPIENTS: ${INVITE_MAX_RECIPIENTS:-}
+      # Transitional, for a `.env` still using the pre-rename names.
+      NEXT_PUBLIC_ENABLED_LANGUAGES: ${NEXT_PUBLIC_ENABLED_LANGUAGES:-}
+      NEXT_PUBLIC_INVITE_MAX_RECIPIENTS: ${NEXT_PUBLIC_INVITE_MAX_RECIPIENTS:-}
       # OIDC issuer must resolve identically for the browser AND this container.
       # Both reach Keycloak at http://keycloak:8080 (browser via the /etc/hosts
       # entry, container via docker DNS) so the token `iss` claim always matches.

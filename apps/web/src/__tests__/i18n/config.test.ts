@@ -54,6 +54,23 @@ describe('i18n config', () => {
     expect(getEnabledLocales()).toEqual(['en', 'hi']);
   });
 
+  it('getEnabledLocales falls through to the legacy name when the new one is EMPTY', () => {
+    // The regression this guards: compose passes `ENABLED_LANGUAGES: ${...:-}`,
+    // so the var is present-but-empty whenever the operator's `.env` omits it.
+    // With `??` instead of `||`, `''` is not nullish, the legacy name was never
+    // consulted, and a VM still using the old name silently got every language
+    // back. Dead fallback on the only path deployments actually use.
+    process.env[ENV_KEY] = '';
+    process.env[LEGACY_ENV_KEY] = 'en,hi';
+    expect(getEnabledLocales()).toEqual(['en', 'hi']);
+  });
+
+  it('getEnabledLocales returns all supported when BOTH names are empty', () => {
+    process.env[ENV_KEY] = '';
+    process.env[LEGACY_ENV_KEY] = '';
+    expect(getEnabledLocales()).toEqual(['en', 'kn', 'hi']);
+  });
+
   it('getEnabledLocales prefers the runtime name over the legacy one', () => {
     // A deployment mid-rename must follow the unprefixed value, since that is
     // the one an operator can change without rebuilding the image.

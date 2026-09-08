@@ -53,7 +53,7 @@ Vitest + jsdom + `@testing-library/react` for components (`src/__tests__/compone
 
 The pattern to follow instead: resolve the value in a **server** component and pass it down.
 
-- Needed by a subtree of client components → resolve once in `app/layout.tsx` and publish via a context provider. `EnabledLocalesProvider` (`src/i18n/EnabledLocalesProvider.tsx`) does this for `ENABLED_LANGUAGES`, since `LanguageSwitcher` renders in four places, three of them inside client components. Its `useEnabledLocales` **throws** without a provider rather than defaulting, so a mis-wired subtree fails loudly instead of quietly showing languages the deployment disabled.
+- Needed by a subtree of client components → resolve once in `app/layout.tsx` and publish via a context provider. `EnabledLocalesProvider` (`src/i18n/EnabledLocalesProvider.tsx`) does this for `ENABLED_LANGUAGES`, since `LanguageSwitcher` renders in four places, three of them inside client components. Its `useEnabledLocales` returns `['en']` (English only) when no provider is above it, which makes the switcher hide itself — chosen over defaulting to every supported locale (that would offer a language the deployment disabled) and over throwing (a blank page for a non-fatal problem).
 - Needed by one client component → read it in that route's `page.tsx` and pass a prop, as `register/invite/page.tsx` does for `INVITE_MAX_RECIPIENTS` (and `register/page.tsx` already did for `ORG_HIERARCHY_ENABLED`).
 
 `getEnabledLocales()` in `src/i18n/config.ts` reads `process.env` and is therefore **server-only in effect** — never call it from a client component. `parseEnabledLocales()` is the pure half if you need the parsing rules elsewhere.

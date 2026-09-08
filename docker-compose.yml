@@ -311,10 +311,23 @@ services:
       # included as the fallback. Read per request by the root layout, so
       # changing this needs only a container restart. Set it to `en,hi` to drop
       # Kannada, or to `en` to hide the switcher entirely.
-      ENABLED_LANGUAGES: ${ENABLED_LANGUAGES:-en,kn,hi}
+      #
+      # NO literal default here, deliberately. `${ENABLED_LANGUAGES:-en,kn,hi}`
+      # would put that default in the container whenever the operator's `.env`
+      # omits the var, which is indistinguishable from them having chosen it —
+      # and it silently masked the legacy-name fallback below. The default now
+      # lives in exactly one place, `parseEnabledLocales`' SUPPORTED_LOCALES,
+      # which an empty value falls through to.
+      ENABLED_LANGUAGES: ${ENABLED_LANGUAGES:-}
       # Max invites an org owner can send per submission. Keep in step with the
-      # api's INVITE_MINT_MAX_RECIPIENTS.
-      INVITE_MAX_RECIPIENTS: ${INVITE_MAX_RECIPIENTS:-10}
+      # api's INVITE_MINT_MAX_RECIPIENTS. Empty → the app's default of 10.
+      INVITE_MAX_RECIPIENTS: ${INVITE_MAX_RECIPIENTS:-}
+      # Transitional: both settings were `NEXT_PUBLIC_`-prefixed before they
+      # were made runtime-readable. Forwarded so a deployment whose `.env` still
+      # uses the old name keeps working until it renames. Drop these two once no
+      # deployment sets them.
+      NEXT_PUBLIC_ENABLED_LANGUAGES: ${NEXT_PUBLIC_ENABLED_LANGUAGES:-}
+      NEXT_PUBLIC_INVITE_MAX_RECIPIENTS: ${NEXT_PUBLIC_INVITE_MAX_RECIPIENTS:-}
       # Gates the "Register Organisation" tab; read server-side by the register
       # page. Must match the api's ORG_HIERARCHY_ENABLED so both agree.
       ORG_HIERARCHY_ENABLED: ${ORG_HIERARCHY_ENABLED:-false}
