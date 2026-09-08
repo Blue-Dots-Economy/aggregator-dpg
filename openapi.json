@@ -9170,7 +9170,8 @@
                       "type": "string",
                       "minLength": 1
                     },
-                    "minItems": 1
+                    "minItems": 1,
+                    "maxItems": 1000
                   },
                   "domain": {
                     "type": "string",

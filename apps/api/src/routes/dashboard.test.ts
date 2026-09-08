@@ -837,6 +837,24 @@ describe('POST /v1/dashboard/export/profiles', () => {
     expect(res.statusCode).toBe(400);
   });
 
+  it('rejects more than 1000 item_ids with 400', async () => {
+    // The array was previously unbounded, so one call could ask signalstack to
+    // decrypt arbitrarily many profiles.
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/dashboard/export/profiles',
+      headers: {
+        authorization: 'Bearer agg-a-approved-with-org',
+        'content-type': 'application/json',
+      },
+      payload: {
+        item_ids: Array.from({ length: 1001 }, (_, i) => `id-${i}`),
+        domain: 'seeker',
+      },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
   it('400 SCHEMA_VALIDATION on an unknown domain', async () => {
     const res = await app.inject({
       method: 'POST',

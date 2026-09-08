@@ -43,7 +43,11 @@ describe('coordinator submit with ORG_HIERARCHY_ENABLED', () => {
   beforeEach(async () => {
     _resetTokenKey();
     _resetJwks();
-    _setSubmitRateChecker(null);
+    // Pin the limiter to always-allow: these cases are not about throttling,
+    // and the default checker talks to a real Redis, where every file shares
+    // the one `(ip, email)` bucket and exhausts it mid-run. Cases that DO
+    // assert a 429 override this per test.
+    _setSubmitRateChecker(async () => ({ allowed: true, retryAfterSeconds: 0 }));
     process.env.APPROVAL_TOKEN_SECRET = 'k'.repeat(48);
     process.env.ADMIN_EMAILS = 'reviewer@bluedots.local';
     process.env.KEYCLOAK_URL = 'http://kc.local';

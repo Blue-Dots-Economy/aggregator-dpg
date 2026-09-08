@@ -61,6 +61,16 @@ const DASHBOARD_LIFECYCLE = ['draft', 'live'] as const;
 const SS_MAX_PAGE = 100;
 
 /**
+ * Max `item_ids` accepted by the decrypted-profile export in one call.
+ *
+ * This is a PII decrypt path, and the array was previously unbounded — one
+ * request could ask signalstack to decrypt arbitrarily many profiles. 1000
+ * matches TILE_CAP, the widest window the dashboard itself ever renders, so
+ * the bound is invisible to any real export.
+ */
+const EXPORT_MAX_ITEM_IDS = 1000;
+
+/**
  * Lifecycle filter accepted by the dashboard items endpoint.
  *
  *   - `draft|live|paused` — narrows the returned items to that lifecycle bucket.
@@ -132,7 +142,7 @@ const DashboardExportQuerySchema = z.object({
 });
 
 const ExportProfilesBodySchema = z.object({
-  item_ids: z.array(z.string().min(1)).min(1),
+  item_ids: z.array(z.string().min(1)).min(1).max(EXPORT_MAX_ITEM_IDS),
   domain: z.string().min(1).optional(),
 });
 
