@@ -23,7 +23,7 @@ pnpm --filter <pkg> test -- -t "test name"         # single test by name
 pnpm --filter <pkg> test --coverage                # ≥ 70% line target
 ```
 
-Stack run modes, env layout, and the VM-deploy checklist live in the `local-stack` skill — including the two footguns (`make reset` destroys data volumes; `make rebuild-web` is required after any `NEXT_PUBLIC_*` change, since those are baked at build time).
+Stack run modes, env layout, and the VM-deploy checklist live in the `local-stack` skill — including the footgun that `make reset` destroys data volumes. Note `make rebuild-web` is only needed for web **code** changes: the web image takes no `NEXT_PUBLIC_*` build args, so env changes apply on restart (see `apps/web/CLAUDE.md` for the server-resolve-then-pass-down pattern that keeps it that way).
 
 Commits run husky/lint-staged (`prettier --write` + `eslint --fix`) on staged files. Conventional Commits required; **do not bypass with `--no-verify`** (per `CONTRIBUTING.md`).
 

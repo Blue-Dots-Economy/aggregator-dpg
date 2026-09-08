@@ -373,25 +373,21 @@ Engineering controls required regardless of how these resolve:
 
 **Message catalogs:** `apps/web/src/i18n/messages/<code>.json` — one file per locale. `en.json` is the canonical source of truth. `kn.json` and `hi.json` must mirror the full key tree; a parity test in the web package enforces this.
 
-**Runtime language switcher:** controlled by the `NEXT_PUBLIC_ENABLED_LANGUAGES` env var (comma-separated locale codes, e.g. `en,kn,hi`). Only codes listed here appear in the UI switcher; `en` is always included as the fallback. If the var is unset all supported locales are shown.
+**Runtime language switcher:** controlled by the `ENABLED_LANGUAGES` env var (comma-separated, ordered locale codes, e.g. `en,kn,hi`). Only codes listed here appear in the UI switcher; `en` is always included as the fallback. If the var is unset all supported locales are shown. Setting it to a single code (`ENABLED_LANGUAGES=en`) hides the switcher entirely.
+
+It is a **true runtime** setting: the root layout is a server component, so it reads the value per request and publishes it to client components via `EnabledLocalesProvider`. Changing the language set is an env edit plus a container restart — **no image rebuild**. The same value also gates the server side, so a stale `NEXT_LOCALE` cookie or an `Accept-Language` header naming a disabled language falls back to `en` rather than pinning the UI to it.
+
+`NEXT_PUBLIC_ENABLED_LANGUAGES` is still read as a fallback so deployments can migrate without a flag day; prefer the unprefixed name, and note the prefixed one is build-time only (see the note below).
 
 **Adding a new language:**
 
 1. Add `apps/web/src/i18n/messages/<code>.json` with every key present in `en.json`.
 2. Add the locale code to `SUPPORTED_LOCALES` and a display name to `LOCALE_NAMES` in `apps/web/src/i18n/config.ts`.
-3. Include the code in `NEXT_PUBLIC_ENABLED_LANGUAGES` in your `.env` (dev) or as a Docker build arg (prod — see Docker section below).
+3. Include the code in `ENABLED_LANGUAGES` in your `.env`.
 
 **Scope:** UI chrome only (navigation, labels, headings, status text). RJSF form field labels, API response strings, and transactional emails are **not** localised.
 
-**Docker / production note:** `NEXT_PUBLIC_ENABLED_LANGUAGES` is baked into the client bundle at `next build` time, not at runtime. When building the `web` Docker image you must pass it as a build arg:
-
-```bash
-docker build \
-  --build-arg NEXT_PUBLIC_ENABLED_LANGUAGES=en,kn,hi \
-  -f apps/web/Dockerfile .
-```
-
-With `docker compose` the value flows automatically from `.env` via the `build.args` entry in `docker-compose.yml`; override it in `.env` before running `make up` or `docker compose up -d --build`.
+**Why the name has no `NEXT_PUBLIC_` prefix:** Next.js inlines `NEXT_PUBLIC_*` into the client bundle at `next build`, so any such var read from a client component is frozen into the image and cannot be changed by an operator without rebuilding — which defeats the point of it being configuration. The `web` image therefore takes **no** `NEXT_PUBLIC_*` build args at all and carries no deployment-specific values; anything the browser needs is resolved in a server component and passed down. Do not add a `NEXT_PUBLIC_*` var for something an operator is expected to tune.
 
 ---
 
