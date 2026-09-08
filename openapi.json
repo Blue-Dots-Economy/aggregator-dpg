@@ -2339,11 +2339,11 @@
     },
     "/v1/bulk-uploads/template": {
       "get": {
-        "summary": "Download the bulk-upload template (CSV or XLSX)",
+        "summary": "Download CSV template for a domain",
         "tags": [
           "bulk-uploads"
         ],
-        "description": "?format=csv (default) returns a CSV template (text/csv) with the header row + sample row for the requested ?participant_type= (seeker/provider). ?format=xlsx returns one workbook covering every domain the network serves — a sample sheet, a fill-in sheet with dropdowns and an allowed-values sheet per type — and ignores ?participant_type=. Array-typed fields use the network's csv_array_delimiter. Responds with a file attachment on 200 (no JSON body).",
+        "description": "Returns a CSV template (text/csv) with the header row + sample row for the requested ?participant_type= (seeker/provider). Array-typed fields use the network's csv_array_delimiter. Responds with a text/csv attachment on 200 (no JSON body).",
         "parameters": [
           {
             "schema": {
@@ -2352,20 +2352,7 @@
             "in": "query",
             "name": "participant_type",
             "required": false,
-            "description": "Participant domain id declared by the active network (e.g. seeker, provider). Required for format=csv; ignored for format=xlsx, which covers every domain."
-          },
-          {
-            "schema": {
-              "type": "string",
-              "enum": [
-                "csv",
-                "xlsx"
-              ]
-            },
-            "in": "query",
-            "name": "format",
-            "required": false,
-            "description": "Template format. Defaults to csv."
+            "description": "Participant domain id declared by the active network (e.g. seeker, provider)."
           }
         ],
         "security": [
