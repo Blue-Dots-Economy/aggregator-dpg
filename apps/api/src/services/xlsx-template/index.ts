@@ -65,7 +65,7 @@ const SAMPLE_SHEET = '3. Sample data';
 const LISTS_SHEET = 'Lists';
 /** Rows the grid carries validation for — generous, so pasting keeps it. */
 const VALIDATED_ROWS = 500;
-/** Upper bound on generated sample rows. */
+/** Upper bound on sample rows, applied after duplicates are dropped. */
 const MAX_SAMPLE_ROWS = 14;
 /** Excel's hard limit on a worksheet name. */
 const SHEET_NAME_MAX = 31;
@@ -694,7 +694,7 @@ function sampleRows(
       .join('');
   };
 
-  const distinct = dedupeBy(buildPinSets(controllers), signature);
+  const distinct = dedupeBy(buildPinSets(controllers), signature).slice(0, MAX_SAMPLE_ROWS);
   return distinct.map((pins, i) => {
     const cells = rowCells(pins, i);
     return plans.map((plan) => cells.get(plan.name) ?? '');
@@ -729,22 +729,37 @@ function collectControllers(plans: readonly ColumnPlan[]): ReadonlyMap<string, s
  * One pin set per controller value — the shape of the sample sheet.
  *
  * Each pin set fixes a single controller to a single value, so the row it
- * renders demonstrates exactly one conditional branch. Capped at
- * {@link MAX_SAMPLE_ROWS}: on a wide schema the product of every controller and
- * value runs to dozens of rows, and a sample sheet nobody scrolls to the end of
- * teaches nothing.
+ * renders demonstrates exactly one conditional branch.
+ *
+ * Ordered BREADTH-first: every controller's first value, then every
+ * controller's second, and so on. Depth-first spent the whole budget on the
+ * controllers that happened to be declared earliest — on a live seeker schema
+ * `workExperience` (3 values) and `educationCategory` (10) filled it, and
+ * `natureOfJobsInterestedIn` was never reached, so `stipendMin` / `salaryMin`
+ * were blank in every row. That is precisely the case this module's header
+ * names as the reason the sample sheet exists ("One row cannot show that
+ * `stipendMin` applies to an Internship while `salaryMin` applies to a
+ * Full-time role"). It was also order-fragile: ka-dhwd's 170-value `itiTrade`
+ * declared first would have produced 14 near-identical rows and nothing else.
+ *
+ * Uncapped — {@link MAX_SAMPLE_ROWS} is applied by the caller after deduping,
+ * so the budget is spent on rows that actually differ. The count here is the
+ * SUM of the controllers' value counts, not their product.
  *
  * @param controllers - Controller fields and their allowed values.
- * @returns Pin sets, in controller declaration order.
+ * @returns Pin sets, one controller value each, breadth-first across
+ *   controllers.
  */
 function buildPinSets(
   controllers: ReadonlyMap<string, string[]>,
 ): Array<ReadonlyMap<string, string>> {
+  const entries = [...controllers];
+  const widest = Math.max(0, ...entries.map(([, values]) => values.length));
   const pinSets: Array<ReadonlyMap<string, string>> = [];
-  for (const [field, values] of controllers) {
-    for (const value of values) {
-      if (pinSets.length >= MAX_SAMPLE_ROWS) return pinSets;
-      pinSets.push(new Map([[field, value]]));
+  for (let i = 0; i < widest; i += 1) {
+    for (const [field, values] of entries) {
+      const value = values[i];
+      if (value !== undefined) pinSets.push(new Map([[field, value]]));
     }
   }
   // A schema with no conditionals still deserves worked examples.

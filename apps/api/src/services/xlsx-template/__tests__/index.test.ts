@@ -614,6 +614,53 @@ describe('buildXlsxTemplate', () => {
     expect(note).toContain('join them with "|"');
   });
 
+  it('spends the sample-row budget across controllers, not on the first one', async () => {
+    const wide = {
+      type: 'object',
+      required: ['name'],
+      properties: {
+        name: { type: 'string', title: 'Full Name' },
+        // Wide enough to consume the whole budget alone, and a controller only
+        // because `tradeCertificate` keys off it — `collectControllers` finds
+        // controllers through their DEPENDENTS, so this pair has to come first
+        // for `jobType` to be the later controller.
+        trade: {
+          type: 'string',
+          title: 'Trade',
+          enum: Array.from({ length: 20 }, (_, i) => `Trade ${i + 1}`),
+        },
+        tradeCertificate: {
+          type: 'string',
+          title: 'Trade Certificate',
+          enum: ['Yes', 'No'],
+          'x-show-if': { trade: ['Trade 2'] },
+        },
+        jobType: { type: 'string', title: 'Job Type', enum: ['Internship', 'Full-time'] },
+        stipendMin: {
+          type: 'string',
+          title: 'Stipend Min',
+          'x-show-if': { jobType: ['Full-time'] },
+        },
+      },
+    } as Record<string, unknown>;
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load((await buildXlsxTemplate(wide, 'seeker')) as unknown as ExcelJS.Buffer);
+    const cols = orderedColumns(wide);
+    const sample = wb.getWorksheet(TAB_SAMPLE)!;
+    const stipendCol = cols.indexOf('stipendMin') + 1;
+
+    // `jobType` is the LAST controller and its second value is what unlocks
+    // `stipendMin`, so a depth-first budget never reached it and the column was
+    // blank in every row — the case the module header names as the motivation.
+    let demonstrated = 0;
+    for (let r = 2; r <= sample.rowCount; r += 1) {
+      if (String(sample.getCell(r, stipendCol).value ?? '') !== '') demonstrated += 1;
+    }
+    expect(demonstrated).toBeGreaterThan(0);
+    // Still bounded: a sheet nobody scrolls to the end of teaches nothing.
+    expect(sample.rowCount).toBeLessThanOrEqual(15);
+  });
+
   it('honours a non-pipe delimiter from the network config', async () => {
     const wb = await build(';');
     const sheet = wb.getWorksheet(TAB_VALUES)!;
