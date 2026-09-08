@@ -68,17 +68,6 @@ export interface Provider extends ParticipantBase {
   role: string;
 }
 
-export type OpportunityProvider = Provider;
-
-export type ParticipantKind = 'seeker' | 'provider' | 'opp';
-
-export interface ParticipantFilter {
-  kind?: ParticipantKind;
-  status?: ParticipantStatus;
-  city?: string;
-  search?: string;
-}
-
 export interface User {
   id: string;
   name: string;

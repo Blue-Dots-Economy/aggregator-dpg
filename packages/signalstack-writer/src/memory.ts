@@ -5,7 +5,6 @@
  *   - User identity is shared (single row per phone OR email).
  *   - Profile rows are appended; uniqueness is NOT enforced (matches current
  *     server behaviour — no dedupe on items).
- *   - `aggregator_id` is recorded on create and immutable on update.
  *
  * Returned ids and timestamps are deterministic across the lifetime of the
  * writer to make assertions predictable.
@@ -223,7 +222,6 @@ export class InMemorySignalStackWriter extends SignalStackWriterBase {
       item_state: input.profile,
       item_latitude: null,
       item_longitude: null,
-      aggregator_id: null,
       created_at: ISO_FIXED,
       updated_at: ISO_FIXED,
       lifecycle_status: classification.lifecycle_status,

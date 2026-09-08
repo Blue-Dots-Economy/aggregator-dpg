@@ -37,7 +37,6 @@ export interface SignalStackProfile {
   item_state: Record<string, unknown>;
   item_latitude: number | null;
   item_longitude: number | null;
-  aggregator_id: string | null;
   created_at: string;
   updated_at: string;
   /**
@@ -153,49 +152,6 @@ export interface SignalStackOnboardParticipantResult {
    * returned for the calling aggregator.
    */
   owned_elsewhere?: boolean;
-}
-
-/**
- * Filter for the aggregator-scoped read of signalstack items.
- *
- * `item_network` + `item_domain` are required so signalstack can look up the
- * right partition; `aggregator_id` is the dashboard's primary scope; the
- * rest are pagination + optional refinement.
- */
-export interface SignalStackItemQuery {
-  /** Correlation id (the x-request-id header) forwarded to Signals for tracing. */
-  requestId?: string;
-  aggregator_id: string;
-  item_network: string;
-  item_domain: string;
-  item_type?: string;
-  limit?: number;
-  offset?: number;
-  /**
-   * Restricts the returned items by lifecycle classification.
-   *   - `'live_only'` (signals default — applied when this field is
-   *     absent) returns rows with `lifecycle_status === 'live'`.
-   *   - `'all'` returns every row regardless of lifecycle, including
-   *     drafts and paused items.
-   */
-  lifecycle_filter?: 'live_only' | 'all';
-}
-
-/**
- * Paginated meta block returned alongside the items list.
- */
-export interface SignalStackItemListMeta {
-  total: number;
-  limit: number;
-  offset: number;
-}
-
-/**
- * Response shape for the aggregator-scoped read.
- */
-export interface SignalStackItemList {
-  meta: SignalStackItemListMeta;
-  items: SignalStackProfile[];
 }
 
 /**
@@ -505,19 +461,6 @@ export interface SignalStackProbeUserResult {
 }
 
 /**
- * Filter for a single-item signalstack read. Used by the outbound
- * completion-dispatch processor to re-check the item's lifecycle right
- * before sending — so a draft that has since flipped to live or paused
- * does not receive a stale prompt.
- */
-export interface SignalStackGetItemQuery {
-  /** Correlation id (the x-request-id header) forwarded to Signals for tracing. */
-  requestId?: string;
-  /** Signalstack item id minted by a prior `onboard()` call. */
-  item_id: string;
-}
-
-/**
  * Provides a bearer access token for authenticating to Signals' client-
  * credentials service-auth path — the alternative to the static `apiKey`
  * credential on {@link HttpSignalStackWriterConfig} (Phase C of
@@ -580,6 +523,17 @@ export abstract class SignalStackWriterBase {
     input: SignalStackOnboardParticipantInput,
   ): Promise<Result<SignalStackOnboardParticipantResult, BaseError>>;
 
+  /**
+   * Register (or look up) the aggregator's organisation row in signalstack.
+   *
+   * Idempotent on `external_id`: repeated calls with the same input return
+   * the same `org_id` and never create duplicates. Called once at admin
+   * approval, and again as a login-time fallback if the Keycloak attribute
+   * is missing.
+   *
+   * @param input - external_id (our aggregator UUID) + display name + slug.
+   * @returns ok(SignalStackAggregator) on 2xx; err(BaseError) otherwise.
+   */
   abstract upsertAggregator(
     input: SignalStackUpsertAggregatorInput,
   ): Promise<Result<SignalStackAggregator, BaseError>>;

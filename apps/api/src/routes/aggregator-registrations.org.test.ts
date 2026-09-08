@@ -43,7 +43,11 @@ describe('coordinator submit with ORG_HIERARCHY_ENABLED', () => {
   beforeEach(async () => {
     _resetTokenKey();
     _resetJwks();
-    _setSubmitRateChecker(null);
+    // Permissive by default, NOT `null`. `null` restores the Redis-backed
+    // limiter, whose bucket is keyed `ip|email` — constant across this file —
+    // so submits past the window cap 429 and which tests fail depends on the
+    // wall clock. Cases that assert throttling install their own denier.
+    _setSubmitRateChecker(async () => ({ allowed: true, retryAfterSeconds: 0 }));
     process.env.APPROVAL_TOKEN_SECRET = 'k'.repeat(48);
     process.env.ADMIN_EMAILS = 'reviewer@bluedots.local';
     process.env.KEYCLOAK_URL = 'http://kc.local';

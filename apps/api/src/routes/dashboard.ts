@@ -378,8 +378,9 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
 
       // Withheld rows are dropped from the CSV, not rejected — a 403/404 keyed
       // to ids that exist elsewhere would leak their existence. Report the
-      // COUNT so the drop is visible to the caller instead of silent (the UI can
-      // say "N records were not exported"); the count alone identifies nothing.
+      // COUNT so the drop is visible instead of silent; the count alone
+      // identifies nothing. Relayed to the browser by the BFF profiles route
+      // and surfaced as `skippedCount` on the web service's export result.
       return reply
         .header('Content-Type', 'text/csv; charset=utf-8')
         .header('X-Export-Skipped-Count', String(skippedCount))

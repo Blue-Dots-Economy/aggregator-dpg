@@ -622,6 +622,38 @@ describe('POST /v1/dashboard/export/profiles', () => {
     expect(res.statusCode).toBe(400);
   });
 
+  it('accepts exactly 1000 item_ids', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/dashboard/export/profiles',
+      headers: {
+        authorization: 'Bearer agg-a-approved-with-org',
+        'content-type': 'application/json',
+      },
+      payload: {
+        item_ids: Array.from({ length: 1000 }, (_, i) => `id-${i}`),
+        domain: 'seeker',
+      },
+    });
+    // None are owned, so the CSV is empty — the point is that 1000 is not a 400.
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('rejects 1001 copies of one id — the cap applies before dedup', async () => {
+    // Pins the ordering. Moving dedup ahead of validation would make this pass
+    // as a 1-id request and quietly widen the cap back to unbounded.
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/dashboard/export/profiles',
+      headers: {
+        authorization: 'Bearer agg-a-approved-with-org',
+        'content-type': 'application/json',
+      },
+      payload: { item_ids: Array.from({ length: 1001 }, () => 'same-id'), domain: 'seeker' },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
   it('rejects more than 1000 item_ids with 400', async () => {
     // The array was previously unbounded, so one call could ask signalstack to
     // decrypt arbitrarily many profiles.
@@ -690,21 +722,7 @@ describe('POST /v1/dashboard/export/profiles', () => {
     // Signals scopes the decrypt to the acting org and returns unowned ids in
     // `skipped`. The route must NOT turn that into a 4xx — a status keyed to ids
     // that exist under another aggregator would confirm they exist.
-    const onboarded = await writer.onboard({
-      actingOrgId: ORG_A,
-      name: 'Velu',
-      phoneNumber: '+919876801011',
-      terms_accepted: true,
-      privacy_accepted: true,
-      channel: 'link',
-      source_id: 'link-1',
-      network: 'blue_dot',
-      domain: 'seeker',
-      item_type: 'profile_1.0',
-      profile: { name: 'Velu Murugan', phone: '+919876801011' },
-    });
-    if (!onboarded.success) throw new Error('seed failed');
-    const ownedId = onboarded.value.profile_item_id;
+    const ownedId = await seedOwnedProfile('Velu Murugan', '+919876801011');
 
     const res = await app.inject({
       method: 'POST',
@@ -724,11 +742,11 @@ describe('POST /v1/dashboard/export/profiles', () => {
     expect(res.body).not.toContain('nonexistent');
   });
 
-  it('reports a zero skipped count when every requested id is owned', async () => {
+  async function seedOwnedProfile(name: string, phone: string): Promise<string> {
     const onboarded = await writer.onboard({
       actingOrgId: ORG_A,
-      name: 'Asha',
-      phoneNumber: '+919876801012',
+      name,
+      phoneNumber: phone,
       terms_accepted: true,
       privacy_accepted: true,
       channel: 'link',
@@ -736,9 +754,14 @@ describe('POST /v1/dashboard/export/profiles', () => {
       network: 'blue_dot',
       domain: 'seeker',
       item_type: 'profile_1.0',
-      profile: { name: 'Asha Rao', phone: '+919876801012' },
+      profile: { name, phone },
     });
     if (!onboarded.success) throw new Error('seed failed');
+    return onboarded.value.profile_item_id;
+  }
+
+  it('reports a zero skipped count when every requested id is owned', async () => {
+    const ownedId = await seedOwnedProfile('Asha Rao', '+919876801012');
 
     const res = await app.inject({
       method: 'POST',
@@ -747,7 +770,7 @@ describe('POST /v1/dashboard/export/profiles', () => {
         authorization: 'Bearer agg-a-approved-with-org',
         'content-type': 'application/json',
       },
-      payload: { item_ids: [onboarded.value.profile_item_id], domain: 'seeker' },
+      payload: { item_ids: [ownedId], domain: 'seeker' },
     });
 
     expect(res.statusCode).toBe(200);
@@ -757,21 +780,7 @@ describe('POST /v1/dashboard/export/profiles', () => {
   it('deduplicates item_ids before forwarding them to signalstack', async () => {
     // Duplicates never changed the CSV (signals dedupes its own requested set)
     // but they did consume the EXPORT_MAX_ITEM_IDS budget.
-    const onboarded = await writer.onboard({
-      actingOrgId: ORG_A,
-      name: 'Dup',
-      phoneNumber: '+919876801013',
-      terms_accepted: true,
-      privacy_accepted: true,
-      channel: 'link',
-      source_id: 'link-1',
-      network: 'blue_dot',
-      domain: 'seeker',
-      item_type: 'profile_1.0',
-      profile: { name: 'Dup Once', phone: '+919876801013' },
-    });
-    if (!onboarded.success) throw new Error('seed failed');
-    const id = onboarded.value.profile_item_id;
+    const id = await seedOwnedProfile('Dup Once', '+919876801013');
     const spy = vi.spyOn(writer, 'fetchDecryptedProfiles');
 
     const res = await app.inject({

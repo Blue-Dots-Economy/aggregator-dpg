@@ -121,6 +121,15 @@ export interface DashboardExportQuery {
 export interface DashboardExportResult {
   blob: Blob;
   filename: string;
+  /**
+   * Requested rows the API withheld, from `X-Export-Skipped-Count`.
+   *
+   * Only the decrypted-profile export sets this: the API drops item_ids that
+   * are not this aggregator's rather than rejecting the request, so a caller
+   * that selected N rows can receive fewer and needs to say so. `undefined`
+   * when the header is absent (any other export).
+   */
+  skippedCount?: number;
 }
 
 /**
@@ -171,7 +180,10 @@ export interface DashboardService {
    *
    * Posts the item ids and domain to the BFF relay which forwards to the
    * aggregator API (which holds the signalstack admin key). Returns the
-   * Blob + the upstream filename so the caller can trigger a browser download.
+   * Blob + the upstream filename so the caller can trigger a browser download,
+   * plus `skippedCount` when the API reported withholding rows — ids that are
+   * not this aggregator's are dropped from the CSV rather than rejected, so a
+   * caller that selected N rows may receive fewer and should say so.
    */
   dashboardExportProfiles(input: {
     domain: string;
@@ -262,7 +274,11 @@ class HttpDashboardService implements DashboardService {
     const disposition = res.headers.get('content-disposition') ?? '';
     const filename =
       parseFilenameFromContentDisposition(disposition) ?? `profiles-${input.domain}.csv`;
-    return { blob, filename };
+    // Absent header, or a non-numeric one, means "no count available" rather
+    // than zero — the caller must not report "0 withheld" it did not measure.
+    const rawSkipped = Number(res.headers.get('x-export-skipped-count'));
+    const skippedCount = Number.isInteger(rawSkipped) && rawSkipped >= 0 ? rawSkipped : undefined;
+    return { blob, filename, ...(skippedCount === undefined ? {} : { skippedCount }) };
   }
 
   async dashboardBulkAction(input: DashboardBulkActionInput): Promise<DashboardBulkActionResult> {
@@ -311,6 +327,18 @@ export function triggerCsvDownload(result: DashboardExportResult): void {
   URL.revokeObjectURL(url);
 }
 
+/**
+ * Reads the RFC 6266 `filename*=charset'lang'value` parameter.
+ *
+ * Located by index rather than one `filename\*\s*=\s*[^']*''([^;]+)` regex:
+ * the header is upstream-controlled, and that pattern rescans `[^']*` from
+ * every start offset when the `''` never arrives — super-linear on a hostile
+ * header (SonarCloud typescript:S8786). Each step here is a single scan.
+ *
+ * @param header - The raw `Content-Disposition` header value.
+ * @returns The decoded filename, or `null` when the parameter is absent,
+ *   truncated, or not valid percent-encoding.
+ */
 function parseEncodedFilename(header: string): string | null {
   const starKey = /filename\*\s*=/i.exec(header);
   if (!starKey) return null;

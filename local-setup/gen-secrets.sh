@@ -13,6 +13,12 @@
 # signals API requires to be base64 decoding to exactly 32 bytes (AES-256).
 set -eu
 
+# Every file this script creates holds secrets in cleartext, including the
+# shell-redirected scratch file in the loop below — which mktemp does not cover.
+# Set the umask before anything is created rather than chmod-ing after, so there
+# is no window where the file is readable by others.
+umask 077
+
 ENV_FILE="${1:-$(dirname "$0")/.env}"
 
 if [ ! -f "$ENV_FILE" ]; then
@@ -20,8 +26,16 @@ if [ ! -f "$ENV_FILE" ]; then
   exit 1
 fi
 
-# Placeholder lines look like `NAME=CHANGE_ME_ANYTHING`.
-vars=$(sed -n 's/^\([A-Z0-9_]*\)=CHANGE_ME_.*$/\1/p' "$ENV_FILE")
+# One pattern for both finding placeholders and, at the end, proving none are
+# left. Tolerates `export ` and leading whitespace so a line this script cannot
+# rewrite is never silently treated as absent. Anchored at the start of the
+# line, so the `CHANGE_ME_*` mentions in the file's own header comment are not
+# matched.
+PLACEHOLDER_RE='^[[:space:]]*\(export[[:space:]][[:space:]]*\)\{0,1\}\([A-Za-z0-9_]\{1,\}\)=CHANGE_ME_'
+
+remaining() { sed -n "s/${PLACEHOLDER_RE}.*\$/\\2/p" "$1"; }
+
+vars=$(remaining "$ENV_FILE")
 
 if [ -z "$vars" ]; then
   echo "$ENV_FILE has no CHANGE_ME_* placeholders left — nothing to do."
@@ -29,7 +43,7 @@ if [ -z "$vars" ]; then
 fi
 
 tmp=$(mktemp)
-trap 'rm -f "$tmp"' EXIT
+trap 'rm -f "$tmp" "$tmp.next"' EXIT INT TERM
 cp "$ENV_FILE" "$tmp"
 
 for name in $vars; do
@@ -40,10 +54,21 @@ for name in $vars; do
   # `value` is hex or base64, so the only character needing care in the sed
   # replacement is base64's `/`; `|` is not in either alphabet, so use it as
   # the delimiter and escape nothing else.
-  sed "s|^${name}=CHANGE_ME_.*$|${name}=${value}|" "$tmp" > "$tmp.next"
+  sed "s|^\\([[:space:]]*\\(export[[:space:]][[:space:]]*\\)\\{0,1\\}\\)${name}=CHANGE_ME_.*\$|\\1${name}=${value}|" \
+    "$tmp" > "$tmp.next"
   mv "$tmp.next" "$tmp"
   echo "  generated $name"
 done
+
+# Prove the work rather than assume it. A placeholder that the substitution
+# missed would otherwise survive into `.env` under a success message — the exact
+# false all-clear this script exists to prevent.
+missed=$(remaining "$tmp" | tr '\n' ' ')
+if [ -n "$missed" ]; then
+  echo "gen-secrets.sh: these placeholders were not replaced: ${missed}" >&2
+  echo "$ENV_FILE left unchanged. Fix them by hand, or report the line format." >&2
+  exit 1
+fi
 
 cat "$tmp" > "$ENV_FILE"
 chmod 600 "$ENV_FILE"
