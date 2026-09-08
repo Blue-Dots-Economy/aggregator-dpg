@@ -89,16 +89,13 @@ const TemplateQuerySchema = z.object({
   participant_type: z
     .string()
     .optional()
-    .describe(
-      'Participant domain id declared by the active network (e.g. seeker, provider). Required for format=csv; ignored for format=xlsx, which covers every domain.',
-    ),
+    .describe('Participant domain id declared by the active network (e.g. seeker, provider).'),
   /**
-   * `csv` (default) returns the header + one example row for a single
-   * participant type — the shape an API caller generating its own file needs.
-   * `xlsx` returns a workbook covering every served domain, carrying the
-   * guidance a CSV cannot: dropdowns on closed-set columns, required/optional
-   * marking and the array delimiter (#564). Both are generated from the live
-   * schemas. The upload path still accepts `.csv` only.
+   * `csv` (default) returns the header + one example row — the shape an API
+   * caller generating its own file needs. `xlsx` returns the four-tab workbook
+   * for the same type, carrying the guidance a CSV cannot: dropdowns on
+   * closed-set columns, required/conditional marking, worked sample rows and
+   * the array delimiter (#564). The upload path still accepts `.csv` only.
    */
   format: z.enum(['csv', 'xlsx']).optional().describe('Template format. Defaults to csv.'),
 });
@@ -220,7 +217,7 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
         tags: ['bulk-uploads'],
         summary: 'Download the bulk-upload template (CSV or XLSX)',
         description:
-          "?format=csv (default) returns a CSV template (text/csv) with the header row + sample row for the requested ?participant_type= (seeker/provider). ?format=xlsx returns one workbook covering every domain the network serves — a sample sheet, a fill-in sheet with dropdowns and an allowed-values sheet per type — and ignores ?participant_type=. Array-typed fields use the network's csv_array_delimiter. Responds with a file attachment on 200 (no JSON body).",
+          "Both formats are generated from the participant schema resolved out of network.json for ?participant_type= (seeker/provider), and both are gated on the caller's registered aggregator_type. ?format=csv (default) returns text/csv: the header row plus one example row. ?format=xlsx returns a four-tab workbook for that type — instructions, allowed values, worked sample rows and an empty grid with dropdowns on every closed-set column. Array-typed fields use the network's csv_array_delimiter. Responds with a file attachment on 200 (no JSON body).",
         security: [{ bearerAuth: [] }],
         querystring: TemplateQuerySchema,
         response: {
@@ -233,51 +230,6 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
       const format = (req.query as { format?: 'csv' | 'xlsx' }).format ?? 'csv';
       const validTypes = await getValidParticipantTypes();
 
-      // XLSX covers EVERY domain the network serves in one workbook — a sheet
-      // group per type, matching the reference workbook on #564 — so it takes
-      // no `participant_type` and the type gate does not apply to it. That is
-      // safe: the workbook is derived purely from the participant schemas,
-      // which are public config-as-code (the portal already serves them
-      // anonymously for registration), and the gate that actually matters
-      // still stands on POST /v1/bulk-uploads, where rows get attributed to an
-      // aggregator. A seeker coordinator seeing the provider columns cannot
-      // upload provider rows.
-      //
-      // Both formats are generated from the live schemas resolved out of
-      // `network.json`. Nothing is served from a committed artifact any more:
-      // the shipped `bulk-samples/*.csv` were deleted because they had rotted
-      // into templates the parser rejects (against live ka-dhwd: 24 columns
-      // vs the schema's 36, and 18 of 20 seeker rows failing on stale enum
-      // values). A schema edit now reaches the operator on the next boot with
-      // no code change and nothing to regenerate by hand.
-      if (format === 'xlsx') {
-        const cfgForXlsx = await getNetworkConfig();
-        const domains = await Promise.all(
-          [...validTypes].map(async (id) => ({
-            id,
-            schema: await loadParticipantSchema(id),
-            // Names the phone/email columns so their sample cells are realistic
-            // rather than "Example Mobile Number" — see XlsxDomain.identity.
-            identity: cfgForXlsx.domains[id]?.identity,
-          })),
-        );
-        const workbook = await buildXlsxTemplate(domains, {
-          network: cfgForXlsx.network.id,
-          arrayDelimiter: cfgForXlsx.aggregator.network.csv_array_delimiter,
-        });
-        void auth; // authenticated for audit; workbook content is schema-derived only
-        return reply
-          .header(
-            'Content-Type',
-            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-          )
-          .header(
-            'Content-Disposition',
-            `attachment; filename="${cfgForXlsx.network.id}-bulk-template.xlsx"`,
-          )
-          .send(workbook);
-      }
-
       const query = req.query as { participant_type?: string };
       const participantType = query.participant_type;
       if (!participantType || !validTypes.has(participantType)) {
@@ -287,6 +239,40 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
         });
       }
       enforceAggregatorType(auth, participantType as string);
+
+      // Both formats are generated from the live schemas resolved out of
+      // `network.json`. Nothing is served from a committed artifact: the
+      // shipped `bulk-samples/*.csv` were deleted because they had rotted into
+      // templates the parser rejects (against live ka-dhwd: 24 columns vs the
+      // schema's 36, and 18 of 20 seeker rows failing on stale enum values). A
+      // schema edit now reaches the operator on the next boot with no code
+      // change and nothing to regenerate by hand.
+      //
+      // One workbook per participant type, not one covering every domain: a
+      // coordinator is scoped to a single type, so this is four tabs rather
+      // than every domain the network serves, and the type gate above applies
+      // to the workbook exactly as it does to the CSV.
+      if (format === 'xlsx') {
+        const cfgForXlsx = await getNetworkConfig();
+        const workbook = await buildXlsxTemplate(
+          await loadParticipantSchema(participantType as string),
+          participantType as string,
+          {
+            arrayDelimiter: cfgForXlsx.aggregator.network.csv_array_delimiter,
+            // Names the phone/email columns so their sample cells are realistic
+            // rather than "Example Mobile Number" — see XlsxTemplateOptions.
+            identity: cfgForXlsx.domains[participantType as string]?.identity,
+          },
+        );
+        void auth; // authenticated for audit; workbook content is schema-derived only
+        return reply
+          .header(
+            'Content-Type',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          )
+          .header('Content-Disposition', `attachment; filename="${participantType}-template.xlsx"`)
+          .send(workbook);
+      }
 
       const csvSchema = await loadParticipantSchema(participantType as string);
       const cfg = await getNetworkConfig();

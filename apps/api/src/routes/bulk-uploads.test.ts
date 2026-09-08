@@ -384,8 +384,8 @@ describe('bulk-uploads routes', () => {
       expect(res.headers['content-type']).toContain(
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       );
-      // Named for the network, not the type: one workbook carries every domain.
-      expect(res.headers['content-disposition']).toContain('blue_dot-bulk-template.xlsx');
+      // One workbook per participant type, named for it.
+      expect(res.headers['content-disposition']).toContain('seeker-template.xlsx');
       // An .xlsx is a ZIP: the magic bytes prove bytes survived the response
       // path rather than being decoded as text somewhere.
       expect(res.rawPayload.subarray(0, 2).toString('latin1')).toBe('PK');
@@ -414,7 +414,7 @@ describe('bulk-uploads routes', () => {
       });
       const res = await app.inject({
         method: 'GET',
-        url: '/v1/bulk-uploads/template?format=xlsx',
+        url: '/v1/bulk-uploads/template?participant_type=seeker&format=xlsx',
         headers: AUTH('seeker-approved'),
       });
       expect(res.statusCode).toBe(200);
@@ -422,7 +422,7 @@ describe('bulk-uploads routes', () => {
 
       const wb = new ExcelJS.Workbook();
       await wb.xlsx.load(res.rawPayload as unknown as ExcelJS.Buffer);
-      const header = wb.getWorksheet('blue_dot_seekers_data')!.getRow(1).getCell(1).value;
+      const header = wb.getWorksheet('4. Enter your seekers')!.getRow(1).getCell(1).value;
       expect(String(header)).toBe('renamedByConfig');
       _setNetworkConfig(buildBlueDotConfig());
     });
@@ -446,48 +446,42 @@ describe('bulk-uploads routes', () => {
       expect(res.statusCode).toBe(400);
     });
 
-    it('serves the whole-network workbook regardless of the registered type', async () => {
-      // The workbook covers every domain in one file (the reference workbook on
-      // #564), so the type gate does not apply to it: its content is derived
-      // purely from the participant schemas, which are public config-as-code.
-      // The gate that matters still stands on POST /v1/bulk-uploads, where rows
-      // get attributed to an aggregator.
+    it('enforces the aggregator type on the xlsx path too', async () => {
+      // The workbook is per participant type now, so the gate applies to it
+      // exactly as it does to the CSV — a seeker coordinator has no business
+      // downloading the provider grid.
       const res = await app.inject({
         method: 'GET',
         url: '/v1/bulk-uploads/template?participant_type=provider&format=xlsx',
         headers: AUTH('seeker-approved'),
       });
-      expect(res.statusCode).toBe(200);
-      expect(res.rawPayload.subarray(0, 2).toString('latin1')).toBe('PK');
+      expect(res.statusCode).toBe(403);
     });
 
-    it('needs no participant_type for xlsx, since it covers every domain', async () => {
+    it('requires participant_type for xlsx, as for csv', async () => {
       const res = await app.inject({
         method: 'GET',
         url: '/v1/bulk-uploads/template?format=xlsx',
         headers: AUTH('seeker-approved'),
       });
-      expect(res.statusCode).toBe(200);
-      expect(res.headers['content-disposition']).toContain('blue_dot-bulk-template.xlsx');
+      expect(res.statusCode).toBe(400);
+      expect((res.json() as { error: { code: string } }).error.code).toBe('SCHEMA_VALIDATION');
     });
 
-    it('carries a sheet group for EVERY domain the network serves', async () => {
+    it('carries the four operator-facing tabs for that one type', async () => {
       const res = await app.inject({
         method: 'GET',
-        url: '/v1/bulk-uploads/template?format=xlsx',
+        url: '/v1/bulk-uploads/template?participant_type=seeker&format=xlsx',
         headers: AUTH('seeker-approved'),
       });
       const wb = new ExcelJS.Workbook();
       await wb.xlsx.load(res.rawPayload as unknown as ExcelJS.Buffer);
       expect(wb.worksheets.map((s) => s.name)).toEqual([
-        'Instructions',
+        '1. Instructions',
         'Lists',
-        'sample_blue_dot_seekers',
-        'blue_dot_seekers_data',
-        'enumerated_seeker',
-        'sample_blue_dot_providers',
-        'blue_dot_providers_data',
-        'enumerated_provider',
+        '2. Allowed values',
+        '3. Sample data',
+        '4. Enter your seekers',
       ]);
     });
 
@@ -573,10 +567,10 @@ describe('bulk-uploads routes', () => {
     });
 
     it('serves a CSV header matching the workbook, so one cannot drift', async () => {
-      // The operator fills the workbook's `_data` sheet and exports it to CSV,
-      // and an API caller generates from the CSV template. Both have to be the
-      // file `bulk-row-process` accepts, so their headers must be identical —
-      // the divergence the deleted shipped samples had introduced.
+      // The operator fills the workbook's grid and exports it to CSV, and an
+      // API caller generates from the CSV template. Both have to be the file
+      // `bulk-row-process` accepts, so their headers must be identical — the
+      // divergence the deleted shipped samples had introduced.
       const csv = await app.inject({
         method: 'GET',
         url: '/v1/bulk-uploads/template?participant_type=seeker',
@@ -584,13 +578,13 @@ describe('bulk-uploads routes', () => {
       });
       const xlsx = await app.inject({
         method: 'GET',
-        url: '/v1/bulk-uploads/template?format=xlsx',
+        url: '/v1/bulk-uploads/template?participant_type=seeker&format=xlsx',
         headers: AUTH('seeker-approved'),
       });
       const wb = new ExcelJS.Workbook();
       await wb.xlsx.load(xlsx.rawPayload as unknown as ExcelJS.Buffer);
       const sheetHeader: string[] = [];
-      wb.getWorksheet('blue_dot_seekers_data')!
+      wb.getWorksheet('4. Enter your seekers')!
         .getRow(1)
         .eachCell((c) => sheetHeader.push(String(c.value)));
 
