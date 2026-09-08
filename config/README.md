@@ -14,17 +14,13 @@ config/
 │   ├── keycloak.env                   # Brand strings + colours for Keycloak login
 │   ├── schemas/                       # RJSF form schemas (aggregator profile, registration)
 │   │   └── aggregator/
-│   └── bulk-samples/                  # (optional) sample CSV files
-│       ├── seeker.csv
-│       └── provider.csv
 │
 └── <network>/
     └── <brand>/                       # Self-contained brand copy (full override)
         ├── aggregator.config.yaml
         ├── brand.json                 # Logo paths pointing to /brand/<slug>/
         ├── keycloak.env               # BRAND_LOGO_SLUG=<slug> + overridden strings/colours
-        ├── schemas/                   # (optional) brand-specific form schemas
-        └── bulk-samples/             # (optional) brand-specific sample CSVs
+        └── schemas/                   # (optional) brand-specific form schemas
 ```
 
 A brand folder is a **complete copy** of its parent network folder — not a partial override. Every file that exists in the network folder must exist in the brand folder.
