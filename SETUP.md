@@ -134,7 +134,9 @@ Same structure ports cleanly to Kubernetes later (config block → ConfigMap, se
 When moving from localhost to a VM, replace `localhost` and `keycloak` everywhere in `.env` with the VM hostname/IP, then:
 
 ```bash
-docker compose up -d --build   # --build is REQUIRED — NEXT_PUBLIC_API_URL is baked at compile time
+docker compose up -d           # no --build needed for an env change: the web image
+                               # carries no NEXT_PUBLIC_* values, so every setting
+                               # is read at runtime. Rebuild only for code changes.
 ```
 
 Also update Keycloak realm client `aggregator-portal` → **Valid Redirect URIs** + **Web Origins** to match the new portal URL.

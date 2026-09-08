@@ -47,4 +47,13 @@ Vitest + jsdom + `@testing-library/react` for components (`src/__tests__/compone
 
 ## Next.js specifics
 
-`middleware.ts` is intentionally minimal (Edge runtime can't import `ioredis`) — it only stamps `x-pathname`; all real auth gating happens in `(protected)/layout.tsx` (Node runtime), not middleware. `NEXT_PUBLIC_*` vars (API URL, enabled languages) are **build-time only** — no runtime-config/`window.__CONFIG__` pattern exists here, so a VM redeploy after changing one **must** rebuild the image (`docker compose up -d --build`), not just restart the container.
+`middleware.ts` is intentionally minimal (Edge runtime can't import `ioredis`) — it only stamps `x-pathname`; all real auth gating happens in `(protected)/layout.tsx` (Node runtime), not middleware.
+
+**This app uses no `NEXT_PUBLIC_*` vars, deliberately.** Next.js inlines them into the client bundle at `next build`, so one read from a client component freezes the value into the image and an operator cannot change it without a rebuild — which is useless for something documented as configuration. Two vars used to be in that trap (`NEXT_PUBLIC_ENABLED_LANGUAGES`, `NEXT_PUBLIC_INVITE_MAX_RECIPIENTS`) and a third (`NEXT_PUBLIC_API_URL`) was a dead build arg the browser never read.
+
+The pattern to follow instead: resolve the value in a **server** component and pass it down.
+
+- Needed by a subtree of client components → resolve once in `app/layout.tsx` and publish via a context provider. `EnabledLocalesProvider` (`src/i18n/EnabledLocalesProvider.tsx`) does this for `ENABLED_LANGUAGES`, since `LanguageSwitcher` renders in four places, three of them inside client components. Its `useEnabledLocales` **throws** without a provider rather than defaulting, so a mis-wired subtree fails loudly instead of quietly showing languages the deployment disabled.
+- Needed by one client component → read it in that route's `page.tsx` and pass a prop, as `register/invite/page.tsx` does for `INVITE_MAX_RECIPIENTS` (and `register/page.tsx` already did for `ORG_HIERARCHY_ENABLED`).
+
+`getEnabledLocales()` in `src/i18n/config.ts` reads `process.env` and is therefore **server-only in effect** — never call it from a client component. `parseEnabledLocales()` is the pure half if you need the parsing rules elsewhere.

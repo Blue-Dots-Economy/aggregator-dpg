@@ -26,11 +26,11 @@ describe('i18n request config', () => {
   beforeEach(() => {
     cookiesGetMock.mockReset();
     headersGetMock.mockReset();
-    delete process.env.NEXT_PUBLIC_ENABLED_LANGUAGES;
+    delete process.env.ENABLED_LANGUAGES;
   });
 
   afterEach(() => {
-    delete process.env.NEXT_PUBLIC_ENABLED_LANGUAGES;
+    delete process.env.ENABLED_LANGUAGES;
   });
 
   it('resolves the cookie locale and loads its message catalog', async () => {

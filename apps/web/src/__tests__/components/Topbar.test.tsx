@@ -17,9 +17,9 @@ vi.mock('next-intl', () => ({
     return map[key] ?? key;
   },
 }));
-// Real LanguageSwitcher reads NEXT_PUBLIC_ENABLED_LANGUAGES via getEnabledLocales;
-// default (unset) yields 3 locales so it renders — stub it out here since
-// Topbar's own behaviour, not LanguageSwitcher's, is under test.
+// Real LanguageSwitcher needs an EnabledLocalesProvider above it (the root
+// layout supplies one) — stub it out here since Topbar's own behaviour, not
+// LanguageSwitcher's, is under test.
 vi.mock('@/components/shell/LanguageSwitcher', () => ({
   LanguageSwitcher: () => <div data-testid="language-switcher" />,
 }));

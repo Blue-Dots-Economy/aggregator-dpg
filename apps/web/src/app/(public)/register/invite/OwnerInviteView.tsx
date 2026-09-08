@@ -6,6 +6,14 @@ import { RegisterPageShell } from '../RegisterPageShell';
 export interface OwnerInviteViewProps {
   /** The owner grant token from the deep-link query string. */
   grant: string;
+  /**
+   * Max invites per submission, mirroring the API's `INVITE_MINT_MAX_RECIPIENTS`.
+   *
+   * Passed in from the server page rather than read here: this is a client
+   * component, so a `process.env` read would be inlined at `next build` and the
+   * cap could not be retuned without rebuilding the image.
+   */
+  maxInvites?: number;
 }
 
 interface MintSummary {
@@ -31,12 +39,8 @@ interface InviteRow {
   email: string;
 }
 
-/**
- * Max invites per submission — mirrors the API's recipients cap
- * (INVITE_MINT_MAX_RECIPIENTS). Configurable via NEXT_PUBLIC_INVITE_MAX_RECIPIENTS
- * (set it to the same value as the API); defaults to 10.
- */
-const MAX_INVITES = Number(process.env.NEXT_PUBLIC_INVITE_MAX_RECIPIENTS) || 10;
+/** Fallback cap when the server passes none — mirrors the API's default. */
+export const DEFAULT_MAX_INVITES = 10;
 
 let rowSeq = 0;
 /** Builds a fresh empty row with a stable id (avoids array-index keys). */
@@ -51,10 +55,13 @@ function newRow(): InviteRow {
  * per-recipient summary (sent / already-invited / invalid). An expired grant
  * lands on a recovery banner (a fresh link is re-mailed to the registered owner).
  *
- * @param props - The grant token from the deep link.
+ * @param props - The grant token from the deep link, and the per-submission cap.
  * @returns The invite-management page body.
  */
-export function OwnerInviteView({ grant }: Readonly<OwnerInviteViewProps>): JSX.Element {
+export function OwnerInviteView({
+  grant,
+  maxInvites = DEFAULT_MAX_INVITES,
+}: Readonly<OwnerInviteViewProps>): JSX.Element {
   const [rows, setRows] = useState<InviteRow[]>([newRow()]);
   const [state, setState] = useState<ViewState>({ status: 'idle' });
 
@@ -78,7 +85,7 @@ export function OwnerInviteView({ grant }: Readonly<OwnerInviteViewProps>): JSX.
     setRows((prev) => prev.map((r, i) => (i === index ? { ...r, [field]: value } : r)));
   }
   function addRow(): void {
-    setRows((prev) => (prev.length >= MAX_INVITES ? prev : [...prev, newRow()]));
+    setRows((prev) => (prev.length >= maxInvites ? prev : [...prev, newRow()]));
   }
   function removeRow(index: number): void {
     setRows((prev) => (prev.length === 1 ? prev : prev.filter((_, i) => i !== index)));
@@ -184,7 +191,7 @@ export function OwnerInviteView({ grant }: Readonly<OwnerInviteViewProps>): JSX.
             </div>
 
             <div className="mt-3 flex items-center gap-3">
-              {rows.length < MAX_INVITES ? (
+              {rows.length < maxInvites ? (
                 <button
                   type="button"
                   onClick={addRow}
@@ -193,7 +200,7 @@ export function OwnerInviteView({ grant }: Readonly<OwnerInviteViewProps>): JSX.
                   + Add another
                 </button>
               ) : null}
-              <span className="text-[12.5px] text-ink-400">Up to {MAX_INVITES} at a time.</span>
+              <span className="text-[12.5px] text-ink-400">Up to {maxInvites} at a time.</span>
             </div>
 
             <div className="mt-5 flex items-center gap-3">
