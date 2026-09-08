@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
@@ -10,6 +11,10 @@ export default defineConfig({
     // `pg.Pool` is lazy — this only satisfies startup config validation.
     env: {
       DATABASE_URL: 'postgres://localhost:5432/aggregator_test',
+      // Email copy (and every other config layer) is read from CONFIG_ROOT,
+      // which defaults to the container path `/app/config`. Point it at the
+      // repo's own config/ so the suite exercises the real files.
+      CONFIG_ROOT: fileURLToPath(new URL('../../config', import.meta.url)),
     },
     coverage: {
       provider: 'v8',

@@ -4,6 +4,10 @@ export { renderApplicantRejected, type ApplicantRejectedVars } from './applicant
 export { renderOrgOwnerApproved, type OrgOwnerApprovedVars } from './org-owner-approved.js';
 export { renderCoordinatorInvite, type CoordinatorInviteVars } from './coordinator-invite.js';
 export {
+  renderOrgAlreadyRegistered,
+  type OrgAlreadyRegisteredVars,
+} from './org-already-registered.js';
+export {
   renderOwnerGrantRefreshed,
   type OwnerGrantRefreshedVars,
 } from './owner-grant-refreshed.js';

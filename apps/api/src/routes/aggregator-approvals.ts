@@ -44,6 +44,7 @@ import {
 import { renderConfirmPage, renderResultPage } from '../views/approval-pages.js';
 import { mintReviewToken } from '../services/registration-notify.js';
 import { sendHtml, sendPage, missingTokenPage, verifyTokenForId } from './approval-shared.js';
+import { checkApprovalVerifyRate } from '../services/approval-verify-rate.js';
 import type { Aggregator } from '../services/aggregator-store/index.js';
 import { KC_ATTR } from '../services/idp-admin/index.js';
 import type { IdpUser } from '../services/idp-admin/index.js';
@@ -62,6 +63,44 @@ const ReadQuerySchema = z.object({
   token: z.string().optional(),
   intent: z.string().optional(),
 });
+
+/**
+ * Per-IP throttle shared by the three approval-token verify entrypoints
+ * (read / decision / renew). Defence-in-depth against brute-forcing a forged
+ * token — the renew path in particular accepts an expired-but-signature-valid
+ * token, so it is the most replayable. Renders an HTML 429 page (these are all
+ * browser flows) and returns true when the caller has been rate-limited.
+ *
+ * @param req - The inbound request (its `ip` is the bucket key).
+ * @param reply - The reply to render the 429 page onto when limited.
+ * @returns True if the request was rate-limited (caller must stop).
+ */
+async function approvalVerifyRateLimited(
+  req: FastifyRequest,
+  reply: FastifyReply,
+): Promise<boolean> {
+  const ip = (req.ip ?? '0.0.0.0').toString();
+  const rate = await checkApprovalVerifyRate(ip);
+  if (!rate.allowed) {
+    void reply.header('Retry-After', String(rate.retryAfterSeconds));
+    req.log.warn({
+      operation: 'aggregator-approval.verify',
+      status: 'rate_limited',
+      retry_after_seconds: rate.retryAfterSeconds,
+    });
+    sendHtml(
+      reply,
+      429,
+      renderResultPage({
+        status: 'error',
+        title: 'Too many attempts',
+        message: 'Too many attempts from this location. Please wait and try again.',
+      }),
+    );
+    return true;
+  }
+  return false;
+}
 
 export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Promise<void> {
   app.get(
@@ -83,6 +122,8 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
       }>,
       reply: FastifyReply,
     ) => {
+      if (await approvalVerifyRateLimited(req, reply)) return;
+
       const aggregatorId = req.params.id;
       const { token } = req.query;
 
@@ -155,6 +196,8 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
       },
     },
     async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+      if (await approvalVerifyRateLimited(req, reply)) return;
+
       const aggregatorId = req.params.id;
       const log = req.log.child({
         operation: 'aggregator-approval.decide',
@@ -554,6 +597,8 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
       },
     },
     async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+      if (await approvalVerifyRateLimited(req, reply)) return;
+
       const aggregatorId = req.params.id;
       const body = (req.body ?? {}) as { token?: string };
       const token = typeof body.token === 'string' ? body.token : '';

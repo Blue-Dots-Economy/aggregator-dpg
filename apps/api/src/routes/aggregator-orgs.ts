@@ -19,16 +19,20 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { orgHierarchyEnabled } from '../config.js';
+import { config, orgHierarchyEnabled } from '../config.js';
 import { coolingRetryAfter } from '../services/registration-cooling.js';
 import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js';
 import type { AggregatorOrg } from '../services/aggregator-org-store/interface.js';
 import { resolveProfileRef } from '../services/schema-ref.js';
 import { getIdpAdmin, KC_ATTR } from '../services/idp-admin/index.js';
 import { sendOrgReviewEmail } from '../services/org-registration-notify.js';
+import { getMailer } from '@aggregator-dpg/mailer';
+import { renderOrgAlreadyRegistered } from '../services/email-templates/index.js';
+import { mintGrantToken } from '../services/grant-token.js';
 import { normalisePhone } from '@aggregator-dpg/shared-primitives/phone';
 import { splitName } from '../services/name.js';
 import { checkSubmitRate } from '../services/submit-rate.js';
+import { checkOrgInviteResendRate } from '../services/org-invite-resend-rate.js';
 import { slugFromName } from '../services/slug.js';
 import { authenticateAny } from '../services/auth/access-token.js';
 import { httpError } from '../errors/http-error.js';
@@ -196,6 +200,85 @@ export async function registerAggregatorOrgRoutes(app: FastifyInstance): Promise
         });
       };
 
+      // Re-send the coordinator-invite (grant) link for an org that is already
+      // approved. Soft-fail on the mail send, matching the approval path: the
+      // org is live either way, so a mail outage must not surface as a
+      // registration failure. Nothing about the row is touched.
+      const resendOwnerInvite = async (row: AggregatorOrg): Promise<FastifyReply> => {
+        // Bound per OWNER ADDRESS, fail-closed, before anything is minted.
+        // The route's inherited submit limiter is keyed `ip|email` and fails
+        // open, so rotating IPs buys a fresh bucket and a Redis outage removes
+        // the cap entirely — neither is acceptable on a path where every
+        // admitted call produces another independent 90-day credential.
+        const resendRate = await checkOrgInviteResendRate(row.ownerEmail);
+        if (!resendRate.allowed) {
+          void reply.header('Retry-After', String(resendRate.retryAfterSeconds));
+          log.warn(
+            {
+              status: 'skipped',
+              org_id: row.id,
+              reason: 'resend_rate_limited',
+              retry_after_seconds: resendRate.retryAfterSeconds,
+            },
+            'invite-link resend throttled for this owner address',
+          );
+          throw httpError('RATE_LIMITED', {
+            detail: `Retry in ${resendRate.retryAfterSeconds}s.`,
+            fields: { retry_after_seconds: resendRate.retryAfterSeconds },
+          });
+        }
+
+        const grant = await mintGrantToken({
+          org: row.id,
+          ttlSec: config.GRANT_TOKEN_TTL_SECONDS,
+        });
+        const mail = renderOrgAlreadyRegistered({
+          orgName: row.displayName,
+          inviteUrl: `${config.PUBLIC_PORTAL_URL}/register/invite?grant=${encodeURIComponent(grant.token)}`,
+        });
+        const send = await getMailer().send({
+          to: row.ownerEmail,
+          subject: mail.subject,
+          html: mail.html,
+          text: mail.text,
+        });
+        if (!send.ok) {
+          log.warn(
+            {
+              status: 'failure',
+              sub_operation: 'mailer.send.orgAlreadyRegistered',
+              org_id: row.id,
+              code: send.error.code,
+              cause: send.error.message,
+            },
+            'already-registered invite link could not be delivered',
+          );
+        }
+        log.info(
+          {
+            status: 'success',
+            latency_ms: Date.now() - start,
+            org_id: row.id,
+            already_registered: true,
+            mail_sent: send.ok,
+          },
+          'org already active — coordinator invite link re-sent to the owner on file',
+        );
+        // Never claim delivery that did not happen: the whole point of this
+        // branch is an owner who never received the first email, so telling
+        // them a second one is on its way when the send just failed leaves
+        // them waiting instead of contacting support.
+        return reply.status(200).send({
+          org_id: row.id,
+          slug: row.slug,
+          status: 'active',
+          mail_sent: send.ok,
+          message: send.ok
+            ? 'This organisation is already registered. The coordinator invitation link has been sent to the owner email on file.'
+            : 'This organisation is already registered, but the coordinator invitation link could not be emailed just now. Please try again shortly, or contact support.',
+        });
+      };
+
       // Rate limit per (ip, owner email) — org create does KC group + user +
       // email per hit, so throttle it like the coordinator submit.
       const rl = await checkSubmitRate(`${req.ip}|${ownerEmail}`);
@@ -247,8 +330,19 @@ export async function registerAggregatorOrgRoutes(app: FastifyInstance): Promise
           }
           return reclaimOrgReview(prior);
         }
+        if (prior.status === 'active') {
+          // An approved org re-submitting is almost always its owner looking for
+          // the coordinator-invite link they lost — the org-approved email is
+          // sent once, soft-fails, and the owner cannot sign in to recover it,
+          // so a bare 409 leaves the org permanently unable to onboard anyone.
+          // Re-send the link instead. Mail goes to the STORED owner email, never
+          // `body.owner.email`: this submit is anonymous, so honouring the
+          // submitted address would hand a stranger the org's invite credential.
+          return resendOwnerInvite(prior);
+        }
         if (prior.status !== 'pending') {
-          // active / retired — a live org owns this owner email.
+          // retired — a dead org owns this owner email, and must never be
+          // handed a working credential.
           throw httpError('OWNER_ALREADY_REGISTERED', { fields: { email: body.owner.email } });
         }
         // Still pending → re-send the review link, no field change.

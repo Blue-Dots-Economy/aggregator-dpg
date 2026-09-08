@@ -24,8 +24,7 @@ updates:
     target-branch: "feature"
     directory: "/"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "monthly"
       time: "03:00"
       timezone: "UTC"
     # 5 was throttling this repo: the limit counts open *version-update* PRs, and
@@ -119,8 +118,7 @@ updates:
     target-branch: "feature"
     directory: "/"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "monthly"
       time: "03:15"
       timezone: "UTC"
     labels:
@@ -147,8 +145,7 @@ updates:
       - "/apps/worker"
       - "/infra/keycloak"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "monthly"
       time: "03:30"
       timezone: "UTC"
     labels:

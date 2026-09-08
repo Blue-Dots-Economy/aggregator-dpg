@@ -1,16 +1,24 @@
 /**
- * Applicant-rejected email. Polite decline; optional reason rendered
- * verbatim if supplied by the admin.
+ * Applicant-rejected email. Polite decline; optional reason rendered verbatim
+ * if supplied by the admin.
+ *
+ * Belongs to `@aggregator-dpg/api`. Copy lives under `applicant_rejected.*`.
+ * The greeting is two copy keys chosen by a `oneOf` on the layout rather than
+ * a conditional here: the org flow has no owner-name column, so that path
+ * greets without a name instead of addressing a person by their
+ * organisation's name.
  */
 
-import { escapeHtml, getEmailBrand, renderShell } from './shared.js';
+import { renderCase, type RenderedEmail } from './render-case.js';
 
+/**
+ * Template inputs for the applicant-rejected email.
+ */
 export interface ApplicantRejectedVars {
   /**
    * Personal name of the applicant contact. Optional because the org flow has
    * no owner-name column — the name given at org registration is only used to
-   * build the Keycloak user — so that path greets without one rather than
-   * addressing a person by their organisation's name.
+   * build the Keycloak user.
    */
   contactName?: string | undefined;
   association: string;
@@ -22,48 +30,17 @@ export interface ApplicantRejectedVars {
   entityLabel?: string | undefined;
 }
 
-export function renderApplicantRejected(v: ApplicantRejectedVars): {
-  subject: string;
-  html: string;
-  text: string;
-} {
-  const brand = getEmailBrand();
-  const label = v.entityLabel ?? 'aggregator';
-  const subject = `Update on your ${brand.short_name} ${label} application`;
-  // Two greetings, not one: the HTML body needs the name escaped, the plain-text
-  // part must not be (an apostrophe would arrive as &#39;).
-  const greeting = v.contactName ? `Hi ${escapeHtml(v.contactName)},` : 'Hi there,';
-  const textGreeting = v.contactName ? `Hi ${v.contactName},` : 'Hi there,';
-  const reasonBlock = v.reason
-    ? `<div style="margin:18px 0 0;padding:14px;background:#fef2f2;border:1px solid #fecaca;border-radius:10px;font-size:13.5px;color:#7f1d1d;line-height:1.55;">
-         <strong>Reason:</strong> ${escapeHtml(v.reason)}
-       </div>`
-    : '';
-
-  const body = `
-<h1 style="font-size:22px;font-weight:700;letter-spacing:-0.01em;margin:0 0 12px;color:#0b1020;">
-  ${greeting}
-</h1>
-<p style="margin:0 0 14px;font-size:14px;color:#475069;line-height:1.55;">
-  Thanks for applying to onboard <strong>${escapeHtml(v.association)}</strong> as a ${escapeHtml(brand.short_name)} ${escapeHtml(label)}.
-</p>
-<p style="margin:0 0 14px;font-size:14px;color:#475069;line-height:1.55;">
-  After review, we are unable to approve your application at this time.
-</p>
-${reasonBlock}
-<p style="margin:18px 0 0;font-size:13.5px;color:#475069;line-height:1.55;">
-  If you believe this was a mistake, reply to this email with additional context and our team will take a second look.
-</p>
-`;
-  const reasonText = v.reason ? `\n\nReason: ${v.reason}` : '';
-  const text = `${textGreeting}
-
-Thanks for applying to onboard ${v.association} as a ${brand.short_name} ${label}.
-
-After review, we are unable to approve your application at this time.${reasonText}
-
-If you believe this was a mistake, reply to this email with additional context and our team will take a second look.
-`;
-
-  return { subject, html: renderShell({ preheader: subject, bodyHtml: body }), text };
+/**
+ * Renders the applicant-rejected email.
+ *
+ * @param v - Association, optional contact name, optional reason and label.
+ * @returns The `subject`, `html`, and `text` parts ready for the mailer.
+ */
+export function renderApplicantRejected(v: ApplicantRejectedVars): RenderedEmail {
+  return renderCase('applicant_rejected', {
+    contactName: v.contactName,
+    association: v.association,
+    entityLabel: v.entityLabel ?? 'aggregator',
+    reason: v.reason,
+  });
 }
