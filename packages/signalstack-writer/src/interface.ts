@@ -579,28 +579,6 @@ export abstract class SignalStackWriterBase {
     input: SignalStackOnboardParticipantInput,
   ): Promise<Result<SignalStackOnboardParticipantResult, BaseError>>;
 
-  /**
-   * Read all items signalstack has stored for the given aggregator_id
-   * within a single (item_network, item_domain[, item_type]) scope.
-   *
-   * @param query - Aggregator + network/domain scope + optional pagination.
-   * @returns ok(SignalStackItemList) on 2xx; err(BaseError) otherwise.
-   */
-  abstract listItemsByAggregator(
-    query: SignalStackItemQuery,
-  ): Promise<Result<SignalStackItemList, BaseError>>;
-
-  /**
-   * Register (or look up) the aggregator's organisation row in signalstack.
-   *
-   * Idempotent on `external_id`: repeated calls with the same input return
-   * the same `org_id` and never create duplicates. Called once at admin
-   * approval, and again as a login-time fallback if the Keycloak attribute
-   * is missing.
-   *
-   * @param input - external_id (our aggregator UUID) + display name + slug.
-   * @returns ok(SignalStackAggregator) on 2xx; err(BaseError) otherwise.
-   */
   abstract upsertAggregator(
     input: SignalStackUpsertAggregatorInput,
   ): Promise<Result<SignalStackAggregator, BaseError>>;
@@ -674,19 +652,4 @@ export abstract class SignalStackWriterBase {
   abstract probeUser(
     input: SignalStackProbeUserInput,
   ): Promise<Result<SignalStackProbeUserResult, BaseError>>;
-
-  /**
-   * Fetch a single signals item by `item_id`.
-   *
-   * Returns `ok(null)` when the item is not known to signals, so a caller
-   * can distinguish "absent" from a failure. Transport / protocol errors
-   * surface as a structured `BaseError`.
-   *
-   * @param query - Item id to look up.
-   * @returns ok(SignalStackProfile) on hit; ok(null) when absent;
-   *   err(BaseError) on transport / protocol failure.
-   */
-  abstract getItem(
-    query: SignalStackGetItemQuery,
-  ): Promise<Result<SignalStackProfile | null, BaseError>>;
 }

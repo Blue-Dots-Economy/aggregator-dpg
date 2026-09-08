@@ -28,9 +28,6 @@ import {
   type SignalStackDecryptedProfileRow,
   type SignalStackDecryptedProfiles,
   type SignalStackFetchDecryptedProfilesQuery,
-  type SignalStackGetItemQuery,
-  type SignalStackItemList,
-  type SignalStackItemQuery,
   type SignalStackOnboardParticipantInput,
   type SignalStackOnboardParticipantResult,
   type SignalStackProbeUserInput,
@@ -383,21 +380,6 @@ export class InMemorySignalStackWriter extends SignalStackWriterBase {
     });
   }
 
-  override async getItem(
-    query: SignalStackGetItemQuery,
-  ): Promise<Result<SignalStackProfile | null, BaseError>> {
-    if (!query?.item_id) {
-      return err(
-        new ValidationError('item_id is required', {
-          code: 'SIGNALSTACK_INPUT_INVALID',
-        }),
-      );
-    }
-    const row = this.profiles.get(query.item_id);
-    if (!row) return ok(null);
-    return ok(stripCreatedBy(row));
-  }
-
   /**
    * Seeds a single signalstack item keyed by `itemId`, filling unspecified
    * fields with deterministic defaults. Used by tests to pin the lifecycle
@@ -435,39 +417,6 @@ export class InMemorySignalStackWriter extends SignalStackWriterBase {
       source_id: '',
     };
     this.profiles.set(itemId, row);
-  }
-
-  override async listItemsByAggregator(
-    query: SignalStackItemQuery,
-  ): Promise<Result<SignalStackItemList, BaseError>> {
-    if (!query.aggregator_id || !query.item_network || !query.item_domain) {
-      return err(
-        new UpstreamError('aggregator_id, item_network, and item_domain are required', {
-          code: 'SIGNALSTACK_INPUT_INVALID',
-        }),
-      );
-    }
-    // signalstack's default is `live_only` — drafts and paused rows are
-    // hidden unless the caller passes `lifecycle_filter: 'all'`. Treat an
-    // absent lifecycle_status on a stored row as 'live' so seeds written
-    // before lifecycle support landed remain visible by default.
-    const lifecycleFilter: 'live_only' | 'all' = query.lifecycle_filter ?? 'live_only';
-    const matching = Array.from(this.profiles.values()).filter((p) => {
-      if (p.aggregator_id !== query.aggregator_id) return false;
-      if (p.item_network !== query.item_network) return false;
-      if (p.item_domain !== query.item_domain) return false;
-      if (query.item_type && p.item_type !== query.item_type) return false;
-      if (lifecycleFilter === 'live_only') {
-        const status = p.lifecycle_status ?? 'live';
-        if (status !== 'live') return false;
-      }
-      return true;
-    });
-    const total = matching.length;
-    const offset = query.offset ?? 0;
-    const limit = query.limit ?? 50;
-    const page = matching.slice(offset, offset + limit).map(stripCreatedBy);
-    return ok({ meta: { total, limit, offset }, items: page });
   }
 
   /**
@@ -673,12 +622,6 @@ function normalizePhone(value: string | null | undefined): string | null {
   if (!value) return null;
   const trimmed = value.trim();
   return trimmed || null;
-}
-
-function stripCreatedBy(profile: StoredProfile): SignalStackProfile {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { created_by, acting_org_id, channel, source_id, contact, ...rest } = profile;
-  return rest;
 }
 
 /**

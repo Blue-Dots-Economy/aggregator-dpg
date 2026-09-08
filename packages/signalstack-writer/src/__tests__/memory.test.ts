@@ -271,62 +271,6 @@ describe('InMemorySignalStackWriter.onboard', () => {
 // listItemsByAggregator()
 // ---------------------------------------------------------------------------
 
-describe('InMemorySignalStackWriter.listItemsByAggregator', () => {
-  let writer: InMemorySignalStackWriter;
-
-  beforeEach(() => {
-    writer = new InMemorySignalStackWriter();
-  });
-
-  it('returns only items matching the aggregator + network + domain', async () => {
-    // Seed two profiles with different aggregator_id via the fake
-    const fake = new SignalStackWriterFake();
-    fake.seed({
-      profiles: [
-        {
-          item_id: 'item-a',
-          created_by: 'user-1',
-          item_network: 'blue_dot',
-          item_domain: 'seeker',
-          item_type: 'profile_1.0',
-          aggregator_id: 'agg-1',
-        },
-        {
-          item_id: 'item-b',
-          created_by: 'user-2',
-          item_network: 'blue_dot',
-          item_domain: 'seeker',
-          item_type: 'profile_1.0',
-          aggregator_id: 'agg-2',
-        },
-      ],
-    });
-
-    const result = await fake.listItemsByAggregator({
-      aggregator_id: 'agg-1',
-      item_network: 'blue_dot',
-      item_domain: 'seeker',
-    });
-
-    expect(result.success).toBe(true);
-    if (!result.success) return;
-    expect(result.value.items).toHaveLength(1);
-    expect(result.value.items[0]!.item_id).toBe('item-a');
-  });
-
-  it('returns SIGNALSTACK_INPUT_INVALID when aggregator_id is empty', async () => {
-    const result = await writer.listItemsByAggregator({
-      aggregator_id: '',
-      item_network: 'blue_dot',
-      item_domain: 'seeker',
-    });
-
-    expect(result.success).toBe(false);
-    if (result.success) return;
-    expect(result.error.code).toBe('SIGNALSTACK_INPUT_INVALID');
-  });
-});
-
 // ---------------------------------------------------------------------------
 // upsertAggregator()
 // ---------------------------------------------------------------------------
@@ -439,52 +383,6 @@ describe('InMemorySignalStackWriter.probeUser', () => {
 // ---------------------------------------------------------------------------
 // getItem()
 // ---------------------------------------------------------------------------
-
-describe('InMemorySignalStackWriter.getItem', () => {
-  it('returns SIGNALSTACK_INPUT_INVALID when item_id is missing', async () => {
-    const writer = new InMemorySignalStackWriter();
-    const result = await writer.getItem({ item_id: '' });
-
-    expect(result.success).toBe(false);
-    if (result.success) return;
-    expect(result.error.code).toBe('SIGNALSTACK_INPUT_INVALID');
-  });
-
-  it('returns ok(null) when the item is not known', async () => {
-    const writer = new InMemorySignalStackWriter();
-    const result = await writer.getItem({ item_id: 'missing' });
-
-    expect(result.success).toBe(true);
-    if (!result.success) return;
-    expect(result.value).toBeNull();
-  });
-
-  it('returns the seeded item on a hit, stripped of internal bookkeeping fields', async () => {
-    const fake = new SignalStackWriterFake();
-    fake.seedItem('item-1', { lifecycle_status: 'draft' });
-
-    const result = await fake.getItem({ item_id: 'item-1' });
-
-    expect(result.success).toBe(true);
-    if (!result.success) return;
-    expect(result.value?.item_id).toBe('item-1');
-    expect(result.value?.lifecycle_status).toBe('draft');
-    expect(result.value).not.toHaveProperty('created_by');
-    expect(result.value).not.toHaveProperty('acting_org_id');
-  });
-
-  it('omits lifecycle_status entirely when the seed does not specify one', async () => {
-    const fake = new SignalStackWriterFake();
-    fake.seedItem('item-2');
-
-    const result = await fake.getItem({ item_id: 'item-2' });
-
-    expect(result.success).toBe(true);
-    if (!result.success) return;
-    expect(result.value).not.toHaveProperty('lifecycle_status');
-    expect(result.value?.item_network).toBe('blue_dot');
-  });
-});
 
 // ---------------------------------------------------------------------------
 // fetchDashboard() — canonical new shape (emptyDomainSlice)

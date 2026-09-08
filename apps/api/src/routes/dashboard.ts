@@ -20,30 +20,13 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { errorResponses } from '../errors/openapi.js';
-import { authenticate, requireApproved, type AuthContext } from '../services/auth/access-token.js';
+import { requireApproved, type AuthContext } from '../services/auth/access-token.js';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
 import { getNetworkConfig } from '../services/network-config.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
-import type {
-  SignalStackDecryptedProfileRow,
-  SignalStackProfile,
-} from '@aggregator-dpg/signalstack-writer/interface';
+import type { SignalStackDecryptedProfileRow } from '@aggregator-dpg/signalstack-writer/interface';
 import { buildDecryptedProfilesCsv } from '@aggregator-dpg/profile-csv';
-import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
-import { resolveLifecycle } from '../services/onboarding/lifecycle.js';
-import { config } from '../config.js';
 import { httpError } from '../errors/http-error.js';
-
-/**
- * Upper bound on items considered for lifecycle tile counts. Tiles are
- * computed by fetching up to this many rows (lifecycle_filter='all') in
- * parallel with the user's paginated items fetch. Aggregators with more
- * items than this cap get approximate tile counts (capped at TILE_CAP per
- * bucket); the response surfaces `meta.tiles_truncated: true` so the UI
- * can render a "showing N+" affordance. Lift once signals exposes a
- * server-side per-lifecycle count endpoint.
- */
-const TILE_CAP = 1000;
 
 /**
  * Lifecycle statuses the aggregator dashboard surfaces. Signals filters the
@@ -53,44 +36,14 @@ const TILE_CAP = 1000;
 const DASHBOARD_LIFECYCLE = ['draft', 'live'] as const;
 
 /**
- * Max rows signalstack's `fetch_local` accepts per request (`limit` is
- * validated `<= 100` upstream). Any wider window — a >100 page or the
- * TILE_CAP sweep — is gathered by paging at this size. Keep in sync with
- * signals' validator; exceeding it returns 400 SIGNALSTACK_BAD_REQUEST.
- */
-const SS_MAX_PAGE = 100;
-
-/**
  * Max `item_ids` accepted by the decrypted-profile export in one call.
  *
  * This is a PII decrypt path, and the array was previously unbounded — one
- * request could ask signalstack to decrypt arbitrarily many profiles. 1000
- * matches TILE_CAP, the widest window the dashboard itself ever renders, so
- * the bound is invisible to any real export.
+ * request could ask signalstack to decrypt arbitrarily many profiles. 1000 is
+ * comfortably wider than any window the dashboard renders, so the bound is
+ * invisible to a real export while capping the blast radius of a crafted one.
  */
 const EXPORT_MAX_ITEM_IDS = 1000;
-
-/**
- * Lifecycle filter accepted by the dashboard items endpoint.
- *
- *   - `draft|live|paused` — narrows the returned items to that lifecycle bucket.
- *   - `account_only` — participants that exist locally but have no signals
- *     item; items array is always empty for this filter (account-only rows
- *     live in the local `participants` table, not in signals items).
- */
-const LifecycleFilterSchema = z.enum(['draft', 'live', 'paused', 'account_only']).optional();
-
-/**
- * Domain accepts any string at the schema layer — the resolved network
- * config decides which ids are valid for the live deployment. The route
- * handler validates against `config.domainIds` after parse.
- */
-const ItemsQuerySchema = z.object({
-  domain: z.string().min(1),
-  limit: z.coerce.number().int().min(1).max(200).optional().default(50),
-  offset: z.coerce.number().int().min(0).optional().default(0),
-  lifecycle: LifecycleFilterSchema,
-});
 
 /**
  * Dashboard query schema. `status` is a pass-through with a light shape
@@ -147,182 +100,6 @@ const ExportProfilesBodySchema = z.object({
 });
 
 export async function registerDashboardRoutes(app: FastifyInstance): Promise<void> {
-  app.get(
-    '/v1/dashboard/items',
-    {
-      schema: {
-        tags: ['dashboard'],
-        summary: 'List participants for the caller aggregator (paginated)',
-        description:
-          'Returns every signalstack profile tagged with the caller aggregator_id, scoped to the requested domain, with lifecycle tile counts. Used by /blue-dots to render the participant table. The 200 payload is proxied verbatim from signalstack, so no response schema is pinned (avoids a deep zod re-parse of large item lists on every reply).',
-        security: [{ bearerAuth: [] }],
-        querystring: ItemsQuerySchema,
-        // 200 carries no schema on purpose — see description.
-        response: { ...errorResponses(400, 401, 403, 500, 503) },
-      },
-    },
-    async (req, reply) => {
-      const auth = await requireAuth(req);
-      const log = req.log.child({
-        operation: 'dashboard.items',
-        aggregator_id: auth.aggregatorId,
-      });
-      const start = Date.now();
-
-      // Validated (and defaulted) by the route's `querystring` zod schema.
-      const { domain, limit, offset, lifecycle } = req.query as z.infer<typeof ItemsQuerySchema>;
-
-      const networkCfg = await getNetworkConfig();
-      const domainCfg = networkCfg.domains[domain];
-      if (!domainCfg) {
-        throw httpError('SCHEMA_VALIDATION', {
-          detail: `unknown domain '${domain}' — valid: ${networkCfg.domainIds.join(', ')}`,
-        });
-      }
-
-      const ss = getSignalStackWriter();
-      if (!ss) {
-        log.warn({ status: 'failure', sub: 'signalstack.disabled' });
-        throw httpError('INTERNAL', {
-          detail: 'Signalstack push is not configured for this environment.',
-        });
-      }
-
-      // Tiles must reflect the FULL aggregator dataset, not the paginated
-      // items slice. Fetch the user's page and a separate tile-compute set
-      // in parallel. `TILE_CAP` is the upper bound on rows considered for
-      // tile counts: aggregators with more items than the cap get
-      // approximate tiles (capped at TILE_CAP each) until signals exposes
-      // a server-side per-lifecycle count endpoint.
-      const baseQuery = {
-        aggregator_id: auth.aggregatorId,
-        item_network: config.SIGNALSTACK_ITEM_NETWORK,
-        item_domain: domain,
-        item_type: domainCfg.itemType,
-        lifecycle_filter: 'all' as const,
-        requestId: req.id,
-      };
-
-      // signalstack's `fetch_local` caps `limit` at SS_MAX_PAGE per request, so
-      // any window wider than that (a >100 page, or the TILE_CAP tile sweep) is
-      // gathered by paging. Returns the accumulated rows + the upstream `total`
-      // (taken from the first page's meta), or the upstream error verbatim so
-      // the existing error branches still fire.
-      const collect = async (
-        startOffset: number,
-        count: number,
-      ): Promise<
-        { ok: true; items: SignalStackProfile[]; total: number } | { ok: false; error: BaseError }
-      > => {
-        const items: SignalStackProfile[] = [];
-        let total = 0;
-        while (items.length < count) {
-          const pageLimit = Math.min(SS_MAX_PAGE, count - items.length);
-          const res = await ss.listItemsByAggregator({
-            ...baseQuery,
-            limit: pageLimit,
-            offset: startOffset + items.length,
-          });
-          if (!res.success) return { ok: false, error: res.error };
-          total = res.value.meta.total;
-          items.push(...res.value.items);
-          if (res.value.items.length < pageLimit) break; // last page reached
-        }
-        return { ok: true, items, total };
-      };
-
-      const [itemsResult, tilesResult] = await Promise.all([
-        collect(offset, limit),
-        collect(0, TILE_CAP),
-      ]);
-
-      if (!itemsResult.ok) {
-        log.error({
-          status: 'failure',
-          sub: 'signalstack.list',
-          error: itemsResult.error.message,
-          code: itemsResult.error.code,
-        });
-        throw httpError('INTERNAL', {
-          detail: `Signalstack list failed: ${itemsResult.error.code}`,
-          cause: itemsResult.error,
-        });
-      }
-      if (!tilesResult.ok) {
-        log.error({
-          status: 'failure',
-          sub: 'signalstack.list.tiles',
-          error: tilesResult.error.message,
-          code: tilesResult.error.code,
-        });
-        throw httpError('INTERNAL', {
-          detail: `Signalstack tile list failed: ${tilesResult.error.code}`,
-          cause: tilesResult.error,
-        });
-      }
-
-      // Normalise lifecycle on every row via `resolveLifecycle`. A row whose
-      // real `lifecycle_status` we can't read resolves to `'draft'` (#613) —
-      // never optimistically `'live'` — so the dashboard mirrors the true
-      // signals status instead of reporting a draft profile as live.
-      const normalisedItems = itemsResult.items.map((item) => {
-        const lifecycleStatus = resolveLifecycle(item);
-        return {
-          ...item,
-          lifecycle_status: lifecycleStatus ?? 'draft',
-        };
-      });
-      const tileRows = tilesResult.items.map((item) => resolveLifecycle(item) ?? 'draft');
-
-      // Tiles count the full dataset (up to TILE_CAP). `account_only` is the
-      // local-only bucket — participants who exist in our table but have no
-      // signals item — and requires a participants reader not wired here
-      // yet. v1: report 0; once a participants reader is exposed, count
-      // participants for this aggregator + domain whose identity
-      // (phone/email) is not in `tileRows`-corresponding items and surface
-      // that here.
-      const tiles = {
-        draft: tileRows.filter((s) => s === 'draft').length,
-        live: tileRows.filter((s) => s === 'live').length,
-        paused: tileRows.filter((s) => s === 'paused').length,
-        account_only: 0,
-      };
-      const tilesTruncated = tilesResult.total > TILE_CAP;
-
-      // Apply the lifecycle filter AFTER tile computation. `account_only` short
-      // circuits to an empty items array — those rows live in `participants`,
-      // not in the signals items response.
-      let filteredItems: typeof normalisedItems;
-      if (lifecycle === 'account_only') {
-        filteredItems = [];
-      } else if (lifecycle) {
-        filteredItems = normalisedItems.filter((i) => i.lifecycle_status === lifecycle);
-      } else {
-        filteredItems = normalisedItems;
-      }
-
-      log.info({
-        status: 'success',
-        latency_ms: Date.now() - start,
-        total: itemsResult.total,
-        lifecycle_filter: lifecycle ?? null,
-        tiles,
-        tiles_truncated: tilesTruncated,
-      });
-
-      return reply.send({
-        meta: {
-          total: itemsResult.total,
-          limit,
-          offset,
-          tiles,
-          tiles_truncated: tilesTruncated,
-        },
-        items: filteredItems,
-      });
-    },
-  );
-
   app.get(
     '/v1/dashboard',
     {
@@ -641,16 +418,6 @@ async function requireApprovedAuth(req: FastifyRequest): Promise<AuthContext> {
     });
   }
   throw httpError('UNAUTHORIZED', {
-    detail: result.error.message,
-    fields: { reason: result.error.code },
-  });
-}
-
-async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
-  const result = await authenticate(req);
-  if (result.ok) return result.context;
-  const code = result.error.code === 'MISSING_AGGREGATOR_ID' ? 'FORBIDDEN' : 'UNAUTHORIZED';
-  throw httpError(code, {
     detail: result.error.message,
     fields: { reason: result.error.code },
   });
