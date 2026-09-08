@@ -277,6 +277,10 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
       const cfg = await getNetworkConfig();
       const csv = buildCsvTemplate(csvSchema, {
         arrayDelimiter: cfg.aggregator.network.csv_array_delimiter,
+        // Same reason the workbook gets them, and this is the default format:
+        // without the selectors a phone column that declares no pattern samples
+        // as "Example Mobile Number", which `bulk-row-process` rejects.
+        identity: cfg.domains[participantType as string]?.identity,
       });
       return reply
         .header('Content-Type', 'text/csv; charset=utf-8')

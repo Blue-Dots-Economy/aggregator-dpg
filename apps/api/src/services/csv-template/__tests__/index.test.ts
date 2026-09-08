@@ -32,6 +32,54 @@ function parse(csv: string): { header: string[]; example: string[] } {
 }
 
 describe('buildCsvTemplate', () => {
+  // The workbook takes `identity` for exactly this reason, and CSV is the
+  // format an operator gets by default. Without the selectors a phone column
+  // that declares no pattern samples as "Example Mobile", which
+  // `normalisePhone` strips to zero digits and `bulk-row-process` rejects
+  // before Ajv ever sees the row.
+  it('uses the configured identity columns for name, phone and email', () => {
+    const schema = {
+      type: 'object',
+      required: ['fullName', 'mobile'],
+      properties: {
+        fullName: { type: 'string', title: 'Full Name' },
+        mobile: { type: 'string', title: 'Mobile' },
+        emailId: { type: 'string', title: 'Email', format: 'email' },
+      },
+    };
+    const { header, example } = parse(
+      buildCsvTemplate(schema, {
+        identity: { name: 'fullName', phone: 'mobile', email: 'emailId' },
+      }),
+    );
+    const at = (name: string): string => example[header.indexOf(name)] ?? '';
+
+    expect(at('mobile')).toBe('9876510000');
+    expect(at('fullName')).toBe('Sample Full Name 1');
+    expect(at('emailId')).toBe('person1@example.com');
+
+    // Same schema, no selectors: the cells the row parser rejects.
+    const plain = parse(buildCsvTemplate(schema));
+    expect(plain.example[plain.header.indexOf('mobile')]).toBe('Example Mobile');
+  });
+
+  it('lets a column that declares its own shape outrank the identity value', () => {
+    const schema = {
+      type: 'object',
+      required: ['mobile'],
+      properties: { mobile: { type: 'string', title: 'Mobile', pattern: '^\\+91[0-9]{10}$' } },
+    };
+    const { header, example } = parse(
+      buildCsvTemplate(schema, { identity: { name: 'fullName', phone: 'mobile' } }),
+    );
+    const cell = example[header.indexOf('mobile')] ?? '';
+
+    // The hardcoded 10-digit placeholder fails `^\+91…`, so `exampleValue`
+    // derives one from the declaration instead of writing a rejected cell.
+    expect(cell).toBe('+919876543210');
+    expect(new RegExp('^\\+91[0-9]{10}$').test(cell)).toBe(true);
+  });
+
   it('emits a header row followed by one example row of equal width', () => {
     const csv = buildCsvTemplate(SEEKER_SCHEMA, { arrayDelimiter: '|' });
     const lines = csv.trimEnd().split('\n');

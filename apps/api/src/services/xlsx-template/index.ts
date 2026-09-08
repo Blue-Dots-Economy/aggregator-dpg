@@ -48,7 +48,7 @@
 
 import ExcelJS from 'exceljs';
 import type { JsonSchema } from '@aggregator-dpg/schema-loader/interface';
-import { exampleValue, orderedColumns } from '../csv-template/index.js';
+import { exampleValue, identityExample, orderedColumns } from '../csv-template/index.js';
 
 /** Tab 1 — what to do. */
 const INSTRUCTIONS_SHEET = '1. Instructions';
@@ -360,12 +360,12 @@ function writeInstructions(
   line('Steps').font = { bold: true, size: 12 };
   const requiredLabels = plans.filter((p) => p.required).map((p) => `"${p.label}"`);
   for (const step of [
-    `1. Open "${SAMPLE_SHEET}" and look at how a row is filled in. It is only an example — nothing there is uploaded.`,
+    `1. Open "${SAMPLE_SHEET}" and look at how a row is filled in. Those rows are examples, not participants — come back to "${gridName}" before you save.`,
     `2. Type your own rows in "${gridName}", one participant per row. Start on row 2.`,
     `3. Cells with a dropdown arrow only accept the listed values. Click the arrow and pick one.`,
     `4. Leave anything you do not have blank. Only ${requiredLabels.join(' and ') || 'the marked columns'} must be filled for every row.`,
     `5. Check "${VALUES_SHEET}" whenever you are unsure what a column wants.`,
-    `6. Save as CSV: File > Save As (or Export) > CSV. Then upload that .csv file.`,
+    `6. Save as CSV: File > Save As (or Export) > CSV. This exports only the tab you are on, so be on "${gridName}" — saving from "${SAMPLE_SHEET}" would upload the examples.`,
   ]) {
     line(step);
   }
@@ -518,52 +518,35 @@ function writeValuesSheet(
  * Blank for a conditional column this row's controller value does not unlock.
  *
  * A filled-in conditional that does not apply is the wrong example — it teaches
- * an operator to populate a column the schema will reject.
+ * an operator to populate a column the schema will reject. The reverse is just
+ * as wrong, and is what reading `pins` alone produced: a row rendering
+ * `educationCategory = "School"` left `schoolQualification` blank, contradicting
+ * that column's own header note, because the row pinned a different controller.
+ * A row pins one controller; every other controller still renders its first
+ * allowed value, so the values consulted here are the ones the row ACTUALLY
+ * shows.
  *
  * @param plan - The column.
- * @param pins - Controller values fixed for this row.
+ * @param selectedIn - The values a controller renders in this row: one entry
+ *   for a single-value column, the split cell for an array column, none when
+ *   the controller is itself blanked or absent.
  * @returns `''` when the column does not apply, else undefined to fall through.
  */
-function conditionalCell(plan: ColumnPlan, pins: ReadonlyMap<string, string>): string | undefined {
+function conditionalCell(
+  plan: ColumnPlan,
+  selectedIn: (field: string) => readonly string[],
+): string | undefined {
   if (plan.showIfNeverApplies) return '';
   if (plan.showIf.length === 0) return undefined;
-  // AND across clauses, as `isFieldVisible` does — a row that pins only one
-  // controller of a two-key rule leaves the column blank, because that is what
-  // the form would show.
+  // AND across clauses, and an array-valued controller matches when ANY of its
+  // selected values is allowed — both exactly as `isFieldVisible` does
+  // (`apps/web/src/lib/show-if.ts`).
   const applies = plan.showIf.every(({ field, values }) => {
-    const pinned = pins.get(field);
-    if (pinned === undefined) return false;
-    return values.length === 0 || values.includes(pinned);
+    const selected = selectedIn(field);
+    if (selected.length === 0) return false;
+    return selected.some((value) => values.length === 0 || values.includes(value));
   });
   return applies ? undefined : '';
-}
-
-/**
- * True when a candidate identity value satisfies the column's own declaration.
- *
- * The column's schema outranks any identity-shaped placeholder: a value that
- * fails the column's `format` or `pattern` is one the row parser rejects, and
- * `bulk-row-process` treats both as blocking. When this returns `false` the
- * caller falls through to `exampleValue`, which derives from the declaration
- * rather than around it.
- *
- * @param plan - The column.
- * @param candidate - The identity value being considered for the cell.
- * @param satisfiesFormat - The one `format` this candidate is known to meet,
- *   or undefined when it meets none.
- * @returns `true` when the candidate can be used as-is.
- */
-function fitsColumn(plan: ColumnPlan, candidate: string, satisfiesFormat?: string): boolean {
-  const format = plan.prop['format'];
-  if (typeof format === 'string' && format !== satisfiesFormat) return false;
-
-  const pattern = plan.prop['pattern'];
-  if (typeof pattern !== 'string') return true;
-  try {
-    return new RegExp(pattern).test(candidate);
-  } catch {
-    return false;
-  }
 }
 
 /**
@@ -597,19 +580,9 @@ function identityCell(
   identity?: XlsxTemplateOptions['identity'],
 ): string | undefined {
   if (identity === undefined) return undefined;
-
-  let candidate: { value: string; format?: string };
-  if (plan.name === identity.name) {
-    candidate = { value: `Sample ${plan.label} ${rowIndex + 1}` };
-  } else if (plan.name === identity.phone) {
-    candidate = { value: `98765${String(10000 + rowIndex).slice(-5)}` };
-  } else if (plan.name === identity.email) {
-    candidate = { value: `person${rowIndex + 1}@example.com`, format: 'email' };
-  } else {
-    return undefined;
-  }
-
-  return fitsColumn(plan, candidate.value, candidate.format) ? candidate.value : undefined;
+  // Derivation and the fits-the-column check live in `csv-template` so the two
+  // formats cannot disagree about the same column.
+  return identityExample(plan.name, plan.prop, identity, rowIndex);
 }
 
 /**
@@ -664,14 +637,48 @@ function sampleRows(
   identity?: XlsxTemplateOptions['identity'],
 ): string[][] {
   const controllers = collectControllers(plans);
+  const byName = new Map(plans.map((plan) => [plan.name, plan] as const));
 
-  /** One cell, given the controller values pinned for this row. */
-  const cell = (plan: ColumnPlan, pins: ReadonlyMap<string, string>, rowIndex: number): string =>
-    pins.get(plan.name) ??
-    conditionalCell(plan, pins) ??
-    identityCell(plan, rowIndex, identity) ??
-    rotatedCell(plan, rowIndex, controllers) ??
-    exampleValue(plan.name, plan.prop, arrayDelimiter);
+  /**
+   * Every cell of one row, each conditional column resolved against what its
+   * controller renders in THIS row. Chain-aware, like `resolveVisibleSchema`'s
+   * fixpoint: a controller that is itself conditional and blanked unlocks
+   * nothing downstream.
+   */
+  const rowCells = (pins: ReadonlyMap<string, string>, rowIndex: number): Map<string, string> => {
+    const resolved = new Map<string, string>();
+    const resolving = new Set<string>();
+
+    /** The controller's rendered cell, split into the values it selects. */
+    function selectedIn(field: string): readonly string[] {
+      const controller = byName.get(field);
+      if (controller === undefined) return [];
+      const value = resolve(controller);
+      if (value === '') return [];
+      return controller.isArray ? value.split(arrayDelimiter).map((v) => v.trim()) : [value];
+    }
+
+    function resolve(plan: ColumnPlan): string {
+      const done = resolved.get(plan.name);
+      if (done !== undefined) return done;
+      // A cyclic `x-show-if` would otherwise recurse forever. Mid-resolution
+      // reads as blank, which is what the form shows for an unsatisfied rule.
+      if (resolving.has(plan.name)) return '';
+      resolving.add(plan.name);
+      const value =
+        pins.get(plan.name) ??
+        conditionalCell(plan, selectedIn) ??
+        identityCell(plan, rowIndex, identity) ??
+        rotatedCell(plan, rowIndex, controllers) ??
+        exampleValue(plan.name, plan.prop, arrayDelimiter);
+      resolving.delete(plan.name);
+      resolved.set(plan.name, value);
+      return value;
+    }
+
+    for (const plan of plans) resolve(plan);
+    return resolved;
+  };
 
   // The signature ignores the identity columns: those vary by row index by
   // construction, so including them would make every row look unique and the
@@ -679,14 +686,19 @@ function sampleRows(
   const identityColumns = new Set(
     identity === undefined ? [] : [identity.name, identity.phone, identity.email],
   );
-  const signature = (pins: ReadonlyMap<string, string>): string =>
-    plans
+  const signature = (pins: ReadonlyMap<string, string>): string => {
+    const cells = rowCells(pins, 0);
+    return plans
       .filter((plan) => !identityColumns.has(plan.name))
-      .map((plan) => cell(plan, pins, 0))
+      .map((plan) => cells.get(plan.name) ?? '')
       .join('');
+  };
 
   const distinct = dedupeBy(buildPinSets(controllers), signature);
-  return distinct.map((pins, i) => plans.map((plan) => cell(plan, pins, i)));
+  return distinct.map((pins, i) => {
+    const cells = rowCells(pins, i);
+    return plans.map((plan) => cells.get(plan.name) ?? '');
+  });
 }
 
 /**
@@ -970,14 +982,14 @@ function headerNote(
   // other about the same cell.
   const pick = plan.isArray ? 'Pick one or more of' : 'Pick one of';
   const joinHint = plan.isArray ? ` — join them with "${arrayDelimiter}".` : '';
-  const alsoJoinHint = plan.isArray
-    ? ` More than one is allowed — join them with "${arrayDelimiter}".`
-    : '';
+  // `writeGridSheet` skips validation on an array column, so this must not send
+  // the operator to a dropdown that is deliberately not there.
+  const manyValues = plan.isArray
+    ? `${plan.allowed.length} values to choose from — see "${VALUES_SHEET}". More than one is allowed — join them with "${arrayDelimiter}".`
+    : `${plan.allowed.length} values to choose from — use the dropdown, or see "${VALUES_SHEET}".`;
   if (plan.allowed.length > 0) {
     lines.push(
-      plan.allowed.length <= 10
-        ? `${pick}: ${plan.allowed.join(', ')}${joinHint}`
-        : `${plan.allowed.length} values to choose from — use the dropdown, or see "${VALUES_SHEET}".${alsoJoinHint}`,
+      plan.allowed.length <= 10 ? `${pick}: ${plan.allowed.join(', ')}${joinHint}` : manyValues,
     );
   } else if (plan.isArray) {
     lines.push(`More than one value allowed — join them with "${arrayDelimiter}".`);

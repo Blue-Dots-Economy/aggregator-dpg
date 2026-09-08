@@ -248,6 +248,8 @@ describe('buildXlsxTemplate', () => {
     expect(noteOf('notes')).toContain('Anything else worth knowing');
     // A 300-value set points at the tab instead of listing them in a tooltip.
     expect(noteOf('itiTrade')).toContain('300 values');
+    // A single-value closed set does get a dropdown, so the note may say so.
+    expect(noteOf('itiTrade')).toContain('use the dropdown');
   });
 
   it('colour-codes the header by required / conditional / optional', async () => {
@@ -509,15 +511,107 @@ describe('buildXlsxTemplate', () => {
     // must not tell the operator to fill it in.
     expect(rowFor('neverShown')[4]).not.toBe('Always');
 
-    // And no sample row pins both controllers, so the two-key column stays
-    // blank rather than demonstrating a state the form never renders.
+    // A row pins one controller but RENDERS them all, so the two-key column is
+    // filled exactly in the rows whose own cells satisfy both clauses. The row
+    // pinning `workExperience = Worked` still shows `state = KA`, which is a
+    // state the form does render — blanking `lastRole` there would contradict
+    // the values printed beside it, and the header note on that same column.
     const sample = wb.getWorksheet(TAB_SAMPLE)!;
     const roleCol = cols.indexOf('lastRole') + 1;
     const neverCol = cols.indexOf('neverShown') + 1;
+    const expCol = cols.indexOf('workExperience') + 1;
+    const stateCol = cols.indexOf('state') + 1;
+    let satisfyingRows = 0;
     for (let r = 2; r <= sample.rowCount; r += 1) {
-      expect(String(sample.getCell(r, roleCol).value ?? '')).toBe('');
-      expect(String(sample.getCell(r, neverCol).value ?? '')).toBe('');
+      const at = (c: number): string => String(sample.getCell(r, c).value ?? '');
+      const applies = at(expCol) === 'Worked' && at(stateCol) === 'KA';
+      expect(at(roleCol) === '').toBe(!applies);
+      if (applies) satisfyingRows += 1;
+      // A scalar `allowed` hides the field outright — blank in every row.
+      expect(at(neverCol)).toBe('');
     }
+    expect(satisfyingRows).toBeGreaterThan(0);
+  });
+
+  // Finding on #754: `conditionalCell` read `pins`, so a row that rendered
+  // `educationCategory = School` from the fall-through left the column keyed
+  // off it blank, contradicting that column's own "Only when …" note.
+  it('fills a conditional column when the row renders the controller value', async () => {
+    const chained = {
+      type: 'object',
+      required: ['name'],
+      properties: {
+        name: { type: 'string', title: 'Full Name' },
+        educationCategory: { type: 'string', title: 'Education', enum: ['School', 'Degree'] },
+        schoolQualification: {
+          type: 'string',
+          title: 'School Qualification',
+          enum: ['10th', '12th'],
+          'x-show-if': { educationCategory: ['School'] },
+        },
+        // A second controller, so some rows pin THIS one and leave
+        // `educationCategory` on its first value by fall-through — the case
+        // reading `pins` alone got wrong.
+        workExperience: { type: 'string', title: 'Work Experience', enum: ['Fresher', 'Worked'] },
+        lastRole: {
+          type: 'string',
+          title: 'Last Role',
+          'x-show-if': { workExperience: ['Worked'] },
+        },
+      },
+    } as Record<string, unknown>;
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load((await buildXlsxTemplate(chained, 'seeker')) as unknown as ExcelJS.Buffer);
+    const cols = orderedColumns(chained);
+    const sample = wb.getWorksheet(TAB_SAMPLE)!;
+    const eduCol = cols.indexOf('educationCategory') + 1;
+    const qualCol = cols.indexOf('schoolQualification') + 1;
+    const expCol = cols.indexOf('workExperience') + 1;
+
+    let fallThroughSchoolRows = 0;
+    for (let r = 2; r <= sample.rowCount; r += 1) {
+      const at = (c: number): string => String(sample.getCell(r, c).value ?? '');
+      const qual = at(qualCol);
+      if (at(eduCol) === 'School') {
+        expect(qual).not.toBe('');
+        // `workExperience = Worked` can only be the pinned controller, so this
+        // row's `School` came from the fall-through, not from `pins`.
+        if (at(expCol) === 'Worked') fallThroughSchoolRows += 1;
+      } else {
+        expect(qual).toBe('');
+      }
+    }
+    expect(fallThroughSchoolRows).toBeGreaterThan(0);
+  });
+
+  it('does not point an array column at a dropdown it deliberately lacks', async () => {
+    const many = {
+      type: 'object',
+      required: ['name'],
+      properties: {
+        name: { type: 'string', title: 'Full Name' },
+        skills: {
+          type: 'array',
+          title: 'Skills',
+          items: { enum: Array.from({ length: 12 }, (_, i) => `Skill ${i + 1}`) },
+        },
+      },
+    } as Record<string, unknown>;
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load((await buildXlsxTemplate(many, 'seeker')) as unknown as ExcelJS.Buffer);
+    const grid = wb.getWorksheet(TAB_GRID)!;
+    const col = orderedColumns(many).indexOf('skills') + 1;
+    const raw = grid.getRow(1).getCell(col).note;
+    const note = typeof raw === 'string' ? raw : JSON.stringify(raw);
+
+    // `writeGridSheet` skips validation on an array column — a single-value
+    // dropdown would reject a valid delimiter-joined cell — so a note telling
+    // the operator to use one points at nothing.
+    expect(grid.getCell(2, col).dataValidation).toBeUndefined();
+    expect(note).not.toContain('use the dropdown');
+    expect(note).toContain('12 values');
+    expect(note).toContain(TAB_VALUES);
+    expect(note).toContain('join them with "|"');
   });
 
   it('honours a non-pipe delimiter from the network config', async () => {

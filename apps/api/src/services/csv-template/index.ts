@@ -19,6 +19,30 @@ export interface CsvTemplateOptions {
   arrayDelimiter?: string;
   /** Set false to emit the legacy header-only template. */
   exampleRow?: boolean;
+  /**
+   * The domain's identity selectors (`ResolvedDomain.identity`), naming which
+   * columns hold the name / phone / email.
+   *
+   * The XLSX template takes the same option for the same reason: `exampleValue`
+   * is schema-driven by design, so a phone column that declares no `format` or
+   * `pattern` samples as "Example Mobile Number", which `normalisePhone`
+   * rejects before Ajv ever sees the row. Both formats of one template have to
+   * agree about the same column, so both take the selectors — and this is the
+   * only format an operator gets by default (`?format=csv`).
+   */
+  identity?: IdentitySelectors | undefined;
+}
+
+/**
+ * The columns holding the name / phone / email, from the network binding.
+ *
+ * Structurally `ResolvedDomain.identity`, redeclared here so `csv-template`
+ * stays free of a `network-config` dependency.
+ */
+export interface IdentitySelectors {
+  name: string;
+  phone: string;
+  email?: string | undefined;
 }
 
 /**
@@ -53,11 +77,11 @@ export function orderedColumns(schema: JsonSchema): string[] {
  * Builds the downloadable CSV template for a participant schema.
  *
  * @param schema - The participant JSON Schema (object-typed, draft 2020-12).
- * @param options - Array delimiter + example-row toggle.
+ * @param options - Array delimiter, example-row toggle, identity selectors.
  * @returns CSV text: header line, then (by default) one example line.
  */
 export function buildCsvTemplate(schema: JsonSchema, options: CsvTemplateOptions = {}): string {
-  const { arrayDelimiter = '|', exampleRow = true } = options;
+  const { arrayDelimiter = '|', exampleRow = true, identity } = options;
   const properties = (schema['properties'] as Record<string, Record<string, unknown>>) ?? {};
   const ordered = orderedColumns(schema);
 
@@ -66,9 +90,96 @@ export function buildCsvTemplate(schema: JsonSchema, options: CsvTemplateOptions
 
   const example =
     ordered
-      .map((name) => escapeCsvCell(exampleValue(name, properties[name] ?? {}, arrayDelimiter)))
+      .map((name) => {
+        const prop = properties[name] ?? {};
+        const identityCell =
+          identity === undefined ? undefined : identityExample(name, prop, identity);
+        return escapeCsvCell(identityCell ?? exampleValue(name, prop, arrayDelimiter));
+      })
       .join(',') + '\n';
   return header + example;
+}
+
+/**
+ * True when a candidate identity value satisfies the column's own declaration.
+ *
+ * The column's schema outranks any identity-shaped placeholder: a value that
+ * fails the column's `format` or `pattern` is one the row parser rejects, and
+ * `bulk-row-process` treats both as blocking. When this returns `false` the
+ * caller falls through to `exampleValue`, which derives from the declaration
+ * rather than around it.
+ *
+ * @param prop - The column's schema fragment.
+ * @param candidate - The identity value being considered for the cell.
+ * @param satisfiesFormat - The one `format` this candidate is known to meet,
+ *   or undefined when it meets none.
+ * @returns `true` when the candidate can be used as-is.
+ */
+function fitsProperty(
+  prop: Record<string, unknown>,
+  candidate: string,
+  satisfiesFormat?: string,
+): boolean {
+  const format = prop['format'];
+  if (typeof format === 'string' && format !== satisfiesFormat) return false;
+
+  const pattern = prop['pattern'];
+  if (typeof pattern !== 'string') return true;
+  try {
+    return new RegExp(pattern).test(candidate);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Derives a realistic sample value for one configured identity column.
+ *
+ * `exampleValue` is schema-driven with no field-name heuristics, so a name /
+ * phone / email column that declares nothing about its shape samples as
+ * "Example <Title>" — the one class of cell `bulk-row-process` rejects
+ * outright (`normalisePhone` strips it to zero digits) rather than merely
+ * reporting. Config names those columns, so nothing is guessed here. Shared by
+ * both template formats: an operator who fills the workbook and one who fills
+ * the CSV must not be shown different values for the same column.
+ *
+ * Two things this deliberately does NOT do:
+ *
+ * - **Override a column that declares its own `format` or `pattern`.** A phone
+ *   declaring `^\+91[0-9]{10}$` would reject the hardcoded 10-digit run,
+ *   putting a value the parser rejects in the field the network dedups on.
+ *   `exampleValue` handles those; this fills only the gap where the schema says
+ *   nothing about the shape.
+ * - **Assume `identity.name` names a person.** blue_dot points it at
+ *   `jobProviderName`, so the sample is built from the column's own label —
+ *   "Sample Job Provider Name 1", not "Sample Person 1" in a company column.
+ *
+ * @param name - Column (property) name.
+ * @param prop - The column's schema fragment.
+ * @param identity - The domain's identity selectors.
+ * @param rowIndex - Zero-based sample row index; 0 for the CSV's single row.
+ * @returns The cell value, or undefined when this is not an identity column,
+ *   or when the column's own declaration rejects the placeholder.
+ */
+export function identityExample(
+  name: string,
+  prop: Record<string, unknown>,
+  identity: IdentitySelectors,
+  rowIndex = 0,
+): string | undefined {
+  const label = str(prop, 'title') ?? name;
+  let candidate: { value: string; format?: string };
+  if (name === identity.name) {
+    candidate = { value: `Sample ${label} ${rowIndex + 1}` };
+  } else if (name === identity.phone) {
+    candidate = { value: `98765${String(10000 + rowIndex).slice(-5)}` };
+  } else if (name === identity.email) {
+    candidate = { value: `person${rowIndex + 1}@example.com`, format: 'email' };
+  } else {
+    return undefined;
+  }
+
+  return fitsProperty(prop, candidate.value, candidate.format) ? candidate.value : undefined;
 }
 
 /** Reads a schema keyword as a string, or undefined when absent/wrong type. */
