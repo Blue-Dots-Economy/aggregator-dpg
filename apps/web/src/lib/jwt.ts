@@ -71,6 +71,12 @@ export function tokenRealmRoles(token: string): string[] {
  * end. `signalsRoles` is injected rather than hardcoded because the roles that
  * mark a Signals participant are deployment config on that side.
  *
+ * Reads the token WITHOUT verifying its signature, like everything else in
+ * this module: the caller has it straight from the code exchange over the
+ * trusted back-channel, or from an established session, and the result only
+ * selects which message to show. It grants nothing — the access decision was
+ * already made by the `aggregator_id` check this classifies the failure of.
+ *
  * @param token - A Keycloak access token that lacks `aggregator_id`.
  * @param signalsRoles - Realm roles that identify a Signals participant.
  * @returns Which population the token belongs to.
@@ -84,3 +90,18 @@ export function classifyNonCoordinator(
   if (roles.has('org_owner')) return 'org_owner';
   return 'unknown';
 }
+
+/**
+ * Login-screen reason code for each population the coordinator gate turns away.
+ *
+ * A table rather than a chain of conditionals: the cases are a closed set that
+ * mirrors {@link classifyNonCoordinator}, so a missing one is a type error
+ * instead of a silently wrong message. Shared by BOTH gates — the OIDC callback
+ * and the protected-layout re-check — so the two can never disagree about what
+ * to tell the same user.
+ */
+export const PORTAL_GATE_REASON: Record<ReturnType<typeof classifyNonCoordinator>, string> = {
+  signals_participant: 'signals_account_no_portal',
+  org_owner: 'org_no_portal',
+  unknown: 'no_portal_access',
+};

@@ -22,7 +22,7 @@ import {
   verifyFlowState,
 } from '@/lib/cookies';
 import { logger, pickRequestId } from '@/lib/logger';
-import { classifyNonCoordinator, tokenAggregatorId } from '@/lib/jwt';
+import { PORTAL_GATE_REASON, classifyNonCoordinator, tokenAggregatorId } from '@/lib/jwt';
 
 export const runtime = 'nodejs';
 
@@ -144,19 +144,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   res.cookies.set(OIDC_FLOW_COOKIE, '', clearCookieOptions());
   return res;
 }
-
-/**
- * Login-screen reason code for each population the coordinator gate turns away.
- *
- * A lookup rather than a chain of conditionals: the three cases are a closed
- * set that mirrors `classifyNonCoordinator`, so keeping them as one table makes
- * a missing case a type error instead of a silently wrong message.
- */
-const PORTAL_GATE_REASON: Record<ReturnType<typeof classifyNonCoordinator>, string> = {
-  signals_participant: 'signals_account_no_portal',
-  org_owner: 'org_no_portal',
-  unknown: 'no_portal_access',
-};
 
 function failure(req: NextRequest, reason: string): NextResponse {
   const target = absoluteUrl(req, `/login?error=${encodeURIComponent(reason)}`);
