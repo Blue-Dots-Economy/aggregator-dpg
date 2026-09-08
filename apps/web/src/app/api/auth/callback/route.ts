@@ -13,6 +13,7 @@
 import { type NextRequest, NextResponse } from 'next/server';
 import { getOidcAdapter } from '@/lib/oidc';
 import { getSessionStore, type SessionData } from '@/lib/session';
+import { signalsRealmRoles } from '@/lib/signals-roles';
 import {
   OIDC_FLOW_COOKIE,
   SESSION_COOKIE,
@@ -21,7 +22,7 @@ import {
   verifyFlowState,
 } from '@/lib/cookies';
 import { logger, pickRequestId } from '@/lib/logger';
-import { tokenAggregatorId } from '@/lib/jwt';
+import { classifyNonCoordinator, tokenAggregatorId } from '@/lib/jwt';
 
 export const runtime = 'nodejs';
 
@@ -101,15 +102,30 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // owner who is a valid KC user cannot land in the (data-less, broken)
   // coordinator portal. Org-owner console login is a separate, future feature.
   if (!tokenAggregatorId(tokens.accessToken)) {
+    // One Keycloak realm serves both this portal and the Signals app, so a
+    // token can be entirely valid and still belong to the other application —
+    // Keycloak reuses an existing SSO session silently, and the user never
+    // gets to pick an account. Classify WHICH population this is so the login
+    // screen can say what happened instead of assuming everyone here is an
+    // org owner (#753).
+    const population = classifyNonCoordinator(tokens.accessToken, signalsRealmRoles());
+    const reason =
+      population === 'signals_participant'
+        ? 'signals_account_no_portal'
+        : population === 'org_owner'
+          ? 'org_no_portal'
+          : 'no_portal_access';
     log.warn(
       {
         code: 'NO_AGGREGATOR_ID',
         sub: claims.sub,
-        hint: 'Authenticated KC user has no aggregator_id claim (org owner / network admin). Portal is coordinator-only.',
+        population,
+        reason,
+        hint: 'Authenticated KC user has no aggregator_id claim. Portal is coordinator-only; see reason for which account type.',
       },
       'blocking non-coordinator portal login',
     );
-    return failure(req, 'org_no_portal');
+    return failure(req, reason);
   }
 
   const now = Date.now();

@@ -36,11 +36,20 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   const returnTo = isSafePath(returnCandidate) ? returnCandidate! : '/dashboard';
   const reason = cookieReason ?? (typeof params.reason === 'string' ? params.reason : null);
   // Map well-known reasons to error codes the LoginView already understands.
+  // Reasons the protected layout may hand back via the logout redirect. The
+  // callback's cross-app rejections (#753) arrive as `?error=` instead, so they
+  // fall through to the params branch below — listed here too because the
+  // layout re-checks the same gate and can emit any of them.
+  const PORTAL_GATE_REASONS = new Set([
+    'org_no_portal',
+    'signals_account_no_portal',
+    'no_portal_access',
+  ]);
   const error =
     reason === 'expired'
       ? 'session_expired'
-      : reason === 'org_no_portal'
-        ? 'org_no_portal'
+      : reason && PORTAL_GATE_REASONS.has(reason)
+        ? reason
         : typeof params.error === 'string'
           ? params.error
           : null;

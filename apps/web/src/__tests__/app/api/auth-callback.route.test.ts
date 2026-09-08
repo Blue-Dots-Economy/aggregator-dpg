@@ -154,26 +154,60 @@ describe('GET /api/auth/callback', () => {
     expect(create).not.toHaveBeenCalled();
   });
 
-  it('blocks portal login and redirects to /login when the token has no aggregator_id', async () => {
+  /**
+   * One Keycloak realm serves this portal and the Signals app, so "no
+   * aggregator_id" covers three different populations. The reason code has to
+   * tell them apart or the login screen shows org-owner advice to a Signals
+   * participant (#753).
+   */
+  function blockedWith(roles: string[]): Promise<Response> {
     exchangeCode.mockResolvedValue({
       ok: true,
       value: {
         tokens: {
-          accessToken: fakeJwt({ sub: 'org-owner-1' }),
+          accessToken: fakeJwt({ sub: 'no-agg-1', realm_access: { roles } }),
           refreshToken: 'refresh-1',
           idToken: 'id-1',
           accessTokenExp: Date.now() + 60_000,
           refreshTokenExp: Date.now() + 60_000,
         },
-        claims: { sub: 'org-owner-1' },
+        claims: { sub: 'no-agg-1' },
       },
     });
     const req = new NextRequest('http://localhost/api/auth/callback?code=abc&state=state-1', {
       headers: { cookie: `oidc_flow=${flowCookie()}` },
     });
-    const res = await GET(req);
+    return GET(req);
+  }
+
+  it('blocks an org owner with org_no_portal', async () => {
+    const res = await blockedWith(['org_owner']);
     expect(res.status).toBe(302);
     expect(res.headers.get('location')).toBe('http://portal.test/login?error=org_no_portal');
     expect(create).not.toHaveBeenCalled();
+  });
+
+  it('blocks a Signals participant with signals_account_no_portal', async () => {
+    process.env.SIGNALS_REALM_ROLES = 'seeker,provider';
+    const res = await blockedWith(['seeker']);
+    expect(res.headers.get('location')).toBe(
+      'http://portal.test/login?error=signals_account_no_portal',
+    );
+    expect(create).not.toHaveBeenCalled();
+    delete process.env.SIGNALS_REALM_ROLES;
+  });
+
+  it('blocks any other realm user with no_portal_access', async () => {
+    const res = await blockedWith(['offline_access']);
+    expect(res.headers.get('location')).toBe('http://portal.test/login?error=no_portal_access');
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('falls back to no_portal_access when SIGNALS_REALM_ROLES is unset', async () => {
+    // A wrong message is worse than a generic one: without the config we
+    // cannot claim the user is a Signals account.
+    delete process.env.SIGNALS_REALM_ROLES;
+    const res = await blockedWith(['seeker']);
+    expect(res.headers.get('location')).toBe('http://portal.test/login?error=no_portal_access');
   });
 });

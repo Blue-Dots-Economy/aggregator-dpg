@@ -41,3 +41,46 @@ export function tokenAggregatorId(token: string): string | null {
   const id = claims?.['aggregator_id'];
   return typeof id === 'string' && id.length > 0 ? id : null;
 }
+
+/**
+ * Returns the realm roles carried by a Keycloak access token.
+ *
+ * Realm roles live under `realm_access.roles`. Used to tell WHICH kind of
+ * account a rejected token belongs to: the coordinator portal and the Signals
+ * app share one Keycloak realm, so a token can be perfectly valid and still
+ * belong to the other application. Knowing that positively — rather than
+ * inferring it from the absence of `aggregator_id` — is what lets the login
+ * screen say "you're signed in as a Signals account" instead of guessing.
+ *
+ * @param token - A Keycloak access token.
+ * @returns The realm role names, or an empty array when absent/malformed.
+ */
+export function tokenRealmRoles(token: string): string[] {
+  const claims = decodeJwtClaims(token);
+  const realmAccess = claims?.['realm_access'];
+  if (typeof realmAccess !== 'object' || realmAccess === null) return [];
+  const roles = (realmAccess as Record<string, unknown>)['roles'];
+  return Array.isArray(roles) ? roles.filter((r): r is string => typeof r === 'string') : [];
+}
+
+/**
+ * Classifies a token that failed the coordinator-portal gate.
+ *
+ * One shared realm means "no `aggregator_id`" covers three different people,
+ * and telling them apart is the difference between actionable copy and a dead
+ * end. `signalsRoles` is injected rather than hardcoded because the roles that
+ * mark a Signals participant are deployment config on that side.
+ *
+ * @param token - A Keycloak access token that lacks `aggregator_id`.
+ * @param signalsRoles - Realm roles that identify a Signals participant.
+ * @returns Which population the token belongs to.
+ */
+export function classifyNonCoordinator(
+  token: string,
+  signalsRoles: readonly string[],
+): 'signals_participant' | 'org_owner' | 'unknown' {
+  const roles = new Set(tokenRealmRoles(token));
+  if (signalsRoles.some((r) => roles.has(r))) return 'signals_participant';
+  if (roles.has('org_owner')) return 'org_owner';
+  return 'unknown';
+}

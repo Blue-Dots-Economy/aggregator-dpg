@@ -12,6 +12,13 @@ export interface AuthorizationUrlInput {
   codeChallenge: string;
   redirectUri: string;
   scope?: string;
+  /**
+   * OIDC `prompt`. `'login'` forces re-authentication even when a realm SSO
+   * session already exists — the only way to let someone switch account, since
+   * this portal and the Signals app share a realm and Keycloak would otherwise
+   * silently reissue a token for whoever is already signed in (#753).
+   */
+  prompt?: 'login';
 }
 
 export interface ExchangeCodeInput {

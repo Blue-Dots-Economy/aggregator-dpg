@@ -88,12 +88,27 @@ export function LoginView({ returnTo, error }: LoginViewProps): JSX.Element {
                 >
                   {t('session_expired')}
                 </div>
-              ) : error === 'org_no_portal' ? (
+              ) : error === 'org_no_portal' ||
+                error === 'signals_account_no_portal' ||
+                error === 'no_portal_access' ? (
                 <div
                   role="alert"
                   className="mb-5 rounded-[10px] border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-800"
                 >
-                  {t('org_no_portal')}
+                  {t(error)}
+                  {/* An org owner has nowhere else to go — the portal genuinely
+                      is not for them. The other two are signed in as the wrong
+                      account, so they need a way to switch; a plain link back to
+                      /login would silently reuse the same realm SSO session and
+                      return them here, which is why this forces a fresh prompt. */}
+                  {error !== 'org_no_portal' ? (
+                    <a
+                      href="/api/auth/login?switch=1"
+                      className="mt-2 block font-semibold underline underline-offset-2"
+                    >
+                      {t('switch_account')}
+                    </a>
+                  ) : null}
                 </div>
               ) : (
                 <div

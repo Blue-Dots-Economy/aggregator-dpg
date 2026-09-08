@@ -51,11 +51,16 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const redirectUri = mustEnv('OIDC_REDIRECT_URI');
   const adapter = getOidcAdapter();
+  // `?switch=1` comes from the "sign in with a different account" action on a
+  // cross-app rejection. Without prompt=login Keycloak reuses the existing
+  // realm SSO session and the user lands back on the same error (#753).
+  const forceReauth = req.nextUrl.searchParams.get('switch') === '1';
   const authUrl = await adapter.buildAuthorizationUrl({
     state,
     nonce,
     codeChallenge,
     redirectUri,
+    ...(forceReauth ? { prompt: 'login' as const } : {}),
   });
 
   const res = NextResponse.redirect(authUrl, { status: 302 });
