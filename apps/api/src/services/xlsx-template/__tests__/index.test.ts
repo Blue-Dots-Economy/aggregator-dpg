@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import ExcelJS from 'exceljs';
+import { createRequire } from 'node:module';
 import { buildXlsxTemplate, columnLetter } from '../index.js';
-import { buildCsvTemplate, orderedColumns } from '../../csv-template/index.js';
+import { buildCsvTemplate, exampleValue, orderedColumns } from '../../csv-template/index.js';
 
 /**
  * Mirrors the shapes the real networks use, including the three that constrain
@@ -42,6 +43,23 @@ const SCHEMA = {
       enum: Array.from({ length: 300 }, (_, i) => `Trade ${i + 1}`),
     },
     notes: { type: 'string', title: 'Notes', description: 'Anything else worth knowing' },
+  },
+} as Record<string, unknown>;
+
+const SCHEMA_PROPS = SCHEMA['properties'] as Record<string, Record<string, unknown>>;
+
+/**
+ * The shapes Excel silently rewrites when a column is left on General: an ISO
+ * date it reformats per locale, a leading zero it drops, and a long numeric id
+ * it flips to scientific notation. Save As CSV writes the DISPLAYED value.
+ */
+const DATED_SCHEMA = {
+  type: 'object',
+  required: ['joinedOn'],
+  properties: {
+    joinedOn: { type: 'string', title: 'Joined On', format: 'date' },
+    pincode: { type: 'string', title: 'Pincode', pattern: '^[0-9]{6}$' },
+    idNumber: { type: 'string', title: 'ID Number', pattern: '^[0-9]{16}$' },
   },
 } as Record<string, unknown>;
 
@@ -220,7 +238,13 @@ describe('buildXlsxTemplate', () => {
     // "Work Experience", not "workExperience".
     expect(noteOf('lastRole')).toContain('Work Experience');
     expect(noteOf('lastRole')).toContain('Worked before');
+    // One sentence about multiplicity, not a contradictory pair: an array with
+    // a closed set used to say "join them with |" AND "Pick one of: …".
+    expect(noteOf('languageSpoken')).toContain('Pick one or more of');
     expect(noteOf('languageSpoken')).toContain('join them with "|"');
+    expect(noteOf('languageSpoken')).not.toContain('Pick one of');
+    expect(noteOf('gender')).toContain('Pick one of');
+    expect(noteOf('gender')).not.toContain('join them with');
     expect(noteOf('notes')).toContain('Anything else worth knowing');
     // A 300-value set points at the tab instead of listing them in a tooltip.
     expect(noteOf('itiTrade')).toContain('300 values');
@@ -262,8 +286,11 @@ describe('buildXlsxTemplate', () => {
     // answered without reading 10 columns of headers.
     expect(text).toContain('"Full Name"');
     expect(text).toContain('"Mobile Number"');
-    // Counts the conditional columns rather than leaving them to be discovered.
-    expect(text).toMatch(/1 of the 10 columns only appl/);
+    // Counts the conditional columns rather than leaving them to be
+    // discovered. Anchored on the bullet: unanchored, "21 of the 10 columns"
+    // and "11 of the 10 columns" both matched, so an off-by-one in the count
+    // (or counting `plans` where it meant the conditional subset) passed.
+    expect(text).toContain('• 1 of the 10 columns only appl');
   });
 
   it('lists closed sets first on the allowed-values tab, with labels', async () => {
@@ -338,6 +365,46 @@ describe('buildXlsxTemplate', () => {
     expect(seen.size).toBeGreaterThan(1);
   });
 
+  it('joins an array column in ONE cell, the rule a CSV cannot express', async () => {
+    // `planColumn` fills `allowed` from `items.enum`, so a multi-value column
+    // reached `rotatedCell` and got one value per cell — and tab 3, the tab the
+    // header comment says a row "can be copied straight across" from, never
+    // demonstrated the delimiter at all.
+    const wb = await build();
+    const sample = wb.getWorksheet(TAB_SAMPLE)!;
+    const col = orderedColumns(SCHEMA).indexOf('languageSpoken') + 1;
+
+    for (let r = 2; r <= sample.rowCount; r += 1) {
+      expect(String(sample.getCell(r, col).value ?? '')).toContain('|');
+    }
+    // And it is the CSV generator's own joined value, not a second opinion.
+    expect(String(sample.getCell(2, col).value)).toBe(
+      exampleValue('languageSpoken', SCHEMA_PROPS['languageSpoken']!, '|'),
+    );
+  });
+
+  it('formats every grid column as text, so Save As CSV writes what was typed', async () => {
+    // Left on General, Excel reinterprets the cell and Save As CSV writes the
+    // DISPLAYED value: `2024-01-01` exports as `01/01/2024` (which
+    // `ajv-formats` rejects), a leading zero is dropped, and a long numeric id
+    // flips to scientific notation. That is the post-hoc `errors.csv` failure
+    // this generator exists to remove, reintroduced by cell formatting.
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(
+      (await buildXlsxTemplate(DATED_SCHEMA, 'seeker')) as unknown as ExcelJS.Buffer,
+    );
+    const cols = orderedColumns(DATED_SCHEMA);
+    for (const tab of [TAB_SAMPLE, '4. Enter your seekers']) {
+      const sheet = wb.getWorksheet(tab)!;
+      expect(sheet.getColumn(cols.indexOf('pincode') + 1).style.numFmt).toBe('@');
+      expect(sheet.getColumn(cols.indexOf('idNumber') + 1).style.numFmt).toBe('@');
+      // A date column keeps an explicit ISO mask instead, so a value Excel has
+      // already parsed as a date still round-trips in the shape the CSV
+      // template demonstrates.
+      expect(sheet.getColumn(cols.indexOf('joinedOn') + 1).style.numFmt).toBe('yyyy-mm-dd');
+    }
+  });
+
   it('samples the configured identity columns realistically, not as prose', async () => {
     // ka-dhwd's phone declares no `pattern`, so the purely schema-driven
     // generator yields "Example Mobile Number" — a cell the row parser rejects,
@@ -362,6 +429,95 @@ describe('buildXlsxTemplate', () => {
 
     expect(String(sample.getCell(2, cols.indexOf('mobile') + 1).value)).toMatch(/^\d{10}$/);
     expect(String(sample.getCell(2, cols.indexOf('mailId') + 1).value)).toContain('@example.com');
+    // `identity.name` is not necessarily a person — blue_dot points it at
+    // `jobProviderName` — so the sample is built from the column's own label
+    // rather than printing "Sample Person 1" into a company-name column.
+    expect(String(sample.getCell(2, cols.indexOf('fullName') + 1).value)).toBe(
+      'Sample Full name 1',
+    );
+  });
+
+  it('never overrides an identity column that declares its own pattern', async () => {
+    // The hardcoded 10-digit phone fails a `^\+91[0-9]{10}$` or `^[0-9]{12}$`
+    // column, putting a value the row parser rejects in the field the network
+    // dedups on — and making the workbook and the CSV template disagree about
+    // the same column. The schema outranks the placeholder.
+    const strict = {
+      type: 'object',
+      required: ['mobile'],
+      properties: {
+        fullName: { type: 'string', title: 'Full name' },
+        mobile: { type: 'string', title: 'Mobile Number', pattern: '^\\+91[0-9]{10}$' },
+        mailId: { type: 'string', title: 'Email', format: 'email' },
+      },
+    } as Record<string, unknown>;
+    const props = strict['properties'] as Record<string, Record<string, unknown>>;
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(
+      (await buildXlsxTemplate(strict, 'seeker', {
+        identity: { name: 'fullName', phone: 'mobile', email: 'mailId' },
+      })) as unknown as ExcelJS.Buffer,
+    );
+    const sample = wb.getWorksheet(TAB_SAMPLE)!;
+    const cols = orderedColumns(strict);
+
+    const phone = String(sample.getCell(2, cols.indexOf('mobile') + 1).value);
+    expect(phone).toMatch(/^\+91[0-9]{10}$/);
+    expect(phone).toBe(exampleValue('mobile', props['mobile']!, '|'));
+    // `format: email` IS what the identity email satisfies, so that one is
+    // still filled per row rather than being thrown away with the rest.
+    expect(String(sample.getCell(2, cols.indexOf('mailId') + 1).value)).toBe('person1@example.com');
+  });
+
+  it('reads a multi-key x-show-if the way the form renderer does', async () => {
+    // `apps/web/src/lib/show-if.ts` ANDs across EVERY key and returns false for
+    // a non-array value. Reading only the first key described a weaker
+    // condition than the form enforces; treating a scalar as "no constraint"
+    // said "always fill this in" about a column the form never shows.
+    const multi = {
+      type: 'object',
+      properties: {
+        workExperience: { type: 'string', title: 'Work Experience', enum: ['Fresher', 'Worked'] },
+        state: { type: 'string', title: 'State', enum: ['KA', 'UP'] },
+        lastRole: {
+          type: 'string',
+          title: 'Last Role',
+          'x-show-if': { workExperience: ['Worked'], state: ['KA'] },
+        },
+        neverShown: { type: 'string', title: 'Never Shown', 'x-show-if': { state: 'KA' } },
+      },
+    } as Record<string, unknown>;
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load((await buildXlsxTemplate(multi, 'seeker')) as unknown as ExcelJS.Buffer);
+    const cols = orderedColumns(multi);
+
+    const values = wb.getWorksheet(TAB_VALUES)!;
+    const rowFor = (name: string): string[] => {
+      let found: string[] = [];
+      values.eachRow((row) => {
+        if (String(row.getCell(1).value) === name) {
+          found = [1, 2, 3, 4, 5, 6].map((c) => String(row.getCell(c).value ?? ''));
+        }
+      });
+      return found;
+    };
+    // Both controllers are named, joined by "and" — not just the first key.
+    expect(rowFor('lastRole')[4]).toContain('Work Experience');
+    expect(rowFor('lastRole')[4]).toContain('State');
+    expect(rowFor('lastRole')[4]).toContain(' and ');
+    // A scalar `allowed` hides the field outright in the form; the workbook
+    // must not tell the operator to fill it in.
+    expect(rowFor('neverShown')[4]).not.toBe('Always');
+
+    // And no sample row pins both controllers, so the two-key column stays
+    // blank rather than demonstrating a state the form never renders.
+    const sample = wb.getWorksheet(TAB_SAMPLE)!;
+    const roleCol = cols.indexOf('lastRole') + 1;
+    const neverCol = cols.indexOf('neverShown') + 1;
+    for (let r = 2; r <= sample.rowCount; r += 1) {
+      expect(String(sample.getCell(r, roleCol).value ?? '')).toBe('');
+      expect(String(sample.getCell(r, neverCol).value ?? '')).toBe('');
+    }
   });
 
   it('honours a non-pipe delimiter from the network config', async () => {
@@ -407,6 +563,168 @@ describe('buildXlsxTemplate', () => {
     );
     expect(wb.getWorksheet(TAB_GRID)).toBeDefined();
     expect(wb.getWorksheet(TAB_INSTRUCTIONS)).toBeDefined();
+  });
+});
+
+/**
+ * The gap that justified deleting the shipped `bulk-samples/*.csv`: nothing
+ * checked that a generated example is a row the parser would accept. Against
+ * live ka-dhwd those files carried 24 columns to the schema's 36, and 18 of 20
+ * seeker rows failed on stale enum values — discovered by an operator, after
+ * the upload.
+ *
+ * These cases close it for both formats at once, by putting each generated row
+ * through the pipeline `apps/worker/src/jobs/bulk-row-process.ts` runs before
+ * Ajv: split delimiter-joined array cells, strip empty cells, validate, then
+ * drop `required` errors (a required-field gap is not a row failure — signals
+ * accepts partial `item_state` and classifies the item as `draft`; every other
+ * keyword is blocking).
+ */
+describe('generated examples validate against the schema they came from', () => {
+  /** The subset of an Ajv validator these cases read. */
+  interface Validator {
+    (data: unknown): boolean;
+    errors?: Array<{
+      keyword?: string;
+      instancePath?: string;
+      schemaPath?: string;
+      message?: string;
+    }> | null;
+  }
+
+  /**
+   * Compiles a schema exactly as `packages/schema-loader/src/ajv.ts` does.
+   *
+   * Same options and the same `ajv-formats` registration, via the same
+   * `createRequire` interop — both packages ship CommonJS. Anything looser here
+   * would make this suite pass on rows the loader's own validator rejects.
+   *
+   * @param schema - The participant schema to compile.
+   * @returns A validator over that schema.
+   */
+  function compile(schema: Record<string, unknown>): Validator {
+    const require = createRequire(import.meta.url);
+    const AjvCtor = require('ajv/dist/2020').default ?? require('ajv/dist/2020');
+    const addFormats = require('ajv-formats').default ?? require('ajv-formats');
+    const ajv = new AjvCtor({ allErrors: true, strict: false, coerceTypes: 'array' });
+    addFormats(ajv);
+    return ajv.compile(schema) as Validator;
+  }
+
+  /** Mirrors `preprocessArrayCells` + `stripAllEmptyCells` in the worker. */
+  function toPayload(
+    schema: Record<string, unknown>,
+    row: Record<string, string>,
+    delimiter: string,
+  ): Record<string, unknown> {
+    const props = schema['properties'] as Record<string, Record<string, unknown>>;
+    const payload: Record<string, unknown> = {};
+    for (const [field, cell] of Object.entries(row)) {
+      if (props[field]?.['type'] === 'array') {
+        const parts = cell
+          .split(delimiter)
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0);
+        if (parts.length > 0) payload[field] = parts;
+        continue;
+      }
+      if (cell.trim() !== '') payload[field] = cell;
+    }
+    return payload;
+  }
+
+  /** Blocking reasons only — mirrors the worker's `blockingValidationReasons`. */
+  function blockingErrors(
+    schema: Record<string, unknown>,
+    payload: Record<string, unknown>,
+  ): string[] {
+    const validate = compile(schema);
+    if (validate(payload)) return [];
+    return (validate.errors ?? [])
+      .filter((e) => e.keyword !== 'required')
+      .map((e) => `${e.instancePath || e.schemaPath}: ${e.message ?? 'invalid'}`);
+  }
+
+  /**
+   * Every shape a live participant schema uses that can make a GENERATED value
+   * wrong: bounded patterns, a leading character class, a prefixed pattern, a
+   * format, a bounded array and a bounded string.
+   */
+  const LIVE_SHAPED = {
+    type: 'object',
+    additionalProperties: false,
+    required: ['fullName', 'mobile'],
+    properties: {
+      fullName: { type: 'string', title: 'Full Name', minLength: 1, maxLength: 60 },
+      mobile: { type: 'string', title: 'Mobile Number', pattern: '^[6-9][0-9]{9}$' },
+      altMobile: { type: 'string', title: 'Alternate Mobile', pattern: '^\\+91[0-9]{10}$' },
+      aadhaar: { type: 'string', title: 'Aadhaar', pattern: '^[0-9]{12}$' },
+      pincode: { type: 'string', title: 'Pincode', pattern: '^[0-9]{6,10}$' },
+      pan: { type: 'string', title: 'PAN', pattern: '^[A-Z]{5}[0-9]{4}[A-Z]$' },
+      mailId: { type: 'string', title: 'Email', format: 'email' },
+      joinedOn: { type: 'string', title: 'Joined On', format: 'date' },
+      age: { type: 'integer', title: 'Age', minimum: 14, maximum: 65 },
+      gender: { type: 'string', title: 'Gender', enum: ['Male', 'Female', 'Other'] },
+      workExperience: {
+        type: 'string',
+        title: 'Work Experience',
+        enum: ['Fresher', 'Worked before'],
+      },
+      lastRole: {
+        type: 'string',
+        title: 'Last Role Held',
+        maxLength: 40,
+        'x-show-if': { workExperience: ['Worked before'] },
+      },
+      languageSpoken: {
+        type: 'array',
+        title: 'Languages Spoken',
+        maxItems: 2,
+        items: { enum: ['Hindi', 'English', 'Kannada'] },
+      },
+    },
+  } as Record<string, unknown>;
+
+  for (const [label, schema] of [
+    ['the test fixture', SCHEMA],
+    ['a live-shaped schema', LIVE_SHAPED],
+    ['the Excel-hostile shapes', DATED_SCHEMA],
+  ] as Array<[string, Record<string, unknown>]>) {
+    it(`accepts every workbook sample row — ${label}`, async () => {
+      const wb = new ExcelJS.Workbook();
+      await wb.xlsx.load(
+        (await buildXlsxTemplate(schema, 'seeker', {
+          identity: { name: 'fullName', phone: 'mobile', email: 'mailId' },
+        })) as unknown as ExcelJS.Buffer,
+      );
+      const sheet = wb.getWorksheet(TAB_SAMPLE)!;
+      const cols = orderedColumns(schema);
+      expect(sheet.rowCount).toBeGreaterThan(1);
+
+      for (let r = 2; r <= sheet.rowCount; r += 1) {
+        const row = Object.fromEntries(
+          cols.map((name, i) => [name, String(sheet.getCell(r, i + 1).value ?? '')]),
+        );
+        expect(blockingErrors(schema, toPayload(schema, row, '|'))).toEqual([]);
+      }
+    });
+
+    it(`accepts the CSV example row — ${label}`, () => {
+      const cols = orderedColumns(schema);
+      const [, example = ''] = buildCsvTemplate(schema).split('\n');
+      // The generator only quotes a cell containing `,`, `"` or a newline, and
+      // no example value here does, so a plain split matches the columns.
+      const row = Object.fromEntries(cols.map((name, i) => [name, example.split(',')[i] ?? '']));
+      expect(blockingErrors(schema, toPayload(schema, row, '|'))).toEqual([]);
+    });
+  }
+
+  it('leaves a cell blank rather than seeding a value that fails its pattern', () => {
+    // `Example <Title>` in a pattern-constrained column is worse than nothing:
+    // `bulk-row-process` treats a pattern miss as a blocking row error, so the
+    // template would guarantee the very failure it exists to prevent.
+    const unsynthesisable = { type: 'string', title: 'GST', pattern: '^[0-9]{2}[A-Z]{5}[0-9]{4}$' };
+    expect(exampleValue('gst', unsynthesisable, '|')).toBe('');
   });
 });
 

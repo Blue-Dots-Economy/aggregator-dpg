@@ -12,8 +12,8 @@ config/
 │   ├── aggregator.config.yaml         # Core app config for the network
 │   ├── brand.json                     # Logo paths pointing to /brand/<network-slug>/
 │   ├── keycloak.env                   # Brand strings + colours for Keycloak login
-│   ├── schemas/                       # RJSF form schemas (aggregator profile, registration)
-│   │   └── aggregator/
+│   └── schemas/                       # RJSF form schemas (aggregator profile, registration)
+│       └── aggregator/
 │
 └── <network>/
     └── <brand>/                       # Self-contained brand copy (full override)

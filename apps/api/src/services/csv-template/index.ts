@@ -22,13 +22,6 @@ export interface CsvTemplateOptions {
 }
 
 /**
- * Builds the downloadable CSV template for a participant schema.
- *
- * @param schema - The participant JSON Schema (object-typed, draft 2020-12).
- * @param options - Array delimiter + example-row toggle.
- * @returns CSV text: header line, then (by default) one example line.
- */
-/**
  * Column order for a participant schema: required properties first (in the
  * schema's own `required` order), then every remaining property in declaration
  * order.
@@ -56,6 +49,13 @@ export function orderedColumns(schema: JsonSchema): string[] {
   return ordered;
 }
 
+/**
+ * Builds the downloadable CSV template for a participant schema.
+ *
+ * @param schema - The participant JSON Schema (object-typed, draft 2020-12).
+ * @param options - Array delimiter + example-row toggle.
+ * @returns CSV text: header line, then (by default) one example line.
+ */
 export function buildCsvTemplate(schema: JsonSchema, options: CsvTemplateOptions = {}): string {
   const { arrayDelimiter = '|', exampleRow = true } = options;
   const properties = (schema['properties'] as Record<string, Record<string, unknown>>) ?? {};
@@ -135,19 +135,55 @@ function formatExample(format: string | undefined): string | undefined {
 }
 
 /**
- * Digit run matching a simple `pattern`, or undefined when it is not one.
+ * A value that satisfies a simple `pattern`, or undefined when none can be
+ * synthesised.
  *
- * Digit-run patterns (`^[0-9]{10}$`, `^\d{6}$`) are the common case in
- * participant schemas — phone, pincode — and an example that fails the pattern
- * is worse than no example at all.
+ * Digit-run patterns are the common case in participant schemas — phone,
+ * pincode, Aadhaar — and this handles the fixed (`{10}`) and bounded
+ * (`{6,10}`) forms with an optional literal prefix (`^\+91[0-9]{10}$`), plus a
+ * leading character class so `^[6-9][0-9]{9}$` gets a valid first digit.
+ *
+ * Whatever it builds is then TESTED against the pattern before being returned.
+ * That is the point: an example that fails its own pattern is worse than no
+ * example, because `bulk-row-process` treats a pattern miss as a blocking row
+ * error — so an unrecognised shape, or a run longer than the digits available,
+ * yields undefined and the caller leaves the cell blank rather than seeding a
+ * value the parser will reject.
  *
  * @param pattern - The schema's `pattern`, when it declares one.
- * @returns A matching run of digits, or undefined.
+ * @returns A string matching the pattern, or undefined.
  */
 function patternExample(pattern: string | undefined): string | undefined {
   if (pattern === undefined) return undefined;
-  const digits = /^\^?(?:\[0-9\]|\\d)\{(\d+)\}\$?$/.exec(pattern);
-  return digits ? '9876543210'.repeat(2).slice(0, Number(digits[1])) : undefined;
+
+  // ^<prefix?><[a-b]?>(digit-class){n[,m]}$ — the prefix is a literal run, the
+  // optional leading class fixes the first digit (`^[6-9][0-9]{9}$`).
+  const m =
+    /^\^?((?:\\\+|\+)?[0-9A-Za-z-]*?)(?:\[(\d)-\d\])?(?:\[0-9\]|\\d)\{(\d+)(?:,(\d+))?\}\$?$/.exec(
+      pattern,
+    );
+  if (!m) return undefined;
+
+  const prefix = (m[1] ?? '').replace('\\+', '+');
+  const firstDigit = m[2];
+  const min = Number(m[3]);
+  const runLength = firstDigit === undefined ? min : min + 1;
+  const digits = '9876543210';
+  if (runLength > digits.length * 4) return undefined;
+
+  const body =
+    (firstDigit ?? '') +
+    digits
+      .repeat(Math.ceil(runLength / digits.length))
+      .slice(0, firstDigit === undefined ? min : min);
+  const candidate = prefix + body;
+
+  // The whole reason this function is allowed to guess: verify before emitting.
+  try {
+    return new RegExp(pattern).test(candidate) ? candidate : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -179,8 +215,14 @@ export function exampleValue(
   const fromFormat = formatExample(str(prop, 'format'));
   if (fromFormat !== undefined) return fromFormat;
 
-  const fromPattern = patternExample(str(prop, 'pattern'));
+  const pattern = str(prop, 'pattern');
+  const fromPattern = patternExample(pattern);
   if (fromPattern !== undefined) return fromPattern;
+  // A pattern we could not satisfy: leave the cell blank. `Example <Title>`
+  // would fail the pattern, and `bulk-row-process` treats that as a blocking
+  // row error — the operator is better served by an empty cell and the note on
+  // the allowed-values tab than by a value that is guaranteed to be rejected.
+  if (pattern !== undefined) return '';
 
   const base = `Example ${str(prop, 'title') ?? name}`;
   const minLength = num(prop, 'minLength') ?? 0;

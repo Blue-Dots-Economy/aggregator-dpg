@@ -128,11 +128,72 @@ interface ColumnPlan {
   /** Closed value set, from `enum` or `items.enum`. */
   allowed: string[];
   isArray: boolean;
-  /** `x-show-if` controller field, when this column is conditional. */
-  showIfField?: string;
-  /** Controller values that make this column apply. */
-  showIfValues: string[];
+  /**
+   * Parsed `x-show-if` clauses — one per controller field, ANDed together, in
+   * the rule's own key order. Empty when the column always applies.
+   */
+  showIf: readonly ShowIfClause[];
+  /**
+   * True when the rule is present but cannot be satisfied by any form state,
+   * so the column is never shown. See {@link parseShowIf}.
+   */
+  showIfNeverApplies: boolean;
   description?: string;
+}
+
+/** One `(controller field → values that reveal this column)` clause. */
+interface ShowIfClause {
+  field: string;
+  /** Controller values that make the column apply; empty means "any value". */
+  values: string[];
+}
+
+/**
+ * True when a column does not apply to every row.
+ *
+ * @param plan - The column.
+ * @returns `true` when the column is conditional in any way.
+ */
+function isConditional(plan: ColumnPlan): boolean {
+  return plan.showIf.length > 0 || plan.showIfNeverApplies;
+}
+
+/**
+ * Parses the custom `x-show-if` keyword the same way the form renderer does.
+ *
+ * Deliberately mirrors `apps/web/src/lib/show-if.ts` (`isFieldVisible`), which
+ * is the implementation that decides what an operator actually sees: **every**
+ * `(controlField → allowed)` entry must hold (AND across keys), and a
+ * non-array `allowed` makes the field permanently hidden rather than
+ * unconstrained. Reading only the first key described a weaker condition than
+ * the form enforces, and treating a scalar as "no constraint" said "always
+ * fill this in" about a column the form never shows.
+ *
+ * Every `x-show-if` in `config/` is single-key and array-valued today, so this
+ * is parity insurance rather than a live divergence — but the workbook is the
+ * document an operator trusts over the form, so the two must not be able to
+ * disagree.
+ *
+ * Known limitation, shared with the form renderer: conditionality expressed
+ * the plain JSON Schema way (`allOf` / `if` / `then`) is not read here, and a
+ * network using it would get every column marked optional. `x-show-if` is the
+ * only conditional keyword either side supports today; adding a fallback here
+ * alone would make the workbook and the form disagree in the other direction.
+ *
+ * @param rule - The property's `x-show-if` value, whatever shape it has.
+ * @returns The ANDed clauses, and whether the rule can ever be satisfied.
+ */
+function parseShowIf(rule: unknown): { clauses: ShowIfClause[]; neverApplies: boolean } {
+  if (!rule || typeof rule !== 'object' || Array.isArray(rule)) {
+    return { clauses: [], neverApplies: false };
+  }
+  const clauses: ShowIfClause[] = [];
+  for (const [field, allowed] of Object.entries(rule as Record<string, unknown>)) {
+    // `isFieldVisible` returns false outright for a non-array `allowed`.
+    if (!Array.isArray(allowed)) return { clauses: [], neverApplies: true };
+    clauses.push({ field, values: allowed.map(String) });
+  }
+  return { clauses, neverApplies: false };
 }
 
 /**
@@ -147,6 +208,7 @@ function planColumn(name: string, prop: Record<string, unknown>, required: boole
   const items = prop['items'] as Record<string, unknown> | undefined;
   const ownEnum = Array.isArray(prop['enum']) ? (prop['enum'] as unknown[]) : undefined;
   const itemEnum = Array.isArray(items?.['enum']) ? (items?.['enum'] as unknown[]) : undefined;
+  const showIf = parseShowIf(prop['x-show-if']);
 
   const plan: ColumnPlan = {
     name,
@@ -155,17 +217,10 @@ function planColumn(name: string, prop: Record<string, unknown>, required: boole
     required,
     allowed: (ownEnum ?? itemEnum ?? []).map(String),
     isArray: prop['type'] === 'array',
-    showIfValues: [],
+    showIf: showIf.clauses,
+    showIfNeverApplies: showIf.neverApplies,
   };
 
-  const showIf = prop['x-show-if'];
-  if (showIf && typeof showIf === 'object') {
-    const [field, values] = Object.entries(showIf as Record<string, unknown>)[0] ?? [];
-    if (field !== undefined) {
-      plan.showIfField = field;
-      plan.showIfValues = Array.isArray(values) ? values.map(String) : [];
-    }
-  }
   if (typeof prop['description'] === 'string') plan.description = prop['description'] as string;
   return plan;
 }
@@ -173,15 +228,24 @@ function planColumn(name: string, prop: Record<string, unknown>, required: boole
 /**
  * Renders the "only fill in when" sentence for a conditional column.
  *
+ * Multi-clause rules are joined with "and", matching the AND the form renderer
+ * applies — a sentence that named only the first controller would describe a
+ * weaker condition than the one actually enforced.
+ *
  * @param plan - The column.
  * @param byName - Every column by field name, for the controller's label.
  * @returns The sentence, or `''` when the column always applies.
  */
 function onlyWhen(plan: ColumnPlan, byName: ReadonlyMap<string, ColumnPlan>): string {
-  if (plan.showIfField === undefined) return '';
-  const controller = byName.get(plan.showIfField)?.label ?? plan.showIfField;
-  if (plan.showIfValues.length === 0) return `Only when "${controller}" is filled in`;
-  return `Only when "${controller}" is ${plan.showIfValues.join(' or ')}`;
+  if (plan.showIfNeverApplies) return 'Never — leave this blank';
+  if (plan.showIf.length === 0) return '';
+  const clause = ({ field, values }: ShowIfClause): string => {
+    const controller = byName.get(field)?.label ?? field;
+    return values.length === 0
+      ? `"${controller}" is filled in`
+      : `"${controller}" is ${values.join(' or ')}`;
+  };
+  return `Only when ${plan.showIf.map(clause).join(' and ')}`;
 }
 
 /**
@@ -328,7 +392,7 @@ function writeInstructions(
       `• ${multi.length} column${multi.length === 1 ? '' : 's'} take more than one value. Join them with "${arrayDelimiter}" in the same cell — for example: ${exampleValue(multi[0]!.name, multi[0]!.prop, arrayDelimiter)}`,
     );
   }
-  const conditional = plans.filter((p) => p.showIfField !== undefined);
+  const conditional = plans.filter(isConditional);
   if (conditional.length > 0) {
     const example = conditional[0]!;
     line(
@@ -421,9 +485,12 @@ function writeValuesSheet(
       required: plan.required ? 'Yes' : 'No',
       multi: plan.isArray ? `Yes — join with ${arrayDelimiter}` : 'No',
       when: onlyWhen(plan, byName) || 'Always',
+      // Comma-separated unless the column really does take several values: on a
+      // single-value column the delimiter reads as an instruction to join them,
+      // which is the one thing that column does not accept.
       allowed:
         plan.allowed.length > 0
-          ? plan.allowed.join(`${arrayDelimiter} `)
+          ? plan.allowed.join(plan.isArray ? `${arrayDelimiter} ` : ', ')
           : (plan.description ?? 'Free text'),
     });
     row.alignment = { vertical: 'top', wrapText: true };
@@ -459,19 +526,66 @@ function writeValuesSheet(
  * @returns `''` when the column does not apply, else undefined to fall through.
  */
 function conditionalCell(plan: ColumnPlan, pins: ReadonlyMap<string, string>): string | undefined {
-  if (plan.showIfField === undefined) return undefined;
-  const controllerValue = pins.get(plan.showIfField);
-  if (controllerValue === undefined) return '';
-  if (plan.showIfValues.length > 0 && !plan.showIfValues.includes(controllerValue)) return '';
-  return undefined;
+  if (plan.showIfNeverApplies) return '';
+  if (plan.showIf.length === 0) return undefined;
+  // AND across clauses, as `isFieldVisible` does — a row that pins only one
+  // controller of a two-key rule leaves the column blank, because that is what
+  // the form would show.
+  const applies = plan.showIf.every(({ field, values }) => {
+    const pinned = pins.get(field);
+    if (pinned === undefined) return false;
+    return values.length === 0 || values.includes(pinned);
+  });
+  return applies ? undefined : '';
 }
 
 /**
- * Per-row name / phone / email, so the sample rows read as distinct people
+ * True when a candidate identity value satisfies the column's own declaration.
+ *
+ * The column's schema outranks any identity-shaped placeholder: a value that
+ * fails the column's `format` or `pattern` is one the row parser rejects, and
+ * `bulk-row-process` treats both as blocking. When this returns `false` the
+ * caller falls through to `exampleValue`, which derives from the declaration
+ * rather than around it.
+ *
+ * @param plan - The column.
+ * @param candidate - The identity value being considered for the cell.
+ * @param satisfiesFormat - The one `format` this candidate is known to meet,
+ *   or undefined when it meets none.
+ * @returns `true` when the candidate can be used as-is.
+ */
+function fitsColumn(plan: ColumnPlan, candidate: string, satisfiesFormat?: string): boolean {
+  const format = plan.prop['format'];
+  if (typeof format === 'string' && format !== satisfiesFormat) return false;
+
+  const pattern = plan.prop['pattern'];
+  if (typeof pattern !== 'string') return true;
+  try {
+    return new RegExp(pattern).test(candidate);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Per-row name / phone / email, so the sample rows read as distinct entries
  * rather than a dozen copies of one.
  *
  * Config names these columns (`ResolvedDomain.identity`); nothing is guessed
  * from field names.
+ *
+ * Two things this deliberately does NOT do:
+ *
+ * - **Override a column that declares its own `format` or `pattern`.** A phone
+ *   declaring `^\+91[0-9]{10}$` or `^[0-9]{12}$` would reject the hardcoded
+ *   10-digit run, putting a value the row parser rejects in the field the
+ *   network dedups on — and making the workbook and the CSV template disagree
+ *   about the same column. `exampleValue` handles those; this only fills the
+ *   gap where the schema says nothing about the shape.
+ * - **Assume `identity.name` names a person.** blue_dot points it at
+ *   `jobProviderName` (`config/blue_dot/aggregator.config.yaml`), so the
+ *   sample is built from the column's own label — "Sample Job Provider Name 1"
+ *   rather than "Sample Person 1" in a company-name column.
  *
  * @param plan - The column.
  * @param rowIndex - Zero-based sample row index.
@@ -484,18 +598,34 @@ function identityCell(
   identity?: XlsxTemplateOptions['identity'],
 ): string | undefined {
   if (identity === undefined) return undefined;
-  if (plan.name === identity.name) return `Sample Person ${rowIndex + 1}`;
-  if (plan.name === identity.phone) return `98765${String(10000 + rowIndex).slice(-5)}`;
-  if (plan.name === identity.email) return `person${rowIndex + 1}@example.com`;
-  return undefined;
+
+  const candidate =
+    plan.name === identity.name
+      ? { value: `Sample ${plan.label} ${rowIndex + 1}`, format: undefined }
+      : plan.name === identity.phone
+        ? { value: `98765${String(10000 + rowIndex).slice(-5)}`, format: undefined }
+        : plan.name === identity.email
+          ? { value: `person${rowIndex + 1}@example.com`, format: 'email' }
+          : undefined;
+  if (candidate === undefined) return undefined;
+
+  return fitsColumn(plan, candidate.value, candidate.format) ? candidate.value : undefined;
 }
 
 /**
  * Next value of a closed set, rotated by row, so each is demonstrated somewhere
  * rather than every row repeating the first option.
  *
- * Controllers are excluded: their value is pinned per row to drive the
- * conditional branches, which is a stronger claim on the cell than rotation.
+ * Two kinds of column are excluded:
+ *
+ * - **Controllers** — their value is pinned per row to drive the conditional
+ *   branches, which is a stronger claim on the cell than rotation.
+ * - **Array columns** — `planColumn` fills `allowed` from `items.enum` too, so
+ *   a multi-value column would otherwise rotate to ONE value per cell and tab
+ *   3 would never show the delimiter. Falling through to `exampleValue` is the
+ *   only thing that produces a joined cell, and the join is the single
+ *   formatting rule a CSV cannot express — precisely what the tab the operator
+ *   copies from has to demonstrate.
  *
  * @param plan - The column.
  * @param rowIndex - Zero-based sample row index.
@@ -507,7 +637,7 @@ function rotatedCell(
   rowIndex: number,
   controllers: ReadonlyMap<string, string[]>,
 ): string | undefined {
-  if (plan.allowed.length <= 1 || controllers.has(plan.name)) return undefined;
+  if (plan.allowed.length <= 1 || plan.isArray || controllers.has(plan.name)) return undefined;
   return plan.allowed[rowIndex % plan.allowed.length];
 }
 
@@ -572,10 +702,12 @@ function sampleRows(
 function collectControllers(plans: readonly ColumnPlan[]): ReadonlyMap<string, string[]> {
   const controllers = new Map<string, string[]>();
   for (const plan of plans) {
-    if (plan.showIfField === undefined || controllers.has(plan.showIfField)) continue;
-    const controller = plans.find((p) => p.name === plan.showIfField);
-    if (controller && controller.allowed.length > 0) {
-      controllers.set(plan.showIfField, controller.allowed);
+    for (const { field } of plan.showIf) {
+      if (controllers.has(field)) continue;
+      const controller = plans.find((p) => p.name === field);
+      if (controller && controller.allowed.length > 0) {
+        controllers.set(field, controller.allowed);
+      }
     }
   }
   return controllers;
@@ -739,6 +871,32 @@ function rangeValidations(sheet: ExcelJS.Worksheet): {
 }
 
 /**
+ * Number format for a column, so Excel does not rewrite what the operator types.
+ *
+ * Left on the default General format, Excel reinterprets the cell and **Save As
+ * CSV writes the DISPLAYED value, not the typed one** — which is the same
+ * post-hoc `errors.csv` failure this generator exists to remove, reintroduced
+ * by cell formatting:
+ *
+ * - a `format: date` column typed as `2024-01-01` exports per locale as
+ *   `01/01/2024`, which `ajv-formats` (registered in
+ *   `packages/schema-loader/src/ajv.ts`) rejects;
+ * - a leading zero is dropped, so a pincode or an ID loses a digit;
+ * - a long numeric id flips to scientific notation.
+ *
+ * Text (`@`) is therefore the default: it makes the exported CSV byte-identical
+ * to what was typed for every column. Date columns get an explicit ISO mask
+ * instead, so a value Excel has already parsed as a date still round-trips in
+ * the shape `formatExample` demonstrates.
+ *
+ * @param plan - The column.
+ * @returns The Excel number-format code for the column's cells.
+ */
+function numFmtFor(plan: ColumnPlan): string {
+  return plan.prop['format'] === 'date' ? 'yyyy-mm-dd' : '@';
+}
+
+/**
  * Lays out one column per planned field, in the CSV template's order.
  *
  * Width comes from the human label rather than the field name: the label is
@@ -753,13 +911,14 @@ function applyColumns(sheet: ExcelJS.Worksheet, plans: readonly ColumnPlan[]): v
     header: plan.name,
     key: plan.name,
     width: Math.min(32, Math.max(16, plan.label.length + 2)),
+    style: { numFmt: numFmtFor(plan) },
   }));
 }
 
 /** Header fill for a column, per the legend on tab 1. */
 function headerFill(plan: ColumnPlan): string {
   if (plan.required) return FILL_REQUIRED;
-  return plan.showIfField !== undefined ? FILL_CONDITIONAL : FILL_OPTIONAL;
+  return isConditional(plan) ? FILL_CONDITIONAL : FILL_OPTIONAL;
 }
 
 /**
@@ -805,13 +964,19 @@ function headerNote(
   if (plan.description !== undefined) lines.push(plan.description);
   const when = onlyWhen(plan, byName);
   if (when) lines.push(`${when}. Otherwise leave blank.`);
-  if (plan.isArray) lines.push(`More than one value allowed — join them with "${arrayDelimiter}".`);
+
+  // One sentence about multiplicity, not two: an array column with a closed set
+  // used to get "join them with |" AND "Pick one of: …", which contradict each
+  // other about the same cell.
+  const pick = plan.isArray ? 'Pick one or more of' : 'Pick one of';
   if (plan.allowed.length > 0) {
     lines.push(
       plan.allowed.length <= 10
-        ? `Pick one of: ${plan.allowed.join(', ')}`
-        : `${plan.allowed.length} values to choose from — use the dropdown, or see "${VALUES_SHEET}".`,
+        ? `${pick}: ${plan.allowed.join(', ')}${plan.isArray ? ` — join them with "${arrayDelimiter}".` : ''}`
+        : `${plan.allowed.length} values to choose from — use the dropdown, or see "${VALUES_SHEET}".${plan.isArray ? ` More than one is allowed — join them with "${arrayDelimiter}".` : ''}`,
     );
+  } else if (plan.isArray) {
+    lines.push(`More than one value allowed — join them with "${arrayDelimiter}".`);
   }
   return lines.join('\n');
 }
