@@ -51,6 +51,8 @@ const TAB_INSTRUCTIONS = '1. Instructions';
 const TAB_VALUES = '2. Allowed values';
 const TAB_SAMPLE = '3. Sample data';
 const TAB_GRID = '4. Enter your seekers';
+/** Last row the generator attaches validation to (mirrors VALIDATED_ROWS). */
+const VALIDATED_LAST_ROW = 500;
 
 /** Builds the seeker workbook these cases assert against. */
 async function build(delimiter = '|'): Promise<ExcelJS.Workbook> {
@@ -131,6 +133,30 @@ describe('buildXlsxTemplate', () => {
 
     const firstDataRow = orderedColumns(SCHEMA).map((_, i) => grid.getCell(2, i + 1).value);
     expect(firstDataRow.every((v) => v === null || v === undefined)).toBe(true);
+  });
+
+  it('materialises no empty rows, so Save As cannot emit 499 blank lines', async () => {
+    // Validations are added against the RANGE. Assigning them cell by cell
+    // materialised rows 2-500, leaving the sheet declaring
+    // `<dimension ref="A1:AJ500">` with 499 empty `<row>` records. Whether
+    // those export as blank lines is a per-application judgement, and if one
+    // disagrees the operator types 2 rows, saves, and the upload reports 498
+    // failures they cannot explain. Only the header row may exist.
+    // Two separate loads on purpose: `getCell` MATERIALISES the row it touches,
+    // so reading a validation off row 500 pushes `rowCount` to 500 and would
+    // make this pass or fail on assertion order alone.
+    const forRowCount = await build();
+    expect(forRowCount.getWorksheet(TAB_GRID)!.rowCount).toBe(1);
+
+    // The dropdowns must still be there, which is the other half of what the
+    // range addressing buys. `dataValidations` is an untyped exceljs internal,
+    // so an upgrade moving it has to fail here rather than ship a workbook
+    // with no dropdowns at all.
+    const forValidation = await build();
+    const grid = forValidation.getWorksheet(TAB_GRID)!;
+    const genderCol = orderedColumns(SCHEMA).indexOf('gender') + 1;
+    expect(grid.getCell(2, genderCol).dataValidation?.type).toBe('list');
+    expect(grid.getCell(VALIDATED_LAST_ROW, genderCol).dataValidation?.type).toBe('list');
   });
 
   it('has no autofilter on the grid — it is noise on an empty sheet', async () => {

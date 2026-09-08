@@ -605,18 +605,52 @@ function writeGridSheet(
     // tab 2 and in the header note instead.
     if (plan.isArray) return;
 
-    for (let row = 2; row <= VALIDATED_ROWS; row += 1) {
-      sheet.getCell(row, i + 1).dataValidation = {
-        type: 'list',
-        allowBlank: !plan.required,
-        formulae: [range],
-        showErrorMessage: true,
-        errorStyle: 'error',
-        errorTitle: `Pick a listed value for ${plan.label}`,
-        error: `"${plan.label}" only accepts the values in the dropdown. Click the arrow in this cell, or see "${VALUES_SHEET}".`,
-      };
-    }
+    // Added against the RANGE, not cell by cell. Assigning `dataValidation` on
+    // `getCell(row, col)` materialises that cell, and with 499 rows x every
+    // closed-set column that left the sheet declaring
+    // `<dimension ref="A1:AJ500">` with 499 empty `<row>` records. They export
+    // as nothing in LibreOffice, but "used range" is a per-application
+    // judgement and the failure mode if an application disagrees is ugly and
+    // silent: the operator types 2 rows, Save As writes 500 lines, and the
+    // upload reports 498 failures they cannot explain. The XLSX format stores
+    // list validations by `sqref` range anyway, so addressing the range is both
+    // the smaller file and the one with no phantom rows.
+    const letter = columnLetter(i + 1);
+    rangeValidations(sheet).add(`${letter}2:${letter}${VALIDATED_ROWS}`, {
+      type: 'list',
+      allowBlank: !plan.required,
+      formulae: [range],
+      showErrorMessage: true,
+      errorStyle: 'error',
+      errorTitle: `Pick a listed value for ${plan.label}`,
+      error: `"${plan.label}" only accepts the values in the dropdown. Click the arrow in this cell, or see "${VALUES_SHEET}".`,
+    });
   });
+}
+
+/**
+ * Range-addressable view of a sheet's data validations.
+ *
+ * exceljs keeps `worksheet.dataValidations` at runtime (`lib/doc/data-validations.js`)
+ * but leaves it out of its published typings — `index.d.ts` exposes only the
+ * per-cell `dataValidation` and has the worksheet-level model commented out. The
+ * cast is deliberate rather than incidental, and the workbook test asserts both
+ * halves of what it buys: that the emitted `sqref` ranges are present, and that
+ * the sheet declares no phantom rows. An exceljs upgrade that moved this would
+ * fail those assertions instead of silently shipping a workbook with no
+ * dropdowns.
+ *
+ * @param sheet - Sheet to add range validations to.
+ * @returns The sheet's validation collection.
+ */
+function rangeValidations(sheet: ExcelJS.Worksheet): {
+  add: (address: string, validation: ExcelJS.DataValidation) => void;
+} {
+  return (
+    sheet as unknown as {
+      dataValidations: { add: (address: string, validation: ExcelJS.DataValidation) => void };
+    }
+  ).dataValidations;
 }
 
 /**
