@@ -54,7 +54,7 @@ import { exampleValue, orderedColumns } from '../csv-template/index.js';
 const INSTRUCTIONS_SHEET = '1. Instructions';
 /** Tab 2 — the closed sets, then every remaining column. */
 const VALUES_SHEET = '2. Allowed values';
-/** Tab 3 — worked examples, locked. */
+/** Tab 3 — worked examples. */
 const SAMPLE_SHEET = '3. Sample data';
 /**
  * Backing ranges for the dropdowns. Hidden rather than absent: Excel resolves
@@ -234,14 +234,6 @@ export async function buildXlsxTemplate(
   writeSampleSheet(wb, plans, arrayDelimiter, identity);
   writeGridSheet(wb, gridName, plans, byName, ranges, arrayDelimiter);
 
-  // Read-only tabs are locked so a stray keystroke cannot rewrite the guidance
-  // an operator is reading. The grid is deliberately left unprotected: locking
-  // it would mean unlocking 18,000 data cells to keep paste working, and a
-  // paste that silently fails is worse than an edited header.
-  for (const name of [INSTRUCTIONS_SHEET, VALUES_SHEET, SAMPLE_SHEET]) {
-    await wb.getWorksheet(name)?.protect('', { selectLockedCells: true, formatCells: false });
-  }
-
   // exceljs declares its own `Buffer` interface, structurally unrelated to
   // Node's, so the cast goes through `unknown`. The value IS a Node Buffer.
   return (await wb.xlsx.writeBuffer()) as unknown as Buffer;
@@ -287,7 +279,7 @@ function writeInstructions(
   line('Steps').font = { bold: true, size: 12 };
   const requiredLabels = plans.filter((p) => p.required).map((p) => `"${p.label}"`);
   for (const step of [
-    `1. Open "${SAMPLE_SHEET}" and look at how a row is filled in. Do not type there — it is locked.`,
+    `1. Open "${SAMPLE_SHEET}" and look at how a row is filled in. It is only an example — nothing there is uploaded.`,
     `2. Type your own rows in "${gridName}", one participant per row. Start on row 2.`,
     `3. Cells with a dropdown arrow only accept the listed values. Click the arrow and pick one.`,
     `4. Leave anything you do not have blank. Only ${requiredLabels.join(' and ') || 'the marked columns'} must be filled for every row.`,

@@ -348,23 +348,18 @@ describe('buildXlsxTemplate', () => {
     expect(multi).toContain(';');
   });
 
-  // ── Protection + robustness ──────────────────────────────────────────────
+  // ── Robustness ───────────────────────────────────────────────────────────
 
-  it('locks the read-only tabs and leaves the grid editable', async () => {
+  it('leaves every sheet unprotected', async () => {
+    // No sheet protection anywhere. An operator who wants to widen a column,
+    // annotate the guidance or delete the sample rows they have already read
+    // should be able to, and a protected sheet also blocks paste unless every
+    // data cell is individually unlocked — a paste that silently fails is
+    // worse than an edited header.
     const wb = await build();
-    for (const name of [TAB_INSTRUCTIONS, TAB_VALUES, TAB_SAMPLE]) {
-      expect(wb.getWorksheet(name)!.protect).toBeDefined();
-      // exceljs surfaces protection on load as `sheetProtection`.
-      expect(
-        (wb.getWorksheet(name) as unknown as { sheetProtection?: unknown }).sheetProtection,
-      ).toBeDefined();
+    for (const sheet of wb.worksheets) {
+      expect((sheet as unknown as { sheetProtection?: unknown }).sheetProtection).toBeUndefined();
     }
-    // The grid stays unprotected: locking it would mean unlocking 18,000 data
-    // cells to keep paste working, and a paste that silently fails is worse
-    // than an edited header.
-    expect(
-      (wb.getWorksheet(TAB_GRID) as unknown as { sheetProtection?: unknown }).sheetProtection,
-    ).toBeUndefined();
   });
 
   it('handles a schema with no properties without throwing', async () => {
