@@ -2038,9 +2038,9 @@ function toProviderRow(
 
 export default function DashboardPageRoot() {
   const rawProfile = useProfileRaw();
-  // Wait for the profile to resolve before mounting any tab — the SeekersTab
-  // and ProvidersTab kick off their own /api/dashboard/items?domain=... fetch
-  // on mount, so rendering a default before we know the aggregator's type
+  // Wait for the profile to resolve before mounting any tab — SeekersTab and
+  // ProvidersTab each fetch /api/dashboard?domain=... on mount (via
+  // useDashboard), so rendering a default before we know the aggregator's type
   // fires a stale seeker request that a provider account should never make.
   const profileType = rawProfile.data?.type;
   if (!profileType) {

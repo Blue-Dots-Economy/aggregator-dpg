@@ -1440,8 +1440,6 @@ describe('HttpSignalStackWriter.upsertAggregator', () => {
 });
 
 // ---------------------------------------------------------------------------
-// listItemsByAggregator()
-// ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // requestWithRetry — transient-failure retry/backoff (error-handling.md rule)
@@ -1877,7 +1875,7 @@ describe('HttpSignalStackWriter.probeUser (http)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// getItem()
+// fetchDecryptedProfiles()
 // ---------------------------------------------------------------------------
 
 describe('HttpSignalStackWriter.fetchDecryptedProfiles', () => {

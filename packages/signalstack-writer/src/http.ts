@@ -1125,7 +1125,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
 
   private guardInput(input: SignalStackOnboardParticipantInput): BaseError | null {
     // Pre-send input validation → ValidationError (malformed input before the
-    // request leaves us), consistent with probeUser/getItem. The machine code
+    // request leaves us), consistent with probeUser. The machine code
     // stays SIGNALSTACK_INPUT_INVALID so existing callers/branches are intact.
     if (!input?.actingOrgId) {
       return new ValidationError('actingOrgId is required', {

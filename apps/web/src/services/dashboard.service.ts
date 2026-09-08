@@ -92,64 +92,14 @@ export interface DashboardPage {
 }
 
 /**
- * Lifecycle bucket filter for the items endpoint. Mirrors the API's
- * {@link DashboardItemsResponse} `meta.tiles` keys + the `?lifecycle=`
- * query the route accepts.
+ * Lifecycle bucket a dashboard row can sit in.
+ *
+ * Forwarded as the `?lifecycle=` filter on the dashboard read, and narrowed
+ * to what the UI actually offers by `LifecycleFilterValue` on the dashboard
+ * page — `paused` and `account_only` are accepted by the API but not
+ * surfaced in the dropdown today.
  */
 export type LifecycleFilter = 'draft' | 'live' | 'paused' | 'account_only';
-
-/**
- * Query for `/api/dashboard/items` — the lifecycle-aware items feed.
- *
- * `lifecycle` narrows the items list to a single bucket; tiles always
- * reflect the full unfiltered dataset regardless of this filter.
- */
-export interface DashboardItemsQuery {
-  domain: string;
-  limit?: number;
-  offset?: number;
-  lifecycle?: LifecycleFilter;
-}
-
-/**
- * `meta.tiles` block from `/v1/dashboard/items`. Counts by lifecycle
- * bucket across the full unfiltered dataset.
- */
-export interface DashboardItemsTiles {
-  draft: number;
-  live: number;
-  paused: number;
-  account_only: number;
-}
-
-/**
- * Per-item shape returned by `/v1/dashboard/items` with lifecycle
- * normalisation applied. Carries the raw signalstack item fields the
- * caller may need to merge into a participant row (item_id +
- * lifecycle_status).
- */
-export interface DashboardItemRow {
-  item_id?: string;
-  aggregator_id?: string | null;
-  lifecycle_status: 'draft' | 'live' | 'paused';
-  /** Pass-through for any extra fields signalstack returns. */
-  [key: string]: unknown;
-}
-
-/**
- * Full response of `/v1/dashboard/items`. The lifecycle tiles live in
- * `meta.tiles`; items are lifecycle-filtered if the caller passed
- * `?lifecycle=`.
- */
-export interface DashboardItemsResponse {
-  meta: {
-    total: number;
-    limit: number;
-    offset: number;
-    tiles: DashboardItemsTiles;
-  };
-  items: DashboardItemRow[];
-}
 
 /**
  * Query for the dashboard CSV export. Subset of {@link DashboardQuery}

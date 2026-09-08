@@ -557,8 +557,9 @@ export abstract class SignalStackTokenProviderBase {
  * Implementations:
  *   - Http: real fetch-backed adapter — calls
  *     `POST /api/v1/admin/participant`,
- *     `POST /api/v1/admin/aggregator/upsert`, and
- *     `POST /api/v1/network/item/fetch_local`.
+ *     `POST /api/v1/admin/aggregator/upsert`,
+ *     `GET /api/v1/aggregator/dashboard[/export]`, and
+ *     `POST /api/v1/admin/participant/decrypt`.
  *   - InMemory: deterministic Map-backed impl for unit tests.
  *   - Fake: in-memory + `seed()` helper for cross-package consumer tests.
  */

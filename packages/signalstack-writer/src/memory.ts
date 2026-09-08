@@ -381,45 +381,6 @@ export class InMemorySignalStackWriter extends SignalStackWriterBase {
   }
 
   /**
-   * Seeds a single signalstack item keyed by `itemId`, filling unspecified
-   * fields with deterministic defaults. Used by tests to pin the lifecycle
-   * a `getItem(...)` lookup will surface for a given id.
-   *
-   * Re-seeding the same `itemId` overwrites the previous entry.
-   *
-   * @param itemId - Item id the seed is keyed under.
-   * @param partial - Optional overrides; `lifecycle_status` is the field the
-   *   lifecycle re-check reads.
-   */
-  seedItem(
-    itemId: string,
-    partial: Partial<SignalStackProfile> & {
-      lifecycle_status?: 'draft' | 'live' | 'paused';
-    } = {},
-  ): void {
-    const row: StoredProfile = {
-      item_id: itemId,
-      item_network: partial.item_network ?? 'blue_dot',
-      item_domain: partial.item_domain ?? 'seeker',
-      item_type: partial.item_type ?? 'profile_1.0',
-      item_state: partial.item_state ?? {},
-      item_latitude: partial.item_latitude ?? null,
-      item_longitude: partial.item_longitude ?? null,
-      aggregator_id: partial.aggregator_id ?? null,
-      created_at: partial.created_at ?? ISO_FIXED,
-      updated_at: partial.updated_at ?? ISO_FIXED,
-      ...(partial.lifecycle_status !== undefined
-        ? { lifecycle_status: partial.lifecycle_status }
-        : {}),
-      created_by: '',
-      acting_org_id: '',
-      channel: 'link',
-      source_id: '',
-    };
-    this.profiles.set(itemId, row);
-  }
-
-  /**
    * Deterministic Map-backed upsert. First call for an `external_id`
    * mints a new `mem-org-N` id and stores the row; subsequent calls update
    * `name`, `slug`, and `metadata` in place and return the same `org_id`.

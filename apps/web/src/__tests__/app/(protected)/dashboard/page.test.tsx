@@ -18,7 +18,7 @@
  *
  * Note on lifecycle filtering: the page's own `LIFECYCLE_FILTER_VALUES` is
  * `['all', 'draft', 'live']` only — `paused`/`account_only` are values the
- * `/v1/dashboard/items` API-level filter supports (see root CLAUDE.md) but
+ * `/v1/dashboard` API-level filter supports (see root CLAUDE.md) but
  * this page's dropdown does not surface them today, so only `all`/`draft`/
  * `live` are exercised below.
  */

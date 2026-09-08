@@ -1,11 +1,6 @@
 /**
  * Dashboard endpoints.
  *
- *   GET /v1/dashboard/items?domain=seeker|provider&limit&offset
- *     Returns every signalstack profile tagged with the caller aggregator's
- *     aggregator_id, scoped to the requested domain. Used by the /blue-dots
- *     page to render the participant table.
- *
  *   GET /v1/dashboard?domain=seeker&page&limit&status
  *     Proxies signalstack's pre-computed aggregator dashboard payload
  *     (rollup + paginated participants + cursor + metadata) for the

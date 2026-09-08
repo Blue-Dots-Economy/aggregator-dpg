@@ -6,11 +6,7 @@ import { dashboardService } from '@/services/dashboard.service';
 
 vi.mock('@/services/dashboard.service', () => ({
   dashboardService: {
-    seekers: vi.fn(),
-    providers: vi.fn(),
-    oppProviders: vi.fn(),
     dashboard: vi.fn(),
-    dashboardItems: vi.fn(),
   },
 }));
 
