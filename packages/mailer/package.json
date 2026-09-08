@@ -29,7 +29,7 @@
   },
   "devDependencies": {
     "@aggregator-dpg/tsconfig": "workspace:*",
-    "@types/node": "^22.0.0",
+    "@types/node": "^26.4.1",
     "@types/nodemailer": "^8.0.1",
     "@vitest/coverage-v8": "^3.2.7",
     "typescript": "^6.0.3",
