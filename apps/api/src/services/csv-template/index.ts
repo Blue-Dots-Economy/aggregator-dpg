@@ -28,8 +28,20 @@ export interface CsvTemplateOptions {
  * @param options - Array delimiter + example-row toggle.
  * @returns CSV text: header line, then (by default) one example line.
  */
-export function buildCsvTemplate(schema: JsonSchema, options: CsvTemplateOptions = {}): string {
-  const { arrayDelimiter = '|', exampleRow = true } = options;
+/**
+ * Column order for a participant schema: required properties first (in the
+ * schema's own `required` order), then every remaining property in declaration
+ * order.
+ *
+ * Exported because the XLSX template (`services/xlsx-template`) must produce
+ * the SAME columns in the SAME order as the CSV one — an operator who fills the
+ * workbook and exports it to CSV has to land on a file this repo's parser
+ * accepts. Two copies of this rule would drift the moment a schema changed.
+ *
+ * @param schema - Participant JSON Schema.
+ * @returns Property names in template column order.
+ */
+export function orderedColumns(schema: JsonSchema): string[] {
   const properties = (schema['properties'] as Record<string, Record<string, unknown>>) ?? {};
   const required = Array.isArray(schema['required']) ? (schema['required'] as string[]) : [];
   const requiredSet = new Set(required);
@@ -41,6 +53,13 @@ export function buildCsvTemplate(schema: JsonSchema, options: CsvTemplateOptions
   for (const name of Object.keys(properties)) {
     if (!requiredSet.has(name)) ordered.push(name);
   }
+  return ordered;
+}
+
+export function buildCsvTemplate(schema: JsonSchema, options: CsvTemplateOptions = {}): string {
+  const { arrayDelimiter = '|', exampleRow = true } = options;
+  const properties = (schema['properties'] as Record<string, Record<string, unknown>>) ?? {};
+  const ordered = orderedColumns(schema);
 
   const header = ordered.map(escapeCsvCell).join(',') + '\n';
   if (!exampleRow) return header;
@@ -57,7 +76,11 @@ export function buildCsvTemplate(schema: JsonSchema, options: CsvTemplateOptions
  * Purely schema-driven (enum/format/pattern/bounds) — no field-name
  * heuristics, so it stays correct for any network's schemas.
  */
-function exampleValue(name: string, prop: Record<string, unknown>, arrayDelimiter: string): string {
+export function exampleValue(
+  name: string,
+  prop: Record<string, unknown>,
+  arrayDelimiter: string,
+): string {
   const type = typeof prop['type'] === 'string' ? (prop['type'] as string) : 'string';
 
   if (type === 'array') {
