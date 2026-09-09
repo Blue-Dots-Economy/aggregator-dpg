@@ -23,9 +23,9 @@ describe('middleware', () => {
   });
 
   it('stamps x-pathname for a nested route', () => {
-    const req = new NextRequest('http://localhost/api/dashboard/items');
+    const req = new NextRequest('http://localhost/api/dashboard/export');
     const res = middleware(req);
-    expect(res.headers.get('x-pathname')).toBe('/api/dashboard/items');
+    expect(res.headers.get('x-pathname')).toBe('/api/dashboard/export');
   });
 
   it('stamps x-pathname for the root path', () => {

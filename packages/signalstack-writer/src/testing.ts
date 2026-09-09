@@ -91,7 +91,6 @@ export interface SignalStackProfileSeed {
   item_state?: Record<string, unknown>;
   item_latitude?: number | null;
   item_longitude?: number | null;
-  aggregator_id?: string | null;
   created_at?: string;
   updated_at?: string;
   /**
@@ -196,7 +195,6 @@ export class SignalStackWriterFake extends InMemorySignalStackWriter {
         item_state: s.item_state ?? {},
         item_latitude: s.item_latitude ?? null,
         item_longitude: s.item_longitude ?? null,
-        aggregator_id: s.aggregator_id ?? null,
         created_at: s.created_at ?? ISO_FIXED,
         updated_at: s.updated_at ?? ISO_FIXED,
         created_by: s.created_by,

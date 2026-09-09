@@ -2,14 +2,6 @@
 
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { dashboardService, type DashboardQuery } from '../services/dashboard.service';
-import type { ParticipantFilter } from '../types';
-
-export function useOppProviders(filter?: ParticipantFilter) {
-  return useQuery({
-    queryKey: ['dashboard', 'opp-providers', filter],
-    queryFn: () => dashboardService.oppProviders(filter),
-  });
-}
 
 /**
  * Reads the signalstack-backed aggregator dashboard payload.

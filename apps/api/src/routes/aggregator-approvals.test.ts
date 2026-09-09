@@ -304,9 +304,6 @@ describe('admin approval routes', () => {
       async onboard() {
         return err(new UpstreamError('not used', { code: 'X' }));
       }
-      async listItemsByAggregator() {
-        return err(new UpstreamError('not used', { code: 'X' }));
-      }
       async upsertAggregator() {
         return err(
           new UpstreamError('signalstack upsert returned 503', {
@@ -324,9 +321,6 @@ describe('admin approval routes', () => {
         return err(new UpstreamError('not used', { code: 'X' }));
       }
       async probeUser() {
-        return err(new UpstreamError('not used', { code: 'X' }));
-      }
-      async getItem() {
         return err(new UpstreamError('not used', { code: 'X' }));
       }
     }
@@ -424,9 +418,6 @@ describe('admin approval routes', () => {
       async onboard() {
         return err(new UpstreamError('not used', { code: 'X' }));
       }
-      async listItemsByAggregator() {
-        return err(new UpstreamError('not used', { code: 'X' }));
-      }
       async upsertAggregator() {
         return err(new UpstreamError('down', { code: 'SIGNALSTACK_SERVER_ERROR' }));
       }
@@ -440,9 +431,6 @@ describe('admin approval routes', () => {
         return err(new UpstreamError('not used', { code: 'X' }));
       }
       async probeUser() {
-        return err(new UpstreamError('not used', { code: 'X' }));
-      }
-      async getItem() {
         return err(new UpstreamError('not used', { code: 'X' }));
       }
     }
@@ -507,9 +495,6 @@ describe('admin approval routes', () => {
       async onboard() {
         return err(new UpstreamError('not used', { code: 'X' }));
       }
-      async listItemsByAggregator() {
-        return err(new UpstreamError('not used', { code: 'X' }));
-      }
       async upsertAggregator(input: { external_id: string; domains?: string[] | undefined }) {
         captured.push({ external_id: input.external_id, domains: input.domains });
         return ok({
@@ -529,9 +514,6 @@ describe('admin approval routes', () => {
         return err(new UpstreamError('not used', { code: 'X' }));
       }
       async probeUser() {
-        return err(new UpstreamError('not used', { code: 'X' }));
-      }
-      async getItem() {
         return err(new UpstreamError('not used', { code: 'X' }));
       }
     })();

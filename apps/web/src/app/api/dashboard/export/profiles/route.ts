@@ -10,7 +10,8 @@
  * access token swap is handled by callApi. The CSV body is streamed
  * straight back to the browser with the upstream `Content-Type` and
  * `Content-Disposition` headers preserved so file-save dialogs receive
- * the same filename the API minted.
+ * the same filename the API minted, plus `X-Export-Skipped-Count` so the
+ * caller can report rows the API withheld.
  */
 
 import { type NextRequest, NextResponse } from 'next/server';
@@ -62,6 +63,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const headers: Record<string, string> = { 'Content-Type': ct || 'text/csv; charset=utf-8' };
     const disposition = upstream.headers.get('content-disposition');
     if (disposition) headers['Content-Disposition'] = disposition;
+    // How many requested ids the API withheld because they are not this
+    // aggregator's. Relayed so the browser can tell the user the export is
+    // short rather than silently handing over fewer rows than they selected.
+    const skipped = upstream.headers.get('x-export-skipped-count');
+    if (skipped) headers['X-Export-Skipped-Count'] = skipped;
     return new NextResponse(csv, { status: upstream.status, headers });
   } catch (err) {
     if (err instanceof Error && err.message === 'no active session') {

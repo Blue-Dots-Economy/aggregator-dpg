@@ -36,14 +36,10 @@ import {
   type SignalStackDashboardQuery,
   type SignalStackDecryptedProfiles,
   type SignalStackFetchDecryptedProfilesQuery,
-  type SignalStackGetItemQuery,
-  type SignalStackItemList,
-  type SignalStackItemQuery,
   type SignalStackOnboardParticipantInput,
   type SignalStackOnboardParticipantResult,
   type SignalStackProbeUserInput,
   type SignalStackProbeUserResult,
-  type SignalStackProfile,
   type SignalStackUpsertAggregatorInput,
 } from './interface.js';
 
@@ -437,86 +433,6 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
           aborted
             ? `signalstack onboard timed out after ${this.timeoutMs}ms`
             : `signalstack onboard transport failure: ${cause.message}`,
-          {
-            cause,
-            code: aborted ? 'SIGNALSTACK_TIMEOUT' : 'SIGNALSTACK_TRANSPORT_FAILED',
-          },
-        ),
-      );
-    }
-  }
-
-  override async listItemsByAggregator(
-    query: SignalStackItemQuery,
-  ): Promise<Result<SignalStackItemList, BaseError>> {
-    if (!query.aggregator_id || !query.item_network || !query.item_domain) {
-      return err(
-        new ValidationError('aggregator_id, item_network, and item_domain are required', {
-          code: 'SIGNALSTACK_INPUT_INVALID',
-        }),
-      );
-    }
-
-    // Local-only network fetch (POST): hits this signalstack instance's
-    // items table directly with the aggregator_id filter. The sibling GET
-    // /api/v1/network/item/fetch aggregates across every instance listed in
-    // the network config and external instances do not know about
-    // aggregator_id, so totals there are inflated. fetch_local is the
-    // correct endpoint for an aggregator dashboard scoped to its own data.
-    const url = `${this.baseUrl}/api/v1/network/item/fetch_local`;
-    const body = {
-      aggregator_id: query.aggregator_id,
-      item_network: query.item_network,
-      item_domain: query.item_domain,
-      ...(query.item_type ? { item_type: query.item_type } : {}),
-      // Forward the lifecycle filter only when set; signals defaults to
-      // 'live_only' so the writer omits the field for that case to keep
-      // the wire shape minimal and let signals own the default.
-      ...(query.lifecycle_filter ? { lifecycle_filter: query.lifecycle_filter } : {}),
-      limit: query.limit ?? 50,
-      offset: query.offset ?? 0,
-    };
-    const headersResult = await this.buildHeaders();
-    if (!headersResult.success) return err(headersResult.error);
-    const headers = {
-      ...headersResult.value,
-      ...(query.requestId ? { 'x-request-id': query.requestId } : {}),
-    };
-    try {
-      const res = await this.requestWithRetry(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(body),
-      });
-
-      if (!res.ok) {
-        const bodyText = await safeReadText(res);
-        return err(
-          new UpstreamError(`signalstack list_items returned ${res.status}`, {
-            code: this.codeForStatus(res.status),
-            details: { status: res.status, body: bodyText },
-          }),
-        );
-      }
-
-      const payload = (await res.json()) as SignalStackItemList;
-      if (!payload || typeof payload !== 'object' || !Array.isArray(payload.items)) {
-        return err(
-          new UpstreamError('signalstack list_items returned unexpected payload', {
-            code: 'SIGNALSTACK_BAD_RESPONSE',
-            details: { payload },
-          }),
-        );
-      }
-      return ok(payload);
-    } catch (e) {
-      const cause = e as Error;
-      const aborted = cause.name === 'AbortError';
-      return err(
-        new UpstreamError(
-          aborted
-            ? `signalstack list_items timed out after ${this.timeoutMs}ms`
-            : `signalstack list_items transport failure: ${cause.message}`,
           {
             cause,
             code: aborted ? 'SIGNALSTACK_TIMEOUT' : 'SIGNALSTACK_TRANSPORT_FAILED',
@@ -1207,93 +1123,9 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
     }
   }
 
-  /**
-   * Fetch a single signals item by `item_id` from the
-   * `POST /api/v1/network/item/fetch_local` endpoint.
-   *
-   * Generic single-item read primitive. A 404 (or empty `items[]`) is
-   * mapped to `ok(null)` so a caller can distinguish "absent" from an
-   * error. All other non-2xx responses and transport failures surface as
-   * `UpstreamError`.
-   *
-   * @param query - Item id to look up.
-   * @returns ok(SignalStackProfile) on hit; ok(null) on absent;
-   *   err(BaseError) on transport / protocol failure.
-   */
-  override async getItem(
-    query: SignalStackGetItemQuery,
-  ): Promise<Result<SignalStackProfile | null, BaseError>> {
-    if (!query?.item_id) {
-      return err(
-        new ValidationError('item_id is required', {
-          code: 'SIGNALSTACK_INPUT_INVALID',
-        }),
-      );
-    }
-
-    // fetch_local accepts a server-side `item_id` filter; signalstack
-    // returns a list payload with 0 or 1 row. We collapse the list into
-    // a single-item result here so the caller doesn't have to.
-    const url = `${this.baseUrl}/api/v1/network/item/fetch_local`;
-    const body = { item_id: query.item_id, limit: 1, offset: 0 };
-
-    const headersResult = await this.buildHeaders();
-    if (!headersResult.success) return err(headersResult.error);
-    const headers = {
-      ...headersResult.value,
-      ...(query.requestId ? { 'x-request-id': query.requestId } : {}),
-    };
-    try {
-      const res = await this.requestWithRetry(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(body),
-      });
-
-      if (res.status === 404) return ok(null);
-
-      if (!res.ok) {
-        const bodyText = await safeReadText(res);
-        return err(
-          new UpstreamError(`signalstack get_item returned ${res.status}`, {
-            code: this.codeForStatus(res.status),
-            details: { status: res.status, body: bodyText },
-          }),
-        );
-      }
-
-      const payload = (await res.json()) as { items?: unknown };
-      if (!payload || typeof payload !== 'object' || !Array.isArray(payload.items)) {
-        return err(
-          new UpstreamError('signalstack get_item returned unexpected payload', {
-            code: 'SIGNALSTACK_BAD_RESPONSE',
-            details: { payload },
-          }),
-        );
-      }
-      const first = payload.items[0];
-      if (!first || typeof first !== 'object') return ok(null);
-      return ok(first as SignalStackProfile);
-    } catch (e) {
-      const cause = e as Error;
-      const aborted = cause.name === 'AbortError';
-      return err(
-        new UpstreamError(
-          aborted
-            ? `signalstack get_item timed out after ${this.timeoutMs}ms`
-            : `signalstack get_item transport failure: ${cause.message}`,
-          {
-            cause,
-            code: aborted ? 'SIGNALSTACK_TIMEOUT' : 'SIGNALSTACK_TRANSPORT_FAILED',
-          },
-        ),
-      );
-    }
-  }
-
   private guardInput(input: SignalStackOnboardParticipantInput): BaseError | null {
     // Pre-send input validation → ValidationError (malformed input before the
-    // request leaves us), consistent with probeUser/getItem. The machine code
+    // request leaves us), consistent with probeUser. The machine code
     // stays SIGNALSTACK_INPUT_INVALID so existing callers/branches are intact.
     if (!input?.actingOrgId) {
       return new ValidationError('actingOrgId is required', {

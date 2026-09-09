@@ -53,9 +53,9 @@ export interface ParticipantBase {
    */
   actionableTags?: string[];
   /**
-   * Onboarding lifecycle bucket for the row. Sourced from
-   * `/v1/dashboard/items` (which normalises via `resolveLifecycle` so
-   * legacy items without `lifecycle_status` surface as `'live'`).
+   * Onboarding lifecycle bucket for the row. Sourced from `/v1/dashboard`
+   * and normalised client-side by `resolveLifecycleStatus` on the dashboard
+   * page, so legacy items without `lifecycle_status` surface as `'live'`.
    * Undefined when the lifecycle fetch hasn't resolved yet or this row
    * has no associated signals item.
    */
@@ -66,17 +66,6 @@ export type Seeker = ParticipantBase;
 
 export interface Provider extends ParticipantBase {
   role: string;
-}
-
-export type OpportunityProvider = Provider;
-
-export type ParticipantKind = 'seeker' | 'provider' | 'opp';
-
-export interface ParticipantFilter {
-  kind?: ParticipantKind;
-  status?: ParticipantStatus;
-  city?: string;
-  search?: string;
 }
 
 export interface User {

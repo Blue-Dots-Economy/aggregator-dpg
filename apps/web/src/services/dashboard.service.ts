@@ -1,21 +1,12 @@
 /**
  * Blue-dots dashboard service.
  *
- * Reads signalstack-backed profile items via the BFF proxy and maps them
- * into the existing ParticipantBase / Seeker / Provider / OpportunityProvider
- * shape consumed by the dashboard. Columns that signalstack does not store
- * (Applied / Pre-shortlisted / Status / Recommended Action) are filled with
- * zero / safe defaults — the dashboard already renders blanks gracefully.
+ * Reads the signalstack-backed aggregator dashboard (rollup + participant
+ * rows) via the BFF proxy. Every read here is org-scoped upstream by
+ * signalstack from the caller's acting-org, so the service does no
+ * ownership filtering of its own.
  */
 
-import type {
-  OpportunityProvider,
-  ParticipantBase,
-  ParticipantFilter,
-  ParticipantKind,
-  Provider,
-  Seeker,
-} from '../types';
 import { jsonFetch } from './http';
 
 /**
@@ -101,64 +92,14 @@ export interface DashboardPage {
 }
 
 /**
- * Lifecycle bucket filter for the items endpoint. Mirrors the API's
- * {@link DashboardItemsResponse} `meta.tiles` keys + the `?lifecycle=`
- * query the route accepts.
+ * Lifecycle bucket a dashboard row can sit in.
+ *
+ * Forwarded as the `?lifecycle=` filter on the dashboard read, and narrowed
+ * to what the UI actually offers by `LifecycleFilterValue` on the dashboard
+ * page — `paused` and `account_only` are accepted by the API but not
+ * surfaced in the dropdown today.
  */
 export type LifecycleFilter = 'draft' | 'live' | 'paused' | 'account_only';
-
-/**
- * Query for `/api/dashboard/items` — the lifecycle-aware items feed.
- *
- * `lifecycle` narrows the items list to a single bucket; tiles always
- * reflect the full unfiltered dataset regardless of this filter.
- */
-export interface DashboardItemsQuery {
-  domain: string;
-  limit?: number;
-  offset?: number;
-  lifecycle?: LifecycleFilter;
-}
-
-/**
- * `meta.tiles` block from `/v1/dashboard/items`. Counts by lifecycle
- * bucket across the full unfiltered dataset.
- */
-export interface DashboardItemsTiles {
-  draft: number;
-  live: number;
-  paused: number;
-  account_only: number;
-}
-
-/**
- * Per-item shape returned by `/v1/dashboard/items` with lifecycle
- * normalisation applied. Carries the raw signalstack item fields the
- * caller may need to merge into a participant row (item_id +
- * lifecycle_status).
- */
-export interface DashboardItemRow {
-  item_id?: string;
-  aggregator_id?: string | null;
-  lifecycle_status: 'draft' | 'live' | 'paused';
-  /** Pass-through for any extra fields signalstack returns. */
-  [key: string]: unknown;
-}
-
-/**
- * Full response of `/v1/dashboard/items`. The lifecycle tiles live in
- * `meta.tiles`; items are lifecycle-filtered if the caller passed
- * `?lifecycle=`.
- */
-export interface DashboardItemsResponse {
-  meta: {
-    total: number;
-    limit: number;
-    offset: number;
-    tiles: DashboardItemsTiles;
-  };
-  items: DashboardItemRow[];
-}
 
 /**
  * Query for the dashboard CSV export. Subset of {@link DashboardQuery}
@@ -180,6 +121,15 @@ export interface DashboardExportQuery {
 export interface DashboardExportResult {
   blob: Blob;
   filename: string;
+  /**
+   * Requested rows the API withheld, from `X-Export-Skipped-Count`.
+   *
+   * Only the decrypted-profile export sets this: the API drops item_ids that
+   * are not this aggregator's rather than rejecting the request, so a caller
+   * that selected N rows can receive fewer and needs to say so. `undefined`
+   * when the header is absent (any other export).
+   */
+  skippedCount?: number;
 }
 
 /**
@@ -199,10 +149,6 @@ export interface DashboardBulkActionResult {
 }
 
 export interface DashboardService {
-  list(kind: ParticipantKind, filter?: ParticipantFilter): Promise<ParticipantBase[]>;
-  seekers(filter?: ParticipantFilter): Promise<Seeker[]>;
-  providers(filter?: ParticipantFilter): Promise<Provider[]>;
-  oppProviders(filter?: ParticipantFilter): Promise<OpportunityProvider[]>;
   /**
    * Fetch the signalstack-backed aggregator dashboard payload.
    *
@@ -212,14 +158,6 @@ export interface DashboardService {
    * filtered slice.
    */
   dashboard(query?: DashboardQuery): Promise<DashboardPage>;
-  /**
-   * Fetch lifecycle-aware items + `meta.tiles` from `/v1/dashboard/items`.
-   *
-   * Use this in parallel with {@link dashboard} when the dashboard page
-   * needs the lifecycle pill / completion bar / tile counts that the
-   * rollup endpoint does not carry.
-   */
-  dashboardItems(query: DashboardItemsQuery): Promise<DashboardItemsResponse>;
   /**
    * Download the dashboard as a CSV file.
    *
@@ -242,7 +180,10 @@ export interface DashboardService {
    *
    * Posts the item ids and domain to the BFF relay which forwards to the
    * aggregator API (which holds the signalstack admin key). Returns the
-   * Blob + the upstream filename so the caller can trigger a browser download.
+   * Blob + the upstream filename so the caller can trigger a browser download,
+   * plus `skippedCount` when the API reported withholding rows — ids that are
+   * not this aggregator's are dropped from the CSV rather than rejected, so a
+   * caller that selected N rows may receive fewer and should say so.
    */
   dashboardExportProfiles(input: {
     domain: string;
@@ -250,68 +191,7 @@ export interface DashboardService {
   }): Promise<DashboardExportResult>;
 }
 
-interface SignalStackItem {
-  item_id: string;
-  item_network: string;
-  item_domain: string;
-  item_type: string;
-  item_state: Record<string, unknown>;
-  item_latitude: number | null;
-  item_longitude: number | null;
-  aggregator_id: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-interface SignalStackItemList {
-  meta: { total: number; limit: number; offset: number };
-  items: SignalStackItem[];
-}
-
-const ZERO_STATS = { total: 0, shortlisted: 0, accepted: 0, rejected: 0, pending: 0 };
-const ZERO_DIRECTIONAL = { create: 0, accept: 0, reject: 0, cancel: 0 };
-
 class HttpDashboardService implements DashboardService {
-  async seekers(filter?: ParticipantFilter): Promise<Seeker[]> {
-    const raw = await this.fetchDomain('seeker');
-    return this.applyFilter(
-      raw.map((it) => this.toSeeker(it)),
-      filter,
-    );
-  }
-
-  async providers(filter?: ParticipantFilter): Promise<Provider[]> {
-    const raw = await this.fetchDomain('provider');
-    return this.applyFilter(
-      raw.map((it) => this.toProvider(it)),
-      filter,
-    );
-  }
-
-  async oppProviders(filter?: ParticipantFilter): Promise<OpportunityProvider[]> {
-    // Signalstack has no dedicated opp-provider item_type yet — provider rows
-    // cover the dashboard's data needs for now. Switch to a separate
-    // item_type when the schema lands.
-    const raw = await this.fetchDomain('provider');
-    return this.applyFilter(
-      raw.map((it) => this.toProvider(it)),
-      filter,
-    );
-  }
-
-  async list(kind: ParticipantKind, filter?: ParticipantFilter): Promise<ParticipantBase[]> {
-    if (kind === 'seeker') return this.seekers(filter);
-    if (kind === 'provider') return this.providers(filter);
-    return this.oppProviders(filter);
-  }
-
-  private async fetchDomain(domain: 'seeker' | 'provider'): Promise<SignalStackItem[]> {
-    // Signalstack's FetchItemsBodySchema caps limit at 100. Match that here.
-    const url = `/api/dashboard/items?domain=${domain}&limit=100`;
-    const payload = await jsonFetch<SignalStackItemList>(url);
-    return payload.items ?? [];
-  }
-
   async dashboard(query?: DashboardQuery): Promise<DashboardPage> {
     const params = new URLSearchParams();
     // Domain is required by signalstack and must be a valid network domain
@@ -331,17 +211,6 @@ class HttpDashboardService implements DashboardService {
     if (query?.refresh) params.set('refresh', 'true');
     const url = `/api/dashboard?${params.toString()}`;
     return jsonFetch<DashboardPage>(url);
-  }
-
-  async dashboardItems(query: DashboardItemsQuery): Promise<DashboardItemsResponse> {
-    if (!query.domain) throw new Error('dashboardItems query requires `domain`');
-    const params = new URLSearchParams();
-    params.set('domain', query.domain);
-    if (query.limit !== undefined) params.set('limit', String(query.limit));
-    if (query.offset !== undefined) params.set('offset', String(query.offset));
-    if (query.lifecycle) params.set('lifecycle', query.lifecycle);
-    const url = `/api/dashboard/items?${params.toString()}`;
-    return jsonFetch<DashboardItemsResponse>(url);
   }
 
   async dashboardExport(query?: DashboardExportQuery): Promise<DashboardExportResult> {
@@ -405,7 +274,15 @@ class HttpDashboardService implements DashboardService {
     const disposition = res.headers.get('content-disposition') ?? '';
     const filename =
       parseFilenameFromContentDisposition(disposition) ?? `profiles-${input.domain}.csv`;
-    return { blob, filename };
+    // Absent header, or a non-numeric one, means "no count available" rather
+    // than zero — the caller must not report "0 withheld" it did not measure.
+    // `Number` coerces both `null` (absent header) and `''` (present but empty)
+    // to 0, not NaN, so neither can be fed to it directly — either would be
+    // reported as a measured zero by every export that sends no count.
+    const rawHeader = res.headers.get('x-export-skipped-count')?.trim();
+    const rawSkipped = rawHeader ? Number(rawHeader) : Number.NaN;
+    const skippedCount = Number.isInteger(rawSkipped) && rawSkipped >= 0 ? rawSkipped : undefined;
+    return { blob, filename, ...(skippedCount === undefined ? {} : { skippedCount }) };
   }
 
   async dashboardBulkAction(input: DashboardBulkActionInput): Promise<DashboardBulkActionResult> {
@@ -431,123 +308,7 @@ class HttpDashboardService implements DashboardService {
     }
     return (await res.json()) as DashboardBulkActionResult;
   }
-
-  private toSeeker(item: SignalStackItem): Seeker {
-    const state = item.item_state ?? {};
-    const name = pickString(state, 'name') ?? 'Unknown';
-    const city = pickString(state, 'location') ?? '';
-    return {
-      id: item.item_id,
-      name,
-      city,
-      joined: formatDate(item.created_at),
-      avatar: initials(name),
-      profile: {
-        title: pickString(state, 'nameOfJobRolesInterestedIn') ?? '',
-        exp: pickString(state, 'workExperienceYearsConditional') ?? '',
-        verified: false,
-        complete: completeness(state),
-      },
-      applied: { ...ZERO_STATS },
-      initiated: { ...ZERO_DIRECTIONAL },
-      received: { ...ZERO_DIRECTIONAL },
-      status: 'active',
-      last: relative(item.updated_at),
-    };
-  }
-
-  private toProvider(item: SignalStackItem): Provider {
-    const state = item.item_state ?? {};
-    const name = pickString(state, 'jobProviderName') ?? pickString(state, 'name') ?? 'Unknown';
-    const city = pickString(state, 'jobProviderLocation') ?? pickString(state, 'location') ?? '';
-    const role = pickString(state, 'role') ?? '';
-    const nature = pickString(state, 'natureOfJob') ?? '';
-    return {
-      id: item.item_id,
-      name,
-      city,
-      joined: formatDate(item.created_at),
-      avatar: initials(name),
-      profile: {
-        title: role,
-        exp: nature,
-        verified: false,
-        complete: completeness(state),
-      },
-      applied: { ...ZERO_STATS },
-      initiated: { ...ZERO_DIRECTIONAL },
-      received: { ...ZERO_DIRECTIONAL },
-      status: 'active',
-      last: relative(item.updated_at),
-      role: role && nature ? `${role} · ${nature}` : role || nature,
-    };
-  }
-
-  private applyFilter<T extends ParticipantBase>(rows: T[], filter?: ParticipantFilter): T[] {
-    if (!filter) return rows;
-    return rows.filter((r) => {
-      if (filter.status && r.status !== filter.status) return false;
-      if (filter.city && !r.city.toLowerCase().includes(filter.city.toLowerCase())) return false;
-      if (filter.search) {
-        const q = filter.search.toLowerCase();
-        const haystack = `${r.name} ${r.id} ${r.profile.title}`.toLowerCase();
-        if (!haystack.includes(q)) return false;
-      }
-      return true;
-    });
-  }
 }
-
-function pickString(state: Record<string, unknown>, key: string): string | null {
-  const v = state[key];
-  return typeof v === 'string' && v.length > 0 ? v : null;
-}
-
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return '??';
-  if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase();
-  return (parts[0]![0]! + parts[parts.length - 1]![0]!).toUpperCase();
-}
-
-function formatDate(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
-}
-
-function relative(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  const diffMs = Date.now() - d.getTime();
-  const mins = Math.floor(diffMs / 60_000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  if (days < 30) return `${days}d ago`;
-  const months = Math.floor(days / 30);
-  return `${months}mo ago`;
-}
-
-/**
- * Crude profile completeness ratio based on the count of non-empty string
- * fields in item_state. Avoids hard-coding any schema and degrades safely
- * for unknown shapes — the dashboard only uses it for the progress bar.
- */
-function completeness(state: Record<string, unknown>): number {
-  const entries = Object.entries(state);
-  if (entries.length === 0) return 0;
-  const filled = entries.filter(([, v]) => {
-    if (v === null || v === undefined) return false;
-    if (typeof v === 'string') return v.length > 0;
-    if (Array.isArray(v)) return v.length > 0;
-    return true;
-  }).length;
-  return Math.round((filled / entries.length) * 100);
-}
-
 export const dashboardService: DashboardService = new HttpDashboardService();
 
 /**

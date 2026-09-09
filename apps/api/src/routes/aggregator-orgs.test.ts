@@ -54,7 +54,11 @@ describe('aggregator-orgs routes', () => {
     mailer = new FakeMailer();
     consentLedger = new ConsentLedgerFake();
 
-    _setSubmitRateChecker(null);
+    // Permissive by default, NOT `null`. `null` restores the Redis-backed
+    // limiter, whose bucket is keyed `ip|email` — constant across this file —
+    // so submits past the window cap 429 and which tests fail depends on the
+    // wall clock. Cases that assert throttling install their own denier.
+    _setSubmitRateChecker(async () => ({ allowed: true, retryAfterSeconds: 0 }));
     // Allow by default; the throttle cases override per-test.
     _setOrgInviteResendRateChecker(async () => ({ allowed: true, retryAfterSeconds: 0 }));
     loadConsentConfigMock.mockReset();
