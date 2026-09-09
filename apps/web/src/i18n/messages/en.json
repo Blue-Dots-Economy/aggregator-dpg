@@ -111,7 +111,7 @@
       "count": "{shown} of {total}"
     },
     "filters": {
-      "all_statuses": "All statuses",
+      "all_statuses": "Any status",
       "lifecycle_label": "Lifecycle",
       "lifecycle_all": "All lifecycles",
       "lifecycle_draft": "Draft",

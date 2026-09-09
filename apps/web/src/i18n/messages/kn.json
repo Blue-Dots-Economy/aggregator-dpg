@@ -111,7 +111,7 @@
       "count": "{total} ರಲ್ಲಿ {shown}"
     },
     "filters": {
-      "all_statuses": "ಎಲ್ಲಾ ಸ್ಥಿತಿಗಳು",
+      "all_statuses": "ಯಾವುದೇ ಸ್ಥಿತಿ",
       "lifecycle_label": "ಜೀವನಚಕ್ರ",
       "lifecycle_all": "ಎಲ್ಲಾ ಜೀವನಚಕ್ರಗಳು",
       "lifecycle_draft": "ಕರಡು",

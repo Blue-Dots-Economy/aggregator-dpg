@@ -111,7 +111,7 @@
       "count": "{total} में से {shown}"
     },
     "filters": {
-      "all_statuses": "सभी स्थितियाँ",
+      "all_statuses": "कोई भी स्थिति",
       "lifecycle_label": "जीवनचक्र",
       "lifecycle_all": "सभी जीवनचक्र",
       "lifecycle_draft": "ड्राफ्ट",
