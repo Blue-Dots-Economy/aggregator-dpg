@@ -433,6 +433,29 @@ describe('<DashboardPageRoot />', () => {
   });
 
   describe('status filter popover', () => {
+    it('bounds its own height so options stay reachable on a short page', async () => {
+      // The panel hangs below a trigger that sits at the bottom of the
+      // toolbar. Applying a filter that matches nothing collapses the table,
+      // so the page stops scrolling and anything past the fold used to be
+      // unreachable — no page scroll, and the panel did not scroll either.
+      renderPage();
+      await userEvent.click(screen.getByRole('button', { name: /All filters/i }));
+
+      const menu = screen.getByRole('menu');
+      expect(menu.className).toContain('overflow-y-auto');
+      expect(menu.className).toMatch(/max-h-/);
+    });
+
+    it('labels the reset option distinctly from the lifecycle filter', async () => {
+      // "All statuses" sat next to "All lifecycles" and read as its twin.
+      renderPage();
+      await userEvent.click(screen.getByRole('button', { name: /All filters/i }));
+
+      const menu = screen.getByRole('menu');
+      expect(within(menu).getByText('Any status')).toBeInTheDocument();
+      expect(within(menu).queryByText('All statuses')).toBeNull();
+    });
+
     it('lists rollup-derived status options and refetches with the selected status', async () => {
       renderPage();
       await userEvent.click(screen.getByRole('button', { name: /All filters/i }));
