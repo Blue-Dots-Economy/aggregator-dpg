@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 1180 720" width="1180" height="720"><defs><marker id="ah-1971c2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9" fill="none" stroke="#1971c2" stroke-width="1.6"/></marker><marker id="ah-1e1e1e" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9" fill="none" stroke="#1e1e1e" stroke-width="1.6"/></marker><marker id="ah-2f9e44" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9" fill="none" stroke="#2f9e44" stroke-width="1.6"/></marker><marker id="ah-6741d9" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9" fill="none" stroke="#6741d9" stroke-width="1.6"/></marker><marker id="ah-868e96" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9" fill="none" stroke="#868e96" stroke-width="1.6"/></marker><marker id="ah-e03131" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9" fill="none" stroke="#e03131" stroke-width="1.6"/></marker><marker id="ah-f08c00" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9" fill="none" stroke="#f08c00" stroke-width="1.6"/></marker></defs><rect width="1180" height="720" fill="#ffffff"/>
+<rect x="390" y="30" width="400" height="172" rx="10" fill="none" stroke="#f08c00" stroke-width="2"/>
+<text x="590.0" y="51.3" fill="#f08c00" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="14" text-anchor="middle" xml:space="preserve">Keycloak user   realm bluedots</text>
+<line x1="390" y1="62" x2="790" y2="62" stroke="#f08c00" stroke-width="1"/>
+<text x="402" y="82.0" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" text-anchor="start" xml:space="preserve">sub</text>
+<text x="778" y="81.0" fill="#868e96" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9.5" text-anchor="end" xml:space="preserve">the operator</text>
+<text x="402" y="99.0" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" text-anchor="start" xml:space="preserve">aggregator_id        -&gt; Postgres</text>
+<text x="778" y="98.0" fill="#868e96" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9.5" text-anchor="end" xml:space="preserve">REVERSE PTR</text>
+<text x="402" y="116.0" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" text-anchor="start" xml:space="preserve">aggregator_type      seeker / provider</text>
+<text x="402" y="133.0" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" text-anchor="start" xml:space="preserve">decision_made  pending / approved / rejected</text>
+<text x="778" y="132.0" fill="#868e96" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9.5" text-anchor="end" xml:space="preserve">login gate</text>
+<text x="402" y="150.0" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" text-anchor="start" xml:space="preserve">phoneNumber</text>
+<text x="778" y="149.0" fill="#868e96" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9.5" text-anchor="end" xml:space="preserve">OTP SPI</text>
+<text x="402" y="167.0" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" text-anchor="start" xml:space="preserve">signalstack_org_id</text>
+<text x="778" y="166.0" fill="#868e96" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9.5" text-anchor="end" xml:space="preserve">tenant key</text>
+<text x="402" y="184.0" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" text-anchor="start" xml:space="preserve">realm role  org_owner</text>
+<text x="778" y="183.0" fill="#868e96" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9.5" text-anchor="end" xml:space="preserve">at approval</text>
+<text x="590.0" y="218.0" fill="#e03131" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" text-anchor="middle" xml:space="preserve">two protocol mappers must be added by hand after a fresh realm import</text>
+<line x1="590" y1="226" x2="590" y2="240" stroke="#f08c00" stroke-width="2" marker-end="url(#ah-f08c00)"/>
+<rect x="30" y="245" width="330" height="210" rx="10" fill="none" stroke="#1971c2" stroke-width="2"/>
+<text x="195.0" y="266.3" fill="#1971c2" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="14" text-anchor="middle" xml:space="preserve">aggregator_orgs</text>
+<line x1="30" y1="277" x2="360" y2="277" stroke="#1971c2" stroke-width="1"/>
+<text x="42" y="297.0" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" text-anchor="start" xml:space="preserve">id             uuid PK</text>
+<text x="42" y="314.0" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" text-anchor="start" xml:space="preserve">slug</text>
+<text x="348" y="313.0" fill="#868e96" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9.5" text-anchor="end" xml:space="preserve">partial uniq</text>
+<text x="42" y="331.0" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" text-anchor="start" xml:space="preserve">display_name</text>
+<text x="348" y="330.0" fill="#868e96" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9.5" text-anchor="end" xml:space="preserve">partial uniq</text>
+<text x="42" y="348.0" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" text-anchor="start" xml:space="preserve">state</text>
+<text x="42" y="365.0" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" text-anchor="start" xml:space="preserve">owner_email</text>
+<text x="348" y="364.0" fill="#868e96" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9.5" text-anchor="end" xml:space="preserve">ONE owner</text>
+<text x="42" y="382.0" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" text-anchor="start" xml:space="preserve">owner_phone   owner_kc_sub</text>
+<text x="42" y="399.0" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" text-anchor="start" xml:space="preserve">kc_group_id</text>
+<text x="348" y="398.0" fill="#868e96" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9.5" text-anchor="end" xml:space="preserve">KC group</text>
+<text x="42" y="416.0" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" text-anchor="start" xml:space="preserve">profile  profile_ref</text>
+<text x="348" y="415.0" fill="#868e96" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9.5" text-anchor="end" xml:space="preserve">jsonb</text>
+<text x="42" y="433.0" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" text-anchor="start" xml:space="preserve">status  rejected_at</text>
+<text x="348" y="432.0" fill="#868e96" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9.5" text-anchor="end" xml:space="preserve">write-once</text>
+<text x="195.0" y="471.0" fill="#e03131" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" text-anchor="middle" xml:space="preserve">owner_* is a column set, not a table   -&gt;   one admin per org</text>
+<rect x="390" y="245" width="400" height="300" rx="10" fill="none" stroke="#6741d9" stroke-width="2"/>
+<text x="590.0" y="266.3" fill="#6741d9" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="14" text-anchor="middle" xml:space="preserve">aggregators</text>
+<line x1="390" y1="277" x2="790" y2="277" stroke="#6741d9" stroke-width="1"/>
+<text x="402" y="297.0" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" text-anchor="start" xml:space="preserve">id                 uuid PK</text>
+<text x="402" y="314.0" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" text-anchor="start" xml:space="preserve">org_slug</text>
+<text x="778" y="313.0" fill="#868e96" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9.5" text-anchor="end" xml:space="preserve">uniq, immutable</text>
+<text x="402" y="331.0" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" text-anchor="start" xml:space="preserve">actor_type   aggregator / seeker / provider</text>
+<text x="402" y="348.0" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" text-anchor="start" xml:space="preserve">name   type   url</text>
+<text x="402" y="365.0" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" text-anchor="start" xml:space="preserve">contact            jsonb</text>
+<text x="778" y="364.0" fill="#868e96" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9.5" text-anchor="end" xml:space="preserve">Beckn</text>
+<text x="402" y="382.0" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" text-anchor="start" xml:space="preserve">contact_phone      generated</text>
+<text x="778" y="381.0" fill="#868e96" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9.5" text-anchor="end" xml:space="preserve">unique</text>
+<text x="402" y="399.0" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" text-anchor="start" xml:space="preserve">contact_email      generated lower()</text>
+<text x="778" y="398.0" fill="#868e96" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9.5" text-anchor="end" xml:space="preserve">unique</text>
+<text x="402" y="416.0" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" text-anchor="start" xml:space="preserve">locations          jsonb</text>
+<text x="778" y="415.0" fill="#868e96" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9.5" text-anchor="end" xml:space="preserve">Beckn</text>
+<text x="402" y="433.0" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" text-anchor="start" xml:space="preserve">consent            jsonb</text>
+<text x="778" y="432.0" fill="#868e96" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9.5" text-anchor="end" xml:space="preserve">snapshot</text>
+<text x="402" y="450.0" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" text-anchor="start" xml:space="preserve">profile   profile_ref</text>
+<text x="778" y="449.0" fill="#868e96" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9.5" text-anchor="end" xml:space="preserve">schema-driven</text>
+<text x="402" y="467.0" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" text-anchor="start" xml:space="preserve">status  pending / active / inactive / retired</text>
+<text x="402" y="484.0" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" text-anchor="start" xml:space="preserve">parent_org_id  -&gt; aggregator_orgs</text>
+<text x="778" y="483.0" fill="#868e96" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9.5" text-anchor="end" xml:space="preserve">flag-gated</text>
+<text x="402" y="501.0" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" text-anchor="start" xml:space="preserve">invite_email   rejected_at</text>
+<text x="778" y="500.0" fill="#868e96" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9.5" text-anchor="end" xml:space="preserve">write-once</text>
+<text x="402" y="518.0" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" text-anchor="start" xml:space="preserve">signalstack_org_id</text>
+<text x="778" y="517.0" fill="#868e96" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9.5" text-anchor="end" xml:space="preserve">mirrors KC</text>
+<text x="402" y="535.0" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" text-anchor="start" xml:space="preserve">created_by   updated_by</text>
+<text x="590.0" y="561.0" fill="#e03131" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" text-anchor="middle" xml:space="preserve">one row is the operating unit AND its contact person</text>
+<line x1="388" y1="400" x2="362" y2="400" stroke="#6741d9" stroke-width="2" marker-end="url(#ah-6741d9)"/>
+<rect x="820" y="245" width="330" height="160" rx="10" fill="none" stroke="#2f9e44" stroke-width="2"/>
+<text x="985.0" y="266.3" fill="#2f9e44" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="14" text-anchor="middle" xml:space="preserve">aggregator_profile</text>
+<line x1="820" y1="277" x2="1150" y2="277" stroke="#2f9e44" stroke-width="1"/>
+<text x="832" y="297.0" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" text-anchor="start" xml:space="preserve">aggregator_id  PK -&gt; aggregators</text>
+<text x="1138" y="296.0" fill="#868e96" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9.5" text-anchor="end" xml:space="preserve">1:1</text>
+<text x="832" y="314.0" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" text-anchor="start" xml:space="preserve">contact_name</text>
+<text x="1138" y="313.0" fill="#868e96" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9.5" text-anchor="end" xml:space="preserve">4th name copy</text>
+<text x="832" y="331.0" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" text-anchor="start" xml:space="preserve">personas             jsonb</text>
+<text x="1138" y="330.0" fill="#868e96" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9.5" text-anchor="end" xml:space="preserve">GIN</text>
+<text x="832" y="348.0" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" text-anchor="start" xml:space="preserve">services             jsonb</text>
+<text x="1138" y="347.0" fill="#868e96" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9.5" text-anchor="end" xml:space="preserve">GIN</text>
+<text x="832" y="365.0" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" text-anchor="start" xml:space="preserve">verified_certificate jsonb</text>
+<text x="832" y="382.0" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" text-anchor="start" xml:space="preserve">profile_completed_at</text>
+<text x="985.0" y="421.0" fill="#e03131" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" text-anchor="middle" xml:space="preserve">stub row inserted in the parent&#x27;s transaction</text>
+<line x1="818" y1="300" x2="792" y2="300" stroke="#2f9e44" stroke-width="2" marker-end="url(#ah-2f9e44)"/>
+<rect x="30" y="575" width="1120" height="108" rx="10" fill="none" stroke="#1e1e1e" stroke-width="2" stroke-dasharray="8 6"/>
+<text x="590.0" y="597.8" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13.5" text-anchor="middle" xml:space="preserve">everything else hangs off those ids</text>
+<line x1="60" y1="609" x2="1120" y2="609" stroke="#868e96" stroke-width="1"/>
+<text x="60" y="629.5" fill="#e03131" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" text-anchor="start" xml:space="preserve">aggregator_id  FK  ON DELETE CASCADE</text>
+<text x="60" y="648.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">bulk_uploads   registration_links   participants</text>
+<text x="60" y="664.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">link_submissions   onboarding   campaign_job</text>
+<text x="610" y="629.5" fill="#f08c00" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" text-anchor="start" xml:space="preserve">no FK   -   app-level only</text>
+<text x="610" y="648.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">aggregator_consent_record.subject_id   polymorphic org / aggregator</text>
+<text x="610" y="664.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">campaign_job.signalstack_org_id   text, the real tenant scope</text>
+<text x="590.0" y="708.9" fill="#e03131" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11.5" text-anchor="middle" xml:space="preserve">an operator&#x27;s identity IS their org row   -   one org holds one person, one person belongs to one org</text>
+</svg>

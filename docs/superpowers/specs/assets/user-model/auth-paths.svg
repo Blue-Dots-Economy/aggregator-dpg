@@ -1,0 +1,109 @@
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 1180 680" width="1180" height="680"><defs><marker id="ah-1971c2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9" fill="none" stroke="#1971c2" stroke-width="1.6"/></marker><marker id="ah-1e1e1e" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9" fill="none" stroke="#1e1e1e" stroke-width="1.6"/></marker><marker id="ah-2f9e44" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9" fill="none" stroke="#2f9e44" stroke-width="1.6"/></marker><marker id="ah-6741d9" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9" fill="none" stroke="#6741d9" stroke-width="1.6"/></marker><marker id="ah-868e96" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9" fill="none" stroke="#868e96" stroke-width="1.6"/></marker><marker id="ah-e03131" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9" fill="none" stroke="#e03131" stroke-width="1.6"/></marker><marker id="ah-f08c00" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9" fill="none" stroke="#f08c00" stroke-width="1.6"/></marker></defs><rect width="1180" height="680" fill="#ffffff"/>
+<rect x="30" y="35" width="250" height="86" rx="10" fill="none" stroke="#6741d9" stroke-width="2"/>
+<text x="155.0" y="53.9" fill="#6741d9" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" text-anchor="middle" xml:space="preserve">portal user</text>
+<text x="42" y="72.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">browser -&gt; apps/web</text>
+<text x="42" y="87.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">Next.js 15 App Router</text>
+<line x1="282" y1="78" x2="318" y2="78" stroke="#6741d9" stroke-width="2" marker-end="url(#ah-6741d9)"/>
+<rect x="320" y="35" width="250" height="86" rx="10" fill="none" stroke="#6741d9" stroke-width="2"/>
+<text x="445.0" y="53.9" fill="#6741d9" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" text-anchor="middle" xml:space="preserve">aggregator-portal</text>
+<text x="332" y="72.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">OIDC code + PKCE</text>
+<text x="332" y="87.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">OTP by email / phone (SPI)</text>
+<text x="332" y="102.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">realm bluedots</text>
+<line x1="572" y1="78" x2="608" y2="78" stroke="#6741d9" stroke-width="2" marker-end="url(#ah-6741d9)"/>
+<rect x="610" y="35" width="250" height="86" rx="10" fill="none" stroke="#6741d9" stroke-width="2"/>
+<text x="735.0" y="53.9" fill="#6741d9" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" text-anchor="middle" xml:space="preserve">web BFF session</text>
+<text x="622" y="72.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">signed cookie -&gt; Redis</text>
+<text x="622" y="87.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">session:&lt;sid&gt;</text>
+<text x="622" y="102.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">callApi attaches the OIDC token</text>
+<line x1="862" y1="78" x2="898" y2="78" stroke="#6741d9" stroke-width="2" marker-end="url(#ah-6741d9)"/>
+<rect x="900" y="35" width="250" height="86" rx="10" fill="none" stroke="#6741d9" stroke-width="2"/>
+<text x="1025.0" y="53.9" fill="#6741d9" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" text-anchor="middle" xml:space="preserve">api authenticate()</text>
+<text x="912" y="72.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">JWKS + azp allow-list</text>
+<text x="912" y="87.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">aggregator_id claim REQUIRED</text>
+<text x="912" y="102.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">requireApproved: decision_made</text>
+<rect x="30" y="150" width="250" height="86" rx="10" fill="none" stroke="#1971c2" stroke-width="2"/>
+<text x="155.0" y="168.9" fill="#1971c2" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" text-anchor="middle" xml:space="preserve">anonymous visitor</text>
+<text x="42" y="187.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">registration submit</text>
+<text x="42" y="202.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">public link submit</text>
+<text x="42" y="217.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">no account yet</text>
+<line x1="282" y1="193" x2="318" y2="193" stroke="#1971c2" stroke-width="2" marker-end="url(#ah-1971c2)"/>
+<rect x="320" y="150" width="250" height="86" rx="10" fill="none" stroke="#1971c2" stroke-width="2"/>
+<text x="445.0" y="168.9" fill="#1971c2" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" text-anchor="middle" xml:space="preserve">aggregator-bff</text>
+<text x="332" y="187.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">service-account token</text>
+<text x="332" y="202.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">holds NO realm-mgmt roles</text>
+<text x="332" y="217.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">a leak cannot admin the realm</text>
+<line x1="572" y1="193" x2="608" y2="193" stroke="#1971c2" stroke-width="2" marker-end="url(#ah-1971c2)"/>
+<rect x="610" y="150" width="250" height="86" rx="10" fill="none" stroke="#1971c2" stroke-width="2"/>
+<text x="735.0" y="168.9" fill="#1971c2" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" text-anchor="middle" xml:space="preserve">api authenticateAny()</text>
+<text x="622" y="187.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">accepts service accounts</text>
+<text x="622" y="202.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">isUser=false, no aggregator_id</text>
+<text x="622" y="217.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">rate-limited  rl:&lt;ns&gt;:&lt;key&gt;:&lt;win&gt;</text>
+<text x="1025.0" y="180.4" fill="#868e96" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" text-anchor="middle" xml:space="preserve">no identity resolved</text>
+<text x="1025.0" y="201.5" fill="#868e96" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="middle" xml:space="preserve">the route decides what a</text>
+<text x="1025.0" y="216.5" fill="#868e96" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="middle" xml:space="preserve">tokenless caller may do</text>
+<rect x="30" y="265" width="250" height="86" rx="10" fill="none" stroke="#2f9e44" stroke-width="2"/>
+<text x="155.0" y="283.9" fill="#2f9e44" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" text-anchor="middle" xml:space="preserve">api admin ops</text>
+<text x="42" y="302.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">approve / reject decisions</text>
+<text x="42" y="317.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">enable user, assign role</text>
+<text x="42" y="332.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">create org group</text>
+<line x1="282" y1="308" x2="318" y2="308" stroke="#2f9e44" stroke-width="2" marker-end="url(#ah-2f9e44)"/>
+<rect x="320" y="265" width="250" height="86" rx="10" fill="none" stroke="#2f9e44" stroke-width="2"/>
+<text x="445.0" y="283.9" fill="#2f9e44" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" text-anchor="middle" xml:space="preserve">aggregator-api</text>
+<text x="332" y="302.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">service account</text>
+<text x="332" y="317.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">manage-users + manage-realm</text>
+<text x="332" y="332.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">timeout, but NO retry</text>
+<line x1="572" y1="308" x2="608" y2="308" stroke="#2f9e44" stroke-width="2" marker-end="url(#ah-2f9e44)"/>
+<rect x="610" y="265" width="250" height="86" rx="10" fill="none" stroke="#2f9e44" stroke-width="2"/>
+<text x="735.0" y="283.9" fill="#2f9e44" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" text-anchor="middle" xml:space="preserve">Keycloak Admin REST</text>
+<text x="622" y="302.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">writes the five attributes</text>
+<text x="622" y="317.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">org_owner realm role</text>
+<text x="622" y="332.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">mirrored org group</text>
+<text x="1025.0" y="302.5" fill="#868e96" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="middle" xml:space="preserve">Keycloak is authoritative for</text>
+<text x="1025.0" y="317.5" fill="#868e96" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="middle" xml:space="preserve">phone, email and decision_made</text>
+<text x="1025.0" y="332.5" fill="#868e96" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="middle" xml:space="preserve">everything else is Postgres</text>
+<rect x="30" y="380" width="250" height="86" rx="10" fill="none" stroke="#f08c00" stroke-width="2"/>
+<text x="155.0" y="398.9" fill="#f08c00" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" text-anchor="middle" xml:space="preserve">email link recipient</text>
+<text x="42" y="417.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">an approver, or an invitee</text>
+<text x="42" y="432.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">no session, no account</text>
+<text x="42" y="447.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">the link IS the credential</text>
+<line x1="282" y1="423" x2="318" y2="423" stroke="#f08c00" stroke-width="2" marker-end="url(#ah-f08c00)"/>
+<rect x="320" y="380" width="250" height="86" rx="10" fill="none" stroke="#f08c00" stroke-width="2"/>
+<text x="445.0" y="398.9" fill="#f08c00" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" text-anchor="middle" xml:space="preserve">HS256 token, jose</text>
+<text x="332" y="417.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">issuer aggregator-api</text>
+<text x="332" y="432.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">one secret APPROVAL_TOKEN_SECRET</text>
+<text x="332" y="447.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">audience separates the three</text>
+<line x1="572" y1="423" x2="608" y2="423" stroke="#f08c00" stroke-width="2" marker-end="url(#ah-f08c00)"/>
+<rect x="610" y="380" width="250" height="106" rx="10" fill="none" stroke="#f08c00" stroke-width="2"/>
+<text x="735.0" y="398.9" fill="#f08c00" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" text-anchor="middle" xml:space="preserve">three kinds</text>
+<text x="622" y="417.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">approval   single-use via KC state</text>
+<text x="622" y="432.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">invite     14 d, jti = invites row</text>
+<text x="622" y="447.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">grant      90 d, org owner&#x27;s only</text>
+<text x="622" y="462.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">           surface (KC user disabled)</text>
+<text x="1025.0" y="417.5" fill="#868e96" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="middle" xml:space="preserve">single-use is re-derived, not</text>
+<text x="1025.0" y="432.5" fill="#868e96" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="middle" xml:space="preserve">stored: approval re-checks the</text>
+<text x="1025.0" y="447.5" fill="#868e96" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="middle" xml:space="preserve">Keycloak enabled flag</text>
+<rect x="30" y="515" width="250" height="86" rx="10" fill="none" stroke="#e03131" stroke-width="2"/>
+<text x="155.0" y="533.9" fill="#e03131" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" text-anchor="middle" xml:space="preserve">outbound to Signals</text>
+<text x="42" y="552.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">signalstack-writer</text>
+<text x="42" y="567.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">api + worker share it</text>
+<line x1="282" y1="558" x2="318" y2="558" stroke="#e03131" stroke-width="2" marker-end="url(#ah-e03131)"/>
+<rect x="320" y="515" width="250" height="86" rx="10" fill="none" stroke="#e03131" stroke-width="2"/>
+<text x="445.0" y="533.9" fill="#e03131" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" text-anchor="middle" xml:space="preserve">SIGNALSTACK_AUTH_MODE</text>
+<text x="332" y="552.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">apikey   x-api-key  (default)</text>
+<text x="332" y="567.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">bearer   client credentials</text>
+<text x="332" y="582.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">client id == Signals org slug</text>
+<line x1="572" y1="558" x2="608" y2="558" stroke="#e03131" stroke-width="2" marker-end="url(#ah-e03131)"/>
+<rect x="610" y="515" width="250" height="86" rx="10" fill="none" stroke="#e03131" stroke-width="2"/>
+<text x="735.0" y="533.9" fill="#e03131" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" text-anchor="middle" xml:space="preserve">x-acting-org-id</text>
+<text x="622" y="552.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">= signalstack_org_id claim</text>
+<text x="622" y="567.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">per call for worker + links</text>
+<text x="622" y="582.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">fixed per deploy for admin ops</text>
+<line x1="862" y1="558" x2="898" y2="558" stroke="#e03131" stroke-width="2" marker-end="url(#ah-e03131)"/>
+<rect x="900" y="515" width="250" height="86" rx="10" fill="none" stroke="#e03131" stroke-width="2"/>
+<text x="1025.0" y="533.9" fill="#e03131" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" text-anchor="middle" xml:space="preserve">signals-dpg</text>
+<text x="912" y="552.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">/admin/participant  /onboard</text>
+<text x="912" y="567.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">/admin/aggregator/upsert</text>
+<text x="912" y="582.5" fill="#1e1e1e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10" text-anchor="start" xml:space="preserve">/aggregator/dashboard</text>
+<text x="590.0" y="635.9" fill="#e03131" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11.5" text-anchor="middle" xml:space="preserve">no global preHandler   -   every route file re-declares its own wrapper, and nothing stops a new route from omitting it</text>
+<text x="590.0" y="660.5" fill="#868e96" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" text-anchor="middle" xml:space="preserve">authority is one aggregator_id claim plus decision_made   -   there is no role on the token beyond org_owner</text>
+</svg>
