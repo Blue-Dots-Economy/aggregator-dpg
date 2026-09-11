@@ -75,9 +75,6 @@ export class KeycloakAdapter extends IdentityProviderAdapter {
       code_challenge: input.codeChallenge,
       code_challenge_method: 'S256',
       redirect_uri: input.redirectUri,
-      // Omitted unless asked for: a normal login should still reuse an existing
-      // SSO session. Only the switch-account path forces a fresh prompt.
-      ...(input.prompt ? { prompt: input.prompt } : {}),
     });
   }
 

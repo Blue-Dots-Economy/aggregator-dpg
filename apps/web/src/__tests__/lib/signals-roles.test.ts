@@ -7,7 +7,7 @@ vi.mock('@aggregator-dpg/config-loader/fs', () => ({
 const warnMock = vi.fn();
 vi.mock('@/lib/logger', () => ({ logger: { warn: warnMock, info: vi.fn(), error: vi.fn() } }));
 
-const { signalsRealmRoles, resolveSignalsRealmRoles, resetSignalsRealmRolesCache } =
+const { resolveSignalsRealmRoles, resetSignalsRealmRolesCache } =
   await import('@/lib/signals-roles');
 
 const ENV_KEYS = ['SIGNALS_REALM_ROLES', 'AGGREGATOR_NETWORK', 'AGGREGATOR_BRAND', 'CONFIG_ROOT'];
@@ -28,16 +28,6 @@ afterEach(() => {
     if (saved[k] === undefined) delete process.env[k];
     else process.env[k] = saved[k];
   }
-});
-
-describe('signalsRealmRoles (env override, pure)', () => {
-  it('splits and trims a comma-separated list', () => {
-    expect(signalsRealmRoles({ SIGNALS_REALM_ROLES: ' a , b ' })).toEqual(['a', 'b']);
-  });
-
-  it('returns empty when unset — the classifier then reports unknown', () => {
-    expect(signalsRealmRoles({})).toEqual([]);
-  });
 });
 
 describe('resolveSignalsRealmRoles', () => {
@@ -70,6 +60,12 @@ describe('resolveSignalsRealmRoles', () => {
 
     expect(await resolveSignalsRealmRoles()).toEqual(['override_role']);
     expect(loadSignalsRealmRolesMock).not.toHaveBeenCalled();
+  });
+
+  it('splits and trims the env override, ignoring blank entries', async () => {
+    process.env.SIGNALS_REALM_ROLES = ' a , , b ';
+
+    expect(await resolveSignalsRealmRoles()).toEqual(['a', 'b']);
   });
 
   // A corrupt config must not take the login page down: the whole value of this

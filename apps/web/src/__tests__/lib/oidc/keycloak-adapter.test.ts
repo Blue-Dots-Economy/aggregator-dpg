@@ -550,43 +550,6 @@ describe('KeycloakAdapter', () => {
       expect(generatorsMock.codeChallenge).toHaveBeenCalledWith('verifier-x');
     });
   });
-
-  it('omits `prompt` on a normal login, so an existing SSO session is reused', async () => {
-    // Only the switch-account path forces a fresh prompt; adding it
-    // unconditionally would defeat SSO for every ordinary sign-in.
-    const { KeycloakAdapter } = await importAdapter();
-    const adapter = new KeycloakAdapter({
-      issuerUrl: 'http://kc.fake/realms/aggregator',
-      clientId: 'aggregator-portal',
-    });
-    await adapter.buildAuthorizationUrl({
-      state: 's',
-      nonce: 'n',
-      codeChallenge: 'cc',
-      redirectUri: 'http://app/cb',
-    });
-    expect(mockAuthorizationUrl).toHaveBeenCalledWith(
-      expect.not.objectContaining({ prompt: expect.anything() }),
-    );
-  });
-
-  it('passes `prompt=login` through when asked to force re-authentication', async () => {
-    // Without this the shared realm silently reissues a token for whoever is
-    // already signed in, and "sign in with a different account" is a no-op.
-    const { KeycloakAdapter } = await importAdapter();
-    const adapter = new KeycloakAdapter({
-      issuerUrl: 'http://kc.fake/realms/aggregator',
-      clientId: 'aggregator-portal',
-    });
-    await adapter.buildAuthorizationUrl({
-      state: 's',
-      nonce: 'n',
-      codeChallenge: 'cc',
-      redirectUri: 'http://app/cb',
-      prompt: 'login',
-    });
-    expect(mockAuthorizationUrl).toHaveBeenCalledWith(expect.objectContaining({ prompt: 'login' }));
-  });
 });
 
 /** Builds a JWT-shaped (but unsigned) string carrying the given payload. */

@@ -25,7 +25,6 @@ vi.mock('@/lib/jwt', () => ({
   },
 }));
 vi.mock('@/lib/signals-roles', () => ({
-  signalsRealmRoles: () => ['signals_participant', 'signals_admin'],
   resolveSignalsRealmRoles: async () => ['signals_participant', 'signals_admin'],
 }));
 vi.mock('@/lib/upstream-client', () => ({ callApi: vi.fn() }));

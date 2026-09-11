@@ -35,15 +35,16 @@ import { logger } from './logger';
 const ENV_KEY = 'SIGNALS_REALM_ROLES';
 
 /**
- * Returns the Signals participant realm roles set by env override.
+ * Returns the Signals participant realm roles set by the env override.
  *
- * Kept separate from the config read so the precedence is testable on its own,
- * and because it is pure — no filesystem, no async.
+ * Module-private: every caller wants {@link resolveSignalsRealmRoles}, which
+ * applies the config fallback. Kept as its own function because it is pure —
+ * no filesystem, no async — which keeps the precedence logic readable.
  *
  * @param env - Env bag; defaults to `process.env`.
  * @returns Role names, or an empty array when unset.
  */
-export function signalsRealmRoles(env: NodeJS.ProcessEnv = process.env): string[] {
+function envRealmRoles(env: NodeJS.ProcessEnv = process.env): string[] {
   return (env[ENV_KEY] ?? '')
     .split(',')
     .map((r) => r.trim())
@@ -71,7 +72,7 @@ let cached: string[] | undefined;
 export async function resolveSignalsRealmRoles(): Promise<string[]> {
   if (cached !== undefined) return cached;
 
-  const fromEnv = signalsRealmRoles();
+  const fromEnv = envRealmRoles();
   if (fromEnv.length > 0) {
     cached = fromEnv;
     return cached;
