@@ -18,7 +18,8 @@ import type { ReactNode } from 'react';
 import { Sidebar } from '../../components/shell/Sidebar';
 import { AuthProvider } from '../../lib/auth-context';
 import { getSession } from '../../lib/server-session';
-import { tokenAggregatorId } from '../../lib/jwt';
+import { PORTAL_GATE_REASON, classifyNonCoordinator, tokenAggregatorId } from '../../lib/jwt';
+import { resolveSignalsRealmRoles } from '../../lib/signals-roles';
 import { callApi } from '../../lib/upstream-client';
 import type { User } from '../../types';
 
@@ -64,7 +65,16 @@ export default async function ProtectedLayout({ children }: { children: ReactNod
   // (e.g. before the callback gate, or via another path). Sign them out with a
   // clear message rather than showing a data-less, broken shell.
   if (!tokenAggregatorId(session.accessToken)) {
-    redirect('/api/auth/logout?reason=org_no_portal');
+    // Classify rather than assume org owner: this gate exists for a session
+    // minted before the callback gate or by another route, and those users are
+    // the same three populations the callback distinguishes (#753). Hardcoding
+    // one reason here told a Signals participant to go looking for approval
+    // emails that do not exist for them.
+    const population = classifyNonCoordinator(
+      session.accessToken,
+      await resolveSignalsRealmRoles(),
+    );
+    redirect(`/api/auth/logout?reason=${PORTAL_GATE_REASON[population]}`);
   }
 
   const user: User = {

@@ -515,6 +515,18 @@ button {
 }
 .bd-link-btn:hover { text-decoration: underline; }
 
+/* Error-page escape hatch. Stacks the prompt above the sign-out link so the
+   link reads as an action rather than as part of the sentence. */
+.bd-error-switch {
+  margin: 18px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--bd-ink-600, #4b5563);
+}
+.bd-error-switch a { display: inline-block; }
+
 .bd-terms {
   margin: 28px 0 0;
   font-size: 12px;

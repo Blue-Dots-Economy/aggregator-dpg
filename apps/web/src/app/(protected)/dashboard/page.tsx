@@ -968,7 +968,11 @@ function ParticipantTable<R extends ParticipantBase>({
             {filterOpen && (
               <div
                 role="menu"
-                className="absolute right-0 top-full mt-1 z-20 min-w-[180px] bg-white border border-(--bd-border) rounded-[10px] bd-shadow-lg p-1"
+                // Bounded + self-scrolling. The panel hangs below the trigger,
+                // which sits at the bottom of the toolbar; once a filter
+                // returns no rows the table collapses, the page stops
+                // scrolling, and any option past the fold became unreachable.
+                className="absolute right-0 top-full mt-1 z-20 min-w-[180px] max-h-[min(320px,60vh)] overflow-y-auto bg-white border border-(--bd-border) rounded-[10px] bd-shadow-lg p-1"
               >
                 {options.map((opt) => {
                   const active = statusFilter === opt.value;

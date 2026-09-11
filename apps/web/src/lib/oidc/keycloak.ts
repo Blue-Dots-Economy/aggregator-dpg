@@ -203,7 +203,9 @@ export class KeycloakAdapter extends IdentityProviderAdapter {
   async buildLogoutUrl(input: LogoutUrlInput): Promise<string> {
     const client = await this.getClient();
     return client.endSessionUrl({
-      id_token_hint: input.idToken,
+      // No token to hint with: identify the RP so Keycloak still validates the
+      // post-logout URI, and accept its confirmation page.
+      ...(input.idToken ? { id_token_hint: input.idToken } : { client_id: this.opts.clientId }),
       post_logout_redirect_uri: input.postLogoutRedirectUri,
     });
   }

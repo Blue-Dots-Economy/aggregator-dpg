@@ -15,7 +15,18 @@ import { useAuth } from '@/lib/auth-context';
 import type { SessionData } from '@/lib/session';
 
 vi.mock('@/lib/server-session', () => ({ getSession: vi.fn() }));
-vi.mock('@/lib/jwt', () => ({ tokenAggregatorId: vi.fn() }));
+vi.mock('@/lib/jwt', () => ({
+  tokenAggregatorId: vi.fn(),
+  classifyNonCoordinator: vi.fn(),
+  PORTAL_GATE_REASON: {
+    signals_participant: 'signals_account_no_portal',
+    org_owner: 'org_no_portal',
+    unknown: 'no_portal_access',
+  },
+}));
+vi.mock('@/lib/signals-roles', () => ({
+  resolveSignalsRealmRoles: async () => ['signals_participant', 'signals_admin'],
+}));
 vi.mock('@/lib/upstream-client', () => ({ callApi: vi.fn() }));
 vi.mock('@/components/shell/Sidebar', () => ({
   Sidebar: () => <nav data-testid="sidebar" />,
@@ -35,7 +46,7 @@ vi.mock('next/headers', () => ({
 
 import ProtectedLayout from '@/app/(protected)/layout';
 import { getSession } from '@/lib/server-session';
-import { tokenAggregatorId } from '@/lib/jwt';
+import { classifyNonCoordinator, tokenAggregatorId } from '@/lib/jwt';
 import { callApi } from '@/lib/upstream-client';
 import { redirect } from 'next/navigation';
 
@@ -111,12 +122,21 @@ describe('<ProtectedLayout />', () => {
   // behaviour) — assert on the rejection + the exact target passed to the
   // mock rather than the stringified message (`.rejects.toThrow(<string>)`
   // mis-parses a URL containing `%2F`/`&` in this Vitest version).
-  it('redirects to logout with org_no_portal when the token carries no aggregator_id', async () => {
+  it.each([
+    ['org_owner', 'org_no_portal'],
+    ['signals_participant', 'signals_account_no_portal'],
+    ['unknown', 'no_portal_access'],
+  ] as const)('signs a %s out with reason=%s', async (population, reason) => {
+    // This gate catches a session minted before the callback gate or by
+    // another route, so it faces the same three populations. Hardcoding one
+    // reason told a Signals participant to hunt for approval emails that do
+    // not exist for them (#753).
     vi.mocked(getSession).mockResolvedValue(baseSession());
     vi.mocked(tokenAggregatorId).mockReturnValue(null);
+    vi.mocked(classifyNonCoordinator).mockReturnValue(population);
 
     await expect(ProtectedLayout({ children: <div /> })).rejects.toThrow();
-    expect(redirect).toHaveBeenCalledWith('/api/auth/logout?reason=org_no_portal');
+    expect(redirect).toHaveBeenCalledWith(`/api/auth/logout?reason=${reason}`);
     // Support/config is never consulted once the portal-access gate rejects.
     expect(callApi).not.toHaveBeenCalled();
   });
