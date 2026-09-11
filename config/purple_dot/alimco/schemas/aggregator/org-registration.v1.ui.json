@@ -4,6 +4,7 @@
     "display_name",
     "website",
     "aggregator_type",
+    "organisation_type",
     "address",
     "state",
     "owner",
@@ -94,5 +95,10 @@
     "addressCountry": {
       "ui:placeholder": "India"
     }
+  },
+  "organisation_type": {
+    "ui:widget": "select",
+    "ui:placeholder": "Select organisation type",
+    "ui:enumNames": ["NGO", "Government Entity", "Private Company", "Community Group", "Others"]
   }
 }
