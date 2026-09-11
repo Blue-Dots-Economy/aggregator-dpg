@@ -28,8 +28,20 @@ async function rejectionMessage(p: Promise<unknown>): Promise<string> {
   throw new Error('expected promise to reject');
 }
 
-/** jsdom's Blob polyfill has no `.text()`/`.arrayBuffer()` — read via FileReader instead. */
+/**
+ * Reads a Blob as text across both Blob implementations in play here.
+ *
+ * Two incompatible ones coexist: `Response.blob()` returns Node's (undici)
+ * Blob, while `FileReader` comes from jsdom and type-checks its argument
+ * against jsdom's own Blob — so passing the former throws "parameter 1 is not
+ * of type 'Blob'". Node's Blob does have `.text()` (the comment this replaces
+ * assumed every Blob here was jsdom's, which has none), so prefer it and keep
+ * the FileReader path for a Blob that lacks it.
+ */
 function readBlobText(blob: Blob): Promise<string> {
+  if (typeof (blob as { text?: unknown }).text === 'function') {
+    return blob.text();
+  }
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result));
