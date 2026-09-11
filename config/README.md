@@ -32,10 +32,21 @@ A brand folder is a **complete copy** of its parent network folder — not a par
 | `blue_dot`   | `config/blue_dot/`   | `upsdm`    | `config/blue_dot/upsdm/`    |
 | `blue_dot`   | `config/blue_dot/`   | `up-gzb`   | `config/blue_dot/up-gzb/`   |
 | `orange_dot` | `config/orange_dot/` | `onetac`   | `config/orange_dot/onetac/` |
+| `purple_dot` | `config/purple_dot/` | `alimco`   | `config/purple_dot/alimco/` |
 
 `up-gzb` is the Ghaziabad rollout. It is identical to the `blue_dot` defaults
 apart from its logo assets, which carry the refreshed Blue Dots lockup
 (uppercase wordmark, solid dot, "Seeded by EkStep").
+
+`alimco` is the ALIMCO rollout on `purple_dot`, and is currently a
+**byte-identical copy** of the `purple_dot` defaults — a deliberate scaffold
+until the team supplies the real branding, legal copy and form fields. Two
+values are copies on purpose rather than oversight: `brand.json`'s logo paths
+still point at `/brand/purple-dot/`, and `keycloak.env` keeps
+`BRAND_LOGO_SLUG=purple-dot`, because no `alimco` asset folder exists under
+`apps/web/public/brand/` or in the baked Keycloak theme. Pointing either at
+`alimco` before those assets land would serve 404s and an unbranded login
+page.
 
 ---
 
