@@ -13,7 +13,7 @@
 import { type NextRequest, NextResponse } from 'next/server';
 import { getOidcAdapter } from '@/lib/oidc';
 import { getSessionStore, type SessionData } from '@/lib/session';
-import { signalsRealmRoles } from '@/lib/signals-roles';
+import { resolveSignalsRealmRoles } from '@/lib/signals-roles';
 import {
   OIDC_FLOW_COOKIE,
   SESSION_COOKIE,
@@ -108,7 +108,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // gets to pick an account. Classify WHICH population this is so the login
     // screen can say what happened instead of assuming everyone here is an
     // org owner (#753).
-    const population = classifyNonCoordinator(tokens.accessToken, signalsRealmRoles());
+    const population = classifyNonCoordinator(tokens.accessToken, await resolveSignalsRealmRoles());
     const reason = PORTAL_GATE_REASON[population];
     log.warn(
       {

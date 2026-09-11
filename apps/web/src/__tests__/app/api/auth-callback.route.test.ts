@@ -12,6 +12,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { NextRequest } from 'next/server';
 import { signFlowState } from '@/lib/cookies';
 
+const { resolveSignalsRealmRolesMock } = vi.hoisted(() => ({
+  resolveSignalsRealmRolesMock: vi.fn(async (): Promise<string[]> => []),
+}));
+vi.mock('@/lib/signals-roles', () => ({
+  resolveSignalsRealmRoles: resolveSignalsRealmRolesMock,
+}));
 vi.mock('@/lib/oidc', () => ({
   getOidcAdapter: vi.fn(),
 }));
@@ -188,13 +194,12 @@ describe('GET /api/auth/callback', () => {
   });
 
   it('blocks a Signals participant with signals_account_no_portal', async () => {
-    process.env.SIGNALS_REALM_ROLES = 'seeker,provider';
+    resolveSignalsRealmRolesMock.mockResolvedValueOnce(['seeker', 'provider']);
     const res = await blockedWith(['seeker']);
     expect(res.headers.get('location')).toBe(
       'http://portal.test/login?error=signals_account_no_portal',
     );
     expect(create).not.toHaveBeenCalled();
-    delete process.env.SIGNALS_REALM_ROLES;
   });
 
   it('blocks any other realm user with no_portal_access', async () => {
@@ -203,10 +208,12 @@ describe('GET /api/auth/callback', () => {
     expect(create).not.toHaveBeenCalled();
   });
 
-  it('falls back to no_portal_access when SIGNALS_REALM_ROLES is unset', async () => {
-    // A wrong message is worse than a generic one: without the config we
-    // cannot claim the user is a Signals account.
-    delete process.env.SIGNALS_REALM_ROLES;
+  it('falls back to no_portal_access when no Signals roles are configured', async () => {
+    // A wrong message is worse than a generic one: with neither
+    // `aggregator.signals.realm_roles` nor the SIGNALS_REALM_ROLES override we
+    // cannot claim the user is a Signals account. The resolver returns [] for
+    // both the unconfigured and the unreadable-config case.
+    resolveSignalsRealmRolesMock.mockResolvedValueOnce([]);
     const res = await blockedWith(['seeker']);
     expect(res.headers.get('location')).toBe('http://portal.test/login?error=no_portal_access');
   });

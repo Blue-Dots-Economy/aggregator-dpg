@@ -19,7 +19,7 @@ import { Sidebar } from '../../components/shell/Sidebar';
 import { AuthProvider } from '../../lib/auth-context';
 import { getSession } from '../../lib/server-session';
 import { PORTAL_GATE_REASON, classifyNonCoordinator, tokenAggregatorId } from '../../lib/jwt';
-import { signalsRealmRoles } from '../../lib/signals-roles';
+import { resolveSignalsRealmRoles } from '../../lib/signals-roles';
 import { callApi } from '../../lib/upstream-client';
 import type { User } from '../../types';
 
@@ -70,7 +70,10 @@ export default async function ProtectedLayout({ children }: { children: ReactNod
     // the same three populations the callback distinguishes (#753). Hardcoding
     // one reason here told a Signals participant to go looking for approval
     // emails that do not exist for them.
-    const population = classifyNonCoordinator(session.accessToken, signalsRealmRoles());
+    const population = classifyNonCoordinator(
+      session.accessToken,
+      await resolveSignalsRealmRoles(),
+    );
     redirect(`/api/auth/logout?reason=${PORTAL_GATE_REASON[population]}`);
   }
 
