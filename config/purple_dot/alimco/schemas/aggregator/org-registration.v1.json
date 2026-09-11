@@ -83,8 +83,7 @@
       "type": "string",
       "title": "State",
       "description": "Derived from the address block on this instance; not asked for separately.",
-      "maxLength": 200,
-      "examples": ["Uttar Pradesh"]
+      "maxLength": 200
     },
     "owner": {
       "type": "object",
