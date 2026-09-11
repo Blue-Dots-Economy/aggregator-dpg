@@ -26,11 +26,12 @@ if (typeof window !== 'undefined') {
   if (!window.ResizeObserver) {
     Object.defineProperty(window, 'ResizeObserver', {
       writable: true,
-      value: vi.fn().mockImplementation(() => ({
-        observe: vi.fn(),
-        unobserve: vi.fn(),
-        disconnect: vi.fn(),
-      })),
+      // Must be a `function`, not an arrow: this is invoked as
+      // `new ResizeObserver(...)`, and vitest 4 propagates the real
+      // "is not a constructor" TypeError instead of papering over it.
+      value: vi.fn(function () {
+        return { observe: vi.fn(), unobserve: vi.fn(), disconnect: vi.fn() };
+      }),
     });
   }
   // jsdom 25 on Node >=22 defers `window.localStorage` to Node's own

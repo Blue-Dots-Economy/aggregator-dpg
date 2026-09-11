@@ -49,14 +49,28 @@ updates:
       # typescript-eslint does not support TS 7 yet — hold the major.
       - dependency-name: "typescript"
         update-types: ["version-update:semver-major"]
-      # vitest 4 needs vite 6 in lockstep — hold the major.
+      # Now on vitest 4.1.11 (taken here as the CVE-2026-84373 floor, see below),
+      # so the old "vitest 4 needs vite 6 in lockstep" reason is spent. What is
+      # held now is the v5 major, for a different and concrete reason: vitest 5
+      # requires Vite 6.4 while apps/web is still on vite 7 via next, and its
+      # "clear mocks by default before each test" change breaks suites silently
+      # rather than loudly. Dependabot proposed exactly that jump in #764 and it
+      # went red. Revisit v5 deliberately, with the mock audit, not on a Monday.
+      #
+      # Holding the major does NOT hold the 4.x line — patches and minors still
+      # flow, which is what matters for the next advisory on this package. That
+      # is the thing the previous hold got wrong: it blocked the 3.x -> 4.x move
+      # that CVE-2026-84373 needed, so the fix could only reach us sideways as a
+      # security PR proposing v5, which could never merge.
       - dependency-name: "vitest"
         update-types: ["version-update:semver-major"]
       # @vitest/coverage-v8 peers on the EXACT vitest version, so its major can
       # only move when vitest's does — and vitest's is held above. #559 proposed
       # coverage-v8 4.1.10 against vitest 3, which passes CI (unmet peers are a
       # warning, and `test:coverage` is continue-on-error) while silently
-      # producing no coverage for SonarCloud. Keep the two majors coupled.
+      # producing no coverage for SonarCloud. Keep the two majors coupled: both
+      # sit at 4.1.11 here, and `test:coverage` was verified to emit a non-empty
+      # lcov (129 SF records) rather than assumed.
       - dependency-name: "@vitest/coverage-v8"
         update-types: ["version-update:semver-major"]
       # Tailwind majors are migrations, not bumps: v4 (landed in #593, issue #586)
