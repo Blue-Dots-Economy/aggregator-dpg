@@ -18,10 +18,11 @@ vi.mock('./network-config.js', () => ({ getNetworkConfig }));
 const fileGetSchema = vi.fn();
 const fileGetValidator = vi.fn();
 vi.mock('@aggregator-dpg/schema-loader/file', () => ({
-  FileSchemaLoader: vi.fn().mockImplementation(() => ({
-    getSchema: fileGetSchema,
-    getValidator: fileGetValidator,
-  })),
+  // vitest 4 requires a *constructible* implementation for a mock invoked with
+  // `new` — an arrow function throws "is not a constructor".
+  FileSchemaLoader: vi.fn(function () {
+    return { getSchema: fileGetSchema, getValidator: fileGetValidator };
+  }),
 }));
 
 vi.mock('./config.js', () => ({ config: { SCHEMA_ROOT_DIR: './config/schemas' } }));

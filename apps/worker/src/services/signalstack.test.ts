@@ -14,7 +14,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const writerCtorCalls: unknown[] = [];
 vi.mock('@aggregator-dpg/signalstack-writer/http', () => ({
-  HttpSignalStackWriter: vi.fn().mockImplementation((opts: unknown) => {
+  // vitest 4 requires a *constructible* implementation for a mock invoked with
+  // `new` — an arrow function throws "is not a constructor".
+  HttpSignalStackWriter: vi.fn(function (opts: unknown) {
     writerCtorCalls.push(opts);
     return { __fakeWriter: true, opts };
   }),
