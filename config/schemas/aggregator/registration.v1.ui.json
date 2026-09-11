@@ -1,6 +1,6 @@
 {
   "ui:layout": "stack",
-  "ui:order": ["name", "type", "url", "contact", "locations", "consent"],
+  "ui:order": ["name", "sub_org", "type", "url", "contact", "locations", "consent"],
   "locations": {
     "ui:options": {
       "addable": true,
@@ -108,5 +108,8 @@
         "label": false
       }
     }
+  },
+  "sub_org": {
+    "ui:placeholder": "e.g. GarvSe Centre, Dodbalapur"
   }
 }

@@ -14,6 +14,13 @@
       "maxLength": 200,
       "examples": ["SkillBridge Network", "TRRAIN", "Pankh Foundation"]
     },
+    "sub_org": {
+      "type": "string",
+      "title": "Sub-Org / Division / Vertical / Institution Name",
+      "description": "Any sub-identity needed to identify and track this unit separately. May be the same as the organisation name.",
+      "maxLength": 200,
+      "examples": ["GarvSe Centre, Dodbalapur"]
+    },
     "type": {
       "type": "string",
       "title": "Aggregator Type",
