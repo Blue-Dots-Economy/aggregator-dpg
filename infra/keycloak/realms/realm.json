@@ -712,7 +712,7 @@
     {
       "clientId": "campaign-manager",
       "name": "Campaign Manager",
-      "description": "Confidential client for the external campaign-manager system (#692). Its service account is the client_credentials system caller for the non-PII dump route; directAccessGrantsEnabled additionally lets a human coordinator obtain a password-grant token for the existing org-scoped campaign routes on this same client. Not used for browser login.",
+      "description": "Confidential client for the external campaign-manager system (#692). Service account is the client_credentials caller for the non-PII dump route; direct grant lets a coordinator obtain a token for org-scoped campaign routes. Not for browser login.",
       "enabled": true,
       "publicClient": false,
       "clientAuthenticatorType": "client-secret",
