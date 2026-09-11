@@ -11,7 +11,7 @@
     "consent"
   ],
   "display_name": {
-    "ui:placeholder": "e.g. Enable India",
+    "ui:placeholder": "e.g. ABC Limited",
     "ui:autofocus": true
   },
   "state": {

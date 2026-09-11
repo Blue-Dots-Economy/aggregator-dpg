@@ -57,7 +57,7 @@
     }
   },
   "name": {
-    "ui:placeholder": "e.g. SkillBridge Network",
+    "ui:placeholder": "e.g. ABC Limited",
     "ui:autofocus": true
   },
   "type": {
@@ -66,7 +66,7 @@
     "ui:enumNames": ["Seeker", "Service Provider"]
   },
   "url": {
-    "ui:placeholder": "https://yourorg.in",
+    "ui:placeholder": "https://abclimited.org",
     "ui:options": {
       "inputType": "url"
     }

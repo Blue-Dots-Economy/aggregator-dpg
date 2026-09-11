@@ -12,7 +12,7 @@
       "title": "Organisation Name",
       "minLength": 2,
       "maxLength": 200,
-      "examples": ["Enable India", "Pankh Foundation"]
+      "examples": ["ABC Limited", "XYZ Foundation"]
     },
     "website": {
       "type": "string",
@@ -20,7 +20,7 @@
       "format": "uri",
       "maxLength": 2048,
       "description": "Not required at signup; can be added or edited later.",
-      "examples": ["https://enableindia.org"],
+      "examples": ["https://abclimited.org"],
       "x-updatable": true
     },
     "aggregator_type": {
@@ -110,7 +110,7 @@
           "title": "Email",
           "format": "email",
           "maxLength": 320,
-          "examples": ["owner@enableindia.org"]
+          "examples": ["owner@abclimited.org"]
         }
       }
     },

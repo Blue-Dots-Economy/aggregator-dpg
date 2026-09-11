@@ -12,7 +12,7 @@
       "title": "Organisation Name",
       "minLength": 2,
       "maxLength": 200,
-      "examples": ["SkillBridge Network", "TRRAIN", "Pankh Foundation"]
+      "examples": ["ABC Limited", "XYZ Foundation"]
     },
     "type": {
       "type": "string",
@@ -31,7 +31,7 @@
       "title": "Website",
       "format": "uri",
       "maxLength": 2048,
-      "examples": ["https://skillbridge.in"],
+      "examples": ["https://abclimited.org"],
       "x-updatable": true
     },
     "locations": {
@@ -126,7 +126,7 @@
           "title": "Email",
           "format": "email",
           "maxLength": 320,
-          "examples": ["admin@skillbridge.in"]
+          "examples": ["admin@abclimited.org"]
         }
       }
     },
