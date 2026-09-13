@@ -1,6 +1,12 @@
 /**
- * BFF proxy: CSV template / sample download.
- *   GET /api/bulk-uploads/template?participant_type=seeker[&sample=10]
+ * BFF proxy: bulk-upload template download (CSV or XLSX).
+ *   GET /api/bulk-uploads/template?participant_type=seeker[&sample=10][&format=xlsx]
+ *
+ * The body is forwarded as BYTES, not text. `format=xlsx` returns a workbook
+ * (#564), and reading that through `.text()` would decode it as UTF-8 and
+ * corrupt every byte outside the ASCII range — a silently broken download
+ * rather than a failure. `arrayBuffer` is byte-exact for CSV too, so one path
+ * serves both.
  */
 
 import { type NextRequest, NextResponse } from 'next/server';
@@ -17,7 +23,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       const text = await upstream.text();
       return new NextResponse(text || 'upstream error', { status: upstream.status });
     }
-    const body = await upstream.text();
+    const body = await upstream.arrayBuffer();
     const ct = upstream.headers.get('content-type') ?? 'text/csv; charset=utf-8';
     const cd = upstream.headers.get('content-disposition') ?? 'attachment; filename="template.csv"';
     return new NextResponse(body, {

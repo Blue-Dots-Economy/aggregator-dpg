@@ -7,7 +7,7 @@
  * pagination, refresh) is exercised through the one default export,
  * `DashboardPageRoot`.
  *
- * Data + config hooks (`useDashboard`, `useOppProviders`, `useAggregatorConfig`,
+ * Data + config hooks (`useDashboard`, `useAggregatorConfig`,
  * `useProfileRaw`) and the two service modules the page calls directly
  * (`dashboardService`, `DASHBOARD_BULK_ACTIONS`) are mocked as black boxes per
  * their exported shapes — no real network/BFF calls. `Topbar` and `Sidebar`-
@@ -18,7 +18,7 @@
  *
  * Note on lifecycle filtering: the page's own `LIFECYCLE_FILTER_VALUES` is
  * `['all', 'draft', 'live']` only — `paused`/`account_only` are values the
- * `/v1/dashboard/items` API-level filter supports (see root CLAUDE.md) but
+ * `/v1/dashboard` API-level filter supports (see root CLAUDE.md) but
  * this page's dropdown does not surface them today, so only `all`/`draft`/
  * `live` are exercised below.
  */
@@ -90,10 +90,8 @@ vi.mock('@/components/shell/Topbar', () => ({
 }));
 
 const mockUseDashboard = vi.fn();
-const mockUseOppProviders = vi.fn();
 vi.mock('@/hooks/useDashboard', () => ({
   useDashboard: (...args: unknown[]) => mockUseDashboard(...args),
-  useOppProviders: (...args: unknown[]) => mockUseOppProviders(...args),
 }));
 
 // `vi.hoisted` so these fixtures exist before the (hoisted) `vi.mock` factory
@@ -250,7 +248,6 @@ describe('<DashboardPageRoot />', () => {
     nav.resetSearchParams();
     mockUseAggregatorConfig.mockReturnValue({ data: CFG_FIXTURE });
     mockUseProfileRaw.mockReturnValue({ data: { type: 'seeker' } });
-    mockUseOppProviders.mockReturnValue({ data: [], isLoading: false, isError: false });
     mockUseDashboard.mockReturnValue({
       data: dashboardPageFixture(),
       isLoading: false,
@@ -433,6 +430,29 @@ describe('<DashboardPageRoot />', () => {
   });
 
   describe('status filter popover', () => {
+    it('bounds its own height so options stay reachable on a short page', async () => {
+      // The panel hangs below a trigger that sits at the bottom of the
+      // toolbar. Applying a filter that matches nothing collapses the table,
+      // so the page stops scrolling and anything past the fold used to be
+      // unreachable — no page scroll, and the panel did not scroll either.
+      renderPage();
+      await userEvent.click(screen.getByRole('button', { name: /All filters/i }));
+
+      const menu = screen.getByRole('menu');
+      expect(menu.className).toContain('overflow-y-auto');
+      expect(menu.className).toMatch(/max-h-/);
+    });
+
+    it('labels the reset option distinctly from the lifecycle filter', async () => {
+      // "All statuses" sat next to "All lifecycles" and read as its twin.
+      renderPage();
+      await userEvent.click(screen.getByRole('button', { name: /All filters/i }));
+
+      const menu = screen.getByRole('menu');
+      expect(within(menu).getByText('Any status')).toBeInTheDocument();
+      expect(within(menu).queryByText('All statuses')).toBeNull();
+    });
+
     it('lists rollup-derived status options and refetches with the selected status', async () => {
       renderPage();
       await userEvent.click(screen.getByRole('button', { name: /All filters/i }));

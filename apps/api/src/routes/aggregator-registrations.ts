@@ -252,6 +252,21 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
         // the reclaim path and the new-registration path below.
         const serverConsent = stampConsent(body.consent);
 
+        // Rate limit per (ip, email) (spec A6). This bounds submission volume on
+        // an endpoint that provisions a Keycloak user and sends mail, so it has
+        // to apply in BOTH modes — it used to sit inside the org-hierarchy
+        // branch below, which left the flat deployment shape unlimited.
+        // Deliberately fail-open (see `submit-rate.ts`): this is a public
+        // pre-login path, and a downed Redis must not block registration.
+        const rl = await checkSubmitRate(`${req.ip}|${contact.email}`);
+        if (!rl.allowed) {
+          void reply.header('Retry-After', String(rl.retryAfterSeconds));
+          throw httpError('RATE_LIMITED', {
+            detail: `Retry in ${rl.retryAfterSeconds}s.`,
+            fields: { retry_after_seconds: rl.retryAfterSeconds },
+          });
+        }
+
         // Org-hierarchy gate (spec §6.2). When enabled, a coordinator must select
         // an *active* org; the link lives in `aggregators.parent_org_id`.
         let parentOrgId: string | null = null;
@@ -260,15 +275,6 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
         // for provenance so the approving owner can see who was originally targeted.
         let inviteEmailClaim: string | null = null;
         if (orgHierarchyEnabled()) {
-          // Rate limit per (ip, email) (spec A6).
-          const rl = await checkSubmitRate(`${req.ip}|${contact.email}`);
-          if (!rl.allowed) {
-            void reply.header('Retry-After', String(rl.retryAfterSeconds));
-            throw httpError('RATE_LIMITED', {
-              detail: `Retry in ${rl.retryAfterSeconds}s.`,
-              fields: { retry_after_seconds: rl.retryAfterSeconds },
-            });
-          }
           const orgStore = getAggregatorOrgStore();
           const reqInvite = (req.body as { invite?: string }).invite;
 

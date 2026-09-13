@@ -8,11 +8,11 @@ const { setLocale } = await import('@/i18n/locale-cookie');
 describe('setLocale', () => {
   beforeEach(() => {
     setMock.mockReset();
-    delete process.env.NEXT_PUBLIC_ENABLED_LANGUAGES;
+    delete process.env.ENABLED_LANGUAGES;
   });
 
   afterEach(() => {
-    delete process.env.NEXT_PUBLIC_ENABLED_LANGUAGES;
+    delete process.env.ENABLED_LANGUAGES;
   });
 
   it('persists an enabled locale to the NEXT_LOCALE cookie', async () => {
@@ -30,7 +30,7 @@ describe('setLocale', () => {
   });
 
   it('rejects a locale not in the enabled set even if globally supported', async () => {
-    process.env.NEXT_PUBLIC_ENABLED_LANGUAGES = 'en,hi';
+    process.env.ENABLED_LANGUAGES = 'en,hi';
     await setLocale('kn');
     expect(setMock).toHaveBeenCalledWith('NEXT_LOCALE', 'en', expect.any(Object));
   });

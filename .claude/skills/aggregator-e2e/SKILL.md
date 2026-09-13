@@ -159,8 +159,11 @@ when something fails.
 7. **Registration links** — `/onboarding/links`: create, QR renders (derived
    client-side, no S3), activate/deactivate, then open the public link in a
    fresh context and submit a participant.
-8. **Bulk upload** — `/onboarding/bulk-uploads`: download template, upload
-   `config/$NETWORK/bulk-samples/seeker.csv` → watch the worker process it →
+8. **Bulk upload** — `/onboarding/bulk-uploads`: download the template in **both**
+   formats (`?format=xlsx` and the CSV default — the shipped
+   `config/$NETWORK/bulk-samples/*.csv` were deleted in #564; both are now
+   generated from the live schema), fill a couple of rows from the workbook's
+   "3. Sample data" tab, save as CSV, upload it → watch the worker process it →
    row counts land → download `errors.csv`. Then upload a deliberately broken CSV
    (missing a required column, and a file with **blank optional cells and >20
    rows** — the shape that used to trip PapaParse header re-derivation) and

@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-const KeycloakAdapterMock = vi.fn().mockImplementation((opts: unknown) => ({ opts }));
+// `function`, not an arrow — getOidcAdapter() calls `new KeycloakAdapter(...)`,
+// and vitest 4 no longer tolerates a non-constructible mock implementation.
+const KeycloakAdapterMock = vi.fn(function (opts: unknown) {
+  return { opts };
+});
 vi.mock('@/lib/oidc/keycloak', () => ({
   KeycloakAdapter: KeycloakAdapterMock,
   oidcGenerators: { state: vi.fn() },

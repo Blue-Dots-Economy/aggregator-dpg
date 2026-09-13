@@ -28,7 +28,7 @@ and is always run **from this directory**:
 
 ```bash
 cd aggregator-dpg/local-setup
-cp .env.example .env          # then set ADMIN_EMAILS (see LOCAL_SETUP.md §2)
+cp .env.example .env          # then ./gen-secrets.sh, and set ADMIN_EMAILS (see LOCAL_SETUP.md §2)
 # once; safe to re-run
 grep -qE '^[[:space:]]*127\.0\.0\.1[[:space:]]+keycloak([[:space:]]|$)' /etc/hosts \
   || sudo sh -c "printf '\n127.0.0.1 keycloak\n' >> /etc/hosts"
@@ -41,14 +41,15 @@ Mailpit → http://localhost:8025 · Keycloak → http://localhost:8080/admin
 
 ## Contents
 
-| File                                 | Purpose                                                    |
-| ------------------------------------ | ---------------------------------------------------------- |
-| `docker-compose.yml`                 | the unified stack (both DPGs + shared infra)               |
-| `.env.example`                       | single root env with working dev defaults — copy to `.env` |
-| `LOCAL_SETUP.md`                     | from-scratch setup guide, both run modes, troubleshooting  |
-| `infra/postgres.Dockerfile`          | Postgres 17 + PostGIS + pgvector image                     |
-| `infra/postgres-init/`               | creates the `signals` + `keycloak` DBs on first boot       |
-| `infra/signals-bootstrap.Dockerfile` | one-shot signals migrate + seed tools image                |
+| File                                 | Purpose                                                                   |
+| ------------------------------------ | ------------------------------------------------------------------------- |
+| `docker-compose.yml`                 | the unified stack (both DPGs + shared infra)                              |
+| `.env.example`                       | single root env — copy to `.env`, then run `gen-secrets.sh`               |
+| `gen-secrets.sh`                     | fills every `CHANGE_ME_*` placeholder in `.env` with a fresh random value |
+| `LOCAL_SETUP.md`                     | from-scratch setup guide, both run modes, troubleshooting                 |
+| `infra/postgres.Dockerfile`          | Postgres 17 + PostGIS + pgvector image                                    |
+| `infra/postgres-init/`               | creates the `signals` + `keycloak` DBs on first boot                      |
+| `infra/signals-bootstrap.Dockerfile` | one-shot signals migrate + seed tools image                               |
 
 > This is **local dev only**. The repo-root `../docker-compose.yml` is the
 > separate VM/prod nginx+certbot ingress variant for aggregator-dpg alone.

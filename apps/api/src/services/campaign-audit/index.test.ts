@@ -10,13 +10,21 @@
  * needs its own direct test rather than relying on the throwing fake to
  * stand in for it.
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { err, ok } from '@aggregator-dpg/shared-primitives/result';
 import { UpstreamError } from '@aggregator-dpg/shared-primitives/errors';
 import { logger } from '../../logger.js';
 import { safeAudit } from './index.js';
 
 describe('safeAudit', () => {
+  // Each test spies on the same `logger.error`. vitest 4 hands back the EXISTING
+  // spy when a method is already spied, call history included, so without this
+  // the "does not log" assertion sees the previous test's call and fails. Under
+  // vitest 3 each `vi.spyOn` handed back a fresh spy and the leak was invisible.
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('does not throw and logs at error when the writer resolves err(...)', async () => {
     const errorSpy = vi.spyOn(logger, 'error');
     const cause = new UpstreamError('campaign audit insert failed', {

@@ -15,7 +15,10 @@ const loadMock = vi.fn();
 const loaderCtorCalls: unknown[] = [];
 
 vi.mock('@aggregator-dpg/network-config/loader', () => ({
-  FileNetworkConfigLoader: vi.fn().mockImplementation((opts: unknown) => {
+  // vitest 4 requires a *constructible* implementation for a mock invoked with
+  // `new` — an arrow function throws "is not a constructor". `function` works and
+  // still overrides `this` by returning an object.
+  FileNetworkConfigLoader: vi.fn(function (opts: unknown) {
     loaderCtorCalls.push(opts);
     return { load: loadMock };
   }),

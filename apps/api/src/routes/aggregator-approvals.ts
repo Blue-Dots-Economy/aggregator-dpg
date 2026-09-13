@@ -44,6 +44,7 @@ import {
 import { renderConfirmPage, renderResultPage } from '../views/approval-pages.js';
 import { mintReviewToken } from '../services/registration-notify.js';
 import { sendHtml, sendPage, missingTokenPage, verifyTokenForId } from './approval-shared.js';
+import { checkApprovalVerifyRate } from '../services/approval-verify-rate.js';
 import type { Aggregator } from '../services/aggregator-store/index.js';
 import { KC_ATTR } from '../services/idp-admin/index.js';
 import type { IdpUser } from '../services/idp-admin/index.js';
@@ -62,6 +63,81 @@ const ReadQuerySchema = z.object({
   token: z.string().optional(),
   intent: z.string().optional(),
 });
+
+/**
+ * Per-IP throttle shared by the three approval-token verify entrypoints
+ * (read / decision / renew). Defence-in-depth against brute-forcing a forged
+ * token — the renew path in particular accepts an expired-but-signature-valid
+ * token, so it is the most replayable. Renders an HTML 429 page (these are all
+ * browser flows) and returns true when the caller has been rate-limited.
+ *
+ * @param req - The inbound request (its `ip` is the bucket key).
+ * @param reply - The reply to render the 429 page onto when limited.
+ * @returns True if the request was rate-limited (caller must stop).
+ */
+async function approvalVerifyRateLimited(
+  req: FastifyRequest,
+  reply: FastifyReply,
+): Promise<boolean> {
+  const ip = (req.ip ?? '0.0.0.0').toString();
+  const rate = await checkApprovalVerifyRate(ip);
+  if (!rate.allowed) {
+    void reply.header('Retry-After', String(rate.retryAfterSeconds));
+    req.log.warn({
+      operation: 'aggregator-approval.verify',
+      status: 'rate_limited',
+      retry_after_seconds: rate.retryAfterSeconds,
+    });
+    sendHtml(
+      reply,
+      429,
+      renderResultPage({
+        status: 'error',
+        title: 'Too many attempts',
+        message: 'Too many attempts from this location. Please wait and try again.',
+      }),
+    );
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Emits a structured audit log entry for an admin approval action.
+ *
+ * These routes are reached by an admin clicking a signed link in an email —
+ * there is no Keycloak-authenticated admin identity to attribute the action
+ * to (see `docs/security/admin-approval-auth-design.md` for why, and the
+ * proposed fix). `identity_verified: false` makes that gap explicit in every
+ * audit entry rather than silently implying stronger attribution than the
+ * system actually has.
+ *
+ * @param req - The Fastify request handling the admin action.
+ * @param fields - Action-specific context (aggregator id, action name, and
+ *   optional decision outcome) to merge into the log entry.
+ */
+function logApprovalAudit(
+  req: FastifyRequest,
+  fields: {
+    aggregatorId: string;
+    action: 'view_confirm' | 'decision' | 'renew';
+    decision?: 'approve' | 'reject';
+  },
+): void {
+  req.log.info(
+    {
+      operation: 'aggregator-approval.audit',
+      status: 'success',
+      aggregator_id: fields.aggregatorId,
+      action: fields.action,
+      decision: fields.decision ?? null,
+      identity_verified: false,
+      client_ip: req.ip,
+      request_id: req.id,
+    },
+    'admin approval action',
+  );
+}
 
 export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Promise<void> {
   app.get(
@@ -83,6 +159,8 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
       }>,
       reply: FastifyReply,
     ) => {
+      if (await approvalVerifyRateLimited(req, reply)) return;
+
       const aggregatorId = req.params.id;
       const { token } = req.query;
 
@@ -124,6 +202,8 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
         return sendHtml(reply, 200, renderResultPage(alreadyDecidedView(prior)));
       }
 
+      logApprovalAudit(req, { aggregatorId, action: 'view_confirm' });
+
       return sendHtml(
         reply,
         200,
@@ -155,6 +235,8 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
       },
     },
     async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+      if (await approvalVerifyRateLimited(req, reply)) return;
+
       const aggregatorId = req.params.id;
       const log = req.log.child({
         operation: 'aggregator-approval.decide',
@@ -220,6 +302,8 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
           );
         }
       }
+
+      logApprovalAudit(req, { aggregatorId, action: 'decision', decision: parsed.data.decision });
 
       const store = getAggregatorStore();
       const idp = getIdpAdmin();
@@ -554,6 +638,8 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
       },
     },
     async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+      if (await approvalVerifyRateLimited(req, reply)) return;
+
       const aggregatorId = req.params.id;
       const body = (req.body ?? {}) as { token?: string };
       const token = typeof body.token === 'string' ? body.token : '';
@@ -570,6 +656,8 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
       if (prior) {
         return sendHtml(reply, 200, renderResultPage(alreadyDecidedView(prior)));
       }
+
+      logApprovalAudit(req, { aggregatorId, action: 'renew' });
 
       // Mint a fresh review token, preserving the original org binding (so the
       // decision handler's parent_org_id check still passes), and land the

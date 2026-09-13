@@ -5,6 +5,7 @@ import type { ReactNode } from 'react';
 import type * as UseAggregatorConfigModule from '@/hooks/useAggregatorConfig';
 import messages from '@/i18n/messages/en.json';
 import { LegalDocumentView, type LegalGroup } from '@/components/legal/LegalDocumentView';
+import { EnabledLocalesProvider } from '@/i18n/EnabledLocalesProvider';
 
 // The app bar (item 2 of the consent-scroll-gate port) reads the brand logo
 // and theme mode. Neither is under test here, so both are stubbed to their
@@ -25,10 +26,13 @@ vi.mock('@/lib/theme-mode', () => ({
   useThemeMode: () => ({ mode: 'light', setMode: vi.fn(), toggle: vi.fn() }),
 }));
 
+// Mirrors the root layout's providers. `EnabledLocalesProvider` is needed for
+// the embedded LanguageSwitcher to render at all — without it the switcher
+// falls back to English only and hides itself.
 function Wrapper({ children }: { children: ReactNode }) {
   return (
     <NextIntlClientProvider locale="en" messages={messages}>
-      {children}
+      <EnabledLocalesProvider value={['en', 'kn', 'hi']}>{children}</EnabledLocalesProvider>
     </NextIntlClientProvider>
   );
 }

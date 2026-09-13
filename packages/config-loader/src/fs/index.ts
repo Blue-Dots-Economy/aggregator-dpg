@@ -24,6 +24,7 @@ import { validateConfig } from '../validate.js';
 import { startWatcher } from './watcher.js';
 export { resolveEnv } from '../env.js';
 export { loadConsentConfig } from './consent-loader.js';
+export { loadSignalsRealmRoles } from './signals-roles-loader.js';
 
 /**
  * Loads YAML from disk. Returns an empty object if the file does not exist.

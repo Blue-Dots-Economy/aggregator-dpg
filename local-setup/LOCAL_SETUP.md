@@ -102,16 +102,17 @@ gateway for local setup — the unified stack substitutes MinIO (for S3), Mailpi
 ### 1.2 Functional prerequisites (things that aren't software)
 
 These are the human/config inputs the apps expect. The unified `.env.example`
-pre-fills everything except the first item.
+pre-fills everything except the first item and the secrets, which
+`gen-secrets.sh` generates for you.
 
-| Prerequisite                                                                                       | Why it's needed                                                                                                                        | Local default                                                                                                                              |
-| -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Admin email address** (`ADMIN_EMAILS`)                                                           | aggregator-dpg emails new-aggregator **approval requests** here. You approve/reject from this inbox to complete the registration flow. | You must set it. Any address works — the mail is captured by Mailpit, not actually delivered.                                              |
-| **SMTP account**                                                                                   | Sending real approval + OTP email in staging/prod.                                                                                     | Not needed locally (Mailpit catches all). For real email use a Gmail **App Password** (not your login password) or Amazon SES.             |
-| **SMS / OTP provider**                                                                             | Delivering login OTPs by phone in prod (Twilio / AWS SNS / MSG91).                                                                     | Not needed locally — Keycloak's `log` provider writes the code to `docker compose logs keycloak`; signals-dpg sets `CREATE_TEST_OTP=true`. |
-| **S3 bucket + credentials**                                                                        | aggregator bulk-uploads, QR PNGs, error CSVs in prod.                                                                                  | Not needed locally — MinIO provides an S3-compatible endpoint and the bucket is auto-created.                                              |
-| **App secrets** (`SESSION_KEY`, `APPROVAL_TOKEN_SECRET`, `SIGNALS_AUTH_SECRET`, `SIGNALS_PII_KEY`) | Signing sessions/approval tokens, encrypting PII.                                                                                      | Pre-filled dev values in `.env.example`. Regenerate for any shared host.                                                                   |
-| **`127.0.0.1 keycloak` in `/etc/hosts`**                                                           | So the browser and the web container resolve the OIDC issuer to the _same_ Keycloak (issuer-claim validation).                         | You add it once (§2).                                                                                                                      |
+| Prerequisite                                                                                                                                                                             | Why it's needed                                                                                                                        | Local default                                                                                                                              |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Admin email address** (`ADMIN_EMAILS`)                                                                                                                                                 | aggregator-dpg emails new-aggregator **approval requests** here. You approve/reject from this inbox to complete the registration flow. | You must set it. Any address works — the mail is captured by Mailpit, not actually delivered.                                              |
+| **SMTP account**                                                                                                                                                                         | Sending real approval + OTP email in staging/prod.                                                                                     | Not needed locally (Mailpit catches all). For real email use a Gmail **App Password** (not your login password) or Amazon SES.             |
+| **SMS / OTP provider**                                                                                                                                                                   | Delivering login OTPs by phone in prod (Twilio / AWS SNS / MSG91).                                                                     | Not needed locally — Keycloak's `log` provider writes the code to `docker compose logs keycloak`; signals-dpg sets `CREATE_TEST_OTP=true`. |
+| **S3 bucket + credentials**                                                                                                                                                              | aggregator bulk-uploads, QR PNGs, error CSVs in prod.                                                                                  | Not needed locally — MinIO provides an S3-compatible endpoint and the bucket is auto-created.                                              |
+| **App secrets + infra passwords** (`SESSION_KEY`, `APPROVAL_TOKEN_SECRET`, `SIGNALS_AUTH_SECRET`, `SIGNALS_PII_KEY`, `POSTGRES_PASSWORD`, `SIGNALS_REDIS_PASSWORD`, `KC_ADMIN_PASSWORD`) | Signing sessions/approval tokens, encrypting PII, and the local Postgres/Redis/Keycloak logins.                                        | Ship as `CHANGE_ME_*` placeholders. Run `./gen-secrets.sh` after copying `.env` — it fills each one with a fresh random value.             |
+| **`127.0.0.1 keycloak` in `/etc/hosts`**                                                                                                                                                 | So the browser and the web container resolve the OIDC issuer to the _same_ Keycloak (issuer-claim validation).                         | You add it once (§2).                                                                                                                      |
 
 ### 1.3 Clone both repos
 
@@ -136,15 +137,16 @@ in place at `aggregator-dpg/local-setup/`), skip this step.
 ```bash
 cd aggregator-dpg/local-setup     # all Track A commands run from here
 cp .env.example .env
+./gen-secrets.sh                  # fills every CHANGE_ME_* with a random value
 ```
 
-Open `.env` and set the **one required edit**:
+Then open `.env` and set the **one required edit**:
 
 ```dotenv
 ADMIN_EMAILS=you@yourorg.com
 ```
 
-Everything else has working dev defaults. Then add the hosts entry (once):
+Everything else has working defaults. Then add the hosts entry (once):
 
 ```bash
 # macOS / Linux
@@ -347,7 +349,8 @@ app images:
 
 ```bash
 cd aggregator-dpg/local-setup
-cp .env.example .env                                # then set ADMIN_EMAILS=you@yourorg.com
+cp .env.example .env
+./gen-secrets.sh                                    # then set ADMIN_EMAILS=you@yourorg.com
 # once (browser + host apps resolve the OIDC issuer); safe to re-run
 grep -qE '^[[:space:]]*127\.0\.0\.1[[:space:]]+keycloak([[:space:]]|$)' /etc/hosts \
   || sudo sh -c "printf '\n127.0.0.1 keycloak\n' >> /etc/hosts"

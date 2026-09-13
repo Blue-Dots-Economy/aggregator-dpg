@@ -66,6 +66,41 @@ describe('POST /api/dashboard/export/profiles', () => {
     expect(body.error?.code).toBe('TOO_MANY_IDS');
   });
 
+  it('relays X-Export-Skipped-Count so the browser can report withheld rows', async () => {
+    mockCallApi.mockResolvedValue(
+      new Response('id,email\n1,a@x.com\n', {
+        status: 200,
+        headers: {
+          'content-type': 'text/csv; charset=utf-8',
+          'content-disposition': 'attachment; filename="profiles.csv"',
+          'x-export-skipped-count': '2',
+        },
+      }),
+    );
+    const req = new Request('http://localhost/api/dashboard/export/profiles', {
+      method: 'POST',
+      body: JSON.stringify({ item_ids: ['1', '2', '3'], domain: 'seeker' }),
+    });
+    const res = await POST(req as never);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('X-Export-Skipped-Count')).toBe('2');
+  });
+
+  it('omits X-Export-Skipped-Count when the API does not send one', async () => {
+    mockCallApi.mockResolvedValue(
+      new Response('id,email\n', {
+        status: 200,
+        headers: { 'content-type': 'text/csv; charset=utf-8' },
+      }),
+    );
+    const req = new Request('http://localhost/api/dashboard/export/profiles', {
+      method: 'POST',
+      body: JSON.stringify({ item_ids: ['1'], domain: 'seeker' }),
+    });
+    const res = await POST(req as never);
+    expect(res.headers.get('X-Export-Skipped-Count')).toBeNull();
+  });
+
   it('returns 401 when there is no active session', async () => {
     mockCallApi.mockRejectedValue(new Error('no active session'));
     const req = new Request('http://localhost/api/dashboard/export/profiles', {

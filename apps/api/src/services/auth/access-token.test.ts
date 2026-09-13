@@ -151,9 +151,6 @@ describe('requireApproved + signalstack backfill', () => {
       async onboard() {
         return err(new UpstreamError('not used', { code: 'X' }));
       }
-      async listItemsByAggregator() {
-        return err(new UpstreamError('not used', { code: 'X' }));
-      }
       async upsertAggregator() {
         return err(
           new UpstreamError('signalstack down', {
@@ -171,9 +168,6 @@ describe('requireApproved + signalstack backfill', () => {
         return err(new UpstreamError('not used', { code: 'X' }));
       }
       async probeUser() {
-        return err(new UpstreamError('not used', { code: 'X' }));
-      }
-      async getItem() {
         return err(new UpstreamError('not used', { code: 'X' }));
       }
     }

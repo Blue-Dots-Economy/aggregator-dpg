@@ -16,6 +16,7 @@ import { _resetTokenKey } from '../services/approval-token.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
 import { ConsentLedgerFake } from '@aggregator-dpg/consent-ledger/testing';
 import { _setConsentLedger } from '../services/consent-ledger/index.js';
+import { _setSubmitRateChecker } from '../services/submit-rate.js';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import type * as ConfigLoaderFs from '@aggregator-dpg/config-loader/fs';
 
@@ -56,6 +57,12 @@ describe('POST /v1/aggregator-registrations/create', () => {
     );
     loadConsentConfigMock.mockImplementation(actualLoader.loadConsentConfig);
 
+    // Pin the limiter to always-allow: these cases are not about throttling,
+    // and the default checker talks to a real Redis, where every file shares
+    // the one `(ip, email)` bucket and exhausts it mid-run. Cases that DO
+    // assert a 429 override this per test.
+    _setSubmitRateChecker(async () => ({ allowed: true, retryAfterSeconds: 0 }));
+
     _setAggregatorStore(aggregatorStore);
     _setAggregatorProfileStore(profileStore);
     _setIdpAdmin(idp);
@@ -73,6 +80,7 @@ describe('POST /v1/aggregator-registrations/create', () => {
 
   afterAll(async () => {
     await app?.close();
+    _setSubmitRateChecker(null);
     _setAggregatorStore(null);
     _setAggregatorProfileStore(null);
     _setIdpAdmin(null);
@@ -679,5 +687,34 @@ describe('POST /v1/aggregator-registrations/create', () => {
       expect(validTill).toBeLessThan(now + fiveYearsMs + 60_000);
       expect(validTill).toBeGreaterThan(now + fiveYearsMs - 60_000);
     }
+  });
+  it('throttles a submit when the rate checker denies, with the org hierarchy off (429)', async () => {
+    // The limiter used to sit inside the `orgHierarchyEnabled()` branch, so a
+    // flat-mode deployment — the shape this whole file exercises — accepted
+    // unlimited submissions on a route that provisions a KC user and sends mail.
+    _setSubmitRateChecker(async () => ({ allowed: false, retryAfterSeconds: 42 }));
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/aggregator-registrations/create',
+      headers: AUTH_HEADER,
+      payload: validBody,
+    });
+    expect(res.statusCode).toBe(429);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('RATE_LIMITED');
+    expect(res.headers['retry-after']).toBe('42');
+  });
+
+  it('creates nothing when the submit limiter denies', async () => {
+    _setSubmitRateChecker(async () => ({ allowed: false, retryAfterSeconds: 1 }));
+    await app.inject({
+      method: 'POST',
+      url: '/v1/aggregator-registrations/create',
+      headers: AUTH_HEADER,
+      payload: validBody,
+    });
+    // Throttled before any provisioning — no KC user and no mail.
+    const kcUser = await idp.findByEmail(validBody.contact.email);
+    expect(kcUser.ok && kcUser.value).toBeNull();
+    expect(mailer.outbox.length).toBe(0);
   });
 });
