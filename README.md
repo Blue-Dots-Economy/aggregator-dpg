@@ -167,7 +167,7 @@ Four areas, matching PRD § 4:
 ### 4.3 Onboard
 
 - **Overall health** card — total registered / verified / discoverable (from Signal Processing Service).
-- **Bulk upload** — upload CSV against a seeker or provider template; Aggregator API validates rows, calls Signals Stack bulk-create endpoints, records a `bulk_upload_batch` row, shows per-row success/flag status. Bulk-created accounts are consent-gated: the success message tells the coordinator that "Accounts will be live once the user logs in on the platform or via the call" (discoverability is unlocked only after the participant consents at first contact).
+- **Bulk upload** — download a template for the seeker or provider type, fill it in, upload the result as CSV; Aggregator API validates rows, calls Signals Stack bulk-create endpoints, records a `bulk_upload_batch` row, shows per-row success/flag status. Bulk-created accounts are consent-gated: the success message tells the coordinator that "Accounts will be live once the user logs in on the platform or via the call" (discoverability is unlocked only after the participant consents at first contact).
 - **Link & QR generation** — Aggregator fills required fields (role, campaign label), system generates a signed link and QR image. Link carries `aggregator_id` and `mode` as query params; target registration page records the source mode. Join count per link is pulled from Signal Processing Service (mode-wise counts filtered by `link_id`, assuming the Signals Stack supports `link_id` attribution; see open item in § 8.1).
 - **Flagged profiles** — list of profiles with `profile_completion_pct < threshold` or format errors from the most recent bulk upload. Action = trigger a follow-up (logged as intent in MVP; actual outreach is out of scope).
 
@@ -208,6 +208,7 @@ Node.js + TypeScript, **Fastify** (as built). Stateless, deployed behind the pla
 | POST      | `/v1/onboard/links`              | Create onboarding link (returns URL + QR payload) |
 | GET       | `/v1/onboard/links`              | List links with join counts per mode              |
 | POST      | `/v1/onboard/bulk-uploads`       | Multipart CSV upload; returns batch id            |
+| GET       | `/v1/bulk-uploads/template`      | Template download; `?participant_type=` + `?format=csv\|xlsx` |
 | GET       | `/v1/onboard/bulk-uploads/:id`   | Batch status + per-row outcomes                   |
 | GET       | `/v1/onboard/flagged-profiles`   | Incomplete/flagged profile list                   |
 | GET       | `/v1/blue-dots/summary`          | Aggregate status + participation metrics          |
@@ -290,9 +291,18 @@ Diagrams in the PRD (Flows 1–4) are authoritative. Implementation notes:
 
 ### 6.3 Bulk upload
 
-1. Aggregator uploads CSV → API validates against template schema (seeker or provider).
+1. Aggregator uploads CSV → API validates against template schema (seeker or provider). See the template formats below.
 2. For each valid row, API calls the Signals Stack bulk-create endpoint; failures are recorded with `error_code`.
 3. `bulk_upload_batch` and `bulk_upload_row` rows persisted; summary shown immediately on completion.
+
+**Template formats** (`GET /v1/bulk-uploads/template?participant_type=seeker|provider`, #564). Both are generated from the participant schema resolved out of `network.json` and are gated on the caller's registered `aggregator_type` — nothing is shipped in the repo. The previously committed `bulk-samples/*.csv` were deleted because they had rotted into templates the parser itself rejects.
+
+| `?format=` | Returns |
+| --- | --- |
+| `csv` (default) | `text/csv` — the header row plus one example row. What a caller generating its own file needs. |
+| `xlsx` | A four-tab workbook for that type: **Instructions** (and the colour legend), **Allowed values** (every column, closed sets first), **Sample data** (worked rows covering every conditional branch), and **Enter your &lt;type&gt;s** (the empty grid, with a dropdown on every closed-set column). |
+
+**The upload path is unchanged and still accepts `.csv` only.** The workbook is what an operator fills in and then exports with *File > Save As > CSV* — it exists because a CSV cannot tell an operator which columns are required, which values a closed set accepts, or that an array cell is delimiter-joined, each of which is a class of failure otherwise only reported after the fact, per row, in `errors.csv`. The grid deliberately keeps **machine-name headers** rather than the human `title` from `network.json`, because the exported CSV's header line is what `bulk-file-stream` matches against. Array-typed fields use the network's `csv_array_delimiter`.
 4. Profile-completeness flags surface later via the Signal Processing Service (because completion % is a computed signal).
 
 ### 6.4 My Blue Dots list
