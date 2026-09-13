@@ -36,14 +36,26 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   const returnTo = isSafePath(returnCandidate) ? returnCandidate! : '/dashboard';
   const reason = cookieReason ?? (typeof params.reason === 'string' ? params.reason : null);
   // Map well-known reasons to error codes the LoginView already understands.
-  const error =
-    reason === 'expired'
-      ? 'session_expired'
-      : reason === 'org_no_portal'
-        ? 'org_no_portal'
-        : typeof params.error === 'string'
-          ? params.error
-          : null;
+  // Portal-gate refusals arrive by two routes: the callback redirects with
+  // `?error=`, and the protected layout signs the session out with `?reason=`.
+  // Both now classify the same way, so either can carry any of the three.
+  const PORTAL_GATE_REASONS = new Set([
+    'org_no_portal',
+    'signals_account_no_portal',
+    'no_portal_access',
+    // Set by `/api/auth/login?switch=1` after it ends the realm session, so the
+    // banner explains why the user is back here signed out (#753).
+    'account_switch',
+  ]);
+  // Precedence, most specific first: an expired session, then a portal-gate
+  // refusal handed back by the layout, then whatever the callback put on the
+  // query string.
+  function resolveError(): string | null {
+    if (reason === 'expired') return 'session_expired';
+    if (reason && PORTAL_GATE_REASONS.has(reason)) return reason;
+    return typeof params.error === 'string' ? params.error : null;
+  }
+  const error = resolveError();
 
   return <LoginView returnTo={returnTo} error={error} />;
 }

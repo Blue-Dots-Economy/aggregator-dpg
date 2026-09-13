@@ -316,7 +316,12 @@ const ps = () => run('docker', composeArgs('ps'));
 const psql = () =>
   run('docker', composeArgs('exec', 'postgres', 'psql', '-U', 'aggregator', '-d', 'aggregator'));
 
-/** Rebuilds the web image (with NEXT_PUBLIC_* baked at compile time) and restarts it. */
+/**
+ * Rebuilds the web image and restarts it — for web CODE changes.
+ *
+ * Not needed for an env change: the image takes no `NEXT_PUBLIC_*` build args,
+ * so every setting is read at runtime and `up -d web` alone applies it.
+ */
 function rebuildWeb() {
   run('pnpm', ['--filter', '@aggregator-dpg/web', 'build']);
   run('docker', composeArgs('build', 'web'));

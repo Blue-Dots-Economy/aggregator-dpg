@@ -145,6 +145,46 @@ describe('<OrgRegisterForm />', () => {
     expect(screen.getByText(messages.register.org_success_heading)).toBeInTheDocument();
   });
 
+  it('shows the ALREADY-REGISTERED panel when the API reports status active', async () => {
+    // The API returns 200 for both a new pending registration and an
+    // already-approved org whose invite link was re-sent. Rendering "our team
+    // will review your organisation" over the second is simply false.
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ slug: 'org1-2ab4', status: 'active', mail_sent: true }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+    ) as unknown as typeof fetch;
+
+    renderForm();
+    await submitAndAcceptGate();
+
+    expect(await screen.findByText(messages.register.org_exists_heading)).toBeInTheDocument();
+    expect(screen.getByText(messages.register.org_exists_link_sent)).toBeInTheDocument();
+    // The pending copy must NOT appear — that was the reported bug.
+    expect(screen.queryByText(messages.register.org_success_review)).not.toBeInTheDocument();
+    expect(screen.queryByText(messages.register.org_success_heading)).not.toBeInTheDocument();
+  });
+
+  it('tells the owner the mail failed rather than claiming it was sent', async () => {
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ slug: 'org1-2ab4', status: 'active', mail_sent: false }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+    ) as unknown as typeof fetch;
+
+    renderForm();
+    await submitAndAcceptGate();
+
+    expect(await screen.findByText(messages.register.org_exists_mail_failed)).toBeInTheDocument();
+    expect(screen.queryByText(messages.register.org_exists_link_sent)).not.toBeInTheDocument();
+  });
+
   it('shows the error banner on a non-2xx response', async () => {
     originalFetch = globalThis.fetch;
     globalThis.fetch = vi.fn(

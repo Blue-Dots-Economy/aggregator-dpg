@@ -12,6 +12,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { NextRequest } from 'next/server';
 import { signFlowState } from '@/lib/cookies';
 
+const { resolveSignalsRealmRolesMock } = vi.hoisted(() => ({
+  resolveSignalsRealmRolesMock: vi.fn(async (): Promise<string[]> => []),
+}));
+vi.mock('@/lib/signals-roles', () => ({
+  resolveSignalsRealmRoles: resolveSignalsRealmRolesMock,
+}));
 vi.mock('@/lib/oidc', () => ({
   getOidcAdapter: vi.fn(),
 }));
@@ -154,26 +160,61 @@ describe('GET /api/auth/callback', () => {
     expect(create).not.toHaveBeenCalled();
   });
 
-  it('blocks portal login and redirects to /login when the token has no aggregator_id', async () => {
+  /**
+   * One Keycloak realm serves this portal and the Signals app, so "no
+   * aggregator_id" covers three different populations. The reason code has to
+   * tell them apart or the login screen shows org-owner advice to a Signals
+   * participant (#753).
+   */
+  function blockedWith(roles: string[]): Promise<Response> {
     exchangeCode.mockResolvedValue({
       ok: true,
       value: {
         tokens: {
-          accessToken: fakeJwt({ sub: 'org-owner-1' }),
+          accessToken: fakeJwt({ sub: 'no-agg-1', realm_access: { roles } }),
           refreshToken: 'refresh-1',
           idToken: 'id-1',
           accessTokenExp: Date.now() + 60_000,
           refreshTokenExp: Date.now() + 60_000,
         },
-        claims: { sub: 'org-owner-1' },
+        claims: { sub: 'no-agg-1' },
       },
     });
     const req = new NextRequest('http://localhost/api/auth/callback?code=abc&state=state-1', {
       headers: { cookie: `oidc_flow=${flowCookie()}` },
     });
-    const res = await GET(req);
+    return GET(req);
+  }
+
+  it('blocks an org owner with org_no_portal', async () => {
+    const res = await blockedWith(['org_owner']);
     expect(res.status).toBe(302);
     expect(res.headers.get('location')).toBe('http://portal.test/login?error=org_no_portal');
     expect(create).not.toHaveBeenCalled();
+  });
+
+  it('blocks a Signals participant with signals_account_no_portal', async () => {
+    resolveSignalsRealmRolesMock.mockResolvedValueOnce(['seeker', 'provider']);
+    const res = await blockedWith(['seeker']);
+    expect(res.headers.get('location')).toBe(
+      'http://portal.test/login?error=signals_account_no_portal',
+    );
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('blocks any other realm user with no_portal_access', async () => {
+    const res = await blockedWith(['offline_access']);
+    expect(res.headers.get('location')).toBe('http://portal.test/login?error=no_portal_access');
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('falls back to no_portal_access when no Signals roles are configured', async () => {
+    // A wrong message is worse than a generic one: with neither
+    // `aggregator.signals.realm_roles` nor the SIGNALS_REALM_ROLES override we
+    // cannot claim the user is a Signals account. The resolver returns [] for
+    // both the unconfigured and the unreadable-config case.
+    resolveSignalsRealmRolesMock.mockResolvedValueOnce([]);
+    const res = await blockedWith(['seeker']);
+    expect(res.headers.get('location')).toBe('http://portal.test/login?error=no_portal_access');
   });
 });

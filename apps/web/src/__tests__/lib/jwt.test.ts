@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { decodeJwtClaims, tokenAggregatorId } from '@/lib/jwt';
+import {
+  classifyNonCoordinator,
+  decodeJwtClaims,
+  tokenAggregatorId,
+  tokenRealmRoles,
+} from '@/lib/jwt';
 
 function makeToken(payload: Record<string, unknown>): string {
   const header = Buffer.from(JSON.stringify({ alg: 'none' })).toString('base64url');
@@ -45,5 +50,56 @@ describe('tokenAggregatorId', () => {
 
   it('returns null for a malformed token', () => {
     expect(tokenAggregatorId('garbage')).toBeNull();
+  });
+});
+
+describe('tokenRealmRoles', () => {
+  it('reads realm_access.roles', () => {
+    const token = makeToken({ realm_access: { roles: ['seeker', 'offline_access'] } });
+    expect(tokenRealmRoles(token)).toEqual(['seeker', 'offline_access']);
+  });
+
+  it('returns [] when realm_access is absent, null, or malformed', () => {
+    expect(tokenRealmRoles(makeToken({}))).toEqual([]);
+    expect(tokenRealmRoles(makeToken({ realm_access: null }))).toEqual([]);
+    expect(tokenRealmRoles(makeToken({ realm_access: { roles: 'nope' } }))).toEqual([]);
+  });
+
+  it('drops non-string entries rather than trusting the claim shape', () => {
+    const token = makeToken({ realm_access: { roles: ['ok', 42, null] } });
+    expect(tokenRealmRoles(token)).toEqual(['ok']);
+  });
+});
+
+describe('classifyNonCoordinator', () => {
+  const SIGNALS = ['seeker', 'provider'];
+
+  it('identifies a Signals participant by its realm role', () => {
+    const token = makeToken({ realm_access: { roles: ['seeker'] } });
+    expect(classifyNonCoordinator(token, SIGNALS)).toBe('signals_participant');
+  });
+
+  it('identifies an org owner', () => {
+    const token = makeToken({ realm_access: { roles: ['org_owner'] } });
+    expect(classifyNonCoordinator(token, SIGNALS)).toBe('org_owner');
+  });
+
+  it('prefers the Signals verdict when a token somehow carries both', () => {
+    // Cross-app confusion is the thing being explained, so naming the other
+    // app is more useful than the org-owner copy about emailed approval links.
+    const token = makeToken({ realm_access: { roles: ['org_owner', 'seeker'] } });
+    expect(classifyNonCoordinator(token, SIGNALS)).toBe('signals_participant');
+  });
+
+  it('falls back to unknown for any other realm user', () => {
+    const token = makeToken({ realm_access: { roles: ['offline_access'] } });
+    expect(classifyNonCoordinator(token, SIGNALS)).toBe('unknown');
+  });
+
+  it('falls back to unknown when the Signals roles are unconfigured', () => {
+    // A wrong message is worse than a generic one, so an empty config must
+    // never let a Signals user be described as something else.
+    const token = makeToken({ realm_access: { roles: ['seeker'] } });
+    expect(classifyNonCoordinator(token, [])).toBe('unknown');
   });
 });

@@ -3,6 +3,8 @@ import type { ReactNode } from 'react';
 import { Providers } from '../lib/providers';
 import './globals.css';
 import { NextIntlClientProvider } from 'next-intl';
+import { getEnabledLocales } from '../i18n/config';
+import { EnabledLocalesProvider } from '../i18n/EnabledLocalesProvider';
 import { getLocale, getMessages, getTranslations } from 'next-intl/server';
 
 /**
@@ -57,6 +59,9 @@ const themeNoFlashScript = `
 export default async function RootLayout({ children }: { children: ReactNode }) {
   const locale = await getLocale();
   const messages = await getMessages();
+  // Resolved here, not in the switcher: this is a server component, so
+  // `ENABLED_LANGUAGES` is read per request rather than inlined at build time.
+  const enabledLocales = getEnabledLocales();
   return (
     <html lang={locale} suppressHydrationWarning>
       <head>
@@ -70,7 +75,9 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
       </head>
       <body>
         <NextIntlClientProvider locale={locale} messages={messages}>
-          <Providers>{children}</Providers>
+          <EnabledLocalesProvider value={enabledLocales}>
+            <Providers>{children}</Providers>
+          </EnabledLocalesProvider>
         </NextIntlClientProvider>
       </body>
     </html>

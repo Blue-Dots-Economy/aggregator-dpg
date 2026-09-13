@@ -3,9 +3,9 @@
  * the `buildDecryptedProfileRow` test-data builder.
  *
  * The `seed()` profile/dashboard/dashboardExport paths are already exercised
- * by memory.test.ts (they back the listItemsByAggregator + dashboard-pinning
- * suites there); this file focuses on the `users` and `aggregators` seed
- * arrays plus the standalone builder, which no other test file touches.
+ * by memory.test.ts (they back the dashboard-pinning suites there); this file
+ * focuses on the `users` and `aggregators` seed arrays plus the standalone
+ * builder, which no other test file touches.
  *
  * @module @aggregator-dpg/signalstack-writer
  */

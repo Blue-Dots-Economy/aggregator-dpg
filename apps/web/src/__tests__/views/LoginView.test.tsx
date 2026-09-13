@@ -88,6 +88,28 @@ describe('<LoginView />', () => {
     expect(screen.getByRole('alert')).toHaveTextContent(messages.auth.org_no_portal);
   });
 
+  it('names the Signals account and offers a switch, for a cross-app rejection', () => {
+    renderView({ error: 'signals_account_no_portal' });
+    expect(screen.getByRole('alert')).toHaveTextContent(messages.auth.signals_account_no_portal);
+    // Must force re-auth: a plain /login link would reuse the realm SSO
+    // session and land the user back on this same error (#753).
+    const link = screen.getByRole('link', { name: messages.auth.switch_account });
+    expect(link).toHaveAttribute('href', '/api/auth/login?switch=1');
+  });
+
+  it('offers a switch for the generic no-portal-access case', () => {
+    renderView({ error: 'no_portal_access' });
+    expect(screen.getByRole('alert')).toHaveTextContent(messages.auth.no_portal_access);
+    expect(screen.getByRole('link', { name: messages.auth.switch_account })).toBeInTheDocument();
+  });
+
+  it('does NOT offer a switch to an org owner — the portal is not for them', () => {
+    // Unlike the other two, an org owner is not signed in as the wrong
+    // account; switching would send them round a loop with no valid answer.
+    renderView({ error: 'org_no_portal' });
+    expect(screen.queryByRole('link', { name: messages.auth.switch_account })).toBeNull();
+  });
+
   it('renders a humanised message for a known OIDC error code', () => {
     renderView({ error: 'oidc_error_access_denied' });
     expect(screen.getByRole('alert')).toHaveTextContent(

@@ -25,7 +25,7 @@ export type SignalStackOnboardChannel = 'bulk' | 'link';
 
 /**
  * Echo of one profile row stored in signalstack's `items` table. Returned
- * by the `listItemsByAggregator` read endpoint (the participant onboard
+ * by the aggregator dashboard read endpoints (the participant onboard
  * endpoint returns the slimmer {@link SignalStackOnboardParticipantResult}
  * shape).
  */
@@ -37,7 +37,6 @@ export interface SignalStackProfile {
   item_state: Record<string, unknown>;
   item_latitude: number | null;
   item_longitude: number | null;
-  aggregator_id: string | null;
   created_at: string;
   updated_at: string;
   /**
@@ -130,7 +129,7 @@ export interface SignalStackOnboardParticipantInput {
  *
  * Slim shape: signalstack returns only the identifiers it minted plus the
  * server-side timestamp. The caller's audit log captures this verbatim;
- * `listItemsByAggregator` is the canonical read path for the full row.
+ * `fetchDecryptedProfiles` is the canonical read path for the full row.
  */
 export interface SignalStackOnboardParticipantResult {
   user_id: string;
@@ -153,49 +152,6 @@ export interface SignalStackOnboardParticipantResult {
    * returned for the calling aggregator.
    */
   owned_elsewhere?: boolean;
-}
-
-/**
- * Filter for the aggregator-scoped read of signalstack items.
- *
- * `item_network` + `item_domain` are required so signalstack can look up the
- * right partition; `aggregator_id` is the dashboard's primary scope; the
- * rest are pagination + optional refinement.
- */
-export interface SignalStackItemQuery {
-  /** Correlation id (the x-request-id header) forwarded to Signals for tracing. */
-  requestId?: string;
-  aggregator_id: string;
-  item_network: string;
-  item_domain: string;
-  item_type?: string;
-  limit?: number;
-  offset?: number;
-  /**
-   * Restricts the returned items by lifecycle classification.
-   *   - `'live_only'` (signals default — applied when this field is
-   *     absent) returns rows with `lifecycle_status === 'live'`.
-   *   - `'all'` returns every row regardless of lifecycle, including
-   *     drafts and paused items.
-   */
-  lifecycle_filter?: 'live_only' | 'all';
-}
-
-/**
- * Paginated meta block returned alongside the items list.
- */
-export interface SignalStackItemListMeta {
-  total: number;
-  limit: number;
-  offset: number;
-}
-
-/**
- * Response shape for the aggregator-scoped read.
- */
-export interface SignalStackItemList {
-  meta: SignalStackItemListMeta;
-  items: SignalStackProfile[];
 }
 
 /**
@@ -505,19 +461,6 @@ export interface SignalStackProbeUserResult {
 }
 
 /**
- * Filter for a single-item signalstack read. Used by the outbound
- * completion-dispatch processor to re-check the item's lifecycle right
- * before sending — so a draft that has since flipped to live or paused
- * does not receive a stale prompt.
- */
-export interface SignalStackGetItemQuery {
-  /** Correlation id (the x-request-id header) forwarded to Signals for tracing. */
-  requestId?: string;
-  /** Signalstack item id minted by a prior `onboard()` call. */
-  item_id: string;
-}
-
-/**
  * Provides a bearer access token for authenticating to Signals' client-
  * credentials service-auth path — the alternative to the static `apiKey`
  * credential on {@link HttpSignalStackWriterConfig} (Phase C of
@@ -557,8 +500,9 @@ export abstract class SignalStackTokenProviderBase {
  * Implementations:
  *   - Http: real fetch-backed adapter — calls
  *     `POST /api/v1/admin/participant`,
- *     `POST /api/v1/admin/aggregator/upsert`, and
- *     `POST /api/v1/network/item/fetch_local`.
+ *     `POST /api/v1/admin/aggregator/upsert`,
+ *     `GET /api/v1/aggregator/dashboard[/export]`, and
+ *     `POST /api/v1/admin/participant/decrypt`.
  *   - InMemory: deterministic Map-backed impl for unit tests.
  *   - Fake: in-memory + `seed()` helper for cross-package consumer tests.
  */
@@ -578,17 +522,6 @@ export abstract class SignalStackWriterBase {
   abstract onboard(
     input: SignalStackOnboardParticipantInput,
   ): Promise<Result<SignalStackOnboardParticipantResult, BaseError>>;
-
-  /**
-   * Read all items signalstack has stored for the given aggregator_id
-   * within a single (item_network, item_domain[, item_type]) scope.
-   *
-   * @param query - Aggregator + network/domain scope + optional pagination.
-   * @returns ok(SignalStackItemList) on 2xx; err(BaseError) otherwise.
-   */
-  abstract listItemsByAggregator(
-    query: SignalStackItemQuery,
-  ): Promise<Result<SignalStackItemList, BaseError>>;
 
   /**
    * Register (or look up) the aggregator's organisation row in signalstack.
@@ -674,19 +607,4 @@ export abstract class SignalStackWriterBase {
   abstract probeUser(
     input: SignalStackProbeUserInput,
   ): Promise<Result<SignalStackProbeUserResult, BaseError>>;
-
-  /**
-   * Fetch a single signals item by `item_id`.
-   *
-   * Returns `ok(null)` when the item is not known to signals, so a caller
-   * can distinguish "absent" from a failure. Transport / protocol errors
-   * surface as a structured `BaseError`.
-   *
-   * @param query - Item id to look up.
-   * @returns ok(SignalStackProfile) on hit; ok(null) when absent;
-   *   err(BaseError) on transport / protocol failure.
-   */
-  abstract getItem(
-    query: SignalStackGetItemQuery,
-  ): Promise<Result<SignalStackProfile | null, BaseError>>;
 }

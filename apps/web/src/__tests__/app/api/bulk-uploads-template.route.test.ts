@@ -41,6 +41,36 @@ describe('GET /api/bulk-uploads/template', () => {
     });
   });
 
+  it('forwards a workbook byte-for-byte, without decoding it as UTF-8', async () => {
+    // The one change in this route whose failure mode is silent corruption. An
+    // XLSX is a ZIP, so its bytes are arbitrary — `await upstream.text()`
+    // decodes them as UTF-8 and every byte outside the ASCII range becomes
+    // U+FFFD, producing a download that opens as a broken file rather than an
+    // error. Every other case here uses an ASCII body, so reverting
+    // `.arrayBuffer()` would leave all of them green.
+    const zipHeaderAndHighBytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0xff, 0xfe, 0x00, 0x80]);
+    mockCallApi.mockResolvedValue(
+      new Response(zipHeaderAndHighBytes, {
+        status: 200,
+        headers: {
+          'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'content-disposition': 'attachment; filename="seeker-template.xlsx"',
+        },
+      }),
+    );
+    const res = await GET(
+      new NextRequest(
+        'http://localhost/api/bulk-uploads/template?participant_type=seeker&format=xlsx',
+      ) as never,
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toBe(
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(zipHeaderAndHighBytes);
+  });
+
   it('falls back to a default filename/content-type when upstream omits them', async () => {
     const upstream = new Response('name,email\n', { status: 200 });
     upstream.headers.delete('content-type');

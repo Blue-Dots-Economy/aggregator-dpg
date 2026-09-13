@@ -16,7 +16,18 @@ import type { RJSFSchema } from '@rjsf/utils';
 export type SubmitState =
   | { status: 'idle' }
   | { status: 'submitting' }
-  | { status: 'done'; refId: string }
+  /**
+   * Submitted successfully. `outcome` distinguishes a NEW pending registration
+   * from an org that was already approved and had its coordinator-invite link
+   * re-sent — the API returns 200 for both, and rendering "our team will
+   * review your organisation" over the second is simply false.
+   */
+  | {
+      status: 'done';
+      refId: string;
+      outcome?: 'pending' | 'already_registered';
+      mailSent?: boolean;
+    }
   | { status: 'error'; title: string; detail: string; code: string; requestId: string };
 
 /** Canonical API error envelope (partial — every field optional on the wire). */

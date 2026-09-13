@@ -968,7 +968,11 @@ function ParticipantTable<R extends ParticipantBase>({
             {filterOpen && (
               <div
                 role="menu"
-                className="absolute right-0 top-full mt-1 z-20 min-w-[180px] bg-white border border-(--bd-border) rounded-[10px] bd-shadow-lg p-1"
+                // Bounded + self-scrolling. The panel hangs below the trigger,
+                // which sits at the bottom of the toolbar; once a filter
+                // returns no rows the table collapses, the page stops
+                // scrolling, and any option past the fold became unreachable.
+                className="absolute right-0 top-full mt-1 z-20 min-w-[180px] max-h-[min(320px,60vh)] overflow-y-auto bg-white border border-(--bd-border) rounded-[10px] bd-shadow-lg p-1"
               >
                 {options.map((opt) => {
                   const active = statusFilter === opt.value;
@@ -2038,9 +2042,9 @@ function toProviderRow(
 
 export default function DashboardPageRoot() {
   const rawProfile = useProfileRaw();
-  // Wait for the profile to resolve before mounting any tab — the SeekersTab
-  // and ProvidersTab kick off their own /api/dashboard/items?domain=... fetch
-  // on mount, so rendering a default before we know the aggregator's type
+  // Wait for the profile to resolve before mounting any tab — SeekersTab and
+  // ProvidersTab each fetch /api/dashboard?domain=... on mount (via
+  // useDashboard), so rendering a default before we know the aggregator's type
   // fires a stale seeker request that a provider account should never make.
   const profileType = rawProfile.data?.type;
   if (!profileType) {

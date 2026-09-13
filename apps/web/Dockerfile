@@ -40,13 +40,15 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
 # ── builder ───────────────────────────────────────────────────────────────────
 FROM installer AS builder
 ENV NEXT_TELEMETRY_DISABLED=1
-# NEXT_PUBLIC_* vars are inlined into the client bundle at build time by Next.js.
-# Declare them as ARGs so they can be forwarded from `docker build --build-arg`
-# or from docker-compose `build.args`, then promote to ENV so `next build` sees them.
-ARG NEXT_PUBLIC_API_URL
-ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
-ARG NEXT_PUBLIC_ENABLED_LANGUAGES=en,kn,hi
-ENV NEXT_PUBLIC_ENABLED_LANGUAGES=$NEXT_PUBLIC_ENABLED_LANGUAGES
+# No NEXT_PUBLIC_* build args, deliberately. Next.js inlines those into the
+# client bundle at `next build`, which made every value passed here permanent
+# for the life of the image — an operator could not change the language list or
+# the invite cap without a rebuild, even though both are documented as env.
+#
+# Every setting the browser needs is now resolved in a SERVER component and
+# handed down (see apps/web/src/i18n/EnabledLocalesProvider.tsx), so the image
+# is deployment-agnostic and reconfiguring it is an env change plus a restart.
+# Do not reintroduce a NEXT_PUBLIC_* ARG here without that reasoning changing.
 COPY . .
 # Build web AND its workspace dependencies in topological order
 # (shared-primitives → config-loader → web). Without the trailing `...`,

@@ -14,11 +14,12 @@
  * @module @aggregator-dpg/config-loader/fs
  */
 
-import { readFile, access } from 'node:fs/promises';
-import { resolve, join } from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { ConfigError } from '@aggregator-dpg/shared-primitives/errors';
 import { parseAggregatorConsentConfig, type AggregatorConsentConfig } from '../consent.schema.js';
 import { deepMerge } from '../merge.js';
+import { fileExists, findRepoRoot } from './repo-root.js';
 
 /** Relative path suffix for consent files inside a config root. */
 const CONSENT_SUFFIX = join('schemas', 'aggregator', 'consent.json');
@@ -35,20 +36,6 @@ const DEFAULT_SUPPORT_EMAIL = 'hello@bluedotseconomy.org';
 
 function resolveSupportEmail(): string {
   return process.env.CONSENT_SUPPORT_EMAIL || DEFAULT_SUPPORT_EMAIL;
-}
-
-/**
- * Returns true if the file at `filePath` exists and is readable.
- *
- * @param filePath - Absolute path to test.
- */
-async function fileExists(filePath: string): Promise<boolean> {
-  try {
-    await access(filePath);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 /**
@@ -74,35 +61,6 @@ async function readJson(filePath: string): Promise<unknown> {
 }
 
 /**
- * Determines the monorepo root by searching upward from `startDir` for a
- * directory that contains `config/schemas/aggregator/`.
- *
- * Tries three candidate paths relative to `startDir`:
- *   - `../../config`  (typical when cwd is apps/web or apps/api)
- *   - `../config`
- *   - `config`
- *
- * @param startDir - Directory to start searching from (usually process.cwd()).
- * @returns Absolute path to the monorepo root (the directory that owns `config/`).
- * @throws {ConfigError} If no suitable root is found.
- */
-async function findRepoRoot(startDir: string): Promise<string> {
-  const candidates = [resolve(startDir, '../..'), resolve(startDir, '..'), resolve(startDir)];
-
-  for (const candidate of candidates) {
-    const probe = join(candidate, 'config', 'schemas', 'aggregator');
-    if (await fileExists(probe)) {
-      return candidate;
-    }
-  }
-
-  throw new ConfigError(
-    `Cannot locate monorepo root from "${startDir}": no config/schemas/aggregator/ directory found in [${candidates.join(', ')}]`,
-    { code: 'CONSENT_CONFIG_ROOT_NOT_FOUND', details: { startDir } },
-  );
-}
-
-/**
  * Loads and validates the consent configuration for the given network and
  * optional brand.
  *
@@ -125,7 +83,8 @@ export async function loadConsentConfig(
   brand?: string,
   configRoot?: string,
 ): Promise<AggregatorConsentConfig> {
-  const repoRoot = configRoot ?? (await findRepoRoot(process.cwd()));
+  const repoRoot =
+    configRoot ?? (await findRepoRoot(process.cwd(), 'CONSENT_CONFIG_ROOT_NOT_FOUND'));
   const configDir = join(repoRoot, 'config');
 
   // Build base candidate paths: network-specific → default fallback.

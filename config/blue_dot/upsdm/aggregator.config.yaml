@@ -29,6 +29,18 @@ aggregator:
     primary_color: '#0074ff'
     accent_color: '#57abff'
 
+  # Realm roles that mark a Signals participant. One Keycloak realm serves this
+  # portal and the Signals app, so signing into either creates an SSO session the
+  # other silently reuses; this portal then correctly refuses the token (no
+  # aggregator_id) and uses this list to tell the visitor WHICH account they are
+  # signed in as rather than showing everyone the org-owner message (#753).
+  #
+  # Must name the roles Signals actually stamps — its KEYCLOAK_REQUIRED_REALM_ROLES.
+  # Unset ⇒ the classifier reports "unknown" and the login screen falls back to
+  # generic copy. Overridable per-deployment with SIGNALS_REALM_ROLES.
+  signals:
+    realm_roles: [signals_participant, signals_admin]
+
   domain_labels:
     seeker:
       singular: Seeker
