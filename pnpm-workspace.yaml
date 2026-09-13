@@ -35,10 +35,14 @@ overrides:
   #   postcss <8.5.26 → GHSA-r28c-9q8g-f849 + CVE-2026-45623 (HIGH), CVE-2026-41305
   #     / -69153 (MED). apps/web already declares ^8.5.26; this dedups the
   #     vulnerable transitive copy up to it.
-  #   sharp 0.34.x → GHSA-f88m-g3jw-g9cj (HIGH); 0.35.0 is the fix.
+  #   sharp <0.35.4 → GHSA-rgj7-g3m4-5g8c (HIGH), the bundled libheif carrying
+  #     GHSA-g89c-p67h-r497 + GHSA-2jg2-4ch7-h545; 0.35.4 is the fix. This floor
+  #     previously read `sharp@<0.35.0: 0.35.0` for the older GHSA-f88m-g3jw-g9cj.
+  #     sharp is declared nowhere here — it arrives as next's optional peer — so
+  #     Dependabot cannot raise it.
   #   @babel/core <7.29.6 → CVE-2026-49356 (LOW).
   'postcss@<8.5.26': 8.5.26
-  'sharp@<0.35.0': 0.35.0
+  'sharp@<0.35.4': 0.35.4
   '@babel/core@<7.29.6': 7.29.6
 
   # fast-uri 3.1.5 and 4.1.2 → four HIGH SSRF / host-confusion advisories:
