@@ -124,6 +124,38 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "zod"
         update-types: ["version-update:semver-major"]
+      # nodemailer v10 moves its types in-package and drops the `nodemailer`
+      # global namespace that @types/nodemailer supplied. #750 is GREEN here
+      # because apps/api's mailer never referenced that namespace — but the same
+      # major is RED on notification-service #122 (`TS2503: Cannot find namespace
+      # 'nodemailer'` in sendMailCore.ts), so taking it here would split the fleet
+      # across two majors of the mail library. Held on that basis rather than on a
+      # failure of our own: mail is the one dependency where a green typecheck and
+      # a green test suite prove the least, since neither performs an SMTP round
+      # trip. Both repos move together once notification-service drops
+      # @types/nodemailer and switches to `import type { Transporter }`.
+      - dependency-name: "nodemailer"
+        update-types: ["version-update:semver-major"]
+      # ioredis v6 CANNOT land while the pnpm-workspace.yaml override pins
+      # `ioredis: ^5.11.1`, which is why #744 is lockfile-only and would be
+      # reverted by the next install. That override is not incidental: bullmq
+      # pins ioredis 5.10.1 EXACTLY, so without it the tree carries two copies and
+      # TypeScript refuses to assign a `Redis` from one to the `ConnectionOptions`
+      # of the other — 16 errors, #573/#585. The hold and the override lift
+      # together, when bullmq moves its own pin; align with it rather than
+      # dropping the override.
+      - dependency-name: "ioredis"
+        update-types: ["version-update:semver-major"]
+      # next v16 is a framework migration, not a bump, and there is no security
+      # pressure for it: the two CRITICAL RCEs (CVE-2026-75604,
+      # GHSA-2xp9-vwfh-vxw4) were cleared on the 15.x line by taking 15.5.24+,
+      # which is what this tree runs. #734 proposes 16.3.4. Held so it is taken
+      # deliberately with its own test pass — apps/web is the participant-facing
+      # portal, and a Next major changes routing and rendering behaviour that a
+      # jsdom suite does not exercise. 15.x minors and patches are unaffected by
+      # this entry and keep flowing, which is what matters for the next advisory.
+      - dependency-name: "next"
+        update-types: ["version-update:semver-major"]
 
   # GitHub Actions — keeps CI workflow action versions current
   - package-ecosystem: "github-actions"
