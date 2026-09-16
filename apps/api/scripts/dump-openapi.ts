@@ -7,6 +7,12 @@ import { writeFile } from 'node:fs/promises';
 
 process.env.API_REFERENCE_ENABLED = 'true';
 process.env.API_REFERENCE_FORCE = 'true';
+// The org + coordinator-invite routes register only behind this flag, so a dump
+// taken without it silently omits `/v1/orgs*`, `/admin/v1/orgs/*` and
+// `/admin/v1/invites`. CI drift-checks the committed spec, so they then stay out
+// of the published API reference permanently. The spec describes what the API
+// CAN serve, not what one deployment happens to switch on.
+process.env.ORG_HIERARCHY_ENABLED = 'true';
 // `DATABASE_URL` has no source default — it carries credentials, so the config
 // schema requires it rather than falling back to a literal (secrets:S6698).
 // This script only builds the Fastify app to serialise its route metadata and

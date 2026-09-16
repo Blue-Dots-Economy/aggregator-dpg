@@ -86,14 +86,22 @@ tooling.
 
 ### 1.1 Software
 
-| Tool                                    | Version                              | Needed for                      | Notes                                                             |
-| --------------------------------------- | ------------------------------------ | ------------------------------- | ----------------------------------------------------------------- |
-| **Docker + Docker Compose**             | recent (v2)                          | both tracks                     | Docker Desktop on macOS/Windows; engine + compose plugin on Linux |
-| **Node.js**                             | ≥ 24 (22 works for dev)              | Track B; Track A never needs it | CI pins 24                                                        |
-| **pnpm**                                | 10.x (aggregator) / 11.1.2 (signals) | Track B                         | `npm i -g pnpm` or `corepack enable pnpm`                         |
-| **openssl**                             | any                                  | generating secrets              | pre-shipped on macOS/Linux                                        |
-| **git**                                 | any                                  | cloning                         | —                                                                 |
-| A REST client (curl / Postman / HTTPie) | —                                    | poking APIs, cross-DPG wiring   | optional                                                          |
+| Tool                        | Version                              | Needed for                      | Notes                                                             |
+| --------------------------- | ------------------------------------ | ------------------------------- | ----------------------------------------------------------------- |
+| **Docker + Docker Compose** | recent (v2)                          | both tracks                     | Docker Desktop on macOS/Windows; engine + compose plugin on Linux |
+| **Node.js**                 | ≥ 24 (22 works for dev)              | Track B; Track A never needs it | CI pins 24                                                        |
+| **pnpm**                    | 10.x (aggregator) / 11.1.2 (signals) | Track B                         | `npm i -g pnpm` or `corepack enable pnpm`                         |
+| **openssl**                 | any                                  | generating secrets              | pre-shipped on macOS/Linux                                        |
+| **git**                     | any                                  | cloning                         | —                                                                 |
+| **`docker login dhi.io`**   | —                                    | **Track A**                     | Only for building images. See note below.                         |
+
+> **Track A needs a registry login.** The api, web and worker images build `FROM
+dhi.io/...` (Docker Hardened Images), and dhi.io refuses anonymous pulls — so
+> `docker compose up -d --build` fails at the first `FROM` with `401
+Unauthorized` unless you have run `docker login dhi.io` with a Docker Hub
+> account. Track B needs no login: it builds no app images. signals-dpg's
+> `local-setup/LOCAL_SETUP.md` carries the same note.
+> | A REST client (curl / Postman / HTTPie) | — | poking APIs, cross-DPG wiring | optional |
 
 You do **not** need a real AWS account, a real SMTP server, or a real SMS
 gateway for local setup — the unified stack substitutes MinIO (for S3), Mailpit
@@ -219,7 +227,7 @@ docker compose logs -f aggregator-api      # migrations + upstream calls
 | Service          | URL                         | Credentials / notes                                                                                             |
 | ---------------- | --------------------------- | --------------------------------------------------------------------------------------------------------------- |
 | Aggregator API   | http://localhost:4000       | — (`/health/live`)                                                                                              |
-| Signals API      | http://localhost:2742       | apikey (`/reference` for Swagger)                                                                               |
+| Signals API      | http://localhost:2742       | apikey (`/api/reference` for Swagger)                                                                           |
 | Keycloak admin   | http://localhost:8080/admin | `admin` / `KC_ADMIN_PASSWORD` from `.env`                                                                       |
 | MinIO console    | http://localhost:9001       | `minioadmin` / `MINIO_ROOT_PASSWORD`                                                                            |
 | Postgres         | localhost:5432              | `dpg` / `POSTGRES_PASSWORD` (one shared server; dbs: `aggregator`, `signals`, `keycloak`)                       |
