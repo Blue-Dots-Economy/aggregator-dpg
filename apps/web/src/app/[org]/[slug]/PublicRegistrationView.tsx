@@ -153,10 +153,6 @@ function navigateToSignals(url: string): void {
 type LookupOutcome =
   | { kind: 'allow' }
   | { kind: 'owned_elsewhere' }
-  // Already fully registered with THIS aggregator (live item). Re-submitting
-  // would fail upstream with a cryptic INVALID_ITEM_STATE — short-circuit with
-  // a clear message instead.
-  | { kind: 'already_registered' }
   | {
       kind: 'resume';
       itemId: string;
@@ -616,12 +612,15 @@ export function PublicRegistrationView({
     const body = (await res.json().catch(() => ({}))) as LookupResponse;
     if (body.owned_elsewhere) return { kind: 'owned_elsewhere' };
     const primary = body.lifecycle_summary?.primary_item;
-    // Already registered with THIS aggregator and the profile is live → nothing
-    // to add. Surface a clear "already registered" message rather than letting
-    // the submit hit signalstack and fail with INVALID_ITEM_STATE.
-    if (primary && primary.lifecycle_status === 'live') {
-      return { kind: 'already_registered' };
-    }
+    // A live profile with THIS aggregator is deliberately NOT a stop (#780). A
+    // participant may hold more than one profile — signals inserts a new one on
+    // every onboard call without an `item_id`, bounded only by
+    // `MAX_PROFILES_PER_USER` — and bulk upload has always created a second one
+    // for a re-uploaded row. This form used to be the odd one out, blocking with
+    // an "Already registered" banner whose only way forward was to change your
+    // contact details. It now falls through to `allow` and submits, and the cap
+    // is left to signals, which answers `PROFILE_LIMIT_REACHED` with a sentence
+    // the route below surfaces verbatim.
     if (
       primary &&
       (primary.lifecycle_status === 'draft' || primary.lifecycle_status === 'paused')
@@ -1230,40 +1229,6 @@ export function PublicRegistrationView({
                       className="mt-3 text-[12px] font-semibold underline text-amber-900 hover:text-amber-700"
                     >
                       {t('lookup.owned_elsewhere_cta')}
-                    </button>
-                  </div>
-                ) : null}
-
-                {lookup?.kind === 'already_registered' ? (
-                  <div
-                    role="alert"
-                    data-testid="lookup-already-registered"
-                    className="mb-5 rounded-[10px] border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-800"
-                  >
-                    <div className="font-semibold">{t('lookup.already_registered_title')}</div>
-                    <div className="mt-1 text-amber-700">{t('lookup.already_registered_body')}</div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setLookup(null);
-                        setFormData((prev) => {
-                          const next = { ...prev };
-                          for (const key of [
-                            identity?.email,
-                            identity?.phone,
-                            'email',
-                            'phone',
-                            'phone_number',
-                            'mobile',
-                          ]) {
-                            if (key) delete next[key];
-                          }
-                          return next;
-                        });
-                      }}
-                      className="mt-3 text-[12px] font-semibold underline text-amber-900 hover:text-amber-700"
-                    >
-                      {t('lookup.already_registered_cta')}
                     </button>
                   </div>
                 ) : null}

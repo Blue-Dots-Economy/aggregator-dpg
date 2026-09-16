@@ -380,8 +380,12 @@ describe('<PublicRegistrationView /> — remaining branches', () => {
     globalThis.fetch = originalFetch;
   });
 
-  it('shows the already-registered banner for a live primary item and clears it on CTA click', async () => {
-    globalThis.fetch = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
+  it('submits and creates another profile when the participant already has a live one (#780)', async () => {
+    // A participant may hold more than one profile. This form used to stop here
+    // with an "Already registered" banner, which made it the only onboarding
+    // path that refused — bulk upload has always created a second profile for a
+    // re-uploaded row. A live primary must now fall straight through to /submit.
+    const fetchMock = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
       const url = input.toString();
       if (url.includes('/lookup')) {
         return new Response(
@@ -395,15 +399,26 @@ describe('<PublicRegistrationView /> — remaining branches', () => {
           { status: 200, headers: { 'content-type': 'application/json' } },
         );
       }
+      if (url.includes('/submit')) {
+        return new Response(JSON.stringify({ outcome: 'passed', submission_id: 'sub-780' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
       throw new Error(`unexpected fetch: ${url}`);
-    }) as unknown as typeof fetch;
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
 
     renderView();
     fireEvent.submit(screen.getByTestId('rjsf-shim'));
-    const banner = await screen.findByTestId('lookup-already-registered');
-    expect(banner).toBeInTheDocument();
 
-    fireEvent.click(screen.getByText(messages.profile.public_reg.lookup.already_registered_cta));
+    // The probe still runs — `owned_elsewhere` and the resume branch depend on
+    // it — but a live primary no longer short-circuits it.
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+    expect(fetchMock.mock.calls[0]![0]!.toString()).toContain('/lookup');
+    expect(fetchMock.mock.calls[1]![0]!.toString()).toContain('/submit');
     expect(screen.queryByTestId('lookup-already-registered')).toBeNull();
   });
 

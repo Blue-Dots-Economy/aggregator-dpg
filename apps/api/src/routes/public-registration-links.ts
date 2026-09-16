@@ -19,6 +19,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { eq } from 'drizzle-orm';
 import { PostgresParticipantsWriter } from '@aggregator-dpg/participants-writer/postgres';
 import type { ParticipantsWriterBase } from '@aggregator-dpg/participants-writer/interface';
 import { getRegistrationLinksStore } from '../services/registration-links-store/index.js';
@@ -706,14 +707,19 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
           lifecycleStatusOut = lifecycleStatus;
 
           // signalstack is the identity authority. The local participants table
-          // is a soon-to-be-removed mirror, so its per-phone dedup must not flip
-          // an account_only capture to `skipped`/409 — re-submitting the same
-          // phone is an idempotent success (signals returns the same user). Drive
-          // the account_only outcome from signals: skip only when the identity is
-          // genuinely owned by another aggregator (owned_elsewhere).
-          if (submitMode === 'account_only') {
-            outcome = ownedElsewhere ? 'skipped' : 'passed';
-          }
+          // is a soon-to-be-removed mirror, and its per-phone dedup must not flip
+          // a successful capture to `skipped`/409. This rule already governed the
+          // account_only path — re-submitting the same phone is an idempotent
+          // success there, since signals returns the same user — and #780 extends
+          // it to the full form: a repeat submission is a legitimate NEW profile,
+          // because signals inserts one on every onboard call without an
+          // `item_id`. Leaving the mirror in charge produced the worst of both
+          // answers — the profile WAS created upstream while the participant was
+          // told "already registered, no need to register again".
+          //
+          // Skip only when the identity is genuinely owned by ANOTHER aggregator.
+          // That is tenant isolation, not deduplication, and is unaffected.
+          outcome = ownedElsewhere ? 'skipped' : 'passed';
 
           log.info({
             status: 'success',
@@ -730,10 +736,25 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
           });
         }
 
+        // The submission row was inserted BEFORE the push, carrying the local
+        // writer's verdict, and the push may since have corrected it (above).
+        // Persist the correction inside the same transaction so the stored
+        // record matches both the response and what actually happened — a row
+        // reading `skipped` for a submission that created a profile would
+        // under-count real registrations for anyone who later reports on this
+        // table. Pre-existing for `account_only`; #780 makes it routine.
+        const submissionId = submission[0]?.id;
+        if (submissionId && outcome !== writeOutcome) {
+          await tx
+            .update(linkSubmissions)
+            .set({ outcome })
+            .where(eq(linkSubmissions.id, submissionId));
+        }
+
         return {
           outcome,
           participantRowId,
-          submissionId: submission[0]?.id,
+          submissionId,
         };
       });
       const { outcome, participantRowId, submissionId } = txResult;

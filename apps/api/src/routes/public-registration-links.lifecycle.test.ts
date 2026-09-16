@@ -86,17 +86,26 @@ class StubRegistrationLinksStore extends RegistrationLinksStoreBase {
 }
 
 /**
- * Builds a minimal `tx`/`db` shape the route exercises. The only mutation
- * the route runs against the tx is
- * `tx.insert(linkSubmissions).values(...).returning({ id })` — we shortcut
- * that to a deterministic id so the response carries a stable submission
- * uuid.
+ * Builds a minimal `tx`/`db` shape the route exercises: the
+ * `tx.insert(linkSubmissions).values(...).returning({ id })` chain, shortcut to
+ * a deterministic id so the response carries a stable submission uuid, and the
+ * `tx.update(...).set(...).where(...)` the route runs when the signalstack push
+ * corrects the local writer's outcome (#780).
+ *
+ * `storedOutcome` exposes what the row would actually hold at commit — the
+ * response alone cannot show that, and a row disagreeing with the response is
+ * precisely the bug the correction exists to prevent.
  */
-function buildFakeDb(submissionId: string): unknown {
+function buildFakeDb(submissionId: string): {
+  db: unknown;
+  storedOutcome: () => string | undefined;
+} {
+  let stored: string | undefined;
   const tx = {
     insert() {
       return {
-        values() {
+        values(row: { outcome?: string }) {
+          stored = row.outcome;
           return {
             async returning() {
               return [{ id: submissionId }];
@@ -105,11 +114,25 @@ function buildFakeDb(submissionId: string): unknown {
         },
       };
     },
+    update() {
+      return {
+        set(patch: { outcome?: string }) {
+          return {
+            async where() {
+              stored = patch.outcome;
+            },
+          };
+        },
+      };
+    },
   };
   return {
-    async transaction(cb: (tx: unknown) => Promise<unknown>) {
-      return cb(tx);
+    db: {
+      async transaction(cb: (tx: unknown) => Promise<unknown>) {
+        return cb(tx);
+      },
     },
+    storedOutcome: () => stored,
   };
 }
 
@@ -117,6 +140,7 @@ const SUBMISSION_ID = '33333333-3333-3333-3333-333333333333';
 const PARTICIPANT_PARENT_ID = '44444444-4444-4444-4444-444444444444';
 
 describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — lifecycle', () => {
+  let fakeDb: ReturnType<typeof buildFakeDb>;
   let app: FastifyInstance;
   let signalstack: SignalStackWriterFake;
   let aggregatorStore: AggregatorStoreFake;
@@ -174,7 +198,8 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — lifecycle
 
     // Minimal db stub — exposes only what the public-submit handler calls
     // on the transaction handle.
-    _setDbClients(null, buildFakeDb(SUBMISSION_ID) as never);
+    fakeDb = buildFakeDb(SUBMISSION_ID);
+    _setDbClients(null, fakeDb.db as never);
 
     app = await buildApp();
   });
@@ -281,6 +306,38 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — lifecycle
     expect(body.outcome).toBe('skipped');
     expect(body.owned_elsewhere).toBe(true);
     expect(body.lifecycle_status).toBeNull();
+  });
+
+  it('a repeat submission from the same participant passes, not skipped (#780)', async () => {
+    // The local `participants` table dedups on the normalised phone, so a
+    // second submission from the same person hits its ON CONFLICT path and the
+    // writer reports `skipped`. That mirror must NOT decide the response:
+    // signals inserts a NEW profile on every onboard call without an `item_id`,
+    // so the profile really was created. Reporting 409 "already registered"
+    // told the participant the opposite of what had just happened.
+    const payload = { ...basePayload, phone: '+919876533333', email: 'repeat@x.com' };
+    const first = await app.inject({
+      method: 'POST',
+      url: `/public/v1/aggregators/${ORG_SLUG}/registrations/${LINK_SLUG}`,
+      payload,
+    });
+    expect(first.statusCode).toBe(201);
+    expect((first.json() as { outcome: string }).outcome).toBe('passed');
+
+    const second = await app.inject({
+      method: 'POST',
+      url: `/public/v1/aggregators/${ORG_SLUG}/registrations/${LINK_SLUG}`,
+      payload,
+    });
+    expect(second.statusCode).toBe(201);
+    const body = second.json() as { outcome: string; owned_elsewhere: boolean };
+    expect(body.outcome).toBe('passed');
+    // Tenant isolation is untouched — only the same-aggregator repeat changed.
+    expect(body.owned_elsewhere).toBe(false);
+    // And the STORED row agrees. The insert runs before the push, carrying the
+    // local writer's `skipped`; without the in-transaction correction the table
+    // would record a duplicate for a submission that created a profile.
+    expect(fakeDb.storedOutcome()).toBe('passed');
   });
 
   it('creates a minor without consent — age + compliance omitted (#522 §4.4)', async () => {
