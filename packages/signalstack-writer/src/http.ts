@@ -1039,8 +1039,28 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       // `items` span domains, so items[0] could belong to a DIFFERENT domain;
       // reporting its lifecycle for THIS domain would be wrong (a paused
       // domain-A profile must not read as a paused domain-B one).
-      const domainItem = items.find(
+      //
+      // Within the domain, pick by resumability rather than by position. A
+      // participant can hold several profiles in one domain, and this probe
+      // answers exactly one question — "can this person resume here, or should
+      // they start fresh?" — so a live profile has to win over a retired or
+      // abandoned-draft sibling no matter which order signals lists them in.
+      // Taking the first match made the answer depend on that order: with a
+      // live profile and a newer retired one, the probe reported "nothing in
+      // this domain" and the registration form started a second profile for
+      // someone who already had a live one (and eventually walked them into
+      // PROFILE_LIMIT_REACHED). Ties keep signals' own order, so among equally
+      // resumable profiles the most recent still wins.
+      const domainItems = items.filter(
         (it) => it.item_domain === input.domain && it.item_network === input.network,
+      );
+      const domainItem = domainItems.reduce<(typeof domainItems)[number] | undefined>(
+        (best, it) =>
+          best === undefined ||
+          primaryItemRank(it.lifecycle_status) < primaryItemRank(best.lifecycle_status)
+            ? it
+            : best,
+        undefined,
       );
 
       // Own user (this org owns items) but nothing in the requested domain yet —
@@ -1193,6 +1213,35 @@ async function safeReadText(res: Response): Promise<string> {
  * present so the caller sees both the machine code and the human text.
  */
 /** Extract signalstack's machine error code (the JSON `error` field), if any. */
+/**
+ * Resumability rank of a probed item's `lifecycle_status` — lower wins when a
+ * participant holds several profiles in the same domain.
+ *
+ * Ordering is by what the probe is asked to decide, not by recency: `live`
+ * settles the question outright ("already registered"), `paused`/`draft` are
+ * resumable, and `retired` is a real but dead end. An unrecognised value ranks
+ * alongside `retired` so it is never preferred over a profile the caller can
+ * actually act on — it is still selectable when it is all the domain has, which
+ * keeps the upstream-drift error below reachable.
+ *
+ * @param lifecycle - The raw `lifecycle_status` from the probe payload.
+ * @returns The rank; 0 is the strongest candidate.
+ */
+function primaryItemRank(lifecycle: unknown): number {
+  // absent/empty → 'live' (back-compat: older signals builds omit the field).
+  if (lifecycle === undefined || lifecycle === null || lifecycle === '') return 0;
+  switch (lifecycle) {
+    case 'live':
+      return 0;
+    case 'paused':
+      return 1;
+    case 'draft':
+      return 2;
+    default:
+      return 3;
+  }
+}
+
 function extractUpstreamCode(bodyText: string): string | null {
   if (!bodyText) return null;
   try {

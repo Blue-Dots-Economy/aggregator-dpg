@@ -1675,6 +1675,170 @@ describe('HttpSignalStackWriter.probeUser (http)', () => {
     expect(result.value.lifecycle_summary).toBeNull();
   });
 
+  // Multi-profile selection. A participant accumulates profiles in a domain
+  // (signals inserts a new one on every onboard call without an item_id), and
+  // signals returns them newest-first — so "the first match" is not the profile
+  // this probe is meant to report on.
+
+  it('prefers a live profile over a newer retired one in the same domain', async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJsonResponse({
+        user_id: 'u-1',
+        items: [
+          // newest first, as signals returns them
+          {
+            item_id: 'new-retired',
+            item_network: 'blue_dot',
+            item_domain: 'seeker',
+            lifecycle_status: 'retired',
+          },
+          {
+            item_id: 'old-live',
+            item_network: 'blue_dot',
+            item_domain: 'seeker',
+            lifecycle_status: 'live',
+          },
+        ],
+      }),
+    );
+
+    const result = await writer.probeUser(PROBE_INPUT);
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    // Reporting the retired one would answer "no profile here" and send an
+    // already-registered participant back through the registration form.
+    expect(result.value.lifecycle_summary).toEqual({
+      primary_item: { item_id: 'old-live', lifecycle_status: 'live' },
+    });
+  });
+
+  it('prefers a live profile over a newer abandoned draft in the same domain', async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJsonResponse({
+        user_id: 'u-1',
+        items: [
+          {
+            item_id: 'new-draft',
+            item_network: 'blue_dot',
+            item_domain: 'seeker',
+            lifecycle_status: 'draft',
+          },
+          {
+            item_id: 'old-live',
+            item_network: 'blue_dot',
+            item_domain: 'seeker',
+            lifecycle_status: 'live',
+          },
+        ],
+      }),
+    );
+
+    const result = await writer.probeUser(PROBE_INPUT);
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    // Resuming the draft would offer to finish an abandoned attempt instead of
+    // telling the participant they are already registered.
+    expect(result.value.lifecycle_summary).toEqual({
+      primary_item: { item_id: 'old-live', lifecycle_status: 'live' },
+    });
+  });
+
+  it('prefers a resumable profile over a retired one listed ahead of it', async () => {
+    // The mirror of the case above, and one that was already broken before
+    // signals changed its ordering: retired first, resumable second. Ranking
+    // fixes both directions, which taking the first match never could.
+    fetchMock.mockResolvedValueOnce(
+      okJsonResponse({
+        user_id: 'u-1',
+        items: [
+          {
+            item_id: 'old-retired',
+            item_network: 'blue_dot',
+            item_domain: 'seeker',
+            lifecycle_status: 'retired',
+          },
+          {
+            item_id: 'new-paused',
+            item_network: 'blue_dot',
+            item_domain: 'seeker',
+            lifecycle_status: 'paused',
+          },
+        ],
+      }),
+    );
+
+    const result = await writer.probeUser(PROBE_INPUT);
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.lifecycle_summary).toEqual({
+      primary_item: { item_id: 'new-paused', lifecycle_status: 'paused' },
+    });
+  });
+
+  it('keeps signals order among equally resumable profiles (newest wins)', async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJsonResponse({
+        user_id: 'u-1',
+        items: [
+          {
+            item_id: 'new-draft',
+            item_network: 'blue_dot',
+            item_domain: 'seeker',
+            lifecycle_status: 'draft',
+          },
+          {
+            item_id: 'old-draft',
+            item_network: 'blue_dot',
+            item_domain: 'seeker',
+            lifecycle_status: 'draft',
+          },
+        ],
+      }),
+    );
+
+    const result = await writer.probeUser(PROBE_INPUT);
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.lifecycle_summary).toEqual({
+      primary_item: { item_id: 'new-draft', lifecycle_status: 'draft' },
+    });
+  });
+
+  it('still rejects an unknown lifecycle_status when it is all the domain has', async () => {
+    // Ranking must not let upstream drift slip through as a silent skip: the
+    // unrecognised value is still selected when nothing resumable sits beside
+    // it, so the BAD_RESPONSE guard below keeps firing.
+    fetchMock.mockResolvedValueOnce(
+      okJsonResponse({
+        user_id: 'u-1',
+        items: [
+          {
+            item_id: 'x-1',
+            item_network: 'blue_dot',
+            item_domain: 'seeker',
+            lifecycle_status: 'archived',
+          },
+          {
+            item_id: 'x-2',
+            item_network: 'blue_dot',
+            item_domain: 'seeker',
+            lifecycle_status: 'retired',
+          },
+        ],
+      }),
+    );
+
+    const result = await writer.probeUser(PROBE_INPUT);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_BAD_RESPONSE');
+  });
+
   it('rejects an unknown lifecycle_status as SIGNALSTACK_BAD_RESPONSE (not coerced to live)', async () => {
     fetchMock.mockResolvedValueOnce(
       okJsonResponse({
