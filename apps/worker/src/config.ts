@@ -80,7 +80,8 @@ const ConfigSchema = z.object({
   // ─── Worker role selection ──────────────────────────────────────────────
   /**
    * Comma-separated subset of consumer roles this process runs:
-   * `file`, `row`, `finalise`, `cron`. Unset / empty / `all` runs everything
+   * `file`, `row`, `finalise`, `cron`, `campaign`. Unset / empty / `all` runs
+   * everything
    * (single-process default). Run `file` in its own deployment to isolate the
    * CPU-sensitive parser from the other consumers.
    */
