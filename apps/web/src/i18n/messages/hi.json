@@ -11,7 +11,10 @@
     "select_placeholder": "चुनें…",
     "comma_separated": "अल्पविराम से अलग किए गए मान",
     "select_options": "विकल्प चुनें…",
-    "clear_selection": "चयन हटाएँ"
+    "clear_selection": "चयन हटाएँ",
+    "location_search_placeholder": "पता लिखना शुरू करें…",
+    "location_add": "+ एक और स्थान जोड़ें",
+    "location_remove": "{label} हटाएँ"
   },
   "status_pill": {
     "active": "सक्रिय",

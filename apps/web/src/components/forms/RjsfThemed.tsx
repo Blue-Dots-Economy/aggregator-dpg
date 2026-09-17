@@ -27,6 +27,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { MultiSelect } from '../ui/MultiSelect';
 import { resolveVisibleSchema, stripShowIf } from '../../lib/show-if';
 import { ConsentCheckboxWidget } from './ConsentCheckboxWidget';
+import { LocationAutocompleteWidget } from './custom-widgets/LocationAutocompleteWidget';
+import { MultiLocationAutocompleteWidget } from './custom-widgets/MultiLocationAutocompleteWidget';
+import { ReferenceAutocompleteWidget } from './custom-widgets/ReferenceAutocompleteWidget';
 
 function TextWidget(props: WidgetProps) {
   const {
@@ -498,6 +501,12 @@ function CheckboxesWidget(props: WidgetProps) {
 // shared `.bd-input` styling applies everywhere.
 const widgets: RegistryWidgetsType = {
   TextWidget,
+  // Schema-marker-driven widgets, keyed by the names the uiSchema builder
+  // emits. They mirror the Signals profile form so a `location` /
+  // `x-reference-source` field behaves the same in both surfaces.
+  'location-autocomplete': LocationAutocompleteWidget,
+  'location-multi': MultiLocationAutocompleteWidget,
+  'reference-autocomplete': ReferenceAutocompleteWidget,
   TextareaWidget,
   SelectWidget,
   DateWidget,

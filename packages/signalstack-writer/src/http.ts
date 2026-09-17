@@ -275,6 +275,13 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
     // bespoke flag.
     if (submitMode !== 'account_only') {
       body.item_state = input.profile;
+      // Caller-resolved coordinates for the item, sent only alongside one.
+      // Omitted when empty so signalstack geocodes the address text out of
+      // item_state instead — and never sent on the account_only path, which
+      // creates no item for them to belong to.
+      if (input.item_locations && input.item_locations.length > 0) {
+        body.item_locations = input.item_locations;
+      }
     }
     // Signalstack's user schema treats email / phoneNumber as `.optional()`
     // (not `.nullable()`), so omit the keys entirely when we have no value

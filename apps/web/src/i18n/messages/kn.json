@@ -11,7 +11,10 @@
     "select_placeholder": "ಆಯ್ಕೆಮಾಡಿ…",
     "comma_separated": "ಅಲ್ಪವಿರಾಮದಿಂದ ಬೇರ್ಪಡಿಸಿದ ಮೌಲ್ಯಗಳು",
     "select_options": "ಆಯ್ಕೆಗಳನ್ನು ಆರಿಸಿ…",
-    "clear_selection": "ಆಯ್ಕೆಯನ್ನು ತೆರವುಗೊಳಿಸಿ"
+    "clear_selection": "ಆಯ್ಕೆಯನ್ನು ತೆರವುಗೊಳಿಸಿ",
+    "location_search_placeholder": "ವಿಳಾಸ ಟೈಪ್ ಮಾಡಲು ಪ್ರಾರಂಭಿಸಿ…",
+    "location_add": "+ ಇನ್ನೊಂದು ಸ್ಥಳ ಸೇರಿಸಿ",
+    "location_remove": "{label} ತೆಗೆದುಹಾಕಿ"
   },
   "status_pill": {
     "active": "ಸಕ್ರಿಯ",

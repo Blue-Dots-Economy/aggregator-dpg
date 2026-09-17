@@ -5,6 +5,8 @@ import './globals.css';
 import { NextIntlClientProvider } from 'next-intl';
 import { getEnabledLocales } from '../i18n/config';
 import { EnabledLocalesProvider } from '../i18n/EnabledLocalesProvider';
+import { getFormRuntimeConfig } from '../lib/form-runtime-config';
+import { FormRuntimeConfigProvider } from '../lib/FormRuntimeConfigProvider';
 import { getLocale, getMessages, getTranslations } from 'next-intl/server';
 
 /**
@@ -62,6 +64,11 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   // Resolved here, not in the switcher: this is a server component, so
   // `ENABLED_LANGUAGES` is read per request rather than inlined at build time.
   const enabledLocales = getEnabledLocales();
+  // Same reason as the locales above: the Maps key and the reference-dataset
+  // settings must stay runtime values, so they are read here (server) and handed
+  // to the form widgets through a provider rather than a `NEXT_PUBLIC_*` name
+  // that `next build` would inline.
+  const formRuntimeConfig = getFormRuntimeConfig();
   return (
     <html lang={locale} suppressHydrationWarning>
       <head>
@@ -76,7 +83,9 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
       <body>
         <NextIntlClientProvider locale={locale} messages={messages}>
           <EnabledLocalesProvider value={enabledLocales}>
-            <Providers>{children}</Providers>
+            <FormRuntimeConfigProvider value={formRuntimeConfig}>
+              <Providers>{children}</Providers>
+            </FormRuntimeConfigProvider>
           </EnabledLocalesProvider>
         </NextIntlClientProvider>
       </body>
