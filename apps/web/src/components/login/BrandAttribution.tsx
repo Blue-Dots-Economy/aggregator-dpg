@@ -26,11 +26,13 @@ export function BrandAttribution({
 }: Readonly<{ rows: Row[] | undefined }>): JSX.Element | null {
   if (!rows?.length) return null;
   return (
-    // Each row is a fixed-size box (`h-20 w-44`) so both marks get the same
-    // amount of room regardless of their aspect ratio, and `object-left` pins
-    // the artwork to the box's left edge — the same edge the caption starts
-    // at, so the mark sits directly under its own label rather than drifting
-    // toward the middle of a centred column.
+    // Marks are sized by HEIGHT only (`h-20 w-auto`), never by a fixed box.
+    // The two have different aspect ratios, so a shared fixed-width box left
+    // a different amount of empty space to the right of each one — the
+    // captions were flush with their boxes but the artwork underneath them
+    // was not the same width, which reads as misalignment. With `w-auto` the
+    // column hugs its own mark, so each caption spans exactly the mark below
+    // it.
     <div className="mt-8 flex items-start gap-12">
       {rows.map((row) => (
         <div key={`${row.label}-${row.name}`} className="flex flex-col items-start gap-2">
@@ -41,7 +43,7 @@ export function BrandAttribution({
               alt={row.name}
               width={352}
               height={160}
-              className="h-20 w-44 object-contain object-left"
+              className="h-20 w-auto object-contain object-left"
             />
           ) : (
             <span className="text-sm font-semibold text-ink-900">{row.name}</span>
