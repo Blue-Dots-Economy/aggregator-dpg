@@ -38,17 +38,22 @@ export function BrandAttribution({
     // is kept at 32px rather than 48: across a wide gap the eye compares the
     // two marks' centres of mass instead of their left edges, and the two have
     // very different shapes (a symmetric emblem vs a wide wordmark).
-    <div className="mt-14 flex items-start gap-8">
+    <div className="mt-16 flex items-start gap-8">
       {rows.map((row) => (
         <div key={`${row.label}-${row.name}`} className="flex flex-col items-start gap-2">
-          <span className="text-xs font-medium tracking-wide text-ink-400">{row.label}</span>
+          {/* `pl-2` nudges the caption right off the box edge: the marks are
+              symmetric emblems whose visual weight sits inboard of their left
+              edge, so a caption flush at x=0 reads as sitting left of its own
+              logo. Padding the text, not the image, keeps the artwork where it
+              is. */}
+          <span className="pl-2 text-xs font-medium tracking-wide text-ink-400">{row.label}</span>
           {row.logo ? (
             <Image
               src={row.logo}
               alt={row.name}
               width={352}
               height={160}
-              className="h-20 w-auto object-contain object-left"
+              className="h-24 w-auto object-contain object-left"
             />
           ) : (
             <span className="text-sm font-semibold text-ink-900">{row.name}</span>
