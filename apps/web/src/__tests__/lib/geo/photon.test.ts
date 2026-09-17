@@ -1,0 +1,150 @@
+/**
+ * Unit tests for the key-less Photon geocoder.
+ *
+ * This is the provider every unconfigured deployment actually runs, so its
+ * failure modes matter more than the Google one's: a malformed feature must be
+ * skipped rather than surfacing a suggestion with a broken coordinate, and any
+ * transport or parse failure must degrade to "no suggestions" rather than
+ * throwing inside a keystroke handler.
+ */
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { parsePhotonFeatures, createPhotonProvider } from '@/lib/geo/photon';
+
+const FEATURE = {
+  geometry: { coordinates: [77.5938, 12.9251] },
+  properties: {
+    name: 'Jayanagar',
+    city: 'Bengaluru',
+    state: 'Karnataka',
+    postcode: '560041',
+    country: 'India',
+  },
+};
+
+describe('parsePhotonFeatures', () => {
+  it('maps a feature to a suggestion, converting [lng, lat] to lat/lng', () => {
+    // Photon emits GeoJSON order (lng first). Swapping these silently puts
+    // every Indian address in the Indian Ocean.
+    const [suggestion] = parsePhotonFeatures({ features: [FEATURE] });
+
+    expect(suggestion).toMatchObject({ lat: 12.9251, lng: 77.5938 });
+  });
+
+  it('builds the label from the populated address parts, in order', () => {
+    const [suggestion] = parsePhotonFeatures({ features: [FEATURE] });
+
+    expect(suggestion?.label).toBe('Jayanagar, Bengaluru, Karnataka, 560041, India');
+  });
+
+  it('omits missing parts from the label rather than leaving empty separators', () => {
+    const [suggestion] = parsePhotonFeatures({
+      features: [{ geometry: { coordinates: [77, 12] }, properties: { name: 'Somewhere' } }],
+    });
+
+    expect(suggestion?.label).toBe('Somewhere');
+  });
+
+  it('falls back to the raw coordinate when a feature has no usable name at all', () => {
+    const [suggestion] = parsePhotonFeatures({
+      features: [{ geometry: { coordinates: [77, 12] }, properties: {} }],
+    });
+
+    expect(suggestion?.label).toBe('12, 77');
+  });
+
+  it('carries the address components through', () => {
+    const [suggestion] = parsePhotonFeatures({ features: [FEATURE] });
+
+    expect(suggestion?.components).toMatchObject({ city: 'Bengaluru', state: 'Karnataka' });
+  });
+
+  it('skips a feature with no geometry', () => {
+    expect(parsePhotonFeatures({ features: [{ properties: { name: 'Nowhere' } }] })).toEqual([]);
+  });
+
+  it('skips a feature whose coordinates are not numbers', () => {
+    expect(
+      parsePhotonFeatures({
+        features: [{ geometry: { coordinates: ['77', '12'] }, properties: {} }],
+      }),
+    ).toEqual([]);
+  });
+
+  it('returns an empty list for a response with no features key', () => {
+    expect(parsePhotonFeatures({})).toEqual([]);
+    expect(parsePhotonFeatures(null)).toEqual([]);
+  });
+});
+
+describe('createPhotonProvider', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchMock = vi
+      .fn()
+      .mockResolvedValue({ ok: true, json: async () => ({ features: [FEATURE] }) });
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('queries the configured host and returns parsed suggestions', async () => {
+    const results = await createPhotonProvider('https://photon.test').suggest('jayanagar');
+
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      'https://photon.test/api?q=jayanagar&limit=5',
+    );
+    expect(results).toHaveLength(1);
+  });
+
+  it('strips a trailing slash off the configured host', async () => {
+    await createPhotonProvider('https://photon.test/').suggest('jayanagar');
+
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      'https://photon.test/api?q=jayanagar&limit=5',
+    );
+  });
+
+  it('url-encodes the query', async () => {
+    await createPhotonProvider('https://photon.test').suggest('mg road, bengaluru');
+
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('q=mg%20road%2C%20bengaluru');
+  });
+
+  it('returns nothing for a blank query without calling out', async () => {
+    expect(await createPhotonProvider('https://photon.test').suggest('   ')).toEqual([]);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('returns nothing on a non-2xx response', async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 503, json: async () => ({}) });
+
+    expect(await createPhotonProvider('https://photon.test').suggest('jayanagar')).toEqual([]);
+  });
+
+  it('returns nothing rather than throwing when the transport fails', async () => {
+    // This runs inside a keystroke handler; a throw here would surface as an
+    // unhandled rejection with the field left in a half-searched state.
+    fetchMock.mockRejectedValue(new Error('network down'));
+
+    expect(await createPhotonProvider('https://photon.test').suggest('jayanagar')).toEqual([]);
+  });
+
+  it('forwards an abort signal so a superseded keystroke cancels its request', async () => {
+    const controller = new AbortController();
+
+    await createPhotonProvider('https://photon.test').suggest('jayanagar', controller.signal);
+
+    expect((fetchMock.mock.calls[0]?.[1] as RequestInit).signal).toBe(controller.signal);
+  });
+
+  it('omits the signal key entirely when no signal is supplied', async () => {
+    // `exactOptionalPropertyTypes` forbids passing an explicit `undefined`
+    // here, so the implementation spreads it conditionally.
+    await createPhotonProvider('https://photon.test').suggest('jayanagar');
+
+    expect(fetchMock.mock.calls[0]?.[1]).not.toHaveProperty('signal');
+  });
+});

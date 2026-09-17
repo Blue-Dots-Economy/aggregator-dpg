@@ -21,6 +21,7 @@ import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 
 import {
   AggregatorYamlSchema,
+  BrandAttributionSchema,
   BrandLogoSchema,
   BrandPaletteSchema,
   BrandTypographySchema,
@@ -54,6 +55,7 @@ const BrandJsonSchema = z.object({
     })
     .optional(),
   logo: BrandLogoSchema.optional(),
+  attribution: z.array(BrandAttributionSchema).optional(),
   colours: BrandPaletteSchema.optional(),
   typography: BrandTypographySchema.optional(),
 });
@@ -486,6 +488,7 @@ function applyBrandJson(yaml: AggregatorYaml, brand: BrandJson): AggregatorYaml 
         ...(brand.colours ? { palette: brand.colours } : {}),
         ...(brand.typography ? { typography: brand.typography } : {}),
         ...(brand.logo ? { logo: brand.logo } : {}),
+        ...(brand.attribution ? { attribution: brand.attribution } : {}),
         ...(brand.brand?.strapline ? { strapline: brand.brand.strapline } : {}),
       },
     },

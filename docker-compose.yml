@@ -322,6 +322,22 @@ services:
       # Max invites an org owner can send per submission. Keep in step with the
       # api's INVITE_MINT_MAX_RECIPIENTS. Empty → the app's default of 10.
       INVITE_MAX_RECIPIENTS: ${INVITE_MAX_RECIPIENTS:-}
+      # Registration-form address autocomplete + institute picker. All four are
+      # runtime values read per request by the root layout, so a change needs a
+      # container restart and never an image rebuild — same reason the two above
+      # are not `NEXT_PUBLIC_`-prefixed. No literal defaults here for the same
+      # reason as ENABLED_LANGUAGES: the defaults live in the app, in
+      # `getFormRuntimeConfig`, and an empty value falls through to them.
+      #
+      # Empty GOOGLE_MAPS_API_KEY → the key-less Photon geocoder, so the address
+      # field still works. Empty REFERENCE_BASE_URL → this app's own
+      # `/reference/`, which holds nothing locally: the datasets are not
+      # committed, so point it at canonical to work on the institute field. See
+      # infra/env.template for the URL.
+      GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY:-}
+      COLLEGE_DATASET: ${COLLEGE_DATASET:-}
+      REFERENCE_BASE_URL: ${REFERENCE_BASE_URL:-}
+      PHOTON_URL: ${PHOTON_URL:-}
       # Transitional: both settings were `NEXT_PUBLIC_`-prefixed before they
       # were made runtime-readable. Forwarded so a deployment whose `.env` still
       # uses the old name keeps working until it renames. Drop these two once no

@@ -6,6 +6,7 @@ import type { RJSFSchema, UiSchema } from '@rjsf/utils';
 import type { IChangeEvent } from '@rjsf/core';
 import { useTranslations } from 'next-intl';
 import { RjsfThemedForm } from '../../../components/forms/RjsfThemed';
+import type { ResolvedPlace } from '../../../components/forms/custom-widgets/LocationAutocompleteWidget';
 import { BlueDotsLogo } from '../../../components/ui/BlueDotsLogo';
 import { I } from '../../../icons';
 import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
@@ -147,21 +148,11 @@ function navigateToSignals(url: string): void {
 }
 
 /**
- * Outcome of the pre-submit identity probe — drives the branched UI
- * (allow normal submit / show owned-elsewhere / offer resume).
+ * Outcome of the pre-submit identity probe. The probe now answers exactly one
+ * question — is this identity owned by a DIFFERENT aggregator? — so the only
+ * outcomes are "submit normally" and "owned elsewhere" (#780).
  */
-type LookupOutcome =
-  | { kind: 'allow' }
-  | { kind: 'owned_elsewhere' }
-  // Already fully registered with THIS aggregator (live item). Re-submitting
-  // would fail upstream with a cryptic INVALID_ITEM_STATE — short-circuit with
-  // a clear message instead.
-  | { kind: 'already_registered' }
-  | {
-      kind: 'resume';
-      itemId: string;
-      lifecycleStatus: 'draft' | 'live' | 'paused';
-    };
+type LookupOutcome = { kind: 'allow' } | { kind: 'owned_elsewhere' };
 
 interface LookupResponse {
   user_exists?: boolean;
@@ -188,6 +179,87 @@ interface SubmitResponse {
 
 interface ApiErrorEnvelope {
   error?: { code?: string; title?: string; detail?: string };
+}
+
+/**
+ * One coordinate to persist alongside the profile, as Signals' admin-participant
+ * API accepts it. `lat`/`lng` must be JSON numbers — Signals 400s on strings
+ * rather than coercing them.
+ */
+interface ItemLocation {
+  lat: number;
+  lng: number;
+  label?: string;
+}
+
+/**
+ * Maps a schema property's custom markers onto the uiSchema entry that selects a
+ * custom widget, or `null` when the property carries no marker.
+ *
+ * The markers are the same ones the Signals profile form reads, so a field
+ * declared once in network.json renders the same way in both apps:
+ *
+ *  - `location: "primary" | "secondary"` → address autocomplete. Only a primary
+ *    field's picked coordinate is persisted; secondary fields are
+ *    autocomplete-only, which is what `isPrimaryLocation` tells the widget.
+ *  - `x-reference-source` → an autocomplete backed by an external dataset,
+ *    either a bare source id or `{ source, subtitle }`.
+ *
+ * @param def - The property's JSON Schema.
+ * @param type - The property's declared `type`, used to pick the array variant.
+ * Exported for test: the column spans it assigns are a layout contract with
+ * the two-column grid, and a stray `ui:colSpan` orphans the cell beside the
+ * field (which is exactly how this regressed once).
+ *
+ * @returns A uiSchema entry for the field, or `null` if no marker applies.
+ */
+export function resolveMarkerUiSchema(
+  def: Record<string, unknown>,
+  type: unknown,
+): Record<string, unknown> | null {
+  const locationRole = def['location'];
+  if (locationRole === 'primary' || locationRole === 'secondary') {
+    const isArray = type === 'array';
+    return {
+      'ui:widget': isArray ? 'location-multi' : 'location-autocomplete',
+      // Only the array variant spans both columns. It is a row-builder — a
+      // stack of inputs each with a remove button, plus an "add" action — and
+      // reads badly squeezed into half the grid.
+      //
+      // The single-value variant deliberately takes NO colSpan, so it keeps the
+      // half-width cell a plain text input would have had. Giving it the full
+      // width pushed it onto its own row and left the cell beside it empty,
+      // which is a visible regression on a form whose fields otherwise pair up.
+      // The suggestion list is absolutely positioned at the field's own width,
+      // so half a column is ample for it.
+      ...(isArray ? { 'ui:colSpan': 2 } : {}),
+      'ui:options': { isPrimaryLocation: locationRole === 'primary' },
+    };
+  }
+
+  const marker = def['x-reference-source'];
+  let source: string | undefined;
+  let subtitleFields: string[] | undefined;
+  if (typeof marker === 'string') {
+    source = marker;
+  } else if (marker && typeof marker === 'object') {
+    const m = marker as { source?: unknown; subtitle?: unknown };
+    if (typeof m.source === 'string') source = m.source;
+    if (Array.isArray(m.subtitle)) {
+      subtitleFields = m.subtitle.filter((s): s is string => typeof s === 'string');
+    }
+  }
+  if (source) {
+    return {
+      'ui:widget': 'reference-autocomplete',
+      // No colSpan, for the same reason as the single-value location widget: it
+      // renders one text input, so it keeps the half-width cell it occupied
+      // before this became an autocomplete.
+      'ui:options': { source, ...(subtitleFields ? { subtitleFields } : {}) },
+    };
+  }
+
+  return null;
 }
 
 /**
@@ -230,16 +302,10 @@ export function PublicRegistrationView({
   const [handoff, setHandoff] = useState<SignalsHandoff | null>(null);
   /**
    * Pre-submit probe outcome. `null` = probe hasn't run yet (or returned
-   * "allow"); `owned_elsewhere` / `resume` short-circuit the submit
-   * pipeline and render branched UI instead.
+   * "allow"); `owned_elsewhere` short-circuits the submit pipeline and renders
+   * its banner instead.
    */
   const [lookup, setLookup] = useState<LookupOutcome | null>(null);
-  /**
-   * Forces the next submit to bypass the probe — set when the user picks
-   * "Continue with a new submission" from the resume prompt. One-shot:
-   * cleared the moment the submit fires.
-   */
-  const [bypassProbe, setBypassProbe] = useState(false);
   // Defer required-field error rendering until the user has actually
   // interacted (typed in a field) or attempted submit once. Otherwise
   // RJSF's `liveValidate` paints every required field red on first
@@ -248,6 +314,15 @@ export function PublicRegistrationView({
   // Schema-validity of the visible form, driven by RjsfThemedForm. Gates the
   // submit button — disabled until every visible required field is valid.
   const [canSubmit, setCanSubmit] = useState(false);
+  // Coordinates for the address the registrant PICKED from the autocomplete, as
+  // opposed to text they typed. Submitted as `item_locations` so Signals stores
+  // that exact point instead of re-geocoding the address string.
+  //
+  // Empty is the correct, common state — no Maps key configured, or an address
+  // typed without choosing a suggestion. It is submitted as "absent", which
+  // leaves Signals to geocode the text exactly as it does today; sending a
+  // guessed point would be worse than sending none.
+  const [resolvedLocations, setResolvedLocations] = useState<ItemLocation[]>([]);
   // Single consent acceptance covering terms + privacy + profile-creation
   // (§3.1's three points), collected through the blocking ConsentGate rather
   // than an inline checkbox. Feeds consent_terms / consent_privacy /
@@ -548,10 +623,27 @@ export function PublicRegistrationView({
         } else {
           tail.push(field);
         }
+
+        // Schema markers win over the type-derived widget above. Both are read
+        // straight off the network.json property, so the public form and the
+        // Signals profile form pick the same widget for the same field with no
+        // per-field configuration here.
+        const marker = resolveMarkerUiSchema(def, type);
+        if (marker) defaults[field] = marker;
       }
     }
+    // A schema that declares its own sections also declares its own field
+    // order, and the two must not disagree — the sectioned renderer looks
+    // fields up by name, so a conflicting `ui:order` would only scramble any
+    // field the layout happens to omit. Where there is no layout, the
+    // required-first heuristic above still applies.
+    const layoutOrder = (
+      (schema as { 'x-form-layout'?: { sections?: Array<{ fields?: string[] }> } })['x-form-layout']
+        ?.sections ?? []
+    ).flatMap((section) => section.fields ?? []);
+
     return {
-      'ui:order': [...order, ...tail, '*'],
+      'ui:order': layoutOrder.length > 0 ? [...layoutOrder, '*'] : [...order, ...tail, '*'],
       ...defaults,
       ...uiSchema,
       participant_id: { 'ui:widget': 'hidden' },
@@ -570,8 +662,9 @@ export function PublicRegistrationView({
   /**
    * Runs the identity probe before the actual submit. Picks `email` or
    * `phone` off the RJSF form data and asks the BFF whether this contact
-   * already lives in signalstack — either with another aggregator
-   * (`owned_elsewhere`) or as an unfinished profile under us (`resume`).
+   * already lives in signalstack under ANOTHER aggregator
+   * (`owned_elsewhere`). A contact that already has profiles under THIS
+   * aggregator is not a stop: they may hold more than one (#780).
    *
    * Returns `{ kind: 'allow' }` when no identity is supplied, when the
    * network id is unknown, when the BFF errors, or when the probe says
@@ -615,23 +708,27 @@ export function PublicRegistrationView({
     if (!res.ok) return { kind: 'allow' };
     const body = (await res.json().catch(() => ({}))) as LookupResponse;
     if (body.owned_elsewhere) return { kind: 'owned_elsewhere' };
-    const primary = body.lifecycle_summary?.primary_item;
-    // Already registered with THIS aggregator and the profile is live → nothing
-    // to add. Surface a clear "already registered" message rather than letting
-    // the submit hit signalstack and fail with INVALID_ITEM_STATE.
-    if (primary && primary.lifecycle_status === 'live') {
-      return { kind: 'already_registered' };
-    }
-    if (
-      primary &&
-      (primary.lifecycle_status === 'draft' || primary.lifecycle_status === 'paused')
-    ) {
-      return {
-        kind: 'resume',
-        itemId: primary.item_id,
-        lifecycleStatus: primary.lifecycle_status,
-      };
-    }
+    // A live profile with THIS aggregator is deliberately NOT a stop (#780). A
+    // participant may hold more than one profile — signals inserts a new one on
+    // every onboard call without an `item_id`, bounded only by
+    // `MAX_PROFILES_PER_USER` — and bulk upload has always created a second one
+    // for a re-uploaded row. This form used to be the odd one out, blocking with
+    // an "Already registered" banner whose only way forward was to change your
+    // contact details. It now falls through to `allow` and submits, and the cap
+    // is left to signals, which answers `PROFILE_LIMIT_REACHED` with a sentence
+    // the route below surfaces verbatim.
+    // A draft or paused profile is not a stop either, and the "Resume where you
+    // left off" prompt that used to appear here has been removed with the live
+    // block. That prompt never resumed anything: its CTA only set a bypass flag and
+    // re-submitted, and `onboard()` sends no `item_id`, so signals inserted a
+    // NEW profile exactly as the plain path does — while its sibling button
+    // ("register under different contact details") wiped the identity fields.
+    // It also made the answer depend on which profile signals happened to list
+    // first, so a participant with a live profile and a newer abandoned draft
+    // was offered a resume instead of simply registering again.
+    //
+    // `lifecycle_summary` is consequently not read at all any more; the probe
+    // is consumed only for `owned_elsewhere` above.
     return { kind: 'allow' };
   };
 
@@ -707,6 +804,15 @@ export function PublicRegistrationView({
                 }
               : {}),
             ...(showBirthYear ? { year_of_birth: birthYear.trim() } : {}),
+            // Coordinates the registrant picked from the address autocomplete.
+            // Omitted entirely when none were resolved, so Signals falls back to
+            // geocoding the address text — its behaviour before this existed.
+            // Never sent on the account_only shape: that path creates no profile
+            // item for a coordinate to belong to, and the server rejects any key
+            // outside its identity allow-list.
+            ...(!isAccountOnly && resolvedLocations.length > 0
+              ? { item_locations: resolvedLocations }
+              : {}),
           }),
         },
       );
@@ -784,18 +890,16 @@ export function PublicRegistrationView({
     // full-profile surfaces — both submits are routed through this same
     // `handleSubmit`.
     const needsConsentNow = showConsent && !isMinorForSubmit && !consentAccepted;
-    // Pre-submit probe. Skipped when the user has explicitly chosen
-    // "Continue with a new submission" after a resume prompt.
-    if (!bypassProbe) {
-      setState({ status: 'submitting' });
-      const outcome = await runIdentityProbe(values);
-      if (outcome.kind !== 'allow') {
-        setLookup(outcome);
-        setState({ status: 'idle' });
-        return;
-      }
-    } else {
-      setBypassProbe(false);
+    // Pre-submit probe. Always runs: its only remaining verdict is
+    // `owned_elsewhere`, which no participant may opt out of (#780). The
+    // `bypassProbe` escape hatch it used to carry existed solely for the resume
+    // prompt, which is gone.
+    setState({ status: 'submitting' });
+    const outcome = await runIdentityProbe(values);
+    if (outcome.kind !== 'allow') {
+      setLookup(outcome);
+      setState({ status: 'idle' });
+      return;
     }
     setLookup(null);
 
@@ -1234,107 +1338,34 @@ export function PublicRegistrationView({
                   </div>
                 ) : null}
 
-                {lookup?.kind === 'already_registered' ? (
-                  <div
-                    role="alert"
-                    data-testid="lookup-already-registered"
-                    className="mb-5 rounded-[10px] border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-800"
-                  >
-                    <div className="font-semibold">{t('lookup.already_registered_title')}</div>
-                    <div className="mt-1 text-amber-700">{t('lookup.already_registered_body')}</div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setLookup(null);
-                        setFormData((prev) => {
-                          const next = { ...prev };
-                          for (const key of [
-                            identity?.email,
-                            identity?.phone,
-                            'email',
-                            'phone',
-                            'phone_number',
-                            'mobile',
-                          ]) {
-                            if (key) delete next[key];
-                          }
-                          return next;
-                        });
-                      }}
-                      className="mt-3 text-[12px] font-semibold underline text-amber-900 hover:text-amber-700"
-                    >
-                      {t('lookup.already_registered_cta')}
-                    </button>
-                  </div>
-                ) : null}
-
-                {lookup?.kind === 'resume' ? (
-                  <div
-                    role="alert"
-                    data-testid="lookup-resume"
-                    className="mb-5 rounded-[10px] border border-sky-200 bg-sky-50 px-4 py-3 text-[13px] text-sky-800"
-                  >
-                    <div className="font-semibold">{t('lookup.resume_title')}</div>
-                    <div className="mt-1 text-sky-700">{t('lookup.resume_body')}</div>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          // Resume = let the upstream lifecycle parser
-                          // dedup against the existing item by identity.
-                          // No client-side state to thread: the server
-                          // finds the same item_id via signalstack probe.
-                          setLookup(null);
-                          setBypassProbe(true);
-                        }}
-                        style={{ backgroundColor: cfg.brand.primary_color }}
-                        className="px-3 py-2 rounded-[8px] font-semibold text-[12px] text-white hover:opacity-90"
-                      >
-                        {t('lookup.resume_cta')}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          // "New submission" = the user wants to register
-                          // under different contact details. Clear the
-                          // identity fields and DON'T bypass — so the new
-                          // identity is re-probed on the next submit (rather
-                          // than silently resuming the existing draft, which
-                          // is what the "Resume" button above does).
-                          setLookup(null);
-                          setBypassProbe(false);
-                          setFormData((prev) => {
-                            const next = { ...prev };
-                            for (const key of [
-                              identity?.email,
-                              identity?.phone,
-                              'email',
-                              'phone',
-                              'phone_number',
-                              'mobile',
-                            ]) {
-                              if (key) delete next[key];
-                            }
-                            return next;
-                          });
-                        }}
-                        className="px-3 py-2 rounded-[8px] font-semibold text-[12px] text-sky-900 underline hover:text-sky-700"
-                      >
-                        {t('lookup.resume_continue_new')}
-                      </button>
-                    </div>
-                  </div>
-                ) : null}
-
                 {/* Account-only links capture identity via MinimalIdentityForm
-                    (the idle early-return). In the owned_elsewhere / resume /
-                    error states we only show the banner above — never the RJSF
+                    (the idle early-return). In the owned_elsewhere / error
+                    states we only show the banner above — never the RJSF
                     profile form or its submit button. */}
                 {!isAccountOnly && (
                   <RjsfThemedForm
                     schema={formSchema}
                     uiSchema={mergedUiSchema as unknown as UiSchema<Record<string, unknown>>}
                     formData={formData}
+                    // How the location widgets hand back the coordinate they
+                    // resolved. RJSF v6 exposes this to widgets only as
+                    // `registry.formContext`, never as a prop — see the note in
+                    // LocationAutocompleteWidget (signals-dpg#506).
+                    formContext={{
+                      // Narrowed to lat/lng rather than stored as-is: the
+                      // single-value widget reports a richer `ResolvedPlace`
+                      // that also carries the parsed address `components`, and
+                      // passing that straight through put them in the submit
+                      // body. The API strips them (its Zod object is
+                      // non-strict), so nothing broke — but it sent a nested
+                      // copy of address data already present in the form's own
+                      // location field, and made the payload disagree with the
+                      // `ItemLocation` type this state is declared as.
+                      onLocationResolved: (place: ResolvedPlace | null) =>
+                        setResolvedLocations(place ? [{ lat: place.lat, lng: place.lng }] : []),
+                      // The multi-value widget already emits exactly this shape.
+                      onLocationsResolved: (coords: ItemLocation[]) => setResolvedLocations(coords),
+                    }}
                     onChange={(e) => setFormData(e.formData as Record<string, unknown>)}
                     onValidityChange={setCanSubmit}
                     onSubmit={handleSubmit}

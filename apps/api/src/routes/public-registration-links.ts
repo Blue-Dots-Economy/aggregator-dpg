@@ -19,6 +19,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { eq } from 'drizzle-orm';
 import { PostgresParticipantsWriter } from '@aggregator-dpg/participants-writer/postgres';
 import type { ParticipantsWriterBase } from '@aggregator-dpg/participants-writer/interface';
 import { getRegistrationLinksStore } from '../services/registration-links-store/index.js';
@@ -100,8 +101,39 @@ const PublicRegistrationSubmitBodySchema = z
   .object({})
   .passthrough()
   .describe(
-    "Dynamic registration payload validated at runtime against the link domain's participant JSON Schema (identity fields such as name/phone/email plus profile fields). consent_terms / consent_privacy are accepted on account_only links.",
+    "Dynamic registration payload validated at runtime against the link domain's participant JSON Schema (identity fields such as name/phone/email plus profile fields). consent_terms / consent_privacy are accepted on account_only links. item_locations optionally carries coordinates the registrant picked from the address autocomplete.",
   );
+
+/**
+ * Upper bound on submitted coordinates. The array exists for multi-location
+ * fields (e.g. a service provider's service areas) and no schema caps it, so the
+ * limit is set here — this is unauthenticated input, and each entry costs a
+ * geocode-free but still non-zero write downstream.
+ */
+const MAX_ITEM_LOCATIONS = 25;
+
+/**
+ * Coordinates the registrant PICKED from the address autocomplete, forwarded to
+ * signalstack as `item_locations`.
+ *
+ * Optional throughout: absent (or empty) means no suggestion was chosen — or no
+ * Maps key is configured — and signalstack then geocodes the address text from
+ * `item_state`, which is the behaviour that predates this field. A non-empty
+ * array is stored as-is and the address text is not geocoded over.
+ *
+ * `lat`/`lng` are strict numbers rather than coerced strings, matching what
+ * signalstack's admin-participant API accepts; a string there is a 400 on its
+ * side, so rejecting it here turns a confusing upstream error into a local one.
+ */
+const ItemLocationsSchema = z
+  .array(
+    z.object({
+      lat: z.number().min(-90).max(90),
+      lng: z.number().min(-180).max(180),
+      label: z.string().min(1).optional(),
+    }),
+  )
+  .max(MAX_ITEM_LOCATIONS);
 
 /** 201 payload — participant created (or saved as draft) and pushed to signalstack. */
 const SubmitAcceptedResponseSchema = z
@@ -345,6 +377,25 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       // it.
       const body: Record<string, unknown> = { ...rawBody };
       delete body['partial'];
+
+      // Picked-coordinate passthrough. Read then stripped like the consent and
+      // birth-year keys above, so it never reaches Ajv or the signalstack
+      // item_state — it is transport metadata about the profile, not a field of
+      // it. A malformed value is rejected here rather than forwarded, since
+      // signalstack would answer with its own 400 that this route cannot
+      // attribute back to the offending key.
+      const rawItemLocations = body['item_locations'];
+      delete body['item_locations'];
+      let itemLocations: z.infer<typeof ItemLocationsSchema> = [];
+      if (rawItemLocations !== undefined) {
+        const parsed = ItemLocationsSchema.safeParse(rawItemLocations);
+        if (!parsed.success) {
+          throw httpError('SCHEMA_VALIDATION', {
+            detail: `item_locations is invalid: ${parsed.error.issues[0]?.message ?? 'unexpected shape'}`,
+          });
+        }
+        itemLocations = parsed.data;
+      }
 
       const submitMode: 'with_item' | 'account_only' =
         submissionShape === 'account_only' ? 'account_only' : 'with_item';
@@ -636,6 +687,10 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
             domain: link.domain,
             item_type: linkDomainCfg.itemType,
             profile: buildSignalStackItemState(link.domain, body, pushPhone, linkDomainCfg),
+            // Omitted when empty so signalstack geocodes the address text
+            // instead — it treats an empty array as "none supplied", but not
+            // sending the key at all keeps that explicit on the wire.
+            ...(itemLocations.length > 0 ? { item_locations: itemLocations } : {}),
             submit_mode: submitMode,
           });
 
@@ -706,14 +761,19 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
           lifecycleStatusOut = lifecycleStatus;
 
           // signalstack is the identity authority. The local participants table
-          // is a soon-to-be-removed mirror, so its per-phone dedup must not flip
-          // an account_only capture to `skipped`/409 — re-submitting the same
-          // phone is an idempotent success (signals returns the same user). Drive
-          // the account_only outcome from signals: skip only when the identity is
-          // genuinely owned by another aggregator (owned_elsewhere).
-          if (submitMode === 'account_only') {
-            outcome = ownedElsewhere ? 'skipped' : 'passed';
-          }
+          // is a soon-to-be-removed mirror, and its per-phone dedup must not flip
+          // a successful capture to `skipped`/409. This rule already governed the
+          // account_only path — re-submitting the same phone is an idempotent
+          // success there, since signals returns the same user — and #780 extends
+          // it to the full form: a repeat submission is a legitimate NEW profile,
+          // because signals inserts one on every onboard call without an
+          // `item_id`. Leaving the mirror in charge produced the worst of both
+          // answers — the profile WAS created upstream while the participant was
+          // told "already registered, no need to register again".
+          //
+          // Skip only when the identity is genuinely owned by ANOTHER aggregator.
+          // That is tenant isolation, not deduplication, and is unaffected.
+          outcome = ownedElsewhere ? 'skipped' : 'passed';
 
           log.info({
             status: 'success',
@@ -730,10 +790,25 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
           });
         }
 
+        // The submission row was inserted BEFORE the push, carrying the local
+        // writer's verdict, and the push may since have corrected it (above).
+        // Persist the correction inside the same transaction so the stored
+        // record matches both the response and what actually happened — a row
+        // reading `skipped` for a submission that created a profile would
+        // under-count real registrations for anyone who later reports on this
+        // table. Pre-existing for `account_only`; #780 makes it routine.
+        const submissionId = submission[0]?.id;
+        if (submissionId && outcome !== writeOutcome) {
+          await tx
+            .update(linkSubmissions)
+            .set({ outcome })
+            .where(eq(linkSubmissions.id, submissionId));
+        }
+
         return {
           outcome,
           participantRowId,
-          submissionId: submission[0]?.id,
+          submissionId,
         };
       });
       const { outcome, participantRowId, submissionId } = txResult;

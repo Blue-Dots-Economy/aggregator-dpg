@@ -114,6 +114,25 @@ export interface SignalStackOnboardParticipantInput {
   /** Free-form item_state payload — the participant's profile fields. */
   profile: Record<string, unknown>;
   /**
+   * Coordinates to store for the profile, when the caller already resolved them
+   * (e.g. the registrant picked an address from a Places autocomplete).
+   *
+   * Omit — or pass an empty array — to let signalstack geocode the address field
+   * out of `profile` itself, which is what it does for every caller that does
+   * not supply this. A non-empty array is stored as-is and the address text is
+   * not geocoded over. A `private` location field's point is jittered by
+   * signalstack at its own storage choke point either way, so supplying the
+   * exact coordinate here does not persist it.
+   *
+   * Signalstack validates `lat`/`lng` as numbers and rejects strings, so these
+   * are typed `number` rather than a looser coercible shape. `label` is
+   * `?: string | undefined` rather than a bare optional because callers build
+   * these from a Zod `.optional()`, whose inferred type includes `undefined`
+   * explicitly — which a bare optional rejects under
+   * `exactOptionalPropertyTypes`.
+   */
+  item_locations?: Array<{ lat: number; lng: number; label?: string | undefined }>;
+  /**
    * Controls signals' lifecycle path:
    *   - `'with_item'` (default) — POST /admin/participant with profile
    *     body; signals classifies draft|live based on completeness.
