@@ -521,6 +521,17 @@ function useHighlightOnMount(highlight: boolean) {
   return { cardRef, ringed };
 }
 
+/**
+ * Pill + dot colours per link status. A lookup rather than nested ternaries in
+ * the JSX: the two were duplicating the same status test, and the nesting is
+ * what pushed LinkCard over the cognitive-complexity limit.
+ */
+const STATUS_STYLE: Record<string, { pill: string; dot: string }> = {
+  live: { pill: 'bg-emerald-50 text-emerald-700', dot: 'bg-emerald-500' },
+  retired: { pill: 'bg-rose-50 text-rose-700', dot: 'bg-rose-500' },
+};
+const DRAFT_STATUS_STYLE = { pill: 'bg-amber-50 text-amber-700', dot: 'bg-amber-500' };
+
 function LinkCard({
   link,
   highlight = false,
@@ -539,6 +550,7 @@ function LinkCard({
   const update = useUpdateLink();
   const isLive = link.status === 'live';
   const isDraft = link.status === 'draft';
+  const badge = STATUS_STYLE[link.status] ?? DRAFT_STATUS_STYLE;
   const ctx = (link.context ?? {}) as Record<string, unknown>;
   const ctxString = (key: string): string =>
     typeof ctx[key] === 'string' ? (ctx[key] as string) : '';
@@ -652,23 +664,9 @@ function LinkCard({
               {title}
             </h3>
             <span
-              className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold ${
-                isLive
-                  ? 'bg-emerald-50 text-emerald-700'
-                  : link.status === 'retired'
-                    ? 'bg-rose-50 text-rose-700'
-                    : 'bg-amber-50 text-amber-700'
-              }`}
+              className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold ${badge.pill}`}
             >
-              <span
-                className={`w-1.5 h-1.5 rounded-full inline-block ${
-                  isLive
-                    ? 'bg-emerald-500'
-                    : link.status === 'retired'
-                      ? 'bg-rose-500'
-                      : 'bg-amber-500'
-                }`}
-              />
+              <span className={`w-1.5 h-1.5 rounded-full inline-block ${badge.dot}`} />
               {isLive ? t('link_card.active') : link.status}
             </span>
           </div>
