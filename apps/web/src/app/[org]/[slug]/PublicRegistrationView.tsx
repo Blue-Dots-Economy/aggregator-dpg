@@ -207,17 +207,32 @@ interface ItemLocation {
  *
  * @param def - The property's JSON Schema.
  * @param type - The property's declared `type`, used to pick the array variant.
+ * Exported for test: the column spans it assigns are a layout contract with
+ * the two-column grid, and a stray `ui:colSpan` orphans the cell beside the
+ * field (which is exactly how this regressed once).
+ *
  * @returns A uiSchema entry for the field, or `null` if no marker applies.
  */
-function resolveMarkerUiSchema(
+export function resolveMarkerUiSchema(
   def: Record<string, unknown>,
   type: unknown,
 ): Record<string, unknown> | null {
   const locationRole = def['location'];
   if (locationRole === 'primary' || locationRole === 'secondary') {
+    const isArray = type === 'array';
     return {
-      'ui:widget': type === 'array' ? 'location-multi' : 'location-autocomplete',
-      'ui:colSpan': 2,
+      'ui:widget': isArray ? 'location-multi' : 'location-autocomplete',
+      // Only the array variant spans both columns. It is a row-builder — a
+      // stack of inputs each with a remove button, plus an "add" action — and
+      // reads badly squeezed into half the grid.
+      //
+      // The single-value variant deliberately takes NO colSpan, so it keeps the
+      // half-width cell a plain text input would have had. Giving it the full
+      // width pushed it onto its own row and left the cell beside it empty,
+      // which is a visible regression on a form whose fields otherwise pair up.
+      // The suggestion list is absolutely positioned at the field's own width,
+      // so half a column is ample for it.
+      ...(isArray ? { 'ui:colSpan': 2 } : {}),
       'ui:options': { isPrimaryLocation: locationRole === 'primary' },
     };
   }
@@ -237,7 +252,9 @@ function resolveMarkerUiSchema(
   if (source) {
     return {
       'ui:widget': 'reference-autocomplete',
-      'ui:colSpan': 2,
+      // No colSpan, for the same reason as the single-value location widget: it
+      // renders one text input, so it keeps the half-width cell it occupied
+      // before this became an autocomplete.
       'ui:options': { source, ...(subtitleFields ? { subtitleFields } : {}) },
     };
   }
