@@ -42,6 +42,14 @@ Streaming CSV parsing is entirely `apps/worker`'s job (see `apps/worker/CLAUDE.m
 
 A Signals `409 PROFILE_LIMIT_REACHED` is mapped to `SIGNALSTACK_PROFILE_LIMIT_REACHED` and categorised as `limit_reached` (not `system_error`) in `errors.csv`, and surfaced on registration links. Note that `onboard` is **no longer idempotent** — it always inserts, bounded only by the profile cap.
 
+## Public registration submit — two things that are not obvious from the route
+
+**`item_locations` is transport metadata, not a profile field (#778).** The submit body may carry `item_locations` — the coordinates the registrant picked from the address autocomplete. `public-registration-links.ts` reads it and then **deletes it from the body**, exactly like the consent and birth-year keys, so it never reaches Ajv or the signalstack `item_state`. It is validated locally (strict numbers, lat/lng bounds, max 25 entries) rather than forwarded blind: signals would answer with its own 400 that this route cannot attribute back to the offending key. Absent or empty means no suggestion was chosen — or no Maps key is configured — and signals geocodes the address text instead, which is the behaviour that predates the field.
+
+**The local `participants` mirror no longer decides the outcome (#780).** It dedups per phone and used to report `skipped`, which after the client-side gate came down meant a participant was told "already registered" while a second profile had just been created upstream. Signals is the identity authority; the route now skips **only** when the identity is genuinely owned by ANOTHER aggregator — tenant isolation, not deduplication. The `link_submissions` row is inserted before the push, so the corrected verdict is persisted in the same transaction; without that the table records a duplicate for a submission that created a profile.
+
+**Brand `attribution` on `/v1/aggregator-config` is opt-in (signals-dpg#720).** The response only carries an `attribution` array when the resolved `brand.json` declares one, so every deployment that does not is byte-identical to before.
+
 ## Campaign PII audit log (#617)
 
 `campaign_pii_audit` is **append-only** and records every campaign action that
