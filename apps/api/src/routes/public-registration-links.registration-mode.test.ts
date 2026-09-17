@@ -113,6 +113,10 @@ function buildFakeDb(submissionId: string): unknown {
         },
       };
     },
+    // The route corrects the stored outcome after the signalstack push (#780).
+    update() {
+      return { set: () => ({ async where() {} }) };
+    },
   };
   return {
     async transaction(cb: (tx: unknown) => Promise<unknown>) {
