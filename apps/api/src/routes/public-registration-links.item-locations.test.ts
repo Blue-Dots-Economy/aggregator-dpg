@@ -270,6 +270,24 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — item_loca
     expect(input?.profile).not.toHaveProperty('item_locations');
   });
 
+  it('strips any extra keys a client sends inside a coordinate', async () => {
+    // The browser widget reports parsed address `components` alongside the
+    // point; the page narrows them away before submit, but an older client (or
+    // a hand-rolled caller) may still send them. Zod's non-strict object drops
+    // them here so signalstack only ever receives lat/lng/label — asserted
+    // because signalstack validates its own body and an unexpected key there
+    // would surface as an opaque upstream 400.
+    const { res, input } = await submitAndCaptureOnboard({
+      ...basePayload,
+      phone: '+919876540008',
+      email: 'extrakeys@example.com',
+      item_locations: [{ ...LOCATION, components: { city: 'Bengaluru' }, bogus: 1 }],
+    });
+
+    expect(res.statusCode).toBe(201);
+    expect(input?.item_locations).toEqual([LOCATION]);
+  });
+
   it('forwards every entry of a multi-location field', async () => {
     const { res, input } = await submitAndCaptureOnboard({
       ...basePayload,

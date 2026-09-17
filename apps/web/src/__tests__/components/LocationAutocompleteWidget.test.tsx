@@ -110,6 +110,28 @@ describe('LocationAutocompleteWidget', () => {
     );
   });
 
+  it('reports address components alongside the coordinate', async () => {
+    // The page deliberately drops these before submit (see the narrowing in
+    // PublicRegistrationView) — but the widget still reports them, so that a
+    // caller which DOES want them, such as a future coarsen-before-submit path,
+    // has them without a second geocode.
+    const onLocationResolved = vi.fn();
+    render(
+      <Wrapper>
+        <LocationAutocompleteWidget
+          {...(makeProps({ formContext: { onLocationResolved } }) as never)}
+        />
+      </Wrapper>,
+    );
+
+    await typeAndAwaitSuggestions('jayanagar');
+    fireEvent.mouseDown(await screen.findByRole('option', { name: JAYANAGAR.label }));
+
+    expect(onLocationResolved.mock.calls.at(-1)?.[0]).toMatchObject({
+      components: { city: 'Bengaluru' },
+    });
+  });
+
   it('writes the picked label back to the form', async () => {
     const onChange = vi.fn();
     render(

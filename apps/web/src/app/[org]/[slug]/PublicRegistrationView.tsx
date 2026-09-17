@@ -6,6 +6,7 @@ import type { RJSFSchema, UiSchema } from '@rjsf/utils';
 import type { IChangeEvent } from '@rjsf/core';
 import { useTranslations } from 'next-intl';
 import { RjsfThemedForm } from '../../../components/forms/RjsfThemed';
+import type { ResolvedPlace } from '../../../components/forms/custom-widgets/LocationAutocompleteWidget';
 import { BlueDotsLogo } from '../../../components/ui/BlueDotsLogo';
 import { I } from '../../../icons';
 import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
@@ -1324,8 +1325,18 @@ export function PublicRegistrationView({
                     // `registry.formContext`, never as a prop — see the note in
                     // LocationAutocompleteWidget (signals-dpg#506).
                     formContext={{
-                      onLocationResolved: (place: ItemLocation | null) =>
-                        setResolvedLocations(place ? [place] : []),
+                      // Narrowed to lat/lng rather than stored as-is: the
+                      // single-value widget reports a richer `ResolvedPlace`
+                      // that also carries the parsed address `components`, and
+                      // passing that straight through put them in the submit
+                      // body. The API strips them (its Zod object is
+                      // non-strict), so nothing broke — but it sent a nested
+                      // copy of address data already present in the form's own
+                      // location field, and made the payload disagree with the
+                      // `ItemLocation` type this state is declared as.
+                      onLocationResolved: (place: ResolvedPlace | null) =>
+                        setResolvedLocations(place ? [{ lat: place.lat, lng: place.lng }] : []),
+                      // The multi-value widget already emits exactly this shape.
                       onLocationsResolved: (coords: ItemLocation[]) => setResolvedLocations(coords),
                     }}
                     onChange={(e) => setFormData(e.formData as Record<string, unknown>)}
