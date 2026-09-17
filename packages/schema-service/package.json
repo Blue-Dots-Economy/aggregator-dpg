@@ -34,7 +34,7 @@
     "@aggregator-dpg/tsconfig": "workspace:*",
     "@types/js-yaml": "^4.0.9",
     "@vitest/coverage-v8": "^4.1.11",
-    "js-yaml": "^5.4.1",
+    "js-yaml": "^5.4.2",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"
   }
