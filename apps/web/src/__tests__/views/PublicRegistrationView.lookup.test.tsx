@@ -207,7 +207,13 @@ describe('<PublicRegistrationView /> — lookup branches', () => {
     expect(fetchMock.mock.calls[0]![0]!.toString()).toContain('/lookup');
   });
 
-  it('shows the resume prompt for an in-progress draft', async () => {
+  it('submits on an in-progress draft instead of offering to resume it (#780)', async () => {
+    // The "Resume where you left off" prompt is gone. It never resumed
+    // anything — its CTA only bypassed the probe, and `onboard()` sends no
+    // `item_id`, so signals inserted a new profile exactly as the plain path
+    // does. Keeping it also made the form's answer depend on which profile
+    // signals listed first: a participant with a live profile and a newer
+    // abandoned draft was offered a resume rather than simply registering.
     const fetchMock = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
       const url = input.toString();
       if (url.includes('/lookup')) {
@@ -216,23 +222,30 @@ describe('<PublicRegistrationView /> — lookup branches', () => {
             user_exists: true,
             owned_elsewhere: false,
             lifecycle_summary: {
-              primary_item: {
-                item_id: 'item-xyz',
-                lifecycle_status: 'draft',
-              },
+              primary_item: { item_id: 'item-xyz', lifecycle_status: 'draft' },
             },
           }),
           { status: 200, headers: { 'content-type': 'application/json' } },
         );
       }
+      if (url.includes('/submit')) {
+        return new Response(JSON.stringify({ outcome: 'passed', submission_id: 'sub-draft' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
       throw new Error(`unexpected fetch: ${url}`);
     });
     globalThis.fetch = fetchMock as unknown as typeof fetch;
+
     renderView();
     fireEvent.submit(screen.getByTestId('rjsf-shim'));
-    const banner = await screen.findByTestId('lookup-resume');
-    expect(banner).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+    expect(fetchMock.mock.calls[1]![0]!.toString()).toContain('/submit');
+    expect(screen.queryByTestId('lookup-resume')).toBeNull();
   });
 
   it('passes through to /submit when the probe says allow', async () => {
@@ -440,75 +453,6 @@ describe('<PublicRegistrationView /> — remaining branches', () => {
 
     fireEvent.click(screen.getByText(messages.profile.public_reg.lookup.owned_elsewhere_cta));
     expect(screen.queryByTestId('lookup-owned-elsewhere')).toBeNull();
-  });
-
-  it('"Continue with a new submission" clears the resume banner and re-probes on next submit', async () => {
-    let lookupCalls = 0;
-    globalThis.fetch = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
-      const url = input.toString();
-      if (url.includes('/lookup')) {
-        lookupCalls += 1;
-        return new Response(
-          JSON.stringify({
-            user_exists: true,
-            owned_elsewhere: false,
-            lifecycle_summary: {
-              primary_item: { item_id: 'item-2', lifecycle_status: 'draft' },
-            },
-          }),
-          { status: 200, headers: { 'content-type': 'application/json' } },
-        );
-      }
-      throw new Error(`unexpected fetch: ${url}`);
-    }) as unknown as typeof fetch;
-
-    renderView();
-    fireEvent.submit(screen.getByTestId('rjsf-shim'));
-    await screen.findByTestId('lookup-resume');
-
-    fireEvent.click(screen.getByText(messages.profile.public_reg.lookup.resume_continue_new));
-    expect(screen.queryByTestId('lookup-resume')).toBeNull();
-
-    fireEvent.submit(screen.getByTestId('rjsf-shim'));
-    await waitFor(() => expect(lookupCalls).toBe(2));
-  });
-
-  it('"Resume profile" bypasses the probe on the next submit', async () => {
-    const fetchMock = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
-      const url = input.toString();
-      if (url.includes('/lookup')) {
-        return new Response(
-          JSON.stringify({
-            user_exists: true,
-            owned_elsewhere: false,
-            lifecycle_summary: {
-              primary_item: { item_id: 'item-3', lifecycle_status: 'draft' },
-            },
-          }),
-          { status: 200, headers: { 'content-type': 'application/json' } },
-        );
-      }
-      if (url.includes('/submit')) {
-        return new Response(JSON.stringify({ outcome: 'passed', submission_id: 'sub-resume' }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        });
-      }
-      throw new Error(`unexpected fetch: ${url}`);
-    });
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
-
-    renderView();
-    fireEvent.submit(screen.getByTestId('rjsf-shim'));
-    await screen.findByTestId('lookup-resume');
-
-    fireEvent.click(screen.getByText(messages.profile.public_reg.lookup.resume_cta));
-    fireEvent.submit(screen.getByTestId('rjsf-shim'));
-
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    // Second call bypasses the probe and goes straight to /submit — no
-    // second /lookup call.
-    expect(fetchMock.mock.calls[1]![0]!.toString()).toContain('/submit');
   });
 
   it('shows a server error banner (title/detail/code) on a non-409 failure response', async () => {

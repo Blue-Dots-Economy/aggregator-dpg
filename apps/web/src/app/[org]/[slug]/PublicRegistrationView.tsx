@@ -147,17 +147,11 @@ function navigateToSignals(url: string): void {
 }
 
 /**
- * Outcome of the pre-submit identity probe — drives the branched UI
- * (allow normal submit / show owned-elsewhere / offer resume).
+ * Outcome of the pre-submit identity probe. The probe now answers exactly one
+ * question — is this identity owned by a DIFFERENT aggregator? — so the only
+ * outcomes are "submit normally" and "owned elsewhere" (#780).
  */
-type LookupOutcome =
-  | { kind: 'allow' }
-  | { kind: 'owned_elsewhere' }
-  | {
-      kind: 'resume';
-      itemId: string;
-      lifecycleStatus: 'draft' | 'live' | 'paused';
-    };
+type LookupOutcome = { kind: 'allow' } | { kind: 'owned_elsewhere' };
 
 interface LookupResponse {
   user_exists?: boolean;
@@ -226,16 +220,10 @@ export function PublicRegistrationView({
   const [handoff, setHandoff] = useState<SignalsHandoff | null>(null);
   /**
    * Pre-submit probe outcome. `null` = probe hasn't run yet (or returned
-   * "allow"); `owned_elsewhere` / `resume` short-circuit the submit
-   * pipeline and render branched UI instead.
+   * "allow"); `owned_elsewhere` short-circuits the submit pipeline and renders
+   * its banner instead.
    */
   const [lookup, setLookup] = useState<LookupOutcome | null>(null);
-  /**
-   * Forces the next submit to bypass the probe — set when the user picks
-   * "Continue with a new submission" from the resume prompt. One-shot:
-   * cleared the moment the submit fires.
-   */
-  const [bypassProbe, setBypassProbe] = useState(false);
   // Defer required-field error rendering until the user has actually
   // interacted (typed in a field) or attempted submit once. Otherwise
   // RJSF's `liveValidate` paints every required field red on first
@@ -566,8 +554,9 @@ export function PublicRegistrationView({
   /**
    * Runs the identity probe before the actual submit. Picks `email` or
    * `phone` off the RJSF form data and asks the BFF whether this contact
-   * already lives in signalstack — either with another aggregator
-   * (`owned_elsewhere`) or as an unfinished profile under us (`resume`).
+   * already lives in signalstack under ANOTHER aggregator
+   * (`owned_elsewhere`). A contact that already has profiles under THIS
+   * aggregator is not a stop: they may hold more than one (#780).
    *
    * Returns `{ kind: 'allow' }` when no identity is supplied, when the
    * network id is unknown, when the BFF errors, or when the probe says
@@ -611,7 +600,6 @@ export function PublicRegistrationView({
     if (!res.ok) return { kind: 'allow' };
     const body = (await res.json().catch(() => ({}))) as LookupResponse;
     if (body.owned_elsewhere) return { kind: 'owned_elsewhere' };
-    const primary = body.lifecycle_summary?.primary_item;
     // A live profile with THIS aggregator is deliberately NOT a stop (#780). A
     // participant may hold more than one profile — signals inserts a new one on
     // every onboard call without an `item_id`, bounded only by
@@ -621,16 +609,18 @@ export function PublicRegistrationView({
     // contact details. It now falls through to `allow` and submits, and the cap
     // is left to signals, which answers `PROFILE_LIMIT_REACHED` with a sentence
     // the route below surfaces verbatim.
-    if (
-      primary &&
-      (primary.lifecycle_status === 'draft' || primary.lifecycle_status === 'paused')
-    ) {
-      return {
-        kind: 'resume',
-        itemId: primary.item_id,
-        lifecycleStatus: primary.lifecycle_status,
-      };
-    }
+    // A draft or paused profile is not a stop either, and the "Resume where you
+    // left off" prompt that used to appear here has been removed with the live
+    // block. That prompt never resumed anything: its CTA only set a bypass flag and
+    // re-submitted, and `onboard()` sends no `item_id`, so signals inserted a
+    // NEW profile exactly as the plain path does — while its sibling button
+    // ("register under different contact details") wiped the identity fields.
+    // It also made the answer depend on which profile signals happened to list
+    // first, so a participant with a live profile and a newer abandoned draft
+    // was offered a resume instead of simply registering again.
+    //
+    // `lifecycle_summary` is consequently not read at all any more; the probe
+    // is consumed only for `owned_elsewhere` above.
     return { kind: 'allow' };
   };
 
@@ -783,18 +773,16 @@ export function PublicRegistrationView({
     // full-profile surfaces — both submits are routed through this same
     // `handleSubmit`.
     const needsConsentNow = showConsent && !isMinorForSubmit && !consentAccepted;
-    // Pre-submit probe. Skipped when the user has explicitly chosen
-    // "Continue with a new submission" after a resume prompt.
-    if (!bypassProbe) {
-      setState({ status: 'submitting' });
-      const outcome = await runIdentityProbe(values);
-      if (outcome.kind !== 'allow') {
-        setLookup(outcome);
-        setState({ status: 'idle' });
-        return;
-      }
-    } else {
-      setBypassProbe(false);
+    // Pre-submit probe. Always runs: its only remaining verdict is
+    // `owned_elsewhere`, which no participant may opt out of (#780). The
+    // `bypassProbe` escape hatch it used to carry existed solely for the resume
+    // prompt, which is gone.
+    setState({ status: 'submitting' });
+    const outcome = await runIdentityProbe(values);
+    if (outcome.kind !== 'allow') {
+      setLookup(outcome);
+      setState({ status: 'idle' });
+      return;
     }
     setLookup(null);
 
@@ -1233,67 +1221,9 @@ export function PublicRegistrationView({
                   </div>
                 ) : null}
 
-                {lookup?.kind === 'resume' ? (
-                  <div
-                    role="alert"
-                    data-testid="lookup-resume"
-                    className="mb-5 rounded-[10px] border border-sky-200 bg-sky-50 px-4 py-3 text-[13px] text-sky-800"
-                  >
-                    <div className="font-semibold">{t('lookup.resume_title')}</div>
-                    <div className="mt-1 text-sky-700">{t('lookup.resume_body')}</div>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          // Resume = let the upstream lifecycle parser
-                          // dedup against the existing item by identity.
-                          // No client-side state to thread: the server
-                          // finds the same item_id via signalstack probe.
-                          setLookup(null);
-                          setBypassProbe(true);
-                        }}
-                        style={{ backgroundColor: cfg.brand.primary_color }}
-                        className="px-3 py-2 rounded-[8px] font-semibold text-[12px] text-white hover:opacity-90"
-                      >
-                        {t('lookup.resume_cta')}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          // "New submission" = the user wants to register
-                          // under different contact details. Clear the
-                          // identity fields and DON'T bypass — so the new
-                          // identity is re-probed on the next submit (rather
-                          // than silently resuming the existing draft, which
-                          // is what the "Resume" button above does).
-                          setLookup(null);
-                          setBypassProbe(false);
-                          setFormData((prev) => {
-                            const next = { ...prev };
-                            for (const key of [
-                              identity?.email,
-                              identity?.phone,
-                              'email',
-                              'phone',
-                              'phone_number',
-                              'mobile',
-                            ]) {
-                              if (key) delete next[key];
-                            }
-                            return next;
-                          });
-                        }}
-                        className="px-3 py-2 rounded-[8px] font-semibold text-[12px] text-sky-900 underline hover:text-sky-700"
-                      >
-                        {t('lookup.resume_continue_new')}
-                      </button>
-                    </div>
-                  </div>
-                ) : null}
-
                 {/* Account-only links capture identity via MinimalIdentityForm
-                    (the idle early-return). In the owned_elsewhere / resume /
-                    error states we only show the banner above — never the RJSF
+                    (the idle early-return). In the owned_elsewhere / error
+                    states we only show the banner above — never the RJSF
                     profile form or its submit button. */}
                 {!isAccountOnly && (
                   <RjsfThemedForm
