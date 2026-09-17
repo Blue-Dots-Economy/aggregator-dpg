@@ -33,7 +33,12 @@ export function BrandAttribution({
     // was not the same width, which reads as misalignment. With `w-auto` the
     // column hugs its own mark, so each caption spans exactly the mark below
     // it.
-    <div className="mt-8 flex items-start gap-12">
+    //
+    // Left edges of caption and mark measure flush to within ~2px, so the gap
+    // is kept at 32px rather than 48: across a wide gap the eye compares the
+    // two marks' centres of mass instead of their left edges, and the two have
+    // very different shapes (a symmetric emblem vs a wide wordmark).
+    <div className="mt-14 flex items-start gap-8">
       {rows.map((row) => (
         <div key={`${row.label}-${row.name}`} className="flex flex-col items-start gap-2">
           <span className="text-xs font-medium tracking-wide text-ink-400">{row.label}</span>
