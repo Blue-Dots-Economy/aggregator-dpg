@@ -349,6 +349,38 @@ body {
   border-color: var(--bd-primary);
   box-shadow: 0 0 0 4px var(--bd-primary-50);
 }
+
+/* A native <select> honours almost none of .bd-input: the UA draws its own
+   compact control, so the field renders visibly shorter than the <input>s
+   beside it and, on macOS, picks up a system shadow and highlight that look
+   nothing like the rest of the form. Reset the appearance and draw our own
+   chevron so a select is pixel-identical to an input.
+
+   Applies to every select that already opts into .bd-input — the create-link
+   campaign type, the dashboard lifecycle filter, the public year-of-birth
+   picker, and anything RJSF renders — rather than being patched per call site.
+
+   The background-image has to be repeated on :hover and :focus because
+   .bd-input sets `background` (the shorthand), which resets background-image
+   to none, and `.bd-input:hover` outranks a bare `select.bd-input`. */
+select.bd-input,
+select.bd-input:hover,
+select.bd-input:focus {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 34px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23475069' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 12px;
+  cursor: pointer;
+}
+/* Muted foreground flips in dark mode, so the chevron has to follow. */
+.dark select.bd-input,
+.dark select.bd-input:hover,
+.dark select.bd-input:focus {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239aa3c0' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+}
 .bd-label {
   font-size: 12.5px;
   font-weight: 500;
