@@ -60,7 +60,7 @@ jobs:
     # put main's Security Rating on New Code at C. This SHA is bluedots-automation
     # `main`, which is the ref signals-dpg/docs/operations/security-scanning-a2-callers.md
     # prescribes for callers; bump it deliberately when that workflow changes.
-    uses: Blue-Dots-Economy/bluedots-automation/.github/workflows/security-scan.yml@56298e8001dbbf5f25b0d47f958b46727fc8f9d5 # main 2026-09-13
+    uses: Blue-Dots-Economy/bluedots-automation/.github/workflows/security-scan.yml@af0e74825a05dff470a483a08592b4710bbf31c9 # main 2026-09-13
     with:
       language: ts
       node-version: "24"   # matches engines.node (>=24) and ci.yml
