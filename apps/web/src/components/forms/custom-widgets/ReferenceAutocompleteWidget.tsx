@@ -163,10 +163,11 @@ export function resolveDatasetId(source: string, collegeDataset: string): string
  * Builds the URL a dataset is fetched from.
  *
  * Defaults to the app's own `/reference/`, which is where a deployment mounts
- * its ConfigMap over the copies baked into the image. An absolute
- * `referenceBaseUrl` is used as-is; a relative one resolves against the app
- * origin. A remote host must send permissive CORS headers — the browser fetches
- * it directly.
+ * its ConfigMap. The datasets are deliberately NOT committed to this repo, so
+ * that path serves nothing without one — locally, point `referenceBaseUrl` at
+ * canonical instead (see `infra/env.template`). An absolute value is used
+ * as-is; a relative one resolves against the app origin. A remote host must
+ * send permissive CORS headers, since the browser fetches it directly.
  *
  * @param id - Resolved dataset file id.
  * @param referenceBaseUrl - Optional base URL override.

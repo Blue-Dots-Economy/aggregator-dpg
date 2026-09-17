@@ -46,9 +46,13 @@ export interface FormRuntimeConfig {
   collegeDataset: string;
   /**
    * Base URL the reference datasets are served from. Empty → the app's own
-   * `/reference/`, which is where the deployment's ConfigMap is mounted over
-   * the copies baked into the image. A remote host must send permissive CORS
-   * headers, since the browser fetches it directly.
+   * `/reference/`, where a deployment mounts its ConfigMap. The datasets are
+   * NOT committed to this repo — they are large, always shadowed by that
+   * ConfigMap in a real deployment, and a committed copy cannot stay in step
+   * with canonical (this repo's own pre-commit prettier rewrites it). So local
+   * development points this at canonical directly; see `infra/env.template`.
+   * A remote host must send permissive CORS headers, since the browser fetches
+   * it directly.
    */
   referenceBaseUrl?: string;
 }
