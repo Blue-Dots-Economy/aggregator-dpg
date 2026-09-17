@@ -11,7 +11,10 @@
     "select_placeholder": "Select…",
     "comma_separated": "Comma-separated values",
     "select_options": "Select options…",
-    "clear_selection": "Clear selection"
+    "clear_selection": "Clear selection",
+    "location_search_placeholder": "Start typing an address…",
+    "location_add": "+ Add another location",
+    "location_remove": "Remove {label}"
   },
   "status_pill": {
     "active": "Active",

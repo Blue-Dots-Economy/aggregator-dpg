@@ -6,6 +6,7 @@ import type { RJSFSchema, UiSchema } from '@rjsf/utils';
 import type { IChangeEvent } from '@rjsf/core';
 import { useTranslations } from 'next-intl';
 import { RjsfThemedForm } from '../../../components/forms/RjsfThemed';
+import type { ResolvedPlace } from '../../../components/forms/custom-widgets/LocationAutocompleteWidget';
 import { BlueDotsLogo } from '../../../components/ui/BlueDotsLogo';
 import { I } from '../../../icons';
 import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
@@ -181,6 +182,87 @@ interface ApiErrorEnvelope {
 }
 
 /**
+ * One coordinate to persist alongside the profile, as Signals' admin-participant
+ * API accepts it. `lat`/`lng` must be JSON numbers — Signals 400s on strings
+ * rather than coercing them.
+ */
+interface ItemLocation {
+  lat: number;
+  lng: number;
+  label?: string;
+}
+
+/**
+ * Maps a schema property's custom markers onto the uiSchema entry that selects a
+ * custom widget, or `null` when the property carries no marker.
+ *
+ * The markers are the same ones the Signals profile form reads, so a field
+ * declared once in network.json renders the same way in both apps:
+ *
+ *  - `location: "primary" | "secondary"` → address autocomplete. Only a primary
+ *    field's picked coordinate is persisted; secondary fields are
+ *    autocomplete-only, which is what `isPrimaryLocation` tells the widget.
+ *  - `x-reference-source` → an autocomplete backed by an external dataset,
+ *    either a bare source id or `{ source, subtitle }`.
+ *
+ * @param def - The property's JSON Schema.
+ * @param type - The property's declared `type`, used to pick the array variant.
+ * Exported for test: the column spans it assigns are a layout contract with
+ * the two-column grid, and a stray `ui:colSpan` orphans the cell beside the
+ * field (which is exactly how this regressed once).
+ *
+ * @returns A uiSchema entry for the field, or `null` if no marker applies.
+ */
+export function resolveMarkerUiSchema(
+  def: Record<string, unknown>,
+  type: unknown,
+): Record<string, unknown> | null {
+  const locationRole = def['location'];
+  if (locationRole === 'primary' || locationRole === 'secondary') {
+    const isArray = type === 'array';
+    return {
+      'ui:widget': isArray ? 'location-multi' : 'location-autocomplete',
+      // Only the array variant spans both columns. It is a row-builder — a
+      // stack of inputs each with a remove button, plus an "add" action — and
+      // reads badly squeezed into half the grid.
+      //
+      // The single-value variant deliberately takes NO colSpan, so it keeps the
+      // half-width cell a plain text input would have had. Giving it the full
+      // width pushed it onto its own row and left the cell beside it empty,
+      // which is a visible regression on a form whose fields otherwise pair up.
+      // The suggestion list is absolutely positioned at the field's own width,
+      // so half a column is ample for it.
+      ...(isArray ? { 'ui:colSpan': 2 } : {}),
+      'ui:options': { isPrimaryLocation: locationRole === 'primary' },
+    };
+  }
+
+  const marker = def['x-reference-source'];
+  let source: string | undefined;
+  let subtitleFields: string[] | undefined;
+  if (typeof marker === 'string') {
+    source = marker;
+  } else if (marker && typeof marker === 'object') {
+    const m = marker as { source?: unknown; subtitle?: unknown };
+    if (typeof m.source === 'string') source = m.source;
+    if (Array.isArray(m.subtitle)) {
+      subtitleFields = m.subtitle.filter((s): s is string => typeof s === 'string');
+    }
+  }
+  if (source) {
+    return {
+      'ui:widget': 'reference-autocomplete',
+      // No colSpan, for the same reason as the single-value location widget: it
+      // renders one text input, so it keeps the half-width cell it occupied
+      // before this became an autocomplete.
+      'ui:options': { source, ...(subtitleFields ? { subtitleFields } : {}) },
+    };
+  }
+
+  return null;
+}
+
+/**
  * Renders the anonymous participant-registration form. Slug + domain come
  * from the server resolve; the form schema drives the UI. Submit POSTs to
  * the BFF, which proxies to `/public/v1/registrations/create/:slug`.
@@ -232,6 +314,15 @@ export function PublicRegistrationView({
   // Schema-validity of the visible form, driven by RjsfThemedForm. Gates the
   // submit button — disabled until every visible required field is valid.
   const [canSubmit, setCanSubmit] = useState(false);
+  // Coordinates for the address the registrant PICKED from the autocomplete, as
+  // opposed to text they typed. Submitted as `item_locations` so Signals stores
+  // that exact point instead of re-geocoding the address string.
+  //
+  // Empty is the correct, common state — no Maps key configured, or an address
+  // typed without choosing a suggestion. It is submitted as "absent", which
+  // leaves Signals to geocode the text exactly as it does today; sending a
+  // guessed point would be worse than sending none.
+  const [resolvedLocations, setResolvedLocations] = useState<ItemLocation[]>([]);
   // Single consent acceptance covering terms + privacy + profile-creation
   // (§3.1's three points), collected through the blocking ConsentGate rather
   // than an inline checkbox. Feeds consent_terms / consent_privacy /
@@ -532,10 +623,27 @@ export function PublicRegistrationView({
         } else {
           tail.push(field);
         }
+
+        // Schema markers win over the type-derived widget above. Both are read
+        // straight off the network.json property, so the public form and the
+        // Signals profile form pick the same widget for the same field with no
+        // per-field configuration here.
+        const marker = resolveMarkerUiSchema(def, type);
+        if (marker) defaults[field] = marker;
       }
     }
+    // A schema that declares its own sections also declares its own field
+    // order, and the two must not disagree — the sectioned renderer looks
+    // fields up by name, so a conflicting `ui:order` would only scramble any
+    // field the layout happens to omit. Where there is no layout, the
+    // required-first heuristic above still applies.
+    const layoutOrder = (
+      (schema as { 'x-form-layout'?: { sections?: Array<{ fields?: string[] }> } })['x-form-layout']
+        ?.sections ?? []
+    ).flatMap((section) => section.fields ?? []);
+
     return {
-      'ui:order': [...order, ...tail, '*'],
+      'ui:order': layoutOrder.length > 0 ? [...layoutOrder, '*'] : [...order, ...tail, '*'],
       ...defaults,
       ...uiSchema,
       participant_id: { 'ui:widget': 'hidden' },
@@ -696,6 +804,15 @@ export function PublicRegistrationView({
                 }
               : {}),
             ...(showBirthYear ? { year_of_birth: birthYear.trim() } : {}),
+            // Coordinates the registrant picked from the address autocomplete.
+            // Omitted entirely when none were resolved, so Signals falls back to
+            // geocoding the address text — its behaviour before this existed.
+            // Never sent on the account_only shape: that path creates no profile
+            // item for a coordinate to belong to, and the server rejects any key
+            // outside its identity allow-list.
+            ...(!isAccountOnly && resolvedLocations.length > 0
+              ? { item_locations: resolvedLocations }
+              : {}),
           }),
         },
       );
@@ -1230,6 +1347,25 @@ export function PublicRegistrationView({
                     schema={formSchema}
                     uiSchema={mergedUiSchema as unknown as UiSchema<Record<string, unknown>>}
                     formData={formData}
+                    // How the location widgets hand back the coordinate they
+                    // resolved. RJSF v6 exposes this to widgets only as
+                    // `registry.formContext`, never as a prop — see the note in
+                    // LocationAutocompleteWidget (signals-dpg#506).
+                    formContext={{
+                      // Narrowed to lat/lng rather than stored as-is: the
+                      // single-value widget reports a richer `ResolvedPlace`
+                      // that also carries the parsed address `components`, and
+                      // passing that straight through put them in the submit
+                      // body. The API strips them (its Zod object is
+                      // non-strict), so nothing broke — but it sent a nested
+                      // copy of address data already present in the form's own
+                      // location field, and made the payload disagree with the
+                      // `ItemLocation` type this state is declared as.
+                      onLocationResolved: (place: ResolvedPlace | null) =>
+                        setResolvedLocations(place ? [{ lat: place.lat, lng: place.lng }] : []),
+                      // The multi-value widget already emits exactly this shape.
+                      onLocationsResolved: (coords: ItemLocation[]) => setResolvedLocations(coords),
+                    }}
                     onChange={(e) => setFormData(e.formData as Record<string, unknown>)}
                     onValidityChange={setCanSubmit}
                     onSubmit={handleSubmit}

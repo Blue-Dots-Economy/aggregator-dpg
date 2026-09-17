@@ -101,8 +101,39 @@ const PublicRegistrationSubmitBodySchema = z
   .object({})
   .passthrough()
   .describe(
-    "Dynamic registration payload validated at runtime against the link domain's participant JSON Schema (identity fields such as name/phone/email plus profile fields). consent_terms / consent_privacy are accepted on account_only links.",
+    "Dynamic registration payload validated at runtime against the link domain's participant JSON Schema (identity fields such as name/phone/email plus profile fields). consent_terms / consent_privacy are accepted on account_only links. item_locations optionally carries coordinates the registrant picked from the address autocomplete.",
   );
+
+/**
+ * Upper bound on submitted coordinates. The array exists for multi-location
+ * fields (e.g. a service provider's service areas) and no schema caps it, so the
+ * limit is set here — this is unauthenticated input, and each entry costs a
+ * geocode-free but still non-zero write downstream.
+ */
+const MAX_ITEM_LOCATIONS = 25;
+
+/**
+ * Coordinates the registrant PICKED from the address autocomplete, forwarded to
+ * signalstack as `item_locations`.
+ *
+ * Optional throughout: absent (or empty) means no suggestion was chosen — or no
+ * Maps key is configured — and signalstack then geocodes the address text from
+ * `item_state`, which is the behaviour that predates this field. A non-empty
+ * array is stored as-is and the address text is not geocoded over.
+ *
+ * `lat`/`lng` are strict numbers rather than coerced strings, matching what
+ * signalstack's admin-participant API accepts; a string there is a 400 on its
+ * side, so rejecting it here turns a confusing upstream error into a local one.
+ */
+const ItemLocationsSchema = z
+  .array(
+    z.object({
+      lat: z.number().min(-90).max(90),
+      lng: z.number().min(-180).max(180),
+      label: z.string().min(1).optional(),
+    }),
+  )
+  .max(MAX_ITEM_LOCATIONS);
 
 /** 201 payload — participant created (or saved as draft) and pushed to signalstack. */
 const SubmitAcceptedResponseSchema = z
@@ -346,6 +377,25 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       // it.
       const body: Record<string, unknown> = { ...rawBody };
       delete body['partial'];
+
+      // Picked-coordinate passthrough. Read then stripped like the consent and
+      // birth-year keys above, so it never reaches Ajv or the signalstack
+      // item_state — it is transport metadata about the profile, not a field of
+      // it. A malformed value is rejected here rather than forwarded, since
+      // signalstack would answer with its own 400 that this route cannot
+      // attribute back to the offending key.
+      const rawItemLocations = body['item_locations'];
+      delete body['item_locations'];
+      let itemLocations: z.infer<typeof ItemLocationsSchema> = [];
+      if (rawItemLocations !== undefined) {
+        const parsed = ItemLocationsSchema.safeParse(rawItemLocations);
+        if (!parsed.success) {
+          throw httpError('SCHEMA_VALIDATION', {
+            detail: `item_locations is invalid: ${parsed.error.issues[0]?.message ?? 'unexpected shape'}`,
+          });
+        }
+        itemLocations = parsed.data;
+      }
 
       const submitMode: 'with_item' | 'account_only' =
         submissionShape === 'account_only' ? 'account_only' : 'with_item';
@@ -637,6 +687,10 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
             domain: link.domain,
             item_type: linkDomainCfg.itemType,
             profile: buildSignalStackItemState(link.domain, body, pushPhone, linkDomainCfg),
+            // Omitted when empty so signalstack geocodes the address text
+            // instead — it treats an empty array as "none supplied", but not
+            // sending the key at all keeps that explicit on the wire.
+            ...(itemLocations.length > 0 ? { item_locations: itemLocations } : {}),
             submit_mode: submitMode,
           });
 
