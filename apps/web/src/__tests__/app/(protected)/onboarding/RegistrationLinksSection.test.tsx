@@ -475,12 +475,14 @@ describe('<YourLinksBody />', () => {
     expect(screen.getByRole('button', { name: /Download/ })).toBeInTheDocument();
     await user.keyboard('{Escape}');
 
-    const copyButtons = screen.getAllByRole('button', { name: 'Copy link' });
-    await user.click(copyButtons[copyButtons.length - 1]!);
+    // One copy affordance per card now: the icon inside the URL pill. The
+    // labelled "Copy link" button that used to duplicate it is gone, so this
+    // asserts a single match rather than picking the last of several.
+    await user.click(screen.getByRole('button', { name: 'Copy link' }));
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
       'https://bluedots.example/acme/dharwad-drive',
     );
-    expect(await screen.findByText('Copied!')).toBeInTheDocument();
+    expect(await screen.findByTitle('Copied!')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Deactivate' }));
     expect(deactivateMutate).toHaveBeenCalledWith('link-1');

@@ -5,9 +5,11 @@
  * chooser, for a participant who already has a Signals account and does not
  * want to fill the form.
  *
- * Distinct from the reactive `already_registered` alert, which fires on a
- * submit-attempt after the identity probe and offers edit-and-retry. This one
- * is proactive, sits in front of the form, and leaves the page.
+ * This is proactive — it sits in front of the form and leaves the page. It is
+ * the only remaining "you may already be registered" affordance on this screen:
+ * the reactive `already_registered` alert that used to fire after the identity
+ * probe was removed in #780, because a participant is allowed to hold more than
+ * one profile and the form no longer refuses a repeat submission.
  */
 
 import { useTranslations } from 'next-intl';

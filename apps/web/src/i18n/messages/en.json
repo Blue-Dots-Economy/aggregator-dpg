@@ -11,7 +11,10 @@
     "select_placeholder": "Select…",
     "comma_separated": "Comma-separated values",
     "select_options": "Select options…",
-    "clear_selection": "Clear selection"
+    "clear_selection": "Clear selection",
+    "location_search_placeholder": "Start typing an address…",
+    "location_add": "+ Add another location",
+    "location_remove": "Remove {label}"
   },
   "status_pill": {
     "active": "Active",
@@ -503,14 +506,7 @@
       "lookup": {
         "owned_elsewhere_title": "Contact already registered",
         "owned_elsewhere_body": "This email or mobile is already registered with another organisation. Please use a different contact or sign in through that organisation.",
-        "owned_elsewhere_cta": "Use a different contact",
-        "already_registered_title": "Already registered",
-        "already_registered_body": "This email or mobile is already registered with this organisation. To change your details, sign in or contact the aggregator.",
-        "already_registered_cta": "Use a different contact",
-        "resume_title": "You have a profile in progress",
-        "resume_body": "We found an unfinished profile for this contact. Resume where you left off?",
-        "resume_cta": "Resume profile",
-        "resume_continue_new": "Continue with a new submission"
+        "owned_elsewhere_cta": "Use a different contact"
       },
       "account_only": {
         "title": "Quick sign-up",

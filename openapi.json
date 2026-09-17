@@ -7907,11 +7907,11 @@
                 "type": "object",
                 "properties": {},
                 "additionalProperties": true,
-                "description": "Dynamic registration payload validated at runtime against the link domain's participant JSON Schema (identity fields such as name/phone/email plus profile fields). consent_terms / consent_privacy are accepted on account_only links."
+                "description": "Dynamic registration payload validated at runtime against the link domain's participant JSON Schema (identity fields such as name/phone/email plus profile fields). consent_terms / consent_privacy are accepted on account_only links. item_locations optionally carries coordinates the registrant picked from the address autocomplete."
               }
             }
           },
-          "description": "Dynamic registration payload validated at runtime against the link domain's participant JSON Schema (identity fields such as name/phone/email plus profile fields). consent_terms / consent_privacy are accepted on account_only links."
+          "description": "Dynamic registration payload validated at runtime against the link domain's participant JSON Schema (identity fields such as name/phone/email plus profile fields). consent_terms / consent_privacy are accepted on account_only links. item_locations optionally carries coordinates the registrant picked from the address autocomplete."
         },
         "parameters": [
           {
@@ -10244,6 +10244,28 @@
                         },
                         "favicon_url": {
                           "type": "string"
+                        },
+                        "attribution": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "label": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "logo": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "label",
+                              "name"
+                            ],
+                            "additionalProperties": false
+                          }
                         }
                       },
                       "required": [

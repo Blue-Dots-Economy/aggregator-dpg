@@ -1,4 +1,8 @@
 {
+  "attribution": [
+    { "label": "Owned by", "name": "Swavlamban", "logo": "/brand/alimco/swavlamban-mark.png" },
+    { "label": "Managed by", "name": "ALIMCO", "logo": "/brand/alimco/alimco-mark.png" }
+  ],
   "brand": {
     "name": "purple dots AI",
     "wordmark": "purple dots AI",
@@ -6,11 +10,11 @@
     "strapline": "Seeded by EkStep Foundation"
   },
   "logo": {
-    "default": "/brand/purple-dot/logo.png",
-    "light": "/brand/purple-dot/logo-light.png",
-    "withStrapline": "/brand/purple-dot/logo-with-strapline.png",
-    "withStraplineLight": "/brand/purple-dot/logo-with-strapline-light.png",
-    "onBrand": "/brand/purple-dot/logo-on-brand.png"
+    "default": "/brand/alimco/logo.png",
+    "light": "/brand/alimco/logo-light.png",
+    "withStrapline": "/brand/alimco/logo-with-strapline.png",
+    "withStraplineLight": "/brand/alimco/logo-with-strapline-light.png",
+    "onBrand": "/brand/alimco/logo-on-brand.png"
   },
   "colours": {
     "primary": [

@@ -65,6 +65,19 @@ if (typeof window !== 'undefined') {
   }
 }
 
+// jsdom implements no layout, so it ships no `scrollIntoView` at all — calling
+// it throws rather than no-oping. The autocomplete widgets call it to keep the
+// arrow-key-highlighted option in view, which is real behaviour worth keeping;
+// without this shim any keyboard-navigation test dies inside a React effect,
+// where the failure surfaces as an unrelated-looking commit-phase TypeError.
+if (typeof Element !== 'undefined' && !Element.prototype.scrollIntoView) {
+  Object.defineProperty(Element.prototype, 'scrollIntoView', {
+    configurable: true,
+    writable: true,
+    value: vi.fn(),
+  });
+}
+
 if (typeof HTMLCanvasElement !== 'undefined') {
   HTMLCanvasElement.prototype.getContext = vi.fn().mockImplementation(() => ({
     setTransform: vi.fn(),

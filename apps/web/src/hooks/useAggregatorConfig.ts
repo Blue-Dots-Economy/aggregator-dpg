@@ -159,6 +159,17 @@ export interface BrandLogo {
   onBrand?: string;
 }
 
+/**
+ * One "Owned by <party>" row on the login hero (signals-dpg#720). Mirrors
+ * `BrandAttributionSchema`. A LIST of different organisations, unlike
+ * {@link BrandLogo}, which is variants of one mark.
+ */
+export interface BrandAttribution {
+  label: string;
+  name: string;
+  logo?: string;
+}
+
 export interface AggregatorConfigPayload {
   aggregator: {
     name: string;
@@ -178,6 +189,7 @@ export interface AggregatorConfigPayload {
     palette?: BrandPalette;
     typography?: BrandTypography;
     logo?: BrandLogo;
+    attribution?: BrandAttribution[];
   };
   network: {
     id: string;
