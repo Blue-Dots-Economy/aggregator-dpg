@@ -9208,6 +9208,28 @@
                         },
                         "favicon_url": {
                           "type": "string"
+                        },
+                        "attribution": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "label": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "logo": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "label",
+                              "name"
+                            ],
+                            "additionalProperties": false
+                          }
                         }
                       },
                       "required": [
