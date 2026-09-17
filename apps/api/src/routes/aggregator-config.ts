@@ -121,6 +121,15 @@ const AggregatorConfigResponseSchema = z
         accent_color: z.string().optional(),
         logo_url: z.string().optional(),
         favicon_url: z.string().optional(),
+        attribution: z
+          .array(
+            z.object({
+              label: z.string(),
+              name: z.string(),
+              logo: z.string().optional(),
+            }),
+          )
+          .optional(),
       })
       .passthrough(),
     network: z
@@ -209,6 +218,12 @@ export async function registerAggregatorConfigRoutes(app: FastifyInstance): Prom
             ? { typography: cfg.aggregator.brand.typography }
             : {}),
           ...(cfg.aggregator.brand.logo ? { logo: cfg.aggregator.brand.logo } : {}),
+          // Opt-in per brand (signals-dpg#720). Only a brand.json that declares
+          // `attribution` sends anything, so every other deployment keeps the
+          // exact payload it had before.
+          ...(cfg.aggregator.brand.attribution?.length
+            ? { attribution: cfg.aggregator.brand.attribution }
+            : {}),
         },
         network: {
           id: cfg.network.id,

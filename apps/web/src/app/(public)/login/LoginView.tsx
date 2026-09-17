@@ -7,6 +7,7 @@ import { BlueDotsLogo } from '../../../components/ui/BlueDotsLogo';
 import { BrandPanel } from '../../../components/login/BrandPanel';
 import { I } from '../../../icons';
 import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
+import { BrandAttribution } from '../../../components/login/BrandAttribution';
 import { LegalLinksFooter } from '../../../components/legal/LegalLinksFooter';
 
 export interface LoginViewProps {
@@ -133,6 +134,8 @@ export function LoginView({ returnTo, error }: LoginViewProps): JSX.Element {
             <p className="mt-6 text-[12.5px] text-ink-400">
               Need access? Contact your organisation administrator for an invitation.
             </p>
+
+            <BrandAttribution rows={cfg.brand.attribution} />
           </div>
         </div>
 
