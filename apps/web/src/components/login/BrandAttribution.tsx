@@ -35,7 +35,11 @@ export function BrandAttribution({
     // flush: both marks are symmetric emblems whose visual weight sits inboard
     // of their left edge, so a caption starting at x=0 looks like it is sitting
     // to the left of its own logo.
-    <div className="mt-16 flex items-start gap-8">
+    // `pl-6` insets the block from the column's left edge. It is the only
+    // thing on the right pane that is not body copy, so starting it flush
+    // with the headline and the sign-in card made it read as a fourth
+    // paragraph rather than a footer credit.
+    <div className="mt-16 flex items-start gap-8 pl-6">
       {rows.map((row) => (
         <div key={`${row.label}-${row.name}`} className="flex flex-col items-center gap-2">
           <span className="text-xs font-medium tracking-wide text-ink-400">{row.label}</span>
