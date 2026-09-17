@@ -122,6 +122,29 @@ export const BrandLogoSchema = z.object({
 export type BrandLogo = z.infer<typeof BrandLogoSchema>;
 
 /**
+ * One labelled party in the login hero's attribution block — "Owned by
+ * Swavlamban", "Managed by ALIMCO" (signals-dpg#720).
+ *
+ * Deliberately NOT part of `BrandLogoSchema`: those are variants of ONE mark,
+ * this is an ordered list of DIFFERENT organisations, each with its own
+ * caption. It is also opt-in per brand — only a deployment that declares it
+ * renders anything, so nothing changes for blue_dot, orange_dot or a plain
+ * purple_dot instance.
+ *
+ * `logo` paths resolve the same way as `BrandLogoSchema`: absolute web paths
+ * under `apps/web/public/`.
+ */
+export const BrandAttributionSchema = z.object({
+  /** Caption above the mark, e.g. `Owned by`. */
+  label: z.string().min(1),
+  /** Organisation name. Used as the image's accessible name. */
+  name: z.string().min(1),
+  /** Mark to render. Omit to fall back to the name as text. */
+  logo: z.string().min(1).optional(),
+});
+export type BrandAttribution = z.infer<typeof BrandAttributionSchema>;
+
+/**
  * Brand / UI surface — sidebar/topbar/email templates read from here.
  *
  * The flat fields (`short_name`, `primary_color`, ...) are the
@@ -146,6 +169,11 @@ export const BrandConfigSchema = z.object({
   typography: BrandTypographySchema.optional(),
   logo: BrandLogoSchema.optional(),
   strapline: z.string().optional(),
+  /**
+   * Ordered "Owned by / Managed by" rows for the login hero. Absent on every
+   * brand that does not declare it, which is all of them bar alimco.
+   */
+  attribution: z.array(BrandAttributionSchema).optional(),
 });
 export type BrandConfig = z.infer<typeof BrandConfigSchema>;
 
