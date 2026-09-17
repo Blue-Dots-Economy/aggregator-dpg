@@ -1,9 +1,12 @@
 /**
  * Google Places (New) autocomplete provider.
  *
- * Ported verbatim from Signals-DPG `apps/ui/src/lib/geo/google-places.ts`. Loads
- * the Maps JS API on first use via a single shared <script> tag, then resolves
- * each prediction to its coordinate + address components.
+ * Loads the Maps JS API on first use via a single shared <script> tag, then
+ * resolves each prediction to its coordinate + address components.
+ *
+ * Ported from Signals-DPG `apps/ui/src/lib/geo/google-places.ts`, with the
+ * address-component mapping lifted out of the prediction loop into
+ * `toGeoComponents` — see the note there.
  *
  * @module apps/web/lib/geo/google-places
  */
@@ -54,6 +57,34 @@ function loadMapsApi(apiKey: string): Promise<void> {
   return scriptPromise;
 }
 
+type AddressComponent = { types: string[]; longText: string; shortText: string };
+
+/**
+ * Maps Google's flat address-component list onto our `GeoComponents` shape.
+ *
+ * Extracted from the prediction loop it is called from, where it sat as a
+ * closure inside a closure inside a `.map()` — six levels of nesting, which
+ * Sonar flags (S2004) and which made the component-priority rules below hard to
+ * see. Priority matters: Google returns several components that could each be
+ * called "the locality", and picking the wrong one puts a neighbourhood label
+ * where a city belongs.
+ *
+ * @param components - `addressComponents` from a resolved Place.
+ * @returns The mapped components; any field Google did not supply is absent.
+ */
+function toGeoComponents(components: AddressComponent[]): GeoComponents {
+  const find = (types: string[]): string | undefined =>
+    components.find((c) => types.some((t) => c.types.includes(t)))?.longText;
+
+  return {
+    locality: find(['sublocality', 'sublocality_level_1', 'neighborhood']) ?? find(['locality']),
+    city: find(['locality']) ?? find(['administrative_area_level_2']),
+    state: find(['administrative_area_level_1']),
+    postcode: find(['postal_code']),
+    country: find(['country']),
+  };
+}
+
 export function createGooglePlacesProvider(apiKey: string): GeoProvider {
   return {
     async suggest(query, signal) {
@@ -99,23 +130,11 @@ export function createGooglePlacesProvider(apiKey: string): GeoProvider {
             await place.fetchFields({ fields: ['location', 'addressComponents'] });
             const loc = place.location;
             if (!loc) return null;
-            const addrComponents = place.addressComponents ?? [];
-            const findComponent = (types: string[]): string | undefined =>
-              addrComponents.find((c) => types.some((t) => c.types.includes(t)))?.longText;
-            const components: GeoComponents = {
-              locality:
-                findComponent(['sublocality', 'sublocality_level_1', 'neighborhood']) ??
-                findComponent(['locality']),
-              city: findComponent(['locality']) ?? findComponent(['administrative_area_level_2']),
-              state: findComponent(['administrative_area_level_1']),
-              postcode: findComponent(['postal_code']),
-              country: findComponent(['country']),
-            };
             return {
               label: s.placePrediction.text.toString(),
               lat: loc.lat(),
               lng: loc.lng(),
-              components,
+              components: toGeoComponents(place.addressComponents ?? []),
             };
           }),
         );

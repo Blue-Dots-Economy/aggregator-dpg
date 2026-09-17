@@ -57,53 +57,91 @@ const MAX_SUGGESTIONS = 50;
 const MIN_QUERY_LENGTH = 2;
 const BLUR_CLOSE_MS = 150;
 
+/** Where reference datasets are served from when no override is configured. */
+const DEFAULT_REFERENCE_BASE = '/reference/';
+
 /**
  * Module-level so switching fields or re-mounting the form doesn't refetch the
  * (large) dataset. Holds the in-flight promise, keyed by resolved dataset id.
  */
 const datasetCache = new Map<string, Promise<ReferenceOption[]>>();
 
+/** Reads `field` off an unverified record, or `undefined` if it is not a string. */
+function stringField(source: Record<string, unknown>, field: string): string | undefined {
+  const value = source[field];
+  return typeof value === 'string' ? value : undefined;
+}
+
 /**
- * Normalises either supported dataset shape into a flat option list:
- * hierarchical (`{ states: [{ districts: [{ organizations: [...] }] }] }`, the
- * KA/UP institute lists) or already-flat (`[{ name, district?, state? }]`).
+ * Builds one option, omitting `district`/`state` rather than setting them
+ * undefined — the rendered subtitle filters on presence.
+ */
+function toOption(
+  name: string,
+  district: string | undefined,
+  state: string | undefined,
+): ReferenceOption {
+  return {
+    name,
+    ...(district ? { district } : {}),
+    ...(state ? { state } : {}),
+  };
+}
+
+/** Flattens the already-flat shape: `[{ name, district?, state? }, ...]`. */
+function flattenFlat(raw: unknown[]): ReferenceOption[] {
+  const out: ReferenceOption[] = [];
+  for (const entry of raw) {
+    const record = entry as Record<string, unknown>;
+    const name = stringField(record, 'name');
+    if (!name) continue;
+    out.push(toOption(name, stringField(record, 'district'), stringField(record, 'state')));
+  }
+  return out;
+}
+
+/**
+ * Flattens the hierarchical shape (the KA/UP institute lists):
+ * `{ states: [{ name, districts: [{ name, organizations: [...] }] }] }`.
+ *
+ * An organization's own `district`/`state` wins over the node it hangs under,
+ * since a few entries are filed under one district but record another.
+ */
+function flattenHierarchical(raw: HierarchicalDataset | null): ReferenceOption[] {
+  const out: ReferenceOption[] = [];
+  for (const state of raw?.states ?? []) {
+    for (const district of state.districts ?? []) {
+      for (const org of district.organizations ?? []) {
+        const name = stringField(org, 'name');
+        if (!name) continue;
+        out.push(
+          toOption(
+            name,
+            stringField(org, 'district') ?? district.name,
+            stringField(org, 'state') ?? state.name,
+          ),
+        );
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Normalises either supported dataset shape into a flat option list.
+ *
+ * Split across the two helpers above rather than one branching function: the
+ * hierarchical walk is three nested loops, which on its own carried more
+ * cognitive complexity than Sonar's threshold allows (S3776) and made the
+ * district/state precedence rules hard to pick out.
  *
  * @param raw - Parsed dataset JSON, shape unverified.
  * @returns Flat options; entries without a string `name` are dropped.
  */
 export function flattenReferenceDataset(raw: unknown): ReferenceOption[] {
-  if (Array.isArray(raw)) {
-    const flat: ReferenceOption[] = [];
-    for (const entry of raw) {
-      const o = entry as Record<string, unknown>;
-      if (typeof o.name !== 'string') continue;
-      flat.push({
-        name: o.name,
-        ...(typeof o.district === 'string' ? { district: o.district } : {}),
-        ...(typeof o.state === 'string' ? { state: o.state } : {}),
-      });
-    }
-    return flat;
-  }
-
-  const ds = raw as HierarchicalDataset;
-  const out: ReferenceOption[] = [];
-  for (const state of ds.states ?? []) {
-    for (const district of state.districts ?? []) {
-      for (const org of district.organizations ?? []) {
-        const name = typeof org.name === 'string' ? org.name : undefined;
-        if (!name) continue;
-        const resolvedDistrict = typeof org.district === 'string' ? org.district : district.name;
-        const resolvedState = typeof org.state === 'string' ? org.state : state.name;
-        out.push({
-          name,
-          ...(resolvedDistrict ? { district: resolvedDistrict } : {}),
-          ...(resolvedState ? { state: resolvedState } : {}),
-        });
-      }
-    }
-  }
-  return out;
+  return Array.isArray(raw)
+    ? flattenFlat(raw)
+    : flattenHierarchical(raw as HierarchicalDataset | null);
 }
 
 /**
@@ -134,8 +172,11 @@ export function resolveDatasetId(source: string, collegeDataset: string): string
  * @param referenceBaseUrl - Optional base URL override.
  * @returns An absolute URL to the dataset JSON.
  */
-function referenceUrl(id: string, referenceBaseUrl: string | undefined): string {
-  const raw = referenceBaseUrl || '/reference/';
+function referenceUrl(id: string, referenceBaseUrl: string = DEFAULT_REFERENCE_BASE): string {
+  // A default parameter only covers `undefined`, and Helm renders an unset
+  // chart value as `""` — `getFormRuntimeConfig` already maps blank to absent,
+  // so this second guard is belt-and-braces for a hand-built config.
+  const raw = referenceBaseUrl.trim() || DEFAULT_REFERENCE_BASE;
   const base = raw.endsWith('/') ? raw : `${raw}/`;
   return new URL(`${id}.json`, new URL(base, window.location.origin)).toString();
 }
@@ -167,7 +208,7 @@ export function ReferenceAutocompleteWidget({
   onChange,
   placeholder,
   options,
-}: WidgetProps) {
+}: Readonly<WidgetProps>) {
   const opts = options as { source?: string; subtitleFields?: string[] } | undefined;
   const source = opts?.source;
   // Unknown field names are dropped; an explicit (possibly empty) list wins over

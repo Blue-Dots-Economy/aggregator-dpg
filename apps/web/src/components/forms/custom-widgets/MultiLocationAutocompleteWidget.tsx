@@ -178,7 +178,7 @@ export function MultiLocationAutocompleteWidget({
   schema,
   registry,
   options,
-}: WidgetProps) {
+}: Readonly<WidgetProps>) {
   const t = useTranslations('form');
   const ctx = (registry?.formContext ?? {}) as MultiLocationFormContext;
   const isPrimary =

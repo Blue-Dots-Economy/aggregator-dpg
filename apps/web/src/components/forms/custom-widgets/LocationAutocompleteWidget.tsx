@@ -67,7 +67,7 @@ export function LocationAutocompleteWidget({
   placeholder,
   registry,
   options,
-}: WidgetProps) {
+}: Readonly<WidgetProps>) {
   const t = useTranslations('form');
   const ctx = (registry?.formContext ?? {}) as LocationFormContext;
   const isPrimary =

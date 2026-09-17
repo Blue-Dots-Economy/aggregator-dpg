@@ -1,8 +1,9 @@
 /**
  * Key-less geocoding fallback, used when no Google Maps key is configured.
  *
- * Ported from Signals-DPG `apps/ui/src/lib/geo/photon.ts`, with one
- * `exactOptionalPropertyTypes` adaptation at the fetch call (see there).
+ * Ported from Signals-DPG `apps/ui/src/lib/geo/photon.ts`, with two small
+ * adaptations: an `exactOptionalPropertyTypes` fix at the fetch call, and
+ * optional chaining in place of two `a && a.b` guards (Sonar S6582).
  *
  * @module apps/web/lib/geo/photon
  */
@@ -27,12 +28,12 @@ export function parsePhotonFeatures(json: unknown): GeoSuggestion[] {
   const out: GeoSuggestion[] = [];
   for (const f of features) {
     const coords = f.geometry?.coordinates;
-    if (!coords || coords.length !== 2) continue;
+    if (coords?.length !== 2) continue;
     const [lng, lat] = coords;
     if (typeof lat !== 'number' || typeof lng !== 'number') continue;
     const p = f.properties ?? {};
     const label = [p.name, p.city, p.state, p.postcode, p.country]
-      .filter((s): s is string => Boolean(s && s.trim()))
+      .filter((s): s is string => Boolean(s?.trim()))
       .join(', ');
     const components: GeoComponents = {
       locality: p.name,
