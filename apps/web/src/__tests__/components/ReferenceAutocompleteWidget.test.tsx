@@ -234,6 +234,34 @@ describe('ReferenceAutocompleteWidget', () => {
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
   });
 
+  it('degrades to a plain text input when the response is 200 but not JSON', async () => {
+    // A misconfigured COLLEGE_DATASET asks for a region the deployment does
+    // not ship. Next serves its catch-all app shell for that path — 200, with
+    // 34 KB of text/html — rather than a 404, so `res.ok` is true and the
+    // failure only surfaces when `res.json()` rejects. Confirmed against the
+    // deployed aggregator. The widget must still fall back to a usable text
+    // input rather than leaving an unhandled rejection behind.
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => {
+        throw new SyntaxError('Unexpected token < in JSON at position 0');
+      },
+    });
+    const onChange = vi.fn();
+    render(
+      <Wrapper>
+        <ReferenceAutocompleteWidget {...(makeProps({ onChange }) as never)} />
+      </Wrapper>,
+    );
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'anything typed' } });
+
+    expect(screen.queryByRole('option')).not.toBeInTheDocument();
+    expect(onChange).toHaveBeenLastCalledWith('anything typed');
+  });
+
   it('degrades to a plain text input when the dataset fails to load', async () => {
     // Deliberate: a missing reference file must not block a registrant from
     // typing their institute name and submitting.
