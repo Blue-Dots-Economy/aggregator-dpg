@@ -632,8 +632,18 @@ export function PublicRegistrationView({
         if (marker) defaults[field] = marker;
       }
     }
+    // A schema that declares its own sections also declares its own field
+    // order, and the two must not disagree — the sectioned renderer looks
+    // fields up by name, so a conflicting `ui:order` would only scramble any
+    // field the layout happens to omit. Where there is no layout, the
+    // required-first heuristic above still applies.
+    const layoutOrder = (
+      (schema as { 'x-form-layout'?: { sections?: Array<{ fields?: string[] }> } })['x-form-layout']
+        ?.sections ?? []
+    ).flatMap((section) => section.fields ?? []);
+
     return {
-      'ui:order': [...order, ...tail, '*'],
+      'ui:order': layoutOrder.length > 0 ? [...layoutOrder, '*'] : [...order, ...tail, '*'],
       ...defaults,
       ...uiSchema,
       participant_id: { 'ui:widget': 'hidden' },

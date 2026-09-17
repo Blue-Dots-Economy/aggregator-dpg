@@ -344,8 +344,135 @@ function childUiSchema(content: ReactElement): Record<string, unknown> | undefin
   return (content.props as { uiSchema?: Record<string, unknown> }).uiSchema;
 }
 
+/** One titled group of fields, from the schema's `x-form-layout`. */
+interface FormLayoutSection {
+  title: string;
+  fields: string[];
+}
+
+/**
+ * Schema-authored form layout (`x-form-layout` on the item schema).
+ *
+ * `sections` gives the grouping and the field order; `twoColumn` names the
+ * fields narrow enough to sit two-up. The same block drives the Signals profile
+ * form, so a schema author restyles both apps at once — which is the whole
+ * point of honouring it here rather than keeping a second opinion in code.
+ */
+interface FormLayout {
+  sections: FormLayoutSection[];
+  twoColumn?: string[];
+}
+
+type ObjectProperty = ObjectFieldTemplateProps['properties'][number];
+
+/**
+ * Groups a section's fields into rows, pairing ADJACENT fields that are both
+ * marked two-column and giving everything else a row of its own.
+ *
+ * Adjacency is what makes the rule readable rather than arbitrary: a
+ * two-column field whose neighbour is full-width stays full-width itself, so
+ * the grid never leaves a half-empty cell mid-section. It also means the
+ * pairing follows the author's field order — reorder the schema and the
+ * layout follows, with no code change.
+ *
+ * @param fields - The section's visible fields, in layout order.
+ * @param twoColumn - Field names the layout marks as two-column.
+ * @returns Rows of one or two fields.
+ */
+function packRows(fields: ObjectProperty[], twoColumn: Set<string>): ObjectProperty[][] {
+  const rows: ObjectProperty[][] = [];
+  let i = 0;
+  while (i < fields.length) {
+    const current = fields[i]!;
+    const next = fields[i + 1];
+    if (twoColumn.has(current.name) && next && twoColumn.has(next.name)) {
+      rows.push([current, next]);
+      i += 2;
+    } else {
+      rows.push([current]);
+      i += 1;
+    }
+  }
+  return rows;
+}
+
+/**
+ * Renders the form as the schema's numbered sections.
+ *
+ * A section whose every field is hidden renders nothing at all — `x-show-if`
+ * prunes fields before this point, so without the check an untouched form would
+ * show an "Education & Skills" heading above no fields. Section numbering
+ * counts only the sections that actually render, so it never skips a digit.
+ *
+ * Any field the layout forgot still renders, after the sections, rather than
+ * vanishing — losing an input is a far worse failure than an unlabelled one.
+ */
+function SectionedObject({
+  layout,
+  properties,
+}: Readonly<{ layout: FormLayout; properties: ObjectProperty[] }>) {
+  const byName = new Map(properties.map((p) => [p.name, p]));
+  const twoColumn = new Set(layout.twoColumn ?? []);
+  const claimed = new Set<string>();
+  let sectionNumber = 0;
+
+  const sections = layout.sections.map((section) => {
+    const fields = section.fields
+      .map((name) => byName.get(name))
+      .filter((p): p is ObjectProperty => Boolean(p));
+    if (fields.length === 0) return null;
+    fields.forEach((f) => claimed.add(f.name));
+    sectionNumber += 1;
+    return { title: section.title, number: sectionNumber, rows: packRows(fields, twoColumn) };
+  });
+
+  const orphans = properties.filter((p) => !claimed.has(p.name));
+
+  return (
+    <div className="space-y-8">
+      {sections.map(
+        (section) =>
+          section && (
+            <section key={section.title}>
+              <div className="mb-5">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-(--bd-primary-50) text-[12px] font-bold text-(--bd-primary-600)">
+                    {section.number}
+                  </div>
+                  <h3 className="font-display text-[15px] font-bold tracking-tight text-ink-900">
+                    {section.title}
+                  </h3>
+                </div>
+                <div className="mt-3 h-px bg-linear-to-r from-(--bd-border) to-transparent" />
+              </div>
+              <div className="space-y-3">
+                {section.rows.map((row) =>
+                  row.length === 2 ? (
+                    <div
+                      key={row[0]!.name}
+                      className="grid grid-cols-1 gap-x-5 gap-y-3 md:grid-cols-2"
+                    >
+                      {row.map((p) => (
+                        <div key={p.name}>{p.content}</div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div key={row[0]!.name}>{row[0]!.content}</div>
+                  ),
+                )}
+              </div>
+            </section>
+          ),
+      )}
+      {orphans.map((p) => (
+        <div key={p.name}>{p.content}</div>
+      ))}
+    </div>
+  );
+}
+
 function ObjectFieldTemplate(props: ObjectFieldTemplateProps) {
-  const { properties, title, description, uiSchema } = props;
+  const { properties, title, description, uiSchema, schema } = props;
   const layout = (uiSchema?.['ui:layout'] as 'grid' | 'stack' | undefined) ?? 'grid';
   // Skip the header when ui:title is explicitly empty / false — used to hide
   // auto-derived property-name headings (e.g. lowercase "address" on a
@@ -357,6 +484,15 @@ function ObjectFieldTemplate(props: ObjectFieldTemplateProps) {
   const visibleProperties = properties.filter(
     (p) => childUiSchema(p.content)?.['ui:widget'] !== 'hidden',
   );
+
+  // Schema-authored sections win over the flat grid below. Only the root item
+  // schema carries `x-form-layout`, so a nested object falls through to the
+  // grid on its own — no root check needed.
+  const formLayout = (schema as { 'x-form-layout'?: FormLayout } | undefined)?.['x-form-layout'];
+  if (formLayout?.sections?.length) {
+    return <SectionedObject layout={formLayout} properties={visibleProperties} />;
+  }
+
   return (
     <div className="space-y-3">
       {showTitle && (
