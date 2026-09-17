@@ -685,13 +685,20 @@ function LinkCard({
               <div className="inline-flex items-center gap-1 bg-ink-50 border border-(--bd-border) rounded-[10px] px-3 py-1.5 text-[12.5px] font-mono">
                 <span className="text-ink-500">{urlHost}/</span>
                 <span className="text-amber-700 font-semibold">{urlPath}</span>
+                {/*
+                 * The only copy affordance on the card. A second, labelled
+                 * "Copy link" button used to sit at the end of this row firing
+                 * the same handler; it was removed, so the copied confirmation
+                 * it carried moves here.
+                 */}
                 <button
                   type="button"
                   onClick={onCopy}
-                  title={t('link_card.copy_title')}
-                  className="ml-1 text-ink-400 hover:text-primary-600"
+                  title={copied ? t('link_card.copied') : t('link_card.copy_title')}
+                  aria-label={t('link_card.copy_title')}
+                  className={`ml-1 ${copied ? 'text-emerald-600' : 'text-ink-400 hover:text-primary-600'}`}
                 >
-                  <I.copy size={12} />
+                  {copied ? <I.check size={12} /> : <I.copy size={12} />}
                 </button>
               </div>
               <button
@@ -711,13 +718,6 @@ function LinkCard({
               >
                 <I.link size={14} />
               </a>
-              <button
-                type="button"
-                onClick={onCopy}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] border border-(--bd-border) text-ink-600 text-[12.5px] font-semibold hover:bg-ink-50"
-              >
-                {copied ? t('link_card.copied') : t('link_card.copy_link')}
-              </button>
             </div>
           )}
           {qrOpen && (
