@@ -60,7 +60,13 @@ const OrgCreateBodySchema = z.object({
   // `aggregator_orgs.profile` — none has a column of its own.
   website: z.string().url().max(2048).optional(),
   aggregator_type: z.array(z.enum(['seeker', 'provider', 'service_provider'])).optional(),
-  organisation_type: z.enum(['educational', 'non_educational']).optional(),
+  // Not an enum: each network's org-registration schema owns its own closed
+  // set (UP-GZB ships educational/non_educational, ALIMCO ships
+  // ngo/government_entity/…), and the form already validates the value against
+  // that schema client-side. Pinning one network's list here rejected every
+  // other network's valid answer with a 400 — the same reason the sibling
+  // `organisation_sub_type_*` fields are bounded strings.
+  organisation_type: z.string().max(100).optional(),
   organisation_sub_type_educational: z.string().max(100).optional(),
   organisation_sub_type_non_educational: z.string().max(100).optional(),
   management_type: z.enum(['private', 'government', 'ngo', 'other']).optional(),

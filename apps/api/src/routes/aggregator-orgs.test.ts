@@ -139,6 +139,34 @@ describe('aggregator-orgs routes', () => {
     expect(consentRow?.brand).toBeNull(); // default when AGGREGATOR_BRAND unset
   });
 
+  // The schema-driven fields are per-network: each deployment's
+  // org-registration JSON Schema owns its own closed set for
+  // `organisation_type` (UP-GZB educational/non_educational, ALIMCO
+  // ngo/government_entity/…) and the form validates the answer against it.
+  // A zod enum here pinned one network's list and rejected every other
+  // network's valid form with a 400, so the value must round-trip as given.
+  it('accepts a network-specific organisation_type and stores the schema-driven fields', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: {
+        ...orgBody,
+        aggregator_type: ['seeker'],
+        organisation_type: 'ngo',
+        website: 'https://enable.org',
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    const { org_id } = res.json() as { org_id: string };
+    const stored = await orgStore.findById(org_id);
+    const profile = (stored.ok ? stored.value?.profile : undefined) as
+      Record<string, unknown> | undefined;
+    expect(profile?.['organisation_type']).toBe('ngo');
+    expect(profile?.['aggregator_type']).toEqual(['seeker']);
+    expect(profile?.['website']).toBe('https://enable.org');
+  });
+
   it('records org consent in the ledger on successful registration', async () => {
     const res = await app.inject({
       method: 'POST',
