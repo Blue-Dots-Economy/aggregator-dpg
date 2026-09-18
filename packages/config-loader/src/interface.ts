@@ -42,15 +42,13 @@ export type ConfigSlice<S extends z.ZodTypeAny> = z.infer<S>;
 /**
  * Abstract base class for the config service.
  *
- * Concrete implementations (FsConfigService, ConfigServiceFake) must extend
- * this class and implement every method with the exact same signature.
+ * Concrete implementations must extend this class and implement every method
+ * with the exact same signature. `ConfigServiceFake` (the `./testing` subpath)
+ * is the only implementation that ships today.
  *
  * @example
- * // Boot
- * const config = new FsConfigService();
- * await config.load('production');
- *
- * // Access
+ * const config = new ConfigServiceFake({ signalStack: { baseUrl: 'http://localhost' } });
+ * await config.load('test');
  * const url = config.require<string>('signalStack.baseUrl');
  */
 export abstract class ConfigServiceBase {
