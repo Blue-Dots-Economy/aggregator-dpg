@@ -324,9 +324,6 @@ export abstract class CampaignJobStoreBase {
     errorReason?: string,
   ): Promise<StoreResult<void>>;
 
-  /** Ids of `processing` jobs whose `last_progress_at` is older than the cutoff. */
-  abstract claimStalledJobs(olderThanSeconds: number): Promise<StoreResult<string[]>>;
-
   /**
    * Derives and persists the job's roll-up status from its item counts.
    *
