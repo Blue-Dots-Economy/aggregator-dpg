@@ -3,44 +3,28 @@
  *
  * The API validates + persists the `campaign_job` row, then enqueues a job
  * carrying only its id; the worker's `campaign` role loads the rest and runs
- * the per-channel handler. Connection + queue are lazy singletons, mirroring
- * `services/campaign-export-queue`. Belongs to `@aggregator-dpg/api`.
+ * the per-channel handler. Connection + queue are lazy singletons owned by
+ * {@link createQueueClient}. Belongs to `@aggregator-dpg/api`.
  */
 
-import { Queue } from 'bullmq';
 import {
   QueueName,
   CAMPAIGN_PROCESS_JOB_OPTS,
-  createRedisConnection,
   type CampaignProcessJob,
 } from '@aggregator-dpg/queue';
-import type { Redis } from 'ioredis';
 import { config } from '../../config.js';
 import { logger } from '../../logger.js';
+import { createQueueClient } from '../queue-client.js';
 
-let connection: Redis | null = null;
-let processQueue: Queue<CampaignProcessJob> | null = null;
-
-function getConnection(): Redis {
-  if (connection) return connection;
-  connection = createRedisConnection({ url: config.REDIS_URL });
-  connection.on('error', (err) => {
-    logger.warn({ operation: 'campaignProcessQueue.redis.error', error: err.message });
-  });
-  return connection;
-}
-
-function getProcessQueue(): Queue<CampaignProcessJob> {
-  if (processQueue) return processQueue;
-  // No `attempts` here: one queue serves every channel, so baking in the
-  // export knob would silently govern email and voice too. Callers pass their
-  // own CAMPAIGN_<CHANNEL>_ATTEMPTS per enqueue.
-  processQueue = new Queue<CampaignProcessJob>(QueueName.CampaignProcess, {
-    connection: getConnection(),
-    defaultJobOptions: CAMPAIGN_PROCESS_JOB_OPTS,
-  });
-  return processQueue;
-}
+// No `attempts` in the default job options: one queue serves every channel, so
+// baking in the export knob would silently govern email and voice too. Callers
+// pass their own CAMPAIGN_<CHANNEL>_ATTEMPTS per enqueue.
+const client = createQueueClient<CampaignProcessJob>({
+  name: QueueName.CampaignProcess,
+  url: config.REDIS_URL,
+  defaultJobOptions: CAMPAIGN_PROCESS_JOB_OPTS,
+  operation: 'campaignProcessQueue',
+});
 
 /**
  * Enqueues a `campaign-process` job. Uses the durable `campaign_job.id` as the
@@ -58,7 +42,7 @@ export async function enqueueCampaignProcess(
 ): Promise<void> {
   const start = Date.now();
   try {
-    await getProcessQueue().add(QueueName.CampaignProcess, payload, {
+    await client.queue().add(QueueName.CampaignProcess, payload, {
       jobId: payload.jobId,
       ...(opts.attempts !== undefined ? { attempts: opts.attempts } : {}),
     });
@@ -85,10 +69,7 @@ export async function enqueueCampaignProcess(
  * shutdown so the connection is not leaked on SIGTERM.
  */
 export async function closeCampaignProcessQueue(): Promise<void> {
-  await processQueue?.close();
-  await connection?.quit().catch(() => undefined);
-  processQueue = null;
-  connection = null;
+  await client.close();
 }
 
 /** Test-only — disconnect and clear cached singletons. */

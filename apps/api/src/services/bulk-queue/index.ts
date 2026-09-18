@@ -1,44 +1,21 @@
 /**
  * BullMQ enqueue surface for the bulk-upload pipeline.
  *
- * The API only enqueues; consumption lives in `apps/worker`. Connection is
- * a singleton ioredis client; queues are constructed lazily and reused.
+ * The API only enqueues; consumption lives in `apps/worker`. Connection and
+ * queue are lazy singletons owned by {@link createQueueClient}.
  */
 
-import { Queue } from 'bullmq';
-import {
-  QueueName,
-  DEFAULT_JOB_OPTS,
-  createRedisConnection,
-  type BulkFileProcessJob,
-} from '@aggregator-dpg/queue';
-import type { Redis } from 'ioredis';
+import { QueueName, DEFAULT_JOB_OPTS, type BulkFileProcessJob } from '@aggregator-dpg/queue';
 import { config } from '../../config.js';
 import { logger } from '../../logger.js';
+import { createQueueClient } from '../queue-client.js';
 
-let connection: Redis | null = null;
-let fileProcessQueue: Queue<BulkFileProcessJob> | null = null;
-
-function getConnection(): Redis {
-  if (connection) return connection;
-  connection = createRedisConnection({ url: config.REDIS_URL });
-  connection.on('error', (err) => {
-    logger.warn({
-      operation: 'bulkQueue.redis.error',
-      error: err.message,
-    });
-  });
-  return connection;
-}
-
-function getFileProcessQueue(): Queue<BulkFileProcessJob> {
-  if (fileProcessQueue) return fileProcessQueue;
-  fileProcessQueue = new Queue<BulkFileProcessJob>(QueueName.BulkFileProcess, {
-    connection: getConnection(),
-    defaultJobOptions: DEFAULT_JOB_OPTS,
-  });
-  return fileProcessQueue;
-}
+const client = createQueueClient<BulkFileProcessJob>({
+  name: QueueName.BulkFileProcess,
+  url: config.REDIS_URL,
+  defaultJobOptions: DEFAULT_JOB_OPTS,
+  operation: 'bulkQueue',
+});
 
 /**
  * Enqueues a `bulk-file-process` job. Idempotent via `jobId = uploadId` —
@@ -47,7 +24,7 @@ function getFileProcessQueue(): Queue<BulkFileProcessJob> {
 export async function enqueueBulkFileProcess(payload: BulkFileProcessJob): Promise<void> {
   const start = Date.now();
   try {
-    await getFileProcessQueue().add(QueueName.BulkFileProcess, payload, {
+    await client.queue().add(QueueName.BulkFileProcess, payload, {
       jobId: payload.uploadId,
     });
     logger.info({
@@ -73,10 +50,7 @@ export async function enqueueBulkFileProcess(payload: BulkFileProcessJob): Promi
  * from process shutdown so the queue + connection are not leaked on SIGTERM.
  */
 export async function closeBulkQueue(): Promise<void> {
-  await fileProcessQueue?.close();
-  await connection?.quit().catch(() => undefined);
-  fileProcessQueue = null;
-  connection = null;
+  await client.close();
 }
 
 /** Test-only — disconnect and clear cached singletons. */
