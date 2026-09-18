@@ -10,7 +10,12 @@ aggregator:
 
   network:
     # Pin to a tag in production; develop is fine for local iteration.
-    source: https://raw.githubusercontent.com/Blue-Dots-Economy/Signals-DPG/refs/heads/develop/examples/schemas/purple_dot/network.json
+    source: https://raw.githubusercontent.com/Blue-Dots-Economy/bluedots-schemas/refs/heads/main/purple_dot/alimco/network.json
+    # Participant registration-link consent (Terms/Privacy/profile-creation),
+    # fetched the same cache-backed way as network.json (sibling in the schemas
+    # repo). Env AGGREGATOR_PARTICIPANT_CONSENT_SOURCE overrides; absent ⇒ web app uses the
+    # on-disk schemas/participant/consent.json copy.
+    consent_source: https://raw.githubusercontent.com/Blue-Dots-Economy/bluedots-schemas/refs/heads/main/purple_dot/alimco/consent.json
     # Purple_dot schemas have array-typed fields (disability_type,
     # looking_for, documents_available) — bulk CSV cells use `|` as the
     # delimiter.
