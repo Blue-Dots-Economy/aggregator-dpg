@@ -36,15 +36,26 @@ export type ExportId = Brand<string, 'ExportId'>;
 const nonEmptyString = z.string().min(1, 'ID must not be empty');
 
 /**
+ * Builds the cast-and-validate function for one branded ID family.
+ *
+ * Every ID constructor below is the same `nonEmptyString.parse(raw) as X`, so
+ * they share one implementation — adding a new ID family is one line, not six.
+ *
+ * @typeParam B - The brand tag, e.g. `'AggregatorId'`.
+ * @returns A function casting a validated non-empty string to `Brand<string, B>`.
+ */
+function makeId<B extends string>(): (raw: string) => Brand<string, B> {
+  return (raw: string) => nonEmptyString.parse(raw) as Brand<string, B>;
+}
+
+/**
  * Casts a raw string to AggregatorId after validating it is non-empty.
  *
  * @param raw - Untrusted string value.
  * @returns Branded AggregatorId.
  * @throws {Error} If raw is empty.
  */
-export function aggregatorId(raw: string): AggregatorId {
-  return nonEmptyString.parse(raw) as AggregatorId;
-}
+export const aggregatorId = makeId<'AggregatorId'>();
 
 /**
  * Casts a raw string to UserId after validating it is non-empty.
@@ -53,9 +64,7 @@ export function aggregatorId(raw: string): AggregatorId {
  * @returns Branded UserId.
  * @throws {Error} If raw is empty.
  */
-export function userId(raw: string): UserId {
-  return nonEmptyString.parse(raw) as UserId;
-}
+export const userId = makeId<'UserId'>();
 
 /**
  * Casts a raw string to OrgId after validating it is non-empty.
@@ -64,9 +73,7 @@ export function userId(raw: string): UserId {
  * @returns Branded OrgId.
  * @throws {Error} If raw is empty.
  */
-export function orgId(raw: string): OrgId {
-  return nonEmptyString.parse(raw) as OrgId;
-}
+export const orgId = makeId<'OrgId'>();
 
 /**
  * Casts a raw string to LinkId after validating it is non-empty.
@@ -75,9 +82,7 @@ export function orgId(raw: string): OrgId {
  * @returns Branded LinkId.
  * @throws {Error} If raw is empty.
  */
-export function linkId(raw: string): LinkId {
-  return nonEmptyString.parse(raw) as LinkId;
-}
+export const linkId = makeId<'LinkId'>();
 
 /**
  * Casts a raw string to BatchId after validating it is non-empty.
@@ -86,9 +91,7 @@ export function linkId(raw: string): LinkId {
  * @returns Branded BatchId.
  * @throws {Error} If raw is empty.
  */
-export function batchId(raw: string): BatchId {
-  return nonEmptyString.parse(raw) as BatchId;
-}
+export const batchId = makeId<'BatchId'>();
 
 /**
  * Casts a raw string to ExportId after validating it is non-empty.
@@ -97,6 +100,4 @@ export function batchId(raw: string): BatchId {
  * @returns Branded ExportId.
  * @throws {Error} If raw is empty.
  */
-export function exportId(raw: string): ExportId {
-  return nonEmptyString.parse(raw) as ExportId;
-}
+export const exportId = makeId<'ExportId'>();
