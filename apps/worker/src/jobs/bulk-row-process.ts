@@ -29,6 +29,7 @@ import { getSchemaLoader } from '../services/schema-loader.js';
 import { getRedis } from '../services/redis.js';
 import { enqueueFinalise } from '../services/bulk-queue.js';
 import { normalisePhone, normaliseEmail } from '@aggregator-dpg/shared-primitives/phone';
+import { extractBulkItemLocations, type BulkItemLocation } from './bulk-location-columns.js';
 import { getNetworkConfig } from '../services/network-config.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
 import { config } from '../config.js';
@@ -95,6 +96,24 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
       },
       log,
     );
+  }
+
+  // 0. Coordinate columns. Pulled out BEFORE Ajv and before item_state is
+  // built: they are not schema properties, so a schema declaring
+  // `additionalProperties: false` would otherwise fail every row carrying
+  // them, and any that survived would leak upstream as junk profile fields.
+  // Unusable values are logged and dropped, never fatal — the row onboards
+  // and signals geocodes the address text as it always has.
+  const rowLocations = extractBulkItemLocations(job.payload);
+  if (rowLocations.ignored) {
+    // Reason only — the raw cells are a participant's location, which is PII
+    // and must not reach the logs. The reason names the offending column and
+    // the rule it broke, which is what an operator needs to fix the generator.
+    log.warn({
+      status: 'skipped',
+      sub: 'location.ignored',
+      reason: rowLocations.ignored.reason,
+    });
   }
 
   // 1. Schema validation. Load schema + validator together (both cached
@@ -238,7 +257,14 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
     // row's outcome to `failed` so it surfaces in errors.csv alongside any
     // validation / normalisation failures. Operators see one consistent
     // signal: a row only counts as "passed" once signalstack has it too.
-    const push = await pushToSignalStack(job, participantId, phoneNormalised, emailNormalised, log);
+    const push = await pushToSignalStack(
+      job,
+      participantId,
+      phoneNormalised,
+      emailNormalised,
+      log,
+      rowLocations.locations,
+    );
     if (!push.success) {
       // `push.message` already includes the upstream's own error text when
       // signalstack returned a JSON body (e.g.
@@ -395,6 +421,7 @@ export async function pushToSignalStack(
   phone: string | null,
   email: string | null,
   log: typeof logger,
+  itemLocations?: BulkItemLocation[] | null,
 ): Promise<SignalStackPushResult> {
   const ss = getSignalStackWriter();
   // Signalstack disabled in this env — treat as success so the row is not
@@ -500,6 +527,10 @@ export async function pushToSignalStack(
     // `draft` when required fields are missing — that's signals' job,
     // not ours. Aggregator stays a thin pass-through.
     profile: buildSignalStackItemState(job.participantType, job.payload, pushPhone, domainCfg),
+    // Coordinates the CSV supplied, when it supplied usable ones. Their
+    // presence tells signals to store them as-is instead of geocoding the
+    // address text — the whole point of the columns.
+    ...(itemLocations && itemLocations.length > 0 ? { item_locations: itemLocations } : {}),
   });
   if (!result.success) {
     log.error({

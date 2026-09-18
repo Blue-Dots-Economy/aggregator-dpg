@@ -364,6 +364,73 @@ describe('HttpSignalStackWriter.onboard', () => {
     expect(result.error.code).toBe('SIGNALSTACK_BAD_RESPONSE');
   });
 
+  // item_locations: caller-resolved coordinates that suppress signals' own
+  // geocoding of the address text. Optional — the key must be absent, not
+  // empty, when the caller has none.
+  const LOCATION_INPUT = {
+    actingOrgId: 'org-abc',
+    name: 'Asha',
+    phoneNumber: '+919876543210',
+    channel: 'bulk' as const,
+    source_id: 'upload-1',
+    network: 'blue_dot',
+    domain: 'seeker',
+    item_type: 'profile_1.0',
+    profile: { occupation: 'carpenter' },
+  };
+
+  function sentBodyOf(fetchMockRef: ReturnType<typeof vi.fn>): Record<string, unknown> {
+    return JSON.parse(String((fetchMockRef.mock.calls[0]?.[1] as RequestInit).body)) as Record<
+      string,
+      unknown
+    >;
+  }
+
+  it('forwards item_locations when the caller supplies coordinates', async () => {
+    fetchMock.mockResolvedValueOnce(okJsonResponse(ONBOARD_RESPONSE));
+
+    await writer.onboard({
+      ...LOCATION_INPUT,
+      item_locations: [{ lat: 12.9716, lng: 77.5946, label: 'Head Office' }],
+    });
+
+    expect(sentBodyOf(fetchMock).item_locations).toEqual([
+      { lat: 12.9716, lng: 77.5946, label: 'Head Office' },
+    ]);
+  });
+
+  it('omits the item_locations key entirely when the caller has none', async () => {
+    fetchMock.mockResolvedValueOnce(okJsonResponse(ONBOARD_RESPONSE));
+
+    await writer.onboard(LOCATION_INPUT);
+
+    expect(sentBodyOf(fetchMock)).not.toHaveProperty('item_locations');
+  });
+
+  it('omits item_locations rather than sending an empty array', async () => {
+    fetchMock.mockResolvedValueOnce(okJsonResponse(ONBOARD_RESPONSE));
+
+    await writer.onboard({ ...LOCATION_INPUT, item_locations: [] });
+
+    expect(sentBodyOf(fetchMock)).not.toHaveProperty('item_locations');
+  });
+
+  it('drops item_locations on an account_only push — there is no item to locate', async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJsonResponse({ user_id: 'u-1', user_existed: false, owned_elsewhere: false, items: [] }),
+    );
+
+    await writer.onboard({
+      ...LOCATION_INPUT,
+      submit_mode: 'account_only',
+      item_locations: [{ lat: 12.9716, lng: 77.5946 }],
+    });
+
+    const body = sentBodyOf(fetchMock);
+    expect(body).not.toHaveProperty('item_state');
+    expect(body).not.toHaveProperty('item_locations');
+  });
+
   // Regression: account_only always returns an empty `items` array (signals
   // creates the user row only). The with-item owned-elsewhere heuristic keys
   // off empty-items, so account_only MUST be classified before it — otherwise

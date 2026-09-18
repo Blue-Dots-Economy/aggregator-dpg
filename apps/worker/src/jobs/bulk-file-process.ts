@@ -28,6 +28,7 @@ import { getSchemaLoader } from '../services/schema-loader.js';
 import { getRedis } from '../services/redis.js';
 import { enqueueRowProcessBulk } from '../services/bulk-queue.js';
 import { streamCsvParse, type FileFailureReason } from './bulk-file-stream.js';
+import { BULK_LOCATION_COLUMNS } from './bulk-location-columns.js';
 
 export type { FileFailureReason };
 
@@ -115,7 +116,10 @@ export async function processBulkFile(job: BulkFileProcessJob): Promise<ProcessO
   }
 
   const required = extractRequiredFields(schemaResult.value);
-  const allowed = new Set(extractAllProperties(schemaResult.value));
+  // The coordinate columns are not schema properties, so the header check
+  // would reject them as `unknown` and fail the whole file. They stay optional:
+  // adding them to `allowed` permits them, and `required` is untouched.
+  const allowed = new Set([...extractAllProperties(schemaResult.value), ...BULK_LOCATION_COLUMNS]);
   const parsed = await streamCsvParse(stream, {
     required,
     allowed,

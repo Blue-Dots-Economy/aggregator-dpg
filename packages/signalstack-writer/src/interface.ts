@@ -58,6 +58,20 @@ export interface SignalStackProfile {
  * signalstack organisation id (sourced from `aggregators.signalstack_org_id`),
  * NOT the platform-wide acting org id used by aggregator upsert.
  */
+/**
+ * One coordinate forwarded to Signals as an `item_locations` entry.
+ *
+ * Mirrors signals' `ItemLocationPoint`: decimal degrees, latitude bounded to
+ * ±90 and longitude to ±180, with an optional human label. Signals validates
+ * the bounds itself and answers 400 on a violation — callers should filter
+ * unusable values rather than relying on that.
+ */
+export interface SignalStackItemLocation {
+  lat: number;
+  lng: number;
+  label?: string;
+}
+
 /** One participant compliance point forwarded to Signals `/admin/participant`. */
 export interface ComplianceEntry {
   /** Compliance point key, e.g. `user_terms`, `user_privacy`, `profile_creation`. */
@@ -114,6 +128,21 @@ export interface SignalStackOnboardParticipantInput {
   item_type: string;
   /** Free-form item_state payload — the participant's profile fields. */
   profile: Record<string, unknown>;
+  /**
+   * Coordinates the caller has already resolved for this item.
+   *
+   * When present and non-empty signals stores them as-is and does NOT geocode
+   * the address text in {@link SignalStackOnboardParticipantInput.profile};
+   * when absent signals geocodes the item schema's primary location field, its
+   * historical behaviour. Privacy is unaffected either way — a coordinate on a
+   * field declared private is jittered before storage regardless of who
+   * resolved it.
+   *
+   * Omit the key entirely rather than sending `[]`: signals treats an empty
+   * array as "no coordinates supplied" too, but an absent key states it
+   * without relying on that equivalence.
+   */
+  item_locations?: SignalStackItemLocation[];
   /**
    * Controls signals' lifecycle path:
    *   - `'with_item'` (default) — POST /admin/participant with profile

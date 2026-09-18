@@ -244,6 +244,66 @@ describe('processBulkRow — normal execution', () => {
   });
 });
 
+describe('processBulkRow — CSV-supplied coordinates', () => {
+  const coordPayload = {
+    name: 'Asha',
+    phone: '9876543210',
+    email: 'a@x.com',
+    latitude: '12.9716',
+    longitude: '77.5946',
+    location_label: 'Head Office',
+  };
+
+  it('forwards usable coordinates to signalstack so it skips geocoding', async () => {
+    const onboardSpy = vi.spyOn(signalStackWriter, 'onboard');
+
+    const result = await processBulkRow(makeJob({ payload: { ...coordPayload } }));
+
+    expect(result.outcome).toBe('passed');
+    expect(onboardSpy.mock.calls[0]![0].item_locations).toEqual([
+      { lat: 12.9716, lng: 77.5946, label: 'Head Office' },
+    ]);
+  });
+
+  it('keeps the coordinate columns out of item_state and out of the stored row', async () => {
+    const onboardSpy = vi.spyOn(signalStackWriter, 'onboard');
+
+    await processBulkRow(makeJob({ payload: { ...coordPayload } }));
+
+    const profile = onboardSpy.mock.calls[0]![0].profile;
+    const stored = participantsWriter.list()[0]!;
+    for (const column of ['latitude', 'longitude', 'location_label']) {
+      expect(profile).not.toHaveProperty(column);
+      expect(stored.data).not.toHaveProperty(column);
+    }
+    // The real profile fields are untouched by the extraction.
+    expect(profile).toHaveProperty('name', 'Asha');
+  });
+
+  it('passes the row with no item_locations when the pair is unusable — never fails it', async () => {
+    const onboardSpy = vi.spyOn(signalStackWriter, 'onboard');
+
+    const result = await processBulkRow(
+      makeJob({
+        payload: { name: 'Asha', phone: '9876543210', email: 'a@x.com', latitude: '12.9716' },
+      }),
+    );
+
+    expect(result.outcome).toBe('passed');
+    expect(onboardSpy.mock.calls[0]![0]).not.toHaveProperty('item_locations');
+    expect(participantsWriter.list()[0]!.data).not.toHaveProperty('latitude');
+  });
+
+  it('behaves exactly as before for a row with no coordinate columns', async () => {
+    const onboardSpy = vi.spyOn(signalStackWriter, 'onboard');
+
+    const result = await processBulkRow(makeJob());
+
+    expect(result.outcome).toBe('passed');
+    expect(onboardSpy.mock.calls[0]![0]).not.toHaveProperty('item_locations');
+  });
+});
+
 describe('processBulkRow — edge cases: rejected before persistence', () => {
   it('fails fast on an unrecognised participant_type', async () => {
     const result = await processBulkRow(makeJob({ participantType: 'ghost' }));
