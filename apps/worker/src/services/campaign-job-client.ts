@@ -11,7 +11,7 @@
  *
  * @module @aggregator-dpg/worker
  */
-import { and, count, eq, lt, sql } from 'drizzle-orm';
+import { and, count, eq, sql } from 'drizzle-orm';
 import {
   campaignJob,
   campaignJobItem,
@@ -393,18 +393,4 @@ export async function failPendingItems(jobId: string, errorReason: string): Prom
     .update(campaignJobItem)
     .set({ status: 'failed', errorReason, updatedAt: new Date() })
     .where(and(eq(campaignJobItem.jobId, jobId), eq(campaignJobItem.status, 'pending')));
-}
-
-/** Ids of `processing` jobs whose `last_progress_at` is older than the cutoff. */
-export async function claimStalledJobs(olderThanSeconds: number): Promise<string[]> {
-  const rows = await getDb()
-    .select({ id: campaignJob.id })
-    .from(campaignJob)
-    .where(
-      and(
-        eq(campaignJob.status, 'processing'),
-        lt(campaignJob.lastProgressAt, sql`now() - make_interval(secs => ${olderThanSeconds})`),
-      ),
-    );
-  return rows.map((r) => r.id);
 }

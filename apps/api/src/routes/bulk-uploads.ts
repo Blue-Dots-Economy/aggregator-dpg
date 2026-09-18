@@ -23,7 +23,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { JsonSchema } from '@aggregator-dpg/schema-loader/interface';
 import { z } from 'zod';
 import { and, eq, inArray } from 'drizzle-orm';
-import { requireApproved, type AuthContext } from '../services/auth/access-token.js';
+import { enforceAggregatorType, requireApprovedAggregator as requireAuth } from './auth-shared.js';
 import { getBulkUploadsStore } from '../services/bulk-uploads-store/index.js';
 import { enqueueBulkFileProcess } from '../services/bulk-queue/index.js';
 import {
@@ -857,41 +857,6 @@ async function loadCountsBatch(
     out.set(u.id, await loadCountsFromRedis(u.id));
   }
   return out;
-}
-
-async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
-  const result = await requireApproved(req);
-  if (!result.ok) {
-    if (result.error.code === 'NOT_APPROVED') {
-      throw httpError('NOT_APPROVED', { detail: result.error.message });
-    }
-    throw httpError('UNAUTHORIZED', { detail: result.error.message });
-  }
-  if (!result.context.aggregatorId) {
-    throw httpError('UNAUTHORIZED', { detail: 'Token missing aggregator_id claim.' });
-  }
-  return result.context;
-}
-
-/**
- * Reject when the requested participant type does not match the aggregator's
- * registered type (read from the JWT `aggregator_type` claim). An aggregator
- * may only upload or template the type it registered as.
- */
-function enforceAggregatorType(auth: AuthContext, participantType: string): void {
-  if (!auth.aggregatorType) {
-    throw httpError('AGGREGATOR_TYPE_MISSING', {
-      fields: { aggregator_id: auth.aggregatorId },
-    });
-  }
-  if (auth.aggregatorType !== participantType) {
-    throw httpError('AGGREGATOR_TYPE_MISMATCH', {
-      fields: {
-        aggregator_type: auth.aggregatorType,
-        requested_type: participantType,
-      },
-    });
-  }
 }
 
 /**

@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { consumeMock } = vi.hoisted(() => ({
-  consumeMock: vi.fn().mockResolvedValue({ allowed: true, count: 1, retryAfterSeconds: 0 }),
+const { consumeSlotMock } = vi.hoisted(() => ({
+  consumeSlotMock: vi.fn().mockResolvedValue({ allowed: true, retryAfterSeconds: 0 }),
 }));
-vi.mock('./rate-limiter/index.js', () => ({ consume: consumeMock }));
+vi.mock('./rate-limiter/index.js', () => ({ consumeSlot: consumeSlotMock }));
 
 import {
   checkApprovalVerifyRate,
@@ -14,8 +14,8 @@ import {
 
 describe('checkApprovalVerifyRate', () => {
   beforeEach(() => {
-    consumeMock.mockClear();
-    consumeMock.mockResolvedValue({ allowed: true, count: 1, retryAfterSeconds: 0 });
+    consumeSlotMock.mockClear();
+    consumeSlotMock.mockResolvedValue({ allowed: true, retryAfterSeconds: 0 });
     _setApprovalVerifyRateChecker(null);
   });
 
@@ -23,8 +23,8 @@ describe('checkApprovalVerifyRate', () => {
     const res = await checkApprovalVerifyRate('203.0.113.7');
 
     expect(res).toEqual({ allowed: true, retryAfterSeconds: 0 });
-    expect(consumeMock).toHaveBeenCalledTimes(1);
-    expect(consumeMock).toHaveBeenCalledWith({
+    expect(consumeSlotMock).toHaveBeenCalledTimes(1);
+    expect(consumeSlotMock).toHaveBeenCalledWith({
       namespace: 'approval-verify',
       key: '203.0.113.7',
       windowSeconds: APPROVAL_VERIFY_RATE_WINDOW_SECONDS,
@@ -34,9 +34,8 @@ describe('checkApprovalVerifyRate', () => {
   });
 
   it('surfaces a denial with its retry-after when the window cap is exceeded', async () => {
-    consumeMock.mockResolvedValueOnce({
+    consumeSlotMock.mockResolvedValueOnce({
       allowed: false,
-      count: 21,
       retryAfterSeconds: 17,
     });
 
@@ -53,11 +52,11 @@ describe('checkApprovalVerifyRate', () => {
 
     const overridden = await checkApprovalVerifyRate('anything');
     expect(overridden).toEqual({ allowed: false, retryAfterSeconds: 5 });
-    expect(consumeMock).not.toHaveBeenCalled();
+    expect(consumeSlotMock).not.toHaveBeenCalled();
 
     _setApprovalVerifyRateChecker(null);
     const restored = await checkApprovalVerifyRate('anything');
     expect(restored.allowed).toBe(true);
-    expect(consumeMock).toHaveBeenCalledTimes(1);
+    expect(consumeSlotMock).toHaveBeenCalledTimes(1);
   });
 });

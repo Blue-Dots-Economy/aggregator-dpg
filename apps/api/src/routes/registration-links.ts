@@ -12,10 +12,10 @@
  */
 
 import { randomBytes } from 'node:crypto';
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, eq, inArray, sql } from 'drizzle-orm';
-import { requireApproved, type AuthContext } from '../services/auth/access-token.js';
+import { enforceAggregatorType, requireApprovedAggregator as requireAuth } from './auth-shared.js';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
 import { getRegistrationLinksStore } from '../services/registration-links-store/index.js';
 import type { RegistrationLink } from '../services/registration-links-store/index.js';
@@ -777,39 +777,4 @@ function generateSlug(): string {
 function buildPublicUrl(orgSlug: string, slug: string): string {
   const base = stripTrailingSlashes(config.PUBLIC_LINK_BASE_URL);
   return `${base}/${orgSlug}/${slug}`;
-}
-
-async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
-  const result = await requireApproved(req);
-  if (!result.ok) {
-    if (result.error.code === 'NOT_APPROVED') {
-      throw httpError('NOT_APPROVED', { detail: result.error.message });
-    }
-    throw httpError('UNAUTHORIZED', { detail: result.error.message });
-  }
-  if (!result.context.aggregatorId) {
-    throw httpError('UNAUTHORIZED', { detail: 'Token missing aggregator_id claim.' });
-  }
-  return result.context;
-}
-
-/**
- * Reject when the requested link domain (seeker | provider) does not match
- * the aggregator's registered type (JWT `aggregator_type` claim). An
- * aggregator may only create registration links for the type it registered as.
- */
-function enforceAggregatorType(auth: AuthContext, domain: string): void {
-  if (!auth.aggregatorType) {
-    throw httpError('AGGREGATOR_TYPE_MISSING', {
-      fields: { aggregator_id: auth.aggregatorId },
-    });
-  }
-  if (auth.aggregatorType !== domain) {
-    throw httpError('AGGREGATOR_TYPE_MISMATCH', {
-      fields: {
-        aggregator_type: auth.aggregatorType,
-        requested_type: domain,
-      },
-    });
-  }
 }

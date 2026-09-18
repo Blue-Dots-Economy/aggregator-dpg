@@ -23,7 +23,7 @@
  * `aggregator_id` claim mapped from the user attribute.
  */
 
-import type { FastifyBaseLogger, FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
   ConsentRecordSchema,
@@ -38,7 +38,8 @@ import type {
   ServiceRef,
 } from '@aggregator-dpg/shared-primitives/aggregator';
 import { BecknContactSchema, BecknLocationSchema } from '@aggregator-dpg/shared-primitives/beckn';
-import { authenticate, type AuthContext } from '../services/auth/access-token.js';
+import type { AuthContext } from '../services/auth/access-token.js';
+import { requireAuthenticatedAggregator as requireAuth } from './auth-shared.js';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
 import {
   getAggregatorProfileStore,
@@ -450,16 +451,6 @@ function pickAttribute(user: IdpUser | null, name: string): string | undefined {
   const v = user?.attributes?.[name];
   if (Array.isArray(v) && typeof v[0] === 'string' && v[0].length > 0) return v[0];
   return undefined;
-}
-
-async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
-  const result = await authenticate(req);
-  if (result.ok) return result.context;
-  const code = result.error.code === 'MISSING_AGGREGATOR_ID' ? 'FORBIDDEN' : 'UNAUTHORIZED';
-  throw httpError(code, {
-    detail: result.error.message,
-    fields: { reason: result.error.code },
-  });
 }
 
 /**

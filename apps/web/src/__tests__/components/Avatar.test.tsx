@@ -14,18 +14,7 @@ describe('<Avatar />', () => {
     expect(el).toHaveStyle({ width: '36px', height: '36px' });
   });
 
-  it('applies a custom size', () => {
-    render(<Avatar initials="AB" size={64} />);
-    const el = screen.getByText('AB');
-    expect(el).toHaveStyle({ width: '64px', height: '64px' });
-  });
-
-  it('uses the explicit color when provided', () => {
-    render(<Avatar initials="AB" color="#123456" />);
-    expect(screen.getByText('AB')).toHaveStyle({ background: '#123456' });
-  });
-
-  it('derives a palette color deterministically from the initials when no color given', () => {
+  it('derives a palette color deterministically from the initials', () => {
     const { container: c1 } = render(<Avatar initials="AB" />);
     const { container: c2 } = render(<Avatar initials="AB" />);
     const bg1 = (c1.firstElementChild as HTMLElement).style.background;

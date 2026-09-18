@@ -10,16 +10,13 @@
  * Belongs to `@aggregator-dpg/api`.
  */
 
-import { consume } from './rate-limiter/index.js';
+import { consumeSlot, type RateCheckResult } from './rate-limiter/index.js';
 
 /** Verify attempts allowed per IP per window across read/decision/renew. */
 export const APPROVAL_VERIFY_RATE_WINDOW_SECONDS = 60;
 export const APPROVAL_VERIFY_RATE_MAX_PER_WINDOW = 20;
 
-export interface ApprovalVerifyRateResult {
-  allowed: boolean;
-  retryAfterSeconds: number;
-}
+export type ApprovalVerifyRateResult = RateCheckResult;
 
 type Checker = (key: string) => Promise<ApprovalVerifyRateResult>;
 
@@ -38,12 +35,11 @@ export function _setApprovalVerifyRateChecker(c: Checker | null): void {
  */
 export async function checkApprovalVerifyRate(key: string): Promise<ApprovalVerifyRateResult> {
   if (override) return override(key);
-  const r = await consume({
+  return consumeSlot({
     namespace: 'approval-verify',
     key,
     windowSeconds: APPROVAL_VERIFY_RATE_WINDOW_SECONDS,
     max: APPROVAL_VERIFY_RATE_MAX_PER_WINDOW,
     failClosed: true,
   });
-  return { allowed: r.allowed, retryAfterSeconds: r.retryAfterSeconds };
 }

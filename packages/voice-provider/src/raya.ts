@@ -52,6 +52,7 @@ import {
   UpstreamError,
   ValidationError,
 } from '@aggregator-dpg/shared-primitives/errors';
+import { setTimeout as sleep } from 'node:timers/promises';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import { err, ok } from '@aggregator-dpg/shared-primitives/result';
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
@@ -219,7 +220,9 @@ export class RayaVoiceProvider extends VoiceProviderBase {
     this.maxAttempts = opts.maxAttempts ?? 3;
     this.acquireSlot = opts.acquireSlot;
     this.fetchImpl = opts.fetchImpl ?? fetch;
-    this.sleep = opts.sleep ?? defaultSleep;
+    // `node:timers/promises` — see `./egress.js`'s note on why that file keeps
+    // its own hand-rolled wait instead.
+    this.sleep = opts.sleep ?? sleep;
   }
 
   /**
@@ -709,17 +712,6 @@ function firstFiniteNumber(...values: unknown[]): number | undefined {
     if (typeof v === 'number' && Number.isFinite(v)) return v;
   }
   return undefined;
-}
-
-/**
- * Default sleep implementation — a real `setTimeout`-backed wait, used when
- * no `sleep` dependency is injected (i.e. outside of tests). Mirrors
- * `./egress.js`'s `defaultSleep`.
- *
- * @param ms - Milliseconds to wait.
- */
-function defaultSleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**

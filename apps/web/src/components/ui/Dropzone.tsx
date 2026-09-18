@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type DragEvent, type ReactNode } from 'react';
+import type { DragEvent, ReactNode } from 'react';
 import { cn } from '../../lib/cn';
 
 interface DropzoneProps {
@@ -10,16 +10,12 @@ interface DropzoneProps {
 }
 
 export function Dropzone({ onFiles, className, children }: DropzoneProps) {
-  const [_hover, setHover] = useState(false);
-
+  // `onDragOver` must preventDefault or the browser never fires `drop`.
   const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
-    setHover(true);
   };
-  const handleDragLeave = () => setHover(false);
   const handleDrop = (e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
-    setHover(false);
     const files = Array.from(e.dataTransfer.files);
     onFiles?.(files);
   };
@@ -28,7 +24,6 @@ export function Dropzone({ onFiles, className, children }: DropzoneProps) {
     <div
       className={cn('dropzone p-10 text-center', className)}
       onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
       {children}

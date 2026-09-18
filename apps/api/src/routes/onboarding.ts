@@ -9,13 +9,12 @@
  * Aggregator (one per (aggregator, link, hour-bucket)).
  */
 
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import { and, eq, gte, lte, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { requireApproved, type AuthContext } from '../services/auth/access-token.js';
+import { requireApprovedAggregator as requireAuth } from './auth-shared.js';
 import { getDb } from '../db/client.js';
 import { onboarding } from '../db/schema.js';
-import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 
 const RangeQuerySchema = z.object({
@@ -149,18 +148,4 @@ function parseRange(query: z.infer<typeof RangeQuerySchema>): { from?: Date; to?
   if (query.from) out.from = new Date(query.from);
   if (query.to) out.to = new Date(query.to);
   return out;
-}
-
-async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
-  const result = await requireApproved(req);
-  if (!result.ok) {
-    if (result.error.code === 'NOT_APPROVED') {
-      throw httpError('NOT_APPROVED', { detail: result.error.message });
-    }
-    throw httpError('UNAUTHORIZED', { detail: result.error.message });
-  }
-  if (!result.context.aggregatorId) {
-    throw httpError('UNAUTHORIZED', { detail: 'Token missing aggregator_id claim.' });
-  }
-  return result.context;
 }

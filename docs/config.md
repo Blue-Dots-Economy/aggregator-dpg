@@ -2,6 +2,11 @@
 
 How the aggregator-dpg config system works, how to add a new key, and what is forbidden.
 
+> **Status:** the `FsConfigService` / `discoverPackages` loader described below was never wired into any
+> service and has been removed. The `./fs` subpath now exposes only `resolveEnv`, `loadConsentConfig` and
+> `loadSignalsRealmRoles`; `./testing` still ships `ConfigServiceFake`. Everything below the precedence
+> table is the design this package was heading towards, not what runs today.
+
 ---
 
 ## Precedence (lowest → highest)

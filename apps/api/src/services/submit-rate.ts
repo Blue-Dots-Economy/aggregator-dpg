@@ -8,12 +8,9 @@
  */
 
 import { config } from '../config.js';
-import { consume } from './rate-limiter/index.js';
+import { consumeSlot, type RateCheckResult } from './rate-limiter/index.js';
 
-export interface SubmitRateResult {
-  allowed: boolean;
-  retryAfterSeconds: number;
-}
+export type SubmitRateResult = RateCheckResult;
 
 type Checker = (key: string) => Promise<SubmitRateResult>;
 
@@ -33,11 +30,10 @@ export function _setSubmitRateChecker(c: Checker | null): void {
  */
 export async function checkSubmitRate(key: string): Promise<SubmitRateResult> {
   if (override) return override(key);
-  const r = await consume({
+  return consumeSlot({
     namespace: 'coordinator-submit',
     key,
     windowSeconds: config.PUBLIC_SUBMIT_RATE_WINDOW_SECONDS,
     max: config.PUBLIC_SUBMIT_RATE_MAX_PER_WINDOW,
   });
-  return { allowed: r.allowed, retryAfterSeconds: r.retryAfterSeconds };
 }

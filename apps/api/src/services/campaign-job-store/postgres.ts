@@ -8,7 +8,7 @@
  *
  * @module @aggregator-dpg/api
  */
-import { and, count, desc, eq, inArray, lt, sql } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, sql } from 'drizzle-orm';
 import { logger } from '../../logger.js';
 import { campaignJob, campaignJobItem } from '../../db/schema.js';
 import { getDb } from '../../db/client.js';
@@ -467,24 +467,6 @@ export class PostgresCampaignJobStore extends CampaignJobStoreBase {
       return { ok: true, value: undefined };
     } catch (err) {
       return dbError('setJobStatus', err, start);
-    }
-  }
-
-  async claimStalledJobs(olderThanSeconds: number): Promise<StoreResult<string[]>> {
-    const start = Date.now();
-    try {
-      const rows = await getDb()
-        .select({ id: campaignJob.id })
-        .from(campaignJob)
-        .where(
-          and(
-            eq(campaignJob.status, 'processing'),
-            lt(campaignJob.lastProgressAt, sql`now() - make_interval(secs => ${olderThanSeconds})`),
-          ),
-        );
-      return { ok: true, value: rows.map((r) => r.id) };
-    } catch (err) {
-      return dbError('claimStalledJobs', err, start);
     }
   }
 
