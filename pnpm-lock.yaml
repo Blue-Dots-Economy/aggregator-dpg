@@ -766,31 +766,6 @@ importers:
         specifier: ^4.1.11
         version: 4.1.11(@types/node@26.5.1)(@vitest/coverage-v8@4.1.11)(jsdom@30.0.1)(vite@7.3.6(@types/node@26.5.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.13)(yaml@2.9.0))
 
-  packages/schema-service:
-    dependencies:
-      zod:
-        specifier: ^3.24.0
-        version: 3.25.76
-    devDependencies:
-      '@aggregator-dpg/tsconfig':
-        specifier: workspace:*
-        version: link:../tsconfig
-      '@types/js-yaml':
-        specifier: ^4.0.9
-        version: 4.0.9
-      '@vitest/coverage-v8':
-        specifier: ^4.1.11
-        version: 4.1.11(vitest@4.1.11)
-      js-yaml:
-        specifier: ^5.4.1
-        version: 5.4.1
-      typescript:
-        specifier: ^6.0.3
-        version: 6.0.3
-      vitest:
-        specifier: ^4.1.11
-        version: 4.1.11(@types/node@26.5.1)(@vitest/coverage-v8@4.1.11)(jsdom@30.0.1)(vite@7.3.6(@types/node@26.5.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.13)(yaml@2.9.0))
-
   packages/shared-primitives:
     dependencies:
       zod:
