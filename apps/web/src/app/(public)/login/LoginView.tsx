@@ -5,6 +5,7 @@ import Image from 'next/image';
 import { useTranslations } from 'next-intl';
 import { BlueDotsLogo } from '../../../components/ui/BlueDotsLogo';
 import { BrandPanel } from '../../../components/login/BrandPanel';
+import { useThemeMode } from '../../../lib/theme-mode';
 import { I } from '../../../icons';
 import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
 import { BrandAttribution } from '../../../components/login/BrandAttribution';
@@ -29,6 +30,12 @@ export function LoginView({ returnTo, error }: LoginViewProps): JSX.Element {
   const t = useTranslations('auth');
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
   const brand = cfg.brand.short_name;
+  // The default lockup is the navy-on-white variant, which all but disappears
+  // on the dark pane. `logo.light` is the light-ink variant shipped for exactly
+  // this; fall back to the default when a brand ships only one.
+  const { mode } = useThemeMode();
+  const headerLogo =
+    mode === 'dark' ? (cfg.brand.logo?.light ?? cfg.brand.logo?.default) : cfg.brand.logo?.default;
   const goSignIn = (): void => {
     window.location.href = `/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`;
   };
@@ -37,9 +44,14 @@ export function LoginView({ returnTo, error }: LoginViewProps): JSX.Element {
     <div className="h-screen w-full flex overflow-hidden">
       <BrandPanel />
 
+      {/* The pane background is the `--bd-bg` token, not a literal. It used to
+          be `background: '#FBFCFE'`, and an inline style outranks every CSS
+          rule — including the `.dark` overrides — so when the login page
+          stopped pinning light theme the text flipped to its dark palette
+          while this stayed white, leaving "Welcome back." unreadable. */}
       <div
         className="flex-1 min-w-0 h-screen flex flex-col px-6 py-8 relative overflow-y-auto"
-        style={{ background: '#FBFCFE' }}
+        style={{ background: 'var(--bd-bg)' }}
       >
         <div
           aria-hidden
@@ -59,9 +71,9 @@ export function LoginView({ returnTo, error }: LoginViewProps): JSX.Element {
         <div className="flex-1 flex items-center justify-center relative z-10">
           <div className="w-full max-w-[440px]">
             <div className="flex items-center gap-3 mb-7">
-              {cfg.brand.logo?.default ? (
+              {headerLogo ? (
                 <Image
-                  src={cfg.brand.logo.default}
+                  src={headerLogo}
                   alt={brand}
                   width={150}
                   height={40}
@@ -208,12 +220,12 @@ function Welcome({ onSignIn, brand, t }: Readonly<WelcomeProps>): JSX.Element {
           type="button"
           onClick={onSignIn}
           className="group w-full flex items-center justify-between gap-4 p-4 pr-5 rounded-[14px] border text-left transition-all
-                     border-(--bd-primary) bg-(--bd-primary-50)/50 hover:bg-(--bd-primary-50)"
+                     border-(--bd-primary) bg-(--bd-tint-primary) hover:bg-(--bd-primary-50) dark:hover:bg-(--bd-tint-primary)"
         >
           <div className="flex items-center gap-3.5">
             <div
               className="w-9 h-9 rounded-[10px] flex items-center justify-center"
-              style={{ background: 'rgba(37,99,235,0.12)' }}
+              style={{ background: 'color-mix(in srgb, var(--bd-primary) 14%, transparent)' }}
             >
               <I.lock size={16} className="text-primary-700" />
             </div>
