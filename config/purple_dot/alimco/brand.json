@@ -1,6 +1,10 @@
 {
   "attribution": [
-    { "label": "Owned by", "name": "Swavlamban", "logo": "/brand/alimco/swavlamban-mark.png" },
+    {
+      "label": "Owned by",
+      "name": "Swavlamban",
+      "logo": "/brand/alimco/swavlamban-mark.png"
+    },
     { "label": "Managed by", "name": "ALIMCO", "logo": "/brand/alimco/alimco-mark.png" }
   ],
   "brand": {

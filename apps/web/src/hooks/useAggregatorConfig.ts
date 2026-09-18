@@ -168,6 +168,8 @@ export interface BrandAttribution {
   label: string;
   name: string;
   logo?: string;
+  /** Dark-mode variant of `logo`; falls back to `logo` when absent. */
+  logoLight?: string;
 }
 
 export interface AggregatorConfigPayload {

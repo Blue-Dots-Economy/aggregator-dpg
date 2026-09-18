@@ -801,3 +801,41 @@ button {
   .bd-pane { padding: 36px 20px; }
   .bd-version { right: 14px; bottom: 12px; }
 }
+
+/* ── "Owned by / Managed by" attribution (signals-dpg#720) ──────────────────
+   Mirrors the web login page: marks sized by HEIGHT only, so each column is
+   as wide as its own artwork and the caption can centre over it. A shared
+   fixed width would leave a different amount of empty space beside each mark
+   — the two have different aspect ratios — and that reads as misalignment.
+   Renders only when the brand sets attrOneLabel/attrTwoLabel. */
+.bd-attribution {
+  display: flex;
+  width: 100%;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 32px;
+  margin-top: 64px;
+}
+.bd-attribution-row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.bd-attribution-label {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--bd-fg-muted, #6b7493);
+}
+.bd-attribution-mark {
+  height: 96px;
+  width: auto;
+  object-fit: contain;
+  display: block;
+}
+.bd-attribution-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--bd-fg, #0b1020);
+}
