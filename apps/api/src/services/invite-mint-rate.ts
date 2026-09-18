@@ -9,12 +9,9 @@
  */
 
 import { config } from '../config.js';
-import { consume } from './rate-limiter/index.js';
+import { consumeSlot, type RateCheckResult } from './rate-limiter/index.js';
 
-export interface InviteMintRateResult {
-  allowed: boolean;
-  retryAfterSeconds: number;
-}
+export type InviteMintRateResult = RateCheckResult;
 
 type Checker = (orgId: string, count: number) => Promise<InviteMintRateResult>;
 type IpChecker = (ip: string) => Promise<InviteMintRateResult>;
@@ -43,13 +40,12 @@ export function _setInviteIpRateChecker(c: IpChecker | null): void {
  */
 export async function checkInviteIpRate(ip: string): Promise<InviteMintRateResult> {
   if (ipOverride) return ipOverride(ip);
-  const r = await consume({
+  return consumeSlot({
     namespace: 'invite-mint-ip',
     key: ip,
     windowSeconds: config.PUBLIC_SUBMIT_RATE_WINDOW_SECONDS,
     max: config.PUBLIC_SUBMIT_RATE_MAX_PER_WINDOW,
   });
-  return { allowed: r.allowed, retryAfterSeconds: r.retryAfterSeconds };
 }
 
 /**
@@ -66,7 +62,7 @@ export async function checkInviteMintRate(
   count: number,
 ): Promise<InviteMintRateResult> {
   if (override) return override(orgId, count);
-  const r = await consume({
+  return consumeSlot({
     namespace: 'invite-mint',
     key: orgId,
     windowSeconds: config.INVITE_MINT_RATE_WINDOW_SECONDS,
@@ -76,5 +72,4 @@ export async function checkInviteMintRate(
     // remove it (§7.2). Fail closed.
     failClosed: true,
   });
-  return { allowed: r.allowed, retryAfterSeconds: r.retryAfterSeconds };
 }

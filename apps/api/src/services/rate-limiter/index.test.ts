@@ -206,6 +206,54 @@ describe('rate-limiter consume', () => {
     await expect(closeRateLimiter()).resolves.toBeUndefined();
   });
 
+  it('consumeSlot drops `count` but keeps the allow decision and retry-after', async () => {
+    const redis = makeRedis([[null, 1]]);
+    mockCreateRedisConnection.mockReturnValue(redis);
+    const { consumeSlot } = await import('./index.js');
+    const result = await consumeSlot({
+      namespace: 'support-submit',
+      key: 'user-1',
+      windowSeconds: 3600,
+      max: 5,
+    });
+    expect(result).toEqual({ allowed: true, retryAfterSeconds: 0 });
+  });
+
+  it('consumeSlot passes the fail-closed posture through to consume', async () => {
+    const redis = makeRedis([[null, 1]]);
+    redis.exec.mockRejectedValue(new Error('redis down'));
+    mockCreateRedisConnection.mockReturnValue(redis);
+    const { consumeSlot } = await import('./index.js');
+    // failClosed: a downed Redis must deny, and report the whole window.
+    await expect(
+      consumeSlot({
+        namespace: 'invite-mint',
+        key: 'org-1',
+        windowSeconds: 60,
+        max: 10,
+        failClosed: true,
+      }),
+    ).resolves.toEqual({ allowed: false, retryAfterSeconds: 60 });
+    // Default posture on the same failure: fail open.
+    await expect(
+      consumeSlot({ namespace: 'coordinator-submit', key: 'ip|mail', windowSeconds: 60, max: 10 }),
+    ).resolves.toEqual({ allowed: true, retryAfterSeconds: 0 });
+  });
+
+  it('consumeSlot forwards `cost` so a bulk call consumes N slots', async () => {
+    const redis = makeRedis([[null, 4]]);
+    mockCreateRedisConnection.mockReturnValue(redis);
+    const { consumeSlot } = await import('./index.js');
+    await consumeSlot({
+      namespace: 'invite-mint',
+      key: 'org-1',
+      windowSeconds: 60,
+      max: 10,
+      cost: 4,
+    });
+    expect(redis.incrby).toHaveBeenCalledWith(expect.stringContaining('rl:invite-mint:org-1:'), 4);
+  });
+
   it('builds the dedicated fail-fast connection options (not the BullMQ profile)', async () => {
     const redis = makeRedis([[null, 1]]);
     mockCreateRedisConnection.mockReturnValue(redis);
