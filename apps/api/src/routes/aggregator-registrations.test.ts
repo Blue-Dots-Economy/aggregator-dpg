@@ -19,6 +19,9 @@ import { _setConsentLedger } from '../services/consent-ledger/index.js';
 import { _setSubmitRateChecker } from '../services/submit-rate.js';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import type * as ConfigLoaderFs from '@aggregator-dpg/config-loader/fs';
+import { writeFormsBundle } from '@aggregator-dpg/network-config/testing';
+import { _resetValidator } from '../services/registration-validator.js';
+import { _resetFormsBundle } from '../services/aggregator-forms.js';
 
 const { loadConsentConfigMock } = vi.hoisted(() => ({ loadConsentConfigMock: vi.fn() }));
 vi.mock('@aggregator-dpg/config-loader/fs', async (importOriginal) => {
@@ -38,6 +41,11 @@ describe('POST /v1/aggregator-registrations/create', () => {
   let consentLedger: ConsentLedgerFake;
 
   beforeEach(async () => {
+    // #640: the forms arrive on the mounted schemas tree, not baked into this
+    // repo, so point CONFIG_ROOT at a temp root holding a synthetic bundle.
+    process.env.CONFIG_ROOT = writeFormsBundle();
+    _resetFormsBundle();
+    _resetValidator();
     _resetTokenKey();
     _resetJwks();
     process.env.APPROVAL_TOKEN_SECRET = 'k'.repeat(48);

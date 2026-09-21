@@ -3,21 +3,19 @@
  * `isOrgHierarchyEnabled`, `loadConsentContent`, `loadOrgSchema`.
  *
  * The page tests mock this module, so its function bodies are exercised
- * directly here — deps (config-loader, fs, schema-path resolver, logger) are
- * mocked so no real I/O happens.
+ * directly here — deps (config-loader, fs, the published-form loader, logger)
+ * are mocked so no real I/O happens.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const { loadConsentConfig } = vi.hoisted(() => ({ loadConsentConfig: vi.fn() }));
 const { readFile } = vi.hoisted(() => ({ readFile: vi.fn() }));
-const { resolveAggregatorSchemaPath } = vi.hoisted(() => ({
-  resolveAggregatorSchemaPath: vi.fn((file: string) => `/config/aggregator/${file}`),
-}));
+const { loadPublishedForm } = vi.hoisted(() => ({ loadPublishedForm: vi.fn() }));
 const { loggerWarn } = vi.hoisted(() => ({ loggerWarn: vi.fn() }));
 
 vi.mock('@aggregator-dpg/config-loader/fs', () => ({ loadConsentConfig }));
 vi.mock('node:fs/promises', () => ({ readFile, default: { readFile } }));
-vi.mock('@/lib/aggregator-schema.server', () => ({ resolveAggregatorSchemaPath }));
+vi.mock('@/lib/aggregator-forms.server', () => ({ loadPublishedForm }));
 vi.mock('@/lib/logger', () => ({ logger: { warn: loggerWarn, error: vi.fn(), info: vi.fn() } }));
 
 import {
@@ -111,24 +109,32 @@ describe('loadConsentContent', () => {
 
 describe('loadOrgSchema', () => {
   beforeEach(() => {
-    readFile.mockReset();
+    loadPublishedForm.mockReset();
   });
 
-  it('returns the parsed schema + ui schema when both files read', async () => {
-    readFile.mockImplementation((p: string) =>
-      p.includes('.ui.json')
-        ? Promise.resolve('{"ui:order":["name"]}')
-        : Promise.resolve('{"title":"Org","properties":{}}'),
-    );
-    const out = await loadOrgSchema();
-    expect(out).toEqual({
-      schema: { title: 'Org', properties: {} },
-      uiSchema: { 'ui:order': ['name'] },
+  it("derives the ui schema from the published schema's own x- annotations", async () => {
+    // One document now: presentation lives in `x-rjsf` inside the schema and
+    // the uiSchema is computed, not read from a sibling file.
+    loadPublishedForm.mockResolvedValue({
+      title: 'Org',
+      'x-rjsf': { order: ['name'] },
+      properties: { name: { type: 'string', 'x-rjsf': { placeholder: 'e.g. ABC Limited' } } },
     });
+    const out = await loadOrgSchema();
+    expect(loadPublishedForm).toHaveBeenCalledWith('org-registration');
+    expect(out?.uiSchema).toEqual({
+      'ui:order': ['name'],
+      name: { 'ui:placeholder': 'e.g. ABC Limited' },
+    });
+    // The annotations stay on the schema — Ajv ignores unknown keywords, and
+    // stripping them would mean the browser and the API validate different docs.
+    expect(out?.schema).toHaveProperty('x-rjsf');
   });
 
-  it('returns null when a schema file is missing', async () => {
-    readFile.mockRejectedValue(new Error('ENOENT'));
+  it('returns null when the published bundle carries no org form', async () => {
+    // Same outcome a deployment without the org tab has always had: the owner
+    // route 404s and registration stays coordinator-only.
+    loadPublishedForm.mockResolvedValue(null);
     expect(await loadOrgSchema()).toBeNull();
   });
 });

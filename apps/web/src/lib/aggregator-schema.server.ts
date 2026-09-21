@@ -2,19 +2,26 @@
  * Server-side loader for the aggregator registration JSON Schema.
  *
  * Both the public registration page and the (read-only) authenticated profile
- * page render the *same* form from `config/schemas/aggregator/registration.v1`.
- * Keeping the load + network-enum patch in one module guarantees the two
- * surfaces never drift. Belongs to the `web` app's server layer.
+ * page render the *same* published `coordinator-registration` form. Keeping the
+ * load + network-enum patch in one module guarantees the two surfaces never
+ * drift. Belongs to the `web` app's server layer.
+ *
+ * Since #640 the schema comes only from the published `aggregator-forms.json`
+ * on the mounted config tree — this repo no longer ships a copy, because a
+ * mounted K8s deployment hid it anyway. When the bundle cannot be resolved
+ * there is nothing to render, and {@link SchemaUnavailableError} is thrown
+ * rather than a partial form shown.
  *
  * @module apps/web/src/lib/aggregator-schema.server
  */
 
 import 'server-only';
 import { existsSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { RJSFSchema } from '@rjsf/utils';
+import { deriveUiSchema } from './form-layout';
+import { loadPublishedForm } from './aggregator-forms.server';
 import { aggregatorSchemaRelPaths } from './config-paths';
+import type { RJSFSchema } from '@rjsf/utils';
 
 /** Parsed registration schema pair (JSON Schema + RJSF UI schema). */
 export interface AggregatorSchemaPair {
@@ -23,27 +30,51 @@ export interface AggregatorSchemaPair {
 }
 
 /**
- * Resolves an aggregator schema file, preferring a network/brand override.
+ * Thrown when the published bundle carries no form for this surface.
  *
- * Works for both `pnpm --filter web dev` (cwd = apps/web) and the production
- * Docker build (cwd = /app/apps/web). Within each `config/` root the
- * network/brand override is tried before the shared default, so an instance
- * that needs extra registration fields (UP-GZB) ships its own complete copy
- * under `config/<network>[/<brand>]/schemas/aggregator/` while Purple Dot and
- * Dharwad keep rendering the generic form.
+ * Its own class so a page can tell "the deployment is misconfigured" apart from
+ * an ordinary render fault, and so the message never implies the visitor did
+ * something wrong.
+ */
+export class SchemaUnavailableError extends Error {
+  constructor(formName: string) {
+    super(
+      `No published "${formName}" form in aggregator-forms.json. Check the ` +
+        `schemas tree is mounted at CONFIG_ROOT and carries this scope.`,
+    );
+    this.name = 'SchemaUnavailableError';
+  }
+}
+
+/**
+ * Resolves a file under `schemas/aggregator/`, preferring a network/brand
+ * override.
+ *
+ * Works for `pnpm --filter web dev` (cwd = apps/web), the production Docker
+ * build (cwd = /app/apps/web), and the deployment where the schemas repo is
+ * mounted at `CONFIG_ROOT`. Within each root the network/brand override is
+ * tried before the shared default, so an instance that needs extra registration
+ * fields ships its own bundle at `<network>[/<brand>]/schemas/aggregator/`
+ * while every other instance keeps reading the generic one.
  *
  * Falls back to the shared-default path when nothing exists, so the caller's
  * `readFile` surfaces a normal ENOENT naming a real location.
  *
- * @param file - Bare schema file name, e.g. `registration.v1.json`.
- * @returns Absolute path to the most specific schema file that exists.
+ * @param file - Bare file name, e.g. `aggregator-forms.json`.
+ * @returns Absolute path to the most specific copy that exists.
  */
 export function resolveAggregatorSchemaPath(file: string): string {
-  const roots = [
-    path.resolve(process.cwd(), '../../config'),
-    path.resolve(process.cwd(), '../config'),
-    path.resolve(process.cwd(), 'config'),
-  ];
+  const configRoot = process.env.CONFIG_ROOT?.trim();
+  // An explicit CONFIG_ROOT is used exclusively: it names the initContainer's
+  // mount point, and quietly falling back elsewhere when the mount is missing
+  // would render a different form than the one the operator pinned.
+  const roots = configRoot
+    ? [path.resolve(configRoot)]
+    : [
+        path.resolve(process.cwd(), '../../config'),
+        path.resolve(process.cwd(), '../config'),
+        path.resolve(process.cwd(), 'config'),
+      ];
   const rel = aggregatorSchemaRelPaths(file);
   // Specificity first, then root — a brand override in any resolvable root must
   // beat the shared default in another.
@@ -100,14 +131,14 @@ export async function patchTypeFromNetwork(
  *
  * @returns The parsed schema + UI schema, with the type dropdown reflecting
  *   the current network's domains.
+ * @throws {SchemaUnavailableError} When the published bundle carries no
+ *   coordinator-registration form.
  */
 export async function loadRegistrationSchema(): Promise<AggregatorSchemaPair> {
-  const [schemaRaw, uiSchemaRaw] = await Promise.all([
-    readFile(resolveAggregatorSchemaPath('registration.v1.json'), 'utf8'),
-    readFile(resolveAggregatorSchemaPath('registration.v1.ui.json'), 'utf8'),
-  ]);
-  const schema = JSON.parse(schemaRaw) as RJSFSchema;
-  const uiSchema = JSON.parse(uiSchemaRaw) as Record<string, unknown>;
+  const published = await loadPublishedForm('coordinator-registration');
+  if (!published) throw new SchemaUnavailableError('coordinator-registration');
+  const schema = published as RJSFSchema;
+  const uiSchema = deriveUiSchema(schema);
   await patchTypeFromNetwork(schema, uiSchema);
   return { schema, uiSchema };
 }

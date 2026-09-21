@@ -22,6 +22,9 @@ import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-tok
 import { _setSubmitRateChecker } from '../services/submit-rate.js';
 import { ConsentLedgerFake } from '@aggregator-dpg/consent-ledger/testing';
 import { _setConsentLedger } from '../services/consent-ledger/index.js';
+import { writeFormsBundle } from '@aggregator-dpg/network-config/testing';
+import { _resetValidator } from '../services/registration-validator.js';
+import { _resetFormsBundle } from '../services/aggregator-forms.js';
 
 const SERVICE_BEARER = 'service-token';
 const AUTH_HEADER = { authorization: `Bearer ${SERVICE_BEARER}` };
@@ -41,6 +44,11 @@ describe('coordinator submit with ORG_HIERARCHY_ENABLED', () => {
   };
 
   beforeEach(async () => {
+    // #640: the forms arrive on the mounted schemas tree, not baked into this
+    // repo, so point CONFIG_ROOT at a temp root holding a synthetic bundle.
+    process.env.CONFIG_ROOT = writeFormsBundle();
+    _resetFormsBundle();
+    _resetValidator();
     _resetTokenKey();
     _resetJwks();
     // Permissive by default, NOT `null`. `null` restores the Redis-backed

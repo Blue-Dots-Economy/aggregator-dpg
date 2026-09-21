@@ -1,6 +1,4 @@
 import { describe, it, expect, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
 import type { RJSFSchema } from '@rjsf/utils';
 import { isFieldVisible, resolveVisibleSchema, stripShowIf } from '../../lib/show-if';
 
@@ -142,21 +140,41 @@ describe('stripShowIf', () => {
   });
 });
 
-// ─── Real UP-GZB org-registration schema ────────────────────────────────────
-// Locks the wiring end to end: the shipped schema file, the shipped resolver.
-// Both sub-type fields deliberately carry the SAME title ("Organisation
-// Sub-Type", as the sheet does) — safe only because they are never visible at
-// the same time, which is exactly what these assertions pin down.
-describe('up-gzb org-registration organisation sub-type', () => {
-  const schema = JSON.parse(
-    readFileSync(
-      path.resolve(
-        process.cwd(),
-        '../../config/blue_dot/up-gzb/schemas/aggregator/org-registration.v1.json',
-      ),
-      'utf8',
-    ),
-  ) as RJSFSchema;
+// ─── The UP-GZB org-registration SHAPE ──────────────────────────────────────
+// Reproduces the arrangement that makes this resolver load-bearing: two
+// sub-type fields carrying the SAME title ("Organisation Sub-Type", as the
+// sheet does), mutually exclusive via `x-show-if`. Safe only because they are
+// never visible at once — which is exactly what these assertions pin down.
+//
+// Synthetic, not the published document. Since #640 the real forms live in
+// `bluedots-schemas`; vendoring a copy here to read would reintroduce the
+// second source of truth that change removed, and would rot the first time the
+// published form moved. What belongs here is the resolver's behaviour. Whether
+// up-gzb's option lists still match the sheet is asserted where the document
+// lives.
+describe('org-registration mutually exclusive sub-types (up-gzb shape)', () => {
+  const schema = {
+    type: 'object',
+    properties: {
+      organisation_type: {
+        type: 'string',
+        title: 'Organisation Type',
+        enum: ['educational', 'non_educational'],
+      },
+      organisation_sub_type_educational: {
+        type: 'string',
+        title: 'Organisation Sub-Type',
+        enum: ['school', 'polytechnic', 'other'],
+        'x-show-if': { organisation_type: ['educational'] },
+      },
+      organisation_sub_type_non_educational: {
+        type: 'string',
+        title: 'Organisation Sub-Type',
+        enum: ['placement_agency', 'community_group', 'other'],
+        'x-show-if': { organisation_type: ['non_educational'] },
+      },
+    },
+  } as RJSFSchema;
 
   const visible = (formData: Record<string, unknown>): string[] =>
     Object.keys(resolveVisibleSchema(schema, formData).schema.properties ?? {});
@@ -188,28 +206,5 @@ describe('up-gzb org-registration organisation sub-type', () => {
     });
     expect(formData).not.toHaveProperty('organisation_sub_type_educational');
     expect(formData['organisation_type']).toBe('non_educational');
-  });
-
-  it('carries the sheet option lists on each sub-type', () => {
-    const props = schema.properties as Record<string, { enum?: string[] }>;
-    expect(props['organisation_sub_type_educational']!.enum).toEqual([
-      'school',
-      'pu_college',
-      'college',
-      'iti',
-      'other_vocational_training',
-      'polytechnic',
-      'diploma',
-      'other',
-    ]);
-    expect(props['organisation_sub_type_non_educational']!.enum).toEqual([
-      'employment_exchange',
-      'placement_agency',
-      'community_group',
-      'individual_trainer_counsellor',
-      'msme_association',
-      'industries_and_commerce_department',
-      'other',
-    ]);
   });
 });

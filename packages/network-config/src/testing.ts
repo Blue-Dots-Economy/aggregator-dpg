@@ -9,6 +9,10 @@
  * @module @aggregator-dpg/network-config/testing
  */
 
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+
 import { ok } from '@aggregator-dpg/shared-primitives/result';
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
@@ -185,4 +189,107 @@ export function buildPurpleDotConfig(
     },
     overrides,
   );
+}
+
+/**
+ * Builds a minimal `aggregator-forms.json` bundle for tests.
+ *
+ * Synthetic on purpose. Since #640 the real forms live in `bluedots-schemas`
+ * and this repo ships none — vendoring a copy here to test against would
+ * reintroduce exactly the second source of truth that change removed, and it
+ * would rot silently the first time the published form moved.
+ *
+ * So this covers the *shape* a consumer depends on (the three form keys, a
+ * patchable `type` enum, `additionalProperties: false`) and nothing more.
+ * Whether the published documents themselves are correct is asserted upstream,
+ * where they live.
+ *
+ * @param overrides - Forms to add or replace, by form name.
+ * @returns A bundle suitable for `ResolvedNetworkConfig.forms`.
+ */
+export function buildFormsBundle(overrides: Record<string, Record<string, unknown>> = {}): {
+  forms: Record<string, Record<string, unknown>>;
+} {
+  const contact = {
+    type: 'object',
+    required: ['name', 'phone', 'email'],
+    additionalProperties: false,
+    properties: {
+      name: { type: 'string', minLength: 2, maxLength: 200 },
+      phone: { type: 'string', pattern: '^(\\+?\\d{10,15}|\\d{10})$' },
+      email: { type: 'string', format: 'email', maxLength: 320 },
+    },
+  };
+  const consent = {
+    type: 'object',
+    required: ['value'],
+    additionalProperties: false,
+    properties: {
+      value: { type: 'boolean' },
+      given_at: { type: 'string', format: 'date-time' },
+      valid_till: { type: 'string', format: 'date-time' },
+    },
+  };
+  return {
+    forms: {
+      'coordinator-registration': {
+        $schema: 'https://json-schema.org/draft/2020-12/schema',
+        type: 'object',
+        required: ['name', 'type', 'contact', 'consent'],
+        additionalProperties: false,
+        properties: {
+          name: { type: 'string', minLength: 2, maxLength: 200 },
+          // Patched at compile time with the live network's domain ids.
+          type: { type: 'string', enum: ['seeker', 'provider'] },
+          url: { type: 'string', format: 'uri', maxLength: 2048 },
+          locations: { type: 'array' },
+          contact,
+          consent,
+        },
+      },
+      'org-registration': {
+        $schema: 'https://json-schema.org/draft/2020-12/schema',
+        type: 'object',
+        required: ['display_name', 'owner', 'consent'],
+        additionalProperties: false,
+        properties: {
+          display_name: { type: 'string', minLength: 2, maxLength: 200 },
+          state: { type: 'string', maxLength: 200 },
+          owner: contact,
+          consent,
+        },
+      },
+      profile: {
+        $schema: 'https://json-schema.org/draft/2020-12/schema',
+        type: 'object',
+        additionalProperties: false,
+        properties: { who_i_am: { type: 'object' } },
+      },
+      ...overrides,
+    },
+  };
+}
+
+/**
+ * Writes a synthetic `aggregator-forms.json` into a temp config root and
+ * returns that root, for tests that exercise the disk resolver.
+ *
+ * Since #640 the bundle is delivered by the mounted schemas tree, so code under
+ * test reads it from `CONFIG_ROOT`. Writing a synthetic one per test keeps the
+ * suite offline without checking a copy of the published document into this
+ * repo — the second source of truth #640 removed.
+ *
+ * @param forms - Forms to publish; defaults to {@link buildFormsBundle}'s.
+ * @param scope - Optional `<network>[/<brand>]` prefix, for override tests.
+ * @returns The temp directory to use as `CONFIG_ROOT`.
+ */
+export function writeFormsBundle(
+  forms: { forms: Record<string, Record<string, unknown>> } = buildFormsBundle(),
+  scope = '',
+): string {
+  const root = mkdtempSync(path.join(tmpdir(), 'agg-forms-'));
+  const dir = path.join(root, scope, 'schemas', 'aggregator');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(path.join(dir, 'aggregator-forms.json'), JSON.stringify(forms), 'utf8');
+  return root;
 }

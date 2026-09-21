@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic';
 
 /**
  * Public aggregator (coordinator) registration page. Loads the coordinator JSON
- * Schema + UI schema from `config/schemas/aggregator/` on the server and renders
+ * Schema from the published form bundle (UI schema derived from it) on the server and renders
  * the single coordinator flow.
  *
  * Owner (organisation) registration is no longer a tab here — as of #619 it is

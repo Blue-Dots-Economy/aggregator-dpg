@@ -48,7 +48,7 @@ import { checkSubmitRate } from '../services/submit-rate.js';
 import { loadConsentConfig } from '@aggregator-dpg/config-loader/fs';
 import { getConsentLedger } from '../services/consent-ledger/index.js';
 import { resolveActiveNetwork } from '@aggregator-dpg/network-config/paths';
-import { resolveProfileRef } from '../services/schema-ref.js';
+import { publishedFormRef } from '../services/aggregator-forms.js';
 import { normalisePhone } from '@aggregator-dpg/shared-primitives/phone';
 import { splitName } from '../services/name.js';
 import { slugFromName } from '../services/slug.js';
@@ -127,7 +127,7 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
         tags: ['aggregator-registrations'],
         summary: 'Submit a new aggregator registration',
         description:
-          'Validates submission against config/schemas/aggregator/registration.v1.json, creates a disabled user (login enabled on admin approval), and pushes the org to signalstack. Reached via a non-aggregator Bearer token from Keycloak.',
+          'Validates submission against the published coordinator-registration form (fetched from forms_source; 503 SCHEMA_UNAVAILABLE when it cannot be resolved), creates a disabled user (login enabled on admin approval), and pushes the org to signalstack. Reached via a non-aggregator Bearer token from Keycloak.',
         body: CoordinatorRegistrationBodySchema,
         response: {
           201: RegistrationCreatedResponseSchema,
@@ -214,8 +214,21 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
         } = req.body as Record<string, unknown>;
 
         // JSON Schema is the authoritative contract — keeps the form rules in
-        // `config/` rather than code.
+        // the published bundle rather than code.
         const validate = await getRegistrationValidator();
+        if (!validate) {
+          // No published form means no contract to check this payload against.
+          // Registering someone against no schema would bypass the
+          // `additionalProperties: false` allowlist, so refuse instead (#640).
+          throw httpError('SCHEMA_UNAVAILABLE', {
+            detail: 'The coordinator-registration form could not be loaded.',
+          });
+        }
+        // Recorded on the row so a later reader knows which published bundle
+        // this payload was checked against. Resolved here, next to the
+        // validator, so the two can never name different documents.
+        const registrationRef = publishedFormRef('coordinator-registration');
+
         if (!validate(formBody)) {
           throw httpError('SCHEMA_VALIDATION', {
             detail: 'Payload failed JSON Schema validation.',
@@ -480,7 +493,7 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
           parentOrgId,
           inviteEmail: inviteEmailClaim,
           profile: buildAggregatorProfile(body as unknown as Record<string, unknown>),
-          profileRef: resolveProfileRef('registration.v1.json'),
+          profileRef: registrationRef,
         });
         if (!aggregator.ok) {
           const code = mapStoreCreateError(aggregator.error.code);

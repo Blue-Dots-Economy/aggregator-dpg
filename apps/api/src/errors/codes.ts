@@ -45,6 +45,13 @@ export const ERR = {
       'Your consent could not be recorded, so the registration was not completed. Please try again.',
     hint: 'The consent-ledger write failed and the registration was rolled back (fail-closed). Check consent config + DB.',
   },
+  SCHEMA_UNAVAILABLE: {
+    code: 'SCHEMA_UNAVAILABLE',
+    status: 503,
+    title: 'Form schema unavailable',
+    detail: 'The form definition could not be loaded, so this request cannot be validated.',
+    hint: 'Since #640 the forms are fetched from bluedots-schemas via aggregator.network.forms_source — there is no on-disk fallback. Check that forms_source is set and reachable, then restart: the config resolves once per process.',
+  },
   SCHEMA_VALIDATION: {
     code: 'SCHEMA_VALIDATION',
     status: 400,

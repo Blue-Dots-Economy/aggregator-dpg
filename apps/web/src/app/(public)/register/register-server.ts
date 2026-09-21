@@ -7,10 +7,10 @@
  * @module apps/web/src/app/(public)/register/register-server
  */
 
+import { deriveUiSchema } from '@/lib/form-layout';
+import { loadPublishedForm } from '@/lib/aggregator-forms.server';
 import 'server-only';
-import { readFile } from 'node:fs/promises';
 import type { RJSFSchema } from '@rjsf/utils';
-import { resolveAggregatorSchemaPath } from '../../../lib/aggregator-schema.server';
 import { loadConsentConfig } from '@aggregator-dpg/config-loader/fs';
 import { logger } from '../../../lib/logger';
 import type { ConsentDocContent } from '../../../components/consent/consent-types';
@@ -85,17 +85,11 @@ export async function loadOrgSchema(): Promise<{
   schema: RJSFSchema;
   uiSchema: Record<string, unknown>;
 } | null> {
-  try {
-    const [rawSchema, rawUi] = await Promise.all([
-      readFile(resolveAggregatorSchemaPath('org-registration.v1.json'), 'utf8'),
-      readFile(resolveAggregatorSchemaPath('org-registration.v1.ui.json'), 'utf8'),
-    ]);
-    return {
-      schema: JSON.parse(rawSchema) as RJSFSchema,
-      uiSchema: JSON.parse(rawUi) as Record<string, unknown>,
-    };
-  } catch {
-    // Best-effort: absent org schema → owner route 404s / coordinator-only.
-    return null;
-  }
+  // Bundle-only since #640 — this repo ships no copy. Absent org form →
+  // owner route 404s / coordinator-only, which is the same outcome a
+  // deployment without the org tab has always had.
+  const published = await loadPublishedForm('org-registration');
+  if (!published) return null;
+  const schema = published as RJSFSchema;
+  return { schema, uiSchema: deriveUiSchema(schema) };
 }

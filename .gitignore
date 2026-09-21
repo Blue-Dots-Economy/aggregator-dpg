@@ -78,3 +78,8 @@ pids/
 # straight off `git clone` without running `make helm-deps` first.
 helm/aggregator-dpg/charts/*.tgz
 helm/*.tgz
+
+# Aggregator form schemas are published in bluedots-schemas (#640) and pulled
+# in by `pnpm forms:sync` for local dev. A committed copy would be the second
+# source of truth that change removed.
+config/**/schemas/aggregator/aggregator-forms.json

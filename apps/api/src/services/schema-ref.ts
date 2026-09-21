@@ -25,8 +25,19 @@ import type { ConfigPathEnv } from '@aggregator-dpg/network-config/paths';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-/** Candidate `config/` roots, covering source, compiled and container layouts. */
-function configRoots(): string[] {
+/**
+ * Candidate `config/` roots, covering source, compiled and container layouts.
+ *
+ * An explicit `CONFIG_ROOT` is used **exclusively** — the guessed roots are not
+ * appended behind it. In a deployment that env var names the initContainer's
+ * mount point, and silently falling back to some other directory when the
+ * mount is missing would serve a different form than the one the operator
+ * pinned. It also keeps tests honest: a test that points `CONFIG_ROOT` at an
+ * empty directory must see "no bundle", not this repo's own `config/`.
+ */
+function configRoots(env: ConfigPathEnv = process.env): string[] {
+  const explicit = env.CONFIG_ROOT?.trim();
+  if (explicit) return [path.resolve(explicit)];
   return [
     // Source layout: apps/api/src/services → ../../../../config
     path.resolve(__dirname, '../../../../config'),
@@ -103,7 +114,7 @@ export function schemaCandidates(
   file: string,
   env: ConfigPathEnv = process.env,
 ): { path: string; rel: string }[] {
-  const roots = configRoots();
+  const roots = configRoots(env);
   // Specificity first, then root: a brand override in ANY resolvable root must
   // beat the shared default, or a layout where two roots both resolve would
   // silently fall back to the generic schema.

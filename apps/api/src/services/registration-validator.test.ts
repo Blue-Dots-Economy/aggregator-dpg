@@ -1,112 +1,125 @@
 /**
  * Unit tests for the registration-schema Ajv validator loader.
  *
- * Loads the real `config/schemas/aggregator/registration.v1.json` (no
- * filesystem mocking, matching the sibling `profile-validator.test.ts`
- * approach) but mocks `./network-config.js` so each test controls whether
- * the live network's domain ids are available to patch
- * `properties.type.enum` — covering the patch-applied, empty-ids,
- * network-config-unavailable (fallback), and caching paths.
+ * Since #640 the schema comes from the published `aggregator-forms.json` on
+ * the mounted config tree, so these write a synthetic bundle to a temp
+ * `CONFIG_ROOT` rather than relying on a file this repo ships. `network-config`
+ * is still mocked, because the domain enum is patched from it.
+ *
+ * What matters here is what the route depends on: a missing bundle yields
+ * `null` (→ 503, never an unvalidated accept), the `null` stays retryable, and
+ * patching the enum must not mutate the cached bundle.
  *
  * @module @aggregator-dpg/api
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { rmSync } from 'node:fs';
+import { writeFormsBundle, buildFormsBundle } from '@aggregator-dpg/network-config/testing';
 
-const { mockGetNetworkConfig } = vi.hoisted(() => ({
-  mockGetNetworkConfig: vi.fn(),
-}));
+const { mockGetNetworkConfig } = vi.hoisted(() => ({ mockGetNetworkConfig: vi.fn() }));
+vi.mock('./network-config.js', () => ({ getNetworkConfig: mockGetNetworkConfig }));
 
-vi.mock('./network-config.js', () => ({
-  getNetworkConfig: mockGetNetworkConfig,
-}));
+const roots: string[] = [];
+
+/** Points CONFIG_ROOT at a fresh temp tree holding `forms`. */
+function mountForms(forms = buildFormsBundle()): void {
+  const root = writeFormsBundle(forms);
+  roots.push(root);
+  process.env.CONFIG_ROOT = root;
+}
 
 describe('getRegistrationValidator', () => {
+  const origRoot = process.env.CONFIG_ROOT;
+
   beforeEach(async () => {
     mockGetNetworkConfig.mockReset();
+    mockGetNetworkConfig.mockResolvedValue({ domainIds: ['seeker', 'provider'] });
     const { _resetValidator } = await import('./registration-validator.js');
+    const { _resetFormsBundle } = await import('./aggregator-forms.js');
     _resetValidator();
+    _resetFormsBundle();
+  });
+
+  afterEach(() => {
+    while (roots.length) rmSync(roots.pop()!, { recursive: true, force: true });
+    if (origRoot === undefined) delete process.env.CONFIG_ROOT;
+    else process.env.CONFIG_ROOT = origRoot;
   });
 
   it('patches properties.type.enum with the live network domain ids', async () => {
+    mountForms();
     mockGetNetworkConfig.mockResolvedValue({ domainIds: ['student', 'mentor'] });
     const { getRegistrationValidator } = await import('./registration-validator.js');
     const validate = await getRegistrationValidator();
-    // A `type` of 'seeker' (the static schema default) should now be
-    // rejected since the network only declares student/mentor.
-    const rejects = validate({ type: 'seeker' });
-    expect(rejects).toBe(false);
-    const accepts = validate({ type: 'student' });
-    // May still fail on other required fields, but not on `type`'s enum.
-    if (!accepts) {
-      const typeErrors = (validate.errors ?? []).filter((e) => e.instancePath === '/type');
-      expect(typeErrors).toHaveLength(0);
-    }
+    expect(validate).not.toBeNull();
+
+    const body = {
+      name: 'Acme',
+      contact: { name: 'Jo', phone: '9876543210', email: 'jo@x.com' },
+      consent: { value: true },
+    };
+    // 'seeker' is in the published enum but not this network's domains.
+    expect(validate!({ ...body, type: 'seeker' })).toBe(false);
+    expect(validate!({ ...body, type: 'student' })).toBe(true);
   });
 
-  it('keeps the static schema enum when the network reports no domain ids', async () => {
+  it('keeps the published enum when the network reports no domain ids', async () => {
+    mountForms();
     mockGetNetworkConfig.mockResolvedValue({ domainIds: [] });
     const { getRegistrationValidator } = await import('./registration-validator.js');
     const validate = await getRegistrationValidator();
-    const errorsForSeeker = validate({ type: 'seeker' });
-    // 'seeker' is in the static enum, so this should not fail on `/type`.
-    if (!errorsForSeeker) {
-      const typeErrors = (validate.errors ?? []).filter((e) => e.instancePath === '/type');
-      expect(typeErrors).toHaveLength(0);
-    }
+    expect(
+      validate!({
+        name: 'Acme',
+        type: 'seeker',
+        contact: { name: 'Jo', phone: '9876543210', email: 'jo@x.com' },
+        consent: { value: true },
+      }),
+    ).toBe(true);
   });
 
-  it('falls back to the static schema when network-config is unavailable', async () => {
-    mockGetNetworkConfig.mockRejectedValue(new Error('network-config load failed'));
+  it('does not mutate the cached bundle when patching the enum', async () => {
+    // The parsed bundle is cached process-wide; a patch leaking into it would
+    // hand one network's domains to every later reader.
+    mountForms();
+    mockGetNetworkConfig.mockResolvedValue({ domainIds: ['student'] });
     const { getRegistrationValidator } = await import('./registration-validator.js');
-    const validate = await getRegistrationValidator();
-    expect(typeof validate).toBe('function');
-    // Registration stays open on cold boot: an otherwise-empty payload still
-    // gets a validator back, just against the static default enum.
-    const ok = validate({ type: 'seeker' });
-    if (!ok) {
-      const typeErrors = (validate.errors ?? []).filter((e) => e.instancePath === '/type');
-      expect(typeErrors).toHaveLength(0);
-    }
+    await getRegistrationValidator();
+
+    const { getPublishedForm } = await import('./aggregator-forms.js');
+    const form = getPublishedForm('coordinator-registration');
+    const props = form!.schema['properties'] as Record<string, { enum?: string[] }>;
+    expect(props['type']!.enum).toEqual(['seeker', 'provider']);
   });
 
-  it('caches the compiled validator across calls (network-config read once)', async () => {
-    mockGetNetworkConfig.mockResolvedValue({ domainIds: ['seeker'] });
+  it('returns null when the bundle carries no coordinator-registration form', async () => {
+    mountForms({ forms: { profile: { type: 'object' } } });
     const { getRegistrationValidator } = await import('./registration-validator.js');
-    const a = await getRegistrationValidator();
-    const b = await getRegistrationValidator();
-    expect(a).toBe(b);
-    expect(mockGetNetworkConfig).toHaveBeenCalledTimes(1);
+    await expect(getRegistrationValidator()).resolves.toBeNull();
   });
 
-  it('_resetValidator forces a fresh compile + network-config read', async () => {
-    mockGetNetworkConfig.mockResolvedValue({ domainIds: ['seeker'] });
-    const { getRegistrationValidator, _resetValidator } =
-      await import('./registration-validator.js');
-    const a = await getRegistrationValidator();
-    _resetValidator();
-    const b = await getRegistrationValidator();
-    expect(a).not.toBe(b);
-    expect(mockGetNetworkConfig).toHaveBeenCalledTimes(2);
-  });
-});
-
-describe('getRegistrationValidator schema-not-found failure', () => {
-  beforeEach(() => {
-    vi.resetModules();
-    mockGetNetworkConfig.mockReset();
-    vi.doMock('node:fs', () => ({
-      // schema-ref probes with existsSync; the validator still reads the file
-      // with readFileSync once a candidate resolves.
-      existsSync: () => false,
-      readFileSync: () => {
-        throw new Error('ENOENT');
-      },
-    }));
+  it('returns null when the mount carries no bundle at all', async () => {
+    // A deployment whose schemas tree never arrived: 503, not a 500 and never
+    // an unvalidated accept.
+    process.env.CONFIG_ROOT = '/nonexistent-config-root';
+    const { getRegistrationValidator } = await import('./registration-validator.js');
+    await expect(getRegistrationValidator()).resolves.toBeNull();
   });
 
-  it('throws a descriptive error listing every candidate path tried', async () => {
-    const { getRegistrationValidator: getFresh } = await import('./registration-validator.js');
-    await expect(getFresh()).rejects.toThrow(/registration schema not found; tried:/);
-    vi.doUnmock('node:fs');
+  it('does not cache the null — a later call can still succeed', async () => {
+    // An instance that started before its mount was ready would otherwise
+    // answer 503 for the life of the process.
+    process.env.CONFIG_ROOT = '/nonexistent-config-root';
+    const { getRegistrationValidator } = await import('./registration-validator.js');
+    expect(await getRegistrationValidator()).toBeNull();
+
+    mountForms();
+    expect(await getRegistrationValidator()).not.toBeNull();
+  });
+
+  it('caches the compiled validator across calls', async () => {
+    mountForms();
+    const { getRegistrationValidator } = await import('./registration-validator.js');
+    expect(await getRegistrationValidator()).toBe(await getRegistrationValidator());
   });
 });
