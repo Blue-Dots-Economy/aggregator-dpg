@@ -198,10 +198,42 @@ export const NetworkBindingSchema = z.object({
    * (the web app then falls back to the on-disk participant `consent.json`).
    */
   consent_source: z.string().url().optional(),
+  /**
+   * Absolute URL of the `aggregator-forms.json` bundle holding the
+   * coordinator-registration / org-registration / profile schemas, fetched the
+   * same cache-backed way as `source` and `consent_source`. Typically their
+   * sibling in the schemas repo.
+   *
+   * Optional, and absent is a supported state: the web app then reads the
+   * on-disk `config/schemas/aggregator/*.json` it ships with. That fallback is
+   * what makes this safe to roll out one deployment at a time.
+   */
+  forms_source: z.string().url().optional(),
   field_overrides: z.record(z.string(), IdentitySelectorsSchema).optional(),
   csv_array_delimiter: z.string().min(1).default('|'),
 });
 export type NetworkBinding = z.infer<typeof NetworkBindingSchema>;
+
+/**
+ * The `aggregator-forms.json` bundle.
+ *
+ * Deliberately lenient about each form's interior, for the same reason as
+ * {@link ParticipantConsentDocSchema}: the job here is to reject a non-JSON or
+ * wrong-shape body (a GitHub 404 page) before it reaches the form renderer, not
+ * to re-model JSON Schema. Each form is validated as a schema by Ajv at the
+ * point it is used.
+ *
+ * Bundles are self-contained — a brand's bundle repeats every form it serves
+ * rather than diffing against its network, matching how `network.json` ships —
+ * so a missing key means the deployment does not serve that form, never "look
+ * it up somewhere else".
+ */
+export const AggregatorFormsBundleSchema = z
+  .object({
+    forms: z.record(z.string(), z.record(z.string(), z.unknown())),
+  })
+  .passthrough();
+export type AggregatorFormsBundle = z.infer<typeof AggregatorFormsBundleSchema>;
 
 /** One title+content version entry of a participant consent document. */
 export const ConsentDocVersionSchema = z
@@ -509,6 +541,12 @@ export interface ResolvedNetworkConfig {
    * on-disk participant `consent.json`.
    */
   participantConsent?: ParticipantConsentDoc;
+  /**
+   * Form schemas fetched from {@link NetworkBindingSchema.forms_source}.
+   * Undefined when no `forms_source` is configured or the fetch failed with no
+   * cached copy — the web app then uses its on-disk schemas.
+   */
+  forms?: AggregatorFormsBundle;
 }
 
 // ─── Loader port ─────────────────────────────────────────────────────────────

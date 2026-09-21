@@ -164,15 +164,20 @@ describe('loadRegistrationSchema', () => {
   });
 
   it('loads schema + uiSchema and patches the type enum', async () => {
-    readFileMock
-      .mockResolvedValueOnce(
-        JSON.stringify({ type: 'object', properties: { type: { enum: ['old'] } } }),
-      )
-      .mockResolvedValueOnce(JSON.stringify({ type: {} }));
-    globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ domains: [{ id: 'seeker', label: 'Seekers' }] }), {
-        status: 200,
-      }),
+    readFileMock.mockResolvedValue(
+      JSON.stringify({ type: 'object', properties: { type: { enum: ['old'] } } }),
+    );
+    // A fresh Response per call, routed by URL: the loader now asks for the
+    // published form bundle as well as the network config, and a single shared
+    // Response would have its body consumed by whichever call lands first.
+    globalThis.fetch = vi.fn((url: string) =>
+      Promise.resolve(
+        String(url).includes('/v1/aggregator-forms')
+          ? new Response(JSON.stringify({ forms: null }), { status: 200 })
+          : new Response(JSON.stringify({ domains: [{ id: 'seeker', label: 'Seekers' }] }), {
+              status: 200,
+            }),
+      ),
     ) as unknown as typeof fetch;
 
     const result = await loadRegistrationSchema();

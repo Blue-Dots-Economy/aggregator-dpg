@@ -12,6 +12,7 @@
 import 'server-only';
 import { existsSync } from 'node:fs';
 import { deriveUiSchema } from './form-layout';
+import { loadPublishedForm } from './aggregator-forms.server';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { RJSFSchema } from '@rjsf/utils';
@@ -103,8 +104,13 @@ export async function patchTypeFromNetwork(
  *   the current network's domains.
  */
 export async function loadRegistrationSchema(): Promise<AggregatorSchemaPair> {
-  const schemaRaw = await readFile(resolveAggregatorSchemaPath('registration.v1.json'), 'utf8');
-  const schema = JSON.parse(schemaRaw) as RJSFSchema;
+  // Published bundle first, on-disk copy when it cannot be resolved — the
+  // fallback is what lets `forms_source` roll out per deployment (#640).
+  const published = await loadPublishedForm('coordinator-registration');
+  const schema = (published ??
+    JSON.parse(
+      await readFile(resolveAggregatorSchemaPath('registration.v1.json'), 'utf8'),
+    )) as RJSFSchema;
   const uiSchema = deriveUiSchema(schema);
   await patchTypeFromNetwork(schema, uiSchema);
   return { schema, uiSchema };

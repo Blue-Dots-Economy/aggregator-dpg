@@ -8,6 +8,7 @@
  */
 
 import { deriveUiSchema } from '@/lib/form-layout';
+import { loadPublishedForm } from '@/lib/aggregator-forms.server';
 import 'server-only';
 import { readFile } from 'node:fs/promises';
 import type { RJSFSchema } from '@rjsf/utils';
@@ -87,11 +88,11 @@ export async function loadOrgSchema(): Promise<{
   uiSchema: Record<string, unknown>;
 } | null> {
   try {
-    const rawSchema = await readFile(
-      resolveAggregatorSchemaPath('org-registration.v1.json'),
-      'utf8',
-    );
-    const schema = JSON.parse(rawSchema) as RJSFSchema;
+    const published = await loadPublishedForm('org-registration');
+    const schema = (published ??
+      JSON.parse(
+        await readFile(resolveAggregatorSchemaPath('org-registration.v1.json'), 'utf8'),
+      )) as RJSFSchema;
     return { schema, uiSchema: deriveUiSchema(schema) };
   } catch {
     // Best-effort: absent org schema → owner route 404s / coordinator-only.

@@ -290,4 +290,28 @@ export async function registerAggregatorConfigRoutes(app: FastifyInstance): Prom
         .send({ participant_consent: cfg.participantConsent ?? null });
     },
   );
+
+  app.get(
+    '/v1/aggregator-forms',
+    {
+      schema: {
+        tags: ['aggregator-config'],
+        summary: 'Aggregator form schemas (coordinator-registration, org-registration, profile)',
+        description:
+          'The `aggregator-forms.json` bundle fetched from `aggregator.network.forms_source` — the same cache-backed pull as network.json. `forms` is null when no `forms_source` is configured (the web app then falls back to the on-disk `config/schemas/aggregator/` copies it ships with). Served separately from `/v1/aggregator-config` so that response stays small: these are raw JSON Schema documents. No auth — the same content the public registration form renders.',
+        response: {
+          200: z
+            .object({ forms: z.record(z.string(), z.record(z.string(), z.unknown())).nullable() })
+            .passthrough(),
+          ...errorResponses(500, 503),
+        },
+      },
+    },
+    async (_req, reply) => {
+      const cfg = await getNetworkConfig();
+      return reply
+        .header('Cache-Control', 'public, max-age=60')
+        .send({ forms: cfg.forms?.forms ?? null });
+    },
+  );
 }

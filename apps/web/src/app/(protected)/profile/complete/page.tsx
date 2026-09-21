@@ -1,4 +1,5 @@
 import { deriveUiSchema } from '@/lib/form-layout';
+import { loadPublishedForm } from '@/lib/aggregator-forms.server';
 import type { Metadata } from 'next';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -16,8 +17,9 @@ export const dynamic = 'force-dynamic';
  * renders the post-login profile completion form.
  */
 export default async function ProfileCompletePage() {
-  const schemaRaw = await readFile(resolveSchemaPath('profile.v1.json'), 'utf8');
-  const schema = JSON.parse(schemaRaw) as RJSFSchema;
+  const published = await loadPublishedForm('profile');
+  const schema = (published ??
+    JSON.parse(await readFile(resolveSchemaPath('profile.v1.json'), 'utf8'))) as RJSFSchema;
   const uiSchema = deriveUiSchema(schema);
 
   return <ProfileCompleteView schema={schema} uiSchema={uiSchema} />;
