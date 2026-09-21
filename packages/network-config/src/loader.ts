@@ -26,13 +26,11 @@ import {
   BrandPaletteSchema,
   BrandTypographySchema,
   NetworkConfigLoaderBase,
-  AggregatorFormsBundleSchema,
   ParticipantConsentDocSchema,
   type AggregatorYaml,
   type IdentitySelectors,
   type NetworkConfigError,
   type NetworkDomain,
-  type AggregatorFormsBundle,
   type ParticipantConsentDoc,
   type ResolvedDomain,
   type ResolvedNetworkConfig,
@@ -180,15 +178,6 @@ export class FileNetworkConfigLoader extends NetworkConfigLoaderBase {
       if (consent) resolved.value.participantConsent = consent;
     }
 
-    // Form schemas: same posture as consent — cache-backed, and NON-fatal,
-    // because the web app ships an on-disk copy. Absent `forms_source` is a
-    // supported state, which is what lets this roll out per deployment.
-    const formsSource = yaml.value.aggregator.network.forms_source;
-    if (formsSource) {
-      const forms = await this.fetchForms(formsSource);
-      if (forms) resolved.value.forms = forms;
-    }
-
     this.cached = resolved.value;
     return ok(resolved.value);
   }
@@ -324,7 +313,7 @@ export class FileNetworkConfigLoader extends NetworkConfigLoaderBase {
    */
   private async writeCacheFile(
     url: string,
-    kind: 'network' | 'consent' | 'forms',
+    kind: 'network' | 'consent',
     payload: unknown,
   ): Promise<void> {
     const cachePath = this.cachePath(url, kind);
@@ -338,7 +327,7 @@ export class FileNetworkConfigLoader extends NetworkConfigLoaderBase {
     }
   }
 
-  private cachePath(url: string, kind: 'network' | 'consent' | 'forms' = 'network'): string | null {
+  private cachePath(url: string, kind: 'network' | 'consent' = 'network'): string | null {
     if (!this.opts.cacheDir) return null;
     // Deterministic file name per source URL so different deployments
     // sharing a host don't overwrite each other.
@@ -369,45 +358,6 @@ export class FileNetworkConfigLoader extends NetworkConfigLoaderBase {
       return this.recoverConsentFromCache(url);
     } finally {
       clearTimeout(timer);
-    }
-  }
-
-  // ─── aggregator-forms.json ──────────────────────────────────────────────────
-
-  /**
-   * Fetches + validates the `aggregator-forms.json` bundle, mirroring
-   * {@link fetchConsent} (timeout + last-known-good cache). Returns null on any
-   * failure with no cached copy: the web app falls back to its on-disk schemas,
-   * so a failure must never fail aggregator boot.
-   */
-  private async fetchForms(url: string): Promise<AggregatorFormsBundle | null> {
-    const fetchImpl = this.opts.fetchImpl ?? fetch;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.opts.fetchTimeoutMs);
-    try {
-      const res = await fetchImpl(url, { signal: controller.signal });
-      if (!res.ok) return this.recoverFormsFromCache(url);
-      const checked = AggregatorFormsBundleSchema.safeParse(await res.json());
-      if (!checked.success) return this.recoverFormsFromCache(url);
-      await this.writeCacheFile(url, 'forms', checked.data);
-      return checked.data;
-    } catch {
-      return this.recoverFormsFromCache(url);
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
-  private async recoverFormsFromCache(url: string): Promise<AggregatorFormsBundle | null> {
-    const cachePath = this.cachePath(url, 'forms');
-    if (!cachePath) return null;
-    try {
-      const parsed = AggregatorFormsBundleSchema.safeParse(
-        JSON.parse(await fs.readFile(cachePath, 'utf8')),
-      );
-      return parsed.success ? parsed.data : null;
-    } catch {
-      return null;
     }
   }
 

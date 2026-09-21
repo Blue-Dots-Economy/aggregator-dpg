@@ -1,80 +1,93 @@
 /**
- * Resolves an aggregator form schema from the published bundle.
+ * Reads the aggregator form schemas from the mounted config tree.
  *
- * The forms used to be read from the image's own `config/schemas/aggregator/`,
- * which this repo no longer ships. In a mounted K8s deployment the schemas repo
- * is mounted over `/app/config`, hiding them entirely — the gap
- * aggregator-dpg#640 closes. They are now published as `aggregator-forms.json`
- * per network/brand and fetched through the same cache-backed loader as
- * `network.json`, served to this app by `GET /v1/aggregator-forms`.
+ * Since #640 the forms are published in `bluedots-schemas` as a single
+ * `aggregator-forms.json` per scope, at the path this app already probes
+ * (`[<network>[/<brand>]/]schemas/aggregator/`). The K8s initContainer mounts
+ * that tree over `/app/config`, so a form change ships by bumping the schemas
+ * tag and rolling pods — no image rebuild, and the version is pinned by the
+ * mount rather than tracking a branch.
  *
- * Returns `null` on every failure — no `forms_source`, timeout, non-2xx,
- * malformed body, missing key — rather than throwing, so the caller decides
- * what an absent form means for its surface. There is no on-disk fallback left:
- * `null` means the page has nothing to render and says so.
+ * No copy is baked into this image, so `null` means the deployment has no form
+ * contract at all. The caller decides what that means for its surface — the
+ * registration page has nothing to render, whereas an absent org form just
+ * leaves the owner route 404ing, as it always has for instances without the
+ * org tab.
  *
  * @module apps/web/src/lib/aggregator-forms.server
  */
 
 import 'server-only';
+import { readFile } from 'node:fs/promises';
+import { resolveAggregatorSchemaPath } from './aggregator-schema.server';
 import { logger } from './logger';
 
-/** Bundle keys, named for who fills the form in rather than the code path. */
+/** The published bundle file name, identical in every scope. */
+export const FORMS_BUNDLE_FILE = 'aggregator-forms.json';
+
+/** The forms a bundle publishes, named for who fills each one in. */
 export type AggregatorFormName = 'coordinator-registration' | 'org-registration' | 'profile';
 
-const FETCH_TIMEOUT_MS = 3_000;
+/** Parsed bundle, cached for the life of the process. */
+let cached: Record<string, unknown> | null = null;
 
 /**
- * Fetches one form schema from the published bundle.
+ * Returns a published form schema, or `null` when the mount carries no bundle
+ * or the bundle omits that form.
  *
- * @param name - Which form to take from the bundle.
- * @returns The schema, or null when it cannot be resolved for any reason.
+ * Never throws: a missing or malformed bundle is a deployment fault, and the
+ * caller turns it into its own user-facing state rather than an unhandled
+ * render error.
+ *
+ * Only a successful parse is cached, so an instance that rendered before its
+ * mount was ready recovers on a later request.
+ *
+ * @param name - Which form to read.
+ * @returns The JSON Schema document, or `null` when unavailable.
  */
 export async function loadPublishedForm(
   name: AggregatorFormName,
 ): Promise<Record<string, unknown> | null> {
-  const apiBase = process.env.API_BASE_URL ?? 'http://localhost:4000';
-  const start = Date.now();
-  try {
-    const res = await fetch(`${apiBase}/v1/aggregator-forms`, {
-      cache: 'no-store',
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    });
-    if (!res.ok) {
-      logger.warn({
-        operation: 'aggregatorForms.loadPublished',
+  if (!cached) {
+    const bundlePath = resolveAggregatorSchemaPath(FORMS_BUNDLE_FILE);
+    try {
+      const parsed = JSON.parse(await readFile(bundlePath, 'utf8')) as { forms?: unknown };
+      if (!parsed.forms || typeof parsed.forms !== 'object') {
+        logger.error({
+          operation: 'aggregatorForms.loadPublishedForm',
+          status: 'failure',
+          error: 'bundle has no `forms` object',
+          path: bundlePath,
+        });
+        return null;
+      }
+      cached = parsed.forms as Record<string, unknown>;
+    } catch (err) {
+      logger.error({
+        operation: 'aggregatorForms.loadPublishedForm',
         status: 'failure',
-        error: `HTTP ${res.status}`,
-        latency_ms: Date.now() - start,
-        form: name,
+        error: err instanceof Error ? err.message : String(err),
+        error_type: err instanceof Error ? err.constructor.name : 'unknown',
+        path: bundlePath,
       });
       return null;
     }
-    const body = (await res.json()) as {
-      forms?: Record<string, Record<string, unknown>> | null;
-    };
-    const form = body.forms?.[name];
-    if (!form) {
-      // Absent is normal: no `forms_source` configured, or a bundle that does
-      // not serve this form. Logged at debug so a rollout is visible without
-      // making the common case noisy.
-      logger.debug({
-        operation: 'aggregatorForms.loadPublished',
-        status: 'skipped',
-        form: name,
-        latency_ms: Date.now() - start,
-      });
-      return null;
-    }
-    return form;
-  } catch (err) {
+  }
+
+  const schema = cached[name];
+  if (!schema || typeof schema !== 'object') {
     logger.warn({
-      operation: 'aggregatorForms.loadPublished',
-      status: 'failure',
-      error: err instanceof Error ? err.message : String(err),
-      latency_ms: Date.now() - start,
+      operation: 'aggregatorForms.loadPublishedForm',
+      status: 'skipped',
+      reason: 'form_absent_from_bundle',
       form: name,
     });
     return null;
   }
+  return schema as Record<string, unknown>;
+}
+
+/** Test-only — clears the parsed-bundle cache. */
+export function _resetFormsBundle(): void {
+  cached = null;
 }

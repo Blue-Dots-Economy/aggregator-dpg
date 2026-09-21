@@ -9,6 +9,10 @@
  * @module @aggregator-dpg/network-config/testing
  */
 
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+
 import { ok } from '@aggregator-dpg/shared-primitives/result';
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
@@ -264,4 +268,28 @@ export function buildFormsBundle(overrides: Record<string, Record<string, unknow
       ...overrides,
     },
   };
+}
+
+/**
+ * Writes a synthetic `aggregator-forms.json` into a temp config root and
+ * returns that root, for tests that exercise the disk resolver.
+ *
+ * Since #640 the bundle is delivered by the mounted schemas tree, so code under
+ * test reads it from `CONFIG_ROOT`. Writing a synthetic one per test keeps the
+ * suite offline without checking a copy of the published document into this
+ * repo — the second source of truth #640 removed.
+ *
+ * @param forms - Forms to publish; defaults to {@link buildFormsBundle}'s.
+ * @param scope - Optional `<network>[/<brand>]` prefix, for override tests.
+ * @returns The temp directory to use as `CONFIG_ROOT`.
+ */
+export function writeFormsBundle(
+  forms: { forms: Record<string, Record<string, unknown>> } = buildFormsBundle(),
+  scope = '',
+): string {
+  const root = mkdtempSync(path.join(tmpdir(), 'agg-forms-'));
+  const dir = path.join(root, scope, 'schemas', 'aggregator');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(path.join(dir, 'aggregator-forms.json'), JSON.stringify(forms), 'utf8');
+  return root;
 }

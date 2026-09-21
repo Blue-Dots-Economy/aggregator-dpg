@@ -11,10 +11,6 @@ aggregator:
   network:
     # Pin to a tag in production; develop is fine for local iteration.
     source: https://raw.githubusercontent.com/Blue-Dots-Economy/Signals-DPG/refs/heads/develop/examples/schemas/purple_dot/network.json
-    # Form schemas (coordinator-registration / org-registration / profile),
-    # fetched the same cache-backed way as network.json. Absent => the web app
-    # uses the on-disk config/schemas/aggregator/ copies it ships with.
-    forms_source: https://raw.githubusercontent.com/Blue-Dots-Economy/bluedots-schemas/refs/heads/main/purple_dot/aggregator-forms.json
     # Purple_dot schemas have array-typed fields (disability_type,
     # looking_for, documents_available) — bulk CSV cells use `|` as the
     # delimiter.

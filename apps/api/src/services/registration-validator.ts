@@ -1,13 +1,14 @@
 /**
- * Compiles the Ajv validator for coordinator registration from the **published**
- * form bundle.
+ * Compiles the Ajv validator for coordinator registration from the published
+ * form bundle on the mounted config tree.
  *
- * Before #640 this read `config/schemas/aggregator/registration.v1.json` off
- * disk. It no longer does: the schemas are published to `bluedots-schemas` and
- * fetched via `forms_source`, because a K8s deployment mounts that repo over
- * `/app/config` and hid the on-disk copy entirely.
+ * Before #640 this read `registration.v1.json` from the copy baked into the
+ * image. That copy is gone: the forms are published in `bluedots-schemas` as
+ * `aggregator-forms.json`, and the initContainer mounts that tree over
+ * `/app/config` — which is also why the baked copy was unreachable in the
+ * deployment that needed it.
  *
- * There is therefore no local fallback. When the bundle is unavailable this
+ * Nothing is baked in as a fallback. When the mount carries no bundle this
  * returns `null` and the route answers `503 SCHEMA_UNAVAILABLE` — accepting a
  * registration we cannot validate would defeat the `additionalProperties:
  * false` allowlist that keeps unknown fields out of the participant record.
@@ -58,12 +59,12 @@ let cachedValidator: ValidateFunction | null = null;
  */
 export async function getRegistrationValidator(): Promise<ValidateFunction | null> {
   if (cachedValidator) return cachedValidator;
-  const form = await getPublishedForm(FORM_NAME);
+  const form = getPublishedForm(FORM_NAME);
   if (!form) return null;
 
-  // Clone before patching: the bundle is the process-wide config singleton, and
-  // mutating it here would leak a network-specific enum into every other reader
-  // (including what `GET /v1/aggregator-forms` serves the browser).
+  // Clone before patching: the parsed bundle is cached process-wide, and
+  // mutating it here would leak a network-specific enum into every other
+  // reader of the same object.
   const schema = structuredClone(form.schema);
 
   try {

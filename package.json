@@ -26,7 +26,8 @@
     "stack:logs": "node scripts/stack.mjs logs",
     "stack:ps": "node scripts/stack.mjs ps",
     "stack:psql": "node scripts/stack.mjs psql",
-    "stack:rebuild-web": "node scripts/stack.mjs rebuild-web"
+    "stack:rebuild-web": "node scripts/stack.mjs rebuild-web",
+    "forms:sync": "bash scripts/sync-form-schemas.sh"
   },
   "lint-staged": {
     "*.{ts,tsx,js,mjs,cjs,json,yaml,md}": [

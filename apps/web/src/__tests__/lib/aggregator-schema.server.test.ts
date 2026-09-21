@@ -1,10 +1,14 @@
 /**
- * #640 removed `resolveAggregatorSchemaPath` along with the on-disk schemas —
- * the form now comes only from the published bundle, so the tests that asserted
- * filesystem precedence went with it. What replaces them is the bundle-present
- * and bundle-absent behaviour at the bottom of this file.
+ * #640 moved the form out of this repo: it is read from the published
+ * `aggregator-forms.json` on the mounted schemas tree. The resolver is covered
+ * by `schema-ref.test.ts` on the API side against a real temp tree, so here the
+ * loader is mocked and what is asserted is the enum patch, the derived
+ * uiSchema, and the bundle-absent behaviour.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
+const { loadPublishedForm } = vi.hoisted(() => ({ loadPublishedForm: vi.fn() }));
+vi.mock('@/lib/aggregator-forms.server', () => ({ loadPublishedForm }));
 
 const { patchTypeFromNetwork, loadRegistrationSchema, SchemaUnavailableError } =
   await import('@/lib/aggregator-schema.server');
@@ -108,59 +112,50 @@ describe('patchTypeFromNetwork', () => {
 describe('loadRegistrationSchema', () => {
   const origFetch = globalThis.fetch;
 
+  beforeEach(() => {
+    loadPublishedForm.mockReset();
+    // Only the domain-enum patch still goes over HTTP.
+    globalThis.fetch = vi.fn(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ domains: [{ id: 'seeker', label: 'Seekers' }] }), {
+          status: 200,
+        }),
+      ),
+    ) as unknown as typeof fetch;
+  });
+
   afterEach(() => {
     globalThis.fetch = origFetch;
   });
 
-  /** Routes the two calls the loader makes: the form bundle and the config. */
-  function mockFetch(forms: unknown) {
-    globalThis.fetch = vi.fn((url: string) =>
-      Promise.resolve(
-        String(url).includes('/v1/aggregator-forms')
-          ? new Response(JSON.stringify({ forms }), { status: 200 })
-          : new Response(JSON.stringify({ domains: [{ id: 'seeker', label: 'Seekers' }] }), {
-              status: 200,
-            }),
-      ),
-    ) as unknown as typeof fetch;
-  }
-
-  it('loads schema + uiSchema from the published bundle and patches the type enum', async () => {
-    mockFetch({
-      'coordinator-registration': {
-        type: 'object',
-        properties: { type: { enum: ['old'] } },
-      },
+  it('loads schema + uiSchema from the mounted bundle and patches the type enum', async () => {
+    loadPublishedForm.mockResolvedValue({
+      type: 'object',
+      properties: { type: { enum: ['old'] } },
     });
 
     const result = await loadRegistrationSchema();
+    expect(loadPublishedForm).toHaveBeenCalledWith('coordinator-registration');
     expect(
       (result.schema.properties as Record<string, Record<string, unknown>>).type!.enum,
     ).toEqual(['seeker']);
     expect(result.uiSchema.type).toEqual({ 'ui:enumNames': ['Seekers'] });
   });
 
-  it("derives the uiSchema from the published schema's own x-rjsf annotations", async () => {
-    mockFetch({
-      'coordinator-registration': {
-        type: 'object',
-        properties: { name: { type: 'string', 'x-rjsf': { placeholder: 'Your name' } } },
-      },
+  it("derives the uiSchema from the schema's own x-rjsf annotations", async () => {
+    loadPublishedForm.mockResolvedValue({
+      type: 'object',
+      properties: { name: { type: 'string', 'x-rjsf': { placeholder: 'Your name' } } },
     });
 
     const result = await loadRegistrationSchema();
     expect(result.uiSchema.name).toEqual({ 'ui:placeholder': 'Your name' });
   });
 
-  it('throws SchemaUnavailableError when the bundle carries no such form', async () => {
-    // There is no on-disk copy to fall back to since #640 — rendering a blank
-    // form the visitor could "submit" would be worse than failing loudly.
-    mockFetch({ profile: {} });
-    await expect(loadRegistrationSchema()).rejects.toBeInstanceOf(SchemaUnavailableError);
-  });
-
-  it('throws SchemaUnavailableError when no bundle is published at all', async () => {
-    mockFetch(null);
+  it('throws SchemaUnavailableError when the mount carries no such form', async () => {
+    // Nothing is baked into the image to fall back to since #640 — rendering a
+    // blank form the visitor could "submit" would be worse than failing loudly.
+    loadPublishedForm.mockResolvedValue(null);
     await expect(loadRegistrationSchema()).rejects.toBeInstanceOf(SchemaUnavailableError);
   });
 });

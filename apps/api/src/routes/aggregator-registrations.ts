@@ -227,7 +227,7 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
         // Recorded on the row so a later reader knows which published bundle
         // this payload was checked against. Resolved here, next to the
         // validator, so the two can never name different documents.
-        const registrationRef = await publishedFormRef('coordinator-registration');
+        const registrationRef = publishedFormRef('coordinator-registration');
 
         if (!validate(formBody)) {
           throw httpError('SCHEMA_VALIDATION', {

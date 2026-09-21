@@ -349,7 +349,7 @@ export async function registerAggregatorOrgRoutes(app: FastifyInstance): Promise
         return reclaimOrgReview(prior);
       }
 
-      const orgProfileRef = await publishedFormRef('org-registration');
+      const orgProfileRef = publishedFormRef('org-registration');
       if (!orgProfileRef) {
         log.warn(
           {

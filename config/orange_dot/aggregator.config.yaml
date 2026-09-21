@@ -13,10 +13,6 @@ aggregator:
     # Sourced from the signals-dpg `feature` branch until orange_dot/network.json
     # lands on `develop`. Update to `refs/heads/develop` once merged.
     source: https://raw.githubusercontent.com/Blue-Dots-Economy/Signals-DPG/refs/heads/develop/examples/schemas/orange_dot/network.json
-    # Form schemas (coordinator-registration / org-registration / profile),
-    # fetched the same cache-backed way as network.json. Absent => the web app
-    # uses the on-disk config/schemas/aggregator/ copies it ships with.
-    forms_source: https://raw.githubusercontent.com/Blue-Dots-Economy/bluedots-schemas/refs/heads/main/orange_dot/aggregator-forms.json
     # Mirror the purple_dot bulk-CSV array-delimiter for now — adjust
     # if orange_dot's schemas use a different separator.
     csv_array_delimiter: '|'
