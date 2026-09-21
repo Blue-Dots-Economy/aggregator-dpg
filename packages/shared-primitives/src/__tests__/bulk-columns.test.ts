@@ -8,7 +8,12 @@
  * that already succeeded.
  */
 import { describe, it, expect } from 'vitest';
-import { parseGeoLocation, WELL_KNOWN_COLUMNS, GEO_LOCATION_COLUMN } from './index.js';
+import {
+  parseGeoLocation,
+  schemaOwnsColumn,
+  WELL_KNOWN_COLUMNS,
+  GEO_LOCATION_COLUMN,
+} from '../bulk-columns/index.js';
 
 describe('parseGeoLocation', () => {
   it('parses a pipe-separated pair', () => {
@@ -64,5 +69,36 @@ describe('parseGeoLocation', () => {
 
   it('exposes geo_location in the header allowlist', () => {
     expect(WELL_KNOWN_COLUMNS).toContain(GEO_LOCATION_COLUMN);
+  });
+});
+
+describe('schemaOwnsColumn', () => {
+  it('is true when the schema declares the property itself', () => {
+    expect(
+      schemaOwnsColumn({ properties: { geo_location: { type: 'string' } } }, GEO_LOCATION_COLUMN),
+    ).toBe(true);
+  });
+
+  it('is false when the schema declares other properties', () => {
+    expect(
+      schemaOwnsColumn({ properties: { name: { type: 'string' } } }, GEO_LOCATION_COLUMN),
+    ).toBe(false);
+  });
+
+  it.each([
+    ['null', null],
+    ['undefined', undefined],
+    ['a schema with no properties key', {}],
+    ['a non-object properties value', { properties: 'nonsense' }],
+  ])('is false for %s rather than throwing', (_label, schema) => {
+    expect(schemaOwnsColumn(schema as Record<string, unknown> | null, GEO_LOCATION_COLUMN)).toBe(
+      false,
+    );
+  });
+
+  it('does not treat an inherited Object.prototype key as owned', () => {
+    // `Object.hasOwn`, not `in` — otherwise every schema would "own" toString
+    // and a column named that would silently never be extracted.
+    expect(schemaOwnsColumn({ properties: {} }, 'toString')).toBe(false);
   });
 });
