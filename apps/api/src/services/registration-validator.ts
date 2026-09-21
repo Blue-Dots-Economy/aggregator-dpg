@@ -1,15 +1,24 @@
 /**
- * Loads the published JSON Schema for aggregator registration and returns a
- * compiled Ajv validator. Schema lives at
- * `config/schemas/aggregator/registration.v1.json` so non-engineers can
- * change the form without touching code.
+ * Compiles the Ajv validator for coordinator registration from the **published**
+ * form bundle.
+ *
+ * Before #640 this read `config/schemas/aggregator/registration.v1.json` off
+ * disk. It no longer does: the schemas are published to `bluedots-schemas` and
+ * fetched via `forms_source`, because a K8s deployment mounts that repo over
+ * `/app/config` and hid the on-disk copy entirely.
+ *
+ * There is therefore no local fallback. When the bundle is unavailable this
+ * returns `null` and the route answers `503 SCHEMA_UNAVAILABLE` — accepting a
+ * registration we cannot validate would defeat the `additionalProperties:
+ * false` allowlist that keeps unknown fields out of the participant record.
+ *
+ * @module apps/api/services/registration-validator
  */
 
-import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import type { ValidateFunction } from 'ajv';
 import { getNetworkConfig } from './network-config.js';
-import { resolveSchema, schemaCandidates } from './schema-ref.js';
+import { getPublishedForm } from './aggregator-forms.js';
 
 const require = createRequire(import.meta.url);
 // CJS interop — ajv 8 and ajv-formats publish CommonJS modules. Default
@@ -28,25 +37,34 @@ type AddFormatsFn = (ajv: AjvLike, opts?: unknown) => AjvLike;
 const AjvCtor: AjvCtorType = require('ajv/dist/2020').default ?? require('ajv/dist/2020');
 const addFormats: AddFormatsFn = require('ajv-formats').default ?? require('ajv-formats');
 
-/** The coordinator-registration schema this validator compiles. */
-const SCHEMA_FILE = 'registration.v1.json';
+/** The published form this validator compiles. */
+const FORM_NAME = 'coordinator-registration' as const;
 
 let cachedValidator: ValidateFunction | null = null;
 
 /**
- * Returns the shared compiled validator. Caches on first use.
+ * Returns the shared compiled validator, or `null` when the published bundle
+ * carries no coordinator-registration form.
  *
- * Patches `properties.type.enum` with the live network's domain ids
- * (sourced from network-config / signalstack network.json) before
- * compiling, so the validator accepts whatever domains the current
- * network declares — not the hardcoded `[seeker, provider]` from
- * the schema file.
+ * Patches `properties.type.enum` with the live network's domain ids before
+ * compiling, so the validator accepts whatever domains the current network
+ * declares rather than the enum frozen into the published document.
+ *
+ * Only a successful compile is cached — a `null` must stay retryable, or an
+ * instance that raced its first request against config resolution would answer
+ * 503 for the life of the process.
+ *
+ * @returns The compiled validator, or `null` when no schema is available.
  */
-export async function getRegistrationValidator(): Promise<ValidateFunction> {
+export async function getRegistrationValidator(): Promise<ValidateFunction | null> {
   if (cachedValidator) return cachedValidator;
-  const schemaPath = resolveSchemaPath();
-  const raw = readFileSync(schemaPath, 'utf8');
-  const schema = JSON.parse(raw) as Record<string, unknown>;
+  const form = await getPublishedForm(FORM_NAME);
+  if (!form) return null;
+
+  // Clone before patching: the bundle is the process-wide config singleton, and
+  // mutating it here would leak a network-specific enum into every other reader
+  // (including what `GET /v1/aggregator-forms` serves the browser).
+  const schema = structuredClone(form.schema);
 
   try {
     const cfg = await getNetworkConfig();
@@ -58,7 +76,7 @@ export async function getRegistrationValidator(): Promise<ValidateFunction> {
       }
     }
   } catch {
-    // Fall back to the schema file's static enum if network-config
+    // Fall back to the published document's static enum if network-config
     // is unavailable — keeps the registration path open on cold boot.
   }
 
@@ -70,44 +88,8 @@ export async function getRegistrationValidator(): Promise<ValidateFunction> {
 }
 
 /**
- * Locates `registration.v1.json`, preferring a network/brand override.
- *
- * Each `config/` root is crossed with {@link aggregatorSchemaRelPaths}, so an
- * instance that needs extra registration fields (UP-GZB captures organisation
- * type / sub-type / management type and a `service_provider` aggregator type)
- * ships its own complete copy under
- * `config/<network>[/<brand>]/schemas/aggregator/` without changing what Purple
- * Dot or Dharwad validate against.
- *
- * @returns Absolute path to the most specific schema file that exists.
- * @throws {Error} If no candidate is readable.
- */
-/**
- * Locates `registration.v1.json`, preferring a network/brand override.
- *
- * Delegates to {@link resolveSchema} so the candidate-root algorithm lives in
- * exactly one place — this used to re-implement it, and two copies of the
- * lookup would let the validator and the recorded `profile_ref` disagree about
- * which file answered.
- *
- * @returns Absolute path to the most specific schema file that exists.
- * @throws {Error} If no candidate is readable.
- */
-function resolveSchemaPath(): string {
-  const resolved = resolveSchema(SCHEMA_FILE);
-  if (!resolved) {
-    throw new Error(
-      `registration schema not found; tried: ${schemaCandidates(SCHEMA_FILE)
-        .map((c) => c.path)
-        .join(', ')}`,
-    );
-  }
-  return resolved.path;
-}
-
-/**
  * Test-only — clears the cached validator so a fresh compile happens on
- * the next call (e.g. after the schema file changes).
+ * the next call (e.g. after the published bundle changes).
  */
 export function _resetValidator(): void {
   cachedValidator = null;

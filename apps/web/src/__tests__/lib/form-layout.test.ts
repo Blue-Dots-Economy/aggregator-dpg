@@ -7,8 +7,12 @@
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname } from 'node:path';
 import { resolve } from 'node:path';
 import { deriveUiSchema } from '@/lib/form-layout';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 describe('deriveUiSchema', () => {
   it('maps x-rjsf and x-rjsf onto ui: directives', () => {
@@ -55,11 +59,16 @@ describe('deriveUiSchema', () => {
     expect(deriveUiSchema('nope')).toEqual({});
   });
 
-  it('reproduces the real registration.v1 layout from the shipped schema', () => {
-    // Guards the actual conversion, not a fixture: if the merge dropped
-    // something, the shipped form loses it silently.
-    const path = resolve(process.cwd(), '../../config/schemas/aggregator/registration.v1.json');
-    const schema = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
+  it('reproduces the real coordinator-registration layout from the published bundle', () => {
+    // Guards the actual conversion against the document users are served, not
+    // a hand-written fixture: if the merge dropped a directive, the real form
+    // loses it silently. Reads the vendored copy of the published bundle —
+    // #640 removed the on-disk schema this used to open.
+    const path = resolve(__dirname, '../__fixtures__/aggregator-forms.blue_dot.json');
+    const bundle = JSON.parse(readFileSync(path, 'utf8')) as {
+      forms: Record<string, Record<string, unknown>>;
+    };
+    const schema = bundle.forms['coordinator-registration']!;
     const ui = deriveUiSchema(schema);
 
     expect(ui['ui:order']).toEqual(['name', 'type', 'url', 'contact', 'locations', 'consent']);

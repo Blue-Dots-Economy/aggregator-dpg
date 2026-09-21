@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import type { RJSFSchema } from '@rjsf/utils';
 import { isFieldVisible, resolveVisibleSchema, stripShowIf } from '../../lib/show-if';
@@ -25,6 +26,8 @@ function chainSchema(): RJSFSchema {
     },
   } as RJSFSchema;
 }
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 describe('isFieldVisible', () => {
   it('is always visible when there is no x-show-if', () => {
@@ -143,20 +146,22 @@ describe('stripShowIf', () => {
 });
 
 // ─── Real UP-GZB org-registration schema ────────────────────────────────────
-// Locks the wiring end to end: the shipped schema file, the shipped resolver.
-// Both sub-type fields deliberately carry the SAME title ("Organisation
-// Sub-Type", as the sheet does) — safe only because they are never visible at
-// the same time, which is exactly what these assertions pin down.
+// Locks the wiring end to end: the real published document, the shipped
+// resolver. Both sub-type fields deliberately carry the SAME title
+// ("Organisation Sub-Type", as the sheet does) — safe only because they are
+// never visible at the same time, which is exactly what these assertions pin
+// down.
+//
+// Reads the vendored copy of the published up-gzb bundle: #640 removed the
+// on-disk schema this used to open.
 describe('up-gzb org-registration organisation sub-type', () => {
-  const schema = JSON.parse(
+  const bundle = JSON.parse(
     readFileSync(
-      path.resolve(
-        process.cwd(),
-        '../../config/blue_dot/up-gzb/schemas/aggregator/org-registration.v1.json',
-      ),
+      path.resolve(__dirname, '../__fixtures__/aggregator-forms.blue_dot.up-gzb.json'),
       'utf8',
     ),
-  ) as RJSFSchema;
+  ) as { forms: Record<string, RJSFSchema> };
+  const schema = bundle.forms['org-registration']!;
 
   const visible = (formData: Record<string, unknown>): string[] =>
     Object.keys(resolveVisibleSchema(schema, formData).schema.properties ?? {});

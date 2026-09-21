@@ -234,7 +234,7 @@ export async function registerAggregatorProfileRoutes(app: FastifyInstance): Pro
         tags: ['aggregator-profile'],
         summary: 'Update the caller aggregator profile',
         description:
-          'Partial update of profile fields (contact, locations, etc) for the caller aggregator. Validates the patch against profile.v1.json. Re-syncs to signalstack on success.',
+          'Partial update of profile fields (contact, locations, etc) for the caller aggregator. Validates the patch against ProfileUpdateBodySchema (zod). Re-syncs to signalstack on success.',
         security: [{ bearerAuth: [] }],
         body: ProfileUpdateBodySchema,
         response: {

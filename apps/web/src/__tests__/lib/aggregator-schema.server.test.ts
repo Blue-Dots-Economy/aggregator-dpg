@@ -1,63 +1,13 @@
+/**
+ * #640 removed `resolveAggregatorSchemaPath` along with the on-disk schemas —
+ * the form now comes only from the published bundle, so the tests that asserted
+ * filesystem precedence went with it. What replaces them is the bundle-present
+ * and bundle-absent behaviour at the bottom of this file.
+ */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import path from 'node:path';
 
-const readFileMock = vi.fn();
-vi.mock('node:fs/promises', () => ({
-  readFile: readFileMock,
-  default: { readFile: readFileMock },
-}));
-
-const { resolveAggregatorSchemaPath, patchTypeFromNetwork, loadRegistrationSchema } =
+const { patchTypeFromNetwork, loadRegistrationSchema, SchemaUnavailableError } =
   await import('@/lib/aggregator-schema.server');
-
-describe('resolveAggregatorSchemaPath', () => {
-  const origNetwork = process.env.AGGREGATOR_NETWORK;
-  const origBrand = process.env.AGGREGATOR_BRAND;
-
-  afterEach(() => {
-    if (origNetwork === undefined) delete process.env.AGGREGATOR_NETWORK;
-    else process.env.AGGREGATOR_NETWORK = origNetwork;
-    if (origBrand === undefined) delete process.env.AGGREGATOR_BRAND;
-    else process.env.AGGREGATOR_BRAND = origBrand;
-  });
-
-  it('resolves the network-level schema for the default network', () => {
-    delete process.env.AGGREGATOR_BRAND;
-    const p = resolveAggregatorSchemaPath('registration.v1.json');
-    // `config/blue_dot/schemas/aggregator` is a symlink to the shared
-    // `config/schemas/aggregator`, so this is the same file the flat path
-    // resolved to before override support existed.
-    expect(p).toBe(
-      path.resolve(
-        process.cwd(),
-        '../../config/blue_dot/schemas/aggregator',
-        'registration.v1.json',
-      ),
-    );
-  });
-
-  it('prefers a brand override when the brand ships its own schema', () => {
-    process.env.AGGREGATOR_NETWORK = 'blue_dot';
-    process.env.AGGREGATOR_BRAND = 'up-gzb';
-    const p = resolveAggregatorSchemaPath('registration.v1.json');
-    expect(p).toBe(
-      path.resolve(
-        process.cwd(),
-        '../../config/blue_dot/up-gzb/schemas/aggregator',
-        'registration.v1.json',
-      ),
-    );
-  });
-
-  it('falls back to the shared default when the network has no schema dir', () => {
-    process.env.AGGREGATOR_NETWORK = 'no_such_network';
-    delete process.env.AGGREGATOR_BRAND;
-    const p = resolveAggregatorSchemaPath('registration.v1.json');
-    expect(p).toBe(
-      path.resolve(process.cwd(), '../../config/schemas/aggregator', 'registration.v1.json'),
-    );
-  });
-});
 
 describe('patchTypeFromNetwork', () => {
   const origFetch = globalThis.fetch;
@@ -160,31 +110,57 @@ describe('loadRegistrationSchema', () => {
 
   afterEach(() => {
     globalThis.fetch = origFetch;
-    readFileMock.mockReset();
   });
 
-  it('loads schema + uiSchema and patches the type enum', async () => {
-    readFileMock.mockResolvedValue(
-      JSON.stringify({ type: 'object', properties: { type: { enum: ['old'] } } }),
-    );
-    // A fresh Response per call, routed by URL: the loader now asks for the
-    // published form bundle as well as the network config, and a single shared
-    // Response would have its body consumed by whichever call lands first.
+  /** Routes the two calls the loader makes: the form bundle and the config. */
+  function mockFetch(forms: unknown) {
     globalThis.fetch = vi.fn((url: string) =>
       Promise.resolve(
         String(url).includes('/v1/aggregator-forms')
-          ? new Response(JSON.stringify({ forms: null }), { status: 200 })
+          ? new Response(JSON.stringify({ forms }), { status: 200 })
           : new Response(JSON.stringify({ domains: [{ id: 'seeker', label: 'Seekers' }] }), {
               status: 200,
             }),
       ),
     ) as unknown as typeof fetch;
+  }
+
+  it('loads schema + uiSchema from the published bundle and patches the type enum', async () => {
+    mockFetch({
+      'coordinator-registration': {
+        type: 'object',
+        properties: { type: { enum: ['old'] } },
+      },
+    });
 
     const result = await loadRegistrationSchema();
-    expect(result.schema.properties).toHaveProperty('type');
     expect(
       (result.schema.properties as Record<string, Record<string, unknown>>).type!.enum,
     ).toEqual(['seeker']);
     expect(result.uiSchema.type).toEqual({ 'ui:enumNames': ['Seekers'] });
+  });
+
+  it("derives the uiSchema from the published schema's own x-rjsf annotations", async () => {
+    mockFetch({
+      'coordinator-registration': {
+        type: 'object',
+        properties: { name: { type: 'string', 'x-rjsf': { placeholder: 'Your name' } } },
+      },
+    });
+
+    const result = await loadRegistrationSchema();
+    expect(result.uiSchema.name).toEqual({ 'ui:placeholder': 'Your name' });
+  });
+
+  it('throws SchemaUnavailableError when the bundle carries no such form', async () => {
+    // There is no on-disk copy to fall back to since #640 — rendering a blank
+    // form the visitor could "submit" would be worse than failing loudly.
+    mockFetch({ profile: {} });
+    await expect(loadRegistrationSchema()).rejects.toBeInstanceOf(SchemaUnavailableError);
+  });
+
+  it('throws SchemaUnavailableError when no bundle is published at all', async () => {
+    mockFetch(null);
+    await expect(loadRegistrationSchema()).rejects.toBeInstanceOf(SchemaUnavailableError);
   });
 });

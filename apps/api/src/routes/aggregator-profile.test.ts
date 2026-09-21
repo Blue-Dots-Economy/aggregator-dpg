@@ -12,7 +12,6 @@ import {
   buildAggregatorProfile,
 } from '../services/aggregator-profile-store/index.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
-import { _resetProfileValidator } from '../services/profile-validator.js';
 import { IdpAdminFake, _setIdpAdmin } from '../services/idp-admin/index.js';
 
 const aggregatorId = '22222222-2222-2222-2222-222222222222';
@@ -25,7 +24,6 @@ describe('aggregator profile routes', () => {
 
   beforeEach(async () => {
     _resetJwks();
-    _resetProfileValidator();
     process.env.KEYCLOAK_URL = 'http://kc.local';
     process.env.KEYCLOAK_REALM = 'bluedots';
 

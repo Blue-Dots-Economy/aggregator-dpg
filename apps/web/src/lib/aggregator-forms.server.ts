@@ -1,16 +1,17 @@
 /**
- * Resolves an aggregator form schema, preferring the published bundle.
+ * Resolves an aggregator form schema from the published bundle.
  *
- * The forms used to be read only from the image's own
- * `config/schemas/aggregator/`. In a mounted K8s deployment the schemas repo is
- * mounted over `/app/config`, which hides them — the gap aggregator-dpg#640
- * closes. They are now published as `aggregator-forms.json` per network/brand
- * and fetched through the same cache-backed loader as `network.json`.
+ * The forms used to be read from the image's own `config/schemas/aggregator/`,
+ * which this repo no longer ships. In a mounted K8s deployment the schemas repo
+ * is mounted over `/app/config`, hiding them entirely — the gap
+ * aggregator-dpg#640 closes. They are now published as `aggregator-forms.json`
+ * per network/brand and fetched through the same cache-backed loader as
+ * `network.json`, served to this app by `GET /v1/aggregator-forms`.
  *
- * Best-effort by design, mirroring `participant-consent.server.ts`: any
- * failure — no `forms_source`, timeout, non-2xx, malformed body, missing key —
- * falls back to the on-disk copy rather than failing the page. That fallback is
- * what lets the bundle roll out one deployment at a time.
+ * Returns `null` on every failure — no `forms_source`, timeout, non-2xx,
+ * malformed body, missing key — rather than throwing, so the caller decides
+ * what an absent form means for its surface. There is no on-disk fallback left:
+ * `null` means the page has nothing to render and says so.
  *
  * @module apps/web/src/lib/aggregator-forms.server
  */

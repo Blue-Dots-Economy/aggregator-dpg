@@ -1,8 +1,7 @@
 import { deriveUiSchema } from '@/lib/form-layout';
+import { SchemaUnavailableError } from '../../../../lib/aggregator-schema.server';
 import { loadPublishedForm } from '@/lib/aggregator-forms.server';
 import type { Metadata } from 'next';
-import { readFile } from 'node:fs/promises';
-import path from 'node:path';
 import type { RJSFSchema } from '@rjsf/utils';
 import { ProfileCompleteView } from './ProfileCompleteView';
 
@@ -13,23 +12,17 @@ export const metadata: Metadata = {
 export const dynamic = 'force-dynamic';
 
 /**
- * Loads the published profile schema from `config/schemas/aggregator/` and
- * renders the post-login profile completion form.
+ * Loads the published `profile` form and renders the post-login profile
+ * completion page.
+ *
+ * Bundle-only since #640 — no on-disk copy remains, so an unresolvable bundle
+ * throws rather than rendering an empty form the user could "submit".
  */
 export default async function ProfileCompletePage() {
   const published = await loadPublishedForm('profile');
-  const schema = (published ??
-    JSON.parse(await readFile(resolveSchemaPath('profile.v1.json'), 'utf8'))) as RJSFSchema;
+  if (!published) throw new SchemaUnavailableError('profile');
+  const schema = published as RJSFSchema;
   const uiSchema = deriveUiSchema(schema);
 
   return <ProfileCompleteView schema={schema} uiSchema={uiSchema} />;
-}
-
-function resolveSchemaPath(file: string): string {
-  const candidates = [
-    path.resolve(process.cwd(), '../../config/schemas/aggregator', file),
-    path.resolve(process.cwd(), '../config/schemas/aggregator', file),
-    path.resolve(process.cwd(), 'config/schemas/aggregator', file),
-  ];
-  return candidates[0]!;
 }

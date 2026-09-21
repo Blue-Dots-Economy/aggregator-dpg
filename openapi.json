@@ -128,7 +128,7 @@
         "tags": [
           "aggregator-registrations"
         ],
-        "description": "Validates submission against config/schemas/aggregator/registration.v1.json, creates a disabled user (login enabled on admin approval), and pushes the org to signalstack. Reached via a non-aggregator Bearer token from Keycloak.",
+        "description": "Validates submission against the published coordinator-registration form (fetched from forms_source; 503 SCHEMA_UNAVAILABLE when it cannot be resolved), creates a disabled user (login enabled on admin approval), and pushes the org to signalstack. Reached via a non-aggregator Bearer token from Keycloak.",
         "requestBody": {
           "required": true,
           "content": {
@@ -2477,7 +2477,7 @@
         "tags": [
           "aggregator-profile"
         ],
-        "description": "Partial update of profile fields (contact, locations, etc) for the caller aggregator. Validates the patch against profile.v1.json. Re-syncs to signalstack on success.",
+        "description": "Partial update of profile fields (contact, locations, etc) for the caller aggregator. Validates the patch against ProfileUpdateBodySchema (zod). Re-syncs to signalstack on success.",
         "requestBody": {
           "required": true,
           "content": {
@@ -10629,7 +10629,7 @@
         "tags": [
           "aggregator-config"
         ],
-        "description": "The `aggregator-forms.json` bundle fetched from `aggregator.network.forms_source` — the same cache-backed pull as network.json. `forms` is null when no `forms_source` is configured (the web app then falls back to the on-disk `config/schemas/aggregator/` copies it ships with). Served separately from `/v1/aggregator-config` so that response stays small: these are raw JSON Schema documents. No auth — the same content the public registration form renders.",
+        "description": "The `aggregator-forms.json` bundle fetched from `aggregator.network.forms_source` — the same cache-backed pull as network.json. `forms` is null when no `forms_source` is configured or the bundle could not be resolved — this repo ships no on-disk copy since #640, so the schema-dependent routes answer 503 SCHEMA_UNAVAILABLE rather than validating against nothing. Served separately from `/v1/aggregator-config` so that response stays small: these are raw JSON Schema documents. No auth — the same content the public registration form renders.",
         "responses": {
           "200": {
             "description": "Default Response",

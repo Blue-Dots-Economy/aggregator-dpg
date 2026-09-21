@@ -23,7 +23,7 @@ import { config, orgHierarchyEnabled } from '../config.js';
 import { coolingRetryAfter } from '../services/registration-cooling.js';
 import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js';
 import type { AggregatorOrg } from '../services/aggregator-org-store/interface.js';
-import { resolveProfileRef } from '../services/schema-ref.js';
+import { publishedFormRef } from '../services/aggregator-forms.js';
 import { getIdpAdmin, KC_ATTR } from '../services/idp-admin/index.js';
 import { sendOrgReviewEmail } from '../services/org-registration-notify.js';
 import { getMailer } from '@aggregator-dpg/mailer';
@@ -349,15 +349,15 @@ export async function registerAggregatorOrgRoutes(app: FastifyInstance): Promise
         return reclaimOrgReview(prior);
       }
 
-      const orgProfileRef = resolveProfileRef('org-registration.v1.json');
+      const orgProfileRef = await publishedFormRef('org-registration');
       if (!orgProfileRef) {
         log.warn(
           {
             operation: 'org-registration.create',
             status: 'skipped',
-            sub_operation: 'resolveProfileRef',
+            sub_operation: 'publishedFormRef',
           },
-          'org-registration schema not found — storing profile without a variant ref',
+          'org-registration form not in the published bundle — storing profile without a variant ref',
         );
       }
       const slug = slugFromName(body.display_name);

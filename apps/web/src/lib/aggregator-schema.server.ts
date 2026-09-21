@@ -2,21 +2,22 @@
  * Server-side loader for the aggregator registration JSON Schema.
  *
  * Both the public registration page and the (read-only) authenticated profile
- * page render the *same* form from `config/schemas/aggregator/registration.v1`.
- * Keeping the load + network-enum patch in one module guarantees the two
- * surfaces never drift. Belongs to the `web` app's server layer.
+ * page render the *same* published `coordinator-registration` form. Keeping the
+ * load + network-enum patch in one module guarantees the two surfaces never
+ * drift. Belongs to the `web` app's server layer.
+ *
+ * Since #640 the schema comes only from the published bundle — this repo no
+ * longer ships a copy, because a mounted K8s deployment hid it anyway. When the
+ * bundle cannot be resolved there is nothing to render, and
+ * {@link SchemaUnavailableError} is thrown rather than a partial form shown.
  *
  * @module apps/web/src/lib/aggregator-schema.server
  */
 
 import 'server-only';
-import { existsSync } from 'node:fs';
 import { deriveUiSchema } from './form-layout';
 import { loadPublishedForm } from './aggregator-forms.server';
-import { readFile } from 'node:fs/promises';
-import path from 'node:path';
 import type { RJSFSchema } from '@rjsf/utils';
-import { aggregatorSchemaRelPaths } from './config-paths';
 
 /** Parsed registration schema pair (JSON Schema + RJSF UI schema). */
 export interface AggregatorSchemaPair {
@@ -25,33 +26,20 @@ export interface AggregatorSchemaPair {
 }
 
 /**
- * Resolves an aggregator schema file, preferring a network/brand override.
+ * Thrown when the published bundle carries no form for this surface.
  *
- * Works for both `pnpm --filter web dev` (cwd = apps/web) and the production
- * Docker build (cwd = /app/apps/web). Within each `config/` root the
- * network/brand override is tried before the shared default, so an instance
- * that needs extra registration fields (UP-GZB) ships its own complete copy
- * under `config/<network>[/<brand>]/schemas/aggregator/` while Purple Dot and
- * Dharwad keep rendering the generic form.
- *
- * Falls back to the shared-default path when nothing exists, so the caller's
- * `readFile` surfaces a normal ENOENT naming a real location.
- *
- * @param file - Bare schema file name, e.g. `registration.v1.json`.
- * @returns Absolute path to the most specific schema file that exists.
+ * Its own class so a page can tell "the deployment is misconfigured" apart from
+ * an ordinary render fault, and so the message never implies the visitor did
+ * something wrong.
  */
-export function resolveAggregatorSchemaPath(file: string): string {
-  const roots = [
-    path.resolve(process.cwd(), '../../config'),
-    path.resolve(process.cwd(), '../config'),
-    path.resolve(process.cwd(), 'config'),
-  ];
-  const rel = aggregatorSchemaRelPaths(file);
-  // Specificity first, then root — a brand override in any resolvable root must
-  // beat the shared default in another.
-  const candidates = rel.flatMap((r) => roots.map((root) => path.join(root, r)));
-  const found = candidates.find((c) => existsSync(c));
-  return found ?? path.join(roots[0]!, rel.at(-1)!);
+export class SchemaUnavailableError extends Error {
+  constructor(formName: string) {
+    super(
+      `No published "${formName}" form. Check aggregator.network.forms_source ` +
+        `resolves, then restart — the config is read once per process.`,
+    );
+    this.name = 'SchemaUnavailableError';
+  }
 }
 
 /**
@@ -102,15 +90,13 @@ export async function patchTypeFromNetwork(
  *
  * @returns The parsed schema + UI schema, with the type dropdown reflecting
  *   the current network's domains.
+ * @throws {SchemaUnavailableError} When the published bundle carries no
+ *   coordinator-registration form.
  */
 export async function loadRegistrationSchema(): Promise<AggregatorSchemaPair> {
-  // Published bundle first, on-disk copy when it cannot be resolved — the
-  // fallback is what lets `forms_source` roll out per deployment (#640).
   const published = await loadPublishedForm('coordinator-registration');
-  const schema = (published ??
-    JSON.parse(
-      await readFile(resolveAggregatorSchemaPath('registration.v1.json'), 'utf8'),
-    )) as RJSFSchema;
+  if (!published) throw new SchemaUnavailableError('coordinator-registration');
+  const schema = published as RJSFSchema;
   const uiSchema = deriveUiSchema(schema);
   await patchTypeFromNetwork(schema, uiSchema);
   return { schema, uiSchema };

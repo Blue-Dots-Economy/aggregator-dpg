@@ -22,6 +22,10 @@ import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-tok
 import { _setSubmitRateChecker } from '../services/submit-rate.js';
 import { ConsentLedgerFake } from '@aggregator-dpg/consent-ledger/testing';
 import { _setConsentLedger } from '../services/consent-ledger/index.js';
+import formsFixture from '../__fixtures__/aggregator-forms.blue_dot.json' with { type: 'json' };
+import { buildBlueDotConfig } from '@aggregator-dpg/network-config/testing';
+import { _setNetworkConfig } from '../services/network-config.js';
+import { _resetValidator } from '../services/registration-validator.js';
 
 const SERVICE_BEARER = 'service-token';
 const AUTH_HEADER = { authorization: `Bearer ${SERVICE_BEARER}` };
@@ -41,6 +45,10 @@ describe('coordinator submit with ORG_HIERARCHY_ENABLED', () => {
   };
 
   beforeEach(async () => {
+    // #640: the forms are a published artefact, not a file this repo ships,
+    // so the validator has nothing to compile unless the config carries them.
+    _setNetworkConfig(buildBlueDotConfig({ forms: formsFixture as never }));
+    _resetValidator();
     _resetTokenKey();
     _resetJwks();
     // Permissive by default, NOT `null`. `null` restores the Redis-backed
