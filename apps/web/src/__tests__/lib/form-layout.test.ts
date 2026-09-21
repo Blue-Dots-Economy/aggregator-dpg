@@ -11,11 +11,11 @@ import { resolve } from 'node:path';
 import { deriveUiSchema } from '@/lib/form-layout';
 
 describe('deriveUiSchema', () => {
-  it('maps x-form-layout and x-ui onto ui: directives', () => {
+  it('maps x-rjsf and x-rjsf onto ui: directives', () => {
     expect(
       deriveUiSchema({
-        'x-form-layout': { order: ['a'], layout: 'stack' },
-        properties: { a: { 'x-ui': { placeholder: 'A', widget: 'select' } } },
+        'x-rjsf': { order: ['a'], layout: 'stack' },
+        properties: { a: { 'x-rjsf': { placeholder: 'A', widget: 'select' } } },
       }),
     ).toEqual({
       'ui:order': ['a'],
@@ -29,8 +29,8 @@ describe('deriveUiSchema', () => {
       deriveUiSchema({
         properties: {
           locations: {
-            'x-ui': { options: { addable: true } },
-            items: { properties: { geo: { 'x-ui': { widget: 'hidden' } } } },
+            'x-rjsf': { options: { addable: true } },
+            items: { properties: { geo: { 'x-rjsf': { widget: 'hidden' } } } },
           },
         },
       }),

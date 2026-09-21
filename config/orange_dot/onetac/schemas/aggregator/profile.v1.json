@@ -19,7 +19,7 @@
           "description": "Public display name shown on the network.",
           "minLength": 2,
           "maxLength": 200,
-          "x-ui": {
+          "x-rjsf": {
             "placeholder": "Public display name"
           }
         },
@@ -28,7 +28,7 @@
           "title": "Office Address",
           "minLength": 5,
           "maxLength": 500,
-          "x-ui": {
+          "x-rjsf": {
             "widget": "textarea",
             "options": {
               "rows": 3
@@ -40,7 +40,7 @@
           "title": "Logo URL",
           "format": "uri",
           "maxLength": 500,
-          "x-ui": {
+          "x-rjsf": {
             "placeholder": "https://...",
             "options": {
               "inputType": "url"
@@ -65,7 +65,7 @@
           },
           "minItems": 1,
           "maxItems": 12,
-          "x-ui": {
+          "x-rjsf": {
             "options": {
               "addable": true,
               "removable": true
@@ -82,7 +82,7 @@
           },
           "minItems": 1,
           "maxItems": 36,
-          "x-ui": {
+          "x-rjsf": {
             "options": {
               "addable": true,
               "removable": true
@@ -98,7 +98,7 @@
             "maxLength": 100
           },
           "maxItems": 24,
-          "x-ui": {
+          "x-rjsf": {
             "options": {
               "addable": true,
               "removable": true
@@ -118,7 +118,7 @@
           "title": "Approximate Network Size",
           "minimum": 0,
           "maximum": 10000000,
-          "x-ui": {
+          "x-rjsf": {
             "placeholder": "0"
           }
         },
@@ -131,7 +131,7 @@
             "maxLength": 100
           },
           "maxItems": 24,
-          "x-ui": {
+          "x-rjsf": {
             "options": {
               "addable": true,
               "removable": true
@@ -148,49 +148,49 @@
         "profile_creation": {
           "type": "boolean",
           "title": "Profile creation & representation",
-          "x-ui": {
+          "x-rjsf": {
             "widget": "checkbox"
           }
         },
         "data_sharing": {
           "type": "boolean",
           "title": "Sharing information with relevant parties",
-          "x-ui": {
+          "x-rjsf": {
             "widget": "checkbox"
           }
         },
         "notifications": {
           "type": "boolean",
           "title": "Receive notifications",
-          "x-ui": {
+          "x-rjsf": {
             "widget": "checkbox"
           }
         },
         "analytics": {
           "type": "boolean",
           "title": "Anonymous analytics",
-          "x-ui": {
+          "x-rjsf": {
             "widget": "checkbox"
           }
         },
         "marketing": {
           "type": "boolean",
           "title": "Marketing communications",
-          "x-ui": {
+          "x-rjsf": {
             "widget": "checkbox"
           }
         },
         "retention": {
           "type": "boolean",
           "title": "Data retention per policy",
-          "x-ui": {
+          "x-rjsf": {
             "widget": "checkbox"
           }
         }
       }
     }
   },
-  "x-form-layout": {
+  "x-rjsf": {
     "order": ["who_i_am", "what_i_want", "what_i_have", "consent"]
   }
 }

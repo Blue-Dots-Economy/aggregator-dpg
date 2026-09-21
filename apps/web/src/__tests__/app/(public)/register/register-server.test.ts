@@ -115,13 +115,13 @@ describe('loadOrgSchema', () => {
   });
 
   it("derives the ui schema from the schema's own x- annotations", async () => {
-    // One file now: layout lives in `x-form-layout` / `x-ui` inside the schema,
-    // the way signals ships its item schemas. The uiSchema is computed, not read.
+    // One file now: presentation lives in `x-rjsf` inside the schema and the
+    // uiSchema is computed, not read from a sibling file.
     readFile.mockResolvedValue(
       JSON.stringify({
         title: 'Org',
-        'x-form-layout': { order: ['name'] },
-        properties: { name: { type: 'string', 'x-ui': { placeholder: 'e.g. ABC Limited' } } },
+        'x-rjsf': { order: ['name'] },
+        properties: { name: { type: 'string', 'x-rjsf': { placeholder: 'e.g. ABC Limited' } } },
       }),
     );
     const out = await loadOrgSchema();
@@ -132,7 +132,7 @@ describe('loadOrgSchema', () => {
     });
     // The annotations stay on the schema — Ajv ignores unknown keywords, and
     // stripping them would mean the browser and the API validate different docs.
-    expect(out?.schema).toHaveProperty('x-form-layout');
+    expect(out?.schema).toHaveProperty('x-rjsf');
   });
 
   it('returns null when a schema file is missing', async () => {

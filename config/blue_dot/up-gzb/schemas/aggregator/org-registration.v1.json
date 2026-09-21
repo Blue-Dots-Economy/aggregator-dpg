@@ -20,7 +20,7 @@
       "minLength": 2,
       "maxLength": 200,
       "examples": ["Enable India", "Pankh Foundation"],
-      "x-ui": {
+      "x-rjsf": {
         "placeholder": "e.g. Enable India",
         "autofocus": true
       }
@@ -31,7 +31,7 @@
       "description": "Derived from the address block on this instance; not asked for separately.",
       "maxLength": 200,
       "examples": ["Uttar Pradesh"],
-      "x-ui": {
+      "x-rjsf": {
         "widget": "hidden",
         "options": {
           "label": false
@@ -46,7 +46,7 @@
       "description": "Not required at signup; can be added or edited later.",
       "examples": ["https://enableindia.org"],
       "x-updatable": true,
-      "x-ui": {
+      "x-rjsf": {
         "placeholder": "https://yourorg.org",
         "options": {
           "inputType": "url"
@@ -64,7 +64,7 @@
         "enum": ["seeker", "provider", "service_provider"]
       },
       "examples": [["seeker"], ["provider", "service_provider"]],
-      "x-ui": {
+      "x-rjsf": {
         "widget": "checkboxes",
         "enumNames": ["Seekers", "Job Providers", "Service Providers"],
         "options": {
@@ -77,7 +77,7 @@
       "title": "Organisation Type",
       "description": "The broad category that describes your organisation.",
       "enum": ["educational", "non_educational"],
-      "x-ui": {
+      "x-rjsf": {
         "widget": "select",
         "placeholder": "Select organisation type",
         "enumNames": ["Educational", "Non-Educational"]
@@ -100,7 +100,7 @@
         "diploma",
         "other"
       ],
-      "x-ui": {
+      "x-rjsf": {
         "widget": "select",
         "placeholder": "Select sub-type",
         "enumNames": [
@@ -131,7 +131,7 @@
         "industries_and_commerce_department",
         "other"
       ],
-      "x-ui": {
+      "x-rjsf": {
         "widget": "select",
         "placeholder": "Select sub-type",
         "enumNames": [
@@ -150,7 +150,7 @@
       "title": "Management Type",
       "description": "Whether the organisation is privately run, government-operated, or an NGO.",
       "enum": ["private", "government", "ngo", "other"],
-      "x-ui": {
+      "x-rjsf": {
         "widget": "select",
         "placeholder": "Select management type",
         "enumNames": ["Private", "Government", "NGO", "Other"]
@@ -166,7 +166,7 @@
           "type": "string",
           "title": "Street",
           "maxLength": 300,
-          "x-ui": {
+          "x-rjsf": {
             "placeholder": "Street, Area"
           }
         },
@@ -174,7 +174,7 @@
           "type": "string",
           "title": "City",
           "maxLength": 200,
-          "x-ui": {
+          "x-rjsf": {
             "placeholder": "City"
           }
         },
@@ -182,7 +182,7 @@
           "type": "string",
           "title": "District",
           "maxLength": 200,
-          "x-ui": {
+          "x-rjsf": {
             "placeholder": "District"
           }
         },
@@ -190,7 +190,7 @@
           "type": "string",
           "title": "State",
           "maxLength": 200,
-          "x-ui": {
+          "x-rjsf": {
             "placeholder": "State"
           }
         },
@@ -198,7 +198,7 @@
           "type": "string",
           "title": "PIN code",
           "maxLength": 20,
-          "x-ui": {
+          "x-rjsf": {
             "placeholder": "PIN"
           }
         },
@@ -206,12 +206,12 @@
           "type": "string",
           "title": "Country",
           "maxLength": 100,
-          "x-ui": {
+          "x-rjsf": {
             "placeholder": "India"
           }
         }
       },
-      "x-form-layout": {
+      "x-rjsf": {
         "layout": "grid",
         "order": [
           "streetAddress",
@@ -235,7 +235,7 @@
           "minLength": 2,
           "maxLength": 200,
           "examples": ["Rajesh Kumar"],
-          "x-ui": {
+          "x-rjsf": {
             "placeholder": "Full name of the organisation owner"
           }
         },
@@ -244,7 +244,7 @@
           "title": "Phone",
           "pattern": "^(\\+?\\d{10,15}|\\d{10})$",
           "examples": ["+919876543210", "9876543210"],
-          "x-ui": {
+          "x-rjsf": {
             "placeholder": "+91 98765 43210",
             "options": {
               "inputType": "tel"
@@ -257,7 +257,7 @@
           "format": "email",
           "maxLength": 320,
           "examples": ["owner@enableindia.org"],
-          "x-ui": {
+          "x-rjsf": {
             "placeholder": "owner@yourorg.org",
             "options": {
               "inputType": "email"
@@ -265,7 +265,7 @@
           }
         }
       },
-      "x-form-layout": {
+      "x-rjsf": {
         "layout": "grid",
         "order": ["name", "phone", "email"]
       }
@@ -279,14 +279,14 @@
         "value": {
           "type": "boolean",
           "title": "I have read and accept the terms and privacy policy",
-          "x-ui": {
+          "x-rjsf": {
             "widget": "ConsentCheckbox"
           }
         },
         "given_at": {
           "type": "string",
           "format": "date-time",
-          "x-ui": {
+          "x-rjsf": {
             "widget": "hidden",
             "options": {
               "label": false
@@ -296,7 +296,7 @@
         "valid_till": {
           "type": "string",
           "format": "date-time",
-          "x-ui": {
+          "x-rjsf": {
             "widget": "hidden",
             "options": {
               "label": false
@@ -304,13 +304,13 @@
           }
         }
       },
-      "x-form-layout": {
+      "x-rjsf": {
         "layout": "stack",
         "order": ["value", "given_at", "valid_till"]
       }
     }
   },
-  "x-form-layout": {
+  "x-rjsf": {
     "layout": "stack",
     "order": [
       "display_name",

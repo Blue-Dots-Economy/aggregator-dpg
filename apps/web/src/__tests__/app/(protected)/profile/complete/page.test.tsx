@@ -20,7 +20,7 @@ describe('ProfileCompletePage (server component)', () => {
     readFile.mockResolvedValue(
       JSON.stringify({
         title: 'Complete your profile',
-        'x-form-layout': { order: ['org_name'] },
+        'x-rjsf': { order: ['org_name'] },
         properties: { org_name: {} },
       }),
     );

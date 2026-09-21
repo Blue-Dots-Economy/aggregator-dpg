@@ -13,7 +13,7 @@
       "minLength": 2,
       "maxLength": 200,
       "examples": ["SkillBridge Network", "TRRAIN", "Pankh Foundation"],
-      "x-ui": {
+      "x-rjsf": {
         "placeholder": "e.g. SkillBridge Network",
         "autofocus": true
       }
@@ -22,7 +22,7 @@
       "type": "string",
       "title": "Aggregator Type",
       "enum": ["seeker", "provider", "service_provider"],
-      "x-ui": {
+      "x-rjsf": {
         "widget": "select",
         "placeholder": "Select aggregator type",
         "enumNames": ["Seeker", "Provider", "Service Provider"]
@@ -35,7 +35,7 @@
       "maxLength": 200,
       "examples": ["GarvSe Centre, Ghaziabad"],
       "x-updatable": true,
-      "x-ui": {
+      "x-rjsf": {
         "placeholder": "e.g. GarvSe Centre, Ghaziabad"
       }
     },
@@ -46,7 +46,7 @@
       "maxLength": 2048,
       "examples": ["https://skillbridge.in"],
       "x-updatable": true,
-      "x-ui": {
+      "x-rjsf": {
         "placeholder": "https://yourorg.in",
         "options": {
           "inputType": "url"
@@ -84,19 +84,19 @@
                   "GeometryCollection"
                 ],
                 "default": "Point",
-                "x-ui": {
+                "x-rjsf": {
                   "widget": "hidden"
                 }
               },
               "coordinates": {
                 "type": "array",
                 "default": [0, 0],
-                "x-ui": {
+                "x-rjsf": {
                   "widget": "hidden"
                 }
               }
             },
-            "x-ui": {
+            "x-rjsf": {
               "widget": "hidden",
               "title": ""
             }
@@ -108,28 +108,28 @@
               "streetAddress": {
                 "type": "string",
                 "title": "Street",
-                "x-ui": {
+                "x-rjsf": {
                   "placeholder": "Street"
                 }
               },
               "addressLocality": {
                 "type": "string",
                 "title": "City",
-                "x-ui": {
+                "x-rjsf": {
                   "placeholder": "City"
                 }
               },
               "addressRegion": {
                 "type": "string",
                 "title": "State",
-                "x-ui": {
+                "x-rjsf": {
                   "placeholder": "State"
                 }
               },
               "postalCode": {
                 "type": "string",
                 "title": "PIN code",
-                "x-ui": {
+                "x-rjsf": {
                   "placeholder": "PIN"
                 }
               },
@@ -137,12 +137,12 @@
                 "type": "string",
                 "title": "Country",
                 "minLength": 1,
-                "x-ui": {
+                "x-rjsf": {
                   "placeholder": "India"
                 }
               }
             },
-            "x-form-layout": {
+            "x-rjsf": {
               "layout": "grid",
               "order": [
                 "streetAddress",
@@ -150,22 +150,18 @@
                 "addressRegion",
                 "postalCode",
                 "addressCountry"
-              ]
-            },
-            "x-ui": {
+              ],
               "title": ""
             }
           }
         },
-        "x-form-layout": {
+        "x-rjsf": {
           "layout": "stack",
-          "order": ["address", "geo"]
-        },
-        "x-ui": {
+          "order": ["address", "geo"],
           "title": ""
         }
       },
-      "x-ui": {
+      "x-rjsf": {
         "options": {
           "addable": true,
           "removable": true,
@@ -186,7 +182,7 @@
           "minLength": 2,
           "maxLength": 200,
           "examples": ["Rajesh Kumar"],
-          "x-ui": {
+          "x-rjsf": {
             "placeholder": "Full name of the primary contact"
           }
         },
@@ -195,7 +191,7 @@
           "title": "Phone",
           "pattern": "^(\\+?\\d{10,15}|\\d{10})$",
           "examples": ["+919876543210", "9876543210"],
-          "x-ui": {
+          "x-rjsf": {
             "placeholder": "+91 98765 43210",
             "options": {
               "inputType": "tel"
@@ -208,7 +204,7 @@
           "format": "email",
           "maxLength": 320,
           "examples": ["admin@skillbridge.in"],
-          "x-ui": {
+          "x-rjsf": {
             "placeholder": "admin@yourorg.in",
             "options": {
               "inputType": "email"
@@ -216,7 +212,7 @@
           }
         }
       },
-      "x-form-layout": {
+      "x-rjsf": {
         "layout": "grid",
         "order": ["name", "phone", "email"]
       }
@@ -230,14 +226,14 @@
         "value": {
           "type": "boolean",
           "title": "I have read and accept the terms and privacy policy",
-          "x-ui": {
+          "x-rjsf": {
             "widget": "ConsentCheckbox"
           }
         },
         "given_at": {
           "type": "string",
           "format": "date-time",
-          "x-ui": {
+          "x-rjsf": {
             "widget": "hidden",
             "options": {
               "label": false
@@ -247,7 +243,7 @@
         "valid_till": {
           "type": "string",
           "format": "date-time",
-          "x-ui": {
+          "x-rjsf": {
             "widget": "hidden",
             "options": {
               "label": false
@@ -255,13 +251,13 @@
           }
         }
       },
-      "x-form-layout": {
+      "x-rjsf": {
         "layout": "stack",
         "order": ["value", "given_at", "valid_till"]
       }
     }
   },
-  "x-form-layout": {
+  "x-rjsf": {
     "layout": "stack",
     "order": ["name", "type", "sub_org_name", "url", "contact", "locations", "consent"]
   }

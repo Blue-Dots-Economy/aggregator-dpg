@@ -13,7 +13,7 @@
       "minLength": 2,
       "maxLength": 200,
       "examples": ["ABC Limited", "XYZ Foundation"],
-      "x-ui": {
+      "x-rjsf": {
         "placeholder": "e.g. ABC Limited",
         "autofocus": true
       }
@@ -26,7 +26,7 @@
       "description": "Not required at signup; can be added or edited later.",
       "examples": ["https://abclimited.org"],
       "x-updatable": true,
-      "x-ui": {
+      "x-rjsf": {
         "placeholder": "https://yourorg.org",
         "options": {
           "inputType": "url"
@@ -44,7 +44,7 @@
         "enum": ["seeker", "provider"]
       },
       "examples": [["seeker"], ["provider"], ["seeker", "provider"]],
-      "x-ui": {
+      "x-rjsf": {
         "enumNames": ["Seekers", "Service Providers"]
       }
     },
@@ -53,7 +53,7 @@
       "title": "Organisation Type",
       "description": "The broad category that describes your organisation.",
       "enum": ["ngo", "government_entity", "private_company", "community_group", "other"],
-      "x-ui": {
+      "x-rjsf": {
         "widget": "select",
         "placeholder": "Select organisation type",
         "enumNames": ["NGO", "Government Entity", "Private Company", "Community Group", "Others"]
@@ -69,7 +69,7 @@
           "type": "string",
           "title": "Street",
           "maxLength": 300,
-          "x-ui": {
+          "x-rjsf": {
             "placeholder": "Street, Area"
           }
         },
@@ -77,7 +77,7 @@
           "type": "string",
           "title": "City",
           "maxLength": 200,
-          "x-ui": {
+          "x-rjsf": {
             "placeholder": "City"
           }
         },
@@ -85,7 +85,7 @@
           "type": "string",
           "title": "District",
           "maxLength": 200,
-          "x-ui": {
+          "x-rjsf": {
             "placeholder": "District"
           }
         },
@@ -93,7 +93,7 @@
           "type": "string",
           "title": "State",
           "maxLength": 200,
-          "x-ui": {
+          "x-rjsf": {
             "placeholder": "State"
           }
         },
@@ -101,7 +101,7 @@
           "type": "string",
           "title": "PIN code",
           "maxLength": 20,
-          "x-ui": {
+          "x-rjsf": {
             "placeholder": "PIN"
           }
         },
@@ -109,12 +109,12 @@
           "type": "string",
           "title": "Country",
           "maxLength": 100,
-          "x-ui": {
+          "x-rjsf": {
             "placeholder": "India"
           }
         }
       },
-      "x-form-layout": {
+      "x-rjsf": {
         "layout": "grid",
         "order": [
           "streetAddress",
@@ -131,7 +131,7 @@
       "title": "State",
       "description": "Derived from the address block on this instance; not asked for separately.",
       "maxLength": 200,
-      "x-ui": {
+      "x-rjsf": {
         "widget": "hidden",
         "options": {
           "label": false
@@ -150,7 +150,7 @@
           "minLength": 2,
           "maxLength": 200,
           "examples": ["Rajesh Kumar"],
-          "x-ui": {
+          "x-rjsf": {
             "placeholder": "Full name of the organisation owner"
           }
         },
@@ -159,7 +159,7 @@
           "title": "Phone",
           "pattern": "^(\\+?\\d{10,15}|\\d{10})$",
           "examples": ["+919876543210", "9876543210"],
-          "x-ui": {
+          "x-rjsf": {
             "placeholder": "+91 98765 43210",
             "options": {
               "inputType": "tel"
@@ -172,7 +172,7 @@
           "format": "email",
           "maxLength": 320,
           "examples": ["owner@abclimited.org"],
-          "x-ui": {
+          "x-rjsf": {
             "placeholder": "owner@yourorg.org",
             "options": {
               "inputType": "email"
@@ -180,7 +180,7 @@
           }
         }
       },
-      "x-form-layout": {
+      "x-rjsf": {
         "layout": "grid",
         "order": ["name", "phone", "email"]
       }
@@ -194,14 +194,14 @@
         "value": {
           "type": "boolean",
           "title": "I have read and accept the terms and privacy policy",
-          "x-ui": {
+          "x-rjsf": {
             "widget": "ConsentCheckbox"
           }
         },
         "given_at": {
           "type": "string",
           "format": "date-time",
-          "x-ui": {
+          "x-rjsf": {
             "widget": "hidden",
             "options": {
               "label": false
@@ -211,7 +211,7 @@
         "valid_till": {
           "type": "string",
           "format": "date-time",
-          "x-ui": {
+          "x-rjsf": {
             "widget": "hidden",
             "options": {
               "label": false
@@ -219,13 +219,13 @@
           }
         }
       },
-      "x-form-layout": {
+      "x-rjsf": {
         "layout": "stack",
         "order": ["value", "given_at", "valid_till"]
       }
     }
   },
-  "x-form-layout": {
+  "x-rjsf": {
     "layout": "stack",
     "order": [
       "display_name",
