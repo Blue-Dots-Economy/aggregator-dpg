@@ -264,4 +264,44 @@ describe('GET /v1/aggregator-config', () => {
     const body = res.json() as { participant_consent: unknown };
     expect(body.participant_consent).toBeNull();
   });
+
+  it('GET /v1/aggregator-forms returns the resolved forms bundle', async () => {
+    const forms = {
+      forms: {
+        'coordinator-registration': { type: 'object', title: 'Coordinator' },
+        'org-registration': { type: 'object', title: 'Organisation' },
+        profile: { type: 'object', title: 'Profile' },
+      },
+    };
+    _setNetworkConfig(buildBlueDotConfig({ forms }));
+
+    const res = await app.inject({ method: 'GET', url: '/v1/aggregator-forms' });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { forms: Record<string, unknown> | null };
+    expect(body.forms).toEqual(forms.forms);
+    expect(Object.keys(body.forms ?? {})).toEqual([
+      'coordinator-registration',
+      'org-registration',
+      'profile',
+    ]);
+  });
+
+  it('GET /v1/aggregator-forms returns null when no forms_source is configured', async () => {
+    // The web reader treats null as "use the on-disk copy", which is what
+    // keeps a not-yet-migrated deployment rendering its forms (#640).
+    _setNetworkConfig(buildBlueDotConfig());
+
+    const res = await app.inject({ method: 'GET', url: '/v1/aggregator-forms' });
+    expect(res.statusCode).toBe(200);
+    expect((res.json() as { forms: unknown }).forms).toBeNull();
+  });
+
+  it('GET /v1/aggregator-forms is cacheable and needs no authentication', async () => {
+    // Registration is anonymous: a 401 here is a registration outage.
+    _setNetworkConfig(buildBlueDotConfig());
+
+    const res = await app.inject({ method: 'GET', url: '/v1/aggregator-forms' });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['cache-control']).toContain('max-age');
+  });
 });

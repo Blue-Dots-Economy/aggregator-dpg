@@ -1063,4 +1063,122 @@ aggregator:
       );
     });
   });
+
+  describe('aggregator forms fetch', () => {
+    const FORMS_SOURCE = 'https://example.invalid/blue_dot/aggregator-forms.json';
+    const FORMS_BUNDLE = {
+      forms: {
+        'coordinator-registration': { type: 'object', title: 'Coordinator' },
+        'org-registration': { type: 'object', title: 'Organisation' },
+        profile: { type: 'object', title: 'Profile' },
+      },
+    };
+
+    /** YAML for this fixture, with `forms_source` optionally declared. */
+    function yamlWith(formsSource?: string): string {
+      return `
+aggregator:
+  name: BBMP
+  network:
+    source: https://example.invalid/blue_dot/network.json${
+      formsSource ? `\n    forms_source: ${formsSource}` : ''
+    }
+  brand:
+    short_name: Blue Dots
+    long_name: Blue Dots Aggregator Portal
+    url_slug: blue-dots
+`;
+    }
+
+    /** Routes the forms URL to `forms`; everything else returns network.json. */
+    function makeFetch(forms: () => Response | Promise<Response>): typeof fetch {
+      return (async (input: RequestInfo | URL) => {
+        if (String(input) === FORMS_SOURCE) return forms();
+        return new Response(JSON.stringify(BLUE_DOT_NETWORK), { status: 200 });
+      }) as unknown as typeof fetch;
+    }
+
+    it('fetches + attaches the forms bundle from forms_source', async () => {
+      await fs.writeFile(configPath, yamlWith(FORMS_SOURCE), 'utf8');
+      const loader = new FileNetworkConfigLoader({
+        configPath,
+        fetchImpl: makeFetch(() => new Response(JSON.stringify(FORMS_BUNDLE), { status: 200 })),
+      });
+      const result = await loader.load();
+      expect(result.success).toBe(true);
+      if (!result.success) return;
+      expect(result.value.forms).toEqual(FORMS_BUNDLE);
+    });
+
+    it('leaves forms undefined when no forms_source is configured', async () => {
+      // The pre-#640 posture, and what every not-yet-migrated deployment runs:
+      // the reader falls back to the schema shipped in the image.
+      await fs.writeFile(configPath, yamlWith(), 'utf8');
+      const loader = new FileNetworkConfigLoader({
+        configPath,
+        fetchImpl: makeFetch(() => new Response('unused', { status: 200 })),
+      });
+      const result = await loader.load();
+      expect(result.success).toBe(true);
+      if (!result.success) return;
+      expect(result.value.forms).toBeUndefined();
+    });
+
+    it.each([
+      ['a 404', () => new Response('missing', { status: 404 })],
+      ['a 500', () => new Response('down', { status: 500 })],
+      ['a transport throw', () => Promise.reject(new Error('boom'))],
+      ['a non-JSON body', () => new Response('<!doctype html>', { status: 200 })],
+      ['the wrong shape', () => new Response(JSON.stringify({ nope: true }), { status: 200 })],
+    ])(
+      'is non-fatal: %s leaves forms undefined but load() still succeeds',
+      async (_label, forms) => {
+        // Every one of these is a blank registration page if it throws, so the
+        // whole point of the feature is that load() survives all of them.
+        await fs.writeFile(configPath, yamlWith(FORMS_SOURCE), 'utf8');
+        const loader = new FileNetworkConfigLoader({ configPath, fetchImpl: makeFetch(forms) });
+        const result = await loader.load();
+        expect(result.success).toBe(true);
+        if (!result.success) return;
+        expect(result.value.forms).toBeUndefined();
+      },
+    );
+
+    it('recovers the last-known-good bundle from cache when a later fetch fails', async () => {
+      await fs.writeFile(configPath, yamlWith(FORMS_SOURCE), 'utf8');
+      const cacheDir = path.join(tmpDir, 'cache');
+      const good = new FileNetworkConfigLoader({
+        configPath,
+        cacheDir,
+        fetchImpl: makeFetch(() => new Response(JSON.stringify(FORMS_BUNDLE), { status: 200 })),
+      });
+      await good.load(); // writes the last-known-good cache
+
+      const degraded = new FileNetworkConfigLoader({
+        configPath,
+        cacheDir,
+        fetchImpl: makeFetch(() => new Response('down', { status: 500 })),
+      });
+      const result = await degraded.load();
+      expect(result.success).toBe(true);
+      if (!result.success) return;
+      expect(result.value.forms).toEqual(FORMS_BUNDLE);
+    });
+
+    it('caches forms separately from the network document', async () => {
+      // Both derive their cache filename from a URL; a collision would serve
+      // one document in place of the other on the recovery path.
+      await fs.writeFile(configPath, yamlWith(FORMS_SOURCE), 'utf8');
+      const cacheDir = path.join(tmpDir, 'cache');
+      const loader = new FileNetworkConfigLoader({
+        configPath,
+        cacheDir,
+        fetchImpl: makeFetch(() => new Response(JSON.stringify(FORMS_BUNDLE), { status: 200 })),
+      });
+      await loader.load();
+      const written = await fs.readdir(cacheDir);
+      expect(new Set(written).size).toBe(written.length);
+      expect(written.length).toBeGreaterThanOrEqual(2);
+    });
+  });
 });
