@@ -6,13 +6,7 @@
  * and nodes that must contribute NO key at all.
  */
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname } from 'node:path';
-import { resolve } from 'node:path';
 import { deriveUiSchema } from '@/lib/form-layout';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
 
 describe('deriveUiSchema', () => {
   it('maps x-rjsf and x-rjsf onto ui: directives', () => {
@@ -59,22 +53,53 @@ describe('deriveUiSchema', () => {
     expect(deriveUiSchema('nope')).toEqual({});
   });
 
-  it('reproduces the real coordinator-registration layout from the published bundle', () => {
-    // Guards the actual conversion against the document users are served, not
-    // a hand-written fixture: if the merge dropped a directive, the real form
-    // loses it silently. Reads the vendored copy of the published bundle —
-    // #640 removed the on-disk schema this used to open.
-    const path = resolve(__dirname, '../__fixtures__/aggregator-forms.blue_dot.json');
-    const bundle = JSON.parse(readFileSync(path, 'utf8')) as {
-      forms: Record<string, Record<string, unknown>>;
+  it('derives every directive kind from one nested schema', () => {
+    // Stands in for the shipped form this used to read. Since #640 the real
+    // documents live in `bluedots-schemas`, and keeping a copy here to assert
+    // against would reintroduce the second source of truth that change removed.
+    // What belongs in this repo is the converter; whether a published form
+    // still carries a given directive is asserted where the form lives.
+    const schema = {
+      type: 'object',
+      'x-rjsf': { order: ['name', 'type', 'contact', 'locations'] },
+      properties: {
+        name: { type: 'string', 'x-rjsf': { autofocus: true, placeholder: 'Your name' } },
+        type: {
+          type: 'string',
+          'x-rjsf': { widget: 'select', enumNames: ['Seeker', 'Provider'] },
+        },
+        contact: {
+          type: 'object',
+          'x-rjsf': { order: ['phone'] },
+          properties: { phone: { type: 'string', 'x-rjsf': { placeholder: '+91…' } } },
+        },
+        locations: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: { geo: { type: 'object', 'x-rjsf': { widget: 'hidden' } } },
+          },
+        },
+      },
     };
-    const schema = bundle.forms['coordinator-registration']!;
+
     const ui = deriveUiSchema(schema);
 
-    expect(ui['ui:order']).toEqual(['name', 'type', 'url', 'contact', 'locations', 'consent']);
-    expect(ui['name']).toMatchObject({ 'ui:autofocus': true });
-    expect(ui['type']).toMatchObject({ 'ui:widget': 'select' });
-    // Nested array-item layout survived the merge.
-    expect((ui['locations'] as Record<string, unknown>)['items']).toBeDefined();
+    expect(ui['ui:order']).toEqual(['name', 'type', 'contact', 'locations']);
+    expect(ui['name']).toEqual({ 'ui:autofocus': true, 'ui:placeholder': 'Your name' });
+    expect(ui['type']).toEqual({
+      'ui:widget': 'select',
+      'ui:enumNames': ['Seeker', 'Provider'],
+    });
+    // Nested objects recurse, keeping their own order.
+    expect(ui['contact']).toEqual({
+      'ui:order': ['phone'],
+      phone: { 'ui:placeholder': '+91…' },
+    });
+    // Array-item layout survives, which is where the registration form's
+    // location repeater lives.
+    expect((ui['locations'] as Record<string, unknown>)['items']).toEqual({
+      geo: { 'ui:widget': 'hidden' },
+    });
   });
 });

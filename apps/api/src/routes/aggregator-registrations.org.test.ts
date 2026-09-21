@@ -22,8 +22,7 @@ import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-tok
 import { _setSubmitRateChecker } from '../services/submit-rate.js';
 import { ConsentLedgerFake } from '@aggregator-dpg/consent-ledger/testing';
 import { _setConsentLedger } from '../services/consent-ledger/index.js';
-import formsFixture from '../__fixtures__/aggregator-forms.blue_dot.json' with { type: 'json' };
-import { buildBlueDotConfig } from '@aggregator-dpg/network-config/testing';
+import { buildBlueDotConfig, buildFormsBundle } from '@aggregator-dpg/network-config/testing';
 import { _setNetworkConfig } from '../services/network-config.js';
 import { _resetValidator } from '../services/registration-validator.js';
 
@@ -47,7 +46,7 @@ describe('coordinator submit with ORG_HIERARCHY_ENABLED', () => {
   beforeEach(async () => {
     // #640: the forms are a published artefact, not a file this repo ships,
     // so the validator has nothing to compile unless the config carries them.
-    _setNetworkConfig(buildBlueDotConfig({ forms: formsFixture as never }));
+    _setNetworkConfig(buildBlueDotConfig({ forms: buildFormsBundle() }));
     _resetValidator();
     _resetTokenKey();
     _resetJwks();

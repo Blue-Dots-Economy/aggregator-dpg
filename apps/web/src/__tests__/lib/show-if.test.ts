@@ -1,7 +1,4 @@
 import { describe, it, expect, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import path from 'node:path';
 import type { RJSFSchema } from '@rjsf/utils';
 import { isFieldVisible, resolveVisibleSchema, stripShowIf } from '../../lib/show-if';
 
@@ -26,8 +23,6 @@ function chainSchema(): RJSFSchema {
     },
   } as RJSFSchema;
 }
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 describe('isFieldVisible', () => {
   it('is always visible when there is no x-show-if', () => {
@@ -145,23 +140,41 @@ describe('stripShowIf', () => {
   });
 });
 
-// ─── Real UP-GZB org-registration schema ────────────────────────────────────
-// Locks the wiring end to end: the real published document, the shipped
-// resolver. Both sub-type fields deliberately carry the SAME title
-// ("Organisation Sub-Type", as the sheet does) — safe only because they are
-// never visible at the same time, which is exactly what these assertions pin
-// down.
+// ─── The UP-GZB org-registration SHAPE ──────────────────────────────────────
+// Reproduces the arrangement that makes this resolver load-bearing: two
+// sub-type fields carrying the SAME title ("Organisation Sub-Type", as the
+// sheet does), mutually exclusive via `x-show-if`. Safe only because they are
+// never visible at once — which is exactly what these assertions pin down.
 //
-// Reads the vendored copy of the published up-gzb bundle: #640 removed the
-// on-disk schema this used to open.
-describe('up-gzb org-registration organisation sub-type', () => {
-  const bundle = JSON.parse(
-    readFileSync(
-      path.resolve(__dirname, '../__fixtures__/aggregator-forms.blue_dot.up-gzb.json'),
-      'utf8',
-    ),
-  ) as { forms: Record<string, RJSFSchema> };
-  const schema = bundle.forms['org-registration']!;
+// Synthetic, not the published document. Since #640 the real forms live in
+// `bluedots-schemas`; vendoring a copy here to read would reintroduce the
+// second source of truth that change removed, and would rot the first time the
+// published form moved. What belongs here is the resolver's behaviour. Whether
+// up-gzb's option lists still match the sheet is asserted where the document
+// lives.
+describe('org-registration mutually exclusive sub-types (up-gzb shape)', () => {
+  const schema = {
+    type: 'object',
+    properties: {
+      organisation_type: {
+        type: 'string',
+        title: 'Organisation Type',
+        enum: ['educational', 'non_educational'],
+      },
+      organisation_sub_type_educational: {
+        type: 'string',
+        title: 'Organisation Sub-Type',
+        enum: ['school', 'polytechnic', 'other'],
+        'x-show-if': { organisation_type: ['educational'] },
+      },
+      organisation_sub_type_non_educational: {
+        type: 'string',
+        title: 'Organisation Sub-Type',
+        enum: ['placement_agency', 'community_group', 'other'],
+        'x-show-if': { organisation_type: ['non_educational'] },
+      },
+    },
+  } as RJSFSchema;
 
   const visible = (formData: Record<string, unknown>): string[] =>
     Object.keys(resolveVisibleSchema(schema, formData).schema.properties ?? {});
@@ -193,28 +206,5 @@ describe('up-gzb org-registration organisation sub-type', () => {
     });
     expect(formData).not.toHaveProperty('organisation_sub_type_educational');
     expect(formData['organisation_type']).toBe('non_educational');
-  });
-
-  it('carries the sheet option lists on each sub-type', () => {
-    const props = schema.properties as Record<string, { enum?: string[] }>;
-    expect(props['organisation_sub_type_educational']!.enum).toEqual([
-      'school',
-      'pu_college',
-      'college',
-      'iti',
-      'other_vocational_training',
-      'polytechnic',
-      'diploma',
-      'other',
-    ]);
-    expect(props['organisation_sub_type_non_educational']!.enum).toEqual([
-      'employment_exchange',
-      'placement_agency',
-      'community_group',
-      'individual_trainer_counsellor',
-      'msme_association',
-      'industries_and_commerce_department',
-      'other',
-    ]);
   });
 });
