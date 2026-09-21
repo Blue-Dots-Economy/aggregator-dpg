@@ -36,8 +36,9 @@ import { logger } from '../logger.js';
 import {
   GEO_LOCATION_COLUMN,
   parseGeoLocation,
+  schemaOwnsColumn,
   type ParsedGeoLocation,
-} from './bulk-well-known-columns.js';
+} from '@aggregator-dpg/shared-primitives/bulk-columns';
 
 let participantsWriter: ParticipantsWriterBase | null = null;
 function getParticipantsWriter(): ParticipantsWriterBase {
@@ -102,28 +103,6 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
     );
   }
 
-  // 0. Well-known columns (#807). Pulled out of the payload BEFORE Ajv runs:
-  // they are not schema properties, so a schema with
-  // `additionalProperties: false` would reject every row carrying them, and
-  // any that survived would reach Signals as junk `item_state` fields.
-  // Removing them here also keeps them out of `item_state` without a second
-  // strip step, since the payload is passed through verbatim further down.
-  const geoRaw = job.payload[GEO_LOCATION_COLUMN];
-  delete job.payload[GEO_LOCATION_COLUMN];
-  const geo = parseGeoLocation(geoRaw);
-  if (geo.status === 'invalid') {
-    // Not a row failure. Coordinates only let Signals skip geocoding, so a bad
-    // cell costs a geocoder call rather than correctness — and failing here
-    // would push the operator into a re-upload, which duplicates every
-    // already-successful row because `onboard` always inserts.
-    // Logged without the raw cell: coordinates are PII.
-    log.warn({
-      status: 'partial',
-      sub: 'geo_location.ignored',
-      reason: geo.reason,
-    });
-  }
-
   // 1. Schema validation. Load schema + validator together (both cached
   // by the loader) so we can pre-split comma-joined array cells before Ajv
   // runs. Ajv's `coerceTypes: 'array'` wraps a single string into a
@@ -145,6 +124,35 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
       log,
     );
   }
+  // 1b. Well-known columns (#807). Pulled out of the payload BEFORE Ajv runs:
+  // they are not schema properties, so a schema with
+  // `additionalProperties: false` would reject every row carrying them, and
+  // any that survived would reach Signals as junk `item_state` fields.
+  // Removing them here also keeps them out of `item_state` without a second
+  // strip step, since the payload is passed through verbatim further down.
+  // The schema wins if it declares the name itself: extracting then would
+  // delete a real property before Ajv sees it, failing every row on a column
+  // the operator can see in their own file.
+  const schemaOwnsGeo = schemaOwnsColumn(
+    schemaResult.success ? (schemaResult.value as Record<string, unknown>) : null,
+    GEO_LOCATION_COLUMN,
+  );
+  const geoRaw = schemaOwnsGeo ? undefined : job.payload[GEO_LOCATION_COLUMN];
+  if (!schemaOwnsGeo) delete job.payload[GEO_LOCATION_COLUMN];
+  const geo = parseGeoLocation(geoRaw);
+  if (geo.status === 'invalid') {
+    // Not a row failure. Coordinates only let Signals skip geocoding, so a bad
+    // cell costs a geocoder call rather than correctness — and failing here
+    // would push the operator into a re-upload, which duplicates every
+    // already-successful row because `onboard` always inserts.
+    // Logged without the raw cell: coordinates are PII.
+    log.warn({
+      status: 'skipped',
+      sub: 'geo_location.ignored',
+      reason: geo.reason,
+    });
+  }
+
   if (schemaResult.success) {
     const cfg = await getNetworkConfig();
     preprocessArrayCells(

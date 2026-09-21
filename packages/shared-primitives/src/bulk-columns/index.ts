@@ -92,3 +92,24 @@ export function parseGeoLocation(raw: unknown): GeoLocationParse {
   }
   return { status: 'ok', value: { lat, lng } };
 }
+
+/**
+ * True when the item schema itself declares `name` as a property.
+ *
+ * Extraction is otherwise unconditional, which would silently rob a schema
+ * that legitimately owns one of these names: the value is deleted before Ajv
+ * runs, so a `required` property would fail every row with a message naming a
+ * column the operator can plainly see in their file. No shipped schema
+ * collides today — this keeps it impossible rather than merely unlikely.
+ *
+ * The schema wins. A network that declares `geo_location` as a real property
+ * gets the property, not the well-known column.
+ */
+export function schemaOwnsColumn(
+  schema: Record<string, unknown> | null | undefined,
+  name: string,
+): boolean {
+  const props = schema?.['properties'];
+  if (!props || typeof props !== 'object') return false;
+  return Object.hasOwn(props as Record<string, unknown>, name);
+}

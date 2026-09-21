@@ -8,11 +8,7 @@
  * that already succeeded.
  */
 import { describe, it, expect } from 'vitest';
-import {
-  parseGeoLocation,
-  WELL_KNOWN_COLUMNS,
-  GEO_LOCATION_COLUMN,
-} from './bulk-well-known-columns.js';
+import { parseGeoLocation, WELL_KNOWN_COLUMNS, GEO_LOCATION_COLUMN } from './index.js';
 
 describe('parseGeoLocation', () => {
   it('parses a pipe-separated pair', () => {

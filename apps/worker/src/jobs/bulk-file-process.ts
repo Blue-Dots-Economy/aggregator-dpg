@@ -28,7 +28,7 @@ import { getSchemaLoader } from '../services/schema-loader.js';
 import { getRedis } from '../services/redis.js';
 import { enqueueRowProcessBulk } from '../services/bulk-queue.js';
 import { streamCsvParse, type FileFailureReason } from './bulk-file-stream.js';
-import { WELL_KNOWN_COLUMNS } from './bulk-well-known-columns.js';
+import { WELL_KNOWN_COLUMNS } from '@aggregator-dpg/shared-primitives/bulk-columns';
 
 export type { FileFailureReason };
 

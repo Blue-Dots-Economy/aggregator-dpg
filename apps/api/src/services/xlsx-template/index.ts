@@ -48,7 +48,12 @@
 
 import ExcelJS from 'exceljs';
 import type { JsonSchema } from '@aggregator-dpg/schema-loader/interface';
-import { exampleValue, identityExample, orderedColumns } from '../csv-template/index.js';
+import {
+  exampleValue,
+  identityExample,
+  orderedColumns,
+  wellKnownExample,
+} from '../csv-template/index.js';
 
 /** Tab 1 — what to do. */
 const INSTRUCTIONS_SHEET = '1. Instructions';
@@ -667,6 +672,10 @@ function sampleRows(
       resolving.add(plan.name);
       const value =
         pins.get(plan.name) ??
+        // Well-known columns carry no JSON Schema, so `exampleValue` — which is
+        // purely schema-driven — has nothing to work from. Both formats of one
+        // template have to agree about the same column.
+        wellKnownExample(plan.name) ??
         conditionalCell(plan, selectedIn) ??
         identityCell(plan, rowIndex, identity) ??
         rotatedCell(plan, rowIndex, controllers) ??
