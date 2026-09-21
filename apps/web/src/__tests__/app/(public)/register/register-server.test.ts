@@ -114,17 +114,25 @@ describe('loadOrgSchema', () => {
     readFile.mockReset();
   });
 
-  it('returns the parsed schema + ui schema when both files read', async () => {
-    readFile.mockImplementation((p: string) =>
-      p.includes('.ui.json')
-        ? Promise.resolve('{"ui:order":["name"]}')
-        : Promise.resolve('{"title":"Org","properties":{}}'),
+  it("derives the ui schema from the schema's own x- annotations", async () => {
+    // One file now: layout lives in `x-form-layout` / `x-ui` inside the schema,
+    // the way signals ships its item schemas. The uiSchema is computed, not read.
+    readFile.mockResolvedValue(
+      JSON.stringify({
+        title: 'Org',
+        'x-form-layout': { order: ['name'] },
+        properties: { name: { type: 'string', 'x-ui': { placeholder: 'e.g. ABC Limited' } } },
+      }),
     );
     const out = await loadOrgSchema();
-    expect(out).toEqual({
-      schema: { title: 'Org', properties: {} },
-      uiSchema: { 'ui:order': ['name'] },
+    expect(readFile).toHaveBeenCalledTimes(1);
+    expect(out?.uiSchema).toEqual({
+      'ui:order': ['name'],
+      name: { 'ui:placeholder': 'e.g. ABC Limited' },
     });
+    // The annotations stay on the schema — Ajv ignores unknown keywords, and
+    // stripping them would mean the browser and the API validate different docs.
+    expect(out?.schema).toHaveProperty('x-form-layout');
   });
 
   it('returns null when a schema file is missing', async () => {

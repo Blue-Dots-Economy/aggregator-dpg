@@ -16,30 +16,27 @@ describe('ProfileCompletePage (server component)', () => {
     readFile.mockReset();
   });
 
-  it('loads and parses the profile schema + UI schema, passing them through', async () => {
-    readFile.mockImplementation((path: string) => {
-      if (path.includes('profile.v1.ui.json')) {
-        return Promise.resolve(JSON.stringify({ 'ui:order': ['org_name'] }));
-      }
-      return Promise.resolve(
-        JSON.stringify({ title: 'Complete your profile', properties: { org_name: {} } }),
-      );
-    });
+  it('derives the UI schema from the profile schema and passes both through', async () => {
+    readFile.mockResolvedValue(
+      JSON.stringify({
+        title: 'Complete your profile',
+        'x-form-layout': { order: ['org_name'] },
+        properties: { org_name: {} },
+      }),
+    );
 
     const el = await ProfileCompletePage();
 
-    expect(el.props.schema).toEqual({
-      title: 'Complete your profile',
-      properties: { org_name: {} },
-    });
+    expect(el.props.schema).toMatchObject({ title: 'Complete your profile' });
     expect(el.props.uiSchema).toEqual({ 'ui:order': ['org_name'] });
   });
 
-  it('reads both schema files from the resolved aggregator config path', async () => {
+  it('reads one schema file from the resolved aggregator config path', async () => {
     readFile.mockResolvedValue('{}');
     await ProfileCompletePage();
     const paths = readFile.mock.calls.map((c) => String(c[0]));
     expect(paths.some((p) => p.endsWith('profile.v1.json'))).toBe(true);
-    expect(paths.some((p) => p.endsWith('profile.v1.ui.json'))).toBe(true);
+    // The sibling .ui.json is gone; a read of it would mean a stale caller.
+    expect(paths.some((p) => p.endsWith('.ui.json'))).toBe(false);
   });
 });

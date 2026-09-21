@@ -7,6 +7,7 @@
  * @module apps/web/src/app/(public)/register/register-server
  */
 
+import { deriveUiSchema } from '@/lib/form-layout';
 import 'server-only';
 import { readFile } from 'node:fs/promises';
 import type { RJSFSchema } from '@rjsf/utils';
@@ -86,14 +87,12 @@ export async function loadOrgSchema(): Promise<{
   uiSchema: Record<string, unknown>;
 } | null> {
   try {
-    const [rawSchema, rawUi] = await Promise.all([
-      readFile(resolveAggregatorSchemaPath('org-registration.v1.json'), 'utf8'),
-      readFile(resolveAggregatorSchemaPath('org-registration.v1.ui.json'), 'utf8'),
-    ]);
-    return {
-      schema: JSON.parse(rawSchema) as RJSFSchema,
-      uiSchema: JSON.parse(rawUi) as Record<string, unknown>,
-    };
+    const rawSchema = await readFile(
+      resolveAggregatorSchemaPath('org-registration.v1.json'),
+      'utf8',
+    );
+    const schema = JSON.parse(rawSchema) as RJSFSchema;
+    return { schema, uiSchema: deriveUiSchema(schema) };
   } catch {
     // Best-effort: absent org schema → owner route 404s / coordinator-only.
     return null;

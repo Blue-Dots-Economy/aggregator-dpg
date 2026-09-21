@@ -11,6 +11,7 @@
 
 import 'server-only';
 import { existsSync } from 'node:fs';
+import { deriveUiSchema } from './form-layout';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { RJSFSchema } from '@rjsf/utils';
@@ -102,12 +103,9 @@ export async function patchTypeFromNetwork(
  *   the current network's domains.
  */
 export async function loadRegistrationSchema(): Promise<AggregatorSchemaPair> {
-  const [schemaRaw, uiSchemaRaw] = await Promise.all([
-    readFile(resolveAggregatorSchemaPath('registration.v1.json'), 'utf8'),
-    readFile(resolveAggregatorSchemaPath('registration.v1.ui.json'), 'utf8'),
-  ]);
+  const schemaRaw = await readFile(resolveAggregatorSchemaPath('registration.v1.json'), 'utf8');
   const schema = JSON.parse(schemaRaw) as RJSFSchema;
-  const uiSchema = JSON.parse(uiSchemaRaw) as Record<string, unknown>;
+  const uiSchema = deriveUiSchema(schema);
   await patchTypeFromNetwork(schema, uiSchema);
   return { schema, uiSchema };
 }

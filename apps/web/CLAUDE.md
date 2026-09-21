@@ -17,7 +17,7 @@ Guidance specific to working inside `apps/web`. Read the root `CLAUDE.md` first 
 
 ## `aggregator-schema.server.ts` is the single source for both editable and read-only rendering
 
-Both `/register` and `/profile` call `loadRegistrationSchema()`, which loads `registration.v1.json` + `.ui.json` from `config/schemas/aggregator/` (three-candidate path resolution for dev vs Docker cwd) and patches the `type` enum from `GET /v1/aggregator-config` (falls back silently on error). **The same schema/uiSchema objects** feed both modes:
+Both `/register` and `/profile` call `loadRegistrationSchema()`, which loads `registration.v1.json` from `config/schemas/aggregator/` and derives the uiSchema from its `x-form-layout` / `x-ui` annotations (`lib/form-layout.ts`) — presentation lives in the schema, the way signals ships its item schemas; there is no sibling `.ui.json` (three-candidate path resolution for dev vs Docker cwd) and patches the `type` enum from `GET /v1/aggregator-config` (falls back silently on error). **The same schema/uiSchema objects** feed both modes:
 
 - **Editable** (`/register`) — rendered as-is.
 - **Read-only** (`/profile`, `ProfileFormView.tsx`) — achieved via RJSF's `readonly` prop (not per-field `ui:disabled`), plus a locally-built `readonlyUiSchema` that hides the `consent` block and empties the submit button's children.

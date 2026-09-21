@@ -19,14 +19,24 @@
       "title": "Organisation Name",
       "minLength": 2,
       "maxLength": 200,
-      "examples": ["Enable India", "Pankh Foundation"]
+      "examples": ["Enable India", "Pankh Foundation"],
+      "x-ui": {
+        "placeholder": "e.g. Enable India",
+        "autofocus": true
+      }
     },
     "state": {
       "type": "string",
       "title": "State",
       "description": "Derived from the address block on this instance; not asked for separately.",
       "maxLength": 200,
-      "examples": ["Uttar Pradesh"]
+      "examples": ["Uttar Pradesh"],
+      "x-ui": {
+        "widget": "hidden",
+        "options": {
+          "label": false
+        }
+      }
     },
     "website": {
       "type": "string",
@@ -35,7 +45,13 @@
       "maxLength": 2048,
       "description": "Not required at signup; can be added or edited later.",
       "examples": ["https://enableindia.org"],
-      "x-updatable": true
+      "x-updatable": true,
+      "x-ui": {
+        "placeholder": "https://yourorg.org",
+        "options": {
+          "inputType": "url"
+        }
+      }
     },
     "aggregator_type": {
       "type": "array",
@@ -47,19 +63,33 @@
         "type": "string",
         "enum": ["seeker", "provider", "service_provider"]
       },
-      "examples": [["seeker"], ["provider", "service_provider"]]
+      "examples": [["seeker"], ["provider", "service_provider"]],
+      "x-ui": {
+        "widget": "checkboxes",
+        "enumNames": ["Seekers", "Job Providers", "Service Providers"],
+        "options": {
+          "inline": true
+        }
+      }
     },
     "organisation_type": {
       "type": "string",
       "title": "Organisation Type",
       "description": "The broad category that describes your organisation.",
-      "enum": ["educational", "non_educational"]
+      "enum": ["educational", "non_educational"],
+      "x-ui": {
+        "widget": "select",
+        "placeholder": "Select organisation type",
+        "enumNames": ["Educational", "Non-Educational"]
+      }
     },
     "organisation_sub_type_educational": {
       "type": "string",
       "title": "Organisation Sub-Type",
       "description": "Select the type that best applies.",
-      "x-show-if": { "organisation_type": ["educational"] },
+      "x-show-if": {
+        "organisation_type": ["educational"]
+      },
       "enum": [
         "school",
         "pu_college",
@@ -69,13 +99,29 @@
         "polytechnic",
         "diploma",
         "other"
-      ]
+      ],
+      "x-ui": {
+        "widget": "select",
+        "placeholder": "Select sub-type",
+        "enumNames": [
+          "School",
+          "PU College",
+          "College",
+          "ITI",
+          "Other Vocational Training",
+          "Polytechnic",
+          "Diploma",
+          "Other"
+        ]
+      }
     },
     "organisation_sub_type_non_educational": {
       "type": "string",
       "title": "Organisation Sub-Type",
       "description": "Select the type that best applies.",
-      "x-show-if": { "organisation_type": ["non_educational"] },
+      "x-show-if": {
+        "organisation_type": ["non_educational"]
+      },
       "enum": [
         "employment_exchange",
         "placement_agency",
@@ -84,13 +130,31 @@
         "msme_association",
         "industries_and_commerce_department",
         "other"
-      ]
+      ],
+      "x-ui": {
+        "widget": "select",
+        "placeholder": "Select sub-type",
+        "enumNames": [
+          "Employment Exchange",
+          "Placement Agency",
+          "Community Group",
+          "Individual Trainer / Counsellor",
+          "MSME Association",
+          "Industries and Commerce Department",
+          "Other"
+        ]
+      }
     },
     "management_type": {
       "type": "string",
       "title": "Management Type",
       "description": "Whether the organisation is privately run, government-operated, or an NGO.",
-      "enum": ["private", "government", "ngo", "other"]
+      "enum": ["private", "government", "ngo", "other"],
+      "x-ui": {
+        "widget": "select",
+        "placeholder": "Select management type",
+        "enumNames": ["Private", "Government", "NGO", "Other"]
+      }
     },
     "address": {
       "type": "object",
@@ -98,12 +162,65 @@
       "description": "Street onwards for the organisation.",
       "additionalProperties": false,
       "properties": {
-        "streetAddress": { "type": "string", "title": "Street", "maxLength": 300 },
-        "addressLocality": { "type": "string", "title": "City", "maxLength": 200 },
-        "addressDistrict": { "type": "string", "title": "District", "maxLength": 200 },
-        "addressRegion": { "type": "string", "title": "State", "maxLength": 200 },
-        "postalCode": { "type": "string", "title": "PIN code", "maxLength": 20 },
-        "addressCountry": { "type": "string", "title": "Country", "maxLength": 100 }
+        "streetAddress": {
+          "type": "string",
+          "title": "Street",
+          "maxLength": 300,
+          "x-ui": {
+            "placeholder": "Street, Area"
+          }
+        },
+        "addressLocality": {
+          "type": "string",
+          "title": "City",
+          "maxLength": 200,
+          "x-ui": {
+            "placeholder": "City"
+          }
+        },
+        "addressDistrict": {
+          "type": "string",
+          "title": "District",
+          "maxLength": 200,
+          "x-ui": {
+            "placeholder": "District"
+          }
+        },
+        "addressRegion": {
+          "type": "string",
+          "title": "State",
+          "maxLength": 200,
+          "x-ui": {
+            "placeholder": "State"
+          }
+        },
+        "postalCode": {
+          "type": "string",
+          "title": "PIN code",
+          "maxLength": 20,
+          "x-ui": {
+            "placeholder": "PIN"
+          }
+        },
+        "addressCountry": {
+          "type": "string",
+          "title": "Country",
+          "maxLength": 100,
+          "x-ui": {
+            "placeholder": "India"
+          }
+        }
+      },
+      "x-form-layout": {
+        "layout": "grid",
+        "order": [
+          "streetAddress",
+          "addressLocality",
+          "addressDistrict",
+          "addressRegion",
+          "postalCode",
+          "addressCountry"
+        ]
       }
     },
     "owner": {
@@ -117,21 +234,40 @@
           "title": "Owner Name",
           "minLength": 2,
           "maxLength": 200,
-          "examples": ["Rajesh Kumar"]
+          "examples": ["Rajesh Kumar"],
+          "x-ui": {
+            "placeholder": "Full name of the organisation owner"
+          }
         },
         "phone": {
           "type": "string",
           "title": "Phone",
           "pattern": "^(\\+?\\d{10,15}|\\d{10})$",
-          "examples": ["+919876543210", "9876543210"]
+          "examples": ["+919876543210", "9876543210"],
+          "x-ui": {
+            "placeholder": "+91 98765 43210",
+            "options": {
+              "inputType": "tel"
+            }
+          }
         },
         "email": {
           "type": "string",
           "title": "Email",
           "format": "email",
           "maxLength": 320,
-          "examples": ["owner@enableindia.org"]
+          "examples": ["owner@enableindia.org"],
+          "x-ui": {
+            "placeholder": "owner@yourorg.org",
+            "options": {
+              "inputType": "email"
+            }
+          }
         }
+      },
+      "x-form-layout": {
+        "layout": "grid",
+        "order": ["name", "phone", "email"]
       }
     },
     "consent": {
@@ -142,17 +278,52 @@
       "properties": {
         "value": {
           "type": "boolean",
-          "title": "I have read and accept the terms and privacy policy"
+          "title": "I have read and accept the terms and privacy policy",
+          "x-ui": {
+            "widget": "ConsentCheckbox"
+          }
         },
         "given_at": {
           "type": "string",
-          "format": "date-time"
+          "format": "date-time",
+          "x-ui": {
+            "widget": "hidden",
+            "options": {
+              "label": false
+            }
+          }
         },
         "valid_till": {
           "type": "string",
-          "format": "date-time"
+          "format": "date-time",
+          "x-ui": {
+            "widget": "hidden",
+            "options": {
+              "label": false
+            }
+          }
         }
+      },
+      "x-form-layout": {
+        "layout": "stack",
+        "order": ["value", "given_at", "valid_till"]
       }
     }
+  },
+  "x-form-layout": {
+    "layout": "stack",
+    "order": [
+      "display_name",
+      "website",
+      "aggregator_type",
+      "organisation_type",
+      "organisation_sub_type_educational",
+      "organisation_sub_type_non_educational",
+      "management_type",
+      "address",
+      "state",
+      "owner",
+      "consent"
+    ]
   }
 }

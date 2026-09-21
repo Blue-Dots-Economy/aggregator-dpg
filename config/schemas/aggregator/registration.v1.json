@@ -12,12 +12,21 @@
       "title": "Organisation Name",
       "minLength": 2,
       "maxLength": 200,
-      "examples": ["SkillBridge Network", "TRRAIN", "Pankh Foundation"]
+      "examples": ["SkillBridge Network", "TRRAIN", "Pankh Foundation"],
+      "x-ui": {
+        "placeholder": "e.g. SkillBridge Network",
+        "autofocus": true
+      }
     },
     "type": {
       "type": "string",
       "title": "Aggregator Type",
-      "enum": ["seeker", "provider"]
+      "enum": ["seeker", "provider"],
+      "x-ui": {
+        "widget": "select",
+        "placeholder": "Select aggregator type",
+        "enumNames": ["Seeker", "Provider"]
+      }
     },
     "url": {
       "type": "string",
@@ -25,7 +34,13 @@
       "format": "uri",
       "maxLength": 2048,
       "examples": ["https://skillbridge.in"],
-      "x-updatable": true
+      "x-updatable": true,
+      "x-ui": {
+        "placeholder": "https://yourorg.in",
+        "options": {
+          "inputType": "url"
+        }
+      }
     },
     "locations": {
       "type": "array",
@@ -57,12 +72,22 @@
                   "MultiPolygon",
                   "GeometryCollection"
                 ],
-                "default": "Point"
+                "default": "Point",
+                "x-ui": {
+                  "widget": "hidden"
+                }
               },
               "coordinates": {
                 "type": "array",
-                "default": [0, 0]
+                "default": [0, 0],
+                "x-ui": {
+                  "widget": "hidden"
+                }
               }
+            },
+            "x-ui": {
+              "widget": "hidden",
+              "title": ""
             }
           },
           "address": {
@@ -71,27 +96,70 @@
             "properties": {
               "streetAddress": {
                 "type": "string",
-                "title": "Street"
+                "title": "Street",
+                "x-ui": {
+                  "placeholder": "Street"
+                }
               },
               "addressLocality": {
                 "type": "string",
-                "title": "City"
+                "title": "City",
+                "x-ui": {
+                  "placeholder": "City"
+                }
               },
               "addressRegion": {
                 "type": "string",
-                "title": "State"
+                "title": "State",
+                "x-ui": {
+                  "placeholder": "State"
+                }
               },
               "postalCode": {
                 "type": "string",
-                "title": "PIN code"
+                "title": "PIN code",
+                "x-ui": {
+                  "placeholder": "PIN"
+                }
               },
               "addressCountry": {
                 "type": "string",
                 "title": "Country",
-                "minLength": 1
+                "minLength": 1,
+                "x-ui": {
+                  "placeholder": "India"
+                }
               }
+            },
+            "x-form-layout": {
+              "layout": "grid",
+              "order": [
+                "streetAddress",
+                "addressLocality",
+                "addressRegion",
+                "postalCode",
+                "addressCountry"
+              ]
+            },
+            "x-ui": {
+              "title": ""
             }
           }
+        },
+        "x-form-layout": {
+          "layout": "stack",
+          "order": ["address", "geo"]
+        },
+        "x-ui": {
+          "title": ""
+        }
+      },
+      "x-ui": {
+        "options": {
+          "addable": true,
+          "removable": true,
+          "orderable": false,
+          "itemLabel": "Location"
         }
       }
     },
@@ -106,21 +174,40 @@
           "title": "Contact Name",
           "minLength": 2,
           "maxLength": 200,
-          "examples": ["Rajesh Kumar"]
+          "examples": ["Rajesh Kumar"],
+          "x-ui": {
+            "placeholder": "Full name of the primary contact"
+          }
         },
         "phone": {
           "type": "string",
           "title": "Phone",
           "pattern": "^(\\+?\\d{10,15}|\\d{10})$",
-          "examples": ["+919876543210", "9876543210"]
+          "examples": ["+919876543210", "9876543210"],
+          "x-ui": {
+            "placeholder": "+91 98765 43210",
+            "options": {
+              "inputType": "tel"
+            }
+          }
         },
         "email": {
           "type": "string",
           "title": "Email",
           "format": "email",
           "maxLength": 320,
-          "examples": ["admin@skillbridge.in"]
+          "examples": ["admin@skillbridge.in"],
+          "x-ui": {
+            "placeholder": "admin@yourorg.in",
+            "options": {
+              "inputType": "email"
+            }
+          }
         }
+      },
+      "x-form-layout": {
+        "layout": "grid",
+        "order": ["name", "phone", "email"]
       }
     },
     "consent": {
@@ -131,17 +218,40 @@
       "properties": {
         "value": {
           "type": "boolean",
-          "title": "I have read and accept the terms and privacy policy"
+          "title": "I have read and accept the terms and privacy policy",
+          "x-ui": {
+            "widget": "ConsentCheckbox"
+          }
         },
         "given_at": {
           "type": "string",
-          "format": "date-time"
+          "format": "date-time",
+          "x-ui": {
+            "widget": "hidden",
+            "options": {
+              "label": false
+            }
+          }
         },
         "valid_till": {
           "type": "string",
-          "format": "date-time"
+          "format": "date-time",
+          "x-ui": {
+            "widget": "hidden",
+            "options": {
+              "label": false
+            }
+          }
         }
+      },
+      "x-form-layout": {
+        "layout": "stack",
+        "order": ["value", "given_at", "valid_till"]
       }
     }
+  },
+  "x-form-layout": {
+    "layout": "stack",
+    "order": ["name", "type", "url", "contact", "locations", "consent"]
   }
 }

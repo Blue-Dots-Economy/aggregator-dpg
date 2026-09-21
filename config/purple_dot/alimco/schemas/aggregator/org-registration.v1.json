@@ -12,7 +12,11 @@
       "title": "Organisation Name",
       "minLength": 2,
       "maxLength": 200,
-      "examples": ["ABC Limited", "XYZ Foundation"]
+      "examples": ["ABC Limited", "XYZ Foundation"],
+      "x-ui": {
+        "placeholder": "e.g. ABC Limited",
+        "autofocus": true
+      }
     },
     "website": {
       "type": "string",
@@ -21,7 +25,13 @@
       "maxLength": 2048,
       "description": "Not required at signup; can be added or edited later.",
       "examples": ["https://abclimited.org"],
-      "x-updatable": true
+      "x-updatable": true,
+      "x-ui": {
+        "placeholder": "https://yourorg.org",
+        "options": {
+          "inputType": "url"
+        }
+      }
     },
     "aggregator_type": {
       "type": "array",
@@ -33,13 +43,21 @@
         "type": "string",
         "enum": ["seeker", "provider"]
       },
-      "examples": [["seeker"], ["provider"], ["seeker", "provider"]]
+      "examples": [["seeker"], ["provider"], ["seeker", "provider"]],
+      "x-ui": {
+        "enumNames": ["Seekers", "Service Providers"]
+      }
     },
     "organisation_type": {
       "type": "string",
       "title": "Organisation Type",
       "description": "The broad category that describes your organisation.",
-      "enum": ["ngo", "government_entity", "private_company", "community_group", "other"]
+      "enum": ["ngo", "government_entity", "private_company", "community_group", "other"],
+      "x-ui": {
+        "widget": "select",
+        "placeholder": "Select organisation type",
+        "enumNames": ["NGO", "Government Entity", "Private Company", "Community Group", "Others"]
+      }
     },
     "address": {
       "type": "object",
@@ -50,40 +68,75 @@
         "streetAddress": {
           "type": "string",
           "title": "Street",
-          "maxLength": 300
+          "maxLength": 300,
+          "x-ui": {
+            "placeholder": "Street, Area"
+          }
         },
         "addressLocality": {
           "type": "string",
           "title": "City",
-          "maxLength": 200
+          "maxLength": 200,
+          "x-ui": {
+            "placeholder": "City"
+          }
         },
         "addressDistrict": {
           "type": "string",
           "title": "District",
-          "maxLength": 200
+          "maxLength": 200,
+          "x-ui": {
+            "placeholder": "District"
+          }
         },
         "addressRegion": {
           "type": "string",
           "title": "State",
-          "maxLength": 200
+          "maxLength": 200,
+          "x-ui": {
+            "placeholder": "State"
+          }
         },
         "postalCode": {
           "type": "string",
           "title": "PIN code",
-          "maxLength": 20
+          "maxLength": 20,
+          "x-ui": {
+            "placeholder": "PIN"
+          }
         },
         "addressCountry": {
           "type": "string",
           "title": "Country",
-          "maxLength": 100
+          "maxLength": 100,
+          "x-ui": {
+            "placeholder": "India"
+          }
         }
+      },
+      "x-form-layout": {
+        "layout": "grid",
+        "order": [
+          "streetAddress",
+          "addressLocality",
+          "addressDistrict",
+          "addressRegion",
+          "postalCode",
+          "addressCountry"
+        ]
       }
     },
     "state": {
       "type": "string",
       "title": "State",
       "description": "Derived from the address block on this instance; not asked for separately.",
-      "maxLength": 200
+      "maxLength": 200,
+      "x-ui": {
+        "widget": "hidden",
+        "options": {
+          "label": false
+        }
+      }
     },
     "owner": {
       "type": "object",
@@ -96,21 +149,40 @@
           "title": "Owner Name",
           "minLength": 2,
           "maxLength": 200,
-          "examples": ["Rajesh Kumar"]
+          "examples": ["Rajesh Kumar"],
+          "x-ui": {
+            "placeholder": "Full name of the organisation owner"
+          }
         },
         "phone": {
           "type": "string",
           "title": "Phone",
           "pattern": "^(\\+?\\d{10,15}|\\d{10})$",
-          "examples": ["+919876543210", "9876543210"]
+          "examples": ["+919876543210", "9876543210"],
+          "x-ui": {
+            "placeholder": "+91 98765 43210",
+            "options": {
+              "inputType": "tel"
+            }
+          }
         },
         "email": {
           "type": "string",
           "title": "Email",
           "format": "email",
           "maxLength": 320,
-          "examples": ["owner@abclimited.org"]
+          "examples": ["owner@abclimited.org"],
+          "x-ui": {
+            "placeholder": "owner@yourorg.org",
+            "options": {
+              "inputType": "email"
+            }
+          }
         }
+      },
+      "x-form-layout": {
+        "layout": "grid",
+        "order": ["name", "phone", "email"]
       }
     },
     "consent": {
@@ -121,17 +193,49 @@
       "properties": {
         "value": {
           "type": "boolean",
-          "title": "I have read and accept the terms and privacy policy"
+          "title": "I have read and accept the terms and privacy policy",
+          "x-ui": {
+            "widget": "ConsentCheckbox"
+          }
         },
         "given_at": {
           "type": "string",
-          "format": "date-time"
+          "format": "date-time",
+          "x-ui": {
+            "widget": "hidden",
+            "options": {
+              "label": false
+            }
+          }
         },
         "valid_till": {
           "type": "string",
-          "format": "date-time"
+          "format": "date-time",
+          "x-ui": {
+            "widget": "hidden",
+            "options": {
+              "label": false
+            }
+          }
         }
+      },
+      "x-form-layout": {
+        "layout": "stack",
+        "order": ["value", "given_at", "valid_till"]
       }
     }
+  },
+  "x-form-layout": {
+    "layout": "stack",
+    "order": [
+      "display_name",
+      "website",
+      "aggregator_type",
+      "organisation_type",
+      "address",
+      "state",
+      "owner",
+      "consent"
+    ]
   }
 }
