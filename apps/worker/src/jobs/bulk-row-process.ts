@@ -33,6 +33,11 @@ import { getNetworkConfig } from '../services/network-config.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
 import { config } from '../config.js';
 import { logger } from '../logger.js';
+import {
+  GEO_LOCATION_COLUMN,
+  parseGeoLocation,
+  type ParsedGeoLocation,
+} from './bulk-well-known-columns.js';
 
 let participantsWriter: ParticipantsWriterBase | null = null;
 function getParticipantsWriter(): ParticipantsWriterBase {
@@ -95,6 +100,28 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
       },
       log,
     );
+  }
+
+  // 0. Well-known columns (#807). Pulled out of the payload BEFORE Ajv runs:
+  // they are not schema properties, so a schema with
+  // `additionalProperties: false` would reject every row carrying them, and
+  // any that survived would reach Signals as junk `item_state` fields.
+  // Removing them here also keeps them out of `item_state` without a second
+  // strip step, since the payload is passed through verbatim further down.
+  const geoRaw = job.payload[GEO_LOCATION_COLUMN];
+  delete job.payload[GEO_LOCATION_COLUMN];
+  const geo = parseGeoLocation(geoRaw);
+  if (geo.status === 'invalid') {
+    // Not a row failure. Coordinates only let Signals skip geocoding, so a bad
+    // cell costs a geocoder call rather than correctness — and failing here
+    // would push the operator into a re-upload, which duplicates every
+    // already-successful row because `onboard` always inserts.
+    // Logged without the raw cell: coordinates are PII.
+    log.warn({
+      status: 'partial',
+      sub: 'geo_location.ignored',
+      reason: geo.reason,
+    });
   }
 
   // 1. Schema validation. Load schema + validator together (both cached
@@ -238,7 +265,14 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
     // row's outcome to `failed` so it surfaces in errors.csv alongside any
     // validation / normalisation failures. Operators see one consistent
     // signal: a row only counts as "passed" once signalstack has it too.
-    const push = await pushToSignalStack(job, participantId, phoneNormalised, emailNormalised, log);
+    const push = await pushToSignalStack(
+      job,
+      participantId,
+      phoneNormalised,
+      emailNormalised,
+      log,
+      geo.status === 'ok' ? geo.value : null,
+    );
     if (!push.success) {
       // `push.message` already includes the upstream's own error text when
       // signalstack returned a JSON body (e.g.
@@ -395,6 +429,12 @@ export async function pushToSignalStack(
   phone: string | null,
   email: string | null,
   log: typeof logger,
+  /**
+   * Point parsed from the row's `geo_location` cell, or null when the column
+   * was absent, blank or unusable. Non-null makes Signals store it verbatim
+   * and skip geocoding the address text; null leaves today's behaviour intact.
+   */
+  geoLocation: ParsedGeoLocation | null = null,
 ): Promise<SignalStackPushResult> {
   const ss = getSignalStackWriter();
   // Signalstack disabled in this env — treat as success so the row is not
@@ -495,6 +535,10 @@ export async function pushToSignalStack(
     network: config.SIGNALSTACK_ITEM_NETWORK,
     domain: job.participantType,
     item_type: domainCfg.itemType,
+    // Omitted entirely rather than sent as `[]` — Signals treats a present,
+    // non-empty array as "use these coordinates, do not geocode", and an empty
+    // one would be an ambiguous way to say "I have none".
+    ...(geoLocation ? { item_locations: [geoLocation] } : {}),
     // Always pass the row's profile cells through verbatim. Signals
     // accepts partial item_state and classifies the resulting item as
     // `draft` when required fields are missing — that's signals' job,
