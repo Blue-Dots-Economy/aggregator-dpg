@@ -132,19 +132,67 @@ describe('createPhotonProvider', () => {
     expect(await createPhotonProvider('https://photon.test').suggest('jayanagar')).toEqual([]);
   });
 
-  it('forwards an abort signal so a superseded keystroke cancels its request', async () => {
+  it('aborting a superseded keystroke aborts the request it started', async () => {
+    // The caller's signal is no longer forwarded as-is — it is combined with a
+    // request deadline — so assert the behaviour rather than object identity:
+    // cancelling upstream must still abort what reached `fetch`.
     const controller = new AbortController();
 
     await createPhotonProvider('https://photon.test').suggest('jayanagar', controller.signal);
+    const sent = (fetchMock.mock.calls[0]?.[1] as RequestInit).signal as AbortSignal;
+    expect(sent.aborted).toBe(false);
 
-    expect((fetchMock.mock.calls[0]?.[1] as RequestInit).signal).toBe(controller.signal);
+    controller.abort();
+    expect(sent.aborted).toBe(true);
   });
 
-  it('omits the signal key entirely when no signal is supplied', async () => {
-    // `exactOptionalPropertyTypes` forbids passing an explicit `undefined`
-    // here, so the implementation spreads it conditionally.
+  it('always sends a signal, so an unsupplied one still carries the deadline', async () => {
+    // Previously this asserted the key was omitted. Every call now carries a
+    // deadline, which is the point: a request with no caller signal was the
+    // one that could hang indefinitely.
     await createPhotonProvider('https://photon.test').suggest('jayanagar');
 
-    expect(fetchMock.mock.calls[0]?.[1]).not.toHaveProperty('signal');
+    expect((fetchMock.mock.calls[0]?.[1] as RequestInit).signal).toBeInstanceOf(AbortSignal);
+  });
+});
+
+describe('request deadline', () => {
+  it('aborts a stalled request instead of hanging the dropdown', async () => {
+    // The caller's signal only cancels when the NEXT keystroke supersedes this
+    // query. A public endpoint that accepts the connection and then goes quiet
+    // would otherwise leave the request open and the list empty forever.
+    vi.useFakeTimers();
+    let observed: AbortSignal | undefined;
+    globalThis.fetch = vi.fn((_u: string, init?: RequestInit) => {
+      observed = init?.signal ?? undefined;
+      return new Promise<Response>((_res, rej) => {
+        observed?.addEventListener('abort', () => rej(new Error('aborted')), { once: true });
+      });
+    }) as unknown as typeof fetch;
+
+    const pending = createPhotonProvider().suggest('MG Road');
+    await vi.advanceTimersByTimeAsync(4_000);
+    // Failure is swallowed into an empty list, as every other failure here is.
+    await expect(pending).resolves.toEqual([]);
+    expect(observed?.aborted).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it("still honours the caller's own cancellation", async () => {
+    vi.useFakeTimers();
+    let observed: AbortSignal | undefined;
+    globalThis.fetch = vi.fn((_u: string, init?: RequestInit) => {
+      observed = init?.signal ?? undefined;
+      return new Promise<Response>((_res, rej) => {
+        observed?.addEventListener('abort', () => rej(new Error('aborted')), { once: true });
+      });
+    }) as unknown as typeof fetch;
+
+    const caller = new AbortController();
+    const pending = createPhotonProvider().suggest('MG Road', caller.signal);
+    caller.abort();
+    await expect(pending).resolves.toEqual([]);
+    expect(observed?.aborted).toBe(true);
+    vi.useRealTimers();
   });
 });

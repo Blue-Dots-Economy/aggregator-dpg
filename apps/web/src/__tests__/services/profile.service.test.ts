@@ -95,6 +95,32 @@ describe('profileService', () => {
     expect(profile.address).toBe('');
   });
 
+  // Since #810 registration stores one free-text address, so `addressRegion`
+  // and friends are absent on any row created after it. The fixture above is
+  // the pre-#810 shape and must keep working; this is the current one.
+  it('renders a single-field address, falling back to it for geographies', async () => {
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            ...apiResponse,
+            locations: [
+              {
+                geo: { type: 'Point', coordinates: [77.6245, 12.9352] },
+                address: { streetAddress: 'JP Nagar, Bengaluru, Karnataka' },
+              },
+            ],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+    ) as unknown as typeof fetch;
+    const profile = await profileService.get();
+    expect(profile.address).toBe('JP Nagar, Bengaluru, Karnataka');
+    // Without the fallback this renders blank for every new registration,
+    // because `geographies` used to read `addressRegion` alone.
+    expect(profile.geographies).toBe('JP Nagar, Bengaluru, Karnataka');
+  });
+
   it('throws when API returns non-2xx', async () => {
     globalThis.fetch = vi.fn(
       async () => new Response('nope', { status: 503 }),

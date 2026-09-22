@@ -78,24 +78,8 @@
             "properties": {
               "streetAddress": {
                 "type": "string",
-                "title": "Street"
-              },
-              "addressLocality": {
-                "type": "string",
-                "title": "City"
-              },
-              "addressRegion": {
-                "type": "string",
-                "title": "State"
-              },
-              "postalCode": {
-                "type": "string",
-                "title": "PIN code"
-              },
-              "addressCountry": {
-                "type": "string",
-                "title": "Country",
-                "minLength": 1
+                "title": "Address",
+                "maxLength": 500
               }
             }
           }

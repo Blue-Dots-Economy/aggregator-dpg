@@ -4,19 +4,21 @@ import { useMemo, useState, type JSX } from 'react';
 import type { RJSFSchema, UiSchema } from '@rjsf/utils';
 import { useTranslations } from 'next-intl';
 import { RjsfThemedForm } from '../../../components/forms/RjsfThemed';
+import type { ResolvedPlace } from '../../../components/forms/custom-widgets/LocationAutocompleteWidget';
 import { ConsentGate } from '../../../components/consent/ConsentGate';
 import { toConsentDocs } from '../../../components/consent/consent-docs';
 import {
-  humaniseValidationErrors,
   stampConsent,
   stripConsentBlock,
   stripFormChrome,
   submitRegistration,
+  withOrgCoordinates,
 } from './registration-shared';
 import {
   RegistrationErrorBanner,
   RegistrationSubmitButton,
   RegistrationSuccessPanel,
+  sharedRegistrationFormProps,
   useConsentGateSubmit,
   useRegistrationFormState,
 } from './registration-ui';
@@ -54,6 +56,9 @@ export function OrgRegisterForm({
   const t = useTranslations('register');
   const { state, setState, canSubmit, setCanSubmit, errorRef } = useRegistrationFormState();
   const [formData, setFormData] = useState<Record<string, unknown>>({});
+  // Coordinate the address widget resolved, held outside `formData` because
+  // RJSF hands `formContext` to widgets one-way and never writes it back.
+  const [resolvedPlace, setResolvedPlace] = useState<ResolvedPlace | null>(null);
   const consentDocs = useMemo(() => toConsentDocs(consentContent), [consentContent]);
   const { gateOpen, setGateOpen, pendingRef, handleSubmit } = useConsentGateSubmit(
     consentDocs,
@@ -68,12 +73,13 @@ export function OrgRegisterForm({
   const submitWithConsent = async (): Promise<void> => {
     setGateOpen(false);
     setState({ status: 'submitting' });
-    const payload: Record<string, unknown> = {
+    const body: Record<string, unknown> = {
       // No `?? {}`: spreading null contributes nothing, so the fallback
       // object was dead weight rather than a guard.
       ...pendingRef.current,
       consent: stampConsent({ value: true }),
     };
+    const payload = withOrgCoordinates(body, resolvedPlace);
     const result = await submitRegistration('/api/org/register', payload);
     if (!result.ok) {
       setState({ status: 'error', ...result.error });
@@ -116,23 +122,17 @@ export function OrgRegisterForm({
       <RjsfThemedForm
         schema={formSchema}
         uiSchema={uiSchema as unknown as UiSchema<Record<string, unknown>>}
-        formData={formData}
-        formContext={{ consentContent }}
-        onChange={(e) => setFormData(e.formData as Record<string, unknown>)}
-        onValidityChange={setCanSubmit}
-        onSubmit={handleSubmit}
-        onError={(errs) => {
-          setState({
-            status: 'error',
-            title: t('validation_error_title'),
-            detail: humaniseValidationErrors(errs, formSchema).join('\n'),
-            code: 'CLIENT_VALIDATION',
-            requestId: JSON.stringify(errs, null, 2),
-          });
-        }}
-        showErrorList={false}
-        focusOnFirstError
-        noHtml5Validate
+        {...sharedRegistrationFormProps({
+          formData,
+          setFormData,
+          setCanSubmit,
+          setState,
+          handleSubmit,
+          formSchema,
+          consentContent,
+          onLocationResolved: setResolvedPlace,
+          validationErrorTitle: t('validation_error_title'),
+        })}
       >
         <RegistrationSubmitButton
           submitting={state.status === 'submitting'}

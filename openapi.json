@@ -921,7 +921,7 @@
                     "properties": {
                       "streetAddress": {
                         "type": "string",
-                        "maxLength": 300
+                        "maxLength": 500
                       },
                       "addressLocality": {
                         "type": "string",
@@ -945,6 +945,23 @@
                       }
                     },
                     "additionalProperties": false
+                  },
+                  "coordinates": {
+                    "type": "array",
+                    "minItems": 2,
+                    "maxItems": 2,
+                    "items": [
+                      {
+                        "type": "number",
+                        "minimum": -180,
+                        "maximum": 180
+                      },
+                      {
+                        "type": "number",
+                        "minimum": -90,
+                        "maximum": 90
+                      }
+                    ]
                   }
                 },
                 "required": [

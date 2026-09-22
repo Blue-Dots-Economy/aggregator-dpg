@@ -342,6 +342,11 @@ body {
   color: var(--bd-fg);
   transition: all 0.15s;
 }
+/* Leaves room for a leading icon. A Tailwind `pl-*` utility cannot do this:
+   `.bd-input` sets the `padding` shorthand as plain CSS, which outranks the
+   layered utility, so the icon would sit on top of the text. */
+.bd-input--icon-left { padding-left: 36px; }
+
 .bd-input:hover { background: var(--bd-border-soft); }
 .bd-input:focus {
   outline: none;

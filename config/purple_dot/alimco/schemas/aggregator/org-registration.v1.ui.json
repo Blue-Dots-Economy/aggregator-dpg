@@ -6,19 +6,12 @@
     "aggregator_type",
     "organisation_type",
     "address",
-    "state",
     "owner",
     "consent"
   ],
   "display_name": {
     "ui:placeholder": "e.g. ABC Limited",
     "ui:autofocus": true
-  },
-  "state": {
-    "ui:widget": "hidden",
-    "ui:options": {
-      "label": false
-    }
   },
   "owner": {
     "ui:layout": "grid",
@@ -68,33 +61,15 @@
     "ui:enumNames": ["Seekers", "Service Providers"]
   },
   "address": {
-    "ui:layout": "grid",
-    "ui:order": [
-      "streetAddress",
-      "addressLocality",
-      "addressDistrict",
-      "addressRegion",
-      "postalCode",
-      "addressCountry"
-    ],
+    "ui:title": "",
     "streetAddress": {
-      "ui:placeholder": "Street, Area"
+      "ui:widget": "location-autocomplete",
+      "ui:placeholder": "Start typing and pick your address",
+      "ui:options": {
+        "isPrimaryLocation": true
+      }
     },
-    "addressLocality": {
-      "ui:placeholder": "City"
-    },
-    "addressDistrict": {
-      "ui:placeholder": "District"
-    },
-    "addressRegion": {
-      "ui:placeholder": "State"
-    },
-    "postalCode": {
-      "ui:placeholder": "PIN"
-    },
-    "addressCountry": {
-      "ui:placeholder": "India"
-    }
+    "ui:layout": "stack"
   },
   "organisation_type": {
     "ui:widget": "select",

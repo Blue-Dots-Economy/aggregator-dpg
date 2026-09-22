@@ -258,3 +258,78 @@ export function stripConsentBlock(schema: RJSFSchema): RJSFSchema {
   }
   return clone;
 }
+
+/** The half of a resolved place this module needs. Structural, so the widget's
+ *  richer `ResolvedPlace` satisfies it without importing React code here. */
+export interface ResolvedCoordinate {
+  lat: number;
+  lng: number;
+}
+
+/**
+ * Attaches the resolved coordinate to an **organisation** submit body.
+ *
+ * Flat, unlike {@link withResolvedCoordinates}: the org body has no location
+ * array, so the coordinate rides alongside the address and lands in
+ * `aggregator_orgs.profile`.
+ *
+ * Extracted rather than built inline in the component for one reason — the
+ * `[longitude, latitude]` order is the single most dangerous thing in this
+ * feature and it cannot be type-checked, because both members are numbers.
+ * A function is something a test can pin; an object literal inside a submit
+ * handler is not.
+ *
+ * @param payload - The submit body.
+ * @param place - The coordinate the widget resolved, or null if none.
+ * @returns A copy carrying `coordinates`, or the original when none resolved.
+ */
+export function withOrgCoordinates(
+  payload: Record<string, unknown>,
+  place: ResolvedCoordinate | null,
+): Record<string, unknown> {
+  if (!place) return payload;
+  return {
+    ...payload,
+    // GeoJSON is [longitude, latitude] — the reverse of how the widget (and
+    // everyday speech) orders them. Swapped, Bengaluru lands in Somalia.
+    coordinates: [place.lng, place.lat],
+  };
+}
+
+/**
+ * Stitches a resolved coordinate into the coordinator payload's first location.
+ *
+ * The address widget reports what it resolved on a side channel — RJSF exposes
+ * `formContext` to widgets but never writes it back into `formData` — so the
+ * coordinate has to be merged in at submit rather than read off the form.
+ *
+ * Returns the payload untouched when nothing was resolved, which is the case
+ * whenever the user typed an address without picking a suggestion. The `[0,0]`
+ * placeholder then stands, exactly as it did before this field existed:
+ * `locations.items.required` includes `geo`, so the entry cannot simply omit it.
+ *
+ * @param payload - The submit body, carrying the form's `locations` array.
+ * @param place - The coordinate the widget resolved, or null if none.
+ * @returns A copy with `locations[0].geo.coordinates` set, or the original.
+ */
+export function withResolvedCoordinates(
+  payload: Record<string, unknown>,
+  place: ResolvedCoordinate | null,
+): Record<string, unknown> {
+  if (!place) return payload;
+  const locations = payload['locations'];
+  if (!Array.isArray(locations) || locations.length === 0) return payload;
+  const [first, ...rest] = locations as Record<string, unknown>[];
+  return {
+    ...payload,
+    locations: [
+      {
+        ...first,
+        // GeoJSON is [longitude, latitude] — the reverse of how the widget (and
+        // everyday speech) orders them. Swapped, Bengaluru lands in Somalia.
+        geo: { type: 'Point', coordinates: [place.lng, place.lat] },
+      },
+      ...rest,
+    ],
+  };
+}
