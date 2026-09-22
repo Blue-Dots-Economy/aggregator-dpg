@@ -55,7 +55,11 @@ export interface StreamedRow {
 export interface StreamCsvOptions {
   /** Required header columns (from the schema `required` array). */
   required: string[];
-  /** Permitted header columns (the schema `properties` keys). */
+  /**
+   * Permitted header columns: the schema's `properties` keys UNION the
+   * well-known columns that are not schema properties (`WELL_KNOWN_COLUMNS`,
+   * #807). Anything outside that union fails the whole file.
+   */
   allowed: ReadonlySet<string>;
   /** Maximum number of data rows; exceeding it fails `row_cap_exceeded`. */
   maxRows: number;

@@ -28,6 +28,7 @@ import { getSchemaLoader } from '../services/schema-loader.js';
 import { getRedis } from '../services/redis.js';
 import { enqueueRowProcessBulk } from '../services/bulk-queue.js';
 import { streamCsvParse, type FileFailureReason } from './bulk-file-stream.js';
+import { WELL_KNOWN_COLUMNS } from '@aggregator-dpg/shared-primitives/bulk-columns';
 
 export type { FileFailureReason };
 
@@ -115,7 +116,10 @@ export async function processBulkFile(job: BulkFileProcessJob): Promise<ProcessO
   }
 
   const required = extractRequiredFields(schemaResult.value);
-  const allowed = new Set(extractAllProperties(schemaResult.value));
+  // Well-known columns are allowed on top of the schema's own properties, and
+  // deliberately never added to `required` — a CSV written before they existed
+  // must keep working (#807).
+  const allowed = new Set([...extractAllProperties(schemaResult.value), ...WELL_KNOWN_COLUMNS]);
   const parsed = await streamCsvParse(stream, {
     required,
     allowed,

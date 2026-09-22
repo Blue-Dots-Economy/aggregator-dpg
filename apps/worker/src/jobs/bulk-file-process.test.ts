@@ -143,6 +143,33 @@ describe('processBulkFile — idempotency + failure', () => {
     expect(updates.some((u) => u['status'] === 'file_failed')).toBe(true);
   });
 
+  it('accepts a well-known column in the header (#807)', async () => {
+    // The single line that makes geo_location work at all is the
+    // `...WELL_KNOWN_COLUMNS` union in the allowlist. Without it the header
+    // check rejects the column as unknown and the WHOLE file onboards zero
+    // rows — so every CSV downloaded from the new template would fail, and
+    // none of the row-level behaviour is ever reached.
+    const { getCsvStream } = await import('../object-storage.js');
+    vi.mocked(getCsvStream).mockResolvedValueOnce(
+      Readable.from([Buffer.from('name,email,geo_location\nAsha,a@b.c,12.9352|77.6245', 'utf8')]),
+    );
+    const res = await processBulkFile(JOB);
+    expect(res.status).not.toBe('failed');
+    expect(enqueueRowProcessBulk).toHaveBeenCalled();
+  });
+
+  it('still rejects a genuinely unknown column', async () => {
+    // The allowlist is a union, not a bypass — anything outside the schema's
+    // properties and the well-known set must still fail the file.
+    const { getCsvStream } = await import('../object-storage.js');
+    vi.mocked(getCsvStream).mockResolvedValueOnce(
+      Readable.from([Buffer.from('name,email,not_a_column\nAsha,a@b.c,x', 'utf8')]),
+    );
+    const res = await processBulkFile(JOB);
+    expect(res.status).toBe('failed');
+    expect(res.reason).toBe('header_mismatch');
+  });
+
   it('marks file_failed with a bare (non-detailed) reason for a failure kind that carries no detail', async () => {
     const { getCsvStream } = await import('../object-storage.js');
     vi.mocked(getCsvStream).mockResolvedValueOnce(Readable.from([Buffer.from('', 'utf8')]));

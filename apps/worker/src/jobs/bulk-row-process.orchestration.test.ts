@@ -144,6 +144,22 @@ class FailingParticipantsWriter extends InMemoryParticipantsWriter {
   }
 }
 
+/**
+ * Records every `onboard` input so a test can assert what actually reached the
+ * wire — `item_locations` presence and the absence of `geo_location` from the
+ * profile are the two claims #807 makes, and neither is observable from the
+ * row outcome alone.
+ */
+class RecordingSignalStackWriter extends InMemorySignalStackWriter {
+  readonly inputs: SignalStackOnboardParticipantInput[] = [];
+  override async onboard(
+    input: SignalStackOnboardParticipantInput,
+  ): Promise<Result<SignalStackOnboardParticipantResult, BaseError>> {
+    this.inputs.push(input);
+    return await super.onboard(input);
+  }
+}
+
 class FailingSignalStackWriter extends InMemorySignalStackWriter {
   constructor(
     private readonly code = 'UPSTREAM_TIMEOUT',
@@ -458,5 +474,77 @@ describe('processBulkRow — Redis commit outcome handling', () => {
     heartbeatShouldThrow = new Error('db unavailable');
     const result = await processBulkRow(makeJob());
     expect(result.outcome).toBe('passed');
+  });
+});
+
+describe('processBulkRow — geo_location column (#807)', () => {
+  let recorder: RecordingSignalStackWriter;
+
+  beforeEach(() => {
+    recorder = new RecordingSignalStackWriter();
+    _setSignalStackWriter(recorder);
+  });
+
+  it('sends a valid cell as item_locations and keeps it out of the profile', async () => {
+    const result = await processBulkRow(
+      makeJob({
+        payload: {
+          name: 'Asha',
+          phone: '9876543210',
+          geo_location: '12.9352|77.6245',
+        },
+      }),
+    );
+
+    expect(result.outcome).toBe('passed');
+    const input = recorder.inputs.at(-1)!;
+    expect(input.item_locations).toEqual([{ lat: 12.9352, lng: 77.6245 }]);
+    // The column is not a schema property; leaking it would reach Signals as a
+    // junk item_state field.
+    expect(input.profile).not.toHaveProperty('geo_location');
+  });
+
+  it('omits item_locations entirely when the column is absent', async () => {
+    const result = await processBulkRow(makeJob());
+    expect(result.outcome).toBe('passed');
+    // Omitted, not `[]` — Signals reads a present non-empty array as "use
+    // these, do not geocode", and an empty one would be ambiguous.
+    expect(recorder.inputs.at(-1)!.item_locations).toBeUndefined();
+  });
+
+  it('passes the row and falls back to geocoding when the cell is unusable', async () => {
+    // `12.9352|` is the case that matters: Number('') is 0, not NaN, so this
+    // once parsed as a valid point at longitude 0.
+    const result = await processBulkRow(
+      makeJob({
+        payload: { name: 'Asha', phone: '9876543210', geo_location: '12.9352|' },
+      }),
+    );
+
+    expect(result.outcome).toBe('passed');
+    expect(lastCommit()).toEqual({ outcome: 'passed', errorPayload: '' });
+    const input = recorder.inputs.at(-1)!;
+    expect(input.item_locations).toBeUndefined();
+    expect(input.profile).not.toHaveProperty('geo_location');
+  });
+
+  it('leaves the value alone when the schema itself declares geo_location', async () => {
+    // The schema wins. Extracting here would delete a real property before Ajv
+    // sees it, failing every row on a column the operator can see in the file.
+    schemaResultVal = {
+      success: true,
+      value: { required: [], properties: { geo_location: { type: 'string' } } },
+    };
+
+    const result = await processBulkRow(
+      makeJob({
+        payload: { name: 'Asha', phone: '9876543210', geo_location: '12.9352|77.6245' },
+      }),
+    );
+
+    expect(result.outcome).toBe('passed');
+    const input = recorder.inputs.at(-1)!;
+    expect(input.item_locations).toBeUndefined();
+    expect(input.profile).toHaveProperty('geo_location', '12.9352|77.6245');
   });
 });
