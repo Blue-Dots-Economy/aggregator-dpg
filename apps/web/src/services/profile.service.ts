@@ -155,8 +155,12 @@ function mapToAggregatorProfile(api: ProfileApiResponse): AggregatorProfile {
   // Personas + services live on the profile half of the response. Render
   // them as bullet-separated lists for the existing dashboard layout.
   const beneficiaries = api.personas.map((p) => p.name).join(' · ');
+  // `addressRegion` only exists on rows registered before the address became a
+  // single autocomplete field (#810), so fall back to the free-text address —
+  // the only location text a current row carries. Without the fallback this
+  // renders blank for every new registration.
   const geographies = api.locations
-    .map((loc) => loc.address?.addressRegion)
+    .map((loc) => loc.address?.addressRegion || loc.address?.streetAddress)
     .filter((r): r is string => Boolean(r && r.length > 0))
     .join(' · ');
   const sectors = api.services.map((s) => s.name).join(' · ');

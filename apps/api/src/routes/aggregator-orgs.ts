@@ -70,16 +70,31 @@ const OrgCreateBodySchema = z.object({
   organisation_sub_type_educational: z.string().max(100).optional(),
   organisation_sub_type_non_educational: z.string().max(100).optional(),
   management_type: z.enum(['private', 'government', 'ngo', 'other']).optional(),
+  /**
+   * One free-text address, as picked from the autocomplete (#810).
+   *
+   * The discrete parts are no longer collected, but they stay declared here so
+   * a body written against the previous schema still validates rather than
+   * being silently stripped — `z.object` defaults to stripping unknown keys,
+   * which would turn an old client into a silent data-loss path.
+   */
   address: z
     .object({
-      streetAddress: z.string().max(300).optional(),
+      streetAddress: z.string().max(500).optional(),
       addressLocality: z.string().max(200).optional(),
-      addressDistrict: z.string().max(200).optional(),
       addressRegion: z.string().max(200).optional(),
       postalCode: z.string().max(20).optional(),
       addressCountry: z.string().max(100).optional(),
     })
     .optional(),
+  /**
+   * `[longitude, latitude]` for the picked address, GeoJSON order.
+   *
+   * Must be declared to survive: `z.object` strips undeclared keys silently,
+   * so an omission here would drop the coordinate with no error anywhere.
+   * Absent whenever the user typed an address without picking a suggestion.
+   */
+  coordinates: z.tuple([z.number().min(-180).max(180), z.number().min(-90).max(90)]).optional(),
 });
 
 /**

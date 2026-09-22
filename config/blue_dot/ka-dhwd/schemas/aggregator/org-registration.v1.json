@@ -21,13 +21,6 @@
       "maxLength": 200,
       "examples": ["Enable India", "Pankh Foundation"]
     },
-    "state": {
-      "type": "string",
-      "title": "State",
-      "description": "Derived from the address block on this instance; not asked for separately.",
-      "maxLength": 200,
-      "examples": ["Uttar Pradesh"]
-    },
     "website": {
       "type": "string",
       "title": "Website",
@@ -59,7 +52,9 @@
       "type": "string",
       "title": "Organisation Sub-Type",
       "description": "Select the type that best applies.",
-      "x-show-if": { "organisation_type": ["educational"] },
+      "x-show-if": {
+        "organisation_type": ["educational"]
+      },
       "enum": [
         "school",
         "pu_college",
@@ -75,7 +70,9 @@
       "type": "string",
       "title": "Organisation Sub-Type",
       "description": "Select the type that best applies.",
-      "x-show-if": { "organisation_type": ["non_educational"] },
+      "x-show-if": {
+        "organisation_type": ["non_educational"]
+      },
       "enum": [
         "employment_exchange",
         "placement_agency",
@@ -95,15 +92,14 @@
     "address": {
       "type": "object",
       "title": "Address",
-      "description": "Street onwards for the organisation.",
       "additionalProperties": false,
       "properties": {
-        "streetAddress": { "type": "string", "title": "Street", "maxLength": 300 },
-        "addressLocality": { "type": "string", "title": "City", "maxLength": 200 },
-        "addressDistrict": { "type": "string", "title": "District", "maxLength": 200 },
-        "addressRegion": { "type": "string", "title": "State", "maxLength": 200 },
-        "postalCode": { "type": "string", "title": "PIN code", "maxLength": 20 },
-        "addressCountry": { "type": "string", "title": "Country", "maxLength": 100 }
+        "streetAddress": {
+          "type": "string",
+          "title": "Address",
+          "description": "Start typing and pick your address from the list",
+          "maxLength": 500
+        }
       }
     },
     "owner": {

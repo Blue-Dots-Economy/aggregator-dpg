@@ -300,6 +300,13 @@ export function CreateLinkSection() {
   // Prefill state / district / event location from the aggregator's first
   // postal address. User can still override. Only fills on first load —
   // subsequent edits stay sticky.
+  //
+  // Since #810 the address is one free-text line, so `addressRegion` and
+  // `addressLocality` exist only on rows registered before that. State and
+  // district are left blank rather than guessed — a state cannot be parsed out
+  // of free text reliably, and a wrong prefill the user does not notice is
+  // worse than an empty one they fill in. `event_location` is itself a
+  // free-text label, so the address is a valid value for it.
   useEffect(() => {
     const firstLoc = rawProfile.data?.locations?.[0]?.address;
     if (!firstLoc) return;
@@ -307,7 +314,7 @@ export function CreateLinkSection() {
       ...f,
       state: f.state || firstLoc.addressRegion || '',
       district: f.district || firstLoc.addressLocality || '',
-      event_location: f.event_location || firstLoc.addressLocality || '',
+      event_location: f.event_location || firstLoc.addressLocality || firstLoc.streetAddress || '',
     }));
   }, [rawProfile.data]);
 
@@ -317,7 +324,7 @@ export function CreateLinkSection() {
       ...EMPTY_FORM,
       state: firstLoc?.addressRegion ?? '',
       district: firstLoc?.addressLocality ?? '',
-      event_location: firstLoc?.addressLocality ?? '',
+      event_location: firstLoc?.addressLocality ?? firstLoc?.streetAddress ?? '',
     });
     setCreateError(null);
   };

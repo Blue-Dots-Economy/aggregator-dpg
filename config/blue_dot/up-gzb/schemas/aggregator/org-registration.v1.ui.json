@@ -9,7 +9,6 @@
     "organisation_sub_type_non_educational",
     "management_type",
     "address",
-    "state",
     "owner",
     "consent"
   ],
@@ -19,12 +18,16 @@
   },
   "website": {
     "ui:placeholder": "https://yourorg.org",
-    "ui:options": { "inputType": "url" }
+    "ui:options": {
+      "inputType": "url"
+    }
   },
   "aggregator_type": {
     "ui:widget": "checkboxes",
     "ui:enumNames": ["Seekers", "Job Providers", "Service Providers"],
-    "ui:options": { "inline": true }
+    "ui:options": {
+      "inline": true
+    }
   },
   "organisation_type": {
     "ui:widget": "select",
@@ -64,25 +67,14 @@
     "ui:enumNames": ["Private", "Government", "NGO", "Other"]
   },
   "address": {
-    "ui:layout": "grid",
-    "ui:order": [
-      "streetAddress",
-      "addressLocality",
-      "addressDistrict",
-      "addressRegion",
-      "postalCode",
-      "addressCountry"
-    ],
-    "streetAddress": { "ui:placeholder": "Street, Area" },
-    "addressLocality": { "ui:placeholder": "City" },
-    "addressDistrict": { "ui:placeholder": "District" },
-    "addressRegion": { "ui:placeholder": "State" },
-    "postalCode": { "ui:placeholder": "PIN" },
-    "addressCountry": { "ui:placeholder": "India" }
-  },
-  "state": {
-    "ui:widget": "hidden",
-    "ui:options": { "label": false }
+    "ui:title": "",
+    "streetAddress": {
+      "ui:widget": "location-autocomplete",
+      "ui:placeholder": "Start typing and pick your address",
+      "ui:options": {
+        "isPrimaryLocation": true
+      }
+    }
   },
   "owner": {
     "ui:layout": "grid",
@@ -92,11 +84,15 @@
     },
     "phone": {
       "ui:placeholder": "+91 98765 43210",
-      "ui:options": { "inputType": "tel" }
+      "ui:options": {
+        "inputType": "tel"
+      }
     },
     "email": {
       "ui:placeholder": "owner@yourorg.org",
-      "ui:options": { "inputType": "email" }
+      "ui:options": {
+        "inputType": "email"
+      }
     }
   },
   "consent": {
@@ -107,11 +103,15 @@
     },
     "given_at": {
       "ui:widget": "hidden",
-      "ui:options": { "label": false }
+      "ui:options": {
+        "label": false
+      }
     },
     "valid_till": {
       "ui:widget": "hidden",
-      "ui:options": { "label": false }
+      "ui:options": {
+        "label": false
+      }
     }
   }
 }

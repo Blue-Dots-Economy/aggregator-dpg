@@ -4,6 +4,7 @@ import { useMemo, useState, type JSX } from 'react';
 import type { RJSFSchema, UiSchema } from '@rjsf/utils';
 import { useTranslations } from 'next-intl';
 import { RjsfThemedForm } from '../../../components/forms/RjsfThemed';
+import type { ResolvedPlace } from '../../../components/forms/custom-widgets/LocationAutocompleteWidget';
 import { ConsentGate } from '../../../components/consent/ConsentGate';
 import { toConsentDocs } from '../../../components/consent/consent-docs';
 import {
@@ -54,6 +55,9 @@ export function OrgRegisterForm({
   const t = useTranslations('register');
   const { state, setState, canSubmit, setCanSubmit, errorRef } = useRegistrationFormState();
   const [formData, setFormData] = useState<Record<string, unknown>>({});
+  // Coordinate the address widget resolved, held outside `formData` because
+  // RJSF hands `formContext` to widgets one-way and never writes it back.
+  const [resolvedPlace, setResolvedPlace] = useState<ResolvedPlace | null>(null);
   const consentDocs = useMemo(() => toConsentDocs(consentContent), [consentContent]);
   const { gateOpen, setGateOpen, pendingRef, handleSubmit } = useConsentGateSubmit(
     consentDocs,
@@ -73,6 +77,11 @@ export function OrgRegisterForm({
       // object was dead weight rather than a guard.
       ...pendingRef.current,
       consent: stampConsent({ value: true }),
+      // Flat here, unlike the coordinator's nested `locations[0].geo`: the org
+      // body has no location array, so the coordinate rides alongside the
+      // address and lands in `aggregator_orgs.profile`. GeoJSON order,
+      // [longitude, latitude], to match the coordinator side.
+      ...(resolvedPlace ? { coordinates: [resolvedPlace.lng, resolvedPlace.lat] } : {}),
     };
     const result = await submitRegistration('/api/org/register', payload);
     if (!result.ok) {
@@ -117,7 +126,9 @@ export function OrgRegisterForm({
         schema={formSchema}
         uiSchema={uiSchema as unknown as UiSchema<Record<string, unknown>>}
         formData={formData}
-        formContext={{ consentContent }}
+        // RJSF v6 exposes this to widgets only as `registry.formContext`,
+        // never as a prop — see the note in LocationAutocompleteWidget.
+        formContext={{ consentContent, onLocationResolved: setResolvedPlace }}
         onChange={(e) => setFormData(e.formData as Record<string, unknown>)}
         onValidityChange={setCanSubmit}
         onSubmit={handleSubmit}
