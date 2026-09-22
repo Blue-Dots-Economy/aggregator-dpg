@@ -11,6 +11,20 @@ import type { GeoComponents, GeoProvider, GeoSuggestion } from './types';
 
 const DEFAULT_PHOTON_URL = 'https://photon.komoot.io';
 
+/**
+ * Deadline for a single geocoder call.
+ *
+ * `.claude/rules/error-handling.md` requires an explicit timeout on every
+ * external call. The caller's `signal` is a *cancellation* channel — it aborts
+ * when the next keystroke supersedes this query — not a deadline, so a public
+ * endpoint that accepts the connection and then stalls would leave the request
+ * hanging and the dropdown empty with no explanation.
+ *
+ * 4s: long enough for a cold lookup over a slow mobile link, short enough that
+ * a stalled request gives up before the person has retyped the line.
+ */
+const REQUEST_TIMEOUT_MS = 4_000;
+
 interface PhotonFeature {
   geometry?: { coordinates?: [number, number] }; // [lng, lat]
   properties?: {
@@ -20,6 +34,31 @@ interface PhotonFeature {
     postcode?: string;
     country?: string;
   };
+}
+
+/**
+ * Combines the caller's cancellation signal with a request deadline.
+ *
+ * Built by hand rather than with `AbortSignal.any`, which is too recent to
+ * assume across the browsers this portal targets.
+ *
+ * @param signal - The caller's cancel signal, if any.
+ * @returns A signal that aborts on either cancellation or timeout.
+ */
+function withDeadline(signal?: AbortSignal): AbortSignal {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const cancel = () => {
+    clearTimeout(timer);
+    controller.abort();
+  };
+  if (signal) {
+    if (signal.aborted) cancel();
+    else signal.addEventListener('abort', cancel, { once: true });
+  }
+  // Clearing on settle keeps a resolved request from holding the timer open.
+  controller.signal.addEventListener('abort', () => clearTimeout(timer), { once: true });
+  return controller.signal;
 }
 
 /** Pure: maps a Photon FeatureCollection JSON into suggestions. Exported for testing. */
@@ -54,10 +93,7 @@ export function createPhotonProvider(baseUrl = DEFAULT_PHOTON_URL): GeoProvider 
       if (!q) return [];
       try {
         const url = `${baseUrl.replace(/\/$/, '')}/api?q=${encodeURIComponent(q)}&limit=5`;
-        // Spread rather than `{ signal }`: under `exactOptionalPropertyTypes`,
-        // `RequestInit.signal` is `AbortSignal | null` and will not accept an
-        // explicit `undefined` from the optional parameter.
-        const res = await fetch(url, { ...(signal ? { signal } : {}) });
+        const res = await fetch(url, { signal: withDeadline(signal) });
         if (!res.ok) return [];
         return parsePhotonFeatures(await res.json());
       } catch {
