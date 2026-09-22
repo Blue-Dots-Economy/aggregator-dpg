@@ -68,7 +68,8 @@
       "ui:options": {
         "isPrimaryLocation": true
       }
-    }
+    },
+    "ui:layout": "stack"
   },
   "organisation_type": {
     "ui:widget": "select",

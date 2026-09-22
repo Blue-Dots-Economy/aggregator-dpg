@@ -36,7 +36,8 @@
           "ui:options": {
             "isPrimaryLocation": true
           }
-        }
+        },
+        "ui:layout": "stack"
       }
     }
   },
