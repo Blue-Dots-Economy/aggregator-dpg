@@ -72,7 +72,6 @@
               "streetAddress": {
                 "type": "string",
                 "title": "Address",
-                "description": "Start typing and pick your address from the list",
                 "maxLength": 500
               }
             }
