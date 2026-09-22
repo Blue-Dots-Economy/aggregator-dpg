@@ -27,6 +27,45 @@
  */
 export const GEO_LOCATION_COLUMN = 'geo_location';
 
+/**
+ * Operator-facing metadata for a well-known column.
+ *
+ * These columns carry no JSON Schema, so every schema-driven generator —
+ * label, description, allowed-values, example — has nothing to work from and
+ * falls back to the raw field name and "Free text". That leaves the one column
+ * in the template with a non-obvious format as the only one with no
+ * explanation, which defeats the point of putting it in the template at all.
+ *
+ * Declared here rather than in either template so the CSV and XLSX generators
+ * cannot describe the same column differently.
+ */
+export interface WellKnownColumnMeta {
+  /** Human label, standing in for a schema `title`. */
+  title: string;
+  /** One-line explanation, standing in for a schema `description`. */
+  description: string;
+  /** Example cell value. */
+  example: string;
+}
+
+export const WELL_KNOWN_COLUMN_META: Readonly<Record<string, WellKnownColumnMeta>> = {
+  [GEO_LOCATION_COLUMN]: {
+    title: 'Location coordinates',
+    // Spells out the separator because a comma is the natural thing to type
+    // and is exactly what the pipe was chosen to avoid: a comma inside an
+    // unquoted cell shifts every later column instead of erroring.
+    description:
+      'Optional. Latitude and longitude separated by a pipe — for example 12.9352|77.6245. ' +
+      'Use a pipe, not a comma. Leave blank to have the address looked up instead.',
+    example: '12.9352|77.6245',
+  },
+};
+
+/** Metadata for `name`, or undefined when it is a normal schema property. */
+export function wellKnownColumnMeta(name: string): WellKnownColumnMeta | undefined {
+  return WELL_KNOWN_COLUMN_META[name];
+}
+
 /** Every well-known column, for the header allowlist. */
 export const WELL_KNOWN_COLUMNS: readonly string[] = [GEO_LOCATION_COLUMN];
 

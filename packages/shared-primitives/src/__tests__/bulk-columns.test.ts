@@ -59,12 +59,23 @@ describe('parseGeoLocation', () => {
     expect(result.status).toBe('invalid');
   });
 
-  it('never echoes the raw cell in the reason — coordinates are PII', () => {
-    const result = parseGeoLocation('12.9352|999');
+  // Every invalid branch, not just one: the reason is operator-facing and a
+  // participant's coordinates are PII, so an interpolated cell anywhere here
+  // leaks them into errors.csv and the logs. One case per `return` in the
+  // invalid path.
+  it.each([
+    ['part count', '12.9352'],
+    ['empty segment', '12.9352|'],
+    ['non-finite', 'twelve|seventy'],
+    ['lat out of range', '91|77.6245'],
+    ['lng out of range', '12.9352|999'],
+  ])('never echoes the raw cell in the %s reason — coordinates are PII', (_label, raw) => {
+    const result = parseGeoLocation(raw);
     expect(result.status).toBe('invalid');
     if (result.status !== 'invalid') return;
-    expect(result.reason).not.toContain('12.9352');
-    expect(result.reason).not.toContain('999');
+    for (const fragment of raw.split('|').filter(Boolean)) {
+      expect(result.reason).not.toContain(fragment);
+    }
   });
 
   it('exposes geo_location in the header allowlist', () => {

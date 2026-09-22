@@ -10,8 +10,8 @@
 
 import type { JsonSchema } from '@aggregator-dpg/schema-loader/interface';
 import {
-  GEO_LOCATION_COLUMN,
   WELL_KNOWN_COLUMNS,
+  wellKnownColumnMeta,
 } from '@aggregator-dpg/shared-primitives/bulk-columns';
 
 /**
@@ -20,8 +20,7 @@ import {
  * schema-driven — has nothing to work from and would sample a bare string.
  */
 export function wellKnownExample(name: string): string | undefined {
-  if (name === GEO_LOCATION_COLUMN) return '12.9352|77.6245';
-  return undefined;
+  return wellKnownColumnMeta(name)?.example;
 }
 
 export interface CsvTemplateOptions {
