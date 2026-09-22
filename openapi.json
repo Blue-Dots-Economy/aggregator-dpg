@@ -927,6 +927,10 @@
                         "type": "string",
                         "maxLength": 200
                       },
+                      "addressDistrict": {
+                        "type": "string",
+                        "maxLength": 200
+                      },
                       "addressRegion": {
                         "type": "string",
                         "maxLength": 200

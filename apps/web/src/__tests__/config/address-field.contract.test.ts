@@ -64,12 +64,21 @@ function expectAutocompleteWidget(ui: Record<string, unknown>, where: string): v
   expect(options?.['isPrimaryLocation'], `${where} is not the primary location`).toBe(true);
 }
 
-describe.each(SCHEMA_DIRS)('coordinator registration schema — %s', (dir) => {
+// Mirrors the owner block below: a directory that ships no coordinator schema
+// is excluded by name rather than exploding on `undefined['properties']`, and
+// the count assertion stops the filter from silently emptying the suite.
+const COORDINATOR_DIRS = SCHEMA_DIRS.filter((d) => readJson(d, 'registration.v1.json') !== null);
+
+it('finds a coordinator schema to check', () => {
+  expect(COORDINATOR_DIRS.length).toBeGreaterThan(0);
+});
+
+describe.each(COORDINATOR_DIRS)('coordinator registration schema — %s', (dir) => {
   const schema = readJson(dir, 'registration.v1.json');
   const ui = readJson(dir, 'registration.v1.ui.json');
 
   it('exposes one Address field under locations[].address', () => {
-    const locations = (schema?.['properties'] as Record<string, never>)['locations'];
+    const locations = (schema!['properties'] as Record<string, never>)['locations'];
     const address = (locations['items']['properties'] as Record<string, never>)['address'];
     expectSingleAddressField(address, dir);
   });
@@ -83,7 +92,7 @@ describe.each(SCHEMA_DIRS)('coordinator registration schema — %s', (dir) => {
     // The coordinate is merged in at submit, not collected by the form. If
     // `geo` ever stops being required this placeholder can go — until then,
     // dropping it from the seeded form data makes every submission invalid.
-    const locations = (schema?.['properties'] as Record<string, never>)['locations'];
+    const locations = (schema!['properties'] as Record<string, never>)['locations'];
     expect(locations['items']['required']).toContain('geo');
   });
 });

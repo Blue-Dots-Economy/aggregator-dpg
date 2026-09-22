@@ -76,6 +76,10 @@ const OrgCreateBodySchema = z.object({
     .object({
       streetAddress: z.string().max(500).optional(),
       addressLocality: z.string().max(200).optional(),
+      // ka-dhwd, up-gzb and alimco all collected a district before #810, so
+      // dropping it would be the exact silent-stripping path this block
+      // exists to prevent.
+      addressDistrict: z.string().max(200).optional(),
       addressRegion: z.string().max(200).optional(),
       postalCode: z.string().max(20).optional(),
       addressCountry: z.string().max(100).optional(),

@@ -12,6 +12,7 @@ import {
   stripConsentBlock,
   stripFormChrome,
   submitRegistration,
+  withOrgCoordinates,
 } from './registration-shared';
 import {
   RegistrationErrorBanner,
@@ -72,17 +73,13 @@ export function OrgRegisterForm({
   const submitWithConsent = async (): Promise<void> => {
     setGateOpen(false);
     setState({ status: 'submitting' });
-    const payload: Record<string, unknown> = {
+    const body: Record<string, unknown> = {
       // No `?? {}`: spreading null contributes nothing, so the fallback
       // object was dead weight rather than a guard.
       ...pendingRef.current,
       consent: stampConsent({ value: true }),
-      // Flat here, unlike the coordinator's nested `locations[0].geo`: the org
-      // body has no location array, so the coordinate rides alongside the
-      // address and lands in `aggregator_orgs.profile`. GeoJSON order,
-      // [longitude, latitude], to match the coordinator side.
-      ...(resolvedPlace ? { coordinates: [resolvedPlace.lng, resolvedPlace.lat] } : {}),
     };
+    const payload = withOrgCoordinates(body, resolvedPlace);
     const result = await submitRegistration('/api/org/register', payload);
     if (!result.ok) {
       setState({ status: 'error', ...result.error });

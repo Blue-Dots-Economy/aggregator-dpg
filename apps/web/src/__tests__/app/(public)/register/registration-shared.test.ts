@@ -15,6 +15,7 @@ import {
   stampConsent,
   stripConsentBlock,
   withResolvedCoordinates,
+  withOrgCoordinates,
 } from '@/app/(public)/register/registration-shared';
 
 describe('titleCase', () => {
@@ -379,5 +380,44 @@ describe('withResolvedCoordinates', () => {
     expect(withResolvedCoordinates({ locations: [] }, { lat: 1, lng: 2 })).toEqual({
       locations: [],
     });
+  });
+});
+
+describe('withOrgCoordinates', () => {
+  const place = { lat: 12.9741854, lng: 77.6124135 };
+
+  it('writes [longitude, latitude], not [lat, lng]', () => {
+    // The one assertion that matters. Both members are numbers, so a swap
+    // type-checks cleanly and puts Bengaluru (12.97N, 77.61E) in the sea off
+    // Somalia. The coordinator path has the same pin; this is its twin.
+    const out = withOrgCoordinates({ display_name: 'ABC Limited' }, place);
+    expect(out['coordinates']).toEqual([77.6124135, 12.9741854]);
+    const [lng, lat] = out['coordinates'] as [number, number];
+    expect(lng).toBeGreaterThan(lat);
+  });
+
+  it('returns the payload untouched when nothing was resolved', () => {
+    // Typing an address without picking a suggestion is the common case: send
+    // no point rather than a guessed one.
+    const body = { display_name: 'ABC Limited' };
+    const out = withOrgCoordinates(body, null);
+    expect(out).toEqual(body);
+    expect(out).not.toHaveProperty('coordinates');
+  });
+
+  it('keeps the rest of the body intact', () => {
+    const out = withOrgCoordinates(
+      { display_name: 'ABC Limited', address: { streetAddress: 'MG Road' }, owner: { name: 'A' } },
+      place,
+    );
+    expect(out['display_name']).toBe('ABC Limited');
+    expect(out['address']).toEqual({ streetAddress: 'MG Road' });
+    expect(out['owner']).toEqual({ name: 'A' });
+  });
+
+  it('does not mutate the input', () => {
+    const body = { display_name: 'ABC Limited' };
+    withOrgCoordinates(body, place);
+    expect(body).not.toHaveProperty('coordinates');
   });
 });
