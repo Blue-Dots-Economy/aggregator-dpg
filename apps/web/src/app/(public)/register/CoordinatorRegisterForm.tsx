@@ -5,6 +5,8 @@ import { useQuery } from '@tanstack/react-query';
 import type { RJSFSchema, UiSchema } from '@rjsf/utils';
 import { useTranslations } from 'next-intl';
 import { RjsfThemedForm } from '../../../components/forms/RjsfThemed';
+import type { ResolvedPlace } from '../../../components/forms/custom-widgets/LocationAutocompleteWidget';
+import { withResolvedCoordinates } from './registration-shared';
 import { ConsentGate } from '../../../components/consent/ConsentGate';
 import { toConsentDocs } from '../../../components/consent/consent-docs';
 import {
@@ -95,12 +97,18 @@ export function CoordinatorRegisterForm({
 
   const { state, setState, canSubmit, setCanSubmit, errorRef } = useRegistrationFormState();
   const [formData, setFormData] = useState<Record<string, unknown>>(() => ({
-    locations: [{ geo: { type: 'Point', coordinates: [0, 0] }, address: { addressCountry: 'IN' } }],
+    // `[0,0]` stands for "not resolved yet": `locations.items.required`
+    // includes `geo`, so the entry cannot omit it. The real coordinate is
+    // stitched in at submit from whatever the address widget resolved.
+    locations: [{ geo: { type: 'Point', coordinates: [0, 0] }, address: {} }],
     // Prefill the invite-bound email so it can't be mistyped (also locked below).
     ...(lockedEmail ? { contact: { email: lockedEmail } } : {}),
   }));
   // Selected parent org (spec §6.2). Empty until picked.
   const [orgId, setOrgId] = useState<string>('');
+  // Coordinate the address widget resolved, held outside `formData` because
+  // RJSF hands `formContext` to widgets one-way and never writes it back.
+  const [resolvedPlace, setResolvedPlace] = useState<ResolvedPlace | null>(null);
   const consentDocs = useMemo(() => toConsentDocs(consentContent), [consentContent]);
   const { gateOpen, setGateOpen, pendingRef, handleSubmit } = useConsentGateSubmit(
     consentDocs,
@@ -156,12 +164,15 @@ export function CoordinatorRegisterForm({
   const submitWithConsent = async (): Promise<void> => {
     setGateOpen(false);
     setState({ status: 'submitting' });
-    const payload: Record<string, unknown> = {
-      // No `?? {}`: spreading null contributes nothing, so the fallback
-      // object was dead weight rather than a guard.
-      ...pendingRef.current,
-      consent: stampConsent({ value: true }),
-    };
+    const payload: Record<string, unknown> = withResolvedCoordinates(
+      {
+        // No `?? {}`: spreading null contributes nothing, so the fallback
+        // object was dead weight rather than a guard.
+        ...pendingRef.current,
+        consent: stampConsent({ value: true }),
+      },
+      resolvedPlace,
+    );
     // The API strips `org_id`/`invite` before RJSF validation and stores the
     // resolved org on `aggregators.parent_org_id`. In invite mode the org comes
     // from the token claim (never `org_id`); otherwise from the dropdown.
@@ -265,7 +276,9 @@ export function CoordinatorRegisterForm({
             schema={formSchema}
             uiSchema={formUiSchema as unknown as UiSchema<Record<string, unknown>>}
             formData={formData}
-            formContext={{ consentContent }}
+            // RJSF v6 exposes this to widgets only as `registry.formContext`,
+            // never as a prop — see the note in LocationAutocompleteWidget.
+            formContext={{ consentContent, onLocationResolved: setResolvedPlace }}
             onChange={(e) => setFormData(e.formData as Record<string, unknown>)}
             onValidityChange={setCanSubmit}
             onSubmit={handleSubmit}

@@ -14,6 +14,7 @@ import {
   submitRegistration,
   stampConsent,
   stripConsentBlock,
+  withResolvedCoordinates,
 } from '@/app/(public)/register/registration-shared';
 
 describe('titleCase', () => {
@@ -337,5 +338,46 @@ describe('stripConsentBlock', () => {
   it('is a no-op on a schema with no consent block', () => {
     const bare = { type: 'object', required: ['name'], properties: { name: { type: 'string' } } };
     expect(stripConsentBlock(bare as never)).toEqual(bare);
+  });
+});
+
+describe('withResolvedCoordinates', () => {
+  const payload = () => ({
+    name: 'Asha',
+    locations: [
+      { geo: { type: 'Point', coordinates: [0, 0] }, address: { streetAddress: 'JP Nagar' } },
+    ],
+  });
+
+  it('writes the coordinate as GeoJSON [longitude, latitude]', () => {
+    // The single assertion this whole helper exists to get right. The widget
+    // reports lat/lng; GeoJSON stores lng/lat. Swapped, Bengaluru (12.9N,
+    // 77.6E) becomes a point off Somalia — a plausible-looking wrong answer
+    // that no type check catches, since both are numbers.
+    const out = withResolvedCoordinates(payload(), { lat: 12.9352, lng: 77.6245 });
+    const locations = out['locations'] as Array<{ geo: { coordinates: number[] } }>;
+    expect(locations[0]?.geo.coordinates).toEqual([77.6245, 12.9352]);
+  });
+
+  it('keeps the rest of the location entry intact', () => {
+    const out = withResolvedCoordinates(payload(), { lat: 12.9352, lng: 77.6245 });
+    const locations = out['locations'] as Array<{ address: { streetAddress: string } }>;
+    expect(locations[0]?.address).toEqual({ streetAddress: 'JP Nagar' });
+    expect(out['name']).toBe('Asha');
+  });
+
+  it('leaves the [0,0] placeholder alone when nothing was resolved', () => {
+    // Typed an address without picking a suggestion. `locations.items.required`
+    // includes `geo`, so the entry cannot drop it — the placeholder stands.
+    const original = payload();
+    expect(withResolvedCoordinates(original, null)).toBe(original);
+  });
+
+  it('returns the payload untouched when it carries no locations', () => {
+    const orgBody = { display_name: 'Acme' };
+    expect(withResolvedCoordinates(orgBody, { lat: 1, lng: 2 })).toBe(orgBody);
+    expect(withResolvedCoordinates({ locations: [] }, { lat: 1, lng: 2 })).toEqual({
+      locations: [],
+    });
   });
 });
