@@ -8,7 +8,6 @@ import type { ResolvedPlace } from '../../../components/forms/custom-widgets/Loc
 import { ConsentGate } from '../../../components/consent/ConsentGate';
 import { toConsentDocs } from '../../../components/consent/consent-docs';
 import {
-  humaniseValidationErrors,
   stampConsent,
   stripConsentBlock,
   stripFormChrome,
@@ -18,6 +17,7 @@ import {
   RegistrationErrorBanner,
   RegistrationSubmitButton,
   RegistrationSuccessPanel,
+  sharedRegistrationFormProps,
   useConsentGateSubmit,
   useRegistrationFormState,
 } from './registration-ui';
@@ -125,25 +125,17 @@ export function OrgRegisterForm({
       <RjsfThemedForm
         schema={formSchema}
         uiSchema={uiSchema as unknown as UiSchema<Record<string, unknown>>}
-        formData={formData}
-        // RJSF v6 exposes this to widgets only as `registry.formContext`,
-        // never as a prop — see the note in LocationAutocompleteWidget.
-        formContext={{ consentContent, onLocationResolved: setResolvedPlace }}
-        onChange={(e) => setFormData(e.formData as Record<string, unknown>)}
-        onValidityChange={setCanSubmit}
-        onSubmit={handleSubmit}
-        onError={(errs) => {
-          setState({
-            status: 'error',
-            title: t('validation_error_title'),
-            detail: humaniseValidationErrors(errs, formSchema).join('\n'),
-            code: 'CLIENT_VALIDATION',
-            requestId: JSON.stringify(errs, null, 2),
-          });
-        }}
-        showErrorList={false}
-        focusOnFirstError
-        noHtml5Validate
+        {...sharedRegistrationFormProps({
+          formData,
+          setFormData,
+          setCanSubmit,
+          setState,
+          handleSubmit,
+          formSchema,
+          consentContent,
+          onLocationResolved: setResolvedPlace,
+          validationErrorTitle: t('validation_error_title'),
+        })}
       >
         <RegistrationSubmitButton
           submitting={state.status === 'submitting'}

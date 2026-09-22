@@ -15,9 +15,16 @@ import Link from 'next/link';
 import { useEffect, useRef, useState, type RefObject, type JSX } from 'react';
 import { useTranslations } from 'next-intl';
 import type { IChangeEvent } from '@rjsf/core';
+import type { RJSFSchema } from '@rjsf/utils';
 import { I } from '../../../icons';
 import type { ConsentDoc } from '../../../components/consent/consent-docs';
-import type { SubmitState } from './registration-shared';
+import type { ConsentDocContent } from '../../../components/consent/consent-types';
+import type { ResolvedPlace } from '../../../components/forms/custom-widgets/LocationAutocompleteWidget';
+import {
+  humaniseValidationErrors,
+  type AjvLikeError,
+  type SubmitState,
+} from './registration-shared';
 
 /** Local form lifecycle shared by the coordinator + org registration forms. */
 export interface RegistrationFormState {
@@ -102,6 +109,79 @@ export function useConsentGateSubmit(
   };
 
   return { gateOpen, setGateOpen, pendingRef, handleSubmit };
+}
+
+/** What {@link sharedRegistrationFormProps} needs from the calling form. */
+export interface SharedFormWiring {
+  formData: Record<string, unknown>;
+  setFormData: (data: Record<string, unknown>) => void;
+  setCanSubmit: (valid: boolean) => void;
+  setState: (s: SubmitState) => void;
+  handleSubmit: (e: IChangeEvent<Record<string, unknown>>) => Promise<void>;
+  /** The schema the form validates against — used to name fields in errors. */
+  formSchema: RJSFSchema;
+  // `| undefined` is load-bearing under `exactOptionalPropertyTypes`: both
+  // callers pass the prop through explicitly, which an optional-only type
+  // rejects.
+  consentContent?: ConsentDocContent | undefined;
+  /** Where the address widget reports the coordinate it resolved. */
+  onLocationResolved: (place: ResolvedPlace | null) => void;
+  /** Localised heading for the client-side validation banner. */
+  validationErrorTitle: string;
+}
+
+/**
+ * Builds the RJSF props the coordinator and org registration forms share.
+ *
+ * The two forms pass an identical block of wiring — form data, validity gate,
+ * submit, and the client-side validation banner — differing only in the values
+ * they close over. Keeping it here is the same reason the rest of this module
+ * exists: the forms are structurally identical and silently drifting apart is
+ * the failure that actually happens.
+ *
+ * Spread the result onto `<RjsfThemedForm>`; `schema` and `uiSchema` stay with
+ * the caller, since those genuinely differ.
+ *
+ * @param wiring - The calling form's state setters, schema and copy.
+ * @returns Props to spread onto the themed RJSF form.
+ */
+export function sharedRegistrationFormProps(wiring: SharedFormWiring): {
+  formData: Record<string, unknown>;
+  formContext: Record<string, unknown>;
+  onChange: (e: IChangeEvent<Record<string, unknown>>) => void;
+  onValidityChange: (valid: boolean) => void;
+  onSubmit: (e: IChangeEvent<Record<string, unknown>>) => Promise<void>;
+  onError: (errs: AjvLikeError[]) => void;
+  showErrorList: false;
+  focusOnFirstError: true;
+  noHtml5Validate: true;
+} {
+  return {
+    formData: wiring.formData,
+    // RJSF v6 exposes this to widgets only as `registry.formContext`, never as
+    // a prop — see the note in LocationAutocompleteWidget.
+    formContext: {
+      consentContent: wiring.consentContent,
+      onLocationResolved: wiring.onLocationResolved,
+    },
+    onChange: (e) => wiring.setFormData(e.formData as Record<string, unknown>),
+    onValidityChange: wiring.setCanSubmit,
+    onSubmit: wiring.handleSubmit,
+    onError: (errs) => {
+      wiring.setState({
+        status: 'error',
+        title: wiring.validationErrorTitle,
+        detail: humaniseValidationErrors(errs, wiring.formSchema).join('\n'),
+        code: 'CLIENT_VALIDATION',
+        // The raw errors are the only actionable detail for a client-side
+        // failure, so they stand in for a server request id.
+        requestId: JSON.stringify(errs, null, 2),
+      });
+    },
+    showErrorList: false,
+    focusOnFirstError: true,
+    noHtml5Validate: true,
+  };
 }
 
 export interface RegistrationSubmitButtonProps {
