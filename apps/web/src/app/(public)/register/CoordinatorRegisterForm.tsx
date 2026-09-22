@@ -6,7 +6,6 @@ import type { RJSFSchema, UiSchema } from '@rjsf/utils';
 import { useTranslations } from 'next-intl';
 import { RjsfThemedForm } from '../../../components/forms/RjsfThemed';
 import type { ResolvedPlace } from '../../../components/forms/custom-widgets/LocationAutocompleteWidget';
-import { withResolvedCoordinates } from './registration-shared';
 import { ConsentGate } from '../../../components/consent/ConsentGate';
 import { toConsentDocs } from '../../../components/consent/consent-docs';
 import {
@@ -23,6 +22,7 @@ import {
   stripConsentBlock,
   stripFormChrome,
   submitRegistration,
+  withResolvedCoordinates,
 } from './registration-shared';
 import {
   RegistrationErrorBanner,
