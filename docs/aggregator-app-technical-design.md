@@ -849,7 +849,7 @@ Everything below is required before the first product story can be built and run
 **Container images**
 
 - Three images: `aggregator-web` (Next.js standalone build), `aggregator-service` (NestJS), `aggregator-worker` (NestJS, different process entry).
-- Multi-stage Dockerfiles; non-root user; minimal Alpine / Distroless runtime; image scan via Trivy in `ci.yml`.
+- Multi-stage Dockerfiles; non-root user; minimal Alpine / Distroless runtime; image scan via Trivy in `build-images.yml`.
 
 **Infrastructure**
 
