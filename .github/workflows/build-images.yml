@@ -1,4 +1,4 @@
-name: build-images
+name: Build and Push images (web, api, worker)
 # Release + manual image builds for api, web and worker. Images are published to
 # GHCR ONLY on a release tag or a manual run — no branch push publishes anything
 # (#756). This job used to be the `docker` matrix inside ci.yml, which built and
