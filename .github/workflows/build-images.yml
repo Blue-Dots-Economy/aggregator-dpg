@@ -1,0 +1,175 @@
+name: build-images
+# Release + manual image builds for api, web and worker. Images are published to
+# GHCR ONLY on a release tag or a manual run — no branch push publishes anything
+# (#756). This job used to be the `docker` matrix inside ci.yml, which built and
+# pushed on every push to main, develop and feature; those produced mutable
+# `:main` / `:develop` / `:feature` tags that moved under anyone who pulled them,
+# and nothing consumed them (deployments pin a release tag or an immutable `sha-`
+# tag in bluedots-automation's global-images.yaml).
+#
+# Mirrors signals-dpg's build-images.yaml: same trigger shape, same manual escape
+# hatch. `workflow_dispatch` builds and pushes from whatever ref it is run on.
+on:
+  push:
+    tags:
+      # Org-wide release tags — one tag builds all three apps. Both schemes:
+      #   v*.*.*      semver releases   e.g. v1.2.0
+      #   20*-s*-rc*  sprint release    e.g. 202608-s1-rc1
+      #               <YYYYMM>-s<sprint>-rc<candidate>. A fix for an issue found
+      #               in -rc1 ships as -rc2, so every candidate is its own image.
+      - 'v*.*.*'
+      - '20*-s*-rc*'
+      # Per-app tags, retained: these release ONE app independently, and the
+      # type=semver entries below extract the version from the app prefix.
+      - 'web-v*.*.*'
+      - 'api-v*.*.*'
+      - 'worker-v*.*.*'
+  workflow_dispatch:
+
+concurrency:
+  group: build-images-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  docker:
+    name: Docker / ${{ matrix.app }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      security-events: write   # Trivy image scan uploads SARIF to code-scanning
+
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [api, web, worker]
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      # Docker Hardened Images base layers (apps/*/Dockerfile) come from dhi.io,
+      # which refuses anonymous pulls even for the free Apache-2.0 catalog. The
+      # build fails at the first FROM without these credentials.
+      - name: Log in to dhi.io
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: dhi.io
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image tags & labels
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.app }}
+          # `type=ref,event=tag` emits the tag VERBATIM so the image tag equals the
+          # release tag (v1.2.0 -> v1.2.0, 202608-s1-rc1 -> 202608-s1-rc1).
+          # type=semver below is not sufficient: it strips the leading `v`, and it
+          # cannot parse a 20*-s*-rc* tag at all (emits nothing, logs a warning).
+          #
+          # `enable=` excludes the PER-APP tags. Without that guard an
+          # `api-v1.2.0` tag would stamp `api-v1.2.0` onto the web and worker
+          # images too — this matrix builds all three on any matching tag, while
+          # the type=semver `match=` below correctly resolves for only one of them.
+          # Expressed as a deny-list of the per-app prefixes rather than an
+          # allow-list of org-wide ones: an allow-list silently disables this
+          # entry whenever the org-wide pattern changes (it did for 20*-s*-rc*).
+          #
+          # `type=ref,event=branch` only fires on workflow_dispatch now, since no
+          # branch push reaches this workflow. `type=ref,event=pr` is gone with the
+          # pull_request trigger, and `type=raw,value=latest` is gone with the
+          # branch pushes: it was gated on {{is_default_branch}}, so it tracked the
+          # main BRANCH rather than the last release. Nothing pins `:latest`.
+          # Comments stay OUT of the block scalar: it is passed to the action
+          # verbatim, not parsed as YAML.
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag,enable=${{ !startsWith(github.ref_name, 'api-v') && !startsWith(github.ref_name, 'web-v') && !startsWith(github.ref_name, 'worker-v') }}
+            type=sha,prefix=sha-
+            type=semver,pattern={{version}},match=${{ matrix.app }}-v(.*),group=1
+            type=semver,pattern={{major}}.{{minor}},match=${{ matrix.app }}-v(.*),group=1
+          labels: |
+            org.opencontainers.image.title=aggregator-dpg-${{ matrix.app }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.licenses=UNLICENSED
+
+      - name: Build & push
+        id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: apps/${{ matrix.app }}/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.app }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.app }}
+          provenance: true
+          sbom: true
+          build-args: |
+            VCS_REF=${{ github.sha }}
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            VERSION=${{ steps.meta.outputs.version }}
+
+      - name: Image digest
+        run: |
+          echo "Pushed ${REGISTRY}/${REPO}/${APP}@${DIGEST}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Tags: ${TAGS}" >> "$GITHUB_STEP_SUMMARY"
+        env:
+          REPO: ${{ github.repository }}
+          APP: ${{ matrix.app }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+
+      # Image scanning (Sec-Audit A2 — Blue-Dots-Economy/signals-dpg#300).
+      # Scans the OS + system packages baked into the shipped artifact, which the
+      # source/lockfile scan in security.yml structurally cannot see (an outdated
+      # base-image library appears in no package.json). This repo carries the
+      # largest dependency backlog of the six (76 open Dependabot alerts), so the
+      # image surface is worth measuring rather than assuming.
+      #
+      # `github.repository` preserves the org's capitalisation
+      # ("Blue-Dots-Economy"), which docker/metadata-action normalises for its own
+      # tag outputs. A ref assembled by hand must be normalised too — an uppercase
+      # path is an invalid image reference and Trivy would reject it.
+      - name: Resolve scanned image ref
+        id: scanref
+        run: echo "ref=${IMAGE,,}@${DIGEST}" >> "$GITHUB_OUTPUT"
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.app }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+
+      # Scanned by digest, not by tag: buildx pushes straight to the registry
+      # without loading into the local docker image store, so the action's
+      # `imageid` output is not resolvable by Trivy.
+      - name: Trivy image scan
+        if: steps.scanref.outputs.ref != ''
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ${{ steps.scanref.outputs.ref }}
+          format: sarif
+          output: trivy-image.sarif
+          severity: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
+          exit-code: "0"   # Phase A: report-only, never fails the build
+
+      - name: Upload Trivy image SARIF
+        if: always() && steps.scanref.outputs.ref != ''
+        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
+        with:
+          sarif_file: trivy-image.sarif
+          # One category per app so api/web/worker don't overwrite each other.
+          category: trivy-image-${{ matrix.app }}
