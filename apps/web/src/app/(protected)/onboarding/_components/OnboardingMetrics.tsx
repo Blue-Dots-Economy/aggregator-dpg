@@ -69,7 +69,7 @@ function onboardingModeMeta(
 /**
  * Title-cases an entry-source key for display when no i18n label exists.
  *
- * @param key - Raw source key (e.g. `whatsapp`).
+ * @param key - Raw source key (e.g. `partner_referral`).
  * @returns The key with separators stripped and each word capitalised.
  */
 function statusLabel(key: string): string {
