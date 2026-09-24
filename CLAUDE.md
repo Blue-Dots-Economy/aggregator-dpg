@@ -83,6 +83,23 @@ Non-negotiable for any code change. Some load always; some are path-scoped and o
 
 See `.github/workflows/ci.yml` for the job graph and `docs/ci-required-checks.md` for which checks branch protection requires (and which are deliberately advisory).
 
+The split between the workflows is load-bearing: **`ci.yml` checks, `build-images.yml` publishes, and the two are connected by a gate rather than by `needs:`.**
+
+- **`ci.yml`** — `pull_request` into `main`/`develop`/`feature` and `push` to `main`/`develop`. The `ci` job lints, type-checks, tests, builds, runs the OpenAPI spec-drift and dep-cruiser checks, and scans with SonarCloud. A second job, `smoke-image`, builds `api`, `web` and `worker` on the PR path with `push: false` — build only, because `server.ts` awaits `runMigrations()`, `getNetworkConfig()` and `loadEmailMessageOverrides()` at startup, so a boot probe would need Postgres, Redis and config fixtures and would go red for a missing service rather than a real defect. There is **no `feature` push trigger and no tag trigger** (#756): both existed only to drive the `docker` matrix, which no longer lives here.
+- **`build-images.yml`** — publishes `api`, `web` and `worker` to GHCR on a **release tag** (`v*.*.*`, `20*-s*-rc*`, and the per-app `api-v*.*.*` / `web-v*.*.*` / `worker-v*.*.*`) or a manual run. No branch push publishes (#756). `:latest` is gone with the branch triggers — it was gated on `{{is_default_branch}}`, so it tracked the main branch rather than the last release, and nothing pins it.
+- **`cut-release.yml`** — the front door for cutting a release. Dispatch it with a tag name and a base branch; it checks CI, creates the tag and the GitHub release with generated notes in one API call, then dispatches the image build. `dry_run` previews the notes without creating anything. Its tag validation accepts the per-app prefixes as well as the org-wide patterns.
+- **`keycloak-theme-build.yaml`** (dispatch-only, parameterised by network and brand) and **`openapi-sync.yml`** / **`security.yml`** are unrelated to the release path. Note `release.yml` was deleted: it ran changesets, had never executed once, and the repo's release tags were always cut by hand.
+
+**The CI gate (Blue-Dots-Economy/signals-dpg#765).** Publishing used to be gated by `needs: ci` on the `docker` job. #756 moved publishing into its own workflow, and `needs:` cannot reach across workflows, so the dependency is now a lookup: both `build-images.yml`'s `verify-ci` job and `cut-release.yml` query `ci.yml` runs for the commit and refuse unless one concluded `success`. Three things about it are deliberate and easy to undo by accident:
+
+- It reads **workflow runs**, not check runs, so it stays correct if the job names or the job graph inside CI change.
+- It **fails closed when there are zero runs**. That is the realistic accident (a tag on a commit CI never saw), not a tag on a commit CI rejected; a "did it fail?" test would wave it through.
+- Both carry a `skip_ci_check` input for an emergency publish, which logs a warning naming the commit so the bypass is visible.
+
+**Cut releases from `develop` or `main`, never `feature`.** Merges into `feature` run no CI — `pull_request` runs record the PR head, not the resulting merge commit — so the gate will refuse a tag cut there.
+
+**Two GitHub behaviours the release path depends on**, both of which look like bugs when you hit them: a tag pushed with `GITHUB_TOKEN` does **not** trigger `on: push: tags` (GitHub suppresses it to prevent recursion), which is why `cut-release.yml` creates the tag through the REST API and then dispatches the build explicitly; and a workflow is **not dispatchable until it exists on the default branch**, so `cut-release.yml` will not appear in the Actions tab while it sits on a side branch.
+
 ## Authoring pull requests
 
 When you open a PR, include an **In Plain Terms** section in the description: a short, jargon-free explanation a non-expert teammate can follow — what the problem was and what the change does, in everyday language — alongside the usual Summary / Release Notes. Skip it only for a pure chore with no behavioural effect. This lives here as a Claude authoring rule rather than in the GitHub PR template on purpose, so PRs opened from other tools/flows aren't forced through it.
