@@ -67,7 +67,7 @@ const SupportRequestSchema = z
  *
  * @param app - The Fastify instance to attach routes to.
  */
-export async function registerSupportRoutes(app: FastifyInstance): Promise<void> {
+export function registerSupportRoutes(app: FastifyInstance): void {
   app.get(
     '/v1/support/config',
     {

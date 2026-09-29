@@ -66,10 +66,10 @@ export type CampaignRouteChannel = z.infer<typeof channelSchema>;
  * @param channel - The channel these routes serve; it scopes every lookup, so
  *   `/v1/campaign/export/{id}` never returns an email or voice job.
  */
-export async function registerCampaignJobRoutes(
+export function registerCampaignJobRoutes(
   app: FastifyInstance,
   channel: CampaignRouteChannel,
-): Promise<void> {
+): void {
   app.get(
     `/v1/campaign/${channel}/:job_id`,
     {

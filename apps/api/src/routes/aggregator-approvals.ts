@@ -139,7 +139,7 @@ function logApprovalAudit(
   );
 }
 
-export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Promise<void> {
+export function registerAggregatorApprovalRoutes(app: FastifyInstance): void {
   app.get(
     '/admin/v1/aggregator-registrations/read/:id',
     {

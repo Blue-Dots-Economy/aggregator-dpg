@@ -80,7 +80,7 @@ interface PresentDumpKeyHead extends DumpKeyHead {
  *
  * @param app - The Fastify instance to attach the route to.
  */
-export async function registerCampaignDumpRoutes(app: FastifyInstance): Promise<void> {
+export function registerCampaignDumpRoutes(app: FastifyInstance): void {
   app.get(
     '/v1/campaign/dump',
     {

@@ -46,7 +46,7 @@ const OnboardingBySourceResponseSchema = z
   })
   .passthrough();
 
-export async function registerOnboardingRoutes(app: FastifyInstance): Promise<void> {
+export function registerOnboardingRoutes(app: FastifyInstance): void {
   app.get(
     '/v1/onboarding/summary',
     {

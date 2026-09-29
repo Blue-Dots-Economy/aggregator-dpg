@@ -209,7 +209,7 @@ const ErrorsCsvResponseSchema = z
   })
   .passthrough();
 
-export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<void> {
+export function registerBulkUploadsRoutes(app: FastifyInstance): void {
   app.get(
     '/v1/bulk-uploads/template',
     {

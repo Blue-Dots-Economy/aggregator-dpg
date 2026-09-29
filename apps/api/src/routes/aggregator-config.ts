@@ -171,7 +171,7 @@ const AggregatorConfigResponseSchema = z
   })
   .passthrough();
 
-export async function registerAggregatorConfigRoutes(app: FastifyInstance): Promise<void> {
+export function registerAggregatorConfigRoutes(app: FastifyInstance): void {
   app.get(
     '/v1/aggregator-config',
     {

@@ -70,7 +70,7 @@ const LookupResponseSchema = z
  * handshake), 429 when the per-org rate limit trips, and 502 when
  * signalstack returns an error.
  */
-export async function registerPublicLookupRoute(app: FastifyInstance): Promise<void> {
+export function registerPublicLookupRoute(app: FastifyInstance): void {
   app.get(
     '/public/v1/aggregators/:orgSlug/lookup',
     {

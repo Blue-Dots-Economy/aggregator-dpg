@@ -39,7 +39,7 @@ import { config } from '../config.js';
  *
  * @param app - The Fastify instance to attach the route to.
  */
-export async function registerCampaignEmailRoutes(app: FastifyInstance): Promise<void> {
+export function registerCampaignEmailRoutes(app: FastifyInstance): void {
   app.post(
     '/v1/campaign/email',
     {
