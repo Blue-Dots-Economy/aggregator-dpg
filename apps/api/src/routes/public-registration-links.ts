@@ -138,7 +138,7 @@ const SubmitSkippedResponseSchema = SubmitAcceptedResponseSchema.extend({
   message: z.string(),
 }).passthrough();
 
-export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance): Promise<void> {
+export function registerPublicRegistrationLinkRoutes(app: FastifyInstance): void {
   app.get(
     '/public/v1/aggregators/:orgSlug/links/:slug',
     {
