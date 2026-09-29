@@ -18,7 +18,6 @@ import { describe, it, expect } from 'vitest';
 import {
   aggregators,
   aggregatorOrgs,
-  aggregatorProfile,
   bulkUploads,
   registrationLinks,
   participants,
@@ -114,37 +113,6 @@ describe('aggregator_orgs remaining columns (not covered by aggregator-orgs.sche
     expect(aggregatorOrgs.id.name).toBe('id');
     expect(aggregatorOrgs.id.primary).toBe(true);
     expect(aggregatorOrgs.id.hasDefault).toBe(true);
-  });
-});
-
-describe('aggregator_profile columns', () => {
-  it('is 1:1 keyed on aggregator_id as its own primary key', () => {
-    expect(aggregatorProfile.aggregatorId.name).toBe('aggregator_id');
-    expect(aggregatorProfile.aggregatorId.primary).toBe(true);
-    expect(aggregatorProfile.aggregatorId.notNull).toBe(true);
-  });
-
-  it('personas/services/verified_certificate default to an empty jsonb array', () => {
-    expect(aggregatorProfile.personas.name).toBe('personas');
-    expect(aggregatorProfile.personas.notNull).toBe(true);
-    expect(aggregatorProfile.personas.hasDefault).toBe(true);
-
-    expect(aggregatorProfile.services.name).toBe('services');
-    expect(aggregatorProfile.services.notNull).toBe(true);
-    expect(aggregatorProfile.services.hasDefault).toBe(true);
-
-    expect(aggregatorProfile.verifiedCertificate.name).toBe('verified_certificate');
-    expect(aggregatorProfile.verifiedCertificate.notNull).toBe(true);
-    expect(aggregatorProfile.verifiedCertificate.hasDefault).toBe(true);
-  });
-
-  it('contactName is nullable and profileCompletedAt has no default', () => {
-    expect(aggregatorProfile.contactName.name).toBe('contact_name');
-    expect(aggregatorProfile.contactName.notNull).toBe(false);
-
-    expect(aggregatorProfile.profileCompletedAt.name).toBe('profile_completed_at');
-    expect(aggregatorProfile.profileCompletedAt.notNull).toBe(false);
-    expect(aggregatorProfile.profileCompletedAt.hasDefault).toBe(false);
   });
 });
 

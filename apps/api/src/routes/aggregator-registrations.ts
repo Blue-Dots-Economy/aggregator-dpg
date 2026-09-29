@@ -36,7 +36,6 @@ import type { BecknContact } from '@aggregator-dpg/shared-primitives/aggregator'
 import { getRegistrationValidator } from '../services/registration-validator.js';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
 import type { Aggregator } from '../services/aggregator-store/interface.js';
-import { getAggregatorProfileStore } from '../services/aggregator-profile-store/index.js';
 import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js';
 import { getRegistrationInvitesStore } from '../services/registration-invites-store/index.js';
 import { verifyInviteToken } from '../services/invite-token.js';
@@ -241,7 +240,6 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
         };
 
         const aggregatorStore = getAggregatorStore();
-        const profileStore = getAggregatorProfileStore();
         const idp = getIdpAdmin();
 
         // Server-stamp the consent timestamp so the recorded value reflects
@@ -504,19 +502,6 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
           await aggregatorStore.deleteById(aggregatorId);
           throw httpError('CONSENT_WRITE_FAILED', {
             fields: { sub_operation: 'recordAggregatorConsent', rolled_back: true },
-          });
-        }
-
-        const profile = await profileStore.create({
-          aggregatorId,
-          createdBy: 'self',
-          updatedBy: 'self',
-        });
-        if (!profile.ok) {
-          await aggregatorStore.deleteById(aggregatorId);
-          throw httpError('DB_UNAVAILABLE', {
-            cause: new Error(profile.error.message),
-            fields: { sub_operation: 'profileStore.create', rolled_back: true },
           });
         }
 
