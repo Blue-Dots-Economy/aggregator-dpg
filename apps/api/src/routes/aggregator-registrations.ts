@@ -13,9 +13,8 @@
  *   4. Generate `org_slug = slugFromName(body.name)` with retry on the
  *      (statistically tiny) suffix collision.
  *   5. INSERT `aggregators` (status='pending', actor_type='aggregator',
- *      type=null) and INSERT a stub `aggregator_profile` row alongside.
- *      If the profile insert fails, delete the aggregator (cascade clears
- *      anything that managed to land).
+ *      type=null). Schema-declared fields with no column of their own go
+ *      into the `profile` jsonb, tagged by `profile_ref`.
  *   6. Create the Keycloak user with attributes
  *      { aggregator_id, aggregator_type, phoneNumber, decision_made: 'pending' }.
  *      Email is a built-in field. The user is created disabled — login is
@@ -25,8 +24,8 @@
  *      bulk uploads and public registration links.
  *   7. Mint approve / reject JWTs and email the configured admins.
  *
- * Failures throw `httpError(<CODE>)`. KC failure post-DB → rollback the
- * aggregator row (FK cascades the profile).
+ * Failures throw `httpError(<CODE>)`. A consent-ledger or KC failure after the
+ * DB write rolls back the aggregator row (FK cascades its children).
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';

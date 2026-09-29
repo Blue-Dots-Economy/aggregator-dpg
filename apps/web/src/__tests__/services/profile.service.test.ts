@@ -99,11 +99,6 @@ describe('profileService', () => {
     await expect(profileService.get()).rejects.toThrow();
   });
 
-  it('update() ignores the legacy patch and re-fetches the canonical profile', async () => {
-    const profile = await profileService.update({ org: 'Ignored' });
-    expect(profile.org).toBe('TRRAIN');
-  });
-
   it('falls back to the KC identity when contact.name is absent', async () => {
     globalThis.fetch = vi.fn(
       async () =>

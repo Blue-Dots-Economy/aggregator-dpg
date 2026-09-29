@@ -1,33 +1,8 @@
 import type { AggregatorProfile } from '../types';
 import { jsonFetch } from './http';
 
-/**
- * Server-side patch shape mirrored from the API's `ProfileUpdateBodySchema`.
- * Every field lands on the `aggregators` row; `aggregator` is required because
- * it is now the only half of the body.
- */
-export interface ProfileEditPayload {
-  aggregator: {
-    name?: string;
-    url?: string | null;
-    contact?: {
-      name: string;
-      phone: string;
-      email: string;
-      alternatePhone?: string;
-      company?: string;
-      gstNumber?: string;
-    };
-    locations?: Array<{
-      geo: { type: string; coordinates?: unknown };
-      address?: Record<string, string | undefined>;
-    }>;
-  };
-}
-
 export interface ProfileService {
   get(): Promise<AggregatorProfile>;
-  update(patch: Partial<AggregatorProfile>): Promise<AggregatorProfile>;
   /** Raw read of the API response (pre-mapping) for form pre-fill. */
   getRaw(): Promise<ProfileApiResponse>;
 }
@@ -47,9 +22,8 @@ interface BecknLocation {
 }
 
 /**
- * Merged GET /v1/aggregators/profile/me response shape after the two-table
- * refactor. `aggregator.*` fields are flattened into the top level alongside
- * the post-login `aggregator_profile` fields.
+ * `GET /v1/aggregators/profile/me` response shape — the `aggregators` row
+ * flattened to the top level, plus the Keycloak-derived `identity` fragment.
  */
 export interface ProfileApiResponse {
   aggregator_id: string;
@@ -86,13 +60,6 @@ class ApiProfileService implements ProfileService {
 
   async getRaw(): Promise<ProfileApiResponse> {
     return jsonFetch<ProfileApiResponse>('/api/aggregator/profile/me');
-  }
-
-  async update(patch: Partial<AggregatorProfile>): Promise<AggregatorProfile> {
-    // Display-shape no-op kept for callers that hold a `ProfileService`.
-    // Returns the freshly fetched profile so React Query stays consistent.
-    void patch;
-    return this.get();
   }
 }
 
