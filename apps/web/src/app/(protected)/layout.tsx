@@ -88,10 +88,12 @@ export default async function ProtectedLayout({ children }: { children: ReactNod
 
   return (
     <AuthProvider initialUser={user} supportEnabled={supportEnabled}>
-      <div className="flex min-h-screen">
+      {/* Column below `lg` (slim menu bar stacked above the page), row from
+          `lg` up (fixed sidebar beside it) — see Sidebar (#793). */}
+      <div className="flex flex-col lg:flex-row min-h-dvh">
         <Sidebar />
         <main className="flex-1 min-w-0 overflow-x-hidden">
-          <div className="max-w-[1480px] mx-auto px-8 py-7">{children}</div>
+          <div className="max-w-[1480px] mx-auto px-4 py-5 sm:px-6 lg:px-8 lg:py-7">{children}</div>
         </main>
       </div>
     </AuthProvider>

@@ -248,7 +248,10 @@
     "portal_label": "एग्रीगेटर पोर्टल",
     "sign_out": "साइन आउट",
     "aggregator_sublabel": "एग्रीगेटर · कर्नाटक",
-    "contact_support": "सहायता से संपर्क करें"
+    "contact_support": "सहायता से संपर्क करें",
+    "open_menu": "मेनू खोलें",
+    "close_menu": "मेनू बंद करें",
+    "menu_label": "मुख्य नेविगेशन"
   },
   "onboarding": {
     "title": "ऑनबोर्डिंग",

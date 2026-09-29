@@ -160,7 +160,7 @@ export function ProfileFormView({ schema, uiSchema }: ProfileFormViewProps): JSX
 
       <div className="bd-card bd-shadow overflow-hidden">
         {!requesting && (
-          <div className="px-7 py-4 bg-linear-to-r from-(--bd-tint-primary) to-(--bd-card) border-b border-(--bd-border) flex items-center justify-between gap-4">
+          <div className="px-4 sm:px-7 py-4 bg-linear-to-r from-(--bd-tint-primary) to-(--bd-card) border-b border-(--bd-border) flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
             <h2 className="font-display font-bold text-[15px] text-ink-900">
               {t('section_details')}
             </h2>
@@ -176,7 +176,7 @@ export function ProfileFormView({ schema, uiSchema }: ProfileFormViewProps): JSX
         )}
 
         {requesting && (
-          <div className="px-7 pt-6">
+          <div className="px-4 sm:px-7 pt-6">
             <div className="rounded-[12px] border border-(--bd-border) bg-(--bd-tint-primary) p-5">
               <h3 className="font-display font-bold text-[15px] text-ink-900">
                 {t('update_request_heading')}
@@ -222,7 +222,7 @@ export function ProfileFormView({ schema, uiSchema }: ProfileFormViewProps): JSX
                   <span>{t('update_request_pending')}</span>
                 </div>
               )}
-              <div className="mt-4 flex items-center justify-end gap-2">
+              <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
                 <Button kind="ghost" onClick={closeRequest}>
                   {t('btn_cancel')}
                 </Button>
@@ -238,7 +238,7 @@ export function ProfileFormView({ schema, uiSchema }: ProfileFormViewProps): JSX
           </div>
         )}
 
-        <div className="px-7 py-7">
+        <div className="px-4 py-5 sm:px-7 sm:py-7">
           {isLoading ? (
             <div className="text-center text-ink-400 text-[13.5px] py-6">{t('loading')}</div>
           ) : isError ? (

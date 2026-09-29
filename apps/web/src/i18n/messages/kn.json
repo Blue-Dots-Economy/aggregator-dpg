@@ -248,7 +248,10 @@
     "portal_label": "ಅಗ್ರಿಗೇಟರ್ ಪೋರ್ಟಲ್",
     "sign_out": "ಸೈನ್ ಔಟ್",
     "aggregator_sublabel": "ಅಗ್ರಿಗೇಟರ್ · ಕರ್ನಾಟಕ",
-    "contact_support": "ಬೆಂಬಲವನ್ನು ಸಂಪರ್ಕಿಸಿ"
+    "contact_support": "ಬೆಂಬಲವನ್ನು ಸಂಪರ್ಕಿಸಿ",
+    "open_menu": "ಮೆನು ತೆರೆಯಿರಿ",
+    "close_menu": "ಮೆನು ಮುಚ್ಚಿ",
+    "menu_label": "ಮುಖ್ಯ ನ್ಯಾವಿಗೇಶನ್"
   },
   "onboarding": {
     "title": "ಆನ್‌ಬೋರ್ಡಿಂಗ್",
