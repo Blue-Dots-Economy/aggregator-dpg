@@ -460,14 +460,6 @@
       "btn_saving": "Saving…",
       "save_failed": "Save failed. Please try again."
     },
-    "complete": {
-      "topbar_title": "Complete your profile",
-      "topbar_subtitle": "A few details about your organisation so we can match you with the right opportunities.",
-      "loading": "Loading profile…",
-      "btn_save": "Save profile",
-      "btn_saving": "Saving…",
-      "status_saved": "Saved"
-    },
     "public_reg": {
       "domain_seeker": "Seeker registration",
       "domain_provider": "Provider registration",

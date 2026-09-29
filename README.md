@@ -196,25 +196,25 @@ Node.js + TypeScript, **Fastify** (as built). Stateless, deployed behind the pla
 
 #### Endpoint sketch (REST, all JSON)
 
-| Method    | Path                             | Purpose                                           |
-| --------- | -------------------------------- | ------------------------------------------------- |
-| POST      | `/v1/auth/otp/request`           | Request OTP to email/phone                        |
-| POST      | `/v1/auth/otp/verify`            | Exchange OTP for session JWT                      |
-| POST      | `/v1/registration-requests`      | Submit new-aggregator request (pre-login)         |
-| GET       | `/v1/me`                         | Current aggregator org + verified flag            |
-| GET       | `/v1/profile/schema`             | Current profile schema (versioned)                |
-| GET/PATCH | `/v1/profile`                    | Read/update aggregator profile                    |
-| GET       | `/v1/onboard/summary`            | Registered / verified / discoverable counts       |
-| POST      | `/v1/onboard/links`              | Create onboarding link (returns URL + QR payload) |
-| GET       | `/v1/onboard/links`              | List links with join counts per mode              |
-| POST      | `/v1/onboard/bulk-uploads`       | Multipart CSV upload; returns batch id            |
+| Method    | Path                             | Purpose                                                       |
+| --------- | -------------------------------- | ------------------------------------------------------------- |
+| POST      | `/v1/auth/otp/request`           | Request OTP to email/phone                                    |
+| POST      | `/v1/auth/otp/verify`            | Exchange OTP for session JWT                                  |
+| POST      | `/v1/registration-requests`      | Submit new-aggregator request (pre-login)                     |
+| GET       | `/v1/me`                         | Current aggregator org + verified flag                        |
+| GET       | `/v1/profile/schema`             | Current profile schema (versioned)                            |
+| GET/PATCH | `/v1/profile`                    | Read/update aggregator profile                                |
+| GET       | `/v1/onboard/summary`            | Registered / verified / discoverable counts                   |
+| POST      | `/v1/onboard/links`              | Create onboarding link (returns URL + QR payload)             |
+| GET       | `/v1/onboard/links`              | List links with join counts per mode                          |
+| POST      | `/v1/onboard/bulk-uploads`       | Multipart CSV upload; returns batch id                        |
 | GET       | `/v1/bulk-uploads/template`      | Template download; `?participant_type=` + `?format=csv\|xlsx` |
-| GET       | `/v1/onboard/bulk-uploads/:id`   | Batch status + per-row outcomes                   |
-| GET       | `/v1/onboard/flagged-profiles`   | Incomplete/flagged profile list                   |
-| GET       | `/v1/blue-dots/summary`          | Aggregate status + participation metrics          |
-| GET       | `/v1/blue-dots/participants`     | Paginated participant list with filters & search  |
-| GET       | `/v1/blue-dots/participants/:id` | Participant detail                                |
-| GET       | `/v1/blue-dots/export`           | CSV export of current filter                      |
+| GET       | `/v1/onboard/bulk-uploads/:id`   | Batch status + per-row outcomes                               |
+| GET       | `/v1/onboard/flagged-profiles`   | Incomplete/flagged profile list                               |
+| GET       | `/v1/blue-dots/summary`          | Aggregate status + participation metrics                      |
+| GET       | `/v1/blue-dots/participants`     | Paginated participant list with filters & search              |
+| GET       | `/v1/blue-dots/participants/:id` | Participant detail                                            |
+| GET       | `/v1/blue-dots/export`           | CSV export of current filter                                  |
 
 Every listing endpoint accepts `aggregator_id` implicitly from the session and applies it as a hard filter at query time.
 
@@ -248,8 +248,6 @@ MVP recommendation: **Option A with a 5–15 minute refresh cadence.** The PRD's
 Single logical database, owned by the Aggregator API. Suggested tables:
 
 ```
-aggregator_profile_schema      (id, version, schema_json, active, created_at)
-aggregator_profile             (aggregator_id PK, schema_version, values_json, updated_at)
 onboarding_link                (id PK, aggregator_id, mode, target_role, label, created_at, expires_at, revoked_at)
 bulk_upload_batch              (id PK, aggregator_id, filename, total, succeeded, flagged, created_at, created_by)
 bulk_upload_row                (id PK, batch_id FK, row_number, raw_row_json, outcome, error_code, error_message)
@@ -297,12 +295,13 @@ Diagrams in the PRD (Flows 1–4) are authoritative. Implementation notes:
 
 **Template formats** (`GET /v1/bulk-uploads/template?participant_type=seeker|provider`, #564). Both are generated from the participant schema resolved out of `network.json` and are gated on the caller's registered `aggregator_type` — nothing is shipped in the repo. The previously committed `bulk-samples/*.csv` were deleted because they had rotted into templates the parser itself rejects.
 
-| `?format=` | Returns |
-| --- | --- |
-| `csv` (default) | `text/csv` — the header row plus one example row. What a caller generating its own file needs. |
-| `xlsx` | A four-tab workbook for that type: **Instructions** (and the colour legend), **Allowed values** (every column, closed sets first), **Sample data** (worked rows covering every conditional branch), and **Enter your &lt;type&gt;s** (the empty grid, with a dropdown on every closed-set column). |
+| `?format=`      | Returns                                                                                                                                                                                                                                                                                            |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `csv` (default) | `text/csv` — the header row plus one example row. What a caller generating its own file needs.                                                                                                                                                                                                     |
+| `xlsx`          | A four-tab workbook for that type: **Instructions** (and the colour legend), **Allowed values** (every column, closed sets first), **Sample data** (worked rows covering every conditional branch), and **Enter your &lt;type&gt;s** (the empty grid, with a dropdown on every closed-set column). |
 
-**The upload path is unchanged and still accepts `.csv` only.** The workbook is what an operator fills in and then exports with *File > Save As > CSV* — it exists because a CSV cannot tell an operator which columns are required, which values a closed set accepts, or that an array cell is delimiter-joined, each of which is a class of failure otherwise only reported after the fact, per row, in `errors.csv`. The grid deliberately keeps **machine-name headers** rather than the human `title` from `network.json`, because the exported CSV's header line is what `bulk-file-stream` matches against. Array-typed fields use the network's `csv_array_delimiter`.
+**The upload path is unchanged and still accepts `.csv` only.** The workbook is what an operator fills in and then exports with _File > Save As > CSV_ — it exists because a CSV cannot tell an operator which columns are required, which values a closed set accepts, or that an array cell is delimiter-joined, each of which is a class of failure otherwise only reported after the fact, per row, in `errors.csv`. The grid deliberately keeps **machine-name headers** rather than the human `title` from `network.json`, because the exported CSV's header line is what `bulk-file-stream` matches against. Array-typed fields use the network's `csv_array_delimiter`.
+
 4. Profile-completeness flags surface later via the Signal Processing Service (because completion % is a computed signal).
 
 ### 6.4 My Blue Dots list

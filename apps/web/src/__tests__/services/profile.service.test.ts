@@ -27,11 +27,6 @@ const apiResponse = {
   ],
   consent: { value: true, given_at: '2026-01-01T00:00:00Z', valid_till: '2027-01-01T00:00:00Z' },
   status: 'active',
-  contact_name: 'Asha Rao',
-  personas: [{ id: 'persona-iti-seeker', name: 'Women in retail' }],
-  services: [{ id: 'service-bluedots-job', name: 'BlueDots Job' }],
-  verified_certificate: [],
-  profile_completed_at: '2026-04-30T00:00:00Z',
   identity: {
     first_name: 'Asha',
     last_name: 'Rao',
@@ -41,7 +36,6 @@ const apiResponse = {
     phone_verified: false,
     active: true,
   },
-  is_complete: true,
   created_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-04-30T00:00:00Z',
 };
@@ -73,14 +67,12 @@ describe('profileService', () => {
     expect(profile.consent.profileCreation).toBe(true);
   });
 
-  it('renders empty aggregator-details when personas/services/locations are empty', async () => {
+  it('renders empty aggregator-details when locations are empty', async () => {
     globalThis.fetch = vi.fn(
       async () =>
         new Response(
           JSON.stringify({
             ...apiResponse,
-            personas: [],
-            services: [],
             locations: [],
           }),
           {
@@ -90,7 +82,10 @@ describe('profileService', () => {
         ),
     ) as unknown as typeof fetch;
     const profile = await profileService.get();
+    // `beneficiaries` / `sectors` are now always empty — the personas and
+    // services that fed them lived on the removed `aggregator_profile` row.
     expect(profile.beneficiaries).toBe('');
+    expect(profile.sectors).toBe('');
     expect(profile.geographies).toBe('');
     expect(profile.address).toBe('');
   });
@@ -104,35 +99,13 @@ describe('profileService', () => {
     await expect(profileService.get()).rejects.toThrow();
   });
 
-  it('update() ignores the legacy patch and re-fetches the canonical profile', async () => {
-    const profile = await profileService.update({ org: 'Ignored' });
-    expect(profile.org).toBe('TRRAIN');
-  });
-
-  it('edit() PATCHes the profile endpoint and maps the response', async () => {
-    const fetchSpy = vi.fn(
-      async () =>
-        new Response(JSON.stringify({ ...apiResponse, org_name: 'Updated Org' }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        }),
-    );
-    globalThis.fetch = fetchSpy as unknown as typeof fetch;
-    const profile = await profileService.edit({ profile: { contact_name: 'New Name' } });
-    expect(profile.org).toBe('Updated Org');
-    const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
-    expect(init.method).toBe('PATCH');
-    expect(JSON.parse(init.body as string)).toEqual({ profile: { contact_name: 'New Name' } });
-  });
-
-  it('falls back to KC identity or contact_name when contact.name is absent', async () => {
+  it('falls back to the KC identity when contact.name is absent', async () => {
     globalThis.fetch = vi.fn(
       async () =>
         new Response(
           JSON.stringify({
             ...apiResponse,
             contact: { ...apiResponse.contact, name: '' },
-            contact_name: null,
             identity: { ...apiResponse.identity, first_name: 'Asha', last_name: 'Rao' },
           }),
           { status: 200, headers: { 'Content-Type': 'application/json' } },

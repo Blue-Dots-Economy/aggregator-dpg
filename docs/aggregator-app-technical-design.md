@@ -523,13 +523,6 @@ aggregator
   registration_status CHECK IN ('pending','approved','rejected')
   created_at, updated_at
 
-aggregator_profile
-  aggregator_id FK
-  schema_version
-  data JSONB  -- validated against profile.<version>.json
-  consent JSONB
-  updated_at
-
 registration_link
   id PK
   aggregator_id FK
@@ -895,7 +888,7 @@ This is the build order, expressed as engineering stories. Each story is sized t
 8. **Keycloak realm bring-up** — `signal-stack` realm, `aggregator-web` and `aggregator-api` clients, baseline session policy. Provisioned via the Keycloak admin REST API on first deploy.
 9. **Custom OTP authenticator** — Keycloak SPI plug-in that delegates code delivery to the Aggregator Service's Notification adapter. Unit tests + integration test against the local Keycloak.
 10. **Schema & Rules module** — `GET /v1/schemas/{actor}/{action}` and rule loader. Schemas and rule files committed under `config/`.
-11. **Database migrations** — initial schema for `aggregator`, `aggregator_profile`, `registration_link`, `participant`, `participant_activity`, `bulk_upload_job`. Migration runner wired into `deploy-dev.yml`. Migrations run identically against Postgres (local/dev) and YugabyteDB YSQL (staging/prod).
+11. **Database migrations** — initial schema for `aggregator`, `registration_link`, `participant`, `participant_activity`, `bulk_upload_job`. Migration runner wired into `deploy-dev.yml`. Migrations run identically against Postgres (local/dev) and YugabyteDB YSQL (staging/prod).
 
 **Phase 2 — Registration, Approval, Login**
 
