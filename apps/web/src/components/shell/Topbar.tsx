@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 import { useTranslations } from 'next-intl';
 import { I } from '../../icons';
 import { useThemeMode } from '../../lib/theme-mode';
+import { GuideButton } from '../guide/GuideButton';
 import { LanguageSwitcher } from './LanguageSwitcher';
 
 interface TopbarProps {
@@ -25,16 +26,19 @@ export function Topbar({ title, subtitle, right }: TopbarProps) {
       </div>
       <div className="flex items-center gap-2 shrink-0">
         {right}
-        <LanguageSwitcher />
-        <button
-          type="button"
-          onClick={toggle}
-          title={mode === 'dark' ? t('switch_to_light') : t('switch_to_dark')}
-          aria-label={t('toggle_aria')}
-          className="w-9 h-9 rounded-[10px] flex items-center justify-center border border-(--bd-border) bg-(--bd-card) text-(--bd-fg-muted) hover:text-(--bd-fg) hover:bg-(--bd-border-soft) transition-colors"
-        >
-          {mode === 'dark' ? <I.sun size={16} /> : <I.moon size={16} />}
-        </button>
+        <span data-tour="preferences" className="flex items-center gap-2">
+          <LanguageSwitcher />
+          <button
+            type="button"
+            onClick={toggle}
+            title={mode === 'dark' ? t('switch_to_light') : t('switch_to_dark')}
+            aria-label={t('toggle_aria')}
+            className="w-9 h-9 rounded-[10px] flex items-center justify-center border border-(--bd-border) bg-(--bd-card) text-(--bd-fg-muted) hover:text-(--bd-fg) hover:bg-(--bd-border-soft) transition-colors"
+          >
+            {mode === 'dark' ? <I.sun size={16} /> : <I.moon size={16} />}
+          </button>
+        </span>
+        <GuideButton />
       </div>
     </div>
   );

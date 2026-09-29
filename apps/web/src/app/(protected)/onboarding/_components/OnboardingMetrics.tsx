@@ -140,7 +140,7 @@ export function OnboardingMetrics() {
     totalJoins > 0 ? `${Math.round((n / totalJoins) * 1000) / 10}%` : '0%';
 
   return (
-    <section>
+    <section data-tour="onb-metrics">
       <div className="flex items-center justify-between gap-4 flex-wrap mb-1">
         <span className="text-[11.5px] font-bold uppercase tracking-[.09em] text-ink-400">
           {t('onboardingGroup.title')}
@@ -216,7 +216,7 @@ export function OnboardingMetrics() {
           </div>
 
           {slices.length > 0 && (
-            <div className="bd-card p-5 mt-4">
+            <div data-tour="onb-modes" className="bd-card p-5 mt-4">
               <div className="flex items-center justify-between gap-3">
                 <div className="text-[14px] font-bold text-ink-700">
                   {t('onboardingGroup.byMode')}

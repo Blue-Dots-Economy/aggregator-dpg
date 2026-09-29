@@ -636,5 +636,10 @@
     "back_to_sign_in": "Back to sign in",
     "contents_label": "Contents",
     "agree_sentence": "By continuing you agree to the <privacy>Privacy Policy</privacy> and <terms>Terms</terms>."
+  },
+  "guide": {
+    "menu": "Help and tours",
+    "this_page": "On this page",
+    "how_do_i": "How do I…"
   }
 }

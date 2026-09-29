@@ -376,7 +376,7 @@ export function CreateLinkSection() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px]">
-        <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div data-tour="link-form" className="p-6 grid grid-cols-1 md:grid-cols-2 gap-3">
           <div className="md:col-span-2">
             <Field label={t('create_link.field_org_name')}>
               <input
@@ -445,6 +445,7 @@ export function CreateLinkSection() {
            */}
           <Field label={t('create_link.field_registration_mode')} required>
             <select
+              data-tour="link-mode"
               className="bd-input"
               value={form.registration_mode}
               onChange={(e) => setForm((f) => ({ ...f, registration_mode: e.target.value }))}
@@ -476,7 +477,11 @@ export function CreateLinkSection() {
             </div>
           )}
           <div className="md:col-span-2 flex items-center justify-end gap-2 mt-2 flex-wrap">
-            <Button onClick={onCreate} disabled={create.isPending || createBlockers.length > 0}>
+            <Button
+              data-tour="link-create"
+              onClick={onCreate}
+              disabled={create.isPending || createBlockers.length > 0}
+            >
               {create.isPending ? t('create_link.creating') : t('create_link.create_button')}
             </Button>
           </div>
@@ -653,6 +658,7 @@ function LinkCard({
   return (
     <div
       ref={cardRef}
+      data-tour="link-card"
       className={`bd-card p-5 hover:border-(--bd-primary-100) transition-all ${
         ringed ? 'ring-2 ring-primary-400 ring-offset-2' : ''
       }`}
@@ -691,6 +697,7 @@ function LinkCard({
                  */}
                 <button
                   type="button"
+                  data-tour="link-copy"
                   onClick={onCopy}
                   title={copied ? t('link_card.copied') : t('link_card.copy_title')}
                   aria-label={t('link_card.copy_title')}
@@ -701,6 +708,7 @@ function LinkCard({
               </div>
               <button
                 type="button"
+                data-tour="link-qr"
                 onClick={openQr}
                 title={t('link_card.view_qr')}
                 className="inline-flex items-center justify-center w-8 h-8 rounded-[10px] border border-(--bd-border) text-ink-500 hover:text-primary-600 hover:border-(--bd-primary-100)"
@@ -770,7 +778,7 @@ function LinkCard({
           </div>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div data-tour="link-actions" className="flex items-center gap-2 shrink-0">
           {isDraft && !editing && (
             <Button kind="ghost" onClick={() => setEditing(true)} disabled={update.isPending}>
               {t('link_card.edit')}

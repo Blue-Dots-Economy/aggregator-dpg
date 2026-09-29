@@ -216,7 +216,7 @@ function SummaryBar({
   const t = useTranslations('dashboard');
   const Ic = I[icon];
   return (
-    <div className="bd-card bd-shadow px-5 py-4 flex items-center gap-4">
+    <div data-tour="dash-summary" className="bd-card bd-shadow px-5 py-4 flex items-center gap-4">
       <div
         className="w-11 h-11 rounded-[12px] flex items-center justify-center shrink-0"
         style={{ background: 'var(--bd-primary-50)', color: 'var(--bd-primary-600)' }}
@@ -252,6 +252,7 @@ function SummaryBar({
               aria-hidden="true"
             />
           }
+          data-tour="dash-refresh"
           onClick={onRefresh}
           disabled={refreshing}
           aria-label={t('aria.refresh')}
@@ -908,7 +909,7 @@ function ParticipantTable<R extends ParticipantBase>({
     total > selectablePageRows.length;
 
   return (
-    <div className="bd-card bd-shadow overflow-hidden">
+    <div data-tour="dash-table" className="bd-card bd-shadow overflow-hidden">
       <div className="px-5 py-4 flex items-center gap-3 border-b border-(--bd-border)">
         <div className="font-display font-bold text-[15px] text-ink-900">
           {kind === 'opp'
@@ -929,6 +930,7 @@ function ParticipantTable<R extends ParticipantBase>({
               className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-400"
             />
             <input
+              data-tour="dash-search"
               id={searchId}
               aria-label={t('aria.search_participants')}
               className="bd-input w-[360px] shrink-0 text-[13px] py-1.5"
@@ -942,6 +944,7 @@ function ParticipantTable<R extends ParticipantBase>({
           </div>
           {onLifecycleFilterChange ? (
             <select
+              data-tour="dash-lifecycle"
               aria-label={t('filters.lifecycle_label')}
               className="bd-input w-auto max-w-[150px] text-[12.5px] py-1.5 pr-7"
               value={lifecycleFilter}
@@ -952,7 +955,7 @@ function ParticipantTable<R extends ParticipantBase>({
               <option value="live">{t('filters.lifecycle_live')}</option>
             </select>
           ) : null}
-          <div ref={filterRef} className="relative">
+          <div ref={filterRef} data-tour="dash-filter" className="relative">
             <Button
               kind={filterActive ? 'primary' : 'ghost'}
               icon={<I.filter size={14} />}
@@ -1048,7 +1051,7 @@ function ParticipantTable<R extends ParticipantBase>({
         </div>
       )}
 
-      <div className="overflow-auto scroll-x" style={{ maxHeight: 520 }}>
+      <div data-tour="dash-rows" className="overflow-auto scroll-x" style={{ maxHeight: 520 }}>
         <table className="bd-table" style={{ minWidth: (kind === 'provider' ? 1500 : 1400) + 44 }}>
           <thead
             style={{
@@ -1262,7 +1265,10 @@ function PaginationFooter({
   // so dashboards with many pages stay readable.
   const pageList = buildPageList(page, totalPages);
   return (
-    <div className="px-5 py-3 border-t border-(--bd-border) flex items-center justify-between text-[12.5px] text-ink-500">
+    <div
+      data-tour="dash-pagination"
+      className="px-5 py-3 border-t border-(--bd-border) flex items-center justify-between text-[12.5px] text-ink-500"
+    >
       <div>
         {showSearchSummary
           ? t('pagination.matching', { shown: visibleCount, rowsOnPage })
@@ -1566,7 +1572,7 @@ function SeekersTab({ domainId }: Readonly<DomainTabProps>) {
           void handleRefresh();
         }}
       />
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div data-tour="dash-status" className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <StatCard
           tone="new"
           icon="spark"
@@ -1603,7 +1609,7 @@ function SeekersTab({ domainId }: Readonly<DomainTabProps>) {
         />
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+      <div data-tour="dash-metrics" className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         {/* Profile-level tiles */}
         <MetricGroup title={seekerCfg?.dashboardTiles?.profile_title ?? t('groups.profiles')}>
           {resolveTiles(seekerCfg?.dashboardTiles?.profile, defaultTiles.profile, rollup).map(
@@ -1939,7 +1945,7 @@ function ProvidersTab({ domainId }: Readonly<DomainTabProps>) {
           void handleRefresh();
         }}
       />
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div data-tour="dash-status" className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <StatCard
           tone="new"
           icon="spark"
@@ -1972,7 +1978,7 @@ function ProvidersTab({ domainId }: Readonly<DomainTabProps>) {
         />
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+      <div data-tour="dash-metrics" className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         {/* Profile-level tiles */}
         <MetricGroup title={providerCfg?.dashboardTiles?.profile_title ?? t('groups.profiles')}>
           {resolveTiles(providerCfg?.dashboardTiles?.profile, defaultTiles.profile, rollup).map(
@@ -2095,7 +2101,11 @@ function DashboardContent({ aggregatorType }: { aggregatorType: string }) {
         subtitle={cfg.brand.tagline ?? 'Track every participant in your network — at a glance.'}
         right={
           <div className="flex items-center gap-2">
-            <Button icon={<I.plus size={14} />} onClick={() => router.push('/onboarding')}>
+            <Button
+              data-tour="dash-add"
+              icon={<I.plus size={14} />}
+              onClick={() => router.push('/onboarding')}
+            >
               {t('buttons.addParticipants')}
             </Button>
           </div>

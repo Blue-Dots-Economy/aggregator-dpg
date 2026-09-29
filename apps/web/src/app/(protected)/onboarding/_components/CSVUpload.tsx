@@ -167,6 +167,7 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
            * the value is changeable.
            */}
           <div
+            data-tour="csv-type"
             className="flex items-center bg-ink-50 border border-(--bd-border) rounded-[10px] p-0.5"
             aria-label={`Participant type: ${aggregatorTypeLabel}`}
           >
@@ -178,6 +179,7 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
           </div>
           <button
             type="button"
+            data-tour="csv-template"
             onClick={downloadTemplate}
             className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-primary-600 hover:underline"
           >
@@ -186,62 +188,67 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
         </div>
       </div>
 
-      <Dropzone onFiles={onDropFiles}>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".csv"
-          onChange={onPick}
-          className="hidden"
-          id="csv-file-input"
-        />
-        {pickedFile ? (
-          // Selected-file chip with explicit × dismissal. Cleared state +
-          // resets the file input so the same filename can be re-picked.
-          <div className="flex items-center justify-center gap-2">
-            <div className="inline-flex items-center gap-2 max-w-full px-3 py-2 rounded-[10px] bg-(--bd-primary-50) border border-(--bd-primary-100)">
-              <I.upload size={14} className="text-primary-600 shrink-0" />
-              <span className="text-[13.5px] font-semibold text-primary-700 truncate">
-                {pickedFile.name}
-              </span>
-              <span className="text-[11.5px] text-ink-400 shrink-0">
-                {(pickedFile.size / 1024).toFixed(1)} KB
-              </span>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setPickedFile(null);
-                  setUploadError(null);
-                  setUploadNotice(null);
-                  if (fileInputRef.current) fileInputRef.current.value = '';
-                }}
-                title={t('csv.remove_file')}
-                aria-label={t('csv.remove_file')}
-                className="inline-flex items-center justify-center w-6 h-6 rounded-full text-ink-500 hover:text-rose-600 hover:bg-rose-50 transition-colors shrink-0"
-              >
-                <I.x size={13} />
-              </button>
+      <div data-tour="csv-dropzone">
+        <Dropzone onFiles={onDropFiles}>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv"
+            onChange={onPick}
+            className="hidden"
+            id="csv-file-input"
+          />
+          {pickedFile ? (
+            // Selected-file chip with explicit × dismissal. Cleared state +
+            // resets the file input so the same filename can be re-picked.
+            <div className="flex items-center justify-center gap-2">
+              <div className="inline-flex items-center gap-2 max-w-full px-3 py-2 rounded-[10px] bg-(--bd-primary-50) border border-(--bd-primary-100)">
+                <I.upload size={14} className="text-primary-600 shrink-0" />
+                <span className="text-[13.5px] font-semibold text-primary-700 truncate">
+                  {pickedFile.name}
+                </span>
+                <span className="text-[11.5px] text-ink-400 shrink-0">
+                  {(pickedFile.size / 1024).toFixed(1)} KB
+                </span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setPickedFile(null);
+                    setUploadError(null);
+                    setUploadNotice(null);
+                    if (fileInputRef.current) fileInputRef.current.value = '';
+                  }}
+                  title={t('csv.remove_file')}
+                  aria-label={t('csv.remove_file')}
+                  className="inline-flex items-center justify-center w-6 h-6 rounded-full text-ink-500 hover:text-rose-600 hover:bg-rose-50 transition-colors shrink-0"
+                >
+                  <I.x size={13} />
+                </button>
+              </div>
             </div>
-          </div>
-        ) : (
-          <label htmlFor="csv-file-input" className="cursor-pointer block text-center">
-            <div className="w-12 h-12 mx-auto rounded-full bg-white border border-(--bd-border) flex items-center justify-center text-primary-600 mb-3 bd-shadow">
-              <I.upload size={20} />
-            </div>
-            <div className="text-[14px] font-semibold text-ink-700">
-              {t('csv.drag_prompt')}{' '}
-              <span className="text-primary-600 underline-offset-2">{t('csv.browse')}</span>
-            </div>
-            <div className="text-[12px] text-ink-400 mt-1">
-              {t('csv.hint', { type: participantType })}
-            </div>
-          </label>
-        )}
-      </Dropzone>
+          ) : (
+            <label htmlFor="csv-file-input" className="cursor-pointer block text-center">
+              <div className="w-12 h-12 mx-auto rounded-full bg-white border border-(--bd-border) flex items-center justify-center text-primary-600 mb-3 bd-shadow">
+                <I.upload size={20} />
+              </div>
+              <div className="text-[14px] font-semibold text-ink-700">
+                {t('csv.drag_prompt')}{' '}
+                <span className="text-primary-600 underline-offset-2">{t('csv.browse')}</span>
+              </div>
+              <div className="text-[12px] text-ink-400 mt-1">
+                {t('csv.hint', { type: participantType })}
+              </div>
+            </label>
+          )}
+        </Dropzone>
+      </div>
 
-      <label className="mt-4 flex items-start gap-2.5 rounded-[10px] border border-(--bd-border) px-3.5 py-3 text-[13px] text-ink-800 cursor-pointer">
+      <label
+        data-tour="csv-attest"
+        className="mt-4 flex items-start gap-2.5 rounded-[10px] border border-(--bd-border) px-3.5 py-3 text-[13px] text-ink-800 cursor-pointer"
+      >
         <input
           type="checkbox"
           checked={attested}
@@ -253,7 +260,11 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
       </label>
 
       <div className="flex items-center justify-end mt-4">
-        <Button onClick={onUpload} disabled={!pickedFile || upload.isPending || !attested}>
+        <Button
+          data-tour="csv-upload"
+          onClick={onUpload}
+          disabled={!pickedFile || upload.isPending || !attested}
+        >
           {upload.isPending ? t('csv.uploading') : t('csv.upload_button')}
         </Button>
       </div>
@@ -295,7 +306,7 @@ export function RecentUploadsBody() {
           {t('csv.recent.shown_count', { count: items.length })}
         </span>
       </div>
-      <div className="overflow-auto scroll-x" style={{ maxHeight: 360 }}>
+      <div data-tour="recent-uploads" className="overflow-auto scroll-x" style={{ maxHeight: 360 }}>
         <table className="bd-table" style={{ minWidth: 800 }}>
           <thead
             style={{

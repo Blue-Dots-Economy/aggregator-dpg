@@ -1,0 +1,69 @@
+/* Driver.js popover, re-skinned with the portal's --bd-* tokens so it follows
+   the brand colour and light/dark mode. */
+.driver-popover.bd-guide {
+  background: var(--bd-card);
+  color: var(--bd-fg);
+  border: 1px solid var(--bd-border);
+  border-radius: 12px;
+  max-width: 360px;
+}
+
+.driver-popover.bd-guide .driver-popover-title {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.driver-popover.bd-guide .driver-popover-description,
+.driver-popover.bd-guide .driver-popover-progress-text {
+  color: var(--bd-fg-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.driver-popover.bd-guide .driver-popover-description ul {
+  margin: 0.4rem 0 0;
+  padding-left: 1.1rem;
+  list-style: disc;
+}
+
+.driver-popover.bd-guide .driver-popover-description li + li {
+  margin-top: 0.25rem;
+}
+
+.driver-popover.bd-guide .driver-popover-description b {
+  color: var(--bd-fg);
+  font-weight: 600;
+}
+
+.driver-popover.bd-guide .driver-popover-footer button {
+  background: var(--bd-card);
+  color: var(--bd-fg);
+  border: 1px solid var(--bd-border);
+  border-radius: 8px;
+  text-shadow: none;
+  padding: 0.25rem 0.75rem;
+}
+
+.driver-popover.bd-guide .driver-popover-footer .driver-popover-next-btn {
+  background: var(--bd-primary-600);
+  color: #fff;
+  border-color: var(--bd-primary-600);
+}
+
+.driver-popover.bd-guide .driver-popover-close-btn {
+  color: var(--bd-fg-muted);
+}
+
+/* The arrow is drawn with borders; match it to the popover background. */
+.driver-popover.bd-guide .driver-popover-arrow-side-left {
+  border-left-color: var(--bd-card);
+}
+.driver-popover.bd-guide .driver-popover-arrow-side-right {
+  border-right-color: var(--bd-card);
+}
+.driver-popover.bd-guide .driver-popover-arrow-side-top {
+  border-top-color: var(--bd-card);
+}
+.driver-popover.bd-guide .driver-popover-arrow-side-bottom {
+  border-bottom-color: var(--bd-card);
+}

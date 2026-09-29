@@ -36,8 +36,12 @@ export default function OnboardingPage() {
       {/* Onboarding summary + joins-by-entry-mode at the top of the page,
           above the per-flow cards. */}
       <OnboardingMetrics />
-      <BulkUploadCard />
-      <RegistrationLinkCard />
+      <div data-tour="onb-bulk">
+        <BulkUploadCard />
+      </div>
+      <div data-tour="onb-links">
+        <RegistrationLinkCard />
+      </div>
     </div>
   );
 }
@@ -221,7 +225,7 @@ function SummaryCard({
 
         <div className="pt-2 border-t border-(--bd-border-soft) flex items-center justify-between gap-3 flex-wrap">
           <span className="text-[11.5px] text-ink-400">{footnote}</span>
-          <Button onClick={onCta} icon={<I.arrowR size={14} />}>
+          <Button data-tour="onb-cta" onClick={onCta} icon={<I.arrowR size={14} />}>
             {ctaLabel}
           </Button>
         </div>

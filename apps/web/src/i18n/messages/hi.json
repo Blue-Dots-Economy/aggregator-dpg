@@ -636,5 +636,10 @@
     "back_to_sign_in": "साइन इन पर वापस जाएं",
     "contents_label": "विषय-सूची",
     "agree_sentence": "जारी रखकर आप <privacy>गोपनीयता नीति</privacy> और <terms>शर्तों</terms> से सहमत होते हैं।"
+  },
+  "guide": {
+    "menu": "सहायता और टूर",
+    "this_page": "इस पेज पर",
+    "how_do_i": "मैं कैसे करूँ…"
   }
 }

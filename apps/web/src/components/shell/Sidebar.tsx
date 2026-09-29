@@ -81,7 +81,10 @@ export function Sidebar() {
   }));
 
   return (
-    <aside className="w-[252px] shrink-0 bg-(--bd-card) border-r border-(--bd-border) flex flex-col h-screen sticky top-0">
+    <aside
+      data-tour="sidebar"
+      className="w-[252px] shrink-0 bg-(--bd-card) border-r border-(--bd-border) flex flex-col h-screen sticky top-0"
+    >
       <div className="px-5 pt-6 pb-5">
         {cfg.brand.logo?.default ? (
           <Image
@@ -115,7 +118,7 @@ export function Sidebar() {
         <div className="px-3 pt-3 pb-2 text-[10.5px] uppercase tracking-[0.12em] font-semibold text-(--bd-fg-muted) opacity-60">
           {t('overview')}
         </div>
-        <nav className="flex flex-col gap-0.5">
+        <nav data-tour="sidebar-nav" className="flex flex-col gap-0.5">
           {nav.map((n) => {
             const Ic = I[n.icon];
             const isActive = pathname === n.to || pathname?.startsWith(`${n.to}/`);
@@ -152,7 +155,7 @@ export function Sidebar() {
 
       <div className="mt-auto">
         {supportEnabled && (
-          <div className="px-3 pb-2">
+          <div data-tour="support" className="px-3 pb-2">
             <Button
               kind="ghost"
               icon={<I.message size={16} />}
@@ -165,7 +168,10 @@ export function Sidebar() {
         )}
 
         <div className="p-3 shrink-0">
-          <div className="rounded-[12px] bg-linear-to-br from-(--bd-tint-primary) to-(--bd-card) border border-(--bd-border) p-3 flex items-center gap-2.5">
+          <div
+            data-tour="account"
+            className="rounded-[12px] bg-linear-to-br from-(--bd-tint-primary) to-(--bd-card) border border-(--bd-border) p-3 flex items-center gap-2.5"
+          >
             <div className="w-8 h-8 rounded-lg bg-(--bd-brand) text-white flex items-center justify-center font-display font-bold text-[12px] shrink-0">
               {orgInitials}
             </div>

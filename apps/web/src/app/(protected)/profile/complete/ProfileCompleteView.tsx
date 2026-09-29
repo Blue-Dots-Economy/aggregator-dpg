@@ -100,7 +100,7 @@ export function ProfileCompleteView({ schema, uiSchema }: ProfileCompleteViewPro
     <div className="fade-up">
       <Topbar title={t('topbar_title')} subtitle={t('topbar_subtitle')} />
 
-      <div className="bd-card bd-shadow overflow-hidden">
+      <div data-tour="profile-complete-form" className="bd-card bd-shadow overflow-hidden">
         <div className="px-7 py-7">
           {state.status === 'loading' && (
             <div className="text-[13px] text-ink-400">{t('loading')}</div>
@@ -127,6 +127,7 @@ export function ProfileCompleteView({ schema, uiSchema }: ProfileCompleteViewPro
                 )}
                 <div className="ml-auto">
                   <Button
+                    data-tour="profile-save"
                     type="submit"
                     icon={<I.check size={14} />}
                     disabled={state.status === 'submitting' || !canSubmit}

@@ -167,6 +167,7 @@ export function ProfileFormView({ schema, uiSchema }: ProfileFormViewProps): JSX
             <Button
               kind="ghost"
               icon={<I.edit size={14} />}
+              data-tour="profile-request"
               onClick={() => setRequesting(true)}
               className="shrink-0"
             >
@@ -238,7 +239,7 @@ export function ProfileFormView({ schema, uiSchema }: ProfileFormViewProps): JSX
           </div>
         )}
 
-        <div className="px-7 py-7">
+        <div data-tour="profile-details" className="px-7 py-7">
           {isLoading ? (
             <div className="text-center text-ink-400 text-[13.5px] py-6">{t('loading')}</div>
           ) : isError ? (
