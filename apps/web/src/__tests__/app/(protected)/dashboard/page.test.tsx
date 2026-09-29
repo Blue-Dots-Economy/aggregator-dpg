@@ -532,13 +532,100 @@ describe('<DashboardPageRoot />', () => {
       expect(screen.getAllByText('40%')).toHaveLength(1);
     });
 
-    it('closes an open popover when the page or table scrolls', () => {
+    /**
+     * Stubs layout for the clamp/scroll tests: jsdom has no layout, so every
+     * rect is zero unless stubbed. `trigger` is the tapped cell's rect (mutable,
+     * so a test can "scroll" it); popovers report `popoverWidth`.
+     */
+    function stubLayout(trigger: HTMLElement, popoverWidth: number) {
+      const rect = { left: 0, top: 0, width: 60, height: 12 };
+      const toRect = (r: { left: number; top: number; width: number; height: number }) =>
+        ({
+          ...r,
+          x: r.left,
+          y: r.top,
+          right: r.left + r.width,
+          bottom: r.top + r.height,
+          toJSON: () => r,
+        }) as DOMRect;
+      const original = HTMLElement.prototype.getBoundingClientRect;
+      const spy = vi
+        .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+        .mockImplementation(function (this: HTMLElement) {
+          if (this === trigger) return toRect(rect);
+          if (this.hasAttribute('data-cell-popover'))
+            return toRect({ left: 0, top: 0, width: popoverWidth, height: 40 });
+          return original.call(this);
+        });
+      return { rect, restore: () => spy.mockRestore() };
+    }
+
+    function popoverEl(): HTMLElement {
+      const el = document.querySelector<HTMLElement>('[data-cell-popover]');
+      if (!el) throw new Error('popover not open');
+      return el;
+    }
+
+    it('clamps a popover opened near the right edge by its measured width', () => {
       renderPage();
       const trigger = bobProgressTrigger();
-      fireEvent.click(trigger);
-      expect(screen.getAllByText('40%')).toHaveLength(2);
-      fireEvent.scroll(screen.getByRole('table').parentElement as HTMLElement);
-      expect(screen.getAllByText('40%')).toHaveLength(1);
+      const { rect, restore } = stubLayout(trigger, 180);
+      const innerWidth = window.innerWidth;
+      window.innerWidth = 360;
+      try {
+        rect.left = 300;
+        fireEvent.click(trigger);
+        // 360 viewport − 180 measured width − 8px gutter.
+        expect(popoverEl().style.left).toBe('172px');
+      } finally {
+        window.innerWidth = innerWidth;
+        restore();
+      }
+    });
+
+    it('keeps a popover that already fits beside its cell, and off the left edge', () => {
+      renderPage();
+      const trigger = bobProgressTrigger();
+      const { rect, restore } = stubLayout(trigger, 180);
+      const innerWidth = window.innerWidth;
+      window.innerWidth = 360;
+      try {
+        rect.left = 40;
+        fireEvent.click(trigger);
+        expect(popoverEl().style.left).toBe('40px');
+        fireEvent.click(trigger);
+
+        // A cell scrolled partly off the left edge still gets the gutter.
+        rect.left = -30;
+        fireEvent.click(trigger);
+        expect(popoverEl().style.left).toBe('8px');
+      } finally {
+        window.innerWidth = innerWidth;
+        restore();
+      }
+    });
+
+    it('stays open on a scroll event that does not move its cell, closes when it moves', () => {
+      renderPage();
+      const trigger = bobProgressTrigger();
+      const { rect, restore } = stubLayout(trigger, 140);
+      try {
+        rect.left = 100;
+        rect.top = 200;
+        fireEvent.click(trigger);
+        const scroller = screen.getByRole('table').parentElement as HTMLElement;
+
+        // Layout-driven scroll event, cell unmoved — must not self-close.
+        fireEvent.scroll(scroller);
+        expect(document.querySelector('[data-cell-popover]')).not.toBeNull();
+
+        // Real sideways scroll moves the cell — close so it never detaches.
+        rect.left = 40;
+        fireEvent.scroll(scroller);
+        expect(document.querySelector('[data-cell-popover]')).toBeNull();
+      } finally {
+        restore();
+      }
     });
 
     it('makes the cell keyboard-focusable', () => {

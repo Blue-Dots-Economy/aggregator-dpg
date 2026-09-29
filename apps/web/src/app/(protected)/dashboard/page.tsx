@@ -2,6 +2,7 @@
 
 import {
   useEffect,
+  useLayoutEffect,
   useState,
   useRef,
   useMemo,
@@ -357,39 +358,85 @@ interface FunnelCellProps {
   parts: FunnelPart[];
 }
 
+/** Minimum distance (px) kept between a cell popover and the viewport edge. */
+const POPOVER_GUTTER = 8;
+
+/**
+ * How far (px) a cell may move before a scroll event counts as a real scroll.
+ * Layout-driven scroll events that leave the cell where it was must not close
+ * the popover.
+ */
+const POPOVER_SCROLL_TOLERANCE = 2;
+
 /**
  * Open/position state for the small portal popovers on table cells
  * (FunnelCell, ProgressTiny).
  *
  * Mouse users get the popover on hover, as before. Touch has no hover, so a tap
  * toggles it and moving focus away (tapping elsewhere) closes it; keyboard users
- * get it on focus and can dismiss it with Escape (#793). The position is clamped
- * so a popover opened near the right edge of a phone stays on screen.
+ * get it on focus and can dismiss it with Escape (#793).
  *
- * @param popoverWidth - Approximate popover width in px, used for the clamp.
- * @returns The trigger ref, open flag, page-relative position and the props to
- *   spread onto the trigger element.
+ * Positioning is measured, not assumed: the popover first renders at the page's
+ * left edge (so it takes its natural width, bounded by its viewport-relative
+ * `max-width`), then a layout effect clamps it beside its cell with a
+ * {@link POPOVER_GUTTER} margin — before paint, so the first frame is never
+ * seen. That keeps it on screen whatever the (config-sourced) label length.
+ *
+ * A scroll closes it only when the cell actually moved, so the popover never
+ * ends up detached from its cell, while layout-driven scroll events don't shut
+ * it the moment it opens.
+ *
+ * @returns The trigger ref, the popover ref, open flag, page-relative position
+ *   and the props to spread onto the trigger element.
  */
-function useCellPopover(popoverWidth: number) {
+function useCellPopover() {
   const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [pos, setPos] = useState<{ x: number; y: number; placed: boolean }>({
+    x: 0,
+    y: 0,
+    placed: false,
+  });
   const ref = useRef<HTMLDivElement | null>(null);
+  const popoverRef = useRef<HTMLDivElement | null>(null);
+  // Viewport position of the cell when the popover opened (scroll-move check).
+  const anchorRef = useRef<{ left: number; top: number } | null>(null);
 
   const show = () => {
     const r = ref.current?.getBoundingClientRect();
     if (!r) return;
-    const maxLeft = Math.max(8, window.innerWidth - popoverWidth - 8);
-    setPos({ x: Math.min(r.left, maxLeft) + window.scrollX, y: r.bottom + window.scrollY + 8 });
+    anchorRef.current = { left: r.left, top: r.top };
+    setPos({ x: window.scrollX, y: r.bottom + window.scrollY + 8, placed: false });
     setOpen(true);
   };
   const hide = () => setOpen(false);
 
-  // The popover is pinned to page coordinates, so any scroll — the page, or
+  useLayoutEffect(() => {
+    if (!open || pos.placed) return;
+    const trigger = ref.current?.getBoundingClientRect();
+    const popover = popoverRef.current?.getBoundingClientRect();
+    if (!trigger || !popover) return;
+    const maxLeft = Math.max(POPOVER_GUTTER, window.innerWidth - popover.width - POPOVER_GUTTER);
+    const left = Math.min(Math.max(trigger.left, POPOVER_GUTTER), maxLeft);
+    setPos((p) => ({ ...p, x: left + window.scrollX, placed: true }));
+  }, [open, pos.placed]);
+
+  // The popover is pinned to page coordinates, so a real scroll — the page, or
   // the table scrolling sideways on a phone — would leave it detached from its
-  // cell. Close it instead (capture phase catches element scrolls too).
+  // cell. Close it then (capture phase catches element scrolls too).
   useEffect(() => {
     if (!open) return;
-    const onScroll = () => setOpen(false);
+    const onScroll = () => {
+      const r = ref.current?.getBoundingClientRect();
+      const a = anchorRef.current;
+      if (
+        !r ||
+        !a ||
+        Math.abs(r.left - a.left) > POPOVER_SCROLL_TOLERANCE ||
+        Math.abs(r.top - a.top) > POPOVER_SCROLL_TOLERANCE
+      ) {
+        setOpen(false);
+      }
+    };
     window.addEventListener('scroll', onScroll, true);
     return () => window.removeEventListener('scroll', onScroll, true);
   }, [open]);
@@ -418,12 +465,12 @@ function useCellPopover(popoverWidth: number) {
     },
   };
 
-  return { ref, open, pos, triggerProps };
+  return { ref, popoverRef, open, pos, triggerProps };
 }
 
 function FunnelCell({ total, parts }: FunnelCellProps) {
   const sum = parts.reduce((a, b) => a + b.v, 0) || 1;
-  const { ref, open: hover, pos, triggerProps } = useCellPopover(176);
+  const { ref, popoverRef, open: hover, pos, triggerProps } = useCellPopover();
 
   return (
     <>
@@ -446,8 +493,13 @@ function FunnelCell({ total, parts }: FunnelCellProps) {
         typeof document !== 'undefined' &&
         createPortal(
           <div
+            ref={popoverRef}
+            data-cell-popover=""
             style={{ position: 'absolute', left: pos.x, top: pos.y, zIndex: 9999 }}
-            className="bg-white border border-(--bd-border) rounded-[10px] bd-shadow-lg p-2.5 min-w-[160px] pointer-events-none animate-[fadeUp_.12s_ease-out]"
+            // max-w + wrap-anywhere bound the width to the viewport whatever the
+            // config-sourced bucket labels are, so the measured clamp can always
+            // keep the gutter (#793).
+            className="bg-white border border-(--bd-border) rounded-[10px] bd-shadow-lg p-2.5 min-w-[160px] max-w-[calc(100vw-1rem)] wrap-anywhere pointer-events-none animate-[fadeUp_.12s_ease-out]"
           >
             <div className="flex flex-col gap-1.5">
               {parts.map((p, i) => (
@@ -478,7 +530,7 @@ function FunnelCell({ total, parts }: FunnelCellProps) {
 function ProgressTiny({ pct, title }: { pct: number; title?: string }) {
   const color = pct >= 80 ? '#10B981' : pct >= 50 ? '#F59E0B' : '#EF4444';
   const label = title ?? (pct >= 80 ? 'Complete' : 'Incomplete');
-  const { ref, open: hover, pos, triggerProps } = useCellPopover(136);
+  const { ref, popoverRef, open: hover, pos, triggerProps } = useCellPopover();
   return (
     <>
       <div
@@ -502,8 +554,10 @@ function ProgressTiny({ pct, title }: { pct: number; title?: string }) {
         typeof document !== 'undefined' &&
         createPortal(
           <div
+            ref={popoverRef}
+            data-cell-popover=""
             style={{ position: 'absolute', left: pos.x, top: pos.y, zIndex: 9999 }}
-            className="bg-white border border-(--bd-border) rounded-[10px] bd-shadow-lg px-2.5 py-1.5 pointer-events-none animate-[fadeUp_.12s_ease-out]"
+            className="bg-white border border-(--bd-border) rounded-[10px] bd-shadow-lg px-2.5 py-1.5 max-w-[calc(100vw-1rem)] wrap-anywhere pointer-events-none animate-[fadeUp_.12s_ease-out]"
           >
             <div className="flex items-center gap-2 text-[12px] min-w-[120px]">
               <span className="text-ink-500 flex-1">{label}</span>
