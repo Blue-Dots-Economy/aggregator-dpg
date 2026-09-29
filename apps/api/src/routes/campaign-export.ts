@@ -34,7 +34,7 @@ import { config } from '../config.js';
  *
  * @param app - The Fastify instance to attach the route to.
  */
-export async function registerCampaignExportRoutes(app: FastifyInstance): Promise<void> {
+export function registerCampaignExportRoutes(app: FastifyInstance): void {
   app.post(
     '/v1/campaign/export',
     {

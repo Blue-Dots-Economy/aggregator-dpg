@@ -94,7 +94,7 @@ const ExportProfilesBodySchema = z.object({
   domain: z.string().min(1).optional(),
 });
 
-export async function registerDashboardRoutes(app: FastifyInstance): Promise<void> {
+export function registerDashboardRoutes(app: FastifyInstance): void {
   app.get(
     '/v1/dashboard',
     {

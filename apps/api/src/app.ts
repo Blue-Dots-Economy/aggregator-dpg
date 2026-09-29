@@ -216,29 +216,29 @@ export async function buildApp(): Promise<FastifyInstance> {
     );
   });
 
-  await registerHealthRoutes(app);
-  await registerAggregatorRegistrationRoutes(app);
-  await registerAggregatorMaintenanceRoutes(app);
-  await registerAggregatorOrgRoutes(app);
-  await registerAggregatorOrgApprovalRoutes(app);
-  await registerInviteRoutes(app);
-  await registerAggregatorApprovalRoutes(app);
-  await registerAggregatorProfileRoutes(app);
-  await registerBulkUploadsRoutes(app);
-  await registerRegistrationLinksRoutes(app);
-  await registerPublicRegistrationLinkRoutes(app);
-  await registerPublicLookupRoute(app);
-  await registerOnboardingRoutes(app);
-  await registerDashboardRoutes(app);
-  await registerAggregatorConfigRoutes(app);
-  await registerSupportRoutes(app);
-  await registerCampaignExportRoutes(app);
-  await registerCampaignJobRoutes(app, 'export');
-  await registerCampaignVoiceRoutes(app);
-  await registerCampaignJobRoutes(app, 'voice');
-  await registerCampaignEmailRoutes(app);
-  await registerCampaignJobRoutes(app, 'email');
-  await registerCampaignDumpRoutes(app);
+  registerHealthRoutes(app);
+  registerAggregatorRegistrationRoutes(app);
+  registerAggregatorMaintenanceRoutes(app);
+  registerAggregatorOrgRoutes(app);
+  registerAggregatorOrgApprovalRoutes(app);
+  registerInviteRoutes(app);
+  registerAggregatorApprovalRoutes(app);
+  registerAggregatorProfileRoutes(app);
+  registerBulkUploadsRoutes(app);
+  registerRegistrationLinksRoutes(app);
+  registerPublicRegistrationLinkRoutes(app);
+  registerPublicLookupRoute(app);
+  registerOnboardingRoutes(app);
+  registerDashboardRoutes(app);
+  registerAggregatorConfigRoutes(app);
+  registerSupportRoutes(app);
+  registerCampaignExportRoutes(app);
+  registerCampaignJobRoutes(app, 'export');
+  registerCampaignVoiceRoutes(app);
+  registerCampaignJobRoutes(app, 'voice');
+  registerCampaignEmailRoutes(app);
+  registerCampaignJobRoutes(app, 'email');
+  registerCampaignDumpRoutes(app);
 
   app.setErrorHandler((rawErr, req, reply) => {
     // Fastify schema validation error — promote to a typed HttpError so the

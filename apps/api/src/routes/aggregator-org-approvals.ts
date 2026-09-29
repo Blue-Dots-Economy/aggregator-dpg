@@ -70,7 +70,7 @@ const orgUnavailablePage = (): HtmlPage =>
  *
  * @param app - Fastify instance to attach the routes to.
  */
-export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance): Promise<void> {
+export function registerAggregatorOrgApprovalRoutes(app: FastifyInstance): void {
   if (!orgHierarchyEnabled()) return;
 
   app.get(

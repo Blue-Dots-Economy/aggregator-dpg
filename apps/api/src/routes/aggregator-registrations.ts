@@ -117,7 +117,7 @@ const RegistrationCreatedResponseSchema = z
   })
   .passthrough();
 
-export async function registerAggregatorRegistrationRoutes(app: FastifyInstance): Promise<void> {
+export function registerAggregatorRegistrationRoutes(app: FastifyInstance): void {
   app.post(
     '/v1/aggregator-registrations/create',
     {

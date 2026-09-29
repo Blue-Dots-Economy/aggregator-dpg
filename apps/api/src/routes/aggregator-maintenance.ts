@@ -123,7 +123,7 @@ const CleanupResponseSchema = z
  *
  * @param app - Fastify instance to attach the route to.
  */
-export async function registerAggregatorMaintenanceRoutes(app: FastifyInstance): Promise<void> {
+export function registerAggregatorMaintenanceRoutes(app: FastifyInstance): void {
   app.post(
     '/admin/v1/aggregator-registrations/cleanup-stale',
     {

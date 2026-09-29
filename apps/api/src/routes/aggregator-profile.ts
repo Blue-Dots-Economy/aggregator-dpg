@@ -104,7 +104,7 @@ const ProfileUpdateResponseSchema = z
   })
   .passthrough();
 
-export async function registerAggregatorProfileRoutes(app: FastifyInstance): Promise<void> {
+export function registerAggregatorProfileRoutes(app: FastifyInstance): void {
   app.get(
     '/v1/aggregators/profile/me',
     {

@@ -47,7 +47,7 @@ async function probe(fn: () => Promise<unknown>, ms = 2000): Promise<'ok' | 'err
   }
 }
 
-export async function registerHealthRoutes(app: FastifyInstance): Promise<void> {
+export function registerHealthRoutes(app: FastifyInstance): void {
   app.get(
     '/health/live',
     {
@@ -58,7 +58,7 @@ export async function registerHealthRoutes(app: FastifyInstance): Promise<void> 
         response: { 200: LiveResponseSchema },
       },
     },
-    async () => ({ status: 'ok' as const }),
+    () => ({ status: 'ok' as const }),
   );
 
   app.get(

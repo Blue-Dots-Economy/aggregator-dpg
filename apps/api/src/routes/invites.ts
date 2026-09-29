@@ -217,7 +217,7 @@ async function mintBatch(deps: MintBatchDeps): Promise<MintSummary> {
  *
  * @param app - Fastify instance to attach the route to.
  */
-export async function registerInviteRoutes(app: FastifyInstance): Promise<void> {
+export function registerInviteRoutes(app: FastifyInstance): void {
   if (!orgHierarchyEnabled()) return;
 
   app.post(

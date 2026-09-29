@@ -181,7 +181,7 @@ const ListLinksResponseSchema = z
   })
   .passthrough();
 
-export async function registerRegistrationLinksRoutes(app: FastifyInstance): Promise<void> {
+export function registerRegistrationLinksRoutes(app: FastifyInstance): void {
   app.post(
     '/v1/links/create',
     {

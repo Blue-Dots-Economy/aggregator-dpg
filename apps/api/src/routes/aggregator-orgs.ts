@@ -131,7 +131,7 @@ const OrgListResponseSchema = z
  *
  * @param app - Fastify instance to attach the routes to.
  */
-export async function registerAggregatorOrgRoutes(app: FastifyInstance): Promise<void> {
+export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
   if (!orgHierarchyEnabled()) return;
 
   app.post(
