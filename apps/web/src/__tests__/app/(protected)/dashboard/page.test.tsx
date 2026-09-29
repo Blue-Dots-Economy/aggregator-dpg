@@ -23,7 +23,7 @@
  * `live` are exercised below.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, within, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, within, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { NextIntlClientProvider } from 'next-intl';
@@ -498,6 +498,63 @@ describe('<DashboardPageRoot />', () => {
       renderPage();
       expect(screen.queryByRole('button', { name: '2' })).not.toBeInTheDocument();
       expect(screen.getByText('Showing 1–2 of 2')).toBeInTheDocument();
+    });
+  });
+
+  describe('cell popovers (#793 — touch + keyboard access)', () => {
+    /** The profile-completion cell for Bob (40%) — the popover repeats the pct. */
+    function bobProgressTrigger(): HTMLElement {
+      const bar = screen
+        .getAllByRole('progressbar')
+        .find((el) => el.getAttribute('aria-valuenow') === '40');
+      if (!bar?.parentElement) throw new Error('progress cell not found');
+      return bar.parentElement;
+    }
+
+    it('toggles the popover on tap and closes it when focus moves away', () => {
+      renderPage();
+      const trigger = bobProgressTrigger();
+      expect(screen.getAllByText('40%')).toHaveLength(1);
+      fireEvent.click(trigger);
+      expect(screen.getAllByText('40%')).toHaveLength(2);
+      fireEvent.blur(trigger);
+      expect(screen.getAllByText('40%')).toHaveLength(1);
+    });
+
+    it('closes an open popover on a second tap and on Escape', () => {
+      renderPage();
+      const trigger = bobProgressTrigger();
+      fireEvent.click(trigger);
+      fireEvent.click(trigger);
+      expect(screen.getAllByText('40%')).toHaveLength(1);
+      fireEvent.click(trigger);
+      fireEvent.keyDown(trigger, { key: 'Escape' });
+      expect(screen.getAllByText('40%')).toHaveLength(1);
+    });
+
+    it('closes an open popover when the page or table scrolls', () => {
+      renderPage();
+      const trigger = bobProgressTrigger();
+      fireEvent.click(trigger);
+      expect(screen.getAllByText('40%')).toHaveLength(2);
+      fireEvent.scroll(screen.getByRole('table').parentElement as HTMLElement);
+      expect(screen.getAllByText('40%')).toHaveLength(1);
+    });
+
+    it('makes the cell keyboard-focusable', () => {
+      renderPage();
+      expect(bobProgressTrigger()).toHaveAttribute('tabindex', '0');
+    });
+  });
+
+  describe('responsive table (#793)', () => {
+    it('freezes the select + identity columns only via the md-gated sticky classes', () => {
+      renderPage();
+      const headers = within(screen.getByRole('table')).getAllByRole('columnheader');
+      expect(headers[0]).toHaveClass('bd-sticky-col');
+      expect(headers[1]).toHaveClass('bd-sticky-col', 'bd-sticky-col-2');
+      expect(headers[0]?.style.left).toBe('');
+      expect(headers[1]?.style.left).toBe('');
     });
   });
 

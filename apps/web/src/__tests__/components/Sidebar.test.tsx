@@ -5,13 +5,14 @@
  * badge sourced from the dashboard rollup for the active domain, the
  * brand-logo vs BlueDotsLogo fallback (and its dark/light swap), the
  * conditional "Contact support" entry gated by `supportEnabled`, and the
- * sign-out control. All data hooks (`useAuth`, `useThemeMode`,
+ * sign-out control, plus the mobile menu bar + navigation drawer (#793): open /
+ * close paths, focus handling, scroll lock and the Tab focus trap. All data hooks (`useAuth`, `useThemeMode`,
  * `useAggregatorConfig`, `useDashboard`, `useProfileRaw`) are mocked since
  * they belong to `lib/`/`hooks/`, owned by other concurrent work — only
  * Sidebar's own composition logic is under test here.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { act, render, screen, fireEvent, within } from '@testing-library/react';
 
 const { useAuth, useThemeMode, useAggregatorConfig, useDashboard, useProfileRaw, usePathname } =
   vi.hoisted(() => ({
@@ -54,6 +55,9 @@ vi.mock('next-intl', () => ({
       sign_out: 'Sign Out',
       aggregator_sublabel: 'Aggregator',
       contact_support: 'Contact support',
+      open_menu: 'Open menu',
+      close_menu: 'Close menu',
+      menu_label: 'Main navigation',
     };
     return map[key] ?? key;
   },
@@ -114,10 +118,20 @@ describe('<Sidebar />', () => {
     expect(screen.queryByText(/^\d+$/)).toBeNull();
   });
 
+  // The brand renders twice — desktop <aside> (complementary) and the mobile
+  // menu bar <header> (banner) — so brand assertions are scoped to one landmark.
   it('renders the fallback BlueDotsLogo + short name when no brand logo is configured', () => {
     render(<Sidebar />);
-    expect(screen.getByText('Blue Dots')).toBeInTheDocument();
-    expect(screen.getByText('Aggregator Portal')).toBeInTheDocument();
+    const aside = within(screen.getByRole('complementary'));
+    expect(aside.getByText('Blue Dots')).toBeInTheDocument();
+    expect(aside.getByText('Aggregator Portal')).toBeInTheDocument();
+  });
+
+  it('renders a compact brand (no portal sub-label) in the mobile menu bar', () => {
+    render(<Sidebar />);
+    const header = within(screen.getByRole('banner'));
+    expect(header.getByText('Blue Dots')).toBeInTheDocument();
+    expect(header.queryByText('Aggregator Portal')).toBeNull();
   });
 
   it('renders the configured brand logo image, swapping to the dark variant in dark mode', () => {
@@ -136,8 +150,11 @@ describe('<Sidebar />', () => {
     });
     useThemeMode.mockReturnValue({ mode: 'dark' });
     render(<Sidebar />);
-    const img = screen.getByRole('img', { name: 'Purple Dots' });
+    const img = within(screen.getByRole('complementary')).getByRole('img', { name: 'Purple Dots' });
     expect(img).toHaveAttribute('src', '/logo-dark.png');
+    expect(
+      within(screen.getByRole('banner')).getByRole('img', { name: 'Purple Dots' }),
+    ).toHaveAttribute('src', '/logo-dark.png');
   });
 
   it('uses the default logo variant in light mode even when a dark variant is configured', () => {
@@ -156,7 +173,7 @@ describe('<Sidebar />', () => {
     });
     useThemeMode.mockReturnValue({ mode: 'light' });
     render(<Sidebar />);
-    const img = screen.getByRole('img', { name: 'Purple Dots' });
+    const img = within(screen.getByRole('complementary')).getByRole('img', { name: 'Purple Dots' });
     expect(img).toHaveAttribute('src', '/logo-light.png');
   });
 
@@ -227,5 +244,116 @@ describe('<Sidebar />', () => {
     fireEvent.click(supportBtn);
     // SupportDialog mounts its dialog content once opened.
     expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+});
+
+describe('<Sidebar /> mobile navigation drawer', () => {
+  function openDrawer() {
+    fireEvent.click(screen.getByRole('button', { name: 'Open menu' }));
+    return screen.getByRole('dialog', { name: 'Main navigation' });
+  }
+
+  afterEach(() => {
+    document.body.style.overflow = '';
+  });
+
+  it('renders the menu bar with a collapsed menu button and no drawer', () => {
+    render(<Sidebar />);
+    expect(screen.getByRole('button', { name: 'Open menu' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+    expect(screen.queryByRole('dialog', { name: 'Main navigation' })).toBeNull();
+  });
+
+  it('opens the drawer with the nav links, locks scroll and focuses the close button', () => {
+    render(<Sidebar />);
+    const drawer = openDrawer();
+    const menuBtn = screen.getByRole('button', { name: 'Open menu' });
+    expect(menuBtn).toHaveAttribute('aria-expanded', 'true');
+    expect(menuBtn).toHaveAttribute('aria-controls', drawer.id);
+    expect(within(drawer).getByRole('link', { name: /Onboarding/ })).toHaveAttribute(
+      'href',
+      '/onboarding',
+    );
+    expect(document.body.style.overflow).toBe('hidden');
+    expect(within(drawer).getByRole('button', { name: 'Close menu' })).toHaveFocus();
+  });
+
+  it('closes on Escape, restores scroll and returns focus to the menu button', () => {
+    render(<Sidebar />);
+    openDrawer();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'Main navigation' })).toBeNull();
+    expect(document.body.style.overflow).toBe('');
+    expect(screen.getByRole('button', { name: 'Open menu' })).toHaveFocus();
+  });
+
+  it('closes when the close button is clicked', () => {
+    render(<Sidebar />);
+    const drawer = openDrawer();
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Close menu' }));
+    expect(screen.queryByRole('dialog', { name: 'Main navigation' })).toBeNull();
+  });
+
+  it('closes when the backdrop is tapped', () => {
+    render(<Sidebar />);
+    openDrawer();
+    fireEvent.click(screen.getByTestId('nav-drawer-backdrop'));
+    expect(screen.queryByRole('dialog', { name: 'Main navigation' })).toBeNull();
+  });
+
+  it('closes after a nav link inside the drawer is followed', () => {
+    render(<Sidebar />);
+    const drawer = openDrawer();
+    fireEvent.click(within(drawer).getByRole('link', { name: /Profile/ }));
+    expect(screen.queryByRole('dialog', { name: 'Main navigation' })).toBeNull();
+  });
+
+  it('wraps Tab focus between the first and last focusable drawer elements', () => {
+    render(<Sidebar />);
+    const drawer = openDrawer();
+    const closeBtn = within(drawer).getByRole('button', { name: 'Close menu' });
+    const signOutBtn = within(drawer).getByRole('button', { name: 'Sign Out' });
+
+    signOutBtn.focus();
+    fireEvent.keyDown(document, { key: 'Tab' });
+    expect(closeBtn).toHaveFocus();
+
+    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
+    expect(signOutBtn).toHaveFocus();
+  });
+
+  it('closes the drawer and opens the support dialog from the drawer entry', () => {
+    useAuth.mockReturnValue({
+      user: { id: 'u1', org: 'Acme Org' },
+      signOut: vi.fn(),
+      supportEnabled: true,
+    });
+    render(<Sidebar />);
+    const drawer = openDrawer();
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Contact support' }));
+    expect(screen.queryByRole('dialog', { name: 'Main navigation' })).toBeNull();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+
+  it('closes the drawer when the viewport grows to desktop width', () => {
+    let listener: ((e: { matches: boolean }) => void) | undefined;
+    const original = window.matchMedia;
+    window.matchMedia = vi.fn().mockReturnValue({
+      matches: false,
+      addEventListener: (_: string, cb: (e: { matches: boolean }) => void) => {
+        listener = cb;
+      },
+      removeEventListener: vi.fn(),
+    }) as unknown as typeof window.matchMedia;
+    try {
+      render(<Sidebar />);
+      openDrawer();
+      act(() => listener?.({ matches: true }));
+      expect(screen.queryByRole('dialog', { name: 'Main navigation' })).toBeNull();
+    } finally {
+      window.matchMedia = original;
+    }
   });
 });

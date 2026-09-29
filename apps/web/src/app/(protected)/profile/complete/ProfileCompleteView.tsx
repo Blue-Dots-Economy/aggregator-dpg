@@ -101,7 +101,7 @@ export function ProfileCompleteView({ schema, uiSchema }: ProfileCompleteViewPro
       <Topbar title={t('topbar_title')} subtitle={t('topbar_subtitle')} />
 
       <div className="bd-card bd-shadow overflow-hidden">
-        <div className="px-7 py-7">
+        <div className="px-4 py-5 sm:px-7 sm:py-7">
           {state.status === 'loading' && (
             <div className="text-[13px] text-ink-400">{t('loading')}</div>
           )}
@@ -114,7 +114,7 @@ export function ProfileCompleteView({ schema, uiSchema }: ProfileCompleteViewPro
               onValidityChange={setCanSubmit}
               onSubmit={handleSubmit}
             >
-              <div className="flex items-center justify-between border-t border-(--bd-border) mt-6 pt-5">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-(--bd-border) mt-6 pt-5">
                 {state.status === 'saved' && (
                   <span className="inline-flex items-center gap-1.5 text-emerald-700 text-[12.5px] font-semibold">
                     <I.check size={14} /> {t('status_saved')}
