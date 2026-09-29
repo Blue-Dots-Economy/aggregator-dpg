@@ -39,10 +39,8 @@ import {
   type RegistrationLink,
   type StoreResult,
 } from '../services/registration-links-store/index.js';
-import { _setParticipantsWriter } from './public-registration-links.js';
 import { _setSchemaLoader } from '../services/schema-loader/index.js';
 import { SignalStackWriterFake } from '@aggregator-dpg/signalstack-writer/testing';
-import { ParticipantsWriterFake } from '@aggregator-dpg/participants-writer/testing';
 import { buildBlueDotConfig } from '@aggregator-dpg/network-config/testing';
 import type { ResolvedNetworkConfig } from '@aggregator-dpg/network-config/interface';
 
@@ -163,7 +161,6 @@ async function bootApp(): Promise<{
 
   const signalstack = new SignalStackWriterFake();
   _setSignalStackWriter(signalstack);
-  _setParticipantsWriter(new ParticipantsWriterFake());
 
   const aoLink: RegistrationLink = {
     ...baseLink,
@@ -190,7 +187,6 @@ async function teardown(app: FastifyInstance | undefined): Promise<void> {
   _setAggregatorStore(null);
   _setRegistrationLinksStore(null);
   _setNetworkConfig(null);
-  _setParticipantsWriter(null);
   _setDbClients(null, null);
   _setSchemaLoader(null);
 }

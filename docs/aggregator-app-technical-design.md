@@ -532,7 +532,9 @@ registration_link
   status CHECK IN ('live','inactive')
   created_at, deactivated_at
 
-participant
+participant   -- NOTE: never built as specified; the local participants table
+              -- that did exist was removed (migration 0024). Signals is the
+              -- store of record for participant profiles.
   id PK
   aggregator_id FK
   registration_link_id FK NULL

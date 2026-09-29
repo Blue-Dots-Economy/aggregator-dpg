@@ -20,7 +20,6 @@ import {
   aggregatorOrgs,
   bulkUploads,
   registrationLinks,
-  participants,
   linkSubmissions,
   aggregatorConsentRecord,
   onboarding,
@@ -180,37 +179,6 @@ describe('registration_links remaining columns', () => {
   });
 });
 
-describe('participants columns', () => {
-  it('dedup identity + payload + source-tracking columns', () => {
-    expect(participants.aggregatorId.name).toBe('aggregator_id');
-    expect(participants.aggregatorId.notNull).toBe(true);
-
-    expect(participants.type.name).toBe('type');
-    expect(participants.type.notNull).toBe(true);
-
-    expect(participants.participantId.name).toBe('participant_id');
-    expect(participants.participantId.notNull).toBe(true);
-
-    expect(participants.data.name).toBe('data');
-    expect(participants.data.notNull).toBe(true);
-    expect(participants.data.hasDefault).toBe(true);
-
-    expect(participants.phone.name).toBe('phone');
-    expect(participants.phone.notNull).toBe(false);
-    expect(participants.email.name).toBe('email');
-    expect(participants.email.notNull).toBe(false);
-
-    expect(participants.sourceBulkUploadId.name).toBe('source_bulk_upload_id');
-    expect(participants.sourceBulkUploadId.notNull).toBe(false);
-    expect(participants.sourceLinkId.name).toBe('source_link_id');
-    expect(participants.sourceLinkId.notNull).toBe(false);
-
-    expect(participants.sourceRowIndex.name).toBe('source_row_index');
-    expect(participants.sourceRowIndex.notNull).toBe(false);
-    expect(participants.sourceRowIndex.columnType).toBe('PgInteger');
-  });
-});
-
 describe('link_submissions columns', () => {
   it('outcome + snapshot payload columns', () => {
     expect(linkSubmissions.linkId.name).toBe('link_id');
@@ -218,9 +186,6 @@ describe('link_submissions columns', () => {
 
     expect(linkSubmissions.aggregatorId.name).toBe('aggregator_id');
     expect(linkSubmissions.aggregatorId.notNull).toBe(true);
-
-    expect(linkSubmissions.participantId.name).toBe('participant_id');
-    expect(linkSubmissions.participantId.notNull).toBe(false);
 
     expect(linkSubmissions.metadataSnapshot.name).toBe('metadata_snapshot');
     expect(linkSubmissions.metadataSnapshot.notNull).toBe(true);

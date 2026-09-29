@@ -443,49 +443,6 @@ export const registrationLinks = pgTable(
   }),
 );
 
-// ─── participants ────────────────────────────────────────────────────────────
-
-export const participants = pgTable(
-  'participants',
-  {
-    id: uuid('id').primaryKey().defaultRandom(),
-    aggregatorId: uuid('aggregator_id')
-      .notNull()
-      .references(() => aggregators.id, { onDelete: 'cascade' }),
-    type: text('type').notNull(),
-    // Schema-supplied unique identifier from the data source (e.g. ITI roll
-    // number, employee id). Not the same as `id` (DB row id). Dedup is
-    // (aggregator_id, participant_id) — the same external id can exist
-    // under different aggregators.
-    participantId: text('participant_id').notNull(),
-    data: jsonb('data').$type<Record<string, unknown>>().notNull().default({}),
-    phone: text('phone'),
-    email: text('email'),
-    sourceBulkUploadId: uuid('source_bulk_upload_id').references(() => bulkUploads.id, {
-      onDelete: 'set null',
-    }),
-    sourceLinkId: uuid('source_link_id').references(() => registrationLinks.id, {
-      onDelete: 'set null',
-    }),
-    sourceRowIndex: integer('source_row_index'),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => ({
-    // Dedup key includes `type` so a seeker and a provider can share the same
-    // external participant_id under one aggregator without colliding.
-    aggregatorTypeParticipantUnique: uniqueIndex(
-      'participants_aggregator_type_participant_unique',
-    ).on(table.aggregatorId, table.type, table.participantId),
-    aggregatorPhoneIdx: index('participants_aggregator_phone_idx').on(
-      table.aggregatorId,
-      table.phone,
-    ),
-    sourceBulkIdx: index('participants_source_bulk_idx').on(table.sourceBulkUploadId),
-    sourceLinkIdx: index('participants_source_link_idx').on(table.sourceLinkId),
-  }),
-);
-
 // ─── link_submissions ────────────────────────────────────────────────────────
 
 export const linkSubmissions = pgTable(
@@ -498,9 +455,6 @@ export const linkSubmissions = pgTable(
     aggregatorId: uuid('aggregator_id')
       .notNull()
       .references(() => aggregators.id, { onDelete: 'cascade' }),
-    participantId: uuid('participant_id').references(() => participants.id, {
-      onDelete: 'set null',
-    }),
     metadataSnapshot: jsonb('metadata_snapshot')
       .$type<Record<string, unknown>>()
       .notNull()
@@ -831,8 +785,6 @@ export type AggregatorOrgRow = typeof aggregatorOrgs.$inferSelect;
 export type NewAggregatorOrgRow = typeof aggregatorOrgs.$inferInsert;
 export type BulkUploadRow = typeof bulkUploads.$inferSelect;
 export type NewBulkUploadRow = typeof bulkUploads.$inferInsert;
-export type ParticipantRow = typeof participants.$inferSelect;
-export type NewParticipantRow = typeof participants.$inferInsert;
 export type RegistrationLinkRow = typeof registrationLinks.$inferSelect;
 export type NewRegistrationLinkRow = typeof registrationLinks.$inferInsert;
 export type LinkSubmissionRow = typeof linkSubmissions.$inferSelect;

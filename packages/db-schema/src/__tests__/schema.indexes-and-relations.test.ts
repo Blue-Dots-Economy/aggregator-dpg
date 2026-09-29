@@ -25,7 +25,6 @@ import {
   aggregatorOrgs,
   bulkUploads,
   registrationLinks,
-  participants,
   linkSubmissions,
   aggregatorConsentRecord,
   onboarding,
@@ -185,60 +184,6 @@ describe('registration_links: indexes + foreign key', () => {
   });
 });
 
-describe('participants: indexes + foreign keys', () => {
-  const cfg = getTableConfig(participants);
-
-  it('table name is snake_case', () => {
-    expect(cfg.name).toBe('participants');
-  });
-
-  it('dedup key includes type so seeker/provider can share an external id', () => {
-    const idx = cfg.indexes.find(
-      (i) => i.config.name === 'participants_aggregator_type_participant_unique',
-    );
-    expect(idx?.config.unique).toBe(true);
-    expect(idx?.config.columns.map(colName)).toEqual(['aggregator_id', 'type', 'participant_id']);
-  });
-
-  it('has phone/source-bulk/source-link lookup indexes', () => {
-    const byName = Object.fromEntries(cfg.indexes.map((i) => [i.config.name, i]));
-    expect(byName['participants_aggregator_phone_idx'].config.columns.map(colName)).toEqual([
-      'aggregator_id',
-      'phone',
-    ]);
-    expect(byName['participants_source_bulk_idx'].config.columns.map(colName)).toEqual([
-      'source_bulk_upload_id',
-    ]);
-    expect(byName['participants_source_link_idx'].config.columns.map(colName)).toEqual([
-      'source_link_id',
-    ]);
-    expect(cfg.indexes).toHaveLength(4);
-  });
-
-  it('three foreign keys: aggregator (cascade), source bulk upload + link (set null)', () => {
-    expect(cfg.foreignKeys).toHaveLength(3);
-    const byColumn = new Map(cfg.foreignKeys.map((fk) => [fk.reference().columns[0], fk]));
-
-    const aggregatorFk = byColumn.get(participants.aggregatorId);
-    const aggregatorRef = aggregatorFk?.reference();
-    expect(aggregatorRef?.foreignTable).toBe(aggregators);
-    expect(aggregatorRef?.foreignColumns[0]).toBe(aggregators.id);
-    expect(aggregatorFk?.onDelete).toBe('cascade');
-
-    const bulkFk = byColumn.get(participants.sourceBulkUploadId);
-    const bulkRef = bulkFk?.reference();
-    expect(bulkRef?.foreignTable).toBe(bulkUploads);
-    expect(bulkRef?.foreignColumns[0]).toBe(bulkUploads.id);
-    expect(bulkFk?.onDelete).toBe('set null');
-
-    const linkFk = byColumn.get(participants.sourceLinkId);
-    const linkRef = linkFk?.reference();
-    expect(linkRef?.foreignTable).toBe(registrationLinks);
-    expect(linkRef?.foreignColumns[0]).toBe(registrationLinks.id);
-    expect(linkFk?.onDelete).toBe('set null');
-  });
-});
-
 describe('link_submissions: indexes + foreign keys', () => {
   const cfg = getTableConfig(linkSubmissions);
 
@@ -260,8 +205,8 @@ describe('link_submissions: indexes + foreign keys', () => {
     expect(cfg.indexes).toHaveLength(3);
   });
 
-  it('three foreign keys: link + aggregator (cascade), participant (set null)', () => {
-    expect(cfg.foreignKeys).toHaveLength(3);
+  it('two foreign keys: link + aggregator, both cascade', () => {
+    expect(cfg.foreignKeys).toHaveLength(2);
     const byColumn = new Map(cfg.foreignKeys.map((fk) => [fk.reference().columns[0], fk]));
 
     const linkFk = byColumn.get(linkSubmissions.linkId);
@@ -275,12 +220,6 @@ describe('link_submissions: indexes + foreign keys', () => {
     expect(aggregatorRef?.foreignTable).toBe(aggregators);
     expect(aggregatorRef?.foreignColumns[0]).toBe(aggregators.id);
     expect(aggregatorFk?.onDelete).toBe('cascade');
-
-    const participantFk = byColumn.get(linkSubmissions.participantId);
-    const participantRef = participantFk?.reference();
-    expect(participantRef?.foreignTable).toBe(participants);
-    expect(participantRef?.foreignColumns[0]).toBe(participants.id);
-    expect(participantFk?.onDelete).toBe('set null');
   });
 });
 

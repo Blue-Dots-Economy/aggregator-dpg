@@ -7624,7 +7624,7 @@
         "tags": [
           "public-registration"
         ],
-        "description": "Public endpoint reached by the QR-link registration form. Validates the submission against the link's domain schema (runtime Ajv — the body shape is dynamic per network/domain), creates the participant + user, and pushes to signalstack. Returns 201 on success, 409 (outcome:'skipped') when the phone/email is already registered with this aggregator, and 429 when the per-link rate limit trips.",
+        "description": "Public endpoint reached by the QR-link registration form. Validates the submission against the link's domain schema (runtime Ajv — the body shape is dynamic per network/domain), then creates the user + profile in signalstack. Returns 201 on success, 409 (outcome:'skipped') when the identity is already owned by ANOTHER aggregator, and 429 when the per-link rate limit trips. There is no de-duplication within an aggregator: a repeat submission creates a new profile and returns 201.",
         "requestBody": {
           "required": true,
           "content": {
