@@ -58,7 +58,7 @@ export function registerHealthRoutes(app: FastifyInstance): void {
         response: { 200: LiveResponseSchema },
       },
     },
-    async () => ({ status: 'ok' as const }),
+    () => ({ status: 'ok' as const }),
   );
 
   app.get(
