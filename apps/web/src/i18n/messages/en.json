@@ -248,7 +248,10 @@
     "portal_label": "Aggregator Portal",
     "sign_out": "Sign Out",
     "aggregator_sublabel": "Aggregator · Karnataka",
-    "contact_support": "Contact support"
+    "contact_support": "Contact support",
+    "open_menu": "Open menu",
+    "close_menu": "Close menu",
+    "menu_label": "Main navigation"
   },
   "onboarding": {
     "title": "Onboarding",
