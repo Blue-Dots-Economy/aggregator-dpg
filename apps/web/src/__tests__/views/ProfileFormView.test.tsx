@@ -64,12 +64,6 @@ const apiResponse = {
   ],
   consent: { value: true, given_at: '2024-01-01T00:00:00Z', valid_till: '2025-01-01T00:00:00Z' },
   status: 'active' as const,
-  contact_name: null,
-  personas: [],
-  services: [],
-  verified_certificate: [],
-  profile_completed_at: null,
-  is_complete: true,
   created_at: '2024-01-01T00:00:00Z',
   updated_at: '2024-01-01T00:00:00Z',
 };

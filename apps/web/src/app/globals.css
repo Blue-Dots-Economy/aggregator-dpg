@@ -269,6 +269,14 @@ body {
 .bd-table tbody tr:hover { background: var(--bd-table-head-bg); }
 .bd-table tbody tr:last-child td { border-bottom: 0; }
 
+/* Frozen select + identity columns (dashboard participant table). Only from
+   `md` up — on a phone two frozen columns would take most of the viewport and
+   leave no room to scroll the rest into view (#793). */
+@media (min-width: 768px) {
+  .bd-table .bd-sticky-col { position: sticky; left: 0; }
+  .bd-table .bd-sticky-col-2 { left: 44px; }
+}
+
 /* Gmail-style row checkbox: faint until the row is hovered, the box is
    focused/hovered, or it is checked — so the column reads as quiet by
    default and only the active/selected boxes draw the eye. */
@@ -283,6 +291,10 @@ body {
 .bd-check:checked,
 .bd-table tbody tr:hover .bd-check {
   opacity: 1;
+}
+/* Touch screens have no hover, so the faint default would never lift. */
+@media (hover: none) {
+  .bd-check { opacity: 1; }
 }
 
 .scroll-x::-webkit-scrollbar { height: 10px; }
@@ -341,6 +353,11 @@ body {
   font-size: 14px;
   color: var(--bd-fg);
   transition: all 0.15s;
+}
+/* iOS Safari zooms the page on focus of any field under 16px; bump inputs
+   to 16px on phone widths so focusing a form field never zooms (#793). */
+@media (max-width: 639.98px) {
+  .bd-input { font-size: 16px; }
 }
 .bd-input:hover { background: var(--bd-border-soft); }
 .bd-input:focus {

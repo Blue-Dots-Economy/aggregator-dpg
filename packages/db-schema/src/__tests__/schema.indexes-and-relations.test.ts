@@ -23,7 +23,6 @@ import { getTableConfig } from 'drizzle-orm/pg-core';
 import {
   aggregators,
   aggregatorOrgs,
-  aggregatorProfile,
   bulkUploads,
   registrationLinks,
   linkSubmissions,
@@ -117,41 +116,6 @@ describe('aggregator_orgs: indexes (not covered by aggregator-orgs.schema.test.t
     // Indexed on `lower(display_name)` — a SQL expression, not a plain column.
     expect(idx?.config.where).toBeDefined();
     expect(cfg.indexes).toHaveLength(4);
-  });
-});
-
-describe('aggregator_profile: indexes + foreign key', () => {
-  const cfg = getTableConfig(aggregatorProfile);
-
-  it('table name is snake_case', () => {
-    expect(cfg.name).toBe('aggregator_profile');
-  });
-
-  it('has GIN indexes on personas/services for Beckn catalog discovery', () => {
-    const byName = Object.fromEntries(cfg.indexes.map((i) => [i.config.name, i]));
-
-    expect(byName['aggregator_profile_personas_gin'].config.method).toBe('gin');
-    expect(byName['aggregator_profile_personas_gin'].config.columns.map(colName)).toEqual([
-      'personas',
-    ]);
-
-    expect(byName['aggregator_profile_services_gin'].config.method).toBe('gin');
-    expect(byName['aggregator_profile_services_gin'].config.columns.map(colName)).toEqual([
-      'services',
-    ]);
-
-    expect(byName['aggregator_profile_completed_at_idx'].config.method).toBe('btree');
-    expect(cfg.indexes).toHaveLength(3);
-  });
-
-  it('aggregator_id FK cascades on delete of the parent aggregator', () => {
-    expect(cfg.foreignKeys).toHaveLength(1);
-    const fk = cfg.foreignKeys[0]!;
-    const ref = fk.reference();
-    expect(ref.columns[0]).toBe(aggregatorProfile.aggregatorId);
-    expect(ref.foreignTable).toBe(aggregators);
-    expect(ref.foreignColumns[0]).toBe(aggregators.id);
-    expect(fk.onDelete).toBe('cascade');
   });
 });
 

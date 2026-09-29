@@ -6,13 +6,7 @@ import {
   _setAggregatorStore,
   buildAggregator,
 } from '../services/aggregator-store/index.js';
-import {
-  AggregatorProfileStoreFake,
-  _setAggregatorProfileStore,
-  buildAggregatorProfile,
-} from '../services/aggregator-profile-store/index.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
-import { _resetProfileValidator } from '../services/profile-validator.js';
 import { IdpAdminFake, _setIdpAdmin } from '../services/idp-admin/index.js';
 
 const aggregatorId = '22222222-2222-2222-2222-222222222222';
@@ -20,22 +14,16 @@ const aggregatorId = '22222222-2222-2222-2222-222222222222';
 describe('aggregator profile routes', () => {
   let app: FastifyInstance;
   let aggregatorStore: AggregatorStoreFake;
-  let profileStore: AggregatorProfileStoreFake;
   let idp: IdpAdminFake;
 
   beforeEach(async () => {
     _resetJwks();
-    _resetProfileValidator();
     process.env.KEYCLOAK_URL = 'http://kc.local';
     process.env.KEYCLOAK_REALM = 'bluedots';
 
     aggregatorStore = new AggregatorStoreFake();
     aggregatorStore.seed([buildAggregator({ id: aggregatorId, orgSlug: 'trrain-zzzz' })]);
-    profileStore = new AggregatorProfileStoreFake();
-    profileStore.seed([buildAggregatorProfile({ aggregatorId })]);
-
     _setAggregatorStore(aggregatorStore);
-    _setAggregatorProfileStore(profileStore);
 
     idp = new IdpAdminFake();
     await idp.createUser({
@@ -74,7 +62,6 @@ describe('aggregator profile routes', () => {
   afterAll(async () => {
     await app?.close();
     _setAggregatorStore(null);
-    _setAggregatorProfileStore(null);
     _setAccessTokenVerifier(null);
     _setIdpAdmin(null);
   });
@@ -93,7 +80,7 @@ describe('aggregator profile routes', () => {
     expect(res.statusCode).toBe(403);
   });
 
-  it('GET returns the profile with identity from token + is_complete=false on empty data', async () => {
+  it('GET returns the aggregator with identity from the token', async () => {
     const res = await app.inject({
       method: 'GET',
       url: '/v1/aggregators/profile/me',
@@ -102,7 +89,17 @@ describe('aggregator profile routes', () => {
     expect(res.statusCode).toBe(200);
     const body = res.json() as Record<string, unknown>;
     expect(body.aggregator_id).toBe(aggregatorId);
-    expect(body.is_complete).toBe(false);
+    // The removed `aggregator_profile` keys must not reappear in the response.
+    for (const k of [
+      'contact_name',
+      'personas',
+      'services',
+      'verified_certificate',
+      'profile_completed_at',
+      'is_complete',
+    ]) {
+      expect(body).not.toHaveProperty(k);
+    }
     const id = body.identity as Record<string, unknown>;
     expect(id.first_name).toBe('Asha');
     expect(id.last_name).toBe('Rao');
@@ -112,7 +109,7 @@ describe('aggregator profile routes', () => {
     expect(id.active).toBe(true);
   });
 
-  it('PATCH rejects body that includes neither `aggregator` nor `profile`', async () => {
+  it('PATCH rejects an empty body — `aggregator` is required', async () => {
     const res = await app.inject({
       method: 'PATCH',
       url: '/v1/aggregators/profile/me',
@@ -124,53 +121,16 @@ describe('aggregator profile routes', () => {
     expect(body.error.code).toBe('SCHEMA_VALIDATION');
   });
 
-  it('PATCH profile stamps profile_completed_at when contact_name + persona + service are all present', async () => {
+  it('PATCH rejects a `profile` key — the profile half of the body is gone', async () => {
     const res = await app.inject({
       method: 'PATCH',
       url: '/v1/aggregators/profile/me',
       headers: { authorization: 'Bearer good-token' },
-      payload: {
-        profile: {
-          contact_name: 'Asha Rao',
-          personas: [{ id: 'persona-iti-seeker', name: 'ITI Seeker' }],
-          services: [{ id: 'service-bluedots-job', name: 'BlueDots Job' }],
-        },
-      },
-    });
-    expect(res.statusCode).toBe(200);
-    const body = res.json() as Record<string, unknown>;
-    expect(body.is_complete).toBe(true);
-    expect(body.profile_completed_at).toBeTruthy();
-
-    const stored = await profileStore.findByAggregatorId(aggregatorId);
-    if (stored.ok && stored.value) {
-      expect(stored.value.contactName).toBe('Asha Rao');
-      expect(stored.value.profileCompletedAt).not.toBeNull();
-    }
-  });
-
-  it('PATCH profile rejects unknown persona/service IDs against the schema registry', async () => {
-    const res = await app.inject({
-      method: 'PATCH',
-      url: '/v1/aggregators/profile/me',
-      headers: { authorization: 'Bearer good-token' },
-      payload: {
-        profile: {
-          contact_name: 'Asha',
-          personas: [{ id: 'persona-bogus', name: 'Bogus' }],
-          services: [{ id: 'service-bluedots-job', name: 'BlueDots' }],
-        },
-      },
+      payload: { aggregator: { name: 'Still Valid' }, profile: { contact_name: 'Asha' } },
     });
     expect(res.statusCode).toBe(400);
-    const body = res.json() as { error: { code: string; fields?: Record<string, string[]> } };
-    expect(body.error.code).toBe('SCHEMA_VALIDATION');
-    expect(body.error.fields?.unknown_personas).toContain('persona-bogus');
+    expect((res.json() as { error: { code: string } }).error.code).toBe('SCHEMA_VALIDATION');
   });
-
-  // ---------------------------------------------------------------------------
-  // GET failure branches
-  // ---------------------------------------------------------------------------
 
   it('GET returns 503 when the aggregator store fails', async () => {
     aggregatorStore.findById = async () => ({
@@ -187,29 +147,6 @@ describe('aggregator profile routes', () => {
 
   it('GET returns 404 when the aggregator row is missing', async () => {
     aggregatorStore.findById = async () => ({ ok: true, value: null });
-    const res = await app.inject({
-      method: 'GET',
-      url: '/v1/aggregators/profile/me',
-      headers: { authorization: 'Bearer good-token' },
-    });
-    expect(res.statusCode).toBe(404);
-  });
-
-  it('GET returns 503 when the profile store fails', async () => {
-    profileStore.findByAggregatorId = async () => ({
-      ok: false,
-      error: { code: 'DB_UNAVAILABLE', message: 'db down' },
-    });
-    const res = await app.inject({
-      method: 'GET',
-      url: '/v1/aggregators/profile/me',
-      headers: { authorization: 'Bearer good-token' },
-    });
-    expect(res.statusCode).toBe(503);
-  });
-
-  it('GET returns 404 when the profile row is missing', async () => {
-    profileStore.findByAggregatorId = async () => ({ ok: true, value: null });
     const res = await app.inject({
       method: 'GET',
       url: '/v1/aggregators/profile/me',
@@ -299,9 +236,19 @@ describe('aggregator profile routes', () => {
       },
     });
     expect(res.statusCode).toBe(200);
-    const body = res.json() as { name: string; url: string | null };
+    const body = res.json() as Record<string, unknown>;
     expect(body.name).toBe('TRRAIN Renamed');
     expect(body.url).toBe('https://trrain.example.org');
+    for (const k of [
+      'contact_name',
+      'personas',
+      'services',
+      'verified_certificate',
+      'profile_completed_at',
+      'is_complete',
+    ]) {
+      expect(body).not.toHaveProperty(k);
+    }
   });
 
   it.each([
@@ -328,96 +275,6 @@ describe('aggregator profile routes', () => {
       expect((res.json() as { error: { code: string } }).error.code).toBe(errCode);
     },
   );
-
-  // ---------------------------------------------------------------------------
-  // PATCH profile branch
-  // ---------------------------------------------------------------------------
-
-  it('PATCH updates verified_certificate on the profile', async () => {
-    const res = await app.inject({
-      method: 'PATCH',
-      url: '/v1/aggregators/profile/me',
-      headers: { authorization: 'Bearer good-token' },
-      payload: {
-        profile: {
-          verified_certificate: [
-            {
-              key_id: 'key-1',
-              public_key: 'pubkey-data',
-              algorithm: 'RS256',
-              valid_till: '2027-01-15T10:00:00Z',
-            },
-          ],
-        },
-      },
-    });
-    expect(res.statusCode).toBe(200);
-    const body = res.json() as { verified_certificate: Array<{ key_id: string }> };
-    expect(body.verified_certificate).toHaveLength(1);
-    expect(body.verified_certificate[0]?.key_id).toBe('key-1');
-  });
-
-  it('PATCH returns 404 when the profile row is missing at update time', async () => {
-    profileStore.findByAggregatorId = async () => ({ ok: true, value: null });
-    const res = await app.inject({
-      method: 'PATCH',
-      url: '/v1/aggregators/profile/me',
-      headers: { authorization: 'Bearer good-token' },
-      payload: { profile: { contact_name: 'Asha' } },
-    });
-    expect(res.statusCode).toBe(404);
-  });
-
-  it('PATCH clears profile_completed_at when a previously-complete profile becomes incomplete', async () => {
-    await profileStore.update(aggregatorId, {
-      updatedBy: 'test',
-      contactName: 'Asha Rao',
-      personas: [{ id: 'persona-iti-seeker', name: 'ITI Seeker' }],
-      services: [{ id: 'service-bluedots-job', name: 'BlueDots Job' }],
-      profileCompletedAt: new Date(),
-    });
-    const before = await profileStore.findByAggregatorId(aggregatorId);
-    expect(before.ok && before.value?.profileCompletedAt).not.toBeNull();
-
-    const res = await app.inject({
-      method: 'PATCH',
-      url: '/v1/aggregators/profile/me',
-      headers: { authorization: 'Bearer good-token' },
-      payload: { profile: { personas: [] } },
-    });
-    expect(res.statusCode).toBe(200);
-    const body = res.json() as { is_complete: boolean; profile_completed_at: string | null };
-    expect(body.is_complete).toBe(false);
-    expect(body.profile_completed_at).toBeNull();
-  });
-
-  it('PATCH maps a profile store NOT_FOUND error to 404', async () => {
-    profileStore.update = async () => ({
-      ok: false,
-      error: { code: 'NOT_FOUND', message: 'gone' },
-    });
-    const res = await app.inject({
-      method: 'PATCH',
-      url: '/v1/aggregators/profile/me',
-      headers: { authorization: 'Bearer good-token' },
-      payload: { profile: { contact_name: 'Asha' } },
-    });
-    expect(res.statusCode).toBe(404);
-  });
-
-  it('PATCH maps a profile store DB_UNAVAILABLE error to 503', async () => {
-    profileStore.update = async () => ({
-      ok: false,
-      error: { code: 'DB_UNAVAILABLE', message: 'db down' },
-    });
-    const res = await app.inject({
-      method: 'PATCH',
-      url: '/v1/aggregators/profile/me',
-      headers: { authorization: 'Bearer good-token' },
-      payload: { profile: { contact_name: 'Asha' } },
-    });
-    expect(res.statusCode).toBe(503);
-  });
 
   it('PATCH returns 500 INTERNAL when the post-write read fails', async () => {
     // PATCH's only aggregatorStore.findById call is the post-write "echo the

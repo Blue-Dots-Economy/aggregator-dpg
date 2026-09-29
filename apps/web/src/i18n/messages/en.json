@@ -248,7 +248,10 @@
     "portal_label": "Aggregator Portal",
     "sign_out": "Sign Out",
     "aggregator_sublabel": "Aggregator · Karnataka",
-    "contact_support": "Contact support"
+    "contact_support": "Contact support",
+    "open_menu": "Open menu",
+    "close_menu": "Close menu",
+    "menu_label": "Main navigation"
   },
   "onboarding": {
     "title": "Onboarding",
@@ -456,14 +459,6 @@
       "btn_save": "Save changes",
       "btn_saving": "Saving…",
       "save_failed": "Save failed. Please try again."
-    },
-    "complete": {
-      "topbar_title": "Complete your profile",
-      "topbar_subtitle": "A few details about your organisation so we can match you with the right opportunities.",
-      "loading": "Loading profile…",
-      "btn_save": "Save profile",
-      "btn_saving": "Saving…",
-      "status_saved": "Saved"
     },
     "public_reg": {
       "domain_seeker": "Seeker registration",

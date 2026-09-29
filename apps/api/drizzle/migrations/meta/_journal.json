@@ -164,6 +164,13 @@
       "breakpoints": true
     },
     {
+      "idx": 23,
+      "version": "7",
+      "when": 1790600000000,
+      "tag": "0023_drop_aggregator_profile",
+      "breakpoints": true
+    },
+    {
       "idx": 24,
       "version": "7",
       "when": 1790695000000,

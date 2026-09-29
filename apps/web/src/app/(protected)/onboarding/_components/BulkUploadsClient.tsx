@@ -28,7 +28,7 @@ export function BulkUploadsClient({ attestation }: BulkUploadsClientProps): JSX.
         title={t('bulk_uploads_page.title')}
         subtitle={t('bulk_uploads_page.subtitle')}
         right={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={() => router.push('/onboarding')}
