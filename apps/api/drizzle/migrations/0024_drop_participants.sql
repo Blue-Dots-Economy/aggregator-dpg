@@ -20,6 +20,18 @@
 -- Signals profile (Signals held a strict superset). Re-run that check against the
 -- target environment before applying here.
 --
+-- MIGRATION ORDER CONSTRAINT — this migration must not deploy before 0023.
+--   drizzle's migrator keeps a single high-water mark: it reads the newest
+--   `created_at` from `drizzle.__drizzle_migrations` once, then applies only
+--   entries whose `folderMillis` is strictly greater. Array position is
+--   irrelevant. `0023_drop_aggregator_profile` (journal `when`
+--   1790600000000) lives on a separate branch; this entry is 1790695000000.
+--   If THIS migration is applied first, 0023 fails the `<` test forever and is
+--   silently skipped with no error.
+--
+--   Land the 0023 PR first. If that order changes, whichever migration merges
+--   SECOND must have its journal `when` bumped above the one already applied.
+--
 -- DEPLOY CONSTRAINT — read before rolling this out.
 --   This ships in the SAME release as the code that stopped writing the table.
 --   `server.ts` runs `runMigrations()` at boot, so under a rolling deploy the

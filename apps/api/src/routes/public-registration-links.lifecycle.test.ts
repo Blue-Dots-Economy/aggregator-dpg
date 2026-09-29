@@ -135,7 +135,6 @@ function buildFakeDb(submissionId: string): {
 }
 
 const SUBMISSION_ID = '33333333-3333-3333-3333-333333333333';
-const PARTICIPANT_PARENT_ID = '44444444-4444-4444-4444-444444444444';
 
 describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — lifecycle', () => {
   let fakeDb: ReturnType<typeof buildFakeDb>;
@@ -184,11 +183,6 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — lifecycle
       updatedAt: new Date('2026-01-01T00:00:00Z'),
     };
     _setRegistrationLinksStore(new StubRegistrationLinksStore(liveLink));
-
-    // Fake participants writer so the route does not reach Drizzle's
-    // Pre-seed a parent participant id so the upsert returns `passed` and
-    // the response carries a deterministic submission_id.
-    void PARTICIPANT_PARENT_ID;
 
     // Minimal db stub — exposes only what the public-submit handler calls
     // on the transaction handle.

@@ -10,9 +10,9 @@
  * (replay, heartbeat flush, Finaliser enqueue), and array-cell preprocessing.
  *
  * DB and Redis are faked (hand-built chainable stubs, matching the pattern
- * already used by the sibling job test files). The participants-writer and
- * signalstack-writer dependencies use the real in-memory `./testing` fakes
- * per testing.md ("fakes over mocks").
+ * already used by the sibling job test files). The signalstack-writer
+ * dependency uses the real in-memory `./testing` fake per testing.md
+ * ("fakes over mocks").
  *
  * @module @aggregator-dpg/worker
  */
@@ -297,6 +297,9 @@ describe('processBulkRow — signalstack push outcomes', () => {
     const second = await processBulkRow(makeJob({ payload }));
     expect(first).toEqual({ outcome: 'passed', category: null, reasons: [] });
     expect(second).toEqual({ outcome: 'passed', category: null, reasons: [] });
+    // Pins the reason it is `passed` twice: signals really did create a second
+    // profile. Without this the test would still pass if signals deduped.
+    expect(signalStackWriter.listProfiles()).toHaveLength(2);
   });
 
   it('fails a fresh row with system_error when the signalstack push fails generically', async () => {

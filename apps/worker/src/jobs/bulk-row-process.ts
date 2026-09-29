@@ -5,14 +5,19 @@
  *   1. Pull job { uploadId, aggregatorId, rowIndex, rawRow, payload }.
  *   2. Validate against the schema pinned on bulk_uploads.
  *   3. Normalise phone (E.164) and email (lowercase).
- *   4. INSERT participant ON CONFLICT (aggregator_id, participant_id) DO NOTHING.
+ *   4. Push to signalstack (the store of record — there is no local row).
  *   5. Run Lua script (§7) for atomic SADD + counter INCR + error HSET.
  *   6. If processed_count == total && reader_done → enqueue Finaliser.
  *
  * Outcome categories:
- *   passed   = INSERT succeeded
- *   skipped  = duplicate (ON CONFLICT)
- *   failed   = validation | normalisation | system_error
+ *   passed   = signalstack accepted the push
+ *   failed   = validation | normalisation | limit_reached | owned_elsewhere |
+ *              system_error
+ *   skipped  = no producer on this path since migration 0024 dropped the local
+ *              `participants` table. It deduped its own row but pushed to
+ *              signals regardless, so `skipped`/`duplicate` was reported while a
+ *              second profile was created upstream. Signals does not dedup;
+ *              de-duplication, if wanted, belongs there.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -46,12 +51,16 @@ async function loadValidParticipantTypes(): Promise<Set<string>> {
 type ErrorCategory =
   | 'validation'
   | 'normalisation'
+  // No producer since 0024 (see the module header). Retained because the redis
+  // / finalise / errors.csv plumbing still carries the field, and signals-side
+  // dedup would repopulate it.
   | 'duplicate'
   | 'limit_reached'
   | 'owned_elsewhere'
   | 'system_error';
 
 interface RowOutcome {
+  /** `skipped` has no producer on this path since 0024 — see the module header. */
   outcome: 'passed' | 'skipped' | 'failed';
   category: ErrorCategory | null;
   reasons: string[];
@@ -144,9 +153,8 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
   }
 
   // 2. Normalisation. Auto-allocate a UUID when the row carries no explicit
-  // `participant_id` — keeps the `(aggregator, type, participant_id)` unique
-  // index satisfied while letting the participant schema decide whether the
-  // field is a meaningful business id or not.
+  // `participant_id`. Since 0024 this no longer backs a local unique index; it
+  // is the external id forwarded to signals and the name fallback below.
   const rawParticipantId = String(job.payload['participant_id'] ?? '').trim();
   const participantId = rawParticipantId.length > 0 ? rawParticipantId : randomUUID();
 
@@ -240,8 +248,9 @@ async function commit(
   outcome: RowOutcome,
   log: typeof logger,
 ): Promise<RowOutcome> {
-  // Only `failed` outcomes get a payload — `skipped` (e.g. duplicate
-  // participant) is dedup, not an error, and must not appear in errors.csv.
+  // Only `failed` outcomes get a payload — `skipped` is a deliberate no-op,
+  // not an error, and must not appear in errors.csv. (No bulk producer emits
+  // `skipped` since 0024; the branch is kept for the shared outcome shape.)
   // raw_row is reconstructed by the Finaliser from `bu:{id}:lines` keyed on
   // row_index, so it does NOT travel in the per-row job payload anymore.
   const errorPayload =
