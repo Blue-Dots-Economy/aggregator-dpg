@@ -119,6 +119,32 @@ export async function consume(options: RateLimitOptions): Promise<RateLimitResul
   }
 }
 
+/**
+ * Outcome of one per-surface rate check — {@link RateLimitResult} without the
+ * window count, which is a limiter implementation detail no route reads.
+ */
+export interface RateCheckResult {
+  allowed: boolean;
+  retryAfterSeconds: number;
+}
+
+/**
+ * {@link consume}, reshaped to {@link RateCheckResult}.
+ *
+ * Each per-surface checker (`submit-rate.ts`, `support-rate.ts`,
+ * `approval-verify-rate.ts`, `invite-mint-rate.ts`,
+ * `org-invite-resend-rate.ts`) wrapped `consume` with the same two-line body.
+ * Bucket, window, max, cost and the fail-open/fail-closed posture stay with
+ * the caller — this only drops `count` from the result.
+ *
+ * @param options - Passed straight through to {@link consume}.
+ * @returns Whether the call is allowed + retry-after seconds.
+ */
+export async function consumeSlot(options: RateLimitOptions): Promise<RateCheckResult> {
+  const { allowed, retryAfterSeconds } = await consume(options);
+  return { allowed, retryAfterSeconds };
+}
+
 export async function closeRateLimiter(): Promise<void> {
   await instance?.quit().catch(() => undefined);
   instance = null;

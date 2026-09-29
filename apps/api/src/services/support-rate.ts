@@ -9,16 +9,13 @@
  * Belongs to `@aggregator-dpg/api`.
  */
 
-import { consume } from './rate-limiter/index.js';
+import { consumeSlot, type RateCheckResult } from './rate-limiter/index.js';
 
 /** Submissions allowed per coordinator per window — the endpoint takes multi-MB uploads. */
 export const SUPPORT_RATE_WINDOW_SECONDS = 3600;
 export const SUPPORT_RATE_MAX_PER_WINDOW = 5;
 
-export interface SupportRateResult {
-  allowed: boolean;
-  retryAfterSeconds: number;
-}
+export type SupportRateResult = RateCheckResult;
 
 type Checker = (key: string) => Promise<SupportRateResult>;
 
@@ -37,11 +34,10 @@ export function _setSupportRateChecker(c: Checker | null): void {
  */
 export async function checkSupportRate(key: string): Promise<SupportRateResult> {
   if (override) return override(key);
-  const r = await consume({
+  return consumeSlot({
     namespace: 'support-submit',
     key,
     windowSeconds: SUPPORT_RATE_WINDOW_SECONDS,
     max: SUPPORT_RATE_MAX_PER_WINDOW,
   });
-  return { allowed: r.allowed, retryAfterSeconds: r.retryAfterSeconds };
 }

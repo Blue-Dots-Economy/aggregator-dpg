@@ -300,22 +300,6 @@ export function runStoreConformance(
     });
   });
 
-  describe('heartbeat + claimStalledJobs', () => {
-    it('claims processing jobs with a stale heartbeat, leaves pending/fresh alone', async () => {
-      const store = makeStore();
-      const input = base();
-      const { job } = unwrap(await store.createJob(input));
-      // pending job (never heartbeated) — never claimed, even with a future cutoff.
-      expect(unwrap(await store.claimStalledJobs(-1))).not.toContain(job.id);
-      unwrap(await store.setJobStatus(job.id, 'processing'));
-      unwrap(await store.heartbeat(job.id));
-      // fresh heartbeat — not stale under a real cutoff.
-      expect(unwrap(await store.claimStalledJobs(3600))).not.toContain(job.id);
-      // future cutoff (-1s) — the processing+heartbeated job is "stale".
-      expect(unwrap(await store.claimStalledJobs(-1))).toContain(job.id);
-    });
-  });
-
   describe('createJob dedup-on-create (voice)', () => {
     it('creates a second active item for the same (item_id, action) as duplicate_active', async () => {
       const store = makeStore();

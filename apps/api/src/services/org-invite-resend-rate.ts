@@ -30,13 +30,10 @@
  */
 
 import { config } from '../config.js';
-import { consume } from './rate-limiter/index.js';
+import { consumeSlot, type RateCheckResult } from './rate-limiter/index.js';
 
 /** Outcome of one resend rate check. */
-export interface OrgInviteResendRateResult {
-  allowed: boolean;
-  retryAfterSeconds: number;
-}
+export type OrgInviteResendRateResult = RateCheckResult;
 
 type Checker = (ownerEmail: string) => Promise<OrgInviteResendRateResult>;
 
@@ -59,12 +56,11 @@ export async function checkOrgInviteResendRate(
   ownerEmail: string,
 ): Promise<OrgInviteResendRateResult> {
   if (override) return override(ownerEmail);
-  const r = await consume({
+  return consumeSlot({
     namespace: 'org-invite-resend',
     key: ownerEmail.toLowerCase(),
     windowSeconds: config.ORG_INVITE_RESEND_RATE_WINDOW_SECONDS,
     max: config.ORG_INVITE_RESEND_RATE_MAX_PER_WINDOW,
     failClosed: true,
   });
-  return { allowed: r.allowed, retryAfterSeconds: r.retryAfterSeconds };
 }

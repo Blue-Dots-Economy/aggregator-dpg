@@ -1,10 +1,9 @@
 /**
  * Shared read accessors over a resolved config store.
  *
- * Internal module — not a subpath export. `FsConfigService` and
- * `InMemoryConfigService` implement the same `slice` / `get` / `require`
- * contract over a plain `Record<string, unknown>`, and previously carried
- * byte-identical copies of these bodies plus `resolvePath`. The
+ * Internal module — not a subpath export. `ConfigServiceFake` implements the
+ * `slice` / `get` / `require` contract over a plain `Record<string, unknown>`,
+ * and previously carried copies of these bodies plus `resolvePath`. The
  * `ConfigServiceBase` contract stays fully abstract (see
  * `.claude/rules/base-class-pattern.md`), so the shared logic lives in free
  * functions the implementations delegate to rather than in the base class.

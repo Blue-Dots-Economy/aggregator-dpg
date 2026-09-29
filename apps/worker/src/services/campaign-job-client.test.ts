@@ -259,9 +259,4 @@ describe('campaign job client', () => {
       sentCount: 0,
     });
   });
-
-  it('claimStalledJobs returns ids', async () => {
-    queue([{ id: 'job-1' }]);
-    expect(await client.claimStalledJobs(900)).toEqual(['job-1']);
-  });
 });

@@ -313,10 +313,4 @@ describe('PostgresCampaignJobStore', () => {
     const r = await store.rollUpStatus('job-1');
     expect(r.ok && r.value).toBe('completed');
   });
-
-  it('claimStalledJobs: returns the stale ids', async () => {
-    queue([{ id: 'job-1' }, { id: 'job-2' }]);
-    const r = await store.claimStalledJobs(900);
-    expect(r.ok && r.value).toEqual(['job-1', 'job-2']);
-  });
 });

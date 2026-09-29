@@ -11,9 +11,9 @@
  * need to contact support). Belongs to `@aggregator-dpg/api`.
  */
 
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { authenticate, type AuthContext } from '../services/auth/access-token.js';
+import { requireAuthenticatedAggregator as requireAuth } from './auth-shared.js';
 import { getMailer } from '@aggregator-dpg/mailer';
 import {
   renderSupportRequest,
@@ -224,15 +224,4 @@ export async function registerSupportRoutes(app: FastifyInstance): Promise<void>
       return reply.code(201).send({ ok: true, reference });
     },
   );
-}
-
-/** Unwrap the auth context or throw the catalogue error. Mirrors the local helper in other route modules (e.g. `dashboard.ts`, `aggregator-profile.ts`). */
-async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
-  const result = await authenticate(req);
-  if (result.ok) return result.context;
-  const code = result.error.code === 'MISSING_AGGREGATOR_ID' ? 'FORBIDDEN' : 'UNAUTHORIZED';
-  throw httpError(code, {
-    detail: result.error.message,
-    fields: { reason: result.error.code },
-  });
 }

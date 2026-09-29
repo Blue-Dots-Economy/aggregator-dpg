@@ -21,6 +21,7 @@ import {
   UpstreamError,
   ValidationError,
 } from '@aggregator-dpg/shared-primitives/errors';
+import { setTimeout as sleep } from 'node:timers/promises';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import { err, ok } from '@aggregator-dpg/shared-primitives/result';
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
@@ -211,7 +212,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
   private backoff(attempt: number): Promise<void> {
     const ms = this.retryBaseMs * 2 ** attempt;
     if (ms <= 0) return Promise.resolve();
-    return new Promise((resolve) => setTimeout(resolve, ms));
+    return sleep(ms);
   }
 
   /**

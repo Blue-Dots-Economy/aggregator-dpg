@@ -51,8 +51,8 @@ describe('<Dropzone />', () => {
     const zone = screen.getByText('hover me').parentElement as HTMLElement;
     fireEvent.dragOver(zone);
     fireEvent.dragLeave(zone);
-    // No visible assertion beyond "did not throw" — hover state is purely
-    // internal and not surfaced as a class in this component's markup.
+    // No visible assertion beyond "did not throw" — dragOver only calls
+    // preventDefault (so `drop` fires at all) and dragLeave is unhandled.
     expect(zone).toBeInTheDocument();
   });
 

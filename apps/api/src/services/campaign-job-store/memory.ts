@@ -284,15 +284,6 @@ export class InMemoryCampaignJobStore extends CampaignJobStoreBase {
     return { ok: true, value: undefined };
   }
 
-  async claimStalledJobs(olderThanSeconds: number): Promise<StoreResult<string[]>> {
-    const cutoff = Date.now() - olderThanSeconds * 1000;
-    const ids = [...this.jobs.values()]
-      .filter((j) => j.status === 'processing')
-      .filter((j) => j.lastProgressAt !== null && j.lastProgressAt.getTime() < cutoff)
-      .map((j) => j.id);
-    return { ok: true, value: ids };
-  }
-
   private touch(jobId: string): void {
     const job = this.jobs.get(jobId);
     if (job) job.updatedAt = new Date();

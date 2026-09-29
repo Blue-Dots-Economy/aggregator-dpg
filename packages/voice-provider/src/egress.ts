@@ -117,6 +117,11 @@ export async function acquireRayaSlot(deps: AcquireRayaSlotDeps): Promise<void> 
  * Default sleep implementation — a real `setTimeout`-backed wait, used when
  * no `sleep` dependency is injected (i.e. outside of tests).
  *
+ * Deliberately NOT `node:timers/promises`' `setTimeout` (unlike `./raya.js`,
+ * which swapped to it): `egress.test.ts` drives this function under vitest's
+ * fake timers, which patch the global `setTimeout` but not the
+ * `node:timers/promises` module's internal timer.
+ *
  * @param ms - Milliseconds to wait.
  */
 function defaultSleep(ms: number): Promise<void> {
