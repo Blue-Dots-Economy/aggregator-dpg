@@ -21,13 +21,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { BulkRowProcessJob } from '@aggregator-dpg/queue';
 import { err } from '@aggregator-dpg/shared-primitives/result';
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
-import { DomainError, UpstreamError } from '@aggregator-dpg/shared-primitives/errors';
+import { UpstreamError } from '@aggregator-dpg/shared-primitives/errors';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
-import {
-  ParticipantsWriterFake,
-  InMemoryParticipantsWriter,
-} from '@aggregator-dpg/participants-writer/testing';
-import type { BulkRowInput, WriteResult } from '@aggregator-dpg/participants-writer/interface';
 import {
   SignalStackWriterFake,
   InMemorySignalStackWriter,
@@ -129,20 +124,13 @@ vi.mock('../config.js', () => ({
   },
 }));
 
-const { processBulkRow, pushToSignalStack, _setParticipantsWriter } =
-  await import('./bulk-row-process.js');
+const { processBulkRow, pushToSignalStack } = await import('./bulk-row-process.js');
 const { _setSignalStackWriter } = await import('../services/signalstack.js');
 const { _setNetworkConfig } = await import('../services/network-config.js');
 const { _setDb } = await import('../db.js');
 const { logger } = await import('../logger.js');
 
 // ─── Fakes that fail on demand (extend the real in-memory impls) ───────────
-
-class FailingParticipantsWriter extends InMemoryParticipantsWriter {
-  override async writeBulkRow(_input: BulkRowInput): Promise<Result<WriteResult, BaseError>> {
-    return err(new DomainError('boom', { code: 'DB_WRITE_FAILED' }));
-  }
-}
 
 class FailingSignalStackWriter extends InMemorySignalStackWriter {
   constructor(
@@ -177,7 +165,6 @@ function lastCommit(): { outcome: string; errorPayload: string } {
   return { outcome: call[8] as string, errorPayload: call[9] as string };
 }
 
-let participantsWriter: ParticipantsWriterFake;
 let signalStackWriter: SignalStackWriterFake;
 
 beforeEach(() => {
@@ -191,16 +178,13 @@ beforeEach(() => {
   heartbeatUpdates.length = 0;
   _setDb(makeDb() as never);
   _setNetworkConfig(buildBlueDotConfig());
-  participantsWriter = new ParticipantsWriterFake();
   signalStackWriter = new SignalStackWriterFake();
-  _setParticipantsWriter(participantsWriter);
   _setSignalStackWriter(signalStackWriter);
 });
 
 afterEach(() => {
   _setDb(null);
   _setNetworkConfig(null);
-  _setParticipantsWriter(null);
   _setSignalStackWriter(null);
 });
 
@@ -212,13 +196,13 @@ describe('processBulkRow — normal execution', () => {
     expect(enqueueFinalise).not.toHaveBeenCalled();
   });
 
-  it('treats a missing optional email as null on the writer call', async () => {
+  it('omits a missing optional email from the signalstack push', async () => {
     const result = await processBulkRow(
       makeJob({ payload: { name: 'Asha', phone: '9876543210' } }),
     );
     expect(result.outcome).toBe('passed');
-    const stored = participantsWriter.list()[0]!;
-    expect(stored.email).toBeNull();
+    const [user] = signalStackWriter.listUsers();
+    expect(user?.email ?? null).toBeNull();
   });
 
   it('splits a delimited array-typed cell using the network csv_array_delimiter', async () => {
@@ -239,8 +223,8 @@ describe('processBulkRow — normal execution', () => {
         },
       }),
     );
-    const stored = participantsWriter.list()[0]!;
-    expect(stored.data['skills']).toEqual(['welding', 'carpentry']);
+    const [profile] = signalStackWriter.listProfiles();
+    expect(profile?.item_state['skills']).toEqual(['welding', 'carpentry']);
   });
 });
 
@@ -302,35 +286,17 @@ describe('processBulkRow — edge cases: rejected before persistence', () => {
   });
 });
 
-describe('processBulkRow — writer + signalstack push interplay', () => {
-  it('marks a duplicate participant as skipped when the push still succeeds', async () => {
-    participantsWriter.seed([{ aggregatorId: 'agg-1', type: 'seeker', participantId: 'dup-1' }]);
-    const result = await processBulkRow(
-      makeJob({ payload: { participant_id: 'dup-1', name: 'Asha', phone: '9876543210' } }),
-    );
-    expect(result).toEqual({
-      outcome: 'skipped',
-      category: 'duplicate',
-      reasons: [`participant_id 'dup-1' already registered for this aggregator`],
-    });
-  });
-
-  it('flips a duplicate row to failed when the (still-attempted) push fails', async () => {
-    participantsWriter.seed([{ aggregatorId: 'agg-1', type: 'seeker', participantId: 'dup-1' }]);
-    _setSignalStackWriter(new FailingSignalStackWriter());
-    const result = await processBulkRow(
-      makeJob({ payload: { participant_id: 'dup-1', name: 'Asha', phone: '9876543210' } }),
-    );
-    expect(result.outcome).toBe('failed');
-    expect(result.category).toBe('system_error');
-  });
-
-  it('fails with a db-prefixed reason when the local participant write fails', async () => {
-    _setParticipantsWriter(new FailingParticipantsWriter());
-    const result = await processBulkRow(makeJob());
-    expect(result.outcome).toBe('failed');
-    expect(result.category).toBe('system_error');
-    expect(result.reasons[0]).toContain('db: boom');
+describe('processBulkRow — signalstack push outcomes', () => {
+  // There is no local participant row any more, so there is no local dedup and
+  // no `skipped`/`duplicate` outcome on this path. A repeat row is pushed and
+  // reported as `passed` — which is what actually happens upstream, since
+  // signals `onboard` always inserts. Deduplication, if wanted, belongs there.
+  it('reports a repeat row as passed — dedup is not done locally', async () => {
+    const payload = { participant_id: 'dup-1', name: 'Asha', phone: '9876543210' };
+    const first = await processBulkRow(makeJob({ payload }));
+    const second = await processBulkRow(makeJob({ payload }));
+    expect(first).toEqual({ outcome: 'passed', category: null, reasons: [] });
+    expect(second).toEqual({ outcome: 'passed', category: null, reasons: [] });
   });
 
   it('fails a fresh row with system_error when the signalstack push fails generically', async () => {

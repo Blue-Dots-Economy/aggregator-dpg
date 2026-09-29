@@ -1,0 +1,42 @@
+-- Migration 0024 — drop the local `participants` mirror.
+--
+-- `participants` was a per-aggregator copy of registrations that Signals already
+-- holds. It had no reader: `ParticipantsWriterBase` was a write-only port, and
+-- the single SELECT against the table was self-referential (the ON CONFLICT path
+-- re-reading its own row id to FK into `link_submissions`).
+--
+-- It also provided no deduplication, despite appearing to. Both writers pushed
+-- to Signals regardless of the local UPSERT outcome, so a repeat bulk CSV row
+-- reported `skipped`/`duplicate` in errors.csv while a second Signals profile was
+-- created. Verified empirically before this change: two identical public-link
+-- submissions returned 201 `passed` twice and produced two distinct Signals
+-- profiles from one local row. Removing the table removes a misleading signal,
+-- not a safeguard. Real deduplication belongs upstream in Signals.
+--
+-- `link_submissions.participant_id` is dropped with it — written and logged, but
+-- never read by any query, export or rollup.
+--
+-- Pre-flight before applying: every local `participants` row was reconciled to a
+-- Signals profile (Signals held a strict superset). Re-run that check against the
+-- target environment before applying here.
+--
+-- DEPLOY CONSTRAINT — read before rolling this out.
+--   This ships in the SAME release as the code that stopped writing the table.
+--   `server.ts` runs `runMigrations()` at boot, so under a rolling deploy the
+--   first new pod drops the table while old pods are still executing
+--   `writeLinkSubmission` / `writeBulkRow` — both would hard-fail against a
+--   missing relation.
+--
+--   Deploy stop-the-world (scale the old ReplicaSet to zero first), or split this
+--   migration into a follow-up release once the new code is fully rolled out.
+--
+-- NOT REVERSIBLE.
+--
+-- Order matters: drop the FK-bearing column first so the table drop needs no
+-- CASCADE. `link_submissions.participant_id` is the only inbound reference, and
+-- the table's own indexes go with it. Leaving CASCADE off means an unexpected
+-- future dependent fails this migration loudly instead of being silently dropped.
+
+ALTER TABLE "link_submissions" DROP COLUMN IF EXISTS "participant_id";--> statement-breakpoint
+
+DROP TABLE IF EXISTS "participants";

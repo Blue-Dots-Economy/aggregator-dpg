@@ -4,7 +4,7 @@
  * The Drizzle client (`getDb()`) is swapped for a hand-built stub that mimics
  * its fluent, thenable query-builder chain (per testing.md §1 — third-party
  * adapters may be stubbed rather than faked, matching the pattern used in
- * `packages/participants-writer/src/__tests__/participants-writer.test.ts`
+ * `packages/signalstack-writer/src/__tests__/signalstack-writer.test.ts`
  * and `packages/consent-ledger/src/__tests__/consent-ledger.test.ts`). Every
  * chained call is recorded so a test can assert on the exact values passed
  * into `.values()` / `.set()`, and the terminal `await` resolves to whatever

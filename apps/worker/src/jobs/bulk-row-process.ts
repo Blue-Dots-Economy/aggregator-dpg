@@ -22,8 +22,6 @@ import {
   type BulkFinaliseJob,
   type BulkRowProcessJob,
 } from '@aggregator-dpg/queue';
-import { PostgresParticipantsWriter } from '@aggregator-dpg/participants-writer/postgres';
-import type { ParticipantsWriterBase } from '@aggregator-dpg/participants-writer/interface';
 import { getDb, schema } from '../db.js';
 import { getSchemaLoader } from '../services/schema-loader.js';
 import { getRedis } from '../services/redis.js';
@@ -33,18 +31,6 @@ import { getNetworkConfig } from '../services/network-config.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
 import { config } from '../config.js';
 import { logger } from '../logger.js';
-
-let participantsWriter: ParticipantsWriterBase | null = null;
-function getParticipantsWriter(): ParticipantsWriterBase {
-  if (participantsWriter) return participantsWriter;
-  participantsWriter = new PostgresParticipantsWriter(getDb());
-  return participantsWriter;
-}
-
-/** Test helper — override the writer (e.g., inject a fake). */
-export function _setParticipantsWriter(w: ParticipantsWriterBase | null): void {
-  participantsWriter = w;
-}
 
 /**
  * Returns the set of participant types declared by the active network
@@ -210,64 +196,35 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
       : null,
   );
 
-  // 3. Persist via the participants-writer wrapper (shared by bulk + link).
+  // 3. Push to signalstack. Signals is the identity store of record — there is
+  // no local participant row any more, so its verdict is the row's outcome.
+  //
+  // Note there is no duplicate detection here, and there was none before: the
+  // old local `participants` table deduped its own row but pushed to signals
+  // regardless, so a repeat CSV row reported `skipped`/`duplicate` while a
+  // second signals profile was created. Reporting `passed` is the honest
+  // answer. Real deduplication belongs upstream in signals.
   let outcome: RowOutcome;
-  const writeResult = await getParticipantsWriter().writeBulkRow({
-    aggregatorId: job.aggregatorId,
-    type: job.participantType,
-    participantId,
-    data: job.payload,
-    phone: phoneNormalised,
-    email: emailNormalised,
-    sourceBulkUploadId: job.uploadId,
-    sourceRowIndex: job.rowIndex,
-  });
-  if (writeResult.success) {
-    if (writeResult.value.outcome === 'passed') {
-      outcome = { outcome: 'passed', category: null, reasons: [] };
-    } else {
-      outcome = {
-        outcome: 'skipped',
-        category: 'duplicate',
-        reasons: [`participant_id '${participantId}' already registered for this aggregator`],
-      };
-    }
-
-    // Outward signalstack push. The local participant write is now committed,
-    // so a push failure can NOT roll back the row — instead we flip this
-    // row's outcome to `failed` so it surfaces in errors.csv alongside any
-    // validation / normalisation failures. Operators see one consistent
-    // signal: a row only counts as "passed" once signalstack has it too.
-    const push = await pushToSignalStack(job, participantId, phoneNormalised, emailNormalised, log);
-    if (!push.success) {
-      // `push.message` already includes the upstream's own error text when
-      // signalstack returned a JSON body (e.g.
-      // `signalstack onboard returned 400: INVALID_ITEM_STATE: …`). Surface
-      // it directly so operators see the actual rejection reason in
-      // errors.csv instead of a generic status-code string.
-      // The per-user profile cap (signals #349) is a user/data condition, not a
-      // system fault — categorise it distinctly so errors.csv reads clearly.
-      const category: ErrorCategory = push.ownedElsewhere
-        ? 'owned_elsewhere'
-        : push.code === 'SIGNALSTACK_PROFILE_LIMIT_REACHED'
-          ? 'limit_reached'
-          : 'system_error';
-      outcome = {
-        outcome: 'failed',
-        category,
-        reasons: [`signalstack [${push.code}]: ${push.message}`],
-      };
-    }
+  const push = await pushToSignalStack(job, participantId, phoneNormalised, emailNormalised, log);
+  if (push.success) {
+    outcome = { outcome: 'passed', category: null, reasons: [] };
   } else {
-    log.error({
-      status: 'failure',
-      sub: 'participants.write',
-      error: writeResult.error.message,
-    });
+    // `push.message` already includes the upstream's own error text when
+    // signalstack returned a JSON body (e.g.
+    // `signalstack onboard returned 400: INVALID_ITEM_STATE: …`). Surface
+    // it directly so operators see the actual rejection reason in
+    // errors.csv instead of a generic status-code string.
+    // The per-user profile cap (signals #349) is a user/data condition, not a
+    // system fault — categorise it distinctly so errors.csv reads clearly.
+    const category: ErrorCategory = push.ownedElsewhere
+      ? 'owned_elsewhere'
+      : push.code === 'SIGNALSTACK_PROFILE_LIMIT_REACHED'
+        ? 'limit_reached'
+        : 'system_error';
     outcome = {
       outcome: 'failed',
-      category: 'system_error',
-      reasons: [`db: ${writeResult.error.message}`],
+      category,
+      reasons: [`signalstack [${push.code}]: ${push.message}`],
     };
   }
 

@@ -33,9 +33,7 @@ import {
   type RegistrationLink,
   type StoreResult,
 } from '../services/registration-links-store/index.js';
-import { _setParticipantsWriter } from './public-registration-links.js';
 import { SignalStackWriterFake } from '@aggregator-dpg/signalstack-writer/testing';
-import { ParticipantsWriterFake } from '@aggregator-dpg/participants-writer/testing';
 import { buildBlueDotConfig } from '@aggregator-dpg/network-config/testing';
 import { UpstreamError } from '@aggregator-dpg/shared-primitives/errors';
 import { err } from '@aggregator-dpg/shared-primitives/result';
@@ -144,7 +142,6 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — lifecycle
   let app: FastifyInstance;
   let signalstack: SignalStackWriterFake;
   let aggregatorStore: AggregatorStoreFake;
-  let writer: ParticipantsWriterFake;
 
   beforeEach(async () => {
     // Treat signalstack as enabled so getSignalStackWriter returns our fake.
@@ -189,12 +186,9 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — lifecycle
     _setRegistrationLinksStore(new StubRegistrationLinksStore(liveLink));
 
     // Fake participants writer so the route does not reach Drizzle's
-    // ParticipantsWriter constructor (which assumes a real `tx`).
-    writer = new ParticipantsWriterFake();
     // Pre-seed a parent participant id so the upsert returns `passed` and
     // the response carries a deterministic submission_id.
     void PARTICIPANT_PARENT_ID;
-    _setParticipantsWriter(writer);
 
     // Minimal db stub — exposes only what the public-submit handler calls
     // on the transaction handle.
@@ -210,7 +204,6 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — lifecycle
     _setSignalStackWriter(null);
     _setNetworkConfig(null);
     _setRegistrationLinksStore(null);
-    _setParticipantsWriter(null);
     _setDbClients(null, null);
   });
 
@@ -309,12 +302,12 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — lifecycle
   });
 
   it('a repeat submission from the same participant passes, not skipped (#780)', async () => {
-    // The local `participants` table dedups on the normalised phone, so a
-    // second submission from the same person hits its ON CONFLICT path and the
-    // writer reports `skipped`. That mirror must NOT decide the response:
-    // signals inserts a NEW profile on every onboard call without an `item_id`,
-    // so the profile really was created. Reporting 409 "already registered"
-    // told the participant the opposite of what had just happened.
+    // Signals inserts a NEW profile on every onboard call without an `item_id`,
+    // so a repeat submission really did create a profile and must report
+    // `passed`. This was originally a #780 fix against the local `participants`
+    // mirror, which reported `skipped` while the profile was created anyway;
+    // that mirror has since been removed, and this test pins the behaviour so a
+    // future local dedup cannot silently reintroduce the wrong answer.
     const payload = { ...basePayload, phone: '+919876533333', email: 'repeat@x.com' };
     const first = await app.inject({
       method: 'POST',
@@ -422,19 +415,6 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — lifecycle
     expect((r.json() as { error: { code: string } }).error.code).toBe(
       'SIGNALSTACK_ORG_NOT_REGISTERED',
     );
-  });
-
-  it('500s when the participants-writer transaction write fails', async () => {
-    writer.writeLinkSubmission = async () => ({
-      success: false,
-      error: { code: 'DB_UNAVAILABLE', message: 'insert failed' } as never,
-    });
-    const r = await app.inject({
-      method: 'POST',
-      url: `/public/v1/aggregators/${ORG_SLUG}/registrations/${LINK_SLUG}`,
-      payload: { ...basePayload, phone: '+919876500096', email: 'writefail@example.com' },
-    });
-    expect(r.statusCode).toBe(500);
   });
 
   it('502s (SIGNALSTACK_PUSH_FAILED) when the signalstack push fails for a non-U18 reason', async () => {

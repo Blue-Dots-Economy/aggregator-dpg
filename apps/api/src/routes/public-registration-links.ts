@@ -17,11 +17,8 @@
  */
 
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { eq } from 'drizzle-orm';
-import { PostgresParticipantsWriter } from '@aggregator-dpg/participants-writer/postgres';
-import type { ParticipantsWriterBase } from '@aggregator-dpg/participants-writer/interface';
 import { getRegistrationLinksStore } from '../services/registration-links-store/index.js';
 import type { RegistrationLink } from '../services/registration-links-store/index.js';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
@@ -42,18 +39,6 @@ import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 import { consume } from '../services/rate-limiter/index.js';
 import { config } from '../config.js';
-
-let participantsWriter: ParticipantsWriterBase | null = null;
-function getParticipantsWriter(): ParticipantsWriterBase {
-  if (participantsWriter) return participantsWriter;
-  participantsWriter = new PostgresParticipantsWriter(getDb());
-  return participantsWriter;
-}
-
-/** Test helper — override the writer (e.g., inject a fake). */
-export function _setParticipantsWriter(w: ParticipantsWriterBase | null): void {
-  participantsWriter = w;
-}
 
 interface OrgSlugParams {
   orgSlug?: string;
@@ -571,7 +556,6 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
           ? (body[emailSourceKey] as string)
           : '';
       const emailNormalised = emailRaw ? emailRaw.trim().toLowerCase() : null;
-      const participantId = phoneNormalised ?? randomUUID();
 
       // 2a. Resolve the aggregator's signalstack org id BEFORE opening the
       // transaction. Anonymous submitters carry no token, so the value must
@@ -613,40 +597,18 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       // account_only — neither produces a lifecycle classification.
       let lifecycleStatusOut: LifecycleStatus | null = null;
       let ownedElsewhere = false;
-      const writer = getParticipantsWriter();
       const txResult = await getDb().transaction(async (tx) => {
-        // Bind the writer to the active tx for atomicity. If a custom writer
-        // (test fake) was injected via _setParticipantsWriter, use it directly.
-        type DbCtor = ConstructorParameters<typeof PostgresParticipantsWriter>[0];
-        const txWriter: ParticipantsWriterBase =
-          writer instanceof PostgresParticipantsWriter
-            ? new PostgresParticipantsWriter(tx as unknown as DbCtor)
-            : writer;
-
-        const writeResult = await txWriter.writeLinkSubmission({
-          aggregatorId: link.aggregatorId,
-          type: link.domain,
-          participantId,
-          data: body,
-          phone: phoneNormalised,
-          email: emailNormalised,
-          sourceLinkId: link.id,
-        });
-
-        if (!writeResult.success) {
-          // Bubble DB failure to fastify so the request returns 500.
-          throw new Error(writeResult.error.message);
-        }
-        const { outcome: writeOutcome, participant } = writeResult.value;
-        let outcome: 'passed' | 'skipped' = writeOutcome;
-        const participantRowId = participant.id;
+        // Seeded outcome. Signals is the identity authority and overwrites this
+        // below whenever it is configured; the seed only survives when signals
+        // is disabled, where a successful local capture is a `passed`.
+        const insertedOutcome: 'passed' | 'skipped' = 'passed';
+        let outcome: 'passed' | 'skipped' = insertedOutcome;
 
         const submission = await tx
           .insert(linkSubmissions)
           .values({
             linkId: link.id,
             aggregatorId: link.aggregatorId,
-            participantId: participantRowId,
             metadataSnapshot: link.context,
             submittedData: body,
             outcome,
@@ -654,16 +616,16 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
           .returning({ id: linkSubmissions.id });
 
         // Outward signalstack push, inside the same tx so a downstream failure
-        // rolls the local rows back. Local participant table is deduped per
-        // (aggregator_id, type, participant_id); signalstack is the global
-        // identity store and must also see the row, otherwise the dashboard
-        // and downstream consumers are out of sync.
+        // rolls the `link_submissions` row back. Signalstack is the identity
+        // store of record; the submission row is only the local audit trail of
+        // what this link captured.
         if (ss && signalstackOrgId) {
           const nameSourceKey = linkDomainCfg.identity.name;
+          // Defensive only — the domain schema requires the name field. Falls
+          // back to the link id rather than the normalised phone, which must
+          // never be copied into a name.
           const name =
-            typeof body[nameSourceKey] === 'string'
-              ? (body[nameSourceKey] as string)
-              : participantRowId;
+            typeof body[nameSourceKey] === 'string' ? (body[nameSourceKey] as string) : link.id;
           const phoneFromBody =
             typeof body[phoneSourceKey] === 'string'
               ? (body[phoneSourceKey] as string)
@@ -701,7 +663,6 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
               error: result.error.message,
               code: result.error.code,
               link_id: link.id,
-              participant_id: participantRowId,
             });
             // Profile cap (signals #349): show the bare user-facing sentence
             // (no `signalstack onboard returned 409: PROFILE_LIMIT_REACHED:`
@@ -730,19 +691,6 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
               fields: { code: result.error.code, message: result.error.message },
               cause: result.error,
             });
-          }
-
-          // Cross-org existing user → signalstack has the person under a
-          // different aggregator and won't expose/duplicate them here.
-          // Record a skipped outcome so the form shows the friendly
-          // "already registered" screen instead of a hard failure.
-          // `already_registered` (legacy) and `owned_elsewhere` (Task 4 rename)
-          // carry the same signal during the transition — OR them together so
-          // either field flips the outcome.
-          const isExisting =
-            Boolean(result.value.already_registered) || Boolean(result.value.owned_elsewhere);
-          if (isExisting) {
-            outcome = 'skipped';
           }
 
           // Resolve lifecycle through the back-compat helper so the absent →
@@ -786,7 +734,6 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
             lifecycle_status: lifecycleStatus,
             submit_mode: submitMode,
             link_id: link.id,
-            participant_id: participantRowId,
           });
         }
 
@@ -798,7 +745,7 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
         // under-count real registrations for anyone who later reports on this
         // table. Pre-existing for `account_only`; #780 makes it routine.
         const submissionId = submission[0]?.id;
-        if (submissionId && outcome !== writeOutcome) {
+        if (submissionId && outcome !== insertedOutcome) {
           await tx
             .update(linkSubmissions)
             .set({ outcome })
@@ -807,11 +754,10 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
 
         return {
           outcome,
-          participantRowId,
           submissionId,
         };
       });
-      const { outcome, participantRowId, submissionId } = txResult;
+      const { outcome, submissionId } = txResult;
 
       log.info({
         status: 'success',
@@ -820,7 +766,6 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
         latency_ms: Date.now() - start,
         link_id: link.id,
         outcome,
-        participant_id: participantRowId,
         submission_id: submissionId,
         lifecycle_status: lifecycleStatusOut,
         owned_elsewhere: ownedElsewhere,

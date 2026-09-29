@@ -37,9 +37,7 @@ import {
   type RegistrationLink,
   type StoreResult,
 } from '../services/registration-links-store/index.js';
-import { _setParticipantsWriter } from './public-registration-links.js';
 import { SignalStackWriterFake } from '@aggregator-dpg/signalstack-writer/testing';
-import { ParticipantsWriterFake } from '@aggregator-dpg/participants-writer/testing';
 import { buildBlueDotConfig } from '@aggregator-dpg/network-config/testing';
 
 const AGG_ID = '11111111-1111-1111-1111-111111111111';
@@ -146,7 +144,6 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — item_loca
   let app: FastifyInstance;
   let signalstack: SignalStackWriterFake;
   let aggregatorStore: AggregatorStoreFake;
-  let writer: ParticipantsWriterFake;
 
   beforeEach(async () => {
     // Treat signalstack as enabled so getSignalStackWriter returns our fake.
@@ -191,12 +188,9 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — item_loca
     _setRegistrationLinksStore(new StubRegistrationLinksStore(liveLink));
 
     // Fake participants writer so the route does not reach Drizzle's
-    // ParticipantsWriter constructor (which assumes a real `tx`).
-    writer = new ParticipantsWriterFake();
     // Pre-seed a parent participant id so the upsert returns `passed` and
     // the response carries a deterministic submission_id.
     void PARTICIPANT_PARENT_ID;
-    _setParticipantsWriter(writer);
 
     // Minimal db stub — exposes only what the public-submit handler calls
     // on the transaction handle.
@@ -212,7 +206,6 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — item_loca
     _setSignalStackWriter(null);
     _setNetworkConfig(null);
     _setRegistrationLinksStore(null);
-    _setParticipantsWriter(null);
     _setDbClients(null, null);
   });
 
