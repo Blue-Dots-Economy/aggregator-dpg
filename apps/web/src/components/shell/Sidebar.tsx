@@ -60,11 +60,11 @@ function BrandMark({
   cfg,
   mode,
   compact = false,
-}: {
+}: Readonly<{
   cfg: AggregatorConfigPayload;
   mode: 'light' | 'dark';
   compact?: boolean;
-}) {
+}>) {
   const t = useTranslations('nav');
   if (cfg.brand.logo?.default) {
     return (
@@ -120,7 +120,7 @@ function SidebarPanel({
   headerAction,
   onNavigate,
   onOpenSupport,
-}: SidebarPanelProps) {
+}: Readonly<SidebarPanelProps>) {
   const t = useTranslations('nav');
   const { user, signOut, supportEnabled } = useAuth();
   const orgInitials = (user?.org ?? 'TR').slice(0, 2).toUpperCase();
@@ -293,7 +293,7 @@ export function Sidebar() {
         drawerRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
       );
       const first = focusable[0];
-      const last = focusable[focusable.length - 1];
+      const last = focusable.at(-1);
       if (!first || !last) return;
       if (e.shiftKey && document.activeElement === first) {
         e.preventDefault();
