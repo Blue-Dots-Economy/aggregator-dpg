@@ -1,0 +1,26 @@
+-- Migration 0023 — drop `aggregator_profile`.
+--
+-- The table was created in 0005 as a 1:1 secondary row for post-login profile
+-- fields (`contact_name`, `personas`, `services`, `verified_certificate`,
+-- `profile_completed_at`). It was never populated: registration inserted an
+-- all-defaults stub, and the only value-writing path — `PATCH
+-- /v1/aggregators/profile/me` with a `body.profile` — had no client.
+--
+-- Migration 0018 superseded its extensibility goal with `aggregators.profile`
+-- + `aggregators.profile_ref`, which is where registration payloads already
+-- land. The two GIN indexes justified as "Beckn catalog discovery" had no
+-- reader in any query.
+--
+-- The application-side removal shipped separately and soaked first, so by the
+-- time this runs nothing reads or writes the table. This migration is the DDL
+-- half and is a no-op for application behaviour.
+--
+-- NOT REVERSIBLE. CASCADE takes the three CHECK constraints
+-- (`aggregator_profile_{personas,services,verified_certificate}_array_chk`),
+-- the three indexes (`personas` GIN, `services` GIN, `profile_completed_at`
+-- btree) and the `aggregator_profile_set_updated_at` trigger with the table.
+--
+-- The shared `set_updated_at()` function is deliberately NOT dropped —
+-- `aggregators_set_updated_at` still depends on it.
+
+DROP TABLE IF EXISTS "aggregator_profile" CASCADE;
