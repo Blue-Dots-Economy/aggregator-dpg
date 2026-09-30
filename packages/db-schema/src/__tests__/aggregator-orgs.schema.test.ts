@@ -15,10 +15,10 @@ describe('aggregator_orgs schema', () => {
     expect(aggregatorOrgs.updatedAt.name).toBe('updated_at');
   });
 
-  it('requires slug, display_name, owner_email; allows null state', () => {
+  it('requires slug, display_name; allows null state and (legacy, since 0025) owner_email', () => {
     expect(aggregatorOrgs.slug.notNull).toBe(true);
     expect(aggregatorOrgs.displayName.notNull).toBe(true);
-    expect(aggregatorOrgs.ownerEmail.notNull).toBe(true);
+    expect(aggregatorOrgs.ownerEmail.notNull).toBe(false);
     expect(aggregatorOrgs.state.notNull).toBe(false);
   });
 

@@ -2,25 +2,31 @@
  * Postgres schema definitions for the Aggregator API.
  *
  * Tables:
- *   - `aggregators`: registration-essential identity. Captured during signup
- *     so that the user can authenticate immediately after submitting. Holds
- *     id, slug, actor_type, name/type, url, Beckn `contact` (+ generated
- *     `contact_phone` / `contact_email` for indexed login lookups), Beckn
- *     `locations`, `consent` (T&C snapshot — accepted before account create),
+ *   - `contact`: one row per person (name, email, phone), keyed by the
+ *     deterministic `contactId()` hash of `lower(email):phone`. Every row that
+ *     belongs to a person references it by FK `contact_id` (migration 0025).
+ *   - `aggregators`: registration-essential identity of a coordinator. Holds
+ *     id, slug, actor_type, name (the ORGANISATION name the coordinator
+ *     registered under) / type, url, `contact_id` → `contact` (+ `contact_extra`
+ *     for the optional Beckn contact keys), Beckn `locations`, `consent`,
  *     lifecycle `status`, and audit fields. `org_slug` is derived from `name`
- *     at INSERT and is immutable (trigger lives in the migration).
+ *     at INSERT and is immutable (trigger lives in the migration). The legacy
+ *     Beckn `contact` jsonb (+ generated `contact_phone` / `contact_email`) is
+ *     still written during the contact rollout and is dropped afterwards.
  *   - `bulk_uploads`: parent record per CSV upload. Tracks lifecycle
  *     (pending → uploaded → file_validating → row_processing → completed/failed)
  *     plus counters (passed/failed/skipped). Per-row state lives transiently
  *     in Redis during the run and `errors.csv` on S3 after.
  *
- * Keycloak remains the authoritative store for `phoneNumber`, `email`, and
- * `decision_made` (approval state); those values are mirrored into the
- * `aggregators.contact` jsonb for query / Beckn-shape passthrough.
+ * Keycloak holds its own copy of a user's email / phone / name (login
+ * identifiers) plus `decision_made` (approval state). The `contact` table is
+ * the application's copy; the two are not yet re-synced after registration
+ * (a later phase adds a single sync point).
  *
  * CHECK constraints (shape guards on jsonb, conditional integrity on
- * actor_type ↔ type) and the immutability trigger on `org_slug` are declared
- * in the migration, not here.
+ * actor_type ↔ type, the `contact` id/email/phone format checks), the
+ * `contact` sync + GC triggers, and the immutability trigger on `org_slug` are
+ * declared in the migrations, not here.
  */
 
 import { sql } from 'drizzle-orm';
@@ -178,6 +184,35 @@ export const campaignAuditOutcomeEnum = pgEnum('campaign_audit_outcome', [
   'failed',
 ]);
 
+// ─── contact ─────────────────────────────────────────────────────────────────
+// One row per person — the single home for a name / email / phone that used to
+// live in `aggregators.contact` and `aggregator_orgs.owner_*` (migration 0025).
+// `id` = sha256 hex of `lower(email):phone` (`contactId()` in
+// `@aggregator-dpg/shared-primitives/contact`, `contact_id_of()` in SQL), so it
+// is PII-derived: never log it. Every FK to it is named `contact_id` and is
+// `ON UPDATE CASCADE`, because changing a person's email or phone re-keys the row.
+
+export const contact = pgTable(
+  'contact',
+  {
+    id: text('id').primaryKey(),
+    /** Lowercased, trimmed. Unique across every role. */
+    email: text('email').notNull(),
+    /** Canonical `normalisePhone` form, or NULL. Unique across every role. */
+    phone: text('phone'),
+    /** NULL when never captured (e.g. an org owner registered before 0025). */
+    name: text('name'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('contact_email_unique').on(table.email),
+    uniqueIndex('contact_phone_unique')
+      .on(table.phone)
+      .where(sql`phone IS NOT NULL`),
+  ],
+);
+
 // ─── aggregators ─────────────────────────────────────────────────────────────
 
 export const aggregators = pgTable(
@@ -194,15 +229,26 @@ export const aggregators = pgTable(
     type: text('type'),
     url: text('url'),
 
-    // Beckn Contact (mirrored from Keycloak — KC is authoritative for
-    // phone/email; this jsonb is the Beckn-shape projection for catalog reads).
-    contact: jsonb('contact').$type<BecknContact>().notNull(),
-    contactPhone: text('contact_phone')
+    // The person behind this coordinator (migration 0025). NULL only for a
+    // row the best-effort sync could not link (see contact-verify.sql V1).
+    contactId: text('contact_id').references((): typeof contact.id => contact.id, {
+      onDelete: 'restrict',
+      onUpdate: 'cascade',
+    }),
+    // Optional Beckn contact keys (alternatePhone, company, gstNumber) — part
+    // of the API's `contact` object but not identity, so not on `contact`.
+    contactExtra: jsonb('contact_extra')
+      .$type<Partial<Pick<BecknContact, 'alternatePhone' | 'company' | 'gstNumber'>>>()
       .notNull()
-      .generatedAlwaysAs(sql`(contact->>'phone')`),
-    contactEmail: text('contact_email')
-      .notNull()
-      .generatedAlwaysAs(sql`(lower(contact->>'email'))`),
+      .default(sql`'{}'::jsonb`),
+
+    // LEGACY (dropped once no release writes it). Beckn Contact jsonb plus the
+    // two generated login-lookup columns; the DB sync triggers keep `contact`
+    // / `contact_id` / `contact_extra` in step with writes to it. Nullable
+    // since 0025 so a release that no longer writes it can insert rows.
+    contact: jsonb('contact').$type<BecknContact>(),
+    contactPhone: text('contact_phone').generatedAlwaysAs(sql`(contact->>'phone')`),
+    contactEmail: text('contact_email').generatedAlwaysAs(sql`(lower(contact->>'email'))`),
 
     // Beckn Location[] — optional list of geographic locations.
     locations: jsonb('locations')
@@ -271,6 +317,7 @@ export const aggregators = pgTable(
     // Approval queue + tenant-classification filters.
     statusIdx: index('aggregators_status_idx').on(table.status),
     actorTypeIdx: index('aggregators_actor_type_idx').on(table.actorType),
+    contactIdIdx: index('aggregators_contact_id_idx').on(table.contactId),
   }),
 );
 
@@ -287,7 +334,14 @@ export const aggregatorOrgs = pgTable(
     slug: text('slug').notNull(),
     displayName: text('display_name').notNull(),
     state: text('state'),
-    ownerEmail: text('owner_email').notNull(),
+    // The org owner — the doc's `primary_contact` (migration 0025).
+    contactId: text('contact_id').references(() => contact.id, {
+      onDelete: 'restrict',
+      onUpdate: 'cascade',
+    }),
+    // LEGACY owner contact columns (dropped once no release writes them); the
+    // DB sync triggers keep `contact_id` in step. Nullable since 0025.
+    ownerEmail: text('owner_email'),
     ownerPhone: text('owner_phone'),
     ownerKcSub: text('owner_kc_sub'),
     kcGroupId: text('kc_group_id'),
@@ -311,6 +365,7 @@ export const aggregatorOrgs = pgTable(
     // Active-org dropdown + owner lookup are plain SQL (spec A2/A5).
     statusIdx: index('aggregator_orgs_status_idx').on(table.status),
     ownerEmailIdx: index('aggregator_orgs_owner_email_idx').on(table.ownerEmail),
+    contactIdIdx: index('aggregator_orgs_contact_id_idx').on(table.contactId),
     // Slug uniqueness only over non-terminal rows: a rejected/retired org
     // never blocks a later slug (spec A9). Partial unique index.
     slugActiveUnique: uniqueIndex('aggregator_orgs_slug_active_unique')
@@ -779,6 +834,8 @@ export const campaignPiiAudit = pgTable(
 
 // ─── Inferred row types ──────────────────────────────────────────────────────
 
+export type ContactRow = typeof contact.$inferSelect;
+export type NewContactRow = typeof contact.$inferInsert;
 export type AggregatorRow = typeof aggregators.$inferSelect;
 export type NewAggregatorRow = typeof aggregators.$inferInsert;
 export type AggregatorOrgRow = typeof aggregatorOrgs.$inferSelect;
