@@ -202,6 +202,18 @@ describe('PostgresAggregatorOrgStore.create', () => {
     expect(result.error.code).toBe('DUPLICATE_SLUG');
   });
 
+  it.each([
+    ['contact_email_unique', 'DUPLICATE_EMAIL'],
+    ['contact_phone_unique', 'DUPLICATE_PHONE'],
+  ] as const)('maps a %s violation (another person) to %s', async (constraint, code) => {
+    const db = makeFakeDb(() => {
+      throw Object.assign(new Error('duplicate key'), { code: '23505', constraint });
+    });
+    _setDbClients(null, db as never);
+    const result = await new PostgresAggregatorOrgStore().create(makeInput());
+    expect(result.ok || result.error.code).toBe(code);
+  });
+
   it('does NOT misreport a connection error whose query text names a constraint (M2)', async () => {
     // No SQLSTATE 23505 → must be DB_UNAVAILABLE even though the message text
     // mentions the unique index (Drizzle puts the query text on `.message`).
@@ -334,6 +346,13 @@ describe('PostgresAggregatorOrgStore.findById / findBySlug / findByOwnerEmail', 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value?.ownerEmail).toBe('mixed@x.org');
+  });
+
+  it('findByOwnerPhone returns the org whose owner contact holds the phone', async () => {
+    const db = makeFakeDb(() => [makeRow({ ownerPhone: '+919000000009' })]);
+    _setDbClients(null, db as never);
+    const result = await new PostgresAggregatorOrgStore().findByOwnerPhone('+919000000009');
+    expect(result.ok && result.value?.ownerPhone).toBe('+919000000009');
   });
 
   it('findByOwnerEmail returns DB_UNAVAILABLE on driver throw', async () => {

@@ -34,14 +34,17 @@ interface ChainCall {
  * decides what the "query" resolves to (return an array to simulate rows, or
  * throw to simulate a driver error).
  */
-function makeFakeDb(resolveRaw: (chain: ChainCall[]) => unknown): unknown {
+function makeFakeDb(
+  resolveRaw: (chain: ChainCall[]) => unknown,
+  opts: { refs?: number } = {},
+): unknown {
   // Reads go through `aggregators JOIN contact` (migration 0025) and
   // resolve to `{ a, c }` pairs. Tests keep returning flat rows; wrap them
   // here, deriving the joined contact row from the fixture's `contact`.
   const resolve = (chain: ChainCall[]): unknown => {
     // `db.execute(sql…)` (contact FOR KEY SHARE / reference count) returns a
-    // pg QueryResult: one row held, referenced once (not shared).
-    if (chain[0]?.method === 'execute') return { rows: [{ n: 1 }] };
+    // pg QueryResult: one row held, referenced `opts.refs` times (default once).
+    if (chain[0]?.method === 'execute') return { rows: [{ n: opts.refs ?? 1 }] };
     const out = resolveRaw(chain);
     if (!chain.some((c) => c.method === 'innerJoin') || !Array.isArray(out)) return out;
     return out.map((r: Record<string, unknown>) => {
@@ -283,6 +286,26 @@ describe('PostgresAggregatorStore.create', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe('DUPLICATE_SLUG');
+  });
+
+  it('maps a non-canonical phone (rejected before any SQL) to CHECK_VIOLATION', async () => {
+    _setDbClients(null, makeFakeDb(() => [makeRow()]) as never);
+    const result = await new PostgresAggregatorStore().create(
+      makeInput({ contact: { name: 'A', phone: '9000000001', email: 'a@x.org' } }),
+    );
+    expect(result.ok || result.error.code).toBe('CHECK_VIOLATION');
+  });
+
+  it('maps a second coordinator row for the same person to DUPLICATE_EMAIL', async () => {
+    const db = makeFakeDb(() => {
+      throw Object.assign(new Error('dup'), {
+        code: '23505',
+        constraint: 'aggregators_contact_id_unique',
+      });
+    });
+    _setDbClients(null, db as never);
+    const result = await new PostgresAggregatorStore().create(makeInput());
+    expect(result.ok || result.error.code).toBe('DUPLICATE_EMAIL');
   });
 
   it('maps a check violation to CHECK_VIOLATION', async () => {
@@ -658,6 +681,41 @@ describe('PostgresAggregatorStore.update / updateStatus', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe('DUPLICATE_EMAIL');
+  });
+
+  describe('with a contact change', () => {
+    const next = { name: 'A', phone: '+919000000002', email: 'a@x.org' };
+    /** The row lock returns the current contact; the target lookup finds nothing. */
+    const lockOnly = (chain: ChainCall[]): unknown =>
+      hasCall(chain, 'for') ? [{ contactId: makeRow().contactId }] : [];
+
+    it('returns NOT_FOUND when the row to lock is gone', async () => {
+      _setDbClients(null, makeFakeDb(() => []) as never);
+      const result = await new PostgresAggregatorStore().update('missing', {
+        contact: next,
+        updatedBy: 'tester',
+      });
+      expect(result.ok || result.error.code).toBe('NOT_FOUND');
+    });
+
+    it('maps ContactTakenError (another person has these details) to DUPLICATE_EMAIL', async () => {
+      // Every select returns a row, so the target contact already exists.
+      _setDbClients(null, makeFakeDb(() => [makeRow()]) as never);
+      const result = await new PostgresAggregatorStore().update('agg-1', {
+        contact: next,
+        updatedBy: 'tester',
+      });
+      expect(result.ok || result.error.code).toBe('DUPLICATE_EMAIL');
+    });
+
+    it('maps SharedContactError (contact held by two roles) to DUPLICATE', async () => {
+      _setDbClients(null, makeFakeDb(lockOnly, { refs: 2 }) as never);
+      const result = await new PostgresAggregatorStore().update('agg-1', {
+        contact: next,
+        updatedBy: 'tester',
+      });
+      expect(result.ok || result.error.code).toBe('DUPLICATE');
+    });
   });
 
   it('updateStatus delegates to update with the status field set', async () => {

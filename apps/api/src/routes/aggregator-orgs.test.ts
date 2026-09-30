@@ -703,6 +703,28 @@ describe('aggregator-orgs routes', () => {
     expect((res.json() as { error: { code: string } }).error.code).toBe('DB_UNAVAILABLE');
   });
 
+  it.each(['findByContactEmail', 'findByContactPhone', 'findByOwnerPhone'] as const)(
+    '503 DB_UNAVAILABLE (nothing written) when the owner-contact pre-check %s fails',
+    async (method) => {
+      const down = () =>
+        Promise.resolve({
+          ok: false as const,
+          error: { code: 'DB_UNAVAILABLE' as const, message: 'db down' },
+        });
+      if (method === 'findByOwnerPhone') orgStore.findByOwnerPhone = down;
+      else aggregatorStore[method] = down;
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/orgs/create',
+        headers: AUTH_HEADER,
+        payload: orgBody,
+      });
+      expect(res.statusCode).toBe(503);
+      expect((res.json() as { error: { code: string } }).error.code).toBe('DB_UNAVAILABLE');
+      expect(await orgStore.findByOwnerEmail('ravi@enable.org')).toEqual({ ok: true, value: null });
+    },
+  );
+
   it('503 DB_UNAVAILABLE when orgStore.create fails with an unmapped error code', async () => {
     // NOT_FOUND is a real OrgStoreError variant, but the route only special-cases
     // DUPLICATE_NAME/DUPLICATE_SLUG — everything else (including this) falls

@@ -34,6 +34,7 @@ import { runMigrations } from '../migrate.js';
 let events: string[];
 let released: unknown[];
 let failUnlock = false;
+let failLock = false;
 
 function installFakePool(): void {
   events = [];
@@ -45,6 +46,7 @@ function installFakePool(): void {
         if (failUnlock) throw new Error('connection terminated');
       } else if (sql.includes('pg_advisory_lock')) {
         events.push('lock');
+        if (failLock) throw new Error('lock query failed');
       }
       return { rows: [] };
     }),
@@ -62,6 +64,7 @@ function installFakePool(): void {
 
 beforeEach(() => {
   failUnlock = false;
+  failLock = false;
   installFakePool();
 });
 
@@ -107,6 +110,16 @@ describe('runMigrations', () => {
     await runMigrations();
 
     expect(events).toEqual(['lock', 'migrate', 'unlock', 'release']);
+    expect(released[0]).toBeInstanceOf(Error);
+  });
+
+  it('never migrates, and discards the connection, when taking the lock fails', async () => {
+    failLock = true;
+
+    await expect(runMigrations()).rejects.toThrow('lock query failed');
+
+    expect(events).toEqual(['lock', 'release']);
+    expect(migrateMock).not.toHaveBeenCalled();
     expect(released[0]).toBeInstanceOf(Error);
   });
 });

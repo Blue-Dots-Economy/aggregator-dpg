@@ -1,6 +1,12 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect } from 'vitest';
 import { IdpAdminFake } from './idp-admin/testing.js';
-import { backfillOwnerContactNames, type OwnerNameCandidate } from './owner-name-backfill.js';
+import { _setDbClients } from '../db/client.js';
+import {
+  backfillOwnerContactNames,
+  listOwnerNameCandidatesFromDb,
+  setContactNameIfMissingInDb,
+  type OwnerNameCandidate,
+} from './owner-name-backfill.js';
 import type { IdpResult, IdpUser } from './idp-admin/interface.js';
 
 /** Fake that answers `findById` from a scripted table. */
@@ -131,5 +137,62 @@ describe('backfillOwnerContactNames', () => {
   it('handles an empty candidate list', async () => {
     const { report } = await run(new ScriptedIdp({}), []);
     expect(report).toMatchObject({ candidates: 0, updated: 0 });
+  });
+});
+
+/**
+ * A Drizzle-shaped fake whose every query resolves to `rows`; records the
+ * chained method names so a test can assert the query shape.
+ */
+function fakeDb(rows: unknown[]): { db: unknown; calls: string[] } {
+  const calls: string[] = [];
+  const chain = (): Promise<unknown[]> => {
+    const p = Promise.resolve(rows);
+    for (const m of ['from', 'innerJoin', 'where', 'set', 'returning']) {
+      Object.defineProperty(p, m, {
+        value: () => {
+          calls.push(m);
+          return p;
+        },
+      });
+    }
+    return p;
+  };
+  const db = {
+    select: () => {
+      calls.push('select');
+      return chain();
+    },
+    update: () => {
+      calls.push('update');
+      return chain();
+    },
+  };
+  return { db, calls };
+}
+
+describe('owner-name backfill database helpers', () => {
+  afterEach(() => _setDbClients(null, null));
+
+  it('lists orgs whose contact has no name, dropping any row without a Keycloak owner', async () => {
+    const { db, calls } = fakeDb([
+      { orgId: 'o1', contactId: 'c1', ownerKcSub: 'kc-1' },
+      { orgId: 'o2', contactId: 'c2', ownerKcSub: null },
+    ]);
+    _setDbClients(null, db as never);
+    await expect(listOwnerNameCandidatesFromDb()).resolves.toEqual([
+      { orgId: 'o1', contactId: 'c1', ownerKcSub: 'kc-1' },
+    ]);
+    expect(calls).toEqual(['select', 'from', 'innerJoin', 'where']);
+  });
+
+  it('reports whether the name was written (only while it is still NULL)', async () => {
+    const written = fakeDb([{ id: 'c1' }]);
+    _setDbClients(null, written.db as never);
+    await expect(setContactNameIfMissingInDb('c1', 'Asha')).resolves.toBe(true);
+    expect(written.calls).toEqual(['update', 'set', 'where', 'returning']);
+
+    _setDbClients(null, fakeDb([]).db as never);
+    await expect(setContactNameIfMissingInDb('c1', 'Asha')).resolves.toBe(false);
   });
 });

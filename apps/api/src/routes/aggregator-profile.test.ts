@@ -368,6 +368,84 @@ describe('aggregator profile routes', () => {
     expect(phones[1]).not.toBe('+919876543277'); // put back to the previous phone
   });
 
+  it('PATCH still reports the database failure when restoring Keycloak fails too', async () => {
+    let kcCalls = 0;
+    idp.setAttributes = () => {
+      kcCalls++;
+      return Promise.resolve(
+        kcCalls === 1
+          ? { ok: true, value: undefined }
+          : { ok: false, error: { code: 'IDP_UNAVAILABLE', message: 'kc down' } },
+      );
+    };
+    aggregatorStore.update = () =>
+      Promise.resolve({ ok: false, error: { code: 'DB_UNAVAILABLE', message: 'db down' } });
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/v1/aggregators/profile/me',
+      headers: { authorization: 'Bearer good-token' },
+      payload: {
+        aggregator: {
+          contact: { name: 'Asha', phone: '+919876543266', email: 'asha@trrain.org' },
+        },
+      },
+    });
+    expect(res.statusCode).toBe(503);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('DB_UNAVAILABLE');
+    expect(kcCalls).toBe(2);
+  });
+
+  it('PATCH 409 USER_EXISTS (before any Keycloak write) when another coordinator holds the email', async () => {
+    aggregatorStore.seed([
+      buildAggregator({
+        id: '00000000-0000-0000-0000-00000000cafe',
+        orgSlug: 'other-coord-email',
+        contact: { name: 'Other', phone: '+919876543255', email: 'taken@x.org' },
+      }),
+    ]);
+    let kcWrites = 0;
+    idp.setAttributes = () => {
+      kcWrites++;
+      return Promise.resolve({ ok: true, value: undefined });
+    };
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/v1/aggregators/profile/me',
+      headers: { authorization: 'Bearer good-token' },
+      payload: {
+        aggregator: {
+          contact: { name: 'Asha', phone: '+919876543244', email: 'Taken@X.org' },
+        },
+      },
+    });
+    expect(res.statusCode).toBe(409);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('USER_EXISTS');
+    expect(kcWrites).toBe(0);
+  });
+
+  it('PATCH 503 DB_UNAVAILABLE (before any Keycloak write) when a contact pre-check lookup fails', async () => {
+    orgStore.findByOwnerPhone = () =>
+      Promise.resolve({ ok: false, error: { code: 'DB_UNAVAILABLE', message: 'db down' } });
+    let kcWrites = 0;
+    idp.setAttributes = () => {
+      kcWrites++;
+      return Promise.resolve({ ok: true, value: undefined });
+    };
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/v1/aggregators/profile/me',
+      headers: { authorization: 'Bearer good-token' },
+      payload: {
+        aggregator: {
+          contact: { name: 'Asha', phone: '+919876543233', email: 'asha@trrain.org' },
+        },
+      },
+    });
+    expect(res.statusCode).toBe(503);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('DB_UNAVAILABLE');
+    expect(kcWrites).toBe(0);
+  });
+
   it('PATCH updates aggregator name/url/locations/consent successfully', async () => {
     const res = await app.inject({
       method: 'PATCH',
