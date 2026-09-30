@@ -26,6 +26,7 @@ import * as React from 'react';
 import type { WidgetProps } from '@rjsf/utils';
 import { useTranslations } from 'next-intl';
 import { Input } from '../../ui/Input';
+import { Search } from 'lucide-react';
 import { cn } from '../../../lib/cn';
 import { getGeoProvider } from '../../../lib/geo/provider';
 import { useFormRuntimeConfig } from '../../../lib/FormRuntimeConfigProvider';
@@ -184,8 +185,21 @@ export function LocationAutocompleteWidget({
 
   return (
     <div className="relative">
+      {/*
+        A search affordance inside the field. Without it this looks like an
+        ordinary text box, so people type a full address by hand and never
+        discover the list — which also means no coordinate is ever resolved.
+        `pointer-events-none` so the icon never steals the click that focuses
+        the input; `aria-hidden` because the combobox role already announces
+        the behaviour to assistive tech.
+      */}
+      <Search
+        aria-hidden="true"
+        className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-(--bd-muted)"
+      />
       <Input
         ref={inputRef}
+        className="bd-input--icon-left"
         id={id}
         value={text}
         disabled={Boolean(disabled || readonly)}
