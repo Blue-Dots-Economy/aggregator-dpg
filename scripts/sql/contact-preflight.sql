@@ -14,8 +14,8 @@
 
 -- The JSON keys ('email', 'phone', 'name') repeat across the two reports on
 -- purpose: each statement stays self-contained and readable.
-WITH src AS ( -- NOSONAR plsql:S1192
-  SELECT 'aggregators'::text AS tbl, id, lower(btrim(contact->>'email')) AS e, contact->>'phone' AS p
+WITH src AS (
+  SELECT 'aggregators'::text AS tbl, id, lower(btrim(contact->>'email')) AS e, contact->>'phone' AS p -- NOSONAR plsql:S1192
     FROM aggregators
   UNION ALL
   SELECT 'aggregator_orgs', id, lower(btrim(owner_email)), owner_phone

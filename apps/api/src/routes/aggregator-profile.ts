@@ -442,7 +442,7 @@ async function assertContactChangeAllowed(
       'orgStore.findByOwnerEmail',
       await orgs.findByOwnerEmail(me.contactEmail),
     );
-    if (owner && owner.contactId === me.contactId) {
+    if (owner?.contactId === me.contactId) {
       throw httpError('CONFLICT', {
         detail: 'This contact is also an organisation owner; change it through the organisation.',
       });
