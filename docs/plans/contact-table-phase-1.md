@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-29 (rev 2, 2026-09-30, after review)
 **Repo:** `aggregator-dpg`, branch `refactor/user-org-management` (cut from `feature` @ `1f31f6b`). All phases commit here.
-**Status:** R0, R1 and R2 implemented on `refactor/user-org-management` (see `docs/plans/user-org-refactor-decisions.md` for every decision taken during implementation). R3 next.
+**Status:** Phase 1 complete on `refactor/user-org-management`: R0/R1/R2/R3 plus R4 (0026). R3 and R4 are separate releases (decisions log D21). Every decision taken during implementation is in `docs/plans/user-org-refactor-decisions.md`.
 **Scope:** Phase 1 of the user & org management refactor. Person-contact data (name, email, phone) moves into a dedicated `contact` table, which the coordinator and org-owner rows reference by FK.
 **Design input:** Google Doc _"Blue Dots - Aggregators & User Management"_ (`1XbPjIHg…`), read on 2026-09-30. §0 below reconciles it with the code; §9 maps the doc's target model onto the later phases.
 

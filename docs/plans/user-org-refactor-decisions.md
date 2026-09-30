@@ -167,6 +167,21 @@
 - **Rollback:** R3 can roll back to R2. R4 is irreversible, so take a DB snapshot first.
 - **Gate before R3:** `contact-verify.sql` V1 must be 0, because R3 has no fallback for unlinked rows.
 
+### D22. The plan and decisions docs stay until your review
+
+- **Convention:** a plan dies in the commit that completes it.
+- **Chosen:** Phase 1 is complete on the branch, but I **kept** `contact-table-phase-1.md` and this log, because they are your review material.
+- **What to do:** delete both in the PR that merges Phase 1, or tell me to.
+
+### D23. Local validation used a parallel stack; your `:3000` / `:4000` stack was not touched
+
+- **Stack:** API on `:4100` and web on `:3100`, run from the worktree, against `aggregator_r1`, a `pg_dump` clone of your local `aggregator` DB taken the way an existing instance would be.
+- **Runbook followed:** pre-flight → apply → verify → R1 boot → R2 → R3 → R4 boot.
+- **Snapshot:** taken before R4, at `aggregator_r1_pre_r4.sql` in the session scratchpad.
+- **Two local-environment gaps found, neither caused by the refactor:**
+  - The copied `apps/api/.env` points SMTP at `:1025`, but the aggregator mailpit listens on `:1026`. I overrode it for my stack only.
+  - `SIGNALSTACK_ACTING_ORG_ID` is unset, so the final Signals upsert on approval fails with `SIGNALSTACK_CONFIG_MISSING`. I did not set a value.
+
 ---
 
 ## Review round 1 (R0/R1) — findings and fixes

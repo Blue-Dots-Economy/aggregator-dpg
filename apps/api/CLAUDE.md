@@ -26,6 +26,16 @@ Service-account-only endpoints additionally gate on `subject.startsWith('service
 
 `.claude/rules/error-handling.md` requires "retry transient failures at least once with exponential backoff" on every external call. `services/idp-admin/keycloak.ts` (582 lines) routes every admin call through `safeFetch` (`:530`), which applies `AbortSignal.timeout(HTTP_TIMEOUT_MS)` uniformly — but **there is no retry loop anywhere in this file**. This is a real, verified deviation from the repo-wide rule, not a doc gap. If you're touching this file for an unrelated reason, don't assume retry exists; if you're adding retry, be aware Keycloak admin calls (user enable, role assign) are not all naturally idempotent — check each call site's side effects before wrapping it in a blind retry.
 
+## Person contacts live in `contact` (migrations 0025 / 0026)
+
+A coordinator's and an org owner's name / email / phone are stored once, in `contact`, and referenced by `aggregators.contact_id` / `aggregator_orgs.contact_id` (every FK to `contact` is named `contact_id`; a second one in the same table would take a role prefix). The stores compose the Beckn `contact` the API has always returned (`contact` row + `aggregators.contact_extra` for `alternatePhone` / `company` / `gstNumber`), in the legacy jsonb key order, so responses are byte-identical to before. Things that are easy to get wrong:
+
+- **`contact.id` is PII.** It is `sha256(lower(email):phone)` (`contactId()` in `@aggregator-dpg/shared-primitives/contact`, `contact_id_of()` in SQL — golden vectors pin them together). Never log it or put it in a URL.
+- **One person per email and per phone, across coordinators AND org owners** (`contact_email_unique`, `contact_phone_unique`). The phone is the OTP login key. Org create and profile PATCH pre-check this (`PHONE_EXISTS` / `OWNER_ALREADY_REGISTERED`) before touching Keycloak.
+- **Write through `db/contact-writes.ts`, inside the store's transaction.** Changing an email or phone re-keys the row (FKs are `ON UPDATE CASCADE`); a contact shared by two roles is refused (`SharedContactError` → 409 `CONFLICT`).
+- **Orphan contacts are collected by the database** (`contact_gc()` from `AFTER DELETE` triggers on both tables) — do not add app-side deletes.
+- `scripts/contact-migrate.sh` / `scripts/sql/contact-{preflight,verify}.sql` are the ops tools; the plan and every decision are in `docs/plans/contact-table-phase-1.md` and `docs/plans/user-org-refactor-decisions.md`.
+
 ## Org→coordinator hierarchy: routes 404, not 403, when the flag is off
 
 `routes/aggregator-orgs.ts:74` and `aggregator-org-approvals.ts:66` both `if (!orgHierarchyEnabled()) return;` **before registering any route** — so with the flag off, `/v1/orgs*` and `/admin/v1/orgs*` return Fastify's default 404, not an explicit 403. If you're debugging "why does this org endpoint 404 in this environment," check `ORG_HIERARCHY_ENABLED` before assuming a routing bug. The token↔`parent_org_id` binding is enforced unconditionally regardless of the flag (`aggregator-approvals.ts:190-201`, comment: "independent of the runtime flag") — a data-level invariant, not gated by the feature flag.
