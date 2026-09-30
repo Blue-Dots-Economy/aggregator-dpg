@@ -12,7 +12,9 @@
 
 \echo '== contact pre-flight (blocking checks must all be 0) =='
 
-WITH src AS (
+-- The JSON keys ('email', 'phone', 'name') repeat across the two reports on
+-- purpose: each statement stays self-contained and readable.
+WITH src AS ( -- NOSONAR plsql:S1192
   SELECT 'aggregators'::text AS tbl, id, lower(btrim(contact->>'email')) AS e, contact->>'phone' AS p
     FROM aggregators
   UNION ALL
@@ -47,7 +49,7 @@ SELECT check_name, blocking, n FROM (
   SELECT 8, 'inactive_orgs_without_kc_owner (informational, usually safe to delete)', false,
          (SELECT count(*) FROM aggregator_orgs WHERE status = 'inactive' AND owner_kc_sub IS NULL)
 ) c
-ORDER BY ord;
+ORDER BY ord ASC;
 
 \echo '== rows involved in blocking email/phone conflicts (ids only) =='
 
@@ -68,11 +70,11 @@ SELECT tbl, id, status,
        dense_rank() OVER (ORDER BY CASE WHEN e IN (SELECT e FROM bad_e) THEN e ELSE p END) AS conflict_group
   FROM src
  WHERE e IN (SELECT e FROM bad_e) OR p IN (SELECT p FROM bad_p)
- ORDER BY 5, tbl, id;
+ ORDER BY conflict_group ASC, tbl ASC, id ASC;
 
 \echo '== inactive orgs without a Keycloak owner (ids only) =='
 
 SELECT id, slug, created_at
   FROM aggregator_orgs
  WHERE status = 'inactive' AND owner_kc_sub IS NULL
- ORDER BY created_at;
+ ORDER BY created_at ASC;

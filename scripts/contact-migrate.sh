@@ -124,9 +124,15 @@ VERIFY_LEGACY_GATE_SQL="SELECT (SELECT count(*) FROM aggregators a JOIN contact 
              OR o.owner_phone IS DISTINCT FROM c.phone))"
 
 # Prints the single value of query "$1".
-scalar() { printf '%s;\n' "$1" | "${PSQL[@]}" "${PSQL_FLAGS[@]}" -At; }
+scalar() {
+  local query="$1"
+  printf '%s;\n' "$query" | "${PSQL[@]}" "${PSQL_FLAGS[@]}" -At
+}
 
-sha() { if command -v sha256sum >/dev/null; then sha256sum "$1"; else shasum -a 256 "$1"; fi; }
+sha() {
+  local file="$1"
+  if command -v sha256sum >/dev/null; then sha256sum "$file"; else shasum -a 256 "$file"; fi
+}
 echo "0025_contact.sql sha256: $(sha "$MIGRATION" | cut -d' ' -f1)"
 echo "mode: $MODE"
 echo "database: $(scalar "SELECT current_database() || ' as ' || current_user")"
@@ -185,5 +191,10 @@ case "$MODE" in
   apply)
     "${PSQL[@]}" "${PSQL_FLAGS[@]}" --single-transaction < "$MIGRATION"
     echo "applied — now run: $0 verify"
+    ;;
+  *)
+    # Unreachable: MODE is validated at the top of the script.
+    echo "unknown mode: $MODE" >&2
+    exit 2
     ;;
 esac

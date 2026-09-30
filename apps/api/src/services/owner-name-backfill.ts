@@ -70,71 +70,86 @@ export async function backfillOwnerContactNames(
   report.candidates = candidates.length;
 
   for (const c of candidates) {
-    const start = Date.now();
-    const user = await findWithRetry(deps.idp, c.ownerKcSub, deps.retryDelayMs ?? 500);
-    if (!user.ok) {
-      report.failed++;
-      logger.error({
-        operation: 'ownerNameBackfill.findUser',
-        status: 'failure',
-        error: user.error.message,
-        error_type: user.error.code,
-        latency_ms: Date.now() - start,
-        org_id: c.orgId,
-      });
-      continue;
-    }
-    if (!user.value) {
-      report.userMissing++;
-      logger.warn({
-        operation: 'ownerNameBackfill.findUser',
-        status: 'skipped',
-        reason: 'kc_user_missing',
-        org_id: c.orgId,
-      });
-      continue;
-    }
-    const name = displayName(user.value);
-    if (!name) {
-      report.noName++;
-      logger.info({
-        operation: 'ownerNameBackfill',
-        status: 'skipped',
-        reason: 'kc_user_has_no_name',
-        org_id: c.orgId,
-      });
-      continue;
-    }
-    if (opts.dryRun) {
-      report.updated++;
-      continue;
-    }
-    let written: boolean;
-    try {
-      written = await deps.setNameIfMissing(c.contactId, name);
-    } catch (err: unknown) {
-      // One bad row must not abort the whole run; count it and carry on.
-      report.failed++;
-      logger.error({
-        operation: 'ownerNameBackfill.setName',
-        status: 'failure',
-        error: (err as Error).message,
-        error_type: (err as Error).constructor?.name,
-        latency_ms: Date.now() - start,
-        org_id: c.orgId,
-      });
-      continue;
-    }
-    if (written) report.updated++;
-    logger.info({
-      operation: 'ownerNameBackfill.setName',
-      // `skipped`: the contact gained a name since the candidate list was read.
-      status: written ? 'success' : 'skipped',
+    // Sequential on purpose: one Keycloak lookup (plus its retry) at a time
+    // keeps the load on the shared realm predictable for this one-off run.
+    const outcome = await backfillOne(deps, c, opts.dryRun); // NOSONAR typescript:S9382
+    if (outcome !== 'skipped') report[outcome]++;
+  }
+  return report;
+}
+
+/** What happened to one candidate; each value but `skipped` is a report counter. */
+type CandidateOutcome = 'updated' | 'noName' | 'userMissing' | 'failed' | 'skipped';
+
+/**
+ * Looks up one owner in Keycloak and names their contact when it has no name.
+ *
+ * @param deps - Collaborators (see {@link OwnerNameBackfillDeps}).
+ * @param c - The org owner to process.
+ * @param dryRun - When true, reports what would change without writing.
+ * @returns The outcome to count; never throws.
+ */
+async function backfillOne(
+  deps: OwnerNameBackfillDeps,
+  c: OwnerNameCandidate,
+  dryRun: boolean,
+): Promise<CandidateOutcome> {
+  const start = Date.now();
+  const user = await findWithRetry(deps.idp, c.ownerKcSub, deps.retryDelayMs ?? 500);
+  if (!user.ok) {
+    logger.error({
+      operation: 'ownerNameBackfill.findUser',
+      status: 'failure',
+      error: user.error.message,
+      error_type: user.error.code,
       latency_ms: Date.now() - start,
       org_id: c.orgId,
     });
+    return 'failed';
   }
-  return report;
+  if (!user.value) {
+    logger.warn({
+      operation: 'ownerNameBackfill.findUser',
+      status: 'skipped',
+      reason: 'kc_user_missing',
+      org_id: c.orgId,
+    });
+    return 'userMissing';
+  }
+  const name = displayName(user.value);
+  if (!name) {
+    logger.info({
+      operation: 'ownerNameBackfill',
+      status: 'skipped',
+      reason: 'kc_user_has_no_name',
+      org_id: c.orgId,
+    });
+    return 'noName';
+  }
+  if (dryRun) return 'updated';
+  let written: boolean;
+  try {
+    written = await deps.setNameIfMissing(c.contactId, name);
+  } catch (err: unknown) {
+    // One bad row must not abort the whole run; count it and carry on.
+    logger.error({
+      operation: 'ownerNameBackfill.setName',
+      status: 'failure',
+      error: (err as Error).message,
+      error_type: (err as Error).constructor?.name,
+      latency_ms: Date.now() - start,
+      org_id: c.orgId,
+    });
+    return 'failed';
+  }
+  logger.info({
+    operation: 'ownerNameBackfill.setName',
+    // `skipped`: the contact gained a name since the candidate list was read.
+    status: written ? 'success' : 'skipped',
+    latency_ms: Date.now() - start,
+    org_id: c.orgId,
+  });
+  return written ? 'updated' : 'skipped';
 }
 
 /** First + last name joined, or `null` when Keycloak holds neither. */

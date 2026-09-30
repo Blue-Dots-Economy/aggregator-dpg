@@ -105,7 +105,7 @@ const ProfileUpdateResponseSchema = z
   })
   .passthrough();
 
-export async function registerAggregatorProfileRoutes(app: FastifyInstance): Promise<void> {
+export function registerAggregatorProfileRoutes(app: FastifyInstance): void {
   app.get(
     '/v1/aggregators/profile/me',
     {
@@ -405,53 +405,69 @@ async function assertContactChangeAllowed(
   selfId: string,
   next: { email: string; phone: string },
 ): Promise<string> {
-  const unavailable = (op: string, message: string): never => {
-    throw httpError('DB_UNAVAILABLE', { cause: new Error(message), fields: { sub_operation: op } });
-  };
   const aggregators = getAggregatorStore();
   const orgs = getAggregatorOrgStore();
 
-  const self = await aggregators.findById(selfId);
-  if (!self.ok) return unavailable('aggregatorStore.findById', self.error.message);
-  if (!self.value) throw httpError('NOT_FOUND');
-  const me = self.value;
+  const me = valueOrUnavailable('aggregatorStore.findById', await aggregators.findById(selfId));
+  if (!me) throw httpError('NOT_FOUND');
   const email = next.email.trim().toLowerCase();
-  /** Same person: the org owner's contact IS this coordinator's contact. */
-  const isMine = (contactId: string): boolean => contactId === me.contactId;
+  const phoneClash = () => httpError('PHONE_EXISTS', { fields: { phone: next.phone } });
+  const emailClash = () => httpError('USER_EXISTS', { fields: { email: next.email } });
+  /** Another person: a coordinator row that is not the caller's own. */
+  const otherCoordinator = (a: { id: string } | null): boolean => !!a && a.id !== selfId;
+  /** Another person: an org owner whose contact is not this coordinator's. */
+  const otherOwner = (o: { contactId: string } | null): boolean =>
+    !!o && o.contactId !== me.contactId;
 
   const byPhone = await aggregators.findByContactPhone(next.phone);
-  if (!byPhone.ok) return unavailable('aggregatorStore.findByContactPhone', byPhone.error.message);
-  if (byPhone.value && byPhone.value.id !== selfId) {
-    throw httpError('PHONE_EXISTS', { fields: { phone: next.phone } });
+  if (otherCoordinator(valueOrUnavailable('aggregatorStore.findByContactPhone', byPhone))) {
+    throw phoneClash();
   }
   const byEmail = await aggregators.findByContactEmail(email);
-  if (!byEmail.ok) return unavailable('aggregatorStore.findByContactEmail', byEmail.error.message);
-  if (byEmail.value && byEmail.value.id !== selfId) {
-    throw httpError('USER_EXISTS', { fields: { email: next.email } });
+  if (otherCoordinator(valueOrUnavailable('aggregatorStore.findByContactEmail', byEmail))) {
+    throw emailClash();
   }
-
   const ownerByPhone = await orgs.findByOwnerPhone(next.phone);
-  if (!ownerByPhone.ok) return unavailable('orgStore.findByOwnerPhone', ownerByPhone.error.message);
-  if (ownerByPhone.value && !isMine(ownerByPhone.value.contactId)) {
-    throw httpError('PHONE_EXISTS', { fields: { phone: next.phone } });
+  if (otherOwner(valueOrUnavailable('orgStore.findByOwnerPhone', ownerByPhone))) {
+    throw phoneClash();
   }
   const ownerByEmail = await orgs.findByOwnerEmail(email);
-  if (!ownerByEmail.ok) return unavailable('orgStore.findByOwnerEmail', ownerByEmail.error.message);
-  if (ownerByEmail.value && !isMine(ownerByEmail.value.contactId)) {
-    throw httpError('USER_EXISTS', { fields: { email: next.email } });
+  if (otherOwner(valueOrUnavailable('orgStore.findByOwnerEmail', ownerByEmail))) {
+    throw emailClash();
   }
 
   const identityChanges = email !== me.contactEmail || next.phone !== me.contactPhone;
   if (identityChanges) {
-    const sharedWithOwner = await orgs.findByOwnerEmail(me.contactEmail);
-    if (!sharedWithOwner.ok) {
-      return unavailable('orgStore.findByOwnerEmail', sharedWithOwner.error.message);
-    }
-    if (sharedWithOwner.value && isMine(sharedWithOwner.value.contactId)) {
+    const owner = valueOrUnavailable(
+      'orgStore.findByOwnerEmail',
+      await orgs.findByOwnerEmail(me.contactEmail),
+    );
+    if (owner && owner.contactId === me.contactId) {
       throw httpError('CONFLICT', {
         detail: 'This contact is also an organisation owner; change it through the organisation.',
       });
     }
   }
   return me.contactPhone;
+}
+
+/**
+ * Unwraps a store result, turning a store failure into `503 DB_UNAVAILABLE`.
+ *
+ * @param op - Store operation, reported as `sub_operation`.
+ * @param result - The store result.
+ * @returns The result value.
+ * @throws {HttpError} DB_UNAVAILABLE when the store call failed.
+ */
+function valueOrUnavailable<T>(
+  op: string,
+  result: { ok: true; value: T } | { ok: false; error: { message: string } },
+): T {
+  if (!result.ok) {
+    throw httpError('DB_UNAVAILABLE', {
+      cause: new Error(result.error.message),
+      fields: { sub_operation: op },
+    });
+  }
+  return result.value;
 }

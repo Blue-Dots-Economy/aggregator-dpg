@@ -25,7 +25,7 @@ import { normaliseEmail } from '../phone/index.js';
  * Canonical phone shape stored on a contact — exactly what `normalisePhone`
  * produces (`+` then 10–15 digits). Mirrors the SQL `contact_phone_chk`.
  */
-export const CONTACT_PHONE_REGEX = /^\+[0-9]{10,15}$/;
+export const CONTACT_PHONE_REGEX = /^\+\d{10,15}$/;
 
 /** Hex sha-256 id shape. Mirrors the SQL `contact_id_hex_chk`. */
 export const CONTACT_ID_REGEX = /^[0-9a-f]{64}$/;

@@ -38,24 +38,25 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
   protected readonly byPhone = new Map<string, string>();
   protected readonly byEmail = new Map<string, string>();
 
-  async create(input: CreateAggregatorInput): Promise<StoreResult<Aggregator>> {
+  create(input: CreateAggregatorInput): Promise<StoreResult<Aggregator>> {
     const invariant = checkInvariant(input.actorType, input.type);
-    if (invariant) return { ok: false, error: invariant };
+    if (invariant) return Promise.resolve({ ok: false, error: invariant });
 
     if (this.bySlug.has(input.orgSlug)) {
-      return errResult('DUPLICATE_SLUG', `slug already exists: ${input.orgSlug}`);
+      return Promise.resolve(errResult('DUPLICATE_SLUG', `slug already exists: ${input.orgSlug}`));
     }
     const phone = input.contact.phone;
     const email = input.contact.email.toLowerCase();
     if (this.byPhone.has(phone)) {
-      return errResult('DUPLICATE_PHONE', `phone already exists: ${phone}`);
+      return Promise.resolve(errResult('DUPLICATE_PHONE', `phone already exists: ${phone}`));
     }
     if (this.byEmail.has(email)) {
-      return errResult('DUPLICATE_EMAIL', `email already exists: ${email}`);
+      return Promise.resolve(errResult('DUPLICATE_EMAIL', `email already exists: ${email}`));
     }
 
     const cid = safeContactId(email, phone);
-    if (!cid) return errResult('CHECK_VIOLATION', 'contactId: phone must be canonical');
+    if (!cid)
+      return Promise.resolve(errResult('CHECK_VIOLATION', 'contactId: phone must be canonical'));
 
     const now = new Date();
     const row: Aggregator = {
@@ -84,36 +85,36 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
       rejectedAt: null,
     };
     this.indexInsert(row);
-    return { ok: true, value: row };
+    return Promise.resolve({ ok: true, value: row });
   }
 
-  async findById(id: string): Promise<StoreResult<Aggregator | null>> {
-    return { ok: true, value: this.byId.get(id) ?? null };
+  findById(id: string): Promise<StoreResult<Aggregator | null>> {
+    return Promise.resolve({ ok: true, value: this.byId.get(id) ?? null });
   }
 
-  async findBySlug(orgSlug: string): Promise<StoreResult<Aggregator | null>> {
+  findBySlug(orgSlug: string): Promise<StoreResult<Aggregator | null>> {
     const id = this.bySlug.get(orgSlug);
-    return { ok: true, value: id ? (this.byId.get(id) ?? null) : null };
+    return Promise.resolve({ ok: true, value: id ? (this.byId.get(id) ?? null) : null });
   }
 
-  async findByContactPhone(phone: string): Promise<StoreResult<Aggregator | null>> {
+  findByContactPhone(phone: string): Promise<StoreResult<Aggregator | null>> {
     const id = this.byPhone.get(phone);
-    return { ok: true, value: id ? (this.byId.get(id) ?? null) : null };
+    return Promise.resolve({ ok: true, value: id ? (this.byId.get(id) ?? null) : null });
   }
 
-  async findByContactEmail(email: string): Promise<StoreResult<Aggregator | null>> {
+  findByContactEmail(email: string): Promise<StoreResult<Aggregator | null>> {
     const id = this.byEmail.get(email.toLowerCase());
-    return { ok: true, value: id ? (this.byId.get(id) ?? null) : null };
+    return Promise.resolve({ ok: true, value: id ? (this.byId.get(id) ?? null) : null });
   }
 
-  async findByParentOrgId(orgId: string): Promise<StoreResult<Aggregator[]>> {
-    return {
+  findByParentOrgId(orgId: string): Promise<StoreResult<Aggregator[]>> {
+    return Promise.resolve({
       ok: true,
       value: [...this.byId.values()].filter((r) => r.parentOrgId === orgId),
-    };
+    });
   }
 
-  async list(filter: ListAggregatorsFilter): Promise<StoreResult<ListAggregatorsPage>> {
+  list(filter: ListAggregatorsFilter): Promise<StoreResult<ListAggregatorsPage>> {
     const limit = Math.max(1, Math.min(1000, filter.limit ?? 50));
     const offset = Math.max(0, filter.offset ?? 0);
     let rows = [...this.byId.values()];
@@ -124,20 +125,20 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
       rows = rows.filter((r) => r.updatedAt.getTime() < before);
     }
     rows.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
-    return {
+    return Promise.resolve({
       ok: true,
       value: { rows: rows.slice(offset, offset + limit), total: rows.length },
-    };
+    });
   }
 
-  async update(id: string, patch: UpdateAggregatorPatch): Promise<StoreResult<Aggregator>> {
+  update(id: string, patch: UpdateAggregatorPatch): Promise<StoreResult<Aggregator>> {
     const existing = this.byId.get(id);
-    if (!existing) return errResult('NOT_FOUND', id);
+    if (!existing) return Promise.resolve(errResult('NOT_FOUND', id));
 
     const nextActorType = existing.actorType;
     const nextType = patch.type !== undefined ? patch.type : existing.type;
     const invariant = checkInvariant(nextActorType, nextType);
-    if (invariant) return { ok: false, error: invariant };
+    if (invariant) return Promise.resolve({ ok: false, error: invariant });
 
     let nextPhone = existing.contactPhone;
     let nextEmail = existing.contactEmail;
@@ -147,15 +148,16 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
       nextPhone = patch.contact.phone;
       nextEmail = patch.contact.email.toLowerCase();
       if (nextPhone !== existing.contactPhone && this.byPhone.has(nextPhone)) {
-        return errResult('DUPLICATE_PHONE', `phone already exists: ${nextPhone}`);
+        return Promise.resolve(errResult('DUPLICATE_PHONE', `phone already exists: ${nextPhone}`));
       }
       if (nextEmail !== existing.contactEmail && this.byEmail.has(nextEmail)) {
-        return errResult('DUPLICATE_EMAIL', `email already exists: ${nextEmail}`);
+        return Promise.resolve(errResult('DUPLICATE_EMAIL', `email already exists: ${nextEmail}`));
       }
     }
 
     const nextId = safeContactId(nextEmail, nextPhone);
-    if (!nextId) return errResult('CHECK_VIOLATION', 'contactId: phone must be canonical');
+    if (!nextId)
+      return Promise.resolve(errResult('CHECK_VIOLATION', 'contactId: phone must be canonical'));
 
     const next: Aggregator = {
       ...existing,
@@ -175,7 +177,7 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
       updatedAt: new Date(),
     };
     this.indexReplace(existing, next);
-    return { ok: true, value: next };
+    return Promise.resolve({ ok: true, value: next });
   }
 
   async updateStatus(
@@ -193,13 +195,13 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
     return this.update(id, { status: 'active', updatedBy });
   }
 
-  async updateSignalstackOrgId(
+  updateSignalstackOrgId(
     id: string,
     signalstackOrgId: string,
     updatedBy: string,
   ): Promise<StoreResult<Aggregator>> {
     const existing = this.byId.get(id);
-    if (!existing) return errResult('NOT_FOUND', id);
+    if (!existing) return Promise.resolve(errResult('NOT_FOUND', id));
     const next: Aggregator = {
       ...existing,
       signalstackOrgId,
@@ -207,17 +209,17 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
       updatedAt: new Date(),
     };
     this.byId.set(id, next);
-    return { ok: true, value: next };
+    return Promise.resolve({ ok: true, value: next });
   }
 
-  async deleteById(id: string): Promise<StoreResult<void>> {
+  deleteById(id: string): Promise<StoreResult<void>> {
     const row = this.byId.get(id);
-    if (!row) return errResult('NOT_FOUND', id);
+    if (!row) return Promise.resolve(errResult('NOT_FOUND', id));
     this.byId.delete(id);
     this.bySlug.delete(row.orgSlug);
     this.byPhone.delete(row.contactPhone);
     this.byEmail.delete(row.contactEmail);
-    return { ok: true, value: undefined };
+    return Promise.resolve({ ok: true, value: undefined });
   }
 
   // ─── Index maintenance ────────────────────────────────────────────────────

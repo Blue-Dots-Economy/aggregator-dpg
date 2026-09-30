@@ -22,23 +22,25 @@ const NON_TERMINAL = new Set(['pending', 'active']);
 export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
   protected readonly byId = new Map<string, AggregatorOrg>();
 
-  async create(input: CreateOrgInput): Promise<OrgStoreResult<AggregatorOrg>> {
+  create(input: CreateOrgInput): Promise<OrgStoreResult<AggregatorOrg>> {
     const slugTaken = [...this.byId.values()].some(
       (o) => o.slug === input.slug && NON_TERMINAL.has(o.status),
     );
-    if (slugTaken) return err('DUPLICATE_SLUG', `slug already in use: ${input.slug}`);
+    if (slugTaken)
+      return Promise.resolve(err('DUPLICATE_SLUG', `slug already in use: ${input.slug}`));
     // Case-insensitive display-name uniqueness over non-terminal rows.
     const nameKey = input.displayName.trim().toLowerCase();
     const nameTaken = [...this.byId.values()].some(
       (o) => o.displayName.trim().toLowerCase() === nameKey && NON_TERMINAL.has(o.status),
     );
-    if (nameTaken) return err('DUPLICATE_NAME', `organisation name already in use`);
+    if (nameTaken)
+      return Promise.resolve(err('DUPLICATE_NAME', `organisation name already in use`));
     let id: string;
     try {
       id = contactId(input.ownerEmail, input.ownerPhone ?? null);
     } catch {
       // Postgres fails the same write (contactId() runs before any SQL).
-      return err('DB_UNAVAILABLE', 'TypeError');
+      return Promise.resolve(err('DB_UNAVAILABLE', 'TypeError'));
     }
     const now = new Date();
     const row: AggregatorOrg = {
@@ -60,56 +62,59 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
       rejectedAt: null,
     };
     this.byId.set(row.id, row);
-    return { ok: true, value: row };
+    return Promise.resolve({ ok: true, value: row });
   }
 
-  async findById(id: string): Promise<OrgStoreResult<AggregatorOrg | null>> {
-    return { ok: true, value: this.byId.get(id) ?? null };
+  findById(id: string): Promise<OrgStoreResult<AggregatorOrg | null>> {
+    return Promise.resolve({ ok: true, value: this.byId.get(id) ?? null });
   }
 
-  async findBySlug(slug: string): Promise<OrgStoreResult<AggregatorOrg | null>> {
-    return { ok: true, value: [...this.byId.values()].find((o) => o.slug === slug) ?? null };
+  findBySlug(slug: string): Promise<OrgStoreResult<AggregatorOrg | null>> {
+    return Promise.resolve({
+      ok: true,
+      value: [...this.byId.values()].find((o) => o.slug === slug) ?? null,
+    });
   }
 
-  async findByOwnerEmail(email: string): Promise<OrgStoreResult<AggregatorOrg | null>> {
+  findByOwnerEmail(email: string): Promise<OrgStoreResult<AggregatorOrg | null>> {
     const target = email.toLowerCase();
-    return {
+    return Promise.resolve({
       ok: true,
       value: [...this.byId.values()].find((o) => o.ownerEmail === target) ?? null,
-    };
+    });
   }
 
-  async findByOwnerPhone(phone: string): Promise<OrgStoreResult<AggregatorOrg | null>> {
-    return {
+  findByOwnerPhone(phone: string): Promise<OrgStoreResult<AggregatorOrg | null>> {
+    return Promise.resolve({
       ok: true,
       value: [...this.byId.values()].find((o) => o.ownerPhone === phone) ?? null,
-    };
+    });
   }
 
-  async listActive(): Promise<OrgStoreResult<AggregatorOrg[]>> {
+  listActive(): Promise<OrgStoreResult<AggregatorOrg[]>> {
     const rows = [...this.byId.values()]
       .filter((o) => o.status === 'active')
       .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
-    return { ok: true, value: rows };
+    return Promise.resolve({ ok: true, value: rows });
   }
 
-  async listPending(updatedBefore?: Date): Promise<OrgStoreResult<AggregatorOrg[]>> {
+  listPending(updatedBefore?: Date): Promise<OrgStoreResult<AggregatorOrg[]>> {
     const before = updatedBefore?.getTime();
     const rows = [...this.byId.values()]
       .filter((o) => o.status === 'pending')
       .filter((o) => before === undefined || o.updatedAt.getTime() < before)
       .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
-    return { ok: true, value: rows };
+    return Promise.resolve({ ok: true, value: rows });
   }
 
-  async deleteById(id: string): Promise<OrgStoreResult<void>> {
+  deleteById(id: string): Promise<OrgStoreResult<void>> {
     this.byId.delete(id);
-    return { ok: true, value: undefined };
+    return Promise.resolve({ ok: true, value: undefined });
   }
 
-  async update(id: string, patch: UpdateOrgPatch): Promise<OrgStoreResult<AggregatorOrg>> {
+  update(id: string, patch: UpdateOrgPatch): Promise<OrgStoreResult<AggregatorOrg>> {
     const existing = this.byId.get(id);
-    if (!existing) return err('NOT_FOUND', id);
+    if (!existing) return Promise.resolve(err('NOT_FOUND', id));
     const next: AggregatorOrg = {
       ...existing,
       displayName: patch.displayName ?? existing.displayName,
@@ -121,7 +126,7 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
       updatedAt: new Date(),
     };
     this.byId.set(id, next);
-    return { ok: true, value: next };
+    return Promise.resolve({ ok: true, value: next });
   }
 
   async approve(id: string): Promise<OrgStoreResult<AggregatorOrg | null>> {
@@ -132,13 +137,13 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
     return this.casFromPending(id, 'inactive');
   }
 
-  private async casFromPending(
+  private casFromPending(
     id: string,
     next: AggregatorOrg['status'],
   ): Promise<OrgStoreResult<AggregatorOrg | null>> {
     const existing = this.byId.get(id);
-    if (!existing) return err('NOT_FOUND', id);
-    if (existing.status !== 'pending') return { ok: true, value: null };
+    if (!existing) return Promise.resolve(err('NOT_FOUND', id));
+    if (existing.status !== 'pending') return Promise.resolve({ ok: true, value: null });
     const updated: AggregatorOrg = {
       ...existing,
       status: next,
@@ -147,7 +152,7 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
       ...(next === 'inactive' ? { rejectedAt: new Date() } : {}),
     };
     this.byId.set(id, updated);
-    return { ok: true, value: updated };
+    return Promise.resolve({ ok: true, value: updated });
   }
 }
 

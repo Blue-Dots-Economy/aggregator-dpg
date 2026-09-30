@@ -14,7 +14,7 @@
  */
 
 import { and, desc, eq, lt, sql, type SQL } from 'drizzle-orm';
-import type { BecknContact } from '@aggregator-dpg/shared-primitives/aggregator';
+import type { AggregatorStatus, BecknContact } from '@aggregator-dpg/shared-primitives/aggregator';
 import { logger } from '../../logger.js';
 import { aggregators, contact } from '../../db/schema.js';
 import {
@@ -42,7 +42,6 @@ import {
   type StoreResult,
   type UpdateAggregatorPatch,
 } from './interface.js';
-import type { AggregatorStatus } from '@aggregator-dpg/shared-primitives/aggregator';
 
 export class PostgresAggregatorStore extends AggregatorStoreBase {
   async create(input: CreateAggregatorInput): Promise<StoreResult<Aggregator>> {

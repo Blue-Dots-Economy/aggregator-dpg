@@ -86,14 +86,13 @@ export async function runMigrations(): Promise<void> {
 
 const isMain = import.meta.url === `file://${process.argv[1]}`;
 if (isMain) {
-  runMigrations()
-    .then(async () => {
-      await closeDb();
-      process.exit(0);
-    })
-    .catch(async (err) => {
-      logger.error({ err }, 'migration failed');
-      await closeDb().catch(() => undefined);
-      process.exit(1);
-    });
+  try {
+    await runMigrations();
+    await closeDb();
+    process.exit(0);
+  } catch (err: unknown) {
+    logger.error({ err }, 'migration failed');
+    await closeDb().catch(() => undefined);
+    process.exit(1);
+  }
 }

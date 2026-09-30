@@ -22,29 +22,28 @@ import {
 
 const dryRun = process.argv.includes('--dry-run');
 
-backfillOwnerContactNames(
-  {
-    idp: getIdpAdmin(),
-    listCandidates: listOwnerNameCandidatesFromDb,
-    setNameIfMissing: setContactNameIfMissingInDb,
-  },
-  { dryRun },
-)
-  .then(async (report) => {
-    logger.info(
-      { operation: 'ownerNameBackfill', status: 'success', ...report },
-      'owner-name backfill finished',
-    );
-    await closeDb();
-    process.exit(report.failed > 0 ? 1 : 0);
-  })
-  .catch(async (err: unknown) => {
-    logger.error({
-      operation: 'ownerNameBackfill',
-      status: 'failure',
-      error: (err as Error).message,
-      error_type: (err as Error).constructor?.name,
-    });
-    await closeDb().catch(() => undefined);
-    process.exit(1);
+try {
+  const report = await backfillOwnerContactNames(
+    {
+      idp: getIdpAdmin(),
+      listCandidates: listOwnerNameCandidatesFromDb,
+      setNameIfMissing: setContactNameIfMissingInDb,
+    },
+    { dryRun },
+  );
+  logger.info(
+    { operation: 'ownerNameBackfill', status: 'success', ...report },
+    'owner-name backfill finished',
+  );
+  await closeDb();
+  process.exit(report.failed > 0 ? 1 : 0);
+} catch (err: unknown) {
+  logger.error({
+    operation: 'ownerNameBackfill',
+    status: 'failure',
+    error: (err as Error).message,
+    error_type: (err as Error).constructor?.name,
   });
+  await closeDb().catch(() => undefined);
+  process.exit(1);
+}
