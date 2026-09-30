@@ -308,7 +308,9 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
       // unique index a later migration happens to add (#718 review); the
       // constraint name is logged below either way.
       let storeCode: StoreError['code'] = 'DUPLICATE';
-      if (constraint.includes('contact_phone')) storeCode = 'DUPLICATE_PHONE';
+      // The same person already has a coordinator row (one row per contact).
+      if (constraint.includes('aggregators_contact_id_unique')) storeCode = 'DUPLICATE_EMAIL';
+      else if (constraint.includes('contact_phone')) storeCode = 'DUPLICATE_PHONE';
       else if (constraint.includes('contact_email')) storeCode = 'DUPLICATE_EMAIL';
       else if (constraint.includes('slug')) storeCode = 'DUPLICATE_SLUG';
       logger.warn({

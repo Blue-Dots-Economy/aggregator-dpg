@@ -464,4 +464,72 @@ suite('contact (migration 0025) — integration', () => {
       }
     });
   });
+
+  describe('final review fixes', () => {
+    it('one coordinator row per person: two concurrent registrations of the same person', async () => {
+      const store = new PostgresAggregatorStore();
+      const person = {
+        name: 'Twice',
+        email: `it-${randomUUID().slice(0, 8)}@example.org`,
+        phone: phone(),
+      };
+      const base = {
+        actorType: 'aggregator' as const,
+        name: 'IT Org',
+        type: null,
+        consent: CONSENT,
+        createdBy: 'it',
+        updatedBy: 'it',
+      };
+      const [a, b] = await Promise.all([
+        store.create({ ...base, orgSlug: `it-${randomUUID().slice(0, 8)}`, contact: person }),
+        store.create({ ...base, orgSlug: `it-${randomUUID().slice(0, 8)}`, contact: person }),
+      ]);
+      try {
+        expect([a.ok, b.ok].filter(Boolean)).toHaveLength(1);
+        const loser = a.ok ? b : a;
+        if (!loser.ok) expect(['DUPLICATE_EMAIL', 'DUPLICATE_PHONE']).toContain(loser.error.code);
+      } finally {
+        if (a.ok) await store.deleteById(a.value.id);
+        if (b.ok) await store.deleteById(b.value.id);
+      }
+    });
+
+    it("a legacy write never merges one person onto another person's contact", () =>
+      inRollback(async (c) => {
+        const ownerEmail = `it-${randomUUID().slice(0, 8)}@example.org`;
+        const ownerPhone = phone();
+        await c.query(
+          `INSERT INTO aggregator_orgs (slug, display_name, owner_email, owner_phone)
+           VALUES ($1, $1, $2, $3)`,
+          [`it-org-${randomUUID().slice(0, 8)}`, ownerEmail, ownerPhone],
+        );
+        await c.query(`UPDATE contact SET name = 'Owner Name' WHERE email = $1`, [ownerEmail]);
+        const ins = await c.query(
+          `INSERT INTO aggregators (org_slug, actor_type, name, contact, consent, created_by, updated_by)
+           VALUES ($1, 'aggregator', 'IT', $2, $3, 'it', 'it') RETURNING id`,
+          [
+            `it-${randomUUID().slice(0, 8)}`,
+            JSON.stringify({
+              name: 'Intruder',
+              email: `it-${randomUUID().slice(0, 8)}@example.org`,
+              phone: phone(),
+            }),
+            JSON.stringify(CONSENT),
+          ],
+        );
+        // A legacy PATCH to exactly the owner's email + phone.
+        await c.query(
+          `UPDATE aggregators SET contact = jsonb_build_object('name', 'Intruder', 'email', $2::text, 'phone', $3::text)
+            WHERE id = $1`,
+          [ins.rows[0].id, ownerEmail, ownerPhone],
+        );
+        const row = await c.query('SELECT contact_id FROM aggregators WHERE id = $1', [
+          ins.rows[0].id,
+        ]);
+        expect(row.rows[0].contact_id).toBeNull(); // left unlinked, not merged
+        const owner = await c.query('SELECT name FROM contact WHERE email = $1', [ownerEmail]);
+        expect(owner.rows[0].name).toBe('Owner Name'); // never renamed
+      }));
+  });
 });

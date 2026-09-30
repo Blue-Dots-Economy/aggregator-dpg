@@ -208,6 +208,8 @@ export async function registerAggregatorProfileRoutes(app: FastifyInstance): Pro
       // If KC fails, abort before touching the DB so we never have the DB
       // ahead of Keycloak.
       let normalisedContact: BecknContact | undefined;
+      // The Keycloak phone before this request, restored if the DB write fails.
+      let previousPhone: string | undefined;
       if (body.aggregator.contact) {
         const raw = body.aggregator.contact;
         const phoneR = normalisePhone(raw.phone);
@@ -226,7 +228,10 @@ export async function registerAggregatorProfileRoutes(app: FastifyInstance): Pro
         // Keycloak write so a clash never leaves Keycloak ahead of the DB. A
         // clash with another coordinator returns the same PHONE_EXISTS the
         // unique index already produced; a clash with an org owner is new.
-        await assertPhoneFree(phoneR.value, auth.aggregatorId, raw.email);
+        previousPhone = await assertContactChangeAllowed(auth.aggregatorId, {
+          email: raw.email,
+          phone: phoneR.value,
+        });
 
         const idp = getIdpAdmin();
         const kcWrite = await idp.setAttributes(auth.userId, {
@@ -257,6 +262,23 @@ export async function registerAggregatorProfileRoutes(app: FastifyInstance): Pro
       if (body.aggregator.consent !== undefined) patch.consent = body.aggregator.consent;
 
       const result = await aggregatorStore.update(auth.aggregatorId, patch);
+      if (!result.ok && normalisedContact && previousPhone !== undefined) {
+        // Keycloak was written first; put it back so it never runs ahead of
+        // the database. Best-effort — logged if it fails.
+        const revert = await getIdpAdmin().setAttributes(auth.userId, {
+          [KC_ATTR.PHONE_NUMBER]: previousPhone,
+        });
+        if (!revert.ok) {
+          log.error(
+            {
+              status: 'failure',
+              sub_operation: 'idp.setAttributes.revert',
+              code: revert.error.code,
+            },
+            'DB update failed and the Keycloak phone could not be restored',
+          );
+        }
+      }
       if (!result.ok) {
         throw httpError(mapAggregatorUpdateError(result.error.code), {
           cause: new Error(result.error.message),
@@ -363,34 +385,74 @@ function mapAggregatorUpdateError(
 }
 
 /**
- * Rejects a phone that already belongs to someone else — another coordinator,
- * or an org owner with a different email (the same person may legitimately
- * hold both roles on one contact).
+ * Checks a coordinator's requested contact change BEFORE anything is written
+ * (Keycloak is written first, so a late refusal would leave it ahead of the
+ * database):
+ *   - the phone or email already belongs to another person (another
+ *     coordinator, or an org owner whose contact is not this coordinator's own)
+ *     → PHONE_EXISTS / USER_EXISTS;
+ *   - this coordinator's contact is shared with an org-owner role (one person,
+ *     two roles) and the email or phone would change → CONFLICT (not supported
+ *     until accounts are split, Phase 2+).
+ * Identity is compared on stored contact ids, never on the submitted email.
  *
- * @param phone - Canonical phone the coordinator wants.
  * @param selfId - The caller's own `aggregators.id`.
- * @param email - The email submitted alongside it.
- * @throws {HttpError} `PHONE_EXISTS` on a clash; `DB_UNAVAILABLE` when a lookup fails.
+ * @param next - The requested email and canonical phone.
+ * @returns The coordinator's current phone (to restore Keycloak on failure).
+ * @throws {HttpError} PHONE_EXISTS, USER_EXISTS, CONFLICT, NOT_FOUND or DB_UNAVAILABLE.
  */
-async function assertPhoneFree(phone: string, selfId: string, email: string): Promise<void> {
-  const byCoordinator = await getAggregatorStore().findByContactPhone(phone);
-  if (!byCoordinator.ok) {
-    throw httpError('DB_UNAVAILABLE', {
-      cause: new Error(byCoordinator.error.message),
-      fields: { sub_operation: 'aggregatorStore.findByContactPhone' },
-    });
+async function assertContactChangeAllowed(
+  selfId: string,
+  next: { email: string; phone: string },
+): Promise<string> {
+  const unavailable = (op: string, message: string): never => {
+    throw httpError('DB_UNAVAILABLE', { cause: new Error(message), fields: { sub_operation: op } });
+  };
+  const aggregators = getAggregatorStore();
+  const orgs = getAggregatorOrgStore();
+
+  const self = await aggregators.findById(selfId);
+  if (!self.ok) return unavailable('aggregatorStore.findById', self.error.message);
+  if (!self.value) throw httpError('NOT_FOUND');
+  const me = self.value;
+  const email = next.email.trim().toLowerCase();
+  /** Same person: the org owner's contact IS this coordinator's (non-null) contact. */
+  const isMine = (contactId: string | null): boolean =>
+    contactId !== null && me.contactId !== null && contactId === me.contactId;
+
+  const byPhone = await aggregators.findByContactPhone(next.phone);
+  if (!byPhone.ok) return unavailable('aggregatorStore.findByContactPhone', byPhone.error.message);
+  if (byPhone.value && byPhone.value.id !== selfId) {
+    throw httpError('PHONE_EXISTS', { fields: { phone: next.phone } });
   }
-  if (byCoordinator.value && byCoordinator.value.id !== selfId) {
-    throw httpError('PHONE_EXISTS', { fields: { phone } });
+  const byEmail = await aggregators.findByContactEmail(email);
+  if (!byEmail.ok) return unavailable('aggregatorStore.findByContactEmail', byEmail.error.message);
+  if (byEmail.value && byEmail.value.id !== selfId) {
+    throw httpError('USER_EXISTS', { fields: { email: next.email } });
   }
-  const byOwner = await getAggregatorOrgStore().findByOwnerPhone(phone);
-  if (!byOwner.ok) {
-    throw httpError('DB_UNAVAILABLE', {
-      cause: new Error(byOwner.error.message),
-      fields: { sub_operation: 'orgStore.findByOwnerPhone' },
-    });
+
+  const ownerByPhone = await orgs.findByOwnerPhone(next.phone);
+  if (!ownerByPhone.ok) return unavailable('orgStore.findByOwnerPhone', ownerByPhone.error.message);
+  if (ownerByPhone.value && !isMine(ownerByPhone.value.contactId)) {
+    throw httpError('PHONE_EXISTS', { fields: { phone: next.phone } });
   }
-  if (byOwner.value && byOwner.value.ownerEmail !== email.trim().toLowerCase()) {
-    throw httpError('PHONE_EXISTS', { fields: { phone } });
+  const ownerByEmail = await orgs.findByOwnerEmail(email);
+  if (!ownerByEmail.ok) return unavailable('orgStore.findByOwnerEmail', ownerByEmail.error.message);
+  if (ownerByEmail.value && !isMine(ownerByEmail.value.contactId)) {
+    throw httpError('USER_EXISTS', { fields: { email: next.email } });
   }
+
+  const identityChanges = email !== me.contactEmail || next.phone !== me.contactPhone;
+  if (identityChanges && me.contactId) {
+    const sharedWithOwner = await orgs.findByOwnerEmail(me.contactEmail);
+    if (!sharedWithOwner.ok) {
+      return unavailable('orgStore.findByOwnerEmail', sharedWithOwner.error.message);
+    }
+    if (sharedWithOwner.value && isMine(sharedWithOwner.value.contactId)) {
+      throw httpError('CONFLICT', {
+        detail: 'This contact is also an organisation owner; change it through the organisation.',
+      });
+    }
+  }
+  return me.contactPhone;
 }

@@ -168,7 +168,10 @@ BEGIN
   END IF;
 END $$;
 
-CREATE INDEX IF NOT EXISTS aggregators_contact_id_idx     ON aggregators (contact_id);
+-- One coordinator row per person: this replaces the per-row email/phone
+-- uniqueness the legacy aggregators_contact_{email,phone}_unique indexes gave
+-- (0026 drops those). NULLs (unlinked rows) do not collide.
+CREATE UNIQUE INDEX IF NOT EXISTS aggregators_contact_id_unique ON aggregators (contact_id);
 CREATE INDEX IF NOT EXISTS aggregator_orgs_contact_id_idx ON aggregator_orgs (contact_id);
 
 -- ─── Relax legacy NOT NULLs (idempotent by nature) ──────────────────────────
@@ -258,7 +261,7 @@ $fn$;
 -- Moves one referencing row from its current contact to (email, phone, name).
 -- p_table is 'aggregators' or 'aggregator_orgs'. Rules (plan §3.3):
 --   same id            → name sync only (explicit update: new name wins)
---   target id exists   → repoint to it, GC the old row
+--   target id exists   → another person's contact: leave the row unlinked
 --   no current contact → link
 --   old contact shared → link a new contact for this row only
 --   otherwise          → re-key the old row in place (FK cascades)
@@ -295,11 +298,13 @@ BEGIN
   END IF;
 
   IF EXISTS (SELECT 1 FROM contact WHERE id = v_new) THEN
-    EXECUTE format('UPDATE %I SET contact_id = $1 WHERE id = $2', p_table) USING v_new, p_row_id;
-    IF v_name IS NOT NULL THEN
-      UPDATE contact SET name = v_name WHERE id = v_new AND name IS DISTINCT FROM v_name;
-    END IF;
+    -- The new email + phone already form ANOTHER person's contact. Never
+    -- merge onto it (nor rename it): leave this row unlinked and report it.
+    -- The application pre-checks make this unreachable for current code; it
+    -- guards writes from a release that predates them.
+    EXECUTE format('UPDATE %I SET contact_id = NULL WHERE id = $1', p_table) USING p_row_id;
     PERFORM contact_gc(p_old_id);
+    RAISE WARNING 'contact_move: email and phone already belong to another contact; % row left unlinked', p_table;
     RETURN;
   END IF;
 
@@ -510,5 +515,9 @@ END $$;
 
 -- Hand the rest of the transaction (later migrations in the same drizzle run)
 -- back its normal timeouts.
+-- Leave the transaction as the role that started it: drizzle records the
+-- migration in drizzle.__drizzle_migrations right after this file, and the
+-- table owner may have no rights there.
+RESET ROLE;
 SELECT set_config('lock_timeout', current_setting('aggregator_dpg.prev_lock_timeout'), true),
        set_config('statement_timeout', current_setting('aggregator_dpg.prev_statement_timeout'), true);

@@ -17,7 +17,7 @@
  * Belongs to `@aggregator-dpg/api`.
  */
 
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { FastifyBaseLogger, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { config, orgHierarchyEnabled } from '../config.js';
 import { coolingRetryAfter } from '../services/registration-cooling.js';
@@ -402,6 +402,7 @@ export async function registerAggregatorOrgRoutes(app: FastifyInstance): Promise
         if (created.error.code === 'DUPLICATE_SLUG') {
           throw httpError('ORG_SLUG_TAKEN', { fields: { slug } });
         }
+
         throw httpError('DB_UNAVAILABLE', {
           cause: new Error(created.error.message),
           fields: { sub_operation: 'orgStore.create' },
@@ -437,7 +438,11 @@ export async function registerAggregatorOrgRoutes(app: FastifyInstance): Promise
         display_name: body.display_name,
       });
       if (!group.ok) {
-        await orgStore.update(org.id, { status: 'inactive' });
+        // Delete the half-created org (the contact GC trigger then frees the
+        // owner's email/phone) rather than parking it inactive: an inactive
+        // row that never got a Keycloak owner would hold the owner's contact
+        // and block every retry with PHONE_EXISTS.
+        await discardHalfCreatedOrg(org.id, null, log);
         throw httpError('IDP_UNAVAILABLE', {
           cause: new Error(group.error.message),
           fields: { sub_operation: 'idp.createGroup', rolled_back: true },
@@ -459,7 +464,7 @@ export async function registerAggregatorOrgRoutes(app: FastifyInstance): Promise
         },
       });
       if (!ownerUser.ok) {
-        await orgStore.update(org.id, { status: 'inactive' });
+        await discardHalfCreatedOrg(org.id, group.value.id, log);
         if (ownerUser.error.code === 'USER_EXISTS') {
           throw httpError('OWNER_ALREADY_REGISTERED', {
             fields: { email: body.owner.email, rolled_back: true },
@@ -666,4 +671,42 @@ async function findOwnerContactClash(
   }
   if (orgByPhone.value && orgByPhone.value.ownerEmail !== ownerEmail) return 'phone';
   return null;
+}
+
+/**
+ * Removes an org whose Keycloak provisioning failed part-way: its mirrored
+ * group (when one was created) and the row itself. Best-effort — each step is
+ * logged; a leftover is reported by scripts/sql/contact-preflight.sql
+ * ("inactive_orgs_without_kc_owner") and the stale-registration prune.
+ *
+ * @param orgId - The half-created org.
+ * @param groupId - Its Keycloak group id, or `null` when none was created.
+ * @param log - Request logger.
+ */
+async function discardHalfCreatedOrg(
+  orgId: string,
+  groupId: string | null,
+  log: FastifyBaseLogger,
+): Promise<void> {
+  if (groupId) {
+    const g = await getIdpAdmin().deleteGroup(groupId);
+    if (!g.ok) {
+      log.warn(
+        { status: 'failure', sub_operation: 'idp.deleteGroup', org_id: orgId, code: g.error.code },
+        'could not remove the Keycloak group of a half-created org',
+      );
+    }
+  }
+  const d = await getAggregatorOrgStore().deleteById(orgId);
+  if (!d.ok) {
+    log.warn(
+      {
+        status: 'failure',
+        sub_operation: 'orgStore.deleteById',
+        org_id: orgId,
+        code: d.error.code,
+      },
+      'could not remove a half-created org row',
+    );
+  }
 }

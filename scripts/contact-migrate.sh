@@ -13,7 +13,7 @@
 #   ./scripts/contact-migrate.sh preflight   # read-only report; blocking checks must be 0
 #   ./scripts/contact-migrate.sh dry-run     # apply + verify inside a transaction, then ROLLBACK
 #   ./scripts/contact-migrate.sh apply       # apply for real (single transaction)
-#   ./scripts/contact-migrate.sh verify      # read-only V1–V6 checks
+#   ./scripts/contact-migrate.sh verify      # read-only V1–V6 checks (V4/V6 only while legacy columns exist)
 #
 # Runbook: preflight → (fix rows) → dry-run → apply (off-peak) → verify →
 #          deploy → verify again. See docs/plans/contact-table-phase-1.md §6.3.
@@ -96,6 +96,17 @@ echo "mode: $MODE"
 
 # Files are streamed on stdin so the same invocation works for local psql,
 # `docker exec -i` and `kubectl exec -i` alike.
+# 0025 is the EXPAND step. Once 0026 has dropped the legacy columns it must not
+# be re-applied (it would try to relax columns that no longer exist).
+if [[ "$MODE" == "apply" || "$MODE" == "dry-run" || "$MODE" == "preflight" ]]; then
+  legacy=$(echo "SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='aggregators' AND column_name='contact';" \
+    | "${PSQL[@]}" "${PSQL_FLAGS[@]}" -At)
+  if [[ "$legacy" == "0" ]]; then
+    echo "the legacy contact columns are already dropped (migration 0026) — nothing to pre-apply; use: $0 verify" >&2
+    exit 1
+  fi
+fi
+
 case "$MODE" in
   preflight)
     "${PSQL[@]}" "${PSQL_FLAGS[@]}" < "$PREFLIGHT"
@@ -106,9 +117,14 @@ case "$MODE" in
       exit 1
     fi
     "${PSQL[@]}" "${PSQL_FLAGS[@]}" < "$VERIFY"
+    legacy=$(echo "SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='aggregators' AND column_name='contact';" \
+      | "${PSQL[@]}" "${PSQL_FLAGS[@]}" -At)
+    if [[ "$legacy" != "0" ]]; then
+      "${PSQL[@]}" "${PSQL_FLAGS[@]}" < "$ROOT/scripts/sql/contact-verify-legacy.sql"
+    fi
     ;;
   dry-run)
-    { echo 'BEGIN;'; cat "$MIGRATION"; echo; cat "$VERIFY"; echo; echo 'ROLLBACK;'; } \
+    { echo 'BEGIN;'; cat "$MIGRATION"; echo; cat "$VERIFY"; echo; cat "$ROOT/scripts/sql/contact-verify-legacy.sql"; echo; echo 'ROLLBACK;'; } \
       | "${PSQL[@]}" "${PSQL_FLAGS[@]}"
     echo "dry-run complete — rolled back, nothing changed"
     ;;

@@ -317,7 +317,9 @@ export const aggregators = pgTable(
     // Approval queue + tenant-classification filters.
     statusIdx: index('aggregators_status_idx').on(table.status),
     actorTypeIdx: index('aggregators_actor_type_idx').on(table.actorType),
-    contactIdIdx: index('aggregators_contact_id_idx').on(table.contactId),
+    // One coordinator row per person (replaces the legacy per-row email/phone
+    // unique indexes once they are dropped).
+    contactIdUnique: uniqueIndex('aggregators_contact_id_unique').on(table.contactId),
   }),
 );
 

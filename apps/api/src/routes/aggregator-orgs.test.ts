@@ -715,7 +715,7 @@ describe('aggregator-orgs routes', () => {
     expect(found.ok && found.value).toBeNull();
   });
 
-  it('503 IDP_UNAVAILABLE (org rolled back to inactive) when the mirrored KC group create fails', async () => {
+  it('503 IDP_UNAVAILABLE (half-created org deleted) when the mirrored KC group create fails', async () => {
     idp.createGroup = async () => ({
       ok: false,
       error: { code: 'IDP_UNAVAILABLE', message: 'kc down' },
@@ -729,10 +729,12 @@ describe('aggregator-orgs routes', () => {
     expect(res.statusCode).toBe(503);
     expect((res.json() as { error: { code: string } }).error.code).toBe('IDP_UNAVAILABLE');
     const found = await orgStore.findByOwnerEmail('group-fail@enable.org');
-    expect(found.ok && found.value?.status).toBe('inactive');
+    // Deleted, not parked inactive: a row that never got a Keycloak owner
+    // would keep the owner's contact and block a retry with PHONE_EXISTS.
+    expect(found.ok && found.value).toBeNull();
   });
 
-  it('409 OWNER_ALREADY_REGISTERED (rolled back to inactive) when the KC owner user already exists', async () => {
+  it('409 OWNER_ALREADY_REGISTERED (half-created org + group deleted) when the KC owner user already exists', async () => {
     await idp.createUser({ email: 'dup-owner@enable.org' });
     const res = await app.inject({
       method: 'POST',
@@ -743,10 +745,13 @@ describe('aggregator-orgs routes', () => {
     expect(res.statusCode).toBe(409);
     expect((res.json() as { error: { code: string } }).error.code).toBe('OWNER_ALREADY_REGISTERED');
     const found = await orgStore.findByOwnerEmail('dup-owner@enable.org');
-    expect(found.ok && found.value?.status).toBe('inactive');
+    // Deleted, not parked inactive: a row that never got a Keycloak owner
+    // would keep the owner's contact and block a retry with PHONE_EXISTS.
+    expect(found.ok && found.value).toBeNull();
+    expect(idp.getGroup('grp-1')).toBeUndefined();
   });
 
-  it('503 IDP_UNAVAILABLE (org rolled back to inactive) when KC owner user creation fails for another reason', async () => {
+  it('503 IDP_UNAVAILABLE (half-created org + group deleted) when KC owner user creation fails for another reason', async () => {
     idp.createUser = async () => ({
       ok: false,
       error: { code: 'IDP_UNAVAILABLE', message: 'kc down' },
@@ -760,7 +765,9 @@ describe('aggregator-orgs routes', () => {
     expect(res.statusCode).toBe(503);
     expect((res.json() as { error: { code: string } }).error.code).toBe('IDP_UNAVAILABLE');
     const found = await orgStore.findByOwnerEmail('user-create-fail@enable.org');
-    expect(found.ok && found.value?.status).toBe('inactive');
+    // Deleted, not parked inactive: a row that never got a Keycloak owner
+    // would keep the owner's contact and block a retry with PHONE_EXISTS.
+    expect(found.ok && found.value).toBeNull();
   });
 
   it('503 DB_UNAVAILABLE when the final stamp update (kcGroupId/ownerKcSub) fails', async () => {

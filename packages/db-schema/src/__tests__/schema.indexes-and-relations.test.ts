@@ -66,7 +66,8 @@ describe('aggregators: indexes + foreign key', () => {
       'actor_type',
     ]);
 
-    expect(byName['aggregators_contact_id_idx'].config.columns.map(colName)).toEqual([
+    expect(byName['aggregators_contact_id_unique'].config.unique).toBe(true);
+    expect(byName['aggregators_contact_id_unique'].config.columns.map(colName)).toEqual([
       'contact_id',
     ]);
 

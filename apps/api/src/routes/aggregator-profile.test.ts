@@ -276,6 +276,70 @@ describe('aggregator profile routes', () => {
     expect((res.json() as { error: { code: string } }).error.code).toBe('PHONE_EXISTS');
   });
 
+  it('PATCH 409 CONFLICT before any Keycloak write when the contact is shared with an org owner', async () => {
+    const shared = 'c'.repeat(64);
+    aggregatorStore.seed([
+      buildAggregator({
+        id: aggregatorId,
+        orgSlug: 'trrain-zzzz',
+        contactId: shared,
+        contact: { name: 'Both', phone: '+919876543201', email: 'both@trrain.org' },
+      }),
+    ]);
+    orgStore.seed([
+      buildAggregatorOrg({
+        contactId: shared,
+        ownerEmail: 'both@trrain.org',
+        ownerPhone: '+919876543201',
+        status: 'active',
+      }),
+    ]);
+    let kcWrites = 0;
+    idp.setAttributes = async () => {
+      kcWrites++;
+      return { ok: true, value: undefined };
+    };
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/v1/aggregators/profile/me',
+      headers: { authorization: 'Bearer good-token' },
+      payload: {
+        aggregator: {
+          contact: { name: 'Both', phone: '+919876543202', email: 'both@trrain.org' },
+        },
+      },
+    });
+    expect(res.statusCode).toBe(409);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('CONFLICT');
+    expect(kcWrites).toBe(0);
+  });
+
+  it('PATCH restores the Keycloak phone when the database update fails', async () => {
+    const phones: string[] = [];
+    idp.setAttributes = async (_id, attrs) => {
+      phones.push(String((attrs as Record<string, unknown>)['phoneNumber']));
+      return { ok: true, value: undefined };
+    };
+    aggregatorStore.update = async () => ({
+      ok: false,
+      error: { code: 'DB_UNAVAILABLE', message: 'db down' },
+    });
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/v1/aggregators/profile/me',
+      headers: { authorization: 'Bearer good-token' },
+      payload: {
+        aggregator: {
+          contact: { name: 'Asha', phone: '+919876543277', email: 'asha@trrain.org' },
+        },
+      },
+    });
+    expect(res.statusCode).toBe(503);
+    expect(phones).toHaveLength(2);
+    expect(phones[0]).toBe('+919876543277');
+    expect(phones[1]).not.toBe('+919876543277'); // put back to the previous phone
+  });
+
   it('PATCH updates aggregator name/url/locations/consent successfully', async () => {
     const res = await app.inject({
       method: 'PATCH',
