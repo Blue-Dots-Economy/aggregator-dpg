@@ -227,12 +227,13 @@ export const aggregators = pgTable(
     type: text('type'),
     url: text('url'),
 
-    // The person behind this coordinator (migration 0025). NULL only for a
-    // row the best-effort sync could not link (see contact-verify.sql V1).
-    contactId: text('contact_id').references((): typeof contact.id => contact.id, {
-      onDelete: 'restrict',
-      onUpdate: 'cascade',
-    }),
+    // The person behind this coordinator (migration 0025; NOT NULL since 0026).
+    contactId: text('contact_id')
+      .notNull()
+      .references((): typeof contact.id => contact.id, {
+        onDelete: 'restrict',
+        onUpdate: 'cascade',
+      }),
     // Optional Beckn contact keys (alternatePhone, company, gstNumber) — part
     // of the API's `contact` object but not identity, so not on `contact`.
     contactExtra: jsonb('contact_extra')
@@ -328,11 +329,13 @@ export const aggregatorOrgs = pgTable(
     slug: text('slug').notNull(),
     displayName: text('display_name').notNull(),
     state: text('state'),
-    // The org owner — the doc's `primary_contact` (migration 0025).
-    contactId: text('contact_id').references(() => contact.id, {
-      onDelete: 'restrict',
-      onUpdate: 'cascade',
-    }),
+    // The org owner's contact (migration 0025; NOT NULL since 0026).
+    contactId: text('contact_id')
+      .notNull()
+      .references(() => contact.id, {
+        onDelete: 'restrict',
+        onUpdate: 'cascade',
+      }),
     // The legacy owner_email / owner_phone columns are no longer part of the
     // application schema (contact rollout R3); migration 0026 drops them.
     ownerKcSub: text('owner_kc_sub'),

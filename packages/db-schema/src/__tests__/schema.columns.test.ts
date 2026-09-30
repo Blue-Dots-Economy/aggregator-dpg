@@ -73,7 +73,7 @@ describe('aggregators columns', () => {
 
   it('contact FK + contact_extra (migration 0025)', () => {
     expect(aggregators.contactId.name).toBe('contact_id');
-    expect(aggregators.contactId.notNull).toBe(false);
+    expect(aggregators.contactId.notNull).toBe(true);
     expect(aggregators.contactExtra.name).toBe('contact_extra');
     expect(aggregators.contactExtra.notNull).toBe(true);
     expect(aggregators.contactExtra.hasDefault).toBe(true);
@@ -99,7 +99,7 @@ describe('aggregators columns', () => {
 describe('aggregator_orgs remaining columns (not covered by aggregator-orgs.schema.test.ts)', () => {
   it('contact_id FK column (0025)', () => {
     expect(aggregatorOrgs.contactId.name).toBe('contact_id');
-    expect(aggregatorOrgs.contactId.notNull).toBe(false);
+    expect(aggregatorOrgs.contactId.notNull).toBe(true);
   });
 
   it('id is a defaulted primary key', () => {
