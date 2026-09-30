@@ -113,8 +113,10 @@ jobs:
         image: postgres:16-alpine
         env:
           POSTGRES_USER: aggregator
-          POSTGRES_PASSWORD: aggregator-ci
           POSTGRES_DB: aggregator_it
+          # Throwaway database reachable only from this runner: trust auth, so
+          # no credential appears anywhere in this file.
+          POSTGRES_HOST_AUTH_METHOD: trust
         ports:
           - 5432:5432
         options: >-
@@ -123,9 +125,9 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     env:
-      # Throwaway CI-only database; the credential never leaves this job.
-      DATABASE_URL: postgres://aggregator:aggregator-ci@127.0.0.1:5432/aggregator_it
-      INTEGRATION_DATABASE_URL: postgres://aggregator:aggregator-ci@127.0.0.1:5432/aggregator_it
+      # Throwaway CI-only database (trust auth, see the service above).
+      DATABASE_URL: postgres://aggregator@127.0.0.1:5432/aggregator_it
+      INTEGRATION_DATABASE_URL: postgres://aggregator@127.0.0.1:5432/aggregator_it
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -155,8 +157,7 @@ jobs:
       # without the later migrations drives it.
       - name: Integration tests — expand-phase schema (migrations up to 0025)
         env:
-          PGPASSWORD: aggregator-ci
-          INTEGRATION_DATABASE_URL: postgres://aggregator:aggregator-ci@127.0.0.1:5432/aggregator_it_expand
+          INTEGRATION_DATABASE_URL: postgres://aggregator@127.0.0.1:5432/aggregator_it_expand
           INTEGRATION_MIGRATIONS_FOLDER: ${{ runner.temp }}/migrations-0025
         run: |
           psql -h 127.0.0.1 -U aggregator -d aggregator_it -c 'CREATE DATABASE aggregator_it_expand'
