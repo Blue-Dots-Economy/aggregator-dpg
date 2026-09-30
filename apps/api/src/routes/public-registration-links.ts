@@ -9,19 +9,16 @@
  *   POST /public/v1/aggregators/:orgSlug/registrations/:slug
  *     Anonymous synchronous submit. Validates the body against the active
  *     participant schema for the link's domain, normalises phone+email,
- *     creates the participant + a link_submission row, and returns the
- *     submission id.
+ *     creates the user + profile in signalstack, records a link_submission
+ *     row, and returns the submission id.
  *
  * Security model: (org_slug, slug) pair is the access token. No JWT
  * required. Aggregator scoping is implicit via the link row.
  */
 
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { eq } from 'drizzle-orm';
-import { PostgresParticipantsWriter } from '@aggregator-dpg/participants-writer/postgres';
-import type { ParticipantsWriterBase } from '@aggregator-dpg/participants-writer/interface';
 import { getRegistrationLinksStore } from '../services/registration-links-store/index.js';
 import type { RegistrationLink } from '../services/registration-links-store/index.js';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
@@ -42,18 +39,6 @@ import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 import { consume } from '../services/rate-limiter/index.js';
 import { config } from '../config.js';
-
-let participantsWriter: ParticipantsWriterBase | null = null;
-function getParticipantsWriter(): ParticipantsWriterBase {
-  if (participantsWriter) return participantsWriter;
-  participantsWriter = new PostgresParticipantsWriter(getDb());
-  return participantsWriter;
-}
-
-/** Test helper — override the writer (e.g., inject a fake). */
-export function _setParticipantsWriter(w: ParticipantsWriterBase | null): void {
-  participantsWriter = w;
-}
 
 interface OrgSlugParams {
   orgSlug?: string;
@@ -240,7 +225,7 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
         tags: ['public-registration'],
         summary: 'Submit a public participant registration',
         description:
-          "Public endpoint reached by the QR-link registration form. Validates the submission against the link's domain schema (runtime Ajv — the body shape is dynamic per network/domain), creates the participant + user, and pushes to signalstack. Returns 201 on success, 409 (outcome:'skipped') when the phone/email is already registered with this aggregator, and 429 when the per-link rate limit trips.",
+          "Public endpoint reached by the QR-link registration form. Validates the submission against the link's domain schema (runtime Ajv — the body shape is dynamic per network/domain), then creates the user + profile in signalstack. Returns 201 on success, 409 (outcome:'skipped') when the identity is already owned by ANOTHER aggregator, and 429 when the per-link rate limit trips. There is no de-duplication within an aggregator: a repeat submission creates a new profile and returns 201.",
         params: LinkParamsSchema,
         body: PublicRegistrationSubmitBodySchema,
         response: {
@@ -571,7 +556,6 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
           ? (body[emailSourceKey] as string)
           : '';
       const emailNormalised = emailRaw ? emailRaw.trim().toLowerCase() : null;
-      const participantId = phoneNormalised ?? randomUUID();
 
       // 2a. Resolve the aggregator's signalstack org id BEFORE opening the
       // transaction. Anonymous submitters carry no token, so the value must
@@ -600,10 +584,10 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
         }
       }
 
-      // 3 + 4. participant UPSERT (via shared writer), link_submission INSERT,
-      // AND signalstack push must all commit atomically. A signalstack failure
-      // rolls back the local rows so the caller sees a single, honest outcome:
-      // a 2xx response means the participant exists in both stores. Tightens
+      // 3 + 4. The link_submission INSERT and the signalstack push must commit
+      // atomically. A signalstack failure rolls the submission row back so the
+      // caller sees a single, honest outcome: a 2xx means signals really has
+      // the profile. Tightens
       // the DB connection hold time — acceptable for a public-link form submit
       // (low volume). If push volume ever requires async fan-out, switch to an
       // outbox table inside the tx + worker consumer.
@@ -613,40 +597,18 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       // account_only — neither produces a lifecycle classification.
       let lifecycleStatusOut: LifecycleStatus | null = null;
       let ownedElsewhere = false;
-      const writer = getParticipantsWriter();
       const txResult = await getDb().transaction(async (tx) => {
-        // Bind the writer to the active tx for atomicity. If a custom writer
-        // (test fake) was injected via _setParticipantsWriter, use it directly.
-        type DbCtor = ConstructorParameters<typeof PostgresParticipantsWriter>[0];
-        const txWriter: ParticipantsWriterBase =
-          writer instanceof PostgresParticipantsWriter
-            ? new PostgresParticipantsWriter(tx as unknown as DbCtor)
-            : writer;
-
-        const writeResult = await txWriter.writeLinkSubmission({
-          aggregatorId: link.aggregatorId,
-          type: link.domain,
-          participantId,
-          data: body,
-          phone: phoneNormalised,
-          email: emailNormalised,
-          sourceLinkId: link.id,
-        });
-
-        if (!writeResult.success) {
-          // Bubble DB failure to fastify so the request returns 500.
-          throw new Error(writeResult.error.message);
-        }
-        const { outcome: writeOutcome, participant } = writeResult.value;
-        let outcome: 'passed' | 'skipped' = writeOutcome;
-        const participantRowId = participant.id;
+        // Seeded outcome. Signals is the identity authority and overwrites this
+        // below whenever it is configured; the seed only survives when signals
+        // is disabled, where a successful local capture is a `passed`.
+        const insertedOutcome: 'passed' | 'skipped' = 'passed';
+        let outcome: 'passed' | 'skipped' = insertedOutcome;
 
         const submission = await tx
           .insert(linkSubmissions)
           .values({
             linkId: link.id,
             aggregatorId: link.aggregatorId,
-            participantId: participantRowId,
             metadataSnapshot: link.context,
             submittedData: body,
             outcome,
@@ -654,16 +616,17 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
           .returning({ id: linkSubmissions.id });
 
         // Outward signalstack push, inside the same tx so a downstream failure
-        // rolls the local rows back. Local participant table is deduped per
-        // (aggregator_id, type, participant_id); signalstack is the global
-        // identity store and must also see the row, otherwise the dashboard
-        // and downstream consumers are out of sync.
+        // rolls the `link_submissions` row back. Signalstack is the identity
+        // store of record; the submission row is only the local audit trail of
+        // what this link captured.
         if (ss && signalstackOrgId) {
           const nameSourceKey = linkDomainCfg.identity.name;
+          // Unreachable in practice — the identity-presence guard above rejects
+          // a blank name on both submit shapes. Kept as a defensive fallback;
+          // the link id is an opaque UUID, so nothing identifying leaks if it
+          // ever did fire.
           const name =
-            typeof body[nameSourceKey] === 'string'
-              ? (body[nameSourceKey] as string)
-              : participantRowId;
+            typeof body[nameSourceKey] === 'string' ? (body[nameSourceKey] as string) : link.id;
           const phoneFromBody =
             typeof body[phoneSourceKey] === 'string'
               ? (body[phoneSourceKey] as string)
@@ -701,7 +664,6 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
               error: result.error.message,
               code: result.error.code,
               link_id: link.id,
-              participant_id: participantRowId,
             });
             // Profile cap (signals #349): show the bare user-facing sentence
             // (no `signalstack onboard returned 409: PROFILE_LIMIT_REACHED:`
@@ -732,19 +694,6 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
             });
           }
 
-          // Cross-org existing user → signalstack has the person under a
-          // different aggregator and won't expose/duplicate them here.
-          // Record a skipped outcome so the form shows the friendly
-          // "already registered" screen instead of a hard failure.
-          // `already_registered` (legacy) and `owned_elsewhere` (Task 4 rename)
-          // carry the same signal during the transition — OR them together so
-          // either field flips the outcome.
-          const isExisting =
-            Boolean(result.value.already_registered) || Boolean(result.value.owned_elsewhere);
-          if (isExisting) {
-            outcome = 'skipped';
-          }
-
           // Resolve lifecycle through the back-compat helper so the absent →
           // 'live' rule stays centralised. `account_only` submits produce no
           // item, so we suppress lifecycle fields entirely (null) — the
@@ -760,16 +709,13 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
           ownedElsewhere = Boolean(result.value.owned_elsewhere);
           lifecycleStatusOut = lifecycleStatus;
 
-          // signalstack is the identity authority. The local participants table
-          // is a soon-to-be-removed mirror, and its per-phone dedup must not flip
-          // a successful capture to `skipped`/409. This rule already governed the
-          // account_only path — re-submitting the same phone is an idempotent
-          // success there, since signals returns the same user — and #780 extends
-          // it to the full form: a repeat submission is a legitimate NEW profile,
-          // because signals inserts one on every onboard call without an
-          // `item_id`. Leaving the mirror in charge produced the worst of both
-          // answers — the profile WAS created upstream while the participant was
-          // told "already registered, no need to register again".
+          // Signalstack is the identity authority and the sole source of this
+          // outcome. A repeat submission is a legitimate NEW profile: signals
+          // inserts one on every onboard call without an `item_id`, so there is
+          // no de-duplication within an aggregator. A local mirror used to
+          // report `skipped` here while the profile was created upstream anyway
+          // — the worst of both answers — which is why it was removed (#780,
+          // then migration 0024).
           //
           // Skip only when the identity is genuinely owned by ANOTHER aggregator.
           // That is tenant isolation, not deduplication, and is unaffected.
@@ -786,19 +732,18 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
             lifecycle_status: lifecycleStatus,
             submit_mode: submitMode,
             link_id: link.id,
-            participant_id: participantRowId,
           });
         }
 
-        // The submission row was inserted BEFORE the push, carrying the local
-        // writer's verdict, and the push may since have corrected it (above).
+        // The submission row was inserted BEFORE the push, carrying the seeded
+        // `passed`, and the push may since have corrected it to `skipped`.
         // Persist the correction inside the same transaction so the stored
         // record matches both the response and what actually happened — a row
         // reading `skipped` for a submission that created a profile would
         // under-count real registrations for anyone who later reports on this
         // table. Pre-existing for `account_only`; #780 makes it routine.
         const submissionId = submission[0]?.id;
-        if (submissionId && outcome !== writeOutcome) {
+        if (submissionId && outcome !== insertedOutcome) {
           await tx
             .update(linkSubmissions)
             .set({ outcome })
@@ -807,11 +752,10 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
 
         return {
           outcome,
-          participantRowId,
           submissionId,
         };
       });
-      const { outcome, participantRowId, submissionId } = txResult;
+      const { outcome, submissionId } = txResult;
 
       log.info({
         status: 'success',
@@ -820,7 +764,6 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
         latency_ms: Date.now() - start,
         link_id: link.id,
         outcome,
-        participant_id: participantRowId,
         submission_id: submissionId,
         lifecycle_status: lifecycleStatusOut,
         owned_elsewhere: ownedElsewhere,
@@ -828,14 +771,13 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       });
 
       if (outcome === 'skipped') {
-        // Surface dedup in the response status to match the design (409).
-        // `participant_id` is intentionally omitted on the public path so we
-        // do not leak the DB row UUID of an existing participant to an
-        // anonymous caller.
+        // Cross-aggregator ownership surfaces as 409 (design). No participant
+        // identifier is returned on the public path — an anonymous caller must
+        // not learn anything about a record held by another aggregator.
         return reply.code(409).send({
           outcome,
           submission_id: submissionId,
-          message: 'This mobile number or email is already registered with this aggregator.',
+          message: 'This mobile number or email is already registered with another aggregator.',
           registration_mode: link.registrationMode,
           submission_shape: submissionShape,
           lifecycle_status: lifecycleStatusOut,

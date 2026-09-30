@@ -137,7 +137,7 @@ function SuccessToast({ message, onDone }: { message: string; onDone: () => void
     <div
       role="status"
       aria-live="polite"
-      className="fixed top-4 right-4 z-100 rounded-[10px] border border-emerald-200 bg-emerald-50 px-4 py-3 text-[13px] text-emerald-700 shadow-lg inline-flex items-center gap-2"
+      className="fixed top-4 left-4 right-4 sm:left-auto z-100 rounded-[10px] border border-emerald-200 bg-emerald-50 px-4 py-3 text-[13px] text-emerald-700 shadow-lg inline-flex items-center gap-2"
     >
       <I.check size={14} /> {message}
     </div>,
@@ -369,7 +369,7 @@ export function CreateLinkSection() {
 
   return (
     <div className="bd-card bd-shadow overflow-hidden">
-      <div className="px-6 py-5 flex items-center gap-3 border-b border-(--bd-border)">
+      <div className="px-6 py-5 flex flex-wrap items-center gap-3 border-b border-(--bd-border)">
         <I.link size={16} className="text-ink-500" />
         <div className="font-display font-bold text-[16px] text-ink-900">
           {t('create_link.title')}
@@ -664,7 +664,9 @@ function LinkCard({
         ringed ? 'ring-2 ring-primary-400 ring-offset-2' : ''
       }`}
     >
-      <div className="flex items-start justify-between gap-4">
+      {/* Phones stack the actions under the card body instead of squeezing
+          them beside it (#793). */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
             <h3 className="font-display font-bold text-[16px] text-ink-900 leading-tight">
@@ -687,9 +689,15 @@ function LinkCard({
            */}
           {isLive && link.public_url && (
             <div className="flex items-center gap-2 mt-3 flex-wrap">
-              <div className="inline-flex items-center gap-1 bg-ink-50 border border-(--bd-border) rounded-[10px] px-3 py-1.5 text-[12.5px] font-mono">
+              <div className="inline-flex flex-wrap sm:flex-nowrap items-center gap-1 min-w-0 max-w-full bg-ink-50 border border-(--bd-border) rounded-[10px] px-3 py-1.5 text-[12.5px] font-mono">
                 <span className="text-ink-500">{urlHost}/</span>
-                <span className="text-amber-700 font-semibold">{urlPath}</span>
+                {/* Below `sm` the pill wraps, so a long slug drops onto its own
+                    line under the host; min-w-0 + wrap-anywhere then let it break
+                    inside the pill instead of pushing the card off-screen. From
+                    `sm` up the layout is the original single row. */}
+                <span className="min-w-0 wrap-anywhere text-amber-700 font-semibold">
+                  {urlPath}
+                </span>
                 {/*
                  * The only copy affordance on the card. A second, labelled
                  * "Copy link" button used to sit at the end of this row firing
@@ -701,7 +709,7 @@ function LinkCard({
                   onClick={onCopy}
                   title={copied ? t('link_card.copied') : t('link_card.copy_title')}
                   aria-label={t('link_card.copy_title')}
-                  className={`ml-1 ${copied ? 'text-emerald-600' : 'text-ink-400 hover:text-primary-600'}`}
+                  className={`ml-1 shrink-0 ${copied ? 'text-emerald-600' : 'text-ink-400 hover:text-primary-600'}`}
                 >
                   {copied ? <I.check size={12} /> : <I.copy size={12} />}
                 </button>
@@ -777,7 +785,7 @@ function LinkCard({
           </div>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
           {isDraft && !editing && (
             <Button kind="ghost" onClick={() => setEditing(true)} disabled={update.isPending}>
               {t('link_card.edit')}
@@ -896,7 +904,7 @@ export function YourLinksBody() {
   return (
     <div>
       <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <div className="font-display font-bold text-[14px] text-ink-700">
             {t('your_links.title')}
           </div>

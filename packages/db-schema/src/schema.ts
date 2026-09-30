@@ -9,11 +9,6 @@
  *     `locations`, `consent` (T&C snapshot — accepted before account create),
  *     lifecycle `status`, and audit fields. `org_slug` is derived from `name`
  *     at INSERT and is immutable (trigger lives in the migration).
- *   - `aggregator_profile`: secondary, 1:1 with `aggregators`. Filled out
- *     post-login via the profile-completion flow. Holds `contact_name`,
- *     `personas`, `services`, `verified_certificate`, and a
- *     `profile_completed_at` checkpoint. A stub row is inserted alongside the
- *     parent in the same transaction so the 1:1 invariant always holds.
  *   - `bulk_uploads`: parent record per CSV upload. Tracks lifecycle
  *     (pending → uploaded → file_validating → row_processing → completed/failed)
  *     plus counters (passed/failed/skipped). Per-row state lives transiently
@@ -44,12 +39,9 @@ import type {
   BecknContact,
   BecknLocation,
   ConsentRecord,
-  PersonaRef,
-  PublicKeyEntry,
-  ServiceRef,
 } from '@aggregator-dpg/shared-primitives/aggregator';
 
-export type { BecknContact, BecknLocation, ConsentRecord, PersonaRef, PublicKeyEntry, ServiceRef };
+export type { BecknContact, BecknLocation, ConsentRecord };
 
 // ─── Enums ───────────────────────────────────────────────────────────────────
 
@@ -372,49 +364,6 @@ export const registrationInvites = pgTable(
 export type RegistrationInviteRow = typeof registrationInvites.$inferSelect;
 export type NewRegistrationInviteRow = typeof registrationInvites.$inferInsert;
 
-// ─── aggregator_profile ──────────────────────────────────────────────────────
-
-export const aggregatorProfile = pgTable(
-  'aggregator_profile',
-  {
-    aggregatorId: uuid('aggregator_id')
-      .primaryKey()
-      .references(() => aggregators.id, { onDelete: 'cascade' }),
-    // Display label for the primary human contact at the aggregator org.
-    // Distinct from `aggregators.contact.name` (which is the Beckn contact
-    // object's `name` field on the structured contact payload).
-    contactName: text('contact_name'),
-    // Schema-registry references — IDs validated at app layer against the
-    // active schema registry (config/schema-registry.yaml).
-    personas: jsonb('personas')
-      .$type<PersonaRef[]>()
-      .notNull()
-      .default(sql`'[]'::jsonb`),
-    services: jsonb('services')
-      .$type<ServiceRef[]>()
-      .notNull()
-      .default(sql`'[]'::jsonb`),
-    verifiedCertificate: jsonb('verified_certificate')
-      .$type<PublicKeyEntry[]>()
-      .notNull()
-      .default(sql`'[]'::jsonb`),
-    // NULL until profile_completed_at is stamped (when all required profile
-    // fields are present). Powers the "complete your profile" UI banner and
-    // Beckn-catalog visibility filter.
-    profileCompletedAt: timestamp('profile_completed_at', { withTimezone: true }),
-    createdBy: text('created_by').notNull(),
-    updatedBy: text('updated_by').notNull(),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => ({
-    // Beckn catalog discovery: "all aggregators supporting persona X / service Y".
-    personasGin: index('aggregator_profile_personas_gin').using('gin', table.personas),
-    servicesGin: index('aggregator_profile_services_gin').using('gin', table.services),
-    profileCompletedIdx: index('aggregator_profile_completed_at_idx').on(table.profileCompletedAt),
-  }),
-);
-
 // ─── bulk_uploads ────────────────────────────────────────────────────────────
 
 export const bulkUploads = pgTable(
@@ -494,49 +443,6 @@ export const registrationLinks = pgTable(
   }),
 );
 
-// ─── participants ────────────────────────────────────────────────────────────
-
-export const participants = pgTable(
-  'participants',
-  {
-    id: uuid('id').primaryKey().defaultRandom(),
-    aggregatorId: uuid('aggregator_id')
-      .notNull()
-      .references(() => aggregators.id, { onDelete: 'cascade' }),
-    type: text('type').notNull(),
-    // Schema-supplied unique identifier from the data source (e.g. ITI roll
-    // number, employee id). Not the same as `id` (DB row id). Dedup is
-    // (aggregator_id, participant_id) — the same external id can exist
-    // under different aggregators.
-    participantId: text('participant_id').notNull(),
-    data: jsonb('data').$type<Record<string, unknown>>().notNull().default({}),
-    phone: text('phone'),
-    email: text('email'),
-    sourceBulkUploadId: uuid('source_bulk_upload_id').references(() => bulkUploads.id, {
-      onDelete: 'set null',
-    }),
-    sourceLinkId: uuid('source_link_id').references(() => registrationLinks.id, {
-      onDelete: 'set null',
-    }),
-    sourceRowIndex: integer('source_row_index'),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => ({
-    // Dedup key includes `type` so a seeker and a provider can share the same
-    // external participant_id under one aggregator without colliding.
-    aggregatorTypeParticipantUnique: uniqueIndex(
-      'participants_aggregator_type_participant_unique',
-    ).on(table.aggregatorId, table.type, table.participantId),
-    aggregatorPhoneIdx: index('participants_aggregator_phone_idx').on(
-      table.aggregatorId,
-      table.phone,
-    ),
-    sourceBulkIdx: index('participants_source_bulk_idx').on(table.sourceBulkUploadId),
-    sourceLinkIdx: index('participants_source_link_idx').on(table.sourceLinkId),
-  }),
-);
-
 // ─── link_submissions ────────────────────────────────────────────────────────
 
 export const linkSubmissions = pgTable(
@@ -549,9 +455,6 @@ export const linkSubmissions = pgTable(
     aggregatorId: uuid('aggregator_id')
       .notNull()
       .references(() => aggregators.id, { onDelete: 'cascade' }),
-    participantId: uuid('participant_id').references(() => participants.id, {
-      onDelete: 'set null',
-    }),
     metadataSnapshot: jsonb('metadata_snapshot')
       .$type<Record<string, unknown>>()
       .notNull()
@@ -880,12 +783,8 @@ export type AggregatorRow = typeof aggregators.$inferSelect;
 export type NewAggregatorRow = typeof aggregators.$inferInsert;
 export type AggregatorOrgRow = typeof aggregatorOrgs.$inferSelect;
 export type NewAggregatorOrgRow = typeof aggregatorOrgs.$inferInsert;
-export type AggregatorProfileRow = typeof aggregatorProfile.$inferSelect;
-export type NewAggregatorProfileRow = typeof aggregatorProfile.$inferInsert;
 export type BulkUploadRow = typeof bulkUploads.$inferSelect;
 export type NewBulkUploadRow = typeof bulkUploads.$inferInsert;
-export type ParticipantRow = typeof participants.$inferSelect;
-export type NewParticipantRow = typeof participants.$inferInsert;
 export type RegistrationLinkRow = typeof registrationLinks.$inferSelect;
 export type NewRegistrationLinkRow = typeof registrationLinks.$inferInsert;
 export type LinkSubmissionRow = typeof linkSubmissions.$inferSelect;

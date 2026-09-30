@@ -41,9 +41,11 @@ until coverage and the security rating are green.
   is what actually gates. Do not "tidy" these into one step — that re-introduces the
   coupling.
 - The `SonarCloud scan` step is **also** `continue-on-error: true`, for a different
-  reason: the `docker` matrix depends on the `ci` job, so a SonarCloud outage or an
-  expired token must not stop a green build from publishing images. Scan failures show
-  up in the run log and in SonarCloud's own commit check instead of reddening CI.
+  reason: `CI` is the one required check, so a scan that fails for reasons unrelated
+  to the code — a SonarCloud outage, an expired token, the quality gate — must not
+  redden it. Scan failures show up in the run log and in SonarCloud's own commit
+  check instead. (This used to be justified by the `docker` matrix depending on the
+  `ci` job; that matrix now lives in `build-images.yml` and no longer depends on CI.)
 - `SONAR_TOKEN` lives in repo Actions secrets. Checkout uses `fetch-depth: 0` so
   Sonar can attribute new code to the right commits.
 - The token is exposed as a **job-level** `env` so the scan step can gate on it with

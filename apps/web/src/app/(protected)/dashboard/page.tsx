@@ -1,6 +1,17 @@
 'use client';
 
-import { useEffect, useState, useRef, useMemo, type ReactNode } from 'react';
+import {
+  useEffect,
+  useLayoutEffect,
+  useState,
+  useRef,
+  useMemo,
+  type FocusEvent as ReactFocusEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+} from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { createPortal } from 'react-dom';
 import { useQueryClient } from '@tanstack/react-query';
@@ -216,7 +227,7 @@ function SummaryBar({
   const t = useTranslations('dashboard');
   const Ic = I[icon];
   return (
-    <div className="bd-card bd-shadow px-5 py-4 flex items-center gap-4">
+    <div className="bd-card bd-shadow px-5 py-4 flex flex-wrap items-center gap-4">
       <div
         className="w-11 h-11 rounded-[12px] flex items-center justify-center shrink-0"
         style={{ background: 'var(--bd-primary-50)', color: 'var(--bd-primary-600)' }}
@@ -347,26 +358,126 @@ interface FunnelCellProps {
   parts: FunnelPart[];
 }
 
-function FunnelCell({ total, parts }: FunnelCellProps) {
-  const sum = parts.reduce((a, b) => a + b.v, 0) || 1;
-  const [hover, setHover] = useState(false);
-  const [pos, setPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
-  const ref = useRef<HTMLDivElement | null>(null);
+/** Minimum distance (px) kept between a cell popover and the viewport edge. */
+const POPOVER_GUTTER = 8;
 
-  const onEnter = () => {
+/**
+ * How far (px) a cell may move before a scroll event counts as a real scroll.
+ * Layout-driven scroll events that leave the cell where it was must not close
+ * the popover.
+ */
+const POPOVER_SCROLL_TOLERANCE = 2;
+
+/**
+ * Open/position state for the small portal popovers on table cells
+ * (FunnelCell, ProgressTiny).
+ *
+ * Mouse users get the popover on hover, as before. Touch has no hover, so a tap
+ * toggles it and moving focus away (tapping elsewhere) closes it; keyboard users
+ * get it on focus and can dismiss it with Escape (#793).
+ *
+ * Positioning is measured, not assumed: the popover first renders at the page's
+ * left edge (so it takes its natural width, bounded by its viewport-relative
+ * `max-width`), then a layout effect clamps it beside its cell with a
+ * {@link POPOVER_GUTTER} margin — before paint, so the first frame is never
+ * seen. That keeps it on screen whatever the (config-sourced) label length.
+ *
+ * A scroll closes it only when the cell actually moved, so the popover never
+ * ends up detached from its cell, while layout-driven scroll events don't shut
+ * it the moment it opens.
+ *
+ * @returns The trigger ref, the popover ref, open flag, page-relative position
+ *   and the props to spread onto the trigger element.
+ */
+function useCellPopover() {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ x: number; y: number; placed: boolean }>({
+    x: 0,
+    y: 0,
+    placed: false,
+  });
+  const ref = useRef<HTMLDivElement | null>(null);
+  const popoverRef = useRef<HTMLDivElement | null>(null);
+  // Viewport position of the cell when the popover opened (scroll-move check).
+  const anchorRef = useRef<{ left: number; top: number } | null>(null);
+
+  const show = () => {
     const r = ref.current?.getBoundingClientRect();
     if (!r) return;
-    setPos({ x: r.left + window.scrollX, y: r.bottom + window.scrollY + 8 });
-    setHover(true);
+    anchorRef.current = { left: r.left, top: r.top };
+    setPos({ x: window.scrollX, y: r.bottom + window.scrollY + 8, placed: false });
+    setOpen(true);
   };
+  const hide = () => setOpen(false);
+
+  useLayoutEffect(() => {
+    if (!open || pos.placed) return;
+    const trigger = ref.current?.getBoundingClientRect();
+    const popover = popoverRef.current?.getBoundingClientRect();
+    if (!trigger || !popover) return;
+    const maxLeft = Math.max(POPOVER_GUTTER, window.innerWidth - popover.width - POPOVER_GUTTER);
+    const left = Math.min(Math.max(trigger.left, POPOVER_GUTTER), maxLeft);
+    setPos((p) => ({ ...p, x: left + window.scrollX, placed: true }));
+  }, [open, pos.placed]);
+
+  // The popover is pinned to page coordinates, so a real scroll — the page, or
+  // the table scrolling sideways on a phone — would leave it detached from its
+  // cell. Close it then (capture phase catches element scrolls too).
+  useEffect(() => {
+    if (!open) return;
+    const onScroll = () => {
+      const r = ref.current?.getBoundingClientRect();
+      const a = anchorRef.current;
+      if (
+        !r ||
+        !a ||
+        Math.abs(r.left - a.left) > POPOVER_SCROLL_TOLERANCE ||
+        Math.abs(r.top - a.top) > POPOVER_SCROLL_TOLERANCE
+      ) {
+        setOpen(false);
+      }
+    };
+    window.addEventListener('scroll', onScroll, true);
+    return () => window.removeEventListener('scroll', onScroll, true);
+  }, [open]);
+
+  const triggerProps = {
+    tabIndex: 0,
+    onPointerEnter: (e: ReactPointerEvent) => {
+      if (e.pointerType === 'mouse') show();
+    },
+    onPointerLeave: (e: ReactPointerEvent) => {
+      if (e.pointerType === 'mouse') hide();
+    },
+    onClick: (e: ReactMouseEvent) => {
+      // Mouse already opened on hover; a click there must not toggle it shut.
+      if ((e.nativeEvent as PointerEvent).pointerType === 'mouse') return;
+      if (open) hide();
+      else show();
+    },
+    onFocus: (e: ReactFocusEvent<HTMLDivElement>) => {
+      // Only keyboard focus opens it — a tap also focuses, and its click opens.
+      if (e.currentTarget.matches(':focus-visible')) show();
+    },
+    onBlur: hide,
+    onKeyDown: (e: ReactKeyboardEvent) => {
+      if (e.key === 'Escape') hide();
+    },
+  };
+
+  return { ref, popoverRef, open, pos, triggerProps };
+}
+
+function FunnelCell({ total, parts }: FunnelCellProps) {
+  const sum = parts.reduce((a, b) => a + b.v, 0) || 1;
+  const { ref, popoverRef, open: hover, pos, triggerProps } = useCellPopover();
 
   return (
     <>
       <div
         ref={ref}
-        onMouseEnter={onEnter}
-        onMouseLeave={() => setHover(false)}
-        className="inline-flex items-center gap-2 cursor-default"
+        {...triggerProps}
+        className="inline-flex items-center gap-2 cursor-default rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--bd-primary)"
       >
         <span className="font-display font-bold text-[18px] text-ink-900 tabular-nums leading-none">
           {total}
@@ -382,8 +493,13 @@ function FunnelCell({ total, parts }: FunnelCellProps) {
         typeof document !== 'undefined' &&
         createPortal(
           <div
+            ref={popoverRef}
+            data-cell-popover=""
             style={{ position: 'absolute', left: pos.x, top: pos.y, zIndex: 9999 }}
-            className="bg-white border border-(--bd-border) rounded-[10px] bd-shadow-lg p-2.5 min-w-[160px] pointer-events-none animate-[fadeUp_.12s_ease-out]"
+            // max-w + wrap-anywhere bound the width to the viewport whatever the
+            // config-sourced bucket labels are, so the measured clamp can always
+            // keep the gutter (#793).
+            className="bg-white border border-(--bd-border) rounded-[10px] bd-shadow-lg p-2.5 min-w-[160px] max-w-[calc(100vw-1rem)] wrap-anywhere pointer-events-none animate-[fadeUp_.12s_ease-out]"
           >
             <div className="flex flex-col gap-1.5">
               {parts.map((p, i) => (
@@ -414,22 +530,13 @@ function FunnelCell({ total, parts }: FunnelCellProps) {
 function ProgressTiny({ pct, title }: { pct: number; title?: string }) {
   const color = pct >= 80 ? '#10B981' : pct >= 50 ? '#F59E0B' : '#EF4444';
   const label = title ?? (pct >= 80 ? 'Complete' : 'Incomplete');
-  const [hover, setHover] = useState(false);
-  const [pos, setPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
-  const ref = useRef<HTMLDivElement | null>(null);
-  const onEnter = () => {
-    const r = ref.current?.getBoundingClientRect();
-    if (!r) return;
-    setPos({ x: r.left + window.scrollX, y: r.bottom + window.scrollY + 8 });
-    setHover(true);
-  };
+  const { ref, popoverRef, open: hover, pos, triggerProps } = useCellPopover();
   return (
     <>
       <div
         ref={ref}
-        onMouseEnter={onEnter}
-        onMouseLeave={() => setHover(false)}
-        className="flex items-center gap-2 cursor-default"
+        {...triggerProps}
+        className="flex items-center gap-2 cursor-default rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--bd-primary)"
       >
         <div
           role="progressbar"
@@ -447,8 +554,10 @@ function ProgressTiny({ pct, title }: { pct: number; title?: string }) {
         typeof document !== 'undefined' &&
         createPortal(
           <div
+            ref={popoverRef}
+            data-cell-popover=""
             style={{ position: 'absolute', left: pos.x, top: pos.y, zIndex: 9999 }}
-            className="bg-white border border-(--bd-border) rounded-[10px] bd-shadow-lg px-2.5 py-1.5 pointer-events-none animate-[fadeUp_.12s_ease-out]"
+            className="bg-white border border-(--bd-border) rounded-[10px] bd-shadow-lg px-2.5 py-1.5 max-w-[calc(100vw-1rem)] wrap-anywhere pointer-events-none animate-[fadeUp_.12s_ease-out]"
           >
             <div className="flex items-center gap-2 text-[12px] min-w-[120px]">
               <span className="text-ink-500 flex-1">{label}</span>
@@ -639,11 +748,11 @@ function BulkActionBar({
   };
 
   return (
-    <div className="px-5 py-2.5 flex items-center gap-3 border-b border-(--bd-border) bg-(--bd-primary-50)">
+    <div className="px-5 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-(--bd-border) bg-(--bd-primary-50)">
       <span className="text-[12.5px] font-semibold text-primary-600 whitespace-nowrap">
         {t('bulk.selected', { count: selectedRows.length })}
       </span>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         {DASHBOARD_BULK_ACTIONS.map((a) => {
           const Ic = I[a.icon];
           return (
@@ -909,7 +1018,7 @@ function ParticipantTable<R extends ParticipantBase>({
 
   return (
     <div className="bd-card bd-shadow overflow-hidden">
-      <div className="px-5 py-4 flex items-center gap-3 border-b border-(--bd-border)">
+      <div className="px-5 py-4 flex flex-wrap sm:flex-nowrap items-center gap-3 border-b border-(--bd-border)">
         <div className="font-display font-bold text-[15px] text-ink-900">
           {kind === 'opp'
             ? t('table.opportunityProviders')
@@ -919,8 +1028,14 @@ function ParticipantTable<R extends ParticipantBase>({
           {t('table.count', { shown: visibleRows.length, total: total ?? rows.length })}
         </span>
 
-        <div className="ml-auto flex items-center gap-2">
-          <div className="relative">
+        {/* Below `sm` the controls take their own full-width row: search on
+            top, then the lifecycle select stretched beside the filter button,
+            which stays pinned right so its right-anchored menu stays on
+            screen (#793). From `sm` up nothing wraps — the layout is exactly the
+            original single row (`.bd-input`'s unlayered `width: 100%` would
+            otherwise push each control onto its own line). */}
+        <div className="w-full sm:w-auto sm:ml-auto flex flex-wrap sm:flex-nowrap items-center gap-2">
+          <div className="relative basis-full sm:basis-auto">
             <label htmlFor={searchId} className="sr-only">
               {t('aria.search_participants')}
             </label>
@@ -931,7 +1046,7 @@ function ParticipantTable<R extends ParticipantBase>({
             <input
               id={searchId}
               aria-label={t('aria.search_participants')}
-              className="bd-input w-[360px] shrink-0 text-[13px] py-1.5"
+              className="bd-input w-full sm:w-[360px] sm:shrink-0 text-[13px] py-1.5"
               style={{ paddingLeft: 36 }}
               placeholder={
                 kind === 'seeker' ? t('search.seekerPlaceholder') : t('search.providerPlaceholder')
@@ -943,7 +1058,7 @@ function ParticipantTable<R extends ParticipantBase>({
           {onLifecycleFilterChange ? (
             <select
               aria-label={t('filters.lifecycle_label')}
-              className="bd-input w-auto max-w-[150px] text-[12.5px] py-1.5 pr-7"
+              className="bd-input w-auto max-w-[150px] text-[12.5px] py-1.5 pr-7 flex-1 sm:flex-initial"
               value={lifecycleFilter}
               onChange={(e) => onLifecycleFilterChange(e.target.value as LifecycleFilterValue)}
             >
@@ -952,7 +1067,7 @@ function ParticipantTable<R extends ParticipantBase>({
               <option value="live">{t('filters.lifecycle_live')}</option>
             </select>
           ) : null}
-          <div ref={filterRef} className="relative">
+          <div ref={filterRef} className="relative ml-auto sm:ml-0">
             <Button
               kind={filterActive ? 'primary' : 'ghost'}
               icon={<I.filter size={14} />}
@@ -972,7 +1087,7 @@ function ParticipantTable<R extends ParticipantBase>({
                 // which sits at the bottom of the toolbar; once a filter
                 // returns no rows the table collapses, the page stops
                 // scrolling, and any option past the fold became unreachable.
-                className="absolute right-0 top-full mt-1 z-20 min-w-[180px] max-h-[min(320px,60vh)] overflow-y-auto bg-white border border-(--bd-border) rounded-[10px] bd-shadow-lg p-1"
+                className="absolute right-0 top-full mt-1 z-20 min-w-[180px] max-w-[calc(100vw-2rem)] max-h-[min(320px,60vh)] overflow-y-auto bg-white border border-(--bd-border) rounded-[10px] bd-shadow-lg p-1"
               >
                 {options.map((opt) => {
                   const active = statusFilter === opt.value;
@@ -1060,9 +1175,8 @@ function ParticipantTable<R extends ParticipantBase>({
           >
             <tr>
               <th
+                className="bd-sticky-col"
                 style={{
-                  position: 'sticky',
-                  left: 0,
                   zIndex: 5,
                   background: 'var(--bd-table-head-bg)',
                   width: 44,
@@ -1087,9 +1201,8 @@ function ParticipantTable<R extends ParticipantBase>({
                 />
               </th>
               <th
+                className="bd-sticky-col bd-sticky-col-2"
                 style={{
-                  position: 'sticky',
-                  left: 44,
                   zIndex: 5,
                   background: 'var(--bd-table-head-bg)',
                   minWidth: 240,
@@ -1109,9 +1222,8 @@ function ParticipantTable<R extends ParticipantBase>({
               return (
                 <tr key={r.id} className="fade-up">
                   <td
+                    className="bd-sticky-col"
                     style={{
-                      position: 'sticky',
-                      left: 0,
                       background: 'inherit',
                       backgroundColor: 'var(--bd-card)',
                       zIndex: 1,
@@ -1129,9 +1241,8 @@ function ParticipantTable<R extends ParticipantBase>({
                     )}
                   </td>
                   <td
+                    className="bd-sticky-col bd-sticky-col-2"
                     style={{
-                      position: 'sticky',
-                      left: 44,
                       background: 'inherit',
                       backgroundColor: 'var(--bd-card)',
                       zIndex: 1,
@@ -1262,14 +1373,14 @@ function PaginationFooter({
   // so dashboards with many pages stay readable.
   const pageList = buildPageList(page, totalPages);
   return (
-    <div className="px-5 py-3 border-t border-(--bd-border) flex items-center justify-between text-[12.5px] text-ink-500">
-      <div>
+    <div className="px-5 py-3 border-t border-(--bd-border) flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between text-[12.5px] text-ink-500">
+      <div className="text-center sm:text-left">
         {showSearchSummary
           ? t('pagination.matching', { shown: visibleCount, rowsOnPage })
           : t('pagination.showing', { from: start, to: end, total })}
       </div>
       {totalPages > 1 && !searchActive && (
-        <div className="flex items-center gap-1">
+        <div className="flex flex-wrap items-center justify-center gap-1">
           <button
             type="button"
             aria-label={t('aria.prev_page')}
@@ -1566,7 +1677,7 @@ function SeekersTab({ domainId }: Readonly<DomainTabProps>) {
           void handleRefresh();
         }}
       />
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard
           tone="new"
           icon="spark"
@@ -1939,7 +2050,7 @@ function ProvidersTab({ domainId }: Readonly<DomainTabProps>) {
           void handleRefresh();
         }}
       />
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard
           tone="new"
           icon="spark"

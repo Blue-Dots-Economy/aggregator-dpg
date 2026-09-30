@@ -1,41 +1,9 @@
 import type { AggregatorProfile } from '../types';
 import { jsonFetch } from './http';
 
-/**
- * Server-side patch shape mirrored from the API's
- * `ProfileUpdateBodySchema`. The API splits writes by destination:
- *   - `aggregator.*` → `aggregators` row (Beckn contact / locations live here)
- *   - `profile.*`    → `aggregator_profile` row (post-login extras)
- */
-export interface ProfileEditPayload {
-  aggregator?: {
-    name?: string;
-    url?: string | null;
-    contact?: {
-      name: string;
-      phone: string;
-      email: string;
-      alternatePhone?: string;
-      company?: string;
-      gstNumber?: string;
-    };
-    locations?: Array<{
-      geo: { type: string; coordinates?: unknown };
-      address?: Record<string, string | undefined>;
-    }>;
-  };
-  profile?: {
-    contact_name?: string | null;
-    personas?: Array<{ id: string; name: string }>;
-    services?: Array<{ id: string; name: string }>;
-  };
-}
-
 export interface ProfileService {
   get(): Promise<AggregatorProfile>;
-  update(patch: Partial<AggregatorProfile>): Promise<AggregatorProfile>;
-  edit(payload: ProfileEditPayload): Promise<AggregatorProfile>;
-  /** Raw read of the merged API response (pre-mapping) for edit pre-fill. */
+  /** Raw read of the API response (pre-mapping) for form pre-fill. */
   getRaw(): Promise<ProfileApiResponse>;
 }
 
@@ -53,20 +21,9 @@ interface BecknLocation {
   address?: Record<string, string | undefined>;
 }
 
-interface PersonaRef {
-  id: string;
-  name: string;
-}
-
-interface ServiceRef {
-  id: string;
-  name: string;
-}
-
 /**
- * Merged GET /v1/aggregators/profile/me response shape after the two-table
- * refactor. `aggregator.*` fields are flattened into the top level alongside
- * the post-login `aggregator_profile` fields.
+ * `GET /v1/aggregators/profile/me` response shape — the `aggregators` row
+ * flattened to the top level, plus the Keycloak-derived `identity` fragment.
  */
 export interface ProfileApiResponse {
   aggregator_id: string;
@@ -82,12 +39,6 @@ export interface ProfileApiResponse {
   locations: BecknLocation[];
   consent: { value: boolean; given_at: string; valid_till: string };
   status: 'pending' | 'active' | 'inactive' | 'retired';
-  // Post-login profile
-  contact_name: string | null;
-  personas: PersonaRef[];
-  services: ServiceRef[];
-  verified_certificate: unknown[];
-  profile_completed_at: string | null;
   identity?: {
     first_name: string | null;
     last_name: string | null;
@@ -97,7 +48,6 @@ export interface ProfileApiResponse {
     phone_verified: boolean;
     active: boolean;
   };
-  is_complete: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -111,35 +61,18 @@ class ApiProfileService implements ProfileService {
   async getRaw(): Promise<ProfileApiResponse> {
     return jsonFetch<ProfileApiResponse>('/api/aggregator/profile/me');
   }
-
-  async update(patch: Partial<AggregatorProfile>): Promise<AggregatorProfile> {
-    // Legacy display-shape patch (kept for callers that haven't migrated to
-    // `edit()`). Returns the freshly fetched profile so React Query stays
-    // consistent.
-    void patch;
-    return this.get();
-  }
-
-  async edit(payload: ProfileEditPayload): Promise<AggregatorProfile> {
-    const data = await jsonFetch<ProfileApiResponse>('/api/aggregator/profile/me', {
-      method: 'PATCH',
-      body: JSON.stringify(payload),
-    });
-    return mapToAggregatorProfile(data);
-  }
 }
 
 function mapToAggregatorProfile(api: ProfileApiResponse): AggregatorProfile {
-  // Display the Beckn contact.name as the coordinator. Fall back to KC
-  // identity (firstName + lastName) when the contact has not been set, then
-  // to the profile's separate contact_name label.
+  // Display the Beckn contact.name as the coordinator, falling back to the KC
+  // identity (firstName + lastName) when the contact has not been set.
   const identityFull = [api.identity?.first_name, api.identity?.last_name]
     .filter((p): p is string => Boolean(p && p.length > 0))
     .join(' ');
-  const coordinator = api.contact?.name || api.contact_name || identityFull;
+  const coordinator = api.contact?.name || identityFull;
 
   // Render the first location's postal address as a single line for the
-  // dashboard card. Profile-completion page can render the full array.
+  // dashboard card.
   const firstLoc = api.locations?.[0]?.address;
   const address = firstLoc
     ? [
@@ -152,18 +85,14 @@ function mapToAggregatorProfile(api: ProfileApiResponse): AggregatorProfile {
         .join(', ')
     : '';
 
-  // Personas + services live on the profile half of the response. Render
-  // them as bullet-separated lists for the existing dashboard layout.
-  const beneficiaries = api.personas.map((p) => p.name).join(' · ');
   // `addressRegion` only exists on rows registered before the address became a
   // single autocomplete field (#810), so fall back to the free-text address —
   // the only location text a current row carries. Without the fallback this
   // renders blank for every new registration.
-  const geographies = api.locations
+  const geographies = (api.locations ?? [])
     .map((loc) => loc.address?.addressRegion || loc.address?.streetAddress)
     .filter((r): r is string => Boolean(r && r.length > 0))
     .join(' · ');
-  const sectors = api.services.map((s) => s.name).join(' · ');
 
   const fmtDate = (iso: string | null | undefined): string => {
     if (!iso) return '';
@@ -182,10 +111,13 @@ function mapToAggregatorProfile(api: ProfileApiResponse): AggregatorProfile {
       mobile: api.contact?.phone ?? api.identity?.phone ?? '',
       email: api.contact?.email ?? api.identity?.email ?? '',
     },
-    beneficiaries,
+    // `beneficiaries` / `sectors` were fed by the removed `aggregator_profile`
+    // personas + services. No component renders them; kept on the display type
+    // so the dashboard shape is unchanged.
+    beneficiaries: '',
     address,
     geographies,
-    sectors,
+    sectors: '',
     network: {
       activeSeekers: 0,
       openRoles: 0,

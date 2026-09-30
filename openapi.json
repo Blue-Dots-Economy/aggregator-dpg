@@ -2119,94 +2119,6 @@
                     "status": {
                       "type": "string"
                     },
-                    "contact_name": {
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "personas": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "id": {
-                            "type": "string",
-                            "minLength": 1
-                          },
-                          "name": {
-                            "type": "string",
-                            "minLength": 1
-                          }
-                        },
-                        "required": [
-                          "id",
-                          "name"
-                        ],
-                        "additionalProperties": false
-                      }
-                    },
-                    "services": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "id": {
-                            "type": "string",
-                            "minLength": 1
-                          },
-                          "name": {
-                            "type": "string",
-                            "minLength": 1
-                          }
-                        },
-                        "required": [
-                          "id",
-                          "name"
-                        ],
-                        "additionalProperties": false
-                      }
-                    },
-                    "verified_certificate": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "key_id": {
-                            "type": "string",
-                            "minLength": 1
-                          },
-                          "public_key": {
-                            "type": "string",
-                            "minLength": 1
-                          },
-                          "algorithm": {
-                            "type": "string",
-                            "minLength": 1
-                          },
-                          "valid_till": {
-                            "type": "string",
-                            "format": "date-time"
-                          },
-                          "revoked_at": {
-                            "type": "string",
-                            "format": "date-time"
-                          }
-                        },
-                        "required": [
-                          "key_id",
-                          "public_key",
-                          "algorithm",
-                          "valid_till"
-                        ],
-                        "additionalProperties": false
-                      }
-                    },
-                    "profile_completed_at": {
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "is_complete": {
-                      "type": "boolean"
-                    },
                     "updated_at": {
                       "type": "string"
                     },
@@ -2267,12 +2179,6 @@
                     "locations",
                     "consent",
                     "status",
-                    "contact_name",
-                    "personas",
-                    "services",
-                    "verified_certificate",
-                    "profile_completed_at",
-                    "is_complete",
                     "updated_at",
                     "org_name",
                     "identity",
@@ -2494,7 +2400,7 @@
         "tags": [
           "aggregator-profile"
         ],
-        "description": "Partial update of profile fields (contact, locations, etc) for the caller aggregator. Validates the patch against profile.v1.json. Re-syncs to signalstack on success.",
+        "description": "Partial update of the caller aggregator (name / url / contact / locations / consent). Contact phone + email are mirrored to Keycloak before the DB write.",
         "requestBody": {
           "required": true,
           "content": {
@@ -2650,97 +2556,11 @@
                       }
                     },
                     "additionalProperties": false
-                  },
-                  "profile": {
-                    "type": "object",
-                    "properties": {
-                      "contact_name": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 200,
-                        "nullable": true
-                      },
-                      "personas": {
-                        "type": "array",
-                        "items": {
-                          "type": "object",
-                          "properties": {
-                            "id": {
-                              "type": "string",
-                              "minLength": 1
-                            },
-                            "name": {
-                              "type": "string",
-                              "minLength": 1
-                            }
-                          },
-                          "required": [
-                            "id",
-                            "name"
-                          ],
-                          "additionalProperties": false
-                        }
-                      },
-                      "services": {
-                        "type": "array",
-                        "items": {
-                          "type": "object",
-                          "properties": {
-                            "id": {
-                              "type": "string",
-                              "minLength": 1
-                            },
-                            "name": {
-                              "type": "string",
-                              "minLength": 1
-                            }
-                          },
-                          "required": [
-                            "id",
-                            "name"
-                          ],
-                          "additionalProperties": false
-                        }
-                      },
-                      "verified_certificate": {
-                        "type": "array",
-                        "items": {
-                          "type": "object",
-                          "properties": {
-                            "key_id": {
-                              "type": "string",
-                              "minLength": 1
-                            },
-                            "public_key": {
-                              "type": "string",
-                              "minLength": 1
-                            },
-                            "algorithm": {
-                              "type": "string",
-                              "minLength": 1
-                            },
-                            "valid_till": {
-                              "type": "string",
-                              "format": "date-time"
-                            },
-                            "revoked_at": {
-                              "type": "string",
-                              "format": "date-time"
-                            }
-                          },
-                          "required": [
-                            "key_id",
-                            "public_key",
-                            "algorithm",
-                            "valid_till"
-                          ],
-                          "additionalProperties": false
-                        }
-                      }
-                    },
-                    "additionalProperties": false
                   }
                 },
+                "required": [
+                  "aggregator"
+                ],
                 "additionalProperties": false
               }
             }
@@ -2911,94 +2731,6 @@
                     "status": {
                       "type": "string"
                     },
-                    "contact_name": {
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "personas": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "id": {
-                            "type": "string",
-                            "minLength": 1
-                          },
-                          "name": {
-                            "type": "string",
-                            "minLength": 1
-                          }
-                        },
-                        "required": [
-                          "id",
-                          "name"
-                        ],
-                        "additionalProperties": false
-                      }
-                    },
-                    "services": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "id": {
-                            "type": "string",
-                            "minLength": 1
-                          },
-                          "name": {
-                            "type": "string",
-                            "minLength": 1
-                          }
-                        },
-                        "required": [
-                          "id",
-                          "name"
-                        ],
-                        "additionalProperties": false
-                      }
-                    },
-                    "verified_certificate": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "key_id": {
-                            "type": "string",
-                            "minLength": 1
-                          },
-                          "public_key": {
-                            "type": "string",
-                            "minLength": 1
-                          },
-                          "algorithm": {
-                            "type": "string",
-                            "minLength": 1
-                          },
-                          "valid_till": {
-                            "type": "string",
-                            "format": "date-time"
-                          },
-                          "revoked_at": {
-                            "type": "string",
-                            "format": "date-time"
-                          }
-                        },
-                        "required": [
-                          "key_id",
-                          "public_key",
-                          "algorithm",
-                          "valid_till"
-                        ],
-                        "additionalProperties": false
-                      }
-                    },
-                    "profile_completed_at": {
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "is_complete": {
-                      "type": "boolean"
-                    },
                     "updated_at": {
                       "type": "string"
                     },
@@ -3016,12 +2748,6 @@
                     "locations",
                     "consent",
                     "status",
-                    "contact_name",
-                    "personas",
-                    "services",
-                    "verified_certificate",
-                    "profile_completed_at",
-                    "is_complete",
                     "updated_at",
                     "name"
                   ],
@@ -7915,7 +7641,7 @@
         "tags": [
           "public-registration"
         ],
-        "description": "Public endpoint reached by the QR-link registration form. Validates the submission against the link's domain schema (runtime Ajv — the body shape is dynamic per network/domain), creates the participant + user, and pushes to signalstack. Returns 201 on success, 409 (outcome:'skipped') when the phone/email is already registered with this aggregator, and 429 when the per-link rate limit trips.",
+        "description": "Public endpoint reached by the QR-link registration form. Validates the submission against the link's domain schema (runtime Ajv — the body shape is dynamic per network/domain), then creates the user + profile in signalstack. Returns 201 on success, 409 (outcome:'skipped') when the identity is already owned by ANOTHER aggregator, and 429 when the per-link rate limit trips. There is no de-duplication within an aggregator: a repeat submission creates a new profile and returns 201.",
         "requestBody": {
           "required": true,
           "content": {

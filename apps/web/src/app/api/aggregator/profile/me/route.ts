@@ -2,10 +2,7 @@
  * BFF proxy for aggregator profile read + update.
  *
  *   GET   /api/aggregator/profile/me
- *   PATCH /api/aggregator/profile/me  — partial update; body is split by the
- *                                       API into aggregator + profile writes
- *   PUT   /api/aggregator/profile/me  — legacy / full-replace alias kept for
- *                                       callers that haven't migrated yet
+ *   PATCH /api/aggregator/profile/me  — partial update of the aggregator row
  *
  * Requires an active session — `callApi` attaches the access token and
  * refreshes it transparently. The body and response are forwarded verbatim;
@@ -43,9 +40,4 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
   } catch (err) {
     return proxyFailureResponse(err, 'profile');
   }
-}
-
-// Legacy PUT alias — forwards to the API PATCH so older callers don't break.
-export async function PUT(req: NextRequest): Promise<NextResponse> {
-  return PATCH(req);
 }
