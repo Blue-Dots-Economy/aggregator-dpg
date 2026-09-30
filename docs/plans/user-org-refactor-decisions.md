@@ -132,6 +132,32 @@
 - **Commits:** local commits on `refactor/user-org-management` only.
 - **Not done:** no push, no PR, no release tag. Those are outward-facing and wait for you.
 
+### D17. R2 contact writes live in a shared Postgres helper, not a `ContactStore` class
+
+- **Where:** `apps/api/src/db/contact-writes.ts` (`linkContact`, `changeContact`, `gcContact`). Both Postgres stores call these **inside their own transaction**.
+- **Why:**
+  - The contact write and the FK write must be atomic.
+  - The interface rules forbid leaking a Drizzle transaction handle through an abstract contract.
+  - No caller outside the two stores writes contacts.
+  - The in-memory stores keep computing `contactId` as before.
+
+### D18. R2 writes are strict, where the R0 triggers were best-effort
+
+- **Behaviour:** An app write that clashes with another person's email or phone raises the DB unique violation. The stores map it to `DUPLICATE_EMAIL` / `DUPLICATE_PHONE`, and the routes map those to today's codes (coordinator: `USER_EXISTS` / `PHONE_EXISTS`; org create: `OWNER_ALREADY_REGISTERED` / `PHONE_EXISTS`).
+- **Why:** The pre-checks catch clashes first. The strict write closes the race between check and insert.
+
+### D19. ⚠ REVIEW — Re-keying a shared contact is refused with `409 CONFLICT`
+
+- **When:** The contact is shared by a coordinator and an org owner, and one role changes phone.
+- **What happens:** `changeContact` throws `SharedContactError`. The aggregator store maps it to `DUPLICATE`, and profile PATCH maps that to `409 CONFLICT`.
+- **Why:** Changing it would silently change the other role's phone while Keycloak does not follow.
+- **When it applies:** It is unreachable today (see D14). Phase 2 (one contact, two roles) gives this a proper flow.
+
+### D20. R2 clears the legacy copy on a contact change
+
+- **Behaviour:** A contact change also sets the legacy `contact` jsonb (or `owner_email` / `owner_phone`) to NULL.
+- **Why:** During the rollout, the legacy unique indexes still exist. A stale legacy copy would block someone else from reusing the old email or phone through an R1 pod.
+
 ---
 
 ## Review round 1 (R0/R1) — findings and fixes

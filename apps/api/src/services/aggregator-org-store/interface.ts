@@ -77,6 +77,10 @@ export type OrgStoreError =
   | { code: 'NOT_FOUND'; message: string }
   | { code: 'DUPLICATE_SLUG'; message: string }
   | { code: 'DUPLICATE_NAME'; message: string }
+  /** The owner's email already belongs to another person (`contact`, 0025). */
+  | { code: 'DUPLICATE_EMAIL'; message: string }
+  /** The owner's phone already belongs to another person (`contact`, 0025). */
+  | { code: 'DUPLICATE_PHONE'; message: string }
   | { code: 'DB_UNAVAILABLE'; message: string };
 
 export type OrgStoreResult<T> = { ok: true; value: T } | { ok: false; error: OrgStoreError };

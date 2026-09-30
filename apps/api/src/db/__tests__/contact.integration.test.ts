@@ -393,8 +393,7 @@ suite('contact (migration 0025) — integration', () => {
         expect(byId[blank.rows[0].id]).toBeNull();
       }));
 
-    it('the store response is byte-identical to the legacy jsonb (D9)', async () => {
-      const store = new PostgresAggregatorStore();
+    it('a legacy-written row reads back byte-identical to its jsonb (D9)', async () => {
       const email = `it-${randomUUID().slice(0, 8)}@example.org`;
       const legacy = {
         name: ' Padded Name ',
@@ -403,12 +402,31 @@ suite('contact (migration 0025) — integration', () => {
         company: 'Acme',
         gstNumber: 'G1',
       };
+      const ins = await pool.query(
+        `INSERT INTO aggregators (org_slug, actor_type, name, contact, consent, created_by, updated_by)
+         VALUES ($1, 'aggregator', 'IT', $2, $3, 'it', 'it') RETURNING id, contact`,
+        [`it-${randomUUID().slice(0, 8)}`, JSON.stringify(legacy), JSON.stringify(CONSENT)],
+      );
+      try {
+        const found = await new PostgresAggregatorStore().findById(ins.rows[0].id);
+        expect(found.ok).toBe(true);
+        if (!found.ok || !found.value) return;
+        expect(JSON.stringify(found.value.contact)).toBe(JSON.stringify(ins.rows[0].contact));
+      } finally {
+        await pool.query('DELETE FROM aggregators WHERE id = $1', [ins.rows[0].id]);
+      }
+    });
+
+    it('an app-written row serialises exactly as the legacy jsonb would have (D9)', async () => {
+      const store = new PostgresAggregatorStore();
+      const email = `it-${randomUUID().slice(0, 8)}@example.org`;
+      const input = { name: 'Asha', email, phone: phone(), gstNumber: 'G1', company: 'Acme' };
       const created = await store.create({
         orgSlug: `it-${randomUUID().slice(0, 8)}`,
         actorType: 'aggregator',
         name: 'IT Org',
         type: null,
-        contact: legacy,
+        contact: input,
         consent: CONSENT,
         createdBy: 'it',
         updatedBy: 'it',
@@ -416,12 +434,84 @@ suite('contact (migration 0025) — integration', () => {
       expect(created.ok).toBe(true);
       if (!created.ok) return;
       try {
-        const raw = await pool.query('SELECT contact FROM aggregators WHERE id = $1', [
+        // What Postgres would have stored (and returned) for this object.
+        const asJsonb = await pool.query('SELECT $1::jsonb AS j', [JSON.stringify(input)]);
+        expect(JSON.stringify(created.value.contact)).toBe(JSON.stringify(asJsonb.rows[0].j));
+        const raw = await pool.query('SELECT contact, contact_id FROM aggregators WHERE id = $1', [
           created.value.id,
         ]);
-        expect(JSON.stringify(created.value.contact)).toBe(JSON.stringify(raw.rows[0].contact));
+        expect(raw.rows[0].contact).toBeNull(); // legacy column no longer written
+        expect(raw.rows[0].contact_id).toBe(contactId(email, input.phone));
       } finally {
         await store.deleteById(created.value.id);
+      }
+    });
+
+    it('app writes are strict: a second person with the same email is DUPLICATE_EMAIL', async () => {
+      const store = new PostgresAggregatorStore();
+      const email = `it-${randomUUID().slice(0, 8)}@example.org`;
+      const base = {
+        actorType: 'aggregator' as const,
+        name: 'IT Org',
+        type: null,
+        consent: CONSENT,
+        createdBy: 'it',
+        updatedBy: 'it',
+      };
+      const first = await store.create({
+        ...base,
+        orgSlug: `it-${randomUUID().slice(0, 8)}`,
+        contact: { name: 'A', email, phone: phone() },
+      });
+      expect(first.ok).toBe(true);
+      const second = await store.create({
+        ...base,
+        orgSlug: `it-${randomUUID().slice(0, 8)}`,
+        contact: { name: 'B', email, phone: phone() },
+      });
+      try {
+        expect(second.ok).toBe(false);
+        if (!second.ok) expect(second.error.code).toBe('DUPLICATE_EMAIL');
+      } finally {
+        if (first.ok) await store.deleteById(first.value.id);
+      }
+    });
+
+    it('refuses to re-key a contact shared by a coordinator and an org owner', async () => {
+      const email = `it-${randomUUID().slice(0, 8)}@example.org`;
+      const p = phone();
+      const aggStore = new PostgresAggregatorStore();
+      const orgStore = new PostgresAggregatorOrgStore();
+      const coord = await aggStore.create({
+        orgSlug: `it-${randomUUID().slice(0, 8)}`,
+        actorType: 'aggregator',
+        name: 'IT Org',
+        type: null,
+        contact: { name: 'Both', email, phone: p },
+        consent: CONSENT,
+        createdBy: 'it',
+        updatedBy: 'it',
+      });
+      const org = await orgStore.create({
+        slug: `it-org-${randomUUID().slice(0, 8)}`,
+        displayName: `IT Org ${randomUUID().slice(0, 8)}`,
+        ownerEmail: email,
+        ownerPhone: p,
+      });
+      if (!coord.ok || !org.ok) throw new Error('setup failed');
+      try {
+        expect(coord.value.contactId).toBe(org.value.contactId);
+        const moved = await aggStore.update(coord.value.id, {
+          contact: { name: 'Both', email, phone: phone() },
+          updatedBy: 'it',
+        });
+        expect(moved.ok).toBe(false);
+        if (!moved.ok) expect(moved.error.code).toBe('DUPLICATE');
+        const orgAfter = await orgStore.findById(org.value.id);
+        expect(orgAfter.ok && orgAfter.value?.ownerPhone).toBe(p);
+      } finally {
+        await aggStore.deleteById(coord.value.id);
+        await orgStore.deleteById(org.value.id);
       }
     });
 

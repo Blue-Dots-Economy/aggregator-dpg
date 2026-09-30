@@ -7,17 +7,24 @@
  *
  * Person-contact data is read from the `contact` table through
  * `aggregators.contact_id` (migration 0025) and composed back into the Beckn
- * `contact` shape, so callers and the API contract are unchanged. Writes still
- * go to the legacy `contact` jsonb during the contact rollout; the database
- * sync triggers keep `contact` / `contact_id` / `contact_extra` in step, which
- * is why every write re-reads the row instead of trusting `RETURNING` (the
- * AFTER UPDATE trigger may re-key the contact after the statement returns).
+ * `contact` shape, so callers and the API contract are unchanged. Writes go
+ * to `contact` directly, in the same transaction as the row (see
+ * `db/contact-writes.ts`); the legacy `contact` jsonb is written as NULL and is
+ * dropped in the next release. Every write re-reads the joined row, since a
+ * contact re-key cascades after `RETURNING` is produced.
  */
 
 import { and, desc, eq, isNull, lt, or, sql, type SQL } from 'drizzle-orm';
 import type { BecknContact } from '@aggregator-dpg/shared-primitives/aggregator';
 import { logger } from '../../logger.js';
 import { aggregators, contact } from '../../db/schema.js';
+import {
+  changeContact,
+  gcContact,
+  linkContact,
+  SharedContactError,
+  splitBecknContact,
+} from '../../db/contact-writes.js';
 import { getDb } from '../../db/client.js';
 import {
   PG_UNIQUE_VIOLATION,
@@ -37,46 +44,60 @@ import {
 } from './interface.js';
 import type { AggregatorStatus } from '@aggregator-dpg/shared-primitives/aggregator';
 
+/** Internal: an INSERT … RETURNING produced no row. */
+class NoRowError extends Error {}
+
 export class PostgresAggregatorStore extends AggregatorStoreBase {
   async create(input: CreateAggregatorInput): Promise<StoreResult<Aggregator>> {
     const start = Date.now();
+    let id: string;
     try {
-      const rows = await getDb()
-        .insert(aggregators)
-        .values({
-          orgSlug: input.orgSlug,
-          actorType: input.actorType,
-          name: input.name,
-          type: input.type ?? null,
-          url: input.url ?? null,
-          contact: input.contact,
-          locations: input.locations ?? [],
-          consent: input.consent,
-          createdBy: input.createdBy,
-          updatedBy: input.updatedBy,
-          parentOrgId: input.parentOrgId ?? null,
-          inviteEmail: input.inviteEmail ?? null,
-          profile: input.profile ?? {},
-          profileRef: input.profileRef ?? null,
-        })
-        .returning({ id: aggregators.id });
-      const inserted = rows[0];
-      if (!inserted) {
+      // The contact and the row that references it are written atomically.
+      // The legacy `contact` jsonb is no longer written (NULL); the database
+      // sync triggers ignore a NULL legacy value.
+      id = await getDb().transaction(async (tx) => {
+        const { identity, extra } = splitBecknContact(input.contact);
+        const contactId = await linkContact(tx, identity);
+        const rows = await tx
+          .insert(aggregators)
+          .values({
+            orgSlug: input.orgSlug,
+            actorType: input.actorType,
+            name: input.name,
+            type: input.type ?? null,
+            url: input.url ?? null,
+            contactId,
+            contactExtra: extra,
+            contact: null,
+            locations: input.locations ?? [],
+            consent: input.consent,
+            createdBy: input.createdBy,
+            updatedBy: input.updatedBy,
+            parentOrgId: input.parentOrgId ?? null,
+            inviteEmail: input.inviteEmail ?? null,
+            profile: input.profile ?? {},
+            profileRef: input.profileRef ?? null,
+          })
+          .returning({ id: aggregators.id });
+        if (!rows[0]) throw new NoRowError();
+        return rows[0].id;
+      });
+    } catch (err: unknown) {
+      if (err instanceof NoRowError) {
         return { ok: false, error: { code: 'DB_UNAVAILABLE', message: 'no row returned' } };
       }
-      const created = await this.reread('aggregatorStore.create', inserted.id);
-      if (created.ok) {
-        logger.info({
-          operation: 'aggregatorStore.create',
-          status: 'success',
-          latency_ms: Date.now() - start,
-          aggregator_id: inserted.id,
-        });
-      }
-      return created;
-    } catch (err: unknown) {
       return this.mapWriteError('aggregatorStore.create', err, input.orgSlug, start);
     }
+    const created = await this.reread('aggregatorStore.create', id);
+    if (created.ok) {
+      logger.info({
+        operation: 'aggregatorStore.create',
+        status: 'success',
+        latency_ms: Date.now() - start,
+        aggregator_id: id,
+      });
+    }
+    return created;
   }
 
   async findById(id: string): Promise<StoreResult<Aggregator | null>> {
@@ -164,7 +185,6 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
     if (patch.name !== undefined) updates['name'] = patch.name;
     if (patch.type !== undefined) updates['type'] = patch.type;
     if (patch.url !== undefined) updates['url'] = patch.url;
-    if (patch.contact !== undefined) updates['contact'] = patch.contact;
     if (patch.locations !== undefined) updates['locations'] = patch.locations;
     if (patch.consent !== undefined) updates['consent'] = patch.consent;
     if (patch.status !== undefined) updates['status'] = patch.status;
@@ -172,16 +192,54 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
     if (patch.rejectedAt !== undefined) updates['rejectedAt'] = patch.rejectedAt;
 
     try {
-      const rows = await getDb()
-        .update(aggregators)
-        .set(updates)
-        .where(eq(aggregators.id, id))
-        .returning({ id: aggregators.id });
-      if (!rows[0]) return { ok: false, error: { code: 'NOT_FOUND', message: id } };
-      return this.reread('aggregatorStore.update', id);
+      const found = await getDb().transaction(async (tx) => {
+        if (patch.contact !== undefined) {
+          // Lock the row, move its contact (re-key / repoint, plan §3.3), then
+          // collect the contact it no longer uses.
+          const [current] = await tx
+            .select({ contactId: aggregators.contactId })
+            .from(aggregators)
+            .where(eq(aggregators.id, id))
+            .for('update');
+          if (!current) return false;
+          const { identity, extra } = splitBecknContact(patch.contact);
+          const nextId = await changeContact(tx, current.contactId, identity);
+          updates['contactId'] = nextId;
+          updates['contactExtra'] = extra;
+          // Clear the stale legacy copy so its unique index can never block
+          // someone else from the old email/phone during the rollout.
+          updates['contact'] = null;
+          const rows = await tx
+            .update(aggregators)
+            .set(updates)
+            .where(eq(aggregators.id, id))
+            .returning({ id: aggregators.id });
+          if (current.contactId && current.contactId !== nextId) {
+            await gcContact(tx, current.contactId);
+          }
+          return rows.length > 0;
+        }
+        const rows = await tx
+          .update(aggregators)
+          .set(updates)
+          .where(eq(aggregators.id, id))
+          .returning({ id: aggregators.id });
+        return rows.length > 0;
+      });
+      if (!found) return { ok: false, error: { code: 'NOT_FOUND', message: id } };
     } catch (err: unknown) {
+      if (err instanceof SharedContactError) {
+        logger.warn({
+          operation: 'aggregatorStore.update',
+          status: 'failure',
+          error: 'SHARED_CONTACT',
+          aggregator_id: id,
+        });
+        return { ok: false, error: { code: 'DUPLICATE', message: err.message } };
+      }
       return this.mapWriteError('aggregatorStore.update', err, id, Date.now());
     }
+    return this.reread('aggregatorStore.update', id);
   }
 
   async updateStatus(
@@ -301,6 +359,18 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
     const code = pgErrorCode(err);
     const constraint = pgConstraint(err) ?? '';
     const message = (err as Error).message ?? 'unknown';
+
+    // contactId() rejects a non-canonical phone before any SQL runs — the
+    // same class of problem the database CHECK would have reported.
+    if (err instanceof TypeError && message.startsWith('contactId:')) {
+      logger.warn({
+        operation: op,
+        status: 'failure',
+        error: 'CHECK_VIOLATION',
+        latency_ms: Date.now() - start,
+      });
+      return { ok: false, error: { code: 'CHECK_VIOLATION', message } };
+    }
 
     if (code === PG_UNIQUE_VIOLATION) {
       // Match each constraint explicitly. Defaulting the unknown case to

@@ -6,10 +6,10 @@
  * `OrgStoreError` codes so callers never see raw pg error fields.
  *
  * The owner's email / phone / name are read from the `contact` table through
- * `aggregator_orgs.contact_id` (migration 0025). Writes still set the legacy
- * `owner_email` / `owner_phone` columns during the contact rollout; the
- * database sync triggers link and re-key the contact, so every write re-reads
- * the row rather than trusting `RETURNING`. Keycloak keeps its own copy of the
+ * `aggregator_orgs.contact_id` (migration 0025). Writes go to `contact`
+ * directly in the same transaction (`db/contact-writes.ts`); the legacy
+ * `owner_email` / `owner_phone` columns are written as NULL and dropped in the
+ * next release. Every write re-reads the joined row. Keycloak keeps its own copy of the
  * owner's login identifiers.
  */
 
@@ -18,6 +18,12 @@ import { aggregatorOrgs, contact } from '../../db/schema.js';
 import { getDb } from '../../db/client.js';
 import { PG_UNIQUE_VIOLATION, pgErrorCode, pgConstraint } from '../../db/pg-error.js';
 import { logger } from '../../logger.js';
+import {
+  changeContact,
+  gcContact,
+  linkContact,
+  SharedContactError,
+} from '../../db/contact-writes.js';
 import {
   AggregatorOrgStoreBase,
   type AggregatorOrg,
@@ -32,32 +38,30 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
     let id: string;
     try {
       id = await getDb().transaction(async (tx) => {
+        // The owner's contact and the org row are written atomically; the
+        // legacy owner_email / owner_phone columns are left NULL (dropped in
+        // the next release).
+        const contactId = await linkContact(tx, {
+          email: input.ownerEmail,
+          phone: input.ownerPhone ?? null,
+          name: input.ownerName ?? null,
+        });
         const [row] = await tx
           .insert(aggregatorOrgs)
           .values({
             slug: input.slug,
             displayName: input.displayName,
             state: input.state ?? null,
-            ownerEmail: input.ownerEmail.trim().toLowerCase(),
-            ownerPhone: input.ownerPhone ?? null,
+            contactId,
+            ownerEmail: null,
+            ownerPhone: null,
             ownerKcSub: input.ownerKcSub ?? null,
             kcGroupId: input.kcGroupId ?? null,
             profile: input.profile ?? {},
             profileRef: input.profileRef ?? null,
           })
-          .returning({ id: aggregatorOrgs.id, contactId: aggregatorOrgs.contactId });
+          .returning({ id: aggregatorOrgs.id });
         if (!row) throw new Error('insert returned no row');
-        // The legacy org columns carry no owner name, so the sync trigger links
-        // the contact without one. Record it here — an existing name wins
-        // (the same person may already be named, e.g. as a coordinator).
-        // Stored verbatim (as the API echoes names); blank means "no name".
-        const name = input.ownerName?.trim() ? input.ownerName : undefined;
-        if (name && row.contactId) {
-          await tx
-            .update(contact)
-            .set({ name })
-            .where(and(eq(contact.id, row.contactId), isNull(contact.name)));
-        }
         return row.id;
       });
     } catch (e) {
@@ -129,15 +133,49 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
   }
 
   async update(id: string, patch: UpdateOrgPatch): Promise<OrgStoreResult<AggregatorOrg>> {
+    const { ownerPhone, ...rest } = patch;
     try {
-      const [row] = await getDb()
-        .update(aggregatorOrgs)
-        .set({ ...patch, updatedAt: new Date() })
-        .where(eq(aggregatorOrgs.id, id))
-        .returning({ id: aggregatorOrgs.id });
-      if (!row) return errResult('NOT_FOUND', id);
+      const found = await getDb().transaction(async (tx) => {
+        const set: Record<string, unknown> = { ...rest, updatedAt: new Date() };
+        if (ownerPhone !== undefined) {
+          // The phone lives on the owner's contact: move it (plan §3.3).
+          const [current] = await tx
+            .select({ o: aggregatorOrgs, c: contact })
+            .from(aggregatorOrgs)
+            .leftJoin(contact, eq(contact.id, aggregatorOrgs.contactId))
+            .where(eq(aggregatorOrgs.id, id))
+            .for('update', { of: aggregatorOrgs });
+          if (!current) return false;
+          const email = current.c?.email ?? current.o.ownerEmail;
+          if (!email) throw new Error('org has no owner email to re-key');
+          const nextId = await changeContact(tx, current.o.contactId, {
+            email,
+            phone: ownerPhone,
+            name: null,
+          });
+          set['contactId'] = nextId;
+          set['ownerEmail'] = null;
+          set['ownerPhone'] = null;
+          const rows = await tx
+            .update(aggregatorOrgs)
+            .set(set)
+            .where(eq(aggregatorOrgs.id, id))
+            .returning({ id: aggregatorOrgs.id });
+          if (current.o.contactId && current.o.contactId !== nextId) {
+            await gcContact(tx, current.o.contactId);
+          }
+          return rows.length > 0;
+        }
+        const rows = await tx
+          .update(aggregatorOrgs)
+          .set(set)
+          .where(eq(aggregatorOrgs.id, id))
+          .returning({ id: aggregatorOrgs.id });
+        return rows.length > 0;
+      });
+      if (!found) return errResult('NOT_FOUND', id);
     } catch (e) {
-      return errResult('DB_UNAVAILABLE', (e as Error).message);
+      return mapInsertError(e);
     }
     return this.reread(id);
   }
@@ -255,6 +293,15 @@ function mapInsertError(e: unknown): OrgStoreResult<never> {
     if (constraint.includes('aggregator_orgs_slug_active_unique')) {
       return errResult('DUPLICATE_SLUG', 'slug already in use');
     }
+    if (constraint.includes('contact_email_unique')) {
+      return errResult('DUPLICATE_EMAIL', 'owner email already belongs to another person');
+    }
+    if (constraint.includes('contact_phone_unique')) {
+      return errResult('DUPLICATE_PHONE', 'owner phone already belongs to another person');
+    }
+  }
+  if (e instanceof SharedContactError) {
+    return errResult('DUPLICATE_EMAIL', e.message);
   }
   return errResult('DB_UNAVAILABLE', (e as Error).message ?? 'insert failed');
 }

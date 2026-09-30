@@ -38,6 +38,9 @@ function makeFakeDb(resolveRaw: (chain: ChainCall[]) => unknown): unknown {
   // resolve to `{ a, c }` pairs. Tests keep returning flat rows; wrap them
   // here, deriving the joined contact row from the fixture's `contact`.
   const resolve = (chain: ChainCall[]): unknown => {
+    // `db.execute(sql…)` (contact FOR KEY SHARE / reference count) returns a
+    // pg QueryResult: one row held, referenced once (not shared).
+    if (chain[0]?.method === 'execute') return { rows: [{ n: 1 }] };
     const out = resolveRaw(chain);
     if (!chain.some((c) => c.method === 'leftJoin') || !Array.isArray(out)) return out;
     return out.map((r: Record<string, unknown>) => {
@@ -63,6 +66,10 @@ function makeFakeDb(resolveRaw: (chain: ChainCall[]) => unknown): unknown {
       {},
       {
         get(_target, prop: string | symbol) {
+          if (prop === 'transaction') {
+            // Run the callback against a fresh chain, like Drizzle does.
+            return (fn: (tx: unknown) => Promise<unknown>) => fn(build([]));
+          }
           if (prop === 'then') {
             return (onFulfilled: (v: unknown) => unknown, onRejected?: (e: unknown) => unknown) => {
               let result: unknown;
@@ -89,6 +96,13 @@ function makeFakeDb(resolveRaw: (chain: ChainCall[]) => unknown): unknown {
 /** Returns the args of the first recorded call to `method`, if any. */
 function callArgs(chain: ChainCall[], method: string): unknown[] | undefined {
   return chain.find((c) => c.method === method)?.args;
+}
+
+/** Whether `chain` is the INSERT/UPDATE of the `aggregators` row itself. */
+function isAggregatorWrite(chain: ChainCall[]): boolean {
+  const values = callArgs(chain, 'values')?.[0] as Record<string, unknown> | undefined;
+  const set = callArgs(chain, 'set')?.[0] as Record<string, unknown> | undefined;
+  return values?.['orgSlug'] !== undefined || set?.['updatedBy'] !== undefined;
 }
 
 function hasCall(chain: ChainCall[], method: string): boolean {
@@ -151,9 +165,9 @@ describe('PostgresAggregatorStore.create', () => {
   it('inserts the mapped row and returns it on success', async () => {
     let captured: ChainCall[] = [];
     const db = makeFakeDb((chain) => {
-      // Writes are followed by a joined re-read; keep the first chain seen
-      // unless a later one is the write itself.
-      if (!hasCall(chain, 'leftJoin') || captured.length === 0) captured = chain;
+      // A write runs contact statements, then the aggregators statement, then
+      // a joined re-read; keep the aggregators write (or the first read).
+      if (isAggregatorWrite(chain) || captured.length === 0) captured = chain;
       return [makeRow({ id: 'agg-1' })];
     });
     _setDbClients(null, db as never);
@@ -174,9 +188,9 @@ describe('PostgresAggregatorStore.create', () => {
   it('defaults optional fields (url, locations, parentOrgId) when omitted', async () => {
     let captured: ChainCall[] = [];
     const db = makeFakeDb((chain) => {
-      // Writes are followed by a joined re-read; keep the first chain seen
-      // unless a later one is the write itself.
-      if (!hasCall(chain, 'leftJoin') || captured.length === 0) captured = chain;
+      // A write runs contact statements, then the aggregators statement, then
+      // a joined re-read; keep the aggregators write (or the first read).
+      if (isAggregatorWrite(chain) || captured.length === 0) captured = chain;
       return [makeRow()];
     });
     _setDbClients(null, db as never);
@@ -383,9 +397,9 @@ describe('PostgresAggregatorStore.findById / findBySlug / findByContactPhone / f
   it('findByContactEmail lowercases the lookup value', async () => {
     let captured: ChainCall[] = [];
     const db = makeFakeDb((chain) => {
-      // Writes are followed by a joined re-read; keep the first chain seen
-      // unless a later one is the write itself.
-      if (!hasCall(chain, 'leftJoin') || captured.length === 0) captured = chain;
+      // A write runs contact statements, then the aggregators statement, then
+      // a joined re-read; keep the aggregators write (or the first read).
+      if (isAggregatorWrite(chain) || captured.length === 0) captured = chain;
       return [
         makeRow({
           contactEmail: 'mixed@x.org',
@@ -555,9 +569,9 @@ describe('PostgresAggregatorStore.update / updateStatus', () => {
   it('includes only the patch fields that were provided', async () => {
     let captured: ChainCall[] = [];
     const db = makeFakeDb((chain) => {
-      // Writes are followed by a joined re-read; keep the first chain seen
-      // unless a later one is the write itself.
-      if (!hasCall(chain, 'leftJoin') || captured.length === 0) captured = chain;
+      // A write runs contact statements, then the aggregators statement, then
+      // a joined re-read; keep the aggregators write (or the first read).
+      if (isAggregatorWrite(chain) || captured.length === 0) captured = chain;
       return [makeRow({ name: 'New Name' })];
     });
     _setDbClients(null, db as never);
@@ -575,9 +589,9 @@ describe('PostgresAggregatorStore.update / updateStatus', () => {
   it('includes every settable field when the full patch is provided', async () => {
     let captured: ChainCall[] = [];
     const db = makeFakeDb((chain) => {
-      // Writes are followed by a joined re-read; keep the first chain seen
-      // unless a later one is the write itself.
-      if (!hasCall(chain, 'leftJoin') || captured.length === 0) captured = chain;
+      // A write runs contact statements, then the aggregators statement, then
+      // a joined re-read; keep the aggregators write (or the first read).
+      if (isAggregatorWrite(chain) || captured.length === 0) captured = chain;
       return [makeRow()];
     });
     _setDbClients(null, db as never);
@@ -606,6 +620,8 @@ describe('PostgresAggregatorStore.update / updateStatus', () => {
         'type',
         'url',
         'contact',
+        'contactId',
+        'contactExtra',
         'locations',
         'consent',
         'status',
@@ -646,9 +662,9 @@ describe('PostgresAggregatorStore.update / updateStatus', () => {
   it('updateStatus delegates to update with the status field set', async () => {
     let captured: ChainCall[] = [];
     const db = makeFakeDb((chain) => {
-      // Writes are followed by a joined re-read; keep the first chain seen
-      // unless a later one is the write itself.
-      if (!hasCall(chain, 'leftJoin') || captured.length === 0) captured = chain;
+      // A write runs contact statements, then the aggregators statement, then
+      // a joined re-read; keep the aggregators write (or the first read).
+      if (isAggregatorWrite(chain) || captured.length === 0) captured = chain;
       return [makeRow({ status: 'active' })];
     });
     _setDbClients(null, db as never);
@@ -706,9 +722,9 @@ describe('PostgresAggregatorStore.updateSignalstackOrgId', () => {
   it('stamps the signalstack org id and returns the mapped row', async () => {
     let captured: ChainCall[] = [];
     const db = makeFakeDb((chain) => {
-      // Writes are followed by a joined re-read; keep the first chain seen
-      // unless a later one is the write itself.
-      if (!hasCall(chain, 'leftJoin') || captured.length === 0) captured = chain;
+      // A write runs contact statements, then the aggregators statement, then
+      // a joined re-read; keep the aggregators write (or the first read).
+      if (isAggregatorWrite(chain) || captured.length === 0) captured = chain;
       return [makeRow({ signalstackOrgId: 'ss-org-1' })];
     });
     _setDbClients(null, db as never);

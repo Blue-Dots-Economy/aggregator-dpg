@@ -402,7 +402,14 @@ export async function registerAggregatorOrgRoutes(app: FastifyInstance): Promise
         if (created.error.code === 'DUPLICATE_SLUG') {
           throw httpError('ORG_SLUG_TAKEN', { fields: { slug } });
         }
-
+        // Backstops for the contact pre-check above (a concurrent registration
+        // took the email/phone between the check and the insert).
+        if (created.error.code === 'DUPLICATE_EMAIL') {
+          throw httpError('OWNER_ALREADY_REGISTERED', { fields: { email: body.owner.email } });
+        }
+        if (created.error.code === 'DUPLICATE_PHONE') {
+          throw httpError('PHONE_EXISTS', { fields: { phone: phoneE164 } });
+        }
         throw httpError('DB_UNAVAILABLE', {
           cause: new Error(created.error.message),
           fields: { sub_operation: 'orgStore.create' },

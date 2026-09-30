@@ -17,6 +17,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { PostgresAggregatorOrgStore } from '../postgres.js';
 import { _setDbClients } from '../../../db/client.js';
 import type { AggregatorOrg, CreateOrgInput } from '../interface.js';
+import { contactId } from '@aggregator-dpg/shared-primitives/contact';
 
 // ─── Fake Drizzle chain ─────────────────────────────────────────────────────
 
@@ -30,6 +31,7 @@ function makeFakeDb(resolveRaw: (chain: ChainCall[]) => unknown): unknown {
   // resolve to `{ o, c }` pairs. Tests keep returning flat rows; wrap them
   // here, deriving the joined contact from the fixture's owner fields.
   const resolve = (chain: ChainCall[]): unknown => {
+    if (chain[0]?.method === 'execute') return { rows: [{ n: 1 }] };
     const out = resolveRaw(chain);
     if (!chain.some((c) => c.method === 'leftJoin') || !Array.isArray(out)) return out;
     return out.map((r: Record<string, unknown>) =>
@@ -84,6 +86,13 @@ function callArgs(chain: ChainCall[], method: string): unknown[] | undefined {
   return chain.find((c) => c.method === method)?.args;
 }
 
+/** Whether `chain` is the INSERT/UPDATE of the `aggregator_orgs` row itself. */
+function isOrgWrite(chain: ChainCall[]): boolean {
+  const values = callArgs(chain, 'values')?.[0] as Record<string, unknown> | undefined;
+  const set = callArgs(chain, 'set')?.[0] as Record<string, unknown> | undefined;
+  return values?.['slug'] !== undefined || set?.['updatedAt'] !== undefined;
+}
+
 afterEach(() => {
   _setDbClients(null, null);
 });
@@ -123,11 +132,12 @@ function makeInput(overrides: Partial<CreateOrgInput> = {}): CreateOrgInput {
 // ─── create ─────────────────────────────────────────────────────────────────
 
 describe('PostgresAggregatorOrgStore.create', () => {
-  it('inserts the mapped row, lowercasing the owner email', async () => {
+  it('inserts the mapped row linked to the owner contact (legacy owner columns NULL)', async () => {
     let captured: ChainCall[] = [];
     const db = makeFakeDb((chain) => {
-      // Writes are followed by a joined re-read; keep the write's chain.
-      if (!chain.some((c) => c.method === 'leftJoin') || captured.length === 0) captured = chain;
+      // A write runs contact statements, then the org statement, then a
+      // joined re-read; keep the org write (or the first read).
+      if (isOrgWrite(chain) || captured.length === 0) captured = chain;
       return [makeRow({ ownerEmail: 'owner@test.local' })];
     });
     _setDbClients(null, db as never);
@@ -141,7 +151,9 @@ describe('PostgresAggregatorOrgStore.create', () => {
     expect(callArgs(captured, 'values')?.[0]).toMatchObject({
       slug: 'test-org',
       displayName: 'Test Org',
-      ownerEmail: 'owner@test.local',
+      // The lowercased email lives on the contact, keyed by its hash.
+      contactId: contactId('owner@test.local', null),
+      ownerEmail: null,
       state: null,
       ownerPhone: null,
       ownerKcSub: null,
@@ -381,8 +393,9 @@ describe('PostgresAggregatorOrgStore.listPending', () => {
   it('builds a compound where clause when updatedBefore is given', async () => {
     let captured: ChainCall[] = [];
     const db = makeFakeDb((chain) => {
-      // Writes are followed by a joined re-read; keep the write's chain.
-      if (!chain.some((c) => c.method === 'leftJoin') || captured.length === 0) captured = chain;
+      // A write runs contact statements, then the org statement, then a
+      // joined re-read; keep the org write (or the first read).
+      if (isOrgWrite(chain) || captured.length === 0) captured = chain;
       return [makeRow({ status: 'pending' })];
     });
     _setDbClients(null, db as never);
@@ -426,8 +439,9 @@ describe('PostgresAggregatorOrgStore.update', () => {
   it('merges the patch and stamps updatedAt', async () => {
     let captured: ChainCall[] = [];
     const db = makeFakeDb((chain) => {
-      // Writes are followed by a joined re-read; keep the write's chain.
-      if (!chain.some((c) => c.method === 'leftJoin') || captured.length === 0) captured = chain;
+      // A write runs contact statements, then the org statement, then a
+      // joined re-read; keep the org write (or the first read).
+      if (isOrgWrite(chain) || captured.length === 0) captured = chain;
       return [makeRow({ displayName: 'New Name' })];
     });
     _setDbClients(null, db as never);
@@ -501,8 +515,9 @@ describe('PostgresAggregatorOrgStore.approve / reject', () => {
   it('approve returns the updated row on a successful CAS', async () => {
     let captured: ChainCall[] = [];
     const db = makeFakeDb((chain) => {
-      // Writes are followed by a joined re-read; keep the write's chain.
-      if (!chain.some((c) => c.method === 'leftJoin') || captured.length === 0) captured = chain;
+      // A write runs contact statements, then the org statement, then a
+      // joined re-read; keep the org write (or the first read).
+      if (isOrgWrite(chain) || captured.length === 0) captured = chain;
       return [makeRow({ status: 'active' })];
     });
     _setDbClients(null, db as never);
@@ -529,8 +544,9 @@ describe('PostgresAggregatorOrgStore.approve / reject', () => {
   it('reject returns the updated row with status=inactive', async () => {
     let captured: ChainCall[] = [];
     const db = makeFakeDb((chain) => {
-      // Writes are followed by a joined re-read; keep the write's chain.
-      if (!chain.some((c) => c.method === 'leftJoin') || captured.length === 0) captured = chain;
+      // A write runs contact statements, then the org statement, then a
+      // joined re-read; keep the org write (or the first read).
+      if (isOrgWrite(chain) || captured.length === 0) captured = chain;
       return [makeRow({ status: 'inactive' })];
     });
     _setDbClients(null, db as never);
