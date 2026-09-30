@@ -178,6 +178,23 @@ describe('request deadline', () => {
     vi.useRealTimers();
   });
 
+  it('disarms the deadline once the request settles', async () => {
+    // A finished request must not stay armed: without clearing on settle the
+    // 4s timer fired later and aborted a request that had already completed.
+    vi.useFakeTimers();
+    let observed: AbortSignal | undefined;
+    globalThis.fetch = vi.fn(async (_u: string, init?: RequestInit) => {
+      observed = init?.signal ?? undefined;
+      return { ok: true, json: async () => ({ features: [] }) } as unknown as Response;
+    }) as unknown as typeof fetch;
+
+    await createPhotonProvider().suggest('MG Road');
+    await vi.advanceTimersByTimeAsync(4_000);
+
+    expect(observed?.aborted).toBe(false);
+    vi.useRealTimers();
+  });
+
   it("still honours the caller's own cancellation", async () => {
     vi.useFakeTimers();
     let observed: AbortSignal | undefined;

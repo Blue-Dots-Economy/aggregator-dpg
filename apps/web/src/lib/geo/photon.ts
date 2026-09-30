@@ -43,9 +43,10 @@ interface PhotonFeature {
  * assume across the browsers this portal targets.
  *
  * @param signal - The caller's cancel signal, if any.
- * @returns A signal that aborts on either cancellation or timeout.
+ * @returns The combined signal, and `clear` — call it once the request settles
+ *   so a finished request does not stay armed and abort 4s later.
  */
-function withDeadline(signal?: AbortSignal): AbortSignal {
+function withDeadline(signal?: AbortSignal): { signal: AbortSignal; clear: () => void } {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   const cancel = () => {
@@ -56,9 +57,7 @@ function withDeadline(signal?: AbortSignal): AbortSignal {
     if (signal.aborted) cancel();
     else signal.addEventListener('abort', cancel, { once: true });
   }
-  // Clearing on settle keeps a resolved request from holding the timer open.
-  controller.signal.addEventListener('abort', () => clearTimeout(timer), { once: true });
-  return controller.signal;
+  return { signal: controller.signal, clear: () => clearTimeout(timer) };
 }
 
 /** Pure: maps a Photon FeatureCollection JSON into suggestions. Exported for testing. */
@@ -91,13 +90,16 @@ export function createPhotonProvider(baseUrl = DEFAULT_PHOTON_URL): GeoProvider 
     async suggest(query, signal) {
       const q = query.trim();
       if (!q) return [];
+      const deadline = withDeadline(signal);
       try {
         const url = `${baseUrl.replace(/\/$/, '')}/api?q=${encodeURIComponent(q)}&limit=5`;
-        const res = await fetch(url, { signal: withDeadline(signal) });
+        const res = await fetch(url, { signal: deadline.signal });
         if (!res.ok) return [];
         return parsePhotonFeatures(await res.json());
       } catch {
         return [];
+      } finally {
+        deadline.clear();
       }
     },
   };
