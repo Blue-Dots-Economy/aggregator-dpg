@@ -436,8 +436,8 @@ export async function registerAggregatorOrgRoutes(app: FastifyInstance): Promise
         });
       }
 
-      // Mirrored KC group (authz mirror — spec §9). Roll the org back to
-      // inactive on failure so a half-provisioned org never appears active.
+      // Mirrored KC group (authz mirror — spec §9). On failure the org is
+      // deleted (below), so a half-provisioned org never lingers.
       // The group name is slug-based (unique + stable); the human org name is
       // carried as a `display_name` attribute so it is visible in Keycloak.
       const group = await idp.createGroup(`org-${slug}`, {

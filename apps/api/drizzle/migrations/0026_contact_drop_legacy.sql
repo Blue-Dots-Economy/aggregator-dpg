@@ -1,18 +1,24 @@
--- Migration 0026 — drop the legacy contact columns (contact rollout R4).
+-- Migration 0026 — drop the legacy contact columns.
 --
--- Contract step of the user & org management refactor, Phase 1. After R3 no
--- release reads or writes `aggregators.contact` / `contact_phone` /
--- `contact_email` or `aggregator_orgs.owner_email` / `owner_phone`; every
--- person lives in `contact`, referenced by `contact_id` (migration 0025).
+-- Contract step of the user & org management refactor, Phase 1. The release
+-- that ships this never reads or writes `aggregators.contact` /
+-- `contact_phone` / `contact_email` or `aggregator_orgs.owner_email` /
+-- `owner_phone`; every person lives in `contact`, referenced by `contact_id`
+-- (migration 0025).
 --
 -- DEPLOY CONSTRAINTS — read before rolling this out.
---   * Ship this in the release AFTER R3 (the code that stopped declaring these
---     columns), never together with R2: R2 pods still select them.
---   * scripts/sql/contact-verify.sql V1 must be 0 (every row linked). This
+--   * Ships in the SAME release as 0025 and runs in the same drizzle
+--     transaction at that release's first boot, right after 0025 (a no-op
+--     re-run when ops pre-applied it with `scripts/contact-migrate.sh apply`).
+--   * STOP-THE-WORLD: the old release reads and writes the dropped columns, so
+--     no old API or worker pod may be running when the new release boots. See
+--     docs/contact-migration-runbook.md.
+--   * Drops 0025's sync triggers, which only existed to keep `contact` in step
+--     if the old release was started again after `apply` (rollback window).
+--   * Every row must be linked (scripts/sql/contact-verify.sql V1 = 0). This
 --     migration refuses to run otherwise, rather than failing on SET NOT NULL
---     with a cryptic error.
+--     with a cryptic error; the whole boot transaction then rolls back.
 --   * NOT REVERSIBLE. Take a database snapshot first.
---   * Rolling deploys are safe: R3 code never touches the dropped objects.
 --
 -- Idempotent (DROP … IF EXISTS, SET NOT NULL), so a re-run is a no-op. No
 -- CASCADE anywhere: an unexpected dependent fails loudly instead of being
@@ -93,9 +99,10 @@ ALTER TABLE aggregator_orgs DROP COLUMN IF EXISTS owner_email;
 ALTER TABLE aggregator_orgs DROP COLUMN IF EXISTS owner_phone;
 
 -- ─── One coordinator row per person ─────────────────────────────────────────
--- Created by 0025 too, but a database that ran an earlier revision of 0025
--- would not have it (drizzle never re-runs a recorded migration), and it is
--- the only thing left stopping one person from getting two coordinator rows.
+-- 0025 already creates this, so both statements are no-ops on every database
+-- that ran it; they are kept as a guard because, with the legacy per-column
+-- unique indexes gone, this index is the only thing left stopping one person
+-- from getting two coordinator rows.
 DROP INDEX IF EXISTS aggregators_contact_id_idx;
 CREATE UNIQUE INDEX IF NOT EXISTS aggregators_contact_id_unique ON aggregators (contact_id);
 

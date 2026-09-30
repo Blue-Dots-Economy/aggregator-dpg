@@ -21,8 +21,8 @@ import type { AggregatorStatus } from '@aggregator-dpg/shared-primitives/aggrega
 import { contactId } from '@aggregator-dpg/shared-primitives/contact';
 
 /**
- * The id the database sync would give this email + phone, or `null` when the
- * phone is not canonical (the Postgres trigger leaves such a row unlinked too).
+ * The contact id for this email + phone, or `null` when the phone is not
+ * canonical — the Postgres store rejects that write as `CHECK_VIOLATION`.
  */
 function safeContactId(email: string, phone: string): string | null {
   try {
@@ -54,6 +54,9 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
       return errResult('DUPLICATE_EMAIL', `email already exists: ${email}`);
     }
 
+    const cid = safeContactId(email, phone);
+    if (!cid) return errResult('CHECK_VIOLATION', 'contactId: phone must be canonical');
+
     const now = new Date();
     const row: Aggregator = {
       id: randomUUID(),
@@ -62,7 +65,7 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
       name: input.name,
       type: input.type,
       url: input.url ?? null,
-      contactId: safeContactId(email, phone),
+      contactId: cid,
       contact: input.contact,
       contactPhone: phone,
       contactEmail: email,
@@ -151,12 +154,15 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
       }
     }
 
+    const nextId = safeContactId(nextEmail, nextPhone);
+    if (!nextId) return errResult('CHECK_VIOLATION', 'contactId: phone must be canonical');
+
     const next: Aggregator = {
       ...existing,
       name: patch.name ?? existing.name,
       type: patch.type !== undefined ? patch.type : existing.type,
       url: patch.url !== undefined ? patch.url : existing.url,
-      contactId: safeContactId(nextEmail, nextPhone),
+      contactId: nextId,
       contact: nextContact,
       contactPhone: nextPhone,
       contactEmail: nextEmail,

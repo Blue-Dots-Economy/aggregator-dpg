@@ -6,12 +6,11 @@
  * pg error fields.
  *
  * Person-contact data is read from the `contact` table through
- * `aggregators.contact_id` (migration 0025) and composed back into the Beckn
- * `contact` shape, so callers and the API contract are unchanged. Writes go
- * to `contact` directly, in the same transaction as the row (see
- * `db/contact-writes.ts`); the legacy `contact` jsonb is written as NULL and is
- * dropped in the next release. Every write re-reads the joined row, since a
- * contact re-key cascades after `RETURNING` is produced.
+ * `aggregators.contact_id` (migrations 0025/0026) and composed back into the
+ * Beckn `contact` shape, so callers and the API contract are unchanged. Writes
+ * go to `contact` in the same transaction as the row (`db/contact-writes.ts`),
+ * and every write re-reads the joined row, because `RETURNING` cannot include
+ * the joined contact.
  */
 
 import { and, desc, eq, lt, sql, type SQL } from 'drizzle-orm';
@@ -21,10 +20,10 @@ import { aggregators, contact } from '../../db/schema.js';
 import {
   changeContact,
   ContactTakenError,
-  gcContact,
   linkContact,
   SharedContactError,
   splitBecknContact,
+  type DbExecutor,
 } from '../../db/contact-writes.js';
 import { getDb } from '../../db/client.js';
 import {
@@ -45,18 +44,13 @@ import {
 } from './interface.js';
 import type { AggregatorStatus } from '@aggregator-dpg/shared-primitives/aggregator';
 
-/** Internal: an INSERT … RETURNING produced no row. */
-class NoRowError extends Error {}
-
 export class PostgresAggregatorStore extends AggregatorStoreBase {
   async create(input: CreateAggregatorInput): Promise<StoreResult<Aggregator>> {
     const start = Date.now();
-    let id: string;
+    let created: Aggregator | null;
     try {
       // The contact and the row that references it are written atomically.
-      // The legacy `contact` jsonb is no longer written (NULL); the database
-      // sync triggers ignore a NULL legacy value.
-      id = await getDb().transaction(async (tx) => {
+      created = await getDb().transaction(async (tx) => {
         const { identity, extra } = splitBecknContact(input.contact);
         const contactId = await linkContact(tx, identity);
         const rows = await tx
@@ -79,25 +73,21 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
             profileRef: input.profileRef ?? null,
           })
           .returning({ id: aggregators.id });
-        if (!rows[0]) throw new NoRowError();
-        return rows[0].id;
+        return rows[0] ? this.readIn(tx, rows[0].id) : null;
       });
     } catch (err: unknown) {
-      if (err instanceof NoRowError) {
-        return { ok: false, error: { code: 'DB_UNAVAILABLE', message: 'no row returned' } };
-      }
       return this.mapWriteError('aggregatorStore.create', err, input.orgSlug, start);
     }
-    const created = await this.reread('aggregatorStore.create', id);
-    if (created.ok) {
-      logger.info({
-        operation: 'aggregatorStore.create',
-        status: 'success',
-        latency_ms: Date.now() - start,
-        aggregator_id: id,
-      });
+    if (!created) {
+      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: 'no row returned' } };
     }
-    return created;
+    logger.info({
+      operation: 'aggregatorStore.create',
+      status: 'success',
+      latency_ms: Date.now() - start,
+      aggregator_id: created.id,
+    });
+    return { ok: true, value: created };
   }
 
   async findById(id: string): Promise<StoreResult<Aggregator | null>> {
@@ -180,39 +170,29 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
     if (patch.parentOrgId !== undefined) updates['parentOrgId'] = patch.parentOrgId;
     if (patch.rejectedAt !== undefined) updates['rejectedAt'] = patch.rejectedAt;
 
+    let updated: Aggregator | null;
     try {
-      const found = await getDb().transaction(async (tx) => {
+      updated = await getDb().transaction(async (tx) => {
         if (patch.contact !== undefined) {
-          // Lock the row, move its contact (re-key / repoint, plan §3.3), then
-          // collect the contact it no longer uses.
+          // Lock the row, then move its contact. A re-key is done in place and
+          // cascades to the FK, so no contact is left orphaned.
           const [current] = await tx
             .select({ contactId: aggregators.contactId })
             .from(aggregators)
             .where(eq(aggregators.id, id))
             .for('update');
-          if (!current) return false;
+          if (!current) return null;
           const { identity, extra } = splitBecknContact(patch.contact);
-          const nextId = await changeContact(tx, current.contactId, identity);
-          updates['contactId'] = nextId;
+          updates['contactId'] = await changeContact(tx, current.contactId, identity);
           updates['contactExtra'] = extra;
-          const rows = await tx
-            .update(aggregators)
-            .set(updates)
-            .where(eq(aggregators.id, id))
-            .returning({ id: aggregators.id });
-          if (current.contactId && current.contactId !== nextId) {
-            await gcContact(tx, current.contactId);
-          }
-          return rows.length > 0;
         }
         const rows = await tx
           .update(aggregators)
           .set(updates)
           .where(eq(aggregators.id, id))
           .returning({ id: aggregators.id });
-        return rows.length > 0;
+        return rows.length > 0 ? this.readIn(tx, id) : null;
       });
-      if (!found) return { ok: false, error: { code: 'NOT_FOUND', message: id } };
     } catch (err: unknown) {
       if (err instanceof ContactTakenError) {
         logger.warn({
@@ -234,7 +214,8 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
       }
       return this.mapWriteError('aggregatorStore.update', err, id, Date.now());
     }
-    return this.reread('aggregatorStore.update', id);
+    if (!updated) return { ok: false, error: { code: 'NOT_FOUND', message: id } };
+    return { ok: true, value: updated };
   }
 
   async updateStatus(
@@ -309,12 +290,23 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
 
   // ─── Reads ────────────────────────────────────────────────────────────────
 
-  /** `aggregators` LEFT JOIN `contact` — the one read shape every query uses. */
-  private selectJoined() {
-    return getDb()
+  /**
+   * `aggregators` JOIN `contact` — the one read shape every query uses. An
+   * inner join: `contact_id` is NOT NULL (0026) and RESTRICT-protected.
+   *
+   * @param db - Executor (the pool, or the caller's transaction).
+   */
+  private selectJoined(db: DbExecutor = getDb()) {
+    return db
       .select({ a: aggregators, c: contact })
       .from(aggregators)
-      .leftJoin(contact, eq(contact.id, aggregators.contactId));
+      .innerJoin(contact, eq(contact.id, aggregators.contactId));
+  }
+
+  /** Reads one joined row through `db` (used inside write transactions). */
+  private async readIn(db: DbExecutor, id: string): Promise<Aggregator | null> {
+    const [row] = await this.selectJoined(db).where(eq(aggregators.id, id)).limit(1);
+    return row ? toDomain(row) : null;
   }
 
   /** Returns the first row matching `predicate`, or `null`. */
@@ -328,9 +320,9 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
   }
 
   /**
-   * Re-reads a row just written, so the result reflects what the contact sync
-   * triggers did after the statement (a re-key, a relink). A row that vanished
-   * in between is reported as `NOT_FOUND`.
+   * Re-reads a row just written by a single-statement update (the joined
+   * contact is not in `RETURNING`). A row that vanished in between is
+   * reported as `NOT_FOUND`.
    */
   private async reread(op: string, id: string): Promise<StoreResult<Aggregator>> {
     const found = await this.findOne(op, eq(aggregators.id, id));
@@ -348,15 +340,17 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
     start: number,
   ): StoreResult<never> {
     // SQLSTATE `code` + `constraint` come from the shared pg-error helpers,
-    // which walk Drizzle's `.cause` chain (the top-level `.message` is only the
-    // query text). Gating on the code maps a unique/check violation to a clean
-    // 409 rather than a misleading 503.
+    // which walk Drizzle's `.cause` chain. Gating on the code maps a
+    // unique/check violation to a clean 409 rather than a misleading 503.
+    // The driver message is never echoed: Drizzle puts the query parameters
+    // (emails, phones) in it.
     const code = pgErrorCode(err);
     const constraint = pgConstraint(err) ?? '';
-    const message = (err as Error).message ?? 'unknown';
+    const message = err instanceof Error ? err.message : '';
 
     // contactId() rejects a non-canonical phone before any SQL runs — the
-    // same class of problem the database CHECK would have reported.
+    // same class of problem the database CHECK would have reported. Its
+    // message is a fixed string, safe to return.
     if (err instanceof TypeError && message.startsWith('contactId:')) {
       logger.warn({
         operation: op,
@@ -374,9 +368,7 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
       // constraint name is logged below either way.
       let storeCode: StoreError['code'] = 'DUPLICATE';
       // The same person already has a coordinator row (one row per contact).
-      // contact_pkey: the same brand-new contact created concurrently.
-      if (constraint.includes('aggregators_contact_id_unique') || constraint === 'contact_pkey')
-        storeCode = 'DUPLICATE_EMAIL';
+      if (constraint.includes('aggregators_contact_id_unique')) storeCode = 'DUPLICATE_EMAIL';
       else if (constraint.includes('contact_phone')) storeCode = 'DUPLICATE_PHONE';
       else if (constraint.includes('contact_email')) storeCode = 'DUPLICATE_EMAIL';
       else if (constraint.includes('slug')) storeCode = 'DUPLICATE_SLUG';
@@ -402,26 +394,34 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
         error: { code: 'CHECK_VIOLATION', message: `${constraint || 'check_violation'}` },
       };
     }
+    return this.mapReadError(op, err, start);
+  }
+
+  /**
+   * Maps any other database failure to `DB_UNAVAILABLE`, logging the SQLSTATE
+   * and error class only (never the driver message, which carries parameters).
+   */
+  private mapReadError(op: string, err: unknown, start?: number): StoreResult<never> {
+    const code = pgErrorCode(err);
+    const errorType = (err as Error | undefined)?.constructor?.name ?? 'unknown';
     logger.error({
       operation: op,
       status: 'failure',
-      error: message,
-      error_type: (err as Error).constructor?.name,
-      latency_ms: Date.now() - start,
+      error: code ? `database error ${code}` : errorType,
+      error_type: errorType,
+      sqlstate: code,
+      ...(start !== undefined ? { latency_ms: Date.now() - start } : {}),
     });
-    return { ok: false, error: { code: 'DB_UNAVAILABLE', message } };
-  }
-
-  private mapReadError(op: string, err: unknown): StoreResult<never> {
-    const message = (err as Error).message ?? 'unknown';
-    logger.error({ operation: op, status: 'failure', error: message });
-    return { ok: false, error: { code: 'DB_UNAVAILABLE', message } };
+    return {
+      ok: false,
+      error: { code: 'DB_UNAVAILABLE', message: code ? `database error ${code}` : errorType },
+    };
   }
 }
 
 type JoinedRow = {
   a: typeof aggregators.$inferSelect;
-  c: typeof contact.$inferSelect | null;
+  c: typeof contact.$inferSelect;
 };
 
 /**
@@ -432,17 +432,6 @@ type JoinedRow = {
  */
 function composeContact(row: JoinedRow): BecknContact {
   const { a, c } = row;
-  if (!c) {
-    // Every row is linked once the rollout's verify checks are 0; an unlinked
-    // row is a data problem to fix, not something to paper over.
-    logger.warn({
-      operation: 'aggregatorStore.composeContact',
-      status: 'failure',
-      error: 'row has no linked contact',
-      aggregator_id: a.id,
-    });
-    return { name: '', email: '', phone: '' };
-  }
   const extra = a.contactExtra ?? {};
   return {
     name: c.name ?? '',
@@ -471,7 +460,7 @@ function toDomain(row: JoinedRow): Aggregator {
     contactId: a.contactId,
     contact: composed,
     contactPhone: composed.phone,
-    contactEmail: composed.email.toLowerCase(),
+    contactEmail: composed.email,
     locations: a.locations,
     consent: a.consent,
     profile: a.profile ?? {},

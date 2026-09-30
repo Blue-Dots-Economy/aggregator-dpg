@@ -620,7 +620,7 @@ suite('contact (migration 0025) — integration', () => {
       }
     });
 
-    it('findByOwnerPhone ignores a half-created (inactive, no KC owner) org', async (ctx) => {
+    it('findByOwnerPhone matches contact_phone_unique (any status); deleting the org frees the phone', async (ctx) => {
       // Store code is HEAD's: it needs HEAD's schema.
       if (!headSchema) ctx.skip();
       const store = new PostgresAggregatorOrgStore();
@@ -635,7 +635,14 @@ suite('contact (migration 0025) — integration', () => {
       try {
         await store.update(created.value.id, { status: 'inactive' });
         const found = await store.findByOwnerPhone(p);
-        expect(found.ok && found.value).toBeNull();
+        expect(found.ok && found.value?.id).toBe(created.value.id);
+        // A half-created org is deleted by the create route; the GC trigger
+        // then frees its owner's phone for a retry.
+        await store.deleteById(created.value.id);
+        const gone = await store.findByOwnerPhone(p);
+        expect(gone.ok && gone.value).toBeNull();
+        const freed = await pool.query('SELECT 1 FROM contact WHERE phone = $1', [p]);
+        expect(freed.rowCount).toBe(0);
       } finally {
         await store.deleteById(created.value.id);
       }
@@ -760,7 +767,7 @@ suite('contact (migration 0025) — integration', () => {
       expect(left.rows[0].n).toBe(0);
     });
   });
-  describe('app writes (R2)', () => {
+  describe('app writes', () => {
     it("refuses to move a coordinator onto another person's contact (ContactTakenError)", async () => {
       const aggStore = new PostgresAggregatorStore();
       const orgStore = new PostgresAggregatorOrgStore();

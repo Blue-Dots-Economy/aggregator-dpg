@@ -5,26 +5,20 @@
  * of record (spec §5.1). Driver-level errors are normalised to the abstract
  * `OrgStoreError` codes so callers never see raw pg error fields.
  *
- * The owner's email / phone / name are read from the `contact` table through
- * `aggregator_orgs.contact_id` (migration 0025). Writes go to `contact`
- * directly in the same transaction (`db/contact-writes.ts`); the legacy
- * `owner_email` / `owner_phone` columns are written as NULL and dropped in the
- * next release. Every write re-reads the joined row. Keycloak keeps its own copy of the
- * owner's login identifiers.
+ * The owner's email / phone / name live in the `contact` table, referenced by
+ * `aggregator_orgs.contact_id` (migrations 0025/0026). The owner's contact is
+ * written in the same transaction as the org row (`db/contact-writes.ts`), and
+ * every write re-reads the joined row inside that transaction, because
+ * `RETURNING` cannot include the joined contact. Keycloak keeps its own copy of
+ * the owner's login identifiers.
  */
 
-import { and, eq, isNotNull, lt, ne, or, sql, type SQL } from 'drizzle-orm';
+import { and, eq, lt, sql, type SQL } from 'drizzle-orm';
 import { aggregatorOrgs, contact } from '../../db/schema.js';
 import { getDb } from '../../db/client.js';
 import { PG_UNIQUE_VIOLATION, pgErrorCode, pgConstraint } from '../../db/pg-error.js';
 import { logger } from '../../logger.js';
-import {
-  changeContact,
-  ContactTakenError,
-  gcContact,
-  linkContact,
-  SharedContactError,
-} from '../../db/contact-writes.js';
+import { linkContact, type DbExecutor } from '../../db/contact-writes.js';
 import {
   AggregatorOrgStoreBase,
   type AggregatorOrg,
@@ -36,12 +30,9 @@ import {
 
 export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
   async create(input: CreateOrgInput): Promise<OrgStoreResult<AggregatorOrg>> {
-    let id: string;
     try {
-      id = await getDb().transaction(async (tx) => {
-        // The owner's contact and the org row are written atomically; the
-        // legacy owner_email / owner_phone columns are left NULL (dropped in
-        // the next release).
+      const created = await getDb().transaction(async (tx) => {
+        // The owner's contact and the org row are written atomically.
         const contactId = await linkContact(tx, {
           email: input.ownerEmail,
           phone: input.ownerPhone ?? null,
@@ -61,12 +52,13 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
           })
           .returning({ id: aggregatorOrgs.id });
         if (!row) throw new Error('insert returned no row');
-        return row.id;
+        return this.readIn(tx, row.id);
       });
+      if (!created) return errResult('DB_UNAVAILABLE', 'org row not readable after insert');
+      return { ok: true, value: created };
     } catch (e) {
-      return mapInsertError(e);
+      return mapDbError('orgStore.create', e);
     }
-    return this.reread(id);
   }
 
   async findById(id: string): Promise<OrgStoreResult<AggregatorOrg | null>> {
@@ -90,17 +82,14 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
   }
 
   async findByOwnerPhone(phone: string): Promise<OrgStoreResult<AggregatorOrg | null>> {
-    // Excludes the half-created rows a failed org create leaves behind
-    // (inactive, no Keycloak owner) — those never became anyone's login, so
-    // they must not block a retry.
+    // Every org row holds its owner's phone through `contact_phone_unique`, so
+    // the lookup matches the constraint exactly (a half-created org is deleted
+    // by the create route, never left behind).
     return this.findOne(
-      and(
-        eq(
-          aggregatorOrgs.contactId,
-          sql`(SELECT ${contact.id} FROM ${contact} WHERE ${contact.phone} = ${phone})`,
-        ),
-        or(ne(aggregatorOrgs.status, 'inactive'), isNotNull(aggregatorOrgs.ownerKcSub)),
-      )!,
+      eq(
+        aggregatorOrgs.contactId,
+        sql`(SELECT ${contact.id} FROM ${contact} WHERE ${contact.phone} = ${phone})`,
+      ),
     );
   }
 
@@ -109,7 +98,7 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
       const rows = await this.selectJoined().where(eq(aggregatorOrgs.status, 'active'));
       return { ok: true, value: rows.map(toDomain) };
     } catch (e) {
-      return errResult('DB_UNAVAILABLE', (e as Error).message);
+      return mapDbError('orgStore.listActive', e);
     }
   }
 
@@ -121,54 +110,26 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
       const rows = await this.selectJoined().where(where);
       return { ok: true, value: rows.map(toDomain) };
     } catch (e) {
-      return errResult('DB_UNAVAILABLE', (e as Error).message);
+      return mapDbError('orgStore.listPending', e);
     }
   }
 
   async update(id: string, patch: UpdateOrgPatch): Promise<OrgStoreResult<AggregatorOrg>> {
-    const { ownerPhone, ...rest } = patch;
     try {
-      const found = await getDb().transaction(async (tx) => {
-        const set: Record<string, unknown> = { ...rest, updatedAt: new Date() };
-        if (ownerPhone !== undefined) {
-          // The phone lives on the owner's contact: move it (plan §3.3).
-          const [current] = await tx
-            .select({ o: aggregatorOrgs, c: contact })
-            .from(aggregatorOrgs)
-            .leftJoin(contact, eq(contact.id, aggregatorOrgs.contactId))
-            .where(eq(aggregatorOrgs.id, id))
-            .for('update', { of: aggregatorOrgs });
-          if (!current) return false;
-          const email = current.c?.email;
-          if (!email) throw new Error('org has no owner contact to re-key');
-          const nextId = await changeContact(tx, current.o.contactId, {
-            email,
-            phone: ownerPhone,
-            name: null,
-          });
-          set['contactId'] = nextId;
-          const rows = await tx
-            .update(aggregatorOrgs)
-            .set(set)
-            .where(eq(aggregatorOrgs.id, id))
-            .returning({ id: aggregatorOrgs.id });
-          if (current.o.contactId && current.o.contactId !== nextId) {
-            await gcContact(tx, current.o.contactId);
-          }
-          return rows.length > 0;
-        }
+      const updated = await getDb().transaction(async (tx) => {
         const rows = await tx
           .update(aggregatorOrgs)
-          .set(set)
+          .set({ ...patch, updatedAt: new Date() })
           .where(eq(aggregatorOrgs.id, id))
           .returning({ id: aggregatorOrgs.id });
-        return rows.length > 0;
+        if (rows.length === 0) return null;
+        return this.readIn(tx, id);
       });
-      if (!found) return errResult('NOT_FOUND', id);
+      if (!updated) return errResult('NOT_FOUND', id);
+      return { ok: true, value: updated };
     } catch (e) {
-      return mapInsertError(e);
+      return mapDbError('orgStore.update', e);
     }
-    return this.reread(id);
   }
 
   async deleteById(id: string): Promise<OrgStoreResult<void>> {
@@ -176,7 +137,7 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
       await getDb().delete(aggregatorOrgs).where(eq(aggregatorOrgs.id, id));
       return { ok: true, value: undefined };
     } catch (e) {
-      return errResult('DB_UNAVAILABLE', (e as Error).message);
+      return mapDbError('orgStore.deleteById', e);
     }
   }
 
@@ -205,17 +166,28 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
         .returning({ id: aggregatorOrgs.id });
       if (!row) return { ok: true, value: null };
     } catch (e) {
-      return errResult('DB_UNAVAILABLE', (e as Error).message);
+      return mapDbError('orgStore.casFromPending', e);
     }
     return this.findOne(eq(aggregatorOrgs.id, id));
   }
 
-  /** `aggregator_orgs` LEFT JOIN `contact` — the one read shape every query uses. */
-  private selectJoined() {
-    return getDb()
+  /**
+   * `aggregator_orgs` JOIN `contact` — the one read shape every query uses.
+   * An inner join: `contact_id` is NOT NULL (0026) and RESTRICT-protected.
+   *
+   * @param db - Executor (the pool, or the caller's transaction).
+   */
+  private selectJoined(db: DbExecutor = getDb()) {
+    return db
       .select({ o: aggregatorOrgs, c: contact })
       .from(aggregatorOrgs)
-      .leftJoin(contact, eq(contact.id, aggregatorOrgs.contactId));
+      .innerJoin(contact, eq(contact.id, aggregatorOrgs.contactId));
+  }
+
+  /** Reads one joined row through `db` (used inside write transactions). */
+  private async readIn(db: DbExecutor, id: string): Promise<AggregatorOrg | null> {
+    const [row] = await this.selectJoined(db).where(eq(aggregatorOrgs.id, id)).limit(1);
+    return row ? toDomain(row) : null;
   }
 
   private async findOne(predicate: SQL): Promise<OrgStoreResult<AggregatorOrg | null>> {
@@ -223,43 +195,27 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
       const [row] = await this.selectJoined().where(predicate).limit(1);
       return { ok: true, value: row ? toDomain(row) : null };
     } catch (e) {
-      return errResult('DB_UNAVAILABLE', (e as Error).message);
+      return mapDbError('orgStore.findOne', e);
     }
-  }
-
-  /** Re-reads a row just written so the result reflects the contact sync triggers. */
-  private async reread(id: string): Promise<OrgStoreResult<AggregatorOrg>> {
-    const found = await this.findOne(eq(aggregatorOrgs.id, id));
-    if (!found.ok) return found;
-    if (!found.value) return errResult('NOT_FOUND', id);
-    return { ok: true, value: found.value };
   }
 }
 
 type JoinedRow = {
   o: typeof aggregatorOrgs.$inferSelect;
-  c: typeof contact.$inferSelect | null;
+  c: typeof contact.$inferSelect;
 };
 
 function toDomain(row: JoinedRow): AggregatorOrg {
   const { o, c } = row;
-  if (!c) {
-    logger.warn({
-      operation: 'orgStore.toDomain',
-      status: 'failure',
-      error: 'org has no linked owner contact',
-      org_id: o.id,
-    });
-  }
   return {
     id: o.id,
     slug: o.slug,
     displayName: o.displayName,
     state: o.state,
     contactId: o.contactId,
-    ownerEmail: c?.email ?? '',
-    ownerPhone: c?.phone ?? null,
-    ownerName: c ? c.name : null,
+    ownerEmail: c.email,
+    ownerPhone: c.phone,
+    ownerName: c.name,
     ownerKcSub: o.ownerKcSub,
     kcGroupId: o.kcGroupId,
     profile: o.profile ?? {},
@@ -271,32 +227,58 @@ function toDomain(row: JoinedRow): AggregatorOrg {
   };
 }
 
-function mapInsertError(e: unknown): OrgStoreResult<never> {
+/**
+ * Maps a database failure to an `OrgStoreError` and logs it (SQLSTATE and
+ * constraint name only — never the driver message, which carries parameters).
+ *
+ * @param op - Operation name for the log entry.
+ * @param e - The thrown error.
+ * @returns The failure result.
+ */
+function mapDbError(op: string, e: unknown): OrgStoreResult<never> {
+  const code = pgErrorCode(e);
+  const constraint = pgConstraint(e) ?? '';
+  const error = classifyWriteError(e, code, constraint);
+  logger.warn({
+    operation: op,
+    status: 'failure',
+    error: error.code,
+    sqlstate: code,
+    constraint: constraint || undefined,
+  });
+  return { ok: false, error };
+}
+
+function classifyWriteError(
+  e: unknown,
+  code: string | undefined,
+  constraint: string,
+): OrgStoreError {
   // Only a genuine unique-violation (SQLSTATE 23505) maps to a 409 — gate on the
   // code first so a connection failure on a query that happens to mention a
-  // constraint name isn't misreported as a duplicate. The constraint name lives
-  // on the wrapped `.cause`; both come from the shared pg-error helpers.
-  if (pgErrorCode(e) === PG_UNIQUE_VIOLATION) {
-    const constraint = pgConstraint(e) ?? '';
+  // constraint name isn't misreported as a duplicate.
+  if (code === PG_UNIQUE_VIOLATION) {
     if (constraint.includes('aggregator_orgs_display_name_active_unique')) {
-      return errResult('DUPLICATE_NAME', 'organisation name already in use');
+      return err('DUPLICATE_NAME', 'organisation name already in use');
     }
     if (constraint.includes('aggregator_orgs_slug_active_unique')) {
-      return errResult('DUPLICATE_SLUG', 'slug already in use');
+      return err('DUPLICATE_SLUG', 'slug already in use');
     }
-    if (constraint.includes('contact_email_unique') || constraint === 'contact_pkey') {
-      return errResult('DUPLICATE_EMAIL', 'owner email already belongs to another person');
+    if (constraint.includes('contact_email_unique')) {
+      return err('DUPLICATE_EMAIL', 'owner email already belongs to another person');
     }
     if (constraint.includes('contact_phone_unique')) {
-      return errResult('DUPLICATE_PHONE', 'owner phone already belongs to another person');
+      return err('DUPLICATE_PHONE', 'owner phone already belongs to another person');
     }
   }
-  if (e instanceof ContactTakenError || e instanceof SharedContactError) {
-    return errResult('DUPLICATE_EMAIL', e.message);
-  }
-  return errResult('DB_UNAVAILABLE', (e as Error).message ?? 'insert failed');
+  // Never echo the driver message: Drizzle includes the query parameters in it.
+  return err('DB_UNAVAILABLE', code ? `database error ${code}` : (e as Error).name);
+}
+
+function err(code: OrgStoreError['code'], message: string): OrgStoreError {
+  return { code, message } as OrgStoreError;
 }
 
 function errResult<T>(code: OrgStoreError['code'], message: string): OrgStoreResult<T> {
-  return { ok: false, error: { code, message } };
+  return { ok: false, error: err(code, message) };
 }

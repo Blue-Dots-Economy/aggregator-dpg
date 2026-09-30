@@ -33,13 +33,20 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
       (o) => o.displayName.trim().toLowerCase() === nameKey && NON_TERMINAL.has(o.status),
     );
     if (nameTaken) return err('DUPLICATE_NAME', `organisation name already in use`);
+    let id: string;
+    try {
+      id = contactId(input.ownerEmail, input.ownerPhone ?? null);
+    } catch {
+      // Postgres fails the same write (contactId() runs before any SQL).
+      return err('DB_UNAVAILABLE', 'TypeError');
+    }
     const now = new Date();
     const row: AggregatorOrg = {
       id: randomUUID(),
       slug: input.slug,
       displayName: input.displayName,
       state: input.state ?? null,
-      contactId: safeContactId(input.ownerEmail, input.ownerPhone ?? null),
+      contactId: id,
       ownerEmail: input.ownerEmail.toLowerCase(),
       ownerPhone: input.ownerPhone ?? null,
       ownerName: input.ownerName?.trim() ? input.ownerName : null,
@@ -75,10 +82,7 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
   async findByOwnerPhone(phone: string): Promise<OrgStoreResult<AggregatorOrg | null>> {
     return {
       ok: true,
-      value:
-        [...this.byId.values()].find(
-          (o) => o.ownerPhone === phone && (o.status !== 'inactive' || o.ownerKcSub !== null),
-        ) ?? null,
+      value: [...this.byId.values()].find((o) => o.ownerPhone === phone) ?? null,
     };
   }
 
@@ -110,11 +114,6 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
       ...existing,
       displayName: patch.displayName ?? existing.displayName,
       state: patch.state !== undefined ? patch.state : existing.state,
-      ownerPhone: patch.ownerPhone !== undefined ? patch.ownerPhone : existing.ownerPhone,
-      contactId:
-        patch.ownerPhone !== undefined
-          ? safeContactId(existing.ownerEmail, patch.ownerPhone)
-          : existing.contactId,
       ownerKcSub: patch.ownerKcSub !== undefined ? patch.ownerKcSub : existing.ownerKcSub,
       kcGroupId: patch.kcGroupId !== undefined ? patch.kcGroupId : existing.kcGroupId,
       status: patch.status ?? existing.status,
@@ -154,16 +153,4 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
 
 function err<T>(code: OrgStoreError['code'], message: string): OrgStoreResult<T> {
   return { ok: false, error: { code, message } };
-}
-
-/**
- * The id the database sync would give this owner, or `null` when the phone is
- * not canonical (the Postgres trigger leaves such a row unlinked too).
- */
-function safeContactId(email: string, phone: string | null): string | null {
-  try {
-    return contactId(email, phone);
-  } catch {
-    return null;
-  }
 }

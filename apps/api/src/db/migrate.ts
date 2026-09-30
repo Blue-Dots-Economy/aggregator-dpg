@@ -6,26 +6,81 @@
  * instance. Safe to run repeatedly — Drizzle records applied migrations in
  * its own metadata table.
  *
- * Production startup may also call `runMigrations()` programmatically before
+ * Production startup also calls `runMigrations()` programmatically before
  * `app.listen()` to keep the schema in lockstep with the deployed code.
+ *
+ * Concurrent runners (several API replicas booting at once, or a replica plus
+ * a manual `db:migrate`) are serialised on a session-level advisory lock.
+ * Drizzle reads the list of applied migrations BEFORE it opens its own
+ * transaction, so without the lock a second runner can decide to re-apply a
+ * migration the first one has just committed — e.g. re-run 0025 after 0026
+ * dropped the columns it touches, or race on creating the metadata table.
  */
 
 import '../env.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
-import { closeDb, getDb } from './client.js';
+import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import type { Pool } from 'pg';
+import { closeDb, getDb, getPool } from './client.js';
 import { logger } from '../logger.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+/** Advisory-lock key shared by every migration runner of this app. */
+export const MIGRATION_LOCK_SQL_KEY = "hashtext('aggregator-dpg:migrations')";
+
 /**
- * Applies all pending migrations.
+ * Applies all pending migrations in `migrationsFolder` while holding the
+ * session-level migration advisory lock on a dedicated connection from
+ * `pool`. The lock is released (and the connection returned) whether or not
+ * the migrations succeed.
+ *
+ * @param db - Drizzle client the migrations run through.
+ * @param pool - Pool the lock connection is taken from (normally the one `db` wraps).
+ * @param migrationsFolder - Folder holding the `.sql` files and `meta/_journal.json`.
+ */
+export async function migrateWithLock<TSchema extends Record<string, unknown>>(
+  db: NodePgDatabase<TSchema>,
+  pool: Pool,
+  migrationsFolder: string,
+): Promise<void> {
+  const lockClient = await pool.connect();
+  let broken: Error | undefined;
+  try {
+    const started = Date.now();
+    try {
+      await lockClient.query(`SELECT pg_advisory_lock(${MIGRATION_LOCK_SQL_KEY})`);
+    } catch (err) {
+      broken = err as Error;
+      throw err;
+    }
+    logger.info({ waitedMs: Date.now() - started }, 'migration lock acquired');
+    try {
+      await migrate(db, { migrationsFolder });
+    } finally {
+      try {
+        await lockClient.query(`SELECT pg_advisory_unlock(${MIGRATION_LOCK_SQL_KEY})`);
+      } catch (err) {
+        // The server drops a session lock with its connection; destroy this
+        // one rather than return a connection in an unknown state.
+        broken = err as Error;
+        logger.warn({ err }, 'migration lock release failed; discarding the connection');
+      }
+    }
+  } finally {
+    lockClient.release(broken);
+  }
+}
+
+/**
+ * Applies all pending migrations under the migration advisory lock.
  */
 export async function runMigrations(): Promise<void> {
   const migrationsFolder = path.resolve(__dirname, '../../drizzle/migrations');
   logger.info({ migrationsFolder }, 'running database migrations');
-  await migrate(getDb(), { migrationsFolder });
+  await migrateWithLock(getDb(), getPool(), migrationsFolder);
   logger.info('database migrations applied');
 }
 

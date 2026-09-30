@@ -6,34 +6,45 @@
 -- `@aggregator-dpg/shared-primitives/contact` `contactId()`; the two MUST stay
 -- identical (golden-vector tests pin them).
 --
+-- Phase 1 ships as ONE release, deployed STOP-THE-WORLD (API and worker at
+-- zero replicas; see docs/contact-migration-runbook.md). That release's first
+-- boot applies this file and 0026 (which drops the legacy columns) in the same
+-- drizzle transaction.
+--
 -- THIS FILE IS ALSO THE PRE-DEPLOY SCRIPT. On an existing instance ops run it
--- first with `scripts/contact-migrate.sh apply` (psql) against the live DB;
--- drizzle then re-runs it at the next API boot as a no-op that relinks any
--- rows written in between. On a fresh instance only the boot run happens.
--- Everything below is therefore idempotent:
+-- first with `scripts/contact-migrate.sh apply` (psql), with the old release
+-- scaled to zero; the release's boot then re-runs it through drizzle as a
+-- no-op (drizzle never saw the psql run) before 0026. On a fresh instance only
+-- the boot run happens. Everything below is therefore idempotent:
 --   CREATE … IF NOT EXISTS, ADD COLUMN IF NOT EXISTS, CREATE OR REPLACE
---   FUNCTION/TRIGGER, pg_constraint-guarded FKs, WHERE contact_id IS NULL
---   backfills, ON CONFLICT DO NOTHING.
+--   FUNCTION/TRIGGER (PostgreSQL 14+), pg_constraint-guarded FKs,
+--   WHERE contact_id IS NULL backfills, ON CONFLICT DO NOTHING.
 -- Constraints on the file: no BEGIN/COMMIT (drizzle and `psql
 -- --single-transaction` supply the transaction), no psql meta-commands, no
 -- bind parameters, no statement-breakpoints (it runs as one simple query).
 --
--- DEPLOY SAFETY. Additive for the running (N-1) release:
---   * the sync triggers keep `contact` in step with legacy writes to
---     `aggregators.contact` / `aggregator_orgs.owner_email|owner_phone`, and
---     are best-effort — they never fail a legacy write (a conflict leaves the
---     FK NULL and raises a WARNING; `scripts/sql/contact-verify.sql` V1 counts
---     those). Coordinator-vs-coordinator duplicates are still rejected by the
---     legacy `aggregators_contact_{phone,email}_unique` indexes, with the same
---     error codes as before;
---   * the legacy NOT NULLs are relaxed, which N-1 (always writing them) cannot
---     observe, so the later "stop writing legacy columns" release needs no
---     migration of its own.
--- Concurrent runners (several pods booting, or ops + a pod) serialise on the
--- advisory lock below; the second one finds everything in place.
+-- WHY THE SYNC TRIGGERS. They exist only for the rollback window: if the OLD
+-- release is started again after `apply` but before the new release boots,
+-- its writes to `aggregators.contact` / `aggregator_orgs.owner_email|
+-- owner_phone` keep `contact` in step. They are best-effort — they never fail
+-- a legacy write (a conflict leaves the FK NULL and raises a WARNING;
+-- `scripts/sql/contact-verify.sql` V1 counts those, and the boot's re-run of
+-- the backfill below relinks what it can). Coordinator-vs-coordinator
+-- duplicates are still rejected by the legacy
+-- `aggregators_contact_{phone,email}_unique` indexes, with the same error
+-- codes as before. The new release never runs with them: 0026 drops them in
+-- the same boot, before the API listens. The legacy NOT NULLs are relaxed
+-- here too; the old release always writes those columns, so it cannot
+-- observe that.
 --
--- NOT destructive; nothing is dropped. The legacy columns go in a later
--- migration once no release writes them.
+-- Concurrent drizzle runners (several API replicas booting at once) are
+-- serialised by the session-level advisory lock `runMigrations()` takes
+-- (apps/api/src/db/migrate.ts) around drizzle's whole run — drizzle reads the
+-- applied-migrations list before its transaction, so the lock must cover
+-- that. The transaction-level lock below only serialises runs of this file
+-- itself (e.g. two psql `apply`s).
+--
+-- NOT destructive; nothing is dropped. 0026 drops the legacy columns.
 
 -- Remember the caller's timeouts so they can be restored at the end (a bare
 -- `SET LOCAL … = DEFAULT` would reset to the SERVER default instead).
@@ -66,9 +77,9 @@ BEGIN
 END $$;
 
 -- ─── Lock in the same order live writes use ─────────────────────────────────
--- Legacy writes lock aggregators / aggregator_orgs first, then `contact` from
--- their triggers. Taking the parent tables first here means a re-run (after the
--- pre-deploy script) can never deadlock against them.
+-- Legacy writes (the old release, in the rollback window) lock aggregators /
+-- aggregator_orgs first, then `contact` from their triggers. Taking the parent
+-- tables first here means a re-run can never deadlock against them.
 LOCK TABLE aggregators, aggregator_orgs IN ACCESS EXCLUSIVE MODE;
 
 -- ─── Version marker ─────────────────────────────────────────────────────────
@@ -185,6 +196,7 @@ ALTER TABLE aggregator_orgs ALTER COLUMN owner_email DROP NOT NULL;
 
 -- ─── Sync + GC functions (all best-effort) ──────────────────────────────────
 
+-- Used only by the sync triggers (rollback window); 0026 drops it.
 -- Returns the id of the contact for (email, phone), inserting it when absent.
 -- Existing name wins on insert paths. Returns NULL (with a WARNING, no PII)
 -- when the pair cannot be linked — invalid input or a unique conflict with a
@@ -298,10 +310,14 @@ BEGIN
   END IF;
 
   IF EXISTS (SELECT 1 FROM contact WHERE id = v_new) THEN
-    -- The new email + phone already form ANOTHER person's contact. Never
+    -- The new email + phone already form an existing contact: another
+    -- person's, or this same person's other role (e.g. the old release
+    -- changed a coordinator's contact to match their org's owner). Never
     -- merge onto it (nor rename it): leave this row unlinked and report it.
-    -- The application pre-checks make this unreachable for current code; it
-    -- guards writes from a release that predates them.
+    -- Only the old release can get here (rollback window; the new release
+    -- runs after 0026 dropped these triggers). The next boot's re-run of the
+    -- backfill below relinks the row by hash to that contact; V1 counts it
+    -- until then.
     EXECUTE format('UPDATE %I SET contact_id = NULL WHERE id = $1', p_table) USING p_row_id;
     PERFORM contact_gc(p_old_id);
     RAISE WARNING 'contact_move: email and phone already belong to another contact; % row left unlinked', p_table;

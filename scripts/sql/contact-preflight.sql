@@ -2,8 +2,10 @@
 --
 -- Run BEFORE `scripts/contact-migrate.sh apply` on an existing instance.
 -- Every "blocking" count must be 0; otherwise 0025 refuses to create the table
--- (its first-creation guard re-runs the same checks). Fix the listed rows by
+-- (its first-creation guard re-runs the same checks) and
+-- `scripts/contact-migrate.sh preflight` exits 1. Fix the listed rows by
 -- hand, coordinating with Keycloak (it holds the same identity), then re-run.
+-- Safe to run against the live database.
 --
 -- Output is row ids and counts only — never an email, phone or name — so it
 -- is safe to paste into a ticket.

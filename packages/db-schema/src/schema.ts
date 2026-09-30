@@ -242,8 +242,7 @@ export const aggregators = pgTable(
       .default(sql`'{}'::jsonb`),
 
     // The legacy Beckn `contact` jsonb and its generated `contact_phone` /
-    // `contact_email` columns are no longer part of the application schema
-    // (contact rollout R3); migration 0026 drops them from the database.
+    // `contact_email` columns were dropped by migration 0026.
 
     // Beckn Location[] — optional list of geographic locations.
     locations: jsonb('locations')
@@ -336,8 +335,7 @@ export const aggregatorOrgs = pgTable(
         onDelete: 'restrict',
         onUpdate: 'cascade',
       }),
-    // The legacy owner_email / owner_phone columns are no longer part of the
-    // application schema (contact rollout R3); migration 0026 drops them.
+    // The legacy owner_email / owner_phone columns were dropped by 0026.
     ownerKcSub: text('owner_kc_sub'),
     kcGroupId: text('kc_group_id'),
     // Schema-driven registration payload (0018) — see the note on

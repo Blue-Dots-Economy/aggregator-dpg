@@ -1,7 +1,7 @@
 /**
  * One-off backfill of org-owner names onto the `contact` table.
  *
- * Belongs to `@aggregator-dpg/api` (user & org management refactor, Phase 1).
+ * Belongs to `@aggregator-dpg/api` (the `contact` table, migrations 0025/0026).
  * Before migration 0025 an org owner's name was never stored in the database —
  * it only reached Keycloak as first/last name — so contacts backfilled from
  * `aggregator_orgs` have `name IS NULL`. This reads the name back from Keycloak
@@ -175,9 +175,7 @@ export async function listOwnerNameCandidatesFromDb(): Promise<OwnerNameCandidat
     .innerJoin(contact, eq(contact.id, aggregatorOrgs.contactId))
     .where(and(isNull(contact.name), isNotNull(aggregatorOrgs.ownerKcSub)));
   return rows.flatMap((r) =>
-    r.contactId && r.ownerKcSub
-      ? [{ orgId: r.orgId, contactId: r.contactId, ownerKcSub: r.ownerKcSub }]
-      : [],
+    r.ownerKcSub ? [{ orgId: r.orgId, contactId: r.contactId, ownerKcSub: r.ownerKcSub }] : [],
   );
 }
 

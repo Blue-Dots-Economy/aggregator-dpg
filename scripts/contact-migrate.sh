@@ -1,22 +1,27 @@
 #!/usr/bin/env bash
 # Pre-deploy runner for migration 0025 (`contact` table) on an EXISTING instance.
 #
-# The migration file IS the script: this wrapper runs
-# apps/api/drizzle/migrations/0025_contact.sql with psql, exactly as drizzle
-# will re-run it at the next API boot (idempotent — a no-op the second time).
-# A fresh instance does not need this; its first boot creates everything.
+# Phase 1 ships as one release, deployed stop-the-world. The migration file IS
+# the script: `apply` runs apps/api/drizzle/migrations/0025_contact.sql with
+# psql; the release's first API boot re-runs it through drizzle (a no-op) and
+# then applies 0026, which drops the legacy columns. A fresh instance does not
+# need this script; its first boot creates everything.
 #
 # Run it from a checkout of the RELEASE TAG you are about to deploy, so the SQL
 # you pre-apply is byte-identical to what the pods will run.
 #
 # Usage:
-#   ./scripts/contact-migrate.sh preflight   # read-only report; blocking checks must be 0
-#   ./scripts/contact-migrate.sh dry-run     # apply + verify inside a transaction, then ROLLBACK
+#   ./scripts/contact-migrate.sh preflight   # read-only report; exit 1 if any blocking count > 0
+#   ./scripts/contact-migrate.sh dry-run     # apply + verify inside a transaction, then ROLLBACK;
+#                                            # exit non-zero if 0025 or the verify gate fails
 #   ./scripts/contact-migrate.sh apply       # apply for real (single transaction)
-#   ./scripts/contact-migrate.sh verify      # read-only V1–V6 checks (V4/V6 only while legacy columns exist)
+#   ./scripts/contact-migrate.sh verify      # read-only V1–V6 report; exit 1 if V1 or V2 > 0,
+#                                            # or V4 > 0 while the legacy columns exist
 #
-# Runbook: preflight → (fix rows) → dry-run → apply (off-peak) → verify →
-#          deploy → verify again. See docs/plans/contact-table-phase-1.md §6.3.
+# Runbook (docs/contact-migration-runbook.md):
+#   preflight + dry-run (may run while live) → scale api + worker to 0 →
+#   DB snapshot → apply → verify → deploy the API at 1 replica (its boot
+#   applies 0026) → verify → start the worker, scale up → owner-name backfill.
 #
 # Postgres — pick ONE (read from the environment or the project .env):
 #   DATABASE_URL   postgres://user:pass@host:port/db   (uses local psql)
@@ -27,6 +32,7 @@
 # Run it as the application role that owns the tables, or as a role that may
 # SET ROLE to it (e.g. a superuser): 0025 switches to the table owner itself so
 # everything it creates stays writable by the app, and refuses any other role.
+# Needs PostgreSQL 14+ (CREATE OR REPLACE TRIGGER).
 #
 # Needs bash + psql (or docker / kubectl) and python3 (only to read .env).
 # PSQL_CMD is word-split, so it cannot carry quoted arguments with spaces.
@@ -40,7 +46,7 @@ MODE="${1:-}"
 case "$MODE" in
   preflight | dry-run | apply | verify) ;;
   *)
-    sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
+    awk 'NR > 1 && !/^#/ { exit } NR > 1' "$0" | sed 's/^# \{0,1\}//'
     exit 2
     ;;
 esac
@@ -90,17 +96,48 @@ else
   exit 1
 fi
 
+# ─── Exit-code gates (one number each; the human-readable reports stay as is) ─
+# Blocking pre-flight count: the same checks 0025's first-creation guard runs
+# (scripts/sql/contact-preflight.sql rows 1–4).
+PREFLIGHT_GATE_SQL="WITH src AS (
+  SELECT lower(btrim(contact->>'email')) AS e, contact->>'phone' AS p FROM aggregators
+  UNION ALL
+  SELECT lower(btrim(owner_email)), owner_phone FROM aggregator_orgs)
+SELECT (SELECT count(*) FROM (SELECT e FROM src GROUP BY e HAVING count(DISTINCT coalesce(p, '')) > 1) a)
+     + (SELECT count(*) FROM (SELECT p FROM src WHERE p IS NOT NULL GROUP BY p HAVING count(DISTINCT e) > 1) b)
+     + (SELECT count(*) FROM src WHERE p IS NOT NULL AND p !~ '^\\+[0-9]{10,15}\$')
+     + (SELECT count(*) FROM src WHERE coalesce(e, '') = '')"
+# V1 + V2 (scripts/sql/contact-verify.sql).
+VERIFY_GATE_SQL="SELECT (SELECT count(*) FROM aggregators WHERE contact_id IS NULL)
+     + (SELECT count(*) FROM aggregator_orgs WHERE contact_id IS NULL)
+     + (SELECT count(*) FROM contact WHERE id <> contact_id_of(email, phone))"
+# V4 (scripts/sql/contact-verify-legacy.sql) — only while the legacy columns exist.
+VERIFY_LEGACY_GATE_SQL="SELECT (SELECT count(*) FROM aggregators a JOIN contact c ON c.id = a.contact_id
+         WHERE a.contact IS NOT NULL
+           AND (lower(btrim(a.contact->>'email')) IS DISTINCT FROM c.email
+             OR (a.contact->>'phone') IS DISTINCT FROM c.phone
+             OR (CASE WHEN btrim(a.contact->>'name') <> '' THEN a.contact->>'name' END) IS DISTINCT FROM c.name
+             OR (a.contact - 'name' - 'phone' - 'email') IS DISTINCT FROM a.contact_extra))
+     + (SELECT count(*) FROM aggregator_orgs o JOIN contact c ON c.id = o.contact_id
+         WHERE o.owner_email IS NOT NULL
+           AND (lower(btrim(o.owner_email)) IS DISTINCT FROM c.email
+             OR o.owner_phone IS DISTINCT FROM c.phone))"
+
+# Prints the single value of query "$1".
+scalar() { printf '%s;\n' "$1" | "${PSQL[@]}" "${PSQL_FLAGS[@]}" -At; }
+
 sha() { if command -v sha256sum >/dev/null; then sha256sum "$1"; else shasum -a 256 "$1"; fi; }
 echo "0025_contact.sql sha256: $(sha "$MIGRATION" | cut -d' ' -f1)"
 echo "mode: $MODE"
+echo "database: $(scalar "SELECT current_database() || ' as ' || current_user")"
 
 # Files are streamed on stdin so the same invocation works for local psql,
 # `docker exec -i` and `kubectl exec -i` alike.
 # 0025 is the EXPAND step. Once 0026 has dropped the legacy columns it must not
 # be re-applied (it would try to relax columns that no longer exist).
+LEGACY_COLUMN_SQL="SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='aggregators' AND column_name='contact'"
 if [[ "$MODE" == "apply" || "$MODE" == "dry-run" || "$MODE" == "preflight" ]]; then
-  legacy=$(echo "SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='aggregators' AND column_name='contact';" \
-    | "${PSQL[@]}" "${PSQL_FLAGS[@]}" -At)
+  legacy=$(scalar "$LEGACY_COLUMN_SQL")
   if [[ "$legacy" == "0" ]]; then
     echo "the legacy contact columns are already dropped (migration 0026) — nothing to pre-apply; use: $0 verify" >&2
     exit 1
@@ -110,21 +147,38 @@ fi
 case "$MODE" in
   preflight)
     "${PSQL[@]}" "${PSQL_FLAGS[@]}" < "$PREFLIGHT"
+    blocking=$(scalar "$PREFLIGHT_GATE_SQL")
+    if [[ "$blocking" != "0" ]]; then
+      echo "preflight FAILED: $blocking blocking row(s) — fix them before apply (0025 would refuse)" >&2
+      exit 1
+    fi
+    echo "preflight OK: no blocking rows"
     ;;
   verify)
-    if [[ "$(echo "SELECT to_regclass('public.contact') IS NOT NULL;" | "${PSQL[@]}" "${PSQL_FLAGS[@]}" -At)" != "t" ]]; then
+    if [[ "$(scalar "SELECT to_regclass('public.contact') IS NOT NULL")" != "t" ]]; then
       echo "table \"contact\" does not exist yet — run: $0 apply" >&2
       exit 1
     fi
     "${PSQL[@]}" "${PSQL_FLAGS[@]}" < "$VERIFY"
-    legacy=$(echo "SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='aggregators' AND column_name='contact';" \
-      | "${PSQL[@]}" "${PSQL_FLAGS[@]}" -At)
+    bad=$(scalar "$VERIFY_GATE_SQL")
+    legacy=$(scalar "$LEGACY_COLUMN_SQL")
     if [[ "$legacy" != "0" ]]; then
       "${PSQL[@]}" "${PSQL_FLAGS[@]}" < "$ROOT/scripts/sql/contact-verify-legacy.sql"
+      bad=$((bad + $(scalar "$VERIFY_LEGACY_GATE_SQL")))
     fi
+    if [[ "$bad" != "0" ]]; then
+      echo "verify FAILED: V1 + V2$([[ "$legacy" != "0" ]] && echo " + V4") = $bad (must be 0)" >&2
+      exit 1
+    fi
+    echo "verify OK"
     ;;
   dry-run)
-    { echo 'BEGIN;'; cat "$MIGRATION"; echo; cat "$VERIFY"; echo; cat "$ROOT/scripts/sql/contact-verify-legacy.sql"; echo; echo 'ROLLBACK;'; } \
+    # The gate raises inside the transaction, so psql exits non-zero; the
+    # transaction is rolled back either way.
+    { echo 'BEGIN;'; cat "$MIGRATION"; echo; cat "$VERIFY"; echo; cat "$ROOT/scripts/sql/contact-verify-legacy.sql"; echo
+      printf 'DO $gate$ DECLARE n bigint; BEGIN\n  SELECT (%s) + (%s) INTO n;\n  IF n > 0 THEN RAISE EXCEPTION %s, n; END IF;\nEND $gate$;\n' \
+        "$VERIFY_GATE_SQL" "$VERIFY_LEGACY_GATE_SQL" "'dry-run verify FAILED: V1 + V2 + V4 = % (must be 0)'"
+      echo 'ROLLBACK;'; } \
       | "${PSQL[@]}" "${PSQL_FLAGS[@]}"
     echo "dry-run complete — rolled back, nothing changed"
     ;;

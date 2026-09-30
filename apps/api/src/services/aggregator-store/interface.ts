@@ -27,11 +27,8 @@ export interface Aggregator {
   name: string;
   type: RoleType | null;
   url: string | null;
-  /**
-   * FK → `contact.id` (migration 0025). PII-derived hash — never log it.
-   * `null` only for a row the best-effort contact sync could not link.
-   */
-  contactId: string | null;
+  /** FK → `contact.id` (migrations 0025/0026). PII-derived hash — never log it. */
+  contactId: string;
   /** Beckn contact, composed from the linked `contact` row + `contact_extra`. */
   contact: BecknContact;
   /** The contact's phone (derived from `contact`; kept for existing callers). */

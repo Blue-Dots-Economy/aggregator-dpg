@@ -79,7 +79,7 @@ describe('aggregators columns', () => {
     expect(aggregators.contactExtra.hasDefault).toBe(true);
   });
 
-  it('the legacy Beckn contact jsonb and generated lookup columns are gone (R3)', () => {
+  it('the legacy Beckn contact jsonb and generated lookup columns are gone (0026)', () => {
     expect('contact' in aggregators).toBe(false);
     expect('contactPhone' in aggregators).toBe(false);
     expect('contactEmail' in aggregators).toBe(false);

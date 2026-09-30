@@ -790,6 +790,34 @@ describe('aggregator-orgs routes', () => {
     expect(found.ok && found.value).toBeNull();
   });
 
+  it('still reports the original failure when cleaning up the half-created org fails too', async () => {
+    idp.createUser = async () => ({
+      ok: false,
+      error: { code: 'IDP_UNAVAILABLE', message: 'kc down' },
+    });
+    let groupDeletes = 0;
+    idp.deleteGroup = async () => {
+      groupDeletes++;
+      return { ok: false, error: { code: 'IDP_UNAVAILABLE', message: 'kc down' } };
+    };
+    let rowDeletes = 0;
+    orgStore.deleteById = async () => {
+      rowDeletes++;
+      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: 'db down' } };
+    };
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: { ...orgBody, owner: { ...orgBody.owner, email: 'cleanup-fail@enable.org' } },
+    });
+    // Cleanup is best-effort and logged; it never masks the error that caused it.
+    expect(res.statusCode).toBe(503);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('IDP_UNAVAILABLE');
+    expect(groupDeletes).toBe(1);
+    expect(rowDeletes).toBe(1);
+  });
+
   it('503 DB_UNAVAILABLE when the final stamp update (kcGroupId/ownerKcSub) fails', async () => {
     const originalUpdate = orgStore.update.bind(orgStore);
     let calls = 0;

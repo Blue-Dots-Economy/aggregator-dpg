@@ -2,10 +2,10 @@
 -- columns; `scripts/contact-migrate.sh verify` runs it only while they exist
 -- (until migration 0026 drops them). Counts only — never PII.
 --
---   V4  drift between the legacy columns and the linked contact. Meaningful
---       while the legacy columns are still written (R0/R1); after R2 stops
---       writing them, rows changed by R2 carry NULL legacy values and are
---       skipped.
+--   V4  drift between the legacy columns and the linked contact. Between
+--       `apply` and the deploy only the old release can write them (if it is
+--       started again), and 0025's sync triggers keep `contact` in step, so
+--       this must be 0.
 --   V6  coordinator rows whose legacy jsonb is NULL (informational).
 
 SELECT check_id, description, n FROM (

@@ -27,13 +27,13 @@ interface ChainCall {
 }
 
 function makeFakeDb(resolveRaw: (chain: ChainCall[]) => unknown): unknown {
-  // Reads go through `aggregator_orgs LEFT JOIN contact` (migration 0025) and
+  // Reads go through `aggregator_orgs JOIN contact` (migration 0025) and
   // resolve to `{ o, c }` pairs. Tests keep returning flat rows; wrap them
   // here, deriving the joined contact from the fixture's owner fields.
   const resolve = (chain: ChainCall[]): unknown => {
     if (chain[0]?.method === 'execute') return { rows: [{ n: 1 }] };
     const out = resolveRaw(chain);
-    if (!chain.some((c) => c.method === 'leftJoin') || !Array.isArray(out)) return out;
+    if (!chain.some((c) => c.method === 'innerJoin') || !Array.isArray(out)) return out;
     return out.map((r: Record<string, unknown>) =>
       'o' in r
         ? r
@@ -104,7 +104,7 @@ function makeRow(overrides: Partial<AggregatorOrg> = {}): AggregatorOrg {
     slug: 'test-org',
     displayName: 'Test Org',
     state: null,
-    contactId: null,
+    contactId: 'a'.repeat(64),
     ownerEmail: 'owner@test.local',
     ownerPhone: null,
     ownerName: null,
@@ -274,7 +274,8 @@ describe('PostgresAggregatorOrgStore.create', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe('DB_UNAVAILABLE');
-    expect(result.error.message).toContain('connection reset');
+    // The driver message carries query parameters; it is never echoed.
+    expect(result.error.message).not.toContain('connection reset');
   });
 });
 

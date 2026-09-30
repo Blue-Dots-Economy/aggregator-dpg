@@ -208,7 +208,8 @@ export async function registerAggregatorProfileRoutes(app: FastifyInstance): Pro
       // If KC fails, abort before touching the DB so we never have the DB
       // ahead of Keycloak.
       let normalisedContact: BecknContact | undefined;
-      // The Keycloak phone before this request, restored if the DB write fails.
+      // The coordinator's stored phone before this request (what Keycloak
+      // mirrors), written back to Keycloak if the DB write fails.
       let previousPhone: string | undefined;
       if (body.aggregator.contact) {
         const raw = body.aggregator.contact;
@@ -223,11 +224,10 @@ export async function registerAggregatorProfileRoutes(app: FastifyInstance): Pro
         }
         normalisedContact = { ...raw, phone: phoneR.value };
 
-        // One phone per person across coordinators and org owners (the phone
-        // is the OTP login key; `contact`, migration 0025). Checked before the
-        // Keycloak write so a clash never leaves Keycloak ahead of the DB. A
-        // clash with another coordinator returns the same PHONE_EXISTS the
-        // unique index already produced; a clash with an org owner is new.
+        // One phone and one email per person across coordinators and org
+        // owners (the phone is the OTP login key; `contact`, migration 0025).
+        // Checked before the Keycloak write so a clash never leaves Keycloak
+        // ahead of the DB.
         previousPhone = await assertContactChangeAllowed(auth.aggregatorId, {
           email: raw.email,
           phone: phoneR.value,
@@ -393,7 +393,7 @@ function mapAggregatorUpdateError(
  *     → PHONE_EXISTS / USER_EXISTS;
  *   - this coordinator's contact is shared with an org-owner role (one person,
  *     two roles) and the email or phone would change → CONFLICT (not supported
- *     until accounts are split, Phase 2+).
+ *     until accounts are modelled separately, in a later phase).
  * Identity is compared on stored contact ids, never on the submitted email.
  *
  * @param selfId - The caller's own `aggregators.id`.
@@ -416,9 +416,8 @@ async function assertContactChangeAllowed(
   if (!self.value) throw httpError('NOT_FOUND');
   const me = self.value;
   const email = next.email.trim().toLowerCase();
-  /** Same person: the org owner's contact IS this coordinator's (non-null) contact. */
-  const isMine = (contactId: string | null): boolean =>
-    contactId !== null && me.contactId !== null && contactId === me.contactId;
+  /** Same person: the org owner's contact IS this coordinator's contact. */
+  const isMine = (contactId: string): boolean => contactId === me.contactId;
 
   const byPhone = await aggregators.findByContactPhone(next.phone);
   if (!byPhone.ok) return unavailable('aggregatorStore.findByContactPhone', byPhone.error.message);
@@ -443,7 +442,7 @@ async function assertContactChangeAllowed(
   }
 
   const identityChanges = email !== me.contactEmail || next.phone !== me.contactPhone;
-  if (identityChanges && me.contactId) {
+  if (identityChanges) {
     const sharedWithOwner = await orgs.findByOwnerEmail(me.contactEmail);
     if (!sharedWithOwner.ok) {
       return unavailable('orgStore.findByOwnerEmail', sharedWithOwner.error.message);

@@ -8,8 +8,8 @@
  * leak through a service interface (interfaces.md §5) and no caller outside
  * those two stores writes contacts.
  *
- * Unlike the migration-0025 sync triggers (best-effort, for legacy writes),
- * these are strict: a clash with another person's email or phone raises the
+ * Unlike the best-effort sync triggers migration 0025 installed for the
+ * previous release's writes (0026 drops them), these are strict: a clash with another person's email or phone raises the
  * database unique violation (`contact_email_unique` / `contact_phone_unique`),
  * which the calling store maps to `DUPLICATE_EMAIL` / `DUPLICATE_PHONE`.
  *
@@ -31,7 +31,8 @@ export type DbExecutor = Pick<
 /**
  * Thrown by {@link changeContact} when the contact is shared by another row
  * (one person holding two roles). Changing it would silently change the other
- * role's email/phone while Keycloak does not follow, so Phase 1 refuses.
+ * role's email/phone while Keycloak does not follow, so it is refused until
+ * accounts are modelled separately.
  */
 export class SharedContactError extends Error {
   constructor() {
@@ -132,8 +133,8 @@ export async function linkContact(db: DbExecutor, input: ContactInput): Promise<
 }
 
 /**
- * Moves a row's contact to new details (plan §3.3) and returns the id the row
- * must now reference.
+ * Moves a row's contact to new details and returns the id the row must now
+ * reference.
  *
  *   - same id           → name update only (an explicit update: new name wins)
  *   - target id exists  → {@link ContactTakenError} (another person's contact)
@@ -142,7 +143,7 @@ export async function linkContact(db: DbExecutor, input: ContactInput): Promise<
  *                          CASCADE` moves every FK
  *
  * @param db - Executor (the caller's transaction).
- * @param oldId - The row's current contact id, or `null` when unlinked.
+ * @param oldId - The row's current contact id.
  * @param input - The new details.
  * @returns The contact id the row must reference afterwards.
  * @throws {SharedContactError} When another row shares the old contact.
@@ -151,7 +152,7 @@ export async function linkContact(db: DbExecutor, input: ContactInput): Promise<
  */
 export async function changeContact(
   db: DbExecutor,
-  oldId: string | null,
+  oldId: string,
   input: ContactInput,
 ): Promise<string> {
   const email = input.email.trim().toLowerCase();
@@ -162,8 +163,6 @@ export async function changeContact(
     if (name) await db.update(contact).set({ name }).where(eq(contact.id, newId));
     return newId;
   }
-  if (!oldId) return linkContact(db, input);
-
   // Lock the current contact first, so the shared-or-not answer below cannot
   // change under us (a concurrent insert referencing it would otherwise be
   // re-keyed along with this row).
@@ -192,16 +191,4 @@ export async function changeContact(
     })
     .where(eq(contact.id, oldId));
   return newId;
-}
-
-/**
- * Deletes a contact nothing references any more (the SQL `contact_gc()` from
- * migration 0025, which the delete triggers also use).
- *
- * @param db - Executor.
- * @param id - Contact id, or `null` (no-op).
- */
-export async function gcContact(db: DbExecutor, id: string | null): Promise<void> {
-  if (!id) return;
-  await db.execute(sql`SELECT contact_gc(${id})`);
 }

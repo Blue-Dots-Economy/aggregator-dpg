@@ -14,6 +14,7 @@
  *
  * @module @aggregator-dpg/api
  */
+import { contactId } from '@aggregator-dpg/shared-primitives/contact';
 import { afterEach, describe, expect, it } from 'vitest';
 import { PostgresAggregatorStore } from '../postgres.js';
 import { _setDbClients } from '../../../db/client.js';
@@ -34,7 +35,7 @@ interface ChainCall {
  * throw to simulate a driver error).
  */
 function makeFakeDb(resolveRaw: (chain: ChainCall[]) => unknown): unknown {
-  // Reads go through `aggregators LEFT JOIN contact` (migration 0025) and
+  // Reads go through `aggregators JOIN contact` (migration 0025) and
   // resolve to `{ a, c }` pairs. Tests keep returning flat rows; wrap them
   // here, deriving the joined contact row from the fixture's `contact`.
   const resolve = (chain: ChainCall[]): unknown => {
@@ -42,7 +43,7 @@ function makeFakeDb(resolveRaw: (chain: ChainCall[]) => unknown): unknown {
     // pg QueryResult: one row held, referenced once (not shared).
     if (chain[0]?.method === 'execute') return { rows: [{ n: 1 }] };
     const out = resolveRaw(chain);
-    if (!chain.some((c) => c.method === 'leftJoin') || !Array.isArray(out)) return out;
+    if (!chain.some((c) => c.method === 'innerJoin') || !Array.isArray(out)) return out;
     return out.map((r: Record<string, unknown>) => {
       if ('a' in r) return r;
       const legacy = r['contact'] as { name: string; email: string; phone: string } | undefined;
@@ -124,7 +125,7 @@ function makeRow(overrides: Partial<Aggregator> = {}): Aggregator {
     name: 'Test Org',
     type: null,
     url: null,
-    contactId: null,
+    contactId: contactId('a@x.org', '+919000000001'),
     contact: { name: 'A', phone: '+919000000001', email: 'a@x.org' },
     contactPhone: '+919000000001',
     contactEmail: 'a@x.org',
@@ -311,7 +312,8 @@ describe('PostgresAggregatorStore.create', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe('DB_UNAVAILABLE');
-    expect(result.error.message).toContain('connection reset');
+    // The driver message carries query parameters; it is never echoed.
+    expect(result.error.message).not.toContain('connection reset');
   });
 });
 
@@ -850,13 +852,6 @@ describe('PostgresAggregatorStore contact composition', () => {
     ]);
     expect(result.value.contactPhone).toBe('+919000000009');
     expect(result.value.contactEmail).toBe('owner@x.org');
-  });
-
-  it('returns an empty contact (and does not throw) for an unlinked row', async () => {
-    const a = { ...makeRow({ contactId: null }), contactExtra: {} };
-    _setDbClients(null, makeFakeDb(() => [{ a, c: null }]) as never);
-    const result = await new PostgresAggregatorStore().findById(a.id);
-    expect(result.ok && result.value?.contact).toEqual({ name: '', email: '', phone: '' });
   });
 
   it('maps a NULL contact name to an empty string (the wire field is required)', async () => {

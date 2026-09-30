@@ -1,5 +1,5 @@
 /**
- * Runner for the one-off org-owner name backfill (contact table, Phase 1).
+ * Runner for the one-off org-owner name backfill (the `contact` table, migrations 0025/0026).
  *
  * Run ONCE per existing instance after the release that ships migration 0025,
  * from a checkout (the api image has no tsx):

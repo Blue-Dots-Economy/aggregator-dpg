@@ -276,6 +276,34 @@ describe('aggregator profile routes', () => {
     expect((res.json() as { error: { code: string } }).error.code).toBe('PHONE_EXISTS');
   });
 
+  it('PATCH 409 USER_EXISTS (before any Keycloak write) when an org owner holds the email', async () => {
+    orgStore.seed([
+      buildAggregatorOrg({
+        ownerEmail: 'boss@else.org',
+        ownerPhone: '+919876543277',
+        status: 'active',
+      }),
+    ]);
+    let kcWrites = 0;
+    idp.setAttributes = async () => {
+      kcWrites++;
+      return { ok: true, value: undefined };
+    };
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/v1/aggregators/profile/me',
+      headers: { authorization: 'Bearer good-token' },
+      payload: {
+        aggregator: {
+          contact: { name: 'Asha', phone: '+919876543210', email: 'Boss@Else.org' },
+        },
+      },
+    });
+    expect(res.statusCode).toBe(409);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('USER_EXISTS');
+    expect(kcWrites).toBe(0);
+  });
+
   it('PATCH 409 CONFLICT before any Keycloak write when the contact is shared with an org owner', async () => {
     const shared = 'c'.repeat(64);
     aggregatorStore.seed([

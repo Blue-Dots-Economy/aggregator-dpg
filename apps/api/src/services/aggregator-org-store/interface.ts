@@ -15,11 +15,10 @@ export interface AggregatorOrg {
   displayName: string;
   state: string | null;
   /**
-   * FK → `contact.id` — the org owner (the design doc's `primary_contact`,
-   * migration 0025). PII-derived hash: never log it. `null` only for a row the
-   * best-effort contact sync could not link.
+   * FK → `contact.id` — the org owner's contact (migration 0025). PII-derived
+   * hash: never log it.
    */
-  contactId: string | null;
+  contactId: string;
   /** Owner email, lowercased — from the linked contact. */
   ownerEmail: string;
   /** Owner phone (canonical) — from the linked contact. */
@@ -65,7 +64,6 @@ export interface CreateOrgInput {
 export interface UpdateOrgPatch {
   displayName?: string;
   state?: string | null;
-  ownerPhone?: string | null;
   ownerKcSub?: string | null;
   kcGroupId?: string | null;
   status?: AggregatorStatus;
