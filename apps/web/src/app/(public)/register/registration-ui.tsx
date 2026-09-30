@@ -68,7 +68,7 @@ export interface ConsentGateSubmit {
   /** Form values parked at submit, replayed once consent is accepted. */
   pendingRef: RefObject<Record<string, unknown> | null>;
   /** RJSF `onSubmit`: parks the payload, then opens the gate. */
-  handleSubmit: (e: IChangeEvent<Record<string, unknown>>) => Promise<void>;
+  handleSubmit: (e: IChangeEvent<Record<string, unknown>>) => void;
 }
 
 /**
@@ -93,7 +93,7 @@ export function useConsentGateSubmit(
   const [gateOpen, setGateOpen] = useState(false);
   const pendingRef = useRef<Record<string, unknown> | null>(null);
 
-  const handleSubmit = async (e: IChangeEvent<Record<string, unknown>>): Promise<void> => {
+  const handleSubmit = (e: IChangeEvent<Record<string, unknown>>): void => {
     pendingRef.current = (e.formData ?? {}) as Record<string, unknown>;
     if (consentDocs.length === 0) {
       setState({
@@ -117,7 +117,7 @@ export interface SharedFormWiring {
   setFormData: (data: Record<string, unknown>) => void;
   setCanSubmit: (valid: boolean) => void;
   setState: (s: SubmitState) => void;
-  handleSubmit: (e: IChangeEvent<Record<string, unknown>>) => Promise<void>;
+  handleSubmit: (e: IChangeEvent<Record<string, unknown>>) => void;
   /** The schema the form validates against — used to name fields in errors. */
   formSchema: RJSFSchema;
   // `| undefined` is load-bearing under `exactOptionalPropertyTypes`: both
@@ -150,7 +150,7 @@ export function sharedRegistrationFormProps(wiring: SharedFormWiring): {
   formContext: Record<string, unknown>;
   onChange: (e: IChangeEvent<Record<string, unknown>>) => void;
   onValidityChange: (valid: boolean) => void;
-  onSubmit: (e: IChangeEvent<Record<string, unknown>>) => Promise<void>;
+  onSubmit: (e: IChangeEvent<Record<string, unknown>>) => void;
   onError: (errs: AjvLikeError[]) => void;
   showErrorList: false;
   focusOnFirstError: true;
