@@ -20,6 +20,7 @@ import { logger } from '../../logger.js';
 import { aggregators, contact } from '../../db/schema.js';
 import {
   changeContact,
+  ContactTakenError,
   gcContact,
   linkContact,
   SharedContactError,
@@ -213,6 +214,15 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
       });
       if (!found) return { ok: false, error: { code: 'NOT_FOUND', message: id } };
     } catch (err: unknown) {
+      if (err instanceof ContactTakenError) {
+        logger.warn({
+          operation: 'aggregatorStore.update',
+          status: 'failure',
+          error: 'CONTACT_TAKEN',
+          aggregator_id: id,
+        });
+        return { ok: false, error: { code: 'DUPLICATE_EMAIL', message: err.message } };
+      }
       if (err instanceof SharedContactError) {
         logger.warn({
           operation: 'aggregatorStore.update',
@@ -364,7 +374,9 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
       // constraint name is logged below either way.
       let storeCode: StoreError['code'] = 'DUPLICATE';
       // The same person already has a coordinator row (one row per contact).
-      if (constraint.includes('aggregators_contact_id_unique')) storeCode = 'DUPLICATE_EMAIL';
+      // contact_pkey: the same brand-new contact created concurrently.
+      if (constraint.includes('aggregators_contact_id_unique') || constraint === 'contact_pkey')
+        storeCode = 'DUPLICATE_EMAIL';
       else if (constraint.includes('contact_phone')) storeCode = 'DUPLICATE_PHONE';
       else if (constraint.includes('contact_email')) storeCode = 'DUPLICATE_EMAIL';
       else if (constraint.includes('slug')) storeCode = 'DUPLICATE_SLUG';

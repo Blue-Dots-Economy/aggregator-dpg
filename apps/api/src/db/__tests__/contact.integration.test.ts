@@ -555,6 +555,50 @@ suite('contact (migration 0025) — integration', () => {
     });
   });
 
+  describe('app writes (R2)', () => {
+    it("refuses to move a coordinator onto another person's contact (ContactTakenError)", async () => {
+      const aggStore = new PostgresAggregatorStore();
+      const orgStore = new PostgresAggregatorOrgStore();
+      const ownerEmail = `it-${randomUUID().slice(0, 8)}@example.org`;
+      const ownerPhone = phone();
+      const org = await orgStore.create({
+        slug: `it-org-${randomUUID().slice(0, 8)}`,
+        displayName: `IT Org ${randomUUID().slice(0, 8)}`,
+        ownerEmail,
+        ownerPhone,
+        ownerName: 'Owner Name',
+      });
+      const coord = await aggStore.create({
+        orgSlug: `it-${randomUUID().slice(0, 8)}`,
+        actorType: 'aggregator',
+        name: 'IT Org',
+        type: null,
+        contact: {
+          name: 'Intruder',
+          email: `it-${randomUUID().slice(0, 8)}@example.org`,
+          phone: phone(),
+        },
+        consent: CONSENT,
+        createdBy: 'it',
+        updatedBy: 'it',
+      });
+      if (!org.ok || !coord.ok) throw new Error('setup failed');
+      try {
+        const moved = await aggStore.update(coord.value.id, {
+          contact: { name: 'Hijacked', email: ownerEmail, phone: ownerPhone },
+          updatedBy: 'it',
+        });
+        expect(moved.ok).toBe(false);
+        if (!moved.ok) expect(moved.error.code).toBe('DUPLICATE_EMAIL');
+        const owner = await orgStore.findById(org.value.id);
+        expect(owner.ok && owner.value?.ownerName).toBe('Owner Name');
+      } finally {
+        await aggStore.deleteById(coord.value.id);
+        await orgStore.deleteById(org.value.id);
+      }
+    });
+  });
+
   describe('final review fixes', () => {
     it('one coordinator row per person: two concurrent registrations of the same person', async () => {
       const store = new PostgresAggregatorStore();

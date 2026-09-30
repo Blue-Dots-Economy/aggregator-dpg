@@ -634,6 +634,26 @@ describe('aggregator-orgs routes', () => {
     expect((res.json() as { error: { code: string } }).error.code).toBe('ORG_SLUG_TAKEN');
   });
 
+  it.each([
+    ['DUPLICATE_EMAIL', 'OWNER_ALREADY_REGISTERED'],
+    ['DUPLICATE_PHONE', 'PHONE_EXISTS'],
+  ] as const)(
+    'maps a %s store error (a race past the pre-check) to %s (409)',
+    async (storeCode, httpCode) => {
+      const racing = new AggregatorOrgStoreFake();
+      racing.create = async () => ({ ok: false, error: { code: storeCode, message: 'race' } });
+      _setAggregatorOrgStore(racing);
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/orgs/create',
+        headers: AUTH_HEADER,
+        payload: orgBody,
+      });
+      expect(res.statusCode).toBe(409);
+      expect((res.json() as { error: { code: string } }).error.code).toBe(httpCode);
+    },
+  );
+
   it('401s POST /v1/orgs/create without a token', async () => {
     const res = await app.inject({
       method: 'POST',

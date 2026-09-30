@@ -20,6 +20,7 @@ import { PG_UNIQUE_VIOLATION, pgErrorCode, pgConstraint } from '../../db/pg-erro
 import { logger } from '../../logger.js';
 import {
   changeContact,
+  ContactTakenError,
   gcContact,
   linkContact,
   SharedContactError,
@@ -283,14 +284,14 @@ function mapInsertError(e: unknown): OrgStoreResult<never> {
     if (constraint.includes('aggregator_orgs_slug_active_unique')) {
       return errResult('DUPLICATE_SLUG', 'slug already in use');
     }
-    if (constraint.includes('contact_email_unique')) {
+    if (constraint.includes('contact_email_unique') || constraint === 'contact_pkey') {
       return errResult('DUPLICATE_EMAIL', 'owner email already belongs to another person');
     }
     if (constraint.includes('contact_phone_unique')) {
       return errResult('DUPLICATE_PHONE', 'owner phone already belongs to another person');
     }
   }
-  if (e instanceof SharedContactError) {
+  if (e instanceof ContactTakenError || e instanceof SharedContactError) {
     return errResult('DUPLICATE_EMAIL', e.message);
   }
   return errResult('DB_UNAVAILABLE', (e as Error).message ?? 'insert failed');

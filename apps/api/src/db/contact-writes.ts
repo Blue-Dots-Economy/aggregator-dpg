@@ -40,6 +40,18 @@ export class SharedContactError extends Error {
   }
 }
 
+/**
+ * Thrown by {@link changeContact} when the requested email + phone already
+ * form ANOTHER person's contact (a row referenced by someone else). Moving onto
+ * it would merge two people and let one overwrite the other's details.
+ */
+export class ContactTakenError extends Error {
+  constructor() {
+    super('the email and phone already belong to another person');
+    this.name = 'ContactTakenError';
+  }
+}
+
 /** Splits a Beckn contact into identity (`contact`) and the optional extras. */
 export function splitBecknContact(c: {
   name: string;
@@ -110,7 +122,11 @@ export async function linkContact(db: DbExecutor, input: ContactInput): Promise<
   // FK check. If it vanished in between, create it again.
   const held = await db.execute(sql`SELECT 1 FROM contact WHERE id = ${id} FOR KEY SHARE`);
   if (held.rows.length === 0) {
-    await db.insert(contact).values({ id, email, phone: input.phone, name });
+    await db
+      .insert(contact)
+      .values({ id, email, phone: input.phone, name })
+      .onConflictDoNothing({ target: contact.id });
+    await db.execute(sql`SELECT 1 FROM contact WHERE id = ${id} FOR KEY SHARE`);
   }
   return id;
 }
@@ -120,8 +136,7 @@ export async function linkContact(db: DbExecutor, input: ContactInput): Promise<
  * must now reference.
  *
  *   - same id           → name update only (an explicit update: new name wins)
- *   - target id exists  → that id (the caller repoints; old row GC'd by
- *                          {@link gcContact})
+ *   - target id exists  → {@link ContactTakenError} (another person's contact)
  *   - old contact shared with another row → {@link SharedContactError}
  *   - otherwise         → the old row is re-keyed in place; `ON UPDATE
  *                          CASCADE` moves every FK
@@ -131,6 +146,7 @@ export async function linkContact(db: DbExecutor, input: ContactInput): Promise<
  * @param input - The new details.
  * @returns The contact id the row must reference afterwards.
  * @throws {SharedContactError} When another row shares the old contact.
+ * @throws {ContactTakenError} When the new email + phone are another person's contact.
  * @throws The driver's unique-violation error on a clash with another person.
  */
 export async function changeContact(
@@ -148,10 +164,16 @@ export async function changeContact(
   }
   if (!oldId) return linkContact(db, input);
 
+  // Lock the current contact first, so the shared-or-not answer below cannot
+  // change under us (a concurrent insert referencing it would otherwise be
+  // re-keyed along with this row).
+  await db.execute(sql`SELECT 1 FROM contact WHERE id = ${oldId} FOR UPDATE`);
+
   const [target] = await db.select({ id: contact.id }).from(contact).where(eq(contact.id, newId));
   if (target) {
-    if (name) await db.update(contact).set({ name }).where(eq(contact.id, newId));
-    return newId;
+    // Another person already has exactly this email + phone. Never merge onto
+    // it (and never overwrite their name) — that is someone else's contact.
+    throw new ContactTakenError();
   }
 
   const refs = await db.execute<{ n: number }>(sql`
