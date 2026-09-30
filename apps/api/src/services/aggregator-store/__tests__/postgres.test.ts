@@ -619,7 +619,6 @@ describe('PostgresAggregatorStore.update / updateStatus', () => {
         'name',
         'type',
         'url',
-        'contact',
         'contactId',
         'contactExtra',
         'locations',
@@ -853,15 +852,8 @@ describe('PostgresAggregatorStore contact composition', () => {
     expect(result.value.contactEmail).toBe('owner@x.org');
   });
 
-  it('falls back to the legacy jsonb for an unlinked row', async () => {
+  it('returns an empty contact (and does not throw) for an unlinked row', async () => {
     const a = { ...makeRow({ contactId: null }), contactExtra: {} };
-    _setDbClients(null, makeFakeDb(() => [{ a, c: null }]) as never);
-    const result = await new PostgresAggregatorStore().findById(a.id);
-    expect(result.ok && result.value?.contact).toEqual(a.contact);
-  });
-
-  it('returns an empty contact (and does not throw) when neither is present', async () => {
-    const a = { ...makeRow({ contactId: null }), contact: null, contactExtra: {} };
     _setDbClients(null, makeFakeDb(() => [{ a, c: null }]) as never);
     const result = await new PostgresAggregatorStore().findById(a.id);
     expect(result.ok && result.value?.contact).toEqual({ name: '', email: '', phone: '' });

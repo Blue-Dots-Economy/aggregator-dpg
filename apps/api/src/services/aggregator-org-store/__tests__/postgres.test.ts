@@ -132,7 +132,7 @@ function makeInput(overrides: Partial<CreateOrgInput> = {}): CreateOrgInput {
 // ─── create ─────────────────────────────────────────────────────────────────
 
 describe('PostgresAggregatorOrgStore.create', () => {
-  it('inserts the mapped row linked to the owner contact (legacy owner columns NULL)', async () => {
+  it('inserts the mapped row linked to the owner contact', async () => {
     let captured: ChainCall[] = [];
     const db = makeFakeDb((chain) => {
       // A write runs contact statements, then the org statement, then a
@@ -153,9 +153,7 @@ describe('PostgresAggregatorOrgStore.create', () => {
       displayName: 'Test Org',
       // The lowercased email lives on the contact, keyed by its hash.
       contactId: contactId('owner@test.local', null),
-      ownerEmail: null,
       state: null,
-      ownerPhone: null,
       ownerKcSub: null,
       kcGroupId: null,
     });

@@ -10,9 +10,7 @@
  *     registered under) / type, url, `contact_id` → `contact` (+ `contact_extra`
  *     for the optional Beckn contact keys), Beckn `locations`, `consent`,
  *     lifecycle `status`, and audit fields. `org_slug` is derived from `name`
- *     at INSERT and is immutable (trigger lives in the migration). The legacy
- *     Beckn `contact` jsonb (+ generated `contact_phone` / `contact_email`) is
- *     still written during the contact rollout and is dropped afterwards.
+ *     at INSERT and is immutable (trigger lives in the migration).
  *   - `bulk_uploads`: parent record per CSV upload. Tracks lifecycle
  *     (pending → uploaded → file_validating → row_processing → completed/failed)
  *     plus counters (passed/failed/skipped). Per-row state lives transiently
@@ -242,13 +240,9 @@ export const aggregators = pgTable(
       .notNull()
       .default(sql`'{}'::jsonb`),
 
-    // LEGACY (dropped once no release writes it). Beckn Contact jsonb plus the
-    // two generated login-lookup columns; the DB sync triggers keep `contact`
-    // / `contact_id` / `contact_extra` in step with writes to it. Nullable
-    // since 0025 so a release that no longer writes it can insert rows.
-    contact: jsonb('contact').$type<BecknContact>(),
-    contactPhone: text('contact_phone').generatedAlwaysAs(sql`(contact->>'phone')`),
-    contactEmail: text('contact_email').generatedAlwaysAs(sql`(lower(contact->>'email'))`),
+    // The legacy Beckn `contact` jsonb and its generated `contact_phone` /
+    // `contact_email` columns are no longer part of the application schema
+    // (contact rollout R3); migration 0026 drops them from the database.
 
     // Beckn Location[] — optional list of geographic locations.
     locations: jsonb('locations')
@@ -310,10 +304,8 @@ export const aggregators = pgTable(
     rejectedAt: timestamp('rejected_at', { withTimezone: true }),
   },
   (table) => ({
-    // Auth-path lookups: phone/email are the credential identifiers a user
-    // types in at login. Uniqueness prevents duplicate registration.
-    contactPhoneUnique: uniqueIndex('aggregators_contact_phone_unique').on(table.contactPhone),
-    contactEmailUnique: uniqueIndex('aggregators_contact_email_unique').on(table.contactEmail),
+    // Phone/email uniqueness now lives on `contact` (contact_email_unique,
+    // contact_phone_unique) — one person per email and per phone across roles.
     // Approval queue + tenant-classification filters.
     statusIdx: index('aggregators_status_idx').on(table.status),
     actorTypeIdx: index('aggregators_actor_type_idx').on(table.actorType),
@@ -341,10 +333,8 @@ export const aggregatorOrgs = pgTable(
       onDelete: 'restrict',
       onUpdate: 'cascade',
     }),
-    // LEGACY owner contact columns (dropped once no release writes them); the
-    // DB sync triggers keep `contact_id` in step. Nullable since 0025.
-    ownerEmail: text('owner_email'),
-    ownerPhone: text('owner_phone'),
+    // The legacy owner_email / owner_phone columns are no longer part of the
+    // application schema (contact rollout R3); migration 0026 drops them.
     ownerKcSub: text('owner_kc_sub'),
     kcGroupId: text('kc_group_id'),
     // Schema-driven registration payload (0018) — see the note on
@@ -366,7 +356,6 @@ export const aggregatorOrgs = pgTable(
   (table) => ({
     // Active-org dropdown + owner lookup are plain SQL (spec A2/A5).
     statusIdx: index('aggregator_orgs_status_idx').on(table.status),
-    ownerEmailIdx: index('aggregator_orgs_owner_email_idx').on(table.ownerEmail),
     contactIdIdx: index('aggregator_orgs_contact_id_idx').on(table.contactId),
     // Slug uniqueness only over non-terminal rows: a rejected/retired org
     // never blocks a later slug (spec A9). Partial unique index.

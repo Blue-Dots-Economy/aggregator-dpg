@@ -79,24 +79,10 @@ describe('aggregators columns', () => {
     expect(aggregators.contactExtra.hasDefault).toBe(true);
   });
 
-  it('LEGACY Beckn contact jsonb + the generated login-lookup columns (nullable since 0025)', () => {
-    expect(aggregators.contact.name).toBe('contact');
-    expect(aggregators.contact.notNull).toBe(false);
-    expect(aggregators.contact.columnType).toBe('PgJsonb');
-
-    // Generated columns: derived from `contact` via a stored SQL expression,
-    // never written directly. They exist purely for indexed login lookups.
-    expect(aggregators.contactPhone.name).toBe('contact_phone');
-    expect(aggregators.contactPhone.notNull).toBe(false);
-    expect(aggregators.contactPhone.generated).toBeTruthy();
-    expect(aggregators.contactPhone.generated?.type).toBe('always');
-    expect(aggregators.contactPhone.generated?.mode).toBe('stored');
-
-    expect(aggregators.contactEmail.name).toBe('contact_email');
-    expect(aggregators.contactEmail.notNull).toBe(false);
-    expect(aggregators.contactEmail.generated).toBeTruthy();
-    expect(aggregators.contactEmail.generated?.type).toBe('always');
-    expect(aggregators.contactEmail.generated?.mode).toBe('stored');
+  it('the legacy Beckn contact jsonb and generated lookup columns are gone (R3)', () => {
+    expect('contact' in aggregators).toBe(false);
+    expect('contactPhone' in aggregators).toBe(false);
+    expect('contactEmail' in aggregators).toBe(false);
   });
 
   it('locations + consent jsonb columns', () => {
@@ -111,15 +97,9 @@ describe('aggregators columns', () => {
 });
 
 describe('aggregator_orgs remaining columns (not covered by aggregator-orgs.schema.test.ts)', () => {
-  it('owner_phone is a nullable text column', () => {
-    expect(aggregatorOrgs.ownerPhone.name).toBe('owner_phone');
-    expect(aggregatorOrgs.ownerPhone.notNull).toBe(false);
-  });
-
-  it('contact_id FK column and the legacy owner_email relaxed to nullable (0025)', () => {
+  it('contact_id FK column (0025)', () => {
     expect(aggregatorOrgs.contactId.name).toBe('contact_id');
     expect(aggregatorOrgs.contactId.notNull).toBe(false);
-    expect(aggregatorOrgs.ownerEmail.notNull).toBe(false);
   });
 
   it('id is a defaulted primary key', () => {

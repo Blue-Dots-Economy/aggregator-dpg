@@ -20,6 +20,7 @@ import type { ConsentRecord } from '@aggregator-dpg/shared-primitives/aggregator
 import { getDb, getPool, closeDb, _setDbClients } from '../../../db/client.js';
 import { aggregators, campaignJob } from '../../../db/schema.js';
 import { PostgresCampaignJobStore } from '../postgres.js';
+import { linkContact } from '../../../db/contact-writes.js';
 import { runStoreConformance } from './conformance.js';
 
 // The vitest config force-sets a placeholder DATABASE_URL, so the real
@@ -37,17 +38,18 @@ suite('PostgresCampaignJobStore (integration)', () => {
     getPool({ url: realUrl! });
 
     const suffix = randomUUID().slice(0, 8);
+    const contactId = await linkContact(getDb(), {
+      name: 'Test',
+      phone: `+9100000${String(parseInt(suffix.slice(0, 5), 16) % 100000).padStart(5, '0')}`,
+      email: `cjs-${suffix}@x.example`,
+    });
     const rows = await getDb()
       .insert(aggregators)
       .values({
         orgSlug: `cjs-test-${suffix}`,
         actorType: 'aggregator',
         name: 'Campaign Job Store Test',
-        contact: {
-          name: 'Test',
-          phone: `+9100000${suffix.slice(0, 5)}`,
-          email: `cjs-${suffix}@x.example`,
-        },
+        contactId,
         consent: {} as unknown as ConsentRecord,
         createdBy: 'integration-test',
         updatedBy: 'integration-test',

@@ -45,18 +45,8 @@ describe('aggregators: indexes + foreign key', () => {
     expect(cfg.name).toBe('aggregators');
   });
 
-  it('has the two login-lookup unique indexes and the two filter indexes', () => {
+  it('has the two filter indexes and the contact_id index (uniqueness lives on contact)', () => {
     const byName = Object.fromEntries(cfg.indexes.map((i) => [i.config.name, i]));
-
-    expect(byName['aggregators_contact_phone_unique'].config.unique).toBe(true);
-    expect(byName['aggregators_contact_phone_unique'].config.columns.map(colName)).toEqual([
-      'contact_phone',
-    ]);
-
-    expect(byName['aggregators_contact_email_unique'].config.unique).toBe(true);
-    expect(byName['aggregators_contact_email_unique'].config.columns.map(colName)).toEqual([
-      'contact_email',
-    ]);
 
     expect(byName['aggregators_status_idx'].config.unique).toBe(false);
     expect(byName['aggregators_status_idx'].config.columns.map(colName)).toEqual(['status']);
@@ -71,7 +61,7 @@ describe('aggregators: indexes + foreign key', () => {
       'contact_id',
     ]);
 
-    expect(cfg.indexes).toHaveLength(5);
+    expect(cfg.indexes).toHaveLength(3);
   });
 
   it('contact_id FK points at contact.id — RESTRICT on delete, CASCADE on update (re-key)', () => {
@@ -100,15 +90,14 @@ describe('aggregator_orgs: indexes (not covered by aggregator-orgs.schema.test.t
     expect(cfg.name).toBe('aggregator_orgs');
   });
 
-  it('has plain filter indexes on status and owner_email', () => {
+  it('has plain filter indexes on status and contact_id', () => {
     const byName = Object.fromEntries(cfg.indexes.map((i) => [i.config.name, i]));
 
     expect(byName['aggregator_orgs_status_idx'].config.unique).toBe(false);
     expect(byName['aggregator_orgs_status_idx'].config.columns.map(colName)).toEqual(['status']);
 
-    expect(byName['aggregator_orgs_owner_email_idx'].config.unique).toBe(false);
-    expect(byName['aggregator_orgs_owner_email_idx'].config.columns.map(colName)).toEqual([
-      'owner_email',
+    expect(byName['aggregator_orgs_contact_id_idx'].config.columns.map(colName)).toEqual([
+      'contact_id',
     ]);
   });
 
@@ -129,8 +118,8 @@ describe('aggregator_orgs: indexes (not covered by aggregator-orgs.schema.test.t
     expect(idx?.config.unique).toBe(true);
     // Indexed on `lower(display_name)` — a SQL expression, not a plain column.
     expect(idx?.config.where).toBeDefined();
-    // status, owner_email, slug-active, display-name-active, contact_id (0025)
-    expect(cfg.indexes).toHaveLength(5);
+    // status, slug-active, display-name-active, contact_id (0025)
+    expect(cfg.indexes).toHaveLength(4);
   });
 });
 

@@ -14,7 +14,7 @@
  * contact re-key cascades after `RETURNING` is produced.
  */
 
-import { and, desc, eq, isNull, lt, or, sql, type SQL } from 'drizzle-orm';
+import { and, desc, eq, lt, sql, type SQL } from 'drizzle-orm';
 import type { BecknContact } from '@aggregator-dpg/shared-primitives/aggregator';
 import { logger } from '../../logger.js';
 import { aggregators, contact } from '../../db/schema.js';
@@ -68,7 +68,6 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
             url: input.url ?? null,
             contactId,
             contactExtra: extra,
-            contact: null,
             locations: input.locations ?? [],
             consent: input.consent,
             createdBy: input.createdBy,
@@ -109,21 +108,13 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
   }
 
   async findByContactPhone(phone: string): Promise<StoreResult<Aggregator | null>> {
-    // The linked contact is authoritative; a row the sync could not link
-    // (contact_id NULL) still answers from its legacy column so a duplicate
-    // check never misses it.
-    // Shaped as `contact_id = (subselect) OR (unlinked AND legacy = v)` so the
-    // planner can use contact_phone_unique + aggregators_contact_id_idx (a
-    // BitmapOr); an OR across the joined tables would force a seq scan.
+    // `contact_id = (subselect)` keeps both lookups on their unique indexes.
     return this.findOne(
       'aggregatorStore.findByContactPhone',
-      or(
-        eq(
-          aggregators.contactId,
-          sql`(SELECT ${contact.id} FROM ${contact} WHERE ${contact.phone} = ${phone})`,
-        ),
-        and(isNull(aggregators.contactId), eq(aggregators.contactPhone, phone)),
-      )!,
+      eq(
+        aggregators.contactId,
+        sql`(SELECT ${contact.id} FROM ${contact} WHERE ${contact.phone} = ${phone})`,
+      ),
     );
   }
 
@@ -131,13 +122,10 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
     const e = email.trim().toLowerCase();
     return this.findOne(
       'aggregatorStore.findByContactEmail',
-      or(
-        eq(
-          aggregators.contactId,
-          sql`(SELECT ${contact.id} FROM ${contact} WHERE ${contact.email} = ${e})`,
-        ),
-        and(isNull(aggregators.contactId), eq(aggregators.contactEmail, e)),
-      )!,
+      eq(
+        aggregators.contactId,
+        sql`(SELECT ${contact.id} FROM ${contact} WHERE ${contact.email} = ${e})`,
+      ),
     );
   }
 
@@ -206,9 +194,6 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
           const nextId = await changeContact(tx, current.contactId, identity);
           updates['contactId'] = nextId;
           updates['contactExtra'] = extra;
-          // Clear the stale legacy copy so its unique index can never block
-          // someone else from the old email/phone during the rollout.
-          updates['contact'] = null;
           const rows = await tx
             .update(aggregators)
             .set(updates)
@@ -436,13 +421,12 @@ type JoinedRow = {
 function composeContact(row: JoinedRow): BecknContact {
   const { a, c } = row;
   if (!c) {
-    // Unlinked row (contact_id NULL): fall back to the legacy jsonb, which is
-    // still written during the contact rollout.
-    if (a.contact) return a.contact;
+    // Every row is linked once the rollout's verify checks are 0; an unlinked
+    // row is a data problem to fix, not something to paper over.
     logger.warn({
       operation: 'aggregatorStore.composeContact',
       status: 'failure',
-      error: 'row has neither a linked contact nor a legacy contact',
+      error: 'row has no linked contact',
       aggregator_id: a.id,
     });
     return { name: '', email: '', phone: '' };

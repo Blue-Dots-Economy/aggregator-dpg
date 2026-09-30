@@ -158,6 +158,15 @@
 - **Behaviour:** A contact change also sets the legacy `contact` jsonb (or `owner_email` / `owner_phone`) to NULL.
 - **Why:** During the rollout, the legacy unique indexes still exist. A stale legacy copy would block someone else from reusing the old email or phone through an R1 pod.
 
+### D21. ⚠ REVIEW — Phase 1 ends in R3 (code) + R4 (drop migration), not a single R3
+
+- **The problem:** R2 still declares the legacy columns in the Drizzle schema, and it needs them to write NULL into them. The migration runs at the first new pod's boot while R2 pods are still serving. If it dropped the columns in the same release, every R2 `SELECT` would fail.
+- **The split:**
+  - **R3 (code only, safe beside R2 pods):** removes the legacy columns from the Drizzle schema and the read fallbacks. Lookups become a plain `contact_id = (subselect)`.
+  - **R4 (the following release):** ships `0026_contact_drop_legacy.sql`. No code change is needed with it.
+- **Rollback:** R3 can roll back to R2. R4 is irreversible, so take a DB snapshot first.
+- **Gate before R3:** `contact-verify.sql` V1 must be 0, because R3 has no fallback for unlinked rows.
+
 ---
 
 ## Review round 1 (R0/R1) — findings and fixes

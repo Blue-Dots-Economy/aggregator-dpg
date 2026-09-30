@@ -7,7 +7,7 @@ describe('aggregator_orgs schema', () => {
     expect(aggregatorOrgs.slug.name).toBe('slug');
     expect(aggregatorOrgs.displayName.name).toBe('display_name');
     expect(aggregatorOrgs.state.name).toBe('state');
-    expect(aggregatorOrgs.ownerEmail.name).toBe('owner_email');
+    expect(aggregatorOrgs.contactId.name).toBe('contact_id');
     expect(aggregatorOrgs.ownerKcSub.name).toBe('owner_kc_sub');
     expect(aggregatorOrgs.kcGroupId.name).toBe('kc_group_id');
     expect(aggregatorOrgs.status.name).toBe('status');
@@ -15,10 +15,11 @@ describe('aggregator_orgs schema', () => {
     expect(aggregatorOrgs.updatedAt.name).toBe('updated_at');
   });
 
-  it('requires slug, display_name; allows null state and (legacy, since 0025) owner_email', () => {
+  it('requires slug, display_name; allows null state; owner lives on contact (no owner_email)', () => {
     expect(aggregatorOrgs.slug.notNull).toBe(true);
     expect(aggregatorOrgs.displayName.notNull).toBe(true);
-    expect(aggregatorOrgs.ownerEmail.notNull).toBe(false);
+    expect('ownerEmail' in aggregatorOrgs).toBe(false);
+    expect('ownerPhone' in aggregatorOrgs).toBe(false);
     expect(aggregatorOrgs.state.notNull).toBe(false);
   });
 

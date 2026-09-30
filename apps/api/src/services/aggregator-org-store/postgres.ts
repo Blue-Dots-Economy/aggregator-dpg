@@ -13,7 +13,7 @@
  * owner's login identifiers.
  */
 
-import { and, eq, isNotNull, isNull, lt, ne, or, sql, type SQL } from 'drizzle-orm';
+import { and, eq, isNotNull, lt, ne, or, sql, type SQL } from 'drizzle-orm';
 import { aggregatorOrgs, contact } from '../../db/schema.js';
 import { getDb } from '../../db/client.js';
 import { PG_UNIQUE_VIOLATION, pgErrorCode, pgConstraint } from '../../db/pg-error.js';
@@ -53,8 +53,6 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
             displayName: input.displayName,
             state: input.state ?? null,
             contactId,
-            ownerEmail: null,
-            ownerPhone: null,
             ownerKcSub: input.ownerKcSub ?? null,
             kcGroupId: input.kcGroupId ?? null,
             profile: input.profile ?? {},
@@ -80,31 +78,25 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
 
   async findByOwnerEmail(email: string): Promise<OrgStoreResult<AggregatorOrg | null>> {
     const e = email.trim().toLowerCase();
-    // The linked contact is authoritative; an unlinked row (contact_id NULL)
-    // still answers from its legacy column so reclaim never misses it.
+    // `contact_id = (subselect)` keeps the lookup on contact_email_unique +
+    // aggregator_orgs_contact_id_idx.
     return this.findOne(
-      or(
-        eq(
-          aggregatorOrgs.contactId,
-          sql`(SELECT ${contact.id} FROM ${contact} WHERE ${contact.email} = ${e})`,
-        ),
-        and(isNull(aggregatorOrgs.contactId), eq(aggregatorOrgs.ownerEmail, e)),
-      )!,
+      eq(
+        aggregatorOrgs.contactId,
+        sql`(SELECT ${contact.id} FROM ${contact} WHERE ${contact.email} = ${e})`,
+      ),
     );
   }
 
   async findByOwnerPhone(phone: string): Promise<OrgStoreResult<AggregatorOrg | null>> {
-    // Index-friendly shape (see findByOwnerEmail). Excludes the half-created
-    // rows a failed org create leaves behind (inactive, no Keycloak owner) —
-    // those never became anyone's login, so they must not block a retry.
+    // Excludes the half-created rows a failed org create leaves behind
+    // (inactive, no Keycloak owner) — those never became anyone's login, so
+    // they must not block a retry.
     return this.findOne(
       and(
-        or(
-          eq(
-            aggregatorOrgs.contactId,
-            sql`(SELECT ${contact.id} FROM ${contact} WHERE ${contact.phone} = ${phone})`,
-          ),
-          and(isNull(aggregatorOrgs.contactId), eq(aggregatorOrgs.ownerPhone, phone)),
+        eq(
+          aggregatorOrgs.contactId,
+          sql`(SELECT ${contact.id} FROM ${contact} WHERE ${contact.phone} = ${phone})`,
         ),
         or(ne(aggregatorOrgs.status, 'inactive'), isNotNull(aggregatorOrgs.ownerKcSub)),
       )!,
@@ -146,16 +138,14 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
             .where(eq(aggregatorOrgs.id, id))
             .for('update', { of: aggregatorOrgs });
           if (!current) return false;
-          const email = current.c?.email ?? current.o.ownerEmail;
-          if (!email) throw new Error('org has no owner email to re-key');
+          const email = current.c?.email;
+          if (!email) throw new Error('org has no owner contact to re-key');
           const nextId = await changeContact(tx, current.o.contactId, {
             email,
             phone: ownerPhone,
             name: null,
           });
           set['contactId'] = nextId;
-          set['ownerEmail'] = null;
-          set['ownerPhone'] = null;
           const rows = await tx
             .update(aggregatorOrgs)
             .set(set)
@@ -252,11 +242,11 @@ type JoinedRow = {
 
 function toDomain(row: JoinedRow): AggregatorOrg {
   const { o, c } = row;
-  if (!c && !o.ownerEmail) {
+  if (!c) {
     logger.warn({
       operation: 'orgStore.toDomain',
       status: 'failure',
-      error: 'org has neither a linked contact nor a legacy owner email',
+      error: 'org has no linked owner contact',
       org_id: o.id,
     });
   }
@@ -266,8 +256,8 @@ function toDomain(row: JoinedRow): AggregatorOrg {
     displayName: o.displayName,
     state: o.state,
     contactId: o.contactId,
-    ownerEmail: c ? c.email : (o.ownerEmail ?? ''),
-    ownerPhone: c ? c.phone : o.ownerPhone,
+    ownerEmail: c?.email ?? '',
+    ownerPhone: c?.phone ?? null,
     ownerName: c ? c.name : null,
     ownerKcSub: o.ownerKcSub,
     kcGroupId: o.kcGroupId,
