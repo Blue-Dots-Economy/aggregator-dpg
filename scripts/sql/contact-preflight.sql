@@ -15,8 +15,8 @@
 -- phone extracted once. A session-local TEMP VIEW, so both reports below read
 -- the same definition; it touches no application table and is dropped at the
 -- end (and with the session regardless).
-CREATE TEMP VIEW contact_preflight_src AS
-  SELECT 'aggregators'::text AS tbl, a.id, a.status::text AS status,
+CREATE TEMP VIEW preflight_src AS
+  SELECT 'aggregators'::text AS tbl, true AS is_coordinator, a.id, a.status::text AS status,
          lower(btrim(j.raw_e)) AS e, j.raw_e, j.p, j.raw_name, j.extras
     FROM aggregators a
     CROSS JOIN LATERAL (
@@ -26,53 +26,51 @@ CREATE TEMP VIEW contact_preflight_src AS
              a.contact - 'name' - 'phone' - 'email' AS extras
     ) j
   UNION ALL
-  SELECT 'aggregator_orgs', o.id, o.status::text,
+  SELECT 'aggregator_orgs', false, o.id, o.status::text,
          lower(btrim(o.owner_email)), o.owner_email, o.owner_phone, NULL, NULL
     FROM aggregator_orgs o;
 
 \echo '== contact pre-flight (blocking checks must all be 0) =='
 
-WITH src AS (SELECT * FROM contact_preflight_src)
 SELECT check_name, blocking, n FROM (
   SELECT 1 AS ord, 'email_with_many_phones' AS check_name, true AS blocking,
-         (SELECT count(*) FROM (SELECT e FROM src GROUP BY e HAVING count(DISTINCT coalesce(p, '')) > 1) x) AS n
+         (SELECT count(*) FROM (SELECT e FROM preflight_src GROUP BY e HAVING count(DISTINCT coalesce(p, '')) > 1) x) AS n
   UNION ALL
   SELECT 2, 'phone_with_many_emails', true,
-         (SELECT count(*) FROM (SELECT p FROM src WHERE p IS NOT NULL GROUP BY p HAVING count(DISTINCT e) > 1) x)
+         (SELECT count(*) FROM (SELECT p FROM preflight_src WHERE p IS NOT NULL GROUP BY p HAVING count(DISTINCT e) > 1) x)
   UNION ALL
   SELECT 3, 'non_canonical_phone', true,
-         (SELECT count(*) FROM src WHERE p IS NOT NULL AND p !~ '^\+[0-9]{10,15}$')
+         (SELECT count(*) FROM preflight_src WHERE p IS NOT NULL AND p !~ '^\+[0-9]{10,15}$')
   UNION ALL
   SELECT 4, 'blank_email', true,
-         (SELECT count(*) FROM src WHERE coalesce(e, '') = '')
+         (SELECT count(*) FROM preflight_src WHERE coalesce(e, '') = '')
   UNION ALL
   SELECT 5, 'non_ascii_email (informational)', false,
-         (SELECT count(*) FROM src WHERE e ~ '[^\x01-\x7F]')
+         (SELECT count(*) FROM preflight_src WHERE e ~ '[^\x01-\x7F]')
   UNION ALL
   SELECT 6, 'blank_coordinator_name (informational, becomes NULL)', false,
-         (SELECT count(*) FROM src WHERE tbl = 'aggregators' AND btrim(coalesce(raw_name, '')) = '')
+         (SELECT count(*) FROM preflight_src WHERE is_coordinator AND btrim(coalesce(raw_name, '')) = '')
   UNION ALL
   SELECT 7, 'rows_with_contact_extras (informational, move to contact_extra)', false,
-         (SELECT count(*) FROM src WHERE extras <> '{}'::jsonb)
+         (SELECT count(*) FROM preflight_src WHERE extras <> '{}'::jsonb)
   UNION ALL
   SELECT 8, 'inactive_orgs_without_kc_owner (informational, usually safe to delete)', false,
          (SELECT count(*) FROM aggregator_orgs WHERE status = 'inactive' AND owner_kc_sub IS NULL)
   UNION ALL
   SELECT 9, 'mixed_case_email (informational, API will return it lowercased)', false,
-         (SELECT count(*) FROM src WHERE tbl = 'aggregators' AND raw_e <> e)
+         (SELECT count(*) FROM preflight_src WHERE is_coordinator AND raw_e <> e)
 ) c
 ORDER BY ord ASC;
 
 \echo '== rows involved in blocking email/phone conflicts (ids only) =='
 
-WITH src AS (SELECT * FROM contact_preflight_src),
-bad_e AS (SELECT e FROM src GROUP BY e HAVING count(DISTINCT coalesce(p, '')) > 1),
-bad_p AS (SELECT p FROM src WHERE p IS NOT NULL GROUP BY p HAVING count(DISTINCT e) > 1),
+WITH bad_e AS (SELECT e FROM preflight_src GROUP BY e HAVING count(DISTINCT coalesce(p, '')) > 1),
+bad_p AS (SELECT p FROM preflight_src WHERE p IS NOT NULL GROUP BY p HAVING count(DISTINCT e) > 1),
 flagged AS (
   SELECT tbl, id, status, e, p,
          e IN (SELECT e FROM bad_e) AS email_conflict,
          p IN (SELECT p FROM bad_p) AS phone_conflict
-    FROM src
+    FROM preflight_src
 )
 SELECT tbl, id, status, email_conflict, phone_conflict,
        -- groups rows of the same conflict without printing the value, or any
@@ -89,4 +87,4 @@ SELECT id, slug, created_at
  WHERE status = 'inactive' AND owner_kc_sub IS NULL
  ORDER BY created_at ASC;
 
-DROP VIEW contact_preflight_src;
+DROP VIEW preflight_src;
