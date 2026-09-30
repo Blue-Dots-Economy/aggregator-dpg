@@ -35,9 +35,41 @@
 -- NOT destructive; nothing is dropped. The legacy columns go in a later
 -- migration once no release writes them.
 
+-- Remember the caller's timeouts so they can be restored at the end (a bare
+-- `SET LOCAL … = DEFAULT` would reset to the SERVER default instead).
+SELECT set_config('aggregator_dpg.prev_lock_timeout', current_setting('lock_timeout'), true),
+       set_config('aggregator_dpg.prev_statement_timeout', current_setting('statement_timeout'), true);
 SET LOCAL lock_timeout = '5s';
 SET LOCAL statement_timeout = '300s';
 SELECT pg_advisory_xact_lock(hashtext('aggregator-dpg:0025_contact'));
+
+-- ─── Run as the table owner ─────────────────────────────────────────────────
+-- Every object created below must be owned by the role that owns the existing
+-- tables (the application role). If ops run this file with an admin/superuser
+-- DSN, the new table and functions would be owned by that role and the
+-- application could no longer write `contact` or replace the functions — every
+-- legacy write through the triggers would then fail. So: switch to the owner
+-- role when the caller may (a superuser or a member of it), otherwise refuse.
+DO $$
+DECLARE
+  v_owner text;
+BEGIN
+  SELECT pg_get_userbyid(c.relowner) INTO v_owner
+    FROM pg_class c WHERE c.oid = 'public.aggregators'::regclass;
+  IF v_owner IS DISTINCT FROM current_user THEN
+    IF pg_has_role(current_user, v_owner, 'MEMBER') THEN
+      EXECUTE format('SET LOCAL ROLE %I', v_owner);
+    ELSE
+      RAISE EXCEPTION '0025_contact: run as the owner of "aggregators" (%), not as %', v_owner, current_user;
+    END IF;
+  END IF;
+END $$;
+
+-- ─── Lock in the same order live writes use ─────────────────────────────────
+-- Legacy writes lock aggregators / aggregator_orgs first, then `contact` from
+-- their triggers. Taking the parent tables first here means a re-run (after the
+-- pre-deploy script) can never deadlock against them.
+LOCK TABLE aggregators, aggregator_orgs IN ACCESS EXCLUSIVE MODE;
 
 -- ─── Version marker ─────────────────────────────────────────────────────────
 -- Never silently no-op over a `contact` table this file did not create.
@@ -159,7 +191,9 @@ CREATE OR REPLACE FUNCTION contact_link(p_email text, p_phone text, p_name text)
 $fn$
 DECLARE
   v_email text := lower(btrim(p_email));
-  v_name  text := nullif(btrim(p_name), '');
+  -- Stored verbatim (the API has always returned the name as submitted); only
+  -- a blank name becomes NULL, which the table's CHECK requires.
+  v_name  text := CASE WHEN btrim(p_name) <> '' THEN p_name END;
   v_id    text;
 BEGIN
   IF v_email IS NULL OR v_email = '' THEN
@@ -170,20 +204,33 @@ BEGIN
     RETURN NULL;
   END IF;
   v_id := contact_id_of(v_email, p_phone);
-  BEGIN
-    INSERT INTO contact (id, email, phone, name)
-    VALUES (v_id, v_email, p_phone, v_name)
-    ON CONFLICT DO NOTHING;
-    IF v_name IS NOT NULL THEN
-      UPDATE contact SET name = v_name WHERE id = v_id AND name IS NULL;
+  -- Two attempts: a concurrent contact_gc() may delete the row between our
+  -- insert and the lock below; the retry re-creates it.
+  FOR attempt IN 1..2 LOOP
+    BEGIN
+      INSERT INTO contact (id, email, phone, name)
+      VALUES (v_id, v_email, p_phone, v_name)
+      ON CONFLICT DO NOTHING;
+      IF v_name IS NOT NULL THEN
+        UPDATE contact SET name = v_name WHERE id = v_id AND name IS NULL;
+      END IF;
+    EXCEPTION WHEN unique_violation OR check_violation THEN
+      RAISE WARNING 'contact_link: % ; row left unlinked', SQLSTATE;
+      RETURN NULL;
+    END;
+    -- FOR KEY SHARE holds the row until our transaction ends, so a concurrent
+    -- GC cannot delete it before the caller's FK check.
+    PERFORM 1 FROM contact WHERE id = v_id FOR KEY SHARE;
+    IF FOUND THEN
+      RETURN v_id;
     END IF;
-  EXCEPTION WHEN others THEN
-    RAISE WARNING 'contact_link: % (%); row left unlinked', SQLERRM, SQLSTATE;
-    RETURN NULL;
-  END;
-  IF EXISTS (SELECT 1 FROM contact WHERE id = v_id) THEN
-    RETURN v_id;
-  END IF;
+    -- Not found: either another person holds the email/phone (DO NOTHING on a
+    -- non-PK conflict) or the row was just GC'd. Retry once to tell them apart.
+    IF EXISTS (SELECT 1 FROM contact WHERE email = v_email)
+       OR (p_phone IS NOT NULL AND EXISTS (SELECT 1 FROM contact WHERE phone = p_phone)) THEN
+      EXIT;
+    END IF;
+  END LOOP;
   RAISE WARNING 'contact_link: email or phone already belongs to another contact; row left unlinked';
   RETURN NULL;
 END;
@@ -223,7 +270,7 @@ CREATE OR REPLACE FUNCTION contact_move(
 $fn$
 DECLARE
   v_email  text := lower(btrim(p_email));
-  v_name   text := nullif(btrim(p_name), '');
+  v_name   text := CASE WHEN btrim(p_name) <> '' THEN p_name END;
   v_new    text;
   v_shared boolean;
 BEGIN
@@ -276,8 +323,11 @@ BEGIN
     UPDATE contact
        SET id = v_new, email = v_email, phone = p_phone, name = coalesce(v_name, name)
      WHERE id = p_old_id;
-  EXCEPTION WHEN others THEN
+  EXCEPTION WHEN unique_violation OR check_violation OR foreign_key_violation THEN
     EXECUTE format('UPDATE %I SET contact_id = NULL WHERE id = $1', p_table) USING p_row_id;
+    -- The old contact has just lost its only reference; collect it, or it
+    -- would block this person's email/phone for good.
+    PERFORM contact_gc(p_old_id);
     RAISE WARNING 'contact_move: re-key failed on % (%); row left unlinked', p_table, SQLSTATE;
   END;
 END;
@@ -408,7 +458,7 @@ SELECT DISTINCT ON (id) id, e, p, n
     SELECT contact_id_of(contact->>'email', contact->>'phone') AS id,
            lower(btrim(contact->>'email'))                     AS e,
            contact->>'phone'                                   AS p,
-           nullif(btrim(contact->>'name'), '')                 AS n,
+           CASE WHEN btrim(contact->>'name') <> '' THEN contact->>'name' END AS n,
            0                                                   AS prio
       FROM aggregators
      WHERE contact_id IS NULL AND contact IS NOT NULL
@@ -460,5 +510,5 @@ END $$;
 
 -- Hand the rest of the transaction (later migrations in the same drizzle run)
 -- back its normal timeouts.
-SET LOCAL lock_timeout = DEFAULT;
-SET LOCAL statement_timeout = DEFAULT;
+SELECT set_config('lock_timeout', current_setting('aggregator_dpg.prev_lock_timeout'), true),
+       set_config('statement_timeout', current_setting('aggregator_dpg.prev_statement_timeout'), true);

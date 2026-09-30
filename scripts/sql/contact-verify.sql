@@ -35,7 +35,7 @@ SELECT check_id, description, n FROM (
            WHERE a.contact IS NOT NULL
              AND (lower(btrim(a.contact->>'email')) IS DISTINCT FROM c.email
                OR (a.contact->>'phone') IS DISTINCT FROM c.phone
-               OR nullif(btrim(a.contact->>'name'), '') IS DISTINCT FROM c.name
+               OR (CASE WHEN btrim(a.contact->>'name') <> '' THEN a.contact->>'name' END) IS DISTINCT FROM c.name
                OR (a.contact - 'name' - 'phone' - 'email') IS DISTINCT FROM a.contact_extra))
   UNION ALL
   SELECT 6, 'V4', 'orgs whose legacy owner email/phone differs from the linked contact',

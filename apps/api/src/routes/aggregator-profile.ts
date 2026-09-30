@@ -32,6 +32,7 @@ import type { BecknContact } from '@aggregator-dpg/shared-primitives/aggregator'
 import { BecknContactSchema, BecknLocationSchema } from '@aggregator-dpg/shared-primitives/beckn';
 import { authenticate, type AuthContext } from '../services/auth/access-token.js';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
+import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js';
 import { getIdpAdmin, KC_ATTR } from '../services/idp-admin/index.js';
 import type { IdpUser } from '../services/idp-admin/index.js';
 import { normalisePhone } from '@aggregator-dpg/shared-primitives/phone';
@@ -220,6 +221,13 @@ export async function registerAggregatorProfileRoutes(app: FastifyInstance): Pro
         }
         normalisedContact = { ...raw, phone: phoneR.value };
 
+        // One phone per person across coordinators and org owners (the phone
+        // is the OTP login key; `contact`, migration 0025). Checked before the
+        // Keycloak write so a clash never leaves Keycloak ahead of the DB. A
+        // clash with another coordinator returns the same PHONE_EXISTS the
+        // unique index already produced; a clash with an org owner is new.
+        await assertPhoneFree(phoneR.value, auth.aggregatorId, raw.email);
+
         const idp = getIdpAdmin();
         const kcWrite = await idp.setAttributes(auth.userId, {
           [KC_ATTR.PHONE_NUMBER]: phoneR.value,
@@ -351,5 +359,38 @@ function mapAggregatorUpdateError(
       return 'CONFLICT';
     default:
       return 'DB_UNAVAILABLE';
+  }
+}
+
+/**
+ * Rejects a phone that already belongs to someone else — another coordinator,
+ * or an org owner with a different email (the same person may legitimately
+ * hold both roles on one contact).
+ *
+ * @param phone - Canonical phone the coordinator wants.
+ * @param selfId - The caller's own `aggregators.id`.
+ * @param email - The email submitted alongside it.
+ * @throws {HttpError} `PHONE_EXISTS` on a clash; `DB_UNAVAILABLE` when a lookup fails.
+ */
+async function assertPhoneFree(phone: string, selfId: string, email: string): Promise<void> {
+  const byCoordinator = await getAggregatorStore().findByContactPhone(phone);
+  if (!byCoordinator.ok) {
+    throw httpError('DB_UNAVAILABLE', {
+      cause: new Error(byCoordinator.error.message),
+      fields: { sub_operation: 'aggregatorStore.findByContactPhone' },
+    });
+  }
+  if (byCoordinator.value && byCoordinator.value.id !== selfId) {
+    throw httpError('PHONE_EXISTS', { fields: { phone } });
+  }
+  const byOwner = await getAggregatorOrgStore().findByOwnerPhone(phone);
+  if (!byOwner.ok) {
+    throw httpError('DB_UNAVAILABLE', {
+      cause: new Error(byOwner.error.message),
+      fields: { sub_operation: 'orgStore.findByOwnerPhone' },
+    });
+  }
+  if (byOwner.value && byOwner.value.ownerEmail !== email.trim().toLowerCase()) {
+    throw httpError('PHONE_EXISTS', { fields: { phone } });
   }
 }

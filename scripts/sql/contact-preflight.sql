@@ -39,6 +39,9 @@ SELECT check_name, blocking, n FROM (
   SELECT 7, 'rows_with_contact_extras (informational, move to contact_extra)', false,
          (SELECT count(*) FROM aggregators WHERE (contact - 'name' - 'phone' - 'email') <> '{}'::jsonb)
   UNION ALL
+  SELECT 9, 'mixed_case_email (informational, API will return it lowercased)', false,
+         (SELECT count(*) FROM aggregators WHERE contact->>'email' <> lower(btrim(contact->>'email')))
+  UNION ALL
   SELECT 8, 'inactive_orgs_without_kc_owner (informational, usually safe to delete)', false,
          (SELECT count(*) FROM aggregator_orgs WHERE status = 'inactive' AND owner_kc_sub IS NULL)
 ) c
@@ -58,11 +61,12 @@ bad_e AS (SELECT e FROM src GROUP BY e HAVING count(DISTINCT coalesce(p, '')) > 
 bad_p AS (SELECT p FROM src WHERE p IS NOT NULL GROUP BY p HAVING count(DISTINCT e) > 1)
 SELECT tbl, id, status,
        CASE WHEN e IN (SELECT e FROM bad_e) THEN 'email' ELSE 'phone' END AS conflict_on,
-       -- groups rows of the same conflict without printing the value itself
-       left(md5(CASE WHEN e IN (SELECT e FROM bad_e) THEN e ELSE p END), 8) AS conflict_group
+       -- groups rows of the same conflict without printing the value, or any
+       -- hash of it (an unsalted hash of an email/phone can be brute-forced)
+       dense_rank() OVER (ORDER BY CASE WHEN e IN (SELECT e FROM bad_e) THEN e ELSE p END) AS conflict_group
   FROM src
  WHERE e IN (SELECT e FROM bad_e) OR p IN (SELECT p FROM bad_p)
- ORDER BY conflict_group, tbl, id;
+ ORDER BY 5, tbl, id;
 
 \echo '== inactive orgs without a Keycloak owner (ids only) =='
 

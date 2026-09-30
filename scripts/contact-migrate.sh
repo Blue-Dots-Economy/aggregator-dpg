@@ -24,6 +24,13 @@
 #                  with PG_USER / PG_DB (default POSTGRES_USER / POSTGRES_DB)
 #   PSQL_CMD       full command prefix, e.g. "kubectl exec -i pod/psql -- psql -U app -d aggregator"
 #
+# Run it as the application role that owns the tables, or as a role that may
+# SET ROLE to it (e.g. a superuser): 0025 switches to the table owner itself so
+# everything it creates stays writable by the app, and refuses any other role.
+#
+# Needs bash + psql (or docker / kubectl) and python3 (only to read .env).
+# PSQL_CMD is word-split, so it cannot carry quoted arguments with spaces.
+#
 # The script never writes drizzle's __drizzle_migrations table; the API boot
 # records 0025 there when it re-runs the (now no-op) file.
 

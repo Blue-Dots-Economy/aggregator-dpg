@@ -91,10 +91,16 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
     // The linked contact is authoritative; a row the sync could not link
     // (contact_id NULL) still answers from its legacy column so a duplicate
     // check never misses it.
+    // Shaped as `contact_id = (subselect) OR (unlinked AND legacy = v)` so the
+    // planner can use contact_phone_unique + aggregators_contact_id_idx (a
+    // BitmapOr); an OR across the joined tables would force a seq scan.
     return this.findOne(
       'aggregatorStore.findByContactPhone',
       or(
-        eq(contact.phone, phone),
+        eq(
+          aggregators.contactId,
+          sql`(SELECT ${contact.id} FROM ${contact} WHERE ${contact.phone} = ${phone})`,
+        ),
         and(isNull(aggregators.contactId), eq(aggregators.contactPhone, phone)),
       )!,
     );
@@ -105,7 +111,10 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
     return this.findOne(
       'aggregatorStore.findByContactEmail',
       or(
-        eq(contact.email, e),
+        eq(
+          aggregators.contactId,
+          sql`(SELECT ${contact.id} FROM ${contact} WHERE ${contact.email} = ${e})`,
+        ),
         and(isNull(aggregators.contactId), eq(aggregators.contactEmail, e)),
       )!,
     );

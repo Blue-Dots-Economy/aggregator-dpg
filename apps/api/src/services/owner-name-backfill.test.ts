@@ -105,6 +105,29 @@ describe('backfillOwnerContactNames', () => {
     expect(report.failed).toBe(1);
   });
 
+  it('counts a failed write and continues with the next candidate', async () => {
+    const idp = new ScriptedIdp({
+      'kc-1': [{ ok: true, value: user({ firstName: 'A' }) }],
+      'kc-2': [{ ok: true, value: user({ firstName: 'B' }) }],
+    });
+    const written: string[] = [];
+    const report = await backfillOwnerContactNames(
+      {
+        idp,
+        listCandidates: async () => [cand(1), cand(2)],
+        setNameIfMissing: async (id) => {
+          if (id === 'c1') throw new Error('db blip');
+          written.push(id);
+          return true;
+        },
+        retryDelayMs: 0,
+      },
+      { dryRun: false },
+    );
+    expect(report).toMatchObject({ failed: 1, updated: 1 });
+    expect(written).toEqual(['c2']);
+  });
+
   it('handles an empty candidate list', async () => {
     const { report } = await run(new ScriptedIdp({}), []);
     expect(report).toMatchObject({ candidates: 0, updated: 0 });

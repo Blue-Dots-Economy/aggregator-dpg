@@ -335,4 +335,133 @@ suite('contact (migration 0025) — integration', () => {
       }
     });
   });
+
+  describe('review fixes', () => {
+    it('a failed re-key leaves no orphan contact behind (B1)', () =>
+      inRollback(async (c) => {
+        const ownerPhone = phone();
+        await c.query(
+          `INSERT INTO aggregator_orgs (slug, display_name, owner_email, owner_phone)
+           VALUES ($1, $1, $2, $3)`,
+          [
+            `it-org-${randomUUID().slice(0, 8)}`,
+            `it-${randomUUID().slice(0, 8)}@example.org`,
+            ownerPhone,
+          ],
+        );
+        const email = `it-${randomUUID().slice(0, 8)}@example.org`;
+        const ins = await c.query(
+          `INSERT INTO aggregators (org_slug, actor_type, name, contact, consent, created_by, updated_by)
+           VALUES ($1, 'aggregator', 'IT', $2, $3, 'it', 'it') RETURNING id`,
+          [
+            `it-${randomUUID().slice(0, 8)}`,
+            JSON.stringify({ name: 'B1', email, phone: phone() }),
+            JSON.stringify(CONSENT),
+          ],
+        );
+        await c.query(
+          `UPDATE aggregators SET contact = jsonb_set(contact, '{phone}', to_jsonb($2::text)) WHERE id = $1`,
+          [ins.rows[0].id, ownerPhone],
+        );
+        const row = await c.query('SELECT contact_id FROM aggregators WHERE id = $1', [
+          ins.rows[0].id,
+        ]);
+        expect(row.rows[0].contact_id).toBeNull();
+        const left = await c.query('SELECT count(*)::int AS n FROM contact WHERE email = $1', [
+          email,
+        ]);
+        expect(left.rows[0].n).toBe(0);
+      }));
+
+    it('stores names verbatim, blank as NULL (M3)', () =>
+      inRollback(async (c) => {
+        const padded = await c.query(`SELECT contact_link($1, $2, '  Asha  ') AS id`, [
+          `it-${randomUUID().slice(0, 8)}@example.org`,
+          phone(),
+        ]);
+        const blank = await c.query(`SELECT contact_link($1, $2, '   ') AS id`, [
+          `it-${randomUUID().slice(0, 8)}@example.org`,
+          phone(),
+        ]);
+        const names = await c.query('SELECT id, name FROM contact WHERE id = ANY($1)', [
+          [padded.rows[0].id, blank.rows[0].id],
+        ]);
+        const byId = Object.fromEntries(
+          names.rows.map((r: { id: string; name: string | null }) => [r.id, r.name]),
+        );
+        expect(byId[padded.rows[0].id]).toBe('  Asha  ');
+        expect(byId[blank.rows[0].id]).toBeNull();
+      }));
+
+    it('the store response is byte-identical to the legacy jsonb (D9)', async () => {
+      const store = new PostgresAggregatorStore();
+      const email = `it-${randomUUID().slice(0, 8)}@example.org`;
+      const legacy = {
+        name: ' Padded Name ',
+        email,
+        phone: phone(),
+        company: 'Acme',
+        gstNumber: 'G1',
+      };
+      const created = await store.create({
+        orgSlug: `it-${randomUUID().slice(0, 8)}`,
+        actorType: 'aggregator',
+        name: 'IT Org',
+        type: null,
+        contact: legacy,
+        consent: CONSENT,
+        createdBy: 'it',
+        updatedBy: 'it',
+      });
+      expect(created.ok).toBe(true);
+      if (!created.ok) return;
+      try {
+        const raw = await pool.query('SELECT contact FROM aggregators WHERE id = $1', [
+          created.value.id,
+        ]);
+        expect(JSON.stringify(created.value.contact)).toBe(JSON.stringify(raw.rows[0].contact));
+      } finally {
+        await store.deleteById(created.value.id);
+      }
+    });
+
+    it('email/phone lookups can use the indexes (M2)', async () => {
+      const c = await pool.connect();
+      try {
+        await c.query('BEGIN');
+        await c.query('SET LOCAL enable_seqscan = off');
+        const plan = await c.query(
+          `EXPLAIN SELECT a.id FROM aggregators a LEFT JOIN contact c ON c.id = a.contact_id
+            WHERE a.contact_id = (SELECT id FROM contact WHERE phone = $1)
+               OR (a.contact_id IS NULL AND a.contact_phone = $1)`,
+          ['+910000000000'],
+        );
+        const text = plan.rows.map((r: Record<string, string>) => Object.values(r)[0]).join('\n');
+        expect(text).not.toMatch(/Seq Scan on aggregators/);
+        expect(text).toMatch(/contact_phone_unique/);
+      } finally {
+        await c.query('ROLLBACK');
+        c.release();
+      }
+    });
+
+    it('findByOwnerPhone ignores a half-created (inactive, no KC owner) org', async () => {
+      const store = new PostgresAggregatorOrgStore();
+      const p = phone();
+      const created = await store.create({
+        slug: `it-org-${randomUUID().slice(0, 8)}`,
+        displayName: `IT Org ${randomUUID().slice(0, 8)}`,
+        ownerEmail: `it-${randomUUID().slice(0, 8)}@example.org`,
+        ownerPhone: p,
+      });
+      if (!created.ok) throw new Error('create failed');
+      try {
+        await store.update(created.value.id, { status: 'inactive' });
+        const found = await store.findByOwnerPhone(p);
+        expect(found.ok && found.value).toBeNull();
+      } finally {
+        await store.deleteById(created.value.id);
+      }
+    });
+  });
 });

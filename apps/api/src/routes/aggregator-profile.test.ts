@@ -8,12 +8,18 @@ import {
 } from '../services/aggregator-store/index.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
 import { IdpAdminFake, _setIdpAdmin } from '../services/idp-admin/index.js';
+import {
+  AggregatorOrgStoreFake,
+  buildAggregatorOrg,
+  _setAggregatorOrgStore,
+} from '../services/aggregator-org-store/index.js';
 
 const aggregatorId = '22222222-2222-2222-2222-222222222222';
 
 describe('aggregator profile routes', () => {
   let app: FastifyInstance;
   let aggregatorStore: AggregatorStoreFake;
+  let orgStore: AggregatorOrgStoreFake;
   let idp: IdpAdminFake;
 
   beforeEach(async () => {
@@ -24,6 +30,8 @@ describe('aggregator profile routes', () => {
     aggregatorStore = new AggregatorStoreFake();
     aggregatorStore.seed([buildAggregator({ id: aggregatorId, orgSlug: 'trrain-zzzz' })]);
     _setAggregatorStore(aggregatorStore);
+    orgStore = new AggregatorOrgStoreFake();
+    _setAggregatorOrgStore(orgStore);
 
     idp = new IdpAdminFake();
     await idp.createUser({
@@ -62,6 +70,7 @@ describe('aggregator profile routes', () => {
   afterAll(async () => {
     await app?.close();
     _setAggregatorStore(null);
+    _setAggregatorOrgStore(null);
     _setAccessTokenVerifier(null);
     _setIdpAdmin(null);
   });
@@ -215,6 +224,56 @@ describe('aggregator profile routes', () => {
     expect((res.json() as { error: { code: string } }).error.code).toBe('IDP_UNAVAILABLE');
     const stored = await aggregatorStore.findById(aggregatorId);
     if (stored.ok) expect(stored.value?.contact.phone).not.toBe('+919876543211');
+  });
+
+  it('PATCH 409 PHONE_EXISTS (before any Keycloak write) when an org owner holds the phone', async () => {
+    orgStore.seed([
+      buildAggregatorOrg({
+        ownerEmail: 'boss@else.org',
+        ownerPhone: '+919876543299',
+        status: 'active',
+      }),
+    ]);
+    let kcWrites = 0;
+    idp.setAttributes = async () => {
+      kcWrites++;
+      return { ok: true, value: undefined };
+    };
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/v1/aggregators/profile/me',
+      headers: { authorization: 'Bearer good-token' },
+      payload: {
+        aggregator: {
+          contact: { name: 'Asha', phone: '+919876543299', email: 'asha@trrain.org' },
+        },
+      },
+    });
+    expect(res.statusCode).toBe(409);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('PHONE_EXISTS');
+    expect(kcWrites).toBe(0);
+  });
+
+  it('PATCH 409 PHONE_EXISTS (before any Keycloak write) when another coordinator holds the phone', async () => {
+    aggregatorStore.seed([
+      buildAggregator({
+        id: '00000000-0000-0000-0000-00000000beef',
+        orgSlug: 'other-coord',
+        contact: { name: 'Other', phone: '+919876543288', email: 'other@x.org' },
+      }),
+    ]);
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/v1/aggregators/profile/me',
+      headers: { authorization: 'Bearer good-token' },
+      payload: {
+        aggregator: {
+          contact: { name: 'Asha', phone: '+919876543288', email: 'asha@trrain.org' },
+        },
+      },
+    });
+    expect(res.statusCode).toBe(409);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('PHONE_EXISTS');
   });
 
   it('PATCH updates aggregator name/url/locations/consent successfully', async () => {

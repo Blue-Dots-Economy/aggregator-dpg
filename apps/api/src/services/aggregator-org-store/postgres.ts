@@ -13,7 +13,7 @@
  * owner's login identifiers.
  */
 
-import { and, eq, isNull, lt, or, type SQL } from 'drizzle-orm';
+import { and, eq, isNotNull, isNull, lt, ne, or, sql, type SQL } from 'drizzle-orm';
 import { aggregatorOrgs, contact } from '../../db/schema.js';
 import { getDb } from '../../db/client.js';
 import { PG_UNIQUE_VIOLATION, pgErrorCode, pgConstraint } from '../../db/pg-error.js';
@@ -50,7 +50,8 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
         // The legacy org columns carry no owner name, so the sync trigger links
         // the contact without one. Record it here — an existing name wins
         // (the same person may already be named, e.g. as a coordinator).
-        const name = input.ownerName?.trim();
+        // Stored verbatim (as the API echoes names); blank means "no name".
+        const name = input.ownerName?.trim() ? input.ownerName : undefined;
         if (name && row.contactId) {
           await tx
             .update(contact)
@@ -79,17 +80,29 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
     // still answers from its legacy column so reclaim never misses it.
     return this.findOne(
       or(
-        eq(contact.email, e),
+        eq(
+          aggregatorOrgs.contactId,
+          sql`(SELECT ${contact.id} FROM ${contact} WHERE ${contact.email} = ${e})`,
+        ),
         and(isNull(aggregatorOrgs.contactId), eq(aggregatorOrgs.ownerEmail, e)),
       )!,
     );
   }
 
   async findByOwnerPhone(phone: string): Promise<OrgStoreResult<AggregatorOrg | null>> {
+    // Index-friendly shape (see findByOwnerEmail). Excludes the half-created
+    // rows a failed org create leaves behind (inactive, no Keycloak owner) —
+    // those never became anyone's login, so they must not block a retry.
     return this.findOne(
-      or(
-        eq(contact.phone, phone),
-        and(isNull(aggregatorOrgs.contactId), eq(aggregatorOrgs.ownerPhone, phone)),
+      and(
+        or(
+          eq(
+            aggregatorOrgs.contactId,
+            sql`(SELECT ${contact.id} FROM ${contact} WHERE ${contact.phone} = ${phone})`,
+          ),
+          and(isNull(aggregatorOrgs.contactId), eq(aggregatorOrgs.ownerPhone, phone)),
+        ),
+        or(ne(aggregatorOrgs.status, 'inactive'), isNotNull(aggregatorOrgs.ownerKcSub)),
       )!,
     );
   }

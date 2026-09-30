@@ -42,7 +42,7 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
       contactId: safeContactId(input.ownerEmail, input.ownerPhone ?? null),
       ownerEmail: input.ownerEmail.toLowerCase(),
       ownerPhone: input.ownerPhone ?? null,
-      ownerName: input.ownerName?.trim() || null,
+      ownerName: input.ownerName?.trim() ? input.ownerName : null,
       ownerKcSub: input.ownerKcSub ?? null,
       kcGroupId: input.kcGroupId ?? null,
       profile: input.profile ?? {},
@@ -75,7 +75,10 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
   async findByOwnerPhone(phone: string): Promise<OrgStoreResult<AggregatorOrg | null>> {
     return {
       ok: true,
-      value: [...this.byId.values()].find((o) => o.ownerPhone === phone) ?? null,
+      value:
+        [...this.byId.values()].find(
+          (o) => o.ownerPhone === phone && (o.status !== 'inactive' || o.ownerKcSub !== null),
+        ) ?? null,
     };
   }
 

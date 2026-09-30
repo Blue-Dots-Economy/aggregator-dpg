@@ -109,10 +109,27 @@ export async function backfillOwnerContactNames(
       report.updated++;
       continue;
     }
-    if (await deps.setNameIfMissing(c.contactId, name)) report.updated++;
+    let written: boolean;
+    try {
+      written = await deps.setNameIfMissing(c.contactId, name);
+    } catch (err: unknown) {
+      // One bad row must not abort the whole run; count it and carry on.
+      report.failed++;
+      logger.error({
+        operation: 'ownerNameBackfill.setName',
+        status: 'failure',
+        error: (err as Error).message,
+        error_type: (err as Error).constructor?.name,
+        latency_ms: Date.now() - start,
+        org_id: c.orgId,
+      });
+      continue;
+    }
+    if (written) report.updated++;
     logger.info({
       operation: 'ownerNameBackfill.setName',
-      status: 'success',
+      // `skipped`: the contact gained a name since the candidate list was read.
+      status: written ? 'success' : 'skipped',
       latency_ms: Date.now() - start,
       org_id: c.orgId,
     });
