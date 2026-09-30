@@ -7,6 +7,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { contactId } from '@aggregator-dpg/shared-primitives/contact';
 import {
   AggregatorOrgStoreBase,
   type AggregatorOrg,
@@ -38,8 +39,10 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
       slug: input.slug,
       displayName: input.displayName,
       state: input.state ?? null,
+      contactId: safeContactId(input.ownerEmail, input.ownerPhone ?? null),
       ownerEmail: input.ownerEmail.toLowerCase(),
       ownerPhone: input.ownerPhone ?? null,
+      ownerName: input.ownerName?.trim() || null,
       ownerKcSub: input.ownerKcSub ?? null,
       kcGroupId: input.kcGroupId ?? null,
       profile: input.profile ?? {},
@@ -66,6 +69,13 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
     return {
       ok: true,
       value: [...this.byId.values()].find((o) => o.ownerEmail === target) ?? null,
+    };
+  }
+
+  async findByOwnerPhone(phone: string): Promise<OrgStoreResult<AggregatorOrg | null>> {
+    return {
+      ok: true,
+      value: [...this.byId.values()].find((o) => o.ownerPhone === phone) ?? null,
     };
   }
 
@@ -98,6 +108,10 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
       displayName: patch.displayName ?? existing.displayName,
       state: patch.state !== undefined ? patch.state : existing.state,
       ownerPhone: patch.ownerPhone !== undefined ? patch.ownerPhone : existing.ownerPhone,
+      contactId:
+        patch.ownerPhone !== undefined
+          ? safeContactId(existing.ownerEmail, patch.ownerPhone)
+          : existing.contactId,
       ownerKcSub: patch.ownerKcSub !== undefined ? patch.ownerKcSub : existing.ownerKcSub,
       kcGroupId: patch.kcGroupId !== undefined ? patch.kcGroupId : existing.kcGroupId,
       status: patch.status ?? existing.status,
@@ -137,4 +151,16 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
 
 function err<T>(code: OrgStoreError['code'], message: string): OrgStoreResult<T> {
   return { ok: false, error: { code, message } };
+}
+
+/**
+ * The id the database sync would give this owner, or `null` when the phone is
+ * not canonical (the Postgres trigger leaves such a row unlinked too).
+ */
+function safeContactId(email: string, phone: string | null): string | null {
+  try {
+    return contactId(email, phone);
+  } catch {
+    return null;
+  }
 }

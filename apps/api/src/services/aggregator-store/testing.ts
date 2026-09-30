@@ -66,6 +66,7 @@ export function buildAggregator(overrides: Partial<Aggregator> = {}): Aggregator
     name: 'Test Org',
     type: null,
     url: null,
+    contactId: null,
     contact,
     contactPhone: overrides.contactPhone ?? contact.phone,
     contactEmail: overrides.contactEmail ?? contact.email.toLowerCase(),

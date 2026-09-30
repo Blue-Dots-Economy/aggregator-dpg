@@ -22,6 +22,7 @@ import { z } from 'zod';
 import { config, orgHierarchyEnabled } from '../config.js';
 import { coolingRetryAfter } from '../services/registration-cooling.js';
 import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js';
+import { getAggregatorStore } from '../services/aggregator-store/index.js';
 import type { AggregatorOrg } from '../services/aggregator-org-store/interface.js';
 import { resolveProfileRef } from '../services/schema-ref.js';
 import { getIdpAdmin, KC_ATTR } from '../services/idp-admin/index.js';
@@ -349,6 +350,23 @@ export async function registerAggregatorOrgRoutes(app: FastifyInstance): Promise
         return reclaimOrgReview(prior);
       }
 
+      // One person per email and per phone across coordinators AND org owners
+      // (the `contact` table, migration 0025). Checked before anything is
+      // written so a clash never leaves a half-provisioned org behind.
+      //  * email held by a coordinator → the same 409 the Keycloak USER_EXISTS
+      //    branch below returns (it used to fire only after the org row and
+      //    KC group had been created and rolled back);
+      //  * phone held by a coordinator, or by a different org's owner →
+      //    PHONE_EXISTS. The phone is the OTP login key; two users on one
+      //    number make login ambiguous.
+      const contactClash = await findOwnerContactClash(ownerEmail, phoneE164);
+      if (contactClash === 'email') {
+        throw httpError('OWNER_ALREADY_REGISTERED', { fields: { email: body.owner.email } });
+      }
+      if (contactClash === 'phone') {
+        throw httpError('PHONE_EXISTS', { fields: { phone: phoneE164 } });
+      }
+
       const orgProfileRef = resolveProfileRef('org-registration.v1.json');
       if (!orgProfileRef) {
         log.warn(
@@ -370,6 +388,7 @@ export async function registerAggregatorOrgRoutes(app: FastifyInstance): Promise
         state: body.address?.addressRegion ?? body.state ?? null,
         ownerEmail: ownerEmail,
         ownerPhone: phoneE164,
+        ownerName: body.owner.name,
         profile: buildOrgProfile(body),
         // Derived from the schema file that actually resolved, not from the
         // brand env — a missing override must not be recorded as if its
@@ -602,4 +621,49 @@ async function recordOrgConsent({
   }
 
   return true;
+}
+
+/**
+ * Reports whether an org owner's email or phone already belongs to someone
+ * else — a coordinator, or (for the phone) another org's owner. Same-email org
+ * rows are handled earlier by the reclaim/revive/resend branches, so a phone
+ * match on an org with the SAME owner email is not a clash.
+ *
+ * @param ownerEmail - Lowercased owner email.
+ * @param phoneE164 - Canonical owner phone.
+ * @returns `'email'`, `'phone'`, or `null` when the pair is free.
+ * @throws {HttpError} `DB_UNAVAILABLE` when a lookup fails.
+ */
+async function findOwnerContactClash(
+  ownerEmail: string,
+  phoneE164: string,
+): Promise<'email' | 'phone' | null> {
+  const aggregators = getAggregatorStore();
+  const byEmail = await aggregators.findByContactEmail(ownerEmail);
+  if (!byEmail.ok) {
+    throw httpError('DB_UNAVAILABLE', {
+      cause: new Error(byEmail.error.message),
+      fields: { sub_operation: 'aggregatorStore.findByContactEmail' },
+    });
+  }
+  if (byEmail.value) return 'email';
+
+  const byPhone = await aggregators.findByContactPhone(phoneE164);
+  if (!byPhone.ok) {
+    throw httpError('DB_UNAVAILABLE', {
+      cause: new Error(byPhone.error.message),
+      fields: { sub_operation: 'aggregatorStore.findByContactPhone' },
+    });
+  }
+  if (byPhone.value) return 'phone';
+
+  const orgByPhone = await getAggregatorOrgStore().findByOwnerPhone(phoneE164);
+  if (!orgByPhone.ok) {
+    throw httpError('DB_UNAVAILABLE', {
+      cause: new Error(orgByPhone.error.message),
+      fields: { sub_operation: 'orgStore.findByOwnerPhone' },
+    });
+  }
+  if (orgByPhone.value && orgByPhone.value.ownerEmail !== ownerEmail) return 'phone';
+  return null;
 }

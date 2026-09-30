@@ -15,6 +15,11 @@ import {
   type OrgStoreResult,
 } from '../services/aggregator-org-store/index.js';
 import { IdpAdminFake, _setIdpAdmin } from '../services/idp-admin/index.js';
+import {
+  AggregatorStoreFake,
+  buildAggregator,
+  _setAggregatorStore,
+} from '../services/aggregator-store/index.js';
 import { FakeMailer, _setMailer } from '@aggregator-dpg/mailer';
 import { _resetTokenKey } from '../services/approval-token.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
@@ -40,6 +45,7 @@ describe('aggregator-orgs routes', () => {
   let idp: IdpAdminFake;
   let mailer: FakeMailer;
   let consentLedger: ConsentLedgerFake;
+  let aggregatorStore: AggregatorStoreFake;
 
   beforeEach(async () => {
     _resetTokenKey();
@@ -67,6 +73,8 @@ describe('aggregator-orgs routes', () => {
     );
     loadConsentConfigMock.mockImplementation(actualLoader.loadConsentConfig);
 
+    aggregatorStore = new AggregatorStoreFake();
+    _setAggregatorStore(aggregatorStore);
     _setAggregatorOrgStore(orgStore);
     _setIdpAdmin(idp);
     _setMailer(mailer);
@@ -98,6 +106,79 @@ describe('aggregator-orgs routes', () => {
     owner: { name: 'Ravi Kumar', email: 'ravi@enable.org', phone: '+919876500000' },
     consent: { value: true, given_at: '2026-01-15T10:00:00Z', valid_till: '2027-01-15T10:00:00Z' },
   };
+
+  describe('one person per email/phone across coordinators and org owners (contact, 0025)', () => {
+    it('409 OWNER_ALREADY_REGISTERED before any write when a coordinator holds the owner email', async () => {
+      aggregatorStore.seed([
+        buildAggregator({
+          contact: { name: 'Ravi', email: 'ravi@enable.org', phone: '+919999900000' },
+        }),
+      ]);
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/orgs/create',
+        headers: AUTH_HEADER,
+        payload: orgBody,
+      });
+      expect(res.statusCode).toBe(409);
+      expect((res.json() as { error: { code: string } }).error.code).toBe(
+        'OWNER_ALREADY_REGISTERED',
+      );
+      // Nothing half-provisioned: no org row, no KC group, no KC user.
+      const orgs = await orgStore.listPending();
+      expect(orgs.ok && orgs.value).toEqual([]);
+      expect(idp.getGroup('grp-1')).toBeUndefined();
+    });
+
+    it('409 PHONE_EXISTS when a coordinator holds the owner phone', async () => {
+      aggregatorStore.seed([
+        buildAggregator({
+          contact: { name: 'Someone', email: 'someone@else.org', phone: '+919876500000' },
+        }),
+      ]);
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/orgs/create',
+        headers: AUTH_HEADER,
+        payload: orgBody,
+      });
+      expect(res.statusCode).toBe(409);
+      expect((res.json() as { error: { code: string } }).error.code).toBe('PHONE_EXISTS');
+    });
+
+    it("409 PHONE_EXISTS when another org's owner holds the phone", async () => {
+      orgStore.seed([
+        buildAggregatorOrg({
+          id: 'o-other',
+          slug: 'other-org',
+          displayName: 'Other Org',
+          ownerEmail: 'boss@other.org',
+          ownerPhone: '+919876500000',
+          status: 'active',
+        }),
+      ]);
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/orgs/create',
+        headers: AUTH_HEADER,
+        payload: orgBody,
+      });
+      expect(res.statusCode).toBe(409);
+      expect((res.json() as { error: { code: string } }).error.code).toBe('PHONE_EXISTS');
+    });
+
+    it('persists the owner name on create', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/orgs/create',
+        headers: AUTH_HEADER,
+        payload: orgBody,
+      });
+      expect(res.statusCode).toBe(201);
+      const created = await orgStore.findByOwnerEmail('ravi@enable.org');
+      expect(created.ok && created.value?.ownerName).toBe('Ravi Kumar');
+    });
+  });
 
   it('creates a pending org + mirrored group + disabled owner, emails the network admin', async () => {
     const res = await app.inject({
@@ -518,6 +599,9 @@ describe('aggregator-orgs routes', () => {
         return { ok: true, value: null };
       }
       async findByOwnerEmail(): Promise<OrgStoreResult<AggregatorOrg | null>> {
+        return { ok: true, value: null };
+      }
+      async findByOwnerPhone(): Promise<OrgStoreResult<AggregatorOrg | null>> {
         return { ok: true, value: null };
       }
       async listActive(): Promise<OrgStoreResult<AggregatorOrg[]>> {

@@ -3,15 +3,21 @@
  *
  * Wraps Drizzle queries against the `aggregator_orgs` table — the org system
  * of record (spec §5.1). Driver-level errors are normalised to the abstract
- * `OrgStoreError` codes so callers never see raw pg error fields. PII
- * (owner_email) is an ordinary indexed column here; Keycloak remains
- * authoritative for the owner identity.
+ * `OrgStoreError` codes so callers never see raw pg error fields.
+ *
+ * The owner's email / phone / name are read from the `contact` table through
+ * `aggregator_orgs.contact_id` (migration 0025). Writes still set the legacy
+ * `owner_email` / `owner_phone` columns during the contact rollout; the
+ * database sync triggers link and re-key the contact, so every write re-reads
+ * the row rather than trusting `RETURNING`. Keycloak keeps its own copy of the
+ * owner's login identifiers.
  */
 
-import { and, eq, lt, type SQL } from 'drizzle-orm';
-import { aggregatorOrgs } from '../../db/schema.js';
+import { and, eq, isNull, lt, or, type SQL } from 'drizzle-orm';
+import { aggregatorOrgs, contact } from '../../db/schema.js';
 import { getDb } from '../../db/client.js';
 import { PG_UNIQUE_VIOLATION, pgErrorCode, pgConstraint } from '../../db/pg-error.js';
+import { logger } from '../../logger.js';
 import {
   AggregatorOrgStoreBase,
   type AggregatorOrg,
@@ -23,26 +29,40 @@ import {
 
 export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
   async create(input: CreateOrgInput): Promise<OrgStoreResult<AggregatorOrg>> {
+    let id: string;
     try {
-      const [row] = await getDb()
-        .insert(aggregatorOrgs)
-        .values({
-          slug: input.slug,
-          displayName: input.displayName,
-          state: input.state ?? null,
-          ownerEmail: input.ownerEmail.toLowerCase(),
-          ownerPhone: input.ownerPhone ?? null,
-          ownerKcSub: input.ownerKcSub ?? null,
-          kcGroupId: input.kcGroupId ?? null,
-          profile: input.profile ?? {},
-          profileRef: input.profileRef ?? null,
-        })
-        .returning();
-      if (!row) return errResult('DB_UNAVAILABLE', 'insert returned no row');
-      return { ok: true, value: toDomain(row) };
+      id = await getDb().transaction(async (tx) => {
+        const [row] = await tx
+          .insert(aggregatorOrgs)
+          .values({
+            slug: input.slug,
+            displayName: input.displayName,
+            state: input.state ?? null,
+            ownerEmail: input.ownerEmail.trim().toLowerCase(),
+            ownerPhone: input.ownerPhone ?? null,
+            ownerKcSub: input.ownerKcSub ?? null,
+            kcGroupId: input.kcGroupId ?? null,
+            profile: input.profile ?? {},
+            profileRef: input.profileRef ?? null,
+          })
+          .returning({ id: aggregatorOrgs.id, contactId: aggregatorOrgs.contactId });
+        if (!row) throw new Error('insert returned no row');
+        // The legacy org columns carry no owner name, so the sync trigger links
+        // the contact without one. Record it here — an existing name wins
+        // (the same person may already be named, e.g. as a coordinator).
+        const name = input.ownerName?.trim();
+        if (name && row.contactId) {
+          await tx
+            .update(contact)
+            .set({ name })
+            .where(and(eq(contact.id, row.contactId), isNull(contact.name)));
+        }
+        return row.id;
+      });
     } catch (e) {
       return mapInsertError(e);
     }
+    return this.reread(id);
   }
 
   async findById(id: string): Promise<OrgStoreResult<AggregatorOrg | null>> {
@@ -54,15 +74,29 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
   }
 
   async findByOwnerEmail(email: string): Promise<OrgStoreResult<AggregatorOrg | null>> {
-    return this.findOne(eq(aggregatorOrgs.ownerEmail, email.toLowerCase()));
+    const e = email.trim().toLowerCase();
+    // The linked contact is authoritative; an unlinked row (contact_id NULL)
+    // still answers from its legacy column so reclaim never misses it.
+    return this.findOne(
+      or(
+        eq(contact.email, e),
+        and(isNull(aggregatorOrgs.contactId), eq(aggregatorOrgs.ownerEmail, e)),
+      )!,
+    );
+  }
+
+  async findByOwnerPhone(phone: string): Promise<OrgStoreResult<AggregatorOrg | null>> {
+    return this.findOne(
+      or(
+        eq(contact.phone, phone),
+        and(isNull(aggregatorOrgs.contactId), eq(aggregatorOrgs.ownerPhone, phone)),
+      )!,
+    );
   }
 
   async listActive(): Promise<OrgStoreResult<AggregatorOrg[]>> {
     try {
-      const rows = await getDb()
-        .select()
-        .from(aggregatorOrgs)
-        .where(eq(aggregatorOrgs.status, 'active'));
+      const rows = await this.selectJoined().where(eq(aggregatorOrgs.status, 'active'));
       return { ok: true, value: rows.map(toDomain) };
     } catch (e) {
       return errResult('DB_UNAVAILABLE', (e as Error).message);
@@ -74,7 +108,7 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
       const where = updatedBefore
         ? and(eq(aggregatorOrgs.status, 'pending'), lt(aggregatorOrgs.updatedAt, updatedBefore))
         : eq(aggregatorOrgs.status, 'pending');
-      const rows = await getDb().select().from(aggregatorOrgs).where(where);
+      const rows = await this.selectJoined().where(where);
       return { ok: true, value: rows.map(toDomain) };
     } catch (e) {
       return errResult('DB_UNAVAILABLE', (e as Error).message);
@@ -87,12 +121,12 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
         .update(aggregatorOrgs)
         .set({ ...patch, updatedAt: new Date() })
         .where(eq(aggregatorOrgs.id, id))
-        .returning();
+        .returning({ id: aggregatorOrgs.id });
       if (!row) return errResult('NOT_FOUND', id);
-      return { ok: true, value: toDomain(row) };
     } catch (e) {
       return errResult('DB_UNAVAILABLE', (e as Error).message);
     }
+    return this.reread(id);
   }
 
   async deleteById(id: string): Promise<OrgStoreResult<void>> {
@@ -126,39 +160,72 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
           ...(next === 'inactive' ? { rejectedAt: new Date() } : {}),
         })
         .where(and(eq(aggregatorOrgs.id, id), eq(aggregatorOrgs.status, 'pending')))
-        .returning();
-      return { ok: true, value: row ? toDomain(row) : null };
+        .returning({ id: aggregatorOrgs.id });
+      if (!row) return { ok: true, value: null };
     } catch (e) {
       return errResult('DB_UNAVAILABLE', (e as Error).message);
     }
+    return this.findOne(eq(aggregatorOrgs.id, id));
+  }
+
+  /** `aggregator_orgs` LEFT JOIN `contact` — the one read shape every query uses. */
+  private selectJoined() {
+    return getDb()
+      .select({ o: aggregatorOrgs, c: contact })
+      .from(aggregatorOrgs)
+      .leftJoin(contact, eq(contact.id, aggregatorOrgs.contactId));
   }
 
   private async findOne(predicate: SQL): Promise<OrgStoreResult<AggregatorOrg | null>> {
     try {
-      const [row] = await getDb().select().from(aggregatorOrgs).where(predicate).limit(1);
+      const [row] = await this.selectJoined().where(predicate).limit(1);
       return { ok: true, value: row ? toDomain(row) : null };
     } catch (e) {
       return errResult('DB_UNAVAILABLE', (e as Error).message);
     }
   }
+
+  /** Re-reads a row just written so the result reflects the contact sync triggers. */
+  private async reread(id: string): Promise<OrgStoreResult<AggregatorOrg>> {
+    const found = await this.findOne(eq(aggregatorOrgs.id, id));
+    if (!found.ok) return found;
+    if (!found.value) return errResult('NOT_FOUND', id);
+    return { ok: true, value: found.value };
+  }
 }
 
-function toDomain(row: typeof aggregatorOrgs.$inferSelect): AggregatorOrg {
+type JoinedRow = {
+  o: typeof aggregatorOrgs.$inferSelect;
+  c: typeof contact.$inferSelect | null;
+};
+
+function toDomain(row: JoinedRow): AggregatorOrg {
+  const { o, c } = row;
+  if (!c && !o.ownerEmail) {
+    logger.warn({
+      operation: 'orgStore.toDomain',
+      status: 'failure',
+      error: 'org has neither a linked contact nor a legacy owner email',
+      org_id: o.id,
+    });
+  }
   return {
-    id: row.id,
-    slug: row.slug,
-    displayName: row.displayName,
-    state: row.state,
-    ownerEmail: row.ownerEmail,
-    ownerPhone: row.ownerPhone,
-    ownerKcSub: row.ownerKcSub,
-    kcGroupId: row.kcGroupId,
-    profile: row.profile ?? {},
-    profileRef: row.profileRef,
-    status: row.status,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-    rejectedAt: row.rejectedAt,
+    id: o.id,
+    slug: o.slug,
+    displayName: o.displayName,
+    state: o.state,
+    contactId: o.contactId,
+    ownerEmail: c ? c.email : (o.ownerEmail ?? ''),
+    ownerPhone: c ? c.phone : o.ownerPhone,
+    ownerName: c ? c.name : null,
+    ownerKcSub: o.ownerKcSub,
+    kcGroupId: o.kcGroupId,
+    profile: o.profile ?? {},
+    profileRef: o.profileRef,
+    status: o.status,
+    createdAt: o.createdAt,
+    updatedAt: o.updatedAt,
+    rejectedAt: o.rejectedAt,
   };
 }
 

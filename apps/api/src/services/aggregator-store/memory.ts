@@ -18,6 +18,19 @@ import {
   type UpdateAggregatorPatch,
 } from './interface.js';
 import type { AggregatorStatus } from '@aggregator-dpg/shared-primitives/aggregator';
+import { contactId } from '@aggregator-dpg/shared-primitives/contact';
+
+/**
+ * The id the database sync would give this email + phone, or `null` when the
+ * phone is not canonical (the Postgres trigger leaves such a row unlinked too).
+ */
+function safeContactId(email: string, phone: string): string | null {
+  try {
+    return contactId(email, phone);
+  } catch {
+    return null;
+  }
+}
 
 export class InMemoryAggregatorStore extends AggregatorStoreBase {
   protected readonly byId = new Map<string, Aggregator>();
@@ -49,6 +62,7 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
       name: input.name,
       type: input.type,
       url: input.url ?? null,
+      contactId: safeContactId(email, phone),
       contact: input.contact,
       contactPhone: phone,
       contactEmail: email,
@@ -142,6 +156,7 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
       name: patch.name ?? existing.name,
       type: patch.type !== undefined ? patch.type : existing.type,
       url: patch.url !== undefined ? patch.url : existing.url,
+      contactId: safeContactId(nextEmail, nextPhone),
       contact: nextContact,
       contactPhone: nextPhone,
       contactEmail: nextEmail,

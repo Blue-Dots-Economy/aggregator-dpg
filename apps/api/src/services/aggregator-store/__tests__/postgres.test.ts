@@ -33,7 +33,31 @@ interface ChainCall {
  * decides what the "query" resolves to (return an array to simulate rows, or
  * throw to simulate a driver error).
  */
-function makeFakeDb(resolve: (chain: ChainCall[]) => unknown): unknown {
+function makeFakeDb(resolveRaw: (chain: ChainCall[]) => unknown): unknown {
+  // Reads go through `aggregators LEFT JOIN contact` (migration 0025) and
+  // resolve to `{ a, c }` pairs. Tests keep returning flat rows; wrap them
+  // here, deriving the joined contact row from the fixture's `contact`.
+  const resolve = (chain: ChainCall[]): unknown => {
+    const out = resolveRaw(chain);
+    if (!chain.some((c) => c.method === 'leftJoin') || !Array.isArray(out)) return out;
+    return out.map((r: Record<string, unknown>) => {
+      if ('a' in r) return r;
+      const legacy = r['contact'] as { name: string; email: string; phone: string } | undefined;
+      return {
+        a: r,
+        c: legacy
+          ? {
+              id: 'c'.repeat(64),
+              email: legacy.email.toLowerCase(),
+              phone: legacy.phone,
+              name: legacy.name,
+              createdAt: new Date(0),
+              updatedAt: new Date(0),
+            }
+          : null,
+      };
+    });
+  };
   function build(chain: ChainCall[]): unknown {
     return new Proxy(
       {},
@@ -86,6 +110,7 @@ function makeRow(overrides: Partial<Aggregator> = {}): Aggregator {
     name: 'Test Org',
     type: null,
     url: null,
+    contactId: null,
     contact: { name: 'A', phone: '+919000000001', email: 'a@x.org' },
     contactPhone: '+919000000001',
     contactEmail: 'a@x.org',
@@ -126,7 +151,9 @@ describe('PostgresAggregatorStore.create', () => {
   it('inserts the mapped row and returns it on success', async () => {
     let captured: ChainCall[] = [];
     const db = makeFakeDb((chain) => {
-      captured = chain;
+      // Writes are followed by a joined re-read; keep the first chain seen
+      // unless a later one is the write itself.
+      if (!hasCall(chain, 'leftJoin') || captured.length === 0) captured = chain;
       return [makeRow({ id: 'agg-1' })];
     });
     _setDbClients(null, db as never);
@@ -147,7 +174,9 @@ describe('PostgresAggregatorStore.create', () => {
   it('defaults optional fields (url, locations, parentOrgId) when omitted', async () => {
     let captured: ChainCall[] = [];
     const db = makeFakeDb((chain) => {
-      captured = chain;
+      // Writes are followed by a joined re-read; keep the first chain seen
+      // unless a later one is the write itself.
+      if (!hasCall(chain, 'leftJoin') || captured.length === 0) captured = chain;
       return [makeRow()];
     });
     _setDbClients(null, db as never);
@@ -329,7 +358,12 @@ describe('PostgresAggregatorStore.findById / findBySlug / findByContactPhone / f
   });
 
   it('findByContactPhone returns the mapped row when found', async () => {
-    const db = makeFakeDb(() => [makeRow({ contactPhone: '+919000000009' })]);
+    const db = makeFakeDb(() => [
+      makeRow({
+        contactPhone: '+919000000009',
+        contact: { name: 'A', phone: '+919000000009', email: 'a@x.org' },
+      }),
+    ]);
     _setDbClients(null, db as never);
     const store = new PostgresAggregatorStore();
     const result = await store.findByContactPhone('+919000000009');
@@ -349,8 +383,15 @@ describe('PostgresAggregatorStore.findById / findBySlug / findByContactPhone / f
   it('findByContactEmail lowercases the lookup value', async () => {
     let captured: ChainCall[] = [];
     const db = makeFakeDb((chain) => {
-      captured = chain;
-      return [makeRow({ contactEmail: 'mixed@x.org' })];
+      // Writes are followed by a joined re-read; keep the first chain seen
+      // unless a later one is the write itself.
+      if (!hasCall(chain, 'leftJoin') || captured.length === 0) captured = chain;
+      return [
+        makeRow({
+          contactEmail: 'mixed@x.org',
+          contact: { name: 'A', phone: '+919000000001', email: 'Mixed@X.org' },
+        }),
+      ];
     });
     _setDbClients(null, db as never);
     const store = new PostgresAggregatorStore();
@@ -514,7 +555,9 @@ describe('PostgresAggregatorStore.update / updateStatus', () => {
   it('includes only the patch fields that were provided', async () => {
     let captured: ChainCall[] = [];
     const db = makeFakeDb((chain) => {
-      captured = chain;
+      // Writes are followed by a joined re-read; keep the first chain seen
+      // unless a later one is the write itself.
+      if (!hasCall(chain, 'leftJoin') || captured.length === 0) captured = chain;
       return [makeRow({ name: 'New Name' })];
     });
     _setDbClients(null, db as never);
@@ -532,7 +575,9 @@ describe('PostgresAggregatorStore.update / updateStatus', () => {
   it('includes every settable field when the full patch is provided', async () => {
     let captured: ChainCall[] = [];
     const db = makeFakeDb((chain) => {
-      captured = chain;
+      // Writes are followed by a joined re-read; keep the first chain seen
+      // unless a later one is the write itself.
+      if (!hasCall(chain, 'leftJoin') || captured.length === 0) captured = chain;
       return [makeRow()];
     });
     _setDbClients(null, db as never);
@@ -601,7 +646,9 @@ describe('PostgresAggregatorStore.update / updateStatus', () => {
   it('updateStatus delegates to update with the status field set', async () => {
     let captured: ChainCall[] = [];
     const db = makeFakeDb((chain) => {
-      captured = chain;
+      // Writes are followed by a joined re-read; keep the first chain seen
+      // unless a later one is the write itself.
+      if (!hasCall(chain, 'leftJoin') || captured.length === 0) captured = chain;
       return [makeRow({ status: 'active' })];
     });
     _setDbClients(null, db as never);
@@ -659,7 +706,9 @@ describe('PostgresAggregatorStore.updateSignalstackOrgId', () => {
   it('stamps the signalstack org id and returns the mapped row', async () => {
     let captured: ChainCall[] = [];
     const db = makeFakeDb((chain) => {
-      captured = chain;
+      // Writes are followed by a joined re-read; keep the first chain seen
+      // unless a later one is the write itself.
+      if (!hasCall(chain, 'leftJoin') || captured.length === 0) captured = chain;
       return [makeRow({ signalstackOrgId: 'ss-org-1' })];
     });
     _setDbClients(null, db as never);
@@ -744,5 +793,68 @@ describe('PostgresAggregatorStore row → domain mapping', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value?.type).toBeNull();
+  });
+});
+
+// ─── contact composition (migration 0025) ───────────────────────────────────
+
+describe('PostgresAggregatorStore contact composition', () => {
+  const linked = (name: string | null, phone: string | null) => ({
+    id: 'c'.repeat(64),
+    email: 'owner@x.org',
+    phone,
+    name,
+    createdAt: new Date(0),
+    updatedAt: new Date(0),
+  });
+
+  it('composes the Beckn contact from the linked row plus contact_extra, legacy key order', async () => {
+    const a = {
+      ...makeRow({ contactId: 'c'.repeat(64) }),
+      contact: { name: 'STALE', phone: '+910000000000', email: 'stale@x.org' },
+      contactExtra: { gstNumber: 'G1', company: 'Acme' },
+    };
+    _setDbClients(null, makeFakeDb(() => [{ a, c: linked('Owner', '+919000000009') }]) as never);
+    const result = await new PostgresAggregatorStore().findById(a.id);
+    expect(result.ok).toBe(true);
+    if (!result.ok || !result.value) return;
+    expect(result.value.contact).toEqual({
+      name: 'Owner',
+      email: 'owner@x.org',
+      phone: '+919000000009',
+      company: 'Acme',
+      gstNumber: 'G1',
+    });
+    // Same key order the legacy jsonb serialised (length, then bytes).
+    expect(Object.keys(result.value.contact)).toEqual([
+      'name',
+      'email',
+      'phone',
+      'company',
+      'gstNumber',
+    ]);
+    expect(result.value.contactPhone).toBe('+919000000009');
+    expect(result.value.contactEmail).toBe('owner@x.org');
+  });
+
+  it('falls back to the legacy jsonb for an unlinked row', async () => {
+    const a = { ...makeRow({ contactId: null }), contactExtra: {} };
+    _setDbClients(null, makeFakeDb(() => [{ a, c: null }]) as never);
+    const result = await new PostgresAggregatorStore().findById(a.id);
+    expect(result.ok && result.value?.contact).toEqual(a.contact);
+  });
+
+  it('returns an empty contact (and does not throw) when neither is present', async () => {
+    const a = { ...makeRow({ contactId: null }), contact: null, contactExtra: {} };
+    _setDbClients(null, makeFakeDb(() => [{ a, c: null }]) as never);
+    const result = await new PostgresAggregatorStore().findById(a.id);
+    expect(result.ok && result.value?.contact).toEqual({ name: '', email: '', phone: '' });
+  });
+
+  it('maps a NULL contact name to an empty string (the wire field is required)', async () => {
+    const a = { ...makeRow({ contactId: 'c'.repeat(64) }), contactExtra: {} };
+    _setDbClients(null, makeFakeDb(() => [{ a, c: linked(null, '+919000000009') }]) as never);
+    const result = await new PostgresAggregatorStore().findById(a.id);
+    expect(result.ok && result.value?.contact.name).toBe('');
   });
 });

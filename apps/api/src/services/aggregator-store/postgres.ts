@@ -4,11 +4,20 @@
  * Wraps Drizzle queries against the `aggregators` table. Driver-level errors
  * are normalised to the abstract `StoreError` codes so callers never see raw
  * pg error fields.
+ *
+ * Person-contact data is read from the `contact` table through
+ * `aggregators.contact_id` (migration 0025) and composed back into the Beckn
+ * `contact` shape, so callers and the API contract are unchanged. Writes still
+ * go to the legacy `contact` jsonb during the contact rollout; the database
+ * sync triggers keep `contact` / `contact_id` / `contact_extra` in step, which
+ * is why every write re-reads the row instead of trusting `RETURNING` (the
+ * AFTER UPDATE trigger may re-key the contact after the statement returns).
  */
 
-import { and, desc, eq, lt, sql } from 'drizzle-orm';
+import { and, desc, eq, isNull, lt, or, sql, type SQL } from 'drizzle-orm';
+import type { BecknContact } from '@aggregator-dpg/shared-primitives/aggregator';
 import { logger } from '../../logger.js';
-import { aggregators } from '../../db/schema.js';
+import { aggregators, contact } from '../../db/schema.js';
 import { getDb } from '../../db/client.js';
 import {
   PG_UNIQUE_VIOLATION,
@@ -50,77 +59,61 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
           profile: input.profile ?? {},
           profileRef: input.profileRef ?? null,
         })
-        .returning();
-      const row = rows[0];
-      if (!row) {
+        .returning({ id: aggregators.id });
+      const inserted = rows[0];
+      if (!inserted) {
         return { ok: false, error: { code: 'DB_UNAVAILABLE', message: 'no row returned' } };
       }
-      logger.info({
-        operation: 'aggregatorStore.create',
-        status: 'success',
-        latency_ms: Date.now() - start,
-        aggregator_id: row.id,
-      });
-      return { ok: true, value: toDomain(row) };
+      const created = await this.reread('aggregatorStore.create', inserted.id);
+      if (created.ok) {
+        logger.info({
+          operation: 'aggregatorStore.create',
+          status: 'success',
+          latency_ms: Date.now() - start,
+          aggregator_id: inserted.id,
+        });
+      }
+      return created;
     } catch (err: unknown) {
       return this.mapWriteError('aggregatorStore.create', err, input.orgSlug, start);
     }
   }
 
   async findById(id: string): Promise<StoreResult<Aggregator | null>> {
-    try {
-      const [row] = await getDb().select().from(aggregators).where(eq(aggregators.id, id)).limit(1);
-      return { ok: true, value: row ? toDomain(row) : null };
-    } catch (err: unknown) {
-      return this.mapReadError('aggregatorStore.findById', err);
-    }
+    return this.findOne('aggregatorStore.findById', eq(aggregators.id, id));
   }
 
   async findBySlug(orgSlug: string): Promise<StoreResult<Aggregator | null>> {
-    try {
-      const [row] = await getDb()
-        .select()
-        .from(aggregators)
-        .where(eq(aggregators.orgSlug, orgSlug))
-        .limit(1);
-      return { ok: true, value: row ? toDomain(row) : null };
-    } catch (err: unknown) {
-      return this.mapReadError('aggregatorStore.findBySlug', err);
-    }
+    return this.findOne('aggregatorStore.findBySlug', eq(aggregators.orgSlug, orgSlug));
   }
 
   async findByContactPhone(phone: string): Promise<StoreResult<Aggregator | null>> {
-    try {
-      const [row] = await getDb()
-        .select()
-        .from(aggregators)
-        .where(eq(aggregators.contactPhone, phone))
-        .limit(1);
-      return { ok: true, value: row ? toDomain(row) : null };
-    } catch (err: unknown) {
-      return this.mapReadError('aggregatorStore.findByContactPhone', err);
-    }
+    // The linked contact is authoritative; a row the sync could not link
+    // (contact_id NULL) still answers from its legacy column so a duplicate
+    // check never misses it.
+    return this.findOne(
+      'aggregatorStore.findByContactPhone',
+      or(
+        eq(contact.phone, phone),
+        and(isNull(aggregators.contactId), eq(aggregators.contactPhone, phone)),
+      )!,
+    );
   }
 
   async findByContactEmail(email: string): Promise<StoreResult<Aggregator | null>> {
-    try {
-      const [row] = await getDb()
-        .select()
-        .from(aggregators)
-        .where(eq(aggregators.contactEmail, email.toLowerCase()))
-        .limit(1);
-      return { ok: true, value: row ? toDomain(row) : null };
-    } catch (err: unknown) {
-      return this.mapReadError('aggregatorStore.findByContactEmail', err);
-    }
+    const e = email.trim().toLowerCase();
+    return this.findOne(
+      'aggregatorStore.findByContactEmail',
+      or(
+        eq(contact.email, e),
+        and(isNull(aggregators.contactId), eq(aggregators.contactEmail, e)),
+      )!,
+    );
   }
 
   async findByParentOrgId(orgId: string): Promise<StoreResult<Aggregator[]>> {
     try {
-      const rows = await getDb()
-        .select()
-        .from(aggregators)
-        .where(eq(aggregators.parentOrgId, orgId));
+      const rows = await this.selectJoined().where(eq(aggregators.parentOrgId, orgId));
       return { ok: true, value: rows.map(toDomain) };
     } catch (err: unknown) {
       return this.mapReadError('aggregatorStore.findByParentOrgId', err);
@@ -137,9 +130,7 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
       if (filter.updatedBefore) conds.push(lt(aggregators.updatedAt, filter.updatedBefore));
       const where = conds.length > 0 ? and(...conds) : undefined;
 
-      const rows = await getDb()
-        .select()
-        .from(aggregators)
+      const rows = await this.selectJoined()
         .where(where)
         .orderBy(desc(aggregators.createdAt))
         .limit(limit)
@@ -176,10 +167,9 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
         .update(aggregators)
         .set(updates)
         .where(eq(aggregators.id, id))
-        .returning();
-      const row = rows[0];
-      if (!row) return { ok: false, error: { code: 'NOT_FOUND', message: id } };
-      return { ok: true, value: toDomain(row) };
+        .returning({ id: aggregators.id });
+      if (!rows[0]) return { ok: false, error: { code: 'NOT_FOUND', message: id } };
+      return this.reread('aggregatorStore.update', id);
     } catch (err: unknown) {
       return this.mapWriteError('aggregatorStore.update', err, id, Date.now());
     }
@@ -199,9 +189,10 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
         .update(aggregators)
         .set({ status: 'active', updatedBy, updatedAt: new Date() })
         .where(and(eq(aggregators.id, id), eq(aggregators.status, 'pending')))
-        .returning();
+        .returning({ id: aggregators.id });
       // No row → not pending (a concurrent approval already committed).
-      return { ok: true, value: rows[0] ? toDomain(rows[0]) : null };
+      if (!rows[0]) return { ok: true, value: null };
+      return this.reread('aggregatorStore.approveFromPending', id);
     } catch (err: unknown) {
       return this.mapWriteError('aggregatorStore.approveFromPending', err, id, Date.now());
     }
@@ -222,16 +213,18 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
           updatedAt: new Date(),
         })
         .where(eq(aggregators.id, id))
-        .returning();
-      const row = rows[0];
-      if (!row) return { ok: false, error: { code: 'NOT_FOUND', message: id } };
-      logger.info({
-        operation: 'aggregatorStore.updateSignalstackOrgId',
-        status: 'success',
-        latency_ms: Date.now() - start,
-        aggregator_id: id,
-      });
-      return { ok: true, value: toDomain(row) };
+        .returning({ id: aggregators.id });
+      if (!rows[0]) return { ok: false, error: { code: 'NOT_FOUND', message: id } };
+      const updated = await this.reread('aggregatorStore.updateSignalstackOrgId', id);
+      if (updated.ok) {
+        logger.info({
+          operation: 'aggregatorStore.updateSignalstackOrgId',
+          status: 'success',
+          latency_ms: Date.now() - start,
+          aggregator_id: id,
+        });
+      }
+      return updated;
     } catch (err: unknown) {
       return this.mapWriteError('aggregatorStore.updateSignalstackOrgId', err, id, start);
     }
@@ -239,7 +232,10 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
 
   async deleteById(id: string): Promise<StoreResult<void>> {
     try {
-      const rows = await getDb().delete(aggregators).where(eq(aggregators.id, id)).returning();
+      const rows = await getDb()
+        .delete(aggregators)
+        .where(eq(aggregators.id, id))
+        .returning({ id: aggregators.id });
       if (rows.length === 0) {
         return { ok: false, error: { code: 'NOT_FOUND', message: id } };
       }
@@ -247,6 +243,38 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
     } catch (err: unknown) {
       return this.mapReadError('aggregatorStore.deleteById', err);
     }
+  }
+
+  // ─── Reads ────────────────────────────────────────────────────────────────
+
+  /** `aggregators` LEFT JOIN `contact` — the one read shape every query uses. */
+  private selectJoined() {
+    return getDb()
+      .select({ a: aggregators, c: contact })
+      .from(aggregators)
+      .leftJoin(contact, eq(contact.id, aggregators.contactId));
+  }
+
+  /** Returns the first row matching `predicate`, or `null`. */
+  private async findOne(op: string, predicate: SQL): Promise<StoreResult<Aggregator | null>> {
+    try {
+      const [row] = await this.selectJoined().where(predicate).limit(1);
+      return { ok: true, value: row ? toDomain(row) : null };
+    } catch (err: unknown) {
+      return this.mapReadError(op, err);
+    }
+  }
+
+  /**
+   * Re-reads a row just written, so the result reflects what the contact sync
+   * triggers did after the statement (a re-key, a relink). A row that vanished
+   * in between is reported as `NOT_FOUND`.
+   */
+  private async reread(op: string, id: string): Promise<StoreResult<Aggregator>> {
+    const found = await this.findOne(op, eq(aggregators.id, id));
+    if (!found.ok) return found;
+    if (!found.value) return { ok: false, error: { code: 'NOT_FOUND', message: id } };
+    return { ok: true, value: found.value };
   }
 
   // ─── Error mapping ────────────────────────────────────────────────────────
@@ -313,33 +341,72 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
   }
 }
 
-function toDomain(row: typeof aggregators.$inferSelect): Aggregator {
+type JoinedRow = {
+  a: typeof aggregators.$inferSelect;
+  c: typeof contact.$inferSelect | null;
+};
+
+/**
+ * Builds the Beckn `contact` the API has always returned, from the linked
+ * `contact` row plus `contact_extra`. Keys are emitted in the order the legacy
+ * jsonb column produced them (Postgres orders jsonb keys by length, then
+ * bytes), so a serialised response stays byte-identical.
+ */
+function composeContact(row: JoinedRow): BecknContact {
+  const { a, c } = row;
+  if (!c) {
+    // Unlinked row (contact_id NULL): fall back to the legacy jsonb, which is
+    // still written during the contact rollout.
+    if (a.contact) return a.contact;
+    logger.warn({
+      operation: 'aggregatorStore.composeContact',
+      status: 'failure',
+      error: 'row has neither a linked contact nor a legacy contact',
+      aggregator_id: a.id,
+    });
+    return { name: '', email: '', phone: '' };
+  }
+  const extra = a.contactExtra ?? {};
+  return {
+    name: c.name ?? '',
+    email: c.email,
+    phone: c.phone ?? '',
+    ...(extra.company !== undefined ? { company: extra.company } : {}),
+    ...(extra.gstNumber !== undefined ? { gstNumber: extra.gstNumber } : {}),
+    ...(extra.alternatePhone !== undefined ? { alternatePhone: extra.alternatePhone } : {}),
+  };
+}
+
+function toDomain(row: JoinedRow): Aggregator {
+  const { a } = row;
   // Legacy `'both'` rows are coerced to null at the boundary — the app no
   // longer treats `both` as a first-class participant focus. Backfill the
   // column to a single value before dropping the DB enum entry.
-  const type = row.type === 'both' ? null : row.type;
+  const type = a.type === 'both' ? null : a.type;
+  const composed = composeContact(row);
   return {
-    id: row.id,
-    orgSlug: row.orgSlug,
-    actorType: row.actorType,
-    name: row.name,
+    id: a.id,
+    orgSlug: a.orgSlug,
+    actorType: a.actorType,
+    name: a.name,
     type,
-    url: row.url,
-    contact: row.contact,
-    contactPhone: row.contactPhone,
-    contactEmail: row.contactEmail,
-    locations: row.locations,
-    consent: row.consent,
-    profile: row.profile ?? {},
-    profileRef: row.profileRef,
-    status: row.status,
-    createdBy: row.createdBy,
-    updatedBy: row.updatedBy,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-    signalstackOrgId: row.signalstackOrgId,
-    parentOrgId: row.parentOrgId,
-    inviteEmail: row.inviteEmail,
-    rejectedAt: row.rejectedAt,
+    url: a.url,
+    contactId: a.contactId,
+    contact: composed,
+    contactPhone: composed.phone,
+    contactEmail: composed.email.toLowerCase(),
+    locations: a.locations,
+    consent: a.consent,
+    profile: a.profile ?? {},
+    profileRef: a.profileRef,
+    status: a.status,
+    createdBy: a.createdBy,
+    updatedBy: a.updatedBy,
+    createdAt: a.createdAt,
+    updatedAt: a.updatedAt,
+    signalstackOrgId: a.signalstackOrgId,
+    parentOrgId: a.parentOrgId,
+    inviteEmail: a.inviteEmail,
+    rejectedAt: a.rejectedAt,
   };
 }

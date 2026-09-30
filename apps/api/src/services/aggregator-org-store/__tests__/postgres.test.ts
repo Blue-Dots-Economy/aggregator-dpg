@@ -25,12 +25,38 @@ interface ChainCall {
   args: unknown[];
 }
 
-function makeFakeDb(resolve: (chain: ChainCall[]) => unknown): unknown {
+function makeFakeDb(resolveRaw: (chain: ChainCall[]) => unknown): unknown {
+  // Reads go through `aggregator_orgs LEFT JOIN contact` (migration 0025) and
+  // resolve to `{ o, c }` pairs. Tests keep returning flat rows; wrap them
+  // here, deriving the joined contact from the fixture's owner fields.
+  const resolve = (chain: ChainCall[]): unknown => {
+    const out = resolveRaw(chain);
+    if (!chain.some((c) => c.method === 'leftJoin') || !Array.isArray(out)) return out;
+    return out.map((r: Record<string, unknown>) =>
+      'o' in r
+        ? r
+        : {
+            o: r,
+            c: {
+              id: 'c'.repeat(64),
+              email: String(r['ownerEmail']).toLowerCase(),
+              phone: (r['ownerPhone'] as string | null) ?? null,
+              name: (r['ownerName'] as string | null) ?? null,
+              createdAt: new Date(0),
+              updatedAt: new Date(0),
+            },
+          },
+    );
+  };
   function build(chain: ChainCall[]): unknown {
     return new Proxy(
       {},
       {
         get(_target, prop: string | symbol) {
+          if (prop === 'transaction') {
+            // Run the callback against a fresh chain, like Drizzle does.
+            return (fn: (tx: unknown) => Promise<unknown>) => fn(build([]));
+          }
           if (prop === 'then') {
             return (onFulfilled: (v: unknown) => unknown, onRejected?: (e: unknown) => unknown) => {
               let result: unknown;
@@ -69,8 +95,10 @@ function makeRow(overrides: Partial<AggregatorOrg> = {}): AggregatorOrg {
     slug: 'test-org',
     displayName: 'Test Org',
     state: null,
+    contactId: null,
     ownerEmail: 'owner@test.local',
     ownerPhone: null,
+    ownerName: null,
     ownerKcSub: null,
     kcGroupId: null,
     profile: {},
@@ -98,7 +126,8 @@ describe('PostgresAggregatorOrgStore.create', () => {
   it('inserts the mapped row, lowercasing the owner email', async () => {
     let captured: ChainCall[] = [];
     const db = makeFakeDb((chain) => {
-      captured = chain;
+      // Writes are followed by a joined re-read; keep the write's chain.
+      if (!chain.some((c) => c.method === 'leftJoin') || captured.length === 0) captured = chain;
       return [makeRow({ ownerEmail: 'owner@test.local' })];
     });
     _setDbClients(null, db as never);
@@ -352,7 +381,8 @@ describe('PostgresAggregatorOrgStore.listPending', () => {
   it('builds a compound where clause when updatedBefore is given', async () => {
     let captured: ChainCall[] = [];
     const db = makeFakeDb((chain) => {
-      captured = chain;
+      // Writes are followed by a joined re-read; keep the write's chain.
+      if (!chain.some((c) => c.method === 'leftJoin') || captured.length === 0) captured = chain;
       return [makeRow({ status: 'pending' })];
     });
     _setDbClients(null, db as never);
@@ -396,7 +426,8 @@ describe('PostgresAggregatorOrgStore.update', () => {
   it('merges the patch and stamps updatedAt', async () => {
     let captured: ChainCall[] = [];
     const db = makeFakeDb((chain) => {
-      captured = chain;
+      // Writes are followed by a joined re-read; keep the write's chain.
+      if (!chain.some((c) => c.method === 'leftJoin') || captured.length === 0) captured = chain;
       return [makeRow({ displayName: 'New Name' })];
     });
     _setDbClients(null, db as never);
@@ -470,7 +501,8 @@ describe('PostgresAggregatorOrgStore.approve / reject', () => {
   it('approve returns the updated row on a successful CAS', async () => {
     let captured: ChainCall[] = [];
     const db = makeFakeDb((chain) => {
-      captured = chain;
+      // Writes are followed by a joined re-read; keep the write's chain.
+      if (!chain.some((c) => c.method === 'leftJoin') || captured.length === 0) captured = chain;
       return [makeRow({ status: 'active' })];
     });
     _setDbClients(null, db as never);
@@ -497,7 +529,8 @@ describe('PostgresAggregatorOrgStore.approve / reject', () => {
   it('reject returns the updated row with status=inactive', async () => {
     let captured: ChainCall[] = [];
     const db = makeFakeDb((chain) => {
-      captured = chain;
+      // Writes are followed by a joined re-read; keep the write's chain.
+      if (!chain.some((c) => c.method === 'leftJoin') || captured.length === 0) captured = chain;
       return [makeRow({ status: 'inactive' })];
     });
     _setDbClients(null, db as never);

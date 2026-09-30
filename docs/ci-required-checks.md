@@ -19,9 +19,14 @@ Add each check name exactly as listed below (copy-paste — GitHub matches by ex
 
 ## Advisory checks (not required)
 
-| Check name                 | What it reports                                    |
-| -------------------------- | -------------------------------------------------- |
-| `SonarCloud Code Analysis` | Coverage + code-quality gate, posted by SonarCloud |
+| Check name                 | What it reports                                                                                             |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `SonarCloud Code Analysis` | Coverage + code-quality gate, posted by SonarCloud                                                          |
+| `db-integration`           | Real-Postgres integration suites (`*.integration.test.ts`) against a freshly migrated `postgres:16` service |
+
+`db-integration` starts **advisory** while it proves stable. Promote it to required
+once it has run green on a few PRs: it is the only check that executes the SQL
+migrations and the database triggers for real.
 
 This check is **deliberately not in the required list**. It is posted by SonarCloud
 (project `Blue-Dots-Economy_aggregator-dpg`, org `blue-dots-economy`) after the
