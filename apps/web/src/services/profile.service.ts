@@ -7,6 +7,13 @@ export interface ProfileService {
   getRaw(): Promise<ProfileApiResponse>;
 }
 
+/**
+ * Wire shape of `contact` on `GET /v1/aggregators/profile/me` — mirrors
+ * `BecknContactSchema` in `@aggregator-dpg/shared-primitives/beckn`. Since
+ * migration 0025 the API composes it from the `contact` table (name / email /
+ * phone) plus `aggregators.contact_extra` (the optional keys below); the shape
+ * the web receives is unchanged.
+ */
 interface BecknContact {
   name: string;
   phone: string;

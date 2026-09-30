@@ -39,6 +39,10 @@
     "./url": {
       "import": "./dist/url/index.js",
       "types": "./dist/url/index.d.ts"
+    },
+    "./contact": {
+      "import": "./dist/contact/index.js",
+      "types": "./dist/contact/index.d.ts"
     }
   },
   "scripts": {

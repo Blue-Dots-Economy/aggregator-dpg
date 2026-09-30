@@ -21,6 +21,7 @@
 import { describe, it, expect } from 'vitest';
 import { getTableConfig } from 'drizzle-orm/pg-core';
 import {
+  contact,
   aggregators,
   aggregatorOrgs,
   bulkUploads,
@@ -44,18 +45,8 @@ describe('aggregators: indexes + foreign key', () => {
     expect(cfg.name).toBe('aggregators');
   });
 
-  it('has the two login-lookup unique indexes and the two filter indexes', () => {
+  it('has the two filter indexes and the contact_id index (uniqueness lives on contact)', () => {
     const byName = Object.fromEntries(cfg.indexes.map((i) => [i.config.name, i]));
-
-    expect(byName['aggregators_contact_phone_unique'].config.unique).toBe(true);
-    expect(byName['aggregators_contact_phone_unique'].config.columns.map(colName)).toEqual([
-      'contact_phone',
-    ]);
-
-    expect(byName['aggregators_contact_email_unique'].config.unique).toBe(true);
-    expect(byName['aggregators_contact_email_unique'].config.columns.map(colName)).toEqual([
-      'contact_email',
-    ]);
 
     expect(byName['aggregators_status_idx'].config.unique).toBe(false);
     expect(byName['aggregators_status_idx'].config.columns.map(colName)).toEqual(['status']);
@@ -65,12 +56,25 @@ describe('aggregators: indexes + foreign key', () => {
       'actor_type',
     ]);
 
-    expect(cfg.indexes).toHaveLength(4);
+    expect(byName['aggregators_contact_id_unique'].config.unique).toBe(true);
+    expect(byName['aggregators_contact_id_unique'].config.columns.map(colName)).toEqual([
+      'contact_id',
+    ]);
+
+    expect(cfg.indexes).toHaveLength(3);
+  });
+
+  it('contact_id FK points at contact.id — RESTRICT on delete, CASCADE on update (re-key)', () => {
+    const fk = cfg.foreignKeys.find((f) => f.reference().columns[0] === aggregators.contactId)!;
+    expect(fk.reference().foreignTable).toBe(contact);
+    expect(fk.reference().foreignColumns[0]).toBe(contact.id);
+    expect(fk.onDelete).toBe('restrict');
+    expect(fk.onUpdate).toBe('cascade');
   });
 
   it('parent_org_id FK points at aggregator_orgs.id with no cascade action', () => {
-    expect(cfg.foreignKeys).toHaveLength(1);
-    const fk = cfg.foreignKeys[0]!;
+    expect(cfg.foreignKeys).toHaveLength(2);
+    const fk = cfg.foreignKeys.find((f) => f.reference().columns[0] === aggregators.parentOrgId)!;
     const ref = fk.reference();
     expect(ref.columns[0]).toBe(aggregators.parentOrgId);
     expect(ref.foreignTable).toBe(aggregatorOrgs);
@@ -86,15 +90,14 @@ describe('aggregator_orgs: indexes (not covered by aggregator-orgs.schema.test.t
     expect(cfg.name).toBe('aggregator_orgs');
   });
 
-  it('has plain filter indexes on status and owner_email', () => {
+  it('has plain filter indexes on status and contact_id', () => {
     const byName = Object.fromEntries(cfg.indexes.map((i) => [i.config.name, i]));
 
     expect(byName['aggregator_orgs_status_idx'].config.unique).toBe(false);
     expect(byName['aggregator_orgs_status_idx'].config.columns.map(colName)).toEqual(['status']);
 
-    expect(byName['aggregator_orgs_owner_email_idx'].config.unique).toBe(false);
-    expect(byName['aggregator_orgs_owner_email_idx'].config.columns.map(colName)).toEqual([
-      'owner_email',
+    expect(byName['aggregator_orgs_contact_id_idx'].config.columns.map(colName)).toEqual([
+      'contact_id',
     ]);
   });
 
@@ -115,6 +118,7 @@ describe('aggregator_orgs: indexes (not covered by aggregator-orgs.schema.test.t
     expect(idx?.config.unique).toBe(true);
     // Indexed on `lower(display_name)` — a SQL expression, not a plain column.
     expect(idx?.config.where).toBeDefined();
+    // status, slug-active, display-name-active, contact_id (0025)
     expect(cfg.indexes).toHaveLength(4);
   });
 });
@@ -288,5 +292,41 @@ describe('onboarding: indexes + foreign keys', () => {
     expect(linkRef?.foreignTable).toBe(registrationLinks);
     expect(linkRef?.foreignColumns[0]).toBe(registrationLinks.id);
     expect(linkFk?.onDelete).toBe('set null');
+  });
+});
+
+describe('contact: indexes (migration 0025)', () => {
+  const cfg = getTableConfig(contact);
+
+  it('table name is contact with a text primary key', () => {
+    expect(cfg.name).toBe('contact');
+    expect(contact.id.primary).toBe(true);
+    expect(contact.id.columnType).toBe('PgText');
+  });
+
+  it('email is unique; phone is partial-unique over non-null values', () => {
+    const byName = Object.fromEntries(cfg.indexes.map((i) => [i.config.name, i]));
+    expect(byName['contact_email_unique'].config.unique).toBe(true);
+    expect(byName['contact_email_unique'].config.columns.map(colName)).toEqual(['email']);
+    expect(byName['contact_phone_unique'].config.unique).toBe(true);
+    expect(byName['contact_phone_unique'].config.columns.map(colName)).toEqual(['phone']);
+    expect(byName['contact_phone_unique'].config.where).toBeDefined();
+    expect(cfg.indexes).toHaveLength(2);
+  });
+
+  it('nullable phone and name, required email', () => {
+    expect(contact.email.notNull).toBe(true);
+    expect(contact.phone.notNull).toBe(false);
+    expect(contact.name.notNull).toBe(false);
+  });
+});
+
+describe('aggregator_orgs: contact_id FK (migration 0025)', () => {
+  it('points at contact.id — RESTRICT on delete, CASCADE on update', () => {
+    const cfg = getTableConfig(aggregatorOrgs);
+    const fk = cfg.foreignKeys.find((f) => f.reference().columns[0] === aggregatorOrgs.contactId)!;
+    expect(fk.reference().foreignTable).toBe(contact);
+    expect(fk.onDelete).toBe('restrict');
+    expect(fk.onUpdate).toBe('cascade');
   });
 });

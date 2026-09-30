@@ -14,8 +14,20 @@ export interface AggregatorOrg {
   slug: string;
   displayName: string;
   state: string | null;
+  /**
+   * FK → `contact.id` — the org owner's contact (migration 0025). PII-derived
+   * hash: never log it.
+   */
+  contactId: string;
+  /** Owner email, lowercased — from the linked contact. */
   ownerEmail: string;
+  /** Owner phone (canonical) — from the linked contact. */
   ownerPhone: string | null;
+  /**
+   * Owner name — from the linked contact. `null` for owners registered before
+   * migration 0025 until `scripts/backfill-owner-contact-names.ts` has run.
+   */
+  ownerName: string | null;
   ownerKcSub: string | null;
   kcGroupId: string | null;
   /**
@@ -41,6 +53,8 @@ export interface CreateOrgInput {
   state?: string | null;
   ownerEmail: string;
   ownerPhone?: string | null;
+  /** Owner's name as submitted; stored on the contact when it has none yet. */
+  ownerName?: string | null;
   ownerKcSub?: string | null;
   kcGroupId?: string | null;
   profile?: Record<string, unknown>;
@@ -50,7 +64,6 @@ export interface CreateOrgInput {
 export interface UpdateOrgPatch {
   displayName?: string;
   state?: string | null;
-  ownerPhone?: string | null;
   ownerKcSub?: string | null;
   kcGroupId?: string | null;
   status?: AggregatorStatus;
@@ -62,6 +75,10 @@ export type OrgStoreError =
   | { code: 'NOT_FOUND'; message: string }
   | { code: 'DUPLICATE_SLUG'; message: string }
   | { code: 'DUPLICATE_NAME'; message: string }
+  /** The owner's email already belongs to another person (`contact`, 0025). */
+  | { code: 'DUPLICATE_EMAIL'; message: string }
+  /** The owner's phone already belongs to another person (`contact`, 0025). */
+  | { code: 'DUPLICATE_PHONE'; message: string }
   | { code: 'DB_UNAVAILABLE'; message: string };
 
 export type OrgStoreResult<T> = { ok: true; value: T } | { ok: false; error: OrgStoreError };
@@ -75,6 +92,15 @@ export abstract class AggregatorOrgStoreBase {
   abstract findById(id: string): Promise<OrgStoreResult<AggregatorOrg | null>>;
   abstract findBySlug(slug: string): Promise<OrgStoreResult<AggregatorOrg | null>>;
   abstract findByOwnerEmail(email: string): Promise<OrgStoreResult<AggregatorOrg | null>>;
+  /**
+   * Finds an org whose owner holds this phone. Backs the org-create pre-check
+   * that keeps one phone per person across coordinators and org owners (the
+   * phone is the OTP login key).
+   *
+   * @param phone - Canonical (`normalisePhone`) phone.
+   * @returns The first matching org, or `null`.
+   */
+  abstract findByOwnerPhone(phone: string): Promise<OrgStoreResult<AggregatorOrg | null>>;
   abstract listActive(): Promise<OrgStoreResult<AggregatorOrg[]>>;
   /**
    * Lists `pending` orgs, optionally only those last updated before `updatedBefore`.

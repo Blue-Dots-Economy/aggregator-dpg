@@ -6,6 +6,7 @@
  */
 
 import { InMemoryAggregatorOrgStore } from './memory.js';
+import { contactId } from '@aggregator-dpg/shared-primitives/contact';
 import type { AggregatorOrg } from './interface.js';
 
 export class AggregatorOrgStoreFake extends InMemoryAggregatorOrgStore {
@@ -33,13 +34,17 @@ export class AggregatorOrgStoreFake extends InMemoryAggregatorOrgStore {
  */
 export function buildAggregatorOrg(overrides: Partial<AggregatorOrg> = {}): AggregatorOrg {
   const createdAt = overrides.createdAt ?? new Date('2026-01-01T00:00:00Z');
+  const ownerEmail = overrides.ownerEmail ?? 'owner@test.local';
+  const ownerPhone = overrides.ownerPhone !== undefined ? overrides.ownerPhone : null;
   return {
     id: '00000000-0000-0000-0000-0000000000a1',
     slug: 'test-org',
     displayName: 'Test Org',
     state: null,
-    ownerEmail: 'owner@test.local',
-    ownerPhone: null,
+    contactId: contactId(ownerEmail, ownerPhone),
+    ownerEmail,
+    ownerPhone,
+    ownerName: null,
     ownerKcSub: null,
     kcGroupId: null,
     profile: {},

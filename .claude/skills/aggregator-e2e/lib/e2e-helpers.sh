@@ -242,9 +242,15 @@ mail_extract_link() {
 # the preconditions.
 
 # seed_active_org — prints the new org UUID.
+# The owner lives in `contact` (migration 0025), referenced by contact_id.
 seed_active_org() {
-  psql_q "INSERT INTO aggregator_orgs (slug, display_name, owner_email, status)
-          VALUES ('$E2E_TAG-org', 'E2E Org $E2E_TAG', '$E2E_TAG-owner@example.org', 'active')
+  psql_q "WITH c AS (
+            INSERT INTO contact (id, email, name)
+            VALUES (contact_id_of('$E2E_TAG-owner@example.org', NULL), '$E2E_TAG-owner@example.org', 'E2E Owner')
+            ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email
+            RETURNING id)
+          INSERT INTO aggregator_orgs (slug, display_name, contact_id, status)
+          SELECT '$E2E_TAG-org', 'E2E Org $E2E_TAG', c.id, 'active' FROM c
           RETURNING id;" | head -1 | tr -d '[:space:]'
   return 0
 }
@@ -292,10 +298,17 @@ TS
 e2e_cleanup() {
   local org_ids
   rm -f "$REPO_ROOT/apps/api/src/__e2e_mint_invite.ts"
-  org_ids=$(psql_q "SELECT id FROM aggregator_orgs WHERE slug LIKE '$E2E_TAG%' OR owner_email LIKE '$E2E_TAG%';")
-  psql_q "DELETE FROM aggregators WHERE contact_email LIKE '$E2E_TAG%' OR name LIKE 'E2E %$E2E_TAG%';" >/dev/null
+  # Match people through `contact` (migration 0025); the delete triggers GC
+  # the contact rows once nothing references them.
+  org_ids=$(psql_q "SELECT o.id FROM aggregator_orgs o LEFT JOIN contact c ON c.id = o.contact_id
+                    WHERE o.slug LIKE '$E2E_TAG%' OR c.email LIKE '$E2E_TAG%';")
+  psql_q "DELETE FROM aggregators a USING contact c
+          WHERE c.id = a.contact_id AND c.email LIKE '$E2E_TAG%';" >/dev/null
+  psql_q "DELETE FROM aggregators WHERE name LIKE 'E2E %$E2E_TAG%';" >/dev/null
   psql_q "DELETE FROM registration_invites WHERE email LIKE '$E2E_TAG%';" >/dev/null
-  psql_q "DELETE FROM aggregator_orgs WHERE slug LIKE '$E2E_TAG%' OR owner_email LIKE '$E2E_TAG%';" >/dev/null
+  psql_q "DELETE FROM aggregator_orgs o USING contact c
+          WHERE c.id = o.contact_id AND c.email LIKE '$E2E_TAG%';" >/dev/null
+  psql_q "DELETE FROM aggregator_orgs WHERE slug LIKE '$E2E_TAG%';" >/dev/null
   echo "cleaned rows tagged $E2E_TAG (orgs: $(echo "$org_ids" | tr '\n' ' '))"
   echo "NOTE: Keycloak users created by the run stay in the local dev realm."
   return 0

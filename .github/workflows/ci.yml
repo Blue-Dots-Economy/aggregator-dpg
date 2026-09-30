@@ -96,6 +96,82 @@ jobs:
         uses: SonarSource/sonarqube-scan-action@22918119ff8e1ca75a623e15c8296b6ea4fbe28f # v8.2.1
         continue-on-error: true
 
+  # ── Real-Postgres integration tests ────────────────────────────────────────
+  # `*.integration.test.ts` skip themselves unless INTEGRATION_DATABASE_URL is
+  # set, so `pnpm -w test` never touches a database. This job provides one: a
+  # throwaway postgres:16 service, migrated from scratch (the fresh-instance
+  # path), then the integration suites — including the contact migration's
+  # idempotent re-run, advisory-lock concurrency, golden vectors and the
+  # legacy-write sync triggers (apps/api/src/db/__tests__/contact.integration.test.ts).
+  # A separate job (not a step in `ci`) so it reports as its own check; see
+  # docs/ci-required-checks.md for whether it is required.
+  db-integration:
+    name: db-integration
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: aggregator
+          POSTGRES_DB: aggregator_it
+          # Throwaway database reachable only from this runner: trust auth, so
+          # no credential appears anywhere in this file.
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aggregator -d aggregator_it"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Throwaway CI-only database (trust auth, see the service above).
+      DATABASE_URL: postgres://aggregator@127.0.0.1:5432/aggregator_it
+      INTEGRATION_DATABASE_URL: postgres://aggregator@127.0.0.1:5432/aggregator_it
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Build workspace packages
+        run: pnpm -w turbo run build --filter='./packages/*'
+
+      - name: Migrate a fresh database
+        run: pnpm --filter @aggregator-dpg/api db:migrate
+
+      - name: Integration tests
+        run: pnpm --filter @aggregator-dpg/api exec vitest run integration --no-file-parallelism
+
+      # The contact suite again, against the EXPAND-phase schema (0000–0025):
+      # the 0025 sync triggers, its idempotent re-run, and 0026 applied over
+      # populated legacy data only exist there. A copy of the migrations folder
+      # without the later migrations drives it.
+      - name: Integration tests — expand-phase schema (migrations up to 0025)
+        env:
+          INTEGRATION_DATABASE_URL: postgres://aggregator@127.0.0.1:5432/aggregator_it_expand
+          INTEGRATION_MIGRATIONS_FOLDER: ${{ runner.temp }}/migrations-0025
+        run: |
+          psql -h 127.0.0.1 -U aggregator -d aggregator_it -c 'CREATE DATABASE aggregator_it_expand'
+          node -e "
+            const fs = require('fs'), path = require('path');
+            const src = 'apps/api/drizzle/migrations', dst = process.env.INTEGRATION_MIGRATIONS_FOLDER;
+            fs.mkdirSync(path.join(dst, 'meta'), { recursive: true });
+            const j = JSON.parse(fs.readFileSync(path.join(src, 'meta/_journal.json'), 'utf8'));
+            j.entries = j.entries.filter((e) => e.idx <= 25);
+            for (const e of j.entries) fs.copyFileSync(path.join(src, e.tag + '.sql'), path.join(dst, e.tag + '.sql'));
+            fs.writeFileSync(path.join(dst, 'meta/_journal.json'), JSON.stringify(j));
+          "
+          pnpm --filter @aggregator-dpg/api exec vitest run src/db/__tests__/contact.integration.test.ts --no-file-parallelism
+
   # ── PR-path image smoke build (#756) ───────────────────────────────────────
   # Restores the review-time Dockerfile check that the `docker` matrix used to
   # provide before it moved to build-images.yml. That matrix ran on PRs with

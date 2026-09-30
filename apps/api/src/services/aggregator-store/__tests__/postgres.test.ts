@@ -14,6 +14,7 @@
  *
  * @module @aggregator-dpg/api
  */
+import { contactId } from '@aggregator-dpg/shared-primitives/contact';
 import { afterEach, describe, expect, it } from 'vitest';
 import { PostgresAggregatorStore } from '../postgres.js';
 import { _setDbClients } from '../../../db/client.js';
@@ -33,12 +34,46 @@ interface ChainCall {
  * decides what the "query" resolves to (return an array to simulate rows, or
  * throw to simulate a driver error).
  */
-function makeFakeDb(resolve: (chain: ChainCall[]) => unknown): unknown {
+function makeFakeDb(
+  resolveRaw: (chain: ChainCall[]) => unknown,
+  opts: { refs?: number } = {},
+): unknown {
+  // Reads go through `aggregators JOIN contact` (migration 0025) and
+  // resolve to `{ a, c }` pairs. Tests keep returning flat rows; wrap them
+  // here, deriving the joined contact row from the fixture's `contact`.
+  const resolve = (chain: ChainCall[]): unknown => {
+    // `db.execute(sql…)` (contact FOR KEY SHARE / reference count) returns a
+    // pg QueryResult: one row held, referenced `opts.refs` times (default once).
+    if (chain[0]?.method === 'execute') return { rows: [{ n: opts.refs ?? 1 }] };
+    const out = resolveRaw(chain);
+    if (!chain.some((c) => c.method === 'innerJoin') || !Array.isArray(out)) return out;
+    return out.map((r: Record<string, unknown>) => {
+      if ('a' in r) return r;
+      const legacy = r['contact'] as { name: string; email: string; phone: string } | undefined;
+      return {
+        a: r,
+        c: legacy
+          ? {
+              id: 'c'.repeat(64),
+              email: legacy.email.toLowerCase(),
+              phone: legacy.phone,
+              name: legacy.name,
+              createdAt: new Date(0),
+              updatedAt: new Date(0),
+            }
+          : null,
+      };
+    });
+  };
   function build(chain: ChainCall[]): unknown {
     return new Proxy(
       {},
       {
         get(_target, prop: string | symbol) {
+          if (prop === 'transaction') {
+            // Run the callback against a fresh chain, like Drizzle does.
+            return (fn: (tx: unknown) => Promise<unknown>) => fn(build([]));
+          }
           if (prop === 'then') {
             return (onFulfilled: (v: unknown) => unknown, onRejected?: (e: unknown) => unknown) => {
               let result: unknown;
@@ -67,6 +102,13 @@ function callArgs(chain: ChainCall[], method: string): unknown[] | undefined {
   return chain.find((c) => c.method === method)?.args;
 }
 
+/** Whether `chain` is the INSERT/UPDATE of the `aggregators` row itself. */
+function isAggregatorWrite(chain: ChainCall[]): boolean {
+  const values = callArgs(chain, 'values')?.[0] as Record<string, unknown> | undefined;
+  const set = callArgs(chain, 'set')?.[0] as Record<string, unknown> | undefined;
+  return values?.['orgSlug'] !== undefined || set?.['updatedBy'] !== undefined;
+}
+
 function hasCall(chain: ChainCall[], method: string): boolean {
   return chain.some((c) => c.method === method);
 }
@@ -86,6 +128,7 @@ function makeRow(overrides: Partial<Aggregator> = {}): Aggregator {
     name: 'Test Org',
     type: null,
     url: null,
+    contactId: contactId('a@x.org', '+919000000001'),
     contact: { name: 'A', phone: '+919000000001', email: 'a@x.org' },
     contactPhone: '+919000000001',
     contactEmail: 'a@x.org',
@@ -126,7 +169,9 @@ describe('PostgresAggregatorStore.create', () => {
   it('inserts the mapped row and returns it on success', async () => {
     let captured: ChainCall[] = [];
     const db = makeFakeDb((chain) => {
-      captured = chain;
+      // A write runs contact statements, then the aggregators statement, then
+      // a joined re-read; keep the aggregators write (or the first read).
+      if (isAggregatorWrite(chain) || captured.length === 0) captured = chain;
       return [makeRow({ id: 'agg-1' })];
     });
     _setDbClients(null, db as never);
@@ -147,7 +192,9 @@ describe('PostgresAggregatorStore.create', () => {
   it('defaults optional fields (url, locations, parentOrgId) when omitted', async () => {
     let captured: ChainCall[] = [];
     const db = makeFakeDb((chain) => {
-      captured = chain;
+      // A write runs contact statements, then the aggregators statement, then
+      // a joined re-read; keep the aggregators write (or the first read).
+      if (isAggregatorWrite(chain) || captured.length === 0) captured = chain;
       return [makeRow()];
     });
     _setDbClients(null, db as never);
@@ -241,6 +288,26 @@ describe('PostgresAggregatorStore.create', () => {
     expect(result.error.code).toBe('DUPLICATE_SLUG');
   });
 
+  it('maps a non-canonical phone (rejected before any SQL) to CHECK_VIOLATION', async () => {
+    _setDbClients(null, makeFakeDb(() => [makeRow()]) as never);
+    const result = await new PostgresAggregatorStore().create(
+      makeInput({ contact: { name: 'A', phone: '9000000001', email: 'a@x.org' } }),
+    );
+    expect(result.ok || result.error.code).toBe('CHECK_VIOLATION');
+  });
+
+  it('maps a second coordinator row for the same person to DUPLICATE_EMAIL', async () => {
+    const db = makeFakeDb(() => {
+      throw Object.assign(new Error('dup'), {
+        code: '23505',
+        constraint: 'aggregators_contact_id_unique',
+      });
+    });
+    _setDbClients(null, db as never);
+    const result = await new PostgresAggregatorStore().create(makeInput());
+    expect(result.ok || result.error.code).toBe('DUPLICATE_EMAIL');
+  });
+
   it('maps a check violation to CHECK_VIOLATION', async () => {
     const db = makeFakeDb(() => {
       throw Object.assign(new Error('check failed'), {
@@ -268,7 +335,8 @@ describe('PostgresAggregatorStore.create', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe('DB_UNAVAILABLE');
-    expect(result.error.message).toContain('connection reset');
+    // The driver message carries query parameters; it is never echoed.
+    expect(result.error.message).not.toContain('connection reset');
   });
 });
 
@@ -329,7 +397,12 @@ describe('PostgresAggregatorStore.findById / findBySlug / findByContactPhone / f
   });
 
   it('findByContactPhone returns the mapped row when found', async () => {
-    const db = makeFakeDb(() => [makeRow({ contactPhone: '+919000000009' })]);
+    const db = makeFakeDb(() => [
+      makeRow({
+        contactPhone: '+919000000009',
+        contact: { name: 'A', phone: '+919000000009', email: 'a@x.org' },
+      }),
+    ]);
     _setDbClients(null, db as never);
     const store = new PostgresAggregatorStore();
     const result = await store.findByContactPhone('+919000000009');
@@ -349,8 +422,15 @@ describe('PostgresAggregatorStore.findById / findBySlug / findByContactPhone / f
   it('findByContactEmail lowercases the lookup value', async () => {
     let captured: ChainCall[] = [];
     const db = makeFakeDb((chain) => {
-      captured = chain;
-      return [makeRow({ contactEmail: 'mixed@x.org' })];
+      // A write runs contact statements, then the aggregators statement, then
+      // a joined re-read; keep the aggregators write (or the first read).
+      if (isAggregatorWrite(chain) || captured.length === 0) captured = chain;
+      return [
+        makeRow({
+          contactEmail: 'mixed@x.org',
+          contact: { name: 'A', phone: '+919000000001', email: 'Mixed@X.org' },
+        }),
+      ];
     });
     _setDbClients(null, db as never);
     const store = new PostgresAggregatorStore();
@@ -514,7 +594,9 @@ describe('PostgresAggregatorStore.update / updateStatus', () => {
   it('includes only the patch fields that were provided', async () => {
     let captured: ChainCall[] = [];
     const db = makeFakeDb((chain) => {
-      captured = chain;
+      // A write runs contact statements, then the aggregators statement, then
+      // a joined re-read; keep the aggregators write (or the first read).
+      if (isAggregatorWrite(chain) || captured.length === 0) captured = chain;
       return [makeRow({ name: 'New Name' })];
     });
     _setDbClients(null, db as never);
@@ -532,7 +614,9 @@ describe('PostgresAggregatorStore.update / updateStatus', () => {
   it('includes every settable field when the full patch is provided', async () => {
     let captured: ChainCall[] = [];
     const db = makeFakeDb((chain) => {
-      captured = chain;
+      // A write runs contact statements, then the aggregators statement, then
+      // a joined re-read; keep the aggregators write (or the first read).
+      if (isAggregatorWrite(chain) || captured.length === 0) captured = chain;
       return [makeRow()];
     });
     _setDbClients(null, db as never);
@@ -560,7 +644,8 @@ describe('PostgresAggregatorStore.update / updateStatus', () => {
         'name',
         'type',
         'url',
-        'contact',
+        'contactId',
+        'contactExtra',
         'locations',
         'consent',
         'status',
@@ -598,10 +683,47 @@ describe('PostgresAggregatorStore.update / updateStatus', () => {
     expect(result.error.code).toBe('DUPLICATE_EMAIL');
   });
 
+  describe('with a contact change', () => {
+    const next = { name: 'A', phone: '+919000000002', email: 'a@x.org' };
+    /** The row lock returns the current contact; the target lookup finds nothing. */
+    const lockOnly = (chain: ChainCall[]): unknown =>
+      hasCall(chain, 'for') ? [{ contactId: makeRow().contactId }] : [];
+
+    it('returns NOT_FOUND when the row to lock is gone', async () => {
+      _setDbClients(null, makeFakeDb(() => []) as never);
+      const result = await new PostgresAggregatorStore().update('missing', {
+        contact: next,
+        updatedBy: 'tester',
+      });
+      expect(result.ok || result.error.code).toBe('NOT_FOUND');
+    });
+
+    it('maps ContactTakenError (another person has these details) to DUPLICATE_EMAIL', async () => {
+      // Every select returns a row, so the target contact already exists.
+      _setDbClients(null, makeFakeDb(() => [makeRow()]) as never);
+      const result = await new PostgresAggregatorStore().update('agg-1', {
+        contact: next,
+        updatedBy: 'tester',
+      });
+      expect(result.ok || result.error.code).toBe('DUPLICATE_EMAIL');
+    });
+
+    it('maps SharedContactError (contact held by two roles) to DUPLICATE', async () => {
+      _setDbClients(null, makeFakeDb(lockOnly, { refs: 2 }) as never);
+      const result = await new PostgresAggregatorStore().update('agg-1', {
+        contact: next,
+        updatedBy: 'tester',
+      });
+      expect(result.ok || result.error.code).toBe('DUPLICATE');
+    });
+  });
+
   it('updateStatus delegates to update with the status field set', async () => {
     let captured: ChainCall[] = [];
     const db = makeFakeDb((chain) => {
-      captured = chain;
+      // A write runs contact statements, then the aggregators statement, then
+      // a joined re-read; keep the aggregators write (or the first read).
+      if (isAggregatorWrite(chain) || captured.length === 0) captured = chain;
       return [makeRow({ status: 'active' })];
     });
     _setDbClients(null, db as never);
@@ -659,7 +781,9 @@ describe('PostgresAggregatorStore.updateSignalstackOrgId', () => {
   it('stamps the signalstack org id and returns the mapped row', async () => {
     let captured: ChainCall[] = [];
     const db = makeFakeDb((chain) => {
-      captured = chain;
+      // A write runs contact statements, then the aggregators statement, then
+      // a joined re-read; keep the aggregators write (or the first read).
+      if (isAggregatorWrite(chain) || captured.length === 0) captured = chain;
       return [makeRow({ signalstackOrgId: 'ss-org-1' })];
     });
     _setDbClients(null, db as never);
@@ -744,5 +868,54 @@ describe('PostgresAggregatorStore row → domain mapping', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value?.type).toBeNull();
+  });
+});
+
+// ─── contact composition (migration 0025) ───────────────────────────────────
+
+describe('PostgresAggregatorStore contact composition', () => {
+  const linked = (name: string | null, phone: string | null) => ({
+    id: 'c'.repeat(64),
+    email: 'owner@x.org',
+    phone,
+    name,
+    createdAt: new Date(0),
+    updatedAt: new Date(0),
+  });
+
+  it('composes the Beckn contact from the linked row plus contact_extra, legacy key order', async () => {
+    const a = {
+      ...makeRow({ contactId: 'c'.repeat(64) }),
+      contact: { name: 'STALE', phone: '+910000000000', email: 'stale@x.org' },
+      contactExtra: { gstNumber: 'G1', company: 'Acme' },
+    };
+    _setDbClients(null, makeFakeDb(() => [{ a, c: linked('Owner', '+919000000009') }]) as never);
+    const result = await new PostgresAggregatorStore().findById(a.id);
+    expect(result.ok).toBe(true);
+    if (!result.ok || !result.value) return;
+    expect(result.value.contact).toEqual({
+      name: 'Owner',
+      email: 'owner@x.org',
+      phone: '+919000000009',
+      company: 'Acme',
+      gstNumber: 'G1',
+    });
+    // Same key order the legacy jsonb serialised (length, then bytes).
+    expect(Object.keys(result.value.contact)).toEqual([
+      'name',
+      'email',
+      'phone',
+      'company',
+      'gstNumber',
+    ]);
+    expect(result.value.contactPhone).toBe('+919000000009');
+    expect(result.value.contactEmail).toBe('owner@x.org');
+  });
+
+  it('maps a NULL contact name to an empty string (the wire field is required)', async () => {
+    const a = { ...makeRow({ contactId: 'c'.repeat(64) }), contactExtra: {} };
+    _setDbClients(null, makeFakeDb(() => [{ a, c: linked(null, '+919000000009') }]) as never);
+    const result = await new PostgresAggregatorStore().findById(a.id);
+    expect(result.ok && result.value?.contact.name).toBe('');
   });
 });

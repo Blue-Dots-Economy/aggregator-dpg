@@ -2,12 +2,13 @@
  * Aggregator store contract.
  *
  * Persistence port for the `aggregators` table — the registration-essential
- * row that an aggregator has after signup. The secondary 1:1 row lives in
- * `aggregator_profile` and is owned by the AggregatorProfileStore.
+ * row a coordinator has after signup.
  *
- * Concrete adapters: Postgres for production, in-memory for tests. PII
- * (phone/email) is mirrored from Keycloak; this store treats both as ordinary
- * indexed columns for login-path lookups.
+ * Concrete adapters: Postgres for production, in-memory for tests. The
+ * person's name / email / phone live in the `contact` table (migration 0025),
+ * referenced by `contactId`; `contact`, `contactPhone` and `contactEmail` on
+ * the record are composed from it so callers see the same Beckn shape as
+ * before. Keycloak keeps its own copy of the login identifiers.
  */
 
 import type {
@@ -26,8 +27,13 @@ export interface Aggregator {
   name: string;
   type: RoleType | null;
   url: string | null;
+  /** FK → `contact.id` (migrations 0025/0026). PII-derived hash — never log it. */
+  contactId: string;
+  /** Beckn contact, composed from the linked `contact` row + `contact_extra`. */
   contact: BecknContact;
+  /** The contact's phone (derived from `contact`; kept for existing callers). */
   contactPhone: string;
+  /** The contact's email, lowercased (derived from `contact`). */
   contactEmail: string;
   locations: BecknLocation[];
   consent: ConsentRecord;

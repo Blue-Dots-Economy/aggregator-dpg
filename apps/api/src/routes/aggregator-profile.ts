@@ -32,6 +32,7 @@ import type { BecknContact } from '@aggregator-dpg/shared-primitives/aggregator'
 import { BecknContactSchema, BecknLocationSchema } from '@aggregator-dpg/shared-primitives/beckn';
 import { authenticate, type AuthContext } from '../services/auth/access-token.js';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
+import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js';
 import { getIdpAdmin, KC_ATTR } from '../services/idp-admin/index.js';
 import type { IdpUser } from '../services/idp-admin/index.js';
 import { normalisePhone } from '@aggregator-dpg/shared-primitives/phone';
@@ -104,7 +105,7 @@ const ProfileUpdateResponseSchema = z
   })
   .passthrough();
 
-export async function registerAggregatorProfileRoutes(app: FastifyInstance): Promise<void> {
+export function registerAggregatorProfileRoutes(app: FastifyInstance): void {
   app.get(
     '/v1/aggregators/profile/me',
     {
@@ -207,6 +208,9 @@ export async function registerAggregatorProfileRoutes(app: FastifyInstance): Pro
       // If KC fails, abort before touching the DB so we never have the DB
       // ahead of Keycloak.
       let normalisedContact: BecknContact | undefined;
+      // The coordinator's stored phone before this request (what Keycloak
+      // mirrors), written back to Keycloak if the DB write fails.
+      let previousPhone: string | undefined;
       if (body.aggregator.contact) {
         const raw = body.aggregator.contact;
         const phoneR = normalisePhone(raw.phone);
@@ -219,6 +223,15 @@ export async function registerAggregatorProfileRoutes(app: FastifyInstance): Pro
           });
         }
         normalisedContact = { ...raw, phone: phoneR.value };
+
+        // One phone and one email per person across coordinators and org
+        // owners (the phone is the OTP login key; `contact`, migration 0025).
+        // Checked before the Keycloak write so a clash never leaves Keycloak
+        // ahead of the DB.
+        previousPhone = await assertContactChangeAllowed(auth.aggregatorId, {
+          email: raw.email,
+          phone: phoneR.value,
+        });
 
         const idp = getIdpAdmin();
         const kcWrite = await idp.setAttributes(auth.userId, {
@@ -249,6 +262,23 @@ export async function registerAggregatorProfileRoutes(app: FastifyInstance): Pro
       if (body.aggregator.consent !== undefined) patch.consent = body.aggregator.consent;
 
       const result = await aggregatorStore.update(auth.aggregatorId, patch);
+      if (!result.ok && normalisedContact && previousPhone !== undefined) {
+        // Keycloak was written first; put it back so it never runs ahead of
+        // the database. Best-effort — logged if it fails.
+        const revert = await getIdpAdmin().setAttributes(auth.userId, {
+          [KC_ATTR.PHONE_NUMBER]: previousPhone,
+        });
+        if (!revert.ok) {
+          log.error(
+            {
+              status: 'failure',
+              sub_operation: 'idp.setAttributes.revert',
+              code: revert.error.code,
+            },
+            'DB update failed and the Keycloak phone could not be restored',
+          );
+        }
+      }
       if (!result.ok) {
         throw httpError(mapAggregatorUpdateError(result.error.code), {
           cause: new Error(result.error.message),
@@ -352,4 +382,92 @@ function mapAggregatorUpdateError(
     default:
       return 'DB_UNAVAILABLE';
   }
+}
+
+/**
+ * Checks a coordinator's requested contact change BEFORE anything is written
+ * (Keycloak is written first, so a late refusal would leave it ahead of the
+ * database):
+ *   - the phone or email already belongs to another person (another
+ *     coordinator, or an org owner whose contact is not this coordinator's own)
+ *     → PHONE_EXISTS / USER_EXISTS;
+ *   - this coordinator's contact is shared with an org-owner role (one person,
+ *     two roles) and the email or phone would change → CONFLICT (not supported
+ *     until accounts are modelled separately, in a later phase).
+ * Identity is compared on stored contact ids, never on the submitted email.
+ *
+ * @param selfId - The caller's own `aggregators.id`.
+ * @param next - The requested email and canonical phone.
+ * @returns The coordinator's current phone (to restore Keycloak on failure).
+ * @throws {HttpError} PHONE_EXISTS, USER_EXISTS, CONFLICT, NOT_FOUND or DB_UNAVAILABLE.
+ */
+async function assertContactChangeAllowed(
+  selfId: string,
+  next: { email: string; phone: string },
+): Promise<string> {
+  const aggregators = getAggregatorStore();
+  const orgs = getAggregatorOrgStore();
+
+  const me = valueOrUnavailable('aggregatorStore.findById', await aggregators.findById(selfId));
+  if (!me) throw httpError('NOT_FOUND');
+  const email = next.email.trim().toLowerCase();
+  const phoneClash = () => httpError('PHONE_EXISTS', { fields: { phone: next.phone } });
+  const emailClash = () => httpError('USER_EXISTS', { fields: { email: next.email } });
+  /** Another person: a coordinator row that is not the caller's own. */
+  const otherCoordinator = (a: { id: string } | null): boolean => !!a && a.id !== selfId;
+  /** Another person: an org owner whose contact is not this coordinator's. */
+  const otherOwner = (o: { contactId: string } | null): boolean =>
+    !!o && o.contactId !== me.contactId;
+
+  const byPhone = await aggregators.findByContactPhone(next.phone);
+  if (otherCoordinator(valueOrUnavailable('aggregatorStore.findByContactPhone', byPhone))) {
+    throw phoneClash();
+  }
+  const byEmail = await aggregators.findByContactEmail(email);
+  if (otherCoordinator(valueOrUnavailable('aggregatorStore.findByContactEmail', byEmail))) {
+    throw emailClash();
+  }
+  const ownerByPhone = await orgs.findByOwnerPhone(next.phone);
+  if (otherOwner(valueOrUnavailable('orgStore.findByOwnerPhone', ownerByPhone))) {
+    throw phoneClash();
+  }
+  const ownerByEmail = await orgs.findByOwnerEmail(email);
+  if (otherOwner(valueOrUnavailable('orgStore.findByOwnerEmail', ownerByEmail))) {
+    throw emailClash();
+  }
+
+  const identityChanges = email !== me.contactEmail || next.phone !== me.contactPhone;
+  if (identityChanges) {
+    const owner = valueOrUnavailable(
+      'orgStore.findByOwnerEmail',
+      await orgs.findByOwnerEmail(me.contactEmail),
+    );
+    if (owner?.contactId === me.contactId) {
+      throw httpError('CONFLICT', {
+        detail: 'This contact is also an organisation owner; change it through the organisation.',
+      });
+    }
+  }
+  return me.contactPhone;
+}
+
+/**
+ * Unwraps a store result, turning a store failure into `503 DB_UNAVAILABLE`.
+ *
+ * @param op - Store operation, reported as `sub_operation`.
+ * @param result - The store result.
+ * @returns The result value.
+ * @throws {HttpError} DB_UNAVAILABLE when the store call failed.
+ */
+function valueOrUnavailable<T>(
+  op: string,
+  result: { ok: true; value: T } | { ok: false; error: { message: string } },
+): T {
+  if (!result.ok) {
+    throw httpError('DB_UNAVAILABLE', {
+      cause: new Error(result.error.message),
+      fields: { sub_operation: op },
+    });
+  }
+  return result.value;
 }

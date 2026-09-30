@@ -223,7 +223,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await registerAggregatorOrgApprovalRoutes(app);
   await registerInviteRoutes(app);
   await registerAggregatorApprovalRoutes(app);
-  await registerAggregatorProfileRoutes(app);
+  registerAggregatorProfileRoutes(app);
   await registerBulkUploadsRoutes(app);
   await registerRegistrationLinksRoutes(app);
   await registerPublicRegistrationLinkRoutes(app);

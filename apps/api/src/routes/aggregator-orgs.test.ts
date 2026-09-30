@@ -15,6 +15,11 @@ import {
   type OrgStoreResult,
 } from '../services/aggregator-org-store/index.js';
 import { IdpAdminFake, _setIdpAdmin } from '../services/idp-admin/index.js';
+import {
+  AggregatorStoreFake,
+  buildAggregator,
+  _setAggregatorStore,
+} from '../services/aggregator-store/index.js';
 import { FakeMailer, _setMailer } from '@aggregator-dpg/mailer';
 import { _resetTokenKey } from '../services/approval-token.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
@@ -40,6 +45,7 @@ describe('aggregator-orgs routes', () => {
   let idp: IdpAdminFake;
   let mailer: FakeMailer;
   let consentLedger: ConsentLedgerFake;
+  let aggregatorStore: AggregatorStoreFake;
 
   beforeEach(async () => {
     _resetTokenKey();
@@ -67,6 +73,8 @@ describe('aggregator-orgs routes', () => {
     );
     loadConsentConfigMock.mockImplementation(actualLoader.loadConsentConfig);
 
+    aggregatorStore = new AggregatorStoreFake();
+    _setAggregatorStore(aggregatorStore);
     _setAggregatorOrgStore(orgStore);
     _setIdpAdmin(idp);
     _setMailer(mailer);
@@ -98,6 +106,79 @@ describe('aggregator-orgs routes', () => {
     owner: { name: 'Ravi Kumar', email: 'ravi@enable.org', phone: '+919876500000' },
     consent: { value: true, given_at: '2026-01-15T10:00:00Z', valid_till: '2027-01-15T10:00:00Z' },
   };
+
+  describe('one person per email/phone across coordinators and org owners (contact, 0025)', () => {
+    it('409 OWNER_ALREADY_REGISTERED before any write when a coordinator holds the owner email', async () => {
+      aggregatorStore.seed([
+        buildAggregator({
+          contact: { name: 'Ravi', email: 'ravi@enable.org', phone: '+919999900000' },
+        }),
+      ]);
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/orgs/create',
+        headers: AUTH_HEADER,
+        payload: orgBody,
+      });
+      expect(res.statusCode).toBe(409);
+      expect((res.json() as { error: { code: string } }).error.code).toBe(
+        'OWNER_ALREADY_REGISTERED',
+      );
+      // Nothing half-provisioned: no org row, no KC group, no KC user.
+      const orgs = await orgStore.listPending();
+      expect(orgs.ok && orgs.value).toEqual([]);
+      expect(idp.getGroup('grp-1')).toBeUndefined();
+    });
+
+    it('409 PHONE_EXISTS when a coordinator holds the owner phone', async () => {
+      aggregatorStore.seed([
+        buildAggregator({
+          contact: { name: 'Someone', email: 'someone@else.org', phone: '+919876500000' },
+        }),
+      ]);
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/orgs/create',
+        headers: AUTH_HEADER,
+        payload: orgBody,
+      });
+      expect(res.statusCode).toBe(409);
+      expect((res.json() as { error: { code: string } }).error.code).toBe('PHONE_EXISTS');
+    });
+
+    it("409 PHONE_EXISTS when another org's owner holds the phone", async () => {
+      orgStore.seed([
+        buildAggregatorOrg({
+          id: 'o-other',
+          slug: 'other-org',
+          displayName: 'Other Org',
+          ownerEmail: 'boss@other.org',
+          ownerPhone: '+919876500000',
+          status: 'active',
+        }),
+      ]);
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/orgs/create',
+        headers: AUTH_HEADER,
+        payload: orgBody,
+      });
+      expect(res.statusCode).toBe(409);
+      expect((res.json() as { error: { code: string } }).error.code).toBe('PHONE_EXISTS');
+    });
+
+    it('persists the owner name on create', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/orgs/create',
+        headers: AUTH_HEADER,
+        payload: orgBody,
+      });
+      expect(res.statusCode).toBe(201);
+      const created = await orgStore.findByOwnerEmail('ravi@enable.org');
+      expect(created.ok && created.value?.ownerName).toBe('Ravi Kumar');
+    });
+  });
 
   it('creates a pending org + mirrored group + disabled owner, emails the network admin', async () => {
     const res = await app.inject({
@@ -520,6 +601,9 @@ describe('aggregator-orgs routes', () => {
       async findByOwnerEmail(): Promise<OrgStoreResult<AggregatorOrg | null>> {
         return { ok: true, value: null };
       }
+      async findByOwnerPhone(): Promise<OrgStoreResult<AggregatorOrg | null>> {
+        return { ok: true, value: null };
+      }
       async listActive(): Promise<OrgStoreResult<AggregatorOrg[]>> {
         return { ok: true, value: [] };
       }
@@ -549,6 +633,26 @@ describe('aggregator-orgs routes', () => {
     expect(res.statusCode).toBe(409);
     expect((res.json() as { error: { code: string } }).error.code).toBe('ORG_SLUG_TAKEN');
   });
+
+  it.each([
+    ['DUPLICATE_EMAIL', 'OWNER_ALREADY_REGISTERED'],
+    ['DUPLICATE_PHONE', 'PHONE_EXISTS'],
+  ] as const)(
+    'maps a %s store error (a race past the pre-check) to %s (409)',
+    async (storeCode, httpCode) => {
+      const racing = new AggregatorOrgStoreFake();
+      racing.create = async () => ({ ok: false, error: { code: storeCode, message: 'race' } });
+      _setAggregatorOrgStore(racing);
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/orgs/create',
+        headers: AUTH_HEADER,
+        payload: orgBody,
+      });
+      expect(res.statusCode).toBe(409);
+      expect((res.json() as { error: { code: string } }).error.code).toBe(httpCode);
+    },
+  );
 
   it('401s POST /v1/orgs/create without a token', async () => {
     const res = await app.inject({
@@ -599,6 +703,28 @@ describe('aggregator-orgs routes', () => {
     expect((res.json() as { error: { code: string } }).error.code).toBe('DB_UNAVAILABLE');
   });
 
+  it.each(['findByContactEmail', 'findByContactPhone', 'findByOwnerPhone'] as const)(
+    '503 DB_UNAVAILABLE (nothing written) when the owner-contact pre-check %s fails',
+    async (method) => {
+      const down = () =>
+        Promise.resolve({
+          ok: false as const,
+          error: { code: 'DB_UNAVAILABLE' as const, message: 'db down' },
+        });
+      if (method === 'findByOwnerPhone') orgStore.findByOwnerPhone = down;
+      else aggregatorStore[method] = down;
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/orgs/create',
+        headers: AUTH_HEADER,
+        payload: orgBody,
+      });
+      expect(res.statusCode).toBe(503);
+      expect((res.json() as { error: { code: string } }).error.code).toBe('DB_UNAVAILABLE');
+      expect(await orgStore.findByOwnerEmail('ravi@enable.org')).toEqual({ ok: true, value: null });
+    },
+  );
+
   it('503 DB_UNAVAILABLE when orgStore.create fails with an unmapped error code', async () => {
     // NOT_FOUND is a real OrgStoreError variant, but the route only special-cases
     // DUPLICATE_NAME/DUPLICATE_SLUG — everything else (including this) falls
@@ -631,7 +757,7 @@ describe('aggregator-orgs routes', () => {
     expect(found.ok && found.value).toBeNull();
   });
 
-  it('503 IDP_UNAVAILABLE (org rolled back to inactive) when the mirrored KC group create fails', async () => {
+  it('503 IDP_UNAVAILABLE (half-created org deleted) when the mirrored KC group create fails', async () => {
     idp.createGroup = async () => ({
       ok: false,
       error: { code: 'IDP_UNAVAILABLE', message: 'kc down' },
@@ -645,10 +771,12 @@ describe('aggregator-orgs routes', () => {
     expect(res.statusCode).toBe(503);
     expect((res.json() as { error: { code: string } }).error.code).toBe('IDP_UNAVAILABLE');
     const found = await orgStore.findByOwnerEmail('group-fail@enable.org');
-    expect(found.ok && found.value?.status).toBe('inactive');
+    // Deleted, not parked inactive: a row that never got a Keycloak owner
+    // would keep the owner's contact and block a retry with PHONE_EXISTS.
+    expect(found.ok && found.value).toBeNull();
   });
 
-  it('409 OWNER_ALREADY_REGISTERED (rolled back to inactive) when the KC owner user already exists', async () => {
+  it('409 OWNER_ALREADY_REGISTERED (half-created org + group deleted) when the KC owner user already exists', async () => {
     await idp.createUser({ email: 'dup-owner@enable.org' });
     const res = await app.inject({
       method: 'POST',
@@ -659,10 +787,13 @@ describe('aggregator-orgs routes', () => {
     expect(res.statusCode).toBe(409);
     expect((res.json() as { error: { code: string } }).error.code).toBe('OWNER_ALREADY_REGISTERED');
     const found = await orgStore.findByOwnerEmail('dup-owner@enable.org');
-    expect(found.ok && found.value?.status).toBe('inactive');
+    // Deleted, not parked inactive: a row that never got a Keycloak owner
+    // would keep the owner's contact and block a retry with PHONE_EXISTS.
+    expect(found.ok && found.value).toBeNull();
+    expect(idp.getGroup('grp-1')).toBeUndefined();
   });
 
-  it('503 IDP_UNAVAILABLE (org rolled back to inactive) when KC owner user creation fails for another reason', async () => {
+  it('503 IDP_UNAVAILABLE (half-created org + group deleted) when KC owner user creation fails for another reason', async () => {
     idp.createUser = async () => ({
       ok: false,
       error: { code: 'IDP_UNAVAILABLE', message: 'kc down' },
@@ -676,7 +807,37 @@ describe('aggregator-orgs routes', () => {
     expect(res.statusCode).toBe(503);
     expect((res.json() as { error: { code: string } }).error.code).toBe('IDP_UNAVAILABLE');
     const found = await orgStore.findByOwnerEmail('user-create-fail@enable.org');
-    expect(found.ok && found.value?.status).toBe('inactive');
+    // Deleted, not parked inactive: a row that never got a Keycloak owner
+    // would keep the owner's contact and block a retry with PHONE_EXISTS.
+    expect(found.ok && found.value).toBeNull();
+  });
+
+  it('still reports the original failure when cleaning up the half-created org fails too', async () => {
+    idp.createUser = async () => ({
+      ok: false,
+      error: { code: 'IDP_UNAVAILABLE', message: 'kc down' },
+    });
+    let groupDeletes = 0;
+    idp.deleteGroup = async () => {
+      groupDeletes++;
+      return { ok: false, error: { code: 'IDP_UNAVAILABLE', message: 'kc down' } };
+    };
+    let rowDeletes = 0;
+    orgStore.deleteById = async () => {
+      rowDeletes++;
+      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: 'db down' } };
+    };
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: { ...orgBody, owner: { ...orgBody.owner, email: 'cleanup-fail@enable.org' } },
+    });
+    // Cleanup is best-effort and logged; it never masks the error that caused it.
+    expect(res.statusCode).toBe(503);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('IDP_UNAVAILABLE');
+    expect(groupDeletes).toBe(1);
+    expect(rowDeletes).toBe(1);
   });
 
   it('503 DB_UNAVAILABLE when the final stamp update (kcGroupId/ownerKcSub) fails', async () => {

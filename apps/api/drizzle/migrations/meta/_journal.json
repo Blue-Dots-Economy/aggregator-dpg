@@ -176,6 +176,20 @@
       "when": 1790695000000,
       "tag": "0024_drop_participants",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1790800000000,
+      "tag": "0025_contact",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1790900000000,
+      "tag": "0026_contact_drop_legacy",
+      "breakpoints": true
     }
   ]
 }
