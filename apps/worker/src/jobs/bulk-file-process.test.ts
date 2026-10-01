@@ -121,6 +121,19 @@ describe('processBulkFile — success path', () => {
     expect((stored as unknown[]).every((c) => typeof c === 'string')).toBe(true);
   });
 
+  it('processes chunks strictly in order, each writing :lines before its enqueue', async () => {
+    // 2,001 rows → three chunks (ENQUEUE_CHUNK = 1000). The promise chain must keep them
+    // serial: lines, enqueue, lines, enqueue, lines, enqueue.
+    const body = ['name,email', ...Array.from({ length: 2001 }, (_, i) => `P${i},p${i}@x.io`)];
+    const { getCsvStream } = await import('../object-storage.js');
+    vi.mocked(getCsvStream).mockResolvedValueOnce(
+      Readable.from([Buffer.from(body.join('\n'), 'utf8')]),
+    );
+    await processBulkFile(JOB);
+    const order = calls.filter((c) => c === 'lines' || c === 'enqueue');
+    expect(order).toEqual(['lines', 'enqueue', 'lines', 'enqueue', 'lines', 'enqueue']);
+  });
+
   it('transitions the upload to row_processing', async () => {
     await processBulkFile(JOB);
     expect(updates.some((u) => u['status'] === 'row_processing')).toBe(true);
