@@ -30,6 +30,27 @@ function opts(overrides: Partial<Parameters<typeof streamCsvParse>[1]> = {}) {
   };
 }
 
+describe('streamCsvParse — field delimiter', () => {
+  it('splits on "," even when multi-value cells make "|" the commoner character', async () => {
+    // A narrow template with long `|`-joined lists. PapaParse's auto-detect
+    // picks `|` for this file (asserted below); with the delimiter pinned the
+    // stream parse never depends on that guess.
+    // Trailing newline included, as saved files have — it tips the guess to `|`.
+    const csv = ['name,tags', 'Asha,a|b|c|d|e|f', 'Ravi,g|h|i|j|k|l', ''].join('\n');
+    expect(Papa.parse(csv).meta.delimiter).toBe('|'); // the guess this guards against
+
+    const res = await streamCsvParse(
+      csv,
+      opts({ required: ['name'], allowed: new Set(['name', 'tags']) }),
+    );
+
+    expect(res.status).toBe('ok');
+    if (res.status !== 'ok') return;
+    expect(res.headers).toEqual(['name', 'tags']);
+    expect(res.rows[0]!.payload).toEqual({ name: 'Asha', tags: 'a|b|c|d|e|f' });
+  });
+});
+
 describe('streamCsvParse — happy path', () => {
   it('parses a well-formed CSV into rows with correct index, payload, and headers', async () => {
     const csv = [HEADER, 'Asha,asha@x.io,Pune', 'Ravi,ravi@x.io,Delhi'].join('\n');
