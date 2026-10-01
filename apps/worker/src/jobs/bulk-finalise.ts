@@ -24,6 +24,7 @@ import { schema, getDb } from '../db.js';
 import { getRedis } from '../services/redis.js';
 import { putObject } from '../object-storage.js';
 import { logger } from '../logger.js';
+import { CSV_FIELD_DELIMITER } from './bulk-file-stream.js';
 
 interface ErrorRecord {
   row_index: number;
@@ -113,11 +114,13 @@ export async function finaliseBulk(job: BulkFinaliseJob): Promise<FinaliseOutcom
     const rawRows =
       indices.length > 0 ? await redis.hmget(`${ns}:lines`, ...indices) : ([] as (string | null)[]);
     const csvRows: string[][] = errors.map((e, i) => {
-      const cells = parseRawRow(rawRows[i] ?? '', headerCols.length).map(sanitiseCsvCell);
+      const { cells, surplus } = parseRawRow(rawRows[i] ?? '', headerCols.length);
+      const reasons = [...(e.reasons ?? [])];
+      if (surplus > 0) reasons.push(surplusNote(headerCols.length + surplus, headerCols.length));
       return [
-        ...cells,
+        ...cells.map(sanitiseCsvCell),
         sanitiseCsvCell(e.error_category ?? ''),
-        sanitiseCsvCell((e.reasons ?? []).join('; ')),
+        sanitiseCsvCell(reasons.join('; ')),
       ];
     });
     const csvBody = Papa.unparse({ fields: csvHeader, data: csvRows });
@@ -236,18 +239,53 @@ async function readHeaderCols(
 }
 
 /**
- * Reconstructs cells from a raw CSV line. With header=false Papaparse
- * returns a positional array; we pad to the expected width if the line is
- * shorter (defensive — File Processor already validates header coverage).
+ * Reconstructs a stored row's cells for errors.csv, fitted to the header width.
+ *
+ * The delimiter is pinned ({@link CSV_FIELD_DELIMITER}): left to auto-detect,
+ * a single row with more `|` (multi-value cells) than `,` was split on `|`.
+ * The result is always exactly `expectedCols` wide — short rows are padded,
+ * wide rows truncated — so `error_category` / `error_reason` land under their
+ * own headings; `Papa.unparse({ fields })` drops anything past the header,
+ * which used to swallow the reason of every wide row. With no known header
+ * (`expectedCols` 0) no data cells are emitted at all.
+ *
+ * @param rawRow - The row as stored by the File Processor.
+ * @param expectedCols - Number of header columns.
+ * @returns The fitted cells, and how many surplus cells were dropped.
  */
-function parseRawRow(rawRow: string, expectedCols: number): string[] {
-  if (!rawRow) return new Array<string>(expectedCols).fill('');
-  const result = Papa.parse<string[]>(rawRow, { header: false, skipEmptyLines: 'greedy' });
+function parseRawRow(rawRow: string, expectedCols: number): { cells: string[]; surplus: number } {
+  if (!rawRow) return { cells: new Array<string>(expectedCols).fill(''), surplus: 0 };
+  const result = Papa.parse<string[]>(rawRow, {
+    header: false,
+    skipEmptyLines: 'greedy',
+    delimiter: CSV_FIELD_DELIMITER,
+  });
   const cells = (result.data[0] ?? []) as string[];
   if (cells.length < expectedCols) {
-    return [...cells, ...new Array<string>(expectedCols - cells.length).fill('')];
+    return {
+      cells: [...cells, ...new Array<string>(expectedCols - cells.length).fill('')],
+      surplus: 0,
+    };
   }
-  return cells;
+  return {
+    cells: cells.slice(0, expectedCols),
+    surplus: expectedCols > 0 ? cells.length - expectedCols : 0,
+  };
+}
+
+/**
+ * The errors.csv note for a row wider than the header, telling the uploader
+ * why columns went missing and the usual cause.
+ *
+ * @param actual - Cells found in the row.
+ * @param expected - Columns in the header.
+ * @returns A one-line, user-facing note.
+ */
+function surplusNote(actual: number, expected: number): string {
+  return (
+    `row has ${actual} cells but the header has ${expected} columns; the extra cells are ` +
+    'not shown (join multiple values with the list separator, not a comma)'
+  );
 }
 
 /**
