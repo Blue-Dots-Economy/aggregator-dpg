@@ -200,8 +200,10 @@ export async function finaliseBulk(job: BulkFinaliseJob): Promise<FinaliseOutcom
  */
 async function readErrors(redis: ReturnType<typeof getRedis>, key: string): Promise<ErrorRecord[]> {
   const errors: ErrorRecord[] = [];
-  let cursor = '0';
-  do {
+  // One HSCAN page per call, recursing on the returned cursor until it wraps
+  // to '0'. Pages are inherently sequential (each needs the previous cursor);
+  // at COUNT 200 a 10k-row upload is ~50 frames deep.
+  const scanFrom = async (cursor: string): Promise<void> => {
     const [next, fields] = (await redis.hscan(key, cursor, 'COUNT', 200)) as [string, string[]];
     for (let i = 1; i < fields.length; i += 2) {
       const raw = fields[i];
@@ -213,8 +215,9 @@ async function readErrors(redis: ReturnType<typeof getRedis>, key: string): Prom
         // skip malformed entry — counter on bulk_uploads still reflects it
       }
     }
-    cursor = next;
-  } while (cursor !== '0');
+    if (next !== '0') await scanFrom(next);
+  };
+  await scanFrom('0');
   return errors;
 }
 

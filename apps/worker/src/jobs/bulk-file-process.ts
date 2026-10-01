@@ -167,8 +167,10 @@ export async function processBulkFile(job: BulkFileProcessJob): Promise<ProcessO
     JSON.stringify(headers),
   );
 
-  for (let off = 0; off < rows.length; off += ENQUEUE_CHUNK) {
-    const slice = rows.slice(off, off + ENQUEUE_CHUNK);
+  // Chunks run strictly one after another (a promise chain, not Promise.all):
+  // each chunk's `:lines` must be written before that chunk is enqueued, and
+  // serialising the chunks keeps Redis / BullMQ load bounded on big files.
+  const writeChunk = async (slice: typeof rows): Promise<void> => {
     const payloads = slice.map((r) => ({
       uploadId: job.uploadId,
       aggregatorId: job.aggregatorId,
@@ -190,7 +192,15 @@ export async function processBulkFile(job: BulkFileProcessJob): Promise<ProcessO
     }
 
     await enqueueRowProcessBulk(payloads);
+  };
+  const chunks: (typeof rows)[] = [];
+  for (let off = 0; off < rows.length; off += ENQUEUE_CHUNK) {
+    chunks.push(rows.slice(off, off + ENQUEUE_CHUNK));
   }
+  await chunks.reduce<Promise<void>>(
+    (prev, slice) => prev.then(() => writeChunk(slice)),
+    Promise.resolve(),
+  );
 
   // Now safe to publish total_rows + reader_done.
   await redis.hset(`${ns}:meta`, 'total_rows', String(rows.length), 'reader_done', '1');
