@@ -26,6 +26,16 @@ import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import Papa from 'papaparse';
 
+/**
+ * The bulk CSV field delimiter. Pinned rather than left to PapaParse's
+ * auto-detect: multi-value cells are joined with the network's
+ * `csv_array_delimiter` (`|` by default), so a row listing many values can
+ * carry more `|` than `,`, and a guess made from that row picks `|` and splits
+ * it into the wrong cells. Every parse of an upload — and every re-parse of a
+ * stored row for errors.csv — must use this.
+ */
+export const CSV_FIELD_DELIMITER = ',';
+
 /** Reasons the File Processor can reject a file before per-row work begins. */
 export type FileFailureReason =
   | 'encoding_unsupported'
@@ -43,12 +53,12 @@ export interface StreamedRow {
   /** Parsed cell values keyed by trimmed header name. */
   payload: Record<string, string>;
   /**
-   * The original record re-serialised verbatim as one CSV line — a ragged row
-   * keeps its own cell count (shorter or wider than the header). The Finaliser
-   * stores this under `bu:{id}:lines` and re-parses it positionally to rebuild
-   * errors.csv, so it must round-trip through `Papa.parse(header:false)`.
+   * The record's cells exactly as parsed — a ragged row keeps its own cell
+   * count (shorter or wider than the header). The File Processor stores them
+   * as a JSON array under `bu:{id}:lines` and the Finaliser reads that back to
+   * rebuild errors.csv, so the row is never CSV-parsed a second time.
    */
-  rawLine: string;
+  cells: string[];
 }
 
 /** Validation inputs and caps for {@link streamCsvParse}. */
@@ -150,6 +160,7 @@ export async function streamCsvParse(
   const parseStream = Papa.parse(Papa.NODE_STREAM_INPUT, {
     header: false,
     skipEmptyLines: 'greedy',
+    delimiter: CSV_FIELD_DELIMITER,
   });
 
   const byteSrc = typeof input === 'string' ? Readable.from([Buffer.from(input, 'utf8')]) : input;
@@ -187,23 +198,23 @@ export async function streamCsvParse(
             if (headerFailure) throw new ParseFailure(headerFailure.reason, headerFailure.detail);
             continue;
           }
-          // rawLine (for errors.csv) is the original record verbatim, incl. any
-          // surplus cells — it must round-trip through `Papa.parse(header:false)`.
-          const rawLine = Papa.unparse([record], { header: false });
-          if (Buffer.byteLength(rawLine, 'utf8') > options.maxRowBytes) {
+          // cells (for errors.csv) is the original record verbatim, incl. any
+          // surplus cells. The size cap is measured on what gets stored.
+          const cells = record.map((c) => String(c ?? ''));
+          if (Buffer.byteLength(JSON.stringify(cells), 'utf8') > options.maxRowBytes) {
             throw new ParseFailure('row_size_exceeded');
           }
           if (rows.length + 1 > options.maxRows) {
             throw new ParseFailure('row_cap_exceeded', String(rows.length + 1));
           }
           // Map cells to columns by position. Cells beyond the header width are
-          // surplus (kept only in rawLine); payload carries schema-keyed fields.
+          // surplus (kept only in cells); payload carries schema-keyed fields.
           const payload: Record<string, string> = {};
           for (let i = 0; i < headers.length; i += 1) {
             const value = record[i];
             if (typeof value === 'string') payload[headers[i]!] = value;
           }
-          rows.push({ rowIndex: rows.length, payload, rawLine });
+          rows.push({ rowIndex: rows.length, payload, cells });
         }
       },
     );

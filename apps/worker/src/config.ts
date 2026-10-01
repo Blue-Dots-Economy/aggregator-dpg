@@ -69,7 +69,7 @@ const ConfigSchema = z.object({
 
   /**
    * TTL (seconds) applied to every per-upload Redis key (`bu:{id}:*`, which
-   * includes the raw participant CSV in `:lines` and error rows in `:errors`).
+   * includes each participant row's cells in `:lines` and error rows in `:errors`).
    * A safety net so participant PII cannot persist indefinitely when an upload
    * fails or is abandoned before `bulk-finalise` deletes the keys. Must comfortably
    * exceed the longest expected processing time (the stuck-job watchdog kills
