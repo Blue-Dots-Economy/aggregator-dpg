@@ -109,12 +109,12 @@ export async function finaliseBulk(job: BulkFinaliseJob): Promise<FinaliseOutcom
   if (failed > 0) {
     const headerCols = await readHeaderCols(redis, `${ns}:meta`);
     const csvHeader = [...headerCols, 'error_category', 'error_reason'];
-    // Fetch raw CSV lines for only the failed row indices in one round-trip.
+    // Fetch the stored cells for only the failed row indices in one round-trip.
     const indices = errors.map((e) => String(e.row_index));
     const rawRows =
       indices.length > 0 ? await redis.hmget(`${ns}:lines`, ...indices) : ([] as (string | null)[]);
     const csvRows: string[][] = errors.map((e, i) => {
-      const { cells, surplus } = parseRawRow(rawRows[i] ?? '', headerCols.length);
+      const { cells, surplus } = fitToHeader(readStoredRow(rawRows[i] ?? ''), headerCols.length);
       const reasons = [...(e.reasons ?? [])];
       if (surplus > 0) reasons.push(surplusNote(headerCols.length + surplus, headerCols.length));
       return [
@@ -239,28 +239,50 @@ async function readHeaderCols(
 }
 
 /**
- * Reconstructs a stored row's cells for errors.csv, fitted to the header width.
+ * Reads a row stored under `bu:{id}:lines` back into its cells.
  *
- * The delimiter is pinned ({@link CSV_FIELD_DELIMITER}): left to auto-detect,
- * a single row with more `|` (multi-value cells) than `,` was split on `|`.
- * The result is always exactly `expectedCols` wide — short rows are padded,
- * wide rows truncated — so `error_category` / `error_reason` land under their
- * own headings; `Papa.unparse({ fields })` drops anything past the header,
- * which used to swallow the reason of every wide row. With no known header
- * (`expectedCols` 0) no data cells are emitted at all.
+ * Rows are stored as a JSON array of strings, so nothing is CSV-parsed twice.
+ * A value that is not one is a row written by the previous release, which
+ * stored a CSV line (still present for an upload in flight across the
+ * deploy); that is split on {@link CSV_FIELD_DELIMITER}, never auto-detected —
+ * a guess made from a single row with more `|` than `,` picked `|`. The
+ * fallback can go once no upload predates this release.
  *
- * @param rawRow - The row as stored by the File Processor.
- * @param expectedCols - Number of header columns.
- * @returns The fitted cells, and how many surplus cells were dropped.
+ * @param stored - The `:lines` value, or `''` when the row is missing.
+ * @returns The row's cells, possibly ragged.
  */
-function parseRawRow(rawRow: string, expectedCols: number): { cells: string[]; surplus: number } {
-  if (!rawRow) return { cells: new Array<string>(expectedCols).fill(''), surplus: 0 };
-  const result = Papa.parse<string[]>(rawRow, {
+function readStoredRow(stored: string): string[] {
+  if (!stored) return [];
+  if (stored.startsWith('[')) {
+    try {
+      const parsed: unknown = JSON.parse(stored);
+      if (Array.isArray(parsed) && parsed.every((c) => typeof c === 'string')) return parsed;
+    } catch {
+      // Not JSON — a legacy CSV line that happens to start with `[`.
+    }
+  }
+  const result = Papa.parse<string[]>(stored, {
     header: false,
     skipEmptyLines: 'greedy',
     delimiter: CSV_FIELD_DELIMITER,
   });
-  const cells = (result.data[0] ?? []) as string[];
+  return (result.data[0] ?? []) as string[];
+}
+
+/**
+ * Fits a row's cells to the header width for errors.csv.
+ *
+ * Short rows are padded and wide rows truncated, so `error_category` /
+ * `error_reason` always land under their own headings —
+ * `Papa.unparse({ fields })` drops anything past the header, which used to
+ * swallow the reason of every wide row. With no known header (`expectedCols`
+ * 0) no data cells are emitted at all.
+ *
+ * @param cells - The row's cells as stored.
+ * @param expectedCols - Number of header columns.
+ * @returns The fitted cells, and how many surplus cells were dropped.
+ */
+function fitToHeader(cells: string[], expectedCols: number): { cells: string[]; surplus: number } {
   if (cells.length < expectedCols) {
     return {
       cells: [...cells, ...new Array<string>(expectedCols - cells.length).fill('')],

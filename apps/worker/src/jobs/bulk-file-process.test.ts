@@ -110,6 +110,17 @@ describe('processBulkFile — success path', () => {
     expect(calls.indexOf('lines')).toBeLessThan(calls.indexOf('enqueue'));
   });
 
+  it('stores each row in :lines as a JSON array of its cells (no CSV re-parse later)', async () => {
+    await processBulkFile(JOB);
+    const linesCall = hset.mock.calls.find(([key]) => String(key).endsWith(':lines'));
+    expect(linesCall).toBeDefined();
+    const [, ...fieldValues] = linesCall!;
+    expect(fieldValues[0]).toBe('0');
+    const stored = JSON.parse(String(fieldValues[1])) as unknown;
+    expect(Array.isArray(stored)).toBe(true);
+    expect((stored as unknown[]).every((c) => typeof c === 'string')).toBe(true);
+  });
+
   it('transitions the upload to row_processing', async () => {
     await processBulkFile(JOB);
     expect(updates.some((u) => u['status'] === 'row_processing')).toBe(true);
