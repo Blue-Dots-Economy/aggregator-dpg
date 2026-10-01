@@ -16,4 +16,4 @@ The header comment states: _"Idempotent. Restart-safe via `rolled_up_at IS NULL`
 
 ## Bulk `bu:{id}:*` working keys carry a TTL so PII self-expires
 
-The bulk-upload working keys (`bu:{id}:lines` = raw CSV, `bu:{id}:errors` = per-row errors including PII) carry `BULK_UPLOAD_REDIS_TTL_SECONDS` (default 24h), refreshed on each row-commit so the PII self-expires as a backstop. The stuck-job watchdog also deletes these keys on failure. Pino loggers redact `email` / `phone` (plus secrets), so PII never lands in logs.
+The bulk-upload working keys (`bu:{id}:lines` = each uploaded row's cells as a JSON array — the Finaliser rebuilds errors.csv from them without re-parsing CSV, falling back to a `,`-split for a CSV line left by the previous release, `bu:{id}:errors` = per-row errors including PII) carry `BULK_UPLOAD_REDIS_TTL_SECONDS` (default 24h), refreshed on each row-commit so the PII self-expires as a backstop. The stuck-job watchdog also deletes these keys on failure. Pino loggers redact `email` / `phone` (plus secrets), so PII never lands in logs.

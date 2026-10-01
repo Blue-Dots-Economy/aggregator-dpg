@@ -175,7 +175,7 @@ describe('streamCsvParse — encoding', () => {
 });
 
 describe('streamCsvParse — ragged rows', () => {
-  it('keeps surplus columns in rawLine but excludes PapaParse internals from payload', async () => {
+  it('keeps surplus columns in cells but excludes PapaParse internals from payload', async () => {
     // Header has 2 cols; the data row has 3 → the 3rd lands in __parsed_extra.
     const res = await streamCsvParse('name,email\nAsha,a@x.io,SURPLUS', {
       required: ['name', 'email'],
@@ -187,22 +187,18 @@ describe('streamCsvParse — ragged rows', () => {
     if (res.status !== 'ok') return;
     // payload is schema-keyed strings only — no __parsed_extra leak.
     expect(res.rows[0]!.payload).toEqual({ name: 'Asha', email: 'a@x.io' });
-    // rawLine preserves the surplus column for the errors.csv report.
-    const cells = (Papa.parse<string[]>(res.rows[0]!.rawLine, { header: false }).data[0] ??
-      []) as string[];
-    expect(cells).toEqual(['Asha', 'a@x.io', 'SURPLUS']);
+    // cells preserves the surplus column for the errors.csv report.
+    expect(res.rows[0]!.cells).toEqual(['Asha', 'a@x.io', 'SURPLUS']);
   });
 });
 
-describe('streamCsvParse — rawLine on returned rows', () => {
-  it('attaches a reconstructed rawLine that re-parses to the row cells', async () => {
-    const csv = [HEADER, 'Asha,"a@x.io",Pune'].join('\n');
+describe('streamCsvParse — cells on returned rows', () => {
+  it('attaches the parsed cells, unquoted, ready to store as JSON', async () => {
+    const csv = [HEADER, 'Asha,"a@x.io","Pune, ""MH"""'].join('\n');
     const res = await streamCsvParse(csv, opts());
     expect(res.status).toBe('ok');
     if (res.status !== 'ok') return;
-    const cells = (Papa.parse<string[]>(res.rows[0]!.rawLine, { header: false }).data[0] ??
-      []) as string[];
-    expect(cells).toEqual(['Asha', 'a@x.io', 'Pune']);
+    expect(res.rows[0]!.cells).toEqual(['Asha', 'a@x.io', 'Pune, "MH"']);
   });
 });
 
