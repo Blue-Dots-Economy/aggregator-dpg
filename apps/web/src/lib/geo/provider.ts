@@ -27,6 +27,8 @@ import { withGeoCache } from './geo-cache';
 export interface GeoProviderConfig {
   googleMapsApiKey?: string;
   photonUrl?: string;
+  /** ISO 3166-1 alpha-2 country suggestions are restricted to (signals-dpg#785). */
+  country?: string;
 }
 
 const cache = new Map<string, GeoProvider>();
@@ -39,17 +41,17 @@ const cache = new Map<string, GeoProvider>();
  * Maps JS API, and `withGeoCache` holds the session's suggestion cache and its
  * in-flight dedup.
  *
- * @param config - Maps key and Photon override, from the form runtime config.
+ * @param config - Maps key, Photon override and country, from the form runtime config.
  * @returns A provider whose `suggest` is cached and PII-mask guarded.
  */
 export function getGeoProvider(config: GeoProviderConfig): GeoProvider {
-  const key = `${config.googleMapsApiKey ?? ''}|${config.photonUrl ?? ''}`;
+  const key = `${config.googleMapsApiKey ?? ''}|${config.photonUrl ?? ''}|${config.country ?? ''}`;
   const existing = cache.get(key);
   if (existing) return existing;
 
   const base = withGeoCache(
     config.googleMapsApiKey
-      ? createGooglePlacesProvider(config.googleMapsApiKey)
+      ? createGooglePlacesProvider(config.googleMapsApiKey, config.country)
       : createPhotonProvider(config.photonUrl || undefined),
   );
   const provider: GeoProvider = {
