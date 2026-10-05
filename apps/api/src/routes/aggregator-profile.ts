@@ -10,7 +10,11 @@
  *
  *       body.aggregator.contact    → Keycloak FIRST (mirror is authoritative
  *                                    for phone+email), then DB
- *       body.aggregator.*          → DB only (name / url / locations / consent)
+ *       body.aggregator.*          → DB only (name / url / locations)
+ *
+ *     `consent` is read-only: it is recorded once, at registration, in the
+ *     append-only consent ledger, and a coordinator cannot rewrite it. A body
+ *     that sends it is refused as `SCHEMA_VALIDATION` (the schema is strict).
  *
  *     `org_slug` is rejected (immutable; DB trigger enforces too).
  *
@@ -47,7 +51,6 @@ const AggregatorPatchSchema = z
     url: z.string().url().max(2048).nullable().optional(),
     contact: BecknContactSchema.optional(),
     locations: z.array(BecknLocationSchema).optional(),
-    consent: ConsentRecordSchema.optional(),
   })
   .strict();
 
@@ -183,7 +186,7 @@ export function registerAggregatorProfileRoutes(app: FastifyInstance): void {
         tags: ['aggregator-profile'],
         summary: 'Update the caller aggregator profile',
         description:
-          'Partial update of the caller aggregator (name / url / contact / locations / consent). Contact phone + email are mirrored to Keycloak before the DB write.',
+          'Partial update of the caller aggregator (name / url / contact / locations). Contact phone + email are mirrored to Keycloak before the DB write. `consent` is read-only (recorded at registration) and is rejected here.',
         security: [{ bearerAuth: [] }],
         body: ProfileUpdateBodySchema,
         response: {
@@ -259,7 +262,6 @@ export function registerAggregatorProfileRoutes(app: FastifyInstance): void {
       if (body.aggregator.url !== undefined) patch.url = body.aggregator.url;
       if (normalisedContact !== undefined) patch.contact = normalisedContact;
       if (body.aggregator.locations !== undefined) patch.locations = body.aggregator.locations;
-      if (body.aggregator.consent !== undefined) patch.consent = body.aggregator.consent;
 
       const result = await aggregatorStore.update(auth.aggregatorId, patch);
       if (!result.ok && normalisedContact && previousPhone !== undefined) {

@@ -169,7 +169,7 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
       contactPhone: nextPhone,
       contactEmail: nextEmail,
       locations: patch.locations ?? existing.locations,
-      consent: patch.consent ?? existing.consent,
+      consent: existing.consent,
       status: patch.status ?? existing.status,
       parentOrgId: patch.parentOrgId !== undefined ? patch.parentOrgId : existing.parentOrgId,
       rejectedAt: patch.rejectedAt !== undefined ? patch.rejectedAt : existing.rejectedAt,

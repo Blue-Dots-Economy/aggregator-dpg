@@ -2400,7 +2400,7 @@
         "tags": [
           "aggregator-profile"
         ],
-        "description": "Partial update of the caller aggregator (name / url / contact / locations / consent). Contact phone + email are mirrored to Keycloak before the DB write.",
+        "description": "Partial update of the caller aggregator (name / url / contact / locations). Contact phone + email are mirrored to Keycloak before the DB write. `consent` is read-only (recorded at registration) and is rejected here.",
         "requestBody": {
           "required": true,
           "content": {
@@ -2531,28 +2531,6 @@
                           ],
                           "additionalProperties": false
                         }
-                      },
-                      "consent": {
-                        "type": "object",
-                        "properties": {
-                          "value": {
-                            "type": "boolean"
-                          },
-                          "given_at": {
-                            "type": "string",
-                            "format": "date-time"
-                          },
-                          "valid_till": {
-                            "type": "string",
-                            "format": "date-time"
-                          }
-                        },
-                        "required": [
-                          "value",
-                          "given_at",
-                          "valid_till"
-                        ],
-                        "additionalProperties": false
                       }
                     },
                     "additionalProperties": false

@@ -120,7 +120,6 @@ export interface UpdateAggregatorPatch {
   url?: string | null;
   contact?: BecknContact;
   locations?: BecknLocation[];
-  consent?: ConsentRecord;
   status?: AggregatorStatus;
   parentOrgId?: string | null;
   /** Write-once rejection stamp (#726) — set only on the reject transition. */

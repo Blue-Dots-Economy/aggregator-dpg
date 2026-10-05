@@ -164,7 +164,6 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
     if (patch.type !== undefined) updates['type'] = patch.type;
     if (patch.url !== undefined) updates['url'] = patch.url;
     if (patch.locations !== undefined) updates['locations'] = patch.locations;
-    if (patch.consent !== undefined) updates['consent'] = patch.consent;
     if (patch.status !== undefined) updates['status'] = patch.status;
     if (patch.parentOrgId !== undefined) updates['parentOrgId'] = patch.parentOrgId;
     if (patch.rejectedAt !== undefined) updates['rejectedAt'] = patch.rejectedAt;
