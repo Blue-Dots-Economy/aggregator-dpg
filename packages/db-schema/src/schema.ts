@@ -231,6 +231,11 @@ export const contact = pgTable(
 // by `db/account-writes.ts` and read through narrow column selects. Property
 // names keep their pre-0027 spelling (`orgSlug`, `name`) until the Phase 4
 // naming commit.
+//
+// Migrations are hand-written SQL (apps/api/drizzle/migrations) — do NOT use
+// `drizzle-kit generate` against this file: the coordinator-only columns are
+// typed `.notNull()` here but are nullable in the database (admin rows), and a
+// generated migration would emit SET NOT NULL and fail on admin rows.
 
 export const users = pgTable(
   'users',

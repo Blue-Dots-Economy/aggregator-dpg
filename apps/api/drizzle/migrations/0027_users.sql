@@ -311,10 +311,14 @@ CREATE OR REPLACE FUNCTION aggregator_orgs_owner_ad() RETURNS trigger
   LANGUAGE plpgsql AS
 $fn$
 BEGIN
-  DELETE FROM users u
-   WHERE u.id = OLD.owner_user_id
-     AND u.user_type = 'admin'
-     AND NOT EXISTS (SELECT 1 FROM aggregator_orgs o WHERE o.owner_user_id = OLD.owner_user_id);
+  BEGIN
+    DELETE FROM users u
+     WHERE u.id = OLD.owner_user_id
+       AND u.user_type = 'admin'
+       AND NOT EXISTS (SELECT 1 FROM aggregator_orgs o WHERE o.owner_user_id = OLD.owner_user_id);
+  EXCEPTION WHEN foreign_key_violation THEN
+    NULL; -- a concurrent org create re-referenced the account; keep it (as contact_gc does)
+  END;
   RETURN NULL;
 END;
 $fn$;

@@ -6,7 +6,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
@@ -158,5 +159,21 @@ describe('runMigrationGuards (IO wrapper)', () => {
       dataIn: [],
     });
     await expect(runMigrationGuards(p, dir, false)).resolves.toBeUndefined();
+  });
+});
+
+describe('train bounds vs the shipped journal', () => {
+  it('cover every migration from 0023 to the latest — bump TRAIN_LAST_WHEN with each train migration', async () => {
+    const journalPath = path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      '../../../drizzle/migrations/meta/_journal.json',
+    );
+    const real = JSON.parse(await readFile(journalPath, 'utf8')) as { entries: JournalEntry[] };
+    const first = real.entries.find((e) => e.tag.startsWith('0023_'));
+    expect(first?.when).toBe(TRAIN_FIRST_WHEN);
+    // Until the train ships, the latest migration IS the last train migration:
+    // a new one (0028, 0029) must move TRAIN_LAST_WHEN, or it would migrate at
+    // boot on databases that hold data.
+    expect(real.entries.at(-1)?.when).toBe(TRAIN_LAST_WHEN);
   });
 });

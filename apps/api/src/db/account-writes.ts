@@ -69,26 +69,42 @@ export class IdentityMismatchError extends Error {
   }
 }
 
+/** The account does not exist, or is not of the required type. */
+export class IdentityNotLinkableError extends Error {
+  constructor() {
+    super('account does not exist or is not of the required type');
+    this.name = 'IdentityNotLinkableError';
+  }
+}
+
 /**
- * Links a provider login to an account, once.
+ * Links a provider login to an account, once. The insert only happens when the
+ * account exists (and, when `userType` is given, is of that type), so a link
+ * can never be recorded against a missing account or the wrong kind of
+ * account (e.g. an org owner's admin account through a coordinator path).
  *
  * @param db - Executor (the pool or the caller's transaction).
  * @param userId - The account (`users.id`).
  * @param provider - Provider key, e.g. `'keycloak'`.
  * @param subject - The provider's user id.
+ * @param userType - When set, the account must be of this type.
  * @returns `'linked'` when recorded now, `'already'` when this exact link exists.
  * @throws {IdentityTakenError} When the subject belongs to another account.
  * @throws {IdentityMismatchError} When the account has another subject for the provider.
+ * @throws {IdentityNotLinkableError} When the account is missing or of another type.
  */
 export async function linkIdentity(
   db: DbExecutor,
   userId: string,
   provider: string,
   subject: string,
+  userType?: 'admin' | 'coordinator',
 ): Promise<LinkIdentityOutcome> {
+  const typeFilter = userType ? sql` AND u.user_type = ${userType}` : sql``;
   const inserted = await db.execute<{ user_id: string }>(sql`
     INSERT INTO user_identities (user_id, provider, subject)
-    VALUES (${userId}, ${provider}, ${subject})
+    SELECT u.id, ${provider}, ${subject} FROM users u
+     WHERE u.id = ${userId}${typeFilter}
     ON CONFLICT DO NOTHING
     RETURNING user_id`);
   if (inserted.rows.length > 0) return 'linked';
@@ -101,6 +117,9 @@ export async function linkIdentity(
     if (mine.subject === subject) return 'already';
     throw new IdentityMismatchError();
   }
+  const eligible = await db.execute<{ ok: boolean }>(sql`
+    SELECT EXISTS (SELECT 1 FROM users u WHERE u.id = ${userId}${typeFilter}) AS ok`);
+  if (!eligible.rows[0]?.ok) throw new IdentityNotLinkableError();
   throw new IdentityTakenError();
 }
 

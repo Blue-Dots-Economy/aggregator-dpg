@@ -507,9 +507,25 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
         ownerKcSub: ownerUser.value.id,
       });
       if (!stamped.ok) {
+        // Roll the half-created org back completely: its group and row, and
+        // the owner user this request just created (so a retry can register
+        // again instead of hitting USER_EXISTS on a stranded disabled user).
+        await discardHalfCreatedOrg(org.id, group.value.id, log);
+        const removed = await idp.deleteUser(ownerUser.value.id);
+        if (!removed.ok) {
+          log.warn(
+            {
+              status: 'failure',
+              sub_operation: 'idp.deleteUser',
+              org_id: org.id,
+              code: removed.error.code,
+            },
+            'could not remove the Keycloak owner user of a half-created org',
+          );
+        }
         throw httpError('DB_UNAVAILABLE', {
           cause: new Error(stamped.error.message),
-          fields: { sub_operation: 'orgStore.update.stamp' },
+          fields: { sub_operation: 'orgStore.update.stamp', rolled_back: true },
         });
       }
 

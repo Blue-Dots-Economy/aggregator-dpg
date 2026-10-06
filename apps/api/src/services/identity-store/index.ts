@@ -5,12 +5,19 @@
 
 import type { IdentityStoreBase } from './interface.js';
 import { PostgresIdentityStore } from './postgres.js';
+import { TEST_IDENTITY_STORE_KEY } from './test-hook.js';
 
 let instance: IdentityStoreBase | null = null;
 
-/** Returns the shared identity store (lazy). */
+/**
+ * Returns the shared identity store (lazy). An explicitly injected store wins;
+ * otherwise, under the unit-test setup, the per-test in-memory store.
+ */
 export function getIdentityStore(): IdentityStoreBase {
-  instance ??= new PostgresIdentityStore();
+  if (instance) return instance;
+  const testStore = (globalThis as Record<string, unknown>)[TEST_IDENTITY_STORE_KEY];
+  if (testStore) return testStore as IdentityStoreBase;
+  instance = new PostgresIdentityStore();
   return instance;
 }
 

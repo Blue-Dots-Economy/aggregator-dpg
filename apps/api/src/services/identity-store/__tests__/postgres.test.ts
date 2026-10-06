@@ -9,7 +9,14 @@ import { PostgresIdentityStore } from '../postgres.js';
 
 afterEach(() => _setDbClients(null, null));
 
-function fakeDb(opts: { execRows?: unknown[]; selectRows?: unknown[]; fail?: boolean }) {
+function fakeDb(opts: {
+  execRows?: unknown[];
+  /** Rows for the second `execute` (the eligibility check), when set. */
+  eligible?: boolean;
+  selectRows?: unknown[];
+  fail?: boolean;
+}) {
+  let execCalls = 0;
   const chain = (rows: unknown): Promise<unknown> => {
     const p = opts.fail
       ? Promise.reject(Object.assign(new Error('x'), { code: '08006' }))
@@ -22,7 +29,9 @@ function fakeDb(opts: { execRows?: unknown[]; selectRows?: unknown[]; fail?: boo
     execute: () =>
       opts.fail
         ? Promise.reject(Object.assign(new Error('x'), { code: '08006' }))
-        : Promise.resolve({ rows: opts.execRows ?? [] }),
+        : Promise.resolve({
+            rows: execCalls++ === 0 ? (opts.execRows ?? []) : [{ ok: opts.eligible ?? true }],
+          }),
     select: () => chain(opts.selectRows ?? []),
   };
 }
@@ -43,6 +52,12 @@ describe('PostgresIdentityStore', () => {
     _setDbClients(null, fakeDb({ execRows: [], selectRows: [{ subject: 'other' }] }) as never);
     const mm = await new PostgresIdentityStore().link('u1', 'keycloak', 's');
     expect(mm.ok || mm.error.code).toBe('MISMATCH');
+  });
+
+  it('maps a missing or wrong-type account to NOT_LINKABLE', async () => {
+    _setDbClients(null, fakeDb({ execRows: [], selectRows: [], eligible: false }) as never);
+    const r = await new PostgresIdentityStore().link('u1', 'keycloak', 's', 'coordinator');
+    expect(r.ok || r.error.code).toBe('NOT_LINKABLE');
   });
 
   it('maps a driver failure to DB_UNAVAILABLE on every method', async () => {

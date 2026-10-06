@@ -12,6 +12,7 @@ import { userIdentities } from '../../db/schema.js';
 import { pgErrorCode } from '../../db/pg-error.js';
 import {
   IdentityMismatchError,
+  IdentityNotLinkableError,
   IdentityTakenError,
   linkIdentity,
   subjectOf,
@@ -21,14 +22,19 @@ import { IdentityStoreBase, type IdentityStoreResult, type LinkOutcome } from '.
 
 /** Postgres-backed {@link IdentityStoreBase}. */
 export class PostgresIdentityStore extends IdentityStoreBase {
+  /** {@inheritDoc IdentityStoreBase.link} */
   async link(
     userId: string,
     provider: string,
     subject: string,
+    userType?: 'admin' | 'coordinator',
   ): Promise<IdentityStoreResult<LinkOutcome>> {
     try {
-      return { ok: true, value: await linkIdentity(getDb(), userId, provider, subject) };
+      return { ok: true, value: await linkIdentity(getDb(), userId, provider, subject, userType) };
     } catch (e) {
+      if (e instanceof IdentityNotLinkableError) {
+        return { ok: false, error: { code: 'NOT_LINKABLE', message: e.message } };
+      }
       if (e instanceof IdentityTakenError) {
         return { ok: false, error: { code: 'DUPLICATE', message: e.message } };
       }
@@ -39,6 +45,7 @@ export class PostgresIdentityStore extends IdentityStoreBase {
     }
   }
 
+  /** {@inheritDoc IdentityStoreBase.subjectOf} */
   async subjectOf(userId: string, provider: string): Promise<IdentityStoreResult<string | null>> {
     try {
       return { ok: true, value: await subjectOf(getDb(), userId, provider) };
@@ -47,6 +54,7 @@ export class PostgresIdentityStore extends IdentityStoreBase {
     }
   }
 
+  /** {@inheritDoc IdentityStoreBase.userOf} */
   async userOf(provider: string, subject: string): Promise<IdentityStoreResult<string | null>> {
     try {
       const [row] = await getDb()
@@ -60,6 +68,13 @@ export class PostgresIdentityStore extends IdentityStoreBase {
   }
 }
 
+/**
+ * Logs a driver failure (SQLSTATE only) and maps it to `DB_UNAVAILABLE`.
+ *
+ * @param op - Operation name for the log entry.
+ * @param e - The thrown error.
+ * @returns The failure result.
+ */
 function dbFailure(op: string, e: unknown): IdentityStoreResult<never> {
   const code = pgErrorCode(e);
   logger.warn({ operation: op, status: 'failure', sqlstate: code });

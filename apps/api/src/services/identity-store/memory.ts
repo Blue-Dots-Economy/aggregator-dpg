@@ -17,11 +17,27 @@ export interface IdentityLink {
 export class InMemoryIdentityStore extends IdentityStoreBase {
   protected readonly links: IdentityLink[] = [];
 
+  /** Known account types (optional; see {@link registerAccount}). */
+  protected readonly accountTypes = new Map<string, 'admin' | 'coordinator'>();
+
+  /** Test helper — declares an account and its type, so `userType` checks apply. */
+  registerAccount(userId: string, type: 'admin' | 'coordinator'): void {
+    this.accountTypes.set(userId, type);
+  }
+
   link(
     userId: string,
     provider: string,
     subject: string,
+    userType?: 'admin' | 'coordinator',
   ): Promise<IdentityStoreResult<LinkOutcome>> {
+    const known = this.accountTypes.get(userId);
+    if (userType && known && known !== userType) {
+      return Promise.resolve({
+        ok: false,
+        error: { code: 'NOT_LINKABLE', message: 'wrong account type' },
+      });
+    }
     const mine = this.links.find((l) => l.userId === userId && l.provider === provider);
     if (mine) {
       return Promise.resolve(

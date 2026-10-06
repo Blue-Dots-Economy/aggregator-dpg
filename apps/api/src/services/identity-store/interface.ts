@@ -13,6 +13,7 @@
 export type IdentityStoreError =
   | { code: 'DUPLICATE'; message: string }
   | { code: 'MISMATCH'; message: string }
+  | { code: 'NOT_LINKABLE'; message: string }
   | { code: 'DB_UNAVAILABLE'; message: string };
 
 /** Result of an identity-store call. */
@@ -30,13 +31,16 @@ export abstract class IdentityStoreBase {
    * @param userId - The account (`users.id`).
    * @param provider - Provider key (see `IDP_PROVIDER`).
    * @param subject - The provider's user id.
+   * @param userType - When set, the account must be of this type.
    * @returns `'linked'` or `'already'`; `DUPLICATE` when the subject belongs to
-   *   another account; `MISMATCH` when the account has a different subject.
+   *   another account; `MISMATCH` when the account has a different subject;
+   *   `NOT_LINKABLE` when the account is missing or of another type.
    */
   abstract link(
     userId: string,
     provider: string,
     subject: string,
+    userType?: 'admin' | 'coordinator',
   ): Promise<IdentityStoreResult<LinkOutcome>>;
 
   /**

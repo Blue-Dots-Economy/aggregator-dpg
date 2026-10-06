@@ -23,6 +23,8 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
   protected readonly byId = new Map<string, AggregatorOrg>();
   /** Owner admin-account id per owner contact (one account per person, 0027). */
   protected readonly adminByContact = new Map<string, string>();
+  /** Contacts that also hold a coordinator account (see {@link markCoordinator}). */
+  protected readonly coordinatorContacts = new Set<string>();
 
   create(input: CreateOrgInput): Promise<OrgStoreResult<AggregatorOrg>> {
     const slugTaken = [...this.byId.values()].some(
@@ -102,7 +104,13 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
   ownerIsShared(id: string): Promise<OrgStoreResult<boolean>> {
     const owner = this.byId.get(id)?.ownerUserId;
     const shared = [...this.byId.values()].some((o) => o.id !== id && o.ownerUserId === owner);
-    return Promise.resolve({ ok: true, value: owner !== undefined && shared });
+    const coordinator = [...this.coordinatorContacts].includes(this.byId.get(id)?.contactId ?? '');
+    return Promise.resolve({ ok: true, value: owner !== undefined && (shared || coordinator) });
+  }
+
+  /** Test helper — marks a person (contact id) as also holding a coordinator account. */
+  markCoordinator(contactIdValue: string): void {
+    this.coordinatorContacts.add(contactIdValue);
   }
 
   listActive(): Promise<OrgStoreResult<AggregatorOrg[]>> {
@@ -122,7 +130,13 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
   }
 
   deleteById(id: string): Promise<OrgStoreResult<void>> {
+    const gone = this.byId.get(id);
     this.byId.delete(id);
+    // Mirror aggregator_orgs_owner_ad: release the owner's account once it
+    // owns no other org.
+    if (gone && ![...this.byId.values()].some((o) => o.ownerUserId === gone.ownerUserId)) {
+      this.adminByContact.delete(gone.contactId);
+    }
     return Promise.resolve({ ok: true, value: undefined });
   }
 
@@ -133,7 +147,8 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
       ...existing,
       displayName: patch.displayName ?? existing.displayName,
       state: patch.state !== undefined ? patch.state : existing.state,
-      ownerKcSub: patch.ownerKcSub !== undefined ? patch.ownerKcSub : existing.ownerKcSub,
+      // As in Postgres: a recorded login is only ever added, never cleared.
+      ownerKcSub: patch.ownerKcSub ? patch.ownerKcSub : existing.ownerKcSub,
       kcGroupId: patch.kcGroupId !== undefined ? patch.kcGroupId : existing.kcGroupId,
       status: patch.status ?? existing.status,
       rejectedAt: patch.rejectedAt !== undefined ? patch.rejectedAt : existing.rejectedAt,

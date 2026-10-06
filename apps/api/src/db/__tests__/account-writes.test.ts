@@ -9,6 +9,7 @@ import { PgDialect } from 'drizzle-orm/pg-core';
 import type { SQL } from 'drizzle-orm';
 import {
   IdentityMismatchError,
+  IdentityNotLinkableError,
   IdentityTakenError,
   linkAdminAccount,
   linkIdentity,
@@ -87,10 +88,18 @@ describe('linkIdentity', () => {
   });
 
   it('reports a subject owned by another account', async () => {
-    const { db } = fakeDb({ executes: [[]], selects: [[]] });
+    const { db } = fakeDb({ executes: [[], [{ ok: true }]], selects: [[]] });
     await expect(linkIdentity(db, 'u1', 'keycloak', 's1')).rejects.toBeInstanceOf(
       IdentityTakenError,
     );
+  });
+
+  it('refuses a missing or wrong-type account, filtering the insert by type', async () => {
+    const { db, sql } = fakeDb({ executes: [[], [{ ok: false }]], selects: [[]] });
+    await expect(linkIdentity(db, 'u1', 'keycloak', 's1', 'coordinator')).rejects.toBeInstanceOf(
+      IdentityNotLinkableError,
+    );
+    expect(sql[0]).toMatch(/AND u\.user_type = \$\d/);
   });
 });
 

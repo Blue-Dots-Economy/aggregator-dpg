@@ -23,6 +23,8 @@ import { SignalStackWriterFake } from '@aggregator-dpg/signalstack-writer/testin
 import { SignalStackWriterBase } from '@aggregator-dpg/signalstack-writer/interface';
 import { UpstreamError } from '@aggregator-dpg/shared-primitives/errors';
 import { err, ok } from '@aggregator-dpg/shared-primitives/result';
+import { getIdentityStore } from '../services/identity-store/index.js';
+import type { IdentityStoreFake } from '../services/identity-store/testing.js';
 
 const aggregatorId = '11111111-1111-1111-1111-111111111111';
 
@@ -173,6 +175,10 @@ describe('admin approval routes', () => {
     expect(res.body).toContain('name="decision" value="reject"');
     expect(res.body).toContain('asha@trrain.org');
     expect(res.body).toContain(`/admin/v1/aggregator-registrations/decision/${aggregatorId}`);
+    // 0027: opening the review link records the coordinator's IdP login.
+    const identities = (getIdentityStore() as IdentityStoreFake).all();
+    expect(identities).toHaveLength(1);
+    expect(identities[0]).toMatchObject({ userId: aggregatorId, provider: 'keycloak' });
   });
 
   it('GET /read/:id shows already-approved when aggregator.status=active', async () => {

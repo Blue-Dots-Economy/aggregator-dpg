@@ -11,9 +11,13 @@
 import { logger } from '../../logger.js';
 import { IDP_PROVIDER } from '../idp-admin/provider.js';
 import { getIdentityStore } from './index.js';
+import type { IdentityStoreBase } from './interface.js';
 
-/** Users already recorded by this process — avoids a write per request. */
-const recorded = new Set<string>();
+/**
+ * Users already recorded by this process, per store instance — avoids a write
+ * per request (and starts empty whenever a different store is in use).
+ */
+let recorded = new WeakMap<IdentityStoreBase, Set<string>>();
 
 /**
  * Links the user's login at this deployment's IdP, once per process.
@@ -27,20 +31,28 @@ export async function recordLoginIdentity(
   subject: string,
   operation: string,
 ): Promise<void> {
-  if (recorded.has(userId)) return;
-  const r = await getIdentityStore().link(userId, IDP_PROVIDER, subject);
+  const store = getIdentityStore();
+  let seen = recorded.get(store);
+  if (!seen) {
+    seen = new Set<string>();
+    recorded.set(store, seen);
+  }
+  if (seen.has(userId)) return;
+  // Only a coordinator account may be linked through this path (the subject
+  // comes from a coordinator's token or review link).
+  const r = await store.link(userId, IDP_PROVIDER, subject, 'coordinator');
   if (r.ok) {
-    recorded.add(userId);
+    seen.add(userId);
     if (r.value === 'linked') {
       logger.info({ operation, status: 'success', aggregator_id: userId, identity: 'linked' });
     }
     return;
   }
-  if (r.error.code !== 'DB_UNAVAILABLE') recorded.add(userId); // a conflict will not heal by retrying
+  if (r.error.code !== 'DB_UNAVAILABLE') seen.add(userId); // a conflict will not heal by retrying
   logger.warn({ operation, status: 'failure', error: r.error.code, aggregator_id: userId });
 }
 
 /** Test helper — forget which users were recorded. */
 export function _resetRecordedIdentities(): void {
-  recorded.clear();
+  recorded = new WeakMap();
 }

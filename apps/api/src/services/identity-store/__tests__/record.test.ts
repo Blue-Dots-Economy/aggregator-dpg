@@ -17,9 +17,14 @@ afterEach(() => {
 
 class CountingStore extends InMemoryIdentityStore {
   calls = 0;
-  override link(u: string, p: string, s: string): Promise<IdentityStoreResult<LinkOutcome>> {
+  override link(
+    u: string,
+    p: string,
+    s: string,
+    t?: 'admin' | 'coordinator',
+  ): Promise<IdentityStoreResult<LinkOutcome>> {
     this.calls += 1;
-    return super.link(u, p, s);
+    return super.link(u, p, s, t);
   }
 }
 
@@ -44,12 +49,17 @@ describe('recordLoginIdentity', () => {
   it('retries after a transient database failure', async () => {
     let calls = 0;
     class FlakyStore extends InMemoryIdentityStore {
-      override link(u: string, p: string, s: string): Promise<IdentityStoreResult<LinkOutcome>> {
+      override link(
+        u: string,
+        p: string,
+        s: string,
+        t?: 'admin' | 'coordinator',
+      ): Promise<IdentityStoreResult<LinkOutcome>> {
         calls += 1;
         if (calls === 1) {
           return Promise.resolve({ ok: false, error: { code: 'DB_UNAVAILABLE', message: 'down' } });
         }
-        return super.link(u, p, s);
+        return super.link(u, p, s, t);
       }
     }
     _setIdentityStore(new FlakyStore());

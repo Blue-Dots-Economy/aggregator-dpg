@@ -859,6 +859,12 @@ describe('aggregator-orgs routes', () => {
     });
     expect(res.statusCode).toBe(503);
     expect((res.json() as { error: { code: string } }).error.code).toBe('DB_UNAVAILABLE');
+    // Rolled back completely: no org row, no stranded Keycloak owner user, so
+    // the same owner can register again.
+    const org = await orgStore.findByOwnerEmail('stamp-fail@enable.org');
+    expect(org.ok && org.value).toBeNull();
+    const kc = await idp.findByEmail('stamp-fail@enable.org');
+    expect(kc.ok && kc.value).toBeNull();
   });
 
   it('401s GET /v1/orgs without a token', async () => {

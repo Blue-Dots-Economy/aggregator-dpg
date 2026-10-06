@@ -492,5 +492,6 @@ function toDomain(row: JoinedRow): Aggregator {
  * @returns The combined condition.
  */
 function coordinator(...conds: (SQL | undefined)[]): SQL {
-  return and(eq(aggregators.userType, 'coordinator'), ...conds)!;
+  const isCoordinator = eq(aggregators.userType, 'coordinator');
+  return and(isCoordinator, ...conds) ?? isCoordinator;
 }

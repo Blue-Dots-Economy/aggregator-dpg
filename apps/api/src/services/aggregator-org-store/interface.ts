@@ -123,8 +123,10 @@ export abstract class AggregatorOrgStoreBase {
    */
   abstract deleteById(id: string): Promise<OrgStoreResult<void>>;
   /**
-   * Whether the org's owner also owns another org. Decides whether deleting
-   * this org may delete the owner's IdP user (prune): a shared owner keeps it.
+   * Whether the org's owner is still needed elsewhere: their account owns
+   * another org, or the same person also has a coordinator account (one IdP
+   * user per person). Decides whether deleting this org may delete the
+   * owner's IdP user (prune): a shared owner keeps it.
    *
    * @param id - Org UUID.
    * @returns `true` inside `ok` when the owner owns another org.

@@ -149,6 +149,14 @@ export async function runMigrationGuards(
       'applied migration differs from the shipped file (edited after release) — continuing',
     );
   }
+  // Drizzle skips by the `when` high-water mark, so a foreign row ABOVE a
+  // shipped migration that is not recorded makes drizzle skip that migration.
+  // Without the override such rows are refused below; with it, the skipped
+  // migrations are named in the warning so the skip is never silent.
+  const appliedWhens = new Set(applied.map((a) => a.createdAt));
+  const unrecorded = entries.filter((e) => !appliedWhens.has(e.when));
+  const highestForeign = Math.max(...foreign.unknown.map((u) => u.createdAt), -Infinity);
+  const masked = unrecorded.filter((e) => e.when < highestForeign).map((e) => e.tag);
   if (foreign.unknown.length > 0 && allowTrainOnBoot) {
     // Dev / e2e databases accumulate rows from journal reshuffles during
     // development; deployed instances never carry them.
@@ -157,6 +165,7 @@ export async function runMigrationGuards(
         operation: 'migrate.guard',
         status: 'skipped',
         unknown_created_at: foreign.unknown.map((u) => u.createdAt),
+        skipped_by_drizzle: masked,
       },
       'applied migrations not in this release — tolerated because ALLOW_TRAIN_ON_BOOT=true (dev / e2e only)',
     );
@@ -179,8 +188,9 @@ export async function runMigrationGuards(
   if (refused.length > 0) {
     throw new Error(
       `refusing to apply the user & org release train at boot (${refused.join(', ')}) on a ` +
-        'database that holds data. Apply it with scripts/user-org-migrate.sh (pre-flight, ' +
-        'dry-run, apply) with pods at zero — see docs/plans/existing-instance-migration.md. ' +
+        'database that holds data. Existing instances apply it with the release-train tool ' +
+        '(scripts/user-org-migrate.sh — shipped with the train; until then the train must not be ' +
+        'deployed) with pods at zero — see docs/plans/existing-instance-migration.md. ' +
         'Dev / e2e only: ALLOW_TRAIN_ON_BOOT=true.',
     );
   }

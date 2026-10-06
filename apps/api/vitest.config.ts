@@ -6,6 +6,8 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['src/**/*.test.ts'],
+    // Fakes shared by every unit test (e.g. the identity store).
+    setupFiles: ['src/test-setup.ts'],
     // `DATABASE_URL` has no source default (it carries credentials), so the
     // suite supplies a credential-free placeholder. No test opens a socket —
     // `pg.Pool` is lazy — this only satisfies startup config validation.

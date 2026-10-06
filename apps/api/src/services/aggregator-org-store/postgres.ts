@@ -49,7 +49,8 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
           name: input.ownerName ?? null,
         });
         const ownerUserId = await linkAdminAccount(tx, contactId);
-        if (input.ownerKcSub) await linkIdentity(tx, ownerUserId, IDP_PROVIDER, input.ownerKcSub);
+        if (input.ownerKcSub)
+          await linkIdentity(tx, ownerUserId, IDP_PROVIDER, input.ownerKcSub, 'admin');
         const [row] = await tx
           .insert(aggregatorOrgs)
           .values({
@@ -95,11 +96,20 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
 
   async ownerIsShared(id: string): Promise<OrgStoreResult<boolean>> {
     try {
+      // Shared when the owner's account owns another org, OR the same person
+      // also has a coordinator account (one IdP user per person: deleting it
+      // would lock the coordinator out).
       const rows = await getDb().execute<{ shared: boolean }>(sql`
+        WITH me AS (
+          SELECT o.owner_user_id, u.contact_id
+            FROM ${aggregatorOrgs} o JOIN ${users} u ON u.id = o.owner_user_id
+           WHERE o.id = ${id})
         SELECT EXISTS (
-          SELECT 1 FROM ${aggregatorOrgs} other
-           WHERE other.owner_user_id = (SELECT owner_user_id FROM ${aggregatorOrgs} WHERE id = ${id})
-             AND other.id <> ${id}) AS shared`);
+                 SELECT 1 FROM ${aggregatorOrgs} other, me
+                  WHERE other.owner_user_id = me.owner_user_id AND other.id <> ${id})
+            OR EXISTS (
+                 SELECT 1 FROM ${users} c, me
+                  WHERE c.contact_id = me.contact_id AND c.user_type = 'coordinator') AS shared`);
       return { ok: true, value: Boolean(rows.rows[0]?.shared) };
     } catch (e) {
       return mapDbError('orgStore.ownerIsShared', e);
@@ -140,7 +150,7 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
         const [row] = rows;
         if (!row) return null;
         // A null subject never unlinks: a recorded login is only ever added.
-        if (ownerKcSub) await linkIdentity(tx, row.ownerUserId, IDP_PROVIDER, ownerKcSub);
+        if (ownerKcSub) await linkIdentity(tx, row.ownerUserId, IDP_PROVIDER, ownerKcSub, 'admin');
         return this.readIn(tx, id);
       });
       if (!updated) return errResult('NOT_FOUND', id);

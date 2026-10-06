@@ -1,6 +1,8 @@
 -- Pre-flight for migration 0027 (`aggregators` → `users`), read-only.
--- Run against the database BEFORE the train (schema 0022 or 0026). Counts and
--- ids only — never PII. Run by scripts/user-org-migrate.sh preflight.
+-- Run against a database at schema 0026 (it reads aggregator_orgs.contact_id,
+-- added by 0025): on an instance still at 0022 the release-train tool runs it
+-- on the dry-run copy after applying 0023–0026. Counts and ids only — never
+-- PII. Run by scripts/user-org-migrate.sh preflight.
 --
 -- Blockers (must be 0): B1–B3. Informational: I1–I3.
 \set ON_ERROR_STOP on

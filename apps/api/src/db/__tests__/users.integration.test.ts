@@ -192,6 +192,30 @@ suite('users (migration 0027) — integration', () => {
     await aggStore.deleteById(c2.id);
   });
 
+  it('treats an owner as shared when they own another org or are also a coordinator', async () => {
+    const solo = await newOrg();
+    expect(await orgStore.ownerIsShared(solo.id)).toEqual({ ok: true, value: false });
+    const e = email();
+    const p = phone();
+    const coord = await newCoordinator(e, p);
+    const both = await newOrg(e, p);
+    // One IdP user per person: pruning this org must not delete the
+    // coordinator's login.
+    expect(await orgStore.ownerIsShared(both.id)).toEqual({ ok: true, value: true });
+    await orgStore.deleteById(both.id);
+    await aggStore.deleteById(coord.id);
+    await orgStore.deleteById(solo.id);
+  });
+
+  it('never links a login to an admin account through the coordinator path', async () => {
+    const org = await newOrg();
+    const r = await identities.link(org.ownerUserId, 'keycloak', randomUUID(), 'coordinator');
+    expect(r.ok || r.error.code).toBe('NOT_LINKABLE');
+    const missing = await identities.link(randomUUID(), 'keycloak', randomUUID(), 'coordinator');
+    expect(missing.ok || missing.error.code).toBe('NOT_LINKABLE');
+    await orgStore.deleteById(org.id);
+  });
+
   it('keeps the Signals org slug immutable under its new name; other updates work', async () => {
     const c = await newCoordinator();
     await expect(
